@@ -25,7 +25,10 @@ use solidcraft_geom::tess::TessPlan;
 use solidcraft_geom::{Mesh, Vec3Geom};
 use wgpu::util::DeviceExt;
 
-use crate::collision::{CollisionGpu, GpuPod, decode_pod_slice, encode_pod, encode_pod_slice};
+use crate::collision::{
+    CollisionGpu, CollisionResult, GpuAabb, GpuPod, OverlapPair, cpu_bipartite_overlap, decode_pod_slice, encode_pod, encode_pod_slice,
+    synthetic_aabb_grid,
+};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::cuda::CudaBackend;
 use crate::cuda::{GpuBvhNode, GpuRay, GpuRayHit, GpuTri, PatchEvalOutF32, PatchUvQueryF32};
@@ -979,6 +982,26 @@ pub fn cpu_raycast_bvh_rayon(rays: &[GpuRay], tris: &[GpuTri], bvh: &[GpuBvhNode
     }
 }
 
+/// CPU `rayon` parallel bipartite AABB overlap.
+pub fn cpu_bipartite_overlap_rayon(aabbs_a: &[GpuAabb], aabbs_b: &[GpuAabb], tolerance: f32) -> CollisionResult {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let tol = tolerance.max(0.0);
+        let mut pairs: Vec<OverlapPair> = aabbs_a
+            .par_iter()
+            .flat_map_iter(|a| aabbs_b.iter().filter(move |b| a.overlaps(b, tol)).map(move |b| OverlapPair { a: a.id, b: b.id }))
+            .collect();
+        let overflowed = pairs.len() > crate::collision::MAX_OVERLAP_PAIRS as usize;
+        pairs.truncate(crate::collision::MAX_OVERLAP_PAIRS as usize);
+        pairs.sort_unstable();
+        CollisionResult { pairs, overflowed }
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        cpu_bipartite_overlap(aabbs_a, aabbs_b, tolerance)
+    }
+}
+
 // ── Calibration Data Structures & Scaling Microbenchmark ──────────────────
 
 /// Number of rotated-order timing samples collected per `(KernelOp, problem_size)` bucket.
@@ -1304,6 +1327,13 @@ pub fn run_scaling_microbenchmark(sizes: &[usize]) -> CalibrationReport {
         let mut buckets = Vec::with_capacity(sizes.len());
         for &n in sizes {
             let n = n.min(max_n).max(1);
+            let side_count = ((n as f64 * 16.0).sqrt().ceil() as usize).clamp(4, 1024);
+            let (boxes_a, boxes_b) = if op == KernelOp::AabbBroadphase {
+                (synthetic_aabb_grid(side_count, 2.0, 0.8), synthetic_aabb_grid(side_count, 2.0, 0.8))
+            } else {
+                (Vec::new(), Vec::new())
+            };
+
             let mut sample_orders = Vec::with_capacity(CALIBRATION_SAMPLES);
             let mut sample_timings_ns = Vec::with_capacity(CALIBRATION_SAMPLES);
 
@@ -1400,6 +1430,27 @@ pub fn run_scaling_microbenchmark(sizes: &[usize]) -> CalibrationReport {
                         (KernelOp::RaycastMesh, BackendTarget::RtCoreBvh) => time_ns(|| {
                             if let Some(c) = cuda {
                                 std::hint::black_box(c.raycast_rt_bvh(&query_rays[..n], &sphere_tris, &sphere_bvh));
+                            }
+                        }),
+                        (KernelOp::AabbBroadphase, BackendTarget::CpuScalar) => time_ns(|| {
+                            std::hint::black_box(cpu_bipartite_overlap(&boxes_a, &boxes_b, 1e-4));
+                        }),
+                        (KernelOp::AabbBroadphase, BackendTarget::CpuRayon) => time_ns(|| {
+                            std::hint::black_box(cpu_bipartite_overlap_rayon(&boxes_a, &boxes_b, 1e-4));
+                        }),
+                        (KernelOp::AabbBroadphase, BackendTarget::VulkanCompute) => time_ns(|| {
+                            if let Some(v) = vk {
+                                std::hint::black_box(v.collision().bipartite_overlap(&boxes_a, &boxes_b, 1e-4));
+                            }
+                        }),
+                        (KernelOp::AabbBroadphase, BackendTarget::CudaGeneric) => time_ns(|| {
+                            if let Some(c) = cuda {
+                                std::hint::black_box(c.bipartite_aabb_overlap(&boxes_a, &boxes_b, 1e-4, false));
+                            }
+                        }),
+                        (KernelOp::AabbBroadphase, BackendTarget::AmperePtx) => time_ns(|| {
+                            if let Some(c) = cuda {
+                                std::hint::black_box(c.bipartite_aabb_overlap(&boxes_a, &boxes_b, 1e-4, true));
                             }
                         }),
                         _ => 1,
@@ -1701,6 +1752,44 @@ impl Dispatcher {
             }
         }
         (BackendTarget::CpuScalar, cpu_raycast_bvh_scalar(rays, tris, bvh))
+    }
+
+    /// Dispatches bipartite AABB broadphase collision detection.
+    pub fn bipartite_aabb_overlap(&self, aabbs_a: &[GpuAabb], aabbs_b: &[GpuAabb], tolerance: f32) -> (BackendTarget, CollisionResult) {
+        let pair_work = aabbs_a.len().saturating_mul(aabbs_b.len()) / 16;
+        let target = self.select_backend(KernelOp::AabbBroadphase, pair_work.max(1));
+        match target {
+            BackendTarget::AmperePtx | BackendTarget::AmpereTensorCore | BackendTarget::RtCoreBvh => {
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(c) = CudaBackend::global()
+                    && let Some(out) = c.bipartite_aabb_overlap(aabbs_a, aabbs_b, tolerance, true)
+                {
+                    return (BackendTarget::AmperePtx, out);
+                }
+            }
+            BackendTarget::CudaGeneric => {
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(c) = CudaBackend::global()
+                    && let Some(out) = c.bipartite_aabb_overlap(aabbs_a, aabbs_b, tolerance, false)
+                {
+                    return (BackendTarget::CudaGeneric, out);
+                }
+            }
+            BackendTarget::VulkanCompute => {
+                if let Some(v) = VulkanAccel::global()
+                    && let Some(out) = v.collision().bipartite_overlap(aabbs_a, aabbs_b, tolerance)
+                {
+                    return (BackendTarget::VulkanCompute, out);
+                }
+            }
+            BackendTarget::CpuRayon => {
+                return (BackendTarget::CpuRayon, cpu_bipartite_overlap_rayon(aabbs_a, aabbs_b, tolerance));
+            }
+            BackendTarget::CpuScalar => {
+                return (BackendTarget::CpuScalar, cpu_bipartite_overlap(aabbs_a, aabbs_b, tolerance));
+            }
+        }
+        (BackendTarget::CpuScalar, cpu_bipartite_overlap(aabbs_a, aabbs_b, tolerance))
     }
 
     /// Evaluates a [`TessPlan`] using either CPU scalar or parallel `rayon` across faces.

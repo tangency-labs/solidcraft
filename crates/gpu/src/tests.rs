@@ -1352,3 +1352,249 @@ fn raycast_bvh_common_and_edge_cases() {
         assert_eq!(deep_cls, vec![false, true], "deep BVH classify mismatch on {target:?}");
     }
 }
+
+/// Verifies bipartite AABB overlap, self-overlap, Morton LBVH traversal, and surface-surface intersection (SSI) residual evaluation across CPU, Vulkan, and CUDA backends.
+#[test]
+fn multi_backend_collision_lbvh_morton_and_ssi_residuals_parity() {
+    use crate::collision::{build_simple_lbvh, cpu_bipartite_overlap, cpu_self_overlap, face_aabbs_from_plan, synthetic_aabb_grid};
+    use crate::cuda::CudaBackend;
+    use crate::dispatch::{VulkanAccel, cpu_bipartite_overlap_rayon};
+
+    let boxes_a = synthetic_aabb_grid(150, 2.0, 1.15);
+    let boxes_b = synthetic_aabb_grid(130, 2.0, 1.15);
+    let tol = 1e-4f32;
+
+    let cpu_res = cpu_bipartite_overlap(&boxes_a, &boxes_b, tol);
+    let ray_res = cpu_bipartite_overlap_rayon(&boxes_a, &boxes_b, tol);
+    assert!(!cpu_res.pairs.is_empty());
+    assert_eq!(cpu_res.pairs, ray_res.pairs);
+
+    if let Some(vk) = VulkanAccel::global() {
+        let vk_res = vk.collision().bipartite_overlap(&boxes_a, &boxes_b, tol).expect("vk bipartite");
+        assert_eq!(cpu_res.pairs, vk_res.pairs, "Vulkan bipartite AABB overlap parity");
+
+        // Self-overlap parity
+        let cpu_self = cpu_self_overlap(&boxes_a, tol);
+        let vk_self = vk.collision().self_overlap(&boxes_a, tol).expect("vk self_overlap");
+        assert_eq!(cpu_self.pairs, vk_self.pairs, "Vulkan self_overlap parity");
+
+        // Morton code + LBVH traversal parity
+        let morton = vk.collision().compute_morton(&boxes_b).expect("vk morton");
+        let lbvh = build_simple_lbvh(&boxes_b, &morton);
+        let lbvh_res = vk.collision().lbvh_query(&boxes_a, &lbvh, tol).expect("vk lbvh_query");
+        assert_eq!(cpu_res.pairs, lbvh_res.pairs, "Vulkan LBVH traversal vs all-pairs parity");
+
+        // Real B-rep face AABBs & SSI surface residuals parity
+        let b1 = ok(solidcraft_kernel::cylinder(Vec3::ZERO, Vec3::Z, 4.0, 10.0));
+        let b2 = ok(solidcraft_kernel::cylinder(Vec3::new(2.0, -5.0, 5.0), Vec3::Y, 3.0, 10.0));
+        let p1 = ok(b1.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(0.05)));
+        let p2 = ok(b2.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(0.05)));
+        let fa = face_aabbs_from_plan(&p1);
+        let fb = face_aabbs_from_plan(&p2);
+        assert_eq!(cpu_bipartite_overlap(&fa, &fb, 1e-3).pairs, vk.collision().bipartite_overlap(&fa, &fb, 1e-3).expect("vk face aabbs").pairs);
+
+        if let (Some(sa), Some(sb)) = (p1.surfaces.first(), p2.surfaces.first()) {
+            let vk_seeds =
+                vk.collision().surface_residuals(sa, (0.0, 1.0), (0.0, 1.0), sb, (0.0, 1.0), (0.0, 1.0), 16, 1.5).expect("vk surface_residuals");
+            for s in &vk_seeds {
+                assert!(s.dist_sq <= 1.5 * 1.5 + 1e-4);
+            }
+        }
+    }
+
+    if let Some(cuda) = CudaBackend::global() {
+        let cu_gen = cuda.bipartite_aabb_overlap(&boxes_a, &boxes_b, tol, false).expect("cuda sm70 bipartite");
+        assert_eq!(cpu_res.pairs, cu_gen.pairs, "CUDA sm_70 bipartite AABB parity");
+        if cuda.has_ampere_ptx() {
+            let cu_amp = cuda.bipartite_aabb_overlap(&boxes_a, &boxes_b, tol, true).expect("cuda sm86 bipartite");
+            assert_eq!(cpu_res.pairs, cu_amp.pairs, "CUDA sm_86 cp.async + redux.sync bipartite AABB parity");
+        }
+    }
+}
+
+#[test]
+fn collision_lbvh_morton_and_ssi_edge_cases() {
+    use crate::collision::{GpuAabb, OverlapPair, build_simple_lbvh, cpu_bipartite_overlap, cpu_self_overlap};
+    use crate::cuda::CudaBackend;
+    use crate::dispatch::{Dispatcher, VulkanAccel, cpu_bipartite_overlap_rayon};
+    use solidcraft_geom::Aabb3;
+
+    let disp = Dispatcher::global();
+    let cuda = CudaBackend::global();
+
+    // 1. Outward-rounded GpuAabb::from_aabb3 conservativeness & Aabb3::EMPTY handling:
+    let empty_gpu = GpuAabb::from_aabb3(&Aabb3::EMPTY, 0);
+    let unit_aabb = Aabb3 { min: Vec3::new(0.1, 0.2, 0.3), max: Vec3::new(1.1, 1.2, 1.3) };
+    let unit_gpu = GpuAabb::from_aabb3(&unit_aabb, 1);
+    assert!(f64::from(unit_gpu.min_x) < unit_aabb.min.x && f64::from(unit_gpu.max_x) > unit_aabb.max.x);
+    assert!(f64::from(unit_gpu.min_y) < unit_aabb.min.y && f64::from(unit_gpu.max_y) > unit_aabb.max.y);
+    assert!(f64::from(unit_gpu.min_z) < unit_aabb.min.z && f64::from(unit_gpu.max_z) > unit_aabb.max.z);
+    assert!(cpu_bipartite_overlap(&[empty_gpu], &[unit_gpu], 0.0).pairs.is_empty(), "Aabb3::EMPTY must not overlap finite box");
+
+    // 2. Empty and single-element inputs across bipartite and self-overlap:
+    assert!(cpu_bipartite_overlap(&[], &[unit_gpu], 0.0).pairs.is_empty());
+    assert!(cpu_bipartite_overlap(&[unit_gpu], &[], 0.0).pairs.is_empty());
+    assert!(cpu_bipartite_overlap_rayon(&[], &[unit_gpu], 0.0).pairs.is_empty());
+    assert!(cpu_self_overlap(&[], 0.0).pairs.is_empty());
+    assert!(cpu_self_overlap(&[unit_gpu], 0.0).pairs.is_empty());
+
+    // 3. Exact tolerance boundary conditions:
+    // Box A = [0, 1]^3, Box B = [1.02, 2.02] x [0, 1]^2 (gap along X is 0.02).
+    // Overlap condition is `a.max_x + tol >= b.min_x`, so tol = 0.015 -> no overlap; tol = 0.025 -> overlap.
+    // Touching box C = [1.0, 2.0] x [0, 1]^2 overlaps at tol = 0.0 and negative tol = -5.0 (clamped to 0.0).
+    let box_a = GpuAabb { min_x: 0.0, min_y: 0.0, min_z: 0.0, id: 0, max_x: 1.0, max_y: 1.0, max_z: 1.0, pad: 0 };
+    let box_b = GpuAabb { min_x: 1.02, min_y: 0.0, min_z: 0.0, id: 1, max_x: 2.02, max_y: 1.0, max_z: 1.0, pad: 0 };
+    let box_c = GpuAabb { min_x: 1.0, min_y: 0.0, min_z: 0.0, id: 2, max_x: 2.0, max_y: 1.0, max_z: 1.0, pad: 0 };
+
+    for target in BVH_TARGETS {
+        let d = disp.with_forced_backend(Some(target));
+        assert!(d.bipartite_aabb_overlap(&[box_a], &[box_b], 0.015).1.pairs.is_empty(), "gap=0.02 with tol=0.015 must not overlap on {target:?}");
+        assert_eq!(
+            d.bipartite_aabb_overlap(&[box_a], &[box_b], 0.025).1.pairs,
+            vec![OverlapPair { a: 0, b: 1 }],
+            "gap=0.02 with tol=0.025 must overlap on {target:?}"
+        );
+        assert_eq!(
+            d.bipartite_aabb_overlap(&[box_a], &[box_c], 0.0).1.pairs,
+            vec![OverlapPair { a: 0, b: 2 }],
+            "touching boxes at tol=0.0 must overlap on {target:?}"
+        );
+        assert_eq!(
+            d.bipartite_aabb_overlap(&[box_a], &[box_c], -5.0).1.pairs,
+            vec![OverlapPair { a: 0, b: 2 }],
+            "negative tol must clamp to 0.0 on {target:?}"
+        );
+    }
+
+    // 4. Workgroup tile boundary sizes (1, 15, 16, 17, 31, 32, 33) for 16x16 bipartite and 256 self-overlap:
+    for (na, nb) in [(1usize, 1usize), (15, 17), (16, 16), (17, 31), (32, 33)] {
+        let set_a: Vec<GpuAabb> = (0..na)
+            .map(|i| {
+                let x = i as f32 * 0.75;
+                GpuAabb { min_x: x, min_y: 0.0, min_z: 0.0, id: i as u32, max_x: x + 1.0, max_y: 1.0, max_z: 1.0, pad: 0 }
+            })
+            .collect();
+        let set_b: Vec<GpuAabb> = (0..nb)
+            .map(|j| {
+                let x = j as f32 * 0.75 + 0.25;
+                GpuAabb { min_x: x, min_y: 0.0, min_z: 0.0, id: j as u32, max_x: x + 1.0, max_y: 1.0, max_z: 1.0, pad: 0 }
+            })
+            .collect();
+        let ref_bi = cpu_bipartite_overlap(&set_a, &set_b, 1e-4);
+        let ref_self = cpu_self_overlap(&set_a, 1e-4);
+        for pair in &ref_self.pairs {
+            assert!(pair.a < pair.b, "self-overlap must strictly emit upper-triangular pairs (a < b)");
+        }
+        for target in COMPUTE_TARGETS {
+            let (_, got_bi) = disp.with_forced_backend(Some(target)).bipartite_aabb_overlap(&set_a, &set_b, 1e-4);
+            assert_eq!(got_bi.pairs, ref_bi.pairs, "bipartite tile boundary ({na}, {nb}) mismatch on {target:?}");
+        }
+        if let Some(vk) = VulkanAccel::global() {
+            let got_self = vk.collision().self_overlap(&set_a, 1e-4).expect("vk self_overlap");
+            assert_eq!(got_self.pairs, ref_self.pairs, "Vulkan self_overlap mismatch for na={na}");
+        }
+    }
+
+    // 5. Coincident / zero-extent scene Morton codes, single-leaf LBVH traversal, & storage buffer limit validation:
+    if let Some(vk) = VulkanAccel::global() {
+        assert!(vk.collision().fits_storage(1024));
+        assert!(!vk.collision().fits_storage(usize::MAX));
+        let coincident_boxes = vec![box_a; 8];
+        let morton = vk.collision().compute_morton(&coincident_boxes).expect("vk morton coincident");
+        assert_eq!(morton.len(), 8);
+        assert!(morton.iter().all(|m| m.code == 0), "zero-extent scene must produce Morton code 0 without NaN");
+        let lbvh_coincident = build_simple_lbvh(&coincident_boxes, &morton);
+        assert_eq!(lbvh_coincident.len(), 15);
+        let res_coincident = vk.collision().lbvh_query(&[box_a], &lbvh_coincident, 0.0).expect("vk lbvh coincident");
+        assert_eq!(res_coincident.pairs.len(), 8);
+
+        let single_morton = vk.collision().compute_morton(&[box_a]).expect("vk morton single");
+        let single_lbvh = build_simple_lbvh(&[box_a], &single_morton);
+        assert_eq!(single_lbvh.len(), 1);
+        let single_res = vk.collision().lbvh_query(&[box_a, box_b, box_c], &single_lbvh, 0.0).expect("vk lbvh single");
+        assert_eq!(single_res.pairs, vec![OverlapPair { a: 0, b: 0 }, OverlapPair { a: 2, b: 0 }]);
+
+        // Caller-supplied 65-leaf left-comb LBVH exceeding LBVH_STACK_CAP (64) must be rejected by lbvh_fits_traversal_stack and lbvh_query:
+        assert!(crate::collision::lbvh_fits_traversal_stack(&lbvh_coincident));
+        let mut left_comb = Vec::with_capacity(129);
+        for d in 0..64u32 {
+            left_comb.push(crate::collision::GpuLbvhNode {
+                min_x: 0.0,
+                min_y: 0.0,
+                min_z: 0.0,
+                left_or_prim: if d < 63 { d + 1 } else { 64 },
+                max_x: 1.0,
+                max_y: 1.0,
+                max_z: 1.0,
+                right_or_flag: 65 + d,
+            });
+        }
+        for leaf_id in 0..65u32 {
+            left_comb.push(crate::collision::GpuLbvhNode {
+                min_x: 0.0,
+                min_y: 0.0,
+                min_z: 0.0,
+                left_or_prim: leaf_id,
+                max_x: 1.0,
+                max_y: 1.0,
+                max_z: 1.0,
+                right_or_flag: 0x8000_0000,
+            });
+        }
+        assert!(!crate::collision::lbvh_fits_traversal_stack(&left_comb));
+        assert!(vk.collision().lbvh_query(&[box_a], &left_comb, 0.0).is_none());
+
+        // Whereas a 65-leaf right-comb LBVH (left child is always a leaf, right child is internal)
+        // keeps at most 2 pending nodes on the shader stack and must succeed with all 65 pairs:
+        let mut right_comb = Vec::with_capacity(129);
+        for d in 0..64u32 {
+            right_comb.push(crate::collision::GpuLbvhNode {
+                min_x: 0.0,
+                min_y: 0.0,
+                min_z: 0.0,
+                left_or_prim: 64 + d,
+                max_x: 1.0,
+                max_y: 1.0,
+                max_z: 1.0,
+                right_or_flag: if d < 63 { d + 1 } else { 128 },
+            });
+        }
+        for leaf_id in 0..65u32 {
+            right_comb.push(crate::collision::GpuLbvhNode {
+                min_x: 0.0,
+                min_y: 0.0,
+                min_z: 0.0,
+                left_or_prim: leaf_id,
+                max_x: 1.0,
+                max_y: 1.0,
+                max_z: 1.0,
+                right_or_flag: 0x8000_0000,
+            });
+        }
+        assert!(crate::collision::lbvh_fits_traversal_stack(&right_comb));
+        let right_res = vk.collision().lbvh_query(&[box_a], &right_comb, 0.0).expect("vk lbvh right_comb");
+        assert_eq!(right_res.pairs.len(), 65);
+
+        // 6. SSI surface residual evaluation: disjoint surfaces vs intersecting surfaces & grid_res clamping:
+        let c1 = ok(solidcraft_kernel::cylinder(Vec3::ZERO, Vec3::Z, 2.0, 5.0));
+        let c2_disjoint = ok(solidcraft_kernel::cylinder(Vec3::new(20.0, 0.0, 0.0), Vec3::Z, 2.0, 5.0));
+        let p1 = ok(c1.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(0.1)));
+        let p2_disjoint = ok(c2_disjoint.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(0.1)));
+        if let (Some(sa), Some(sb)) = (p1.surfaces.first(), p2_disjoint.surfaces.first()) {
+            let disjoint_seeds = vk
+                .collision()
+                .surface_residuals(sa, (0.0, 1.0), (0.0, 1.0), sb, (0.0, 1.0), (0.0, 1.0), 8, 1.0)
+                .expect("vk disjoint surface_residuals");
+            assert!(disjoint_seeds.is_empty(), "disjoint surfaces separated by >15 units must return 0 seeds at threshold=1.0");
+
+            // Same surface against itself with grid_res = 1 (clamped to 2) must find exact zero-distance seeds on the diagonal:
+            let self_seeds = vk
+                .collision()
+                .surface_residuals(sa, (0.0, 1.0), (0.0, 1.0), sa, (0.0, 1.0), (0.0, 1.0), 1, 0.01)
+                .expect("vk self surface_residuals grid_res=1");
+            assert!(self_seeds.len() >= 4, "2x2 clamped grid self-surface residual must find at least 4 zero-distance seeds");
+            assert!(self_seeds[0].dist_sq < 1e-10);
+        }
+    }
+    let _ = cuda;
+}

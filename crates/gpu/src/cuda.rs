@@ -23,7 +23,7 @@ use cudarc::driver::{
 };
 use cudarc::nvrtc::Ptx;
 
-use crate::collision::{GpuAabb, GpuPod, OverlapPair};
+use crate::collision::{CollisionResult, GpuAabb, GpuPod, MAX_OVERLAP_PAIRS, OverlapPair};
 
 const PTX_SM70: &str = include_str!("kernels_sm70.ptx");
 const PTX_SM86: &str = include_str!("kernels_sm86.ptx");
@@ -237,6 +237,7 @@ struct GenericFunctions {
     classify_points: CudaFunction,
     classify_points_rt_bvh: CudaFunction,
     raycast_rt_bvh: CudaFunction,
+    bipartite_aabb: CudaFunction,
 }
 
 struct AmpereFunctions {
@@ -245,6 +246,7 @@ struct AmpereFunctions {
     classify_points_sm86: CudaFunction,
     classify_points_rt_bvh_sm86: CudaFunction,
     raycast_rt_bvh_sm86: CudaFunction,
+    bipartite_aabb_sm86: CudaFunction,
 }
 
 /// Multi-tier `cudarc` CUDA backend holding both Generic (`sm_70`) and Handcrafted Ampere (`sm_86`) modules.
@@ -341,6 +343,7 @@ impl CudaBackend {
             classify_points: mod_generic.load_function("classify_points_generic").ok()?,
             classify_points_rt_bvh: mod_generic.load_function("classify_points_rt_bvh").ok()?,
             raycast_rt_bvh: mod_generic.load_function("raycast_rt_bvh").ok()?,
+            bipartite_aabb: mod_generic.load_function("bipartite_aabb_overlap_generic").ok()?,
         };
 
         let (mod_ampere, ampere) = if best.supports_ampere_ptx {
@@ -352,6 +355,7 @@ impl CudaBackend {
                         classify_points_sm86: m86.load_function("classify_points_sm86").ok()?,
                         classify_points_rt_bvh_sm86: m86.load_function("classify_points_rt_bvh").ok()?,
                         raycast_rt_bvh_sm86: m86.load_function("raycast_rt_bvh").ok()?,
+                        bipartite_aabb_sm86: m86.load_function("bipartite_aabb_overlap_sm86").ok()?,
                     })
                 })();
                 (Some(m86), funcs)
@@ -585,5 +589,56 @@ impl CudaBackend {
         }
 
         self.stream.clone_dtoh(&d_out).ok()
+    }
+
+    /// Finds all overlapping AABB pairs between `aabbs_a` and `aabbs_b` within `tolerance`.
+    /// When `use_ampere_sm86` is true, uses `cp.async.ca.shared.global` and `redux.sync.add.s32`.
+    pub fn bipartite_aabb_overlap(&self, aabbs_a: &[GpuAabb], aabbs_b: &[GpuAabb], tolerance: f32, use_ampere_sm86: bool) -> Option<CollisionResult> {
+        if aabbs_a.is_empty() || aabbs_b.is_empty() {
+            return Some(CollisionResult::default());
+        }
+        let func = if use_ampere_sm86 { &self.ampere.as_ref()?.bipartite_aabb_sm86 } else { &self.generic.bipartite_aabb };
+
+        let count_a = u32::try_from(aabbs_a.len()).ok()?;
+        let count_b = u32::try_from(aabbs_b.len()).ok()?;
+        let max_pairs = MAX_OVERLAP_PAIRS;
+        let tol = tolerance.max(0.0);
+
+        let _guard = self.lock_and_bind()?;
+        let d_a = self.stream.clone_htod(aabbs_a).ok()?;
+        let d_b = self.stream.clone_htod(aabbs_b).ok()?;
+        let mut d_pairs = self.stream.alloc_zeros::<OverlapPair>(max_pairs as usize).ok()?;
+        let mut d_count = self.stream.alloc_zeros::<u32>(1).ok()?;
+
+        let cfg = LaunchConfig { grid_dim: (count_a.div_ceil(16), count_b.div_ceil(16), 1), block_dim: (16, 16, 1), shared_mem_bytes: 0 };
+
+        // SAFETY: Kernel signature takes `(const GpuAabb*, const GpuAabb*, OverlapPair*, u32*, u32, u32, u32, f32)` with block `(16, 16, 1)`.
+        unsafe {
+            self.stream
+                .launch_builder(func)
+                .arg(&d_a)
+                .arg(&d_b)
+                .arg(&mut d_pairs)
+                .arg(&mut d_count)
+                .arg(&count_a)
+                .arg(&count_b)
+                .arg(&max_pairs)
+                .arg(&tol)
+                .launch(cfg)
+                .ok()?;
+        }
+
+        let count_vec = self.stream.clone_dtoh(&d_count).ok()?;
+        let raw_count = *count_vec.first()?;
+        let overflowed = raw_count > max_pairs;
+        let actual = raw_count.min(max_pairs) as usize;
+        if actual == 0 {
+            return Some(CollisionResult { pairs: Vec::new(), overflowed });
+        }
+
+        let pair_view = d_pairs.try_slice(0..actual)?;
+        let mut pairs = self.stream.clone_dtoh(&pair_view).ok()?;
+        pairs.sort_unstable();
+        Some(CollisionResult { pairs, overflowed })
     }
 }

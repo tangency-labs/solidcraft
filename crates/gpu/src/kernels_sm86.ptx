@@ -3860,3 +3860,250 @@ $L__BB7_34:
 
 }
 	// .globl	bipartite_aabb_overlap_generic
+.visible .entry bipartite_aabb_overlap_generic(
+	.param .u64 bipartite_aabb_overlap_generic_param_0,
+	.param .u64 bipartite_aabb_overlap_generic_param_1,
+	.param .u64 bipartite_aabb_overlap_generic_param_2,
+	.param .u64 bipartite_aabb_overlap_generic_param_3,
+	.param .u32 bipartite_aabb_overlap_generic_param_4,
+	.param .u32 bipartite_aabb_overlap_generic_param_5,
+	.param .u32 bipartite_aabb_overlap_generic_param_6,
+	.param .f32 bipartite_aabb_overlap_generic_param_7
+)
+{
+	.reg .pred 	%p<19>;
+	.reg .f32 	%f<26>;
+	.reg .b32 	%r<20>;
+	.reg .b64 	%rd<15>;
+	// demoted variable
+	.shared .align 4 .b8 _ZZ30bipartite_aabb_overlap_genericE3s_b[512];
+
+	ld.param.u64 	%rd2, [bipartite_aabb_overlap_generic_param_0];
+	ld.param.u64 	%rd3, [bipartite_aabb_overlap_generic_param_1];
+	ld.param.u64 	%rd4, [bipartite_aabb_overlap_generic_param_2];
+	ld.param.u64 	%rd5, [bipartite_aabb_overlap_generic_param_3];
+	ld.param.u32 	%r5, [bipartite_aabb_overlap_generic_param_4];
+	ld.param.u32 	%r6, [bipartite_aabb_overlap_generic_param_5];
+	ld.param.u32 	%r7, [bipartite_aabb_overlap_generic_param_6];
+	ld.param.f32 	%f1, [bipartite_aabb_overlap_generic_param_7];
+	mov.u32 	%r8, %ctaid.x;
+	shl.b32 	%r9, %r8, 4;
+	mov.u32 	%r10, %tid.x;
+	add.s32 	%r1, %r9, %r10;
+	mov.u32 	%r11, %ctaid.y;
+	shl.b32 	%r12, %r11, 4;
+	mov.u32 	%r13, %tid.y;
+	add.s32 	%r2, %r12, %r13;
+	setp.ne.s32 	%p1, %r10, 0;
+	setp.ge.u32 	%p2, %r2, %r6;
+	shl.b32 	%r14, %r13, 5;
+	mov.u32 	%r15, _ZZ30bipartite_aabb_overlap_genericE3s_b;
+	add.s32 	%r3, %r15, %r14;
+	or.pred  	%p3, %p1, %p2;
+	@%p3 bra 	$L__BB8_2;
+
+	cvta.to.global.u64 	%rd6, %rd3;
+	mul.wide.u32 	%rd7, %r2, 32;
+	add.s64 	%rd8, %rd6, %rd7;
+	ld.global.nc.f32 	%f2, [%rd8];
+	ld.global.nc.f32 	%f3, [%rd8+4];
+	ld.global.nc.f32 	%f4, [%rd8+8];
+	ld.global.nc.u32 	%r16, [%rd8+12];
+	ld.global.nc.f32 	%f5, [%rd8+16];
+	ld.global.nc.f32 	%f6, [%rd8+20];
+	ld.global.nc.f32 	%f7, [%rd8+24];
+	ld.global.nc.u32 	%r17, [%rd8+28];
+	st.shared.f32 	[%r3], %f2;
+	st.shared.f32 	[%r3+4], %f3;
+	st.shared.f32 	[%r3+8], %f4;
+	st.shared.u32 	[%r3+12], %r16;
+	st.shared.f32 	[%r3+16], %f5;
+	st.shared.f32 	[%r3+20], %f6;
+	st.shared.f32 	[%r3+24], %f7;
+	st.shared.u32 	[%r3+28], %r17;
+
+$L__BB8_2:
+	bar.sync 	0;
+	setp.ge.u32 	%p5, %r1, %r5;
+	or.pred  	%p6, %p5, %p2;
+	@%p6 bra 	$L__BB8_6;
+
+	cvta.to.global.u64 	%rd9, %rd2;
+	mul.wide.u32 	%rd10, %r1, 32;
+	add.s64 	%rd1, %rd9, %rd10;
+	ld.global.nc.f32 	%f8, [%rd1];
+	sub.f32 	%f9, %f8, %f1;
+	ld.shared.f32 	%f10, [%r3+16];
+	setp.gtu.f32 	%p7, %f9, %f10;
+	ld.global.nc.f32 	%f11, [%rd1+16];
+	add.f32 	%f12, %f11, %f1;
+	ld.shared.f32 	%f13, [%r3];
+	setp.ltu.f32 	%p8, %f12, %f13;
+	or.pred  	%p9, %p8, %p7;
+	ld.global.nc.f32 	%f14, [%rd1+4];
+	sub.f32 	%f15, %f14, %f1;
+	ld.shared.f32 	%f16, [%r3+20];
+	setp.gtu.f32 	%p10, %f15, %f16;
+	or.pred  	%p11, %p9, %p10;
+	ld.global.nc.f32 	%f17, [%rd1+20];
+	add.f32 	%f18, %f17, %f1;
+	ld.shared.f32 	%f19, [%r3+4];
+	setp.ltu.f32 	%p12, %f18, %f19;
+	or.pred  	%p13, %p12, %p11;
+	ld.global.nc.f32 	%f20, [%rd1+8];
+	sub.f32 	%f21, %f20, %f1;
+	ld.shared.f32 	%f22, [%r3+24];
+	setp.gtu.f32 	%p14, %f21, %f22;
+	or.pred  	%p15, %p14, %p13;
+	ld.global.nc.f32 	%f23, [%rd1+24];
+	add.f32 	%f24, %f23, %f1;
+	ld.shared.f32 	%f25, [%r3+8];
+	setp.ltu.f32 	%p16, %f24, %f25;
+	or.pred  	%p17, %p16, %p15;
+	@%p17 bra 	$L__BB8_6;
+
+	cvta.to.global.u64 	%rd11, %rd5;
+	atom.global.add.u32 	%r4, [%rd11], 1;
+	setp.ge.u32 	%p18, %r4, %r7;
+	@%p18 bra 	$L__BB8_6;
+
+	ld.global.nc.u32 	%r18, [%rd1+12];
+	ld.shared.u32 	%r19, [%r3+12];
+	cvta.to.global.u64 	%rd12, %rd4;
+	mul.wide.u32 	%rd13, %r4, 8;
+	add.s64 	%rd14, %rd12, %rd13;
+	st.global.u32 	[%rd14], %r18;
+	st.global.u32 	[%rd14+4], %r19;
+
+$L__BB8_6:
+	ret;
+
+}
+	// .globl	bipartite_aabb_overlap_sm86
+.visible .entry bipartite_aabb_overlap_sm86(
+	.param .u64 bipartite_aabb_overlap_sm86_param_0,
+	.param .u64 bipartite_aabb_overlap_sm86_param_1,
+	.param .u64 bipartite_aabb_overlap_sm86_param_2,
+	.param .u64 bipartite_aabb_overlap_sm86_param_3,
+	.param .u32 bipartite_aabb_overlap_sm86_param_4,
+	.param .u32 bipartite_aabb_overlap_sm86_param_5,
+	.param .u32 bipartite_aabb_overlap_sm86_param_6,
+	.param .f32 bipartite_aabb_overlap_sm86_param_7
+)
+{
+	.reg .pred 	%p<25>;
+	.reg .f32 	%f<20>;
+	.reg .b32 	%r<28>;
+	.reg .b64 	%rd<14>;
+	// demoted variable
+	.shared .align 4 .b8 _ZZ27bipartite_aabb_overlap_sm86E3s_b[512];
+
+	ld.param.u64 	%rd1, [bipartite_aabb_overlap_sm86_param_0];
+	ld.param.u64 	%rd2, [bipartite_aabb_overlap_sm86_param_1];
+	ld.param.u64 	%rd3, [bipartite_aabb_overlap_sm86_param_2];
+	ld.param.u64 	%rd4, [bipartite_aabb_overlap_sm86_param_3];
+	ld.param.u32 	%r9, [bipartite_aabb_overlap_sm86_param_4];
+	ld.param.u32 	%r10, [bipartite_aabb_overlap_sm86_param_5];
+	ld.param.u32 	%r11, [bipartite_aabb_overlap_sm86_param_6];
+	ld.param.f32 	%f1, [bipartite_aabb_overlap_sm86_param_7];
+	mov.u32 	%r12, %ctaid.x;
+	shl.b32 	%r13, %r12, 4;
+	mov.u32 	%r14, %tid.x;
+	add.s32 	%r1, %r13, %r14;
+	mov.u32 	%r15, %ctaid.y;
+	shl.b32 	%r16, %r15, 4;
+	mov.u32 	%r2, %tid.y;
+	add.s32 	%r3, %r16, %r2;
+	setp.ne.s32 	%p3, %r14, 0;
+	setp.ge.u32 	%p4, %r3, %r10;
+	or.pred  	%p5, %p3, %p4;
+	@%p5 bra 	$L__BB9_2;
+
+	shl.b32 	%r18, %r2, 5;
+	mov.u32 	%r19, _ZZ27bipartite_aabb_overlap_sm86E3s_b;
+	add.s32 	%r17, %r19, %r18;
+	mul.wide.u32 	%rd6, %r3, 32;
+	add.s64 	%rd5, %rd2, %rd6;
+	// begin inline asm
+	cp.async.ca.shared.global [%r17], [%rd5], 16;
+cp.async.ca.shared.global [%r17 + 16], [%rd5 + 16], 16;
+
+	// end inline asm
+
+$L__BB9_2:
+	// begin inline asm
+	cp.async.commit_group;
+ cp.async.wait_all;
+
+	// end inline asm
+	bar.sync 	0;
+	setp.ge.u32 	%p8, %r1, %r9;
+	mov.pred 	%p24, 0;
+	or.pred  	%p9, %p8, %p4;
+	@%p9 bra 	$L__BB9_4;
+
+	cvta.to.global.u64 	%rd7, %rd1;
+	mul.wide.u32 	%rd8, %r1, 32;
+	add.s64 	%rd9, %rd7, %rd8;
+	ld.global.nc.u32 	%r27, [%rd9+12];
+	shl.b32 	%r21, %r2, 5;
+	mov.u32 	%r22, _ZZ27bipartite_aabb_overlap_sm86E3s_b;
+	add.s32 	%r23, %r22, %r21;
+	ld.shared.u32 	%r26, [%r23+12];
+	ld.global.nc.f32 	%f2, [%rd9];
+	sub.f32 	%f3, %f2, %f1;
+	ld.shared.f32 	%f4, [%r23+16];
+	setp.le.f32 	%p10, %f3, %f4;
+	ld.global.nc.f32 	%f5, [%rd9+16];
+	add.f32 	%f6, %f5, %f1;
+	ld.shared.f32 	%f7, [%r23];
+	setp.ge.f32 	%p11, %f6, %f7;
+	and.pred  	%p12, %p11, %p10;
+	ld.global.nc.f32 	%f8, [%rd9+4];
+	sub.f32 	%f9, %f8, %f1;
+	ld.shared.f32 	%f10, [%r23+20];
+	setp.le.f32 	%p13, %f9, %f10;
+	and.pred  	%p14, %p12, %p13;
+	ld.global.nc.f32 	%f11, [%rd9+20];
+	add.f32 	%f12, %f11, %f1;
+	ld.shared.f32 	%f13, [%r23+4];
+	setp.ge.f32 	%p15, %f12, %f13;
+	and.pred  	%p16, %p15, %p14;
+	ld.global.nc.f32 	%f14, [%rd9+8];
+	sub.f32 	%f15, %f14, %f1;
+	ld.shared.f32 	%f16, [%r23+24];
+	setp.le.f32 	%p17, %f15, %f16;
+	and.pred  	%p18, %p17, %p16;
+	ld.global.nc.f32 	%f17, [%rd9+24];
+	add.f32 	%f18, %f17, %f1;
+	ld.shared.f32 	%f19, [%r23+8];
+	setp.ge.f32 	%p19, %f18, %f19;
+	and.pred  	%p24, %p19, %p18;
+
+$L__BB9_4:
+	not.pred 	%p20, %p24;
+	selp.u32 	%r25, 1, 0, %p24;
+	// begin inline asm
+	redux.sync.add.s32 %r24, %r25, 0xffffffff;
+
+	// end inline asm
+	setp.eq.s32 	%p21, %r24, 0;
+	or.pred  	%p22, %p20, %p21;
+	@%p22 bra 	$L__BB9_7;
+
+	cvta.to.global.u64 	%rd10, %rd4;
+	atom.global.add.u32 	%r8, [%rd10], 1;
+	setp.ge.u32 	%p23, %r8, %r11;
+	@%p23 bra 	$L__BB9_7;
+
+	cvta.to.global.u64 	%rd11, %rd3;
+	mul.wide.u32 	%rd12, %r8, 8;
+	add.s64 	%rd13, %rd11, %rd12;
+	st.global.u32 	[%rd13], %r27;
+	st.global.u32 	[%rd13+4], %r26;
+
+$L__BB9_7:
+	ret;
+
+}
+	// .globl	point_mesh_distance_generic
