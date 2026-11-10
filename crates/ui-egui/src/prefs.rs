@@ -1373,6 +1373,11 @@ preference_settings! {
     auto_operation: bool = true, PAGE_TOOLS => check_id("prefs.auto_operation");
     /// Reuse a command's safe values and options after it succeeds, until the app closes. Off by default: each dialog opens with its usual defaults.
     remember_dialog_values: bool = false, PAGE_TOOLS => check_id_help("prefs.remember_dialog_values", "prefs.remember_dialog_values.help");
+    /// A new Solid Fillet opens at the radius the tool ships with, 2 mm, shown in the design's
+    /// unit ("0.07874 in" in an inch design): a radius is bound by the faces beside its edges, and
+    /// the number read in the design's unit ("2 in" = 50.8 mm) never fits the part (#12418). On: it
+    /// opens at the number 2 read in the design's unit, as before.
+    fillet_legacy_radius: bool = false, PAGE_TOOLS => check_id_help("prefs.fillet_legacy_radius", "prefs.fillet_legacy_radius.help");
     /// Placing a Single hole snaps to the middle of the face and the centres of its round edges
     /// (`hole_place`). Off by default: a hole goes where it is clicked.
     hole_snaps: bool = false, PAGE_TOOLS => check("Snap to face and edge centres");

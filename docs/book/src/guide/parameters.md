@@ -90,8 +90,10 @@ or unitless arithmetic expression typed into a length field is read. In an inch 
 and `1 / 4` mean 0.25 in. A new user parameter given no unit (`parameters.add` or
 `parameters.import` without `unit`) is a length in the design's units, as the Parameters dialog
 makes it: `40/2` is 20 in. Operation dialogs start with lengths in the design's units, including
-secondary distances, wall thicknesses, gaps, offsets and radii. Canvas handles and live sketch
-values use the same units as the operation. Angles, counts and scale factors keep their own
+secondary distances, wall thicknesses, gaps, offsets and radii. One is the exception: a new Solid
+Fillet's radius opens at the 2 mm the tool ships with, shown in the design's units ("0.07874 in" in
+an inch design), because a radius is bound by the faces beside its edges. Canvas handles and live
+sketch values use the same units as the operation. Angles, counts and scale factors keep their own
 units. Preferences selects the default units for new designs; existing designs use their own
 Document Settings.
 
