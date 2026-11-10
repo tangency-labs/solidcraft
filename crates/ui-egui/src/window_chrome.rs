@@ -25,8 +25,8 @@
 //!
 //! Adapted from VectorCraft's `crates/ui-egui/src/titlebar.rs` (MIT OR Apache-2.0).
 
-use crate::icons::glyphs::paint_glyph;
 use crate::ui_kit::BackingTooltipExt as _;
+use crate::ui_kit::icons::glyphs::paint_glyph;
 use egui::{
     Color32, CursorIcon, Id, LayerId, Order, PointerButton, Pos2, Rect, ResizeDirection, Sense, Stroke, Ui, ViewportBuilder, ViewportCommand, pos2,
     vec2,
@@ -342,7 +342,7 @@ mod tests {
 
     impl Bar {
         fn new(bar: TitleBar, width: f32) -> Self {
-            Self { ctx: crate::fonts::test_context(), bar, width, time: 0.0, maximized: false, content: None, action: None }
+            Self { ctx: crate::ui_kit::test_support::context(), bar, width, time: 0.0, maximized: false, content: None, action: None }
         }
 
         fn rect(&self) -> Rect {

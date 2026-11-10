@@ -1414,6 +1414,7 @@ mod tests {
         // menu.rs and search.rs; `CommandSearch::heading` passes its label to `tr`, an id.
         KitCall { name: "Menu::heading", args: &[1], id: false, trim: &[] },
         KitCall { name: "MenuItem::new", args: &[1], id: false, trim: &[] },
+        KitCall { name: "button_enabled", args: &[1], id: false, trim: &[] },
         KitCall { name: "CommandSearch::heading", args: &[1], id: true, trim: &[] },
     ];
 
@@ -1431,21 +1432,6 @@ mod tests {
         KitField { owner: "PairButton", field: "label", id: false },
         KitField { owner: "PopupOption", field: "kind", id: false },
         KitField { owner: "WindowPage", field: "label", id: true },
-    ];
-
-    /// A text carrier outside `ui_kit/` that hands its label to the kit: `context_menu::button`
-    /// and `button_enabled` build a `MenuItem`, which draws `tr_label(label)` (menu.rs:210).
-    /// Resolved by the same origin rules as the kit: a `context_menu::…`/`crate::context_menu::…`
-    /// path, a `use` import, or a call inside `context_menu.rs` itself.
-    struct ModuleCall {
-        module: &'static str,
-        name: &'static str,
-        args: &'static [usize],
-    }
-
-    const MODULE_CALLS: &[ModuleCall] = &[
-        ModuleCall { module: "context_menu", name: "button", args: &[1] },
-        ModuleCall { module: "context_menu", name: "button_enabled", args: &[1] },
     ];
 
     /// The kit's modules: only these may sit between `ui_kit` and a translated function in a path.
@@ -1468,11 +1454,10 @@ mod tests {
         globs: Vec<Vec<String>>,
     }
 
-    /// What a name or path resolves to: a kit function, or a text carrier in another module.
+    /// What a name or path resolves to: a kit function.
     #[derive(Clone, Copy)]
     enum Target {
         Kit(&'static str),
-        Module(&'static ModuleCall),
     }
 
     /// What the crate's files say about the kit: the names each file imports from it, and the
@@ -1552,17 +1537,9 @@ mod tests {
             {
                 return Some(Target::Kit(kit));
             }
-            if let Some(call) = module_call(name, module) {
-                return Some(Target::Module(call));
-            }
             path = reexports.get(module)?.get(name)?.clone();
         }
         None
-    }
-
-    /// The module text carrier `name` names, when the last segment of `module` is its module.
-    fn module_call(name: &str, module: &[String]) -> Option<&'static ModuleCall> {
-        MODULE_CALLS.iter().find(|call| call.name == name && module.last().is_some_and(|segment| segment == call.module))
     }
 
     /// Make a `use`/call path absolute against the module of the file it appears in:
@@ -1603,12 +1580,6 @@ mod tests {
         let mut path = normalize(module, qualifier);
         path.push(name.to_string());
         resolve_target(&path, &context.reexports)
-    }
-
-    /// A module text carrier called inside its own module (`button` in `context_menu.rs`).
-    fn module_inside(path: &std::path::Path, name: &str) -> Option<&'static ModuleCall> {
-        let module = module_path(path);
-        MODULE_CALLS.iter().find(|call| call.name == name && module.last().is_some_and(|segment| segment == call.module))
     }
 
     fn free_kit(name: &str) -> Option<&'static str> {
@@ -1712,13 +1683,11 @@ mod tests {
                                             })
                                         })
                                         .or_else(|| inside_kit.then(|| free_kit(&written)).flatten().map(Target::Kit))
-                                        .or_else(|| module_inside(path, &written).map(Target::Module))
                                 } else {
                                     resolve_qualified(context, names, &module, &qualifier, &written)
                                 };
                                 match resolved {
                                     Some(Target::Kit(kit)) => kit_free(kit, &tokens, i, out),
-                                    Some(Target::Module(call)) => push(&tokens, i + 1, call.args, false, &[], out),
                                     None => {}
                                 }
                             }
@@ -2386,32 +2355,31 @@ mod tests {
         );
     }
 
-    /// `context_menu::button` hands its label to `MenuItem::new` → `tr_label` (menu.rs:210); all
-    /// three origins count: the `crate::context_menu::…` path, a `use` import and a call inside
-    /// `context_menu.rs` itself.
+    /// The kit's `menu::button` hands its label to `MenuItem::new` → `tr_label`; all three
+    /// origins count: the `crate::ui_kit::menu::…` path, a `use` import and a call inside the kit.
     #[test]
-    fn a_context_menu_button_label_is_found() {
+    fn a_menu_button_label_is_found() {
         install();
         assert_eq!(
-            literals("fn live() { crate::context_menu::button(ui, \"Add to New Folder\", \"folder\"); }"),
+            literals("fn live() { crate::ui_kit::menu::button(ui, \"Add to New Folder\", \"folder\"); }"),
             [("Add to New Folder".to_string(), false)]
         );
         assert_eq!(
-            literals("use crate::context_menu::button; fn live() { button(ui, \"Remove from Folder\", \"folder\"); }"),
+            literals("use crate::ui_kit::menu::button; fn live() { button(ui, \"Remove from Folder\", \"folder\"); }"),
             [("Remove from Folder".to_string(), false)]
         );
         assert_eq!(
-            literals_at("src/context_menu.rs", "fn f() { button(ui, \"Roll Back Here\", \"history\"); }"),
+            literals_at("src/ui_kit/menu.rs", "fn f() { button(ui, \"Roll Back Here\", \"history\"); }"),
             [("Roll Back Here".to_string(), false)]
         );
     }
 
-    /// `context_menu::button_enabled` takes the same label at the same position.
+    /// `menu::button_enabled` takes the same label at the same position.
     #[test]
-    fn a_context_menu_button_enabled_label_is_found() {
+    fn a_menu_button_enabled_label_is_found() {
         install();
         assert_eq!(
-            literals("fn live() { context_menu::button_enabled(ui, \"Rename Feature\", \"rename\", enabled); }"),
+            literals("fn live() { crate::ui_kit::menu::button_enabled(ui, \"Rename Feature\", \"rename\", enabled); }"),
             [("Rename Feature".to_string(), false)]
         );
     }

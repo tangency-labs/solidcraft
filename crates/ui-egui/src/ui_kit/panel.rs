@@ -60,9 +60,9 @@ fn header_actions(
     if icon.0.is_empty() {
         ui.painter().circle_filled(icon_rect.center(), t.space_3, solidcraft_theme::TabAccent::current(ui.ctx()).ink);
     } else if let Some(ink) = icon.1 {
-        crate::icons::paint_ink(ui.painter(), icon_rect, icon.0, ink);
+        crate::ui_kit::icons::paint_ink(ui.painter(), icon_rect, icon.0, ink);
     } else {
-        crate::icons::paint_icon(ui.painter(), icon_rect, icon.0, 1.0);
+        crate::ui_kit::icons::paint_icon(ui.painter(), icon_rect, icon.0, 1.0);
     }
     let close_rect = egui::Rect::from_center_size(
         egui::pos2((rect.right() - t.space_8 - t.form_close_size / 2.0).max(rect.left()), rect.center().y),
@@ -223,7 +223,7 @@ impl<'a> TopHeader<'a> {
             ui.interact(self.icon, ui.scope_id().with("compute_status"), egui::Sense::hover()).backing_on_hover_text(status);
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
         } else {
-            crate::icons::paint_icon(ui.painter(), self.icon, icon, 1.0);
+            crate::ui_kit::icons::paint_icon(ui.painter(), self.icon, icon, 1.0);
         }
         let heading = crate::ui_kit::type_face::semibold(t.font_heading);
         match state.text.as_deref() {
@@ -252,7 +252,7 @@ pub(crate) fn inspector_header(ui: &mut Ui, icon: &str, title: &str, kind: &str)
     let mut action = None;
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), header_height()), egui::Sense::hover());
     let icon_rect = egui::Rect::from_center_size(egui::pos2(rect.left() + (t.space_16 + t.space_4), rect.center().y), vec2(t.space_14, t.space_14));
-    crate::icons::paint_ink(ui.painter(), icon_rect, icon, solidcraft_theme::TabAccent::current(ui.ctx()).ink);
+    crate::ui_kit::icons::paint_ink(ui.painter(), icon_rect, icon, solidcraft_theme::TabAccent::current(ui.ctx()).ink);
     let close_rect = egui::Rect::from_center_size(
         egui::pos2(rect.right() - (t.space_16 + t.space_4), rect.center().y),
         vec2(t.form_close_size, t.form_close_size),
@@ -1151,7 +1151,7 @@ impl<'a> Window<'a> {
         self.surface(ctx, false, |ui| self.content(ui, valid, body, left))
     }
 
-    pub(super) fn content(&self, ui: &mut Ui, valid: bool, body: impl FnOnce(&mut Ui), left: impl FnOnce(&mut Ui)) -> (bool, super::Action) {
+    pub(crate) fn content(&self, ui: &mut Ui, valid: bool, body: impl FnOnce(&mut Ui), left: impl FnOnce(&mut Ui)) -> (bool, super::Action) {
         super::scope(ui, |ui| {
             let t = Tokens::get();
             ui.spacing_mut().item_spacing.y = 0.0;
@@ -1345,7 +1345,7 @@ pub(crate) struct PageListHooks<'a, S> {
 }
 
 #[cfg(test)]
-pub(super) fn page_list<S>(ui: &mut Ui, selected: &mut usize, pages: &[WindowPage<'_, S>], state: &mut S) {
+pub(crate) fn page_list<S>(ui: &mut Ui, selected: &mut usize, pages: &[WindowPage<'_, S>], state: &mut S) {
     page_list_sized(ui, selected, pages, state, 16.0, egui::Margin::same(Tokens::get().space_16 as i8), None, None, false);
 }
 
@@ -1431,7 +1431,7 @@ fn page_list_sized<S>(
                 let icon =
                     egui::Rect::from_center_size(egui::pos2(rect.left() + t.space_10 + t.space_8, rect.center().y), vec2(t.space_16, t.space_16));
                 match page.icon {
-                    super::Icon::Kit(name) => crate::icons::paint_ink(ui.painter(), icon, name, if on { ink } else { t.form_dim }),
+                    super::Icon::Kit(name) => crate::ui_kit::icons::paint_ink(ui.painter(), icon, name, if on { ink } else { t.form_dim }),
                     host => host.paint(ui.painter(), icon, 1.0),
                 }
                 let text_rect = egui::Rect::from_min_max(egui::pos2(icon.right() + super::NAV_ROW_GAP, rect.top()), rect.right_bottom());

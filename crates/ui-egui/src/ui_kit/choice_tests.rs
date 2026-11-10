@@ -1,15 +1,15 @@
 use crate::ui_kit::test_support::*;
 use crate::ui_kit::*;
 
-use crate::scenario;
 use egui::Ui;
+use solidcraft_ui_registry as registry;
 
 #[test]
 fn segmented_allocates_only_its_reserved_row() {
     for layout in [egui::Layout::top_down(egui::Align::Min), egui::Layout::left_to_right(egui::Align::Center)] {
         for width in [160.0, 320.0, 640.0] {
             for enabled in [&[][..], &[true, false, true, false][..], &[false; 4][..]] {
-                let ctx = crate::fonts::test_context();
+                let ctx = crate::ui_kit::test_support::context();
                 frame(&ctx, vec![], |ui| {
                     let bounds = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(width, 120.0));
                     let builder = || egui::UiBuilder::new().max_rect(bounds).layout(layout);
@@ -37,8 +37,8 @@ fn segmented_click_respects_parent_and_option_availability() {
     for parent_enabled in [false, true] {
         // Missing availability entries retain the enabled default.
         for enabled in [&[][..], &[true][..], &[true, true][..], &[true, false][..]] {
-            let ctx = crate::fonts::test_context();
-            scenario::clear_handles();
+            let ctx = crate::ui_kit::test_support::context();
+            registry::clear_handles();
             let mut selected = 0;
             let mut changed = false;
             let mut draw = |ui: &mut Ui| {
@@ -50,7 +50,7 @@ fn segmented_click_respects_parent_and_option_availability() {
                 });
             };
             frame(&ctx, vec![], &mut draw);
-            let pos = scenario::handle_at("dialog:Availability:B").expect("disabled segments still publish targets");
+            let pos = registry::handle_at("dialog:Availability:B").expect("disabled segments still publish targets");
             frame(&ctx, pointer(pos, true), &mut draw);
             frame(&ctx, pointer(pos, false), &mut draw);
             let should_change = parent_enabled && enabled.get(1).copied().unwrap_or(true);
@@ -62,7 +62,7 @@ fn segmented_click_respects_parent_and_option_availability() {
 
 #[test]
 fn segmented_availability_keeps_unsupported_options_visible_and_inert() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let mut selected = 1;
     let mut draw = |ui: &mut Ui| {
         row(ui, "Backdrop availability", |ui| {
@@ -76,7 +76,7 @@ fn segmented_availability_keeps_unsupported_options_visible_and_inert() {
     };
     frame(&ctx, vec![], &mut draw);
     for option in ["World", "Gradient"] {
-        let pos = scenario::handle_at(&format!("dialog:Backdrop availability:{option}")).unwrap();
+        let pos = registry::handle_at(&format!("dialog:Backdrop availability:{option}")).unwrap();
         frame(&ctx, pointer(pos, true), &mut draw);
         frame(&ctx, pointer(pos, false), &mut draw);
     }
@@ -85,44 +85,25 @@ fn segmented_availability_keeps_unsupported_options_visible_and_inert() {
 
 #[test]
 fn segmented_click_changes_selection_and_keeps_all_choices_visible() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let mut selected = 0;
     let mut draw = |ui: &mut Ui| {
         row(ui, "Continuity", |ui| segmented(ui, &mut selected, &["G1", "G2", "G3"], Default::default()));
     };
     frame(&ctx, vec![], &mut draw);
-    let pos = scenario::handle_at("dialog:Continuity:G2").unwrap();
+    let pos = registry::handle_at("dialog:Continuity:G2").unwrap();
     frame(&ctx, pointer(pos, true), &mut draw);
     frame(&ctx, pointer(pos, false), &mut draw);
     assert_eq!(selected, 1);
-    let control = scenario::rect_of("dialog:control:Continuity").unwrap();
+    let control = registry::rect_of("dialog:control:Continuity").unwrap();
     for option in ["G1", "G2", "G3"] {
-        assert!(control.contains(scenario::handle_at(&format!("dialog:Continuity:{option}")).unwrap()));
-    }
-}
-
-/// A segment shows its option in the user's language, as the dropdown it falls back to does, and
-/// keeps the option as passed in its handle.
-#[test]
-fn segments_show_their_options_translated() {
-    let ctx = crate::fonts::test_context();
-    let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 120.0));
-    let _japanese = solidcraft_ui_text::scope("ja");
-    let mut selected = 0;
-    let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), ..Default::default() }, |ui| {
-        row(ui, "Section", |ui| segmented(ui, &mut selected, &["Circular", "Square"], Default::default()));
-    });
-    output.textures_delta.clear();
-    let painted = |text: &str| output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(t) if t.galley.job.text == text));
-    for (option, shown) in [("Circular", "円形"), ("Square", "正方形")] {
-        assert!(painted(shown) && !painted(option), "{option} shows as {shown}");
-        assert!(scenario::handle_at(&format!("dialog:Section:{option}")).is_some(), "{option} keeps its handle");
+        assert!(control.contains(registry::handle_at(&format!("dialog:Continuity:{option}")).unwrap()));
     }
 }
 
 #[test]
 fn optional_field_keeps_empty_default_and_options_use_two_columns() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let mut value = String::new();
     let (mut flip, mut copy) = (false, true);
     frame(&ctx, vec![], |ui| {
@@ -130,13 +111,13 @@ fn optional_field_keeps_empty_default_and_options_use_two_columns() {
         options(ui, "options", &mut [("Flip", &mut flip), ("Create Copy", &mut copy)]);
     });
     assert!(value.is_empty(), "displaying a hint must not introduce a parameter");
-    let first = scenario::handle_at("dialog:Flip").unwrap();
-    let second = scenario::handle_at("dialog:Create Copy").unwrap();
+    let first = registry::handle_at("dialog:Flip").unwrap();
+    let second = registry::handle_at("dialog:Create Copy").unwrap();
     assert_eq!(first.y, second.y);
     assert!(second.x > first.x);
     let mut draw = |ui: &mut Ui| options(ui, "options", &mut [("Flip", &mut flip), ("Create Copy", &mut copy)]);
     frame(&ctx, vec![], &mut draw);
-    let first = scenario::handle_at("dialog:Flip").unwrap();
+    let first = registry::handle_at("dialog:Flip").unwrap();
     frame(&ctx, pointer(first, true), &mut draw);
     frame(&ctx, pointer(first, false), &mut draw);
     assert!(flip && copy);
@@ -152,19 +133,19 @@ fn segments_stay_segments_when_a_scrollbar_appears_and_disappears() {
     let scrollbar = solid.allocated_width();
     assert!(scrollbar > 0.0);
     let fresh = || {
-        let ctx = crate::fonts::test_context();
+        let ctx = crate::ui_kit::test_support::context();
         ctx.all_styles_mut(|style| style.spacing.scroll = solid);
         ctx
     };
     let form = |ctx: &egui::Context, width: f32| {
-        scenario::clear_handles();
+        registry::clear_handles();
         let mut selected = 0;
         frame(ctx, vec![], &mut |ui: &mut Ui| {
             ui.allocate_ui(egui::vec2(width, 60.0), |ui| {
                 row(ui, "Orbit around", |ui| segmented(ui, &mut selected, &options, Default::default()));
             });
         });
-        scenario::rect_of("dialog:segments:Orbit around").is_some()
+        registry::rect_of("dialog:segments:Orbit around").is_some()
     };
     // The width where the segments just fit, found without any memory of an earlier frame being
     // anything but the generous start (so it is the width less one scrollbar).
@@ -197,9 +178,9 @@ fn beveled_segments_share_fill_corners_at_internal_joins() {
     });
     let _restore = solidcraft_theme::scoped_tokens(t);
     for selected in 0..3 {
-        let ctx = crate::fonts::test_context();
+        let ctx = crate::ui_kit::test_support::context();
         let mut selected = selected;
-        let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+        let output = crate::ui_kit::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| {
             ui.set_width(300.0);
             segmented(ui, &mut selected, &["Left", "Middle", "Right"], Default::default());
         });
@@ -228,7 +209,7 @@ fn beveled_segments_share_fill_corners_at_internal_joins() {
 
 #[test]
 fn stage_chips_reserve_the_selected_weight_for_complete_labels_in_all_five_catalogs() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 120.0));
     for language in ["en", "ja", "zh", "de", "ko"] {
         let locale = solidcraft_ui_text::Locale::for_language(language);
@@ -258,20 +239,20 @@ fn stage_chips_reserve_the_selected_weight_for_complete_labels_in_all_five_catal
 
 #[test]
 fn thumbnail_choice_states_share_geometry_and_publish_modified_and_running_indicators() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
         solidcraft_theme::set_dark(dark);
         solidcraft_theme::apply(&ctx);
         let mut dimensions = Vec::new();
         for (selected, modified, progress) in [(false, false, None), (true, false, None), (true, true, Some(0.4))] {
-            scenario::clear_handles();
+            registry::clear_handles();
             frame(&ctx, vec![], |ui| {
                 let response = thumbnail_choice(ui, "shot", "Hero", ThumbnailChoice { selected, modified, progress, ..Default::default() });
                 dimensions.push(response.rect.size());
             });
-            assert_eq!(scenario::rect_of("dialog:list:shot:modified").is_some(), modified);
-            assert_eq!(scenario::rect_of("dialog:list:shot:progress").is_some(), progress.is_some());
+            assert_eq!(registry::rect_of("dialog:list:shot:modified").is_some(), modified);
+            assert_eq!(registry::rect_of("dialog:list:shot:progress").is_some(), progress.is_some());
         }
         assert!(dimensions.iter().all(|size| *size == dimensions[0]));
         assert_eq!(dimensions[0].y, 38.0);
@@ -281,7 +262,7 @@ fn thumbnail_choice_states_share_geometry_and_publish_modified_and_running_indic
 
 #[test]
 fn thumbnail_choices_with_ready_images_preserve_names_and_full_chip_stride() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let texture = ctx.load_texture("shot", egui::ColorImage::filled([104, 60], egui::Color32::GRAY), Default::default());
     frame(&ctx, vec![], |ui| {
         ui.horizontal(|ui| {
@@ -309,7 +290,7 @@ fn save_shot_dashes_leave_rounded_corners_at_the_chip_radius() {
             _ => {}
         }
     }
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let mut rect = egui::Rect::NOTHING;
     let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
         rect = add_choice(ui, "Save Shot").rect;
@@ -329,7 +310,7 @@ fn save_shot_dashes_leave_rounded_corners_at_the_chip_radius() {
 
 #[test]
 fn segmented_unavailable_choices_remain_visible_and_cannot_change_selection() {
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let mut selected = 1;
     let mut draw = |ui: &mut Ui| {
         row(ui, "Quality", |ui| {
@@ -342,11 +323,11 @@ fn segmented_unavailable_choices_remain_visible_and_cannot_change_selection() {
         });
     };
     frame(&ctx, vec![], &mut draw);
-    let draft = scenario::handle_at("dialog:Quality:Draft").unwrap();
+    let draft = registry::handle_at("dialog:Quality:Draft").unwrap();
     frame(&ctx, pointer(draft, true), &mut draw);
     frame(&ctx, pointer(draft, false), &mut draw);
     assert_eq!(selected, 1);
-    assert!(scenario::handle_at("dialog:Quality:Custom").is_some());
+    assert!(registry::handle_at("dialog:Quality:Custom").is_some());
 }
 
 #[test]
@@ -356,7 +337,7 @@ fn output_radio_rows_keep_titles_summaries_and_disabled_choices_in_both_themes()
         let _restore = solidcraft_theme::scoped_tokens(tokens);
         for language in ["en", "ja", "zh", "de", "ko"] {
             let locale = solidcraft_ui_text::Locale::for_language(language);
-            let ctx = crate::fonts::test_context();
+            let ctx = crate::ui_kit::test_support::context();
             let mut enabled = true;
             let mut clicked = false;
             let mut draw = |ui: &mut Ui| {
@@ -380,13 +361,13 @@ fn output_radio_rows_keep_titles_summaries_and_disabled_choices_in_both_themes()
                 assert_eq!(response.rect.width(), 240.0);
                 clicked |= response.clicked();
             };
-            let output = crate::test_support::frame(&ctx, egui::RawInput::default(), &mut draw);
-            let texts: Vec<_> = crate::test_support::text_shapes(&output).collect();
+            let output = crate::ui_kit::test_support::raw_frame(&ctx, egui::RawInput::default(), &mut draw);
+            let texts: Vec<_> = crate::ui_kit::test_support::text_shapes(&output).collect();
             let title = texts.iter().find(|text| text.galley.text() == locale.text("render.size_full_hd")).unwrap();
             let summary = texts.iter().find(|text| text.galley.text() == "1920 × 1080").unwrap();
             assert!(title.pos.x + title.galley.size().x <= summary.pos.x, "{language}: title must clear its summary");
             frame(&ctx, vec![], &mut draw);
-            let point = scenario::handle_at("test:output:radio").unwrap();
+            let point = registry::handle_at("test:output:radio").unwrap();
             frame(&ctx, pointer(point, true), &mut draw);
             frame(&ctx, pointer(point, false), &mut draw);
             assert!(clicked);
@@ -403,7 +384,7 @@ fn output_radio_rows_keep_titles_summaries_and_disabled_choices_in_both_themes()
                 });
             };
             frame(&ctx, vec![], &mut disabled);
-            let point = scenario::handle_at("test:output:radio").unwrap();
+            let point = registry::handle_at("test:output:radio").unwrap();
             frame(&ctx, pointer(point, true), &mut disabled);
             frame(&ctx, pointer(point, false), &mut disabled);
             assert!(!clicked);

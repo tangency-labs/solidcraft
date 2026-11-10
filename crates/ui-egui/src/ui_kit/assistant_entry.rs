@@ -1,5 +1,5 @@
 //! Assistant entry point and its status mark, shared by application chrome and previews.
-use crate::icons;
+use crate::ui_kit::icons;
 use egui::{FontId, Rect, Response, Stroke, vec2};
 use solidcraft_theme::Tokens;
 

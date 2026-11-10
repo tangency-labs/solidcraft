@@ -398,7 +398,9 @@ fn searchable_dropdown_with(
         .selected_text(if icon.is_some() { "" } else { current })
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
     let combo = if let Some(icon) = icon {
-        combo.icon(move |ui, rect, _, _| crate::icons::paint_ink(ui.painter(), rect.shrink(Tokens::get().space_2), icon, Tokens::get().form_dim))
+        combo.icon(move |ui, rect, _, _| {
+            crate::ui_kit::icons::paint_ink(ui.painter(), rect.shrink(Tokens::get().space_2), icon, Tokens::get().form_dim)
+        })
     } else {
         combo.icon(dropdown_arrow)
     };
@@ -945,7 +947,7 @@ fn paint_dropdown_icon(ui: &Ui, rect: egui::Rect, icon: &str) {
         egui::pos2(rect.left() + ui.spacing().button_padding.x + t.space_8, rect.center().y),
         vec2(t.space_16, t.space_16),
     );
-    crate::icons::paint_ink(ui.painter(), rect, icon, t.form_ink);
+    crate::ui_kit::icons::paint_ink(ui.painter(), rect, icon, t.form_ink);
     solidcraft_ui_registry::publish_rect(&format!("dialog:dropdown_icon:{icon}"), rect);
 }
 
@@ -1380,7 +1382,7 @@ pub(crate) fn search_field(ui: &mut Ui, id: egui::Id, value: &mut String, hint: 
     let mut response = ui.add_sized(vec2(dimension(ui.available_width()), height), editor);
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE.limited(limit));
     let icon = egui::Rect::from_center_size(egui::pos2(response.rect.left() + t.space_12, response.rect.center().y), vec2(t.space_12, t.space_12));
-    crate::icons::paint_ink(ui.painter(), icon, "zoom", t.form_dim);
+    crate::ui_kit::icons::paint_ink(ui.painter(), icon, "zoom", t.form_dim);
     super::layout::publish_geometry(ui, &response);
     response.widget_info(|| {
         let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), hint);
@@ -1413,7 +1415,7 @@ pub(crate) fn menu_filter(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &
     let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), row_height()), egui::Sense::hover());
     let glyph = egui::Rect::from_center_size(egui::pos2(rect.left() + t.space_8 + t.space_16 / 2.0, rect.center().y), vec2(t.space_16, t.space_16));
-    crate::icons::paint_ink(ui.painter(), glyph, "zoom", t.form_dim);
+    crate::ui_kit::icons::paint_ink(ui.painter(), glyph, "zoom", t.form_dim);
     let field = egui::Rect::from_min_max(egui::pos2((glyph.right() + t.space_8).min(rect.right()), rect.top()), rect.max);
     let hint_text = solidcraft_ui_text::tr_label(hint);
     let response = ui

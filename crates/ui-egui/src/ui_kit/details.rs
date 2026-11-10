@@ -304,7 +304,7 @@ pub(crate) fn details(ui: &mut Ui, id: &str, description: &Details, max_height: 
                                     ui.horizontal(|ui| {
                                         if row.warning {
                                             let (rect, _) = ui.allocate_exact_size(egui::vec2(t.space_16, t.space_16), egui::Sense::hover());
-                                            crate::icons::paint_icon(ui.painter(), rect, "warning", 1.0);
+                                            crate::ui_kit::icons::paint_icon(ui.painter(), rect, "warning", 1.0);
                                         }
                                         ui.label(&row.label).backing_on_hover_text(&row.label);
                                     });
