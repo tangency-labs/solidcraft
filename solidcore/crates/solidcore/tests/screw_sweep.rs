@@ -431,7 +431,6 @@ fn check_wall(wall: &Surface, pitch: f64, law: &[(f64, f64)]) -> WallCheck {
     for span in d.stations().windows(2) {
         for s in [-0.93, -r, -0.31, 0.0, 0.17, r, 0.88] {
             let t = span[0] + 0.5 * (s + 1.0) * (span[1] - span[0]);
-            // Each span keeps its own arc width; the half angle bounds them all.
             let theta = arc_angle(span[0], span[1], 0.5 * (span[1] - span[0]), t);
             assert_eq!(d.turn_at(t).0, theta);
             for a in [0.13, 0.5, 0.87] {
@@ -469,8 +468,8 @@ fn issue_2572_m10_groove_walls_are_their_definitions() {
     let tol = p * 1e-4;
     let b = screw_sweep(&mut k, &m10_groove(p).curves(), O, Z, p, turns, tol).unwrap();
     let walls = walls(&b);
-    // the two flanks, in half-turn pieces (the groove's axial lines make cylinders)
-    assert!(walls.len() >= 12, "{} walls", walls.len());
+    // Cylinder seams split only the analytic axial walls, not the two flanks.
+    assert_eq!(walls.len(), 2, "one multi-turn definition per flank");
     let mut bounds = Vec::new();
     for wall in &walls {
         let c = check_wall(wall, p, &[]);
@@ -486,6 +485,33 @@ fn issue_2572_m10_groove_walls_are_their_definitions() {
         bounds.push(c.bound);
     }
     println!("M10x1.5 groove walls: bounds {bounds:?}");
+}
+
+#[test]
+fn continuous_screw_walls_keep_their_definition_on_a_partial_last_turn() {
+    let mut k = Kernel::default();
+    let pitch = 2.5;
+    let turns = 3.271;
+    let tolerance = pitch * 1e-4;
+    let body = screw_sweep(
+        &mut k,
+        &m10_groove(pitch).curves(),
+        O,
+        Z,
+        pitch,
+        turns,
+        tolerance,
+    )
+    .unwrap();
+    let flanks = walls(&body);
+    assert_eq!(flanks.len(), 2);
+    for flank in flanks {
+        let def = flank.procedural_sweep().unwrap().definition();
+        assert_eq!(def.stations().first(), Some(&0.0));
+        assert_eq!(def.stations().last(), Some(&(turns * 2.0 * PI)));
+        let checked = check_wall(&flank, pitch, &[]);
+        assert!(checked.bound <= tolerance);
+    }
 }
 
 /// A caller reads through the net at a tolerance of at least the bound, and through the
@@ -509,14 +535,18 @@ fn issue_2572_net_scope_reads_the_net_at_or_above_the_bound() {
     let def = sweep.definition().evaluate_definition_point(uv).unwrap();
     assert_ne!(net, def);
     assert_eq!(sweep.evaluate_point(&k, uv).unwrap(), def);
+    assert_eq!(wall.evaluate_point(&k, uv).unwrap(), def);
     {
         let _at = NetScope::within(&k, bound);
         assert_eq!(sweep.evaluate_point(&k, uv).unwrap(), net);
+        assert_eq!(wall.evaluate_point(&k, uv).unwrap(), net);
         let _below = NetScope::within(&k, 0.5 * bound);
         assert_eq!(sweep.evaluate_point(&k, uv).unwrap(), def);
+        assert_eq!(wall.evaluate_point(&k, uv).unwrap(), def);
     }
     let _any = NetScope::new(&k);
     assert_eq!(sweep.evaluate_point(&k, uv).unwrap(), net);
+    assert_eq!(wall.evaluate_point(&k, uv).unwrap(), net);
     // the definition's partials are those of its points
     let _exact = NetScope::exact(&k);
     let d = sweep.evaluate(&k, uv, 1, 1).unwrap();
@@ -797,4 +827,124 @@ fn issue_2572_every_wall_is_a_definition_or_in_the_ledger() {
         fixed.is_empty(),
         "listed kinds no case makes bare any more (fixed? delete their ledger files): {fixed:?}"
     );
+}
+
+/// Offset checks use the original exact surface normal, independently of the
+/// offset generator and its approximation. Parameter edits change that normal.
+#[test]
+fn screw_normal_offsets_keep_distance_certification_and_source_after_edits() {
+    let mut k = Kernel::default();
+    let pitch = 2.5;
+    let Meridian::Polygon(mut polygon) = m10_groove(pitch) else {
+        unreachable!()
+    };
+    for p in &mut polygon {
+        p.0 += 5.0;
+    }
+    let body = screw_sweep(
+        &mut k,
+        &Meridian::Polygon(polygon).curves(),
+        O,
+        Z,
+        pitch,
+        1.271,
+        1e-5,
+    )
+    .unwrap();
+    for original in walls(&body) {
+        for edit in 0..5 {
+            let mut source = original.copy(&k).unwrap();
+            match edit {
+                1 => source.reverse(&k, SurfParamType::U).unwrap(),
+                2 => source.reverse(&k, SurfParamType::V).unwrap(),
+                3 => source.swap_uv(&k).unwrap(),
+                4 => source
+                    .reparameterize(
+                        &k,
+                        &solidcore::geom::extent2d::Extent2d::from_bounds(-1.0, 3.0, 2.0, 9.0),
+                    )
+                    .unwrap(),
+                _ => {}
+            }
+            let input = source.procedural_sweep().unwrap();
+            let domain = input.net().natural_uv_domain();
+            for distance in [-0.1, 0.1] {
+                let result = input
+                    .definition()
+                    .normal_offset(input.net(), distance, 1e-4)
+                    .unwrap_or_else(|e| panic!("edit {edit}, distance {distance}: {e:?}"));
+                let output = result.procedural_sweep().unwrap();
+                assert!(output.bound() <= 1e-4);
+                let record = output.definition().to_record(output.net()).unwrap();
+                let restored = ProceduralSweep::from_record(&record).unwrap();
+                let restored = restored.procedural_sweep().unwrap();
+                for i in 1..9 {
+                    for j in 1..9 {
+                        let uv = Point2::new(
+                            domain.u_min() + (domain.u_max() - domain.u_min()) * f64::from(i) / 9.0,
+                            domain.v_min() + (domain.v_max() - domain.v_min()) * f64::from(j) / 9.0,
+                        );
+                        let first = input.definition().evaluate_definition(uv, 1, 1).unwrap();
+                        let n = first[1][0].cross(first[0][1]);
+                        let expected = first[0][0] + n * (distance / n.length());
+                        let exact = output.definition().evaluate_definition_point(uv).unwrap();
+                        assert!(
+                            (exact - expected).length() < 2e-12,
+                            "edit {edit}, d {distance}"
+                        );
+                        let net = output.net().evaluate_point(uv).unwrap();
+                        assert!((exact - net).length() <= output.bound());
+                        assert_eq!(
+                            exact,
+                            restored.definition().evaluate_definition_point(uv).unwrap()
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn screw_offset_derivatives_through_four_are_derivatives_of_the_exact_wall() {
+    let mut k = Kernel::default();
+    let body = screw_sweep(&mut k, &m10_groove(2.5).curves(), O, Z, 2.5, 1.271, 1e-5).unwrap();
+    let wall = walls(&body).remove(0);
+    let source = wall.procedural_sweep().unwrap();
+    let offset = source
+        .definition()
+        .normal_offset(source.net(), 0.1, 1e-4)
+        .unwrap();
+    let d = offset.procedural_sweep().unwrap().definition();
+    let profile = d.profile().natural_interval();
+    let uv = face_uv(
+        d,
+        profile.min() + 0.37 * (profile.max() - profile.min()),
+        0.63 * d.stations()[0] + 0.37 * d.stations()[1],
+    );
+    let exact = d.evaluate_definition(uv, 4, 4).unwrap();
+    for axis in 0..2 {
+        let h = 1e-5;
+        let shift = if axis == 0 {
+            Point2::new(h, 0.0)
+        } else {
+            Point2::new(0.0, h)
+        };
+        let before = d.evaluate_definition(uv - shift, 4, 4).unwrap();
+        let after = d.evaluate_definition(uv + shift, 4, 4).unwrap();
+        for i in 0..4 {
+            for j in 0..4 {
+                let finite = (after[i][j] - before[i][j]) * (0.5 / h);
+                let next = if axis == 0 {
+                    exact[i + 1][j]
+                } else {
+                    exact[i][j + 1]
+                };
+                assert!(
+                    (finite - next).length() < 2e-6 * next.length().max(1.0),
+                    "axis {axis}, derivative ({i},{j}): {finite:?} != {next:?}"
+                );
+            }
+        }
+    }
 }

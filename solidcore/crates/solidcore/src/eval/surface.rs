@@ -16,6 +16,7 @@ use super::uv::{self, Domain};
 use super::vec::{v3, VecExt};
 use super::{Collapse, CurveEval, EvalError};
 use crate::math::Vec3;
+use crate::surface::procedural_sweep::ProceduralSweep;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
 fn unsupported(what: impl std::fmt::Display) -> EvalError {
@@ -59,6 +60,124 @@ impl Axes {
     }
 }
 
+/// A certified procedural sweep evaluated on its exact definition.
+#[derive(Clone, Debug)]
+pub struct ProceduralSweepEval {
+    record: Box<super::geometry::sweep::ProceduralSweepRecord>,
+    surface: crate::surface::surface::Surface,
+    approximation: EvalSurface,
+    domain: Domain,
+}
+
+impl PartialEq for ProceduralSweepEval {
+    fn eq(&self, other: &Self) -> bool {
+        self.record == other.record && self.domain == other.domain
+    }
+}
+
+impl ProceduralSweepEval {
+    fn new(record: &super::geometry::sweep::ProceduralSweepRecord) -> Result<Self, EvalError> {
+        let surface =
+            ProceduralSweep::from_record(record).map_err(|e| EvalError::Invalid(e.to_string()))?;
+        let net = &record.net;
+        let columns = usize::try_from(net.v_count)
+            .ok()
+            .filter(|n| *n > 0)
+            .ok_or_else(|| EvalError::Invalid("sweep net column count".into()))?;
+        let mut rows = Vec::new();
+        let mut row = Vec::new();
+        for (i, p) in net.points.iter().enumerate() {
+            let w = match &net.weights {
+                Some(weights) => *weights
+                    .get(i)
+                    .ok_or_else(|| EvalError::Invalid("sweep net weights".into()))?,
+                None => 1.0,
+            };
+            let [x, y, z] = *p;
+            row.push([x, y, z, w]);
+            if row.len() == columns {
+                rows.push(std::mem::take(&mut row));
+            }
+        }
+        if !row.is_empty() {
+            rows.push(row);
+        }
+        let approximation = nurbs(&net.u_knots, &net.v_knots, &rows)?;
+        let mut domain = uv::domain(&approximation);
+        // A net's near-coincident ends cannot certify a period of an exact screw.
+        domain.period = [None, None];
+        Ok(Self {
+            record: Box::new(record.clone()),
+            surface,
+            approximation,
+            domain,
+        })
+    }
+
+    /// The fitted net, for display and tessellation only.
+    pub fn approximation(&self) -> &EvalSurface {
+        &self.approximation
+    }
+
+    fn derivatives(&self, u: f64, v: f64, order: usize) -> Option<Vec<Vec<Vec3>>> {
+        self.surface
+            .procedural_sweep()?
+            .definition()
+            .evaluate_definition(crate::math::Point2::new(u, v), order, order)
+            .ok()
+    }
+
+    fn derivs(&self, u: f64, v: f64) -> Option<(Vec3, Vec3, Vec3)> {
+        let d = self.derivatives(u, v, 1)?;
+        Some((
+            *d.first()?.first()?,
+            *d.get(1)?.first()?,
+            *d.first()?.get(1)?,
+        ))
+    }
+
+    fn second(&self, u: f64, v: f64) -> Option<(Vec3, Vec3, Vec3)> {
+        let d = self.derivatives(u, v, 2)?;
+        Some((*d.get(2)?.first()?, *d.get(1)?.get(1)?, *d.first()?.get(2)?))
+    }
+
+    fn partials(&self, u: f64, v: f64) -> Option<Partials> {
+        let d = self.derivatives(u, v, super::MAX_PARTIAL_ORDER)?;
+        tabulate(|i, j| d.get(i)?.get(j).copied())
+    }
+}
+
+/// Native starting-face partials for a curve whose exact screw owner is already certified.
+/// Reversals and swapping are resolved by the definition's existing side mapping.
+pub(super) fn screw_partials_starting_face_spans(
+    surface: &crate::surface::surface::Surface,
+    u: f64,
+    v: f64,
+) -> Option<Partials> {
+    use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
+    use crate::nurbs::knots::Side;
+
+    if !(u.is_finite() && v.is_finite()) {
+        return None;
+    }
+    let d = surface
+        .procedural_sweep()?
+        .definition()
+        .screw_derivatives_with_flags(
+            crate::math::Point2::new(u, v),
+            super::MAX_PARTIAL_ORDER,
+            super::MAX_PARTIAL_ORDER,
+            EvaluateFlags {
+                u_side: Side::Left,
+                v_side: Side::Left,
+                only_upper_half: false,
+                non_zero_tangents: false,
+            },
+        )
+        .ok()?;
+    tabulate(|i, j| d.get(i)?.get(j).copied())
+}
+
 /// The angle of (a, b) in [0, 2π), `near`'s (or 0) on the axis, where it is undefined.
 fn angle(a: f64, b: f64, near: Option<f64>) -> f64 {
     if a == 0.0 && b == 0.0 {
@@ -76,6 +195,8 @@ fn angle(a: f64, b: f64, near: Option<f64>) -> f64 {
 #[derive(Clone, Debug, PartialEq)]
 #[allow(clippy::large_enum_variant)] // evaluated in place: a box would cost every evaluation a load
 pub enum SurfaceEval {
+    /// A sweep's exact definition, with its certified display approximation kept separately.
+    ProceduralSweep(ProceduralSweepEval),
     /// A plane, spline or revolution, with its parameter box.
     Eval(EvalSurface, Domain),
     /// [`Surface::Cylinder`].
@@ -122,6 +243,9 @@ impl SurfaceEval {
             Ok(SurfaceEval::Eval(e, dom))
         };
         match s {
+            Surface::ProceduralSweep(record) => {
+                Ok(Self::ProceduralSweep(ProceduralSweepEval::new(record)?))
+            }
             Surface::Plane {
                 origin,
                 u_axis,
@@ -243,6 +367,7 @@ impl SurfaceEval {
         let turn = (Some((0.0, TAU)), Some(TAU));
         let open = (None, None);
         let ((ru, pu), (rv, pv)) = match self {
+            SurfaceEval::ProceduralSweep(s) => return s.domain,
             SurfaceEval::Eval(_, dom) => return *dom,
             SurfaceEval::Cylinder { .. } | SurfaceEval::Cone { .. } => (turn, open),
             SurfaceEval::Sphere { .. } => (turn, (Some((-FRAC_PI_2, FRAC_PI_2)), None)),
@@ -260,6 +385,7 @@ impl SurfaceEval {
             return None;
         }
         Some(match self {
+            SurfaceEval::ProceduralSweep(s) => return s.derivs(u, v),
             SurfaceEval::Eval(e, _) => return e.derivs(u, v),
             SurfaceEval::Cylinder { axes: a, radius } => {
                 let (r, dr) = a.radial(u);
@@ -315,6 +441,7 @@ impl SurfaceEval {
             return None;
         }
         Some(match self {
+            SurfaceEval::ProceduralSweep(s) => return s.second(u, v),
             SurfaceEval::Eval(e, _) => return e.second(u, v),
             SurfaceEval::Cylinder { axes: a, radius } => {
                 (a.radial(u).0 * -*radius, Vec3::ZERO, Vec3::ZERO)
@@ -369,6 +496,7 @@ impl SurfaceEval {
         let lift =
             |a: &Axes, i: usize, j: usize, x: Vec3| if i == 0 && j == 0 { a.o + x } else { x };
         match self {
+            SurfaceEval::ProceduralSweep(s) => s.partials(u, v),
             SurfaceEval::Eval(e, _) => e.partials(u, v),
             SurfaceEval::Cylinder { axes: a, radius } => tabulate(|i, j| {
                 let height = match j {
@@ -437,6 +565,17 @@ impl SurfaceEval {
         accept: f64,
     ) -> Option<[f64; 2]> {
         let q = match self {
+            SurfaceEval::ProceduralSweep(s) => {
+                return uv::project_by(
+                    &s.approximation,
+                    &s.domain,
+                    starts,
+                    p,
+                    near,
+                    accept,
+                    &|uv| s.derivs(uv[0], uv[1]),
+                );
+            }
             SurfaceEval::Eval(e, dom) => return uv::project_with(e, dom, starts, p, near, accept),
             SurfaceEval::Cylinder { axes, .. } => {
                 let [a, b, h] = axes.local(p);
@@ -502,6 +641,11 @@ impl SurfaceEval {
             }
         };
         let (u_flag, v_flag) = match self {
+            SurfaceEval::ProceduralSweep(_) => {
+                return Err(unsupported(
+                    "a procedural sweep's exact collapsed directions are not certified",
+                ));
+            }
             SurfaceEval::Eval(e, _) => return super::collapse::collapse(e, uv, reach),
             SurfaceEval::Cylinder { radius, .. } => (circle(*radius, 0.0, within(*radius))?, false),
             SurfaceEval::Cone {

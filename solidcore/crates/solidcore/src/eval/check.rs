@@ -6,6 +6,7 @@
 //!
 //! Origin: SolidCraft's `crates/geom/src/brep/check.rs` (MIT OR Apache-2.0), moved here with its
 //! history (RFC 0003). It takes the kernel's evaluation types.
+use super::geometry::sweep::{ProceduralSweepRecord, SweepDefinitionRecord};
 use super::vec::{v3, VecExt};
 use super::{Curve, Frame, Surface};
 
@@ -35,7 +36,10 @@ pub fn curve(c: &Curve) -> Result<()> {
     match c {
         Curve::Circle { frame: f, .. } | Curve::Ellipse { frame: f, .. } => frame(f),
         Curve::SurfaceIntersection { surfaces, .. } => surfaces.iter().try_for_each(|s| surface(s)),
-        Curve::Line { .. }
+        Curve::OnSurface { surface: s, .. } => surface(s),
+        // An `OnSurfaceRef`'s owner is one of the record's screw owners, checked with the record.
+        Curve::OnSurfaceRef { .. }
+        | Curve::Line { .. }
         | Curve::Polyline { .. }
         | Curve::Spline { .. }
         | Curve::RationalSpline { .. } => Ok(()),
@@ -82,8 +86,26 @@ pub fn surface(s: &Surface) -> Result<()> {
             )?;
             curve(profile)
         }
+        Surface::ProceduralSweep(s) => sweep(s),
         Surface::BallPatch { .. } | Surface::Spline { .. } | Surface::RationalSpline { .. } => {
             Ok(())
         }
     }
+}
+
+/// A procedural sweep's directions: its screw axis, and its radial law's direction, are unit
+/// length to 1e-8. The kernel certifies the net against the definition when it takes the record.
+pub fn sweep(s: &ProceduralSweepRecord) -> Result<()> {
+    let SweepDefinitionRecord::Screw { motion, .. } = &s.definition;
+    require(
+        (v3(motion.axis).len() - 1.0).abs() <= 1e-8,
+        "screw axis is not unit length",
+    )?;
+    if let Some(law) = &motion.law {
+        require(
+            (v3(law.direction).len() - 1.0).abs() <= 1e-8,
+            "screw radial-law direction is not unit length",
+        )?;
+    }
+    Ok(())
 }

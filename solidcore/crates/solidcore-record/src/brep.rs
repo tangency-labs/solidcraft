@@ -16,6 +16,7 @@ mod curve2;
 pub mod envelope;
 pub mod history;
 pub mod part;
+pub mod sweep;
 mod topology;
 pub use curve2::Curve2;
 
@@ -46,6 +47,9 @@ pub struct Brep {
     pub faces: Vec<Face>,
     pub edges: Vec<Edge>,
     pub vertices: Vec<Vertex>,
+    /// Exact shared screw owners of curve-on-surface edges.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub screw_owners: Vec<sweep::ProceduralSweepRecord>,
 }
 
 /// A connected volume of space (SMLib `SmRegionData`). The infinite region has no outer shell
@@ -225,6 +229,18 @@ pub enum Curve {
         leader: Box<Curve>,
         tolerance: f64,
     },
+    /// A parameter-space spline evaluated on its exact retained screw surface.
+    OnSurface {
+        surface: Box<Surface>,
+        uv_curve: Curve2,
+        domain: [[f64; 2]; 2],
+    },
+    /// A curve using a body-local retained screw owner.
+    OnSurfaceRef {
+        owner: u32,
+        uv_curve: Curve2,
+        domain: [[f64; 2]; 2],
+    },
 }
 
 /// Unbounded surfaces, each with its (u, v) (docs/native-brep.md, "Surfaces"). Natural
@@ -232,6 +248,8 @@ pub enum Curve {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Surface {
+    /// A procedural sweep's exact definition, fitted net and certified error bound.
+    ProceduralSweep(Box<sweep::ProceduralSweepRecord>),
     /// `origin + u * u_axis + v * v_axis` (STEP `PLANE`).
     Plane {
         origin: [f64; 3],
@@ -455,6 +473,12 @@ fn curve_natural(c: &Curve) -> Natural {
         Curve::Spline { knots, points } => knot_domain(knots, points.len()),
         Curve::RationalSpline { knots, homogeneous } => knot_domain(knots, homogeneous.len()),
         Curve::SurfaceIntersection { leader, .. } => curve_natural(leader),
+        Curve::OnSurface { uv_curve, .. } => uv_curve
+            .interval()
+            .map_or(UNBOUNDED, |[a, b]| Natural::Range(a, b)),
+        Curve::OnSurfaceRef { uv_curve, .. } => uv_curve
+            .interval()
+            .map_or(UNBOUNDED, |[a, b]| Natural::Range(a, b)),
     }
 }
 /// The natural ranges of the (u, v) a face's domain and pcurves are on, [`Face::parameters`]:
@@ -462,6 +486,7 @@ fn curve_natural(c: &Curve) -> Natural {
 /// validation requires; their natural ranges are the kernel's (a cone's apex is computed).
 fn parameter_natural(s: &Surface) -> Result<[Natural; 2]> {
     match s {
+        Surface::ProceduralSweep(s) => sweep_natural(s),
         Surface::Plane { .. } | Surface::PlaneThrough { .. } => Ok([UNBOUNDED; 2]),
         Surface::Spline {
             u_knots,
@@ -481,6 +506,15 @@ fn parameter_natural(s: &Surface) -> Result<[Natural; 2]> {
         ]),
         _ => Err(Invalid("a face's parameters on a surface without its own")),
     }
+}
+
+fn sweep_natural(s: &sweep::ProceduralSweepRecord) -> Result<[Natural; 2]> {
+    let u = usize::try_from(s.net.u_count).map_err(|_| Invalid("sweep net u count"))?;
+    let v = usize::try_from(s.net.v_count).map_err(|_| Invalid("sweep net v count"))?;
+    Ok([
+        knot_domain(&s.net.u_knots, u),
+        knot_domain(&s.net.v_knots, v),
+    ])
 }
 impl Curve {
     /// The range of `t`. Call on a validated record.
@@ -505,6 +539,17 @@ pub fn check_surface(s: &Surface, budget: &mut Budget) -> Result<()> {
 /// oriented edge's, counted against `budget`.
 pub fn check_curve2(c: &Curve2, budget: &mut Budget) -> Result<()> {
     curve2::curve2(c, budget)
+}
+
+fn curve2_with_runtime_copies(c: &Curve2, budget: &mut Budget) -> Result<()> {
+    curve2::curve2(c, budget)?;
+    let n = match c {
+        Curve2::Spline { knots, points } => knots.len().checked_add(points.len()),
+        Curve2::RationalSpline { knots, homogeneous } => knots.len().checked_add(homogeneous.len()),
+    }
+    .ok_or(Invalid("item budget"))?;
+    // Converted UV DTO plus the evaluator's control and NLib arrays.
+    budget.add(n.checked_mul(3).ok_or(Invalid("item budget"))?)
 }
 
 /// `[min, max]` is a parameter interval inside `natural`, as [`Brep::validate`] checks an edge's
@@ -605,6 +650,35 @@ fn curve(c: &Curve, depth: usize, budget: &mut Budget) -> Result<()> {
                 _ => Err(Invalid("intersection leader")),
             }
         }
+        Curve::OnSurface {
+            surface: s,
+            uv_curve,
+            domain,
+        } => {
+            let Surface::ProceduralSweep(owner) = s.as_ref() else {
+                return Err(Invalid("unsupported curve surface"));
+            };
+            require(depth < MAX_DEPTH, "geometry depth")?;
+            budget.add(1)?;
+            sweep::check(owner, budget)?;
+            // Converted DTO, temporary recertification data, and certified
+            // kernel net; an exact edge does not build a display evaluator.
+            budget.add(
+                sweep::evaluator_cost(owner)?
+                    .checked_mul(3)
+                    .ok_or(Invalid("item budget"))?,
+            )?;
+            budget.add(
+                sweep::reference_cost(owner)?
+                    .checked_mul(2)
+                    .ok_or(Invalid("item budget"))?,
+            )?;
+            curve2_with_runtime_copies(uv_curve, budget)?;
+            let natural = parameter_natural(s)?;
+            interval(&domain[0], natural[0])?;
+            interval(&domain[1], natural[1])
+        }
+        Curve::OnSurfaceRef { .. } => Err(Invalid("unbound screw owner")),
     }
 }
 /// A face's own surface: as [`surface`], except that a cone or torus label, which a face always
@@ -650,6 +724,17 @@ fn surface(s: &Surface, depth: usize, budget: &mut Budget) -> Result<()> {
     require(depth <= MAX_DEPTH, "geometry depth")?;
     budget.add(1)?;
     match s {
+        Surface::ProceduralSweep(s) => {
+            sweep::check(s, budget)?;
+            // The converted DTO, certified kernel net, temporary rows,
+            // flattened controls, NLib net, Euclidean net and saved DTO may
+            // coexist while constructing the face's display evaluator.
+            budget.add(
+                sweep::evaluator_cost(s)?
+                    .checked_mul(7)
+                    .ok_or(Invalid("item budget"))?,
+            )
+        }
         Surface::Plane {
             origin,
             u_axis,
@@ -793,12 +878,48 @@ impl Brep {
             "region count",
         )?;
         budget.add(self.regions.len() + self.faces.len() + self.edges.len())?;
+        budget.add(self.screw_owners.len())?;
+        for owner in &self.screw_owners {
+            sweep::check(owner, &mut budget)?;
+            // Converted DTO, temporary recertification data, and certified
+            // kernel net. All edges share this owner rather than a display net.
+            budget.add(
+                sweep::evaluator_cost(owner)?
+                    .checked_mul(3)
+                    .ok_or(Invalid("item budget"))?,
+            )?;
+        }
         for v in &self.vertices {
             points(&[v.point], &mut budget)?;
             tolerance(v.tolerance)?;
         }
         for e in &self.edges {
-            curve(&e.curve, 0, &mut budget)?;
+            if let Curve::OnSurfaceRef {
+                owner,
+                uv_curve,
+                domain: [u_domain, v_domain],
+            } = &e.curve
+            {
+                let owner = self
+                    .screw_owners
+                    .get(*owner as usize)
+                    .ok_or(Invalid("screw owner index"))?;
+                budget.add(1)?;
+                // Body construction temporarily holds the input curve and the
+                // copied topology curve together. Their compact owner net is shared;
+                // their definition metadata and UV coefficients are independent.
+                budget.add(
+                    sweep::reference_cost(owner)?
+                        .checked_mul(2)
+                        .ok_or(Invalid("item budget"))?,
+                )?;
+                curve2_with_runtime_copies(uv_curve, &mut budget)?;
+                let natural = sweep_natural(owner)?;
+                interval(u_domain, natural[0])?;
+                interval(v_domain, natural[1])?;
+            } else {
+                curve(&e.curve, 0, &mut budget)?;
+            }
             if let Some(n) = &e.nurbs {
                 curve(n, 0, &mut budget)?;
                 require(

@@ -303,6 +303,7 @@ fn cylinder_with_displaced_boundary(offset: f64) -> brep::Brep {
         }],
         edges,
         vertices: points.into_iter().map(|point| brep::Vertex { point, tolerance: tol }).collect(),
+        screw_owners: Vec::new(),
     }
 }
 
@@ -745,6 +746,7 @@ fn crossing_test_nodes(f: f64) -> Vec<edges::Nodes> {
 #[test]
 fn near_end_crossings_part_in_one_round_on_forward_and_reversed_uses() {
     let b = crate::fixtures::fixture("box_10x6x4");
+    let curves = solidcore_convert::curve_context::BodyCurveContext::new(&b).expect("curve context");
     let evals = [poles::Face::new(
         EvalSurface::Plane {
             origin: Vec3::ZERO,
@@ -760,7 +762,7 @@ fn near_end_crossings_part_in_one_round_on_forward_and_reversed_uses() {
         let split = crossing_parameters(&[0], &boundaries, &evals, &nodes);
         assert_eq!(split[&0], vec![f]);
         for (e, ts) in split {
-            edges::insert_crossings(&b, e as usize, &mut nodes[e as usize], &ts).expect("inserted");
+            edges::insert_crossings(&b, &curves, e as usize, &mut nodes[e as usize], &ts).expect("inserted");
         }
         assert_eq!(nodes[0].params, vec![0.0, f, 1.0]);
         let after = crossing_test_boundary(&nodes, reversed, [1.0; 2]);
@@ -774,6 +776,7 @@ fn near_end_crossings_part_in_one_round_on_forward_and_reversed_uses() {
 #[test]
 fn two_faces_report_one_crossing_event_despite_metric_rounding() {
     let b = crate::fixtures::fixture("box_10x6x4");
+    let curves = solidcore_convert::curve_context::BodyCurveContext::new(&b).expect("curve context");
     let mut nodes = crossing_test_nodes(0.3);
     let evals: Vec<_> = (0..2)
         .map(|_| {
@@ -799,7 +802,7 @@ fn two_faces_report_one_crossing_event_despite_metric_rounding() {
         split[&0], first[&0],
         "one canonical parameter for both faces"
     );
-    edges::insert_crossings(&b, 0, &mut nodes[0], &split[&0]).expect("inserted");
+    edges::insert_crossings(&b, &curves, 0, &mut nodes[0], &split[&0]).expect("inserted");
     assert_eq!(nodes[0].points.len(), 3, "one node for the event");
 }
 

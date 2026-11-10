@@ -238,8 +238,32 @@ fn reversed(w: &WireCurve) -> WireCurve {
             let r = reversed(&WireCurve { curve: (**leader).clone(), interval: w.interval });
             (Curve::SurfaceIntersection { surfaces: surfaces.clone(), leader: Box::new(r.curve), tolerance: *tolerance }, r.interval)
         }
+        // The surface stays; its UV curve runs the other way, on the mirrored knots.
+        Curve::OnSurface { surface, uv_curve, domain } => {
+            let (uv_curve, s) = reversed_uv(uv_curve, &mirror);
+            (Curve::OnSurface { surface: surface.clone(), uv_curve, domain: *domain }, [s - t1, s - t0])
+        }
+        Curve::OnSurfaceRef { owner, uv_curve, domain } => {
+            let (uv_curve, s) = reversed_uv(uv_curve, &mirror);
+            (Curve::OnSurfaceRef { owner: *owner, uv_curve, domain: *domain }, [s - t1, s - t0])
+        }
     };
     WireCurve { curve, interval }
+}
+
+/// A UV curve run the other way, and the sum of its knot domain's ends (`mirror`'s).
+fn reversed_uv(c: &solidcore_record::brep::Curve2, mirror: &impl Fn(&[f64]) -> (Vec<f64>, f64)) -> (solidcore_record::brep::Curve2, f64) {
+    use solidcore_record::brep::Curve2;
+    match c {
+        Curve2::Spline { knots, points } => {
+            let (k, s) = mirror(knots);
+            (Curve2::Spline { knots: k, points: points.iter().rev().copied().collect() }, s)
+        }
+        Curve2::RationalSpline { knots, homogeneous } => {
+            let (k, s) = mirror(knots);
+            (Curve2::RationalSpline { knots: k, homogeneous: homogeneous.iter().rev().copied().collect() }, s)
+        }
+    }
 }
 
 /// `f` with its y axis turned over, so a circle or ellipse on it runs the other way.

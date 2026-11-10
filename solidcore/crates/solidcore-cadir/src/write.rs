@@ -29,14 +29,13 @@
 //! to where its end does, the way its form runs (a line named the other way is written turned, so
 //! that it runs from the start vertex to the end, as every coedge's sense takes its edge's curve;
 //! none for a line whose vertices give no interval: the reader then finds it so, as it does a STEP
-//! edge's). A face on a ball patch, a blend or a placed revolution, a torus whose tube
+//! edge's). A face on a ball patch, a blend, a procedural sweep or a placed revolution, a torus whose tube
 //! reaches its axis, and a face whose form's side cannot be measured against its named surface,
-//! are written as their NURBS form, with their pcurves; an edge on a traced intersection, or a
+//! are written as their NURBS form, with their pcurves; an edge on a traced intersection or a procedural sweep, or a
 //! polyline held on a form, or a circle or ellipse whose form runs clockwise about its frame
 //! (CADIR's arcs run counter-clockwise) or whose arc its vertices do not give, is written as its
-//! form. A blend's form is its net: a procedural blend's is certified within its definition's
-//! bound ε of the definition, which is not written (CADIR has no form for it; the STEP writer
-//! writes the same net), so ε is written as the face's tolerance. What has no exact CADIR form
+//! form. The net of a procedural blend or sweep has a certified deviation ε from the definition.
+//! CADIR writes the net and records ε as the face's tolerance. What has no exact CADIR form
 //! and no NURBS form refuses the record with the reason ([`WriteError`]); nothing else is
 //! approximated. An arc of a circle or ellipse starts within its first turn, as CADIR has it: its
 //! parameter is moved by whole turns; on a conic so large that the turn's rounding moves its ends
@@ -504,9 +503,13 @@ impl Writer<'_> {
         let (g, param) = geometry::curve(carrier)
             .map_err(|m| m.of(what))?
             .ok_or_else(|| {
-                WriteError::Unsupported(format!(
-                    "{what}: a traced intersection curve without its NURBS form"
-                ))
+                let kind = match carrier {
+                    BCurve::OnSurface { .. } | BCurve::OnSurfaceRef { .. } => {
+                        "a curve on a procedural sweep"
+                    }
+                    _ => "a traced intersection curve",
+                };
+                WriteError::Unsupported(format!("{what}: {kind} without its NURBS form"))
             })?;
         let size = match carrier {
             BCurve::Circle { radius, .. } => radius.abs(),
@@ -595,9 +598,15 @@ impl Writer<'_> {
             }
             None => {
                 let (c, chart) = geometry::surface(&face.surface)?.ok_or_else(|| {
-                    WriteError::Unsupported(
-                        "a ball patch, blend or revolution without its NURBS form".into(),
-                    )
+                    let kind = if matches!(
+                        face.surface,
+                        solidcore_record::brep::Surface::ProceduralSweep(_)
+                    ) {
+                        "a procedural sweep"
+                    } else {
+                        "a ball patch, blend or revolution"
+                    };
+                    WriteError::Unsupported(format!("{kind} without its NURBS form"))
                 })?;
                 Ok((c, chart.keeps_normal(), Some(chart)))
             }
@@ -812,10 +821,8 @@ impl Writer<'_> {
     }
 }
 
-/// The deviation a face written as its NURBS form carries: a procedural blend's net is within
-/// its definition's certified bound ε of the definition, which CADIR cannot hold, so ε is the
-/// face's tolerance (CADIR's `Face::tolerance`, the most its geometry is off the face). An exact
-/// round's net is its definition, and every other face is written exactly: `None`.
+/// The deviation a face written as its NURBS form carries. CADIR records the net's certified
+/// bound as `Face::tolerance` for a procedural blend or sweep. Exact faces need no tolerance.
 fn certified(face: &solidcore_record::brep::Face) -> Option<PositiveReal> {
     match &face.surface {
         solidcore_record::brep::Surface::Blend { definition } => match definition.as_ref() {
@@ -824,6 +831,7 @@ fn certified(face: &solidcore_record::brep::Face) -> Option<PositiveReal> {
             }
             solidcore_record::brep::blend::BlendDefinition::ExactRound(_) => None,
         },
+        solidcore_record::brep::Surface::ProceduralSweep(sweep) => PositiveReal::new(sweep.bound),
         _ => None,
     }
 }

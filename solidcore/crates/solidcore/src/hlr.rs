@@ -310,6 +310,9 @@ pub fn prepare_cancellable(
             crate::eval::Curve::RationalSpline { .. } => "rational_spline",
             // Only one with a spline to follow gets here: what was an `intersection` record.
             crate::eval::Curve::SurfaceIntersection { .. } => "intersection",
+            crate::eval::Curve::OnSurface { .. } | crate::eval::Curve::OnSurfaceRef { .. } => {
+                "on_surface"
+            }
         };
         let shape = if matches!(c, C3::Line { .. }) {
             "line"

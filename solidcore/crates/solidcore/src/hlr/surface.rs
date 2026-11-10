@@ -194,6 +194,7 @@ impl S3 {
                 homogeneous,
             } => S3::Nurbs(Box::new(Nurbs::new(u_knots, v_knots, homogeneous)?)),
             Surface::PlacedRevolution { .. } => placed_revolution(face)?,
+            Surface::ProceduralSweep(_) => return Err(HlrError::Unsupported("procedural sweep")),
             label => S3::bounded(label, form_box(face, label)?)?,
         })
     }

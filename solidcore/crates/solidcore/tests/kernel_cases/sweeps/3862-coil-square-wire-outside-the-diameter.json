@@ -112,8 +112,8 @@
   "outcome": {
     "ran": true,
     "raw_counts": {
-      "edges": 84,
-      "faces": 42,
+      "edges": 66,
+      "faces": 24,
       "vertices": 44
     }
   },

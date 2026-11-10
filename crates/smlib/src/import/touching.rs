@@ -309,6 +309,7 @@ pub(super) fn shared(brep: &b::Brep) -> R<Option<Glued>> {
         faces,
         edges,
         vertices,
+        screw_owners: brep.screw_owners.clone(),
     };
     Ok(Some(Glued { brep: glued, joined }))
 }

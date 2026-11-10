@@ -58,15 +58,15 @@
 use std::f64::consts::TAU;
 
 use crate::curve::curve::{Curve, CurveKind};
+#[cfg(test)]
 use crate::curve::line::Line;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3};
-use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
+use crate::nurbs::b_spline_curve::{BSplineCurve, KnotType};
 use crate::nurbs::b_spline_surface::{BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData};
-use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::surface::cone::Cone;
 use crate::surface::procedural_sweep::{ProceduralSweep, RadialLaw, ScrewMotion};
 use crate::surface::surface::Surface;
@@ -363,26 +363,6 @@ fn nurbs_of(curve: &Curve) -> Result<Nurbs> {
     })
 }
 
-/// The path of `p` over `st` as a curve: the edge a profile vertex traces, exactly as
-/// the walls on either side of it have it.
-fn path_curve(m: &Screw, p: Point3, st: &Stations) -> Result<Curve> {
-    let d = path(m, p, st);
-    let weights: Vec<f64> = (0..d.len()).map(|j| st.weight(j)).collect();
-    let (knots, mult) = st.knots();
-    let c = BSplineCurve::create_canonical(&CanonicalData {
-        dim: 3,
-        degree: 2,
-        control_points: &d,
-        form: BSplineCurveForm::Unspecified,
-        knot_multiplicities: &mult,
-        knots: &knots,
-        knot_type: KnotType::Unspecified,
-        weights: Some(&weights),
-        trim: None,
-    })?;
-    Ok(Curve::from(c))
-}
-
 /// A profile line parallel to the axis sweeps the cylinder its points turn on: its
 /// radius when `line` runs within a thousandth of `tolerance` of parallel to the axis,
 /// at least `1e-6` off it; `0` otherwise.
@@ -446,6 +426,8 @@ fn cylinder_piece(
     b: Point3,
     radius: f64,
     st: &Stations,
+    source: &BSplineCurve,
+    motion: &ScrewMotion,
 ) -> Result<()> {
     let (Some(&a0), Some(&a1)) = (st.t.first(), st.t.last()) else {
         return Err(SolidError::sweep_failed(
@@ -474,26 +456,25 @@ fn cylinder_piece(
         false,
         false,
     );
-    let line = |at: f64| -> Result<Curve> {
-        Ok(Curve::from(Line::create_line_segment(
-            3,
-            m.at(a, at),
-            m.at(b, at),
-            None,
-        )?))
-    };
-    let curves = vec![
-        Some(line(a0)?),
-        Some(path_curve(m, b, st)?),
-        Some(line(a1)?),
-        Some(path_curve(m, a, st)?),
-    ];
-    let orient = [
-        OrientType::Same,
-        OrientType::Same,
-        OrientType::Opposite,
-        OrientType::Opposite,
-    ];
+    // The cylinder's shared helices must denote the same screw motion as the
+    // neighboring retained walls. Its degree-two display path has a different
+    // axial law and cannot be used for exact boundary intersections.
+    let mut owner = Surface::from(screw_net(source, motion, &st.t)?);
+    owner.set_sweep_definition(ProceduralSweep::create(
+        source,
+        motion.clone(),
+        &st.t,
+        st.half,
+    )?);
+    let domain = owner.natural_uv_domain_if_built();
+    let boundaries = owner.create_natural_uv_trim_curves(
+        k,
+        &domain,
+        crate::nurbs::b_spline_surface::SurfParamType::V,
+        false,
+    )?;
+    let curves = boundaries.curves_3d.into_iter().map(Some).collect();
+    let orient = boundaries.orients;
     let made = with_face_env(k, brep, |k, brep, fenv| {
         let region = brep.infinite_region();
         p8::create_faces_with_curves(
@@ -690,7 +671,8 @@ fn screw_of(origin: Point3, axis: Vec3, pitch: f64, turns: f64, tolerance: f64) 
 /// every point of it lies as far from the axis as its profile point) and lifted within
 /// `tolerance` (`>= 1e-6`) of its true screw surface, end to end. A profile line
 /// parallel to the axis sweeps an exact cylinder; then every wall comes in faces of
-/// half a turn (a cylinder face cannot turn on itself). At most [`MAX_STATIONS`] spans.
+/// half a turn for cylinders (a cylinder face cannot turn on itself), while spline
+/// walls span cylinder seams. At most [`MAX_STATIONS`] spans.
 ///
 /// # Errors
 ///
@@ -926,7 +908,10 @@ fn sweep(k: &mut Kernel, profile: &[Curve], m: &mut Screw, tolerance: f64) -> Re
         crate::geom::tol::USE_DEFAULT,
         crate::geom::tol::USE_DEFAULT,
     )?;
-    for st in &pieces {
+    // A law's knots change the wall tangent. Cylinder seams only split the analytic
+    // cylinders: each spline wall retains its spans in one multi-turn face.
+    for group in pieces.chunk_by(|a, _| !a.t.last().is_some_and(|t| m.angles.contains(t))) {
+        let st = joined_stations(group);
         let (Some(&t0), Some(&t1)) = (st.t.first(), st.t.last()) else {
             return Err(SolidError::sweep_failed(
                 OP,
@@ -936,10 +921,27 @@ fn sweep(k: &mut Kernel, profile: &[Curve], m: &mut Screw, tolerance: f64) -> Re
         for (((wall, curve), nurbs), &r) in walls.iter().zip(profile).zip(&curves).zip(&radius) {
             if r > 0.0 && m.offset(t0) == m.offset(t1) {
                 let ends = curve.ends(k)?;
-                cylinder_piece(k, &mut brep, m, ends.start, ends.end, r + m.offset(t0), st)?;
+                for piece in group {
+                    let a = piece
+                        .t
+                        .first()
+                        .copied()
+                        .ok_or_else(|| SolidError::sm_err(OP))?;
+                    cylinder_piece(
+                        k,
+                        &mut brep,
+                        m,
+                        ends.start,
+                        ends.end,
+                        r + m.offset(a),
+                        piece,
+                        nurbs,
+                        &motion,
+                    )?;
+                }
                 continue;
             }
-            let net = screw_wall(m, wall, std::slice::from_ref(st))?;
+            let net = screw_wall(m, wall, group)?;
             let domain: Extent2d = net.natural_uv_domain();
             let mut surface = Surface::from(net);
             surface.set_sweep_definition(ProceduralSweep::create(

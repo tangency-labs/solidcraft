@@ -841,6 +841,40 @@ pub(super) fn build_refined(
     Ok((candidate_refined_net(definition, fitted, pieces)?, pieces))
 }
 
+/// Choose a deterministic reference subdivision using only actual net structure,
+/// never its claimed bound. A partial saved support can yield a looser but still
+/// conservative result; all station and work budgets apply.
+pub(super) fn saved_reference_pieces(
+    definition: &super::ProceduralSweep,
+    actual: &crate::nurbs::b_spline_surface::BSplineSurface,
+) -> Result<usize> {
+    let bad = |reason| SolidError::invalid_input(OP, reason);
+    let net = actual.canonical()?;
+    let angular_knots = if definition.map.swapped {
+        &net.u_knots
+    } else {
+        &net.v_knots
+    };
+    let cells = angular_knots
+        .len()
+        .checked_sub(1)
+        .filter(|&n| n > 0)
+        .ok_or_else(|| bad("saved net has no turn cells"))?;
+    let originals = definition
+        .stations
+        .len()
+        .checked_sub(1)
+        .filter(|&n| n > 0)
+        .ok_or_else(|| bad("definition has no turn spans"))?;
+    // ceil(cells/originals) without an unchecked addition or zero divisor.
+    let pieces = cells
+        .checked_add(originals - 1)
+        .and_then(|n| n.checked_div(originals))
+        .filter(|&n| n > 0)
+        .ok_or_else(|| bad("saved reference subdivision overflow"))?;
+    Ok(pieces)
+}
+
 /// Rebuild an independent retained-parameter reference and certify the actual
 /// net against it. The full S evaluation allowance is supplied by the checked
 /// definition evaluator; serialized bounds never enter this calculation.

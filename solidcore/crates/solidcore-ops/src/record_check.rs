@@ -46,6 +46,9 @@ pub fn geometry(b: &Brep) -> Result<()> {
             surface(n)?;
         }
     }
+    for s in &b.screw_owners {
+        surface(&Surface::ProceduralSweep(Box::new(s.clone())))?;
+    }
     Ok(())
 }
 

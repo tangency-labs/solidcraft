@@ -143,6 +143,7 @@ fn faceted(points: &[[f64; 3]], shells: &[&[&[usize]]], regions: Vec<Region>) ->
         faces: Vec::new(),
         edges: Vec::new(),
         vertices: Vec::new(),
+        screw_owners: Vec::new(),
     };
     let mut vertex_of = vec![None; points.len()];
     let mut vertex = |b: &mut Brep, p: usize| -> u32 {
@@ -320,6 +321,7 @@ fn tube() -> Brep {
                 tolerance: 1e-7,
             },
         ],
+        screw_owners: Vec::new(),
     };
     list_uses(&mut b);
     on_forms(&mut b);
@@ -379,6 +381,7 @@ fn one_face(
                 tolerance: 1e-7,
             })
             .collect(),
+        screw_owners: Vec::new(),
     };
     list_uses(&mut b);
     on_forms(&mut b);

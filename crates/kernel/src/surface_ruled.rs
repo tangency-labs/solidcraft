@@ -388,6 +388,9 @@ fn base_curve(r: &Brep, e: usize, forward: bool) -> Result<CurveN<4>> {
         b::Curve::SurfaceIntersection { .. } => {
             return Err(KernelError::Invalid("not supported yet: a ruled surface on a traced intersection edge".into()));
         }
+        b::Curve::OnSurface { .. } | b::Curve::OnSurfaceRef { .. } => {
+            return Err(KernelError::Invalid("not supported yet: a ruled surface on an edge on a procedural sweep".into()));
+        }
     };
     Ok(if forward { c } else { reversed(&c) })
 }

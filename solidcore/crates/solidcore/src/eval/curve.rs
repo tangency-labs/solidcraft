@@ -4,12 +4,55 @@
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests
 
-use super::geometry::Curve;
+use super::geometry::{Curve, Curve2, Surface};
 use super::normal_section::normal_section;
 use super::spline::{EvalCurve, MAX_SPLINE_DEGREE};
 use super::vec::{v3, VecExt};
 use super::{Axes, EvalError, SurfaceEval};
 use crate::math::Vec3;
+use std::sync::Arc;
+
+fn on_surface_uv(uv_curve: &Curve2, domain: [[f64; 2]; 2]) -> Result<EvalCurve, EvalError> {
+    if !domain
+        .iter()
+        .all(|[a, b]| a.is_finite() && b.is_finite() && a < b)
+    {
+        return Err(EvalError::Invalid("curve surface domain".into()));
+    }
+    let (count, finite) = match uv_curve {
+        Curve2::Spline { points, .. } => {
+            (points.len(), points.iter().flatten().all(|x| x.is_finite()))
+        }
+        Curve2::RationalSpline { homogeneous, .. } => (
+            homogeneous.len(),
+            homogeneous
+                .iter()
+                .all(|p| p.iter().all(|x| x.is_finite()) && p[2] > 0.0),
+        ),
+    };
+    if !finite || count > crate::sweep::screw::MAX_NET_POINTS {
+        return Err(EvalError::Invalid(
+            "UV spline exceeds its resource budget or has invalid weights".into(),
+        ));
+    }
+    let (knots, controls) = match uv_curve {
+        Curve2::Spline { knots, points } => (
+            knots,
+            points.iter().map(|p| [p[0], p[1], 0.0, 1.0]).collect(),
+        ),
+        Curve2::RationalSpline { knots, homogeneous } => (
+            knots,
+            homogeneous
+                .iter()
+                .map(|p| [p[0], p[1], 0.0, p[2]])
+                .collect(),
+        ),
+    };
+    let CurveEval::Spline(uv) = spline(knots, controls)? else {
+        return Err(EvalError::Invalid("UV curve".into()));
+    };
+    Ok(uv)
+}
 
 /// Newton steps of one intersection point.
 const MAX_NEWTON: usize = 64;
@@ -41,6 +84,40 @@ pub enum CurveEval {
     Spline(EvalCurve),
     /// The intersection of two surfaces.
     Intersection(Box<Intersection>),
+    /// An exact UV spline on a retained screw surface.
+    OnSurface(Box<OnSurface>),
+}
+
+/// The retained surface and UV spline of a curve on surface.
+/// Clones share the immutable certified owner. Equality compares that owner identity
+/// and the UV spline, never an approximate surface coincidence test.
+#[derive(Clone, Debug)]
+pub struct OnSurface {
+    pub(super) surface: Arc<crate::surface::surface::Surface>,
+    pub(super) uv: EvalCurve,
+}
+
+impl PartialEq for OnSurface {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.surface, &other.surface) && self.uv == other.uv
+    }
+}
+
+impl OnSurface {
+    fn derivatives(&self, t: f64) -> Option<(Vec3, Vec3, Vec3)> {
+        let uv = self.uv.derivatives(t, 2)?;
+        let [p, d, dd] = uv.as_slice() else {
+            return None;
+        };
+        let s = super::surface::screw_partials_starting_face_spans(&self.surface, p.x, p.y)?;
+        let first = s[1][0] * d.x + s[0][1] * d.y;
+        let second = s[2][0] * (d.x * d.x)
+            + s[1][1] * (2.0 * d.x * d.y)
+            + s[0][2] * (d.y * d.y)
+            + s[1][0] * dd.x
+            + s[0][1] * dd.y;
+        Some((s[0][0], first, second))
+    }
 }
 
 /// A curve's differential geometry at one parameter.
@@ -92,6 +169,20 @@ impl CurveEval {
                 points.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect(),
             )?,
             Curve::RationalSpline { knots, homogeneous } => spline(knots, homogeneous.clone())?,
+            Curve::OnSurface {
+                surface,
+                uv_curve,
+                domain,
+            } => {
+                let Surface::ProceduralSweep(record) = surface.as_ref() else {
+                    return Err(unsupported("curve on a non-screw surface"));
+                };
+                let uv = on_surface_uv(uv_curve, *domain)?;
+                let owner = crate::surface::procedural_sweep::ProceduralSweep::from_record(record)
+                    .map_err(|e| EvalError::Invalid(e.to_string()))?;
+                Self::bind_screw_uv(Arc::new(owner), uv, *domain)?
+            }
+            Curve::OnSurfaceRef { .. } => return Err(unsupported("unbound screw owner")),
             Curve::SurfaceIntersection {
                 surfaces, leader, ..
             } => {
@@ -115,6 +206,40 @@ impl CurveEval {
         })
     }
 
+    /// Bind a UV spline to an already certified screw owner. Body contexts share
+    /// the same owner across edges; no display approximation or owner DTO is copied.
+    /// The domain is native curve ROI metadata, not a clamp on point evaluation.
+    pub fn on_screw_surface(
+        surface: Arc<crate::surface::surface::Surface>,
+        uv_curve: &Curve2,
+        domain: [[f64; 2]; 2],
+    ) -> Result<Self, EvalError> {
+        let uv = on_surface_uv(uv_curve, domain)?;
+        Self::bind_screw_uv(surface, uv, domain)
+    }
+
+    fn bind_screw_uv(
+        surface: Arc<crate::surface::surface::Surface>,
+        uv: EvalCurve,
+        domain: [[f64; 2]; 2],
+    ) -> Result<Self, EvalError> {
+        let owner = surface
+            .procedural_sweep()
+            .filter(|s| s.definition().screw().is_some())
+            .ok_or_else(|| unsupported("curve on a non-screw surface"))?;
+        let support = owner.net().natural_uv_domain();
+        let ranges = [
+            [support.u_min(), support.u_max()],
+            [support.v_min(), support.v_max()],
+        ];
+        if !domain.iter().zip(ranges).all(|([lo, hi], [a, b])| {
+            lo.is_finite() && hi.is_finite() && lo < hi && *lo >= a && *hi <= b
+        }) {
+            return Err(EvalError::Invalid("curve surface domain".into()));
+        }
+        Ok(Self::OnSurface(Box::new(OnSurface { surface, uv })))
+    }
+
     /// The point at `t`.
     pub fn point(&self, t: f64) -> Option<Vec3> {
         if !t.is_finite() {
@@ -128,6 +253,7 @@ impl CurveEval {
             }
             CurveEval::Polyline(_) | CurveEval::Spline(_) => self.leader(t).map(|d| d.0),
             CurveEval::Intersection(x) => x.point(t),
+            CurveEval::OnSurface(x) => x.derivatives(t).map(|d| d.0),
         }
     }
 
@@ -150,6 +276,7 @@ impl CurveEval {
             }
             CurveEval::Polyline(_) | CurveEval::Spline(_) => self.leader(t),
             CurveEval::Intersection(_) => None,
+            CurveEval::OnSurface(x) => x.derivatives(t).map(|(p, d, _)| (p, d)),
         }
     }
 
@@ -185,6 +312,7 @@ impl CurveEval {
                 _ => return None,
             },
             CurveEval::Intersection(x) => return x.jet(t),
+            CurveEval::OnSurface(x) => x.derivatives(t)?,
         };
         let speed2 = d1.len2();
         if !(speed2 > 0.0) {
