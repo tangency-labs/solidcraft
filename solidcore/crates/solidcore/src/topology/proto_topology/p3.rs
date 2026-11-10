@@ -653,6 +653,29 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         self.set_ed_interval(new_ed, new_ivl)?;
 
         let top = top_pe.ok_or(dangling("top proto edge is null"))?;
+
+        // `fixes.split_edge_definition_owns_its_curves`: the new definition (a copy holding
+        // `ed`'s curves) gets copies of its own, and both are trimmed to their intervals,
+        // before `AddEdgeDefinition`: it reparameterizes the definition onto the upper proto
+        // edge where their intervals or directions differ, which would otherwise move
+        // `ed`'s curves too and map the whole curve, not the upper part, onto that edge.
+        if k.fixes.split_edge_definition_owns_its_curves {
+            self.copy_ed_curves(k, geometry, ed, new_ed)?;
+            for which in [0, 1, 2] {
+                for d in [ed, new_ed] {
+                    let curve = self.ed_curve(d, which)?;
+                    if curve.is_some() {
+                        self.trim_ed_curve(k, geometry, d, curve)?;
+                    }
+                }
+            }
+            ignore_soft(passed_on(
+                self.add_edge_definition(k, &mut *geometry, top, new_ed),
+                k.fixes.ssi_proto_topology_statuses_pass_on,
+            )?)?;
+            return Ok((Some(new_vd), Some(new_ed)));
+        }
+
         ignore_soft(passed_on(
             self.add_edge_definition(k, &mut *geometry, top, new_ed),
             k.fixes.ssi_proto_topology_statuses_pass_on,
@@ -705,6 +728,52 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         self.edge_def_mut(ed)
             .ok_or(dangling("edge definition is deleted"))?
             .set_xsect_curve_3d(curve);
+        Ok(())
+    }
+
+    /// An edge definition's 3D curve (`which` 0) or UV curve `which` (1, 2).
+    fn ed_curve(&self, ed: EdgeDefId, which: i32) -> Result<Option<O>> {
+        let d = self
+            .edge_def(ed)
+            .ok_or(dangling("edge definition is deleted"))?;
+        Ok(if which == 0 {
+            d.xsect_curve_3d()
+        } else {
+            d.xsect_uv_curve(which)
+        })
+    }
+
+    /// Gives `new_ed`, a copy of `ed` that holds the same curves, copies of `ed`'s 3D curve
+    /// and of each UV curve it has, so that editing one definition's curves leaves the
+    /// other's as they are.
+    fn copy_ed_curves(
+        &mut self,
+        k: &Kernel,
+        geometry: &mut impl ProtoBrep<O>,
+        ed: EdgeDefId,
+        new_ed: EdgeDefId,
+    ) -> Result<()> {
+        let d = self
+            .edge_def(ed)
+            .ok_or(dangling("edge definition is deleted"))?;
+        let c3 = d.xsect_curve_3d();
+        let uvs = [d.xsect_uv_curve(1), d.xsect_uv_curve(2)];
+        let copy = curve_of(&*geometry, c3)?.copy(k)?;
+        let handle = geometry
+            .insert_curve(copy)
+            .ok_or(SolidError::null_pointer(OP_ED_SPLIT))?;
+        self.set_ed_curve_3d(new_ed, Some(handle))?;
+        for (which, uv) in [1, 2].into_iter().zip(uvs) {
+            if uv.is_some() {
+                let copy = curve_of(&*geometry, uv)?.copy(k)?;
+                let handle = geometry
+                    .insert_curve(copy)
+                    .ok_or(SolidError::null_pointer(OP_ED_SPLIT))?;
+                self.edge_def_mut(new_ed)
+                    .ok_or(dangling("edge definition is deleted"))?
+                    .set_xsect_curve_uv(which, Some(handle));
+            }
+        }
         Ok(())
     }
 

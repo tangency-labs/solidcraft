@@ -713,14 +713,30 @@ pub fn radial_sector_classify_between(
             }
 
             // (the angle values are from the previous iteration)
+            // `fixes.radial_sector_step_off_coincidence_by_own_face`: the classify face
+            // lies on the face it coincides with (the sector edge use's face for ang2, the
+            // radial partner's for ang3), so its side is read against that face's normal,
+            // as the coincidence test below reads it; upstream reads both against the
+            // radial partner's normal, which for ang2 is another face at the sector angle.
+            let by_own_face = k.fixes.radial_sector_step_off_coincidence_by_own_face;
             if ang2 <= ang3 + EFF_ZERO && ang2 < 0.5 * PI / 180.0 {
-                return Ok(if norm2.dot(norm3) > 0.0 {
+                let same = if by_own_face {
+                    norm1.dot(norm3) >= 0.0
+                } else {
+                    norm2.dot(norm3) > 0.0
+                };
+                return Ok(if same {
                     RadialSectorClass::CoincidentSector
                 } else {
                     RadialSectorClass::CoincidentSectorMate
                 });
             } else if ang3 <= ang2 + EFF_ZERO && ang3 < 0.5 * PI / 180.0 {
-                return Ok(if norm2.dot(norm3) > 0.0 {
+                let same = if by_own_face {
+                    norm2.dot(s3.tangent.cross(bin3)) >= 0.0
+                } else {
+                    norm2.dot(norm3) > 0.0
+                };
+                return Ok(if same {
                     RadialSectorClass::CoincidentRadial
                 } else {
                     RadialSectorClass::CoincidentRadialMate
