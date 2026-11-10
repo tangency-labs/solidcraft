@@ -1915,7 +1915,15 @@ fn face_domain(surface: &BSurface, pcs: &[Vec<Curve2>]) -> R<[[f64; 2]; 2]> {
                 y = y.min(*n1);
                 if x < y && y - x < OPEN_DOMAIN_SPAN {
                     let span = OPEN_DOMAIN_SPAN.min(*n1 - *n0);
-                    let lo = (0.5 * (x + y) - 0.5 * span).clamp(*n0, *n1 - span);
+                    // the box's latest start: the range's own where the range is narrower than
+                    // the span (`n1 - span` there is `n0`, which rounding may put below it)
+                    let last = if span < OPEN_DOMAIN_SPAN { *n0 } else { *n1 - span };
+                    // the range is the surface's, from the file: refused where it leaves no
+                    // room (crossed, or not a number), never clamped into one
+                    if !(*n0 <= last) {
+                        return Err(format!("a face's natural range [{n0}, {n1}] leaves no room for a box {span} across"));
+                    }
+                    let lo = (0.5 * (x + y) - 0.5 * span).clamp(*n0, last);
                     (x, y) = (lo, (lo + span).min(*n1));
                 }
             }
