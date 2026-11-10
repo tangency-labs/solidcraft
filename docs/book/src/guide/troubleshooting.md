@@ -10,7 +10,9 @@ shader compiler. That covers older Intel graphics, PCs without a graphics driver
 ## Start in safe mode
 
 Safe mode starts with default settings (your own settings stay as they are, for the next normal
-start), skips the "Recover unsaved design?" offer and draws with the software renderer.
+start), skips the "Recover unsaved design?" offer and draws with the software renderer, without
+anti-aliasing: the software renderer draws every sample on the processor. It still autosaves, and
+the next normal start offers what it kept.
 
 - Windows: run `solidcraft.exe --safe-mode` from a terminal in the install folder, or add
   ` --safe-mode` to the end of a shortcut's *Target*.
@@ -139,7 +141,21 @@ old Intel Vulkan driver, `igvk64.dll`, did). Windows' Event Viewer names the dri
 From 0.11.1, SolidCraft on Windows starts Direct3D 12 first and loads no other graphics API
 when Direct3D 12 has a graphics card; Vulkan and then OpenGL are tried only on a computer
 without one. Earlier versions started Vulkan, Direct3D 12 and OpenGL together and preferred
-Vulkan. To choose the graphics API yourself, in any version, open a Command Prompt and start
+Vulkan. On a computer whose only graphics is AMD's integrated GPU (Ryzen laptops and desktops
+without a graphics card), SolidCraft starts Vulkan instead: Direct3D 12 hung those drivers a
+few seconds after the window opened, and the screen went black until Windows reset the driver.
+If the graphics driver stops responding while SolidCraft is open (the window stays white or
+black and every click takes a second), SolidCraft notices after a few seconds, closes, and
+starts again on the next graphics API: Direct3D 12, then Vulkan, then OpenGL, then the software
+renderer. Later starts keep the new one, as `"backend"` in `graphics.json` (`"cpu"` for the
+software renderer); remove that line to go back to the automatic choice. The unsaved changes of
+every open design are offered for recovery; a design whose changes couldn't be kept (no recovery
+folder, or writing it failed) is named in the new window instead. A graphics card that is only
+slow, and still finishes each frame, doesn't count. The software renderer draws without
+anti-aliasing unless you chose a level in Preferences › Graphics.
+The restarted SolidCraft ignores `WGPU_BACKEND` (below); remove it if you set it with `setx`,
+or the next start uses that API again.
+To choose the graphics API yourself, in any version, open a Command Prompt and start
 SolidCraft from it:
 
 ```
@@ -161,9 +177,12 @@ land above what they point at.
 
 When the graphics driver stops responding, the system resets it (on Windows, "Display driver
 stopped responding and has recovered"), and the graphics device SolidCraft draws with is gone
-for good: the window can't draw anything more. SolidCraft then closes, keeps your unsaved
-changes for recovery as it does after a crash, and starts again; the new window says what
-happened, with what the graphics driver reported, and offers the changes back. The old window
+for good: the window can't draw anything more. On Linux that is when the driver reports the
+device lost (Vulkan's `VK_ERROR_DEVICE_LOST`), as after a GPU reset or, with some drivers, after
+waking from sleep. SolidCraft then closes, writes the unsaved changes of every open design for
+recovery, and starts again; the new window says what happened, with what the graphics driver
+reported, and offers the changes back. A design whose changes couldn't be written (no recovery
+folder, or the write failed) is named there instead. The old window
 closes on its own; SolidCraft doesn't wait for the driver to release it. If the device is reset
 again within ten minutes of that restart, the next start uses software rendering, which doesn't
 depend on the graphics driver. Updating the graphics driver from the GPU maker usually stops the

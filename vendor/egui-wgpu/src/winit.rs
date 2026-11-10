@@ -747,6 +747,13 @@ impl Painter {
             && let Err(err) = self.recreate_surface(viewport_id, window)
         {
             log::error!("Failed to recreate surface for {viewport_id:?}: {err}");
+            if viewport_id == ViewportId::ROOT {
+                crate::note_refused(now);
+            }
+            // SolidCraft: nothing else may draw the next frame, which tries again and lets the
+            // app's hang check see the time without a texture grow (#3321 review).
+            self.context
+                .request_repaint_after_for(std::time::Duration::from_millis(250), viewport_id);
             return vsync_sec;
         }
 
@@ -787,6 +794,10 @@ impl Painter {
                 now,
             )
         {
+            // SolidCraft: the main window's time without a texture (#3321, `refused_for`).
+            if viewport_id == ViewportId::ROOT {
+                crate::note_refused(now);
+            }
             return vsync_sec;
         }
 
@@ -807,7 +818,18 @@ impl Painter {
             if let Some(error) = failed {
                 log::warn!("The surface gave no frame: {error}");
             }
-            vsync_sec += start.elapsed().as_secs_f32();
+            let elapsed = start.elapsed();
+            vsync_sec += elapsed.as_secs_f32();
+            // SolidCraft: the main window's frames that wait out the acquire are a hung GPU
+            // (#3321); only one that gives a texture ends its time without one.
+            if viewport_id == ViewportId::ROOT {
+                let frame = matches!(
+                    output_frame,
+                    wgpu::CurrentSurfaceTexture::Success(_)
+                        | wgpu::CurrentSurfaceTexture::Suboptimal(_)
+                );
+                crate::note_acquire(elapsed, frame);
+            }
             output_frame
         };
 
