@@ -927,7 +927,7 @@ impl Dialog {
                 Kind::Revolve { angle: "360 deg".into(), operation: 0, axis: None },
                 vec![SelInput::new("Profile", PROFILES | PLANAR_FACES, true), SelInput::new("Axis", AXIS_PICKS, false)],
             ),
-            "solid.fillet" => Dialog::new(fillet_kind(&length_default(s, "2"), false), vec![SelInput::new("Edges", EDGES | FACES, true)]),
+            "solid.fillet" => Dialog::new(fillet_kind(&fillet_radius_default(app), false), vec![SelInput::new("Edges", EDGES | FACES, true)]),
             "solid.chamfer" => Dialog::new(fillet_kind(&length_default(s, "1"), true), vec![SelInput::new("Edges", EDGES | FACES, true)]),
             "solid.shell" => {
                 let (kind, inputs) = Kind::simple_start(id)?;
@@ -4657,6 +4657,14 @@ fn fillet_kind(size: &str, chamfer: bool) -> Kind {
 /// number would.
 pub(crate) fn length_default(s: &Session, number: &str) -> String {
     crate::length_input::default(&s.doc, number)
+}
+
+/// A new Solid Fillet's radius: the size the tool ships with (2 mm), shown in the design's unit
+/// ("0.07874 in" in an inch design). A radius is bound by the faces beside its edges, and the
+/// number read in the design's unit ("2 in" = 50.8 mm) never fits the part (#12418). The
+/// preference keeps the old default.
+fn fillet_radius_default(app: &SolveApp) -> String {
+    if app.preferences.fillet_legacy_radius { length_default(&app.session, "2") } else { crate::length_input::shown(&app.session.doc, 2.0) }
 }
 
 /// A feature's length as its edit field shows it. A bare number is kept in millimetres: where the
