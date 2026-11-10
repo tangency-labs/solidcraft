@@ -93,6 +93,9 @@
 //!   walk that needs a UV trim curve made returns [`SolidError::Unported`].
 //! - **Callees in units not ported yet** return [`SolidError::Unported`]: the topology
 //!   zone tolerances of point classifications (through `intersect.point_class`).
+//! - **`HasNearMisses`** measures a vertex end's gap across the curve within surface 1
+//!   when the classification has one: upstream counts its whole 3D gap, so two seams
+//!   ending 1e-8 apart along the seam, inside the vertex tolerance, read as a near miss.
 //! - **Recursion.** None.
 
 use std::borrow::Cow;
@@ -115,6 +118,7 @@ use crate::math::{max2, min2, Point2, Point3, Vec3, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::nurbs::knots::Side;
 use crate::query::face::p1 as qf1;
 use crate::query::face::p2 as qf2;
 use crate::surface::surface::Surface;
@@ -673,12 +677,16 @@ impl<O: ClassObject> CurveClassification<O> {
     /// Whether a vertex end or a coincident edge is only a near miss of the curve
     /// (`HasNearMisses`; upstream default `bInSurfaceGaps = FALSE`): its gap is at
     /// least `1000 * SM_EFF_ZERO`, measured within the surface-1 tangent plane with
-    /// `in_surface_gaps` and a surface 1 (see [`PointClassification::gap_3d`]).
+    /// `in_surface_gaps` and a surface 1 (see [`PointClassification::gap_3d`]). A vertex
+    /// end that far off is measured again across the curve within surface 1, when there
+    /// is one ([`Self::gap_across_curve`]): a vertex off the surface or past the curve's
+    /// end, inside its tolerance, is not a near miss (deviation, see the file header).
     ///
     /// # Errors
     ///
-    /// Those of [`PointClassification::gap_3d`] with a surface;
-    /// [`SolidError::InvalidInput`] for an unresolved surface handle.
+    /// Those of [`PointClassification::gap_3d`] with a surface and of
+    /// [`Self::gap_across_curve`]; [`SolidError::InvalidInput`] for an unresolved surface
+    /// handle.
     pub fn has_near_misses(
         &self,
         k: &Kernel,
@@ -692,24 +700,69 @@ impl<O: ClassObject> CurveClassification<O> {
             None
         };
         let near_miss_dist_3d = EFF_ZERO * 1000.0;
+        let vertex_misses = |pc: &PointClassification<O>, t: f64| -> Result<bool> {
+            if pc.point_class() != PointClassType::Vertex
+                || pc.gap_3d(k, geometry, surface)? < near_miss_dist_3d
+            {
+                return Ok(false);
+            }
+            let across = match self.surface1_geometry(geometry)? {
+                Some(s) => self.gap_across_curve(k, geometry, pc, t, s)?,
+                None => None,
+            };
+            Ok(across.is_none_or(|gap| gap >= near_miss_dist_3d))
+        };
 
         for ivl in self.intervals() {
-            let beg = &ivl.start;
             let mid = &ivl.mid;
-            let end = &ivl.end;
 
-            if (beg.point_class() == PointClassType::Vertex
-                && beg.gap_3d(k, geometry, surface)? >= near_miss_dist_3d)
+            if vertex_misses(&ivl.start, ivl.interval.min())?
                 || (mid.point_class() == PointClassType::Edge
                     && mid.gap_3d(k, geometry, surface)? >= near_miss_dist_3d)
-                || (end.point_class() == PointClassType::Vertex
-                    && end.gap_3d(k, geometry, surface)? >= near_miss_dist_3d)
+                || vertex_misses(&ivl.end, ivl.interval.max())?
             {
                 return Ok(true);
             }
         }
 
         Ok(false)
+    }
+
+    /// The gap of the vertex end `pc` at curve parameter `t` across the curve within
+    /// `surface`: the component of the vertex's offset from `C(t)` along `n × C'(t)`, `n`
+    /// the surface normal at the UV curve 1's point. The part along the curve and the
+    /// part off the surface are gaps the vertex's tolerance bounds. `None` where that
+    /// direction is not defined (no UV curve 1, a vanishing tangent or normal).
+    ///
+    /// # Errors
+    ///
+    /// Those of the curve, UV curve and surface evaluations and of
+    /// [`PointClassification::find_obj_point_3d`].
+    fn gap_across_curve(
+        &self,
+        k: &Kernel,
+        geometry: &impl ClassGeometry<O>,
+        pc: &PointClassification<O>,
+        t: f64,
+        surface: &Surface,
+    ) -> Result<Option<f64>> {
+        let (Some(curve), Some(uv_curve)) = (
+            self.curve().and_then(|c| geometry.curve(c)),
+            self.uv_curve1().and_then(|c| geometry.curve(c)),
+        ) else {
+            return Ok(None);
+        };
+        let derivs = curve.evaluate(k, t, 1, false, false)?;
+        let (Some(&point), Some(&tangent)) = (derivs.first(), derivs.get(1)) else {
+            return Ok(None);
+        };
+        let uv = uv_curve.evaluate_point(k, t)?;
+        let normal = surface.evaluate_normal(k, Point2::new(uv.x, uv.y), Side::Left, Side::Left)?;
+        let Ok(across) = normal.cross(tangent).unitize() else {
+            return Ok(None);
+        };
+        let offset = pc.find_obj_point_3d(k, geometry)? - point;
+        Ok(Some(offset.dot(across).abs()))
     }
 
     /// Whether interval `index` of `self` or of its partner `other` (`self` again to
