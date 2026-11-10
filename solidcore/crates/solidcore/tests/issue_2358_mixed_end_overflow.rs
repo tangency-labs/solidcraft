@@ -32,7 +32,7 @@ use solidcore::error::{EntityRef, SolidError};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::{Kernel, KernelOptions, UpstreamFixes};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
-use solidcore::math::{Point3, Vec3};
+use solidcore::math::{Point3, Vec3, PI};
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::topology::brep::cutting::PlaneCutter;
@@ -162,6 +162,40 @@ fn bound() -> f64 {
 #[test]
 fn the_bound_is_the_closed_form() {
     assert!((bound() - 0.262_524_174).abs() <= 1e-9, "{}", bound());
+}
+
+/// The union of the plate and the boss tilted `deg` (its foot 2 into the plate, as
+/// [`boss_seam`]), closed form: the plate and the part of the cylinder above it. Across
+/// the cylinder, at `x` along the tilt from its axis, the point `s` up the axis from the
+/// foot is above the plate where `s > 2 + x tan(deg)`, so below the plate the cylinder
+/// holds the integral of `(2 + x tan(deg)) c(x)` from `x0 = -2 / tan(deg)` to 6, with the
+/// chord `c(x) = 2 sqrt(36 - x^2)`; `big_c` and `big_d` integrate `c(x)` and `x c(x)`.
+fn union_closed_form(deg: f64) -> f64 {
+    let t = deg.to_radians().tan();
+    let x0 = -2.0 / t;
+    let big_c = |x: f64| x * (36.0 - x * x).sqrt() + 36.0 * (x / 6.0).asin();
+    let big_d = |x: f64| -2.0 / 3.0 * (36.0 - x * x).powf(1.5);
+    let below = 2.0 * (big_c(6.0) - big_c(x0)) + t * (big_d(6.0) - big_d(x0));
+    36_000.0 + 25.0 * PI * 36.0 - below
+}
+
+/// The union tilted 20 degrees, on the default kernel, measures its closed form
+/// 38601.117929444641 to the integration's accuracy: the cylinder's trim of the root
+/// ellipse, the wall's section by the plate's top, is its exact rational curve. With the
+/// traced cubic trim the union measured 38601.117965259655 (every other fix on), 3.6e-5
+/// (9.3e-10 relative) more.
+#[test]
+fn the_union_is_its_closed_form() {
+    let want = union_closed_form(20.0);
+    assert!((want - 38_601.117_929_444_64).abs() <= 1e-8, "{want}");
+    let mut k = Kernel::default();
+    let mut b = boss_seam(&mut k, 20.0, 0.0);
+    let got = volume(&k, &mut b);
+    assert!(
+        (got - want).abs() <= 1e-12 * want,
+        "union {got} != {want} (off {:e})",
+        got - want
+    );
 }
 
 /// Tilted 20 degrees and rounded 1.5: refused, naming r* less the part's tolerance.
