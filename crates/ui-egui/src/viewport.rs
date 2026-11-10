@@ -2398,17 +2398,50 @@ pub fn construction_points(app: &SolveApp) -> Vec<(String, Vec3)> {
         .collect()
 }
 
-/// Construction planes drawn as squares around their origin: (name, normal, quad).
+/// Construction planes as drawn and picked: (name, normal, quad). A plane is a square of a fixed
+/// share of the view round its origin, grown past the edges of every body it passes through:
+/// zoomed in, the square alone fits inside the part and the body hides it (#13318).
 pub fn construction_quads(app: &SolveApp) -> Vec<(String, Vec3, [Vec3; 4])> {
     let h = origin_size(app.cam.half_height()) * 1.2;
+    let st = crate::open_meshing::shown_world(app);
+    let bodies = body_bounds(app, &st);
     solidcraft_engine::view::construction_planes(&app.session)
         .into_iter()
         .filter(|(_, n, _)| app.session.construction_visible(n))
         .map(|(_, name, pl)| {
-            let (o, x, y) = (pl.origin, pl.x * h, pl.y * h);
-            (name, pl.normal(), [o - x - y, o + x - y, o + x + y, o - x + y])
+            let mut r = solidcraft_engine::geom::Aabb2 { min: Vec2::new(-h, -h), max: Vec2::new(h, h) };
+            for (_, b) in bodies.iter() {
+                r = r.union(&plane_cover(&pl, b));
+            }
+            let q = [r.min, Vec2::new(r.max.x, r.min.y), r.max, Vec2::new(r.min.x, r.max.y)];
+            (name, pl.normal(), q.map(|p| pl.to_world(p)))
         })
         .collect()
+}
+
+/// The rectangle in `pl` that covers box `b` seen along the plane's normal, with a tenth of its
+/// size to spare round it, where the plane passes through the box; empty where it misses it.
+fn plane_cover(pl: &Plane, b: &solidcraft_engine::geom::Aabb3) -> solidcraft_engine::geom::Aabb2 {
+    let mut r = solidcraft_engine::geom::Aabb2::EMPTY;
+    if b.is_empty() {
+        return r;
+    }
+    let corners = (0..8).map(|i| {
+        let pick = |bit: usize, lo: f64, hi: f64| if i & bit == 0 { lo } else { hi };
+        Vec3::new(pick(1, b.min.x, b.max.x), pick(2, b.min.y, b.max.y), pick(4, b.min.z, b.max.z))
+    });
+    let (mut below, mut above) = (false, false);
+    for c in corners {
+        let z = pl.height(c);
+        below |= z <= 0.0;
+        above |= z >= 0.0;
+        r.add(pl.to_local(c));
+    }
+    if !(below && above) || r.is_empty() {
+        return solidcraft_engine::geom::Aabb2::EMPTY;
+    }
+    let size = r.size();
+    r.inflated(size.x.max(size.y) * 0.1)
 }
 
 /// Pick what is under `pos`: sketch points, sketch curves, vertices, edges and axes first, then
