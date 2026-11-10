@@ -153,7 +153,6 @@ const OP_SECTOR: &str = "query::face::p3::sector_classify_curve_on";
 const OP_OBJECTS: &str = "query::face::p3::LoopObjectCurves";
 
 // `SM_ERR_INVALID_INPUT`.
-use crate::error::SM_ERR_INVALID_INPUT;
 
 /// The most step-off rounds of the sector classification (`lCount < 20`).
 const MAX_STEP_OFF_ROUNDS: u32 = 20;
@@ -173,12 +172,8 @@ fn null(operation: &'static str, reason: &'static str) -> SolidError {
 }
 
 /// `return(SM_ERR_INVALID_INPUT)`.
-const fn invalid_status(operation: &'static str) -> SolidError {
-    SolidError::Upstream {
-        operation,
-        code: SM_ERR_INVALID_INPUT,
-        entity: None,
-    }
+fn invalid_status(operation: &'static str) -> SolidError {
+    SolidError::query_invalid_value(operation, "a vector of zero length has no direction")
 }
 
 /// `SER(v.Unitize())`: the unit vector, or the `SM_ERR_INVALID_INPUT` status of a zero
@@ -1456,7 +1451,8 @@ fn uv_line<O: ClassObject>(
     // build UVLine
     let start = Point3::new(uv_start.x, uv_start.y, 0.0);
     let end = Point3::new(uv_end.x, uv_end.y, 0.0);
-    Line::create_line_segment(2, start, end, None).map_err(|_| SolidError::null_pointer(OP_UV_LINE))
+    Line::create_line_segment(2, start, end, None)
+        .map_err(|_| SolidError::query_missing(OP_UV_LINE, "the UV line"))
 }
 
 /// `sm_FaceClassifyUVLine` after the tolerance: loads `line` into `cc`.
@@ -2147,7 +2143,8 @@ fn project(p: Vec3, v: Vec3) -> Vec3 {
 ///
 /// [`SolidError::InvalidInput`] where upstream dereferences null (an edge use without
 /// edge or loop use, an edge without curve, a face without surface, a missing vertex use
-/// or mate); `SM_ERR_INVALID_INPUT` ([`SolidError::Upstream`]) for a zero vector the
+/// or mate); `SM_ERR_INVALID_INPUT`
+/// ([`QueryFailure::InvalidValue`](crate::error::query::QueryFailure::InvalidValue)) for a zero vector the
 /// projection or step-off tangents unitize or measure angles with (`SER`); those of the
 /// curve and edge evaluations and of `EvaluateNormalAtSingularity`;
 /// [`SolidError::Unported`]: those of `SmEdgeuse::EvaluateBinormal` and a 2D curve on a

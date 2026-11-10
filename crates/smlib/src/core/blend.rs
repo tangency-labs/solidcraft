@@ -81,6 +81,7 @@ pub(super) fn status(e: SolidError) -> Error {
         e if is_primitive_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
         e if is_mass_heal_or_geom_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
         e if is_sweep_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
+        e if is_query_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
         SolidError::InvalidInput { .. } => Error::Status(INVALID_INPUT),
         SolidError::Unsupported { reason, .. } if reason == MIXED_CORNER_RAILS_CROSS => Error::Unported(MIXED_CORNER_UNSUPPORTED),
         e if is_boolean_failure(&e) => boolean_status(e),
@@ -140,6 +141,12 @@ fn is_mass_heal_or_geom_failure(e: &SolidError) -> bool {
 /// loft's refusal replaced none and passes on as solidcore's text, as before.
 fn is_sweep_failure(e: &SolidError) -> bool {
     e.sweep_failure().is_some_and(|w| w.replaces_upstream_status())
+}
+
+/// A query's failure (solidcore's `QueryFailure`): it stands for the status the query returned
+/// (`Upstream` before solidcore described it), and passes on as that status.
+fn is_query_failure(e: &SolidError) -> bool {
+    e.query_failure().is_some()
 }
 
 /// `size_ok`.
@@ -1498,5 +1505,16 @@ mod tests {
         assert_eq!(pick(&all, &[[1.0, 0.0, 0.0], [0.5, 0.0, 0.0]], 1.0, 1e-6, d).unwrap(), Err(Miss::Ambiguous(1)));
         // The same entity twice is picked once, by its first point.
         assert_eq!(pick(&all, &[[3.1, 0.0, 0.0], [2.9, 0.0, 0.0]], 0.5, 1e-6, d).unwrap(), Ok((vec![3.0], vec![0])));
+    }
+
+    /// A query's failure passes on as the status it replaced, as the `Upstream` it replaced did.
+    #[test]
+    fn query_failures_pass_on_as_their_status() {
+        use solidcore::error::Failure;
+        use solidcore::error::query::QueryFailure;
+        let query = |q| Failure::new("query::edge", q).into_error();
+        assert!(matches!(status(query(QueryFailure::Failed("the region has no shells"))), Error::Status(1001)));
+        assert!(matches!(status(query(QueryFailure::Missing("the face's surface"))), Error::Status(1006)));
+        assert!(matches!(status(query(QueryFailure::InvalidValue("a vector of zero length has no direction"))), Error::Status(1007)));
     }
 }
