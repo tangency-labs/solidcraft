@@ -196,9 +196,8 @@ mod tests {
     }
 
     /// The primitive-creation routines that describe their failures build no bare
-    /// `Upstream` status in their library code (the count is the bare sites a file
-    /// still holds: one in `ruled.rs`, on a line another open change rewrites the line
-    /// after).
+    /// `Upstream` status in their library code (the count is the bare sites a file may
+    /// still hold while a site waits on other work).
     #[test]
     fn the_described_primitive_routines_build_no_bare_statuses() {
         let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/primitive");
@@ -222,7 +221,7 @@ mod tests {
             ("primitive_creation/p3/access.rs", 0),
             ("primitive_creation/p3/construct.rs", 0),
             ("primitive_creation/p3/geometry.rs", 0),
-            ("primitive_creation/p3/ruled.rs", 1),
+            ("primitive_creation/p3/ruled.rs", 0),
             ("primitive_creation/p3/sweeps.rs", 0),
         ];
         for (rel, held) in files {

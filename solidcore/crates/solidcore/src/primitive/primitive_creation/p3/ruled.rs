@@ -95,9 +95,9 @@ pub fn ruled_surface_from_offset(
         let other = usize::try_from(map.other_curve).map_err(|_| {
             SolidError::primitive_failed(OP, "the offset map's other curve index is negative")
         })?;
-        let other = generators
-            .get(other)
-            .ok_or_else(|| SolidError::sm_err(OP))?;
+        let other = generators.get(other).ok_or_else(|| {
+            SolidError::primitive_failed(OP, "the offset map's other generator is out of range")
+        })?;
         let pivot = pivot_nearest_corner(source, other, options.same_point_tolerance, &first)?;
         second = BSplineCurve::create_point_curve(pivot)?;
         second_is_generator = false;
