@@ -114,7 +114,8 @@ fn side(fixed: &[Vec3], n: usize, from: usize, to: usize) -> Option<Side> {
     let mut at = vec![0.0];
     let mut total = 0.0;
     for w in nodes.windows(2) {
-        total += fixed.get(w[0] as usize)?.dist(*fixed.get(w[1] as usize)?);
+        let [w0, w1] = *w else { continue };
+        total += fixed.get(w0 as usize)?.dist(*fixed.get(w1 as usize)?);
         at.push(total);
     }
     if !(total > 0.0) {
@@ -195,11 +196,14 @@ pub(crate) fn coons_at(
     // The blend at (s, t): the sides' points, less the corners counted twice.
     let at = |s: f64, t: f64| -> Option<[f64; 2]> {
         let (b, tp, l, r) = (along(&bottom, uv, s)?, along(&top, uv, s)?, along(&left, uv, t)?, along(&right, uv, t)?);
-        let blend = |d: usize| {
-            (1.0 - t) * b[d] + t * tp[d] + (1.0 - s) * l[d] + s * r[d]
-                - ((1.0 - s) * (1.0 - t) * p00[d] + s * (1.0 - t) * p10[d] + (1.0 - s) * t * p01[d] + s * t * p11[d])
+        let blend = |(b, tp, l, r): (f64, f64, f64, f64), (p00, p10, p01, p11): (f64, f64, f64, f64)| {
+            (1.0 - t) * b + t * tp + (1.0 - s) * l + s * r
+                - ((1.0 - s) * (1.0 - t) * p00 + s * (1.0 - t) * p10 + (1.0 - s) * t * p01 + s * t * p11)
         };
-        Some([blend(0), blend(1)])
+        Some([
+            blend((b[0], tp[0], l[0], r[0]), (p00[0], p10[0], p01[0], p11[0])),
+            blend((b[1], tp[1], l[1], r[1]), (p00[1], p10[1], p01[1], p11[1])),
+        ])
     };
     // The lines come from the sides' seeds (see [`lines`]): every side is seeded at the face's
     // global seed, which the size rules set for the whole surface, so the interior needs no finer
@@ -302,7 +306,7 @@ fn refine(lines: Vec<f64>, max: usize, fine: &dyn Fn(f64, f64, f64) -> Option<bo
     const ACROSS: [f64; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
     let all: Vec<f64> = std::iter::once(0.0).chain(lines).chain(std::iter::once(1.0)).collect();
     let mut out = vec![0.0];
-    let mut stack: Vec<(f64, f64, u32)> = all.windows(2).rev().map(|w| (w[0], w[1], 0)).collect();
+    let mut stack: Vec<(f64, f64, u32)> = all.windows(2).rev().filter_map(|w| if let [a, b] = *w { Some((a, b, 0)) } else { None }).collect();
     while let Some((a, b, depth)) = stack.pop() {
         let ok = depth >= 16 || out.len() + stack.len() >= max || ACROSS.iter().all(|x| fine(a, b, *x).unwrap_or(true));
         if ok {
