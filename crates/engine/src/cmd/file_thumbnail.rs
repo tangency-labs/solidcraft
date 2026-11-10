@@ -1,7 +1,8 @@
 //! A portable picture from warm display meshes only; never evaluate on save.
 use crate::Session;
 use solidcraft_geom::Aabb3;
-use solidcraft_render::{Camera, Rgb, Scene, SceneMesh, StandardView};
+use solidcraft_geom::MeshGeom;
+use solidcraft_viewport::{Camera, Rgb, Scene, SceneMesh, StandardView};
 
 pub(super) fn saved(s: &Session) -> Option<Vec<u8>> {
     let (scene, camera) = scene(s, HOME_ZOOM, None)?;
@@ -23,7 +24,7 @@ pub(super) fn exported(s: &Session, bodies: &[String]) -> Option<Vec<u8>> {
     let renderer = crate::capture::installed()?;
     let (mut scene, camera) = scene(s, 1.0, Some(bodies))?;
     let rgba = transparent(&*renderer, &mut scene, &camera, EXPORT_SIZE)?;
-    solidcraft_render::png(EXPORT_SIZE as usize, EXPORT_SIZE as usize, rgba)
+    solidcraft_viewport::png(EXPORT_SIZE as usize, EXPORT_SIZE as usize, rgba)
 }
 
 /// `scene` drawn over black and over white, unblended to straight RGBA.
@@ -34,7 +35,7 @@ fn transparent(renderer: &crate::capture::Renderer, scene: &mut Scene, camera: &
     };
     let over_black = draw(Rgb(0, 0, 0))?;
     let mut over_white = draw(Rgb(255, 255, 255))?;
-    solidcraft_render::unblend(&mut over_white, &over_black);
+    solidcraft_viewport::unblend(&mut over_white, &over_black);
     Some(over_white)
 }
 
@@ -77,7 +78,7 @@ fn scene(s: &Session, zoom: f64, exported: Option<&[String]>) -> Option<(Scene, 
     }
     let mut camera = Camera::default();
     camera.set_view(StandardView::Iso);
-    camera.fit(&bounds);
+    camera.fit(&solidcraft_render::view_bounds(&bounds));
     camera.distance *= zoom;
     scene.radius = (bounds.diagonal() * 0.5).max(camera.half_height()).max(10.);
     scene.background = Some((crate::view::colors::BG_TOP, crate::view::colors::BG_BOTTOM));

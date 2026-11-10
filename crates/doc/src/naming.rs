@@ -364,6 +364,22 @@ pub fn blend_seams(b: &ModelBody) -> Vec<BlendSeam> {
     out
 }
 
+/// The two faces of the edge a blend face replaced (`F<feature>:blend:<face>|<face>`), `None` for
+/// any other name (its copy's instance is not part of them). A fillet or chamfer face is named
+/// after the edge it rounds, so its name is what tells the two faces it now separates instead of
+/// that edge. The mark may sit inside another role (`F5:inner:F4:blend:A|B`).
+pub(crate) fn blend_sides(name: &str) -> Option<(&str, &str)> {
+    const MARK: &str = ":blend:";
+    let (name, _) = split_instance(name);
+    let at = name.find(MARK)?;
+    // The role right before the mark is the feature that made the blend (`F4`).
+    let feature = name.get(..at)?.rsplit(':').next()?;
+    if !feature.strip_prefix('F').is_some_and(|k| !k.is_empty() && k.bytes().all(|b| b.is_ascii_digit())) {
+        return None;
+    }
+    edge_sides(name.get(at + MARK.len()..)?)
+}
+
 /// The two faces an edge name `<face A>|<face B>` joins. A blend face's own name holds the edge it
 /// replaced (`F<feature>:blend:<face>|<face>`), so a side's name can hold `|` too: the split is the
 /// one `|` outside every blend face's edge (`F1:+y` and `F3:blend:F1:+z|F2:side` for
@@ -859,9 +875,19 @@ fn role_name(f: &Feature, before: &ModelState, ps: &[Vec3], ns: &[Vec3], fi: usi
         FeatureKind::Revolve { sketch, axis, .. } => {
             let Some(ss) = before.sketch(sketch.0) else { return format!("F{fid}:face:{fi}") };
             // The origin was written as its values when the feature was evaluated (`naming_feature`).
-            let Ok((o2, d2)) =
-                crate::eval::revolve_axis(&Default::default(), ss, axis, before, &|name| crate::eval::construction_axis_in(None, before, name, 0))
-            else {
+            let Ok((o2, d2)) = crate::eval::revolve_axis(
+                &Default::default(),
+                ss,
+                axis,
+                before,
+                &|name| crate::eval::construction_axis_in(None, before, name, 0),
+                &|owner, curve| {
+                    before
+                        .sketch(owner)
+                        .ok_or_else(|| crate::DocError::Unknown(format!("sketch {owner}")))
+                        .and_then(|os| crate::eval::sketch_line_world(os, curve))
+                },
+            ) else {
                 return format!("F{fid}:face:{fi}");
             };
             let (o, d) = (ss.plane.to_world(o2), (ss.plane.to_world(o2 + d2) - ss.plane.to_world(o2)).normalized().unwrap_or(Vec3::Z));

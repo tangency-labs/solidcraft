@@ -10,7 +10,8 @@ use std::sync::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::{BackendId, Camera, ExecutorId};
+use crate::{BackendId, ExecutorId};
+use solidcraft_viewport::Camera;
 
 pub mod adaptive;
 pub mod aging;
@@ -62,7 +63,10 @@ pub use host::{
     LinearColourEncoding, LinearMasterInfo, PreparedSubmission, PreviewInfo, RenderFrame, RenderPreview, RetainedMetadata,
 };
 pub use host_memory::{HostMemoryAdmission, HostMemorySource, NativeMemoryPolicy};
-pub use image::{Admission, ImageTask, TaskPoll, admit, admit_geometry, admit_geometry_with_limits};
+pub use image::{
+    Admission, BodyRole, ImageTask, MAX_TILES, OrthoFrame, PicturePoll, PictureRequest, PictureTask, PixelWindow, Projection, Supersample, TaskPoll,
+    admit, admit_geometry, admit_geometry_with_limits, admit_picture,
+};
 pub use lens::ThinLens;
 pub use lighting::{AreaLight, AreaLights, DirectionalLights, MAX_AREA_LIGHTS, MAX_DIRECTIONAL_LIGHTS, StudioLighting, Sun, ToneMap};
 pub use png::PngTask;
@@ -1462,7 +1466,9 @@ impl RaytraceOptions {
                 || target.body_name.capacity() > 1024
                 || !target.tangent.iter().all(|v| v.is_finite())
                 || !target.tangent.iter().any(|v| *v != 0.0)
-                || ![target.roughness_x, target.roughness_y].into_iter().all(|v| v.is_finite() && (crate::surface::MIN_ROUGHNESS..=1.0).contains(&v))
+                || ![target.roughness_x, target.roughness_y]
+                    .into_iter()
+                    .all(|v| v.is_finite() && (solidcraft_viewport::surface::MIN_ROUGHNESS..=1.0).contains(&v))
             {
                 return Err(JobError::new(ErrorCode::InvalidRequest, "invalid bounded anisotropic planar face options"));
             }

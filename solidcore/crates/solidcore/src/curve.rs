@@ -30,6 +30,7 @@ pub mod hermite_curve;
 pub mod hyperbola;
 pub mod iso_curve;
 pub mod line;
+pub(crate) mod native_affine;
 pub mod offset_curve;
 pub mod parabola;
 pub mod path;

@@ -15,13 +15,12 @@
 //! curve on no edge (tests 3 and 14)" (with WR-668's `curve_check_zero_speed_tangent_end`,
 //! the fork's ecf1963).
 //!
-//! The fork's "volume 9393.307931047 against the quadrature's 9393.307936313" matches a
-//! G2 section whose quintic control points are evenly spaced on the faces (2, 4/3, 2/3
-//! from the edge; section area 0.597884, swept and cut at the cylinder as in
-//! `fork_856b54e_tangent_end.rs`). solidcore's blend-curve section removes less here:
-//! 9395.419893021, about the same with or without this change. That difference is not
-//! the rib's, so the volume is checked against the same blend with the rib marched into
-//! the tangent end.
+//! The curvature-continuous round is the G^n section (WR-685; the executive's blend-curve
+//! section, which the fork's cd47efd built and whose rib this case was first written for,
+//! went with `fillet_gn_section_generator`: WR-685 addendum 2026-11-06). Its order n takes
+//! contact k = n + 2 between the peg's two planes: at n = 2 the end rib is regular in `s`,
+//! at n = 3 (k = 5, odd) it is fitted in `t = sqrt(s)` with zero speed at P, as above. The
+//! volumes are graded against the quadrature of the section swept and cut at the cylinder.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -30,7 +29,6 @@
     clippy::cast_precision_loss
 )] // test helpers
 use solidcore::blend::fillet_executive::api::fillet_edges;
-use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_section::section::{GnSectionFsg, GN_THUMBWEIGHT_EQUAL_AREA};
 use solidcore::boolean::api_brep::boolean_union;
 use solidcore::curve::curve::{Curve, CurveKind};
@@ -40,7 +38,6 @@ use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves as curves;
 use solidcore::query::api_queries::get_edges;
 use solidcore::sweep::api_brep::create_linear_sweep;
-use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel};
@@ -126,76 +123,6 @@ fn kernel() -> Kernel {
     k
 }
 
-#[test]
-fn g2_front_round_end_rib_has_zero_speed_at_its_tangent_end() {
-    let mut k = kernel();
-    let mut b = peg(&mut k);
-    let e = front_top(&b);
-    fillet_edges(&mut k, &mut b, &[e], 2.0, 2, 2, 1.0).unwrap();
-
-    // the end rib: the B-spline edge at P = (40, 0, 8) climbing the cylinder
-    let p = Point3::new(40.0, 0.0, 8.0);
-    let at_p = |q: Point3| q.distance(p) < 1e-6;
-    let ribs: Vec<EdgeId> = find_edges(&b, |s, t| (at_p(s) || at_p(t)) && s.z.max(t.z) > 9.0)
-        .into_iter()
-        .filter(|&e| {
-            matches!(
-                b.edge(e).unwrap().curve.as_ref().map(Curve::kind),
-                Some(CurveKind::BSpline(_))
-            )
-        })
-        .collect();
-    assert_eq!(ribs.len(), 1, "end ribs at P: {ribs:?}");
-    let rib = b.edge(ribs[0]).unwrap().curve.clone().unwrap();
-    let ivl = rib.natural_interval();
-    let (t0, t1) = (ivl.min(), ivl.max());
-    let t_p = if rib.evaluate_point(&k, t0).unwrap().distance(p) < 1e-6 {
-        t0
-    } else {
-        t1
-    };
-    let d = rib.evaluate(&k, t_p, 2, t_p == t1, false).unwrap();
-    // zero speed at P (the first two control points coincide), a non-zero second
-    // derivative along the seam T (z)
-    assert!(d[1].length() < 1e-9, "speed at P {:?}", d[1]);
-    let d2 = d[2];
-    assert!(d2.length() > 1e-3, "second derivative at P {d2:?}");
-    let off_t = (d2.x * d2.x + d2.y * d2.y).sqrt() / d2.length();
-    assert!(off_t < 1e-9, "second derivative off T: {d2:?}");
-
-    // SMLib's check passes (tests 3 and 14 on the zero-speed end with WR-668)
-    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
-        .unwrap()
-        .lines();
-    assert!(lines.is_empty(), "{lines:#?}");
-
-    let v = volume(&k, &mut b);
-    // 9395.419893021 here, 9395.419890495 with the rib fitted in s (before cd47efd)
-    assert!((v - 9395.419893021).abs() < 1e-6, "V {v}");
-}
-
-/// The fork's 9393.307931047 (tangency-labs/smlib `cd47efd`) is the G2 round with the
-/// blend curve's quintic control points at thirds (the fork-only `SetBlendCurveAtThirds`,
-/// `fd3b6a7`, ported as `FilletSession::set_blend_curve_at_thirds`, #1438), which
-/// `fillet_edges` never turns on. Built as `fillet_edges` does internally, with the mode
-/// on, solidcore measures 9393.307938954; the off path stays pinned above (9395.419893021).
-#[test]
-fn g2_front_round_at_thirds_matches_the_fork_volume() {
-    let mut k = kernel();
-    let mut b = peg(&mut k);
-    let e = front_top(&b);
-    {
-        let mut s = FilletSession::new(&mut k, &mut b).unwrap();
-        s.set_blend_curve_at_thirds(true);
-        s.prepare_constant_radius_edges(&mut k, &[e], 2.0, 2, 2, 1.0)
-            .unwrap();
-        s.do_fillet(&mut k).unwrap();
-    }
-    stitch_and_orient(&mut k, &mut b, &StitchAndOrientOptions::default()).unwrap();
-    let v = volume(&k, &mut b);
-    assert!((v - 9393.307931047).abs() < 1e-5, "V {v}");
-}
-
 /// Quadrature volume (composite Simpson's rule) of the peg after cutting the order-`n` section
 /// `(y(t), d(t))` of radius 2 and thumbweight `w` along the front top edge up to the cylinder
 /// `(40 - x)^2 + (8 - y)^2 = 64`.
@@ -232,7 +159,7 @@ fn front_gn_quadrature_volume(n: usize, w: f64) -> f64 {
     peg_v - removed
 }
 
-/// smlib#78 (`7268cee`, #2250): with `fillet_gn_section_generator` on, between the peg's two
+/// smlib#78 (`7268cee`, #2250): with the G^n section (WR-685), between the peg's two
 /// perpendicular planes `gn_section_contact_order` gives `k = n + 2`:
 /// - at `n = 2` (`k = 4`, even), the end rib at `P = (40, 0, 8)` is regular in `s` along `T`;
 /// - at `n = 3` (`k = 5`, odd), the end rib is fitted in `t = sqrt(s)` with zero speed at `P`
@@ -251,7 +178,6 @@ fn g2_and_g3_front_round_gn_section_end_rib_and_quadrature_volumes() {
         (3u32, 0.0, 0.0, true),
     ] {
         let mut k = kernel();
-        k.fixes.fillet_gn_section_generator = true;
         let mut b = peg(&mut k);
         let e = front_top(&b);
         fillet_edges(&mut k, &mut b, &[e], 2.0, 2, cont, w_arg).unwrap();

@@ -557,6 +557,25 @@ impl Reader {
                 continue;
             }
             let e = self.ex.get(id)?;
+            // A curve or point style colours the edges or points of the item, not its surface, and
+            // a surface style's boundary, silhouette or grid lines are curves drawn on it: their
+            // colour must not become the solid's (#12291).
+            if matches!(
+                e.name(),
+                "CURVE_STYLE"
+                    | "CURVE_STYLE_RENDERING"
+                    | "POINT_STYLE"
+                    | "SYMBOL_STYLE"
+                    | "TEXT_STYLE"
+                    | "NULL_STYLE"
+                    | "SURFACE_STYLE_BOUNDARY"
+                    | "SURFACE_STYLE_SILHOUETTE"
+                    | "SURFACE_STYLE_SEGMENTATION_CURVE"
+                    | "SURFACE_STYLE_CONTROL_GRID"
+                    | "SURFACE_STYLE_PARAMETER_LINE"
+            ) {
+                continue;
+            }
             if e.name() == "COLOUR_RGB" {
                 let p = e.params();
                 let c = |i: usize| p.get(i).and_then(Param::as_f64).map(|x| x.clamp(0.0, 1.0) as f32);

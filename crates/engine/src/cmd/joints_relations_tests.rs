@@ -274,3 +274,101 @@ fn a_panel_full_of_parts_placed_by_relations_stays_solved() {
         }
     }
 }
+
+/// A leaf standing on a grounded base, on a hinge along x through its bottom edge, and an angle
+/// relation between the base's top and the leaf's side (made at 120 degrees: the leaf turned 30
+/// degrees on the hinge). The relation's angle is the leaf's turn plus 90 degrees.
+fn hinged_leaf() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Base"}));
+    run(&mut s, "solid.box", json!({"length": 100, "width": 100, "height": 10, "corner": [0, 0, 0]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Leaf"}));
+    run(&mut s, "solid.box", json!({"length": 100, "width": 10, "height": 60, "corner": [0, 45, 10]}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let base = occ(&s, "Base");
+    run(&mut s, "occurrence.ground", json!({"occurrence": base, "grounded": true}));
+    run(&mut s, "joint.origin", json!({"name": "Top", "occurrence": "Base", "face": [50.0, 20.0, 10.0]}));
+    run(&mut s, "joint.origin", json!({"name": "Side", "occurrence": "Leaf", "face": [50.0, 55.0, 40.0]}));
+    run(
+        &mut s,
+        "joint.as_built",
+        json!({"type": "revolute", "name": "Hinge", "a": "Base", "b": "Leaf", "at": {"occurrence": 0, "point": [0, 50, 10], "z": [1, 0, 0]}}),
+    );
+    let r = relation(&mut s, "angle", "Top", "Side", json!({"angle": "120 deg"}));
+    assert!(clean(&r), "{r}");
+    s
+}
+
+/// How far the leaf is turned on the hinge, in degrees: its side's normal about x.
+fn leaf_turn(s: &Session) -> f64 {
+    let n = place(s, "Leaf", Vec3::new(50.0, 56.0, 40.0)) - place(s, "Leaf", Vec3::new(50.0, 55.0, 40.0));
+    n.z.atan2(n.y).to_degrees()
+}
+
+/// An angle relation on a hinged part: as its angle changes the part keeps to its side of the
+/// hinge, and past 180 degrees it carries on round instead of coming back the way it went. So it
+/// does edit after edit, and from one start as the Edit Joint dialog previews each value, also
+/// from straight up, where either side is as near (#12426).
+#[test]
+fn an_angle_relation_on_a_hinge_keeps_its_side_and_carries_on_past_180() {
+    let mut s = hinged_leaf();
+    assert!((leaf_turn(&s) - 30.0).abs() < 1e-4, "{}", leaf_turn(&s));
+    let edit = |s: &mut Session, angle: i32| {
+        let r = run(s, "joint.edit", json!({"joint": "angle Top-Side", "angle": format!("{angle} deg")}));
+        assert!(clean(&r), "{angle} deg: {r}");
+    };
+    // From 120 degrees each time, as the dialog previews: no value comes back the other way.
+    let start = s.scratch();
+    for angle in [140, 170, 190, 200, 260] {
+        let mut t = start.scratch();
+        edit(&mut t, angle);
+        let want = f64::from(angle - 90);
+        assert!((leaf_turn(&t) - want).abs() < 1e-4, "from 120 to {angle} deg: turned {}, not {want}", leaf_turn(&t));
+    }
+    // Edit after edit, through straight up (180) and on.
+    for angle in [130, 140, 150, 160, 170, 180, 190, 200, 260] {
+        edit(&mut s, angle);
+        let want = f64::from(angle - 90);
+        assert!((leaf_turn(&s) - want).abs() < 1e-4, "{angle} deg: turned {}, not {want}", leaf_turn(&s));
+    }
+    // From straight up each time: every value on the same side.
+    edit(&mut s, 180);
+    let straight = s.scratch();
+    let angles = [140, 150, 160, 170];
+    let sides: Vec<f64> = angles
+        .into_iter()
+        .map(|angle| {
+            let mut t = straight.scratch();
+            edit(&mut t, angle);
+            leaf_turn(&t) - 90.0
+        })
+        .collect();
+    for (d, angle) in sides.iter().zip(angles) {
+        assert!((d.abs() - f64::from(180 - angle)).abs() < 1e-4, "{angle} deg from straight up: {sides:?}");
+    }
+    assert!(sides.iter().all(|d| d.signum() == sides[0].signum()), "one side from straight up: {sides:?}");
+}
+
+/// A suppressed Angle relation whose part was moved meanwhile starts again from where the part is
+/// when its angle is edited, so turning it back on doesn't carry the part back to where it was:
+/// with the angle edited first and the joint unsuppressed after, or both in one edit.
+#[test]
+fn an_angle_edit_while_the_joint_is_suppressed_starts_from_where_the_part_is() {
+    let side = |s: &Session| place(s, "Leaf", Vec3::new(50.0, 55.0, 40.0));
+    for together in [false, true] {
+        let mut s = hinged_leaf();
+        run(&mut s, "joint.delete", json!({"joint": "Hinge"}));
+        run(&mut s, "joint.edit", json!({"joint": "angle Top-Side", "suppressed": true}));
+        let leaf = occ(&s, "Leaf");
+        run(&mut s, "occurrence.move", json!({"occurrence": leaf, "translate": [0, 0, 50]}));
+        let moved = side(&s);
+        if together {
+            run(&mut s, "joint.edit", json!({"joint": "angle Top-Side", "angle": "130 deg", "suppressed": false}));
+        } else {
+            run(&mut s, "joint.edit", json!({"joint": "angle Top-Side", "angle": "130 deg"}));
+            run(&mut s, "joint.edit", json!({"joint": "angle Top-Side", "suppressed": false}));
+        }
+        assert!(near(side(&s), moved, 1e-6), "together {together}: {:?}, moved to {moved:?}", side(&s));
+    }
+}

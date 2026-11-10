@@ -5,7 +5,7 @@
 //! driver's refusal can't be provoked here, so these check the capture on a real device with an
 //! error the validation always reports, and the retry policy with a stand-in clock and device.
 //! An error no scope catches at all is reported by the device's handler
-//! (`gpu::log_uncaptured_errors`) instead of panicking (#5486). A configure that meets a lost
+//! (`solidcraft_viewport_egui::log_uncaptured_errors`) instead of panicking (#5486). A configure that meets a lost
 //! device isn't taken as configured, and an acquire wgpu refuses configures the surface again
 //! (#7007).
 
@@ -89,7 +89,7 @@ fn an_acquire_wgpu_refuses_configures_the_surface_again() {
 #[test]
 fn an_uncaught_gpu_error_is_not_a_panic() {
     let Some((_, device, queue)) = crate::gpu::offscreen_own_device() else { return };
-    crate::gpu::log_uncaptured_errors(&device);
+    solidcraft_viewport_egui::log_uncaptured_errors(&device, crate::gpu::report_gpu_error);
     // No error scope around it: mapped at creation with a size that isn't a multiple of 4.
     let _bad =
         device.create_buffer(&wgpu::BufferDescriptor { label: Some("bad"), size: 3, usage: wgpu::BufferUsages::MAP_WRITE, mapped_at_creation: true });

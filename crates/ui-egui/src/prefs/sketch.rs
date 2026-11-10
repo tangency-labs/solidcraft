@@ -95,6 +95,7 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             "prefs.sketch.auto_dimensions",
             "prefs.sketch.auto_locate",
             "ui.first_dimension_scales",
+            "ui.first_dimension_scales_about_origin",
         ];
         let right_labels = [
             "prefs.sketch.shortcut_cycles_modes",
@@ -110,7 +111,17 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
         let two_columns = available >= t.space_24 * 20.0 + gap && !crate::ui_kit::settings_search::suppress_chrome(ui);
         let left = if two_columns { (available - gap) * natural[0] / (natural[0] + natural[1]).max(1.0) } else { available };
         let right = if two_columns { available - gap - left } else { available };
-        ui.with_layout(egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true), |ui| {
+        // While searching, the columns keep their space only when one of their checkboxes matched:
+        // a hidden row still leaves its spacing, which stacked into a gap above a match further down
+        // (Window steps).
+        let before = crate::ui_kit::settings_search::hits(ui);
+        let mut detached = crate::ui_kit::settings_search::querying(ui)
+            .then(|| crate::ui_kit::settings_search::detached_child(ui, "prefs-sketch-drawing-columns", false));
+        let columns = match detached.as_mut() {
+            Some(child) => child,
+            None => &mut *ui,
+        };
+        columns.with_layout(egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true), |ui| {
             ui.spacing_mut().item_spacing.x = gap;
             ui.allocate_ui_with_layout(egui::vec2(left, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
                 check(
@@ -160,6 +171,15 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                     Some("ui.first_dimension_scales_tip"),
                     &mut app.preferences.first_dimension_scales,
                 );
+                ui.add_enabled_ui(app.preferences.first_dimension_scales, |ui| {
+                    check(
+                        ui,
+                        "first_dimension_scales_about_origin",
+                        "ui.first_dimension_scales_about_origin",
+                        Some("ui.first_dimension_scales_about_origin_tip"),
+                        &mut app.preferences.first_dimension_scales_about_origin,
+                    );
+                });
             });
             ui.allocate_ui_with_layout(egui::vec2(right, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
                 check(
@@ -196,6 +216,9 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
                 );
             });
         });
+        if let Some(child) = detached {
+            crate::ui_kit::settings_search::commit_search_child(ui, &child, before);
+        }
         dimension_values(app, ui, t.space_24 * 8.0 + t.space_8);
     });
 }

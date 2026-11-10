@@ -236,7 +236,7 @@ impl OdeIntegrator {
                     reason: UNACHIEVABLE,
                     ..
                 } => SolidError::sm_err(OP_STEP_CONTROL),
-                e => SolidError::nl_ser(OP)(e),
+                e => SolidError::nurbs_routine(OP)(e),
             })?;
             if step.taken == h {
                 counts.good += 1;

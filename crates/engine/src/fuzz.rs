@@ -9,6 +9,7 @@
 use serde::Serialize;
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
+use solidcraft_geom::MeshGeom;
 use solidcraft_kernel::fuzz::Rng;
 pub use solidcraft_kernel::fuzz::{BoolCase, boolean_case, boolean_shapes};
 

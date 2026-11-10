@@ -352,8 +352,8 @@ nice -n 10 cargo run -p goldens -- --solidcraft-cases '3526-*'        # ids (<fi
   defect and defers the case, here it is the right answer (a blend too large for its
   faces, for example `199-*/round_past_the_end_face_is_refused`). `refused.fit_size`
   (`value`, `tol`, `kind` `radius` (default), `scale` or `chord`, `source`) also requires the
-  largest size that builds, which a refusal reports with `fillet_gn_section_generator`
-  (`SolidError::FilletRefused`, WR-696): a refusal without a size fails it, and a refusal
+  largest size that builds, which a refusal reports (`SolidError::FilletRefused`,
+  WR-696): a refusal without a size fails it, and a refusal
   with one is still an `ERROR` in a case that expects none.
 * **Verdicts**: `PASS`, `FAIL`, `UNCHECKED` (no expectations were supplied, or no check
   failed but one cannot be measured

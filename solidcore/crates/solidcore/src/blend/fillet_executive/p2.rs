@@ -722,13 +722,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             .ok_or_else(|| first("no radius"))?;
         let mut generator: Option<O> = None;
 
-        let at_thirds = self.blend_curve_at_thirds;
-        // the fork's SmGnSectionFSG in place of the blend curve (WR-685)
-        let gn = k.fixes.fillet_gn_section_generator;
         let exact_arcs = k.fixes.fillet_exact_arc_sections;
+        // the fork's SmGnSectionFSG in place of the blend curve (WR-685)
         let gn_order = params.continuity as usize;
         let gn_invalid = |kind: FilletSurfaceGeneratorType| {
-            gn && kind == FilletSurfaceGeneratorType::BlendCurve
+            kind == FilletSurfaceGeneratorType::BlendCurve
                 && !GnSectionFsg::is_valid(gn_order, params.thumbweight)
         };
         let generator_spec = |kind: FilletSurfaceGeneratorType, circular_tol: f64| match kind {
@@ -740,16 +738,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 false,
                 false,
             )),
-            FilletSurfaceGeneratorType::BlendCurve if gn => Some(
-                FilletSurfaceGenerator::GnSection(GnSectionFsg::new(gn_order, params.thumbweight)),
-            ),
-            FilletSurfaceGeneratorType::BlendCurve => {
-                Some(FilletSurfaceGenerator::blend_curve_at_thirds(
-                    params.thumbweight,
-                    params.continuity,
-                    at_thirds,
-                ))
-            }
+            FilletSurfaceGeneratorType::BlendCurve => Some(FilletSurfaceGenerator::GnSection(
+                GnSectionFsg::new(gn_order, params.thumbweight),
+            )),
             FilletSurfaceGeneratorType::Unknown => None,
         };
 
