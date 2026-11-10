@@ -12,7 +12,8 @@
 use std::collections::HashMap;
 
 use solidcraft_doc::{Mat, mat_mul, rigid};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use crate::{IoError, Result};
 

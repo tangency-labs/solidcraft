@@ -15,7 +15,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use solidcraft_doc::Mat;
-use solidcraft_geom::{Loop2, Plane, Region2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::{IoError, Result};
 
@@ -1243,7 +1244,7 @@ fn mesh_data(name: String, positions: Vec<Vec3>, triangles: Vec<[u32; 3]>, color
 /// have colours of their own (`body.color` is the body-wide style, often absent), and a mesh body
 /// shows only one colour. A body without per-face colours stays a single mesh.
 fn model_body_meshes(name: &str, body: &solidcraft_kernel::Body, color: Option<[f32; 3]>) -> Result<Vec<solidcraft_doc::MeshData>> {
-    let mesh = body.tessellate(0.1).map_err(|e| IoError::Invalid(format!("KiCad model: {e}")))?;
+    let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.1)).map_err(|e| IoError::Invalid(format!("KiCad model: {e}")))?;
     let painted: HashMap<usize, [f32; 3]> = body.paint().map(|p| p.faces.iter().map(|f| (f.face, f.color)).collect()).unwrap_or_default();
     let same = |a: Option<[f32; 3]>, b: Option<[f32; 3]>| match (a, b) {
         (Some(a), Some(b)) => a.iter().zip(b.iter()).all(|(x, y)| x.to_bits() == y.to_bits()),
@@ -1460,7 +1461,7 @@ fn extrude_regions(regions: &[Region2], z0: f64, z1: f64) -> Result<solidcraft_g
     let bodies = extrude_regions_bodies(regions, z0, z1)?;
     let mut out = solidcraft_geom::Mesh::default();
     for body in &bodies {
-        let mesh = body.tessellate(0.05).map_err(|e| IoError::Invalid(format!("KiCad mesh: {e}")))?;
+        let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.05)).map_err(|e| IoError::Invalid(format!("KiCad mesh: {e}")))?;
         out.append(&mesh, 0);
     }
     Ok(out)
@@ -1714,7 +1715,7 @@ fn glyph_polyline(link: &solidcraft_sketch::LinkGeom) -> Vec<Vec2> {
                 })
                 .collect()
         }
-        LinkGeom::Spline { pts, control, periodic, degree: _ } => {
+        LinkGeom::Spline { pts, control, periodic, degree: _, nurbs: _ } => {
             if !*control || *periodic || pts.len() < 2 {
                 return Vec::new();
             }

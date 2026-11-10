@@ -67,27 +67,27 @@ fn board_thickness(path: &str) -> Option<f64> {
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut dialog) = app.kicad_import.take() else { return };
 
-    let (closed, action) = crate::ui_kit::Window::new(egui::Id::new("sc_kicad_import"), "import", crate::i18n::tr_label("Open KiCad PCB"))
+    let (closed, action) = crate::ui_kit::Window::new(egui::Id::new("sc_kicad_import"), "import", solidcraft_ui_text::tr_label("Open KiCad PCB"))
         .cards(2.0)
         .fields()
-        .actions(crate::i18n::tr("Open"), crate::i18n::tr("Cancel"), None)
+        .actions(solidcraft_ui_text::tr("Open"), solidcraft_ui_text::tr("Cancel"), None)
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
         .show(ctx, dialog.problem().is_none(), |ui| {
-            ui.label(crate::i18n::tr_label("Import options"));
+            ui.label(solidcraft_ui_text::tr_label("Import options"));
             ui.add_space(6.0);
             egui::Grid::new("kicad_import_grid").num_columns(2).min_col_width(200.0).spacing([12.0, 6.0]).show(ui, |ui| {
-                let r = ui.checkbox(&mut dialog.components, crate::i18n::tr_label("Include components"));
+                let r = ui.checkbox(&mut dialog.components, solidcraft_ui_text::tr_label("Include components"));
                 crate::scenario::publish_handle("kicad:components", r.rect.center());
                 ui.end_row();
 
-                let copper_label = ui.label(crate::i18n::tr_label("Copper (traces, vias, zones, pads)"));
+                let copper_label = ui.label(solidcraft_ui_text::tr_label("Copper (traces, vias, zones, pads)"));
                 crate::scenario::publish_rect("kicad:copper_label", copper_label.rect);
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 2.0;
                     for (mode, label) in
                         [(KicadCopper::None, "None"), (KicadCopper::Overlay, "Overlay on the board"), (KicadCopper::Mesh, "Modelled")]
                     {
-                        let r = ui.radio(dialog.copper == mode, crate::i18n::tr_label(label));
+                        let r = ui.radio(dialog.copper == mode, solidcraft_ui_text::tr_label(label));
                         crate::scenario::publish_handle(&format!("kicad:copper:{}", mode.as_str()), r.rect.center());
                         if r.clicked() {
                             dialog.copper = mode;
@@ -96,23 +96,23 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 });
                 ui.end_row();
 
-                let r = ui.checkbox(&mut dialog.silkscreen, crate::i18n::tr_label("Include silkscreen"));
+                let r = ui.checkbox(&mut dialog.silkscreen, solidcraft_ui_text::tr_label("Include silkscreen"));
                 crate::scenario::publish_handle("kicad:silkscreen", r.rect.center());
                 ui.end_row();
 
-                ui.label(crate::i18n::tr_label("Board colour"));
+                ui.label(solidcraft_ui_text::tr_label("Board colour"));
                 let r = ui.color_edit_button_srgb(&mut dialog.color);
                 crate::scenario::publish_handle("kicad:color", r.rect.center());
                 ui.end_row();
 
-                ui.label(crate::i18n::tr_label("Board thickness"));
+                ui.label(solidcraft_ui_text::tr_label("Board thickness"));
                 let t = ui.add(egui::DragValue::new(&mut dialog.thickness).speed(0.1).range(0.01..=1000.0).suffix(" mm").max_decimals(3));
                 crate::scenario::publish_handle("kicad:thickness", t.rect.center());
                 ui.end_row();
             });
             if let Some(problem) = dialog.problem() {
                 ui.add_space(4.0);
-                ui.colored_label(crate::theme::Tokens::get().error, crate::i18n::tr_label(problem));
+                ui.colored_label(solidcraft_theme::Tokens::get().error, solidcraft_ui_text::tr_label(problem));
             }
         });
 
@@ -120,7 +120,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         crate::ui_kit::Action::Ok if dialog.problem().is_none() => {
             let params = dialog.params();
             app.open_path_async_with_options(&dialog.path, params);
-            app.set_status(format!("{}: {}", crate::i18n::tr_label("Importing KiCad board"), dialog.path), false);
+            app.set_status(format!("{}: {}", solidcraft_ui_text::tr_label("Importing KiCad board"), dialog.path), false);
         }
         crate::ui_kit::Action::None if !closed => app.kicad_import = Some(dialog),
         _ => {}

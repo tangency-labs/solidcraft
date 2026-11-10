@@ -812,7 +812,7 @@ fn model_face_colours_become_one_mesh_each() {
     let red = meshes.iter().find(|m| m.color == Some([1.0, 0.0, 0.0])).expect("the body colour");
     assert!(!blue.triangles.is_empty() && !red.triangles.is_empty());
     let total: usize = meshes.iter().map(|m| m.triangles.len() / 3).sum();
-    assert_eq!(total, painted.tessellate(0.1).expect("tessellation").triangles.len());
+    assert_eq!(total, painted.mesh(&solidcraft_kernel::MeshTolerance::chord(0.1)).expect("tessellation").triangles.len());
     for mesh in &meshes {
         assert!(mesh.triangles.iter().all(|i| (*i as usize) < mesh.positions.len() / 3), "{} indexes its own vertices", mesh.name);
     }
