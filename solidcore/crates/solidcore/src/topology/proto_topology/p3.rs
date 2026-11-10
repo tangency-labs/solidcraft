@@ -95,6 +95,7 @@
 
 use crate::curve::curve::p2::Curve;
 use crate::curve::curve::p8::CurveIntersectOptions;
+use crate::curve::curve::CurveKind;
 use crate::error::{passed_on, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::solution_array::{ObjectKind, SolutionObject, SolutionType};
@@ -965,6 +966,16 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         // XSect ProtoEdge curves
         let c1 = curve_of(&*geometry, crv1)?;
         let c2 = curve_of(&*geometry, crv2)?;
+        // (not upstream, #14329) Two lines go to `IntersectWithLine`, whose first test
+        // returns no solution when the segments' boxes are apart: answer that here, before
+        // the intersection's setup. A boolean asks it for every pair of proto edges, so
+        // with long outlines nearly every pair ends here.
+        if let (CurveKind::Line(l1), CurveKind::Line(l2)) = (c1.kind(), c2.kind()) {
+            if l1.segments_apart(&dom1, l2, &dom2, tol) {
+                return Ok(deleted);
+            }
+        }
+        k.work_counters.add_proto_edge_intersection();
         let sols = match c1.global_curve_intersect::<CurveHandle>(
             k,
             &dom1,
@@ -2330,5 +2341,56 @@ mod tests {
         assert!(vd.place_by_crossing(&k, &pool, &pc1, &pc2, 0.9).unwrap());
         // a more grazing one than that does not
         assert!(!vd.place_by_crossing(&k, &pool, &pc1, &pc2, 0.5).unwrap());
+    }
+
+    /// An `n`-sided prism of circumradius 30 from `z0` up `h`.
+    fn prism(k: &mut crate::kernel::Kernel, n: usize, z0: f64, h: f64) -> Brep {
+        use crate::curve::curve::Curve;
+        let point = |i: usize| {
+            let t = core::f64::consts::TAU * i as f64 / n as f64;
+            crate::math::Vec3::new(30.0 * t.cos(), 30.0 * t.sin(), z0)
+        };
+        let curves: Vec<Curve> = (0..n)
+            .map(|i| {
+                Curve::from(
+                    crate::primitive::api_curves::create_line_segment(point(i), point(i + 1))
+                        .unwrap(),
+                )
+            })
+            .collect();
+        let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
+        crate::sweep::api_brep::create_linear_sweep(
+            k,
+            &refs,
+            crate::math::Vec3::new(0.0, 0.0, 1.0),
+            h,
+            true,
+        )
+        .unwrap()
+    }
+
+    /// A Join of a prism into a prism of the same outline (z 1..2 into z 0..2: coincident
+    /// sides and top) splits its proto edges where they cross. Every pair of proto edges
+    /// is asked; a pair of lines whose boxes are apart now ends before any curve
+    /// intersection (#14329). The intersections run stay flat as the outline grows
+    /// (none here), where every one of the N² pairs ran one before, and the union is
+    /// the outer prism.
+    #[test]
+    fn a_join_of_coincident_prisms_intersects_no_far_apart_edges() {
+        let mut counts = Vec::new();
+        for n in [12, 48] {
+            let mut k = crate::kernel::Kernel {
+                fixes: crate::kernel::UpstreamFixes::all(),
+                ..crate::kernel::Kernel::default()
+            };
+            let a = prism(&mut k, n, 0.0, 2.0);
+            let b = prism(&mut k, n, 1.0, 1.0);
+            k.work_counters.reset();
+            let u = crate::boolean::api_brep::boolean_union(&mut k, a, b).unwrap();
+            counts.push(k.work_counters.proto_edge_intersections());
+            assert_eq!(u.faces().len(), n + 2, "{n} sides");
+            assert_eq!(u.edges().len(), 3 * n, "{n} sides");
+        }
+        assert_eq!(counts, [0, 0]);
     }
 }
