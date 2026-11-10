@@ -23,10 +23,14 @@ use rayon::prelude::*;
 use solidcore_record::Vec3;
 use solidcraft_geom::tess::TessPlan;
 use solidcraft_geom::{Mesh, Vec3Geom};
+use wgpu::util::DeviceExt;
 
-use crate::collision::{CollisionGpu, GpuPod, decode_pod_slice};
+use crate::collision::{CollisionGpu, GpuPod, decode_pod_slice, encode_pod, encode_pod_slice};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::cuda::CudaBackend;
+use crate::cuda::{PatchEvalOutF32, PatchUvQueryF32};
+
+const ACCEL_SHADER: &str = include_str!("accel.wgsl");
 
 /// Standard problem sizes evaluated by the startup scaling microbenchmark.
 pub const BENCH_SIZES: &[usize] = &[16, 64, 256, 1024, 4096, 16384, 65536];
@@ -115,14 +119,37 @@ impl KernelOp {
     }
 }
 
-// ── Vulkan / wgpu Compute Accelerator ─────────────────────────────────────
+// ── Vulkan / wgpu Compute Accelerator (`accel.wgsl`) ──────────────────────
 
-/// Shared Vulkan / `wgpu` compute accelerator handle.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+struct PatchEvalParams {
+    num_evals: u32,
+    num_patches: u32,
+    pad0: u32,
+    pad1: u32,
+}
+
+impl GpuPod for PatchEvalParams {
+    const WORDS: usize = 4;
+    /// Appends the 4 `u32` words of [`PatchEvalParams`] to `out`.
+    fn push_words(&self, out: &mut Vec<u32>) {
+        out.extend_from_slice(&[self.num_evals, self.num_patches, self.pad0, self.pad1]);
+    }
+    /// Decodes [`PatchEvalParams`] from a 4-word `u32` slice.
+    fn from_words(w: &[u32]) -> Option<Self> {
+        Some(Self { num_evals: *w.first()?, num_patches: *w.get(1)?, pad0: *w.get(2)?, pad1: *w.get(3)? })
+    }
+}
+
+/// Shared Vulkan / `wgpu` compute pipelines for geometric kernel classes.
 pub struct VulkanAccel {
     device: wgpu::Device,
-    _queue: wgpu::Queue,
+    queue: wgpu::Queue,
     adapter_name: String,
     collision: CollisionGpu,
+    patch_pipeline: wgpu::ComputePipeline,
+    patch_bgl: wgpu::BindGroupLayout,
 }
 
 static GLOBAL_VULKAN: OnceLock<Option<VulkanAccel>> = OnceLock::new();
@@ -139,7 +166,47 @@ impl VulkanAccel {
         let (adapter, device, queue) = solidcraft_viewport_gpu::open_headless(policy).ok()?;
         let adapter_name = adapter.get_info().name;
         let collision = CollisionGpu::from_device(device.clone(), queue.clone());
-        Some(Self { device, _queue: queue, adapter_name, collision })
+
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("solidcraft-accel-wgsl"),
+            source: wgpu::ShaderSource::Wgsl(ACCEL_SHADER.into()),
+        });
+
+        let entry = |binding: u32, read_only: bool| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty: if binding == 0 { wgpu::BufferBindingType::Uniform } else { wgpu::BufferBindingType::Storage { read_only } },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        };
+
+        let make_pipeline = |pl: &wgpu::PipelineLayout, ep: &str| {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(ep),
+                layout: Some(pl),
+                module: &shader,
+                entry_point: Some(ep),
+                compilation_options: Default::default(),
+                cache: None,
+            })
+        };
+
+        // 1. Patch Eval (bindings 0..=3)
+        let patch_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("accel-patch-bgl"),
+            entries: &[entry(0, true), entry(1, true), entry(2, true), entry(3, false)],
+        });
+        let patch_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("accel-patch-pl"),
+            bind_group_layouts: &[Some(&patch_bgl)],
+            immediate_size: 0,
+        });
+        let patch_pipeline = make_pipeline(&patch_pl, "eval_bicubic_patches");
+
+        Some(Self { device, queue, adapter_name, collision, patch_pipeline, patch_bgl })
     }
 
     /// Name of the underlying Vulkan / `wgpu` adapter.
@@ -152,8 +219,70 @@ impl VulkanAccel {
         &self.collision
     }
 
+    /// Evaluates a batch of `f32` bicubic Bezier/B-spline patches on Vulkan/wgpu.
+    pub fn eval_bicubic_f32(&self, patch_cpts: &[[f32; 4]], queries: &[PatchUvQueryF32]) -> Option<Vec<PatchEvalOutF32>> {
+        if queries.is_empty() || patch_cpts.len() < 16 {
+            return Some(Vec::new());
+        }
+        let num_evals = u32::try_from(queries.len()).ok()?;
+        let num_patches = u32::try_from(patch_cpts.len() / 16).ok()?;
+        let params = PatchEvalParams { num_evals, num_patches, pad0: 0, pad1: 0 };
+
+        let _guard = self.collision.lock_device();
+        let u_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("vk-patch-params"),
+            contents: &encode_pod(&params),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let cpts_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("vk-patch-cpts"),
+            contents: &encode_pod_slice(patch_cpts),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let q_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("vk-patch-queries"),
+            contents: &encode_pod_slice(queries),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let out_size = (queries.len() * std::mem::size_of::<PatchEvalOutF32>()) as u64;
+        let out_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vk-patch-out"),
+            size: out_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let read_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vk-patch-read"),
+            size: out_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("vk-patch-bg"),
+            layout: &self.patch_bgl,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: u_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: cpts_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: q_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: out_buf.as_entire_binding() },
+            ],
+        });
+
+        let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("vk-patch-enc") });
+        {
+            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("vk-patch-pass"), timestamp_writes: None });
+            pass.set_pipeline(&self.patch_pipeline);
+            pass.set_bind_group(0, &bg, &[]);
+            pass.dispatch_workgroups(num_evals.div_ceil(64), 1, 1);
+        }
+        enc.copy_buffer_to_buffer(&out_buf, 0, &read_buf, 0, out_size);
+        self.queue.submit(Some(enc.finish()));
+
+        self.read_mapped_vec(&read_buf)
+    }
+
     /// Maps a staging readback buffer synchronously and decodes its contents into a `Vec<T>`.
-    #[allow(dead_code)]
     fn read_mapped_vec<T: GpuPod>(&self, read_buf: &wgpu::Buffer) -> Option<Vec<T>> {
         let slice = read_buf.slice(..);
         let (tx, rx) = mpsc::channel();
@@ -167,6 +296,80 @@ impl VulkanAccel {
         drop(mapped);
         read_buf.unmap();
         Some(vec)
+    }
+}
+
+// ── CPU Scalar & Rayon Reference Implementations ──────────────────────────
+
+/// Evaluates a single `f32` rational bicubic Bezier patch at `(q.u, q.v)`.
+fn eval_one_bicubic_f32(patch_cpts: &[[f32; 4]], num_patches: u32, q: PatchUvQueryF32) -> PatchEvalOutF32 {
+    let p_idx = q.patch_idx.min(num_patches.saturating_sub(1)) as usize;
+    let cpts = patch_cpts.get(p_idx * 16..(p_idx + 1) * 16).unwrap_or(&[]);
+    if cpts.len() < 16 {
+        return PatchEvalOutF32::default();
+    }
+    let (u, v) = (q.u, q.v);
+    let (iu, iv) = (1.0 - u, 1.0 - v);
+    let (iu2, u2, iv2, v2) = (iu * iu, u * u, iv * iv, v * v);
+    let bu = [iu2 * iu, 3.0 * u * iu2, 3.0 * u2 * iu, u2 * u];
+    let dbu = [-3.0 * iu2, 3.0 * iu * (1.0 - 3.0 * u), 3.0 * u * (2.0 - 3.0 * u), 3.0 * u2];
+    let bv = [iv2 * iv, 3.0 * v * iv2, 3.0 * v2 * iv, v2 * v];
+    let dbv = [-3.0 * iv2, 3.0 * iv * (1.0 - 3.0 * v), 3.0 * v * (2.0 - 3.0 * v), 3.0 * v2];
+
+    let mut h = [0.0f32; 4];
+    let mut dhu = [0.0f32; 4];
+    let mut dhv = [0.0f32; 4];
+    for i in 0..4 {
+        for j in 0..4 {
+            let cp = cpts[i * 4 + j];
+            let w_uv = bu[i] * bv[j];
+            let w_du = dbu[i] * bv[j];
+            let w_dv = bu[i] * dbv[j];
+            for c in 0..4 {
+                h[c] = cp[c].mul_add(w_uv, h[c]);
+                dhu[c] = cp[c].mul_add(w_du, dhu[c]);
+                dhv[c] = cp[c].mul_add(w_dv, dhv[c]);
+            }
+        }
+    }
+    let inv_w = if h[3].abs() > 1e-12 { 1.0 / h[3] } else { 1.0 };
+    let (px, py, pz) = (h[0] * inv_w, h[1] * inv_w, h[2] * inv_w);
+    let dux = (dhu[0] - px * dhu[3]) * inv_w;
+    let duy = (dhu[1] - py * dhu[3]) * inv_w;
+    let duz = (dhu[2] - pz * dhu[3]) * inv_w;
+    let dvx = (dhv[0] - px * dhv[3]) * inv_w;
+    let dvy = (dhv[1] - py * dhv[3]) * inv_w;
+    let dvz = (dhv[2] - pz * dhv[3]) * inv_w;
+    let cx = duy * dvz - duz * dvy;
+    let cy = duz * dvx - dux * dvz;
+    let cz = dux * dvy - duy * dvx;
+    let len_n = (cx * cx + cy * cy + cz * cz).sqrt();
+    let (nx, ny, nz) = if len_n > 1e-12 { (cx / len_n, cy / len_n, cz / len_n) } else { (0.0, 0.0, 1.0) };
+    PatchEvalOutF32 { pos: [px, py, pz, 1.0], norm: [nx, ny, nz, len_n] }
+}
+
+/// CPU scalar evaluation of `f32` bicubic patches.
+pub fn cpu_eval_bicubic_f32_scalar(patch_cpts: &[[f32; 4]], queries: &[PatchUvQueryF32]) -> Vec<PatchEvalOutF32> {
+    if queries.is_empty() || patch_cpts.len() < 16 {
+        return Vec::new();
+    }
+    let num_patches = (patch_cpts.len() / 16) as u32;
+    queries.iter().map(|&q| eval_one_bicubic_f32(patch_cpts, num_patches, q)).collect()
+}
+
+/// CPU `rayon` parallel evaluation of `f32` bicubic patches.
+pub fn cpu_eval_bicubic_f32_rayon(patch_cpts: &[[f32; 4]], queries: &[PatchUvQueryF32]) -> Vec<PatchEvalOutF32> {
+    if queries.is_empty() || patch_cpts.len() < 16 {
+        return Vec::new();
+    }
+    let num_patches = (patch_cpts.len() / 16) as u32;
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        queries.par_iter().map(|&q| eval_one_bicubic_f32(patch_cpts, num_patches, q)).collect()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        cpu_eval_bicubic_f32_scalar(patch_cpts, queries)
     }
 }
 
@@ -439,6 +642,26 @@ pub fn run_scaling_microbenchmark(sizes: &[usize]) -> CalibrationReport {
     };
 
     let max_n = sizes.iter().copied().max().unwrap_or(65536).max(16);
+
+    // Pre-generate benchmark datasets up to `max_n`.
+    let patch_f32 = synthetic_bicubic_patch_f32();
+    let queries_f32: Vec<PatchUvQueryF32> = (0..max_n)
+        .map(|i| {
+            let t = (i as f32) / (max_n as f32);
+            PatchUvQueryF32 { u: (t * 0.97 + 0.01).fract(), v: (t * 3.17 + 0.02).fract(), patch_idx: 0, pad: 0 }
+        })
+        .collect();
+
+    if let Some(v) = vk {
+        let _ = v.eval_bicubic_f32(&patch_f32, &queries_f32[..16]);
+    }
+    if let Some(c) = cuda {
+        let _ = c.eval_bicubic_f32(&patch_f32, &queries_f32[..max_n], false);
+        if c.has_ampere_ptx() {
+            let _ = c.eval_bicubic_f32(&patch_f32, &queries_f32[..16], true);
+        }
+    }
+
     let mut kernels = Vec::with_capacity(KernelOp::ALL.len());
 
     for &op in KernelOp::ALL {
@@ -457,8 +680,31 @@ pub fn run_scaling_microbenchmark(sizes: &[usize]) -> CalibrationReport {
                 }
                 let mut raw_sample = Vec::with_capacity(order.len());
                 for &backend in &order {
-                    let ns = 1u64;
-                    raw_sample.push((backend, ns));
+                    let ns = match (op, backend) {
+                        (KernelOp::SurfaceEvalF32, BackendTarget::CpuScalar) => time_ns(|| {
+                            std::hint::black_box(cpu_eval_bicubic_f32_scalar(&patch_f32, &queries_f32[..n]));
+                        }),
+                        (KernelOp::SurfaceEvalF32, BackendTarget::CpuRayon) => time_ns(|| {
+                            std::hint::black_box(cpu_eval_bicubic_f32_rayon(&patch_f32, &queries_f32[..n]));
+                        }),
+                        (KernelOp::SurfaceEvalF32, BackendTarget::VulkanCompute) => time_ns(|| {
+                            if let Some(v) = vk {
+                                std::hint::black_box(v.eval_bicubic_f32(&patch_f32, &queries_f32[..n]));
+                            }
+                        }),
+                        (KernelOp::SurfaceEvalF32, BackendTarget::CudaGeneric) => time_ns(|| {
+                            if let Some(c) = cuda {
+                                std::hint::black_box(c.eval_bicubic_f32(&patch_f32, &queries_f32[..n], false));
+                            }
+                        }),
+                        (KernelOp::SurfaceEvalF32, BackendTarget::AmperePtx) => time_ns(|| {
+                            if let Some(c) = cuda {
+                                std::hint::black_box(c.eval_bicubic_f32(&patch_f32, &queries_f32[..n], true));
+                            }
+                        }),
+                        _ => 1,
+                    };
+                    raw_sample.push((backend, ns.max(1)));
                 }
                 sample_orders.push(order);
                 sample_timings_ns.push(raw_sample);
@@ -582,6 +828,43 @@ impl Dispatcher {
             return forced;
         }
         self.report.kernel(op).map_or(BackendTarget::CpuScalar, |k| k.select_backend(problem_size))
+    }
+
+    /// Dispatches batched `f32` bicubic patch evaluation to the optimal backend.
+    pub fn eval_bicubic_f32(&self, patch_cpts: &[[f32; 4]], queries: &[PatchUvQueryF32]) -> (BackendTarget, Vec<PatchEvalOutF32>) {
+        let target = self.select_backend(KernelOp::SurfaceEvalF32, queries.len());
+        match target {
+            BackendTarget::AmperePtx | BackendTarget::AmpereTensorCore | BackendTarget::RtCoreBvh => {
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(c) = CudaBackend::global()
+                    && let Some(out) = c.eval_bicubic_f32(patch_cpts, queries, true)
+                {
+                    return (BackendTarget::AmperePtx, out);
+                }
+            }
+            BackendTarget::CudaGeneric => {
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(c) = CudaBackend::global()
+                    && let Some(out) = c.eval_bicubic_f32(patch_cpts, queries, false)
+                {
+                    return (BackendTarget::CudaGeneric, out);
+                }
+            }
+            BackendTarget::VulkanCompute => {
+                if let Some(v) = VulkanAccel::global()
+                    && let Some(out) = v.eval_bicubic_f32(patch_cpts, queries)
+                {
+                    return (BackendTarget::VulkanCompute, out);
+                }
+            }
+            BackendTarget::CpuRayon => {
+                return (BackendTarget::CpuRayon, cpu_eval_bicubic_f32_rayon(patch_cpts, queries));
+            }
+            BackendTarget::CpuScalar => {
+                return (BackendTarget::CpuScalar, cpu_eval_bicubic_f32_scalar(patch_cpts, queries));
+            }
+        }
+        (BackendTarget::CpuScalar, cpu_eval_bicubic_f32_scalar(patch_cpts, queries))
     }
 
     /// Evaluates a [`TessPlan`] using either CPU scalar or parallel `rayon` across faces.

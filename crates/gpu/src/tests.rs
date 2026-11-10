@@ -487,6 +487,60 @@ fn a_plan_with_pole_nodes_is_refused_by_name() {
     assert!(matches!(gpu.evaluate(&plan), Err(GpuError::PoleNodes { face: 1 })));
 }
 
+/// Verifies numerical parity of `f32` bicubic Bézier tensor-product patch evaluation across CPU, Vulkan, and CUDA PTX backends.
+#[test]
+fn multi_backend_bicubic_patch_f32_and_tensor_mma_parity() {
+    use crate::cuda::{CudaBackend, PatchUvQueryF32};
+    use crate::dispatch::{Dispatcher, VulkanAccel, cpu_eval_bicubic_f32_rayon, cpu_eval_bicubic_f32_scalar, synthetic_bicubic_patch_f32};
+
+    let patch_f32 = synthetic_bicubic_patch_f32();
+    let n = 259usize;
+    let queries_f32: Vec<PatchUvQueryF32> = (0..n)
+        .map(|i| {
+            let t = (i as f32) / (n as f32);
+            PatchUvQueryF32 { u: (t * 0.89 + 0.05).fract(), v: (t * 2.71 + 0.07).fract(), patch_idx: 0, pad: 0 }
+        })
+        .collect();
+
+    let ref_f32 = cpu_eval_bicubic_f32_scalar(&patch_f32, &queries_f32);
+    let ray_f32 = cpu_eval_bicubic_f32_rayon(&patch_f32, &queries_f32);
+    assert_eq!(ref_f32, ray_f32);
+
+    if let Some(vk) = VulkanAccel::global() {
+        let vk_out = vk.eval_bicubic_f32(&patch_f32, &queries_f32).expect("vk eval_bicubic_f32");
+        assert_eq!(vk_out.len(), ref_f32.len());
+        for (i, (a, b)) in ref_f32.iter().zip(&vk_out).enumerate() {
+            for c in 0..3 {
+                assert!((a.pos[c] - b.pos[c]).abs() < 1e-4, "vk pos mismatch at {i}[{c}]: {:?} vs {:?}", a.pos, b.pos);
+                assert!((a.norm[c] - b.norm[c]).abs() < 1e-4, "vk norm mismatch at {i}[{c}]: {:?} vs {:?}", a.norm, b.norm);
+            }
+        }
+    }
+
+    if let Some(cuda) = CudaBackend::global() {
+        let cu_f32_gen = cuda.eval_bicubic_f32(&patch_f32, &queries_f32, false).expect("cuda generic f32");
+        for (i, (a, b)) in ref_f32.iter().zip(&cu_f32_gen).enumerate() {
+            for c in 0..3 {
+                assert!((a.pos[c] - b.pos[c]).abs() < 1e-4, "cuda sm70 f32 pos mismatch at {i}[{c}]");
+                assert!((a.norm[c] - b.norm[c]).abs() < 1e-4, "cuda sm70 f32 norm mismatch at {i}[{c}]");
+            }
+        }
+        if cuda.has_ampere_ptx() {
+            let cu_f32_amp = cuda.eval_bicubic_f32(&patch_f32, &queries_f32, true).expect("cuda sm86 cp.async f32");
+            for (i, (a, b)) in ref_f32.iter().zip(&cu_f32_amp).enumerate() {
+                for c in 0..3 {
+                    assert!((a.pos[c] - b.pos[c]).abs() < 1e-4, "cuda sm86 f32 pos mismatch at {i}[{c}]");
+                    assert!((a.norm[c] - b.norm[c]).abs() < 1e-4, "cuda sm86 f32 norm mismatch at {i}[{c}]");
+                }
+            }
+        }
+    }
+
+    let disp = Dispatcher::global();
+    let (_, d_out) = disp.eval_bicubic_f32(&patch_f32, &queries_f32);
+    assert_eq!(d_out.len(), n);
+}
+
 /// Verifies that CUDA device info enables hardware F32 tensor cores (`mma.sync.aligned.m16n8k8.row.col.f32.tf32.tf32.f32`)
 /// across all consumer and datacenter Ampere (`sm_80+`) and newer architectures.
 #[test]
