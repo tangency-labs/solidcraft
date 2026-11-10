@@ -409,7 +409,7 @@ fn delete_label(count: usize) -> String {
 /// one is among them, labelled with how many, else that feature alone (#5005).
 pub(crate) fn delete_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) {
     let targets = menu_targets(app, id);
-    if crate::context_menu::button(ui, &delete_label(targets.len()), "delete").clicked() {
+    if crate::ui_kit::menu::button(ui, &delete_label(targets.len()), "delete").clicked() {
         delete_features(app, targets);
         ui.close();
     }
@@ -444,7 +444,7 @@ fn after_marker(app: &SolveApp, id: u64, index: usize, marker: usize, shown: Opt
 /// The [`after_marker`] entry as a button.
 pub(crate) fn delete_after_marker_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, index: usize, marker: usize, shown: Option<&[usize]>) {
     let Some((label, ids)) = after_marker(app, id, index, marker, shown) else { return };
-    if crate::context_menu::button(ui, &label, "delete").clicked() {
+    if crate::ui_kit::menu::button(ui, &label, "delete").clicked() {
         delete_features(app, ids);
         ui.close();
     }
@@ -507,12 +507,12 @@ pub(crate) fn anchor_key(id: u64) -> String {
 
 /// Copy and Paste in a feature's timeline menu. Paste puts the copies at the history marker.
 pub(crate) fn clipboard_buttons(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) {
-    if crate::context_menu::button(ui, solidcraft_ui_text::tr_label("Copy"), "copy").clicked() {
+    if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr_label("Copy"), "copy").clicked() {
         let features = menu_targets(app, id);
         let _ = app.run("timeline.copy", json!({ "features": features }));
         ui.close();
     }
-    if crate::context_menu::button_enabled(ui, solidcraft_ui_text::tr_label("Paste"), "paste", !app.session.clipboard.is_empty()).clicked() {
+    if crate::ui_kit::menu::button_enabled(ui, solidcraft_ui_text::tr_label("Paste"), "paste", !app.session.clipboard.is_empty()).clicked() {
         let _ = app.run("timeline.paste", json!({}));
         ui.close();
     }
@@ -692,7 +692,7 @@ pub(crate) fn message_button(app: &SolveApp, ui: &mut egui::Ui, id: u64) {
     let Some(text) = feature_message(app, id) else { return };
     let failed = app.session.model.result(id).is_some_and(|r| r.error.is_some());
     let label = if failed { "Copy Error Message" } else { "Copy Warning Message" };
-    if crate::context_menu::button(ui, solidcraft_ui_text::tr_label(label), "copy").clicked() {
+    if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr_label(label), "copy").clicked() {
         ui.ctx().copy_text(text);
         ui.close();
     }
@@ -708,7 +708,7 @@ pub(crate) fn sketch_plane_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64
     else {
         return;
     };
-    let response = crate::context_menu::button_enabled(ui, &item.label, &item.icon, item.enabled);
+    let response = crate::ui_kit::menu::button_enabled(ui, &item.label, &item.icon, item.enabled);
     if response.clicked() {
         crate::context_menu::run_item(app, &item, response.rect.center());
         ui.close();
@@ -930,7 +930,7 @@ pub(crate) fn edit_holes_item(app: &mut SolveApp, ui: &mut egui::Ui, folder: u64
     if crate::hole_folder::holes(app, folder).is_none() {
         return;
     }
-    if crate::context_menu::button(ui, "Edit Holes", "hole").clicked() {
+    if crate::ui_kit::menu::button(ui, "Edit Holes", "hole").clicked() {
         if let Err(why) = crate::hole_folder::open(app, folder) {
             app.set_status(why, true);
         }
@@ -945,6 +945,11 @@ const BAR_HANDLES: history_bar::Handles<'static> =
 /// A feature as the bar draws it: id, name, icon, suppressed, type name, kind.
 type BarFeature = (u64, String, &'static str, bool, &'static str, TimelineKind);
 
+/// The History Play control's names: SolidCraft's commands that play and stop History.
+pub(crate) fn play_labels() -> crate::ui_kit::PlayLabels<'static> {
+    crate::ui_kit::PlayLabels { play: solidcraft_ui_text::tr("cmd.timeline_play"), stop: solidcraft_ui_text::tr("cmd.timeline_stop") }
+}
+
 /// The bar as SolidCraft describes it; the strip sets the marker's slot and the step count.
 fn bar(app: &SolveApp, floating: bool) -> history_bar::Bar<'static> {
     let t = Tokens::get();
@@ -953,8 +958,9 @@ fn bar(app: &SolveApp, floating: bool) -> history_bar::Bar<'static> {
         marker_tip: solidcraft_ui_text::tr("ui.history_marker_tip"),
         play: app.preferences.history_play_button,
         playing: app.timeline_playback.is_some(),
-        accent: solidcraft_theme::TabAccent::for_tab(&t, &app.ui.tab),
-        drag_accent: solidcraft_theme::TabAccent::for_tab(&t, "SKETCH"),
+        play_labels: play_labels(),
+        accent: crate::workspace::tab_accent(&t, &app.ui.tab),
+        drag_accent: crate::workspace::tab_accent(&t, "SKETCH"),
         marker: 0,
         steps: 0,
         floating,
@@ -979,7 +985,7 @@ pub(crate) fn panel_inline(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 fn timeline_strip(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool, x: f32) {
     let t = Tokens::get();
-    let accent = solidcraft_theme::TabAccent::for_tab(&t, &app.ui.tab);
+    let accent = crate::workspace::tab_accent(&t, &app.ui.tab);
     let r = ui.max_rect();
     let p = ui.painter().clone();
     let n = app.session.doc.features.len();
@@ -1019,7 +1025,7 @@ fn timeline_strip(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool, x: f32)
         let mut steps = BarSteps { app: &mut *app, history: &history, strip: &strip, feats: &feats, reveal, marker, marker_view };
         history_bar::strip(ui, &bar, r, strip_rect, ("history_strip", history.within), &mut steps)
     };
-    app.viewport.hover_feature = out.hovered;
+    crate::semantic_content::set_timeline_feature_hover(app, out.hovered);
     // The design's position of a slot; at the marker's, on the side of the marker the pointer is
     // on (features not shown may sit between it and the next one shown).
     let position = |slot: usize, before: bool| {
@@ -1171,7 +1177,7 @@ impl history_bar::Contents for BarSteps<'_> {
                 slot: i,
                 label: name,
                 icon,
-                icon_accent: crate::ui_kit::feature_icon_accent(ty, icon),
+                icon_accent: crate::workspace::feature_icon_accent(ty, icon),
                 state: history_bar::StepState {
                     selected: picked.contains(id),
                     highlighted: strip.from_view.contains(&Some(*id)),
@@ -2898,7 +2904,7 @@ mod tests {
         let mut h = two_boxes(false);
         h.app.ui.tab = "SURFACE".into();
         let t = solidcraft_theme::Tokens::get();
-        let accent = solidcraft_theme::TabAccent::for_tab(&t, "SURFACE");
+        let accent = crate::workspace::tab_accent(&t, "SURFACE");
         for marker_position in [None, Some(1), Some(0)] {
             h.app.session.doc_mut().marker = marker_position;
             let marker_index = marker_position.unwrap_or(2);

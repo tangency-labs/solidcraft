@@ -577,8 +577,9 @@ pub struct MeasureKeys {
     /// with `items`.
     #[serde(default)]
     pub names_only: Option<bool>,
-    /// One or two selections to measure, instead of bodies: a face or edge `{type, body, point}`
-    /// (`index` is optional), or a body, vertex, sketch curve or profile as `Sel` has it.
+    /// One or two selections to measure, instead of bodies: a face or edge `{type, body, point}`,
+    /// `{type, body, index}` (as `model.faces` and `model.edges` list it) or both, or a body,
+    /// vertex, sketch curve or profile as `Sel` has it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "items_schema")]
     pub items: Option<Vec<Value>>,

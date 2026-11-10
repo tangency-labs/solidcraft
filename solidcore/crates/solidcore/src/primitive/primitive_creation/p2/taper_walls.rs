@@ -92,9 +92,8 @@ pub enum TaperCornerRefusal {
     /// no exact continuation (or the seam is not exact on its walls).
     NotExact,
     /// `SM_TCR_WALL_CLOSES`: a wall closes before the far end: its neighbours meet
-    /// across it, or its arc shrinks to its centre (with `fixes.taper_wall_closes_at_apex`,
-    /// WR-571: a wall closes at the far end, the whole section closes, or an arc shrinks
-    /// to its centre).
+    /// across it, or its arc shrinks to its centre (WR-571: a wall closes at the far end,
+    /// the whole section closes, or an arc shrinks to its centre).
     WallCloses,
 }
 
@@ -146,7 +145,7 @@ struct Wall {
 }
 
 /// A corner (or smooth joint) between the curve before and the curve after it
-/// (`sm_DraftSeam`); with `fixes.taper_wall_closes_at_apex` (WR-571), a seam between
+/// (`sm_DraftSeam`); with WR-571, a seam between
 /// two walls next to each other over a stretch of the height: a corner of the profile,
 /// or one where two walls meet once a wall between them has closed.
 #[derive(Debug, Clone, Copy, Default)]
@@ -1345,7 +1344,7 @@ impl EdgeLoop {
     }
 }
 
-/// [`curvature_keeping_walls`] with `fixes.taper_wall_closes_at_apex` (WR-571; the fork's
+/// [`curvature_keeping_walls`] (WR-571; the fork's
 /// tangency-labs/smlib@183ea65): the seams come from following the section up. Each live
 /// wall's length between its crossings with its neighbours is followed to the first
 /// height where it is gone (halved to the root); there the wall ends at its apex and its
@@ -1891,7 +1890,6 @@ fn walls_closing_at_apexes(
 /// tangent to it there instead. A corner that cannot be closed is `Ok(Err(refusal))`
 /// (upstream's `SM_ERR_INVALID_INPUT` with why and where). `kernel_brep` names the
 /// B-rep whose kernel evaluates the curves.
-#[allow(clippy::too_many_lines)] // one fork routine
 pub(super) fn curvature_keeping_walls(
     a: &mut impl PrimitiveCreationAccess,
     kernel_brep: BrepId,
@@ -1922,334 +1920,7 @@ pub(super) fn curvature_keeping_walls(
         walls = with_tangent_planes(&walls, n, d, input.offset, side)?;
     }
     lean_offsets(&mut walls, n, d);
-    if a.kernel(kernel_brep)?.fixes.taper_wall_closes_at_apex {
-        return walls_closing_at_apexes(a, kernel_brep, target, input, walls, n, h);
-    }
-    let count = walls.len();
-
-    // the seams: seam i is the corner where wall i-1 ends and wall i starts
-    let mut seams = Vec::new();
-    for i in 0..count {
-        let wa = at_ref(&walls, (i + count - 1) % count)?;
-        let wb = at_ref(&walls, i)?;
-        let mut seam = Seam {
-            p: wb.start,
-            ..Seam::default()
-        };
-        let p = seam.p;
-        // the walls' normals at the corner
-        let na = wall_normal(wa, p, h)?;
-        let nb = wall_normal(wb, p, h)?;
-        let ta = if wa.arc {
-            wa.axis.cross(p - wa.center)
-        } else {
-            wa.dir
-        };
-        let tb = if wb.arc {
-            wb.axis.cross(p - wb.center)
-        } else {
-            wb.dir
-        };
-        let turn = n.ccw_angle_between(ta, tb)?;
-        let sharp = turn.abs() > EFF_ZERO_SQRT;
-        if !sharp {
-            // a smooth joint: the common ruling
-            if wb.arc {
-                let r = (p - wb.center).unitize()?;
-                seam.x = p - wb.shrink * r + h;
-            } else {
-                seam.x = p + wb.offset + h;
-            }
-            seam.s = 0.5 * (p + seam.x);
-            seam.weight = 1.0;
-            seams.push(seam);
-            continue;
-        }
-        let (Some(mut mid), Some(far)) = (crossing(wa, wb, 0.5, n, p), crossing(wa, wb, 1.0, n, p))
-        else {
-            return Ok(refuse(TaperCornerRefusal::Apart, p));
-        };
-        let na1 = wall_normal(wa, far, h)?;
-        let nb1 = wall_normal(wb, far, h)?;
-        mid += 0.5 * h;
-        seam.x = far + h;
-        let mut t0 = na.cross(nb);
-        let mut t1 = na1.cross(nb1);
-        if t0.dot(h) < 0.0 {
-            t0 = -t0;
-        }
-        if t1.dot(h) < 0.0 {
-            t1 = -t1;
-        }
-        let chord = seam.x - p;
-        let scale = chord.length();
-        let t0 = t0.unitize()?;
-        let t1 = t1.unitize()?;
-        let off_mid = (mid - p) - ((mid - p).dot(chord) / chord.dot(chord)) * chord;
-        if off_mid.length() <= EFF_ZERO_SQRT * scale {
-            // a straight seam (two planes)
-            seam.s = 0.5 * (p + seam.x);
-            seam.weight = 1.0;
-        } else {
-            // the shoulder where the end tangents cross, the weight from the halfway point
-            let (d0, d1) = line_line_closest_point(p, t0, seam.x, t1)?;
-            let s0 = p + d0 * t0;
-            let s1 = seam.x + d1 * t1;
-            if s0.distance(s1) > EFF_ZERO_SQRT * scale || !(d0 > 0.0) || !(d1 < 0.0) {
-                return Ok(refuse(TaperCornerRefusal::NotExact, p));
-            }
-            seam.s = 0.5 * (s0 + s1);
-            // M - P = b1 (S - P) + b2 (X - P)
-            let e1 = seam.s - p;
-            let e2 = seam.x - p;
-            let m = mid - p;
-            let a11 = e1.dot(e1);
-            let a12 = e1.dot(e2);
-            let a22 = e2.dot(e2);
-            let r1 = m.dot(e1);
-            let r2 = m.dot(e2);
-            let det = a11 * a22 - a12 * a12;
-            let b1 = (r1 * a22 - r2 * a12) / det;
-            let b2 = (a11 * r2 - a12 * r1) / det;
-            let b0 = 1.0 - b1 - b2;
-            if !(det.abs() > 0.0) || !(b0 > 0.0) || !(b1 > 0.0) || !(b2 > 0.0) {
-                return Ok(refuse(TaperCornerRefusal::NotExact, p));
-            }
-            seam.weight = b1 / (2.0 * (b0 * b2).sqrt());
-        }
-        // the seam must lie on both walls
-        for k in 1..8 {
-            let q = seam_point(&seam, f64::from(k) / 8.0);
-            let f = (q - p).dot(n) / h.dot(n);
-            let qp = q - f * h;
-            if off_section(wa, f, qp) > tol || off_section(wb, f, qp) > tol {
-                return Ok(refuse(TaperCornerRefusal::NotExact, p));
-            }
-        }
-        seams.push(seam);
-    }
-
-    // each wall's extent: from its first seam's reach to its last's, in spans that each
-    // hold a seam
-    for i in 0..count {
-        let s0 = at(&seams, i)?;
-        let s1 = at(&seams, (i + 1) % count)?;
-        let w = walls.get_mut(i).ok_or_else(|| SolidError::sm_err(OP))?;
-        let ref0 = if w.arc { w.start_ang } else { 0.0 };
-        let ref1 = if w.arc {
-            w.end_ang
-        } else {
-            (w.end - w.start).dot(w.dir)
-        };
-        let mut reach = [(0.0, 0.0); 2];
-        for (slot, (seam, rf)) in reach.iter_mut().zip([(s0, ref0), (s1, ref1)]) {
-            let mut lo = rf;
-            let mut hi = rf;
-            for k in 0..=8 {
-                let q = seam_point(&seam, f64::from(k) / 8.0);
-                let f = (q - seam.p).dot(n) / h.dot(n);
-                let qp = q - f * h;
-                let t = if w.arc {
-                    angle(w, qp, rf)
-                } else {
-                    (qp - w.start - f * w.offset).dot(w.dir)
-                };
-                lo = min2(lo, t);
-                hi = max2(hi, t);
-            }
-            let pad = 0.05 * (hi - lo) + if w.arc { 1e-3 } else { 1e-3 * input.offset };
-            *slot = (lo - pad, hi + pad);
-        }
-        let [(lo0, hi0), (lo1, hi1)] = reach;
-        // the far end must stay longer than nothing
-        let q0 = s0.x - h;
-        let q1 = s1.x - h;
-        let far0 = if w.arc {
-            angle(w, q0, ref0)
-        } else {
-            (q0 - w.start - w.offset).dot(w.dir)
-        };
-        let far1 = if w.arc {
-            angle(w, q1, ref1)
-        } else {
-            (q1 - w.start - w.offset).dot(w.dir)
-        };
-        if !(far1 > far0 + tol / if w.arc { w.radius } else { 1.0 }) {
-            return Ok(refuse(TaperCornerRefusal::WallCloses, s0.p));
-        }
-        let seams_of_wall = [(&s0, ref0), (&s1, ref1)];
-        (w.lo, w.hi) =
-            cone_face_angles(a.kernel(kernel_brep)?, w, seams_of_wall, n, h).unwrap_or((lo0, hi1));
-        w.breaks.clear();
-        // an arc's wall on its cone: the cone's own equal spans (its seams' pcurves are cut
-        // where they cross from one to the next) (the fork's tangency-labs/smlib@3ae7bfa)
-        let wall_cone = if w.arc {
-            draft_cone(a.kernel(kernel_brep)?, w, h)?
-        } else {
-            None
-        };
-        if let Some(cone) = wall_cone {
-            let (v_knots, _) = Surface::from(cone).knots_with_nurb(
-                a.kernel(kernel_brep)?,
-                SurfParamType::V,
-                None,
-            )?;
-            if v_knots.len() < 2 {
-                return Err(SolidError::sm_err(OP));
-            }
-            let spans = v_knots.len() - 1;
-            for k in 0..=spans {
-                w.breaks
-                    .push(w.lo + (w.hi - w.lo) * k as f64 / spans as f64);
-            }
-        } else if w.arc {
-            let quarter = 0.5 * PI;
-            w.breaks.push(lo0);
-            if hi0 >= lo1 {
-                // one span holds both seams
-                if hi1 - lo0 >= PI - EFF_ZERO_SQRT {
-                    return Ok(refuse(TaperCornerRefusal::WallCloses, s0.p));
-                }
-            } else {
-                w.breaks.push(hi0);
-                // (at most the arc's angle over a quarter turn: lo1 and hi0 lie within
-                // a turn and a half of the arc's start angle)
-                let spans = ((lo1 - hi0) / quarter).ceil() as u64;
-                for k in 1..spans {
-                    w.breaks.push(hi0 + (lo1 - hi0) * k as f64 / spans as f64);
-                }
-                w.breaks.push(lo1);
-                if hi0 - lo0 >= PI - EFF_ZERO_SQRT || hi1 - lo1 >= PI - EFF_ZERO_SQRT {
-                    let corner = if hi0 - lo0 >= hi1 - lo1 { s0.p } else { s1.p };
-                    return Ok(refuse(TaperCornerRefusal::NotExact, corner));
-                }
-            }
-            w.breaks.push(hi1);
-        }
-    }
-
-    // the faces
-    let mut far_curves = Vec::new();
-    for i in 0..count {
-        let w = at_ref(&walls, i)?;
-        let s0 = at(&seams, i)?;
-        let s1 = at(&seams, (i + 1) % count)?;
-        let face = {
-            let k = a.kernel(kernel_brep)?;
-            let low = wall_curve(w, 0.0, h)?;
-            let high = wall_curve(w, 1.0, h)?;
-            // an arc's wall is its cone (as an undrafted arc's is its cylinder), any other
-            // the surface ruled between its ends (the fork's tangency-labs/smlib@3ae7bfa)
-            let cone = if w.arc { draft_cone(k, w, h)? } else { None };
-            let (surface, domain) = if let Some(cone) = cone {
-                let surface = Surface::from(cone);
-                let domain = surface.natural_uv_domain_with_nurb(k)?;
-                (surface, domain)
-            } else {
-                let surface = BSplineSurface::create_ruled_surface(&low, &high, SurfParamType::U)?;
-                let domain = surface.natural_uv_domain();
-                (Surface::from(surface), domain)
-            };
-            let u0 = domain.u_min();
-            let u1 = domain.u_max();
-            let v_scale = (domain.v_max() - domain.v_min()) / (w.hi - w.lo);
-            let v0 = domain.v_min();
-            // the corners' parameters on the wall: at the profile and at the far end
-            let mid = if w.arc {
-                0.5 * (w.start_ang + w.end_ang)
-            } else {
-                0.0
-            };
-            let near0 = if w.arc { w.start_ang } else { mid };
-            let near1 = if w.arc { w.end_ang } else { mid };
-            let tp0 = param(w, s0.p, 0.0, near0)?;
-            let tp1 = param(w, s1.p, 0.0, near1)?;
-            let tx0 = param(w, s0.x - h, 1.0, near0)?;
-            let tx1 = param(w, s1.x - h, 1.0, near1)?;
-            // the loop: the profile's curve (none for a tangent plane's piece), the end
-            // seam, the far end's curve back, the start seam back
-            let seam0 = seam_curve(&s0)?;
-            let seam1 = seam_curve(&s1)?;
-            let mut top = high.copy();
-            top.trim(k, &mut Extent1d::from_min_max(tx0, tx1), TrimMode::Notify)?;
-            let top_now = top.natural_interval();
-            let pc_top = iso_pcurve(
-                u1,
-                v0 + (top_now.min() - w.lo) * v_scale,
-                u1,
-                v0 + (top_now.max() - w.lo) * v_scale,
-                top_now.min(),
-                top_now.max(),
-            )?;
-            let pc_seam1 = match seam_pcurve(w, &s1, n, h, [u0, u1], w.lo, v0, v_scale, false) {
-                Ok(pc) => pc,
-                Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                Err(_) => return Ok(refuse(TaperCornerRefusal::NotExact, s1.p)),
-            };
-            let pc_seam0 = match seam_pcurve(w, &s0, n, h, [u0, u1], w.lo, v0, v_scale, false) {
-                Ok(pc) => pc,
-                Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                Err(_) => return Ok(refuse(TaperCornerRefusal::NotExact, s0.p)),
-            };
-            let mut curves: Vec<BSplineCurve> = Vec::new();
-            let mut pcurves: Vec<BSplineCurve> = Vec::new();
-            let mut orientations = Vec::new();
-            if !w.point {
-                let mut bottom = low.copy();
-                bottom.trim(k, &mut Extent1d::from_min_max(tp0, tp1), TrimMode::Notify)?;
-                let now = bottom.natural_interval();
-                let pc_bottom = iso_pcurve(
-                    u0,
-                    v0 + (now.min() - w.lo) * v_scale,
-                    u0,
-                    v0 + (now.max() - w.lo) * v_scale,
-                    now.min(),
-                    now.max(),
-                )?;
-                curves.push(bottom);
-                pcurves.push(pc_bottom);
-                orientations.push(OrientType::Same);
-            }
-            let seam0_index = curves.len() + 2;
-            curves.push(seam1);
-            pcurves.push(pc_seam1);
-            orientations.push(OrientType::Same);
-            curves.push(top.copy());
-            pcurves.push(pc_top);
-            orientations.push(OrientType::Opposite);
-            curves.push(seam0);
-            pcurves.push(pc_seam0);
-            orientations.push(OrientType::Opposite);
-            // every pcurve must lift onto its curve
-            for (e, (c, pc)) in curves.iter().zip(&pcurves).enumerate() {
-                let ivl = c.natural_interval();
-                for step in 0..=8 {
-                    let t = ivl.evaluate(f64::from(step) / 8.0);
-                    let uv = pc.evaluate_point(t)?;
-                    let on = surface.evaluate_point(k, Point2::new(uv.x, uv.y))?;
-                    let at_t = c.evaluate_point(t)?;
-                    if on.distance(at_t) > tol {
-                        let corner = if e == seam0_index { s0.p } else { s1.p };
-                        return Ok(refuse(TaperCornerRefusal::NotExact, corner));
-                    }
-                }
-            }
-            // the far end's curve, for its cap
-            far_curves.push(Curve::from(top));
-            let face_curves = FaceCurvesInput {
-                loops: vec![curves.len()],
-                curves_3d: Some(curves.into_iter().map(|c| Some(Curve::from(c))).collect()),
-                uv_curves: Some(pcurves.into_iter().map(Curve::from).collect()),
-                orientations,
-                loop_points: Vec::new(),
-            };
-            (face_curves, surface, domain)
-        };
-        // the loop runs clockwise in (u, v): opposite to the surface's normal
-        let (curves, surface, domain) = face;
-        a.face_with_curves(target, curves, surface, domain, OrientType::Opposite)?;
-    }
-    Ok(Ok(far_curves))
+    walls_closing_at_apexes(a, kernel_brep, target, input, walls, n, h)
 }
 
 #[cfg(test)]

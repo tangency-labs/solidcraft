@@ -99,3 +99,28 @@ pub fn check_arguments(defs: &[Value], name: &str, args: &Value) -> Result<(), S
     }
     Ok(())
 }
+
+/// Check `args` against prompt `name` as `defs` list it (MCP `Prompt`): unknown prompt, missing
+/// required arguments, unknown arguments, values that are not strings.
+pub(crate) fn check_prompt_arguments(defs: &[Value], name: &str, args: &Value) -> Result<(), String> {
+    let def = defs.iter().find(|d| d["name"] == name).ok_or_else(|| format!("unknown prompt `{name}`"))?;
+    let declared = def["arguments"].as_array().map(Vec::as_slice).unwrap_or_default();
+    let Some(a) = args.as_object() else { return Err(format!("{name}: arguments must be an object")) };
+    for r in declared.iter().filter(|d| d["required"] == true).filter_map(|d| d["name"].as_str()) {
+        if !a.contains_key(r) {
+            return Err(format!("{name}: missing required argument `{r}`"));
+        }
+    }
+    for (k, v) in a {
+        if !declared.iter().any(|d| d["name"] == k.as_str()) {
+            let valid: Vec<&str> = declared.iter().filter_map(|d| d["name"].as_str()).collect();
+            let valid = if valid.is_empty() { "none".to_string() } else { valid.join(", ") };
+            let k: String = k.chars().take(64).collect();
+            return Err(format!("{name}: unknown argument `{k}`; its arguments are: {valid}"));
+        }
+        if !v.is_string() {
+            return Err(format!("{name}: argument `{k}` must be a string"));
+        }
+    }
+    Ok(())
+}

@@ -455,7 +455,7 @@ fn fillet_fitted(
     match kernel::fillet_removing(body, edges, r, turn) {
         Ok((b, gone)) => Ok((b, None, gone)),
         Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Exact => {
-            Err(with_largest_fit(why, "radius", || kernel::fillet_max(body, edges, r, turn)))
+            Err(with_largest_fit(why, "radius", || kernel::fillet_max_why(body, edges, r, turn)))
         }
         Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Reduce => match kernel::fillet_max_each(body, edges, r, turn)? {
             // Built at the radius asked for after all (the groups apart): nothing reduced.
@@ -495,27 +495,36 @@ impl Drop for EvalValidationGuard {
 }
 
 /// A blend's refusal as too large (`why`) with the largest `size` (radius, distance) that fits,
-/// as `search` finds it by building candidates ([`kernel::fillet_max`]): the refusal as it is
-/// when none fits or the search itself fails (a candidate failing for another reason says
-/// nothing about the size).
+/// as `search` finds it by building candidates ([`kernel::fillet_max_why`]). A size is named only
+/// when a candidate built at it: solidcore's own estimate (in `why`) is replaced by the size the
+/// search built, or, when nothing smaller builds, removed and replaced by what the search met
+/// (the smallest candidate's own failure). An estimate no build
+/// confirmed sent ladders the wrong way: it could name a size that is itself refused.
 fn with_largest_fit(
     why: String,
     size: &str,
-    search: impl FnOnce() -> std::result::Result<Option<(f64, kernel::Body)>, kernel::KernelError>,
+    search: impl FnOnce() -> std::result::Result<kernel::FitSearch, kernel::KernelError>,
 ) -> kernel::KernelError {
     if EVAL_VALIDATION.get() == kernel::Validation::Off {
         return kernel::KernelError::TooLarge(why);
     }
-    // On solidcore the refusal names a size already, less a margin (34.99 where 35 builds), and
-    // its edge: the edge stays, the size is the largest the search builds, solidcore's where the
-    // search finds none.
     match search() {
-        Ok(Some((largest, _))) if kernel::names_largest_fit(&why) => kernel::KernelError::TooLarge(kernel::with_fit_note(&why, size, largest)),
-        Ok(Some((largest, _))) => kernel::KernelError::TooLarge(format!("{why}; {}", kernel::largest_fit_note(size, largest))),
-        Ok(None) => kernel::KernelError::TooLarge(why),
+        Ok(kernel::FitSearch { found: Some((largest, _)), .. }) if kernel::names_largest_fit(&why) => {
+            kernel::KernelError::TooLarge(kernel::with_fit_note(&why, size, largest))
+        }
+        Ok(kernel::FitSearch { found: Some((largest, _)), .. }) => {
+            kernel::KernelError::TooLarge(format!("{why}; {}", kernel::largest_fit_note(size, largest)))
+        }
+        Ok(kernel::FitSearch { found: None, smallest_refused: Some((at, e)) }) => kernel::KernelError::TooLarge(format!(
+            "{}; no smaller {size} builds either (down to {} mm: {})",
+            kernel::without_fit_note(&why),
+            show_mm(at),
+            kernel::without_fit_note(&e.to_string())
+        )),
+        Ok(kernel::FitSearch { found: None, smallest_refused: None }) => kernel::KernelError::TooLarge(kernel::without_fit_note(&why)),
         Err(e) => {
             log::debug!("the largest {size} that fits: {e}");
-            kernel::KernelError::TooLarge(why)
+            kernel::KernelError::TooLarge(format!("{}; a smaller {size} fails otherwise: {e}", kernel::without_fit_note(&why)))
         }
     }
 }
@@ -2929,6 +2938,38 @@ pub(crate) fn val(vals: &BTreeMap<String, Value>, e: &str, k: Kind) -> Result<f6
 }
 
 #[cfg(test)]
+mod largest_fit_tests {
+    use super::*;
+
+    const WHY: &str = "the fillet is larger than the faces beside its edges allow; the largest radius that fits is 1.6 mm";
+
+    /// Nothing smaller builds: the unverified estimate is gone, and the message says what the
+    /// smallest candidate met.
+    #[test]
+    fn a_size_nothing_built_is_not_named() {
+        let e = with_largest_fit(WHY.into(), "radius", || {
+            Ok(kernel::FitSearch {
+                found: None,
+                smallest_refused: Some((0.001, kernel::KernelError::TooLarge("the trim leaks; the largest radius that fits is 0.0004 mm".into()))),
+            })
+        })
+        .to_string();
+        assert!(!e.contains("that fits is"), "{e}");
+        assert!(e.contains("no smaller radius builds either (down to 0.001 mm: "), "{e}");
+        assert!(e.contains("the trim leaks"), "{e}");
+    }
+
+    /// A candidate failing for another reason stops the search: that reason is said, not the
+    /// estimate.
+    #[test]
+    fn a_search_stopped_by_another_failure_says_it() {
+        let e = with_largest_fit(WHY.into(), "radius", || Err(kernel::KernelError::Failed("the corner".into()))).to_string();
+        assert!(!e.contains("that fits is"), "{e}");
+        assert!(e.contains("a smaller radius fails otherwise: "), "{e}");
+    }
+}
+
+#[cfg(test)]
 mod design_unit_val_tests {
     use super::*;
     use expr::Value;
@@ -4641,16 +4682,19 @@ fn naming_feature<'a>(vals: &BTreeMap<String, Value>, f: &'a Feature) -> std::bo
 
 /// The revolve axis in the sketch's plane coordinates (a point and a direction). `st` is the model
 /// an axis on an edge or face of it is found in; `construct` gives a construction axis, by name, in
-/// the sketch's 3D frame; `vals` are the parameter values an explicit axis's origin is read with.
+/// the sketch's 3D frame; `vals` are the parameter values an explicit axis's origin is read with;
+/// `sketch_line` gives a line of another sketch, by owning sketch feature and curve id, in the
+/// same frame as `ss` (#6548).
 pub(crate) fn revolve_axis(
     vals: &BTreeMap<String, Value>,
     ss: &SolvedSketch,
     axis: &AxisRef,
     st: &ModelState,
     construct: &dyn Fn(&str) -> Result<(Vec3, Vec3)>,
+    sketch_line: &dyn Fn(u64, &str) -> Result<(Vec3, Vec3)>,
 ) -> Result<(Vec2, Vec2)> {
     match axis {
-        AxisRef::SketchLine { curve } => {
+        AxisRef::SketchLine { curve, sketch: None } => {
             let ci = ss.sketch.curve_index(curve).ok_or_else(|| DocError::Unknown(format!("sketch line `{curve}`")))?;
             match ss.sketch.curves.get(ci).map(|c| &c.kind) {
                 Some(CurveKind::Line { a, b }) => {
@@ -4659,6 +4703,10 @@ pub(crate) fn revolve_axis(
                 }
                 _ => Err(DocError::Invalid(format!("`{curve}` is not a line"))),
             }
+        }
+        AxisRef::SketchLine { curve, sketch: Some(owner) } => {
+            let (o, d) = sketch_line(*owner, curve)?;
+            line_in_sketch_plane(ss, o, d)
         }
         AxisRef::SketchAxis { axis } => match axis.to_ascii_lowercase().as_str() {
             "x" => Ok((Vec2::ZERO, Vec2::X)),
@@ -4687,6 +4735,19 @@ pub(crate) fn revolve_axis(
             let (o, d) = construct(name)?;
             line_in_sketch_plane(ss, o, d)
         }
+    }
+}
+
+/// The line `curve` of a solved sketch, as a world-space point and direction in the sketch's
+/// plane frame. Used to carry a revolve axis picked in another sketch (#6548).
+pub(crate) fn sketch_line_world(ss: &SolvedSketch, curve: &str) -> Result<(Vec3, Vec3)> {
+    let ci = ss.sketch.curve_index(curve).ok_or_else(|| DocError::Unknown(format!("sketch line `{curve}`")))?;
+    match ss.sketch.curves.get(ci).map(|c| &c.kind) {
+        Some(CurveKind::Line { a, b }) => {
+            let (pa, pb) = (ss.sketch.point(*a).unwrap_or_default(), ss.sketch.point(*b).unwrap_or_default());
+            Ok((ss.plane.to_world(pa), ss.plane.dir_to_world(pb - pa)))
+        }
+        _ => Err(DocError::Invalid(format!("`{curve}` is not a line"))),
     }
 }
 
@@ -5825,9 +5886,18 @@ fn feature_tools_with_constructor(
                 f,
             )?;
             let regions = solidcraft_sketch::merge_regions(&select_profiles(&ss, profiles)?);
-            let (o, d) = revolve_axis(vals, &ss, axis, &*axis_state(doc, st, f.component, axis)?, &|name| {
-                construction_axis_in(Some(doc), st, name, f.component)
-            })?;
+            let (o, d) = revolve_axis(
+                vals,
+                &ss,
+                axis,
+                &*axis_state(doc, st, f.component, axis)?,
+                &|name| construction_axis_in(Some(doc), st, name, f.component),
+                &|owner, curve| {
+                    let solved =
+                        st.sketch(owner).ok_or_else(|| DocError::Unknown(format!("sketch {owner} (it must come earlier in the timeline)")))?;
+                    sketch_line_world(&sketch_in_feature_frame(doc, solved, f.component)?, curve)
+                },
+            )?;
             // To Object is in this feature's component frame: the model as seen from there.
             let tst = if to.is_some() { state_in_frame(doc, st, f.component)? } else { std::borrow::Cow::Borrowed(st) };
             let angles = if to.is_some() {
@@ -7117,6 +7187,10 @@ fn replay(
     kept.dedup();
     let (mut missed, mut total) = (0usize, 0usize);
     let plan = copy_plan(doc, vals, st, &kept, mats)?;
+    // A source's named faces are looked up in the model as it was before any copy was made: the
+    // copy of an earlier source (a boss joined to the body) changes the faces a later source (a cut
+    // starting on the boss) names, though the later source means the original's (#11792).
+    let named_from = plan.iter().any(|(src, _, _)| src.face_names.iter().any(|n| !n.is_empty())).then(|| st.clone());
     for (src, mats, first) in &plan {
         // A fillet or chamfer repeats at the copied edges.
         if let FeatureKind::Fillet { edges, radius, .. } | FeatureKind::Chamfer { edges, distance: radius, .. } = &src.kind {
@@ -7238,8 +7312,23 @@ fn replay(
             // a blind hole's depth counts from the face at the copy, not from the bottom of the
             // original hole under the original spot.
             let (spots, dir) = hole_spots_raw(vals, st, src)?;
+            // A hole at sketch points drills into the material, judged at each copy's spots as
+            // the source's side was judged at its own (#14050): judged at the source spots, where
+            // the source has already left an empty bore, a through hole's copies turned away.
+            let sketch_side = match &src.kind {
+                FeatureKind::Hole { points: Some(sp), .. } if !sp.single => st.sketch(sp.sketch.0).map(|ss| (ss.plane.normal(), sp.flip)),
+                _ => None,
+            };
             for (k, m) in mats.iter().enumerate() {
-                let d = crate::apply_vector(m, dir).normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?;
+                let d = match sketch_side {
+                    Some((n, flip)) => {
+                        let moved: Vec<Vec3> = spots.iter().map(|p| crate::apply_point(m, *p)).collect();
+                        let n = crate::apply_vector(m, n).normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?;
+                        let side = sketch_hole_dir(st, &moved, n, hole_scope(src));
+                        if flip { -side } else { side }
+                    }
+                    None => crate::apply_vector(m, dir).normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?,
+                };
                 let start = copies.len();
                 let mut on = Vec::with_capacity(spots.len());
                 for p in &spots {
@@ -7271,7 +7360,7 @@ fn replay(
             // Each copy's faces are named as the source feature's, with the instance. Its face
             // points follow their named faces, as the feature's own did (#2121): a To Object
             // extrude's copies reach the face where it is now, not where it was picked.
-            let moved = with_named_face_points(doc, st, src)?.map(|(g, _)| g);
+            let moved = with_named_face_points(doc, named_from.as_ref().unwrap_or(st), src)?.map(|(g, _)| g);
             let tools = feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), st, &mut None, &mut None, &mut None)?;
             for (k, m) in mats.iter().enumerate() {
                 let start = copies.len();
@@ -7687,7 +7776,7 @@ fn chamfer_with(
     Ok(match side {
         Some(s) => kernel::chamfer_sides(b, edges, d, s, flip)?,
         None => match kernel::chamfer(b, edges, d) {
-            Err(kernel::KernelError::TooLarge(why)) => return Err(with_largest_fit(why, "distance", || kernel::chamfer_max(b, edges, d)).into()),
+            Err(kernel::KernelError::TooLarge(why)) => return Err(with_largest_fit(why, "distance", || kernel::chamfer_max_why(b, edges, d)).into()),
             other => other?,
         },
     })
@@ -8447,6 +8536,17 @@ fn eval_feature(
                                     || (**target == *base && matches!(operation, Operation::Join | Operation::NewBody))) =>
                         {
                             append_warning(warning, format!("`{t}` is part of `{base}` now"));
+                        }
+                        // A tool whose feature is suppressed is left out, as a suppressed feature is
+                        // everywhere else: the Combine builds from the tools that are there (#13474).
+                        // Only a feature before the Combine can have made a tool.
+                        _ if doc
+                            .features
+                            .iter()
+                            .take_while(|g| g.id != f.id)
+                            .any(|g| g.suppressed && g.body_names.iter().any(|n| n.trim() == t.0.as_str())) =>
+                        {
+                            append_warning(warning, format!("`{t}` is left out: the feature that makes it is suppressed"));
                         }
                         _ => return Err(DocError::Unknown(format!("body `{t}`"))),
                     },

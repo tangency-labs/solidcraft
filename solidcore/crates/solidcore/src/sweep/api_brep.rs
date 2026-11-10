@@ -1371,9 +1371,8 @@ mod tests {
     /// sketch's arc through (20, 0), a rounded (14.142136, 14.142136) and (0, 20), whose
     /// centre (c, 0, c), c = 1.28e-6, is off the axis by far less than the B-rep
     /// tolerance (SolidCraft rig shell/4847, #1123).
-    fn rounded_quarter_disc(k: &mut Kernel, fix: bool) -> Brep {
+    fn rounded_quarter_disc(k: &mut Kernel) -> Brep {
         k.fixes.revolve_analytic_profile_faces = true;
-        k.fixes.revolve_arc_centre_near_axis_is_sphere = fix;
         let (c, r, a0) = (
             1.2846627950203038e-06,
             19.99999871533725,
@@ -1416,9 +1415,9 @@ mod tests {
             store: &store,
             key_of: &key_of,
         };
-        for fix in [false, true] {
+        {
             let mut k = Kernel::default();
-            let mut b = rounded_quarter_disc(&mut k, fix);
+            let mut b = rounded_quarter_disc(&mut k);
             let dome = *b.face_list().last().unwrap();
             let surface = b.face(dome).unwrap().surface.as_ref().unwrap();
             let d = surface.natural_uv_domain_if_built();
@@ -1471,30 +1470,24 @@ mod tests {
             let volume = brep_volume(&k, &mut b, 1e-8, &attributes).unwrap();
             // 2/3 pi 20^3
             let want = 2.0 / 3.0 * std::f64::consts::PI * 8000.0;
-            if fix {
-                assert_eq!(face_kinds(&b), ["plane", "sphere"]);
-                assert!(stray <= 1e-9, "dome strays {stray} from its sphere");
-                assert!(spread <= 1e-12, "pole row spread {spread}");
-                assert!(pole_off <= 1e-12, "pole {pole_off} off the axis");
-                assert!((rim - 20.0).abs() <= 1e-12, "rim radius {rim}");
-                assert!((volume - want).abs() <= 1e-6 * want, "{volume} vs {want}");
-                assert!(crate::topology::brep::p2::is_manifold_solid(&b).unwrap());
-            } else {
-                // the arc's own circle: a torus 1.28e-6 about the axis, off the sphere
-                assert_eq!(face_kinds(&b), ["plane", "torus"]);
-                assert!(stray > 1e-7, "{stray}");
-            }
+            // (upstream: the arc's own circle, a torus 1.28e-6 about the axis, off the sphere)
+            assert_eq!(face_kinds(&b), ["plane", "sphere"]);
+            assert!(stray <= 1e-9, "dome strays {stray} from its sphere");
+            assert!(spread <= 1e-12, "pole row spread {spread}");
+            assert!(pole_off <= 1e-12, "pole {pole_off} off the axis");
+            assert!((rim - 20.0).abs() <= 1e-12, "rim radius {rim}");
+            assert!((volume - want).abs() <= 1e-6 * want, "{volume} vs {want}");
+            assert!(crate::topology::brep::p2::is_manifold_solid(&b).unwrap());
         }
     }
 
     /// WR-471 (the fork's c4209ab): a half circle of radius 5 whose centre, and so both
     /// ends, are 3e-7 off the axis (more than the fit tolerance, less than the B-rep
     /// tolerance 1e-6, so the sweep takes both ends to be on the axis), turned a whole
-    /// turn, with the flag on.
+    /// turn.
     fn wr471_whole_sphere() -> (Kernel, Brep) {
         let mut k = Kernel::default();
         k.fixes.revolve_analytic_profile_faces = true;
-        k.fixes.revolve_arc_centre_near_axis_is_sphere = true;
         let off = 3e-7;
         let half = Curve::from(
             BSplineCurve::create_circle_segment(

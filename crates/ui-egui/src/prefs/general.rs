@@ -70,7 +70,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
                 if shown {
                     ui_kit::below_row_control(ui, app.tr("ui.autosave_every"), t.space_24 * 10.0 + t.space_16 + t.space_4, |ui| {
-                        ui_kit::settings_autosave_timeline(ui, app.autosave_minutes)
+                        super::figures::autosave_timeline(ui, app.autosave_minutes)
                     });
                 }
             });
@@ -133,6 +133,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     });
                 });
             });
+        });
+        ui_kit::settings_section(ui, "dialogs", app.tr("prefs.dialogs"), |ui| {
+            let right_click = setting::right_click_confirms(app, ui);
+            crate::scenario::publish_target("prefs:right_click_confirms", right_click.rect);
         });
         ui_kit::settings_section(ui, "updates", app.tr("prefs.updates"), |ui| {
             crate::update::prefs_rows(app, ui);

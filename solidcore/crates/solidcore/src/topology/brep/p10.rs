@@ -2477,7 +2477,7 @@ fn test_closure_split_region_at_faceuse(
         fu,
     ) {
         Ok(v) => Ok(Some(v)),
-        Err(SolidError::Upstream { .. }) => Ok(None),
+        Err(e) if e.upstream_status().is_some() => Ok(None),
         Err(e) => Err(e),
     }
 }

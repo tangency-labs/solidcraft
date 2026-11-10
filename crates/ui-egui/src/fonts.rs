@@ -817,7 +817,7 @@ pub fn setup_fonts(ctx: &egui::Context) {
 /// A context with the production bundled faces, for isolated widget tests.
 #[cfg(test)]
 pub(crate) fn test_context() -> egui::Context {
-    crate::i18n::install();
+    crate::test_support::host_data();
     let ctx = egui::Context::default();
     setup_bundled_fonts(&ctx);
     ctx
@@ -1366,5 +1366,86 @@ mod tests {
         assert_eq!(web_script_font_kind("ja"), Some("ja"));
         assert!(needs_chinese_font("zh"));
         assert!(!needs_chinese_font("ja"));
+    }
+}
+
+/// The kit's CJK font loader over SolidCraft's languages (the catalogs decide which are CJK).
+#[cfg(test)]
+mod cjk_loader_tests {
+    use crate::ui_kit::type_face::*;
+
+    #[test]
+    fn web_font_is_fetched_only_for_a_cjk_language() {
+        crate::i18n::install();
+        let mut loader = CjkFontLoader::default();
+        for lang in ["en", "de"] {
+            let mut language = lang.to_owned();
+            assert!(!loader.tick(&mut language, false), "no CJK font fetch for {lang}");
+        }
+        let mut language = "ja".to_owned();
+        assert!(loader.tick(&mut language, false), "Japanese starts the fetch");
+        assert!(!loader.tick(&mut language, false), "the fetch starts once");
+        loader.finished(true, &mut language);
+        assert_eq!(loader.status(), CjkFontStatus::Installed);
+        assert_eq!(language, "ja");
+        assert!(!loader.tick(&mut language, true), "ready face needs no fetch");
+    }
+
+    #[test]
+    fn chinese_ui_fetches_again_after_japanese_is_installed() {
+        crate::i18n::install();
+        let mut loader = CjkFontLoader::default();
+        let mut language = "ja".to_owned();
+        assert!(loader.tick(&mut language, false));
+        loader.finished(true, &mut language);
+        language = "zh".to_owned();
+        assert!(loader.tick(&mut language, false), "Chinese needs its own face (#8894)");
+        loader.finished(true, &mut language);
+        assert!(!loader.tick(&mut language, true));
+    }
+
+    /// An English UI fetches the font once CJK text is painted (#720), and a failed fetch leaves
+    /// the language alone.
+    #[test]
+    fn cjk_text_fetches_the_font_with_an_english_ui() {
+        crate::i18n::install();
+        let mut loader = CjkFontLoader::default();
+        let mut language = "en".to_owned();
+        assert!(!loader.tick(&mut language, false));
+        assert!(loader.watching_text());
+        assert!(loader.text_needs_font(), "CJK text starts the fetch");
+        assert!(!loader.text_needs_font(), "the fetch starts once");
+        assert!(!loader.tick(&mut language, false), "no second fetch from the language");
+        assert!(!loader.watching_text());
+        loader.finished(false, &mut language);
+        assert_eq!(loader.status(), CjkFontStatus::Failed);
+        assert_eq!(language, "en");
+        assert!(!loader.text_needs_font(), "no retry loop after a failure");
+
+        let mut loader = CjkFontLoader::default();
+        assert!(loader.text_needs_font());
+        loader.finished(true, &mut language);
+        assert_eq!(loader.status(), CjkFontStatus::Installed);
+        // Switching to Japanese afterwards needs no second fetch when the face is ready.
+        let mut ja = "ja".to_owned();
+        assert!(!loader.tick(&mut ja, true));
+    }
+
+    #[test]
+    fn failed_font_fetch_falls_back_for_the_session_without_changing_the_saved_language() {
+        crate::i18n::install();
+        let mut loader = CjkFontLoader::default();
+        let mut language = "ja".to_owned();
+        assert!(loader.tick(&mut language, false));
+        loader.finished(false, &mut language);
+        assert_eq!(language, "en", "this session shows English instead of tofu");
+        assert_eq!(loader.persisted_language(&language), "ja", "the saved preference stays Japanese");
+        assert!(!loader.tick(&mut language, false));
+        assert_eq!(loader.persisted_language(&language), "ja");
+
+        // Choosing a language afterwards makes that the saved preference.
+        language = "de".to_owned();
+        assert!(!loader.tick(&mut language, false));
+        assert_eq!(loader.persisted_language(&language), "de");
     }
 }

@@ -580,7 +580,8 @@ pub(crate) fn constrain_lined(app: &mut SolveApp, tool: &mut Tool, placed: &[Vec
         for target in targets {
             let Some(id) = &target.id else { continue };
             let mode = if target.horizontal { "horizontal" } else { "vertical" };
-            let params = json!({"points": [point, id], "mode": mode, "if_redundant": "refuse"});
+            let other = id.strip_prefix("mid:").map_or_else(|| json!(id), |line| json!({"midpoint": line}));
+            let params = json!({"points": [point, other], "mode": mode, "if_redundant": "refuse"});
             let _ = app.session.execute("sketch.constraint.horizontal_vertical", &params);
         }
     }
@@ -715,7 +716,12 @@ pub fn refine_snap(
     let g = |v: f64| (v / step).round() * step;
     // Points to line up with as well (#7828): with `sketch_align_points` off, none, so only the
     // previous point, one axis at a time, as before.
-    let targets = if app.preferences.sketch_align_points { align_targets(proj, sk, plane, &own) } else { Vec::new() };
+    let mut targets = if app.preferences.sketch_align_points { align_targets(proj, sk, plane, &own) } else { Vec::new() };
+    // A hovered line's midpoint guide lines up too, as the "mid:<line>" point the constraint
+    // command makes on that line (#13413).
+    if app.preferences.sketch_align_points {
+        targets.extend(app.viewport.tracking.line_midpoints(sk).into_iter().map(|(line, at)| (Some(format!("mid:{line}")), at)));
+    }
     let mut lined = Vec::new();
     if !mid_only
         && best.is_none()

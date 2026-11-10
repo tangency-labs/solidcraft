@@ -528,6 +528,29 @@ fn patterns_of_a_blind_hole_drill_every_copy() {
     assert!((c - 2.0 * one).abs() < 1e-3 * one, "{c} vs 2 × {one}");
 }
 
+/// #14050: a through hole at a sketch point on a plane below the box drills up into it, and so
+/// does every copy of it. Judged where the source hole already left an empty bore, the copies
+/// drilled away from the box and cut almost nothing (test and analysis by Ehuntabi).
+#[test]
+fn patterns_of_a_sketch_point_hole_below_the_box_drill_every_copy() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 90, "width": 60, "height": 10, "center": [0, 0, 5]}));
+    let v0 = volume(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "VP", "offset": -1}));
+    run(&mut s, "sketch.point", json!({"point": [-20, -10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "VP", "points": ["p1"], "diameter": 6, "depth": 12, "name": "H1"}));
+    let one = v0 - volume(&mut s);
+    assert!((one - PI * 9.0 * 10.0).abs() < 1e-3 * one, "{one}");
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"features": ["H1"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 20, "dir2": [0, 1, 0], "count2": 2, "spacing2": 20}),
+    );
+    let six = v0 - volume(&mut s);
+    assert!((six - 6.0 * one).abs() < 1e-3 * one, "{six} vs 6 × {one}");
+}
+
 /// Feature patterns and mirrors reference features by id (#1134): a rename leaves the
 /// references alone, and they keep pointing at the same feature (#401).
 #[test]
@@ -991,6 +1014,29 @@ fn copies_of_a_to_object_extrude_follow_the_moved_face() {
     run(&mut s, "timeline.edit", json!({"feature":"Extrude1","set":{"extent.distance":"10 mm"}}));
     let thick = volume(&mut s);
     assert!(rel(thick, 2.0 * thin) < 1e-6, "5 mm: {thin} mm³, 10 mm: {thick} mm³ (expected {})", 2.0 * thin);
+}
+
+/// The lid of #11792: a boss (`Extrude1`) joined to a half-ring, and a cut (`Extrude2`) that starts
+/// on the boss's `F5:bottom` face. Mirroring both across the front plane copies the boss and the
+/// cut, so the part gains what the two features added a second time.
+#[test]
+fn mirror_of_a_boss_and_a_cut_from_its_face_makes_both_copies() {
+    let text = include_str!("../../../../examples/regressions/mirror_from_object_lid.json");
+    let open = |through: i64| {
+        let mut value: Value = serde_json::from_str(text).unwrap_or_default();
+        if let Some(features) = value.get_mut("features").and_then(Value::as_array_mut) {
+            features.retain(|f| f.get("id").and_then(Value::as_i64).is_some_and(|id| id <= through));
+        }
+        let doc = solidcraft_doc::Document::from_json(&value.to_string()).unwrap_or_else(|e| panic!("{e}"));
+        Session::opened(doc, None)
+    };
+    let ring = volume(&mut open(4));
+    let mut s = open(6);
+    let lid = volume(&mut s);
+    run(&mut s, "solid.mirror", json!({"features":["Extrude1","Extrude2"],"plane":"XZ"}));
+    let both = volume(&mut s);
+    let want = lid + (lid - ring);
+    assert!(rel(both, want) < 1e-6, "ring {ring} mm³, lid {lid} mm³, mirrored {both} mm³ (expected {want})");
 }
 
 /// A disc with an off-centre hole whose top and bottom edges are chamfered.

@@ -314,7 +314,7 @@ pub fn prepare_curve_sweep(
         let mut normal = match compute_crvs_normal(k, &as_curves) {
             Ok(normal) => normal,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(SolidError::Upstream { code: 1001, .. }) => {
+            Err(e) if e.upstream_status() == Some(1001) => {
                 let first = profiles.first().ok_or_else(|| SolidError::sm_err(OP))?;
                 let values = ignored(passed_on(
                     first.evaluate(first.natural_interval().evaluate(0.0), 1, true, false),

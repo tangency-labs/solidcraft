@@ -1624,7 +1624,7 @@ fn render_preview_background_frame(h: &mut Harness, time: f64) -> [Color32; 4] {
 fn render_preview_tab_surfaces_use_published_gradient_through_fade() {
     for base in ["dark", "light"] {
         let mut h = Harness::new();
-        let file = crate::theme_files::tab_fixture(base);
+        let file = crate::test_support::tab_fixture(base);
         crate::prefs::control(&mut h.app, &json!({"theme_import":crate::theme_files::export_file(&file)})).unwrap();
         let app = &mut h.app;
         h.ctx.run_ui(egui::RawInput { time: Some(1.0), ..Default::default() }, |ui| app.logic(ui.ctx())).textures_delta.clear();
@@ -1666,7 +1666,7 @@ fn render_preview_tab_surfaces_use_published_gradient_through_fade() {
 fn render_preview_tab_surfaces_preserve_scene_backplates_and_viewport_overrides() {
     for base in ["dark", "light"] {
         let mut h = Harness::new();
-        let file = crate::theme_files::tab_fixture(base);
+        let file = crate::test_support::tab_fixture(base);
         crate::prefs::control(
             &mut h.app,
             &json!({
@@ -5930,7 +5930,7 @@ fn navigation_bar_render_canvases_filter_slots_and_keep_product_fit() {
     enter(&mut h.app, true).unwrap();
     h.app.preferences.look_at_anim = false;
     h.settle();
-    assert_eq!(crate::navigation_bar::canvas_caps(&h.app), crate::navigation::NavCaps::RENDER);
+    assert_eq!(crate::navigation_bar_view::canvas_caps(&h.app), crate::navigation::NavCaps::RENDER);
     // The product preview picks (#6426), so the slots that need a pick are on the bar there too.
     for slot in ["orbit", "pan", "zoom", "fit", "look_at", "home", "visual_style", "display"] {
         assert!(crate::scenario::handle_at(&format!("nav:slot:{slot}")).is_some(), "{slot}");
@@ -5951,7 +5951,7 @@ fn navigation_bar_render_canvases_filter_slots_and_keep_product_fit() {
     h.app.render_workspace.view.job = Some(job);
     h.app.render_workspace.view.result = true;
     h.settle();
-    assert_eq!(crate::navigation_bar::canvas_caps(&h.app), crate::navigation::NavCaps { orbit: false, pick: false });
+    assert_eq!(crate::navigation_bar_view::canvas_caps(&h.app), crate::navigation::NavCaps { orbit: false, pick: false });
     for slot in ["orbit", "look_at", "visual_style"] {
         assert!(crate::scenario::handle_at(&format!("nav:slot:{slot}")).is_none(), "{slot}");
     }

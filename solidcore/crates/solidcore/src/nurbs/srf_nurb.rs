@@ -697,7 +697,7 @@ impl Surface {
         if pu > MAX_DEGREE || qu > MAX_DEGREE {
             return Err(invalid(
                 OP,
-                "degree above NL_MAXDEG (upstream scratch array size)",
+                "degree above the largest degree the NURBS routines handle",
             ));
         }
         if pu < TINY_NP && qu < TINY_NP {

@@ -13,8 +13,8 @@ pub mod access;
 pub mod agent_chat;
 pub mod agent_cursor;
 pub mod ai_connect;
-pub mod app_bar;
-pub mod blur;
+pub use solidcraft_ui_kit::app_bar;
+pub use solidcraft_ui_kit::blur;
 pub mod bom_panel;
 pub mod browser;
 pub mod browser_canvas;
@@ -57,6 +57,8 @@ pub mod dialogs_view_dxf;
 pub mod dim_view;
 #[cfg(test)]
 mod dimension_create_ui_tests;
+#[cfg(test)]
+mod dock_dialog_ui_tests;
 pub mod documents;
 pub mod drag_extrude;
 pub mod drag_snap;
@@ -67,12 +69,12 @@ mod feature_edit;
 #[cfg(test)]
 mod font_literals_tests;
 pub mod fonts;
-pub mod frame;
+pub use solidcraft_ui_kit::frame;
 pub mod frame_rate;
 pub mod gizmo;
 pub mod gpu;
 pub mod help;
-pub mod history_bar;
+pub use solidcraft_ui_kit::history_bar;
 mod history_folds;
 pub(crate) mod history_rows;
 #[cfg(test)]
@@ -104,6 +106,10 @@ pub mod issue_report;
 pub mod joint_drag;
 pub(crate) mod joint_handles;
 pub mod keymap;
+#[cfg(test)]
+mod kit_gallery_tests;
+#[cfg(test)]
+mod kit_host_tests;
 mod length_input;
 mod linked_source;
 #[cfg(test)]
@@ -194,10 +200,13 @@ mod file_load_ui_tests;
 #[cfg(test)]
 mod fillet_spline_handle_tests;
 pub mod mouse_gesture;
-mod nav_bar;
+use solidcraft_ui_kit::nav_bar;
 pub(crate) mod navigation;
-pub mod navigation_bar;
+pub use solidcraft_ui_kit::navigation_bar;
+#[cfg(test)]
+mod navigation_bar_tests;
 mod navigation_bar_view;
+pub mod navigation_slots;
 pub use navigation::WebWheelGestures;
 pub mod network_prompt;
 pub mod op_auto;
@@ -212,7 +221,7 @@ pub(crate) mod plugins;
 pub mod point_clouds;
 pub mod prefs;
 pub mod prefs_notice;
-pub mod prefs_window;
+pub use solidcraft_ui_kit::prefs_window;
 #[cfg(test)]
 mod preselect_tests;
 pub mod preview;
@@ -235,7 +244,7 @@ pub mod resume_ui;
 mod revolve_edit_tests;
 #[cfg(test)]
 mod revolve_manipulator_tests;
-pub mod ribbon;
+pub use solidcraft_ui_kit::ribbon;
 #[cfg(test)]
 mod round_pick_tests;
 mod rule_editor;
@@ -297,14 +306,16 @@ pub mod space_mouse_calibration;
 pub mod space_mouse_model;
 pub mod space_mouse_offer;
 pub mod stand_up;
-pub mod start_page;
+pub use solidcraft_ui_kit::start_page;
 mod status_bar;
 #[cfg(test)]
 mod sweep_dialog_tests;
 pub(crate) mod test_boat;
 pub mod theme;
-pub mod theme_files;
-mod theme_options;
+pub use solidcraft_ui_kit::theme_files;
+#[cfg(test)]
+mod theme_files_tests;
+use solidcraft_ui_kit::theme_options;
 #[cfg(test)]
 mod thin_extrude_tests;
 pub mod timeline;
@@ -318,13 +329,13 @@ pub mod tool_modifiers;
 pub mod toolbar;
 pub mod toolbar_custom;
 pub mod tools;
-pub mod ui_kit;
+pub use solidcraft_ui_kit as ui_kit;
 #[cfg(test)]
 mod ui_kit_guard_tests;
 pub mod update;
 mod value_step;
 pub(crate) mod view_angles;
-pub mod view_compass;
+pub use solidcraft_ui_kit::view_compass;
 mod view_confirm;
 pub mod view_gizmo;
 pub mod view_pick;
@@ -333,7 +344,7 @@ mod viewport_details;
 mod viewport_layout;
 mod viewport_status;
 mod viewport_status_fixture;
-pub mod window_chrome;
+pub use solidcraft_ui_kit::window_chrome;
 pub mod workspace;
 
 use std::sync::mpsc::Receiver;
@@ -849,6 +860,14 @@ impl SolveApp {
     pub fn new(mut session: Session, services: Services) -> Self {
         // The app's catalogs, once per process; later calls find them installed.
         i18n::install();
+        // The app's icons, likewise, before the first frame.
+        icon_svg::install();
+        // The tab table theme files are read against, likewise.
+        workspace::install_tabs();
+        // The navigation slots stored bars are read against, likewise.
+        navigation_slots::install();
+        // The built-in theme files, likewise.
+        theme::install_builtin_themes();
         #[cfg(test)]
         let image_host = Some(solidcraft_engine::render::job::CpuHost::cooperative());
         #[cfg(not(test))]
