@@ -71,7 +71,7 @@ pub use measure::{
     point_distance, Distance, EdgePoint, FaceCentroid, GapSample, MassPropertiesEstimate, Normal,
     PointClass,
 };
-pub use offset::{draft, offset_faces, offset_sheet, shell, thicken};
+pub use offset::{draft, offset_faces, offset_sheet, offset_surface, shell, thicken};
 pub use order::Order;
 pub use step_assembly::{placed_bodies, PlacedBody};
 
