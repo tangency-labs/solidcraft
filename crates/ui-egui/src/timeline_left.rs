@@ -1672,8 +1672,9 @@ fn feature_row_body(
         select_only(app, TimelineItem::Feature(id));
     }
     let mut edit = false;
+    let (edit_label, edit_icon) = crate::timeline::edit_label(*kind);
     crate::ui_kit::Menu::context(&response, |ui| {
-        if crate::ui_kit::menu::button(ui, "Edit Feature", "edit").clicked() {
+        if crate::ui_kit::menu::button(ui, edit_label, edit_icon).clicked() {
             edit = true;
             ui.close();
         }
