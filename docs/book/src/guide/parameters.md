@@ -20,10 +20,12 @@ Add and edit user parameters through the existing **Change Parameters** command.
 **5** The value it works out to
 
 On the desktop, **Open in separate window** (beside Import and Export) moves the Parameters
-window out of the app into a window of its own, which you can put on another screen. Dragging
-the window's title past the edge of the app does the same. To put it back, click **Dock in main
-window**, or drag that window's title over the app and hold it there for a moment. The values you
-are typing, the column widths and the sort order stay as they are.
+window out of the app into a window of its own, which you can put on another screen. To put it
+back, click **Dock in main window**, or drag that window's title over the app and hold it there for
+a moment. The values you are typing, the column widths and the sort order stay as they are.
+Parameters always open in the app; the separate window opens again where you last left it. With
+**Drag Parameters out of the app into a separate window** on (Preferences › Design, off by
+default), dragging the window's title past the edge of the app also moves it out.
 
 ## Naming a value as you type it
 

@@ -76,7 +76,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     crate::scenario::publish_target(&format!("dialog:{}", app.tr("prefs.parameter_list_rows")), response.rect);
                 });
             });
-            for (setting, help, target, legacy) in [
+            #[allow(unused_mut, reason = "the desktop adds a row")]
+            let mut settings = vec![
                 (
                     setting::step_values as fn(&mut SolveApp, &mut egui::Ui) -> egui::Response,
                     "ui.step_values_tip",
@@ -89,7 +90,16 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     "value_boxes_in_view",
                     "Show values beside their handles in the view",
                 ),
-            ] {
+            ];
+            // Only a desktop app can open a window of its own (#5097).
+            #[cfg(not(target_arch = "wasm32"))]
+            settings.push((
+                |app, ui| ui_kit::checkbox(ui, app.tr("prefs.parameters_drag_out"), &mut app.preferences.parameters_drag_out),
+                "prefs.parameters_drag_out_tip",
+                "parameters_drag_out",
+                "Drag Parameters out of the app into a separate window",
+            ));
+            for (setting, help, target, legacy) in settings {
                 ui.horizontal_wrapped(|ui| {
                     let response = setting(app, ui).backing_on_hover_text(app.tr(help));
                     crate::scenario::publish_target(&format!("prefs:{target}"), response.rect);

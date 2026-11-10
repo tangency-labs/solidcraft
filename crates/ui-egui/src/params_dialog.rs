@@ -10,8 +10,9 @@
 //! Escape closes the window and discards pending edits and their preview.
 //! Import and export go through `parameters.import` / `parameters.export`.
 //! On the desktop the window can move out of the app into a window of its own, by its Pop out
-//! button or by dragging its title past the app's border, and back by Dock or by dragging that
-//! window's title over the app (#5097, `crate::tear_off`).
+//! button or, with the `parameters_drag_out` preference on (off by default), by dragging its title
+//! past the app's border; it comes back by Dock or by dragging that window's title over the app
+//! (#5097, `crate::tear_off`). It opens in the app each time; only the window's place is kept.
 //!
 //! [`complete`] adds suggestions (parameters, functions, units) under any expression box: the
 //! names come from `parameters.complete`, cached per document revision by [`publish`].
@@ -31,10 +32,10 @@ pub(crate) const IMPORT_TYPES: &[&str] = &["csv", "json"];
 const UNITS: [&str; 10] = ["mm", "cm", "m", "in", "ft", "deg", "rad", "", "um", "text"];
 
 /// Whether the window is in a window of its own, and that window's last place on the screen
-/// (`[x, y, width, height]`); remembered in egui's persisted memory (#5097).
+/// (`[x, y, width, height]`, #5097). Only the place is remembered (egui's persisted memory): the
+/// window opens in the app each time, as before, and moves out only when the user asks.
 #[cfg(not(target_arch = "wasm32"))]
-#[derive(Clone, Default, PartialEq, serde::Deserialize, serde::Serialize)]
-#[serde(default)]
+#[derive(Clone, Default, PartialEq)]
 struct OwnWindow {
     open: bool,
     place: Option<[f32; 4]>,
@@ -230,10 +231,11 @@ pub fn open(app: &mut SolveApp) {
 /// Cancel before drawing the editors: egui has already blurred the focused TextEdit on Esc,
 /// and drawing it would apply its pending value through `lost_focus`.
 pub(crate) fn cancel_on_escape(app: &mut SolveApp, ctx: &egui::Context) -> bool {
-    // In a window of its own, the window takes its own Escape; the main window's is for the rest
-    // of the app.
+    // In a system window of its own, that window takes its own Escape; the main window's is for
+    // the rest of the app. Where egui draws that window inside the app, the app's Escape is its
+    // Escape, handled here as for the card.
     #[cfg(not(target_arch = "wasm32"))]
-    let own_window = app.params.as_ref().is_some_and(|d| d.own.open);
+    let own_window = !ctx.embed_viewports() && app.params.as_ref().is_some_and(|d| d.own.open);
     #[cfg(target_arch = "wasm32")]
     let own_window = false;
     if app.home.open || app.params.is_none() || own_window || !ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
@@ -273,14 +275,15 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     #[cfg(not(target_arch = "wasm32"))]
     let outcome = {
         if !d.own_loaded {
-            d.own = ctx.data_mut(|m| m.get_persisted(own_window_id())).unwrap_or_default();
+            d.own.place = ctx.data_mut(|m| m.get_persisted::<[f32; 4]>(own_window_id()));
             d.own_loaded = true;
         }
-        let before = d.own.clone();
+        let before = d.own.place;
         let outcome = if d.own.open { Some(own_window(app, ctx, &mut d, &all, held_status)) } else { in_app(app, ctx, &mut d, &all, held_status) };
-        if d.own != before {
-            let own = d.own.clone();
-            ctx.data_mut(|m| m.insert_persisted(own_window_id(), own));
+        if let Some(place) = d.own.place
+            && d.own.place != before
+        {
+            ctx.data_mut(|m| m.insert_persisted(own_window_id(), place));
         }
         outcome
     };
@@ -404,14 +407,17 @@ fn in_app(app: &mut SolveApp, ctx: &egui::Context, d: &mut ParamsDialog, all: &[
             }
         }
     }
+    // Off by default: a title dragged past the app's border keeps the card in the app, as before.
     #[cfg(not(target_arch = "wasm32"))]
-    if let Some(card) = shown.as_ref().map(|r| r.response.rect) {
+    if app.preferences.parameters_drag_out
+        && let Some(card) = shown.as_ref().map(|r| r.response.rect)
+    {
         leave_when_dragged_out(ctx, d, card);
     }
     Some(outcome)
 }
 
-/// Where the own window's state is kept: egui's persisted memory, like the sort order.
+/// Where the own window's last place is kept: egui's persisted memory, like the sort order.
 #[cfg(not(target_arch = "wasm32"))]
 fn own_window_id() -> egui::Id {
     egui::Id::unique("sc_params_own_window")
@@ -534,6 +540,10 @@ fn own_window(app: &mut SolveApp, ctx: &egui::Context, d: &mut ParamsDialog, all
     let mut outcome = (false, ui_kit::Action::None);
     ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("sc_params_own_window"), builder, |ui, class| {
         let ctx = ui.ctx().clone();
+        // An expression's suggestions take their keys first, as in the main window: the first
+        // Escape closes the list, not the window. Inside the app the main pass has already done
+        // this, and doing it again finds nothing left to take.
+        crate::expression_complete::begin_frame(&ctx);
         // Before the editors draw, so a focused field does not apply its value as it loses the
         // focus (as `cancel_on_escape` does in the app).
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
@@ -1574,27 +1584,76 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn dragging_the_title_past_any_app_border_moves_the_window_into_its_own() {
-        for edge in ["left", "right", "top", "bottom", "beyond"] {
-            let mut h = escape_dialog();
-            h.call("ui.resize", json!({"width": 1600, "height": 1200}));
-            h.frames(6);
-            let title = crate::scenario::handle_at("params:title").unwrap();
-            // The pointer stays inside the app: the hand-off must happen before the system stops it
-            // at the app's edge.
-            let to = match edge {
-                "left" => egui::pos2(8.0, title.y),
-                "right" => egui::pos2(1592.0, title.y),
-                "top" => egui::pos2(title.x, 4.0),
-                "bottom" => egui::pos2(title.x, 1192.0),
-                _ => egui::pos2(-30.0, title.y),
-            };
-            h.step(&json!({"drag": [[title.x, title.y], [to.x, to.y]]})).unwrap();
-            h.frames(6);
-            let d = h.app.params.as_ref().unwrap();
-            assert!(d.own.open && d.own.place.is_some(), "{edge}");
-            assert!(crate::scenario::rect_of("params:own_window").is_some(), "{edge}");
+    fn dragging_the_title_past_an_app_border_leaves_the_app_only_when_chosen() {
+        for drag_out in [false, true] {
+            for edge in ["left", "right", "top", "bottom", "beyond"] {
+                let mut h = escape_dialog();
+                // Left as it is, the preference is off.
+                if drag_out {
+                    h.app.preferences.parameters_drag_out = true;
+                }
+                h.call("ui.resize", json!({"width": 1600, "height": 1200}));
+                h.frames(6);
+                let title = crate::scenario::handle_at("params:title").unwrap();
+                // The pointer stays inside the app: the hand-off must happen before the system
+                // stops it at the app's edge.
+                let to = match edge {
+                    "left" => egui::pos2(8.0, title.y),
+                    "right" => egui::pos2(1592.0, title.y),
+                    "top" => egui::pos2(title.x, 4.0),
+                    "bottom" => egui::pos2(title.x, 1192.0),
+                    _ => egui::pos2(-30.0, title.y),
+                };
+                h.step(&json!({"drag": [[title.x, title.y], [to.x, to.y]]})).unwrap();
+                h.frames(6);
+                let d = h.app.params.as_ref().unwrap();
+                // Off (the default), the card stays in the app as before; on, it leaves it.
+                assert_eq!(d.own.open, drag_out, "{edge}, drag out {drag_out}");
+                assert_eq!(crate::scenario::rect_of("params:own_window").is_some(), drag_out, "{edge}, drag out {drag_out}");
+                assert!(crate::scenario::rect_of("dialog:header").is_some(), "{edge}: a card is drawn in either window");
+            }
         }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn parameters_open_in_the_app_each_time_and_their_window_keeps_its_place() {
+        let mut h = escape_dialog();
+        h.app.preferences.parameters_drag_out = true;
+        h.call("ui.resize", json!({"width": 1600, "height": 1200}));
+        h.frames(6);
+        let title = crate::scenario::handle_at("params:title").unwrap();
+        h.step(&json!({"drag": [[title.x, title.y], [-30.0, title.y]]})).unwrap();
+        h.frames(6);
+        let place = h.app.params.as_ref().unwrap().own.place.expect("dragging out places the window");
+        h.step(&json!({"key": "Escape"})).unwrap();
+        h.frames(3);
+        assert!(h.app.params.is_none());
+        h.step(&json!({"start": "parameters.change"})).unwrap();
+        h.frames(6);
+        let d = h.app.params.as_ref().unwrap();
+        assert!(!d.own.open, "Parameters open in the app again, as before this change");
+        assert!(crate::scenario::rect_of("params:own_window").is_none());
+        assert_eq!(d.own.place, Some(place), "Open in separate window goes back to where the window was");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn escape_in_the_own_window_closes_the_suggestions_before_the_window() {
+        let mut h = escape_dialog();
+        h.step(&json!({"click": {"handle": "params:window_mode"}})).unwrap();
+        h.frames(6);
+        assert!(h.app.params.as_ref().unwrap().own.open);
+        let before = escape_state(&h);
+        escape_type(&mut h, "param:width", "wi");
+        assert!(!suggestions(&h.ctx, "wi").is_empty());
+        escape_key(&mut h, true);
+        let d = h.app.params.as_ref().expect("the suggestions take the first Escape");
+        assert!(d.own.open);
+        assert_eq!(d.editing.get("width").map(String::as_str), Some("wi"), "the draft stays");
+        assert_eq!(escape_state(&h), before);
+        escape_key(&mut h, false);
+        escape_closed(&mut h, &before, "10 mm");
     }
 
     #[cfg(not(target_arch = "wasm32"))]

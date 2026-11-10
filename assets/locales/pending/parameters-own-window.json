@@ -1,34 +1,50 @@
 {
   "en": {
     "manage.parameters_pop_out": "Open in separate window",
-    "manage.parameters_dock": "Dock in main window"
+    "manage.parameters_dock": "Dock in main window",
+    "prefs.parameters_drag_out": "Drag Parameters out of the app into a separate window",
+    "prefs.parameters_drag_out_tip": "Off by default. When on, dragging the Parameters window's title past the edge of the app opens it in a separate window. Open in separate window works either way."
   },
   "ar": {
     "manage.parameters_pop_out": "فتح في نافذة منفصلة",
-    "manage.parameters_dock": "إرساء في النافذة الرئيسية"
+    "manage.parameters_dock": "إرساء في النافذة الرئيسية",
+    "prefs.parameters_drag_out": "سحب المعلمات خارج التطبيق إلى نافذة منفصلة",
+    "prefs.parameters_drag_out_tip": "معطّل افتراضيًا. عند تفعيله، يؤدي سحب عنوان نافذة المعلمات إلى ما بعد حافة التطبيق إلى فتحها في نافذة منفصلة. يعمل «فتح في نافذة منفصلة» في الحالتين."
   },
   "de": {
     "manage.parameters_pop_out": "In eigenem Fenster öffnen",
-    "manage.parameters_dock": "Im Hauptfenster andocken"
+    "manage.parameters_dock": "Im Hauptfenster andocken",
+    "prefs.parameters_drag_out": "Parameter aus der App in ein eigenes Fenster ziehen",
+    "prefs.parameters_drag_out_tip": "Standardmäßig aus. Wenn aktiviert, öffnet sich das Parameter-Fenster in einem eigenen Fenster, sobald Sie seinen Titel über den Rand der App hinausziehen. „In eigenem Fenster öffnen“ funktioniert in beiden Fällen."
   },
   "he": {
     "manage.parameters_pop_out": "פתיחה בחלון נפרד",
-    "manage.parameters_dock": "עיגון בחלון הראשי"
+    "manage.parameters_dock": "עיגון בחלון הראשי",
+    "prefs.parameters_drag_out": "גרירת הפרמטרים אל מחוץ לאפליקציה לחלון נפרד",
+    "prefs.parameters_drag_out_tip": "כבוי כברירת מחדל. כשהאפשרות פעילה, גרירת הכותרת של חלון הפרמטרים אל מעבר לקצה האפליקציה פותחת אותו בחלון נפרד. „פתיחה בחלון נפרד” פועלת בשני המקרים."
   },
   "ja": {
     "manage.parameters_pop_out": "別ウィンドウで開く",
-    "manage.parameters_dock": "メインウィンドウに戻す"
+    "manage.parameters_dock": "メインウィンドウに戻す",
+    "prefs.parameters_drag_out": "パラメータをアプリの外へドラッグして別ウィンドウにする",
+    "prefs.parameters_drag_out_tip": "既定ではオフです。オンにすると、パラメータウィンドウのタイトルをアプリの端より外へドラッグしたときに別ウィンドウで開きます。「別ウィンドウで開く」はどちらの場合も使えます。"
   },
   "ko": {
     "manage.parameters_pop_out": "별도 창에서 열기",
-    "manage.parameters_dock": "메인 창에 도킹"
+    "manage.parameters_dock": "메인 창에 도킹",
+    "prefs.parameters_drag_out": "매개변수를 앱 밖으로 끌어 별도 창으로 열기",
+    "prefs.parameters_drag_out_tip": "기본값은 꺼짐입니다. 켜면 매개변수 창의 제목을 앱 가장자리 밖으로 끌 때 별도 창에서 열립니다. ‘별도 창에서 열기’는 어느 쪽이든 사용할 수 있습니다."
   },
   "vi": {
     "manage.parameters_pop_out": "Mở trong cửa sổ riêng",
-    "manage.parameters_dock": "Gắn vào cửa sổ chính"
+    "manage.parameters_dock": "Gắn vào cửa sổ chính",
+    "prefs.parameters_drag_out": "Kéo Tham số ra khỏi ứng dụng vào cửa sổ riêng",
+    "prefs.parameters_drag_out_tip": "Tắt theo mặc định. Khi bật, kéo tiêu đề cửa sổ Tham số ra ngoài cạnh ứng dụng sẽ mở nó trong cửa sổ riêng. “Mở trong cửa sổ riêng” vẫn dùng được trong cả hai trường hợp."
   },
   "zh": {
     "manage.parameters_pop_out": "在独立窗口中打开",
-    "manage.parameters_dock": "停靠到主窗口"
+    "manage.parameters_dock": "停靠到主窗口",
+    "prefs.parameters_drag_out": "将参数拖出应用，放入独立窗口",
+    "prefs.parameters_drag_out_tip": "默认关闭。开启后，将参数窗口的标题拖出应用边缘时，它会在独立窗口中打开。“在独立窗口中打开”在两种情况下都可用。"
   }
 }

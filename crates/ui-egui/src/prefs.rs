@@ -1117,6 +1117,11 @@ preference_settings! {
     /// edits wait in the dialog until Apply or OK sets them together, in one rebuild and one undo
     /// step. Its checkbox is in the dialog itself.
     parameters_apply_live: bool = true;
+    /// Dragging the Parameters window's title past the edge of the app moves it into a window of
+    /// its own (#5097, desktop only). Off by default: the card stays in the app, as before. Its
+    /// Open in separate window button works either way. Its checkbox is drawn by the Design page
+    /// on the desktop only (`prefs/design.rs`).
+    parameters_drag_out: bool = false, PAGE_DESIGN;
     /// A design coming back to its tab reads again the linked designs whose files changed since
     /// it last read them. Off: they wait for Update Links, as before.
     update_changed_links: bool = true, PAGE_DESIGN => check_id("settings.update_changed_links");
