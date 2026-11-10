@@ -364,7 +364,7 @@ fn check_form(command: &str, labels: &[&str]) {
         h.output = out.platform_output;
     }
     let nodes = &h.output.accesskit_update.as_ref().unwrap().nodes;
-    for input in &d.inputs {
+    for input in d.inputs.iter().filter(|i| input_shown(&d, i.label)) {
         assert!(scenario::rect_of(&format!("dialog:field:{}", input.label)).is_some(), "{command}: selection field {}", input.label);
         assert!(
             nodes.iter().any(|(_, n)| n.role() == egui::accesskit::Role::Button && n.label() == Some(solidcraft_ui_text::tr_label(input.label))),
@@ -413,7 +413,7 @@ fn check_form(command: &str, labels: &[&str]) {
     assert_eq!(scenario::count_of("dialog:ok:enabled"), Some(1.0), "{command}");
     assert_eq!(apply_commands(&h.app, &d).unwrap(), expected, "{command}: drawing is lossless");
     let mut label_width: Option<f32> = None;
-    for label in d.inputs.iter().map(|i| i.label).chain(labels.iter().copied()) {
+    for label in d.inputs.iter().map(|i| i.label).filter(|l| input_shown(&d, l)).chain(labels.iter().copied()) {
         let row = scenario::rect_of(&format!("dialog:row:{label}")).unwrap_or_else(|| panic!("{command}: missing dense row {label}"));
         let label_rect = scenario::rect_of(&format!("dialog:label:{label}")).unwrap();
         let control = scenario::rect_of(&format!("dialog:control:{label}")).unwrap();
@@ -440,6 +440,17 @@ fn check_form(command: &str, labels: &[&str]) {
     assert_eq!(scenario::count_of("dialog:ok:enabled"), Some(0.0), "{command}");
 }
 
+/// Whether the dialog draws the selection input `label` as it is set: Arrange hides the picks its
+/// choices make no use of.
+fn input_shown(d: &Dialog, label: &str) -> bool {
+    match (&d.kind, label) {
+        (Kind::Arrange { on_face, .. }, "Areas") => *on_face,
+        (Kind::Arrange { on_face, .. }, "Plane") => !*on_face,
+        (Kind::Arrange { lay_flat, .. }, "Bottom Faces") => !*lay_flat,
+        _ => true,
+    }
+}
+
 fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
     use egui::accesskit::Role;
     Some(match label {
@@ -455,8 +466,11 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
         "Inset By" => Role::ComboBox,
         "Radius" if command == "joint.rack_pinion" => Role::Label,
         "Pitch" | "Form" | "Hand" | "Starts" | "Extent" | "Start" | "End" if command == "solid.thread" => Role::ComboBox,
-        "Automatic size" | "Reverse" | "Other side" | "All Lines" | "Mirror" => Role::CheckBox,
         "Offset" if command == "frame.end_cap" => Role::CheckBox,
+        "arrange.rotation" => Role::ComboBox,
+        "Automatic size" | "Reverse" | "Other side" | "All Lines" | "Mirror" | "arrange.avoid" | "arrange.keep" | "arrange.lay_flat" => {
+            Role::CheckBox
+        }
         "Animate" => Role::Button,
         "Ratio" if command.starts_with("joint.") && command != "joint.motion_link" => return None,
         _ => Role::TextInput,
@@ -728,6 +742,46 @@ form_case!(remove, "solid.remove", []);
 form_case!(path_pattern, "solid.pattern.path", ["Type", "Object Type", "Quantity", "Spacing"]);
 form_case!(pipe, "solid.pipe", ["Diameter", "Wall", "Operation"]);
 form_case!(stock, "solid.bounding_solid", ["Margin"]);
+form_case!(
+    arrange,
+    "solid.arrange",
+    [
+        "ui.width",
+        "ui.length",
+        "arrange.edge_margin",
+        "Gap",
+        "arrange.rotation",
+        "arrange.lay_flat",
+        "arrange.copies_of_each",
+        "arrange.sheets",
+        "arrange.keep",
+        "arrange.avoid"
+    ]
+);
+/// Arrange keeps the picks of the sheet it is not using without showing them: they are not
+/// highlighted in the view, and come back when that sheet is chosen again.
+#[test]
+fn arrange_set_aside_picks_are_not_highlighted() {
+    use crate::dialogs::{ARRANGE_FACE, ARRANGE_PARTS, ARRANGE_PLANE};
+    let h = fixture();
+    let mut d = Dialog::for_command(&h.app, "solid.arrange").unwrap();
+    d.inputs[ARRANGE_PARTS].items = vec![Sel::Body { name: "Part".into() }];
+    d.inputs[ARRANGE_FACE].items = vec![Sel::Body { name: "Plate".into() }];
+    d.inputs[ARRANGE_PLANE].items = vec![Sel::Body { name: "Ground".into() }];
+    let names = |d: &Dialog| d.items().into_iter().map(|s| format!("{s:?}")).collect::<Vec<_>>().join(" ");
+    let set = |d: &mut Dialog, face: bool| {
+        if let Kind::Arrange { on_face, .. } = &mut d.kind {
+            *on_face = face;
+        }
+    };
+    set(&mut d, false);
+    let shown = names(&d);
+    assert!(shown.contains("Part") && shown.contains("Ground") && !shown.contains("Plate"), "{shown}");
+    set(&mut d, true);
+    let shown = names(&d);
+    assert!(shown.contains("Part") && shown.contains("Plate") && !shown.contains("Ground"), "{shown}");
+    assert_eq!(d.inputs[ARRANGE_PLANE].items.len(), 1, "the plane pick is kept");
+}
 form_case!(frame_member, "frame.member", ["All Lines", "Anchor", "Angle", "Mirror", "Name"]);
 form_case!(thread, "solid.thread", ["Form", "Size", "Pitch", "Designation", "Hand", "Starts", "Extent", "Start", "End"]);
 form_case!(primitive_box, "solid.box", ["ui.length", "ui.width", "ui.height", "Operation"]);

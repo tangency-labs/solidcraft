@@ -15,6 +15,7 @@
 //! [`crate::section`]. See `docs/drawing-hlr.md` for the contract and its measured limits.
 
 pub(crate) mod curve;
+mod outline;
 mod silhouette;
 pub(crate) mod surface;
 mod trim;
@@ -28,6 +29,8 @@ use solidcore_record::brep::Brep;
 use solidcore_record::{Seg2, Vec2, Vec3};
 use surface::{Analytic, Hit, S3};
 use trim::Trim;
+
+pub use outline::projected_curves;
 
 #[derive(Debug, thiserror::Error)]
 pub enum HlrError {

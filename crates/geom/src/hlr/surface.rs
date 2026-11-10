@@ -1423,3 +1423,43 @@ fn sphere_centre(a: Vec3, b: Vec3, c: Vec3, d: Vec3) -> Option<Vec3> {
     let x = (r1.cross(r2) * rhs[0] + r2.cross(r0) * rhs[1] + r0.cross(r1) * rhs[2]) / det;
     x.is_finite().then_some(x)
 }
+
+impl S3 {
+    /// Whether the surface is swept along `d`, so its normal is square to `d` everywhere and its
+    /// outline seen along `d` is its edges'. Judged exactly from how it is made, never from
+    /// samples, which can miss a bump between them: a spline whose control points lie, row by
+    /// row in one direction, on lines along `d` with one weight per row; a surface of revolution
+    /// round an axis along `d` with a straight profile along it.
+    pub(crate) fn swept_along(&self, d: Vec3) -> bool {
+        let Some(d) = d.normalized() else { return false };
+        match self {
+            S3::Plane { n, .. } => n.dot(d).abs() <= 1e-12,
+            S3::Rev(r) => match &r.profile {
+                C3::Line { a, b } => r.a.cross(d).len() <= 1e-12 && (*b - *a).cross(d).len() <= 1e-12 * (*b - *a).len(),
+                _ => false,
+            },
+            S3::Nurbs(n) => {
+                let [nu, nv] = n.s.count();
+                let pts: Vec<(Vec3, f64)> = (0..nv)
+                    .flat_map(|j| (0..nu).map(move |i| (i, j)))
+                    .filter_map(|(i, j)| n.s.point(i, j).project().map(|p| (p, n.s.point(i, j).w)))
+                    .collect();
+                if pts.len() != nu * nv || pts.is_empty() {
+                    return false;
+                }
+                let (lo, hi) = pts.iter().fold((pts[0].0, pts[0].0), |(lo, hi), (p, _)| (lo.min(*p), hi.max(*p)));
+                let tol = 1e-9 * (hi - lo).len().max(1e-9);
+                let at = |i: usize, j: usize| pts.get(j * nu + i).copied();
+                // Rows along v (one per i), or along u (one per j), each a line along `d`.
+                let rows = |outer: usize, inner: usize, at: &dyn Fn(usize, usize) -> Option<(Vec3, f64)>| {
+                    (0..outer).all(|o| {
+                        let Some((p0, w0)) = at(o, 0) else { return false };
+                        (1..inner)
+                            .all(|k| at(o, k).is_some_and(|(p, w)| (p - p0).cross(d).len() <= tol && (w - w0).abs() <= 1e-12 * w0.abs().max(1.0)))
+                    })
+                };
+                rows(nu, nv, &at) || rows(nv, nu, &|j, i| at(i, j))
+            }
+        }
+    }
+}

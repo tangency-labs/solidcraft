@@ -27,6 +27,7 @@ use solidcraft_theme::Tokens;
 
 #[path = "dialogs_dense.rs"]
 mod dense;
+pub(crate) use dense::arrange_notes;
 #[cfg(test)]
 pub(crate) use dense::primitive_label;
 
@@ -49,6 +50,7 @@ pub const MODIFIERS: &[ToolModifiers] = &[
     ToolModifiers { tool: "solid.replace_face", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.boundary_fill", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.align", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
+    ToolModifiers { tool: "solid.arrange", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "solid.remove", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
     // Pattern parameters are dialog-only - no viewport modifier chords.
     ToolModifiers { tool: "solid.pattern.path", scopes: SELECT_ONLY, bindings: &[], audit: Audit::VerifiedNoOp },
@@ -312,6 +314,27 @@ crate::dialog_descriptor::dialog_descriptors! {
             },
             /// Remove bodies from here on in the timeline.
             Remove,
+            /// Lay bodies out side by side on a rectangle of the XY plane or a flat face
+            /// (`solid.arrange`).
+            Arrange {
+                /// The sheet is the picked flat face, not the rectangle.
+                on_face: bool,
+                width: String,
+                length: String,
+                spacing: String,
+                margin: String,
+                /// An index into [`ARRANGE_TURNS`].
+                turn: usize,
+                /// Each body lies on its steadiest flat side; off, the picked bottom faces only.
+                lay_flat: bool,
+                keep: bool,
+                /// Keep clear of the other bodies on the sheet and of the originals.
+                avoid: bool,
+                /// How many of each body.
+                quantity: String,
+                /// How many sheets to fill.
+                sheets: String,
+            },
             /// Pattern bodies along a path of sketch curves.
             PathPattern {
                 count: String,
@@ -970,6 +993,27 @@ impl Dialog {
                 )
             }
             "solid.remove" => Dialog::new(Kind::Remove, vec![SelInput::new("Bodies", BODIES, true)]),
+            "solid.arrange" => Dialog::new(
+                Kind::Arrange {
+                    on_face: false,
+                    width: length_default(s, "200"),
+                    length: length_default(s, "200"),
+                    spacing: length_default(s, "1"),
+                    margin: length_default(s, "0"),
+                    turn: 1,
+                    lay_flat: true,
+                    keep: false,
+                    avoid: true,
+                    quantity: "1".into(),
+                    sheets: "1".into(),
+                },
+                vec![
+                    SelInput::new("Parts", BODIES, true).tip("arrange.tip_bodies"),
+                    SelInput::new("Bottom Faces", PLANAR_FACES, true).tip("arrange.tip_bottoms"),
+                    SelInput::new("Areas", PROFILES | PLANAR_FACES, true).tip("arrange.tip_sheet"),
+                    SelInput::new("Plane", PLANES, false).tip("arrange.tip_plane"),
+                ],
+            ),
             "solid.pattern.path" => Dialog::new(
                 Kind::PathPattern { count: "4".into(), spacing: length_default(s, "20") },
                 vec![SelInput::new("Objects", BODIES, true), SelInput::new("Path", CURVES, true)],
@@ -1432,6 +1476,7 @@ impl Dialog {
                 | Kind::Primitive { .. }
                 | Kind::Combine { .. }
                 | Kind::BoundaryFill { .. }
+                | Kind::Arrange { .. }
         )
     }
 
@@ -1534,9 +1579,20 @@ impl Dialog {
         matches!(self.kind, Kind::Align { components: true, .. }) && self.active == 0
     }
 
-    /// Everything the inputs hold (for highlighting).
+    /// Everything the inputs hold (for highlighting), but the picks an input set aside keeps.
     pub fn items(&self) -> Vec<Sel> {
-        self.inputs.iter().flat_map(|i| i.items.iter().cloned()).collect()
+        self.inputs.iter().enumerate().filter(|(i, _)| !self.set_aside(*i)).flat_map(|(_, inp)| inp.items.iter().cloned()).collect()
+    }
+
+    /// Whether input `i` is set aside: Arrange keeps the picks of the sheet it is not using
+    /// (Areas or Plane), and its Bottom Faces while Lay Flat is on, without using or showing them.
+    pub(crate) fn set_aside(&self, i: usize) -> bool {
+        match &self.kind {
+            Kind::Arrange { on_face, lay_flat, .. } => {
+                (i == ARRANGE_FACE && !*on_face) || (i == ARRANGE_PLANE && *on_face) || (i == ARRANGE_BOTTOMS && *lay_flat)
+            }
+            _ => false,
+        }
     }
 
     /// Faces Shell will open, including the tangent chain. Keep the input itself as the
@@ -2645,6 +2701,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Align { .. } => "ALIGN",
         Kind::BoundaryFill { .. } => "BOUNDARY FILL",
         Kind::Remove => "REMOVE",
+        Kind::Arrange { .. } => "ARRANGE",
         Kind::ChatContext => "PICK CONTEXT",
         Kind::PathPattern { .. } => "PATTERN ON PATH",
         Kind::Split => "SPLIT BODY",
@@ -4359,6 +4416,7 @@ fn rememberable(kind: &Kind) -> bool {
             | Kind::BoundaryFill { .. }
             | Kind::Align { .. }
             | Kind::PathPattern { .. }
+            | Kind::Arrange { .. }
             | Kind::Section { .. }
             | Kind::Move { .. }
             | Kind::Hole { .. }
@@ -4791,6 +4849,15 @@ pub(crate) const CHAMFER_TYPES: [&str; 3] = ["Equal Distance", "Two Distances", 
 fn fillet_kind(size: &str, chamfer: bool) -> Kind {
     Kind::Fillet { radius: size.into(), chamfer, chain: true, ctype: 0, distance2: size.into(), angle: "45 deg".into(), flip: false, setback: None }
 }
+
+/// The Arrange dialog's turn steps: the command's `angle_step` and the dialog's label.
+pub(crate) const ARRANGE_TURNS: [(&str, &str); 4] =
+    [("0 deg", "arrange.turn_off"), ("90 deg", "arrange.turn_90"), ("45 deg", "arrange.turn_45"), ("15 deg", "arrange.turn_15")];
+/// The Arrange dialog's selection inputs.
+pub(crate) const ARRANGE_PARTS: usize = 0;
+pub(crate) const ARRANGE_BOTTOMS: usize = 1;
+pub(crate) const ARRANGE_FACE: usize = 2;
+pub(crate) const ARRANGE_PLANE: usize = 3;
 
 /// A length field's first text: `number` in the design's units, with the unit written out so the
 /// field shows it as the other dialogs show theirs ("20 mm", "20 in"). OK makes the size the bare
@@ -5944,6 +6011,43 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Remove => {
             need(0, "bodies")?;
             ("solid.remove", json!({"bodies": sels(d, 0).body_names()}))
+        }
+        Kind::Arrange { on_face, width, length, spacing, margin, turn, lay_flat, keep, avoid, quantity, sheets } => {
+            need(ARRANGE_PARTS, "parts")?;
+            let angle_step = ARRANGE_TURNS.get(*turn).map_or("90 deg", |(a, _)| *a);
+            let mut p = json!({"bodies": sels(d, ARRANGE_PARTS).body_names(), "spacing": spacing, "margin": margin, "angle_step": angle_step,
+                "lay_flat": lay_flat, "copy": keep, "avoid": avoid, "quantity": quantity});
+            // The faces and sketch areas, when they are the sheet, in the order picked: a hidden
+            // input's picks stay for when it is shown again, and are not used meanwhile.
+            if *on_face {
+                need(ARRANGE_FACE, "the sheet's faces or areas")?;
+                let areas: Vec<Value> = sels(d, ARRANGE_FACE)
+                    .iter()
+                    .filter_map(|sel| match sel {
+                        Sel::Face { point, .. } => Some(json!({"face": pt(*point)})),
+                        Sel::Profile { sketch, index } => Some(json!({"sketch": sketch, "profile": index})),
+                        _ => None,
+                    })
+                    .collect();
+                if areas.is_empty() {
+                    return Err("pick flat faces or sketch areas for the sheet".into());
+                }
+                p["sheet"] = json!(areas);
+            } else {
+                p["width"] = json!(width);
+                p["length"] = json!(length);
+                p["sheets"] = json!(sheets);
+                // On a picked plane, from its origin; none is the XY plane.
+                if let Some(plane) = plane_value(s, sels(d, ARRANGE_PLANE).first()) {
+                    p["plane"] = plane;
+                }
+            }
+            let bottoms = face_points(ARRANGE_BOTTOMS);
+            // Picked bottom faces count only while Lay Flat is off, where they are shown.
+            if !*lay_flat && !bottoms.is_empty() {
+                p["bottoms"] = json!(bottoms);
+            }
+            ("solid.arrange", p)
         }
         Kind::PathPattern { count, spacing } => {
             need(0, "objects")?;
