@@ -1153,28 +1153,26 @@ impl WalkExclusion {
 }
 
 /// Not upstream: whether the walk's drop of `point` on `edge`'s curve (`DropPoint`,
-/// [`SolverOperation::Intersect`] at the edge's tolerance) cannot succeed: `point` lies
-/// farther than the tolerance (and an evaluation's rounding) from the box of every curve
-/// point the drop can measure its distance to, and from [`Vec3::UNDEF`] (where a failed
-/// evaluation leaves it).
-///
-/// The boxes are built here from the curve's own data, each a certified enclosure (not
-/// `CalculateBoundingBox`, whose Bézier refinement of a single span assumes a clamped
-/// curve):
+/// [`SolverOperation::Intersect`] at the edge's tolerance) cannot succeed, decided from
+/// the curve's own data (not `CalculateBoundingBox`, whose Bézier refinement of a single
+/// span assumes a clamped curve):
 /// - a line: no box. Its drop (`DropPointFast`) measures the distance to its infinite
 ///   line, and keeps it when the foot's parameter, converted from STEP to NURB, lies in
 ///   the interval: a conversion that need not invert the evaluation's (found in review: a
 ///   line whose NURB domain is within `SM_EFF_ZERO` maps NURB parameters to themselves
 ///   but STEP parameters back with its scale, so a point far past the segment dropped at
-///   distance 0). So the point must lie farther than the tolerance from the whole
-///   infinite line, the perpendicular distance with the direction normalised: the drop's
-///   distance is that one, or the distance to the line's point when its vector is
-///   shorter than `SM_EFF_ZERO` (found in review: a vector of length `1e-13`, scale
-///   `1.3e14`), or to a clamped foot's point on the line, never less;
+///   distance 0). No geometric bound is taken (reviews found a direction shorter than
+///   `SM_EFF_ZERO`, which `line_point_distance` takes for a point, and directions whose
+///   norm underflows or overflows): the drop's distance is one of three values, its
+///   `line_point_distance` or the distance to its point at either end of the interval,
+///   and each is computed here with the same functions on the same inputs, bit for bit,
+///   so the drop fails exactly when all three are at least the tolerance;
 /// - an ellipse: it evaluates and solves through one NURB, which clamps a parameter into
 ///   its knot range; with positive weights and every parameter the drop can evaluate in
 ///   `[U[p], U[n]]` ([`in_hull_domain`]), its points lie in the box of all its control
-///   points (the convex hull property).
+///   points (the convex hull property), so `point` must lie farther than the tolerance
+///   (and an evaluation's rounding) from that box, and from [`Vec3::UNDEF`] (where a
+///   failed evaluation leaves it).
 ///
 /// Other curves give `false`.
 fn drop_cannot_reach(edge: &crate::topology::Edge, point: Point3) -> bool {
@@ -1191,28 +1189,20 @@ fn drop_cannot_reach(edge: &crate::topology::Edge, point: Point3) -> bool {
     };
     match curve.kind() {
         CurveKind::Line(line) => {
-            // the line's drop measures the distance to its infinite line, or to its point
-            // when the vector is shorter than SM_EFF_ZERO (`line_point_distance`'s
-            // degenerate branch), or, past the interval, to a point it evaluates on that
-            // line: never less than the perpendicular distance to the line, computed
-            // here with the direction normalised
+            // the line's drop is `Line::drop_point_fast` alone (an intersect never
+            // errors there, so the global solve returns its answer), and its distance is
+            // one of three values, computed here as it computes them: its
+            // `line_point_distance` from the line's point and vector when the foot's
+            // parameter is not clamped, else the distance to its point at the interval's
+            // start or end (`clamp_value` gives an end exactly). The drop succeeds only
+            // with that distance below the edge's tolerance.
             let c = line.canonical_unit();
-            let length = c.vector.length();
-            let along = c.vector / length;
-            if !(length > 0.0 && along.x.is_finite() && along.y.is_finite() && along.z.is_finite())
-            {
-                return false;
-            }
-            let offset = point - c.point;
-            let to_line = (offset - along * offset.dot(along)).length();
-            let size = [c.point, point].iter().fold(0.0_f64, |m, p| {
-                m.max(p.x.abs()).max(p.y.abs()).max(p.z.abs())
-            });
-            let reach = edge.tolerance + 1e-6 * (1.0 + size);
-            return to_line.is_finite()
-                && reach.is_finite()
-                && to_line > reach
-                && point.distance(Vec3::UNDEF) > reach;
+            let (unclamped, _) = line_point_distance(c.point, c.vector, point);
+            let ends = [edge.interval.min(), edge.interval.max()];
+            return [unclamped]
+                .into_iter()
+                .chain(ends.map(|t| line.evaluate_point(t).distance(point)))
+                .all(|d| d >= edge.tolerance);
         }
         CurveKind::Ellipse(e) => {
             let base = e.base();
@@ -2133,6 +2123,69 @@ mod tests {
         hold_in_outer_square(&mut b);
         let (on, off) = classified_on_and_off(&b, uv);
         assert_eq!(on, off);
+    }
+
+    /// Line edges whose directions underflow or overflow a norm (`(d, 0, 0)` with
+    /// `d = 1e-13, 1e-160, 1e-161, 1e160`, scale `13 / d`, analytic domain `[1, 2]`,
+    /// either way round, written to a file and read back): wherever the exclusion says
+    /// the drop of `(8, -5)` cannot succeed, it does not, and the face classifies the
+    /// point the same with the shortcut on and off.
+    #[test]
+    fn a_line_edges_exclusion_holds_for_extreme_directions() {
+        use crate::topology::database_io::{DatabaseReader, DatabaseWriter, FileType, InputStream};
+        let k = Kernel::default();
+        let uv = [8.0, -5.0];
+        let point = Vec3::new(uv[0], uv[1], 0.0);
+        for d in [1e-13_f64, 1e-160, 1e-161, 1e160] {
+            for inside_out in [false, true] {
+                let mut b = square(plane(), true, &[]);
+                let nurb = NurbCurve::new(
+                    vec![
+                        CPoint::new(-5.0, -5.0, 0.0, NOW),
+                        CPoint::new(5.0, -5.0, 0.0, NOW),
+                    ],
+                    1,
+                    vec![0.0, 0.0, 1.0, 1.0],
+                )
+                .unwrap();
+                let line = Line::from_parts(
+                    BSplineCurve::from_nurb(nurb, 3, false),
+                    Vec3::new(-5.0, -5.0, 0.0),
+                    Vec3::new(d, 0.0, 0.0),
+                    Extent1d::from_min_max(1.0, 2.0),
+                    13.0 / d,
+                    inside_out,
+                );
+                let mut writer = DatabaseWriter::open_for_write(FileType::Binary);
+                line.write_to_db(&mut writer, 30).unwrap();
+                let mut reader = DatabaseReader::with_stream(
+                    FileType::Binary,
+                    InputStream::new(writer.into_bytes()),
+                );
+                let line = Line::read_from_db(&mut reader, 3, 30).unwrap();
+                let e = b.edge_mut(EdgeId::from_index(0)).unwrap();
+                e.curve = Some(Curve::from(line));
+                let dropped = e
+                    .curve
+                    .as_ref()
+                    .unwrap()
+                    .drop_point(
+                        &k,
+                        &e.interval,
+                        point,
+                        None,
+                        e.tolerance,
+                        None,
+                        SolverOperation::Intersect,
+                    )
+                    .unwrap();
+                let case = format!("d {d:e}, inside out {inside_out}");
+                assert!(!(drop_cannot_reach(e, point) && dropped.success), "{case}");
+                hold_in_outer_square(&mut b);
+                let (on, off) = classified_on_and_off(&b, uv);
+                assert_eq!(on, off, "{case}");
+            }
+        }
     }
 
     /// A point on a side of the surface's natural domain is always walked (the walk then
