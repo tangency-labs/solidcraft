@@ -11,7 +11,7 @@ use solidcore_record::Vec3;
 use solidcraft_doc::{Feature, FeatureKind, Mat, Occurrence};
 
 use super::CommandSpec;
-use crate::params::{bad, bool_, str_, string_list, vec3};
+use crate::params::{bad, bool_, name_or_id_values, str_, string_list, vec3};
 use crate::schema::component::{
     ActivateParams, ActivateResult, CapturePositionParams, CapturePositionResult, ChildEntry, CompactPlacement, ComponentNode, CopyParams,
     CopyResult, CreateParams, CreateResult, DeleteParams, DeleteResult, DragParams, DragResult, EditInPlaceParams, EditInPlaceResult,
@@ -195,7 +195,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("move")
         .contract(&MOVE_SKETCHES_CONTRACT)
         .output(output_schema_for::<MoveSketchesResult>)
-        .params("sketches: [ids or names], component; the sketches keep their own coordinates (component.move_features keeps them where they are in the world), except that a sketch on an exactly attached face stays where it is on the face"),
+        .params("sketches: [ids or names] (a number is an id; a string is an exact name, then an id), component; the sketches keep their own coordinates (component.move_features keeps them where they are in the world), except that a sketch on an exactly attached face stays where it is on the face"),
     CommandSpec::new(
         "component.move_sketches.to_parts",
         "Move Sketches to Their Parts",
@@ -653,12 +653,14 @@ pub(crate) fn transfer_constructor_result(s: &mut Session, p: &Value) -> Result<
 fn move_sketches(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.move_sketches";
     let to = component(s, p, "component", cmd)?;
-    let keys = string_list(cmd, p, "sketches")?;
+    // Named or numbered: an exact name wins over an id it looks like, as in the timeline (#9748).
+    let keys = name_or_id_values(cmd, p, "sketches")?;
     let mut ids = Vec::new();
-    for k in &keys {
-        match s.doc.find_feature(k) {
+    for k in keys {
+        let id = crate::cmd::edit::feature_id(s, Some(k), cmd)?;
+        match s.doc.feature(id) {
             Some(f) if matches!(f.kind, FeatureKind::Sketch { .. }) => ids.push(f.id),
-            _ => return Err(bad(cmd, format!("no sketch `{k}`"))),
+            _ => return Err(bad(cmd, format!("no sketch `{}`", k.as_str().map_or_else(|| k.to_string(), str::to_owned)))),
         }
     }
     if ids.is_empty() {

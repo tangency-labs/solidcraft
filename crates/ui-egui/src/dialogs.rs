@@ -5670,6 +5670,10 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             for (i, key) in [(1, "from"), (2, "to")] {
                 let snap = d.extra.get(&format!("{key}_snap")).and_then(Value::as_str).unwrap_or("picked");
                 match (sels(d, i).first(), snap) {
+                    // Onto Plane sets the bodies on a plane: a planar face or a plane, nothing else.
+                    (Some(sel), "plane") if key == "to" && !*components && !matches!(sel, Sel::Face { .. } | Sel::Plane { .. }) => {
+                        return Err("Onto Plane takes a planar face or a plane".into());
+                    }
                     // A sketch point or circle is a frame whatever the snap: the bodies follow it
                     // when it moves (#6257).
                     (Some(sel @ (Sel::SketchPoint { .. } | Sel::SketchCurve { .. })), _) if !*components => {
@@ -5684,6 +5688,11 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     (Some(Sel::Face { point, .. }), "center") => p[key] = json!({"snap": "face_center", "at": pt(*point)}),
                     (Some(Sel::Face { point, .. } | Sel::Edge { point, .. }), "circle") => {
                         p[key] = json!({"snap": "circle_center", "at": pt(*point)})
+                    }
+                    // Onto Plane: the To face as the plane it lies in, so the bodies come onto it
+                    // along its normal only.
+                    (Some(sel @ Sel::Face { .. }), "plane") if key == "to" && !*components => {
+                        p["to_plane"] = plane_value(s, Some(sel)).ok_or("Onto Plane takes a planar face or a plane")?
                     }
                     (Some(Sel::Face { point, .. }), _) => p[format!("{key}_face")] = pt(*point),
                     (Some(Sel::Edge { point, .. }), _) => p[key] = json!({"snap": "edge_mid", "at": pt(*point)}),
@@ -6303,18 +6312,26 @@ pub(crate) fn takes_as_axis(s: &Session, sel: &Sel) -> bool {
 /// active sketch when it does not). Eval resolves a bare curve id on the profile sketch, and
 /// curve ids repeat from sketch to sketch (#3726), so that line can be a different edge — often
 /// the opposite side of a rectangle. Keep the id when the profile sketch's line is the
-/// highlighted one, so a same-sketch axis stays a sketch line. Otherwise pass the highlighted
-/// line as `{origin, dir}` in world coordinates (the command stores it in the component frame).
+/// highlighted one, so a same-sketch axis stays a sketch line. When the pick names another sketch,
+/// name its owner as `{sketch, curve}`: the revolve resolves the line in that sketch and follows
+/// it when that sketch is edited (#6548). Otherwise pass the highlighted line as `{origin, dir}`
+/// in world coordinates (the command stores it in the component frame).
 /// A face profile has no sketch yet — its generated sketch numbers edges from `l1` again — so
 /// that pick is always the geometric line.
 pub(crate) fn sketch_curve_axis(app: &SolveApp, sel: &Sel, profile_sketch: Option<u64>) -> Result<Value, String> {
-    let Sel::SketchCurve { id, .. } = sel else { return axis_param(app, sel) };
+    let Sel::SketchCurve { id, sketch } = sel else { return axis_param(app, sel) };
     let (origin, dir) = axis_of(app, sel).ok_or(AXIS_PICK)?;
     if !origin.is_finite() || !dir.is_finite() {
         return Err(AXIS_PICK.into());
     }
     let same = profile_sketch.and_then(|sketch| profile_axis_line(app, sketch, id)).is_some_and(|line| same_axis(line, (origin, dir)));
-    if same { Ok(json!(id)) } else { Ok(json!({"origin": pt(origin), "dir": pt(dir)})) }
+    if same {
+        Ok(json!(id))
+    } else if let Some(owner) = sketch.filter(|owner| Some(*owner) != profile_sketch) {
+        Ok(json!({"sketch": owner, "curve": id}))
+    } else {
+        Ok(json!({"origin": pt(origin), "dir": pt(dir)}))
+    }
 }
 
 /// The world line of curve `id` on `sketch`, when that curve is a line.
@@ -6796,7 +6813,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             let ax = match axis {
                 AxisRef::World { axis } => Some(Sel::Axis { name: axis.to_ascii_uppercase() }),
                 AxisRef::SketchAxis { axis } => Some(Sel::Axis { name: axis.to_ascii_lowercase() }),
-                AxisRef::SketchLine { curve } => Some(crate::selection::curve_pick(curve, sketch.0, s.active_sketch)),
+                AxisRef::SketchLine { curve, sketch: Some(owner) } => Some(crate::selection::curve_pick(curve, *owner, s.active_sketch)),
+                AxisRef::SketchLine { curve, sketch: None } => Some(crate::selection::curve_pick(curve, sketch.0, s.active_sketch)),
                 AxisRef::Model { geo } => model_axis_sel(s, geo),
                 AxisRef::Construction { name } => Some(Sel::Axis { name: name.to_string() }),
                 AxisRef::Line { .. } => None,

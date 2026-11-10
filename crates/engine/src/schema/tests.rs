@@ -1163,6 +1163,13 @@ fn revolve_axes_match_the_axis_reader() {
         (json!({"dir": [0, 1]}), false),
         (json!({"dir": "y"}), false),
         (json!({"dir": [0, 0, 1], "type": "sketch_line", "extra": 1}), true),
+        // A line of another sketch, named by its owner (#6548), also as saved with its type.
+        (json!({"sketch": 12, "curve": "l1"}), true),
+        (json!({"sketch": "Axis", "curve": "l1"}), true),
+        (json!({"curve": "l1"}), true),
+        (json!({"type": "sketch_line", "sketch": 12, "curve": "l1"}), true),
+        (json!({"sketch": 12}), false),
+        (json!({"sketch": 12, "curve": 5}), false),
         (json!({"type": "world", "axis": "X"}), true),
         (json!({"type": "world", "axis": "X", "origin": 5, "dir": "q"}), true),
         (json!({"type": "world", "axis": "x"}), false),

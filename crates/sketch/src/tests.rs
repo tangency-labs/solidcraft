@@ -220,6 +220,39 @@ fn zero_distance_edits_preserve_dimension_rank() {
     }
 }
 
+/// A horizontal or vertical distance edited from 0 to a positive value moves the point off the
+/// axis again, on the side the dimension measures towards (`q` past the origin).
+#[test]
+fn component_distance_edited_from_zero_opens_again() {
+    for seed in [false, true] {
+        seeded(seed, || {
+            for vertical in [false, true] {
+                let mut sk = Sketch::new();
+                let q = sk.add_point(v(3.0, 4.0), None).unwrap();
+                let (edited, other) = if vertical {
+                    (ConstraintKind::DistanceY { p: 0, q, value: 4.0 }, ConstraintKind::DistanceX { p: 0, q, value: 3.0 })
+                } else {
+                    (ConstraintKind::DistanceX { p: 0, q, value: 3.0 }, ConstraintKind::DistanceY { p: 0, q, value: 4.0 })
+                };
+                let id = sk.add_constraint(edited, None).unwrap();
+                sk.add_constraint(other, None).unwrap();
+                let last = sk.constraints.len() - 2;
+                for value in [0.0, 0.5, 0.0, 3.0] {
+                    let old = sk.driving_values();
+                    sk.constraints[last].kind.set_value(value);
+                    let report = solve_after_value_edit(&mut sk, &old);
+                    assert!(report.ok(), "{vertical}, {value}: {report:?}");
+                    assert_eq!(report.dof, 0, "{vertical}, {value}: {report:?}");
+                    assert!(!report.redundant.contains(&id), "{report:?}");
+                    assert!(constraint_residual(&sk, last).unwrap() < 1e-6);
+                    let at = sk.point(q).unwrap();
+                    assert!(((if vertical { at.y } else { at.x }) - value).abs() < 1e-6, "{vertical}, {value}: {at:?}");
+                }
+            }
+        });
+    }
+}
+
 /// A length dimension of zero still constrains the sketch: the two ends of the line meet, and
 /// the dimension holds them together instead of leaving a degree of freedom behind (#5505).
 #[test]

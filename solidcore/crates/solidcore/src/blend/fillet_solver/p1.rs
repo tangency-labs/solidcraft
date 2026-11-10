@@ -725,6 +725,11 @@ pub struct FilletSolver {
     /// delete them, so a saved [`FilletSolverOffsetsData`] still points at them (with
     /// any change made while they were the solver's).
     pub detached: Vec<OffsetSurfaceSlot>,
+    /// Not upstream (solidcore-native, [`crate::blend::fillet_tangent_rollover`]): the face beyond a smooth far edge each
+    /// rail rolls on, the whole length, where the session gave the solver that face's offset
+    /// surface before the trace ([`crate::blend::fillet_tangent_rollover`]); the rails are made
+    /// on it.
+    pub rolled_faces: [Option<FaceId>; 2],
 }
 
 impl FilletSolver {
@@ -770,6 +775,7 @@ impl FilletSolver {
             status: FilStatus::Unprocessed,
             g1_knots: Vec::new(),
             detached: Vec::new(),
+            rolled_faces: [None, None],
             chamfer: None,
             law_corner_pieces: Vec::new(),
         }

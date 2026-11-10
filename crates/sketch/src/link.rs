@@ -397,6 +397,13 @@ fn extent(pts: &[Vec2]) -> (Vec2, Vec2) {
     (a, farthest(a))
 }
 
+/// Whether the link's geometry is a closed boundary, whose identity the loop analysis reads.
+/// A face taken with `Intersect` is the face's section with the sketch plane: an open chain of
+/// segments, which no closed boundary describes (#13471).
+fn closed_boundary(link: &Link) -> bool {
+    matches!(link.source, LinkSource::Face { .. }) && link.kind != LinkKind::Intersect
+}
+
 /// Straight pieces along one line: a face seen edge-on, whose silhouette encloses nothing.
 fn flat(curves: &[LCurve], pts: &[Vec2]) -> bool {
     if !curves.iter().all(|c| matches!(c, LCurve::Line(..))) {
@@ -788,7 +795,10 @@ impl Sketch {
             return Err(SketchError::Unknown(id.into()));
         }
         let lay = layout(geom)?;
-        if self.link(id).is_some_and(|l| matches!(l.source, LinkSource::Face { .. }))
+        // A projected face boundary is a closed loop: crossings and touching points make its
+        // identity ambiguous, and the link keeps the geometry it had. A face taken with
+        // `Intersect` is a section: an open chain, which no closed boundary describes.
+        if self.link(id).is_some_and(closed_boundary)
             && lay.lone.is_empty()
             && lay.curves.len() <= 512
             && lay.pts.len() <= 512
@@ -948,7 +958,7 @@ impl Sketch {
                 let b: Aabb2 = ps.iter().copied().collect();
                 ps.iter().map(|p| b.relative(*p)).collect()
             };
-            let loop_roles_required = self.link(id).is_some_and(|l| matches!(l.source, LinkSource::Face { .. }))
+            let loop_roles_required = self.link(id).is_some_and(closed_boundary)
                 && cur.iter().chain(&lay.curves).all(|c| matches!(c, LCurve::Line(..) | LCurve::Arc(..) | LCurve::Circle(..)))
                 && lay.lone.is_empty()
                 && !flat(cur, &old)
@@ -1113,7 +1123,7 @@ impl Sketch {
         // Equal topology alone does not identify a face boundary: an outer rim and a
         // hole can have identical point graphs. Never move saved curve ids between them
         // when the geometric match is ambiguous; the document reports a lost link.
-        if same && !same_order_agrees && self.link(id).is_some_and(|l| matches!(l.source, LinkSource::Face { .. })) {
+        if same && !same_order_agrees && self.link(id).is_some_and(closed_boundary) {
             self.set_link_lost(id, true);
             return Err(SketchError::Invalid("projected face boundary identity is ambiguous; last geometry retained".into()));
         }
