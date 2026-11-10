@@ -737,7 +737,7 @@ pub fn list_row(ui: &mut Ui, key: &str, text: &str) -> Response {
 /// row's buttons sit in the same place, whatever the label says and however many rows there are.
 /// Returns the button's response and the row's new Flip state when its Flip was clicked.
 /// Tokens: `control_height, space_4/8/24, font_label, form_ink, form_dim; icon-button tokens`.
-pub(crate) fn corner_row(ui: &mut Ui, key: &str, name: &str, text: &str, on: bool, flip: Option<bool>) -> (Response, Option<bool>) {
+pub fn corner_row(ui: &mut Ui, key: &str, name: &str, text: &str, on: bool, flip: Option<bool>) -> (Response, Option<bool>) {
     let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), row_height()), egui::Sense::hover());
     // Measured from the right edge the user can see: a row that runs past the clip (a scroll
@@ -763,8 +763,8 @@ pub(crate) fn corner_row(ui: &mut Ui, key: &str, name: &str, text: &str, on: boo
     // The X takes the cut away and the V brings it back, so the button says what a click does.
     let (icon, tip) = if on { ("close", "Remove") } else { ("check", "Show") };
     let response = ui.push_id((key, "toggle"), |ui| super::icon_button_at(ui, toggle, icon, tip)).inner;
-    crate::scenario::publish_rect(&format!("dialog:list:{key}"), rect);
-    crate::scenario::publish_handle(&format!("dialog:list:{key}:remove"), toggle.center());
+    solidcraft_ui_registry::publish_rect(&format!("dialog:list:{key}"), rect);
+    solidcraft_ui_registry::publish_handle(&format!("dialog:list:{key}:remove"), toggle.center());
     (response, flipped)
 }
 
