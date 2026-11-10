@@ -51,8 +51,8 @@ use solidcraft_doc::{Document, Model, ModelState};
 
 pub use cmd::settings::{MAX_PROFILE_NAME, profile_name};
 pub use cmd::{
-    Addition, CommandInfo, CommandSpec, OpenSteps, addition, auto_operation, command_specs, dimension_roles, extrude_reach, find_command,
-    resolve_design_links, shown_scope, standard_view,
+    Addition, CommandInfo, CommandSpec, LinkProblem, LinkState, OpenSteps, addition, auto_operation, command_specs, dimension_roles, extrude_reach,
+    find_command, resolve_design_links, shown_scope, standard_view,
 };
 pub use solidcraft_doc as doc;
 pub use solidcraft_doc::Visibility;
@@ -359,7 +359,10 @@ impl Ahead {
         let stop = self.0.stop.clone();
         stop.within(|| {
             let (after, _) = self.0.preview_in_place(commands, Some(step))?;
-            after.world_state()?.warm_display();
+            // Stopped by its watcher: nothing it ends with will be shown.
+            if !solidcraft_doc::progress::cancelled() {
+                after.world_state()?.warm_display();
+            }
             Ok(Evaluated(after.model))
         })
     }

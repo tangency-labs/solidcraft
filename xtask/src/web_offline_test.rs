@@ -463,7 +463,12 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
     // worker has taken over with (nor from the network, which serves v4).
     let shared = cdp.eval("fetch('shared.js?later', { cache: 'no-store' }).then((r) => r.text())")?;
     if !shared.as_str().is_some_and(|text| text.contains("\"v3\"")) {
-        return Err(format!("the open v3 page was given another build's file after the update: {shared}"));
+        let records = cdp
+            .eval(
+                "caches.keys().then(async (ks) => { const out = {}; for (const k of ks) if (k.startsWith('solidcraft-app-pages ')) { const c = await caches.open(k); for (const r of await c.keys()) out[r.url] = await (await c.match(r)).text(); } return out; })",
+            )
+            .unwrap_or_default();
+        return Err(format!("the open v3 page was given another build's file after the update: {shared}; page records: {records}"));
     }
     // A page whose record is lost never gets the worker's build instead: its request fails visibly.
     let lost = cdp.eval(

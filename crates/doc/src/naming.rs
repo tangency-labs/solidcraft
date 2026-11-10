@@ -1606,6 +1606,7 @@ mod tests {
             sketch,
             report,
             profiles,
+            profiles_3d: Vec::new(),
             ends: Default::default(),
         };
         let full_scan = |q: Vec2| {

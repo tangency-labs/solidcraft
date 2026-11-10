@@ -1,4 +1,4 @@
-//! Convert a `SolidCore` B-rep into the neutral [`step_import::Model`].
+//! Convert a `SolidCore` B-rep into the neutral [`solidcore_record::step::Model`].
 //!
 //! This is the export counterpart of the STEP reader's build. It maps exact `SolidCore`
 //! topology and analytic/B-spline geometry to the neutral model that
@@ -23,7 +23,7 @@ use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::topology::brep::p2::is_sheet;
 use solidcore::topology::edgeuse::p1 as eu;
 use solidcore::topology::{Brep, VertexId};
-use step_import::model::{
+use solidcore_record::step::model::{
     Body, BodyKind, Bound, Curve as ModelCurve, Edge, Face, Frame, Loop, Model, OrientedEdge,
     Shell, Surface as ModelSurface, Vertex,
 };
@@ -87,13 +87,15 @@ fn frame(
 fn bspline_to_model(curve: &BSplineCurve) -> Result<ModelCurve, ExportModelError> {
     let (points, weights) = curve.control_polygon().map_err(|e| err(e.to_string()))?;
     let (knots, mults) = curve.knots(None).map_err(|e| err(e.to_string()))?;
-    Ok(ModelCurve::BSpline(step_import::model::BSplineCurve {
-        degree: curve.degree().map_err(|e| err(e.to_string()))? as u32,
-        points: points.into_iter().map(point).collect(),
-        weights: (!weights.is_empty()).then_some(weights),
-        knots,
-        mults: mults.into_iter().map(|m| m as u32).collect(),
-    }))
+    Ok(ModelCurve::BSpline(
+        solidcore_record::step::model::BSplineCurve {
+            degree: curve.degree().map_err(|e| err(e.to_string()))? as u32,
+            points: points.into_iter().map(point).collect(),
+            weights: (!weights.is_empty()).then_some(weights),
+            knots,
+            mults: mults.into_iter().map(|m| m as u32).collect(),
+        },
+    ))
 }
 
 fn approximate_crv_on_surf(
@@ -223,24 +225,26 @@ fn bspline_surface(
         Some(net.weights.chunks(v_count).map(<[f64]>::to_vec).collect())
     };
     let canonical = bspline.canonical().map_err(|e| err(e.to_string()))?;
-    Ok(ModelSurface::BSpline(step_import::model::BSplineSurface {
-        u_degree: canonical.u_degree as u32,
-        v_degree: canonical.v_degree as u32,
-        points,
-        weights,
-        u_knots: canonical.u_knots,
-        u_mults: canonical
-            .u_multiplicities
-            .into_iter()
-            .map(|m| m as u32)
-            .collect(),
-        v_knots: canonical.v_knots,
-        v_mults: canonical
-            .v_multiplicities
-            .into_iter()
-            .map(|m| m as u32)
-            .collect(),
-    }))
+    Ok(ModelSurface::BSpline(
+        solidcore_record::step::model::BSplineSurface {
+            u_degree: canonical.u_degree as u32,
+            v_degree: canonical.v_degree as u32,
+            points,
+            weights,
+            u_knots: canonical.u_knots,
+            u_mults: canonical
+                .u_multiplicities
+                .into_iter()
+                .map(|m| m as u32)
+                .collect(),
+            v_knots: canonical.v_knots,
+            v_mults: canonical
+                .v_multiplicities
+                .into_iter()
+                .map(|m| m as u32)
+                .collect(),
+        },
+    ))
 }
 
 /// Which of `surface`'s STEP parameters (u, v) are angles (ISO 10303-42): a cylinder's

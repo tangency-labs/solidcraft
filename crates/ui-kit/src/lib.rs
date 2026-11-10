@@ -109,7 +109,7 @@ pub use history::*;
 pub use history_group::*;
 pub use layout::*;
 pub use look_chain::{LookStep, look_chain};
-pub use menu::{Item, LIST_W};
+pub use menu::{Item, ItemIcon, LIST_W};
 pub use menu::{Menu, MenuItem, WorkspaceMenu, WorkspaceStyle, rename_menu, workspace_menu};
 pub use metrics::{ContentWidth, dimension, header_height, row_height, table_row_height};
 pub use name_list::{NameList, NameRow, name_list};

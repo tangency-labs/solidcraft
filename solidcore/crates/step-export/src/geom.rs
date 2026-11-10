@@ -1,17 +1,20 @@
 //! Small vector helpers and the curve evaluation the mapper needs to find the
 //! parameters of an edge's vertices on its curve.
 
-use crate::model::{BSplineCurve, Frame, P3};
+use solidcore_record::step::model::{BSplineCurve, Frame, P3};
 
-pub(crate) fn sub(a: P3, b: P3) -> P3 {
+/// `a - b`.
+pub fn sub(a: P3, b: P3) -> P3 {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 }
 
-pub(crate) fn scale(a: P3, s: f64) -> P3 {
+/// `a * s`.
+pub fn scale(a: P3, s: f64) -> P3 {
     [a[0] * s, a[1] * s, a[2] * s]
 }
 
-pub(crate) fn dot(a: P3, b: P3) -> f64 {
+/// The dot product.
+pub fn dot(a: P3, b: P3) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
@@ -63,7 +66,7 @@ pub(crate) fn build_frame(origin: P3, axis: Option<P3>, ref_dir: Option<P3>) -> 
 }
 
 /// Expanded knot vector, or `None` when the multiplicities do not fit.
-pub(crate) fn expand_knots(knots: &[f64], mults: &[u32], expected: usize) -> Option<Vec<f64>> {
+pub fn expand_knots(knots: &[f64], mults: &[u32], expected: usize) -> Option<Vec<f64>> {
     let mut total: usize = 0;
     for &m in mults {
         total = total.checked_add(m as usize)?;
@@ -84,7 +87,7 @@ pub(crate) fn expand_knots(knots: &[f64], mults: &[u32], expected: usize) -> Opt
 /// refuses with [`check_bspline_curve`](crate::map::check_bspline_curve) (fewer than
 /// degree + 1 points, knots not increasing, multiplicities or weights out of range),
 /// which a model built by hand may carry.
-pub(crate) fn bspline_point(c: &BSplineCurve, t: f64) -> Option<P3> {
+pub fn bspline_point(c: &BSplineCurve, t: f64) -> Option<P3> {
     let p = c.degree as usize;
     let n = c.points.len();
     crate::map::check_bspline_curve(c).ok()?;

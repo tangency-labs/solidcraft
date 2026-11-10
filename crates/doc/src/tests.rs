@@ -114,6 +114,112 @@ fn parametric_plate_reevaluates() {
     assert!(rel(measure(&m.state().bodies[0].body).unwrap().volume, 50.0 * 30.0 * 10.0) < 1e-9);
 }
 
+/// #14256: an end plate whose 25 mm arc meets two lines tangentially, each joint held by two
+/// "point on curve" constraints instead of a shared point. The solver leaves the arc's ends on
+/// the lines only to its 1e-9 mm residual, so along the tangent they lie up to 2.25e-4 mm from
+/// the lines' ends. The outline is still one closed profile, and extruding it gives the plate.
+#[test]
+fn an_outline_closed_by_point_on_curve_tangent_joints_extrudes() {
+    let mut doc = Document::new("end plate");
+    let mut sk = Sketch::new();
+    let knee = (50.0_f64.powi(2) - 11.125_f64.powi(2)).sqrt();
+    let mut point = |x: f64, y: f64| sk.add_point(Vec2::new(x, y), None).unwrap();
+    let corners = [(-14.0, 90.0), (14.0, 90.0), (14.0, 48.0), (knee, 11.125), (90.0, 11.125), (90.0, -11.125), (25.0, -11.125), (25.0, 0.0)];
+    let [top_left, top_right, shoulder, knee_point, right_top, right_bottom, step_bottom, step_top] = corners.map(|(x, y)| point(x, y));
+    // Where the solver left the 25 mm arc's ends, and the end of the line along its top.
+    let arc_start = point(24.999999999949498, 5.025035674136865e-5);
+    let arc_end = point(0.0002252128472149822, 24.999999999324313);
+    let ledge_right = point(0.0, 25.0);
+    let ledge_left = point(-14.0, 25.0);
+    let centre = point(0.0, 0.0);
+    let small_centre = point(0.0, 0.0);
+    let pos = |sk: &Sketch, i: usize| sk.points[i].pos;
+    let line = |sk: &mut Sketch, a: usize, b: usize| sk.add_line_pts(a, b, None).unwrap();
+    line(&mut sk, top_left, top_right);
+    line(&mut sk, top_right, shoulder);
+    sk.add_arc(Vec2::ZERO, pos(&sk, knee_point), pos(&sk, shoulder), [Some(centre), Some(knee_point), Some(shoulder)], None).unwrap();
+    line(&mut sk, right_top, knee_point);
+    line(&mut sk, right_bottom, right_top);
+    line(&mut sk, step_bottom, right_bottom);
+    let side = line(&mut sk, step_top, step_bottom);
+    let arc = sk.add_arc(Vec2::ZERO, pos(&sk, arc_start), pos(&sk, arc_end), [Some(small_centre), Some(arc_start), Some(arc_end)], None).unwrap();
+    let ledge = line(&mut sk, ledge_left, ledge_right);
+    line(&mut sk, top_left, ledge_left);
+    use ConstraintKind::*;
+    for kind in [
+        Coincident { p: centre, q: 0 },
+        Coincident { p: small_centre, q: 0 },
+        Horizontal { l: ledge },
+        Vertical { l: side },
+        Tangent { a: ledge, b: arc },
+        Tangent { a: side, b: arc },
+        PointOnCurve { p: ledge_right, c: arc },
+        PointOnCurve { p: step_top, c: arc },
+        PointOnCurve { p: arc_start, c: side },
+        PointOnCurve { p: arc_end, c: ledge },
+    ] {
+        sk.add_constraint(kind, None).unwrap();
+    }
+    let s = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, None).unwrap();
+    doc.add_feature(
+        FeatureKind::Extrude {
+            thin: None,
+            sketch: crate::SketchId(s),
+            profiles: ProfileSel::All,
+            extent: Extent {
+                convention: crate::ExtrudeConvention::LegacyPerSide,
+                distance: "10".into(),
+                direction: Direction::Positive,
+                distance2: None,
+                start_offset: None,
+                through_all: false,
+                second_follows_first: false,
+                taper: None,
+                corner: Default::default(),
+                to: None,
+                to_offset: None,
+                from: None,
+                to_body_apart: false,
+            },
+            operation: Operation::NewBody,
+            targets: vec![],
+        },
+        None,
+    )
+    .unwrap();
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    assert!(m.results.iter().all(|r| r.error.is_none()), "{:?}", m.results);
+    let st = m.state();
+    assert_eq!(st.sketches[0].profiles.len(), 1);
+    assert_eq!(st.bodies.len(), 1);
+    // The polygon through the corners, plus the segment the 50 mm arc adds, less the segment the
+    // quarter of the 25 mm circle takes away, 10 mm deep.
+    let outline = [
+        (25.0, -11.125),
+        (90.0, -11.125),
+        (90.0, 11.125),
+        (knee, 11.125),
+        (14.0, 48.0),
+        (14.0, 90.0),
+        (-14.0, 90.0),
+        (-14.0, 25.0),
+        (0.0, 25.0),
+        (25.0, 0.0),
+    ];
+    let polygon: f64 = (0..outline.len())
+        .map(|i| {
+            let ((x0, y0), (x1, y1)) = (outline[i], outline[(i + 1) % outline.len()]);
+            x0 * y1 - x1 * y0
+        })
+        .sum::<f64>()
+        / 2.0;
+    let segment = |r: f64, sweep: f64| r * r / 2.0 * (sweep - sweep.sin());
+    let area = polygon + segment(50.0, 48.0_f64.atan2(14.0) - 11.125_f64.atan2(knee)) - segment(25.0, std::f64::consts::FRAC_PI_2);
+    let volume = measure(&st.bodies[0].body).unwrap().volume;
+    assert!(rel(volume, area * 10.0) < 1e-6, "{volume} vs {}", area * 10.0);
+}
+
 /// Setting a parameter back takes the earlier results from the cache: nothing is recomputed, but
 /// the evaluation reports the features it restored (their geometry did change back).
 #[test]

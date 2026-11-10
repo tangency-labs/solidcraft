@@ -93,7 +93,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.proto_vertex_miss_is_false = true;
     f.check_loop_vertex_tolerance = true;
     f.check_loop_projected_seam_ends = true;
-    f.trim_boundary_seam_wrap = true;
     f.bspline_check_min_radius = true;
     f.oscillating_skips_failed_guesses = true;
     f.refine_cc_range_ends = true;
@@ -107,7 +106,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.offset_walls_touch_refused = true;
     f.offset_analytic_mate_edges = true;
     f.nurb_cylinder_inside_out_frame = true;
-    f.shell_inner_shell_of_statuses = true;
     f.offset_collapsed_rounds_mated = true;
     f.offset_missing_surface_fails = true;
     f.fillet_nx1_end_rib_global_merge = true;

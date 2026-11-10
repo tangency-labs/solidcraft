@@ -437,6 +437,8 @@ pub struct SolvedSketch {
     pub sketch: solidcraft_sketch::Sketch,
     pub report: SolveReport,
     pub profiles: Vec<Profile>,
+    /// Planar closed loops the 3D sketch curves take part in, in planes of their own (#741).
+    pub profiles_3d: Vec<solidcraft_sketch::Profile3D>,
     /// Open and untied ends of its profile curves (where a profile can fail).
     pub ends: solidcraft_sketch::EndReport,
 }
@@ -2334,6 +2336,7 @@ impl Model {
             name: last.name.clone(),
             plane: last.plane,
             profiles: find_profiles(&sketch),
+            profiles_3d: solidcraft_sketch::find_planar_3d_profiles(&sketch, last.plane),
             ends: solidcraft_sketch::loose_ends(&sketch),
             sketch,
             report,
@@ -3717,6 +3720,70 @@ pub(crate) fn empty_intersection(bodies: &[&str]) -> DocError {
     DocError::Invalid(format!("the intersection is empty: nothing of {body} would remain; check that the profile overlaps the body"))
 }
 
+/// The body a feature's target name `name` picks. Body names are unique, so a body of the
+/// feature's component asked to be called a name another component's body already has (a
+/// linked component's `AS5047P_PCB`) was named otherwise (`Body1`), and the name still picks the
+/// other component's body. That is refused with both bodies listed, instead of running the
+/// boolean on the other component's body and failing there with a kernel error (#12141).
+pub(crate) fn named_target(doc: &Document, state: &ModelState, f: &Feature, name: &str) -> Result<usize> {
+    let i = state.bodies.iter().position(|b| b.name == name).ok_or_else(|| DocError::Unknown(format!("body `{name}`")))?;
+    let Some(found) = state.bodies.get(i).filter(|b| b.component != f.component) else { return Ok(i) };
+    let asked: Vec<&str> =
+        asked_names(doc, state).filter(|(b, asked)| b.component == f.component && *asked == Some(name)).map(|(b, _)| b.name.as_str()).collect();
+    if asked.is_empty() {
+        return Ok(i);
+    }
+    let component = |id: u64| doc.components.iter().find(|c| c.id == id).map_or_else(|| "the root".to_string(), |c| format!("`{}`", c.name));
+    Err(DocError::Invalid(format!(
+        "the body name `{name}` is ambiguous: it names the body of component {}, while this feature's component {} has {} that was asked to be called `{name}` (the name was taken); target {} or rename the bodies so each name is used once",
+        component(found.component),
+        component(f.component),
+        asked.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join(", "),
+        asked.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join(" or "),
+    )))
+}
+
+/// Each body with the name it was asked to be called: its slot of its feature's stored names.
+/// An Import's skipped solids make no body, so its bodies take the slots left, in order; any
+/// other feature's k-th body takes slot k. Siblings a later feature removed shift the count, so
+/// a body then reads a later slot's name (only ever refusing an ambiguous target). One pass
+/// over the bodies, each feature's slots listed once, so a large import costs linear time.
+fn asked_names<'a, 's>(doc: &'a Document, state: &'s ModelState) -> impl Iterator<Item = (&'s ModelBody, Option<&'a str>)> {
+    let mut made: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
+    let mut slots: std::collections::HashMap<u64, Vec<usize>> = std::collections::HashMap::new();
+    state.bodies.iter().map(move |b| {
+        let j = made.entry(b.feature).or_insert(0);
+        let k = *j;
+        *j += 1;
+        let asked = doc.feature(b.feature).and_then(|m| {
+            let slot = match &m.kind {
+                FeatureKind::Import { skip, .. } => *slots
+                    .entry(m.id)
+                    .or_insert_with(|| {
+                        let skip: std::collections::HashSet<u64> = skip.iter().copied().collect();
+                        (0..m.body_names.len()).filter(|s| !skip.contains(&(*s as u64))).collect()
+                    })
+                    .get(k)?,
+                _ => k,
+            };
+            m.body_names.get(slot).map(String::as_str).filter(|n| !n.is_empty())
+        });
+        (b, asked)
+    })
+}
+
+/// Refuse the target names among `names` that [`named_target`] finds ambiguous, before any
+/// work that does not go through it (a sheet's cut-outs are machined before the boolean). Names
+/// that pick no body are left to the feature, which may allow them.
+fn refuse_ambiguous_targets(doc: &Document, state: &ModelState, f: &Feature, names: &[String]) -> Result<()> {
+    for name in names.iter().filter(|n| *n != "*") {
+        if let Err(e @ DocError::Invalid(_)) = named_target(doc, state, f, name) {
+            return Err(e);
+        }
+    }
+    Ok(())
+}
+
 /// The bodies a feature's boolean takes part in, and whether they were named rather than taken
 /// by default (every body, or the feature's component).
 pub(crate) fn boolean_scope(state: &ModelState, f: &Feature, targets: &[String]) -> (bool, Vec<String>) {
@@ -3812,7 +3879,7 @@ fn apply_traced_with(
     } else {
         let mut v = Vec::new();
         for t in targets {
-            v.push(state.bodies.iter().position(|b| &b.name == t).ok_or_else(|| DocError::Unknown(format!("body `{t}`")))?);
+            v.push(named_target(doc, state, f, t)?);
         }
         v
     };
@@ -8242,6 +8309,7 @@ fn eval_feature(
 ) -> Result<()> {
     // Its tools meet bodies in other placements where those are shown (#3383).
     let _frames = ToolFrames::install(doc, f, st);
+    refuse_ambiguous_targets(doc, st, f, &f.participants)?;
     match &f.kind {
         FeatureKind::NewerFileFeature { raw } => Err(DocError::Invalid(raw.why())),
         FeatureKind::BodyTransfer { bodies, from, to, transform } => {
@@ -8290,6 +8358,7 @@ fn eval_feature(
         | FeatureKind::Loft { operation, targets, .. }
         | FeatureKind::Coil { operation, targets, .. }
         | FeatureKind::Sweep { operation, targets, .. } => {
+            refuse_ambiguous_targets(doc, st, f, &crate::plain(targets))?;
             let mut constructor = None;
             let mut to_body = None;
             let tools = feature_tools_with_constructor(doc, vals, f, st, &mut constructor, &mut to_body, warning)?;
@@ -9273,9 +9342,10 @@ fn eval_sketch(
         append_warning(warning, profiles_cut_short_note());
     }
     let profiles = search.profiles;
+    let profiles_3d = solidcraft_sketch::find_planar_3d_profiles(&sk, plane);
     let ends = solidcraft_sketch::loose_ends(&sk);
     st.sketches.retain(|s| s.feature != f.id);
-    st.sketches.push(Arc::new(SolvedSketch { feature: f.id, name: f.name.clone(), plane, sketch: sk, report, profiles, ends }));
+    st.sketches.push(Arc::new(SolvedSketch { feature: f.id, name: f.name.clone(), plane, sketch: sk, report, profiles, profiles_3d, ends }));
     Ok(())
 }
 
@@ -10144,6 +10214,68 @@ mod world_placement_cache_tests {
         let mapped: Vec<_> = local.positions.iter().map(|p| crate::apply_point(&matrix, *p)).collect();
         assert!(mapped.iter().all(|p| placed.positions.iter().any(|q| p.dist(*q) < 1e-8)));
         assert!(placed.positions.iter().all(|p| mapped.iter().any(|q| p.dist(*q) < 1e-8)));
+    }
+
+    /// A body asked to be called a name a linked component's body has is named otherwise; a
+    /// later feature of its component that targets the name is refused with both bodies listed,
+    /// not run on the other component's body (#12141).
+    #[test]
+    fn a_target_name_taken_by_another_component_is_refused_as_ambiguous() {
+        let mut doc = Document::new("names");
+        let linked = doc.add_component(Some("Encoder"), 0).unwrap();
+        let local = doc.add_component(Some("Assembly"), 0).unwrap();
+        let mut boxes = |comp: u64, operation: Operation, corner: Vec3| {
+            let id = doc
+                .add_feature(
+                    FeatureKind::Box { corner: crate::point_expr(corner), length: "10".into(), width: "10".into(), height: "2".into(), operation },
+                    None,
+                )
+                .unwrap();
+            let f = doc.feature_mut(id).unwrap();
+            f.component = comp;
+            id
+        };
+        let a = boxes(linked, Operation::NewBody, Vec3::new(100., 0., 0.));
+        let b = boxes(local, Operation::NewBody, Vec3::ZERO);
+        let cut = boxes(local, Operation::Cut, Vec3::new(2., 2., -1.));
+        doc.feature_mut(a).unwrap().body_names = vec!["AS5047P_PCB".into()];
+        doc.feature_mut(b).unwrap().body_names = vec!["AS5047P_PCB".into()];
+        if let FeatureKind::Box { length, width, .. } = &mut doc.feature_mut(cut).unwrap().kind {
+            *length = "2".into();
+            *width = "2".into();
+        }
+        doc.feature_mut(cut).unwrap().participants = vec!["AS5047P_PCB".into()];
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        let st = model.state();
+        let own = st.bodies.iter().find(|x| x.component == local).unwrap().name.clone();
+        assert_ne!(own, "AS5047P_PCB", "names stay unique");
+        let err = model.result(cut).and_then(|r| r.error.clone()).expect("the cut is refused");
+        assert!(err.contains("ambiguous") && err.contains("`Encoder`") && err.contains(&format!("`{own}`")), "{err}");
+        // The linked body is left alone.
+        let linked_body = st.body("AS5047P_PCB").unwrap();
+        assert_eq!(linked_body.component, linked);
+
+        // Targeting the local body by the name it has works.
+        doc.feature_mut(cut).unwrap().participants = vec![own.clone()];
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        assert!(model.result(cut).and_then(|r| r.error.clone()).is_none());
+    }
+
+    /// An Import's skipped solids make no body: its bodies take the stored names left, so one
+    /// built from slot B was asked for B, not for the skipped slot's A (#12141).
+    #[test]
+    fn an_imports_body_is_asked_for_its_own_slots_name() {
+        let mut doc = Document::new("names");
+        let id =
+            doc.add_feature(FeatureKind::Import { file: "x.step".into(), step: "".into(), components: Vec::new(), skip: vec![0] }, None).unwrap();
+        doc.feature_mut(id).unwrap().body_names = vec!["A".into(), "B".into()];
+        let mut state = ModelState::default();
+        state.bodies.push(ModelBody::new("B (2)".into(), kernel::box_solid(Vec3::ZERO, Vec3::new(1., 1., 1.)).unwrap(), id));
+        assert_eq!(asked_names(&doc, &state).next().unwrap().1, Some("B"));
+        doc.feature_mut(id).unwrap().kind = FeatureKind::Import { file: "x.step".into(), step: "".into(), components: Vec::new(), skip: Vec::new() };
+        assert_eq!(asked_names(&doc, &state).next().unwrap().1, Some("A"));
     }
 
     #[test]
