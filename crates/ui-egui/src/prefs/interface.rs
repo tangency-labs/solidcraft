@@ -239,7 +239,7 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 let _ = app.run("view.layout", json!({"mode": if selected == 1 { "compact" } else { "floating" }}));
                             }
                         });
-                        if app.ui.layout == crate::shell::LayoutMode::Floating {
+                        if app.ui.layout == crate::ui_kit::LayoutMode::Floating {
                             layout_check(
                                 ui,
                                 app.tr("prefs.rounded_titlebar"),
