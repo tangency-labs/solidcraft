@@ -67,6 +67,12 @@ impl Brep {
         core::bounds(self.core())
     }
 
+    /// [`Brep::bounds`] of a body nobody else reads, which it takes: the token over this
+    /// thread's work ([`crate::stop`]) stops it ([`crate::Error::Cancelled`]).
+    pub fn bounds_owned(self) -> Result<([f64; 3], [f64; 3])> {
+        core::bounds_with(self.core(), true)
+    }
+
     /// How far edge `edge` (its curve over its interval) lies from the surface of face `face`,
     /// over that surface's own domain and not beyond it, in mm: SMLib's own edge/face gap, the
     /// one it sizes an edge's tolerance by. Indices are in the body's edge and face order (as

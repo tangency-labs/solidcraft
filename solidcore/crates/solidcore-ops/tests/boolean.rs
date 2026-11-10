@@ -163,3 +163,57 @@ fn a_rod_cut_by_the_union_of_two_counter_wound_channel_sweeps_is_valid() {
         .unwrap();
     graded("by the union", &r);
 }
+
+/// Cancel stops the full check of a long coil cut (solidcore#3247): a 20-turn square coil cut
+/// from a cylinder, the case of tangency-labs/solidcraft#3962, whose check takes seconds (most
+/// of the cut's time, in the edges' curve analyses). Cancelled from another thread part way,
+/// the check returns `Cancelled` within 500 ms (a few ms on a desktop; the bound leaves room
+/// for shared CI runners). nextest runs each test in a process of its own, so no other test's
+/// call holds the session's kernel meanwhile.
+#[test]
+fn the_check_of_a_long_coil_cut_stops_on_cancel() {
+    use solidcore_ops::cancel::{within, CancelToken};
+    use solidcore_ops::sweep::{screw_sweep, Curve};
+    use std::time::{Duration, Instant};
+    let corners = [
+        [19.0, 0.0, 12.0],
+        [32.0, 0.0, 12.0],
+        [32.0, 0.0, 25.0],
+        [19.0, 0.0, 25.0],
+    ];
+    let square: Vec<Curve> = (0..4)
+        .map(|i| Curve::Line {
+            start: corners[i],
+            end: corners[(i + 1) % 4],
+        })
+        .collect();
+    let coil = screw_sweep(
+        &square,
+        [0.0; 3],
+        [0.0, 0.0, 1.0],
+        15.24,
+        20.0,
+        None,
+        15.24e-4,
+    )
+    .unwrap();
+    let stock = solidcore_ops::make_cylinder([0.0; 3], 20.0, 304.5).unwrap();
+    let cut = boolean(stock, coil, BooleanOp::Subtract).unwrap().unwrap();
+    let token = CancelToken::new();
+    let watched = token.clone();
+    let worker = std::thread::spawn(move || {
+        let r = within(&watched, || cut.check(CheckLevel::All));
+        (r.map(|_| ()), Instant::now())
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    let cancelled = Instant::now();
+    token.cancel();
+    let (r, returned) = worker.join().unwrap();
+    let took = returned.saturating_duration_since(cancelled);
+    eprintln!("the check returned {took:?} after Cancel");
+    assert_eq!(r, Err(Error::Cancelled));
+    assert!(
+        took < Duration::from_millis(500),
+        "returned {took:?} after Cancel"
+    );
+}

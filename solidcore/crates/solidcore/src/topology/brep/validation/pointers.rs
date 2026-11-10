@@ -418,6 +418,9 @@ pub fn validate_pointers(
     }
     let faces = p1::faces(b, None)?;
     for &f in &faces {
+        // (not upstream) cooperative cancellation once per face: checking a face's trim
+        // evaluates its curves and surface (solidcore#3247)
+        k.check_cancelled("topology::brep::validation::pointers::validate_pointers")?;
         let tol = b.face(f)?.tolerance;
         let checked =
             crate::topology::trimming_tools::check_face(k, b, f, tol, r.array.as_deref_mut(), walk);
