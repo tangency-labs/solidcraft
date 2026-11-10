@@ -95,7 +95,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.flat_corners_test_bits = true;
     f.cylinder_rebuild_mean_radius = true;
     f.revolve_analytic_profile_faces = true;
-    f.revolve_arc_centre_near_axis_is_sphere = true;
     f.taper_tangent_corner_planes = true;
     f.revolve_nested_shells_as_cavities = true;
     f.revolve_holed_profile_void = true;
@@ -178,7 +177,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.torus_check_spindle_apex = true;
     f.local_operation_step_walls = true;
     f.edge_check_orders_tangent_faces = true;
-    f.revolve_arc_touching_axis_is_horn_torus = true;
     f.thicken_planar_side_walls = true;
     f.fillet_torus_span_from_start_section = true;
     f.fillet_knife_edge_rounds = true;
@@ -260,7 +258,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.sphere_from_arcs_common_centre = true;
     f.dupin_bottom_hyperbola_axis = true;
     f.extent3d_contains_both_segment_endpoints = true;
-    f.translation_sweep_regularize = true;
     f.gap_samples_use_trimmed_spans = true;
     f.twist_simple_duw_sign = true;
     f.offset_swap_uv_extended_distance = true;
