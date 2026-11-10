@@ -31,6 +31,7 @@
 //! | [`nurbs::NurbsFailure`]     | `NL_*_ERR` numbers, in solidcore's terms         |
 //! | [`defeature::DefeatureFailure`] | none: why a defeature keeps a feature (#3218) |
 //! | [`sweep::SweepFailure`]     | none: why a sweep or loft refuses, and the sweep routines' failures |
+//! | [`curve::CurveFailure`]     | none: why a curve query refuses (#3184)           |
 //!
 //! NLib routines (`NL_*.cpp`) report failure by returning an error flag and storing an
 //! error number in the process-wide `NL_ERROR` record; solidcore returns
@@ -78,6 +79,7 @@
 //! difftest and the FFI), since nothing but the comparison needs them.
 
 pub mod boolean;
+pub mod curve;
 pub mod defeature;
 pub mod geom;
 pub mod heal;
@@ -746,6 +748,8 @@ pub enum Reason {
     /// A geometry utility (linear algebra, transforms, boxes, solvers, tolerances,
     /// attributes) failed.
     Geom(geom::GeomFailure),
+    /// A curve query refused (#3184).
+    Curve(curve::CurveFailure),
 }
 
 impl Reason {
@@ -761,7 +765,8 @@ impl Reason {
             | Self::Sweep(_)
             | Self::Mass(_)
             | Self::Heal(_)
-            | Self::Geom(_) => None,
+            | Self::Geom(_)
+            | Self::Curve(_) => None,
             Self::Offset(o) => o.entity(),
             Self::Boolean(b) => b.entity(),
         }
@@ -782,6 +787,7 @@ impl Reason {
             Self::Mass(m) => m.comparison_status(),
             Self::Heal(h) => h.comparison_status(),
             Self::Geom(g) => g.comparison_status(),
+            Self::Curve(c) => c.comparison_status(),
         }
     }
 
@@ -800,6 +806,7 @@ impl Reason {
             Self::Mass(m) => m.kind(),
             Self::Heal(h) => h.kind(),
             Self::Geom(g) => g.kind(),
+            Self::Curve(c) => c.kind(),
         }
     }
 }
@@ -818,6 +825,7 @@ impl core::fmt::Display for Reason {
             Self::Mass(m) => m.fmt(f),
             Self::Heal(h) => h.fmt(f),
             Self::Geom(g) => g.fmt(f),
+            Self::Curve(c) => c.fmt(f),
         }
     }
 }
@@ -879,6 +887,12 @@ impl From<offset::OffsetFailure> for Reason {
 impl From<sweep::SweepFailure> for Reason {
     fn from(w: sweep::SweepFailure) -> Self {
         Self::Sweep(w)
+    }
+}
+
+impl From<curve::CurveFailure> for Reason {
+    fn from(c: curve::CurveFailure) -> Self {
+        Self::Curve(c)
     }
 }
 
