@@ -225,7 +225,58 @@ fn point_to_point_takes_the_origin_point() {
     let d = h.app.dialog.clone().unwrap();
     assert_eq!(d.inputs[2].items, vec![Sel::Vertex { body: String::new(), point: Vec3::ZERO }], "the origin is the To point");
     let p = params(&h.app, &d).unwrap();
-    assert_eq!(p["translate"], json!([mm(-hi.x), mm(-hi.y), mm(-hi.z)]), "the corner goes onto the origin");
+    let translate: [String; 3] = serde_json::from_value(p["translate"].clone()).unwrap();
+    assert_eq!(Vec3::from(translate.map(|distance| len(&h.app, &distance).unwrap())), -hi, "the corner goes onto the origin");
+}
+
+#[test]
+fn point_placement_picks_planar_spatial_and_construction_points() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10})).unwrap();
+    h.app.run("sketch.create", json!({"plane": "XY", "offset": 3})).unwrap();
+    h.app.run("sketch.point", json!({"point": [42.123456789, 7], "id": "target"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.options", json!({"sketch_3d": true})).unwrap();
+    h.app.run("sketch.point3d", json!({"point": [55, 18, 12]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("construct.point.vertex", json!({"point": {"point": [32, 25, 8]}, "name": "Datum"})).unwrap();
+    h.call("ui.set", json!({"showSketches": true}));
+    h.call("ui.view", json!({"view": "top"}));
+    h.call("ui.camera", json!({"target": [25, 12, 0], "distance": 130}));
+    h.settle();
+
+    let planar = [42.123456789, 7.0, 3.0];
+    let spatial = [55.0, 18.0, 12.0];
+    let datum = [32.0, 25.0, 8.0];
+    for (mode, from, to, expected) in [
+        (POINT_TO_POINT, [0.0, 0.0, 10.0], Some(planar), [planar[0], 7.0, -7.0]),
+        (POINT_TO_POINT, planar, Some(spatial), [55.0 - planar[0], 11.0, 9.0]),
+        (POINT_TO_POINT, spatial, Some(datum), [-23.0, 7.0, -4.0]),
+        (POINT_TO_POSITION, datum, None, [-32.0, -25.0, -8.0]),
+        (POINT_TO_POSITION, spatial, None, [-55.0, -18.0, -12.0]),
+    ] {
+        h.app.start("solid.move");
+        {
+            let d = h.app.dialog.as_mut().unwrap();
+            d.kind = kind(mode, &h.app.session.doc);
+            d.inputs = inputs(mode);
+            d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+            d.active = 1;
+        }
+        h.step(&json!({"click": {"world": from}})).unwrap();
+        if let Some(to) = to {
+            h.app.dialog.as_mut().unwrap().active = 2;
+            h.step(&json!({"click": {"world": to}})).unwrap();
+        }
+        let d = h.app.dialog.as_ref().unwrap();
+        let p = params(&h.app, d).unwrap();
+        let translate: [String; 3] = serde_json::from_value(p["translate"].clone()).unwrap();
+        let translate = translate.map(|distance| len(&h.app, &distance).unwrap());
+        assert!(Vec3::from(translate).dist(Vec3::from(expected)) < 1e-9, "{p}");
+        h.step(&json!({"widget": "Cancel"})).unwrap();
+    }
 }
 
 /// #4776: the box shows the value of the handle dragged: the distance along the Y arrow after

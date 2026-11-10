@@ -16,7 +16,7 @@ use solidcraft_engine::geom::prelude::*;
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
 use crate::gizmo::{self, Change, Drag};
-use crate::selection::{AXIS_PICKS, BODIES, EDGES, FACES, ORIGIN, SelInput, VERTICES};
+use crate::selection::{AXIS_PICKS, BODIES, CONSTRUCTION_POINTS, EDGES, EXTERNAL_POINTS, FACES, ORIGIN, SelInput, VERTICES};
 
 pub const TYPES: [&str; 5] = ["Free Move", "Translate", "Rotate", "Point to Point", "Point to Position"];
 pub const FREE: usize = 0;
@@ -25,6 +25,7 @@ pub const ROTATE: usize = 2;
 pub const POINT_TO_POINT: usize = 3;
 pub const POINT_TO_POSITION: usize = 4;
 const POINTS: u16 = VERTICES | FACES | EDGES | ORIGIN;
+pub(crate) const PLACEMENT_POINTS: u16 = POINTS | crate::selection::POINTS | EXTERNAL_POINTS | CONSTRUCTION_POINTS;
 
 /// A fresh Move dialog of a type (all values zero).
 pub fn kind(mode: usize, doc: &solidcraft_engine::doc::Document) -> Kind {
@@ -40,10 +41,10 @@ pub fn inputs(mode: usize) -> Vec<SelInput> {
         FREE => v.push(SelInput::new("Pivot", POINTS, false)),
         ROTATE => v.push(SelInput::new("Axis", AXIS_PICKS, false)),
         POINT_TO_POINT => {
-            v.push(SelInput::new("From", POINTS, false));
-            v.push(SelInput::new("To", POINTS, false));
+            v.push(SelInput::new("From", PLACEMENT_POINTS, false));
+            v.push(SelInput::new("To", PLACEMENT_POINTS, false));
         }
-        POINT_TO_POSITION => v.push(SelInput::new("Point", POINTS, false)),
+        POINT_TO_POSITION => v.push(SelInput::new("Point", PLACEMENT_POINTS, false)),
         _ => {}
     }
     v
@@ -272,6 +273,21 @@ fn sel_point(app: &SolveApp, d: &Dialog, s: Option<&Sel>) -> Option<Vec3> {
             Some(crate::dialogs::edge_circle_in(&st, body, *index).map_or(*point, |(c, ..)| carried(d, on_moved(&bodies_of(app, d), s), c)))
         }
         Sel::Vertex { point, .. } | Sel::Face { point, .. } => Some(*point),
+        Sel::SketchPoint { .. } | Sel::ExternalSketchPoint { .. } => {
+            let (sketch, point) = match s {
+                Sel::ExternalSketchPoint { sketch, id } => (*sketch, id.as_str()),
+                Sel::SketchPoint { id } => {
+                    let (sketch, point) = id.split_once(':')?;
+                    (sketch.parse().ok()?, point)
+                }
+                _ => return None,
+            };
+            let state = crate::open_meshing::session_world(&app.session);
+            solidcraft_engine::doc::construct::sketch_point_position(&state, sketch, point)
+        }
+        Sel::ConstructionPoint { name } => solidcraft_engine::view::construction_points(&app.session)
+            .into_iter()
+            .find_map(|(_, candidate, point)| (candidate == *name).then_some(point)),
         _ => None,
     }
 }
@@ -405,6 +421,9 @@ fn step(app: &SolveApp, d: &Dialog) -> Result<Step, String> {
     }
     let need_point = |i: usize, what: &str| sel_point(app, d, items(d, i).first()).ok_or(format!("select {what} first"));
     let num = |t: Vec3| json!([mm(t.x), mm(t.y), mm(t.z)]);
+    // Picked points already use millimetres. Keep their precision and tell the dialog's
+    // parameter conversion which unit these distances use.
+    let point_delta = |t: Vec3| json!(<[f64; 3]>::from(t).map(|distance| format!("{distance} mm")));
     let mut p = targets_json(app, d);
     match *mode {
         TRANSLATE => p["translate"] = json!([x, y, z]),
@@ -454,7 +473,7 @@ fn step(app: &SolveApp, d: &Dialog) -> Result<Step, String> {
                 (Ok(from), Ok(to)) => (from, to),
                 (Err(e), _) | (_, Err(e)) => return Ok(Step::Needs(e)),
             };
-            p["translate"] = num(to - from);
+            p["translate"] = point_delta(to - from);
         }
         _ => {
             let from = match need_point(1, "the point to move") {
@@ -462,7 +481,7 @@ fn step(app: &SolveApp, d: &Dialog) -> Result<Step, String> {
                 Err(e) => return Ok(Step::Needs(e)),
             };
             let at = Vec3::new(len(app, x)?, len(app, y)?, len(app, z)?);
-            p["translate"] = num(at - from);
+            p["translate"] = point_delta(at - from);
         }
     }
     Ok(Step::Made(p))

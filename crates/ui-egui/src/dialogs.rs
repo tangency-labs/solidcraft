@@ -1621,9 +1621,12 @@ impl Dialog {
                 _ => None,
             };
         }
-        // Only construction tools resolve wire-node references. In particular, Hole must
-        // not silently freeze a wire node into a face position or accept an unresolved ID.
-        if matches!(h, Hit::SketchPoint3d { .. }) && !matches!(self.kind, Kind::OffsetPlane { .. } | Kind::Construct { .. }) {
+        // Hole must not silently freeze a wire node into a face position or accept an
+        // unresolved ID. Construction and Move/Copy's point inputs resolve these nodes.
+        if matches!(h, Hit::SketchPoint3d { .. })
+            && !matches!(self.kind, Kind::OffsetPlane { .. } | Kind::Construct { .. })
+            && inp.accept != crate::dialogs_move::PLACEMENT_POINTS
+        {
             return None;
         }
         // Features are also picked on the canvas: a face stands for the feature that made it.
