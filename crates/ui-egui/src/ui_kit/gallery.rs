@@ -980,7 +980,7 @@ pub(crate) const ELEMENTS: &[Element] = &[
     }),
     element!("assistant_tool", |ui, _| {
         assistant_tool_frame(ui, false, |ui| {
-            ui.monospace("parameters.set");
+            ui.monospace("sample.action_a");
             assistant_tool_detail(ui, |ui| {
                 ui.monospace("thickness = 8 mm");
             });
@@ -989,7 +989,7 @@ pub(crate) const ELEMENTS: &[Element] = &[
     element!("assistant_tool_failed", |ui, _| {
         assistant_tool_frame(ui, false, |ui| {
             assistant_tool_row(ui, true, |ui| {
-                ui.monospace("solid.fillet");
+                ui.monospace("sample.action_b");
             });
         });
     }),
@@ -1034,8 +1034,8 @@ pub(crate) const ELEMENTS: &[Element] = &[
     }),
     element!("settings_tab_chip", |ui, _| {
         ui.horizontal_wrapped(|ui| {
-            settings_tab_chip(ui, "MODEL", "Model", "extrude", true);
-            settings_tab_chip(ui, "SURFACE", "Surface", "surface_extrude", false);
+            settings_tab_chip(ui, "Tab A", "Tab A", "placeholder", true);
+            settings_tab_chip(ui, "Tab B", "Tab B", "placeholder", false);
         });
     }),
     element!("history_transport", |ui, _| {
@@ -1158,11 +1158,10 @@ pub(crate) const ELEMENTS: &[Element] = &[
         ui.add_space(Tokens::get().space_6);
         CommandSearch::sheet(ui, ui.available_width(), 1.0, false, |ui| {
             CommandSearch::heading(ui, "search.commands", 1);
-            let c = solidcraft_engine::find_command("solid.fillet").unwrap();
-            let mut row = MenuItem::new(c.id, c.label, c.icon);
+            let mut row = MenuItem::new("sample.action_a", "Fillet", "placeholder");
             row.highlighted = true;
             row.shortcut = "F";
-            row.search_row(ui, &query, "MODEL › MODIFY", None);
+            row.search_row(ui, &query, "Tab A › Group", None);
             CommandSearch::detail(ui, "radius  6 mm");
         });
     }),
@@ -1221,14 +1220,14 @@ pub(crate) const ELEMENTS: &[Element] = &[
         // The marking menu's eight slots, as a host fills them outside a sketch.
         let (r, _) = ui.allocate_exact_size(vec2(360.0, 360.0), egui::Sense::hover());
         let items = [
-            Item::action("ui.repeat", "Repeat", "redo").key("R").on_if(false),
-            Item::action("ui.delete", "Delete", "delete").key("Del"),
-            Item::action("solid.press_pull", "Press Pull", "press_pull"),
-            Item::action("solid.hole", "Hole", "hole"),
-            Item::action("sketch.create", "Create Sketch", "sketch"),
-            Item::action("solid.extrude", "Extrude", "extrude"),
-            Item::action("edit.undo", "Undo", "undo"),
-            Item::action("solid.move", "Move/Copy", "move"),
+            Item::action("sample.action_a", "Repeat", "placeholder").key("R").on_if(false),
+            Item::action("sample.action_b", "Delete", "placeholder").key("Del"),
+            Item::action("sample.action_c", "Action C", "placeholder"),
+            Item::action("sample.action_d", "Action D", "placeholder"),
+            Item::action("sample.action_e", "Action E", "placeholder"),
+            Item::action("sample.action_f", "Action F", "placeholder"),
+            Item::action("sample.action_g", "Undo", "placeholder"),
+            Item::action("sample.action_h", "Move/Copy", "placeholder"),
         ];
         radial_menu(ui, r.center(), &items, Some(3));
     }),
