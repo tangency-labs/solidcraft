@@ -95,9 +95,11 @@ pub enum PanelAction {
         id: String,
         value: String,
     },
-    /// Pick things in the model to attach.
-    StartPick,
-    RemovePicked(usize),
+    /// Open the picker for a pill in the message, which goes at this character of the message box
+    /// (its end when not given).
+    StartPick {
+        at: Option<usize>,
+    },
     AttachDropped(Vec<std::path::PathBuf>),
     /// Choose a file to attach.
     ChooseAttachment,
@@ -154,8 +156,7 @@ pub fn run(app: &mut SolveApp, ctx: &egui::Context, action: PanelAction) {
             set_custom_model(app, &m);
         }
         PanelAction::SetConfigOption { id, value } => set_config_option(app, &id, &value),
-        PanelAction::StartPick => start_pick(app),
-        PanelAction::RemovePicked(at) => remove_picked(app, at),
+        PanelAction::StartPick { at } => start_pick(app, at),
         PanelAction::AttachDropped(paths) => attach_dropped(app, paths.into_iter()),
         PanelAction::ChooseAttachment => app.pick_file(tr("ui.agent_chat_attachable"), &attach::extensions(), |app, path| {
             if let Some(path) = path
@@ -186,6 +187,20 @@ pub fn run(app: &mut SolveApp, ctx: &egui::Context, action: PanelAction) {
         PanelAction::OpenSettings => crate::prefs::open_at(app, crate::prefs::PAGE_ASSISTANT),
         PanelAction::AddAgent => super::settings::open_add(app),
     }
+}
+
+/// What the pointer is on in the chat, to light its target in the model: the panel says which pill
+/// or chip, the host looks up what it stands for after the draw ([`light_hovered`]). View state, not
+/// something asked: it lasts the frame.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Hovered {
+    /// A pill in the message box, by its number.
+    Pill(u32),
+    /// A pill (a numbered group) in a sent (`sent`) or queued message at `at`.
+    Group { sent: bool, at: usize, group: u32 },
+    /// A chip of a sent or queued message: the item's place in that message's context.
+    Item { sent: bool, at: usize, item: usize },
 }
 
 /// Run what the panel recorded, in the order it was asked.
@@ -446,11 +461,15 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         if app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none() {
             refresh(app, &ctx);
         }
+        // Which chips and pills stand for things that left the design: plain state the panel reads.
+        refresh_gone(app);
         // Read only when the panel is drawn: a hidden or closed chat costs nothing.
         let view = PanelView::of(app, &ctx);
         draw(&mut app.agent_chat, &view, &mut prefs, ui);
         prefs.write(&mut app.preferences);
         hand_over(app, ui);
+        // Before the model view is laid out, so it lights the pill's target this frame.
+        light_hovered(app);
     }
     run_actions(app, &ctx);
 }
@@ -460,6 +479,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
 pub fn begin(chat: &mut AgentChat, shown: bool, prefs: &AgentPanelPrefs, ctx: &egui::Context) -> bool {
     // Set again when the chat is drawn this frame.
     chat.drop_rect = None;
+    // The pill or chip the pointer is on lights its target for this frame only.
+    chat.hovered = None;
+    chat.hover.clear();
     // Retain the previous card for shortcut hover routing below; clear it when hidden.
     if !shown || !chat.open {
         chat.panel_rect = None;
@@ -538,6 +560,10 @@ pub fn draw(chat: &mut AgentChat, view: &PanelView, prefs: &mut AgentPanelPrefs,
 /// Prepare the shared docked presentation without polling its retained service.
 /// Read the previous visible rectangle before clearing this frame's geometry.
 pub(crate) fn prepare_shared(app: &mut SolveApp, ctx: &egui::Context) {
+    // The pill or chip the pointer is on is found again when the content is drawn. What it lit
+    // stays until then: the shared host draws the model before its panels, so the model shows
+    // what the content found last frame (`finish_shared` puts it out when the content is not drawn).
+    app.agent_chat.hovered = None;
     if shown(app) {
         new_chat_shortcut(&mut app.agent_chat, ctx);
         run_actions(app, ctx);
@@ -556,10 +582,13 @@ pub(crate) fn prepare_shared(app: &mut SolveApp, ctx: &egui::Context) {
 pub(crate) fn finish_shared(app: &mut SolveApp, ctx: &egui::Context) {
     if !shown(app) || !app.agent_chat.open {
         app.agent_chat.keyboard_owned = false;
+        app.agent_chat.hover.clear();
         return;
     }
     if app.agent_chat.panel_rect.is_none() {
         app.agent_chat.keyboard_owned = false;
+        // Not drawn this frame: nothing in it is under the pointer.
+        app.agent_chat.hover.clear();
     }
     #[cfg(not(target_arch = "wasm32"))]
     gallery_window(&mut app.agent_chat, ctx);
@@ -571,11 +600,13 @@ pub(crate) fn shared_content(app: &mut SolveApp, ui: &mut egui::Ui, flow: Flow) 
     if !shown(app) || !app.agent_chat.open {
         return;
     }
+    refresh_gone(app);
     let view = PanelView::of(app, ui.ctx());
 
     let prefs = AgentPanelPrefs::read(&app.preferences);
     draw_content(&mut app.agent_chat, &view, &prefs, ui, flow);
     hand_over(app, ui);
+    light_hovered(app);
     run_actions(app, &ui.ctx().clone());
 }
 
@@ -699,8 +730,6 @@ const MAX_CHIPS: usize = 6;
 /// A chip's longest label (characters), and what its frame adds to the text's width.
 const CHIP_CHARS: usize = 26;
 const CHIP_PAD: f32 = 13.0;
-/// What a chip's × adds.
-const CHIP_CROSS: f32 = 14.0;
 
 /// One thing in a group's rows: its heading, a chip for an item, or the "+N more" note.
 #[cfg(not(target_arch = "wasm32"))]
@@ -712,14 +741,15 @@ enum ChipPart<'a> {
 }
 
 /// What was selected when a message was sent, grouped (elements, features, bodies) with a count
-/// each and a chip per item; hovering a chip tells what is known about it. The rows are filled by
-/// hand: egui wraps plain widgets, not framed ones, and one row wider than the chat would widen
-/// the whole panel.
+/// each and a chip per item; hovering a chip tells what is known about it and lights it in the
+/// model. `gone` flags the items that have left the design (struck through); each chip is
+/// published as `{handle}:chip:{place}`. The rows are filled by hand: egui wraps plain widgets,
+/// not framed ones, and one row wider than the chat would widen the whole panel.
 #[cfg(not(target_arch = "wasm32"))]
-fn context_chips(ui: &mut egui::Ui, context: &Context, removable: bool) -> Option<usize> {
-    let mut removed = None;
+fn context_chips(ui: &mut egui::Ui, context: &Context, gone: &[bool], handle: &str) -> ChipEvents {
+    let mut events = ChipEvents::default();
     if context.is_empty() {
-        return removed;
+        return events;
     }
     let t = Tokens::get();
     let font = egui::FontId::proportional(t.font_small);
@@ -740,7 +770,7 @@ fn context_chips(ui: &mut egui::Ui, context: &Context, removable: bool) -> Optio
             .iter()
             .map(|p| match p {
                 ChipPart::Heading(s) | ChipPart::More(s) => text_width(ui, s),
-                ChipPart::Chip(_, i) => text_width(ui, &shorten(&i.label, CHIP_CHARS)) + CHIP_PAD + if removable { CHIP_CROSS } else { 0.0 },
+                ChipPart::Chip(_, i) => text_width(ui, &shorten(&i.label, CHIP_CHARS)) + CHIP_PAD,
             })
             .collect();
         let mut rows: Vec<Vec<usize>> = vec![Vec::new()];
@@ -764,6 +794,7 @@ fn context_chips(ui: &mut egui::Ui, context: &Context, removable: bool) -> Optio
                             ui.label(RichText::new(s).color(t.text_dim).size(t.font_small));
                         }
                         ChipPart::Chip(place, item) => {
+                            let is_gone = gone.get(*place).copied().unwrap_or(false);
                             let chip = egui::Frame::NONE
                                 .stroke(Stroke::new(1.0, t.text_dim.gamma_multiply(0.5)))
                                 .corner_radius(8.0)
@@ -771,24 +802,27 @@ fn context_chips(ui: &mut egui::Ui, context: &Context, removable: bool) -> Optio
                                 .show(ui, |ui| {
                                     ui.spacing_mut().item_spacing.x = 3.0;
                                     ui.horizontal(|ui| {
-                                        let label = ui.add(
-                                            egui::Label::new(RichText::new(shorten(&item.label, CHIP_CHARS)).color(t.text).size(t.font_small))
-                                                .wrap_mode(egui::TextWrapMode::Extend),
-                                        );
-                                        if removable {
-                                            let cross = ui_kit::button(ui, "×", ui_kit::Button::Small);
-                                            solidcraft_ui_registry::publish_handle(&format!("agent_chat:picked_remove:{place}"), cross.rect.center());
-                                            if cross.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                                                removed = Some(*place);
-                                            }
+                                        let mut text = RichText::new(shorten(&item.label, CHIP_CHARS)).color(t.text).size(t.font_small);
+                                        if is_gone {
+                                            text = text.color(t.text_dim).strikethrough();
                                         }
-                                        label
+                                        ui.add(egui::Label::new(text).wrap_mode(egui::TextWrapMode::Extend))
                                     })
                                     .inner
                                 })
                                 .response;
-                            if !item.detail.is_empty() {
-                                chip.backing_on_hover_text(&item.detail);
+                            solidcraft_ui_registry::publish_handle(&format!("{handle}:chip:{place}"), chip.rect.center());
+                            // Hovering a chip lights its target in the model.
+                            if chip.hovered() {
+                                events.hovered = Some(*place);
+                            }
+                            let tip = match (is_gone, item.detail.is_empty()) {
+                                (true, true) => tr("ui.agent_chat_ctx_gone").to_string(),
+                                (true, false) => format!("{}\n{}", tr("ui.agent_chat_ctx_gone"), item.detail),
+                                (false, _) => item.detail.clone(),
+                            };
+                            if !tip.is_empty() {
+                                chip.backing_on_hover_text(tip);
                             }
                         }
                     }
@@ -799,7 +833,14 @@ fn context_chips(ui: &mut egui::Ui, context: &Context, removable: bool) -> Optio
     if context.omitted > 0 {
         ui.label(RichText::new(more(context.omitted)).color(t.text_dim).size(t.font_small));
     }
-    removed
+    events
+}
+
+/// What happened to a row of chips this frame: the pointer is on one (its place in the context).
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Default)]
+struct ChipEvents {
+    hovered: Option<usize>,
 }
 
 /// `s` cut to `max` characters, with an ellipsis.
@@ -1405,24 +1446,18 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
     let busy = state == State::Busy;
     // Enter sends (queues while the agent works); Ctrl/Cmd+Enter sends now; Esc stops. They are
     // read before the field sees them so no newline is typed.
-    let focused = ui.memory(|m| m.has_focus(Id::unique("sc_agent_chat_input")));
+    let focused = ui.memory(|m| m.has_focus(input_id()));
     let (steer, esc) = if focused {
         ui.input_mut(|i| (i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter), busy && i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)))
     } else {
         (false, false)
     };
     let (mut send_clicked, mut stop_clicked, mut enter, mut pick_clicked) = (false, false, false, false);
-    let mut remove_picked_at = None;
     let frame = Container::new(ui.ctx(), Surface::Viewport).edge_frame(egui::Color32::TRANSPARENT);
     let composer = Container::new(ui.ctx(), Surface::Viewport).edge("sc_agent_chat_composer", Edge::Bottom);
     let composer = composer.resizable(false).show_separator_line(false).frame(frame).show(ui, |ui| {
         let footer = ui_kit::assistant_composer_footer(ui, |ui| {
             let boxed = ui_kit::assistant_composer(ui, focused, |ui| {
-                // What Pick context chose for this message, each item with an ×.
-                if !chat.picked_context.is_empty() {
-                    let tray = chat.picked_context.clone();
-                    remove_picked_at = context_chips(ui, &tray, true);
-                }
                 // The files for the next message (#1744), as chips of their own.
                 attachment_chips(chat, ui);
                 // Ctrl/Cmd+V: files and pictures on the clipboard attach; text goes to the box below.
@@ -1438,12 +1473,7 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
                     .min_scrolled_height(edit_max)
                     .auto_shrink([false, true])
                     .show(ui, |ui| {
-                        ui_kit::assistant_input(
-                            ui,
-                            Id::unique("sc_agent_chat_input"),
-                            &mut chat.input,
-                            tr(if busy { "ui.agent_chat_placeholder_busy" } else { "ui.agent_chat_placeholder" }),
-                        )
+                        pill_input(chat, view, ui, focused, tr(if busy { "ui.agent_chat_placeholder_busy" } else { "ui.agent_chat_placeholder" }))
                     })
                     .inner;
                 solidcraft_ui_registry::publish_rect("agent_chat:input", r.rect);
@@ -1559,11 +1589,9 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
         footer.response.rect.height()
     });
     chat.report.composer_height = Some(composer.inner);
-    if let Some(at) = remove_picked_at {
-        chat.actions.push(PanelAction::RemovePicked(at));
-    }
     if pick_clicked {
-        chat.actions.push(PanelAction::StartPick);
+        // The pill goes where the caret is in the box.
+        chat.actions.push(PanelAction::StartPick { at: caret(ui.ctx()) });
     }
     ComposerOutcome { height: composer.inner, send_clicked, stop_clicked, enter, steer, esc }
 }
@@ -2263,6 +2291,8 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
     let mut approval: Option<(u64, Option<bool>)> = None;
     let mut undo: Option<usize> = None;
     let mut open_gallery: Option<Gallery> = None;
+    // The pill or chip under the pointer, for the host to light.
+    let mut hovered: Option<Hovered> = None;
     let current = &view.revision;
     let units = summary::Units { units: &view.units, decimals: view.decimals };
     for (n, item) in chat.items.iter().enumerate() {
@@ -2272,8 +2302,11 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
                 let copyable = !text.is_empty();
                 let before = ui.cursor();
                 ui_kit::assistant_bubble(ui, |ui| {
-                    if !text.is_empty() {
-                        super::markdown_view::selectable(ui, egui::Label::new(RichText::new(text).color(t.text)).wrap());
+                    let gone = chat.gone.sent.get(&n).map_or(&[][..], Vec::as_slice);
+                    if !text.is_empty()
+                        && let Some(group) = user_text(ui, text, context, gone, &format!("agent_chat:sent:{n}"))
+                    {
+                        hovered = Some(Hovered::Group { sent: true, at: n, group });
                     }
                     if !pictures.is_empty() {
                         if let Some(at) = picture_strip(ui, n, pictures) {
@@ -2283,7 +2316,13 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
                         // Taken when the agent starts on the message: nothing to show yet.
                         ui.label(RichText::new(tr("ui.agent_chat_view_attached")).color(t.text_dim).size(t.font_small));
                     }
-                    context_chips(ui, context, false);
+                    // The picks that are pills in the text light up from there; chips are for the rest.
+                    let (rest, rest_flags, places) = unplaced(context, gone);
+                    if let Some(place) = context_chips(ui, &rest, &rest_flags, &format!("agent_chat:sent:{n}")).hovered
+                        && let Some(item) = places.get(place)
+                    {
+                        hovered = Some(Hovered::Item { sent: true, at: n, item: *item });
+                    }
                     files_line(ui, files.iter().map(String::as_str));
                     if copyable {
                         // Top-aligned: a row centred across its height takes all the height left in
@@ -2489,13 +2528,20 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
                     });
                 }
                 _ => {
-                    if !p.text.is_empty() {
-                        super::markdown_view::selectable(ui, egui::Label::new(RichText::new(&p.text).color(t.text)).wrap());
+                    if !p.text.is_empty()
+                        && let Some(group) = user_text(ui, &p.text, &p.context, &[], &format!("agent_chat:queued:{n}"))
+                    {
+                        hovered = Some(Hovered::Group { sent: false, at: n, group });
                     }
                     if p.image {
                         ui.label(RichText::new(tr("ui.agent_chat_view_attached")).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_small));
                     }
-                    context_chips(ui, &p.context, false);
+                    let (rest, rest_flags, places) = unplaced(&p.context, &[]);
+                    if let Some(place) = context_chips(ui, &rest, &rest_flags, &format!("agent_chat:queued:{n}")).hovered
+                        && let Some(item) = places.get(place)
+                    {
+                        hovered = Some(Hovered::Item { sent: false, at: n, item: *item });
+                    }
                     files_line(ui, p.files.iter().map(|f| f.name.as_str()));
                 }
             }
@@ -2537,6 +2583,7 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
     if let Some((n, text)) = edit_done {
         if let (Some(text), Some(p)) = (text.filter(|t| !t.trim().is_empty()), chat.pending.get_mut(n)) {
             p.text = text;
+            p.regroup();
         }
         chat.pending_edit = None;
     }
@@ -2551,6 +2598,9 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
     }
     if open_gallery.is_some() {
         chat.gallery = open_gallery;
+    }
+    if hovered.is_some() {
+        chat.hovered = hovered;
     }
     if let Some((n, o)) = answer {
         chat.actions.push(PanelAction::AnswerPermission(n, o));
@@ -2577,6 +2627,168 @@ fn files_line<'a>(ui: &mut egui::Ui, names: impl Iterator<Item = &'a str>) {
 
 /// The widest a file chip gets; a narrower chat makes them narrower.
 const CHIP_W: f32 = 170.0;
+
+/// The items of a message that are not pills in its text (those of Attach selection, or all of them
+/// when the message has no pills), with their "gone" flags and each one's place among all of the
+/// message's items: the chips below the message.
+#[cfg(not(target_arch = "wasm32"))]
+fn unplaced<'a>(context: &'a Context, gone: &'a [bool]) -> (std::borrow::Cow<'a, Context>, std::borrow::Cow<'a, [bool]>, Vec<usize>) {
+    use std::borrow::Cow;
+    if context.groups.is_empty() {
+        return (Cow::Borrowed(context), Cow::Borrowed(gone), (0..context.items.len()).collect());
+    }
+    let mut rest = Context { omitted: context.omitted, ..Context::default() };
+    let mut flags = Vec::new();
+    let mut places = Vec::new();
+    for (at, item) in context.items.iter().enumerate().filter(|(_, i)| i.group == 0) {
+        rest.items.push(item.clone());
+        flags.push(gone.get(at).copied().unwrap_or(false));
+        places.push(at);
+    }
+    (Cow::Owned(rest), Cow::Owned(flags), places)
+}
+
+/// A sent message's text, its pills drawn as pills: `gone` flags the context's items that have left
+/// the design, which strikes through the pills they are in. Returns the number of the pill under the
+/// pointer (its group), for the host to light what it stands for.
+#[cfg(not(target_arch = "wasm32"))]
+fn user_text(ui: &mut egui::Ui, text: &str, context: &Context, gone: &[bool], handle: &str) -> Option<u32> {
+    let t = Tokens::get();
+    if context.groups.is_empty() {
+        super::markdown_view::selectable(ui, egui::Label::new(RichText::new(text).color(t.text)).wrap());
+        return None;
+    }
+    let look = |id: u32| {
+        context.groups.iter().any(|(n, _)| *n == id).then(|| {
+            let gone = context.items.iter().enumerate().any(|(at, item)| item.group == id && gone.get(at).copied().unwrap_or(false));
+            // The bubble is the accent colour itself: a pill in it takes the filled chip's colour
+            // so it stands apart from the bubble.
+            pills::Look { background: t.chip, text: if gone { t.text_dim } else { t.text }, gone }
+        })
+    };
+    let font = egui::FontId::proportional(ui.style().text_styles.get(&egui::TextStyle::Body).map_or(t.font_label, |f| f.size));
+    let galley = ui.fonts_mut(|f| f.layout_job(pills::job(text, &font, t.text, ui.available_width(), &look)));
+    // Through the conversation's selectable label, so it stays in a selection scrolled out of view.
+    let response = super::markdown_view::selectable(ui, egui::Label::new(egui::WidgetText::Galley(Arc::clone(&galley))));
+    // Where each pill is, for tests and scripts.
+    for span in pills::spans(text) {
+        let row = galley.pos_from_cursor(egui::text::CCursor::new(span.start + 2));
+        solidcraft_ui_registry::publish_handle(&format!("{handle}:pill:{}", span.id), response.rect.min + row.center().to_vec2());
+    }
+    // The pointer on a pill: which one is read from the text layout, which starts at the label's corner.
+    let pos = response.hover_pos()?;
+    let at = galley.cursor_from_pos(pos - response.rect.min).index.0;
+    pills::spans(text).into_iter().find(|s| s.start <= at && at < s.end).map(|s| s.id)
+}
+
+/// The id of the message box.
+#[cfg(not(target_arch = "wasm32"))]
+fn input_id() -> Id {
+    Id::unique("sc_agent_chat_input")
+}
+
+/// Where the caret is in the message box (a character), if it has been in it.
+#[cfg(not(target_arch = "wasm32"))]
+fn caret(ctx: &egui::Context) -> Option<usize> {
+    egui::TextEdit::load_state(ctx, input_id()).and_then(|s| s.cursor.char_range()).map(|r| r.primary.index.0)
+}
+
+/// Put the caret of the message box at a character, and focus the box.
+#[cfg(not(target_arch = "wasm32"))]
+fn place_caret(ctx: &egui::Context, at: usize) {
+    let mut state = egui::TextEdit::load_state(ctx, input_id()).unwrap_or_default();
+    state.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(at))));
+    egui::TextEdit::store_state(ctx, input_id(), state);
+    ctx.memory_mut(|m| m.request_focus(input_id()));
+}
+
+/// The message box, with the pills of its picks drawn as pills. A pill is text (see [`pills`]), so
+/// the box edits, selects and pastes as always; what is added here: the caret goes after a pill just
+/// made, Backspace and Delete take a pill whole, typing `@` asks the host to open the picker where
+/// the `@` was, and the pointer on a pill says what it holds and has the host light it.
+#[cfg(not(target_arch = "wasm32"))]
+fn pill_input(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, focused: bool, hint: &str) -> egui::Response {
+    let ctx = ui.ctx().clone();
+    let t = Tokens::get();
+    if let Some(at) = chat.caret_to.take() {
+        place_caret(&ctx, at);
+    }
+    // Backspace right after a pill, Delete right before one: the whole pill goes.
+    if focused
+        && let Some(r) = egui::TextEdit::load_state(&ctx, input_id()).and_then(|s| s.cursor.char_range())
+        && r.primary == r.secondary
+    {
+        let at = r.primary.index.0;
+        let known = |id: u32| chat.pills.iter().any(|p| p.id == id);
+        let spans = pills::spans(&chat.input);
+        let back = spans.iter().find(|s| s.end == at && known(s.id)).cloned();
+        let forward = spans.iter().find(|s| s.start == at && known(s.id)).cloned();
+        // Plain, and with the word-delete modifiers (Ctrl, Alt): a word would take only part of a mark.
+        let modifiers = |k: egui::Key, ui: &egui::Ui| {
+            [egui::Modifiers::NONE, egui::Modifiers::CTRL, egui::Modifiers::ALT]
+                .into_iter()
+                .find(|m| ui.input(|i| i.key_pressed(k) && i.modifiers.matches_exact(*m)))
+        };
+        let hit = match (back, forward) {
+            (Some(span), _) if let Some(m) = modifiers(egui::Key::Backspace, ui) => Some((span, egui::Key::Backspace, m)),
+            (_, Some(span)) if let Some(m) = modifiers(egui::Key::Delete, ui) => Some((span, egui::Key::Delete, m)),
+            _ => None,
+        };
+        if let Some((span, key, m)) = hit {
+            ui.input_mut(|i| i.consume_key(m, key));
+            chat.input = pills::remove(&chat.input, span.start, span.end);
+            place_caret(&ctx, span.start);
+        }
+    }
+    let before = chat.input_chars;
+    let font = egui::FontId::proportional(t.font_label);
+    let look = {
+        let ids: Vec<(u32, bool)> = chat.pills.iter().enumerate().map(|(n, p)| (p.id, chat.gone.pills.get(n).copied().unwrap_or(false))).collect();
+        move |id: u32| {
+            ids.iter().find(|(pill, _)| *pill == id).map(|(_, gone)| pills::Look {
+                background: t.accent_soft,
+                text: if *gone { t.text_dim } else { t.text },
+                gone: *gone,
+            })
+        }
+    };
+    let mut layouter =
+        |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap: f32| ui.fonts_mut(|f| f.layout_job(pills::job(text.as_str(), &font, t.text, wrap, &look)));
+    let out = ui_kit::assistant_input_laid_out(ui, input_id(), &mut chat.input, hint, &mut layouter);
+    let chars = chat.input.chars().count();
+    chat.input_chars = chars;
+    // `@` typed as a new word opens the picker (the host opens it after the frame), and is not
+    // left in the text.
+    if out.response.changed()
+        && chars == before + 1
+        && let Some(at) = out.cursor_range.map(|r| r.primary.index.0).filter(|at| *at > 0)
+    {
+        let typed: Vec<char> = chat.input.chars().skip(at.saturating_sub(2)).take(2).collect();
+        let (prev, last) = if at >= 2 { (typed.first().copied(), typed.get(1).copied()) } else { (None, typed.first().copied()) };
+        // Not while another tool or dialog is open (the picker would not open and the @ would be lost),
+        // and not in the middle of an input method's composition.
+        let composing = ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Ime(_))));
+        if last == Some('@') && prev.is_none_or(char::is_whitespace) && !view.dialog_open && !composing {
+            chat.input = pills::remove(&chat.input, at - 1, at);
+            chat.input_chars = chars - 1;
+            place_caret(&ctx, at - 1);
+            chat.actions.push(PanelAction::StartPick { at: Some(at - 1) });
+        }
+    }
+    // The pointer on a pill lights what it stands for in the model, and says what that is.
+    if out.response.hovered()
+        && let Some(pos) = ui.input(|i| i.pointer.hover_pos())
+    {
+        let at = out.galley.cursor_from_pos(pos - out.galley_pos).index.0;
+        let over = pills::spans(&chat.input).into_iter().find(|s| s.start <= at && at < s.end);
+        if let Some(pill) = over.and_then(|s| chat.pills.iter().find(|p| p.id == s.id)) {
+            chat.hovered = Some(Hovered::Pill(pill.id));
+            let tip = pill.context.items.iter().map(|i| i.label.as_str()).collect::<Vec<_>>().join("\n");
+            return out.response.response.on_hover_text(tip);
+        }
+    }
+    out.response.response
+}
 
 /// The files for the next message, as chips in rows that fit the chat: a picture's thumbnail (or
 /// a file mark), the name cut to fit, and a × that takes the file off. Laid out by hand: egui
@@ -2999,6 +3211,65 @@ mod tests {
         }
         assert_eq!(app.agent_chat.actions, [PanelAction::Send { text: "Make a plate".into(), steer: false }]);
         assert!(app.agent_chat.items.is_empty(), "the panel itself sends nothing");
+    }
+
+    /// The composer of `app` drawn once with `events`, as the host draws it, its actions left unrun.
+    fn composer_frame(ctx: &egui::Context, app: &mut SolveApp, events: Vec<egui::Event>) {
+        solidcraft_ui_registry::clear_handles();
+        let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(440.0, 720.0));
+        let input = egui::RawInput { screen_rect: Some(screen), focused: true, events, ..Default::default() };
+        let mut output = ctx.run_ui(input, |ui| {
+            let prefs = AgentPanelPrefs::read(&app.preferences);
+            let view = PanelView::of(app, ui.ctx());
+            ui_kit::scope(ui, |ui| desktop_body(&mut app.agent_chat, &view, ui, Flow::Tall, &prefs));
+        });
+        output.textures_delta.clear();
+    }
+
+    /// A chat ready to take a message, with "Make a plate" in the box.
+    fn ready_app() -> SolveApp {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.agent_chat.detection = Some(discover::Detection::default());
+        app.agent_chat.picking = Some(false);
+        app.agent_chat.state = Some(State::Ready);
+        app.agent_chat.input = "Make a plate".to_string();
+        app
+    }
+
+    /// Pick context records where its pill goes (the caret in the box) for the host to open the
+    /// picker; the panel opens no dialog itself.
+    #[test]
+    fn the_pick_context_button_records_the_pick_for_the_host() {
+        let ctx = crate::fonts::test_context();
+        let mut app = ready_app();
+        // The caret is after "Make".
+        app.agent_chat.caret_to = Some(4);
+        for _ in 0..3 {
+            composer_frame(&ctx, &mut app, Vec::new());
+        }
+        let at = solidcraft_ui_registry::handle_at("agent_chat:pick_context").expect("the button is drawn");
+        for pressed in [true, false] {
+            composer_frame(&ctx, &mut app, crate::test_support::pointer(at, pressed));
+        }
+        assert_eq!(app.agent_chat.actions, [PanelAction::StartPick { at: Some(4) }]);
+        assert!(app.dialog.is_none(), "the panel opens no picker itself");
+    }
+
+    /// `@` typed where a word starts leaves the text and records a pick at its place for the host;
+    /// the panel opens no dialog itself.
+    #[test]
+    fn an_at_sign_records_a_pick_where_it_was_typed() {
+        let ctx = crate::fonts::test_context();
+        let mut app = ready_app();
+        app.agent_chat.input = "match ".into();
+        app.agent_chat.caret_to = Some(6);
+        for _ in 0..3 {
+            composer_frame(&ctx, &mut app, Vec::new());
+        }
+        composer_frame(&ctx, &mut app, vec![egui::Event::Text("@".into())]);
+        assert_eq!(app.agent_chat.input, "match ", "the @ is not left in the text");
+        assert_eq!(app.agent_chat.actions, [PanelAction::StartPick { at: Some(6) }]);
+        assert!(app.dialog.is_none(), "the panel opens no picker itself");
     }
 
     /// What a host with no agents, no selection and nothing open shows the panel.
