@@ -4609,7 +4609,6 @@ dependencies = [
  "log",
  "lopdf",
  "minisign-verify",
- "muda",
  "nix 0.31.3",
  "pollster 0.4.0",
  "proc-macro2",
@@ -4626,6 +4625,7 @@ dependencies = [
  "solidcraft-gpu",
  "solidcraft-space-mouse",
  "solidcraft-theme",
+ "solidcraft-ui-kit",
  "solidcraft-ui-registry",
  "solidcraft-ui-text",
  "solidcraft-viewport",
@@ -4638,6 +4638,29 @@ dependencies = [
  "web-time",
  "winreg",
  "zip",
+]
+
+[[package]]
+name = "solidcraft-ui-kit"
+version = "0.40.0-rc.3"
+dependencies = [
+ "arboard",
+ "egui",
+ "egui-wgpu",
+ "image",
+ "log",
+ "muda",
+ "serde",
+ "serde_json",
+ "solidcraft-color",
+ "solidcraft-theme",
+ "solidcraft-ui-registry",
+ "solidcraft-ui-text",
+ "solidcraft-viewport-egui",
+ "solidcraft-viewport-gpu",
+ "syn 2.0.119",
+ "tiny-skia",
+ "web-time",
 ]
 
 [[package]]

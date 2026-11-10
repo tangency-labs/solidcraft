@@ -270,7 +270,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.fillet_rail_end_on_continued_surface = true;
     k.fixes.fillet_rail_rim_on_face = true;
     k.fixes.fillet_rails_meet_at_one_end_point = true;
-    k.fixes.fillet_refuse_crossing_rails = true;
     k.fixes.fillet_refuse_face_consuming_blends = true;
     k.fixes.fillet_refuse_non_manifold_result = true;
     k.fixes.fillet_refuse_overlapping_bands = true;
@@ -329,7 +328,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.planar_path_sweep_statuses = true;
     k.fixes.point_solve_keeps_triangle_guess = true;
     k.fixes.precise_properties_body_length_scale = true;
-    k.fixes.primitive_path_curve_statuses = true;
     k.fixes.proto_edge_self_loop_on_vertex_degenerate = true;
     k.fixes.proto_edge_splits_at_captured_vertices = true;
     k.fixes.proto_vertex_miss_is_false = true;
@@ -338,8 +336,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.revolution_offset_axis_both_sides = true;
     k.fixes.revolution_round_offset_collapses = true;
     k.fixes.revolve_analytic_profile_faces = true;
-    k.fixes.revolve_arc_centre_near_axis_is_sphere = true;
-    k.fixes.revolve_arc_touching_axis_is_horn_torus = true;
     k.fixes.revolve_holed_profile_void = true;
     k.fixes.revolve_nested_shells_as_cavities = true;
     k.fixes.revolve_splits_curves_on_axis = true;

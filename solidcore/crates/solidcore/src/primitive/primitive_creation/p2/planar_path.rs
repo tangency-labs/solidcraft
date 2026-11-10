@@ -38,7 +38,7 @@ use crate::nurbs::b_spline_curve::p1::BSplineCurve;
 use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::crv_adv::p1::CurveEnd;
 use crate::primitive::primitive_creation::p1::{
-    extend_path_curves_with_kernel, position_profile_curves_impl, PrimitiveCreation,
+    extend_path_curves, position_profile_curves_impl, PrimitiveCreation,
 };
 use crate::primitive::primitive_creation::SweepOptions;
 use crate::topology::brep::p10::TrimType;
@@ -360,17 +360,7 @@ impl PrimitiveCreation {
         extend *= 2.0;
 
         // Extend all the path curves at start and end to make sure sweeps go past corner
-        let extended = if checked {
-            super::super::p1::extend_path_curves_impl(
-                &bspline_paths,
-                closed,
-                periodic,
-                extend,
-                true,
-            )?
-        } else {
-            extend_path_curves_with_kernel(k, &bspline_paths, closed, periodic, extend)?
-        };
+        let extended = extend_path_curves(&bspline_paths, closed, periodic, extend)?;
 
         // A plane normal is only needed at a mitre. A single straight path has
         // no unique normal (`ComputeCrvsNormal` returns SM_ERR) and needs none.

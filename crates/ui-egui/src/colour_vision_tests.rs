@@ -997,7 +997,9 @@ fn validation_badges_are_distinct_and_readable_in_every_mode() {
 /// two-colour themes (1-bit) tell them apart by shape alone.
 #[test]
 fn shipped_themes_draw_dimensions_in_their_own_readable_colour() {
-    use crate::theme_files::{builtin, is_two_colour, resolve};
+    crate::test_support::host_data();
+    use crate::test_support::is_two_colour;
+    use crate::theme_files::{builtin, resolve};
     use solidcraft_theme::contrast_ratio;
     let themes = [("light", Tokens::light()), ("dark", Tokens::dark())]
         .into_iter()
@@ -1086,7 +1088,7 @@ fn the_sections_messages_are_in_every_catalog() {
     let ids: Vec<&str> = ColorVision::ALL
         .into_iter()
         .flat_map(|m| [m.label_id(), m.help_id()])
-        .chain(crate::ui_kit::COLOUR_VISION_SAMPLE)
+        .chain(crate::prefs::figures::COLOUR_VISION_SAMPLE)
         .chain(["ui.colour_vision", "ui.colour_vision_mode", "ui.colour_vision_sample", "ui.colour_vision_note"])
         .collect();
     for (lang, text) in [

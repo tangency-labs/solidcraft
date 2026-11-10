@@ -405,25 +405,14 @@ fn side_pick(app: &SolveApp, o: &JointOrigin) -> Option<Sel> {
     let (pick, face, edge) = match &o.snap {
         Snap::FaceCenter { pick, face, .. } | Snap::CircleCenter { pick, face, .. } => (*pick, face.as_deref(), None),
         Snap::Edge { pick, edge, .. } => (*pick, None, edge.as_deref()),
-        Snap::Point { .. } | Snap::Frame { .. } => {
-            let path = if o.occurrence == 0 {
-                Vec::new()
-            } else {
-                let occurrence = s.doc.occurrences.iter().find(|p| p.id == o.occurrence)?;
-                let mut path = s.doc.first_path(occurrence.parent);
-                path.push(occurrence.id);
-                s.doc.path_placement(&path)?;
-                path
-            };
-            return Some(Sel::Occurrence { path });
-        }
+        Snap::Point { .. } | Snap::Frame { .. } => return Some(Sel::Occurrence { path: origin_placement(s, o)? }),
     };
-    // The pick is in the component's coordinates; the placed bodies are in the world.
-    let at =
-        if o.occurrence == 0 { solidcraft_engine::doc::IDENTITY } else { solidcraft_engine::doc::joints::occurrence_world(&s.doc, o.occurrence) };
+    // The pick is in its part's coordinates; the placed bodies are in the world.
+    let path = origin_placement(s, o)?;
+    let (_, at) = s.doc.path_placement(&path)?;
     let p = solidcraft_engine::doc::apply_point(&at, pick);
     let st = crate::open_meshing::session_world(s);
-    let own: Vec<&solidcraft_engine::doc::ModelBody> = st.bodies.iter().filter(|b| occurrence_of_body(s, &b.name) == Some(o.occurrence)).collect();
+    let own: Vec<&solidcraft_engine::doc::ModelBody> = st.bodies.iter().filter(|b| placement_of_body(s, &b.name).as_ref() == Some(&path)).collect();
     let named = match (face, edge) {
         (Some(name), _) => own.iter().filter_map(|b| named_face(b, name, p)).min_by(|a, b| a.0.total_cmp(&b.0)),
         (None, Some(name)) => own.iter().filter_map(|b| named_edge(b, name, p)).min_by(|a, b| a.0.total_cmp(&b.0)),
@@ -611,15 +600,34 @@ pub struct SnapPt {
 
 /// The occurrence placing a world body (0: the root design), the instance its name says.
 pub(crate) fn occurrence_of_body(s: &Session, body: &str) -> Option<u64> {
-    // The world name tells the instance: a further occurrence of a component is not its first.
+    placement_of_body(s, body).map(|path| path.last().copied().unwrap_or(0))
+}
+
+/// The placement of a world body: the occurrence ids from the root (empty: the root design).
+/// The world name tells the instance, a copy of a sub-assembly placed more than once included.
+pub(crate) fn placement_of_body(s: &Session, body: &str) -> Option<Vec<u64>> {
     let st = crate::open_meshing::session_world(s);
     let b = st.body(body)?;
     if s.doc.model_body_component(b) == 0 {
-        return Some(0);
+        return Some(Vec::new());
     }
     let model = s.model.state();
     let (_, _, _, path, _) = s.doc.body_frames_with_source(&model).into_iter().find(|(world, ..)| world == body)?;
-    path.last().copied()
+    (!path.is_empty()).then_some(path)
+}
+
+/// The placement a joint origin's part is at: its occurrence's first placement, then the
+/// occurrences it is inside.
+fn origin_placement(s: &Session, o: &JointOrigin) -> Option<Vec<u64>> {
+    if o.occurrence == 0 {
+        return Some(Vec::new());
+    }
+    let occurrence = s.doc.occurrences.iter().find(|p| p.id == o.occurrence)?;
+    let mut path = s.doc.first_path(occurrence.parent);
+    path.push(occurrence.id);
+    path.extend(&o.inside);
+    s.doc.path_placement(&path)?;
+    Some(path)
 }
 
 /// Centre and unit normal of the circle through a polyline's points, if it lies on one.
@@ -659,7 +667,7 @@ fn straight_edge_axis(pts: &[Vec3]) -> Option<Vec3> {
 }
 
 /// Normal of the mesh face `f` near `p`.
-fn face_normal_near(m: &Mesh, f: u32, p: Vec3) -> Option<Vec3> {
+pub(crate) fn face_normal_near(m: &Mesh, f: u32, p: Vec3) -> Option<Vec3> {
     m.triangles
         .iter()
         .zip(&m.tri_face)
@@ -744,8 +752,13 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
         }
         _ => return None,
     };
-    if let (Some(occ), Value::Object(m)) = (occurrence_of_body(s, body), &mut snap.param) {
-        m.insert("occurrence".into(), json!(occ));
+    // The placement picked on, so a part in a sub-assembly placed more than once is found on the
+    // copy it was picked on (#11426).
+    if let (Some(path), Value::Object(m)) = (placement_of_body(s, body), &mut snap.param) {
+        m.insert("occurrence".into(), json!(path.last().copied().unwrap_or(0)));
+        if !path.is_empty() {
+            m.insert("path".into(), json!(path));
+        }
     }
     Some(snap)
 }
@@ -794,6 +807,9 @@ fn shifted(s: &SnapPt, x: f64, y: f64) -> Value {
     let ax = s.z.any_perp();
     let ay = s.z.cross(ax);
     let mut p = json!({"frame": {"origin": pt(s.at + ax * x + ay * y), "z": pt(s.z), "x": pt(ax)}});
+    if let Some(path) = s.param.get("path") {
+        p["path"] = path.clone();
+    }
     if let Some(o) = s.param.get("occurrence") {
         p["occurrence"] = o.clone();
     }
@@ -1474,7 +1490,11 @@ fn joint_problem(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Option<(String
             bodies.push(b.to_string());
         }
     }
-    let occs: Vec<Option<u64>> = bodies.iter().map(|b| occurrence_of_body(&app.session, b)).collect();
+    // The occurrence a joint at each body would hold: a part in a later copy of a sub-assembly is
+    // held through that copy, so picks on the same part in two copies are two sides (#11426).
+    let doc = &app.session.doc;
+    let occs: Vec<Option<u64>> =
+        bodies.iter().map(|b| placement_of_body(&app.session, b).map(|path| solidcraft_engine::doc::joints::origin_anchor(doc, &path).0)).collect();
     if occs.first().is_some_and(|first| first.is_some() && occs.iter().all(|o| o == first)) {
         return Some(match bodies.as_slice() {
             [body] => (solidcraft_ui_text::format("joint.one_body", &[("body", body.as_str())]), Vec::new()),
@@ -1576,7 +1596,8 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                 return Ok(cmd("joint.as_built", p));
             }
             let (a, b) = (snap(0, "component 1's joint origin")?, snap(1, "component 2's joint origin")?);
-            if a.param.get("occurrence").is_some() && a.param.get("occurrence") == b.param.get("occurrence") {
+            let placed = |x: &SnapPt| (x.param.get("occurrence").cloned(), x.param.get("path").cloned());
+            if a.param.get("occurrence").is_some() && placed(&a) == placed(&b) {
                 return Err("the two origins are on the same component".into());
             }
             let (x, y) = (eval(&f.offset[0], ValueKind::Length)?, eval(&f.offset[1], ValueKind::Length)?);
@@ -2152,14 +2173,14 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
 }
 
 /// The Joints folder at the end of the Browser: a row per joint (double-click edits, the menu
-/// edits, drives, suppresses or deletes).
-pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
+/// edits, drives, suppresses or deletes). Returns the joint whose row is under the pointer.
+pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) -> Option<u64> {
     use crate::browser::{Row, draw_row, is_open, toggle};
     let joints: Vec<(u64, String, JointKind, bool)> =
         app.session.doc.assembly.joints.iter().map(|j| (j.id, j.name.clone(), j.kind, j.suppressed)).collect();
     app.tree.picked_joints.retain(|p| joints.iter().any(|j| j.0 == *p));
     if joints.is_empty() {
-        return;
+        return None;
     }
     // Drawn like every other browser node (its fold, eye and rows publish `fold:Joints`,
     // `eye:Joints`, `row:<name>`). The folder's eye is its own: hiding it hides every joint's
@@ -2179,9 +2200,10 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
         toggle(app, key, start_open);
     }
     if !open {
-        return;
+        return None;
     }
     let mut dialog: Option<Dialog> = None;
+    let mut hovered = None;
     for (id, name, kind, suppressed) in joints {
         let visible = app.session.joint_visible(id);
         let selected = app.tree.picked_joints.contains(&id);
@@ -2201,6 +2223,9 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
         );
         if let Some(resp) = &r.resp {
             resp.clone().backing_on_hover_text(format!("{kind:?} joint"));
+        }
+        if r.hovered {
+            hovered = Some(id);
         }
         if r.eye {
             let _ = app.run("browser.visibility", json!({ "joints": [id], "visible": !visible }));
@@ -2222,6 +2247,7 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
         app.tool = None;
         app.dialog = Some(d);
     }
+    hovered
 }
 
 /// A click on a joint's browser row: it becomes the pick (or, with Ctrl, toggles in or out of
@@ -2251,11 +2277,12 @@ pub fn pick_joint(app: &mut SolveApp, id: u64, add: bool) {
 /// double-click edits it, the eye shows or hides its glyph and the menu is the joint's menu.
 /// The folder starts closed and has no eye of its own (the root folder's eye hides every joint
 /// glyph); it isn't drawn for a placement no joint attaches. `key` is the placement's row key.
-pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key: &str, depth: usize) {
+/// Returns the joint whose row is under the pointer.
+pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key: &str, depth: usize) -> Option<u64> {
     use crate::browser::{Row, draw_row, is_open, toggle};
     let joints = placement_joints(&app.session.doc, path);
     if joints.is_empty() {
-        return;
+        return None;
     }
     let key = format!("{key}/joints");
     let open = is_open(app, &key, false);
@@ -2264,11 +2291,12 @@ pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key
         toggle(app, &key, false);
     }
     if !open {
-        return;
+        return None;
     }
     // Hiding the root folder hides every glyph: these rows fade with it, as its own rows do.
     let folder_shown = !app.session.folder_hidden("c0/joints");
     let mut dialog: Option<Dialog> = None;
+    let mut hovered = None;
     for j in joints {
         let id = j.id;
         let visible = app.session.joint_visible(id);
@@ -2288,6 +2316,9 @@ pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key
                 ..Default::default()
             },
         );
+        if r.hovered {
+            hovered = Some(id);
+        }
         if let Some(resp) = &r.resp {
             resp.clone().backing_on_hover_text(format!("{:?} joint", j.kind));
         }
@@ -2310,6 +2341,7 @@ pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key
         app.tool = None;
         app.dialog = Some(d);
     }
+    hovered
 }
 
 /// A joint as a placement's Joints folder lists it.
@@ -2615,29 +2647,28 @@ pub fn joint_glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         let Some(j) = app.session.doc.assembly.joints.iter().find(|j| j.id == g.id) else { continue };
         let Some((_, m)) = frames.iter().find(|(f, _)| *f == g.id) else { continue };
         crate::scenario::publish_handle(&format!("joint-glyph:{}", j.name), g.centre);
-        let col = if g.picked {
-            t.sel_edge
-        } else if j.suppressed {
-            t.text_dim
-        } else {
-            t.accent
-        };
-        let col = if g.faded { col.gamma_multiply(0.3) } else { col };
-        let width = if g.picked { 2.5 } else { 1.5 };
-        let stroke = Stroke::new(width, col);
+        let (stroke, rim) = glyph_strokes(app, g.id, g.picked, j.suppressed);
+        // A glyph piled on another is drawn faint.
+        let fade = |s: Stroke| if g.faded { Stroke::new(s.width, s.color.gamma_multiply(0.3)) } else { s };
+        let (stroke, rim) = (fade(stroke), rim.map(fade));
+        let width = stroke.width;
         let c = g.centre;
+        let fill = if g.faded { t.panel.gamma_multiply(0.3) } else { t.panel };
         if g.rigid {
             let half = if g.picked { RIGID_MARK + 1.0 } else { RIGID_MARK };
-            let fill = if g.faded { t.panel.gamma_multiply(0.3) } else { t.panel };
-            painter.rect(egui::Rect::from_center_size(c, vec2(half * 2.0, half * 2.0)), 0.0, fill, stroke, egui::StrokeKind::Middle);
+            let rect = egui::Rect::from_center_size(c, vec2(half * 2.0, half * 2.0));
+            if let Some(rim) = rim {
+                painter.rect_stroke(rect, 0.0, rim, egui::StrokeKind::Middle);
+            }
+            painter.rect(rect, 0.0, fill, stroke, egui::StrokeKind::Middle);
             continue;
         }
         let len = g.len;
-        // The motion axis (z), both ways.
-        if let (Some(a), Some(b)) = (proj.to_screen(at(m, 0.0, 0.0, -len)), proj.to_screen(at(m, 0.0, 0.0, len))) {
-            painter.line_segment([a, b], stroke);
-        }
-        // A ring about the axis.
+        // The motion axis (z), both ways, and a ring about it: the rim first, then the core.
+        let axis = match (proj.to_screen(at(m, 0.0, 0.0, -len)), proj.to_screen(at(m, 0.0, 0.0, len))) {
+            (Some(a), Some(b)) => Some([a, b]),
+            _ => None,
+        };
         let r = len * 0.5;
         let ring: Vec<Pos2> = (0..=32)
             .filter_map(|k| {
@@ -2645,8 +2676,13 @@ pub fn joint_glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
                 proj.to_screen(at(m, r * a.cos(), r * a.sin(), 0.0))
             })
             .collect();
-        if ring.len() > 1 {
-            painter.add(egui::Shape::line(ring, stroke));
+        for s in rim.into_iter().chain([stroke]) {
+            if let Some(axis) = axis {
+                painter.line_segment(axis, s);
+            }
+            if ring.len() > 1 {
+                painter.add(egui::Shape::line(ring.clone(), s));
+            }
         }
         // Limits: ticks across the ring for a turn, across the axis (or slot) for a slide.
         let warning = if g.faded { t.warning.gamma_multiply(0.3) } else { t.warning };
@@ -2668,8 +2704,27 @@ pub fn joint_glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
                 }
             }
         }
-        let fill = if g.faded { t.panel.gamma_multiply(0.3) } else { t.panel };
-        painter.circle(c, if g.picked { 4.5 } else { 3.5 }, fill, stroke);
+        if let Some(rim) = rim {
+            painter.circle_stroke(c, 4.5, rim);
+        }
+        painter.circle(c, if rim.is_some() { 4.5 } else { 3.5 }, fill, stroke);
+    }
+}
+
+/// A joint glyph's core stroke and, while it is picked or its browser row is hovered, the
+/// lighter rim under it: the colours and widths a selected or hovered body's edges use.
+pub(crate) fn glyph_strokes(app: &SolveApp, id: u64, picked: bool, suppressed: bool) -> (Stroke, Option<Stroke>) {
+    let t = Tokens::get();
+    let lit = if picked {
+        Some((t.sel_edge, t.sel_edge_rim))
+    } else if app.viewport.hover_joint == Some(id) {
+        Some((t.hover_edge, t.hover_edge_halo))
+    } else {
+        None
+    };
+    match lit {
+        Some((core, rim)) => (Stroke::new(2.5, core), Some(Stroke::new(2.5 + 3.0, rim))),
+        None => (Stroke::new(1.5, if suppressed { t.text_dim } else { t.accent }), None),
     }
 }
 

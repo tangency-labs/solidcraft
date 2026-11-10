@@ -307,7 +307,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.fillet_refuse_rails_leaving_faces = true;
     f.fillet_refuse_face_consuming_blends = true;
     f.fillet_refuse_non_manifold_result = true;
-    f.fillet_refuse_crossing_rails = true;
     f.fillet_corner_ball_patch = true;
     f.fillet_chamfer_cone_on_arc = true;
     f.fillet_torus_center_on_axis = true;
@@ -328,7 +327,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.flat_corners_test_bits = true;
     f.cylinder_rebuild_mean_radius = true;
     f.revolve_analytic_profile_faces = true;
-    f.revolve_arc_centre_near_axis_is_sphere = true;
     f.revolve_nested_shells_as_cavities = true;
     f.join_touching_loops = true;
     f.uv_trim_reversal_on_surface = true;

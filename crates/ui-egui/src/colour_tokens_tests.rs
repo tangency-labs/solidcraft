@@ -216,23 +216,33 @@ fn colours_outside_the_theme_are_only_the_listed_neutral_ones() {
                 scan(&path, &format!("{relative}/"), found);
                 continue;
             }
-            if !name.ends_with(".rs") || name.ends_with("_tests.rs") || matches!(name, "theme.rs" | "test_support.rs") {
-                continue;
-            }
-            let src = std::fs::read_to_string(&path).unwrap();
-            if src.trim_start().starts_with("#![cfg(test)]") {
-                continue;
-            }
-            let code = src.split("#[cfg(test)]").next().unwrap_or(&src);
-            let n: usize = COLOUR_LITERALS.iter().map(|p| code.matches(p).count()).sum();
-            let allowed = ALLOWED_LITERALS.iter().find(|(f, _, _)| *f == relative).map_or(0, |(_, n, _)| *n);
-            if n > allowed {
-                found.push(format!("{relative}: {n} colour literal(s), at most {allowed} allowed"));
-            }
+            check(&path, &relative, found);
+        }
+    }
+    fn check(path: &std::path::Path, relative: &str, found: &mut Vec<String>) {
+        let name = relative.rsplit('/').next().unwrap_or(relative);
+        if !name.ends_with(".rs") || name.ends_with("_tests.rs") || matches!(name, "theme.rs" | "test_support.rs") {
+            return;
+        }
+        let src = std::fs::read_to_string(path).unwrap();
+        if src.trim_start().starts_with("#![cfg(test)]") {
+            return;
+        }
+        // Code from the first test-only item on (test code and the kit's test fixtures) is not drawn.
+        let code = src.split("#[cfg(test)]").next().unwrap_or(&src);
+        let code = code.split(r#"#[cfg(any(test, feature = "test-support"))]"#).next().unwrap_or(code);
+        let n: usize = COLOUR_LITERALS.iter().map(|p| code.matches(p).count()).sum();
+        let allowed = ALLOWED_LITERALS.iter().find(|(f, _, _)| *f == relative).map_or(0, |(_, n, _)| *n);
+        if n > allowed {
+            found.push(format!("{relative}: {n} colour literal(s), at most {allowed} allowed"));
         }
     }
     for dir in &dirs {
         scan(dir, "", &mut found);
+    }
+    // The UI kit and its components, under the names they had here.
+    for (path, name) in crate::test_support::kit_files() {
+        check(&path, &name, &mut found);
     }
     assert!(found.is_empty(), "colour literals outside solidcraft_theme::Tokens: {found:?}");
 }
