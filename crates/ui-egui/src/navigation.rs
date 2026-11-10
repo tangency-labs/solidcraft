@@ -3192,7 +3192,7 @@ mod tests {
 
     fn touchscreen_frame(app: &mut crate::SolveApp, ctx: &egui::Context, events: Vec<egui::Event>, time: &mut f64, orbit: bool) {
         let rect = egui::Rect::from_min_max(egui::pos2(100.0, 100.0), egui::pos2(700.0, 500.0));
-        touchscreen_frame_in_rect(app, ctx, events, time, orbit, (rect, rect));
+        touchscreen_frame_in_rect(app, ctx, events, time, orbit, rect);
     }
 
     fn touchscreen_frame_in_rect(
@@ -3201,7 +3201,7 @@ mod tests {
         events: Vec<egui::Event>,
         time: &mut f64,
         orbit: bool,
-        (input_rect, camera_rect): (egui::Rect, egui::Rect),
+        input_rect: egui::Rect,
     ) -> bool {
         *time += 1.0 / 60.0;
         let raw = egui::RawInput {
@@ -3215,7 +3215,7 @@ mod tests {
         let mut out = ctx.run_ui(raw, |ui| {
             app.viewport.rect = Some(input_rect);
             let response = ui.interact(input_rect, ui.scope_id().with("touchscreen-test"), egui::Sense::click_and_drag());
-            inside = super::handle(app, ui, camera_rect, &response, super::NavCaps { orbit, pick: true }).inside;
+            inside = super::handle(app, ui, input_rect, &response, super::NavCaps { orbit, pick: true }).inside;
         });
         out.textures_delta.clear();
         inside
@@ -3225,12 +3225,11 @@ mod tests {
     fn touchscreen_release_uses_full_input_bounds_for_framed_camera() {
         use egui::TouchPhase::{End, Move, Start};
         let input_rect = egui::Rect::from_min_max(egui::pos2(100.0, 100.0), egui::pos2(700.0, 500.0));
-        let camera_rect = egui::Rect::from_min_max(egui::pos2(200.0, 200.0), egui::pos2(600.0, 400.0));
         for (release_x, expected_inside) in [(150.0, true), (750.0, false)] {
             let mut app = crate::SolveApp::new(Default::default(), Default::default());
             let ctx = crate::fonts::test_context();
             let mut time = 0.0;
-            let bounds = (input_rect, camera_rect);
+            let bounds = input_rect;
             touchscreen_frame_in_rect(&mut app, &ctx, pointer(300.0, 300.0, None), &mut time, false, bounds);
             let mut events = pointer(300.0, 300.0, Some(true));
             events.push(finger(1, Start, 300.0, 300.0));
@@ -3250,12 +3249,11 @@ mod tests {
     fn touchscreen_second_finger_can_pan_in_letterbox_but_not_outside_input() {
         use egui::TouchPhase::{Move, Start};
         let input_rect = egui::Rect::from_min_max(egui::pos2(100.0, 100.0), egui::pos2(700.0, 500.0));
-        let camera_rect = egui::Rect::from_min_max(egui::pos2(200.0, 200.0), egui::pos2(600.0, 400.0));
         for (second_x, expected_owned) in [(150.0, true), (50.0, false)] {
             let mut app = crate::SolveApp::new(Default::default(), Default::default());
             let ctx = crate::fonts::test_context();
             let mut time = 0.0;
-            let bounds = (input_rect, camera_rect);
+            let bounds = input_rect;
             touchscreen_frame_in_rect(&mut app, &ctx, pointer(300.0, 300.0, None), &mut time, false, bounds);
             let mut events = pointer(300.0, 300.0, Some(true));
             events.push(finger(1, Start, 300.0, 300.0));
