@@ -2438,6 +2438,12 @@ pub fn custom_models_accepted(app: &SolveApp) -> bool {
     app.agent_chat.custom_models_accepted()
 }
 
+/// The model pickers' search hint: one that takes a typed model id says so (#14369), since
+/// the list holds only the models the agent reported.
+pub(crate) fn model_search_hint(custom: bool) -> &'static str {
+    tr(if custom { "ui.agent_chat_model_search_or_id" } else { "ui.agent_chat_model_search" })
+}
+
 /// A typed model (the pickers' custom row). A listed id goes the usual way, others by the agent's
 /// kind; an agent that refuses it keeps its model and the chat says so. Returns whether it was sent.
 pub fn set_custom_model(app: &mut SolveApp, text: &str) -> bool {
