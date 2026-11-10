@@ -285,7 +285,7 @@ pub fn settings_number<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, rang
 }
 
 /// [`settings_number`] for a whole number, with step arrows (`whole_number_field`, #11829).
-pub(crate) fn settings_whole_number<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range: std::ops::RangeInclusive<T>) -> egui::Response {
+pub fn settings_whole_number<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range: std::ops::RangeInclusive<T>) -> egui::Response {
     ui.scope(|ui| {
         let t = Tokens::get();
         ui.spacing_mut().interact_size.x = t.form_label_width - t.space_6;
