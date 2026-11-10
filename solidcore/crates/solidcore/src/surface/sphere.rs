@@ -161,6 +161,7 @@ use crate::surface::surface::p2::{
     scale_step_angular_derivatives, Surface, SurfaceIntersection, SurfaceKind, TsectCurveType,
     SPHERE_TYPE,
 };
+use crate::surface::torus::{fitted_sides, meridians, sweep_frame};
 use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
 
 const OP_NEW: &str = "surface::sphere::Sphere::new";
@@ -2153,7 +2154,6 @@ impl Sphere {
         let ref_frame = ref_iso.reference_frame.ok_or_else(missing)?;
         let other_frame = other_iso.reference_frame.ok_or_else(missing)?;
         let rad = other_iso.radius.ok_or_else(missing)?;
-        let sweep_ivl = ref_iso.angles.ok_or_else(missing)?;
 
         // don't make negative radius spheres
         if rad <= EFF_ZERO {
@@ -2162,9 +2162,18 @@ impl Sphere {
 
         // get sphere orientation and size
         let sphere_origin = other_frame.origin(); // the frame where all circles have common center
-        let sphere_x_axis = ref_frame.x_axis(); // the fame where all circles are parallel
-        let sphere_y_axis = ref_frame.y_axis();
-        let sphere_z_axis = ref_frame.z_axis();
+        let sphere_z_axis = ref_frame.z_axis(); // the fame where all circles are parallel
+
+        // not upstream (#3199): the x axis and the sweep interval from the form's own end
+        // meridians about the axis (`sweep_frame`), not from `is_arc`'s fit of the first row
+        let Some((sphere_x_axis, sphere_y_axis, sweep_ivl)) = sweep_frame(
+            sphere_origin,
+            sphere_z_axis,
+            fitted_sides(&ref_frame, ref_iso.angles.ok_or_else(missing)?),
+            meridians(test, swap_uv)?,
+        ) else {
+            return Ok(None);
+        };
 
         // Check GenCurve rotation direction, its 'y' axis is either +/- sweepCircle z
         // bInsideOut: TRUE = GenCurve starts at +90 Pole and ends at -90 Pole
@@ -2387,13 +2396,19 @@ impl Sphere {
         let ref_frame = ref_iso.reference_frame.ok_or_else(missing)?;
         let other_frame = other_iso.reference_frame.ok_or_else(missing)?;
         let rad = other_iso.radius.ok_or_else(missing)?;
-        let sweep_ivl = ref_iso.angles.ok_or_else(missing)?;
 
         // get sphere orientation and size
         let sphere_origin = other_frame.origin();
-        let sphere_x_axis = ref_frame.x_axis();
-        let sphere_y_axis = ref_frame.y_axis();
         let sphere_z_axis = ref_frame.z_axis();
+        // not upstream (#3199): as `is_nurb_surface_sphere`, the x axis and the sweep interval
+        // from the form's own end meridians (`sweep_frame`)
+        let (sphere_x_axis, sphere_y_axis, sweep_ivl) = sweep_frame(
+            sphere_origin,
+            sphere_z_axis,
+            fitted_sides(&ref_frame, ref_iso.angles.ok_or_else(missing)?),
+            meridians(srf, swap_uv)?,
+        )
+        .ok_or_else(|| SolidError::sm_err(OP_REBUILD))?;
 
         // Check GenCurve rotation direction, its 'y' axis is either +/- sweepCircle z
         // bInsideOut: TRUE = GenCurve starts at +90 Pole and ends at -90 Pole
