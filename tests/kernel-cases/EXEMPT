@@ -118,6 +118,10 @@ motion.delete                     removes a motion study
 motion.export                     writes a study's results to a file
 motion.export_animation           writes an animation
 motion.list                       a listing of motion studies
+note.add                          notes anchored to the model; crates/engine/src/cmd/notes_tests.rs::add_update_delete_and_list_round_trip
+note.delete                       notes anchored to the model; crates/engine/src/cmd/notes_tests.rs::add_update_delete_and_list_round_trip
+note.list                         notes anchored to the model; crates/engine/src/cmd/notes_tests.rs::add_update_delete_and_list_round_trip
+note.update                       notes anchored to the model; crates/engine/src/cmd/notes_tests.rs::add_update_delete_and_list_round_trip
 panel.action                      controller actions; no geometry (crates/engine/src/panels/tests.rs and crates/ui-egui/src/panel_runtime/tests.rs)
 panel.activate                    application panel layout; no geometry (engine/UI/MCP tests)
 panel.close                       application panel layout; no geometry (engine/UI/MCP tests)
