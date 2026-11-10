@@ -16444,3 +16444,72 @@ fn render_quality_denoise_mask_displays_categorical_receipt_exports_and_returns_
     assert!(!quality::mask_active(&h.app));
     assert!(h.app.render_workspace.denoise_mask_image.is_none());
 }
+
+#[test]
+#[cfg(not(target_os = "macos"))]
+fn dx12_render_recovery_saves_vulkan_before_requesting_a_normal_restart() {
+    let mut h = Harness::new();
+    let path = h.dir.join("graphics.json");
+    std::fs::write(&path, json!({"backend":"auto","adapter":"Selected GPU","msaa":4}).to_string()).unwrap();
+    h.app.services.graphics_path = Some(path.to_string_lossy().into_owned());
+    h.app.services.graphics_backend = Some("dx12");
+    h.app.services.graphics_restart = Some((std::env::current_exe().unwrap(), Vec::new()));
+    h.app.preferences.save_prompt_one_at_a_time = true;
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    assert!(can_restart_with_vulkan(&h.app));
+    restart_with_vulkan(&mut h.app).unwrap();
+    let saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(saved["backend"], "vulkan");
+    assert_eq!(saved["backend_trial"], json!({"previous":"auto","requested":"vulkan","started":false}));
+    assert_eq!(saved["adapter"], "Selected GPU");
+    assert_eq!(h.app.preferences.graphics_backend, "vulkan");
+    assert!(!h.app.quit_requested && h.app.docs.quitting.is_some(), "unsaved work still asks");
+    crate::documents::control(&mut h.app, &json!({"answer":"cancel"}));
+    h.frames(1);
+    assert!(!h.app.quit_requested);
+    assert!(crate::update::take_launch(&mut h.app).is_none());
+}
+
+#[test]
+fn render_backend_recovery_is_not_offered_for_an_active_vulkan_or_overridden_session() {
+    let mut h = Harness::new();
+    h.app.services.graphics_path = Some(h.dir.join("graphics.json").to_string_lossy().into_owned());
+    h.app.services.graphics_restart = Some((std::env::current_exe().unwrap(), Vec::new()));
+    for backend in [None, Some("vulkan"), Some("metal")] {
+        h.app.services.graphics_backend = backend;
+        assert!(!can_restart_with_vulkan(&h.app));
+    }
+    h.app.services.graphics_backend = Some("dx12");
+    h.app.services.graphics_backend_override = true;
+    assert!(!can_restart_with_vulkan(&h.app));
+    h.app.services.graphics_backend_override = false;
+    h.app.cpu_meshing = true;
+    assert!(!can_restart_with_vulkan(&h.app));
+}
+
+#[test]
+fn render_backend_save_failure_does_not_schedule_a_restart() {
+    let mut h = Harness::new();
+    h.app.services.graphics_path = Some(h.dir.to_string_lossy().into_owned());
+    h.app.services.graphics_restart = Some((std::env::current_exe().unwrap(), Vec::new()));
+    assert!(restart_with_vulkan(&mut h.app).is_err());
+    assert_eq!(h.app.preferences.graphics_backend, "auto");
+    assert!(!h.app.quit_requested && h.app.docs.quitting.is_none());
+    assert!(crate::update::take_launch(&mut h.app).is_none());
+
+    let path = h.dir.join("graphics.json");
+    let original = br#"{"backend":"auto","msaa":4}"#;
+    std::fs::write(&path, original).unwrap();
+    h.app.services.graphics_path = Some(path.to_string_lossy().into_owned());
+    h.app.services.graphics_backend_override = true;
+    assert!(restart_with_vulkan(&mut h.app).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), original, "an override refuses before saving");
+    assert_eq!(h.app.preferences.graphics_backend, "auto");
+    h.app.services.graphics_backend_override = false;
+    h.app.services.graphics_restart = None;
+    assert!(restart_with_vulkan(&mut h.app).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), original, "missing restart support refuses before saving");
+    assert_eq!(h.app.preferences.graphics_backend, "auto");
+    assert!(!h.app.quit_requested && h.app.docs.quitting.is_none());
+    assert!(crate::update::take_launch(&mut h.app).is_none());
+}

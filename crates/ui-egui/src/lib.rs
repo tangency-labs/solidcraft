@@ -492,6 +492,12 @@ pub struct Services {
     pub desktop_dark: Option<Box<dyn Fn() -> Option<bool>>>,
     /// Lazy background observation; `needed` arms polling, the return is cached only.
     pub reduce_transparency: Option<Box<dyn Fn(bool) -> Option<bool>>>,
+    /// Graphics API that opened the current window; the saved preference applies next start.
+    pub graphics_backend: Option<&'static str>,
+    /// An explicit process override is controlling the API instead of the saved preference.
+    pub graphics_backend_override: bool,
+    /// The host's ordinary restart command, run only after unsaved designs are handled.
+    pub graphics_restart: Option<(std::path::PathBuf, Vec<String>)>,
     /// Adapter names and descriptive labels from the desktop renderer's chosen backends.
     pub graphics_adapters: Vec<(String, String)>,
     /// HTTPS GET for the update check (`update`); None: never check (browser, tests).

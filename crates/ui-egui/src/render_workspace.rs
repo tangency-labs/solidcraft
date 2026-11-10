@@ -1661,6 +1661,7 @@ fn image_edit_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         PathHost::Failed(error) => {
             ui.add(egui::Label::new(format!("{}: {error}", app.tr("render.gpu_path_failed"))).wrap());
             retry_crashed_setup(app, ui);
+            backend_recovery(app, ui);
         }
         _ => {}
     }
@@ -1696,6 +1697,50 @@ fn image_edit_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     materials::controls(app, ui);
     let transparent_label = app.tr("render.image_transparent").to_string();
     crate::ui_kit::checkbox(ui, &transparent_label, &mut app.render_workspace.view.transparent);
+}
+
+/// A DX12 window cannot open a Vulkan path device on Windows. Offer a persisted
+/// choice and the normal save-before-restart flow, without loading another driver here.
+fn can_restart_with_vulkan(app: &SolveApp) -> bool {
+    app.services.graphics_backend == Some("dx12")
+        && app.services.graphics_path.is_some()
+        && app.services.graphics_restart.is_some()
+        && !app.services.graphics_backend_override
+        && !app.blur.software_adapter()
+        && !app.cpu_meshing
+}
+
+/// Save the API before scheduling a restart; rejected host state or I/O leaves the app open.
+fn restart_with_vulkan(app: &mut SolveApp) -> Result<(), String> {
+    crate::prefs::check_graphics_restart(app)?;
+    crate::prefs::set_graphics_backend(app, "vulkan")?;
+    crate::prefs::request_graphics_restart(app)
+}
+
+/// The same backend recovery action is used by the compact image controls and
+/// the Output inspector. Selecting an API never changes the image method.
+fn backend_recovery(app: &mut SolveApp, ui: &mut egui::Ui) {
+    if app.render_workspace.view.method != ImageMethod::GpuRaytrace || app.services.graphics_path.is_none() {
+        return;
+    }
+    if can_restart_with_vulkan(app) {
+        ui.add(egui::Label::new(app.tr("render.graphics_api_vulkan_required")).wrap());
+        let response = crate::ui_kit::button(ui, app.tr("render.graphics_api_restart_vulkan"), crate::ui_kit::Button::Normal);
+        crate::scenario::publish_target("render:restart_vulkan", response.rect);
+        if response.clicked()
+            && let Err(reason) = restart_with_vulkan(app)
+        {
+            app.set_status(reason, true);
+        }
+        ui.add(egui::Label::new(app.tr("render.graphics_api_restart_warning")).wrap());
+    }
+    let response = crate::ui_kit::button(ui, app.tr("render.graphics_api_settings"), crate::ui_kit::Button::Normal);
+    crate::scenario::publish_target("render:graphics_settings", response.rect);
+    if response.clicked()
+        && let Err(reason) = crate::prefs::control(app, &serde_json::json!({"open":"Graphics"}))
+    {
+        app.set_status(reason, true);
+    }
 }
 
 /// Dense all-controls composition, also useful to standalone/offscreen hosts.
