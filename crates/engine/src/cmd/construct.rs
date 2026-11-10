@@ -8,8 +8,9 @@
 
 use serde_json::Value;
 use solidcore_record::Vec3;
-use solidcraft_doc::construct::{AxisDef, DatumItem, GeoRef, PointDef};
+use solidcraft_doc::construct::{AxisDef, DatumItem, DatumRef, GeoRef, PointDef};
 use solidcraft_doc::{FeatureKind, PlaneRef};
+use solidcraft_geom::Vec3Geom as _;
 
 use super::CommandSpec;
 use super::features::{add_feature, check_expr, plane_param, sketch_id};
@@ -19,6 +20,7 @@ use crate::schema::construct::{
     PlaneAlongPathParams, PlaneAxisPointParams, PlanePerpendicularParams, PlaneTangentParams, PlaneThreePointsParams, PlaneTwoEdgesParams,
     PointAlongPathParams, PointCenterParams, PointEdgePlaneParams, PointThreePlanesParams, PointTwoEdgesParams, PointVertexParams,
 };
+use crate::schema::construct::{CoordinateSystemParams, CoordinateSystemResult};
 use crate::schema::features::FeatureResult;
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -44,8 +46,23 @@ const PLANE_THREE_POINTS_CONTRACT: TypedContract<PlaneThreePointsParams> = Typed
 const PLANE_TANGENT_CONTRACT: TypedContract<PlaneTangentParams> = TypedContract::new();
 const PLANE_ALONG_PATH_CONTRACT: TypedContract<PlaneAlongPathParams> = TypedContract::new();
 const PLANE_PERPENDICULAR_CONTRACT: TypedContract<PlanePerpendicularParams> = TypedContract::new();
+const COORDINATE_SYSTEM_CONTRACT: TypedContract<CoordinateSystemParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("construct.coordinate_system", "Coordinate System", crate::checked!("construct.coordinate_system", coordinate_system))
+        .at("SOLID", "CONSTRUCT")
+        .icon("coordinate_system")
+        .contract(&COORDINATE_SYSTEM_CONTRACT)
+        .output(output_schema_for::<CoordinateSystemResult>)
+        .params(
+            "origin: [x,y,z] | \"center\" | \"bottom\" (of the active placement's bodies, kept as that point) | ref (a vertex, a round \
+             edge's or face's centre, a point on a face, a construction point); z?, x?: [x,y,z] | ref (an edge, axis, face or plane: \
+             its direction or normal; X is laid square to Z; defaults: the component's Z and X); z_flip?, x_flip?: bool; name? → \
+             feature, name, frame {origin, x, y, z}. A frame of the active component as a history step (#14644): nothing before \
+             it changes and it follows the model it is built on. Its datums: `CS1` (or `CS1/XY`, `/XZ`, `/YZ`) as a sketch plane \
+             or plane input, `CS1/X`, `/Y`, `/Z` as an axis, `CS1/O` as a point, and `CS1` as a joint side (its whole frame); \
+             saved by id, so renaming it keeps them. Hidden until shown (browser.visibility)",
+        ),
     CommandSpec::new("construct.axis.through_cylinder", "Axis Through Cylinder/Cone/Torus", crate::checked!("construct.axis.through_cylinder", axis_face))
         .at("SOLID", "CONSTRUCT")
         .icon("axis_through_cylinder")
@@ -282,6 +299,12 @@ pub(super) fn geo(s: &Session, v: Option<&Value>, cmd: &str, what: &str) -> Resu
                 None => GeoRef::Plane { plane: plane_param(s, Some(plane), cmd)? },
             }
         }
+        Ok(GeoForm::Axis(a)) if frame_datum_param(s, a, DatumItem::Z).is_some_and(|d| is_axis(d.item)) => {
+            GeoRef::Datum { datum: frame_datum_param(s, a, DatumItem::Z).ok_or_else(|| bad(cmd, format!("no axis `{a}`")))? }
+        }
+        Ok(GeoForm::ConstructPoint(n)) if frame_datum_param(s, n, DatumItem::O).is_some_and(|d| d.item == DatumItem::O) => {
+            GeoRef::Datum { datum: frame_datum_param(s, n, DatumItem::O).ok_or_else(|| bad(cmd, format!("no construction point `{n}`")))? }
+        }
         Ok(GeoForm::Axis(a)) => {
             if ["x", "y", "z"].contains(&a.to_ascii_lowercase().as_str()) {
                 GeoRef::World { axis: a.to_ascii_uppercase() }
@@ -311,6 +334,126 @@ pub(super) fn geo(s: &Session, v: Option<&Value>, cmd: &str, what: &str) -> Resu
     };
     g.name_picks(&s.model.state());
     Ok(g)
+}
+
+/// Whether a datum item is an axis (X, Y or Z).
+pub(crate) fn is_axis(item: DatumItem) -> bool {
+    matches!(item, DatumItem::X | DatumItem::Y | DatumItem::Z)
+}
+
+/// Whether a datum item is a plane (XY, XZ or YZ).
+pub(crate) fn is_plane(item: DatumItem) -> bool {
+    matches!(item, DatumItem::XY | DatumItem::XZ | DatumItem::YZ)
+}
+
+/// A datum from what a call names (#14644): a datum key (`o:2/3/cs:17/XY`, `cs:17/Z`,
+/// `o:2/origin/X`), or a coordinate system by name, alone (its `default` item) or with an item
+/// (`CS1/XZ`). The name is looked up now and saved as the feature's id, so renaming it keeps
+/// what uses it. `path` is the placement it is seen through (a joint side's); without one, the
+/// active placement when its component is the active one, else that component's first.
+pub(crate) fn datum_param(s: &Session, text: &str, default: DatumItem, path: Option<Vec<u64>>) -> Option<DatumRef> {
+    let text = text.trim();
+    if let Some(d) = DatumRef::parse_key(text) {
+        return Some(d);
+    }
+    let named = |name: &str| s.doc.find_feature(name).filter(|f| matches!(f.kind, FeatureKind::CoordinateSystem { .. }));
+    let (f, item) = match named(text) {
+        Some(f) => (f, default),
+        None => {
+            let (name, item) = text.rsplit_once('/')?;
+            (named(name.trim())?, DatumItem::parse(item.trim())?)
+        }
+    };
+    let path = match path {
+        Some(path) => path,
+        None if f.component == 0 => Vec::new(),
+        None if s.active_component == f.component => s.active_occurrence_path.clone().unwrap_or_else(|| s.doc.first_path(f.component)),
+        None => s.doc.first_path(f.component),
+    };
+    Some(DatumRef::frame(path, f.id, item))
+}
+
+/// [`datum_param`] for a coordinate system only: origin datums keep their own resolution order.
+fn frame_datum_param(s: &Session, text: &str, default: DatumItem) -> Option<DatumRef> {
+    datum_param(s, text, default, None).filter(|d| matches!(d.source, solidcraft_doc::construct::DatumSource::Frame(_)))
+}
+
+/// A coordinate system's direction from a call: three numbers are a typed direction, anything
+/// else a reference (an edge, axis, face or plane).
+fn frame_direction(s: &Session, p: &Value, key: &str, cmd: &str) -> Result<(Option<GeoRef>, Option<solidcraft_doc::Dir>)> {
+    match p.get(key) {
+        None | Some(Value::Null) => Ok((None, None)),
+        Some(v @ Value::Array(_)) => {
+            let d = vec3(v).ok_or_else(|| bad(cmd, format!("`{key}` must be [x, y, z] (finite numbers) or a reference: {REF}")))?;
+            if d.normalized().is_none() {
+                return Err(bad(cmd, format!("`{key}` must not be zero")));
+            }
+            Ok((None, Some(solidcraft_doc::Dir(d))))
+        }
+        Some(v) => Ok((Some(geo(s, Some(v), cmd, key)?), None)),
+    }
+}
+
+/// The middle of the box around the bodies of the active placement (the whole design at the
+/// top), or of that box's bottom (lowest world Z): where a part bought as a mesh usually wants
+/// a frame. Kept as the typed point it is now.
+fn bounds_point(s: &Session, which: &str, cmd: &str) -> Result<Vec3> {
+    let st = s.world_state()?;
+    let names: Option<std::collections::BTreeSet<String>> = match s.active_occurrence_path.as_deref().filter(|p| !p.is_empty()) {
+        Some(path) => Some(s.occurrence_bodies(path, true).map_err(|e| bad(cmd, e.to_string()))?.into_iter().collect()),
+        None => None,
+    };
+    let mut bb = solidcraft_geom::Aabb3::EMPTY;
+    for b in st.bodies.iter().filter(|b| names.as_ref().is_none_or(|n| n.contains(&b.name))) {
+        bb = bb.union(&b.body.outline_bounds());
+    }
+    if bb.is_empty() {
+        return Err(bad(cmd, "there are no bodies to measure for `center` or `bottom`"));
+    }
+    let c = (bb.min + bb.max) * 0.5;
+    Ok(if which == "bottom" { Vec3::new(c.x, c.y, bb.min.z) } else { c })
+}
+
+/// `construct.coordinate_system` (#14644): a frame of the active component's as a history step.
+fn coordinate_system(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "construct.coordinate_system";
+    let origin = match p.get("origin") {
+        None | Some(Value::Null) => return Err(bad(cmd, format!("`origin` is required: [x, y, z], \"center\", \"bottom\" or {REF}"))),
+        Some(Value::String(k)) if k == "center" || k == "bottom" => GeoRef::Point { p: bounds_point(s, k, cmd)? },
+        Some(v @ Value::Array(_)) => GeoRef::Point {
+            p: vec3(v).ok_or_else(|| bad(cmd, "`origin` must be [x, y, z] (finite numbers), \"center\", \"bottom\" or a reference"))?,
+        },
+        Some(v) => geo(s, Some(v), cmd, "origin")?,
+    };
+    if let GeoRef::Point { p } = &origin
+        && ![p.x, p.y, p.z].iter().all(|c| c.abs() < 1e9)
+    {
+        return Err(bad(cmd, "`origin` is out of range"));
+    }
+    let (z, z_dir) = frame_direction(s, p, "z", cmd)?;
+    let (x, x_dir) = frame_direction(s, p, "x", cmd)?;
+    let flip = |k: &str| match p.get(k) {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::Bool(b)) => Ok(*b),
+        _ => Err(bad(cmd, format!("`{k}` must be true or false"))),
+    };
+    let (z_flip, x_flip) = (flip("z_flip")?, flip("x_flip")?);
+    let mut out = add_feature(s, p, FeatureKind::CoordinateSystem { origin, z, z_dir, z_flip, x, x_dir, x_flip })?;
+    // Shown when asked for, as an Origin folder's items are: hidden at first.
+    let id = out.get("feature").and_then(Value::as_u64).or_else(|| s.doc.features.last().map(|f| f.id));
+    if let Some(name) = id.and_then(|id| s.doc.feature(id)).map(|f| f.name.clone()) {
+        let hidden = &mut s.visibility.hidden_origin;
+        if !hidden.contains(&name) {
+            hidden.push(name);
+        }
+    }
+    // Its frame in the world, where the active placement shows it.
+    if let Some(id) = id
+        && let Some((_, _, o, x, y, z)) = crate::view::construction_frames(s).into_iter().find(|f| f.0 == id)
+    {
+        out["frame"] = serde_json::json!({"origin": [o.x, o.y, o.z], "x": [x.x, x.y, x.z], "y": [y.x, y.y, y.z], "z": [z.x, z.y, z.z]});
+    }
+    Ok(out)
 }
 
 fn t_param(s: &Session, p: &Value, cmd: &str) -> Result<solidcraft_doc::Expr> {

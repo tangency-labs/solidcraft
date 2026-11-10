@@ -50,6 +50,10 @@ pub struct ExportStepParams {
     /// The bodies to export, by name. Default: every body.
     #[serde(default)]
     pub bodies: Option<StringList>,
+    /// Write the bodies in a coordinate system's frame (#14644), by name (`CS1`) or datum key,
+    /// instead of the world's. Not with URDF or the design file.
+    #[serde(default)]
+    pub frame: Option<String>,
 }
 
 /// Export bodies as an OBJ mesh file (`file.export_obj`), the colours of the bodies in a material
@@ -65,6 +69,10 @@ pub struct ExportMeshParams {
     /// How closely the mesh follows curved faces. Default: standard.
     #[serde(default)]
     pub quality: Option<MeshQualityParam>,
+    /// Write the bodies in a coordinate system's frame (#14644), by name (`CS1`) or datum key,
+    /// instead of the world's. Not with URDF or the design file.
+    #[serde(default)]
+    pub frame: Option<String>,
 }
 
 /// Export bodies as a binary STL file (`file.export_stl`), whatever the path's extension.
@@ -107,6 +115,10 @@ pub struct Export3mfParams {
     /// its shape. Default: false.
     #[serde(default)]
     pub lay_on_print_faces: Option<bool>,
+    /// Write the bodies in a coordinate system's frame (#14644), by name (`CS1`) or datum key,
+    /// instead of the world's. Not with URDF or the design file.
+    #[serde(default)]
+    pub frame: Option<String>,
 }
 
 /// Export the whole assembly as a robot description (URDF), with an STL mesh for each link
@@ -168,6 +180,10 @@ pub struct ExportParams {
     /// `file.export_stl` has it; refused for the other formats. Default: false. Not read for URDF.
     #[serde(default)]
     pub lay_on_print_faces: Option<bool>,
+    /// Write the bodies in a coordinate system's frame (#14644), by name (`CS1`) or datum key,
+    /// instead of the world's. Not with URDF or the design file.
+    #[serde(default)]
+    pub frame: Option<String>,
 }
 
 fn export_required(schema: &mut Schema) {
@@ -217,6 +233,7 @@ impl<'de> Deserialize<'de> for ExportParams {
             effort: None,
             velocity: None,
             lay_on_print_faces: None,
+            frame: None,
         };
         // The handler reads `path` first and refuses anything but a name it can write to; the
         // other keys are read only once it has one, and the format is known.
@@ -231,6 +248,7 @@ impl<'de> Deserialize<'de> for ExportParams {
             return Ok(out);
         };
         out.bodies = names::<D::Error>(&m)?;
+        out.frame = text::<D::Error>(&m, "frame")?;
         if format == Format::Urdf {
             // URDF reads its own keys; `quality` and `objects` are not read.
             out.mesh_prefix = text::<D::Error>(&m, "mesh_prefix")?;

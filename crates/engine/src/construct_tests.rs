@@ -1182,3 +1182,240 @@ fn snapped_centres_and_middles_follow_the_model() {
     let bad = s.execute("construct.point.vertex", &json!({"point": snap(json!({"type": "origin"}), "middle", [0.0, 0.0, 0.0])}));
     assert!(bad.is_err() || construction_points(&s).len() == 2, "{bad:?}");
 }
+
+// ---- Coordinate systems (#14644) ----------------------------------------------------------------
+
+/// A coordinate system's frame in the world: (origin, x, y, z).
+fn frame(s: &Session, name: &str) -> (Vec3, Vec3, Vec3, Vec3) {
+    let f = crate::view::construction_frames(s).into_iter().find(|f| f.1 == name).unwrap_or_else(|| panic!("no frame {name}"));
+    (f.2, f.3, f.4, f.5)
+}
+
+/// Every body's world box, rounded to 0.001 mm, by name.
+fn boxes(s: &Session) -> Vec<(String, [i64; 6])> {
+    let mut out: Vec<(String, [i64; 6])> = s
+        .world_state()
+        .unwrap()
+        .bodies
+        .iter()
+        .map(|b| {
+            let bb = solidcraft_kernel::measure(&b.body).unwrap().bbox;
+            (b.name.clone(), [bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.max.y, bb.max.z].map(|v| (v * 1e3).round() as i64))
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+/// On a vertex, with Z along an edge and X along another, it is the frame those make, and it
+/// follows them when the part changes size: nothing before it was rewritten.
+#[test]
+fn a_coordinate_system_on_a_vertex_follows_the_part() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "L", "expression": "40 mm"}));
+    run(&mut s, "solid.box", json!({"length": "L", "width": 30, "height": 20}));
+    let before: Vec<String> = s.doc.features.iter().map(|f| serde_json::to_string(&f.kind).unwrap()).collect();
+    let r = run(
+        &mut s,
+        "construct.coordinate_system",
+        json!({"origin": {"vertex": [40, 30, 20]}, "z": {"edge": [40, 30, 10]}, "x": {"edge": [20, 30, 20]}, "name": "Corner"}),
+    );
+    assert_eq!(r["name"], "Corner", "{r}");
+    // Earlier features are as they were.
+    let after: Vec<String> = s.doc.features.iter().take(before.len()).map(|f| serde_json::to_string(&f.kind).unwrap()).collect();
+    assert_eq!(after, before);
+    let (o, x, y, z) = frame(&s, "Corner");
+    assert!(near(o, Vec3::new(40.0, 30.0, 20.0)), "{o:?}");
+    assert!(parallel(z, Vec3::Z) && parallel(x, Vec3::X), "{x:?} {z:?}");
+    assert!((x.cross(y) - z).len() < 1e-9 && x.dot(z).abs() < 1e-9, "right-handed and square");
+    run(&mut s, "parameters.change", json!({"name": "L", "expression": "70 mm"}));
+    assert!(near(frame(&s, "Corner").0, Vec3::new(70.0, 30.0, 20.0)), "{:?}", frame(&s, "Corner").0);
+    // Hidden until shown, as an Origin folder's items are.
+    assert!(!s.construction_visible("Corner"));
+}
+
+/// Typed: the origin at a point and the axes along directions given as numbers; X is laid square
+/// to Z, and a flip reverses an axis.
+#[test]
+fn a_typed_coordinate_system_is_square_and_flips() {
+    let mut s = part();
+    run(&mut s, "construct.coordinate_system", json!({"origin": [5, 6, 7], "z": [0, 0, 2], "x": [1, 1, 0], "name": "A"}));
+    let (o, x, _, z) = frame(&s, "A");
+    assert!(near(o, Vec3::new(5.0, 6.0, 7.0)) && near(z, Vec3::Z));
+    assert!(near(x, Vec3::new(1.0, 1.0, 0.0).normalized().unwrap()));
+    run(&mut s, "construct.coordinate_system", json!({"origin": [0, 0, 0], "z": [0, 0, 1], "x": [1, 0, 1], "z_flip": true, "name": "B"}));
+    let (_, x, _, z) = frame(&s, "B");
+    assert!(near(z, Vec3::new(0.0, 0.0, -1.0)) && near(x, Vec3::X), "{x:?} {z:?}");
+    // A box's bottom centre (40 × 30 × 20 at the origin).
+    let mut one = Session::default();
+    run(&mut one, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    run(&mut one, "construct.coordinate_system", json!({"origin": "bottom", "name": "Foot"}));
+    assert!(near(frame(&one, "Foot").0, Vec3::new(20.0, 15.0, 0.0)), "{:?}", frame(&one, "Foot").0);
+}
+
+/// A sketch on a coordinate system's plane, extruded: it stays on that plane when the coordinate
+/// system is renamed (saved by id), and after saving and opening again.
+#[test]
+fn a_sketch_on_a_coordinate_system_plane_survives_rename_and_reopen() {
+    let mut s = part();
+    run(&mut s, "construct.coordinate_system", json!({"origin": [100, 0, 0], "z": [1, 0, 0], "x": [0, 1, 0], "name": "Side"}));
+    // Its YZ: through (100, 0, 0), square to its Y (world Z): the world XY plane at x 100…
+    // its XY is square to world X at x = 100.
+    run(&mut s, "sketch.create", json!({"plane": "Side"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 3, "body_name": "Tab"}));
+    let tab = |s: &Session| boxes(s).into_iter().find(|b| b.0 == "Tab").unwrap().1;
+    let at = tab(&s);
+    // On the frame's XY (world x = 100), 10 along its X (world Y), 5 along its Y (world Z), 3 out
+    // along its Z (world X).
+    assert_eq!(at, [100000, 0, 0, 103000, 10000, 5000]);
+    run(&mut s, "timeline.rename", json!({"feature": "Side", "name": "Wall"}));
+    assert_eq!(tab(&s), at);
+    let dir = std::env::temp_dir().join(format!("solidcraft-cs-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("cs.solidcraft").to_string_lossy().to_string();
+    run(&mut s, "file.save_as", json!({"path": path}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": path}));
+    assert_eq!(tab(&opened), at);
+    let _ = std::fs::remove_dir_all(&dir);
+    // A plane of it by name, and refusals that change nothing.
+    run(&mut s, "sketch.create", json!({"plane": "Wall/XZ"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let doc = s.doc.clone();
+    for bad in [json!({"plane": "Wall/Z"}), json!({"plane": "Wall/QQ"})] {
+        assert!(s.execute("sketch.create", &bad).is_err(), "{bad}");
+        assert_eq!(s.doc, doc);
+    }
+}
+
+/// Two parts joined rigidly by their coordinate systems: the second part's frame lands on the
+/// first's, origin, X and Z alike, whichever way each was built.
+#[test]
+fn a_joint_between_coordinate_systems_mates_whole_frames() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Base", "grounded": true}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10}));
+    run(&mut s, "construct.coordinate_system", json!({"origin": [40, 30, 10], "z": [0, 0, 1], "x": [0, 1, 0], "name": "Seat"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.create", json!({"name": "Peg", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 4, "width": 2, "height": 8, "corner": [100, 100, 0]}));
+    run(&mut s, "construct.coordinate_system", json!({"origin": [100, 100, 0], "z": [0, 0, -1], "x": [1, 0, 0], "name": "Plug"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let r = run(&mut s, "joint.create", json!({"type": "rigid", "a": "Seat", "b": "Plug"}));
+    assert_eq!(r["conflicts"], json!([]), "{r}");
+    let (oa, xa, _, za) = frame(&s, "Seat");
+    // `construction_frames` shows each where its component's first placement is: the Peg's.
+    let peg = s.doc.occurrences.iter().find(|o| s.doc.components.iter().any(|c| c.id == o.component && c.name == "Peg")).unwrap().id;
+    let pegw = s.occurrence_placement(&[peg]).unwrap().world;
+    let st = s.model.state();
+    let plug = st.construct.iter().find(|c| c.name == "Plug").unwrap().geom.placed(&pegw);
+    let solidcraft_doc::construct::ConstructGeom::Frame { origin, x, y } = plug else { panic!() };
+    assert!(near(origin, oa), "{origin:?} {oa:?}");
+    assert!(near(x, xa) && near(x.cross(y), za), "{x:?} {xa:?} {:?} {za:?}", x.cross(y));
+    // The peg, built hanging down from its corner (Z down), now stands on the seat turned over.
+    let peg_box = boxes(&s).into_iter().find(|b| b.0 == "Body2").map(|b| b.1).unwrap();
+    assert_eq!(peg_box[2], 10000 - 8000, "{peg_box:?}");
+}
+
+/// A coordinate system of a part placed twice is a datum of each placement: the same item seen
+/// through each path is where that placement puts it.
+#[test]
+fn a_coordinate_system_of_a_part_placed_twice_resolves_per_placement() {
+    let mut s = Session::default();
+    let made = run(&mut s, "component.create", json!({"name": "Leg", "grounded": false}));
+    let (comp, first) = (made["component"].as_u64().unwrap(), made["occurrence"].as_u64().unwrap());
+    run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 30}));
+    let id = run(&mut s, "construct.coordinate_system", json!({"origin": {"vertex": [4, 4, 30]}, "name": "Top"}))["feature"].as_u64().unwrap();
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let second = run(&mut s, "occurrence.copy", json!({"component": comp, "translate": [50, 0, 0]}))["occurrence"].as_u64().unwrap();
+    let st = s.model.state();
+    for (path, x) in [(vec![first], 4.0), (vec![second], 54.0)] {
+        let d = solidcraft_doc::construct::DatumRef::frame(path, id, solidcraft_doc::construct::DatumItem::O);
+        let key = d.key();
+        assert_eq!(solidcraft_doc::construct::DatumRef::parse_key(&key), Some(d.clone()), "{key}");
+        let g = solidcraft_doc::construct::resolve_datum(&s.doc, Some(&st), &d).unwrap();
+        assert_eq!(g, solidcraft_doc::construct::ConstructGeom::Point(Vec3::new(x, 4.0, 30.0)), "{key}");
+    }
+    // Seen through a placement of another component, it is refused.
+    let other = run(&mut s, "component.create", json!({"name": "Other"}))["occurrence"].as_u64().unwrap();
+    let d = solidcraft_doc::construct::DatumRef::frame(vec![other], id, solidcraft_doc::construct::DatumItem::O);
+    assert!(solidcraft_doc::construct::resolve_datum(&s.doc, Some(&s.model.state()), &d).is_err());
+}
+
+/// Bad calls are refused, changing nothing.
+#[test]
+fn coordinate_system_refusals_change_nothing() {
+    let mut s = part();
+    let doc = s.doc.clone();
+    for p in [
+        json!({}),
+        json!({"origin": [1, 2]}),
+        json!({"origin": [1, "x", 3]}),
+        json!({"origin": [1e300, 0, 0]}),
+        json!({"origin": "middle"}),
+        json!({"origin": [0, 0, 0], "z": [0, 0, 0]}),
+        json!({"origin": [0, 0, 0], "z": [0, 0, 1], "x": [0, 0, 5]}),
+        json!({"origin": [0, 0, 0], "z_flip": "yes"}),
+        json!({"origin": {"vertex": [999, 999, 999]}, "z": {"edge": [999, 0, 0]}}),
+        json!({"origin": {"construct_point": "Nope"}}),
+    ] {
+        assert!(s.execute("construct.coordinate_system", &p).is_err(), "{p} was accepted");
+        assert_eq!(s.doc, doc, "{p}");
+    }
+}
+
+/// Exported in a coordinate system's frame, the bodies' coordinates are the frame's: a box whose
+/// corner the frame sits on, turned, comes out from that corner along the frame's axes. STL and
+/// STEP alike, the STEP of a design with components as an assembly.
+#[test]
+fn an_export_in_a_coordinate_system_is_in_its_frame() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-cs-export-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = |n: &str| dir.join(n).to_string_lossy().to_string();
+    // A 40 × 30 × 20 box from (10, 20, 0); the frame on its corner (10, 20, 0) turned a quarter
+    // about Z: its X is the world's Y. In the frame the box runs 0…30 along X, -40…0 along Y.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "corner": [10, 20, 0]}));
+    run(&mut s, "construct.coordinate_system", json!({"origin": [10, 20, 0], "x": [0, 1, 0], "name": "Here"}));
+    let want = [0.0, -40.0, 0.0, 30.0, 0.0, 20.0];
+    let bounds = |path: &str| {
+        let mut t = Session::default();
+        t.execute("file.insert_mesh", &json!({"path": path})).or_else(|_| t.execute("file.insert_step", &json!({"path": path}))).unwrap();
+        let st = t.world_state().unwrap();
+        let mut bb = solidcraft_geom::Aabb3::EMPTY;
+        for b in &st.bodies {
+            bb = bb.union(&b.body.outline_bounds());
+        }
+        [bb.min.x, bb.min.y, bb.min.z, bb.max.x, bb.max.y, bb.max.z]
+    };
+    let close = |a: [f64; 6], b: [f64; 6]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-3);
+    run(&mut s, "file.export", json!({"path": file("here.stl"), "frame": "Here"}));
+    assert!(close(bounds(&file("here.stl")), want), "{:?}", bounds(&file("here.stl")));
+    run(&mut s, "file.export", json!({"path": file("here.step"), "frame": "Here"}));
+    assert!(close(bounds(&file("here.step")), want), "{:?}", bounds(&file("here.step")));
+    // Without it, the world.
+    run(&mut s, "file.export", json!({"path": file("world.stl")}));
+    assert!(close(bounds(&file("world.stl")), [10.0, 20.0, 0.0, 50.0, 50.0, 20.0]));
+
+    // With components, the STEP is an assembly: the part placed by its occurrence, all in the frame.
+    let mut a = Session::default();
+    run(&mut a, "component.create", json!({"name": "Part", "grounded": false}));
+    run(&mut a, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    run(&mut a, "component.activate", json!({"component": "root"}));
+    let occ = a.doc.occurrences[0].id;
+    run(&mut a, "occurrence.move", json!({"occurrence": occ, "translate": [10, 20, 0]}));
+    run(&mut a, "construct.coordinate_system", json!({"origin": [10, 20, 0], "x": [0, 1, 0], "name": "Here"}));
+    run(&mut a, "file.export", json!({"path": file("assembly.step"), "frame": "Here"}));
+    assert!(close(bounds(&file("assembly.step")), want), "{:?}", bounds(&file("assembly.step")));
+    // Refused: no such frame, URDF, and a slicer.
+    for (cmd, p) in [
+        ("file.export", json!({"path": file("x.stl"), "frame": "Nowhere"})),
+        ("file.export", json!({"path": file("x.urdf"), "frame": "Here"})),
+        ("file.save_mesh", json!({"path": file("x.3mf"), "frame": "Here", "slicer": "bambu"})),
+    ] {
+        assert!(a.execute(cmd, &p).is_err(), "{p}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -282,3 +282,80 @@ pub struct ConstructAutoResult {
 #[cfg(test)]
 #[path = "construct_tests.rs"]
 mod tests;
+
+/// Where a coordinate system's origin is: a point, `center` or `bottom` of the active
+/// placement's bodies (kept as that typed point), or a reference.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum FrameOrigin {
+    /// A point in mm, in the world.
+    At(Point3),
+    /// `center`: the middle of the box around the active placement's bodies (the whole design
+    /// at the top); `bottom`: the middle of that box's bottom (lowest world Z).
+    Keyword(FrameOriginKeyword),
+    /// A vertex, a round edge's or face's centre, a point picked on a face, a construction
+    /// point, a sketch point, or a coordinate system's origin.
+    Ref(GeoRefParam),
+}
+
+/// A place on the box around the active placement's bodies.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FrameOriginKeyword {
+    Center,
+    Bottom,
+}
+
+/// A coordinate system's direction: typed, or from a reference.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum FrameDirection {
+    /// A direction in the world: `[x, y, z]`, not zero.
+    Dir(Point3),
+    /// An edge, line or axis (its direction), or a face or plane (its normal).
+    Ref(GeoRefParam),
+}
+
+/// Add a coordinate system (#14644): a frame of the active component, a history step that
+/// changes nothing before it. Its origin, X/Y/Z axes and XY/XZ/YZ planes are datums: a sketch
+/// plane (`CS1` or `CS1/XZ`), a joint side (`CS1` is the whole frame), a construction input, or
+/// the frame an export is written in. Hidden until shown in the Browser.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CoordinateSystemParams {
+    /// Where its origin is.
+    pub origin: FrameOrigin,
+    /// Its Z axis. Default: the active component's Z.
+    #[serde(default, deserialize_with = "present")]
+    pub z: Option<FrameDirection>,
+    /// Its X axis, laid square to Z. Default: the component's X (its Y when Z runs along X).
+    #[serde(default, deserialize_with = "present")]
+    pub x: Option<FrameDirection>,
+    /// Reverse Z (a face's normal points out of the body; an edge has no side of its own).
+    #[serde(default, deserialize_with = "present")]
+    pub z_flip: Option<bool>,
+    /// Reverse X.
+    #[serde(default, deserialize_with = "present")]
+    pub x_flip: Option<bool>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: ConstructionCommon,
+}
+
+/// A coordinate system's frame in the world, where the active placement shows it.
+#[derive(Debug, Default, serde::Serialize, JsonSchema)]
+pub struct FrameAxes {
+    pub origin: [f64; 3],
+    pub x: [f64; 3],
+    pub y: [f64; 3],
+    pub z: [f64; 3],
+}
+
+/// What `construct.coordinate_system` returns: a feature command's reply and the frame.
+#[derive(Debug, serde::Serialize, JsonSchema)]
+pub struct CoordinateSystemResult {
+    #[serde(flatten)]
+    pub feature: super::features::FeatureResult,
+    /// The frame, once evaluated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frame: Option<FrameAxes>,
+}

@@ -569,6 +569,9 @@ impl SavedModel {
             let field = |key: &str| parse(s.get(key));
             let invalid = |_| bad("saved model: state");
             let sketch_keys = key_sets.get(index(s.get("sketch_key_set"), key_sets.len())?).cloned().ok_or_else(|| bad("saved model: state"))?;
+            let construct: Vec<crate::construct::Construct> = serde_json::from_value(field("construct")?).map_err(invalid)?;
+            // A coordinate system's frame is its construction's, in its own component's frame.
+            let frames = construct.iter().filter_map(|c| c.geom.frame().map(|m| (c.feature, m))).collect();
             Ok(ModelState {
                 frame_bodies: Default::default(),
                 bodies: ids("bodies", model_bodies.len())?.into_iter().filter_map(|i| model_bodies.get(i).cloned()).collect(),
@@ -586,7 +589,8 @@ impl SavedModel {
                     .iter()
                     .map(|i| index(Some(i), sheets.len()).and_then(|i| sheets.get(i).cloned().ok_or_else(|| bad("saved model: sheet"))))
                     .collect::<Result<Vec<_>>>()?,
-                construct: serde_json::from_value(field("construct")?).map_err(invalid)?,
+                construct,
+                frames,
                 threads: ids("threads", threads.len())?.into_iter().filter_map(|i| threads.get(i).cloned()).collect(),
                 sketch_keys,
                 blend_edges: serde_json::from_value(field("blend_edges")?).map_err(invalid)?,

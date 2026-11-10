@@ -2870,6 +2870,16 @@ pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<s
             Ok(PlaneRef::Origin { name: n.trim().to_ascii_uppercase() })
         }
         Some(Value::String(n)) => {
+            // A coordinate system's plane by name or key (#14644: `CS1` is its XY, `CS1/XZ`),
+            // saved as its datum by id.
+            if let Some(datum) = super::construct::datum_param(s, n, DatumItem::XY, None)
+                .filter(|d| matches!(d.source, solidcraft_doc::construct::DatumSource::Frame(_)))
+            {
+                return match super::construct::is_plane(datum.item) {
+                    true => Ok(PlaneRef::Datum { datum }),
+                    false => Err(bad(cmd, format!("`{}` is not a plane: give a coordinate system's XY, XZ or YZ", n.trim()))),
+                };
+            }
             // A construction plane feature by name first, so a name that looks like a datum key
             // still reaches it; a component origin plane is saved as its datum, so it follows
             // the placement instead of staying where it was picked.

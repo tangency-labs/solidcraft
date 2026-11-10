@@ -1081,7 +1081,7 @@ pub fn resolve_axis_ref(doc: &Document, st: &ModelState, occurrence: u64, axis: 
             // through a component's FIRST placement, while a joint side is an exact occurrence,
             // which may be a later placement of its component.
             let inv = in_occurrence(doc, occurrence)?;
-            match crate::construct::resolve_datum(doc, datum)? {
+            match crate::construct::resolve_datum(doc, Some(st), datum)? {
                 ConstructGeom::Axis { origin, dir } => Ok((apply_point(&inv, origin), apply_vector(&inv, dir))),
                 _ => Err(DocError::Invalid("the datum is not an axis (pick the X, Y or Z of a component)".into())),
             }
@@ -3087,16 +3087,14 @@ mod tests {
         let occ = placed.occurrences.iter().find(|o| o.component == comp).unwrap().id;
         let away: crate::Mat = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [100.0, 0.0, 0.0, 1.0]];
         placed.occurrences.iter_mut().find(|o| o.id == occ).unwrap().transform = away;
-        let datum = DatumRef { path: vec![occ], item: DatumItem::XY };
+        let datum = DatumRef::origin(vec![occ], DatumItem::XY);
         let o_datum =
             JointOrigin::new(occ, Snap::Plane { plane: Box::new(PlaneRef::Datum { datum }), pick: Some(Vec3::new(3.0, 0.0, 7.0)), x: None });
         let m_datum = resolve_origin(&placed, &st, &o_datum).unwrap();
         assert_eq!(apply_point(&m_datum, Vec3::ZERO), Vec3::new(3.0, 0.0, 0.0), "the pick, projected onto the component's own XY");
         assert_eq!(apply_vector(&m_datum, Vec3::Z), Vec3::Z);
-        let o_datum_axis = JointOrigin::new(
-            occ,
-            Snap::Axis { axis: Box::new(AxisRef::datum(DatumRef { path: vec![occ], item: DatumItem::X })), pick: None, x: None },
-        );
+        let o_datum_axis =
+            JointOrigin::new(occ, Snap::Axis { axis: Box::new(AxisRef::datum(DatumRef::origin(vec![occ], DatumItem::X))), pick: None, x: None });
         let m_axis = resolve_origin(&placed, &st, &o_datum_axis).unwrap();
         assert_eq!(apply_point(&m_axis, Vec3::ZERO), Vec3::ZERO, "the component's own X datum in its own frame");
         assert_eq!(apply_vector(&m_axis, Vec3::Z), Vec3::X);

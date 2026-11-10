@@ -120,8 +120,17 @@ pub enum PointDef {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ConstructGeom {
     Plane(Plane),
-    Axis { origin: Vec3, dir: Vec3 },
+    Axis {
+        origin: Vec3,
+        dir: Vec3,
+    },
     Point(Vec3),
+    /// A coordinate system (#14644): its origin and its X and Y axes, Z being X × Y.
+    Frame {
+        origin: Vec3,
+        x: Vec3,
+        y: Vec3,
+    },
 }
 
 impl ConstructGeom {
@@ -132,8 +141,21 @@ impl ConstructGeom {
             ConstructGeom::Plane(p) => Plane::new(point(p.origin), vector(p.x), vector(p.y)).map_or_else(|| self.clone(), ConstructGeom::Plane),
             ConstructGeom::Axis { origin, dir } => ConstructGeom::Axis { origin: point(*origin), dir: vector(*dir) },
             ConstructGeom::Point(p) => ConstructGeom::Point(point(*p)),
+            ConstructGeom::Frame { origin, x, y } => ConstructGeom::Frame { origin: point(*origin), x: vector(*x), y: vector(*y) },
         }
     }
+
+    /// A coordinate system's frame as a matrix (its X, Y and Z columns, then its origin).
+    pub fn frame(&self) -> Option<crate::Mat> {
+        let ConstructGeom::Frame { origin, x, y } = self else { return None };
+        Some(frame_matrix(*origin, *x, *y))
+    }
+}
+
+/// The rigid frame with origin `o` and axes `x`, `y` and `x × y`.
+pub fn frame_matrix(o: Vec3, x: Vec3, y: Vec3) -> crate::Mat {
+    let z = x.cross(y);
+    [[x.x, x.y, x.z, 0.0], [y.x, y.y, y.z, 0.0], [z.x, z.y, z.z, 0.0], [o.x, o.y, o.z, 1.0]]
 }
 
 /// One of the seven named items of a placement's Origin folder: the O point, the X, Y and Z
@@ -192,34 +214,79 @@ impl DatumItem {
     }
 }
 
-/// An origin datum of an exact placement. The empty path is never a `DatumRef`: the root keeps
-/// `PlaneRef::Origin` and `GeoRef::Origin` as they are.
+/// What a datum's seven items are the items of: a placement's origin, or a coordinate system
+/// feature in that placement's component (#14644).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum DatumSource {
+    #[default]
+    Origin,
+    /// A `FeatureKind::CoordinateSystem`, by feature id: renaming it keeps its references.
+    Frame(u64),
+}
+
+/// A datum of an exact placement: an item of its origin or of one of its component's
+/// coordinate systems. An origin datum's path is never empty: the root keeps `PlaneRef::Origin`
+/// and `GeoRef::Origin` as they are. A coordinate system of the root has the empty path.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DatumRef {
     /// The occurrence ids of the placement, root first.
     pub path: Vec<u64>,
     pub item: DatumItem,
+    pub source: DatumSource,
+}
+
+/// Canonical non-zero decimal ids: `1`, not `01` or `0`.
+fn canonical_id(id: &str) -> Option<u64> {
+    id.parse::<u64>().ok().filter(|n| *n != 0 && n.to_string() == id)
 }
 
 impl DatumRef {
-    /// The datum's Browser key: `o:2/3/origin/XY`.
+    /// An item of a placement's origin.
+    pub fn origin(path: Vec<u64>, item: DatumItem) -> Self {
+        DatumRef { path, item, source: DatumSource::Origin }
+    }
+
+    /// An item of coordinate system `feature`, seen through the placement `path` (empty for
+    /// one of the design's own).
+    pub fn frame(path: Vec<u64>, feature: u64, item: DatumItem) -> Self {
+        DatumRef { path, item, source: DatumSource::Frame(feature) }
+    }
+
+    /// The datum's Browser key: `o:2/3/origin/XY`; a coordinate system's `o:2/3/cs:17/XY`, or
+    /// `cs:17/XY` for one of the design's own.
     pub fn key(&self) -> String {
-        format!("o:{}/origin/{}", self.path.iter().map(|id| id.to_string()).collect::<Vec<_>>().join("/"), self.item.name())
+        let ids = self.path.iter().map(|id| id.to_string()).collect::<Vec<_>>().join("/");
+        match self.source {
+            DatumSource::Origin => format!("o:{ids}/origin/{}", self.item.name()),
+            DatumSource::Frame(f) if self.path.is_empty() => format!("cs:{f}/{}", self.item.name()),
+            DatumSource::Frame(f) => format!("o:{ids}/cs:{f}/{}", self.item.name()),
+        }
     }
 
     /// Strict: canonical non-zero decimal ids, depth at most 64, length at most 2048. Rejects
-    /// `c0/origin`, `o:01/origin/X` and `o:0/origin/X`.
+    /// `c0/origin`, `o:01/origin/X`, `o:0/origin/X` and `cs:0/X`.
     pub fn parse_key(key: &str) -> Option<Self> {
         if key.len() > 2048 {
             return None;
         }
+        if let Some(rest) = key.strip_prefix("cs:") {
+            let (feature, item) = rest.split_once('/')?;
+            return Some(DatumRef::frame(Vec::new(), canonical_id(feature)?, DatumItem::parse(item)?));
+        }
         let rest = key.strip_prefix("o:")?;
-        let (ids, item) = rest.rsplit_once("/origin/")?;
+        let (ids, source, item) = match rest.rsplit_once("/origin/") {
+            Some((ids, item)) => (ids, DatumSource::Origin, item),
+            None => {
+                let (head, item) = rest.rsplit_once('/')?;
+                let (ids, feature) = head.rsplit_once("/cs:")?;
+                (ids, DatumSource::Frame(canonical_id(feature)?), item)
+            }
+        };
         if ids.is_empty() || ids.split('/').count() > 64 {
             return None;
         }
-        let path = ids.split('/').map(|id| id.parse::<u64>().ok().filter(|n| *n != 0 && n.to_string() == id)).collect::<Option<Vec<_>>>()?;
-        Some(DatumRef { path, item: DatumItem::parse(item)? })
+        let path = ids.split('/').map(canonical_id).collect::<Option<Vec<_>>>()?;
+        Some(DatumRef { path, item: DatumItem::parse(item)?, source })
     }
 }
 
@@ -239,24 +306,42 @@ impl<'de> Deserialize<'de> for DatumRef {
     }
 }
 
-/// An origin datum of an exact placement, resolved at evaluation time: the item in its own
-/// component's frame, placed by the placement's world frame. It follows the component on every
-/// evaluation, the way `PlaneRef::Face` re-finds its face.
-pub fn resolve_datum(doc: &Document, d: &DatumRef) -> Result<ConstructGeom> {
-    Ok(d.item.geom().placed(&doc.placement_frame(&d.path)?))
+/// A datum of an exact placement, resolved at evaluation time: the item in its own component's
+/// frame, placed by the placement's world frame. It follows the component on every evaluation,
+/// the way `PlaneRef::Face` re-finds its face. A coordinate system's items are its own frame's,
+/// as evaluated in `st` (which must have reached it in the timeline).
+pub fn resolve_datum(doc: &Document, st: Option<&ModelState>, d: &DatumRef) -> Result<ConstructGeom> {
+    match d.source {
+        DatumSource::Origin => Ok(d.item.geom().placed(&doc.placement_frame(&d.path)?)),
+        DatumSource::Frame(feature) => {
+            let f = doc.feature(feature).ok_or_else(|| DocError::Unknown(format!("coordinate system {feature}")))?;
+            if !matches!(f.kind, crate::FeatureKind::CoordinateSystem { .. }) {
+                return Err(bad(format!("`{}` is not a coordinate system", f.name)));
+            }
+            let placement = if d.path.is_empty() { crate::IDENTITY } else { doc.placement_frame(&d.path)? };
+            let owner = if d.path.is_empty() { 0 } else { doc.path_placement(&d.path).map_or(u64::MAX, |(c, _)| c) };
+            if owner != f.component {
+                return Err(bad(format!("`{}` belongs to another component than the placement given", f.name)));
+            }
+            let local = st
+                .and_then(|st| st.frame_of(feature))
+                .ok_or_else(|| bad(format!("`{}` comes later in the timeline, so it can't be used here", f.name)))?;
+            Ok(d.item.geom().placed(&crate::mat_mul(&placement, &local)))
+        }
+    }
 }
 
 /// [`resolve_datum`] as the component `component` sees it: placed by the placements, then
 /// mapped back through that component's frame, since a feature evaluated in its own frame
 /// places what it reads into the world again through that frame (the world pass). The root
 /// (0) reads the world as it is.
-pub fn resolve_datum_in(doc: &Document, d: &DatumRef, component: u64) -> Result<ConstructGeom> {
+pub fn resolve_datum_in(doc: &Document, st: Option<&ModelState>, d: &DatumRef, component: u64) -> Result<ConstructGeom> {
     if component == 0 {
-        return resolve_datum(doc, d);
+        return resolve_datum(doc, st, d);
     }
     let inverse =
         crate::mat_inverse(&doc.component_transform(component)).ok_or_else(|| DocError::Invalid("the component's placement is singular".into()))?;
-    Ok(resolve_datum(doc, d)?.placed(&inverse))
+    Ok(resolve_datum(doc, st, d)?.placed(&inverse))
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -533,7 +618,7 @@ pub(crate) fn point(ctx: &Ctx, g: &GeoRef) -> Result<Vec3> {
         // A round edge or face: its centre.
         GeoRef::Edge { .. } | GeoRef::Face { .. } | GeoRef::SketchCurve { .. } => centre(ctx, g),
         GeoRef::Snap { of, kind, at, end } => snap_point(ctx.st, of, *kind, *at, *end).or_else(|_| snap_point_ctx(ctx, of, *kind, *at)),
-        GeoRef::Datum { datum } => match resolve_datum_in(ctx.doc, datum, ctx.component)? {
+        GeoRef::Datum { datum } => match resolve_datum_in(ctx.doc, Some(ctx.st), datum, ctx.component)? {
             ConstructGeom::Point(p) => Ok(p),
             _ => Err(bad("the datum is not a point (pick the O of a component)")),
         },
@@ -654,7 +739,7 @@ pub fn model_axis_in(doc: Option<&Document>, st: &ModelState, g: &GeoRef, compon
     match g {
         GeoRef::Datum { datum } => {
             let doc = doc.ok_or_else(|| bad("this axis is built from a component's origin: evaluate first"))?;
-            match resolve_datum_in(doc, datum, component)? {
+            match resolve_datum_in(doc, Some(st), datum, component)? {
                 ConstructGeom::Axis { origin, dir } => Ok((origin, dir)),
                 _ => Err(bad("the datum is not an axis (pick the X, Y or Z of a component)")),
             }
@@ -677,7 +762,7 @@ pub fn canonical_dir(d: Vec3) -> Vec3 {
 /// A reference as a line (origin, unit direction).
 pub(crate) fn line(ctx: &Ctx, g: &GeoRef) -> Result<(Vec3, Vec3)> {
     match g {
-        GeoRef::Datum { datum } => match resolve_datum_in(ctx.doc, datum, ctx.component)? {
+        GeoRef::Datum { datum } => match resolve_datum_in(ctx.doc, Some(ctx.st), datum, ctx.component)? {
             ConstructGeom::Axis { origin, dir } => Ok((origin, dir)),
             _ => Err(bad("the datum is not an axis (pick the X, Y or Z of a component)")),
         },
@@ -717,7 +802,7 @@ pub(crate) fn plane(ctx: &Ctx, g: &GeoRef) -> Result<Plane> {
                 _ => Err(bad("the face is not planar")),
             }
         }
-        GeoRef::Datum { datum } => match resolve_datum_in(ctx.doc, datum, ctx.component)? {
+        GeoRef::Datum { datum } => match resolve_datum_in(ctx.doc, Some(ctx.st), datum, ctx.component)? {
             ConstructGeom::Plane(p) => Ok(p),
             _ => Err(bad("the datum is not a plane (pick the XY, XZ or YZ of a component)")),
         },
@@ -929,6 +1014,85 @@ fn line_line(a: (Vec3, Vec3), b: (Vec3, Vec3)) -> Option<Vec3> {
 /// and the bodies of the constructions it is built from. Empty when any pick is not on a body
 /// (a fixed point, the origin, a plane, a world axis, a sketch) or is not found: such a
 /// construction is held by something a move of the bodies leaves where it is, so it stays.
+/// The model references a coordinate system reads: its origin and its Z and X references.
+pub(crate) fn frame_refs(kind: &crate::FeatureKind) -> Vec<&GeoRef> {
+    match kind {
+        // One also held by typed coordinates or a typed direction is not carried by a Move of
+        // the bodies it is on (`source_bodies`): that part of it stays where it was typed.
+        crate::FeatureKind::CoordinateSystem { origin: GeoRef::Point { .. }, .. }
+        | crate::FeatureKind::CoordinateSystem { z_dir: Some(_), .. }
+        | crate::FeatureKind::CoordinateSystem { x_dir: Some(_), .. } => vec![&GeoRef::Origin],
+        crate::FeatureKind::CoordinateSystem { origin, z, x, .. } => std::iter::once(origin).chain(z.as_ref()).chain(x.as_ref()).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// A coordinate system's origin and X and Y axes (Z is X × Y) in its component's frame, as the
+/// model is now (#14644). Z comes from its reference or typed direction, else the component's
+/// Z; X from its own, laid square to Z, else the component's X (its Y when Z runs along X).
+pub(crate) fn resolve_frame(ctx: &Ctx, kind: &crate::FeatureKind) -> Result<(Vec3, Vec3, Vec3)> {
+    let crate::FeatureKind::CoordinateSystem { origin, z, z_dir, z_flip, x, x_dir, x_flip } = kind else {
+        return Err(bad("not a coordinate system"));
+    };
+    let o = frame_origin(ctx, origin)?;
+    if ![o.x, o.y, o.z].iter().all(|c| c.is_finite() && c.abs() < 1e9) {
+        return Err(bad("the coordinate system's origin is out of range"));
+    }
+    let direction = |r: &Option<GeoRef>, typed: &Option<crate::Dir>, flip: bool, what: &str| -> Result<Option<Vec3>> {
+        let v = match (r, typed) {
+            (Some(_), Some(_)) => return Err(bad(format!("give the {what} direction by a reference or as numbers, not both"))),
+            (Some(g), None) => frame_direction(ctx, g)?,
+            (None, Some(d)) => Vec3::from(*d),
+            (None, None) => return Ok(None),
+        };
+        let v = v.normalized().filter(|v| v.is_finite()).ok_or_else(|| bad(format!("the {what} direction has no length")))?;
+        Ok(Some(if flip { v * -1.0 } else { v }))
+    };
+    let zv = direction(z, z_dir, *z_flip, "Z")?.unwrap_or(Vec3::Z);
+    let square = |v: Vec3| (v - zv * v.dot(zv)).normalized();
+    let xv = match direction(x, x_dir, false, "X")? {
+        Some(v) => square(v).ok_or_else(|| bad("the X direction runs along Z: pick one across it"))?,
+        None => square(Vec3::X).or_else(|| square(Vec3::Y)).unwrap_or_else(|| zv.any_perp()),
+    };
+    let xv = if *x_flip { xv * -1.0 } else { xv };
+    Ok((o, xv, zv.cross(xv)))
+}
+
+/// A coordinate system's origin: any point reference, or the point picked on a face that has
+/// no centre (a flat one), kept on the face as the face is now.
+fn frame_origin(ctx: &Ctx, g: &GeoRef) -> Result<Vec3> {
+    match point(ctx, g) {
+        Ok(p) => Ok(p),
+        Err(e) => match g {
+            GeoRef::Face { at, .. } => match plane(ctx, g) {
+                Ok(pl) => {
+                    let n = pl.normal().normalized().ok_or(e)?;
+                    Ok(*at - n * (*at - pl.origin).dot(n))
+                }
+                Err(_) => Err(e),
+            },
+            _ => Err(e),
+        },
+    }
+}
+
+/// A direction from a reference: a face's or plane's normal, else an edge's, line's or axis's
+/// direction (a round face's or edge's axis).
+fn frame_direction(ctx: &Ctx, g: &GeoRef) -> Result<Vec3> {
+    match g {
+        GeoRef::Face { .. } | GeoRef::Plane { .. } => match plane(ctx, g) {
+            Ok(p) => Ok(p.normal()),
+            Err(e) => line(ctx, g).map(|(_, d)| d).map_err(|_| e),
+        },
+        GeoRef::Datum { datum } => match resolve_datum_in(ctx.doc, Some(ctx.st), datum, ctx.component)? {
+            ConstructGeom::Plane(p) => Ok(p.normal()),
+            ConstructGeom::Axis { dir, .. } => Ok(dir),
+            _ => Err(bad("the datum is no direction (pick an axis or a plane)")),
+        },
+        _ => line(ctx, g).map(|(_, d)| d),
+    }
+}
+
 pub(crate) fn source_bodies(ctx: &Ctx, refs: &[&GeoRef]) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for g in refs {
