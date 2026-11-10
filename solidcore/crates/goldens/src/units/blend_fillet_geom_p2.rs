@@ -1518,7 +1518,7 @@ mod tests {
     fn gen0014_the_trace_stays_on_its_surface() {
         // only `gen0014`, from its own seed, as `CaseContext::generated_cases` draws it
         let seed = CaseContext::seed_for("blend.fillet_geom_p2", 14);
-        let inputs = Runner.generate(&mut crate::rng::Rng::new(seed)).unwrap();
+        let inputs = Runner.generate(&mut Rng::new(seed)).unwrap();
         let case = Case {
             unit: "blend.fillet_geom_p2".into(),
             name: "gen0014".into(),
