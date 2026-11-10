@@ -82,6 +82,7 @@ fn side_json(s: &Session, st: &ModelState, o: &JointOrigin) -> JointSide {
         component,
         component_name,
         path: occurrence_path(&s.doc, o.occurrence),
+        inside: o.inside.clone(),
         snap: o.snap.clone(),
         references: references(&s.doc, &o.snap),
         resolves: false,
@@ -144,6 +145,11 @@ fn references(doc: &Document, snap: &Snap) -> Vec<Reference> {
             }
             if let Some(e) = corner {
                 out.push(Reference { role: ReferenceRole::Corner, to: Referent::Edge(edge_ref(doc, e)) });
+            }
+        }
+        Snap::Plane { x, .. } | Snap::Axis { x, .. } => {
+            if let Some(XRef::Face { face: n, .. }) = x {
+                face(ReferenceRole::X, &Some(n.clone()));
             }
         }
         Snap::Frame { .. } | Snap::Point { .. } => {}

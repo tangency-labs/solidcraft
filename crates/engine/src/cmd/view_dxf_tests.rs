@@ -2,7 +2,7 @@ use super::*;
 use serde_json::json;
 use solidcore_record::{Vec2, Vec3};
 use solidcraft_geom::prelude::*;
-use solidcraft_render::StandardView;
+use solidcraft_viewport::StandardView;
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     s.execute(id, &p).unwrap()
@@ -130,6 +130,23 @@ fn view_dxf_cylinders_have_side_silhouettes_and_perspective_is_supported() {
 }
 
 #[test]
+fn view_dxf_camera_without_fov_is_orthographic() {
+    // docs/mcp.md: `{target, yaw, pitch, distance, fov?}`; no `fov` is an orthographic view (#13112).
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":20,"width":10,"height":5}));
+    let v = run(&mut s, CMD, json!({"camera":{"target":[0,0,0],"yaw":0,"pitch":0,"distance":100}}));
+    assert_eq!(v["projection"], "orthographic", "{v}");
+    assert!(v["visible"].as_u64().unwrap() > 0, "{v}");
+    // The input schema takes it too.
+    let mut strict = Session { param_check: crate::schema::ParamCheck::Strict, ..Session::default() };
+    run(&mut strict, "solid.box", json!({"length":20,"width":10,"height":5}));
+    assert_eq!(run(&mut strict, CMD, json!({"camera":{"target":[0,0,0],"yaw":0,"pitch":0,"distance":100}}))["projection"], "orthographic");
+    // `distance` stays required.
+    let err = s.execute(CMD, &json!({"camera":{"target":[0,0,0],"yaw":0,"pitch":0}})).unwrap_err().to_string();
+    assert!(err.contains("invalid camera"), "{err}");
+}
+
+#[test]
 fn view_dxf_rejects_invalid_options_and_near_eye_geometry_without_panicking() {
     let mut s = sample();
     for extra in [json!({"hidden":"all"}), json!({"hidden":true}), json!({"tolerance":0}), json!({"tolerance":"x"}), json!({"path":false})] {
@@ -159,7 +176,7 @@ fn view_dxf_keeps_every_occurrence_while_sharing_geometry() {
     let result = export(&mut s, camera(StandardView::Top), "dashed");
     assert_eq!(result["stats"]["bodies"], 3);
     assert_eq!(result["stats"]["shared_meshes"], 1);
-    assert_eq!(result["stats"]["worker_limit"], meshes::WORKERS);
+    assert_eq!(result["stats"]["worker_limit"], mesh_lines::WORKERS);
     assert!(result["hidden"].as_u64().unwrap() > 0);
     let lines = solidcraft_io::read_dxf(result["dxf"].as_str().unwrap()).unwrap();
     let mut centers = std::collections::BTreeSet::new();

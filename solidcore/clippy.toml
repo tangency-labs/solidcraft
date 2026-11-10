@@ -1,0 +1,7 @@
+# Tests may use unwrap/expect/panic/indexing; library code may not (see [workspace.lints]).
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true
+# Proper nouns that appear in docs without backticks.
+doc-valid-idents = ["SMLib", "NLib", "NVIDIA", "SolidCraft", "OpenUSD", "..", ]

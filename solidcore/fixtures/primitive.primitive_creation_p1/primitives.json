@@ -1,0 +1,956 @@
+{
+  "cases": [
+    {
+      "name": "primitive_0",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp",
+      "inputs": {
+        "op": 4,
+        "data": [
+          0,
+          2,
+          3,
+          0,
+          0,
+          0,
+          0,
+          1e-05,
+          1,
+          2,
+          3,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "primitive_1",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp",
+      "inputs": {
+        "op": 4,
+        "data": [
+          1,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1e-05,
+          1,
+          2,
+          3,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "primitive_2",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp",
+      "inputs": {
+        "op": 4,
+        "data": [
+          2,
+          2,
+          3,
+          4,
+          0,
+          0,
+          0,
+          1e-05,
+          1,
+          2,
+          3,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "primitive_3",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp",
+      "inputs": {
+        "op": 4,
+        "data": [
+          3,
+          2,
+          1,
+          3,
+          0,
+          90,
+          0,
+          1e-05,
+          1,
+          2,
+          3,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "primitive_4",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp",
+      "inputs": {
+        "op": 4,
+        "data": [
+          4,
+          4,
+          2,
+          1,
+          0,
+          0,
+          0,
+          1e-05,
+          1,
+          2,
+          3,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "primitive_5",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp",
+      "inputs": {
+        "op": 4,
+        "data": [
+          5,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1e-05,
+          1,
+          2,
+          3,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "primitive_6",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp",
+      "inputs": {
+        "op": 4,
+        "data": [
+          6,
+          3,
+          1,
+          0,
+          0,
+          0,
+          0,
+          1e-05,
+          1,
+          2,
+          3,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "primitive_7",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp",
+      "inputs": {
+        "op": 4,
+        "data": [
+          7,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1e-05,
+          1,
+          2,
+          3,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "primitive_8",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp",
+      "inputs": {
+        "op": 4,
+        "data": [
+          8,
+          2,
+          1,
+          4,
+          5,
+          -3,
+          2,
+          1,
+          1,
+          2,
+          3,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "primitive_9",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp",
+      "inputs": {
+        "op": 4,
+        "data": [
+          9,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1e-05,
+          1,
+          2,
+          3,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "boolean_empty_0",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:7650",
+      "inputs": {
+        "op": 4,
+        "data": [
+          10,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "boolean_empty_1",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:7650",
+      "inputs": {
+        "op": 4,
+        "data": [
+          10,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "boolean_empty_2",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:7650",
+      "inputs": {
+        "op": 4,
+        "data": [
+          10,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "boolean_empty_3",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:7650",
+      "inputs": {
+        "op": 4,
+        "data": [
+          10,
+          3,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "boolean_empty_4",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:7650",
+      "inputs": {
+        "op": 4,
+        "data": [
+          10,
+          4,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "cylindrical_length_zero",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:434",
+      "inputs": {
+        "op": 4,
+        "data": [
+          3,
+          0,
+          1,
+          2,
+          0,
+          90,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "cylindrical_inner_zero",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:434",
+      "inputs": {
+        "op": 4,
+        "data": [
+          3,
+          2,
+          0,
+          2,
+          0,
+          90,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "cylindrical_outer_equal",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:434",
+      "inputs": {
+        "op": 4,
+        "data": [
+          3,
+          2,
+          1,
+          1,
+          0,
+          90,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "cylindrical_start_out",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:434",
+      "inputs": {
+        "op": 4,
+        "data": [
+          3,
+          2,
+          1,
+          2,
+          -361,
+          90,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "cylindrical_end_equal",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:434",
+      "inputs": {
+        "op": 4,
+        "data": [
+          3,
+          2,
+          1,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "cylindrical_span_over",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:434",
+      "inputs": {
+        "op": 4,
+        "data": [
+          3,
+          2,
+          1,
+          2,
+          0,
+          361,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "cone_zero_radii_edit0",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:647,992",
+      "inputs": {
+        "op": 4,
+        "data": [
+          4,
+          3,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "cone_zero_radii_edit1",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:647,992",
+      "inputs": {
+        "op": 4,
+        "data": [
+          4,
+          3,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "torus_zero_minor_edit0",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:647,992",
+      "inputs": {
+        "op": 4,
+        "data": [
+          6,
+          3,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "torus_zero_minor_edit1",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:647,992",
+      "inputs": {
+        "op": 4,
+        "data": [
+          6,
+          3,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "torus_zero_major_edit0",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:647,992",
+      "inputs": {
+        "op": 4,
+        "data": [
+          6,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "torus_zero_major_edit1",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:647,992",
+      "inputs": {
+        "op": 4,
+        "data": [
+          6,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "torus_negative_edit0",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:647,992",
+      "inputs": {
+        "op": 4,
+        "data": [
+          6,
+          -1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "torus_negative_edit1",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:647,992",
+      "inputs": {
+        "op": 4,
+        "data": [
+          6,
+          -1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "upstream_TestSmCreatePlane",
+      "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:212",
+      "inputs": {
+        "op": 4,
+        "data": [
+          0,
+          10,
+          15,
+          0,
+          0,
+          0,
+          0,
+          1e-05,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "upstream_TestSmCreatePlanarCircle",
+      "upstream_ref": "tests/SM_API_test/src/TestSmPrimitives.cpp:246",
+      "inputs": {
+        "op": 4,
+        "data": [
+          1,
+          10,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1e-05,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "cylindrical_full_span_preflight",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:520; source/SMLib/src/SmCircle.cpp:88",
+      "inputs": {
+        "op": 4,
+        "data": [
+          3,
+          2,
+          1,
+          3,
+          0,
+          360,
+          0,
+          1e-05,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "boolean_empty_preserves_existing_result",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:7648",
+      "inputs": {
+        "op": 4,
+        "data": [
+          10,
+          2,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "static_circle_zero_radius",
+      "upstream_ref": "source/SMLib/src/SmPrimitiveCreation.cpp:172",
+      "inputs": {
+        "op": 4,
+        "data": [
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1e-05,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0
+        ]
+      }
+    }
+  ]
+}

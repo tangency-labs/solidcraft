@@ -1,0 +1,189 @@
+{
+  "area": "threads",
+  "bodies": {
+    "b18": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b27": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b28"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b28"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b29"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b27"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b30"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b30"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b31"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b29"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b32"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b31"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b33"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b32",
+        "b33"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b34"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "2822-modelled-thread-in-filleted-cube",
+  "expected": {
+    "bbox": {
+      "max": [
+        20,
+        20,
+        10
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "center_of_mass": [
+      10,
+      10,
+      5
+    ],
+    "method": "ISO 68-1 basic profile: H = P sqrt3/2, basic depth 5H/8. External groove (the space between teeth): a trapezoid P/4 wide at the root radius d/2 - 5H/8, widening by 2 tan30 per unit of radius to 7P/8 at d/2. Internal groove: P/8 wide at the major radius d/2, widening to 3P/4 at the minor radius, cut only where there is material (r >= hole radius). Pappus: volume per turn = 2 pi A rc (A the trapezoid area, rc its centroid radius from the axis); a helical sweep of L/P turns removes exactly (L/P) x that, where each end of the thread is a free end or lies inside material. Cube 20x20x10 with its four vertical edges rounded R2: each removes (1 - pi/4) R^2 x 10 = 8.5841, total 34.3363. A 2.5 mm through hole (the M3 tap drill, rho=1.25) with M3 (P=0.5) over the whole 10 mm (20 turns): V = 4000 - 34.3363 - pi 1.25^2 10 - 20 x 0.43729 = 3907.8305 mm3. By symmetry COM = (10,10,5). Tolerance 1%: a modelled thread is a faceted helical solid (radial chord error up to 1% of the pitch on every wall, i.e. a volume deficit of about 4/3 x sag/R).",
+    "outcome": "solid",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#2822"
+    ],
+    "timeout_s": 600,
+    "tolerance": {
+      "rel": 0.01
+    },
+    "volume_mm3": 3907.8305,
+    "what": "a modelled M3 thread in a hole through a block whose vertical edges are rounded (the fillets showed as black lines after the thread)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 379,
+      "faces": 155,
+      "vertices": 226
+    }
+  },
+  "records": "2822-modelled-thread-in-filleted-cube.bodies.json.gz",
+  "result": [
+    {
+      "body": "Cube",
+      "made": "b34"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 1682.2726388738097,
+      "body_count": 1,
+      "edges": 276,
+      "faces": 94,
+      "vertices": 184,
+      "volume_mm3": 3907.8305470864575
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#2822"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "screw_sweep",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a modelled M3 thread in a hole through a block whose vertical edges are rounded (the fillets showed as black lines after the thread)",
+  "why_not": []
+}

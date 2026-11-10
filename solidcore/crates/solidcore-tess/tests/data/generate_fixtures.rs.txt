@@ -1,0 +1,320 @@
+//! Writes the B-rep records solidcore-tess's planner tests mesh, as SolidCraft builds them.
+//!
+//! The planner tests in solidcore (crates/solidcore-tess/src/planner/{tests,edges,surface}.rs)
+//! read these records instead of modelling the bodies, which solidcore cannot. To make them
+//! again, in a SolidCraft checkout whose kernel crate builds against the solidcore-record the
+//! tests read:
+//!
+//! 1. copy this file to crates/kernel/src/generate_fixtures.rs and add
+//!    `#[cfg(test)] mod generate_fixtures;` to crates/kernel/src/lib.rs;
+//! 2. run `SOLIDCORE_TESS_FIXTURES=<solidcore>/crates/solidcore-tess/tests/data
+//!    cargo test -p solidcraft-kernel --lib generate_fixtures -- --ignored --nocapture`.
+//!
+//! Each body is written as `<name>.json` (gzip it after, `gzip -9 -n <name>.json`, as the
+//! tests read `<name>.json.gz`), its record (`crate::brep_record`, a
+//! `solidcore_record::brep::Brep`) as pretty JSON, and `sizes.json` maps each name to the body's
+//! size (`Body::size`, the size its mesh tolerance rules take). The construction code is the
+//! tests' own, as they were in SolidCraft's kernel (crates/kernel/src/tess) before the planner
+//! moved to solidcore.
+
+use std::collections::BTreeMap;
+
+use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
+
+use crate::{Body, BoolOp};
+
+fn ok<T>(r: crate::Result<T>) -> T {
+    match r {
+        Ok(v) => v,
+        Err(e) => panic!("{e}"),
+    }
+}
+
+fn cut(a: &Body, b: &Body) -> Body {
+    match crate::boolean(a, b, BoolOp::Cut) {
+        Ok(Some(r)) => r,
+        other => panic!("cut: {other:?}"),
+    }
+}
+
+/// A groove of trapezoid `section` (radius, axial offset) in the plane through the z axis along
+/// y, carried `turns` turns of `pitch` about z from `base`, as an SMLib solid.
+fn smlib_groove(section: [(f64, f64); 4], base: f64, pitch: f64, turns: f64) -> solidcraft_smlib::Brep {
+    use solidcore_record::{Loop2, Vec2};
+    smlib_screw(Loop2::polygon(&section.map(|(r, z)| Vec2::new(r, z))), base, pitch, turns)
+}
+
+/// The `section` (radius, axial offset) in the plane through the z axis along y, carried
+/// `turns` turns of `pitch` about z from `base`, as an SMLib solid.
+fn smlib_screw(section: solidcore_record::Loop2, base: f64, pitch: f64, turns: f64) -> solidcraft_smlib::Brep {
+    use solidcore_record::{Plane, Region2};
+    let origin = Vec3::new(0.0, 0.0, base);
+    let plane = Plane { origin, x: Vec3::Y, y: Vec3::Z };
+    let region = Region2 { outer: section, holes: Vec::new() };
+    let Some(numbered) = crate::numbered::number_regions(std::slice::from_ref(&region)).pop() else { panic!("profile") };
+    let profile = numbered.outer.oriented(false);
+    let groove = ok(crate::smlib_sweeps::screw(&plane, &crate::smlib_sweeps::pieces([&profile]), origin, Vec3::Z, pitch, turns));
+    ok(crate::native::smlib_body(&groove))
+}
+
+fn smlib_cut(a: &solidcraft_smlib::Brep, b: &solidcraft_smlib::Brep) -> solidcraft_smlib::Brep {
+    match a.boolean(b, solidcraft_smlib::BooleanOp::Subtract) {
+        Ok(Some(r)) => r,
+        other => panic!("cut: {other:?}"),
+    }
+}
+
+/// The ISO basic profile's groove for pitch `p` and major diameter `d` (see the thread tests).
+fn iso_groove(p: f64, d: f64, wall: f64, internal: bool) -> [(f64, f64); 4] {
+    let h = p * 3f64.sqrt() / 2.0;
+    let slope = (std::f64::consts::PI / 6.0).tan();
+    let (r0, w0, r1, w1) = if internal {
+        let r_in = wall.min(d / 2.0 - 5.0 * h / 8.0) - 0.1 * p;
+        (r_in, (p / 8.0 + 2.0 * (d / 2.0 - r_in) * slope) / 2.0, d / 2.0, p / 16.0)
+    } else {
+        let (r_root, r_out) = (d / 2.0 - 5.0 * h / 8.0, wall.max(d / 2.0) + 0.05 * p);
+        (r_root, p / 8.0, r_out, (p / 4.0 + 2.0 * (r_out - r_root) * slope) / 2.0)
+    };
+    [(r0, -w0), (r1, -w1), (r1, w1), (r0, w0)]
+}
+
+/// The lens and the 2 m square of `a_face_bounded_by_two_short_arcs_keeps_an_area_to_mesh`,
+/// assembled, and the record index of the lens face.
+fn lens_and_square() -> (solidcore_record::brep::Brep, usize) {
+    use crate::sew::{PartEdge, PartFace, PartUse, Parts, assemble};
+    use solidcore_record::brep::{Curve, Frame, Surface};
+    use std::f64::consts::{PI, TAU};
+    let (r, half) = (1000.0f64, 10.0f64);
+    let c = (r * r - half * half).sqrt();
+    let circle = |cy: f64| Curve::Circle { frame: Frame { origin: [0.0, cy, 0.0], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] }, radius: r };
+    let top = c.atan2(half);
+    let line = |a: [f64; 3], z: [f64; 3]| Curve::Line { start: a, end: z };
+    let sq = [[3000.0, 0.0, 0.0], [5000.0, 0.0, 0.0], [5000.0, 2000.0, 0.0], [3000.0, 2000.0, 0.0]];
+    let plane = Surface::Plane { origin: [0.0; 3], u_axis: [1.0, 0.0, 0.0], v_axis: [0.0, 1.0, 0.0] };
+    let mut edges = vec![
+        PartEdge { nurbs: None, curve: circle(-c), interval: [top, PI - top], vertices: [0, 1] },
+        PartEdge { nurbs: None, curve: circle(c), interval: [PI + top, TAU - top], vertices: [1, 0] },
+    ];
+    for k in 0..4 {
+        edges.push(PartEdge {
+            nurbs: None,
+            curve: line(sq[k], sq[(k + 1) % 4]),
+            interval: [0.0, 1.0],
+            vertices: [2 + k as u32, 2 + ((k + 1) % 4) as u32],
+        });
+    }
+    let uses = |es: &[u32]| es.iter().map(|&edge| PartUse { edge, forward: true, given: None }).collect::<Vec<_>>();
+    let mut vertices = vec![[half, 0.0, 0.0], [-half, 0.0, 0.0]];
+    vertices.extend(sq);
+    let parts = Parts {
+        vertices,
+        edges,
+        faces: vec![
+            PartFace { surface: plane.clone(), forward: true, loops: vec![uses(&[0, 1])] },
+            PartFace { surface: plane, forward: true, loops: vec![uses(&[2, 3, 4, 5])] },
+        ],
+        tolerance: 1e-6,
+    };
+    let made = ok(assemble(parts, false));
+    let Some(&lens) = made.faces.first() else { panic!("the lens") };
+    (made.brep, lens)
+}
+
+/// Every body the planner tests mesh, by fixture name.
+fn bodies() -> Vec<(&'static str, Body)> {
+    use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
+    use solidcraft_smlib::{BooleanOp, Brep as S};
+    let mut out: Vec<(&'static str, Body)> = Vec::new();
+
+    // a_box_is_a_regular_grid_on_every_face
+    out.push(("box_40x30x20", ok(crate::box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)))));
+    // primitives_are_watertight_with_the_right_volume (and surface.rs)
+    out.push(("box_10x6x4", ok(crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 6.0, 4.0)))));
+    out.push(("cylinder_tilted", ok(crate::cylinder(Vec3::new(1.0, 2.0, 3.0), Vec3::new(0.0, 1.0, 1.0), 2.5, 7.0))));
+    out.push(("torus_6_1_5", ok(crate::torus(Vec3::ZERO, 6.0, 1.5))));
+
+    // holes_and_trimmed_faces_are_watertight, render_wireframes, edges.rs
+    let bx = ok(crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 4.0)));
+    let pin = ok(crate::cylinder(Vec3::new(5.0, 5.0, -1.0), Vec3::Z, 2.0, 6.0));
+    let cross = ok(crate::cylinder(Vec3::new(5.0, -1.0, 2.0), Vec3::Y, 1.0, 12.0));
+    out.push(("box_with_hole", cut(&bx, &pin)));
+    out.push(("cylinder_with_cross_hole", cut(&pin, &cross)));
+    out.push(("pin_cylinder", pin.clone()));
+    let filleted =
+        ok(crate::fillet(&bx, &[Vec3::new(5.0, 0.0, 4.0), Vec3::new(10.0, 5.0, 4.0), Vec3::new(5.0, 10.0, 4.0), Vec3::new(0.0, 5.0, 4.0)], 1.5));
+    out.push(("box_with_filleted_top", filleted));
+
+    // holes_touching_at_a_point_are_watertight
+    let mut body = ok(crate::box_solid(Vec3::new(-50.0, -50.0, 0.0), Vec3::new(50.0, 50.0, 5.0)));
+    for (x, y) in [(25.0, 0.0), (-25.0, 0.0), (0.0, 25.0), (0.0, -25.0), (15.0, 0.0), (-15.0, 0.0), (0.0, 15.0), (0.0, -15.0)] {
+        body = cut(&body, &ok(crate::cylinder(Vec3::new(x, y, -1.0), Vec3::Z, 5.0, 7.0)));
+    }
+    out.push(("plate_with_holes_touching_at_points", body));
+
+    // a_drill_point_apex_leaves_no_zero_area_triangles
+    let cases = [
+        ("box_with_drill_hole_r3_4_depth_8", Vec3::new(40.0, 30.0, 15.0), Vec3::new(20.0, 15.0, 15.0), 3.4, 8.0),
+        ("box_with_drill_hole_r3_depth_10", Vec3::new(60.0, 40.0, 15.0), Vec3::new(50.0, 20.0, 15.0), 3.0, 10.0),
+    ];
+    for (name, size, at, r, depth) in cases {
+        let bx = ok(crate::box_solid(Vec3::ZERO, size));
+        let tip = r / (118f64 / 2.0).to_radians().tan();
+        let Some(rp) = Plane::new(at, Vec3::X, Vec3::Z) else { panic!("plane") };
+        let pts = [Vec2::new(0.0, 0.6), Vec2::new(r, 0.6), Vec2::new(r, -depth), Vec2::new(0.0, -depth - tip)];
+        let region = Region2 { outer: Loop2::polygon(&pts), holes: vec![] };
+        let Some(drill) = ok(crate::revolve(&rp, &[region], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU)).pop() else { panic!("drill") };
+        out.push((name, cut(&bx, &drill)));
+    }
+
+    // a_placed_body_meshes_like_the_original
+    let b = ok(crate::box_solid(Vec3::ZERO, Vec3::new(2.0, 3.0, 4.0)));
+    out.push(("box_2x3x4_placed", ok(crate::transform(&b, Vec3::new(15.0, -2.0, 8.0), Vec3::ZERO, Vec3::X, 0.7))));
+    out.push(("box_2x3x4", b));
+
+    // a_half_sphere_from_smlib_is_closed_along_its_seam
+    let Ok(ball) = S::make_sphere([0.0; 3], 12.0) else { panic!("sphere") };
+    let Ok(lid) = S::make_box([-20.0, -20.0, 0.0], [40.0, 40.0, 20.0]) else { panic!("box") };
+    let Ok(Some(half)) = ball.boolean(&lid, BooleanOp::Subtract) else { panic!("cut") };
+    out.push(("smlib_half_sphere", ok(crate::native::body_from_smlib(&half))));
+
+    // display_plans_stay_within_the_chord_tolerance
+    out.push(("sphere_r12", ok(crate::sphere(Vec3::ZERO, 12.0))));
+    out.push((
+        "sphere_r10_with_pocket",
+        cut(&ok(crate::sphere(Vec3::ZERO, 10.0)), &ok(crate::box_solid(Vec3::new(-2.0, -2.0, 5.0), Vec3::new(2.0, 2.0, 11.0)))),
+    ));
+    out.push(("torus_22_4", ok(crate::torus(Vec3::ZERO, 22.0, 4.0))));
+
+    // an_smlib_torus_stays_within_the_chord_tolerance
+    let Ok(ring) = S::make_torus([0.0; 3], 22.0, 4.0) else { panic!("torus") };
+    out.push(("smlib_torus_22_4", ok(crate::native::body_from_smlib(&ring))));
+
+    // a_modelled_thread_in_a_bore_meshes_inside_its_block
+    let (Ok(block), Ok(bore)) = (S::make_box([-10.0, -10.0, 0.0], [20.0, 20.0, 10.0]), S::make_cylinder([0.0, 0.0, -1.0], 3.5, 12.0)) else {
+        panic!("stock")
+    };
+    let threaded = smlib_cut(&smlib_cut(&block, &bore), &smlib_groove(iso_groove(1.0, 8.0, 3.5, true), -1.0, 1.0, 12.0));
+    out.push(("smlib_thread_in_bore", ok(crate::native::body_from_smlib(&threaded))));
+
+    // a_thread_root_band_running_out_through_an_end_face_lies_on_its_surface
+    let Ok(shaft) = S::make_cylinder([0.0; 3], 5.0, 30.0) else { panic!("shaft") };
+    let threaded = smlib_cut(&shaft, &smlib_groove(iso_groove(1.5, 10.0, 5.0, false), -1.5, 1.5, 11.0));
+    out.push(("smlib_thread_run_out", ok(crate::native::body_from_smlib(&threaded))));
+
+    // the_halves_of_a_split_smlib_coil_mesh_as_the_whole: a coil (a 1 mm wire at 20 mm, six turns
+    // of pitch 4) cut in two across its axis at z = 12.5.
+    {
+        let coil = smlib_screw(Loop2::circle(Vec2::new(20.0, 0.0), 1.0), 0.0, 4.0, 6.0);
+        let Ok(top) = S::make_box([-30.0, -30.0, 12.5], [60.0, 60.0, 30.0]) else { panic!("box") };
+        let (Ok(Some(upper)), Ok(Some(lower))) = (coil.boolean(&top, BooleanOp::Intersect), coil.boolean(&top, BooleanOp::Subtract)) else {
+            panic!("split")
+        };
+        out.push(("smlib_coil_upper_half", ok(crate::native::body_from_smlib(&upper))));
+        out.push(("smlib_coil_lower_half", ok(crate::native::body_from_smlib(&lower))));
+    }
+
+    // a_hole_far_below_the_tolerance_keeps_its_area
+    let plate = ok(crate::box_solid(Vec3::ZERO, Vec3::new(990.0, 990.0, 10.0)));
+    let (axis, r) = (Vec3::new(495.0, 495.0, 0.0), 0.5);
+    out.push(("plate_990_with_small_hole", cut(&plate, &ok(crate::cylinder(axis - Vec3::Z, Vec3::Z, r, 12.0)))));
+
+    // a_thin_lune_whose_chords_cross_meshes
+    {
+        use std::f64::consts::PI;
+        let (r, gap, h) = (2.5, 0.03, 5.0);
+        let d = (r * r - (r - gap) * (r - gap)) / (2.0 * (r - gap));
+        let (centre, r2) = (Vec2::new(-d, 0.0), r - gap + d);
+        let top = r.atan2(d);
+        let split = 11.25f64.to_radians();
+        let segs = vec![
+            Seg2::Arc { center: Vec2::ZERO, radius: r, start: -0.5 * PI, sweep: PI },
+            Seg2::Arc { center: centre, radius: r2, start: top, sweep: split - top },
+            Seg2::Arc { center: centre, radius: r2, start: split, sweep: -top - split },
+        ];
+        let lune = Region2 { outer: Loop2 { segs }, holes: vec![] };
+        let Some(body) = ok(crate::extrude(&Plane::XY, &[lune], 0.0, h)).pop() else { panic!("one body") };
+        out.push(("thin_lune_prism", body));
+    }
+
+    // a_small_sphere_void_in_a_large_block_meshes
+    let block = ok(crate::box_solid(Vec3::new(-30.0, -30.0, 0.0), Vec3::new(30.0, 30.0, 60.0)));
+    let ball = ok(crate::sphere(Vec3::new(0.0, 0.0, 30.0), 2.0));
+    out.push(("block_with_sphere_void", cut(&block, &ball)));
+
+    // a_ring_touching_itself_at_a_vertex_meshes_strictly
+    let prism = |c: Vec2, r: f64, z0: f64, z1: f64| {
+        ok(crate::extrude(&Plane::XY, &[Region2 { outer: Loop2::circle(c, r), holes: vec![] }], z0, z1)).pop().unwrap()
+    };
+    let stepped =
+        ok(crate::boolean(&prism(Vec2::ZERO, 20.0, 0.0, 5.0), &prism(Vec2::new(10.0, 0.0), 10.0, 5.0, 15.0), crate::BoolOp::Union)).unwrap();
+    out.push(("disc_with_boss_tangent_inside_its_rim", stepped));
+
+    // edges.rs: circle_edges_are_within_tolerance_and_end_on_vertices,
+    // edges_are_split_to_the_side_length_and_turn
+    out.push(("cylinder_r10_h5", ok(crate::cylinder(Vec3::ZERO, Vec3::Z, 10.0, 5.0))));
+
+    // surface.rs: primitives_evaluate_like_the_record
+    out.push(("box_offset", ok(crate::box_solid(Vec3::new(-1.0, -2.0, 0.0), Vec3::new(3.0, 4.0, 5.0)))));
+    out.push(("sphere_r4", ok(crate::sphere(Vec3::new(0.0, 0.0, 1.0), 4.0))));
+    // surface.rs: transformed_and_mirrored_bodies_evaluate_like_the_record
+    let Ok(cyl) = crate::cylinder(Vec3::ZERO, Vec3::Z, 2.0, 5.0) else { panic!("cylinder") };
+    // Column-major: x → 3 − x, z → z + 1.
+    let mirror = [[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [3.0, 0.0, 1.0, 1.0]];
+    out.push(("cylinder_r2_h5_mirrored", ok(crate::transform_matrix(&cyl, mirror))));
+    out
+}
+
+fn write(dir: &std::path::Path, name: &str, rec: &solidcore_record::brep::Brep) {
+    let json = match serde_json::to_string_pretty(rec) {
+        Ok(j) => j,
+        Err(e) => panic!("{name}: {e}"),
+    };
+    // The record reads back as itself, to the bit.
+    match serde_json::from_str::<solidcore_record::brep::Brep>(&json) {
+        Ok(back) => assert!(back == *rec, "{name}: the record does not read back as itself"),
+        Err(e) => panic!("{name}: {e}"),
+    }
+    if let Err(e) = std::fs::write(dir.join(format!("{name}.json")), json + "\n") {
+        panic!("{name}: {e}");
+    }
+}
+
+#[test]
+#[ignore]
+fn generate_fixtures() {
+    let Ok(dir) = std::env::var("SOLIDCORE_TESS_FIXTURES") else { panic!("set SOLIDCORE_TESS_FIXTURES to the output directory") };
+    let dir = std::path::PathBuf::from(dir);
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        panic!("{e}");
+    }
+    let mut sizes: BTreeMap<String, f64> = BTreeMap::new();
+    for (name, body) in bodies() {
+        let rec = ok(crate::brep_record(&body));
+        // The tests count the record's faces where they counted the body's.
+        assert_eq!(rec.faces.len(), body.face_count(), "{name}: faces");
+        println!("{name}: {} faces, {} edges, size {}", rec.faces.len(), rec.edges.len(), body.size());
+        write(&dir, name, &rec);
+        sizes.insert(name.to_string(), body.size());
+    }
+    // The assembled lens has no body; its size is not needed.
+    let (lens, face) = lens_and_square();
+    // The tests find the lens as the face bounded by circles.
+    let circles: Vec<usize> = (0..lens.faces.len())
+        .filter(|&f| {
+            lens.edges.iter().any(|e| {
+                matches!(e.curve, solidcore_record::brep::Curve::Circle { .. }) && e.uses.iter().any(|u| u.face as usize == f)
+            })
+        })
+        .collect();
+    assert_eq!(circles, vec![face], "the lens is the one face on circles");
+    println!("lens_and_square: lens face {face}");
+    write(&dir, "lens_and_square", &lens);
+    let json = match serde_json::to_string_pretty(&sizes) {
+        Ok(j) => j,
+        Err(e) => panic!("{e}"),
+    };
+    if let Err(e) = std::fs::write(dir.join("sizes.json"), json + "\n") {
+        panic!("{e}");
+    }
+}
