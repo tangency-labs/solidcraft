@@ -6082,6 +6082,7 @@ dependencies = [
  "harfrust",
  "serde",
  "serde_json",
+ "solidcore-ops",
  "solidcore-record",
  "solidcraft-geom",
  "thiserror 2.0.21",

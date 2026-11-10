@@ -462,6 +462,9 @@ crates/solidcore/src/curve/ellipse/p1.rs	PolarConversion::write_to_db	int-rem	1	
 crates/solidcore/src/curve/ellipse/p1.rs	PolarConversion::write_to_db	int-rem	2	proven	n % 5	constant non-zero divisor
 crates/solidcore/src/curve/ellipse/p2.rs	Ellipse::drop_point_fast	Vec::remove	1	proven	remove(0)	guarded by solutions.len() > 1
 crates/solidcore/src/curve/ellipse/p2.rs	Ellipse::eval_step	with_capacity	1	proven	Vec::with_capacity(num_derivs + 1)	callers pass num_derivs <= 3: evaluate_step returns Err above 3, step_point passes 0
+crates/solidcore/src/curve/fit_projection.rs	fit_splines	chunks	1	proven	chunks(limit - 3)	fit_splines returns an error unless 4 <= limit <= MAX_CONTROLS, so limit - 3 >= 1
+crates/solidcore/src/curve/fit_projection.rs	fit_splines	chunks	2	proven	chunks(limit - 3)	fit_splines returns an error unless 4 <= limit <= MAX_CONTROLS, so limit - 3 >= 1
+crates/solidcore/src/curve/fit_projection.rs	fit_splines	chunks	3	proven	chunks((limit - 1) / 3)	fit_splines returns an error unless 4 <= limit <= MAX_CONTROLS, so (limit - 1) / 3 >= 1
 crates/solidcore/src/curve/hyperbola.rs	Hyperbola::evaluate_step	with_capacity	1	proven	Vec::with_capacity(num_derivs + 1)	returns Err when num_derivs > 3
 crates/solidcore/src/curve/line.rs	Line::intersect_with_ellipse	swap	1	proven	swap(0, 1)	objects is [_; MAX_TREES], MAX_TREES = 5
 crates/solidcore/src/curve/line.rs	Line::intersect_with_ellipse	swap	2	proven	swap(0, 1)	parameters is [f64; MAX_PARAMS], MAX_PARAMS = 10

@@ -364,71 +364,6 @@ pub fn segment(p: usize, knots: &[f64], ctrl: &[HPoint], a: f64, b: f64) -> Spli
     Ok((out, points))
 }
 
-/// Split a clamped spline at existing knots so each piece has at most `limit`
-/// controls. Cut knots are inserted once on the whole curve, so neighbouring pieces
-/// share exactly the same homogeneous endpoint.
-pub fn split_clamped(p: usize, knots: &[f64], ctrl: &[HPoint], limit: usize) -> SplineResult<Vec<(Vec<f64>, Vec<HPoint>)>> {
-    if !(1..=MAX_SPLINE_DEGREE).contains(&p) || limit <= p || ctrl.len() <= p || knots.len() != ctrl.len() + p + 1 {
-        return invalid("invalid degree or control budget for spline splitting");
-    }
-    check_knots(knots)?;
-    let (lo, hi) = (knots[p], knots[ctrl.len()]);
-    if !(hi - lo).is_finite()
-        || lo >= hi
-        || knots[..=p].iter().any(|x| *x != lo)
-        || knots[ctrl.len()..].iter().any(|x| *x != hi)
-        || ctrl.iter().any(|x| !x.is_finite() || x.w <= 0.0)
-    {
-        return invalid("splitting requires a finite clamped positive-weight spline");
-    }
-    let mut cuts = vec![lo];
-    let mut count = p + 1;
-    let mut i = p + 1;
-    while i < ctrl.len() {
-        let u = knots[i];
-        let mut end = i + 1;
-        while end < ctrl.len() && knots[end] == u {
-            end += 1;
-        }
-        let multiplicity = end - i;
-        if u <= lo || u >= hi || multiplicity > p {
-            return invalid("invalid interior splitting knot");
-        }
-        if count + multiplicity > limit {
-            cuts.push(u);
-            count = p + 1;
-        } else {
-            count += multiplicity;
-        }
-        i = end;
-    }
-    cuts.push(hi);
-    let (mut k, mut c) = (knots.to_vec(), ctrl.to_vec());
-    for u in cuts.iter().copied().skip(1).take(cuts.len() - 2) {
-        for _ in 0..p {
-            if k.iter().filter(|x| **x == u).count() >= p {
-                break;
-            }
-            (k, c) = insert_knot(p, &k, &c, u)?;
-        }
-    }
-    cuts.windows(2)
-        .map(|ab| {
-            let (a, b) = (ab[0], ab[1]);
-            let j0 = k.iter().rposition(|x| *x == a).ok_or_else(|| SplineError::Invalid("missing split start".into()))?;
-            let j1 = k.iter().position(|x| *x == b).ok_or_else(|| SplineError::Invalid("missing split end".into()))?;
-            let start = j0.checked_sub(p).ok_or_else(|| SplineError::Invalid("invalid split start".into()))?;
-            let points = c.get(start..j1).ok_or_else(|| SplineError::Invalid("invalid split controls".into()))?.to_vec();
-            let inner = k.get(j0 + 1..j1).ok_or_else(|| SplineError::Invalid("invalid split knots".into()))?;
-            let out = std::iter::repeat_n(a, p + 1).chain(inner.iter().copied()).chain(std::iter::repeat_n(b, p + 1)).collect();
-            if points.len() > limit {
-                return invalid("spline splitting exceeded its control budget");
-            }
-            Ok((out, points))
-        })
-        .collect()
-}
-
 /// Bernstein polynomial `Bᵢ,ₚ(x)`.
 pub fn bernstein(p: usize, i: usize, x: f64) -> f64 {
     if i > p {
@@ -507,76 +442,6 @@ fn subdivide(ctrl: &[HPoint], x: f64) -> (Vec<HPoint>, Vec<HPoint>) {
     }
     right.reverse();
     (left, right)
-}
-
-/// Outer bounds for x/w on a positive-weight rational Bezier span. Each bound is
-/// within `tolerance` of an attained value. Directed rounding encloses subdivision
-/// arithmetic; exhausting depth or work returns an error instead of a sampled extent.
-pub fn bezier_scalar_range(ctrl: &[HPoint], tolerance: f64, work: &mut usize) -> SplineResult<[f64; 2]> {
-    if !(2..=MAX_SPLINE_DEGREE + 1).contains(&ctrl.len())
-        || !(tolerance.is_finite() && tolerance > 0.0)
-        || ctrl.iter().any(|p| !p.is_finite() || p.w <= 0.0 || !(p.x / p.w).is_finite())
-    {
-        return invalid("scalar range needs finite controls, positive weights and tolerance");
-    }
-    // [numerator interval, weight interval]. All weights remain positive under subdivision.
-    type Bound = [[f64; 2]; 2];
-    let value = |p: &Bound| -> SplineResult<[f64; 2]> {
-        if p[1][0] <= 0.0 {
-            return invalid("scalar range weight lost numerical precision");
-        }
-        let values = [p[0][0] / p[1][0], p[0][0] / p[1][1], p[0][1] / p[1][0], p[0][1] / p[1][1]];
-        let lo = values.iter().copied().fold(f64::INFINITY, f64::min).next_down();
-        let hi = values.iter().copied().fold(f64::NEG_INFINITY, f64::max).next_up();
-        if !(lo.is_finite() && hi.is_finite()) {
-            return invalid("scalar range overflow");
-        }
-        Ok([lo, hi])
-    };
-    let initial: Vec<Bound> = ctrl.iter().map(|p| [[p.x, p.x], [p.w, p.w]]).collect();
-    let mut stack = vec![(initial, 0usize)];
-    let mut inner = [f64::INFINITY, f64::NEG_INFINITY];
-    let mut outer = [f64::INFINITY, f64::NEG_INFINITY];
-    while let Some((points, depth)) = stack.pop() {
-        let ranges = points.iter().map(&value).collect::<SplineResult<Vec<_>>>()?;
-        let first = ranges.first().ok_or_else(|| SplineError::Invalid("empty scalar span".into()))?;
-        let last = ranges.last().ok_or_else(|| SplineError::Invalid("empty scalar span".into()))?;
-        inner[0] = inner[0].min(first[1]).min(last[1]);
-        inner[1] = inner[1].max(first[0]).max(last[0]);
-        let hull = ranges.iter().fold([f64::INFINITY, f64::NEG_INFINITY], |r, q| [r[0].min(q[0]), r[1].max(q[1])]);
-        if hull[0] >= inner[0] - tolerance && hull[1] <= inner[1] + tolerance {
-            outer[0] = outer[0].min(hull[0]);
-            outer[1] = outer[1].max(hull[1]);
-            continue;
-        }
-        let cost = points.len() * points.len();
-        if depth >= 48 || *work < cost {
-            return Err(SplineError::Unsupported("could not certify the projected spline extent within the precision/work limit".into()));
-        }
-        *work -= cost;
-        let mut level = points;
-        let mut left = Vec::with_capacity(level.len());
-        let mut right = Vec::with_capacity(level.len());
-        while let (Some(a), Some(b)) = (level.first(), level.last()) {
-            left.push(*a);
-            right.push(*b);
-            level = level
-                .windows(2)
-                .map(|p| {
-                    std::array::from_fn(|i| {
-                        [
-                            ((p[0][i][0] * 0.5).next_down() + (p[1][i][0] * 0.5).next_down()).next_down(),
-                            ((p[0][i][1] * 0.5).next_up() + (p[1][i][1] * 0.5).next_up()).next_up(),
-                        ]
-                    })
-                })
-                .collect();
-        }
-        right.reverse();
-        stack.push((right, depth + 1));
-        stack.push((left, depth + 1));
-    }
-    Ok(outer)
 }
 
 /// A rational tensor Bézier patch over the parameter rectangle `s × t`: control point `(i, j)`
@@ -790,46 +655,6 @@ impl NurbsSurface {
 pub(crate) mod tests {
     use super::*;
     use crate::prelude::*;
-
-    #[test]
-    fn splitting_preserves_knots_geometry_and_shared_endpoints() {
-        let knots = [0., 0., 0., 0., 0.2, 0.7, 0.7, 1., 1., 1., 1.];
-        let ctrl: Vec<_> = (0..7).map(|i| HPoint::weighted(Vec3::new(i as f64, (i as f64).sin(), 0.), 1. + i as f64 * 0.1)).collect();
-        let pieces = split_clamped(3, &knots, &ctrl, 5).unwrap();
-        assert_eq!(pieces.len(), 2);
-        assert_eq!(pieces[0].1.last(), pieces[1].1.first());
-        for (k, c) in &pieces {
-            assert!(c.len() <= 5);
-            let (a, b) = (k[3], k[c.len()]);
-            let (expected_knots, expected_controls) = segment(3, &knots, &ctrl, a, b).unwrap();
-            // Independent subdivision of the source must give the same piece.
-            assert_eq!(*k, expected_knots);
-            for (p, q) in c.iter().zip(expected_controls) {
-                assert!(p.project().unwrap().dist(q.project().unwrap()) < 1e-12);
-            }
-        }
-        let ctrl = [0., 1., 2., 3.].map(|x| HPoint::weighted(Vec3::new(x, 0., 0.), 1.));
-        assert!(split_clamped(2, &[-1e308, -1e308, -1e308, 0., 1e308, 1e308, 1e308], &ctrl, 3).is_err());
-    }
-
-    #[test]
-    fn scalar_range_encloses_interior_and_rational_extrema() {
-        let ctrl: Vec<_> = [0., 90., 17., 0.].into_iter().map(|x| HPoint::weighted(Vec3::new(x, 0., 0.), 1.)).collect();
-        let [lo, hi] = bezier_scalar_range(&ctrl, 1e-10, &mut 100_000).unwrap();
-        let exact = 44.05262897859362;
-        assert!(lo <= 0. && lo > -1e-10);
-        assert!(hi >= exact && hi - exact < 1e-10, "{hi}");
-        for ratio in [1., 1e6, 1e12] {
-            // Symmetric rational quadratic, maximum at t=1/2.
-            let ctrl = [HPoint::weighted(Vec3::ZERO, 1.), HPoint::weighted(Vec3::X, ratio), HPoint::weighted(Vec3::ZERO, 1.)];
-            let exact = ratio / (ratio + 1.);
-            let r = bezier_scalar_range(&ctrl, 1e-10, &mut 100_000).unwrap();
-            assert!(r[0] <= 0. && r[0] > -1e-10);
-            assert!(r[1] >= exact && r[1] - exact < 1e-10, "{ratio}: {r:?}");
-        }
-        assert!(bezier_scalar_range(&ctrl, 1e-10, &mut 0).is_err());
-        assert!(bezier_scalar_range(&[HPoint::ZERO; 4], 1e-10, &mut 100).is_err());
-    }
 
     /// A small deterministic generator for test data.
     pub(crate) struct Lcg(pub(crate) u64);

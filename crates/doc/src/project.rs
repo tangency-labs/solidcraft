@@ -545,188 +545,53 @@ fn sketch_curves(ss: &crate::eval::SolvedSketch, ci: usize) -> Vec<WireCurve> {
 /// Exact native edge projections. Only mesh bodies may use the polyline fallback;
 /// unsupported native curves report an error rather than silently changing shape.
 fn exact_edges(body: &crate::ModelBody, plane: &Plane, edges: &[usize]) -> Result<Vec<Option<Vec<LinkGeom>>>> {
-    use crate::kernel::PlanarPiece;
-    body.body
-        .planar_edges(plane, edges)
-        .into_iter()
-        .zip(edges)
-        .map(|(pieces, e)| {
-            let Some(pieces) = pieces else {
-                return if body.body.is_mesh() {
-                    Ok(None)
-                } else {
-                    Err(DocError::Invalid(format!("exact projection is not supported for native edge {e}")))
-                };
-            };
-            let free_form = pieces.iter().any(|p| matches!(p, PlanarPiece::Spline(_) | PlanarPiece::Seg(Seg2::Cubic { .. } | Seg2::Bezier { .. })));
-            if free_form && let Some(circle) = tilted_edge_circle(body, plane, *e) {
-                return Ok(Some(circle));
+    if body.body.is_mesh() {
+        return Ok(vec![None; edges.len()]);
+    }
+    edges
+        .iter()
+        .map(|e| {
+            let projected = solidcore_ops::spline_projection::projected_edge(
+                body.body.record(),
+                plane,
+                *e,
+                body.body.planar_edges_tolerance(),
+                solidcraft_sketch::MAX_SPLINE_POINTS,
+                solidcraft_sketch::MAX_COORD,
+            )
+            .map_err(|e| DocError::Invalid(e.to_string()))?;
+            match projected {
+                Some(geometry) => projection_links(geometry).map(Some),
+                None => Err(DocError::Invalid(format!("exact projection is not supported for native edge {e}"))),
             }
-            let mut out = Vec::new();
-            for piece in &pieces {
-                match piece {
-                    PlanarPiece::Spline(s) => out.extend(link_spline(s, plane.origin.len())?),
-                    PlanarPiece::Seg(s) => {
-                        let g = link_geom(s).ok_or_else(|| DocError::Invalid("exact edge degree is not supported by a sketch".into()))?;
-                        match g {
-                            LinkGeom::Spline { pts, degree, nurbs, .. } => {
-                                out.extend(projected_control_spline(pts, degree, nurbs, plane.origin.len(), true)?);
-                            }
-                            LinkGeom::Line(a, b) if a.dist(b) <= 1e-7 => out.push(LinkGeom::Point(a)),
-                            _ => out.push(g),
-                        }
-                    }
-                }
-            }
-            Ok(Some(coalesce_linear(out)))
         })
         .collect()
 }
 
-fn tilted_edge_circle(body: &crate::ModelBody, plane: &Plane, index: usize) -> Option<Vec<LinkGeom>> {
-    let edge = body.body.record().edges.get(index)?;
-    let eval = solidcraft_geom::brep::eval::CurveEval::new(edge.parameters()).ok()?;
-    let [lo, hi] = edge.interval;
-    let points = (0..=CIRCLE_SAMPLES).map(|i| eval.point(lo + (hi - lo) * f64::from(i) / f64::from(CIRCLE_SAMPLES))).collect::<Option<Vec<_>>>()?;
-    let (center, normal, _, _) = circle3(&points)?;
-    let x = (*points.first()? - center).normalized()?;
-    let source_plane = Plane::new(center, x, normal.cross(x))?;
-    // Samples only propose a plane. Use the certified arcs' own centre, radius and sweep,
-    // never a sample-based closure decision or a separately fitted circle.
-    let certified = body.body.planar_edges(&source_plane, &[index]).into_iter().next()??;
-    project_certified_arcs(plane, &source_plane, &certified)
-}
-
-pub(super) fn project_certified_arcs(plane: &Plane, source_plane: &Plane, certified: &[crate::kernel::PlanarPiece]) -> Option<Vec<LinkGeom>> {
-    let arcs: Vec<_> = certified
-        .iter()
-        .map(|p| match p {
-            crate::kernel::PlanarPiece::Seg(Seg2::Arc { center, radius, start, sweep }) => Some((*center, *radius, *start, *sweep)),
-            _ => None,
+/// Store the modelling operation's geometric images as document link state.
+fn projection_links(geometry: Vec<solidcore_ops::conic_projection::Projection>) -> Result<Vec<LinkGeom>> {
+    use solidcore_ops::conic_projection::Projection;
+    geometry
+        .into_iter()
+        .map(|g| {
+            Ok(match g {
+                Projection::Segment(s) => link_geom(&s).ok_or_else(|| DocError::Invalid("exact edge degree is not supported by a sketch".into()))?,
+                Projection::Point(p) => LinkGeom::Point(p),
+                Projection::Line(a, b) => LinkGeom::Line(a, b),
+                Projection::Spline { spline, degree, implicit } => LinkGeom::Spline {
+                    pts: spline.points,
+                    control: true,
+                    degree: u8::try_from(degree).map_err(|_| DocError::Invalid("exact edge degree is not supported by a sketch".into()))?,
+                    periodic: false,
+                    nurbs: (!implicit).then_some(solidcraft_sketch::Nurbs { knots: spline.knots, weights: spline.weights }),
+                },
+                Projection::Conic { a, apex, b, rho } => LinkGeom::Conic { a, apex, b, rho },
+                Projection::Ellipse { center, major, minor } => LinkGeom::Ellipse { c: center, major, minor },
+            })
         })
-        .collect::<Option<_>>()?;
-    let (c, r, _, _) = *arcs.first()?;
-    let sweep: f64 = arcs.iter().map(|a| a.3).sum();
-    let cosang = source_plane.normal().dot(plane.normal()).abs().min(1.);
-    if arcs.iter().all(|a| a.0 == c && a.1 == r) && (sweep.abs() - std::f64::consts::TAU).abs() <= f64::EPSILON * 64. && r * cosang > 1e-9 {
-        let world = source_plane.to_world(c);
-        let major = source_plane.normal().cross(plane.normal()).normalized().unwrap_or(source_plane.x);
-        return Some(vec![LinkGeom::Ellipse { c: plane.to_local(world), major: plane.to_local(world + major * r), minor: r * cosang }]);
-    }
-    let mut out = Vec::new();
-    for (center, radius, start, sweep) in arcs {
-        let count = (sweep.abs() / std::f64::consts::FRAC_PI_2).ceil().clamp(1., 8.) as usize;
-        let step = sweep / count as f64;
-        let w = (step / 2.).cos();
-        let at = |angle: f64, scale: f64| plane.to_local(source_plane.to_world(center + Vec2::new(angle.cos(), angle.sin()) * scale));
-        for i in 0..count {
-            let a = start + step * i as f64;
-            let b = start + step * (i + 1) as f64;
-            let pts = vec![at(a, radius), at((a + b) / 2., radius / w), at(b, radius)];
-            let nurbs = solidcraft_sketch::Nurbs { knots: vec![0., 0., 0., 1., 1., 1.], weights: vec![1., w, 1.] };
-            let g = projected_control_spline(pts.clone(), 2, Some(nurbs), source_plane.origin.len() + plane.origin.len(), true).ok()?;
-            if matches!(g.as_slice(), [LinkGeom::Spline { .. }])
-                && pts.iter().enumerate().all(|(i, p)| pts.iter().skip(i + 1).all(|q| p.dist(*q) > 1e-7))
-            {
-                out.push(LinkGeom::Conic { a: pts[0], apex: pts[1], b: pts[2], rho: w / (1. + w) });
-            } else {
-                out.extend(g);
-            }
-        }
-    }
-    Some(coalesce_linear(out))
+        .collect()
 }
 
-/// Keep the source knots and weights, splitting exactly at existing knots when the
-/// source has more controls than one sketch spline can hold.
-fn link_spline(s: &crate::kernel::PlanarSpline, world_scale: f64) -> Result<Vec<LinkGeom>> {
-    use solidcraft_geom::bspline::{self, HPoint};
-    if !(1..=solidcore_record::MAX_BEZIER_DEGREE).contains(&s.degree) {
-        return Err(DocError::Invalid("exact projection of spline degrees above 9 is not supported".into()));
-    }
-    let h: Vec<_> =
-        s.points.iter().enumerate().map(|(i, p)| HPoint::weighted(Vec3::new(p.x, p.y, 0.), s.weights.get(i).copied().unwrap_or(1.))).collect();
-    let pieces =
-        bspline::split_clamped(s.degree, &s.knots, &h, solidcraft_sketch::MAX_SPLINE_POINTS).map_err(|e| DocError::Invalid(e.to_string()))?;
-    let mut out = Vec::new();
-    for (knots, controls) in pieces {
-        let points: Option<Vec<_>> = controls.iter().map(|p| p.project().map(|p| Vec2::new(p.x, p.y))).collect();
-        let points = points.ok_or_else(|| DocError::Invalid("invalid exact projection weights".into()))?;
-        let weights = if s.weights.is_empty() { Vec::new() } else { controls.iter().map(|p| p.w).collect() };
-        let nurbs = solidcraft_sketch::Nurbs { knots, weights };
-        out.extend(projected_control_spline(points, s.degree as u8, Some(nurbs), world_scale, true)?);
-    }
-    Ok(out)
-}
-
-fn projected_control_spline(
-    pts: Vec<Vec2>,
-    degree: u8,
-    nurbs: Option<solidcraft_sketch::Nurbs>,
-    world_scale: f64,
-    collapse: bool,
-) -> Result<Vec<LinkGeom>> {
-    let representable = |p: &Vec2| p.is_finite() && p.x.abs() < solidcraft_sketch::MAX_COORD && p.y.abs() < solidcraft_sketch::MAX_COORD;
-    if pts.iter().any(|p| !representable(p)) {
-        return Err(DocError::Invalid("exact projected spline coordinates exceed sketch limits".into()));
-    }
-    // Uniform control splines use the highest degree their current point count permits.
-    let evaluation_degree = if nurbs.is_none() { usize::from(degree).min(pts.len().saturating_sub(1)).max(1) as u8 } else { degree };
-    let implicit;
-    let checked = if let Some(nurbs) = &nurbs {
-        nurbs
-    } else {
-        let d = usize::from(evaluation_degree);
-        if pts.len() <= d {
-            return Err(DocError::Invalid("invalid projected spline degree".into()));
-        }
-        let spans = pts.len() - d;
-        let knots = std::iter::repeat_n(0., d + 1).chain((1..spans).map(|i| i as f64 / spans as f64)).chain(std::iter::repeat_n(1., d + 1)).collect();
-        implicit = solidcraft_sketch::Nurbs { knots, weights: Vec::new() };
-        &implicit
-    };
-    checked.check(pts.len(), evaluation_degree).map_err(|e| DocError::Invalid(e.to_string()))?;
-    if collapse {
-        let scale = pts.iter().fold(world_scale.max(1.), |s, p| s.max(p.len()));
-        if let Some([a, b]) =
-            checked.linear_image(&pts, evaluation_degree, scale * f64::EPSILON * 64.).map_err(|e| DocError::Invalid(e.to_string()))?
-        {
-            if !representable(&a) || !representable(&b) {
-                return Err(DocError::Invalid("exact projected spline extent exceeds sketch limits".into()));
-            }
-            return Ok(vec![if a.dist(b) <= 1e-7 { LinkGeom::Point(a) } else { LinkGeom::Line(a, b) }]);
-        }
-    }
-    Ok(vec![LinkGeom::Spline { pts, control: true, degree, periodic: false, nurbs }])
-}
-
-/// A single source can retrace a line or split at the control budget. Keep its whole
-/// interval once; never merge the distinct edges of a face here.
-fn coalesce_linear(geom: Vec<LinkGeom>) -> Vec<LinkGeom> {
-    if geom.len() < 2 || geom.iter().any(|g| !matches!(g, LinkGeom::Point(_) | LinkGeom::Line(..))) {
-        return geom;
-    }
-    let points: Vec<_> = geom
-        .iter()
-        .flat_map(|g| match g {
-            LinkGeom::Point(p) => vec![*p],
-            LinkGeom::Line(a, b) => vec![*a, *b],
-            _ => Vec::new(),
-        })
-        .collect();
-    let Some(a) = points.first().copied() else { return geom };
-    let far = points.iter().copied().max_by(|p, q| p.dist(a).total_cmp(&q.dist(a))).unwrap_or(a);
-    let Some(axis) = (far - a).normalized() else { return vec![LinkGeom::Point(a)] };
-    let tol = points.iter().fold(1.0_f64, |s, p| s.max(p.len())) * f64::EPSILON * 128.;
-    if points.iter().any(|p| axis.cross(*p - a).abs() > tol) {
-        return geom;
-    }
-    let range = points.iter().map(|p| (*p - a).dot(axis)).fold([0.0_f64; 2], |r, x| [r[0].min(x), r[1].max(x)]);
-    if range[1] - range[0] <= 1e-7 { vec![LinkGeom::Point(a)] } else { vec![LinkGeom::Line(a + axis * range[0], a + axis * range[1])] }
-}
-
-/// Points sampled along each free-form piece of an edge to see whether it runs along a circle.
-const CIRCLE_SAMPLES: u16 = 16;
 /// `edges` of `body` projected on `plane`: each exactly ([`exact_edges`]) or fitted to its
 /// polyline in `mesh`.
 fn projected_edges(body: &crate::ModelBody, mesh: &Mesh, plane: &Plane, edges: &[usize]) -> Result<Vec<LinkGeom>> {
@@ -1503,9 +1368,10 @@ fn project_sketch_curve(sk: &Sketch, from: &Plane, ci: usize, to: &Plane) -> Res
         let pts: Vec<Vec3> = sk.polyline(ci).iter().map(|p| from.to_world(*p)).collect();
         fit_world(to, &pts)
     };
-    let parallel = from.normal().cross(to.normal()).len() < 1e-9;
-    let edge_on = from.normal().dot(to.normal()).abs() <= f64::EPSILON * 64.;
-    let flip = from.normal().dot(to.normal()) < 0.0;
+    let relation = solidcore_ops::conic_projection::plane_relation(from, to);
+    let parallel = relation.parallel;
+    let edge_on = relation.edge_on;
+    let flip = relation.flip;
     Ok(match sk.curves.get(ci).map(|c| &c.kind) {
         Some(CurveKind::Line { a, b }) => match (sk.point(*a), sk.point(*b)) {
             (Some(a), Some(b)) => {
@@ -1541,24 +1407,41 @@ fn project_sketch_curve(sk: &Sketch, from: &Plane, ci: usize, to: &Plane) -> Res
         Some(CurveKind::Spline { pts, control, degree, periodic, nurbs, .. }) => {
             let source: Vec<Vec2> =
                 pts.iter().map(|p| sk.point(*p).ok_or_else(|| DocError::Invalid("missing source spline point".into()))).collect::<Result<_>>()?;
-            let scale = source.iter().fold(from.origin.len() + to.origin.len(), |s, p| s.max(p.len()));
             if *control {
-                projected_control_spline(source.into_iter().map(map).collect(), *degree, nurbs.clone(), scale, edge_on)?
+                let metadata = nurbs.as_ref().map(|n| (n.knots.as_slice(), n.weights.as_slice()));
+                projection_links(
+                    solidcore_ops::conic_projection::project_control(
+                        from,
+                        to,
+                        &source,
+                        usize::from(*degree),
+                        metadata,
+                        edge_on,
+                        solidcraft_sketch::MAX_COORD,
+                    )
+                    .map_err(|e| DocError::Invalid(e.to_string()))?,
+                )?
             } else if parallel {
                 vec![LinkGeom::Spline {
-                    pts: source.into_iter().map(map).collect(),
+                    pts: solidcore_ops::conic_projection::project_points(from, to, &source),
                     control: false,
                     degree: *degree,
                     periodic: *periodic,
                     nurbs: None,
                 }]
             } else {
-                let pieces = solidcraft_sketch::Nurbs::from_fit_points(&source, *periodic).map_err(|e| DocError::Invalid(e.to_string()))?;
-                let mut out = Vec::new();
-                for (pts, nurbs) in pieces {
-                    out.extend(projected_control_spline(pts.into_iter().map(map).collect(), 3, Some(nurbs), scale, edge_on)?);
-                }
-                coalesce_linear(out)
+                projection_links(
+                    solidcore_ops::conic_projection::project_fit(
+                        from,
+                        to,
+                        &source,
+                        *periodic,
+                        solidcraft_sketch::MAX_SPLINE_POINTS,
+                        edge_on,
+                        solidcraft_sketch::MAX_COORD,
+                    )
+                    .map_err(|e| DocError::Invalid(e.to_string()))?,
+                )?
             }
         }
         Some(CurveKind::Conic { a, b, apex, rho }) if parallel => match (sk.point(*a), sk.point(*apex), sk.point(*b)) {

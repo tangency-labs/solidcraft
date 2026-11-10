@@ -975,7 +975,27 @@ impl Sketch {
         }
         // A resized face can enumerate the same boundary in another order. Match the
         // shared-point graph in normalized sketch space before discarding its identity.
-        let mut same_order_agrees = false;
+        // Large links skip the quadratic loop matcher. The sharing graph must still agree,
+        // and the kernel must witness a unique nearby point for every ordered point. This
+        // establishes identity only: the changed coordinates are applied below.
+        let mut same_order_agrees = if same && (points.len() > 512 || curves.len() > 512) && self.link(id).is_some_and(closed_boundary) {
+            let parameters_agree = cur.as_ref().is_some_and(|cur| {
+                cur.iter().zip(&new).all(|(a, b)| match (a, b) {
+                    (LCurve::Circle(_, a), LCurve::Circle(_, b))
+                    | (LCurve::Conic(.., a), LCurve::Conic(.., b))
+                    | (LCurve::Ellipse(.., a), LCurve::Ellipse(.., b)) => a == b,
+                    _ => true,
+                })
+            });
+            let old: Option<Vec<Vec2>> = points.iter().map(|i| self.point(*i)).collect();
+            let fresh: Option<Vec<Vec2>> = order.iter().map(|i| lay.pts.get(*i).copied()).collect();
+            parameters_agree
+                && old
+                    .zip(fresh)
+                    .is_some_and(|(old, fresh)| solidcore_ops::point_identity::ordered_nearby_points(&old, &fresh, 1e-6, 4_000_000).unwrap_or(false))
+        } else {
+            false
+        };
         if let Some(cur) = &cur
             && points.len() == lay.pts.len()
             && cur.len() == lay.curves.len()
