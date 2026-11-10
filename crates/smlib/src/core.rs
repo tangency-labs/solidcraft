@@ -94,14 +94,11 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.refine_cc_range_ends = true;
     f.flat_corners_test_bits = true;
     f.cylinder_rebuild_mean_radius = true;
-    f.planar_path_uncapped_open_profiles = true;
     f.revolve_analytic_profile_faces = true;
     f.revolve_arc_centre_near_axis_is_sphere = true;
-    f.taper_pivot_nearest_corner = true;
     f.taper_tangent_corner_planes = true;
     f.revolve_nested_shells_as_cavities = true;
     f.revolve_holed_profile_void = true;
-    f.curve_sweep_caps_at_sweep_ends = true;
     f.join_touching_loops = true;
     f.uv_trim_reversal_on_surface = true;
     f.offset_resolve_crossing_loops = true;
@@ -188,7 +185,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.thicken_planar_side_walls = true;
     f.fillet_torus_span_from_start_section = true;
     f.fillet_knife_edge_rounds = true;
-    f.taper_wall_closes_at_apex = true;
     f.revolution_round_offset_collapses = true;
     f.fillet_chamfer_cone_stored_as_cone = true;
     f.offset_point_vertex_caps = true;
@@ -196,7 +192,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.proto_edge_splits_at_captured_vertices = true;
     f.stitch_solid_nests_cavities = true;
     f.local_operation_closes_walls_to_nothing = true;
-    f.linear_sweep_arc_to_cylinder_zero = true;
     f.imprint_reuses_coincident_face_edge = true;
     f.boolean_new_face_closure_both_sides = true;
     f.linear_sweep_arc_is_cylinder = true;
@@ -279,7 +274,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.twist_simple_duw_sign = true;
     f.offset_swap_uv_extended_distance = true;
     f.circumscribe_axis_map_by_basis = true;
-    f.planar_path_profile_in_path_frame = true;
     f.validation_does_not_make_uv_trims = true;
     f.iso_curve_uv_line_both_params = true;
     f.extrusion_step_uses_clamped_uv = true;
