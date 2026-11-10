@@ -2763,3 +2763,350 @@ $L__BB6_23:
 
 }
 	// .globl	mass_properties_generic
+.visible .entry mass_properties_generic(
+	.param .u64 mass_properties_generic_param_0,
+	.param .u64 mass_properties_generic_param_1,
+	.param .u32 mass_properties_generic_param_2
+)
+{
+	.reg .pred 	%p<11>;
+	.reg .f32 	%f<10>;
+	.reg .b32 	%r<17>;
+	.reg .f64 	%fd<191>;
+	.reg .b64 	%rd<9>;
+	// demoted variable
+	.shared .align 8 .b8 _ZZ23mass_properties_genericE4s_v6[2048];
+	// demoted variable
+	.shared .align 8 .b8 _ZZ23mass_properties_genericE6s_area[2048];
+	// demoted variable
+	.shared .align 8 .b8 _ZZ23mass_properties_genericE4s_mx[2048];
+	// demoted variable
+	.shared .align 8 .b8 _ZZ23mass_properties_genericE4s_my[2048];
+	// demoted variable
+	.shared .align 8 .b8 _ZZ23mass_properties_genericE4s_mz[2048];
+
+	ld.param.u64 	%rd1, [mass_properties_generic_param_0];
+	ld.param.u64 	%rd2, [mass_properties_generic_param_1];
+	ld.param.u32 	%r9, [mass_properties_generic_param_2];
+	mov.u32 	%r10, %ntid.x;
+	mov.u32 	%r1, %ctaid.x;
+	mov.u32 	%r2, %tid.x;
+	mad.lo.s32 	%r3, %r1, %r10, %r2;
+	setp.ge.u32 	%p1, %r3, %r9;
+	mov.f64 	%fd186, 0d0000000000000000;
+	mov.f64 	%fd187, %fd186;
+	mov.f64 	%fd188, %fd186;
+	mov.f64 	%fd189, %fd186;
+	mov.f64 	%fd190, %fd186;
+	@%p1 bra 	$L__BB7_2;
+
+	cvta.to.global.u64 	%rd3, %rd1;
+	mul.wide.u32 	%rd4, %r3, 48;
+	add.s64 	%rd5, %rd3, %rd4;
+	ld.global.nc.f32 	%f1, [%rd5];
+	cvt.f64.f32 	%fd16, %f1;
+	ld.global.nc.f32 	%f2, [%rd5+4];
+	cvt.f64.f32 	%fd17, %f2;
+	ld.global.nc.f32 	%f3, [%rd5+8];
+	cvt.f64.f32 	%fd18, %f3;
+	ld.global.nc.f32 	%f4, [%rd5+16];
+	cvt.f64.f32 	%fd19, %f4;
+	ld.global.nc.f32 	%f5, [%rd5+20];
+	cvt.f64.f32 	%fd20, %f5;
+	ld.global.nc.f32 	%f6, [%rd5+24];
+	cvt.f64.f32 	%fd21, %f6;
+	ld.global.nc.f32 	%f7, [%rd5+32];
+	cvt.f64.f32 	%fd22, %f7;
+	ld.global.nc.f32 	%f8, [%rd5+36];
+	cvt.f64.f32 	%fd23, %f8;
+	ld.global.nc.f32 	%f9, [%rd5+40];
+	cvt.f64.f32 	%fd24, %f9;
+	mul.f64 	%fd25, %fd20, %fd24;
+	mul.f64 	%fd26, %fd21, %fd23;
+	sub.f64 	%fd27, %fd25, %fd26;
+	mul.f64 	%fd28, %fd21, %fd22;
+	mul.f64 	%fd29, %fd19, %fd24;
+	sub.f64 	%fd30, %fd28, %fd29;
+	mul.f64 	%fd31, %fd30, %fd17;
+	fma.rn.f64 	%fd32, %fd27, %fd16, %fd31;
+	mul.f64 	%fd33, %fd19, %fd23;
+	mul.f64 	%fd34, %fd20, %fd22;
+	sub.f64 	%fd35, %fd33, %fd34;
+	fma.rn.f64 	%fd186, %fd35, %fd18, %fd32;
+	sub.f64 	%fd36, %fd19, %fd16;
+	sub.f64 	%fd37, %fd20, %fd17;
+	sub.f64 	%fd38, %fd21, %fd18;
+	sub.f64 	%fd39, %fd22, %fd16;
+	sub.f64 	%fd40, %fd23, %fd17;
+	sub.f64 	%fd41, %fd24, %fd18;
+	mul.f64 	%fd42, %fd37, %fd41;
+	mul.f64 	%fd43, %fd38, %fd40;
+	sub.f64 	%fd44, %fd42, %fd43;
+	mul.f64 	%fd45, %fd38, %fd39;
+	mul.f64 	%fd46, %fd36, %fd41;
+	sub.f64 	%fd47, %fd45, %fd46;
+	mul.f64 	%fd48, %fd36, %fd40;
+	mul.f64 	%fd49, %fd37, %fd39;
+	sub.f64 	%fd50, %fd48, %fd49;
+	mul.f64 	%fd51, %fd47, %fd47;
+	fma.rn.f64 	%fd52, %fd44, %fd44, %fd51;
+	fma.rn.f64 	%fd53, %fd50, %fd50, %fd52;
+	sqrt.rn.f64 	%fd54, %fd53;
+	mul.f64 	%fd187, %fd54, 0d3FE0000000000000;
+	add.f64 	%fd55, %fd16, %fd19;
+	add.f64 	%fd56, %fd55, %fd22;
+	mul.f64 	%fd188, %fd56, %fd186;
+	add.f64 	%fd57, %fd17, %fd20;
+	add.f64 	%fd58, %fd57, %fd23;
+	mul.f64 	%fd189, %fd58, %fd186;
+	add.f64 	%fd59, %fd18, %fd21;
+	add.f64 	%fd60, %fd59, %fd24;
+	mul.f64 	%fd190, %fd60, %fd186;
+
+$L__BB7_2:
+	shl.b32 	%r11, %r2, 3;
+	mov.u32 	%r12, _ZZ23mass_properties_genericE4s_v6;
+	add.s32 	%r4, %r12, %r11;
+	st.shared.f64 	[%r4], %fd186;
+	mov.u32 	%r13, _ZZ23mass_properties_genericE6s_area;
+	add.s32 	%r5, %r13, %r11;
+	st.shared.f64 	[%r5], %fd187;
+	mov.u32 	%r14, _ZZ23mass_properties_genericE4s_mx;
+	add.s32 	%r6, %r14, %r11;
+	st.shared.f64 	[%r6], %fd188;
+	mov.u32 	%r15, _ZZ23mass_properties_genericE4s_my;
+	add.s32 	%r7, %r15, %r11;
+	st.shared.f64 	[%r7], %fd189;
+	mov.u32 	%r16, _ZZ23mass_properties_genericE4s_mz;
+	add.s32 	%r8, %r16, %r11;
+	st.shared.f64 	[%r8], %fd190;
+	bar.sync 	0;
+	setp.gt.u32 	%p2, %r2, 127;
+	@%p2 bra 	$L__BB7_4;
+
+	ld.shared.f64 	%fd61, [%r4];
+	ld.shared.f64 	%fd62, [%r4+1024];
+	add.f64 	%fd63, %fd62, %fd61;
+	st.shared.f64 	[%r4], %fd63;
+	ld.shared.f64 	%fd64, [%r5+1024];
+	ld.shared.f64 	%fd65, [%r5];
+	add.f64 	%fd66, %fd64, %fd65;
+	st.shared.f64 	[%r5], %fd66;
+	ld.shared.f64 	%fd67, [%r6+1024];
+	ld.shared.f64 	%fd68, [%r6];
+	add.f64 	%fd69, %fd67, %fd68;
+	st.shared.f64 	[%r6], %fd69;
+	ld.shared.f64 	%fd70, [%r7+1024];
+	ld.shared.f64 	%fd71, [%r7];
+	add.f64 	%fd72, %fd70, %fd71;
+	st.shared.f64 	[%r7], %fd72;
+	ld.shared.f64 	%fd73, [%r8+1024];
+	ld.shared.f64 	%fd74, [%r8];
+	add.f64 	%fd75, %fd73, %fd74;
+	st.shared.f64 	[%r8], %fd75;
+
+$L__BB7_4:
+	bar.sync 	0;
+	setp.gt.u32 	%p3, %r2, 63;
+	@%p3 bra 	$L__BB7_6;
+
+	ld.shared.f64 	%fd76, [%r4];
+	ld.shared.f64 	%fd77, [%r4+512];
+	add.f64 	%fd78, %fd77, %fd76;
+	st.shared.f64 	[%r4], %fd78;
+	ld.shared.f64 	%fd79, [%r5+512];
+	ld.shared.f64 	%fd80, [%r5];
+	add.f64 	%fd81, %fd79, %fd80;
+	st.shared.f64 	[%r5], %fd81;
+	ld.shared.f64 	%fd82, [%r6+512];
+	ld.shared.f64 	%fd83, [%r6];
+	add.f64 	%fd84, %fd82, %fd83;
+	st.shared.f64 	[%r6], %fd84;
+	ld.shared.f64 	%fd85, [%r7+512];
+	ld.shared.f64 	%fd86, [%r7];
+	add.f64 	%fd87, %fd85, %fd86;
+	st.shared.f64 	[%r7], %fd87;
+	ld.shared.f64 	%fd88, [%r8+512];
+	ld.shared.f64 	%fd89, [%r8];
+	add.f64 	%fd90, %fd88, %fd89;
+	st.shared.f64 	[%r8], %fd90;
+
+$L__BB7_6:
+	bar.sync 	0;
+	setp.gt.u32 	%p4, %r2, 31;
+	@%p4 bra 	$L__BB7_8;
+
+	ld.shared.f64 	%fd91, [%r4];
+	ld.shared.f64 	%fd92, [%r4+256];
+	add.f64 	%fd93, %fd92, %fd91;
+	st.shared.f64 	[%r4], %fd93;
+	ld.shared.f64 	%fd94, [%r5+256];
+	ld.shared.f64 	%fd95, [%r5];
+	add.f64 	%fd96, %fd94, %fd95;
+	st.shared.f64 	[%r5], %fd96;
+	ld.shared.f64 	%fd97, [%r6+256];
+	ld.shared.f64 	%fd98, [%r6];
+	add.f64 	%fd99, %fd97, %fd98;
+	st.shared.f64 	[%r6], %fd99;
+	ld.shared.f64 	%fd100, [%r7+256];
+	ld.shared.f64 	%fd101, [%r7];
+	add.f64 	%fd102, %fd100, %fd101;
+	st.shared.f64 	[%r7], %fd102;
+	ld.shared.f64 	%fd103, [%r8+256];
+	ld.shared.f64 	%fd104, [%r8];
+	add.f64 	%fd105, %fd103, %fd104;
+	st.shared.f64 	[%r8], %fd105;
+
+$L__BB7_8:
+	bar.sync 	0;
+	setp.gt.u32 	%p5, %r2, 15;
+	@%p5 bra 	$L__BB7_10;
+
+	ld.shared.f64 	%fd106, [%r4];
+	ld.shared.f64 	%fd107, [%r4+128];
+	add.f64 	%fd108, %fd107, %fd106;
+	st.shared.f64 	[%r4], %fd108;
+	ld.shared.f64 	%fd109, [%r5+128];
+	ld.shared.f64 	%fd110, [%r5];
+	add.f64 	%fd111, %fd109, %fd110;
+	st.shared.f64 	[%r5], %fd111;
+	ld.shared.f64 	%fd112, [%r6+128];
+	ld.shared.f64 	%fd113, [%r6];
+	add.f64 	%fd114, %fd112, %fd113;
+	st.shared.f64 	[%r6], %fd114;
+	ld.shared.f64 	%fd115, [%r7+128];
+	ld.shared.f64 	%fd116, [%r7];
+	add.f64 	%fd117, %fd115, %fd116;
+	st.shared.f64 	[%r7], %fd117;
+	ld.shared.f64 	%fd118, [%r8+128];
+	ld.shared.f64 	%fd119, [%r8];
+	add.f64 	%fd120, %fd118, %fd119;
+	st.shared.f64 	[%r8], %fd120;
+
+$L__BB7_10:
+	bar.sync 	0;
+	setp.gt.u32 	%p6, %r2, 7;
+	@%p6 bra 	$L__BB7_12;
+
+	ld.shared.f64 	%fd121, [%r4];
+	ld.shared.f64 	%fd122, [%r4+64];
+	add.f64 	%fd123, %fd122, %fd121;
+	st.shared.f64 	[%r4], %fd123;
+	ld.shared.f64 	%fd124, [%r5+64];
+	ld.shared.f64 	%fd125, [%r5];
+	add.f64 	%fd126, %fd124, %fd125;
+	st.shared.f64 	[%r5], %fd126;
+	ld.shared.f64 	%fd127, [%r6+64];
+	ld.shared.f64 	%fd128, [%r6];
+	add.f64 	%fd129, %fd127, %fd128;
+	st.shared.f64 	[%r6], %fd129;
+	ld.shared.f64 	%fd130, [%r7+64];
+	ld.shared.f64 	%fd131, [%r7];
+	add.f64 	%fd132, %fd130, %fd131;
+	st.shared.f64 	[%r7], %fd132;
+	ld.shared.f64 	%fd133, [%r8+64];
+	ld.shared.f64 	%fd134, [%r8];
+	add.f64 	%fd135, %fd133, %fd134;
+	st.shared.f64 	[%r8], %fd135;
+
+$L__BB7_12:
+	bar.sync 	0;
+	setp.gt.u32 	%p7, %r2, 3;
+	@%p7 bra 	$L__BB7_14;
+
+	ld.shared.f64 	%fd136, [%r4];
+	ld.shared.f64 	%fd137, [%r4+32];
+	add.f64 	%fd138, %fd137, %fd136;
+	st.shared.f64 	[%r4], %fd138;
+	ld.shared.f64 	%fd139, [%r5+32];
+	ld.shared.f64 	%fd140, [%r5];
+	add.f64 	%fd141, %fd139, %fd140;
+	st.shared.f64 	[%r5], %fd141;
+	ld.shared.f64 	%fd142, [%r6+32];
+	ld.shared.f64 	%fd143, [%r6];
+	add.f64 	%fd144, %fd142, %fd143;
+	st.shared.f64 	[%r6], %fd144;
+	ld.shared.f64 	%fd145, [%r7+32];
+	ld.shared.f64 	%fd146, [%r7];
+	add.f64 	%fd147, %fd145, %fd146;
+	st.shared.f64 	[%r7], %fd147;
+	ld.shared.f64 	%fd148, [%r8+32];
+	ld.shared.f64 	%fd149, [%r8];
+	add.f64 	%fd150, %fd148, %fd149;
+	st.shared.f64 	[%r8], %fd150;
+
+$L__BB7_14:
+	bar.sync 	0;
+	setp.gt.u32 	%p8, %r2, 1;
+	@%p8 bra 	$L__BB7_16;
+
+	ld.shared.f64 	%fd151, [%r4];
+	ld.shared.f64 	%fd152, [%r4+16];
+	add.f64 	%fd153, %fd152, %fd151;
+	st.shared.f64 	[%r4], %fd153;
+	ld.shared.f64 	%fd154, [%r5+16];
+	ld.shared.f64 	%fd155, [%r5];
+	add.f64 	%fd156, %fd154, %fd155;
+	st.shared.f64 	[%r5], %fd156;
+	ld.shared.f64 	%fd157, [%r6+16];
+	ld.shared.f64 	%fd158, [%r6];
+	add.f64 	%fd159, %fd157, %fd158;
+	st.shared.f64 	[%r6], %fd159;
+	ld.shared.f64 	%fd160, [%r7+16];
+	ld.shared.f64 	%fd161, [%r7];
+	add.f64 	%fd162, %fd160, %fd161;
+	st.shared.f64 	[%r7], %fd162;
+	ld.shared.f64 	%fd163, [%r8+16];
+	ld.shared.f64 	%fd164, [%r8];
+	add.f64 	%fd165, %fd163, %fd164;
+	st.shared.f64 	[%r8], %fd165;
+
+$L__BB7_16:
+	bar.sync 	0;
+	setp.ne.s32 	%p9, %r2, 0;
+	@%p9 bra 	$L__BB7_18;
+
+	ld.shared.f64 	%fd166, [_ZZ23mass_properties_genericE4s_v6+8];
+	ld.shared.f64 	%fd167, [%r4];
+	add.f64 	%fd168, %fd166, %fd167;
+	st.shared.f64 	[%r4], %fd168;
+	ld.shared.f64 	%fd169, [%r5];
+	ld.shared.f64 	%fd170, [_ZZ23mass_properties_genericE6s_area+8];
+	add.f64 	%fd171, %fd170, %fd169;
+	st.shared.f64 	[%r5], %fd171;
+	ld.shared.f64 	%fd172, [%r6];
+	ld.shared.f64 	%fd173, [_ZZ23mass_properties_genericE4s_mx+8];
+	add.f64 	%fd174, %fd173, %fd172;
+	st.shared.f64 	[%r6], %fd174;
+	ld.shared.f64 	%fd175, [%r7];
+	ld.shared.f64 	%fd176, [_ZZ23mass_properties_genericE4s_my+8];
+	add.f64 	%fd177, %fd176, %fd175;
+	st.shared.f64 	[%r7], %fd177;
+	ld.shared.f64 	%fd178, [%r8];
+	ld.shared.f64 	%fd179, [_ZZ23mass_properties_genericE4s_mz+8];
+	add.f64 	%fd180, %fd179, %fd178;
+	st.shared.f64 	[%r8], %fd180;
+
+$L__BB7_18:
+	bar.sync 	0;
+	@%p9 bra 	$L__BB7_20;
+
+	cvta.to.global.u64 	%rd6, %rd2;
+	mul.wide.u32 	%rd7, %r1, 40;
+	add.s64 	%rd8, %rd6, %rd7;
+	ld.shared.f64 	%fd181, [_ZZ23mass_properties_genericE4s_v6];
+	st.global.f64 	[%rd8], %fd181;
+	ld.shared.f64 	%fd182, [_ZZ23mass_properties_genericE6s_area];
+	st.global.f64 	[%rd8+8], %fd182;
+	ld.shared.f64 	%fd183, [_ZZ23mass_properties_genericE4s_mx];
+	st.global.f64 	[%rd8+16], %fd183;
+	ld.shared.f64 	%fd184, [_ZZ23mass_properties_genericE4s_my];
+	st.global.f64 	[%rd8+24], %fd184;
+	ld.shared.f64 	%fd185, [_ZZ23mass_properties_genericE4s_mz];
+	st.global.f64 	[%rd8+32], %fd185;
+
+$L__BB7_20:
+	ret;
+
+}
+

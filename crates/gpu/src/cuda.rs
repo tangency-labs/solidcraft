@@ -239,6 +239,7 @@ struct GenericFunctions {
     raycast_rt_bvh: CudaFunction,
     bipartite_aabb: CudaFunction,
     point_mesh_dist: CudaFunction,
+    mass_properties: CudaFunction,
 }
 
 struct AmpereFunctions {
@@ -249,6 +250,7 @@ struct AmpereFunctions {
     raycast_rt_bvh_sm86: CudaFunction,
     bipartite_aabb_sm86: CudaFunction,
     point_mesh_dist_sm86: CudaFunction,
+    mass_properties_sm86: CudaFunction,
 }
 
 /// Multi-tier `cudarc` CUDA backend holding both Generic (`sm_70`) and Handcrafted Ampere (`sm_86`) modules.
@@ -347,6 +349,7 @@ impl CudaBackend {
             raycast_rt_bvh: mod_generic.load_function("raycast_rt_bvh").ok()?,
             bipartite_aabb: mod_generic.load_function("bipartite_aabb_overlap_generic").ok()?,
             point_mesh_dist: mod_generic.load_function("point_mesh_distance_generic").ok()?,
+            mass_properties: mod_generic.load_function("mass_properties_generic").ok()?,
         };
 
         let (mod_ampere, ampere) = if best.supports_ampere_ptx {
@@ -360,6 +363,7 @@ impl CudaBackend {
                         raycast_rt_bvh_sm86: m86.load_function("raycast_rt_bvh").ok()?,
                         bipartite_aabb_sm86: m86.load_function("bipartite_aabb_overlap_sm86").ok()?,
                         point_mesh_dist_sm86: m86.load_function("point_mesh_distance_sm86").ok()?,
+                        mass_properties_sm86: m86.load_function("mass_properties_sm86").ok()?,
                     })
                 })();
                 (Some(m86), funcs)
@@ -673,5 +677,46 @@ impl CudaBackend {
         }
 
         self.stream.clone_dtoh(&d_out).ok()
+    }
+
+    /// Computes divergence-theorem volume, surface area, and centroid in `f64` double precision.
+    pub fn mass_properties(&self, tris: &[GpuTri], use_ampere_sm86: bool) -> Option<solidcraft_geom::MeshMeasure> {
+        use solidcore_record::Vec3;
+        use solidcraft_geom::MeshMeasure;
+
+        if tris.is_empty() {
+            return Some(MeshMeasure::default());
+        }
+        let func = if use_ampere_sm86 { &self.ampere.as_ref()?.mass_properties_sm86 } else { &self.generic.mass_properties };
+
+        let num_tris = u32::try_from(tris.len()).ok()?;
+        let block_x = 256u32;
+        let num_blocks = num_tris.div_ceil(block_x);
+        let partials_len = (num_blocks as usize) * 5;
+
+        let _guard = self.lock_and_bind()?;
+        let d_tris = self.stream.clone_htod(tris).ok()?;
+        let mut d_partials = self.stream.alloc_zeros::<f64>(partials_len).ok()?;
+
+        let cfg = LaunchConfig { grid_dim: (num_blocks, 1, 1), block_dim: (block_x, 1, 1), shared_mem_bytes: 0 };
+
+        // SAFETY: Kernel signature takes `(const GpuTri*, f64*, u32)` with 256 threads/block.
+        unsafe {
+            self.stream.launch_builder(func).arg(&d_tris).arg(&mut d_partials).arg(&num_tris).launch(cfg).ok()?;
+        }
+
+        let partials = self.stream.clone_dtoh(&d_partials).ok()?;
+
+        let (mut v6, mut area, mut mx, mut my, mut mz) = (0.0f64, 0.0f64, 0.0f64, 0.0f64, 0.0f64);
+        for chunk in partials.as_chunks::<5>().0 {
+            v6 += chunk[0];
+            area += chunk[1];
+            mx += chunk[2];
+            my += chunk[3];
+            mz += chunk[4];
+        }
+        let volume = v6 / 6.0;
+        let centroid = if v6.abs() > 1e-12 { Vec3::new(mx / (4.0 * v6), my / (4.0 * v6), mz / (4.0 * v6)) } else { Vec3::ZERO };
+        Some(MeshMeasure { volume, area, centroid })
     }
 }

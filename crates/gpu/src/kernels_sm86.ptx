@@ -4645,3 +4645,866 @@ $L__BB11_23:
 
 }
 	// .globl	mass_properties_generic
+.visible .entry mass_properties_generic(
+	.param .u64 mass_properties_generic_param_0,
+	.param .u64 mass_properties_generic_param_1,
+	.param .u32 mass_properties_generic_param_2
+)
+{
+	.reg .pred 	%p<11>;
+	.reg .f32 	%f<10>;
+	.reg .b32 	%r<17>;
+	.reg .f64 	%fd<191>;
+	.reg .b64 	%rd<9>;
+	// demoted variable
+	.shared .align 8 .b8 _ZZ23mass_properties_genericE4s_v6[2048];
+	// demoted variable
+	.shared .align 8 .b8 _ZZ23mass_properties_genericE6s_area[2048];
+	// demoted variable
+	.shared .align 8 .b8 _ZZ23mass_properties_genericE4s_mx[2048];
+	// demoted variable
+	.shared .align 8 .b8 _ZZ23mass_properties_genericE4s_my[2048];
+	// demoted variable
+	.shared .align 8 .b8 _ZZ23mass_properties_genericE4s_mz[2048];
+
+	ld.param.u64 	%rd1, [mass_properties_generic_param_0];
+	ld.param.u64 	%rd2, [mass_properties_generic_param_1];
+	ld.param.u32 	%r9, [mass_properties_generic_param_2];
+	mov.u32 	%r10, %ntid.x;
+	mov.u32 	%r1, %ctaid.x;
+	mov.u32 	%r2, %tid.x;
+	mad.lo.s32 	%r3, %r1, %r10, %r2;
+	setp.ge.u32 	%p1, %r3, %r9;
+	mov.f64 	%fd186, 0d0000000000000000;
+	mov.f64 	%fd187, %fd186;
+	mov.f64 	%fd188, %fd186;
+	mov.f64 	%fd189, %fd186;
+	mov.f64 	%fd190, %fd186;
+	@%p1 bra 	$L__BB12_2;
+
+	cvta.to.global.u64 	%rd3, %rd1;
+	mul.wide.u32 	%rd4, %r3, 48;
+	add.s64 	%rd5, %rd3, %rd4;
+	ld.global.nc.f32 	%f1, [%rd5];
+	cvt.f64.f32 	%fd16, %f1;
+	ld.global.nc.f32 	%f2, [%rd5+4];
+	cvt.f64.f32 	%fd17, %f2;
+	ld.global.nc.f32 	%f3, [%rd5+8];
+	cvt.f64.f32 	%fd18, %f3;
+	ld.global.nc.f32 	%f4, [%rd5+16];
+	cvt.f64.f32 	%fd19, %f4;
+	ld.global.nc.f32 	%f5, [%rd5+20];
+	cvt.f64.f32 	%fd20, %f5;
+	ld.global.nc.f32 	%f6, [%rd5+24];
+	cvt.f64.f32 	%fd21, %f6;
+	ld.global.nc.f32 	%f7, [%rd5+32];
+	cvt.f64.f32 	%fd22, %f7;
+	ld.global.nc.f32 	%f8, [%rd5+36];
+	cvt.f64.f32 	%fd23, %f8;
+	ld.global.nc.f32 	%f9, [%rd5+40];
+	cvt.f64.f32 	%fd24, %f9;
+	mul.f64 	%fd25, %fd20, %fd24;
+	mul.f64 	%fd26, %fd21, %fd23;
+	sub.f64 	%fd27, %fd25, %fd26;
+	mul.f64 	%fd28, %fd21, %fd22;
+	mul.f64 	%fd29, %fd19, %fd24;
+	sub.f64 	%fd30, %fd28, %fd29;
+	mul.f64 	%fd31, %fd30, %fd17;
+	fma.rn.f64 	%fd32, %fd27, %fd16, %fd31;
+	mul.f64 	%fd33, %fd19, %fd23;
+	mul.f64 	%fd34, %fd20, %fd22;
+	sub.f64 	%fd35, %fd33, %fd34;
+	fma.rn.f64 	%fd186, %fd35, %fd18, %fd32;
+	sub.f64 	%fd36, %fd19, %fd16;
+	sub.f64 	%fd37, %fd20, %fd17;
+	sub.f64 	%fd38, %fd21, %fd18;
+	sub.f64 	%fd39, %fd22, %fd16;
+	sub.f64 	%fd40, %fd23, %fd17;
+	sub.f64 	%fd41, %fd24, %fd18;
+	mul.f64 	%fd42, %fd37, %fd41;
+	mul.f64 	%fd43, %fd38, %fd40;
+	sub.f64 	%fd44, %fd42, %fd43;
+	mul.f64 	%fd45, %fd38, %fd39;
+	mul.f64 	%fd46, %fd36, %fd41;
+	sub.f64 	%fd47, %fd45, %fd46;
+	mul.f64 	%fd48, %fd36, %fd40;
+	mul.f64 	%fd49, %fd37, %fd39;
+	sub.f64 	%fd50, %fd48, %fd49;
+	mul.f64 	%fd51, %fd47, %fd47;
+	fma.rn.f64 	%fd52, %fd44, %fd44, %fd51;
+	fma.rn.f64 	%fd53, %fd50, %fd50, %fd52;
+	sqrt.rn.f64 	%fd54, %fd53;
+	mul.f64 	%fd187, %fd54, 0d3FE0000000000000;
+	add.f64 	%fd55, %fd16, %fd19;
+	add.f64 	%fd56, %fd55, %fd22;
+	mul.f64 	%fd188, %fd56, %fd186;
+	add.f64 	%fd57, %fd17, %fd20;
+	add.f64 	%fd58, %fd57, %fd23;
+	mul.f64 	%fd189, %fd58, %fd186;
+	add.f64 	%fd59, %fd18, %fd21;
+	add.f64 	%fd60, %fd59, %fd24;
+	mul.f64 	%fd190, %fd60, %fd186;
+
+$L__BB12_2:
+	shl.b32 	%r11, %r2, 3;
+	mov.u32 	%r12, _ZZ23mass_properties_genericE4s_v6;
+	add.s32 	%r4, %r12, %r11;
+	st.shared.f64 	[%r4], %fd186;
+	mov.u32 	%r13, _ZZ23mass_properties_genericE6s_area;
+	add.s32 	%r5, %r13, %r11;
+	st.shared.f64 	[%r5], %fd187;
+	mov.u32 	%r14, _ZZ23mass_properties_genericE4s_mx;
+	add.s32 	%r6, %r14, %r11;
+	st.shared.f64 	[%r6], %fd188;
+	mov.u32 	%r15, _ZZ23mass_properties_genericE4s_my;
+	add.s32 	%r7, %r15, %r11;
+	st.shared.f64 	[%r7], %fd189;
+	mov.u32 	%r16, _ZZ23mass_properties_genericE4s_mz;
+	add.s32 	%r8, %r16, %r11;
+	st.shared.f64 	[%r8], %fd190;
+	bar.sync 	0;
+	setp.gt.u32 	%p2, %r2, 127;
+	@%p2 bra 	$L__BB12_4;
+
+	ld.shared.f64 	%fd61, [%r4];
+	ld.shared.f64 	%fd62, [%r4+1024];
+	add.f64 	%fd63, %fd62, %fd61;
+	st.shared.f64 	[%r4], %fd63;
+	ld.shared.f64 	%fd64, [%r5+1024];
+	ld.shared.f64 	%fd65, [%r5];
+	add.f64 	%fd66, %fd64, %fd65;
+	st.shared.f64 	[%r5], %fd66;
+	ld.shared.f64 	%fd67, [%r6+1024];
+	ld.shared.f64 	%fd68, [%r6];
+	add.f64 	%fd69, %fd67, %fd68;
+	st.shared.f64 	[%r6], %fd69;
+	ld.shared.f64 	%fd70, [%r7+1024];
+	ld.shared.f64 	%fd71, [%r7];
+	add.f64 	%fd72, %fd70, %fd71;
+	st.shared.f64 	[%r7], %fd72;
+	ld.shared.f64 	%fd73, [%r8+1024];
+	ld.shared.f64 	%fd74, [%r8];
+	add.f64 	%fd75, %fd73, %fd74;
+	st.shared.f64 	[%r8], %fd75;
+
+$L__BB12_4:
+	bar.sync 	0;
+	setp.gt.u32 	%p3, %r2, 63;
+	@%p3 bra 	$L__BB12_6;
+
+	ld.shared.f64 	%fd76, [%r4];
+	ld.shared.f64 	%fd77, [%r4+512];
+	add.f64 	%fd78, %fd77, %fd76;
+	st.shared.f64 	[%r4], %fd78;
+	ld.shared.f64 	%fd79, [%r5+512];
+	ld.shared.f64 	%fd80, [%r5];
+	add.f64 	%fd81, %fd79, %fd80;
+	st.shared.f64 	[%r5], %fd81;
+	ld.shared.f64 	%fd82, [%r6+512];
+	ld.shared.f64 	%fd83, [%r6];
+	add.f64 	%fd84, %fd82, %fd83;
+	st.shared.f64 	[%r6], %fd84;
+	ld.shared.f64 	%fd85, [%r7+512];
+	ld.shared.f64 	%fd86, [%r7];
+	add.f64 	%fd87, %fd85, %fd86;
+	st.shared.f64 	[%r7], %fd87;
+	ld.shared.f64 	%fd88, [%r8+512];
+	ld.shared.f64 	%fd89, [%r8];
+	add.f64 	%fd90, %fd88, %fd89;
+	st.shared.f64 	[%r8], %fd90;
+
+$L__BB12_6:
+	bar.sync 	0;
+	setp.gt.u32 	%p4, %r2, 31;
+	@%p4 bra 	$L__BB12_8;
+
+	ld.shared.f64 	%fd91, [%r4];
+	ld.shared.f64 	%fd92, [%r4+256];
+	add.f64 	%fd93, %fd92, %fd91;
+	st.shared.f64 	[%r4], %fd93;
+	ld.shared.f64 	%fd94, [%r5+256];
+	ld.shared.f64 	%fd95, [%r5];
+	add.f64 	%fd96, %fd94, %fd95;
+	st.shared.f64 	[%r5], %fd96;
+	ld.shared.f64 	%fd97, [%r6+256];
+	ld.shared.f64 	%fd98, [%r6];
+	add.f64 	%fd99, %fd97, %fd98;
+	st.shared.f64 	[%r6], %fd99;
+	ld.shared.f64 	%fd100, [%r7+256];
+	ld.shared.f64 	%fd101, [%r7];
+	add.f64 	%fd102, %fd100, %fd101;
+	st.shared.f64 	[%r7], %fd102;
+	ld.shared.f64 	%fd103, [%r8+256];
+	ld.shared.f64 	%fd104, [%r8];
+	add.f64 	%fd105, %fd103, %fd104;
+	st.shared.f64 	[%r8], %fd105;
+
+$L__BB12_8:
+	bar.sync 	0;
+	setp.gt.u32 	%p5, %r2, 15;
+	@%p5 bra 	$L__BB12_10;
+
+	ld.shared.f64 	%fd106, [%r4];
+	ld.shared.f64 	%fd107, [%r4+128];
+	add.f64 	%fd108, %fd107, %fd106;
+	st.shared.f64 	[%r4], %fd108;
+	ld.shared.f64 	%fd109, [%r5+128];
+	ld.shared.f64 	%fd110, [%r5];
+	add.f64 	%fd111, %fd109, %fd110;
+	st.shared.f64 	[%r5], %fd111;
+	ld.shared.f64 	%fd112, [%r6+128];
+	ld.shared.f64 	%fd113, [%r6];
+	add.f64 	%fd114, %fd112, %fd113;
+	st.shared.f64 	[%r6], %fd114;
+	ld.shared.f64 	%fd115, [%r7+128];
+	ld.shared.f64 	%fd116, [%r7];
+	add.f64 	%fd117, %fd115, %fd116;
+	st.shared.f64 	[%r7], %fd117;
+	ld.shared.f64 	%fd118, [%r8+128];
+	ld.shared.f64 	%fd119, [%r8];
+	add.f64 	%fd120, %fd118, %fd119;
+	st.shared.f64 	[%r8], %fd120;
+
+$L__BB12_10:
+	bar.sync 	0;
+	setp.gt.u32 	%p6, %r2, 7;
+	@%p6 bra 	$L__BB12_12;
+
+	ld.shared.f64 	%fd121, [%r4];
+	ld.shared.f64 	%fd122, [%r4+64];
+	add.f64 	%fd123, %fd122, %fd121;
+	st.shared.f64 	[%r4], %fd123;
+	ld.shared.f64 	%fd124, [%r5+64];
+	ld.shared.f64 	%fd125, [%r5];
+	add.f64 	%fd126, %fd124, %fd125;
+	st.shared.f64 	[%r5], %fd126;
+	ld.shared.f64 	%fd127, [%r6+64];
+	ld.shared.f64 	%fd128, [%r6];
+	add.f64 	%fd129, %fd127, %fd128;
+	st.shared.f64 	[%r6], %fd129;
+	ld.shared.f64 	%fd130, [%r7+64];
+	ld.shared.f64 	%fd131, [%r7];
+	add.f64 	%fd132, %fd130, %fd131;
+	st.shared.f64 	[%r7], %fd132;
+	ld.shared.f64 	%fd133, [%r8+64];
+	ld.shared.f64 	%fd134, [%r8];
+	add.f64 	%fd135, %fd133, %fd134;
+	st.shared.f64 	[%r8], %fd135;
+
+$L__BB12_12:
+	bar.sync 	0;
+	setp.gt.u32 	%p7, %r2, 3;
+	@%p7 bra 	$L__BB12_14;
+
+	ld.shared.f64 	%fd136, [%r4];
+	ld.shared.f64 	%fd137, [%r4+32];
+	add.f64 	%fd138, %fd137, %fd136;
+	st.shared.f64 	[%r4], %fd138;
+	ld.shared.f64 	%fd139, [%r5+32];
+	ld.shared.f64 	%fd140, [%r5];
+	add.f64 	%fd141, %fd139, %fd140;
+	st.shared.f64 	[%r5], %fd141;
+	ld.shared.f64 	%fd142, [%r6+32];
+	ld.shared.f64 	%fd143, [%r6];
+	add.f64 	%fd144, %fd142, %fd143;
+	st.shared.f64 	[%r6], %fd144;
+	ld.shared.f64 	%fd145, [%r7+32];
+	ld.shared.f64 	%fd146, [%r7];
+	add.f64 	%fd147, %fd145, %fd146;
+	st.shared.f64 	[%r7], %fd147;
+	ld.shared.f64 	%fd148, [%r8+32];
+	ld.shared.f64 	%fd149, [%r8];
+	add.f64 	%fd150, %fd148, %fd149;
+	st.shared.f64 	[%r8], %fd150;
+
+$L__BB12_14:
+	bar.sync 	0;
+	setp.gt.u32 	%p8, %r2, 1;
+	@%p8 bra 	$L__BB12_16;
+
+	ld.shared.f64 	%fd151, [%r4];
+	ld.shared.f64 	%fd152, [%r4+16];
+	add.f64 	%fd153, %fd152, %fd151;
+	st.shared.f64 	[%r4], %fd153;
+	ld.shared.f64 	%fd154, [%r5+16];
+	ld.shared.f64 	%fd155, [%r5];
+	add.f64 	%fd156, %fd154, %fd155;
+	st.shared.f64 	[%r5], %fd156;
+	ld.shared.f64 	%fd157, [%r6+16];
+	ld.shared.f64 	%fd158, [%r6];
+	add.f64 	%fd159, %fd157, %fd158;
+	st.shared.f64 	[%r6], %fd159;
+	ld.shared.f64 	%fd160, [%r7+16];
+	ld.shared.f64 	%fd161, [%r7];
+	add.f64 	%fd162, %fd160, %fd161;
+	st.shared.f64 	[%r7], %fd162;
+	ld.shared.f64 	%fd163, [%r8+16];
+	ld.shared.f64 	%fd164, [%r8];
+	add.f64 	%fd165, %fd163, %fd164;
+	st.shared.f64 	[%r8], %fd165;
+
+$L__BB12_16:
+	bar.sync 	0;
+	setp.ne.s32 	%p9, %r2, 0;
+	@%p9 bra 	$L__BB12_18;
+
+	ld.shared.f64 	%fd166, [_ZZ23mass_properties_genericE4s_v6+8];
+	ld.shared.f64 	%fd167, [%r4];
+	add.f64 	%fd168, %fd166, %fd167;
+	st.shared.f64 	[%r4], %fd168;
+	ld.shared.f64 	%fd169, [%r5];
+	ld.shared.f64 	%fd170, [_ZZ23mass_properties_genericE6s_area+8];
+	add.f64 	%fd171, %fd170, %fd169;
+	st.shared.f64 	[%r5], %fd171;
+	ld.shared.f64 	%fd172, [%r6];
+	ld.shared.f64 	%fd173, [_ZZ23mass_properties_genericE4s_mx+8];
+	add.f64 	%fd174, %fd173, %fd172;
+	st.shared.f64 	[%r6], %fd174;
+	ld.shared.f64 	%fd175, [%r7];
+	ld.shared.f64 	%fd176, [_ZZ23mass_properties_genericE4s_my+8];
+	add.f64 	%fd177, %fd176, %fd175;
+	st.shared.f64 	[%r7], %fd177;
+	ld.shared.f64 	%fd178, [%r8];
+	ld.shared.f64 	%fd179, [_ZZ23mass_properties_genericE4s_mz+8];
+	add.f64 	%fd180, %fd179, %fd178;
+	st.shared.f64 	[%r8], %fd180;
+
+$L__BB12_18:
+	bar.sync 	0;
+	@%p9 bra 	$L__BB12_20;
+
+	cvta.to.global.u64 	%rd6, %rd2;
+	mul.wide.u32 	%rd7, %r1, 40;
+	add.s64 	%rd8, %rd6, %rd7;
+	ld.shared.f64 	%fd181, [_ZZ23mass_properties_genericE4s_v6];
+	st.global.f64 	[%rd8], %fd181;
+	ld.shared.f64 	%fd182, [_ZZ23mass_properties_genericE6s_area];
+	st.global.f64 	[%rd8+8], %fd182;
+	ld.shared.f64 	%fd183, [_ZZ23mass_properties_genericE4s_mx];
+	st.global.f64 	[%rd8+16], %fd183;
+	ld.shared.f64 	%fd184, [_ZZ23mass_properties_genericE4s_my];
+	st.global.f64 	[%rd8+24], %fd184;
+	ld.shared.f64 	%fd185, [_ZZ23mass_properties_genericE4s_mz];
+	st.global.f64 	[%rd8+32], %fd185;
+
+$L__BB12_20:
+	ret;
+
+}
+	// .globl	mass_properties_sm86
+.visible .entry mass_properties_sm86(
+	.param .u64 mass_properties_sm86_param_0,
+	.param .u64 mass_properties_sm86_param_1,
+	.param .u32 mass_properties_sm86_param_2
+)
+{
+	.reg .pred 	%p<86>;
+	.reg .f32 	%f<10>;
+	.reg .b32 	%r<184>;
+	.reg .f64 	%fd<176>;
+	.reg .b64 	%rd<9>;
+	// demoted variable
+	.shared .align 8 .b8 _ZZ20mass_properties_sm86E9warp_sums[320];
+
+	ld.param.u64 	%rd1, [mass_properties_sm86_param_0];
+	ld.param.u64 	%rd2, [mass_properties_sm86_param_1];
+	ld.param.u32 	%r5, [mass_properties_sm86_param_2];
+	mov.u32 	%r6, %ntid.x;
+	mov.u32 	%r1, %ctaid.x;
+	mov.u32 	%r7, %tid.x;
+	mad.lo.s32 	%r2, %r1, %r6, %r7;
+	and.b32  	%r3, %r7, 31;
+	shr.u32 	%r4, %r7, 5;
+	setp.ge.u32 	%p1, %r2, %r5;
+	mov.f64 	%fd166, 0d0000000000000000;
+	mov.f64 	%fd167, %fd166;
+	mov.f64 	%fd168, %fd166;
+	mov.f64 	%fd169, %fd166;
+	mov.f64 	%fd170, %fd166;
+	@%p1 bra 	$L__BB13_2;
+
+	cvta.to.global.u64 	%rd3, %rd1;
+	mul.wide.u32 	%rd4, %r2, 48;
+	add.s64 	%rd5, %rd3, %rd4;
+	ld.global.nc.f32 	%f1, [%rd5];
+	cvt.f64.f32 	%fd36, %f1;
+	ld.global.nc.f32 	%f2, [%rd5+4];
+	cvt.f64.f32 	%fd37, %f2;
+	ld.global.nc.f32 	%f3, [%rd5+8];
+	cvt.f64.f32 	%fd38, %f3;
+	ld.global.nc.f32 	%f4, [%rd5+16];
+	cvt.f64.f32 	%fd39, %f4;
+	ld.global.nc.f32 	%f5, [%rd5+20];
+	cvt.f64.f32 	%fd40, %f5;
+	ld.global.nc.f32 	%f6, [%rd5+24];
+	cvt.f64.f32 	%fd41, %f6;
+	ld.global.nc.f32 	%f7, [%rd5+32];
+	cvt.f64.f32 	%fd42, %f7;
+	ld.global.nc.f32 	%f8, [%rd5+36];
+	cvt.f64.f32 	%fd43, %f8;
+	ld.global.nc.f32 	%f9, [%rd5+40];
+	cvt.f64.f32 	%fd44, %f9;
+	mul.f64 	%fd45, %fd40, %fd44;
+	mul.f64 	%fd46, %fd41, %fd43;
+	sub.f64 	%fd47, %fd45, %fd46;
+	mul.f64 	%fd48, %fd41, %fd42;
+	mul.f64 	%fd49, %fd39, %fd44;
+	sub.f64 	%fd50, %fd48, %fd49;
+	mul.f64 	%fd51, %fd50, %fd37;
+	fma.rn.f64 	%fd52, %fd47, %fd36, %fd51;
+	mul.f64 	%fd53, %fd39, %fd43;
+	mul.f64 	%fd54, %fd40, %fd42;
+	sub.f64 	%fd55, %fd53, %fd54;
+	fma.rn.f64 	%fd166, %fd55, %fd38, %fd52;
+	sub.f64 	%fd56, %fd39, %fd36;
+	sub.f64 	%fd57, %fd40, %fd37;
+	sub.f64 	%fd58, %fd41, %fd38;
+	sub.f64 	%fd59, %fd42, %fd36;
+	sub.f64 	%fd60, %fd43, %fd37;
+	sub.f64 	%fd61, %fd44, %fd38;
+	mul.f64 	%fd62, %fd57, %fd61;
+	mul.f64 	%fd63, %fd58, %fd60;
+	sub.f64 	%fd64, %fd62, %fd63;
+	mul.f64 	%fd65, %fd58, %fd59;
+	mul.f64 	%fd66, %fd56, %fd61;
+	sub.f64 	%fd67, %fd65, %fd66;
+	mul.f64 	%fd68, %fd56, %fd60;
+	mul.f64 	%fd69, %fd57, %fd59;
+	sub.f64 	%fd70, %fd68, %fd69;
+	mul.f64 	%fd71, %fd67, %fd67;
+	fma.rn.f64 	%fd72, %fd64, %fd64, %fd71;
+	fma.rn.f64 	%fd73, %fd70, %fd70, %fd72;
+	sqrt.rn.f64 	%fd74, %fd73;
+	mul.f64 	%fd167, %fd74, 0d3FE0000000000000;
+	add.f64 	%fd75, %fd36, %fd39;
+	add.f64 	%fd76, %fd75, %fd42;
+	mul.f64 	%fd168, %fd76, %fd166;
+	add.f64 	%fd77, %fd37, %fd40;
+	add.f64 	%fd78, %fd77, %fd43;
+	mul.f64 	%fd169, %fd78, %fd166;
+	add.f64 	%fd79, %fd38, %fd41;
+	add.f64 	%fd80, %fd79, %fd44;
+	mul.f64 	%fd170, %fd80, %fd166;
+
+$L__BB13_2:
+	// begin inline asm
+	mov.b64 {%r8,%r9}, %fd166;
+	// end inline asm
+	mov.u32 	%r108, 31;
+	mov.u32 	%r109, 16;
+	mov.u32 	%r110, -1;
+	shfl.sync.bfly.b32 	%r11|%p2, %r9, %r109, %r108, %r110;
+	shfl.sync.bfly.b32 	%r10|%p3, %r8, %r109, %r108, %r110;
+	// begin inline asm
+	mov.b64 %fd82, {%r10,%r11};
+	// end inline asm
+	add.f64 	%fd91, %fd166, %fd82;
+	// begin inline asm
+	mov.b64 {%r12,%r13}, %fd167;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r15|%p4, %r13, %r109, %r108, %r110;
+	shfl.sync.bfly.b32 	%r14|%p5, %r12, %r109, %r108, %r110;
+	// begin inline asm
+	mov.b64 %fd84, {%r14,%r15};
+	// end inline asm
+	add.f64 	%fd93, %fd167, %fd84;
+	// begin inline asm
+	mov.b64 {%r16,%r17}, %fd168;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r19|%p6, %r17, %r109, %r108, %r110;
+	shfl.sync.bfly.b32 	%r18|%p7, %r16, %r109, %r108, %r110;
+	// begin inline asm
+	mov.b64 %fd86, {%r18,%r19};
+	// end inline asm
+	add.f64 	%fd95, %fd168, %fd86;
+	// begin inline asm
+	mov.b64 {%r20,%r21}, %fd169;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r23|%p8, %r21, %r109, %r108, %r110;
+	shfl.sync.bfly.b32 	%r22|%p9, %r20, %r109, %r108, %r110;
+	// begin inline asm
+	mov.b64 %fd88, {%r22,%r23};
+	// end inline asm
+	add.f64 	%fd97, %fd169, %fd88;
+	// begin inline asm
+	mov.b64 {%r24,%r25}, %fd170;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r27|%p10, %r25, %r109, %r108, %r110;
+	shfl.sync.bfly.b32 	%r26|%p11, %r24, %r109, %r108, %r110;
+	// begin inline asm
+	mov.b64 %fd90, {%r26,%r27};
+	// end inline asm
+	add.f64 	%fd99, %fd170, %fd90;
+	// begin inline asm
+	mov.b64 {%r28,%r29}, %fd91;
+	// end inline asm
+	mov.u32 	%r111, 8;
+	shfl.sync.bfly.b32 	%r31|%p12, %r29, %r111, %r108, %r110;
+	shfl.sync.bfly.b32 	%r30|%p13, %r28, %r111, %r108, %r110;
+	// begin inline asm
+	mov.b64 %fd92, {%r30,%r31};
+	// end inline asm
+	add.f64 	%fd101, %fd91, %fd92;
+	// begin inline asm
+	mov.b64 {%r32,%r33}, %fd93;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r35|%p14, %r33, %r111, %r108, %r110;
+	shfl.sync.bfly.b32 	%r34|%p15, %r32, %r111, %r108, %r110;
+	// begin inline asm
+	mov.b64 %fd94, {%r34,%r35};
+	// end inline asm
+	add.f64 	%fd103, %fd93, %fd94;
+	// begin inline asm
+	mov.b64 {%r36,%r37}, %fd95;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r39|%p16, %r37, %r111, %r108, %r110;
+	shfl.sync.bfly.b32 	%r38|%p17, %r36, %r111, %r108, %r110;
+	// begin inline asm
+	mov.b64 %fd96, {%r38,%r39};
+	// end inline asm
+	add.f64 	%fd105, %fd95, %fd96;
+	// begin inline asm
+	mov.b64 {%r40,%r41}, %fd97;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r43|%p18, %r41, %r111, %r108, %r110;
+	shfl.sync.bfly.b32 	%r42|%p19, %r40, %r111, %r108, %r110;
+	// begin inline asm
+	mov.b64 %fd98, {%r42,%r43};
+	// end inline asm
+	add.f64 	%fd107, %fd97, %fd98;
+	// begin inline asm
+	mov.b64 {%r44,%r45}, %fd99;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r47|%p20, %r45, %r111, %r108, %r110;
+	shfl.sync.bfly.b32 	%r46|%p21, %r44, %r111, %r108, %r110;
+	// begin inline asm
+	mov.b64 %fd100, {%r46,%r47};
+	// end inline asm
+	add.f64 	%fd109, %fd99, %fd100;
+	// begin inline asm
+	mov.b64 {%r48,%r49}, %fd101;
+	// end inline asm
+	mov.u32 	%r112, 4;
+	shfl.sync.bfly.b32 	%r51|%p22, %r49, %r112, %r108, %r110;
+	shfl.sync.bfly.b32 	%r50|%p23, %r48, %r112, %r108, %r110;
+	// begin inline asm
+	mov.b64 %fd102, {%r50,%r51};
+	// end inline asm
+	add.f64 	%fd111, %fd101, %fd102;
+	// begin inline asm
+	mov.b64 {%r52,%r53}, %fd103;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r55|%p24, %r53, %r112, %r108, %r110;
+	shfl.sync.bfly.b32 	%r54|%p25, %r52, %r112, %r108, %r110;
+	// begin inline asm
+	mov.b64 %fd104, {%r54,%r55};
+	// end inline asm
+	add.f64 	%fd113, %fd103, %fd104;
+	// begin inline asm
+	mov.b64 {%r56,%r57}, %fd105;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r59|%p26, %r57, %r112, %r108, %r110;
+	shfl.sync.bfly.b32 	%r58|%p27, %r56, %r112, %r108, %r110;
+	// begin inline asm
+	mov.b64 %fd106, {%r58,%r59};
+	// end inline asm
+	add.f64 	%fd115, %fd105, %fd106;
+	// begin inline asm
+	mov.b64 {%r60,%r61}, %fd107;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r63|%p28, %r61, %r112, %r108, %r110;
+	shfl.sync.bfly.b32 	%r62|%p29, %r60, %r112, %r108, %r110;
+	// begin inline asm
+	mov.b64 %fd108, {%r62,%r63};
+	// end inline asm
+	add.f64 	%fd117, %fd107, %fd108;
+	// begin inline asm
+	mov.b64 {%r64,%r65}, %fd109;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r67|%p30, %r65, %r112, %r108, %r110;
+	shfl.sync.bfly.b32 	%r66|%p31, %r64, %r112, %r108, %r110;
+	// begin inline asm
+	mov.b64 %fd110, {%r66,%r67};
+	// end inline asm
+	add.f64 	%fd119, %fd109, %fd110;
+	// begin inline asm
+	mov.b64 {%r68,%r69}, %fd111;
+	// end inline asm
+	mov.u32 	%r113, 2;
+	shfl.sync.bfly.b32 	%r71|%p32, %r69, %r113, %r108, %r110;
+	shfl.sync.bfly.b32 	%r70|%p33, %r68, %r113, %r108, %r110;
+	// begin inline asm
+	mov.b64 %fd112, {%r70,%r71};
+	// end inline asm
+	add.f64 	%fd121, %fd111, %fd112;
+	// begin inline asm
+	mov.b64 {%r72,%r73}, %fd113;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r75|%p34, %r73, %r113, %r108, %r110;
+	shfl.sync.bfly.b32 	%r74|%p35, %r72, %r113, %r108, %r110;
+	// begin inline asm
+	mov.b64 %fd114, {%r74,%r75};
+	// end inline asm
+	add.f64 	%fd123, %fd113, %fd114;
+	// begin inline asm
+	mov.b64 {%r76,%r77}, %fd115;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r79|%p36, %r77, %r113, %r108, %r110;
+	shfl.sync.bfly.b32 	%r78|%p37, %r76, %r113, %r108, %r110;
+	// begin inline asm
+	mov.b64 %fd116, {%r78,%r79};
+	// end inline asm
+	add.f64 	%fd125, %fd115, %fd116;
+	// begin inline asm
+	mov.b64 {%r80,%r81}, %fd117;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r83|%p38, %r81, %r113, %r108, %r110;
+	shfl.sync.bfly.b32 	%r82|%p39, %r80, %r113, %r108, %r110;
+	// begin inline asm
+	mov.b64 %fd118, {%r82,%r83};
+	// end inline asm
+	add.f64 	%fd127, %fd117, %fd118;
+	// begin inline asm
+	mov.b64 {%r84,%r85}, %fd119;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r87|%p40, %r85, %r113, %r108, %r110;
+	shfl.sync.bfly.b32 	%r86|%p41, %r84, %r113, %r108, %r110;
+	// begin inline asm
+	mov.b64 %fd120, {%r86,%r87};
+	// end inline asm
+	add.f64 	%fd129, %fd119, %fd120;
+	// begin inline asm
+	mov.b64 {%r88,%r89}, %fd121;
+	// end inline asm
+	mov.u32 	%r114, 1;
+	shfl.sync.bfly.b32 	%r91|%p42, %r89, %r114, %r108, %r110;
+	shfl.sync.bfly.b32 	%r90|%p43, %r88, %r114, %r108, %r110;
+	// begin inline asm
+	mov.b64 %fd122, {%r90,%r91};
+	// end inline asm
+	add.f64 	%fd11, %fd121, %fd122;
+	// begin inline asm
+	mov.b64 {%r92,%r93}, %fd123;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r95|%p44, %r93, %r114, %r108, %r110;
+	shfl.sync.bfly.b32 	%r94|%p45, %r92, %r114, %r108, %r110;
+	// begin inline asm
+	mov.b64 %fd124, {%r94,%r95};
+	// end inline asm
+	add.f64 	%fd12, %fd123, %fd124;
+	// begin inline asm
+	mov.b64 {%r96,%r97}, %fd125;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r99|%p46, %r97, %r114, %r108, %r110;
+	shfl.sync.bfly.b32 	%r98|%p47, %r96, %r114, %r108, %r110;
+	// begin inline asm
+	mov.b64 %fd126, {%r98,%r99};
+	// end inline asm
+	add.f64 	%fd13, %fd125, %fd126;
+	// begin inline asm
+	mov.b64 {%r100,%r101}, %fd127;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r103|%p48, %r101, %r114, %r108, %r110;
+	shfl.sync.bfly.b32 	%r102|%p49, %r100, %r114, %r108, %r110;
+	// begin inline asm
+	mov.b64 %fd128, {%r102,%r103};
+	// end inline asm
+	add.f64 	%fd14, %fd127, %fd128;
+	// begin inline asm
+	mov.b64 {%r104,%r105}, %fd129;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r107|%p50, %r105, %r114, %r108, %r110;
+	shfl.sync.bfly.b32 	%r106|%p51, %r104, %r114, %r108, %r110;
+	// begin inline asm
+	mov.b64 %fd130, {%r106,%r107};
+	// end inline asm
+	add.f64 	%fd15, %fd129, %fd130;
+	setp.ne.s32 	%p52, %r3, 0;
+	@%p52 bra 	$L__BB13_4;
+
+	mov.u32 	%r115, _ZZ20mass_properties_sm86E9warp_sums;
+	mad.lo.s32 	%r116, %r4, 40, %r115;
+	st.shared.f64 	[%r116], %fd11;
+	st.shared.f64 	[%r116+8], %fd12;
+	st.shared.f64 	[%r116+16], %fd13;
+	st.shared.f64 	[%r116+24], %fd14;
+	st.shared.f64 	[%r116+32], %fd15;
+
+$L__BB13_4:
+	bar.sync 	0;
+	setp.ne.s32 	%p53, %r4, 0;
+	@%p53 bra 	$L__BB13_9;
+
+	setp.gt.u32 	%p54, %r3, 7;
+	mov.f64 	%fd171, 0d0000000000000000;
+	mov.f64 	%fd172, %fd171;
+	mov.f64 	%fd173, %fd171;
+	mov.f64 	%fd174, %fd171;
+	mov.f64 	%fd175, %fd171;
+	@%p54 bra 	$L__BB13_7;
+
+	mov.u32 	%r117, _ZZ20mass_properties_sm86E9warp_sums;
+	mad.lo.s32 	%r118, %r3, 40, %r117;
+	ld.shared.f64 	%fd173, [%r118];
+	ld.shared.f64 	%fd172, [%r118+8];
+	ld.shared.f64 	%fd174, [%r118+16];
+	ld.shared.f64 	%fd171, [%r118+24];
+	ld.shared.f64 	%fd175, [%r118+32];
+
+$L__BB13_7:
+	// begin inline asm
+	mov.b64 {%r119,%r120}, %fd173;
+	// end inline asm
+	mov.u32 	%r179, 31;
+	mov.u32 	%r180, 4;
+	mov.u32 	%r181, -1;
+	shfl.sync.bfly.b32 	%r122|%p55, %r120, %r180, %r179, %r181;
+	shfl.sync.bfly.b32 	%r121|%p56, %r119, %r180, %r179, %r181;
+	// begin inline asm
+	mov.b64 %fd137, {%r121,%r122};
+	// end inline asm
+	add.f64 	%fd146, %fd173, %fd137;
+	// begin inline asm
+	mov.b64 {%r123,%r124}, %fd172;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r126|%p57, %r124, %r180, %r179, %r181;
+	shfl.sync.bfly.b32 	%r125|%p58, %r123, %r180, %r179, %r181;
+	// begin inline asm
+	mov.b64 %fd139, {%r125,%r126};
+	// end inline asm
+	add.f64 	%fd148, %fd172, %fd139;
+	// begin inline asm
+	mov.b64 {%r127,%r128}, %fd174;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r130|%p59, %r128, %r180, %r179, %r181;
+	shfl.sync.bfly.b32 	%r129|%p60, %r127, %r180, %r179, %r181;
+	// begin inline asm
+	mov.b64 %fd141, {%r129,%r130};
+	// end inline asm
+	add.f64 	%fd150, %fd174, %fd141;
+	// begin inline asm
+	mov.b64 {%r131,%r132}, %fd171;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r134|%p61, %r132, %r180, %r179, %r181;
+	shfl.sync.bfly.b32 	%r133|%p62, %r131, %r180, %r179, %r181;
+	// begin inline asm
+	mov.b64 %fd143, {%r133,%r134};
+	// end inline asm
+	add.f64 	%fd152, %fd171, %fd143;
+	// begin inline asm
+	mov.b64 {%r135,%r136}, %fd175;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r138|%p63, %r136, %r180, %r179, %r181;
+	shfl.sync.bfly.b32 	%r137|%p64, %r135, %r180, %r179, %r181;
+	// begin inline asm
+	mov.b64 %fd145, {%r137,%r138};
+	// end inline asm
+	add.f64 	%fd154, %fd175, %fd145;
+	// begin inline asm
+	mov.b64 {%r139,%r140}, %fd146;
+	// end inline asm
+	mov.u32 	%r182, 2;
+	shfl.sync.bfly.b32 	%r142|%p65, %r140, %r182, %r179, %r181;
+	shfl.sync.bfly.b32 	%r141|%p66, %r139, %r182, %r179, %r181;
+	// begin inline asm
+	mov.b64 %fd147, {%r141,%r142};
+	// end inline asm
+	add.f64 	%fd156, %fd146, %fd147;
+	// begin inline asm
+	mov.b64 {%r143,%r144}, %fd148;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r146|%p67, %r144, %r182, %r179, %r181;
+	shfl.sync.bfly.b32 	%r145|%p68, %r143, %r182, %r179, %r181;
+	// begin inline asm
+	mov.b64 %fd149, {%r145,%r146};
+	// end inline asm
+	add.f64 	%fd158, %fd148, %fd149;
+	// begin inline asm
+	mov.b64 {%r147,%r148}, %fd150;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r150|%p69, %r148, %r182, %r179, %r181;
+	shfl.sync.bfly.b32 	%r149|%p70, %r147, %r182, %r179, %r181;
+	// begin inline asm
+	mov.b64 %fd151, {%r149,%r150};
+	// end inline asm
+	add.f64 	%fd160, %fd150, %fd151;
+	// begin inline asm
+	mov.b64 {%r151,%r152}, %fd152;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r154|%p71, %r152, %r182, %r179, %r181;
+	shfl.sync.bfly.b32 	%r153|%p72, %r151, %r182, %r179, %r181;
+	// begin inline asm
+	mov.b64 %fd153, {%r153,%r154};
+	// end inline asm
+	add.f64 	%fd162, %fd152, %fd153;
+	// begin inline asm
+	mov.b64 {%r155,%r156}, %fd154;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r158|%p73, %r156, %r182, %r179, %r181;
+	shfl.sync.bfly.b32 	%r157|%p74, %r155, %r182, %r179, %r181;
+	// begin inline asm
+	mov.b64 %fd155, {%r157,%r158};
+	// end inline asm
+	add.f64 	%fd164, %fd154, %fd155;
+	// begin inline asm
+	mov.b64 {%r159,%r160}, %fd156;
+	// end inline asm
+	mov.u32 	%r183, 1;
+	shfl.sync.bfly.b32 	%r162|%p75, %r160, %r183, %r179, %r181;
+	shfl.sync.bfly.b32 	%r161|%p76, %r159, %r183, %r179, %r181;
+	// begin inline asm
+	mov.b64 %fd157, {%r161,%r162};
+	// end inline asm
+	add.f64 	%fd26, %fd156, %fd157;
+	// begin inline asm
+	mov.b64 {%r163,%r164}, %fd158;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r166|%p77, %r164, %r183, %r179, %r181;
+	shfl.sync.bfly.b32 	%r165|%p78, %r163, %r183, %r179, %r181;
+	// begin inline asm
+	mov.b64 %fd159, {%r165,%r166};
+	// end inline asm
+	add.f64 	%fd27, %fd158, %fd159;
+	// begin inline asm
+	mov.b64 {%r167,%r168}, %fd160;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r170|%p79, %r168, %r183, %r179, %r181;
+	shfl.sync.bfly.b32 	%r169|%p80, %r167, %r183, %r179, %r181;
+	// begin inline asm
+	mov.b64 %fd161, {%r169,%r170};
+	// end inline asm
+	add.f64 	%fd28, %fd160, %fd161;
+	// begin inline asm
+	mov.b64 {%r171,%r172}, %fd162;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r174|%p81, %r172, %r183, %r179, %r181;
+	shfl.sync.bfly.b32 	%r173|%p82, %r171, %r183, %r179, %r181;
+	// begin inline asm
+	mov.b64 %fd163, {%r173,%r174};
+	// end inline asm
+	add.f64 	%fd29, %fd162, %fd163;
+	// begin inline asm
+	mov.b64 {%r175,%r176}, %fd164;
+	// end inline asm
+	shfl.sync.bfly.b32 	%r178|%p83, %r176, %r183, %r179, %r181;
+	shfl.sync.bfly.b32 	%r177|%p84, %r175, %r183, %r179, %r181;
+	// begin inline asm
+	mov.b64 %fd165, {%r177,%r178};
+	// end inline asm
+	add.f64 	%fd30, %fd164, %fd165;
+	@%p52 bra 	$L__BB13_9;
+
+	cvta.to.global.u64 	%rd6, %rd2;
+	mul.wide.u32 	%rd7, %r1, 40;
+	add.s64 	%rd8, %rd6, %rd7;
+	st.global.f64 	[%rd8], %fd26;
+	st.global.f64 	[%rd8+8], %fd27;
+	st.global.f64 	[%rd8+16], %fd28;
+	st.global.f64 	[%rd8+24], %fd29;
+	st.global.f64 	[%rd8+32], %fd30;
+
+$L__BB13_9:
+	ret;
+
+}
+

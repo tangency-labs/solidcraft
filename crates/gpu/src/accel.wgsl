@@ -531,3 +531,56 @@ struct MassReduceOut {
 var<workgroup> wg_v6: array<f32, 256>;
 var<workgroup> wg_area: array<f32, 256>;
 var<workgroup> wg_mom: array<vec3<f32>, 256>;
+
+@compute @workgroup_size(256)
+fn mass_properties_reduce(
+    @builtin(global_invocation_id) gid: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+    @builtin(workgroup_id) wid: vec3<u32>,
+) {
+    let idx = gid.x;
+    let tid = lid.x;
+
+    var v6: f32 = 0.0;
+    var area: f32 = 0.0;
+    var mom = vec3<f32>(0.0);
+
+    if idx < mp_params.num_tris {
+        let tri = mp_tris[idx];
+        let edge1 = tri.v1.xyz - tri.v0.xyz;
+        let edge2 = tri.v2.xyz - tri.v0.xyz;
+        let n = cross(edge1, edge2);
+        area = length(n) * 0.5;
+
+        let p0 = mp_tris[0].v0.xyz;
+        let a = tri.v0.xyz - p0;
+        let b = tri.v1.xyz - p0;
+        let c = tri.v2.xyz - p0;
+        let det = dot(a, n);
+        v6 = det;
+        mom = (a + b + c) * det;
+    }
+
+    wg_v6[tid] = v6;
+    wg_area[tid] = area;
+    wg_mom[tid] = mom;
+    workgroupBarrier();
+
+    var stride: u32 = 128u;
+    while stride > 0u {
+        if tid < stride {
+            wg_v6[tid] += wg_v6[tid + stride];
+            wg_area[tid] += wg_area[tid + stride];
+            wg_mom[tid] += wg_mom[tid + stride];
+        }
+        workgroupBarrier();
+        stride = stride / 2u;
+    }
+
+    if tid == 0u {
+        mp_partials[wid.x] = MassReduceOut(
+            vec4<f32>(wg_v6[0], wg_area[0], 0.0, 0.0),
+            vec4<f32>(wg_mom[0], 0.0),
+        );
+    }
+}

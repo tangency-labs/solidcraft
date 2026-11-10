@@ -23,7 +23,7 @@ use rayon::prelude::*;
 use solidcore_record::Vec3;
 use solidcraft_geom::compare::closest_on_triangle;
 use solidcraft_geom::tess::TessPlan;
-use solidcraft_geom::{Mesh, Vec3Geom};
+use solidcraft_geom::{Mesh, MeshMeasure, Vec3Geom};
 use wgpu::util::DeviceExt;
 
 use crate::collision::{
@@ -167,7 +167,27 @@ impl GpuPod for MeshQueryParams {
     }
 }
 
-/// Shared Vulkan / `wgpu` compute pipelines for geometric kernel classes.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+struct MassReduceOut {
+    v6_area: [f32; 4],
+    moment1: [f32; 4],
+}
+
+impl GpuPod for MassReduceOut {
+    const WORDS: usize = 8;
+    /// Appends the 8 `u32` words of [`MassReduceOut`] to `out`.
+    fn push_words(&self, out: &mut Vec<u32>) {
+        self.v6_area.push_words(out);
+        self.moment1.push_words(out);
+    }
+    /// Decodes [`MassReduceOut`] from an 8-word `u32` slice.
+    fn from_words(w: &[u32]) -> Option<Self> {
+        Some(Self { v6_area: <[f32; 4]>::from_words(w.get(0..4)?)?, moment1: <[f32; 4]>::from_words(w.get(4..8)?)? })
+    }
+}
+
+/// Shared Vulkan / `wgpu` compute pipelines for all 7 geometric kernel classes.
 pub struct VulkanAccel {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -181,6 +201,8 @@ pub struct VulkanAccel {
     bvh_query_bgl: wgpu::BindGroupLayout,
     dist_pipeline: wgpu::ComputePipeline,
     dist_bgl: wgpu::BindGroupLayout,
+    mass_pipeline: wgpu::ComputePipeline,
+    mass_bgl: wgpu::BindGroupLayout,
 }
 
 static GLOBAL_VULKAN: OnceLock<Option<VulkanAccel>> = OnceLock::new();
@@ -263,6 +285,18 @@ impl VulkanAccel {
         });
         let dist_pipeline = make_pipeline(&dist_pl, "point_mesh_distance");
 
+        // 4. Mass Properties Reduction (bindings 0..=2)
+        let mass_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("accel-mass-bgl"),
+            entries: &[entry(0, true), entry(1, true), entry(2, false)],
+        });
+        let mass_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("accel-mass-pl"),
+            bind_group_layouts: &[Some(&mass_bgl)],
+            immediate_size: 0,
+        });
+        let mass_pipeline = make_pipeline(&mass_pl, "mass_properties_reduce");
+
         Some(Self {
             device,
             queue,
@@ -276,6 +310,8 @@ impl VulkanAccel {
             bvh_query_bgl,
             dist_pipeline,
             dist_bgl,
+            mass_pipeline,
+            mass_bgl,
         })
     }
 
@@ -581,6 +617,75 @@ impl VulkanAccel {
         self.queue.submit(Some(enc.finish()));
 
         self.read_mapped_vec(&read_buf)
+    }
+
+    /// Computes divergence-theorem volume, surface area, and centroid on Vulkan/wgpu.
+    pub fn mass_properties(&self, tris: &[GpuTri]) -> Option<MeshMeasure> {
+        if tris.is_empty() {
+            return Some(MeshMeasure::default());
+        }
+        let num_tris = u32::try_from(tris.len()).ok()?;
+        let num_groups = num_tris.div_ceil(256);
+        let params = MeshQueryParams { num_queries: 0, num_tris, num_bvh_nodes: 0, pad: 0 };
+
+        let _guard = self.collision.lock_device();
+        let u_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("vk-mass-params"),
+            contents: &encode_pod(&params),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let tris_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("vk-mass-tris"),
+            contents: &encode_pod_slice(tris),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let out_size = (num_groups as usize * std::mem::size_of::<MassReduceOut>()) as u64;
+        let out_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vk-mass-out"),
+            size: out_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let read_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vk-mass-read"),
+            size: out_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("vk-mass-bg"),
+            layout: &self.mass_bgl,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: u_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: tris_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: out_buf.as_entire_binding() },
+            ],
+        });
+
+        let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("vk-mass-enc") });
+        {
+            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("vk-mass-pass"), timestamp_writes: None });
+            pass.set_pipeline(&self.mass_pipeline);
+            pass.set_bind_group(0, &bg, &[]);
+            pass.dispatch_workgroups(num_groups, 1, 1);
+        }
+        enc.copy_buffer_to_buffer(&out_buf, 0, &read_buf, 0, out_size);
+        self.queue.submit(Some(enc.finish()));
+
+        let partials: Vec<MassReduceOut> = self.read_mapped_vec(&read_buf)?;
+        let p0 = Vec3::new(tris[0].v0[0] as f64, tris[0].v0[1] as f64, tris[0].v0[2] as f64);
+        let (mut v6, mut area, mut mx, mut my, mut mz) = (0.0f64, 0.0f64, 0.0f64, 0.0f64, 0.0f64);
+        for p in &partials {
+            v6 += p.v6_area[0] as f64;
+            area += p.v6_area[1] as f64;
+            mx += p.moment1[0] as f64;
+            my += p.moment1[1] as f64;
+            mz += p.moment1[2] as f64;
+        }
+        let volume = v6 / 6.0;
+        let centroid = if v6.abs() > 1e-12 { p0 + Vec3::new(mx / (4.0 * v6), my / (4.0 * v6), mz / (4.0 * v6)) } else { Vec3::ZERO };
+        Some(MeshMeasure { volume, area, centroid })
     }
 
     /// Maps a staging readback buffer synchronously and decodes its contents into a `Vec<T>`.
@@ -1119,6 +1224,53 @@ pub fn cpu_point_mesh_distance_rayon(points: &[[f32; 4]], tris: &[GpuTri]) -> Ve
     }
 }
 
+/// CPU scalar divergence-theorem mass properties (`MeshMeasure`).
+pub fn cpu_mass_properties_scalar(tris: &[GpuTri]) -> MeshMeasure {
+    let (mut v6, mut area, mut c) = (0.0f64, 0.0f64, Vec3::ZERO);
+    for t in tris {
+        let a = Vec3::new(t.v0[0] as f64, t.v0[1] as f64, t.v0[2] as f64);
+        let b = Vec3::new(t.v1[0] as f64, t.v1[1] as f64, t.v1[2] as f64);
+        let cc = Vec3::new(t.v2[0] as f64, t.v2[1] as f64, t.v2[2] as f64);
+        let d = a.dot(b.cross(cc));
+        v6 += d;
+        c += (a + b + cc) * d;
+        area += (b - a).cross(cc - a).len() * 0.5;
+    }
+    let volume = v6 / 6.0;
+    let centroid = if v6.abs() > 1e-12 { c / (4.0 * v6) } else { Vec3::ZERO };
+    MeshMeasure { volume, area, centroid }
+}
+
+/// CPU `rayon` parallel divergence-theorem mass properties (`MeshMeasure`).
+pub fn cpu_mass_properties_rayon(tris: &[GpuTri]) -> MeshMeasure {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let (v6, area, c) = tris
+            .par_chunks(256)
+            .map(|chunk| {
+                let (mut lv6, mut larea, mut lc) = (0.0f64, 0.0f64, Vec3::ZERO);
+                for t in chunk {
+                    let a = Vec3::new(t.v0[0] as f64, t.v0[1] as f64, t.v0[2] as f64);
+                    let b = Vec3::new(t.v1[0] as f64, t.v1[1] as f64, t.v1[2] as f64);
+                    let cc = Vec3::new(t.v2[0] as f64, t.v2[1] as f64, t.v2[2] as f64);
+                    let d = a.dot(b.cross(cc));
+                    lv6 += d;
+                    lc += (a + b + cc) * d;
+                    larea += (b - a).cross(cc - a).len() * 0.5;
+                }
+                (lv6, larea, lc)
+            })
+            .reduce(|| (0.0, 0.0, Vec3::ZERO), |(v1, a1, c1), (v2, a2, c2)| (v1 + v2, a1 + a2, c1 + c2));
+        let volume = v6 / 6.0;
+        let centroid = if v6.abs() > 1e-12 { c / (4.0 * v6) } else { Vec3::ZERO };
+        MeshMeasure { volume, area, centroid }
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        cpu_mass_properties_scalar(tris)
+    }
+}
+
 // ── Calibration Data Structures & Scaling Microbenchmark ──────────────────
 
 /// Number of rotated-order timing samples collected per `(KernelOp, problem_size)` bucket.
@@ -1311,7 +1463,6 @@ pub fn synthetic_closed_sphere_mesh(radius: f64, n_lat: usize, n_lon: usize) -> 
 }
 
 /// Measures the wall-clock execution duration of `f` in nanoseconds.
-#[allow(dead_code)]
 fn time_ns(mut f: impl FnMut()) -> u64 {
     let t0 = Instant::now();
     f();
@@ -1401,7 +1552,7 @@ pub fn run_scaling_microbenchmark(sizes: &[usize]) -> CalibrationReport {
         })
         .collect();
 
-    // Closed sphere mesh with 128 triangles for PointInSolid
+    // Closed sphere mesh with 128 triangles for PointInSolid, Raycast, and PointMeshDistance
     let sphere_mesh = synthetic_closed_sphere_mesh(10.0, 8, 8);
     let (sphere_tris, sphere_bvh) = build_gpu_bvh_from_mesh(&sphere_mesh);
 
@@ -1421,11 +1572,16 @@ pub fn run_scaling_microbenchmark(sizes: &[usize]) -> CalibrationReport {
         })
         .collect();
 
+    // Mass properties triangle array up to max_n
+    let mass_tris: Vec<GpuTri> = (0..max_n).map(|i| sphere_tris[i % sphere_tris.len()]).collect();
+
+    // Warmup GPU pipelines and pre-size scratch pools once before timed sweep
     if let Some(v) = vk {
         let _ = v.eval_bicubic_f32(&patch_f32, &queries_f32[..16]);
         let _ = v.classify_points(&query_pts[..16], &sphere_tris, &sphere_bvh, true);
         let _ = v.raycast_bvh(&query_rays[..16], &sphere_tris, &sphere_bvh);
         let _ = v.point_mesh_distance(&query_pts[..16], &sphere_tris);
+        let _ = v.mass_properties(&mass_tris[..16]);
     }
     if let Some(c) = cuda {
         let _ = c.eval_bicubic_f32(&patch_f32, &queries_f32[..max_n], false);
@@ -1437,6 +1593,7 @@ pub fn run_scaling_microbenchmark(sizes: &[usize]) -> CalibrationReport {
         let _ = c.classify_points_rt_bvh(&query_pts[..16], &sphere_tris, &sphere_bvh);
         let _ = c.raycast_rt_bvh(&query_rays[..16], &sphere_tris, &sphere_bvh);
         let _ = c.point_mesh_distance(&query_pts[..16], &sphere_tris, false);
+        let _ = c.mass_properties(&mass_tris[..16], false);
     }
 
     let mut kernels = Vec::with_capacity(KernelOp::ALL.len());
@@ -1591,6 +1748,27 @@ pub fn run_scaling_microbenchmark(sizes: &[usize]) -> CalibrationReport {
                         (KernelOp::PointMeshDistance, BackendTarget::AmperePtx) => time_ns(|| {
                             if let Some(c) = cuda {
                                 std::hint::black_box(c.point_mesh_distance(&query_pts[..n], &sphere_tris, true));
+                            }
+                        }),
+                        (KernelOp::MassProperties, BackendTarget::CpuScalar) => time_ns(|| {
+                            std::hint::black_box(cpu_mass_properties_scalar(&mass_tris[..n]));
+                        }),
+                        (KernelOp::MassProperties, BackendTarget::CpuRayon) => time_ns(|| {
+                            std::hint::black_box(cpu_mass_properties_rayon(&mass_tris[..n]));
+                        }),
+                        (KernelOp::MassProperties, BackendTarget::VulkanCompute) => time_ns(|| {
+                            if let Some(v) = vk {
+                                std::hint::black_box(v.mass_properties(&mass_tris[..n]));
+                            }
+                        }),
+                        (KernelOp::MassProperties, BackendTarget::CudaGeneric) => time_ns(|| {
+                            if let Some(c) = cuda {
+                                std::hint::black_box(c.mass_properties(&mass_tris[..n], false));
+                            }
+                        }),
+                        (KernelOp::MassProperties, BackendTarget::AmperePtx) => time_ns(|| {
+                            if let Some(c) = cuda {
+                                std::hint::black_box(c.mass_properties(&mass_tris[..n], true));
                             }
                         }),
                         _ => 1,
@@ -1967,6 +2145,43 @@ impl Dispatcher {
             }
         }
         (BackendTarget::CpuScalar, cpu_point_mesh_distance_scalar(points, tris))
+    }
+
+    /// Dispatches divergence-theorem mass properties (`volume`, `area`, `centroid`) calculation.
+    pub fn mass_properties(&self, tris: &[GpuTri]) -> (BackendTarget, MeshMeasure) {
+        let target = self.select_backend(KernelOp::MassProperties, tris.len());
+        match target {
+            BackendTarget::AmperePtx | BackendTarget::AmpereTensorCore | BackendTarget::RtCoreBvh => {
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(c) = CudaBackend::global()
+                    && let Some(out) = c.mass_properties(tris, true)
+                {
+                    return (BackendTarget::AmperePtx, out);
+                }
+            }
+            BackendTarget::CudaGeneric => {
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(c) = CudaBackend::global()
+                    && let Some(out) = c.mass_properties(tris, false)
+                {
+                    return (BackendTarget::CudaGeneric, out);
+                }
+            }
+            BackendTarget::VulkanCompute => {
+                if let Some(v) = VulkanAccel::global()
+                    && let Some(out) = v.mass_properties(tris)
+                {
+                    return (BackendTarget::VulkanCompute, out);
+                }
+            }
+            BackendTarget::CpuRayon => {
+                return (BackendTarget::CpuRayon, cpu_mass_properties_rayon(tris));
+            }
+            BackendTarget::CpuScalar => {
+                return (BackendTarget::CpuScalar, cpu_mass_properties_scalar(tris));
+            }
+        }
+        (BackendTarget::CpuScalar, cpu_mass_properties_scalar(tris))
     }
 
     /// Evaluates a [`TessPlan`] using either CPU scalar or parallel `rayon` across faces.
