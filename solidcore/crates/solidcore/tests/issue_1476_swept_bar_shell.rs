@@ -23,8 +23,8 @@
 //! With `shell_edges_on_analytics_exact` (WR-545) on as well, as the SolidCraft rig runs
 //! it, `make_edges_on_analytics_exact` intersected the walls' face-owned surfaces without
 //! their faces and the shell failed with `Unported(topology.face_p2)`; it now goes through
-//! the result's face services. Marched edges between the straight walls become lines
-//! (four with the defaults, two with SolidCraft's fixes); the volumes stay as above.
+//! the result's face services. Two marched edges between the inner planar walls become
+//! lines; the volumes stay as above.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -234,13 +234,17 @@ fn issue_1476_swept_bar_shells_with_solidcraft_fixes() {
 /// intersects the result's face-owned surfaces (the extrusion walls) with their faces'
 /// trimmed caches, as the fork's `GlobalSurfaceIntersect` reaches them through
 /// `SmSurface::GetFace`; without the face context it failed with
-/// `Unported(topology.face_p2)` (SolidCraft rig case shell/566). Four marched edges
-/// between the straight walls become lines; the volume does not change.
+/// `Unported(topology.face_p2)` (SolidCraft rig case shell/566). Two marched edges
+/// between the inner planar walls become lines; the volume does not change. The two
+/// inner straight walls are certified nets (WR-718), bicubic and not recognised as
+/// extrusions when merged, so their edges with the end cap stay marched (`N_SrfOffset`'s
+/// fit was recognised, and those two became lines as well). The volume moves by 1.2e-10
+/// relative, within the pin.
 #[test]
 fn issue_1476_swept_bar_shells_with_edges_on_analytics_exact() {
     let mut fixes = UpstreamFixes::default();
     fixes.shell_edges_on_analytics_exact = true;
-    assert_eq!(check(&fixes, 1299.4876808844865), 20);
+    assert_eq!(check(&fixes, 1299.4876808844865), 18);
 }
 
 /// SolidCraft's configuration with `shell_edges_on_analytics_exact` on as well (the

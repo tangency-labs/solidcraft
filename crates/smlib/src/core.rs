@@ -335,7 +335,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_overflow_crease_along_edge = true;
     f.plane_first_torus_section_exact = true;
     f.keep_exact_pcurves = true;
-    f.shell_one_construction = true;
     f.approximate_surface_checks_every_row = true;
     f.topological_vertex_has_only_edge_uses = true;
     f.planar_section_face_tolerance = true;
