@@ -867,6 +867,10 @@ pub(crate) fn contains_uv_point_with_topology(
 ///   widened interval's ends (a line extends past them);
 ///
 /// so no evaluation reads an undefined point and every evaluated point lies in the box.
+/// Every edge's interval is longer than `SM_EFF_ZERO`, so the walk steps along every edge
+/// use and each chord it tests between edge uses joins two of those points (an edge use
+/// it did not step along would hand the next chord the previous edge use's last point, or
+/// the undefined point on the first).
 /// With the test point outside that box in one coordinate, every evaluated point is in
 /// one open half-plane through it, so the walk's quadrant numbers take two adjacent values
 /// and its winding count ends at `0` or `±1`: [`PointContainment::Outside`]. Every earlier
@@ -905,6 +909,13 @@ impl WindingHull {
         let mut hi = Point2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
         for &eu in &eus {
             let edge = b.edge(edge_of(b, eu).ok()?).ok()?;
+            // the walk steps along an edge use only while its parameters are more than
+            // SM_EFF_ZERO apart (its own test, computed as it computes it); one that does
+            // not step carries the previous `this_uv` (undefined on the first) into the
+            // next edge use's chord, a point outside the box
+            if (edge.interval.max() - edge.interval.min()).abs() <= EFF_ZERO {
+                return None;
+            }
             let curve = edge.curve.as_ref()?;
             if !matches!(
                 curve.kind(),
@@ -1641,6 +1652,129 @@ mod tests {
             left_out_and_walk(&b, l, [0.0, 0.0]),
             (false, PointContainment::Inside)
         );
+    }
+
+    /// A loop with an edge whose interval is within `SM_EFF_ZERO` (the square
+    /// `[-20, -10]^2` clockwise, its first 10-long side parameterised over `[0, 5e-13]`):
+    /// the walk does not step along it and tests the next chord from the undefined
+    /// point, finding `(-5, -5)`, far outside the square, on the first edge. Such a loop
+    /// has no hull, so it is walked, and a face holding it as an inner loop of an outer
+    /// square classifies the point the same with the shortcut on and off.
+    #[test]
+    fn a_loop_with_an_edge_the_walk_does_not_step_along_has_no_hull() {
+        let mut b = square(plane(), true, &[]);
+        let v = [
+            [-20.0, -10.0],
+            [-10.0, -10.0],
+            [-10.0, -20.0],
+            [-20.0, -20.0],
+        ];
+        for i in 0..4_usize {
+            let p = Vec3::new(v[i][0], v[i][1], 0.0);
+            let q = Vec3::new(v[(i + 1) % 4][0], v[(i + 1) % 4][1], 0.0);
+            let (end, max) = if i == 0 {
+                (p + (q - p) / 5e-13, 5e-13)
+            } else {
+                (q, 1.0)
+            };
+            b.vertex_mut(VertexId::from_index(i as u32)).unwrap().point = p;
+            let e = b.edge_mut(EdgeId::from_index(i as u32)).unwrap();
+            e.interval = Extent1d::from_min_max(0.0, max);
+            e.curve = Some(Curve::from(Line::from_points(p, end, 3)));
+            b.edgeuse_mut(EdgeuseId::from_index(i as u32))
+                .unwrap()
+                .uv_trim_curve = Some(Curve::from(Line::from_points(p, end, 2)));
+        }
+        let (k, l, uv) = (Kernel::default(), LoopId::from_index(0), [-5.0, -5.0]);
+        assert_eq!(WindingHull::of(&k, &b, l), None);
+        assert!(!exclusion_at(&k, &b, l, uv).is_some_and(|x| x.excludes(&k, &b, l)));
+        let walk = contains(&mut b.clone_standing_for_self().unwrap(), uv).unwrap();
+        assert_eq!(walk.containment, PointContainment::OnBoundary);
+
+        // the loop as an inner loop of the outer square [-30, 10]^2
+        let o = [[-30.0, -30.0], [10.0, -30.0], [10.0, 10.0], [-30.0, 10.0]];
+        b.add_loop_record(Loop {
+            face: FaceId::from_index(0),
+            edges: Vec::new(),
+            loopuse: Some(LoopuseId::from_index(1)),
+        })
+        .unwrap();
+        b.add_loopuse_record(Loopuse {
+            faceuse: Some(FaceuseId::from_index(0)),
+            loop_: Some(LoopId::from_index(1)),
+            mate: None,
+            start: LoopuseStart::Edgeuse(Some(EdgeuseId::from_index(4))),
+            orientation: OrientType::Same,
+        })
+        .unwrap();
+        for i in 0..4_u32 {
+            let ix = 4 + i;
+            let p = Vec3::new(o[i as usize][0], o[i as usize][1], 0.0);
+            let q = Vec3::new(
+                o[((i + 1) % 4) as usize][0],
+                o[((i + 1) % 4) as usize][1],
+                0.0,
+            );
+            b.add_vertex_record(Vertex {
+                point: p,
+                tolerance: 1e-6,
+                ..Vertex::default()
+            })
+            .unwrap();
+            b.add_edge_record(Edge {
+                vertices: [
+                    VertexId::from_index(ix),
+                    VertexId::from_index(4 + (i + 1) % 4),
+                ],
+                edgeuses: vec![EdgeuseId::from_index(ix)],
+                interval: Extent1d::from_min_max(0.0, 1.0),
+                tolerance: 1e-6,
+                curve: Some(Curve::from(Line::from_points(p, q, 3))),
+            })
+            .unwrap();
+            b.add_edgeuse_record(Edgeuse {
+                edge: Some(EdgeId::from_index(ix)),
+                owner: EdgeuseOwner::Loopuse(Some(LoopuseId::from_index(1))),
+                ccw: Some(EdgeuseId::from_index(4 + (i + 1) % 4)),
+                cw: Some(EdgeuseId::from_index(4 + (i + 3) % 4)),
+                orientation: OrientType::Same,
+                uv_trim_curve: Some(Curve::from(Line::from_points(p, q, 2))),
+                ..Edgeuse::default()
+            })
+            .unwrap();
+        }
+        let f = FaceId::from_index(0);
+        b.face_mut(f).unwrap().loops = vec![LoopId::from_index(1), l];
+        b.faceuse_mut(FaceuseId::from_index(0)).unwrap().loopuses =
+            vec![LoopuseId::from_index(1), LoopuseId::from_index(0)];
+        b.face_mut(f).unwrap().uv_domain = Extent2d::from_bounds(-30.0, -30.0, 10.0, 10.0);
+        for i in 0..8_u32 {
+            let vu = b
+                .add_vertexuse_record(crate::topology::Vertexuse {
+                    vertex: Some(VertexId::from_index(i)),
+                    owner: crate::topology::VertexuseOwner::Edgeuse(Some(EdgeuseId::from_index(i))),
+                    ..crate::topology::Vertexuse::default()
+                })
+                .unwrap();
+            b.edgeuse_mut(EdgeuseId::from_index(i)).unwrap().vertexuse = Some(vu);
+        }
+        let classify = |memo: bool| {
+            let mut k = Kernel::new(&crate::kernel::KernelOptions::default());
+            k.memoize_curve_caches = memo;
+            let mut copy = b.clone_standing_for_self().unwrap();
+            let mut pc =
+                crate::intersect::point_class::PointClassification::<crate::EntityRef>::new(1e-6);
+            let r = crate::query::face::p2::point_classify(
+                &k,
+                &mut copy,
+                f,
+                Point2::new(uv[0], uv[1]),
+                &mut pc,
+                crate::query::face::p2::PointClassifyOptions::default(),
+            );
+            format!("{r:?} {pc:?}")
+        };
+        assert_eq!(classify(true), classify(false));
     }
 
     /// A point on a side of the surface's natural domain is always walked (the walk then
