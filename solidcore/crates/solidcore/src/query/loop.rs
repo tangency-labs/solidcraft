@@ -1147,7 +1147,7 @@ impl WalkExclusion {
         eus.iter().all(|&eu| {
             edge_of(b, eu)
                 .and_then(|e| b.edge(e))
-                .is_ok_and(|edge| drop_cannot_reach(k, edge, self.point))
+                .is_ok_and(|edge| drop_cannot_reach(edge, self.point))
         })
     }
 }
@@ -1161,16 +1161,21 @@ impl WalkExclusion {
 /// The boxes are built here from the curve's own data, each a certified enclosure (not
 /// `CalculateBoundingBox`, whose Bézier refinement of a single span assumes a clamped
 /// curve):
-/// - a line: its points over the edge's interval (its drop clamps the foot into the
-///   interval), the box of its points at the ends of that interval widened by the solves'
-///   slack;
+/// - a line: no box. Its drop (`DropPointFast`) measures the distance to its infinite
+///   line, and keeps it when the foot's parameter, converted from STEP to NURB, lies in
+///   the interval: a conversion that need not invert the evaluation's (found in review: a
+///   line whose NURB domain is within `SM_EFF_ZERO` maps NURB parameters to themselves
+///   but STEP parameters back with its scale, so a point far past the segment dropped at
+///   distance 0). So the point must lie farther than the tolerance from the whole
+///   infinite line, computed as the drop computes it; a clamped foot's point is on that
+///   line, no nearer;
 /// - an ellipse: it evaluates and solves through one NURB, which clamps a parameter into
 ///   its knot range; with positive weights and every parameter the drop can evaluate in
 ///   `[U[p], U[n]]` ([`in_hull_domain`]), its points lie in the box of all its control
 ///   points (the convex hull property).
 ///
 /// Other curves give `false`.
-fn drop_cannot_reach(k: &Kernel, edge: &crate::topology::Edge, point: Point3) -> bool {
+fn drop_cannot_reach(edge: &crate::topology::Edge, point: Point3) -> bool {
     use crate::curve::curve::CurveKind;
     use crate::nurbs::math::NOW;
     let Some(curve) = edge.curve.as_ref() else {
@@ -1183,14 +1188,20 @@ fn drop_cannot_reach(k: &Kernel, edge: &crate::topology::Edge, point: Point3) ->
         hi = Vec3::new(hi.x.max(p.x), hi.y.max(p.y), hi.z.max(p.z));
     };
     match curve.kind() {
-        CurveKind::Line(_) => {
-            let widened = with_solve_slack(&edge.interval);
-            for t in [widened.min(), widened.max()] {
-                match curve.evaluate_point(k, t) {
-                    Ok(p) => add(p),
-                    Err(_) => return false,
-                }
-            }
+        CurveKind::Line(line) => {
+            // the line's drop measures the distance to its infinite line (from the same
+            // point and unit vector), or, past the interval, to a point it evaluates on
+            // that line: never less than the distance to the infinite line
+            let c = line.canonical_unit();
+            let (to_line, _) = line_point_distance(c.point, c.vector, point);
+            let size = [c.point, point].iter().fold(0.0_f64, |m, p| {
+                m.max(p.x.abs()).max(p.y.abs()).max(p.z.abs())
+            });
+            let reach = edge.tolerance + 1e-6 * (1.0 + size);
+            return to_line.is_finite()
+                && reach.is_finite()
+                && to_line > reach
+                && point.distance(Vec3::UNDEF) > reach;
         }
         CurveKind::Ellipse(e) => {
             let base = e.base();
@@ -1997,6 +2008,65 @@ mod tests {
         let (on, off) = classified_on_and_off(&b, uv);
         assert_eq!(on, off);
         assert!(off.contains("point_class: Edge"), "{off}");
+    }
+
+    /// A line edge whose NURB domain is within `SM_EFF_ZERO` (`[0, 1e-13]`, analytic
+    /// domain `[0, 1]`, scale 10, from `(-5, -5)` along X): it evaluates between
+    /// `x = -5` and `5`, but its drop converts the infinite line's foot to a NURB
+    /// parameter that need not invert the evaluation and accepts `(8, -5)`, past the
+    /// segment on its line, at distance 0. A point on an edge's infinite line is walked
+    /// (on the edge, as the drop says), and the face classifies it the same with the
+    /// shortcut on and off.
+    #[test]
+    fn a_point_on_a_line_edges_infinite_line_is_walked() {
+        let k = Kernel::default();
+        let mut b = square(plane(), true, &[]);
+        let nurb = NurbCurve::new(
+            vec![
+                CPoint::new(-5.0, -5.0, 0.0, NOW),
+                CPoint::new(5.0, -5.0, 0.0, NOW),
+            ],
+            1,
+            vec![0.0, 0.0, 1e-13, 1e-13],
+        )
+        .unwrap();
+        let line = Line::from_parts(
+            BSplineCurve::from_nurb(nurb, 3, false),
+            Vec3::new(-5.0, -5.0, 0.0),
+            Vec3::X,
+            Extent1d::from_min_max(0.0, 1.0),
+            10.0,
+            false,
+        );
+        let (uv, l) = ([8.0, -5.0], LoopId::from_index(0));
+        let point = Vec3::new(uv[0], uv[1], 0.0);
+        let e = b.edge_mut(EdgeId::from_index(0)).unwrap();
+        e.curve = Some(Curve::from(line));
+        let dropped = e
+            .curve
+            .as_ref()
+            .unwrap()
+            .drop_point(
+                &k,
+                &e.interval,
+                point,
+                None,
+                e.tolerance,
+                None,
+                SolverOperation::Intersect,
+            )
+            .unwrap();
+        assert!(
+            dropped.success,
+            "the drop accepts the point past the segment"
+        );
+        assert!(!drop_cannot_reach(e, point));
+        assert!(!exclusion_at(&k, &b, l, uv).is_some_and(|x| x.excludes(&k, &b, l)));
+        let walk = contains(&mut b.clone_standing_for_self().unwrap(), uv).unwrap();
+        assert_eq!(walk.containment, PointContainment::OnBoundary);
+        hold_in_outer_square(&mut b);
+        let (on, off) = classified_on_and_off(&b, uv);
+        assert_eq!(on, off);
     }
 
     /// A point on a side of the surface's natural domain is always walked (the walk then
