@@ -3313,7 +3313,14 @@ mod tests {
                 0.1,
             );
         // not an intersector-form curve
-        assert!(matches!(r, Err(SolidError::Upstream { .. })));
+        assert!(matches!(
+            r,
+            Err(e) if e.nurbs_failure()
+                == Some(&NurbsFailure::BSpline(BSplineFailure::Failed(
+                    "the curve is not a piecewise degree-3 intersection curve"
+                )))
+                && e.sm_status() == Some(crate::error::SM_ERR)
+        ));
     }
 
     #[test]

@@ -1991,7 +1991,14 @@ mod tests {
         four_on.fixes.sphere_from_arcs_common_centre = true;
         let err4 =
             BSplineSurface::create_sphere_from_arcs(&four_on, &four_arcs(), 1e-6).unwrap_err();
-        assert_eq!(err4, SolidError::sm_err(OP_SPHERE));
+        assert_eq!(
+            err4,
+            SolidError::b_spline(
+                OP_SPHERE,
+                BSplineFailure::Failed("a sphere is made from three arcs only")
+            )
+        );
+        assert_eq!(err4.sm_status(), Some(1001));
     }
 
     /// `sphere_from_arcs_common_centre` on three arcs of one centre: both settings build

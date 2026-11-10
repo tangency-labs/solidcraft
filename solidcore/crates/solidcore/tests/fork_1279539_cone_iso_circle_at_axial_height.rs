@@ -21,7 +21,7 @@ use solidcore::math::{Point3, Vec3};
 use solidcore::surface::cone::Cone;
 use solidcore::surface::sphere::{Sphere, SphereOptions};
 use solidcore::surface::surface::Surface;
-use solidcore::{Kernel, SolidError};
+use solidcore::Kernel;
 
 const TOL: f64 = 1e-3;
 const SEMI: f64 = 70.0;
