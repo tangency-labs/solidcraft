@@ -162,6 +162,8 @@ pub struct WorkCounters {
     face_pairs: Cell<u64>,
     loops_classified: Cell<u64>,
     wall_body_copies: Cell<u64>,
+    vertex_drops: Cell<u64>,
+    radius_searches: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -190,11 +192,40 @@ impl WorkCounters {
         self.wall_body_copies.get()
     }
 
+    /// Face vertices a curve being classified on a face is solved against (the drops of
+    /// `CurveClassification::intersect_vertices_in`): each vertex not passed over as out of
+    /// the curve's reach. Not the fork's.
+    #[must_use]
+    pub fn vertex_drops(&self) -> u64 {
+        self.vertex_drops.get()
+    }
+
+    /// Searches for the least radius of curvature of a B-spline curve the curve check runs
+    /// (its test 13/14): each one its bounds do not settle. Not the fork's.
+    #[must_use]
+    pub fn radius_searches(&self) -> u64 {
+        self.radius_searches.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
         self.loops_classified.set(0);
         self.wall_body_copies.set(0);
+        self.vertex_drops.set(0);
+        self.radius_searches.set(0);
+    }
+
+    /// Counts one vertex a classified curve is solved against.
+    pub(crate) fn add_vertex_drop(&self) {
+        self.vertex_drops
+            .set(self.vertex_drops.get().saturating_add(1));
+    }
+
+    /// Counts one radius of curvature search of the curve check.
+    pub(crate) fn add_radius_search(&self) {
+        self.radius_searches
+            .set(self.radius_searches.get().saturating_add(1));
     }
 
     /// Counts one face pair examined for intersection.
