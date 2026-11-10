@@ -191,7 +191,8 @@ pub struct SheetScene {
     /// Each note of a view on the sheet, by view and id, then each note on the sheet, by id.
     pub notes: Vec<NoteState>,
     /// The views, dimensions and notes a deferred drawing shows as they last were ([`as_shown`]), and
-    /// the dimensions a view drawing an exploded view holds back ([`held_by_exploded`]).
+    /// the dimensions and notes on its model a view drawing an exploded view holds back
+    /// ([`held_by_exploded`]).
     pub out_of_date: Vec<u64>,
 }
 
@@ -688,9 +689,14 @@ fn sheet_notes(s: &Session, d: &Drawing, sheet: u64, lettering: &Lettering, wait
 }
 
 /// Whether `record`'s view holds it back as it draws an exploded view ([`draws_exploded`]): neither
-/// read nor drawn, and listed out of date. A dimension, which measures the design's placements.
+/// read nor drawn, and listed out of date. A dimension, or a note on the model ([`Note::on_model`]):
+/// both read the design's placements.
 fn held_back(d: &Drawing, record: &Annotation) -> bool {
-    matches!(record, Annotation::Dimension(_)) && draws_exploded(d, record.view())
+    let on_model = match record {
+        Annotation::Dimension(_) => true,
+        Annotation::Note(note, _) => note.on_model(),
+    };
+    on_model && draws_exploded(d, record.view())
 }
 
 /// The dimensions and notes of `views` of `d` that are held back ([`held_back`]), by view and id.

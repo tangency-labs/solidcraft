@@ -259,7 +259,7 @@ pub struct SheetSceneResult {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<SheetSceneNote>,
     /// The views, dimensions and notes a deferred drawing shows as they last were, and the dimensions
-    /// a view drawing an exploded view holds back.
+    /// and notes on its model a view drawing an exploded view holds back.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub out_of_date: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

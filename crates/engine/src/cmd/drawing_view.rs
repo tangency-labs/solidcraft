@@ -34,7 +34,7 @@ use solidcraft_doc::display_units::unit_scale;
 use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::drawing::balloon::Balloon;
 use solidcraft_doc::drawing::dimension::{Dimension, LabelKind, MAX_DECIMALS, reading_label};
-use solidcraft_doc::drawing::note::{Anchor, Note};
+use solidcraft_doc::drawing::note::Note;
 use solidcraft_doc::drawing::view::{ResolvedView, SetBy, Setting, View, ViewKind, ViewPlace, check_occurrence_paths};
 use solidcraft_doc::drawing_view::{Exploded, Looking, OccurrencePaths, TangentEdges, ViewDirection, ViewOverrides};
 use solidcraft_doc::ids;
@@ -683,7 +683,7 @@ fn check_exploded(d: &Drawing, views: impl Iterator<Item = u64>, cmd: &str) -> R
     let on_model = |view: u64| {
         d.dimensions.iter().any(|record| record.view == view)
             || d.balloons.iter().any(|balloon| balloon.view == view)
-            || d.notes.iter().any(|note| matches!(note.anchor, Anchor::Edge { view: v, .. } | Anchor::Corner { view: v, .. } if v == view))
+            || d.notes.iter().any(|note| note.anchor.view() == Some(view) && note.on_model())
     };
     for view in views {
         if let Some(why) = d.resolve_view(view).ok().as_ref().and_then(crate::drawing_view::not_drawable_exploded) {

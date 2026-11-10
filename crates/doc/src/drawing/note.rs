@@ -149,6 +149,11 @@ impl Note {
     pub fn paths(&self) -> impl Iterator<Item = &[u64]> {
         self.anchor.path().into_iter().chain(self.branches.iter().map(Branch::path))
     }
+
+    /// Whether one of its leaders points at the model ([`Note::paths`]).
+    pub fn on_model(&self) -> bool {
+        self.paths().next().is_some()
+    }
 }
 
 impl Record for Note {

@@ -99,12 +99,12 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
             point: s.doc.corner_reference(&s.model, &corner.pick, &corner.path).map_err(|why| bad(ADD, why.to_string()))?,
         },
     };
-    if let Anchor::Edge { view, .. } | Anchor::Corner { view, .. } = anchor {
-        crate::drawing_view::refuse_on_exploded(&record, view, "notes on its model", ADD)?;
-    }
     let branches = request.branches.iter().map(|pick| branch(s, pick, ADD)).collect::<Result<Vec<_>>>()?;
     let mut note = Note { id: 0, anchor, at: request.at, content: request.content.0, cap_mm: request.cap_mm, branches };
     if let Some(view) = note.anchor.view() {
+        if note.on_model() {
+            crate::drawing_view::refuse_on_exploded(&record, view, "notes on its model", ADD)?;
+        }
         check_drawn(&record, view, note.paths(), ADD)?;
     }
     note.id = record.allocate_id(&mut s.ids).map_err(|e| bad(ADD, e.to_string()))?;
@@ -180,6 +180,9 @@ fn new_branches(s: &Session, id: u64, set: BranchesSet) -> Result<Vec<Branch>> {
     let own = usize::from(note.anchor.path().is_some());
     if let Some(why) = leaders_refused(note.anchor.view().is_some(), count, own.saturating_add(count)) {
         return Err(bad(EDIT, why));
+    }
+    if let Some(view) = note.anchor.view() {
+        crate::drawing_view::refuse_on_exploded(record, view, "notes on its model", EDIT)?;
     }
     let added = set.add.iter().map(|pick| branch(s, pick, EDIT)).collect::<Result<Vec<_>>>()?;
     if let Some(view) = note.anchor.view() {

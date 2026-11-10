@@ -841,6 +841,7 @@ fn a_dimension_an_exploded_view_holds_back_is_out_of_date_everywhere() {
     settled(&mut s, sheet);
     let scene = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
     assert_eq!(scene["out_of_date"], json!([id]), "{scene}");
+    assert_eq!(scene["dimensions"], json!([]), "not drawn: {scene}");
     assert_eq!(listed(&mut s, sheet), std::slice::from_ref(&id), "as the export lists it");
     let (reply, words) = status_of(&mut s);
     assert!(all_are(&words, "current"), "{reply}");
@@ -853,6 +854,45 @@ fn a_dimension_an_exploded_view_holds_back_is_out_of_date_everywhere() {
     let scene = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
     assert_eq!(scene["out_of_date"], json!([id]), "deferred: {scene}");
     assert_eq!(out_of_date_dimensions(&status_of(&mut s).0), [id], "deferred");
+}
+
+/// A note on the model of a view that draws an exploded view, as a file can hold it, is held back as
+/// a dimension is: unread, undrawn and listed out of date by the scene and the export, whether its
+/// anchor or only a branch points at the model. A note on the view itself is drawn.
+#[test]
+fn a_note_on_the_model_an_exploded_view_holds_back_is_out_of_date() {
+    let (mut s, sheet, [assembled, ..], apart) = two_assembled_one_apart();
+    let first = s.doc.occurrences[0].id;
+    let edge = json!({"point": [5, 0, 0], "path": [first]});
+    let view = ids::encode(assembled);
+    let note = |s: &mut Session, add: Value| run(s, "drawing.note.add", add)["note"].clone();
+    let on_edge = note(&mut s, json!({"anchor": {"edge": {"view": view, "edge": edge}}, "at": [60, 40], "content": "Deburr"}));
+    let branched = note(&mut s, json!({"anchor": {"view": view}, "at": [60, -40], "content": "Both", "branches": [{"edge": edge}]}));
+    let plain = note(&mut s, json!({"anchor": {"view": view}, "at": [0, -40], "content": "Exploded"}));
+    // As a file holds them: drawing.view.edit refuses to explode a view with a note on its model.
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    let record = d.views.iter_mut().find(|v| v.id == assembled).unwrap();
+    Arc::make_mut(record).settings.exploded = Some(Exploded::View(apart));
+    d.validate().unwrap();
+    s.doc_mut().put_drawing(Arc::new(d));
+    // By view and id, as every list of a view's dimensions and notes is.
+    let mut held = [on_edge, branched];
+    held.sort_by_key(|id| ids::decode(id.as_str().unwrap()).unwrap());
+    settled(&mut s, sheet);
+    let scene = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
+    assert_eq!(scene["out_of_date"], json!(held), "{scene}");
+    let listed_notes: Vec<(Value, Value)> = scene["notes"].as_array().unwrap().iter().map(|n| (n["note"].clone(), n["drawn"].clone())).collect();
+    assert_eq!(listed_notes, [(plain.clone(), json!(true))], "{scene}");
+    let drawn: Vec<u64> = built(&s, sheet).scene.groups.iter().filter(|g| g.kind == ObjectKind::Note).map(|g| g.object).collect();
+    assert_eq!(drawn, [ids::decode(plain.as_str().unwrap()).unwrap()]);
+    assert_eq!(listed(&mut s, sheet), held, "as the export lists them");
+    assert!(status_of(&mut s).0.get("held").is_none());
+
+    run(&mut s, "drawing.set", json!({"updates": "deferred"}));
+    run(&mut s, "drawing.update", json!({}));
+    settled(&mut s, sheet);
+    let scene = run(&mut s, "drawing.scene", json!({"sheet": ids::encode(sheet)}));
+    assert_eq!(scene["out_of_date"], json!(held), "deferred: {scene}");
 }
 
 /// A deferred drawing draws nothing until `drawing.update`: then from the model as it is now, until
