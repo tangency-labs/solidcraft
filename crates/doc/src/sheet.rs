@@ -861,15 +861,27 @@ pub enum ReliefShape {
     /// No relief: both bends run to their corner, and each one's end is cut straight, in the
     /// flat, from that corner to where its flange's closed end starts.
     Tear,
+    /// A notch with straight sides running parallel to the junction and a straight inner end
+    /// square to them. A junction relief's shape ([`JunctionRelief`]); at a corner it is refused
+    /// with a note, as there is no corner for it there.
+    Straight,
+    /// A notch with straight sides closed by a half round of half its width: a stadium, open at
+    /// the far edge. A junction relief's shape ([`JunctionRelief`]); refused at a corner by name.
+    Obround,
 }
 
 impl ReliefShape {
+    /// The shapes a junction relief takes, in the order its refusals list them.
+    pub const JUNCTION: [&'static str; 5] = ["straight", "rectangular", "obround", "tear", "notch"];
+
     pub fn parse(s: &str) -> Option<ReliefShape> {
         match s.trim().to_ascii_lowercase().as_str() {
             "notch" => Some(ReliefShape::Notch),
             "round" => Some(ReliefShape::Round),
             "rectangular" => Some(ReliefShape::Rectangular),
             "tear" => Some(ReliefShape::Tear),
+            "straight" => Some(ReliefShape::Straight),
+            "obround" => Some(ReliefShape::Obround),
             _ => None,
         }
     }
@@ -880,6 +892,18 @@ impl ReliefShape {
             ReliefShape::Round => "round",
             ReliefShape::Rectangular => "rectangular",
             ReliefShape::Tear => "tear",
+            ReliefShape::Straight => "straight",
+            ReliefShape::Obround => "obround",
+        }
+    }
+
+    /// Why this shape relieves no corner: the two a junction takes (`straight`, `obround`) have
+    /// nothing to part where two bends meet at a corner of the base. The corner relief says so by
+    /// name, in a note, rather than cutting something else.
+    pub fn corner_refusal(self) -> String {
+        match self {
+            ReliefShape::Obround => "not supported yet: an obround corner relief".into(),
+            _ => "not supported yet: a straight corner relief".into(),
         }
     }
 }
@@ -933,6 +957,26 @@ pub struct ReliefOverride {
     pub shape: Option<ReliefShape>,
     /// How far across the relief is (mm).
     pub size: Option<f64>,
+}
+
+/// The bend relief a stretch asks for at the junction its far end makes with the next stretch of a
+/// split edge (`sheet.flange`'s `segments[].relief`). Cut `width` across the junction, centred on
+/// it, from `depth` before the deeper (inner) of the two bend lines out to the nearer far edge: the
+/// two stretches are parted there and joined only through the base, `depth` back from the bend
+/// line, so each bend forms with a free end at the notch's side.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct JunctionRelief {
+    /// `straight`, `rectangular`, `obround`, `tear` or `notch`. `straight` and `rectangular` have
+    /// the same footprint here: the junction's frame makes both a rectangle. `notch` cuts nothing;
+    /// `tear` is the junction's zero-width slit, deepened by `depth`.
+    pub shape: ReliefShape,
+    /// How far across the junction the notch is (mm).
+    pub width: f64,
+    /// How far past the inner (deeper) bend line the notch reaches into the base (mm).
+    pub depth: f64,
+    /// The edge and segment the relief was written on (indices into the feature's `edges` and the
+    /// edge's `segments`), so a refusal names what the caller wrote.
+    pub at: (usize, usize),
 }
 
 /// A rule's values (mm, unit-less K).
@@ -1065,6 +1109,10 @@ pub struct SheetFlange {
     /// Which feature made it: `F<feature>.<k>` (persistent edge names).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub tag: String,
+    /// The junction relief this stretch carries at its far end (`segments[].relief`): the notch the
+    /// build cut there, kept so the flat pattern's junction slit and the bend table know of it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relief: Option<JunctionRelief>,
 }
 
 /// One edge flange to make: a pick on the sheet's edge, that flange's height (measured as `from`
@@ -1665,7 +1713,7 @@ const BUTT_CLEAR: f64 = 1e-6;
 const MIN_CORNER_RELIEF: f64 = 0.01;
 
 /// The narrowest bend relief that is cut: a narrower one would leave hairline edges.
-const MIN_BEND_RELIEF: f64 = 0.01;
+pub(crate) const MIN_BEND_RELIEF: f64 = 0.01;
 
 /// How many straight pieces a round corner relief's arc is measured in, when the region it takes
 /// out of the base is worked out (see [`SheetBody::plan_relief`]).
@@ -3048,7 +3096,15 @@ impl SheetBody {
                 // material remains, so there is nothing of the other stretch left to part, and
                 // cutting on would slit the longer stretch's leg on its own (a C-shaped blank's
                 // far foot, for one).
-                let (start, end) = (sa.min(sb), fa.min(fb));
+                // A junction the ending stretch relieved with a real notch (its `segments[].relief`
+                // took material out of the base and both panels) needs no slit: the notch parts the
+                // material, and a line inside it would be a second outline the shop cannot follow.
+                // A tear is the slit itself, starting `depth` deeper, in the base side.
+                let (start, end) = match early.relief {
+                    Some(r) if matches!(r.shape, ReliefShape::Straight | ReliefShape::Rectangular | ReliefShape::Obround) => continue,
+                    Some(r) if r.shape == ReliefShape::Tear => (sa.min(sb) - r.depth, fa.min(fb)),
+                    _ => (sa.min(sb), fa.min(fb)),
+                };
                 if end <= start + 1e-9 {
                     continue;
                 }
@@ -4015,6 +4071,22 @@ impl SheetBody {
         flip: bool,
         relief: ReliefOverride,
     ) -> Result<(Vec<usize>, Vec<String>)> {
+        self.add_flanges_relieved(edges, radius, position, flip, relief, &[])
+    }
+
+    /// [`SheetBody::add_flanges_each`], with the junction relief each new stretch asks for:
+    /// `junction` holds one entry per edge, in the same order as `edges` (`None`: no relief), and a
+    /// shorter list, or none, is no relief for the edges past it. Each relief is cut after every
+    /// stretch has its bend and the base is trimmed back, and before the end reliefs.
+    pub fn add_flanges_relieved(
+        &mut self,
+        edges: &[EdgeFlange],
+        radius: f64,
+        position: &str,
+        flip: bool,
+        relief: ReliefOverride,
+        junction: &[Option<JunctionRelief>],
+    ) -> Result<(Vec<usize>, Vec<String>)> {
         if edges.is_empty() || edges.len() > 1000 {
             return Err(DocError::Invalid("pick 1…1000 edges".into()));
         }
@@ -4183,6 +4255,7 @@ impl SheetBody {
                     exact: None,
                     zone_shape: None,
                     tag: String::new(),
+                    relief: None,
                     ext: (0.0, 0.0),
                     slope: (0.0, 0.0),
                     tear: (false, false),
@@ -4281,6 +4354,7 @@ impl SheetBody {
                 exact: None,
                 zone_shape: None,
                 tag: String::new(),
+                relief: None,
                 ext: (0.0, 0.0),
                 slope: (0.0, 0.0),
                 tear: (false, false),
@@ -4290,6 +4364,14 @@ impl SheetBody {
             made.push(self.flanges.len() - 1);
         }
         let mut notes = Vec::new();
+        // The reliefs the stretches ask for at the junctions between them. Cut here: every stretch
+        // has its bend and the base is trimmed back (so the notch reaches the stretch's own bend
+        // line), and an interior junction's end is free, so `relieve_bend_ends` does not fire there.
+        for (&i, asked) in made.iter().zip(junction) {
+            if let Some(r) = *asked {
+                self.cut_junction_relief(i, r)?;
+            }
+        }
         for ((&i, &free), &notch) in made.iter().zip(&freed).zip(&notched) {
             notes.extend(self.relieve_bend_ends(i, free, notch));
         }
@@ -4402,6 +4484,114 @@ impl SheetBody {
         Ok(())
     }
 
+    /// Cut the relief a stretch asks for at the junction its far end makes with the next stretch of
+    /// a split edge: `width` across the junction, centred on it, from `depth` before the deeper
+    /// bend line out to the nearer far edge, out of the base and of both stretches' panels. Each
+    /// bend zone follows: `zone_span` measures a bend against the base's edge at its own bend line,
+    /// which the notch interrupts. A relief that cannot be cut refuses the feature, naming the
+    /// segment the caller wrote; nothing is clamped.
+    fn cut_junction_relief(&mut self, i: usize, r: JunctionRelief) -> Result<()> {
+        let (edge, seg) = r.at;
+        let named = format!("edges[{edge}].segments[{seg}].relief");
+        let fail = |why: String| DocError::Invalid(format!("{named}: {why}"));
+        let Some(f) = self.flanges.get(i).cloned() else { return Err(DocError::Invalid(format!("{named}: the stretch is missing"))) };
+        let (Some(d), Some(n)) = (f.d.normalized(), f.n.normalized()) else {
+            return Err(fail("the junction after it has no direction".into()));
+        };
+        // The stretch that starts where this one ends: one bend butt to the other along the split
+        // edge, which is the junction `junction_slits` parts.
+        let u = f.p.dot(d) + f.len;
+        let partner = self.flanges.iter().enumerate().position(|(j, b)| {
+            j != i && b.parent == f.parent && b.d.normalized().is_some_and(|db| db.dot(d) > 1.0 - 1e-9) && (b.p.dot(d) - u).abs() < 1e-6
+        });
+        let Some(j) = partner else {
+            return Err(fail("no stretch starts where this one ends, so there is no junction to relieve".into()));
+        };
+        let Some(b) = self.flanges.get(j).cloned() else { return Err(fail("the stretch after it is missing".into())) };
+        // The material the two stretches share across the junction: from the deeper of the two bend
+        // lines (the one nearer the base) out to the nearer far edge.
+        let (sa, sb) = (f.p.dot(n), b.p.dot(n));
+        let (fa, fb) = (sa + self.allowance(&f) + f.leg, sb + self.allowance(&b) + b.leg);
+        let (inner, outer) = (sa.min(sb), fa.min(fb));
+        let reach = outer - inner;
+        if !(reach > 1e-9) {
+            return Err(fail("the two bends leave no material at the junction to relieve".into()));
+        }
+        let (w, depth) = (r.width, r.depth);
+        if depth > reach + 1e-9 {
+            return Err(fail(format!("a depth of {depth:.3} mm reaches past the flange's far edge ({reach:.3} mm away)")));
+        }
+        if r.shape == ReliefShape::Obround && depth < w / 2.0 - 1e-9 {
+            return Err(fail(format!("an obround relief needs a depth of at least half its width ({:.3} mm)", w / 2.0)));
+        }
+        // Half the width comes out of each stretch's own length, so it must fit the narrower one.
+        if r.shape != ReliefShape::Notch && r.shape != ReliefShape::Tear {
+            let (narrow, at) = if f.len <= b.len { (f.len, seg) } else { (b.len, seg + 1) };
+            if w / 2.0 > narrow + 1e-9 {
+                return Err(DocError::Invalid(format!(
+                    "{named} is {w:.3} mm wide, wider than segment {} ({narrow:.3} mm); make the segment wider or the relief narrower",
+                    at + 1
+                )));
+            }
+        }
+        // The notch in the flat frame: `u` along the junction, `v` out from the base. A notch cuts
+        // nothing and a tear is the junction's own slit (which `junction_slits` deepens), so only
+        // the three that take material out build a region.
+        let at = |u: f64, v: f64| d * u + n * v;
+        let (u0, u1) = (u - w / 2.0, u + w / 2.0);
+        let (v0, v1) = (inner - depth, outer);
+        let outline = match r.shape {
+            ReliefShape::Notch | ReliefShape::Tear => None,
+            ReliefShape::Round => {
+                return Err(fail(
+                    "a round relief is a closed hole and does not part the junction; use obround with a depth of half its width".into(),
+                ));
+            }
+            ReliefShape::Straight | ReliefShape::Rectangular => Some(Loop2::polygon(&[at(u0, v0), at(u1, v0), at(u1, v1), at(u0, v1)])),
+            ReliefShape::Obround => {
+                // The sides and the outer end, closed by a half round of half the width on the base
+                // side: the deepest point is the inner end, `depth` past the deeper bend line.
+                let radius = w / 2.0;
+                let mid = v0 + radius;
+                Some(Loop2 {
+                    segs: vec![
+                        Seg2::Line { a: at(u0, v1), b: at(u1, v1) },
+                        Seg2::Line { a: at(u1, v1), b: at(u1, mid) },
+                        Seg2::Arc { center: at(u, mid), radius, start: d.angle(), sweep: std::f64::consts::PI },
+                        Seg2::Line { a: at(u0, mid), b: at(u0, v1) },
+                    ],
+                })
+            }
+        };
+        if let Some(outline) = outline {
+            let tool = planar_region(&Region2 { outer: outline.ccw(), holes: Vec::new() })?;
+            let mut work = FlatWork::new();
+            for panel in [None, Some(i), Some(j)] {
+                let before = match panel {
+                    None => self.base.clone(),
+                    Some(k) => match self.flanges.get(k) {
+                        Some(g) => self.panel(g),
+                        None => return Err(fail("a stretch is missing".into())),
+                    },
+                };
+                let mut left = material_boolean(&[planar_region(&before)?], std::slice::from_ref(&tool), kernel::BoolOp::Cut, &mut work)?;
+                match (left.pop(), left.is_empty()) {
+                    (Some(one), true) if one.holes.len() == before.holes.len() => self.set_panel_region(panel, one)?,
+                    _ => return Err(fail("would cut the sheet apart; reduce its depth".into())),
+                }
+            }
+            if self.flat_regions().map_err(|error| fail(error.to_string()))?.len() != 1 {
+                return Err(fail("would cut the sheet apart; reduce its depth".into()));
+            }
+        }
+        // The stretch keeps the relief it asked for: the flat pattern's junction slit and the bend
+        // table read it from there.
+        if let Some(g) = self.flanges.get_mut(i) {
+            g.relief = Some(r);
+        }
+        Ok(())
+    }
+
     /// Two bends that butt along a split edge's junction: on the same line, one starting where
     /// the other ends. There is no corner to close there (`add_flanges_each`).
     fn junction_pair(&self, a: usize, b: usize) -> bool {
@@ -4497,6 +4687,8 @@ impl SheetBody {
             ])
             .ccw(),
             ReliefShape::Notch | ReliefShape::Tear => return Ok(()),
+            // A junction's shapes: a corner has nothing for them to part.
+            ReliefShape::Straight | ReliefShape::Obround => return Err(shape.corner_refusal()),
         };
         let mut relieved = self.clone();
         relieved.holes.push(Region2 { outer, holes: Vec::new() });
@@ -4970,6 +5162,12 @@ impl SheetBody {
         let (shape, size) = (relief.shape.unwrap_or(self.relief), relief.size.unwrap_or(self.relief_size));
         match shape {
             ReliefShape::Notch => {}
+            // A junction's shapes are refused by name here: they have nothing to part at a corner.
+            ReliefShape::Straight | ReliefShape::Obround => {
+                for k in corners {
+                    notes.push(format!("no corner relief at {}: {}", self.shown(k.c), shape.corner_refusal()));
+                }
+            }
             // The reliefs come last: they move the bends' ends, which is how the corners were found.
             ReliefShape::Round | ReliefShape::Rectangular => {
                 // Every corner's relief is planned against the base as it is now, before any of
@@ -5412,6 +5610,7 @@ impl SheetBody {
         // how far from the corner it reaches.
         let (relief, reach) = match shape {
             ReliefShape::Notch | ReliefShape::Tear => return Ok(None),
+            ReliefShape::Straight | ReliefShape::Obround => return Err(shape.corner_refusal()),
             ReliefShape::Round => (vec![Seg2::Arc { center: c, radius: r, start: da.angle(), sweep: -alpha }], r),
             ReliefShape::Rectangular => {
                 let x = snap(c + (da + db) * (r / (1.0 + da.dot(db))));
@@ -5509,6 +5708,7 @@ impl SheetBody {
             exact: None,
             zone_shape: None,
             tag: String::new(),
+            relief: None,
         });
         Ok(self.flanges.len() - 1)
     }
@@ -5639,6 +5839,7 @@ impl SheetBody {
             exact: None,
             zone_shape: None,
             tag: String::new(),
+            relief: None,
         };
         let ba = self.allowance(&probe);
         let s0 = match position {
@@ -5747,6 +5948,7 @@ impl SheetBody {
             exact: moving_exact,
             zone_shape,
             tag: String::new(),
+            relief: None,
         });
         let i = self.flanges.len() - 1;
         // Flanges on the moving part's edges now hang off the fold and move with it.
@@ -5894,6 +6096,7 @@ impl SheetBody {
                 exact: None,
                 zone_shape: None,
                 tag: String::new(),
+                relief: None,
             });
         }
         for (k, j) in moves {
@@ -6895,6 +7098,7 @@ pub fn contour_flange_path(body: &str, rule: &str, rv: &RuleValues, plane: &Plan
                     exact: None,
                     zone_shape: None,
                     tag: String::new(),
+                    relief: None,
                 };
                 at += sheet.allowance(&f);
                 sheet.flanges.push(f);
@@ -8197,7 +8401,9 @@ mod tests {
     fn relief_area(shape: ReliefShape, size: f64, alpha: f64, ba: f64) -> f64 {
         let r = size / 2.0;
         match shape {
-            ReliefShape::Notch | ReliefShape::Tear => 0.0,
+            // A corner refuses the two a junction takes (`straight`, `obround`), so they cut
+            // nothing here, like the shapes that are no relief at all.
+            ReliefShape::Notch | ReliefShape::Tear | ReliefShape::Straight | ReliefShape::Obround => 0.0,
             ReliefShape::Round => r * r * alpha / 2.0 + 2.0 * r * ba,
             ReliefShape::Rectangular => r * r * (alpha / 2.0).tan() + 2.0 * r * ba,
         }
@@ -8568,6 +8774,9 @@ mod tests {
                     assert_eq!(segs.len(), 4, "{what}: {segs:?}");
                     assert_eq!(s.flanges.iter().map(|f| f.tear.0 as usize + f.tear.1 as usize).sum::<usize>(), 8, "{what}");
                 }
+                // Not in this list: a corner refuses the two shapes a junction takes, with a note
+                // (see `a_rule_with_a_junction_relief_shape_notes_the_corner_refusal`).
+                ReliefShape::Straight | ReliefShape::Obround => {}
             }
             // The flat pattern is one piece without hairline edges, and the folded part holds the
             // same material.
@@ -8634,6 +8843,24 @@ mod tests {
                 assert!((u0 - 2.0).abs() < 1e-9 && (u1 - (short.len - 2.0)).abs() < 1e-9, "{what}: {u0} {u1} of {}", short.len);
                 holds_the_flat_material(&s, &what);
             }
+        }
+    }
+
+    /// A rule whose corner relief is a junction's shape (`straight` or `obround`) has its corners
+    /// closed with a note naming the refusal, and no relief cut: the two shapes FR-13 adds do not
+    /// change corner behaviour silently.
+    #[test]
+    fn a_rule_with_a_junction_relief_shape_notes_the_corner_refusal() {
+        let closed = tray(&alu(), 72.0, 38.6).0;
+        for (shape, why) in [
+            (ReliefShape::Straight, "not supported yet: a straight corner relief"),
+            (ReliefShape::Obround, "not supported yet: an obround corner relief"),
+        ] {
+            let (s, notes) = tray(&RuleValues { corner_relief_shape: shape, corner_relief: 4.0, ..alu() }, 72.0, 38.6);
+            assert_eq!(notes.len(), 4, "{shape:?}: {notes:?}");
+            assert!(notes.iter().all(|n| n.starts_with("no corner relief at (") && n.contains(why)), "{shape:?}: {notes:?}");
+            assert_eq!((&s.base, &s.flanges), (&closed.base, &closed.flanges), "{shape:?}");
+            holds_the_flat_material(&s, &format!("{shape:?} corner relief"));
         }
     }
 
@@ -9076,6 +9303,8 @@ mod tests {
                 ReliefShape::Notch => 0.0,
                 ReliefShape::Tear => -(1.0 - 0.5 / std::f64::consts::SQRT_2) / 2.0,
                 ReliefShape::Round | ReliefShape::Rectangular => 4.0,
+                // A corner refuses a junction's shapes by name: they cut nothing.
+                ReliefShape::Straight | ReliefShape::Obround => 0.0,
             };
             let lengths: Vec<f64> = s.bends().iter().map(|b| b.length).collect();
             assert!((lengths[0] - (137.0 - cut)).abs() < 1e-9 && (lengths[1] - (27.0 - cut)).abs() < 1e-9, "{what}: {lengths:?}");

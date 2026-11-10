@@ -1684,10 +1684,26 @@ fn deleting_a_mid_edit_segment_keeps_the_boundaries_it_did_not_touch() {
     h.app.edit_feature(id);
     h.frames(6);
     // The user clears the second stretch's `to` in its field.
+    let dump = |h: &crate::scenario::Harness, when: &str| {
+        let mut found = Vec::new();
+        if let Some(tree) = h.output.accesskit_update.as_ref() {
+            for (_, n) in tree.nodes.iter() {
+                if let Some(label) = n.label().filter(|l| l.contains("Segment 2")) {
+                    found.push((label.to_string(), n.bounds().map(|b| [b.x0, b.y0, b.x1, b.y1]), n.role()));
+                }
+            }
+        }
+        eprintln!("[diag] {when}: widgets-of-interest {found:?}");
+        eprintln!("[diag] {when}: rows {:?}", restored_stretches(h));
+    };
+    dump(&h, "before click");
     h.step(&json!({"widget": "Segment 2 to"})).unwrap();
+    dump(&h, "after click");
     h.step(&json!({"key": "A", "cmd": true})).unwrap();
+    dump(&h, "after ctrl+A");
     h.step(&json!({"key": "Delete"})).unwrap();
     h.frames(3);
+    dump(&h, "after delete");
     assert_eq!(restored_stretches(&h)[0][1], ("0.1".to_string(), String::new()), "the removed stretch's `to` is empty, as while editing");
     // Delete that stretch: the gap is bridged from the neighbours.
     h.step(&json!({"click": {"handle": "dialog:button:Segment 2:Delete"}})).unwrap();
@@ -1993,4 +2009,76 @@ fn a_dragged_segment_round_trip_keeps_every_other_edge_byte_identical() {
         again[0].1["params"]
     );
     assert_eq!(segment_rows(&h)[1], before[1], "edge 2 still comes back as it was");
+}
+
+/// A stretch's relief describes the junction at its own far end, so splitting the stretch in two
+/// leaves the relief on the last part: the new junction in the middle takes none.
+#[test]
+fn a_split_stretch_keeps_its_relief_at_its_outer_end() {
+    let mut list = vec![
+        SegmentRow { from: "0".into(), to: "0.5".into(), equal: false, ..Default::default() },
+        SegmentRow { from: "0.5".into(), to: "1".into(), equal: false, relief: Some((2, "3 mm".into(), "1 mm".into())), ..Default::default() },
+    ];
+    add_segment(&mut list);
+    assert_eq!(list.len(), 3);
+    assert_eq!(list[2].relief, Some((2, "3 mm".into(), "1 mm".into())), "the relief stays at the outer end");
+    assert_eq!(list[1].relief, None, "the junction the split made takes none");
+}
+
+/// Deleting a stretch in the Flange dialog moves its relief to the row that takes its end, and the
+/// first stretch's relief (no row ends where it did) goes with it.
+#[test]
+fn deleting_a_stretch_moves_its_relief_to_the_row_that_takes_its_end() {
+    let rows = || {
+        vec![
+            SegmentRow { from: "0".into(), to: "0.3".into(), equal: false, ..Default::default() },
+            SegmentRow { from: "0.3".into(), to: "0.8".into(), equal: false, relief: Some((3, String::new(), String::new())), ..Default::default() },
+            SegmentRow { from: "0.8".into(), to: "1".into(), equal: false, ..Default::default() },
+        ]
+    };
+    let mut list = rows();
+    remove_segment(&mut list, 1);
+    assert_eq!(list.len(), 2);
+    assert_eq!(list[0].relief, Some((3, String::new(), String::new())), "the row that takes the removed end takes its relief");
+    let mut first = rows();
+    first[0].relief = Some((4, String::new(), String::new()));
+    remove_segment(&mut first, 0);
+    assert!(
+        !first.iter().any(|r| r.relief.as_ref().is_some_and(|(shape, _, _)| *shape == 4)),
+        "no row ends where the first stretch did: its relief goes"
+    );
+}
+
+/// Edit Feature keeps a segment's whole relief (`shape`, `width`, `depth`) and sends it back byte
+/// for byte: a field the dialog does not hold would be dropped on every edit.
+#[test]
+fn editing_a_flange_keeps_every_segments_relief() {
+    let mut app = plate(crate::ui_kit::LayoutMode::Floating);
+    app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    let params = json!({
+        "type": "edge",
+        "edges": [{"point": [50.0, 0.0, 2.5], "segments": [
+            {"from": 0.0, "to": 0.4, "angle": "90 deg", "height": "20 mm",
+             "relief": {"shape": "straight", "width": "3 mm", "depth": "1 mm"}},
+            {"from": 0.4, "to": 0.7, "angle": "90 deg", "height": "15 mm",
+             "relief": {"shape": "obround"}},
+            {"from": 0.7, "to": 1.0, "angle": "45 deg", "height": "15 mm", "flip": false}
+        ]}],
+        "height": "20 mm",
+        "angle": "90 deg",
+        "position": "inside",
+        "flip": false
+    });
+    app.run("sheet.flange", params.clone()).unwrap();
+    assert!(app.session.model.results.iter().all(|r| r.error.is_none()), "{:?}", app.session.model.results);
+    let f = app.session.doc.features.last().unwrap().clone();
+    let e = edit_dialog(&app, f.id, None).unwrap();
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!(c[0].0, "timeline.redefine");
+    assert_eq!(
+        serde_json::to_string(&c[0].1["params"]).unwrap(),
+        serde_json::to_string(&params).unwrap(),
+        "the edit sends the reliefs back as they were: {}",
+        c[0].1["params"]
+    );
 }

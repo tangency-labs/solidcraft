@@ -672,6 +672,224 @@ fn a_curve_away_from_a_fold_stays_its_curve_in_the_dxf() {
     assert!(count(&es, "LINE") < 12, "the arc went to chords: {} lines", count(&es, "LINE"));
 }
 
+/// A segment's relief notches the junction after it, in the flat pattern and in the DXF: the notch
+/// is centred on the junction, the relief width across, from the relief depth before the inner bend
+/// line out to the nearer far edge. The zero-width junction cut is gone: the notch parts the two
+/// stretches and a cutter can follow it (FR-13).
+#[test]
+fn a_segment_junction_relief_notches_the_flat_pattern_and_the_dxf() {
+    // A 100 x 60 sheet of the 2 mm rule (R 1, K 0.5; relief 2 wide, 1 deep): setback 3 mm,
+    // allowance pi, 20 mm flange -> 17 mm leg, far edge 3 - (pi + 17) = -17.141592653589793.
+    let mut s = plate_in(sheet_of_2mm(), &[]);
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[50,0,2],"segments":[
+            {"from":0,"to":0.5,"angle":"90 deg","height":"20 mm","flip":false,
+             "relief":{"shape":"rectangular"}},
+            {"from":0.5,"to":1,"angle":"90 deg","height":"20 mm","flip":true}]}],
+            "height":"20 mm","angle":"90 deg"}),
+    );
+    let far = 3.0 - (PI + 17.0);
+    let (ld, rd) = (Vec2::new(49.0, 4.0), Vec2::new(51.0, 4.0));
+    let (lf, rf) = (Vec2::new(49.0, far), Vec2::new(51.0, far));
+    let line = |lp: &solidcore_record::Loop2, a: Vec2, b: Vec2| {
+        lp.segs.iter().any(|s| matches!(s, Seg2::Line { a: p, b: q } if p.dist(a) < 1e-6 && q.dist(b) < 1e-6))
+    };
+    let near = |p: Vec2, q: Vec2| p.dist(q) < 1e-6;
+    // A loop draws each edge once, in whichever direction it runs round the material.
+    let drawn = |lines: &[(Vec2, Vec2)], a: Vec2, b: Vec2| lines.iter().any(|&(p, q)| (near(p, a) && near(q, b)) || (near(p, b) && near(q, a)));
+    // The flat pattern: the notch's three lines (its far end is the far edge, so it has none).
+    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    for (a, b) in [(ld, rd), (lf, ld), (rf, rd)] {
+        let sides: Vec<(Vec2, Vec2)> = regions
+            .iter()
+            .flat_map(|r| {
+                r.outer.segs.iter().filter_map(|s| match *s {
+                    Seg2::Line { a, b } => Some((a, b)),
+                    _ => None,
+                })
+            })
+            .collect();
+        assert!(drawn(&sides, a, b), "the flat pattern has no notch line {a:?} to {b:?}: {sides:?}");
+    }
+    // The zero-width junction cut at x = 50 is gone: the notch parts the material instead.
+    let slit = (Vec2::new(50.0, 3.0), Vec2::new(50.0, far));
+    assert!(
+        !regions.iter().any(|r| line(&r.outer, slit.0, slit.1) || line(&r.outer, slit.1, slit.0)),
+        "the blank still carries the junction slit: {:?}",
+        regions.iter().map(|r| r.outer.segs.len()).collect::<Vec<_>>()
+    );
+    // 6000 - 300 + 100 * (pi + 17) - 2 * (pi + 17 + 1) = 7671.8760800518 mm2.
+    let area: f64 = regions.iter().map(|r| r.area()).sum();
+    assert!((area - 7671.8760800518).abs() < 1e-6, "flat area {area}");
+    // Both bends end at the notch's sides: they lose half its width at that end, and their angle,
+    // radius and allowance are unchanged.
+    let bends = s.model.state().sheets[0].bends();
+    let lengths: Vec<f64> = bends.iter().map(|b| b.length).collect();
+    assert_eq!(lengths.len(), 2, "{bends:?}");
+    assert!((lengths[0] - 49.0).abs() < 1e-6 && (lengths[1] - 49.0).abs() < 1e-6, "bend lengths {lengths:?}");
+    // The DXF writes the same three lines on OUTLINE, and no junction cut.
+    let es = entities(&export(&mut s, json!({})));
+    let outline: Vec<(Vec2, Vec2)> =
+        es.iter().filter(|e| e.0 == "LINE" && e.1.iter().any(|(c, v)| *c == 8 && v == "OUTLINE")).map(|e| (point(e, 10), point(e, 11))).collect();
+    for (a, b) in [(ld, lf), (lf, rf), (rf, rd)] {
+        assert!(drawn(&outline, a, b), "the DXF has no notch line {a:?} to {b:?}: {outline:?}");
+    }
+    assert!(!drawn(&outline, slit.0, slit.1), "the DXF still has the junction cut: {outline:?}");
+    // The folded part loses the same material: its volume is the flat area times the thickness.
+    let volume = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap_or(f64::NAN);
+    assert!((volume - 15343.7521601036).abs() < 1e-6, "volume {volume}");
+}
+
+/// Two stretches of different angles (a 90°/20 mm and a 45°/15 mm) that both bend up: today's build
+/// cuts nothing at their junction, and each bend is clamped by the other's base material. A relief
+/// clears both bend lines: its deep end is the deeper bend line less the depth, its outer end the
+/// nearer far edge, and the 90° stretch keeps a tongue below the 45° stretch's far edge.
+#[test]
+fn a_two_setback_junction_relief_clears_both_bend_lines() {
+    let mut s = plate_in(sheet_of_2mm(), &[]);
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[50,0,2],"segments":[
+            {"from":0,"to":0.5,"angle":"90 deg","height":"20 mm",
+             "relief":{"shape":"straight"}},
+            {"from":0.5,"to":1,"angle":"45 deg","height":"15 mm"}]}],
+            "height":"20 mm","angle":"90 deg"}),
+    );
+    // 45° setback 1.2426406871192852, allowance pi/2, leg 13.757359312880714: its far edge is at
+    // 1.2426406871192852 - (pi/2 + 13.757359312880714) = -14.085514952556325. The 90° bend line is
+    // still the deeper one, so the deep end is 3 - 1 = 4 mm the other way.
+    let step = 1.2426406871192852 - (PI / 2.0 + 13.757359312880714);
+    let (ld, rd) = (Vec2::new(49.0, 4.0), Vec2::new(51.0, 4.0));
+    let (lf, rf) = (Vec2::new(49.0, step), Vec2::new(51.0, step));
+    let sides: Vec<(Vec2, Vec2)> = s.model.state().sheets[0]
+        .flat_regions()
+        .unwrap_or_default()
+        .iter()
+        .flat_map(|r| {
+            r.outer.segs.iter().filter_map(|s| match *s {
+                Seg2::Line { a, b } => Some((a, b)),
+                _ => None,
+            })
+        })
+        .collect();
+    let near = |p: Vec2, q: Vec2| p.dist(q) < 1e-6;
+    // A loop draws each edge once, in whichever direction it runs round the material.
+    let drawn = |a: Vec2, b: Vec2| sides.iter().any(|&(p, q)| (near(p, a) && near(q, b)) || (near(p, b) && near(q, a)));
+    for (a, b) in [(ld, rd), (lf, ld), (rf, rd)] {
+        assert!(drawn(a, b), "no notch line {a:?} to {b:?}: {sides:?}");
+    }
+    // The notch opens at the 45° stretch's far edge, which is the nearer one: no line across it.
+    assert!(!drawn(lf, rf) && !drawn(Vec2::new(49.0, step), Vec2::new(51.0, step)), "the notch's end at the far edge is drawn: {sides:?}");
+    // The 90° stretch's own far edge stays, below the 45° one, with its tongue beside the notch.
+    let (tongue_tip, tongue_side) = (Vec2::new(50.0, 3.0 - (PI + 17.0)), Vec2::new(50.0, step));
+    assert!(drawn(tongue_tip, tongue_side), "the tongue below the 45° far edge is missing: {sides:?}");
+    assert!(drawn(Vec2::new(50.0, step), Vec2::new(49.0, step)), "the tongue's side is missing: {sides:?}");
+}
+
+/// A `tear` relief is the junction's own cut, deepened into the base: the slit starts the relief
+/// depth before the inner bend line instead of on it, and it still parts the two stretches.
+#[test]
+fn a_tear_junction_relief_deepens_the_junction_cut() {
+    let mut s = plate_in(sheet_of_2mm(), &[]);
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[50,0,2],"segments":[
+            {"from":0,"to":0.5,"angle":"90 deg","height":"20 mm","flip":false,
+             "relief":{"shape":"tear"}},
+            {"from":0.5,"to":1,"angle":"90 deg","height":"20 mm","flip":true}]}],
+            "height":"20 mm","angle":"90 deg"}),
+    );
+    let far = 3.0 - (PI + 17.0);
+    let (from, to) = (Vec2::new(50.0, 4.0), Vec2::new(50.0, far));
+    let line = |lp: &solidcore_record::Loop2, a: Vec2, b: Vec2| {
+        lp.segs.iter().any(|s| matches!(s, Seg2::Line { a: p, b: q } if p.dist(a) < 1e-6 && q.dist(b) < 1e-6))
+    };
+    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    assert!(
+        regions.iter().any(|r| line(&r.outer, from, to) && line(&r.outer, to, from)),
+        "the tear does not run from 1 mm into the base: {:?}",
+        regions.iter().map(|r| r.outer.segs.len()).collect::<Vec<_>>()
+    );
+    // It cuts nothing: the flat pattern keeps its area.
+    let area: f64 = regions.iter().map(|r| r.area()).sum();
+    assert!((area - 7714.15926535898).abs() < 1e-6, "flat area {area}");
+}
+
+/// An `obround` relief ends in a half round of half its width, centred on the inner bend line at the
+/// rule's defaults: the flat pattern and the DXF carry one arc there, on the outline.
+#[test]
+fn an_obround_junction_relief_ends_in_an_arc() {
+    let mut s = plate_in(sheet_of_2mm(), &[]);
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[50,0,2],"segments":[
+            {"from":0,"to":0.5,"angle":"90 deg","height":"20 mm","flip":false,
+             "relief":{"shape":"obround","depth":"1 mm"}},
+            {"from":0.5,"to":1,"angle":"90 deg","height":"20 mm","flip":true}]}],
+            "height":"20 mm","angle":"90 deg"}),
+    );
+    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let arc = regions.iter().flat_map(|r| r.outer.segs.iter()).find_map(|s| match *s {
+        Seg2::Arc { center, radius, .. } => Some((center, radius)),
+        _ => None,
+    });
+    let (center, radius) =
+        arc.unwrap_or_else(|| panic!("no arc in the flat outline: {:?}", regions.iter().map(|r| r.outer.segs.len()).collect::<Vec<_>>()));
+    assert!(center.dist(Vec2::new(50.0, 3.0)) < 1e-6 && (radius - 1.0).abs() < 1e-6, "arc {center:?} r {radius}");
+    // The DXF: one arc on OUTLINE, about the same point.
+    let es = entities(&export(&mut s, json!({})));
+    let arcs: Vec<(Vec2, f64)> = es
+        .iter()
+        .filter(|e| e.0 == "ARC" && e.1.iter().any(|(c, v)| *c == 8 && v == "OUTLINE"))
+        .map(|e| (point(e, 10), values(e, 40).first().copied().unwrap_or(f64::NAN)))
+        .collect();
+    assert_eq!(arcs.len(), 1, "{arcs:?}");
+    assert!(arcs[0].0.dist(Vec2::new(50.0, 3.0)) < 1e-6 && (arcs[0].1 - 1.0).abs() < 1e-6, "{arcs:?}");
+}
+
+/// A saved design's segment relief survives a save and a reload, and a design saved without one
+/// rebuilds exactly as it did before the field existed.
+#[test]
+fn a_segment_relief_survives_a_save_and_a_design_without_one_rebuilds_identical() {
+    let mut s = plate_in(sheet_of_2mm(), &[]);
+    // A design without a relief: its JSON carries no `relief` key at all.
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[50,0,2],"segments":[
+            {"from":0,"to":0.5,"angle":"90 deg","height":"20 mm"},
+            {"from":0.5,"to":1,"angle":"90 deg","height":"15 mm"}]}],
+            "height":"20 mm","angle":"90 deg"}),
+    );
+    let plain = s.doc.to_json();
+    assert!(!plain.contains("\"relief\""), "a design without a relief writes one: {plain}");
+    let area = |s: &mut Session| -> f64 { s.model.state().sheets[0].flat_regions().unwrap_or_default().iter().map(|r| r.area()).sum() };
+    let before = area(&mut s);
+    // With one: the key is saved, and the design reads back and builds the same part.
+    let mut with = plate_in(sheet_of_2mm(), &[]);
+    run(
+        &mut with,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[50,0,2],"segments":[
+            {"from":0,"to":0.5,"angle":"90 deg","height":"20 mm","relief":{"shape":"straight","width":"3 mm","depth":"0.5 mm"}},
+            {"from":0.5,"to":1,"angle":"90 deg","height":"15 mm"}]}],
+            "height":"20 mm","angle":"90 deg"}),
+    );
+    let saved = with.doc.to_json();
+    assert!(saved.contains("\"relief\""), "the relief is not saved: {saved}");
+    let built = area(&mut with);
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap_or_else(|e| panic!("{e}")));
+    let again = area(&mut reopened);
+    assert!((again - built).abs() < 1e-9, "reopened {again} vs {built}");
+    // The plain design is unchanged by any of it.
+    assert!((area(&mut s) - before).abs() < 1e-9);
+}
+
 /// Two stretches of one edge that bend to opposite sides are parted in the blank: the flat pattern
 /// carries a zero-width cut at their junction, from the bend line out to the far edge, and the DXF
 /// writes both of its lines on the outline. A blank still joined there cannot fold, one stretch up

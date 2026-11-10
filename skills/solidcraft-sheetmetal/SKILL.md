@@ -20,7 +20,7 @@ A sheet metal part is a flat sheet plus bends: base first, then flanges. Work th
 - **Rule:** `sheet.manage_rules {"name":"AL2","thickness":"2 mm","k_factor":0.5,"bend_radius":"1 mm","active":true}`. Ask the shop for the K-factor; never invent it.
 - **Base:** a closed sketch profile, then `sheet.flange {"sketch":"Base"}`.
 - **Edge:** `sheet.flange {"type":"edge","edges":[...],"height":...,"angle":...}`; `{point, angle, height, segments}` gives one edge its own values.
-- **Segments:** stretches `{from, to}` tiling the stretch the sheet still has, each a bend with its own angle, height and side; opposite sides are cut in the flat.
+- **Segments:** stretches `{from, to}` tiling the stretch the sheet still has, each a bend with its own angle, height and side; `relief` notches a junction.
 - **Chains:** `then` bends the far edge again; refused with `segments`, naming the edge.
 - **Other:** `sheet.path_flange`, `sheet.hem`, `sheet.fold`, `sheet.convert`.
 - Parameters, not numbers; edge picks are plain numbers.

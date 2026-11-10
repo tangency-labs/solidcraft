@@ -1157,6 +1157,7 @@ pub fn convert_body(
                 exact: None,
                 zone_shape: None,
                 tag: String::new(),
+                relief: None,
                 tear: (false, false),
                 tear_curved: (false, false),
                 tear_ease: (0.0, 0.0),
