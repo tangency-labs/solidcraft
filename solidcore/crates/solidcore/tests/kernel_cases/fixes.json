@@ -67,7 +67,6 @@
   "twist_simple_duw_sign",
   "volume_lift_third_derivative_terms",
   "drop_curve_v_domain_degeneracy",
-  "cylinder_plane_section_trims_exact",
   "torus_check_reads_v_interval",
   "torus_check_spindle_apex",
   "extent3d_contains_both_segment_endpoints",

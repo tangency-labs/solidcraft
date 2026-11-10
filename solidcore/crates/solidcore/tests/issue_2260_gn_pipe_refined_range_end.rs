@@ -96,7 +96,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "curve_property_gs_branch_bounds",
     "curve_sweep_closed_path_joins_ends",
     "curve_tight_box_interval_knots",
-    "cylinder_plane_section_trims_exact",
     "cylinder_plane_tangent_within_tolerance",
     "cylinder_rebuild_mean_radius",
     "database_io_byte_swaps_read_boolean_and_u16",
