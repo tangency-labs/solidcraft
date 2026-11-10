@@ -31,6 +31,7 @@
 //! | [`SpanAt`], [`gn_enclose_over`], [`face_partials_over`] | `sm_GnSpanAt`, `sm_GnEncloseOver`, `sm_FacePartialsOver` (c5b6bb7) |
 //! | [`gn_fourth_over`]                | `sm_GnFourthOver`                       |
 //! | [`gn_certify_span`]               | `sm_GnCertifySpan`                      |
+//! | [`gn_certify_span_reusing`], [`SpanReuse`], [`CertifiedLevel`], [`CertifiedPiece`] | — (not the fork's: a halved span's halves start from its pieces) |
 //! | `gn_try!` (private)               | `SM_GN_TRY`                             |
 //!
 //! Deviations:
@@ -59,6 +60,22 @@
 //!   value it stops on, the halving it goes on with) by the fork's form, so a span takes no
 //!   more levels or pieces than the fork's, and is certified at the same level or sooner;
 //!   steered by the tighter bound, a round on a round took more spans and solves.
+//! - **A halved span's halves (not the fork's).** The fork certifies each half of a span
+//!   its caller halved afresh, from level 0. [`gn_certify_span_reusing`] takes the halved
+//!   span's finest proved level instead: its pieces over a half cover it, and each piece's
+//!   bounds hold over all of it, so they are the half's level one coarser (the half is half
+//!   as long), proved without an enclosure; the half's levels go on from the next one.
+//!   Only a piece inside the half steers the least-value stop; the row terms are taken again
+//!   about the half's first station. The bounds are as sound as afresh; a half skips the
+//!   coarser levels (which a long span's halves never prove before the inherited one), and
+//!   its bound can differ from the fork's in the last digits (its pieces' ends are the
+//!   parent's stations, not its own).
+//! - **A span's first level (not the fork's).** Where a span inherits no level, the section
+//!   build starts its levels one coarser than the level the span before first proved
+//!   ([`SpanReuse::start`]); a level not tried bounds nothing, so the bound returned is as
+//!   sound as the fork's, but it can be another level's. A level's end stations that the
+//!   level before solved (every other one: the same s from the same seed) are taken from
+//!   it, bit for bit what solving them again gives.
 //! - **Indices.** Knots and nets are read by checked indices (a knot or a coordinate
 //!   outside reads NaN, which shows in the result); the fork's indices stay inside.
 
@@ -79,6 +96,8 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::surface::surface::Surface;
 
 const OP: &str = "blend::fillet_section::certificate";
+/// The most Krawczyk steps that tighten a proved feet's box ([`gn_enclose_over`]).
+const TIGHTEN_STEPS: usize = 2;
 const OP_CERTIFY_SPAN: &str = "blend::fillet_section::certificate::gn_certify_span";
 
 /// `SM_GN_TRY(a)`: a failed evaluation proves nothing, the enclosing function returns
@@ -1114,6 +1133,84 @@ pub fn gn_enclose_over(
     if !proved {
         return Ok(None);
     }
+    // tighten the proved box (not the fork's): Krawczyk's operator again, about the box's
+    // own centre and with the Jacobian over the box, intersected with it, while that
+    // shrinks the box by a tenth or more. Every root in a box is in its K, so the box
+    // keeps the feet; its C (over a box that holds the final one) still bounds the
+    // coefficients' solve, and a narrower box is a smaller q, so the coefficients'
+    // enclosures (rho / (1 - q) at every order) are tighter
+    for _ in 0..TIGHTEN_STEPS {
+        let width = |b: &[Ivl; 4]| b.iter().map(|x| x.hi - x.lo).fold(0.0_f64, cmax);
+        let w0 = width(&bx_);
+        let xc = bx_.map(Ivl::mid);
+        let Ok(pc) = partials_over(xc, xc, 2) else {
+            break;
+        };
+        let sxc = xc.map(|x| Ser::constant(Ivl::from(x)));
+        let Ok((sgc, _)) =
+            gn_evaluate(&system(&pc, &leader, &tangent, r, side, law_r), &sxc, point)
+        else {
+            break;
+        };
+        let Ok(pb) = partials_over(bx_.map(|x| x.lo), bx_.map(|x| x.hi), 2) else {
+            break;
+        };
+        let sxb = bx_.map(Ser::constant);
+        let Ok(jac) = gn_jacobian(&system(&pb, &leader, &tangent, r, side, law_r), &sxb) else {
+            break;
+        };
+        let Ok(yc) = inverse4(&jac.map(|row| row.map(Ivl::mid))) else {
+            break;
+        };
+        let mut cc = [[IZ; 4]; 4];
+        let mut qc = 0.0_f64;
+        for (i, (yi, ci)) in yc.iter().zip(cc.iter_mut()).enumerate() {
+            let mut row = 0.0_f64;
+            for (j, cij) in ci.iter_mut().enumerate() {
+                let mut c = Ivl::from(if i == j { 1.0 } else { 0.0 });
+                for (&yik, jk) in yi.iter().zip(&jac) {
+                    c = c - Ivl::from(yik) * jk.get(j).copied().unwrap_or(IZ);
+                }
+                *cij = c;
+                row = round_up(row + c.mag());
+            }
+            qc = cmax(qc, row);
+        }
+        let contracts = qc < 1.0;
+        if !contracts {
+            break;
+        }
+        let mut next = bx_;
+        let mut empty = false;
+        for (i, ((yi, ci), xi)) in yc.iter().zip(&cc).zip(next.iter_mut()).enumerate() {
+            let mut kv = Ivl::from(f_at(&xc, i));
+            for (&yij, gj) in yi.iter().zip(&sgc) {
+                kv = kv - Ivl::from(yij) * gj.at(0, 0);
+            }
+            for (j, &cij) in ci.iter().enumerate() {
+                kv = kv + cij * (ivl_at(&bx_, j) - Ivl::from(f_at(&xc, j)));
+            }
+            let lo = cmax(xi.lo, kv.lo);
+            let hi = cmin(xi.hi, kv.hi);
+            let holds = lo <= hi;
+            if !holds {
+                empty = true;
+            }
+            *xi = Ivl::new(lo, hi);
+        }
+        if empty {
+            break;
+        }
+        // the C and q over the box just shrunk hold for the narrower one
+        y = yc;
+        cm = cc;
+        q = qc;
+        bx_ = next;
+        let shrank = width(&bx_) < 0.9 * w0;
+        if !shrank {
+            break;
+        }
+    }
 
     // the feet's Taylor coefficients over the span, order by order: x = -Y R + C x,
     // |x| <= rho
@@ -1124,8 +1221,24 @@ pub fn gn_enclose_over(
     );
     let sysk = system(&pk, &leader, &tangent, r, side, law_r);
     let mut sx = bx_.map(Ser::constant);
+    // the highest power of eps solved for (the section's jets of order n are the face
+    // curve's)
+    let eps_solved = if n >= 1 {
+        cmin_usize(tr.e(), n - 1)
+    } else {
+        tr.e()
+    };
     for tot in 1..=(tr.s() + tr.e()) {
-        let (sg, _) = gn_try!(gn_evaluate(&sysk, &sx, tr), None);
+        // this order's coefficients are those with i + k = tot, k <= eps_solved: G's at
+        // them depend only on x's at lower or equal powers of sigma and eps, so G is
+        // computed only there (bit for bit the whole truncation's, `Trunc::computing`),
+        // and not at all at an order with none to solve (the last ones, where every
+        // i = tot - k is past tr.s)
+        let eps = cmin_usize(eps_solved, tot);
+        if tot > tr.s() + eps {
+            continue;
+        }
+        let (sg, _) = gn_try!(gn_evaluate(&sysk, &sx, tr.computing(tot, eps)), None);
         for i in 0..=cmin_usize(tr.s(), tot) {
             let k = tot - i;
             // the section's jets of order n are the face curve's (gn_top_jets, 3bc54a4)
@@ -1831,6 +1944,300 @@ pub fn arc_row_terms_over(
     true
 }
 
+/// One piece of a level [`gn_certify_span`] proved: its parameter range, its
+/// [`gn_fourth_over_series`] terms, and its series where the span's rows vary (the ball's
+/// circle, or a varying thumbweight: their row terms are taken from them). Not upstream.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CertifiedPiece {
+    /// The piece's first and last parameter.
+    pub s: [f64; 2],
+    /// The piece's fourth s-derivative terms ([`Fourth`]).
+    pub fourth: Fourth,
+    /// The piece's series, kept only where the span's rows vary.
+    pub series: Option<Box<PieceSeries>>,
+}
+
+/// A span's finest level [`gn_certify_span_reusing`] proved: its pieces, in order, cover
+/// the span. Not upstream: the fork certifies each half of a halved span afresh.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CertifiedLevel {
+    /// The level: the span in `2^level` pieces.
+    pub level: u32,
+    /// The pieces, in order of s.
+    pub pieces: Vec<CertifiedPiece>,
+}
+
+/// The pieces of `level` that meet `[a, b]`, when they cover it without a gap (each one
+/// starts where the one before ends, the first at or before `a`, the last at or after
+/// `b`); `None` otherwise.
+fn covering(level: &CertifiedLevel, a: f64, b: f64) -> Option<Vec<&CertifiedPiece>> {
+    let meet: Vec<&CertifiedPiece> = level
+        .pieces
+        .iter()
+        .filter(|p| p.s[1] > a && p.s[0] < b)
+        .collect();
+    let (first, last) = (meet.first()?, meet.last()?);
+    let joined = meet.windows(2).all(|w| match w {
+        [p, q] => p.s[1] == q.s[0],
+        _ => false,
+    });
+    let covers = joined && first.s[0] <= a && last.s[1] >= b;
+    covers.then_some(meet)
+}
+
+/// What [`gn_certify_span_reusing`] knows of a span for every level: its length, the jets
+/// graded on their own, whether it is the ball's circle, whether its rows vary, whether
+/// the ball's radius varies (the touch circle's), and the target.
+struct LevelCtx {
+    h: f64,
+    l_jets: usize,
+    arc: bool,
+    rows_vary: bool,
+    touch: bool,
+    target: f64,
+    halving: Halving,
+}
+
+/// Whether a proved level over the target goes on to a finer one only where it halved the
+/// last level's bound ([`SpanReuse::to_target`]).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Halving {
+    /// Only where it halved the bound.
+    Steers,
+    /// While over the target.
+    Ignored,
+}
+
+/// A level's terms, folded in piece by piece ([`absorb_piece`]): the jets' and the uv
+/// curves' largest fourth derivatives (per parameter and the fork's), their least values
+/// at the pieces' middles, the varying rows' terms, and whether every piece so far is
+/// proved.
+struct LevelAcc {
+    m4: [[f64; MAX_E + 1]; 2],
+    uv4: [f64; 2],
+    m4_lo: [[f64; MAX_E + 1]; 2],
+    uv4_fork: [f64; 2],
+    uv4_lo_fork: [f64; 2],
+    proved: bool,
+    rows: GnRowTerms,
+}
+
+impl LevelAcc {
+    /// No piece folded in, for `ld` rows.
+    fn new(ld: usize) -> Self {
+        Self {
+            m4: [[0.0_f64; MAX_E + 1]; 2],
+            uv4: [0.0_f64; 2],
+            m4_lo: [[0.0_f64; MAX_E + 1]; 2],
+            uv4_fork: [0.0_f64; 2],
+            uv4_lo_fork: [0.0_f64; 2],
+            proved: true,
+            rows: GnRowTerms {
+                x: vec![0.0; ld],
+                y: vec![0.0; ld],
+                w_lo: vec![f64::INFINITY; ld],
+                r: 0.0,
+                w: [f64::INFINITY, f64::NEG_INFINITY],
+            },
+        }
+    }
+}
+
+/// Folds piece `p` of the span `[a, b]` into `acc`: its largest terms always, its least
+/// ones (at its middle) only where `steer` (the middle lies in the span), and its row terms
+/// about the span's first station (`bar`, `o`) where the rows vary.
+#[allow(clippy::too_many_arguments)]
+fn absorb_piece(
+    k: &Kernel,
+    acc: &mut LevelAcc,
+    p: &CertifiedPiece,
+    steer: bool,
+    a: &GnStation,
+    b: &GnStation,
+    ctx: &LevelCtx,
+    vary: Option<&mut GnVarying>,
+    bar: &GnSectionFormT<Ivl>,
+    o: [f64; 3],
+) {
+    let (pm, puv, pm_lo, _, puv_fork, puv_lo_fork) = &p.fourth;
+    for (((m4f, pmf), uvf), &puvf) in acc.m4.iter_mut().zip(pm).zip(acc.uv4.iter_mut()).zip(puv) {
+        for (m4fk, &pmfk) in m4f.iter_mut().zip(pmf).take(ctx.l_jets + 1) {
+            let finite = pmfk < f64::INFINITY;
+            if !finite {
+                acc.proved = false;
+            }
+            *m4fk = cmax(*m4fk, pmfk);
+        }
+        let finite = puvf < f64::INFINITY;
+        if !finite {
+            acc.proved = false;
+        }
+        *uvf = cmax(*uvf, puvf);
+    }
+    if steer {
+        for (lf, plf) in acc.m4_lo.iter_mut().zip(pm_lo) {
+            for (l, &pl) in lf.iter_mut().zip(plf) {
+                *l = cmax(*l, pl);
+            }
+        }
+    }
+    for (u, &pu) in acc.uv4_fork.iter_mut().zip(puv_fork) {
+        *u = cmax(*u, pu);
+    }
+    if steer {
+        for (l, &pl) in acc.uv4_lo_fork.iter_mut().zip(puv_lo_fork) {
+            *l = cmax(*l, pl);
+        }
+    }
+    let series = p.series.as_deref();
+    if acc.proved {
+        if let Some(v) = vary {
+            // the root's guess at the piece's middle: the stations' thumbweights, linearly
+            acc.proved = match series {
+                Some(ps) => {
+                    let t = (ps.mid - a.s) / ctx.h;
+                    let d = Ivl::new(p.s[0], p.s[1]) - Ivl::from(ps.mid);
+                    let guess = (1.0 - t) * a.w + t * b.w;
+                    gn_row_terms_over(
+                        k,
+                        v,
+                        &ps.f,
+                        &ps.v,
+                        &ps.fm,
+                        &ps.vm,
+                        d,
+                        guess,
+                        bar,
+                        o,
+                        &mut acc.rows,
+                    )
+                }
+                None => false,
+            };
+        }
+    }
+    if acc.proved && ctx.arc {
+        acc.proved = match series {
+            Some(ps) => {
+                let d = Ivl::new(p.s[0], p.s[1]) - Ivl::from(ps.mid);
+                arc_row_terms_over(&ps.f, &ps.v, &ps.fm, &ps.vm, d, o, &mut acc.rows, ctx.touch)
+            }
+            None => false,
+        };
+    }
+}
+
+/// What a proved level tells [`gn_certify_span_reusing`]: go on to the next level, stop
+/// there, or skip this level (its bound by the fork's term is not finite).
+enum Flow {
+    Next,
+    Stop,
+    Skip,
+}
+
+/// Closes a level whose pieces are all proved: its bound folded into `bound_out` (and the
+/// thumbweight over the span into `vary` where it lowers that), and whether a finer level
+/// goes on ([`gn_certify_span`]).
+fn close_level(
+    acc: &LevelAcc,
+    ctx: &LevelCtx,
+    bar: &GnSectionFormT<Ivl>,
+    bound_out: &mut f64,
+    last: &mut f64,
+    vary: Option<&mut GnVarying>,
+) -> Flow {
+    let (h, l_jets, arc, rows_vary) = (ctx.h, ctx.l_jets, ctx.arc, ctx.rows_vary);
+    let (m4, rows) = (&acc.m4, &acc.rows);
+    // the level's bound with the uv curves' term `uv` (#2690: taken with each
+    // parameter's own term, `uv4`, to certify, and with the fork's, `uv4_fork`, to steer
+    // the levels as the fork does, so that no span takes more levels or pieces than
+    // there)
+    let level_bound = |uv: &[f64; 2]| -> f64 {
+        let mut bound = 0.0_f64;
+        let mut da = 0.0_f64;
+        for (m4f, &uvf) in m4.iter().zip(uv) {
+            let mut sum = 0.0_f64;
+            for &m4fk in m4f.iter().take(l_jets + 1) {
+                sum += h * h * h * h / 384.0 * m4fk;
+            }
+            da = cmax(da, sum);
+            bound = cmax(
+                bound,
+                cmax(
+                    if rows_vary { 0.0 } else { sum },
+                    h * h * h * h / 384.0 * uvf,
+                ),
+            );
+        }
+        // the arc: no fixed section, every row's remainder (the varying rows' bound with
+        // A = 0)
+        if arc {
+            da = 0.0;
+        }
+        if rows_vary {
+            let kh = h * h * h * h / 384.0;
+            for (j, wj) in bar.w.iter().enumerate() {
+                let (Some(&lj), Some(&yj), Some(&xj)) =
+                    (rows.w_lo.get(j), rows.y.get(j), rows.x.get(j))
+                else {
+                    break;
+                };
+                let den = lj - kh * yj;
+                let num = wj.hi * da + kh * xj + kh * yj * rows.r;
+                let positive = den > 0.0;
+                bound = if positive {
+                    cmax(bound, num / den)
+                } else {
+                    f64::INFINITY
+                };
+                if !positive {
+                    break;
+                }
+            }
+        }
+        bound
+    };
+    let bound = level_bound(&acc.uv4_fork);
+    if !bound.is_finite() {
+        return Flow::Skip;
+    }
+    // certified by each parameter's own term, never larger than the fork's
+    let bound = round_up(level_bound(&acc.uv4) * (1.0 + 1.0e-12));
+    if bound < *bound_out {
+        // the thumbweight over the span, proved at the level whose bound is returned
+        if let Some(v) = vary {
+            let ([lo, hi], [rlo, rhi]) = (v.w, rows.w);
+            v.w = [cmin(lo, rlo), cmax(hi, rhi)];
+        }
+    }
+    *bound_out = cmin(*bound_out, bound);
+    if *bound_out <= ctx.target {
+        return Flow::Stop;
+    }
+    // the bound no finer level goes under: over the target, no level certifies the span
+    // (the jets' least terms only where the bound takes the jets' sum, not with
+    // varying rows, whose own least terms are not ported: the fork's f916a8d)
+    let k4 = h * h * h * h / 384.0;
+    let mut lower = 0.0_f64;
+    for (m4lf, &uvl) in acc.m4_lo.iter().zip(&acc.uv4_lo_fork) {
+        let mut sum = 0.0_f64;
+        for &m in m4lf.iter().take(l_jets + 1) {
+            sum += k4 * m;
+        }
+        lower = cmax(lower, cmax(if rows_vary { 0.0 } else { sum }, k4 * uvl));
+    }
+    if round_down(lower * (1.0 - 1.0e-12)) > ctx.target {
+        return Flow::Stop;
+    }
+    // once proved, one finer level more only where the last one halved the bound (or, to
+    // the target, while over it)
+    if ctx.halving == Halving::Steers && bound > 0.5 * *last {
+        return Flow::Stop;
+    }
+    *last = bound;
+    Flow::Next
+}
+
 /// `sm_GnCertifySpan`: the certified bound on the Hermite span between two stations, or
 /// infinity where the span is not proved. The Hermite remainder is `h^4 / 384` times the
 /// jets' largest fourth s-derivative over the span, bounded on its pieces
@@ -1868,9 +2275,69 @@ pub fn gn_certify_span(
     side: [f64; 2],
     n: usize,
     target: f64,
+    vary: Option<&mut GnVarying>,
+    law: Option<&GnLaw<'_>>,
+    defs: Option<&mut GnDefs<'_>>,
+) -> Result<f64> {
+    let mut reuse = SpanReuse::default();
+    gn_certify_span_reusing(
+        k, faces_n, leader_n, faces, center, a, b, r, side, n, target, vary, law, defs, &mut reuse,
+    )
+}
+
+/// What [`gn_certify_span_reusing`] takes from a span's neighbours and gives back (not the
+/// fork's, which certifies every span from level 0). The default takes nothing: the span's
+/// certificate is then [`gn_certify_span`]'s.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SpanReuse<'a> {
+    /// In: the finest proved level of the span this one is a half of.
+    pub inherit: Option<&'a CertifiedLevel>,
+    /// In: the first level tried where nothing is inherited (the coarser ones are not).
+    pub start: u32,
+    /// Out: this span's finest proved level, for its own halves.
+    pub kept: Option<CertifiedLevel>,
+    /// Out: the first level this span proved (an inherited one as its level here).
+    pub first: Option<u32>,
+    /// In: go on to a finer level while the bound is over the target, not only where the
+    /// last level halved it (a target proved before, which a re-certificate must reach: the
+    /// halving is a guess at the cost of the next level, and on bounds that differ in
+    /// their rounding it stops one run a level before the other). The least value still
+    /// stops the levels: past it no level certifies the span.
+    pub to_target: bool,
+}
+
+/// [`gn_certify_span`] taking from and giving to its neighbours ([`SpanReuse`]), not the
+/// fork's. `reuse.inherit`: the span is a half of one the caller halved, and that span's
+/// finest proved level ([`CertifiedLevel`]) has pieces that meet this span and cover it.
+/// Their bounds hold over every point of them, so over this span; they are its level one
+/// coarser than theirs was (the span is half as long), taken without an enclosure, and the
+/// levels go on from the next one as [`gn_certify_span`]'s do. The pieces' row terms are
+/// taken again about this span's first station. Otherwise the levels start at
+/// `reuse.start` (the caller's guess from the span before; a level not tried bounds
+/// nothing, so the bound returned holds as [`gn_certify_span`]'s). A level's end stations
+/// that the level before solved (every other one, at the same parameter from the same
+/// seed) are taken from it.
+///
+/// # Errors
+///
+/// As [`gn_certify_span`].
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+pub fn gn_certify_span_reusing(
+    k: &Kernel,
+    faces_n: [&Nurbs; 2],
+    leader_n: &NurbsCurve,
+    faces: [&Surface; 2],
+    center: &BSplineCurve,
+    a: &GnStation,
+    b: &GnStation,
+    r: [f64; 2],
+    side: [f64; 2],
+    n: usize,
+    target: f64,
     mut vary: Option<&mut GnVarying>,
     law: Option<&GnLaw<'_>>,
     mut defs: Option<&mut GnDefs<'_>>,
+    reuse: &mut SpanReuse<'_>,
 ) -> Result<f64> {
     crate::profile::profile_scope!(k, "blend::certificate::gn_certify_span");
     // the series' orders are checked once (the fork leaves them to its callers)
@@ -1904,9 +2371,79 @@ pub fn gn_certify_span(
             *oq = a.v.a.get(q).map_or(f64::NAN, |c| c.at(0, 0));
         }
     }
-    for level in 0..=6_u32 {
+    let ctx = LevelCtx {
+        h,
+        l_jets,
+        arc,
+        rows_vary,
+        touch: law.is_some(),
+        target,
+        halving: if reuse.to_target {
+            Halving::Ignored
+        } else {
+            Halving::Steers
+        },
+    };
+    // a halved span's pieces over this half: its level one coarser than theirs
+    let mut start = reuse.start.min(6);
+    let inherit = reuse.inherit;
+    if let Some(pieces) = inherit.and_then(|l| covering(l, a.s, b.s)) {
+        start = inherit.map_or(1, |l| l.level.max(1));
+        let mut acc = LevelAcc::new(bar.w.len());
+        for p in &pieces {
+            // a piece's least terms are at its middle: only a piece inside the span steers
+            let steer = p.s[0] >= a.s && p.s[1] <= b.s;
+            absorb_piece(
+                k,
+                &mut acc,
+                p,
+                steer,
+                a,
+                b,
+                &ctx,
+                vary.as_deref_mut(),
+                &bar,
+                o,
+            );
+            if !acc.proved {
+                break;
+            }
+        }
+        if acc.proved {
+            let own = CertifiedLevel {
+                level: start - 1,
+                pieces: pieces.into_iter().cloned().collect(),
+            };
+            let flow = close_level(
+                &acc,
+                &ctx,
+                &bar,
+                &mut bound_out,
+                &mut last,
+                vary.as_deref_mut(),
+            );
+            if !matches!(flow, Flow::Skip) {
+                reuse.first = reuse.first.or(Some(own.level));
+            }
+            match flow {
+                Flow::Skip => {}
+                Flow::Next => reuse.kept = Some(own),
+                Flow::Stop => {
+                    reuse.kept = Some(own);
+                    return Ok(bound_out);
+                }
+            }
+        }
+    }
+    // the last level whose end stations were all solved, and those stations
+    let mut solved_ends: Option<(u32, Vec<GnStation>)> = None;
+    for level in start..=6_u32 {
         k.check_cancelled(OP_CERTIFY_SPAN)?;
         let pieces = 1_usize << level;
+        let coarser = match &solved_ends {
+            Some((l, e)) if l + 1 == level => Some(e),
+            _ => None,
+        };
         // the pieces' end stations
         let mut ends = Vec::new();
         ends.push(*a);
@@ -1914,6 +2451,13 @@ pub fn gn_certify_span(
         let mut i = 1;
         while i < pieces && solved {
             k.check_cancelled(OP_CERTIFY_SPAN)?;
+            // every other end is the coarser level's, at the same s from the same seed
+            let known = coarser.filter(|_| i % 2 == 0).and_then(|e| e.get(i / 2));
+            if let Some(st) = known {
+                ends.push(*st);
+                i += 1;
+                continue;
+            }
             let t = i as f64 / pieces as f64;
             let s = a.s + t * h;
             let mut seed = [0.0_f64; 4];
@@ -1951,29 +2495,18 @@ pub fn gn_certify_span(
             continue;
         }
         ends.push(*b);
-        let mut m4 = [[0.0_f64; MAX_E + 1]; 2];
-        let mut uv4 = [0.0_f64; 2];
-        let mut m4_lo = [[0.0_f64; MAX_E + 1]; 2];
-        let mut uv4_fork = [0.0_f64; 2];
-        let mut uv4_lo_fork = [0.0_f64; 2];
-        let mut proved = true;
-        let ld = bar.w.len();
-        let mut rows = GnRowTerms {
-            x: vec![0.0; ld],
-            y: vec![0.0; ld],
-            w_lo: vec![f64::INFINITY; ld],
-            r: 0.0,
-            w: [f64::INFINITY, f64::NEG_INFINITY],
-        };
+        solved_ends = Some((level, ends.clone()));
+        let mut acc = LevelAcc::new(bar.w.len());
+        let mut level_pieces = Vec::new();
         for pair in ends.windows(2) {
-            if !proved {
+            if !acc.proved {
                 break;
             }
             k.check_cancelled(OP_CERTIFY_SPAN)?;
             let [ea, eb] = pair else {
                 return Err(SolidError::sm_err(OP));
             };
-            let ((pm, puv, pm_lo, _, puv_fork, puv_lo_fork), series) = gn_try!(
+            let (fourth, series) = gn_try!(
                 gn_fourth_over_series(
                     k,
                     faces_n,
@@ -1993,156 +2526,55 @@ pub fn gn_certify_span(
                 ),
                 bound_out
             );
-            for (((m4f, pmf), uvf), &puvf) in m4.iter_mut().zip(&pm).zip(uv4.iter_mut()).zip(&puv) {
-                for (m4fk, &pmfk) in m4f.iter_mut().zip(pmf).take(l_jets + 1) {
-                    let finite = pmfk < f64::INFINITY;
-                    if !finite {
-                        proved = false;
-                    }
-                    *m4fk = cmax(*m4fk, pmfk);
-                }
-                let finite = puvf < f64::INFINITY;
-                if !finite {
-                    proved = false;
-                }
-                *uvf = cmax(*uvf, puvf);
-            }
-            for (lf, plf) in m4_lo.iter_mut().zip(&pm_lo) {
-                for (l, &pl) in lf.iter_mut().zip(plf) {
-                    *l = cmax(*l, pl);
-                }
-            }
-            for (u, &pu) in uv4_fork.iter_mut().zip(&puv_fork) {
-                *u = cmax(*u, pu);
-            }
-            for (l, &pl) in uv4_lo_fork.iter_mut().zip(&puv_lo_fork) {
-                *l = cmax(*l, pl);
-            }
-            if proved {
-                if let Some(v) = vary.as_deref_mut() {
-                    // the root's guess at the piece's middle: the stations' thumbweights,
-                    // linearly
-                    proved = match series {
-                        Some(ps) => {
-                            let t = (ps.mid - a.s) / h;
-                            let d = Ivl::new(ea.s, eb.s) - Ivl::from(ps.mid);
-                            let guess = (1.0 - t) * a.w + t * b.w;
-                            gn_row_terms_over(
-                                k, v, &ps.f, &ps.v, &ps.fm, &ps.vm, d, guess, &bar, o, &mut rows,
-                            )
-                        }
-                        None => false,
-                    };
-                }
-            }
-            if proved && arc {
-                proved = match series {
-                    Some(ps) => {
-                        let d = Ivl::new(ea.s, eb.s) - Ivl::from(ps.mid);
-                        arc_row_terms_over(
-                            &ps.f,
-                            &ps.v,
-                            &ps.fm,
-                            &ps.vm,
-                            d,
-                            o,
-                            &mut rows,
-                            law.is_some(),
-                        )
-                    }
-                    None => false,
-                };
-            }
+            let piece = CertifiedPiece {
+                s: [ea.s, eb.s],
+                fourth,
+                series: if rows_vary {
+                    series.map(Box::new)
+                } else {
+                    None
+                },
+            };
+            absorb_piece(
+                k,
+                &mut acc,
+                &piece,
+                true,
+                a,
+                b,
+                &ctx,
+                vary.as_deref_mut(),
+                &bar,
+                o,
+            );
+            level_pieces.push(piece);
         }
-        if !proved {
+        if !acc.proved {
             continue;
         }
-        // the level's bound with the uv curves' term `uv` (#2690: taken with each
-        // parameter's own term, `uv4`, to certify, and with the fork's, `uv4_fork`, to steer
-        // the levels as the fork does, so that no span takes more levels or pieces than
-        // there)
-        let level_bound = |uv: &[f64; 2]| -> f64 {
-            let mut bound = 0.0_f64;
-            let mut da = 0.0_f64;
-            for (m4f, &uvf) in m4.iter().zip(uv) {
-                let mut sum = 0.0_f64;
-                for &m4fk in m4f.iter().take(l_jets + 1) {
-                    sum += h * h * h * h / 384.0 * m4fk;
-                }
-                da = cmax(da, sum);
-                bound = cmax(
-                    bound,
-                    cmax(
-                        if rows_vary { 0.0 } else { sum },
-                        h * h * h * h / 384.0 * uvf,
-                    ),
-                );
-            }
-            // the arc: no fixed section, every row's remainder (the varying rows' bound with
-            // A = 0)
-            if arc {
-                da = 0.0;
-            }
-            if rows_vary {
-                let kh = h * h * h * h / 384.0;
-                for (j, wj) in bar.w.iter().enumerate() {
-                    let (Some(&lj), Some(&yj), Some(&xj)) =
-                        (rows.w_lo.get(j), rows.y.get(j), rows.x.get(j))
-                    else {
-                        break;
-                    };
-                    let den = lj - kh * yj;
-                    let num = wj.hi * da + kh * xj + kh * yj * rows.r;
-                    let positive = den > 0.0;
-                    bound = if positive {
-                        cmax(bound, num / den)
-                    } else {
-                        f64::INFINITY
-                    };
-                    if !positive {
-                        break;
-                    }
-                }
-            }
-            bound
+        let own = CertifiedLevel {
+            level,
+            pieces: level_pieces,
         };
-        let bound = level_bound(&uv4_fork);
-        if !bound.is_finite() {
-            continue;
+        let flow = close_level(
+            &acc,
+            &ctx,
+            &bar,
+            &mut bound_out,
+            &mut last,
+            vary.as_deref_mut(),
+        );
+        if !matches!(flow, Flow::Skip) {
+            reuse.first = reuse.first.or(Some(own.level));
         }
-        // certified by each parameter's own term, never larger than the fork's
-        let bound = round_up(level_bound(&uv4) * (1.0 + 1.0e-12));
-        if bound < bound_out {
-            // the thumbweight over the span, proved at the level whose bound is returned
-            if let Some(v) = vary.as_deref_mut() {
-                let ([lo, hi], [rlo, rhi]) = (v.w, rows.w);
-                v.w = [cmin(lo, rlo), cmax(hi, rhi)];
+        match flow {
+            Flow::Skip => {}
+            Flow::Next => reuse.kept = Some(own),
+            Flow::Stop => {
+                reuse.kept = Some(own);
+                break;
             }
         }
-        bound_out = cmin(bound_out, bound);
-        if bound_out <= target {
-            break;
-        }
-        // the bound no finer level goes under: over the target, no level certifies the span
-        // (the jets' least terms only where the bound takes the jets' sum, not with
-        // varying rows, whose own least terms are not ported: the fork's f916a8d)
-        let k4 = h * h * h * h / 384.0;
-        let mut lower = 0.0_f64;
-        for (m4lf, &uvl) in m4_lo.iter().zip(&uv4_lo_fork) {
-            let mut sum = 0.0_f64;
-            for &m in m4lf.iter().take(l_jets + 1) {
-                sum += k4 * m;
-            }
-            lower = cmax(lower, cmax(if rows_vary { 0.0 } else { sum }, k4 * uvl));
-        }
-        if round_down(lower * (1.0 - 1.0e-12)) > target {
-            break;
-        }
-        // once proved, one finer level more only where the last one halved the bound
-        if bound > 0.5 * last {
-            break;
-        }
-        last = bound;
     }
     Ok(bound_out)
 }
@@ -2412,6 +2844,116 @@ mod tests {
     /// by order, and the Taylor form's remainder carries that). A span five times as long
     /// fails Krawczyk's test in one enclosure and is proved by the pieces, its bound again
     /// finite, below the target and above the closed form's.
+    /// A piece's enclosure holds every station sampled over the piece: the feet and their
+    /// Taylor coefficients in s and eps, as solved in floating point at 201 points, to 1e-8 (the
+    /// box tightened after Krawczyk's proof keeps the feet: every root in a box is in its
+    /// K). A ball rolled between a plane and a cylinder (as made a NURBS), a piece of 0.02.
+    #[test]
+    fn an_enclosure_holds_every_sampled_station() {
+        let k = Kernel::default();
+        let (big_r, r) = (3.0, 1.0);
+        let fp = plane(Vec3::ZERO, Vec3::X, Vec3::Y);
+        let mut cyl = Cone::new_cylinder_bounded(
+            Vec3::new(0.0, 0.0, -2.0),
+            Vec3::X,
+            Vec3::Y,
+            big_r,
+            0.0,
+            360.0,
+            10.0,
+            false,
+            false,
+            false,
+        );
+        cyl.make_nurb(&k).unwrap();
+        let fc = Surface::from(cyl);
+        let frame = Axis2Placement::new(Vec3::new(0.0, 0.0, r), Vec3::X, Vec3::Y);
+        let leader = BSplineCurve::create_circle_segment(
+            3,
+            &frame,
+            big_r + r,
+            10.0,
+            80.0,
+            NurbCircleParam::Quadratic,
+        )
+        .unwrap();
+        let ln = NurbsCurve::of(&leader).unwrap();
+        let (np, nc) = (nurbs(&k, &fp), nurbs(&k, &fc));
+        let faces = [&fp, &fc];
+        let lpt = |s: f64| leader.evaluate_point(s).unwrap();
+        let foot_c = |s: f64| {
+            let l = lpt(s);
+            let q = big_r / (big_r + r);
+            Vec3::new(l.x * q, l.y * q, r)
+        };
+        let (cu, cv) = nearest_uv(&nc, foot_c(0.41));
+        let pc = nurbs_partials(
+            &nc,
+            span(&nc.u, nc.p, nc.nu, cu),
+            span(&nc.v, nc.q, nc.nv, cv),
+            cu,
+            cv,
+            1,
+        );
+        let nrm = vec3(pc.at(1, 0)).cross(vec3(pc.at(0, 1)));
+        let out = foot_c(0.41) - Vec3::new(0.0, 0.0, r);
+        let side_c = if nrm.dot(out) > 0.0 { 1.0 } else { -1.0 };
+        let (rr, side) = ([r, r], [1.0, side_c]);
+        let n = 2;
+        let order = 4 + TAYLOR;
+        let solve = |s: f64, tr: Trunc| {
+            let l = lpt(s);
+            let (u, v) = nearest_uv(&nc, foot_c(s));
+            super::super::station::gn_solve_station(
+                &k,
+                faces,
+                &leader,
+                s,
+                [l.x, l.y, u, v],
+                rr,
+                side,
+                tr,
+                1e-10,
+            )
+        };
+        let point = Trunc::new(0, 0).unwrap();
+        let (sa, sb) = (0.4, 0.42);
+        let (a, b) = (solve(sa, point).unwrap(), solve(sb, point).unwrap());
+        let e = gn_enclose(&k, [&np, &nc], &ln, &a, &b, rr, side, n, order, None, None)
+            .unwrap()
+            .expect("proved over the piece");
+        // the floating solve's jets go as far as the leader's evaluation does (a rational
+        // circle's derivatives are evaluated to a fixed order): every order it reaches
+        let top = (0..=order)
+            .rev()
+            .find(|&o| solve(sa, Trunc::new(o, n - 1).unwrap()).is_ok())
+            .unwrap();
+        assert!(top >= 3, "{top}");
+        let jets = Trunc::new(top, n - 1).unwrap();
+        let mut judged = 0;
+        for i in 0..=200 {
+            let s = sa + (sb - sa) * f64::from(i) / 200.0;
+            let st = solve(s, jets).unwrap();
+            for (xs, xe) in st.x.iter().zip(&e.x) {
+                for o in 0..=top {
+                    for kk in 0..n {
+                        let (x, iv) = (xs.c[o][kk], xe.c[o][kk]);
+                        // the floating solve's own error (its residual within 1e-10)
+                        let slack = 1e-8 * (1.0 + x.abs());
+                        assert!(
+                            iv.lo - slack <= x && x <= iv.hi + slack,
+                            "s {s}: c[{o}][{kk}] {x:e} outside [{:e}, {:e}]",
+                            iv.lo,
+                            iv.hi
+                        );
+                        judged += 1;
+                    }
+                }
+            }
+        }
+        assert_eq!(judged, 201 * 4 * (top + 1) * n);
+    }
+
     #[test]
     fn cylinder_plane_span_bound_is_the_closed_form() {
         let k = Kernel::default();

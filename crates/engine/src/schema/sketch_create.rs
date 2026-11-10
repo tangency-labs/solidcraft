@@ -239,7 +239,7 @@ fn point_arg_schema(generator: &mut SchemaGenerator, snaps: bool) -> Schema {
     let mut forms = vec![
         json!(point),
         json!({
-            "description": "[x, y] where a coordinate may be an expression over the design's parameters, such as [\"w / 2\", 5]: a point that follows the parameters.",
+            "description": "[x, y] where a coordinate may be an expression over the design's parameters, such as [\"w / 2\", 5]: a point that follows the parameters and is fixed; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point.",
             "type": "array", "items": coordinate, "minItems": 2, "maxItems": 2
         }),
         json!({"description": "An existing point's id such as \"l1.end\" or \"p3\", or a snap such as \"mid:l1\".", "type": "string"}),

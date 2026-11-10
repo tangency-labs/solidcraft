@@ -55,7 +55,7 @@
 //! - `sm_CrvEval` reads `Pw[spn - p + i]` unchecked. At a NaN parameter on a curve
 //!   with fewer than `p + 1` control points (an edge whose limits were never set)
 //!   `N_BasisFindSpan` returns a span below `p` and upstream reads before `Pw`
-//!   (UB-288): [`crv_eval`] returns [`SolidError::Upstream`] `SM_ERR` there, and past
+//!   (UB-288): [`crv_eval`] returns a [`BSplineFailure`] with status `SM_ERR` there, and past
 //!   the end of `Pw`, instead of reading.
 //! - Arrays sized by a caller count (the rows of [`basis_derivs`],
 //!   [`crv_rational_basis_derivs`] and [`basis_i_derivs`] for `der`, the storage of
@@ -90,6 +90,7 @@
 // Branches keep upstream's `if( x NEQ NL_NOZ ) ... else ...` order for traceability.
 #![allow(clippy::if_not_else)]
 
+use crate::error::nurbs::BSplineFailure;
 use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -226,7 +227,7 @@ fn check_degree(p: usize, op: &'static str) -> Result<()> {
     if p >= MAX_DEGREE {
         return Err(SolidError::InvalidInput {
             operation: op,
-            reason: "degree at or above GW_MAX_DEGREE (upstream scratch array size)",
+            reason: "degree at or above the largest degree a curve evaluation holds",
         });
     }
     Ok(())
@@ -1173,12 +1174,19 @@ pub fn crv_eval(cur: &Curve, u: f64, side: Side) -> Result<Vec3> {
     let mut cw = CPoint::new(0.0, 0.0, 0.0, 0.0);
     // Upstream reads Pw[spn - p + i] unchecked; a span below p (a NaN u on a curve
     // with fewer than p + 1 control points) reads before Pw (UB-288): SM_ERR instead.
-    let spn_p = span.checked_sub(p).ok_or_else(|| SolidError::sm_err(OP))?;
+    let spn_p = span.checked_sub(p).ok_or_else(|| {
+        SolidError::b_spline(
+            OP,
+            BSplineFailure::Failed("the curve has fewer control points than its span needs"),
+        )
+    })?;
     for (i, &alpha) in values.iter().enumerate().take(p + 1) {
-        let aw = pw
-            .get(spn_p + i)
-            .copied()
-            .ok_or_else(|| SolidError::sm_err(OP))?;
+        let aw = pw.get(spn_p + i).copied().ok_or_else(|| {
+            SolidError::b_spline(
+                OP,
+                BSplineFailure::Failed("the curve has fewer control points than its span needs"),
+            )
+        })?;
         // MAC_A_updcpt: skip zero weights, add without multiplying for one.
         if alpha == 1.0 {
             cw.x += aw.x;
@@ -2180,13 +2188,11 @@ mod tests {
         assert_eq!(basis_eval(&knt, 3, f64::NAN, Side::Left).unwrap().span, 2);
         for side in [Side::Left, Side::Right] {
             match crv_eval(&c, f64::NAN, side) {
-                Err(SolidError::Upstream {
-                    operation,
-                    code,
-                    entity: None,
-                }) => {
-                    assert_eq!(operation, OP_CEVAL);
-                    assert_eq!(code, crate::error::SM_ERR);
+                Err(e) => {
+                    assert_eq!(e.operation(), OP_CEVAL);
+                    assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
+                    assert_eq!(e.entity(), None);
+                    assert!(!e.is_nurbs_failure());
                 }
                 other => panic!("{other:?}"),
             }

@@ -1605,7 +1605,7 @@ fn lift_offset_surface(
     let base_dom = base.natural_uv_domain_with_nurb(k)?;
     let bs_base = exact_nurbs_surface(k, base)?.ok_or_else(unsupported_base)?;
     let base_net = Nurbs::of(&bs_base).map_err(|e| match e {
-        SolidError::Upstream { .. } => unsupported_base(),
+        e if e.upstream_status().is_some() => unsupported_base(),
         other => other,
     })?;
     let ext_srf = off
@@ -1621,7 +1621,7 @@ fn lift_offset_surface(
             }
             let bs_ext = exact_nurbs_surface(k, &e_srf)?.ok_or_else(unsupported_base)?;
             let ext_net = Nurbs::of(&bs_ext).map_err(|e| match e {
-                SolidError::Upstream { .. } => unsupported_base(),
+                e if e.upstream_status().is_some() => unsupported_base(),
                 other => other,
             })?;
             let ext_dom = e_srf.natural_uv_domain_with_nurb(k)?;
@@ -1893,7 +1893,7 @@ impl LiftSurface {
         };
         let bs = exact_nurbs_surface(k, surface)?.ok_or_else(unsupported_srf)?;
         let net = Nurbs::of(&bs).map_err(|e| match e {
-            SolidError::Upstream { .. } => unsupported_srf(),
+            e if e.upstream_status().is_some() => unsupported_srf(),
             other => other,
         })?;
         let dom = surface.natural_uv_domain_with_nurb(k)?;
@@ -2702,7 +2702,6 @@ mod tests {
         use crate::surface::procedural_blend::{BlendDefinitionInput, ProceduralBlend};
 
         let mut k = Kernel::default();
-        k.fixes.fillet_gn_section_generator = true;
         k.fixes.fillet_round_as_definition = true;
 
         let (l, r) = (10.0, 2.0);
