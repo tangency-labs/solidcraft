@@ -1215,6 +1215,16 @@ fn ui_drag(app: &mut SolveApp, q: params::Drag) -> Outcome {
     app.synthetic.push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
     app.synthetic.push(egui::Event::PointerMoved(a));
     app.synthetic.push(egui::Event::PointerButton { pos: a, button, pressed: true, modifiers });
+    // `chord`: a second button held down with the first for the whole drag (CATIA's middle
+    // plus a side button, which turns the view). `chord_tap`: the same button pressed and
+    // let go at once, which changes gear to zoom while the first button stays down.
+    let chord = q.chord_tap.or(q.chord).map(params::Button::egui);
+    if let Some(side) = chord {
+        app.synthetic.push(egui::Event::PointerButton { pos: a, button: side, pressed: true, modifiers });
+        if q.chord_tap.is_some() {
+            app.synthetic.push(egui::Event::PointerButton { pos: a, button: side, pressed: false, modifiers });
+        }
+    }
     // `hold`: frames to keep the button down before moving (press-and-hold).
     for _ in 0..q.hold.clamp(0.0, 600.0) as usize {
         app.synthetic.push(egui::Event::PointerMoved(a));
@@ -1238,6 +1248,10 @@ fn ui_drag(app: &mut SolveApp, q: params::Drag) -> Outcome {
     // `hold_end`: frames to keep the button down at the end (to look at a drag's snap).
     for _ in 0..q.hold_end.clamp(0.0, 600.0) as usize {
         app.synthetic.push(egui::Event::PointerMoved(z));
+    }
+    // A held side button is let go before the first one, as a hand would.
+    if let Some(side) = chord.filter(|_| q.chord_tap.is_none()) {
+        app.synthetic.push(egui::Event::PointerButton { pos: z, button: side, pressed: false, modifiers });
     }
     app.synthetic.push(egui::Event::PointerButton { pos: z, button, pressed: false, modifiers });
     ok(Value::Null)

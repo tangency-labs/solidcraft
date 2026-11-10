@@ -78,7 +78,7 @@ view.
   Esc or a click elsewhere closes the list. Clicking again on the same spot, with nothing changed
   in between, cycles through visible candidates at that point. The
   wheel zooms at the cursor, the middle button pans and right-drag orbits freely (the mouse
-  preset in Preferences switches to SolidWorks, Inventor, Alias, Maya, Blender, Tinkercad, OpenSCAD, HFSS or Touchpad style). On a
+  preset in Preferences switches to SolidWorks, CATIA, Inventor, Alias, Maya, Blender, Tinkercad, OpenSCAD, HFSS or Touchpad style). On a
   trackpad, pinch zooms and two-finger scroll pans (Navigation › Two-finger scroll pans;
   off: scroll zooms like the wheel); mouse wheels zoom and the thumb wheel pans sideways.
   On Linux, pinch needs the native Wayland window system
@@ -109,6 +109,13 @@ view.
   preset orbits on a right drag. Off, a right drag leaves the camera alone and the right button
   only opens the context menu. Picking the SolidWorks preset turns it off and sets Middle
   double-click to Fit; both can be changed back afterwards.
+
+  **CATIA** navigation holds the middle button for everything: on its own it pans; with the left
+  or right button held it turns the view; letting that side button go while the middle one stays
+  down zooms, and pressing it again turns the view again — the drag changes gear without being
+  let go of. A middle click brings the point picked to the middle of the view, which is what the
+  next orbit turns about, and a middle double-click fits. Holding the middle button also keeps the
+  right button's context menu shut, since the right button is one of the two that turn the view.
 
   **Mouse gestures** (Preferences › Navigation, off by default) work with the SolidWorks mouse preset
   only (the wheel orbits, Ctrl + wheel pans) and take over the right button, which then no longer

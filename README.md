@@ -290,7 +290,7 @@ permission first.
 SolidCraft is independent. Behaviour is designed from public documentation, general CAD
 conventions and user feedback. Reference tests use analytic values and open-source tools.
 SolidCraft is not affiliated with, sponsored by or endorsed by Autodesk, Dassault Systèmes, PTC,
-Siemens or any other CAD vendor. Fusion, AutoCAD, Inventor, SolidWorks, Onshape, Creo, Blender and
+Siemens or any other CAD vendor. Fusion, AutoCAD, Inventor, SolidWorks, CATIA, Onshape, Creo, Blender and
 Tinkercad are trademarks of their respective owners, named only to describe compatibility
 (see [NOTICE](NOTICE)).
 

@@ -1,0 +1,33 @@
+[
+  {"note": "CATIA navigation: the middle button alone pans; the middle button with a side button held turns the view; letting the side button go with the middle still down zooms; a middle click brings the point picked to the middle of the view, which moves the camera's target; a middle double-click fits. Other presets keep their own bindings."},
+  {"call": "engine.execute", "params": {"command": "solid.box", "params": {"length": 20, "width": 10, "height": 5}}},
+  {"call": "ui.prefs", "params": {"nav": "catia"}},
+  {"expect": {"prefs": {"nav": "catia"}}},
+  {"call": "ui.prefs", "params": {"orbit_around": "view_centre", "zoom_to_cursor": false, "free_orbit": false}},
+
+  {"note": "The anchor alone pans: no turn, and the target moves."},
+  {"camera": {"yaw": 0, "pitch": 0}},
+  {"call": "ui.drag", "params": {"x0": 800, "y0": 500, "x1": 848, "y1": 500, "steps": 8, "button": "middle"}},
+  {"expect": {"camera": {"yaw_deg": 0, "pitch_deg": 0, "panned": true, "zoomed": "no"}, "selection": 0}},
+
+  {"note": "A middle click with no drag recentres: marked again where the pan left the target, so the click has to move it by itself, and the distance stays put."},
+  {"camera": {"yaw": 0, "pitch": 0}},
+  {"call": "ui.click", "params": {"x": 800, "y": 500, "button": "middle"}},
+  {"expect": {"camera": {"yaw_deg": 0, "pitch_deg": 0, "panned": true, "zoomed": "no"}}},
+
+  {"note": "A side button held with the anchor turns the view."},
+  {"camera": {"yaw": 0, "pitch": 0}},
+  {"call": "ui.drag", "params": {"x0": 800, "y0": 500, "x1": 848, "y1": 500, "steps": 8, "button": "middle", "chord": "right"}},
+  {"expect": {"camera": {"yaw_deg": 22, "pitch_deg": 0, "panned": false, "zoomed": "no"}, "selection": 0}},
+
+  {"note": "That side button tapped instead, the anchor still down: the same drag zooms, pushing up to zoom in."},
+  {"camera": {"yaw": 0, "pitch": 0}},
+  {"call": "ui.drag", "params": {"x0": 800, "y0": 500, "x1": 800, "y1": 440, "steps": 8, "button": "middle", "chord_tap": "right"}},
+  {"expect": {"camera": {"yaw_deg": 0, "pitch_deg": 0, "panned": false, "zoomed": "in"}, "selection": 0}},
+
+  {"note": "A one-button preset has no ladder: the same chord drag is a plain middle pan."},
+  {"call": "ui.prefs", "params": {"nav": "fusion"}},
+  {"camera": {"yaw": 0, "pitch": 0}},
+  {"call": "ui.drag", "params": {"x0": 800, "y0": 500, "x1": 848, "y1": 500, "steps": 8, "button": "middle", "chord": "right"}},
+  {"expect": {"camera": {"yaw_deg": 0, "pitch_deg": 0, "panned": true, "zoomed": "no"}, "selection": 0}}
+]
