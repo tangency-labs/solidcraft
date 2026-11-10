@@ -1555,8 +1555,9 @@ impl Curve {
                 )?;
                 let Some(cross) = found else {
                     // curves change sides but no crossing found
-                    return Err(SolidError::sm_err(
+                    return Err(SolidError::curve_failed(
                         "curve::simple_coincidence_checker (crossing)",
+                        "the curves change sides but no crossing was found",
                     ));
                 };
                 return Ok(vec![pair_solution(
@@ -1585,8 +1586,9 @@ impl Curve {
                 )?;
                 if !found {
                     // curves within tolerance but no nearest point found
-                    return Err(SolidError::sm_err(
+                    return Err(SolidError::curve_failed(
                         "curve::simple_coincidence_checker (nearest)",
+                        "the curves are within tolerance but no nearest point was found",
                     ));
                 }
                 nearest.num_variables = 2;
@@ -2347,7 +2349,10 @@ impl Curve {
                         pass_on,
                     )?;
                     if pass_on && !dropped.as_ref().is_some_and(|d| d.success) {
-                        return Err(SolidError::sm_err(OP_DEFORM));
+                        return Err(SolidError::curve_failed(
+                            OP_DEFORM,
+                            "the point did not drop onto the surface",
+                        ));
                     }
                     let uv = dropped.map_or(crate::math::Vec2::UNDEF, |result| result.result_uv);
                     Ok(Some(Point3::new(uv.x, uv.y, 0.0)))

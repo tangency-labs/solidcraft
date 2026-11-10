@@ -330,7 +330,10 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
         let curve_node1 = self.base.branch_node(branch, 0)?;
         let curve_node2 = self.base.branch_node(branch, 1)?;
         if !has_data(curve_node1) || !has_data(curve_node2) {
-            return Err(SolidError::null_pointer(OP_LOCAL));
+            return Err(SolidError::curve_missing(
+                OP_LOCAL,
+                "the branch's curve node data",
+            ));
         }
         let tree1: &Tree<O> = self.base.tree(0)?;
         let tree2: &Tree<O> = self.base.tree(1)?;
@@ -928,7 +931,10 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
                         guesses2.push(s.start.parameters[0]);
                     }
                     if guesses1.len() == NUM_PARAM_GUESS {
-                        return Err(SolidError::sm_err(OP_LOCAL));
+                        return Err(SolidError::curve_failed(
+                            OP_LOCAL,
+                            "the parameter guesses are full",
+                        ));
                     }
                 }
             }
@@ -1210,13 +1216,15 @@ fn build_cache<O: SolutionObject>(
     match make_curve_cache::<O>(k, curve, handle) {
         Ok(c) => Ok(c),
         Err(e) if e.is_unported_or_cancelled() => Err(e),
-        Err(_) => Err(SolidError::null_pointer(OP_GCS)),
+        Err(_) => Err(SolidError::curve_missing(OP_GCS, "the curve's cache")),
     }
 }
 
 /// The cache tree (`GetTree`, `NER`).
 fn cache_tree<O: SolutionObject>(cache: &CurveCache<O>) -> Result<&Tree<O>> {
-    cache.tree().ok_or(SolidError::null_pointer(OP_GCS))
+    cache
+        .tree()
+        .ok_or_else(|| SolidError::curve_missing(OP_GCS, "the curve cache's tree"))
 }
 
 /// The axis aligned box of `CalculateBoundingBox` of `curve` over its natural
@@ -1557,7 +1565,7 @@ impl Curve {
             Op::AtDistance => {
                 let target = opts
                     .target_distance
-                    .ok_or(SolidError::null_pointer(OP_GCS))?;
+                    .ok_or_else(|| SolidError::curve_missing(OP_GCS, "the target distance"))?;
                 gs.base.set_at_distance(target);
             }
             Op::SignedDirectedMinimize | Op::Signed3dDirectedMinimize => {

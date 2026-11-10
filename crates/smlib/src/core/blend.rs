@@ -84,6 +84,7 @@ pub(super) fn status(e: SolidError) -> Error {
         e if is_sweep_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
         e if is_query_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
         e if is_topology_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
+        e if is_curve_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
         SolidError::InvalidInput { .. } => Error::Status(INVALID_INPUT),
         SolidError::Unsupported { reason, .. } if reason == MIXED_CORNER_RAILS_CROSS => Error::Unported(MIXED_CORNER_UNSUPPORTED),
         e if is_boolean_failure(&e) => boolean_status(e),
@@ -155,6 +156,13 @@ fn is_query_failure(e: &SolidError) -> bool {
 /// routine returned (`Upstream` before solidcore described it), and passes on as that status.
 fn is_topology_failure(e: &SolidError) -> bool {
     e.topology_failure().is_some()
+}
+
+/// A curve routine's failure (solidcore's `CurveFailure`) that replaced a status the routine
+/// returned (`Upstream` before solidcore described it): it passes on as that status. A length
+/// bracket's refusal replaced none and passes on as solidcore's text, as before.
+fn is_curve_failure(e: &SolidError) -> bool {
+    e.curve_failure().is_some_and(|c| c.replaces_upstream_status())
 }
 
 /// `size_ok`.
@@ -1504,6 +1512,23 @@ mod tests {
         assert!(matches!(status(SolidError::sm_err("CopyFaces")), Error::Status(1001)));
         let cap = SweepFailure::RailPastStationCap { asked: 1e-6, reached: 1e-3, wires: 64 };
         assert!(matches!(status(sweep(cap)), Error::Solidcore(_)));
+    }
+
+    /// A curve routine's failure passes on as the status it replaced, as the `Upstream` it replaced
+    /// did; a length bracket's refusal, which replaced no status, keeps passing on as solidcore's
+    /// text.
+    #[test]
+    fn curve_failures_pass_on_as_their_status() {
+        use solidcore::error::Failure;
+        use solidcore::error::curve::CurveFailure;
+        let curve = |c| Failure::new("curve::curve::p2::Curve::create_by_split_curve", c).into_error();
+        assert!(matches!(status(curve(CurveFailure::Failed("the split parameter is at the curve's end"))), Error::Status(1001)));
+        assert!(matches!(status(curve(CurveFailure::Missing("the curve's cache"))), Error::Status(1006)));
+        assert!(matches!(status(curve(CurveFailure::ZeroDirection("the auxiliary direction"))), Error::Status(1007)));
+        let floor = CurveFailure::LengthBelowFloor { asked: 1e-12, floor: 1e-10, pieces: 8 };
+        assert!(matches!(status(curve(floor)), Error::Solidcore(_)));
+        let cap = CurveFailure::LengthPastPieceCap { asked: 1e-9, reached: 1e-6, pieces: 4096 };
+        assert!(matches!(status(curve(cap)), Error::Solidcore(_)));
     }
 
     #[test]
