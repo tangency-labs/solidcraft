@@ -1943,6 +1943,7 @@ mod tests {
                     width: "4".into(),
                     height: "6".into(),
                     operation: Operation::NewBody,
+                    centred: false,
                 },
                 None,
             )
@@ -2208,6 +2209,7 @@ mod tests {
                     width: "20".into(),
                     height: "5".into(),
                     operation: crate::Operation::NewBody,
+                    centred: false,
                 },
                 None,
             )
@@ -2333,6 +2335,7 @@ mod tests {
                     width: "10".into(),
                     height: "10".into(),
                     operation: crate::Operation::NewBody,
+                    centred: false,
                 },
                 Some(&format!("Box{i}")),
             )
@@ -2363,6 +2366,7 @@ mod tests {
                     width: "10".into(),
                     height: "10".into(),
                     operation: crate::Operation::NewBody,
+                    centred: false,
                 },
                 None,
             )
