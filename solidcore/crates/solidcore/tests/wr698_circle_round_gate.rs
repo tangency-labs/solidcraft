@@ -315,7 +315,9 @@ fn the_ball_s_build_is_the_fork_s() {
     let (s, bound, spans, rail) = build(&k, 2.0);
     let s = s.unwrap();
     assert!(matches!(s.kind(), SurfaceKind::ProceduralBlend(_)));
-    assert_eq!((spans, bound), (40, 5.403_205_167_109_537_5e-9));
+    // the fork's bound 5.403_205_167_109_537_5e-9; tighter here since #13984 (each proved
+    // feet's box tightened, the series' structural zeros left out), the spans the fork's
+    assert_eq!((spans, bound), (40, 5.402_814_802_230_933e-9));
     assert_pt(rail.evaluate_point(0.37).unwrap(), RAIL_037, "rail (0.37)");
     let uv = Point2::new(0.37, 0.5);
     assert_pt(

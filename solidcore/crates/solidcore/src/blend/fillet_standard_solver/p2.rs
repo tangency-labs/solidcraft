@@ -110,6 +110,8 @@
 //!   domain, not the extended one, which holds a second root of the rail-end solve on the far
 //!   side of the whole circle (the solve's interval is the extended one, as upstream's).
 
+use std::borrow::Cow;
+
 use crate::blend::fillet_custom_solver::{
     face_owner, offset_compute_inward_vector, offset_evaluate_1st, offset_evaluate_point,
     offset_local_point_solve, surface_global_point_solve, ConstantRadiusAssistedFs, InitialValues,
@@ -2941,31 +2943,35 @@ pub fn law_in_parameter(lb: &LawBall) -> Result<Option<BSplineCurve>> {
 
 const OP_LAW: &str = "blend::fillet_standard_solver::p2::law_in_parameter";
 
-/// Not the fork's (#2500): the face a round's ball rolls on, for the round by its
-/// definition: the offset's base surface, or, for a surface of revolution of a circle's arc
-/// that the offset extends as itself (`offset_extension_as_itself`, the fork's 43fd6b6) and
-/// whose extension it holds, that extension. Past its generator's interval a surface of
-/// revolution revolves the generator's extrapolation, not its circle, so a ball the trace
-/// rolls on past the face (out to an End, round the tube) has no foot on the base there: the
-/// station solve failed and the round was built as the trace's B-spline. A cylinder, cone,
-/// sphere or torus continues as itself on its own, and keeps its analytic kind in the
-/// definition.
-fn rolled_on<'a>(
-    k: &Kernel,
-    offset: &'a crate::surface::offset_surface::OffsetSurface,
-) -> &'a Surface {
+/// Not the fork's: the face a round's ball rolls on, for the round by its definition: the
+/// surface the trace rolled the ball on. Past its domain the offset of a B-spline, surface
+/// of revolution or surface of extrusion is evaluated on its extended base
+/// (`m_pExtendedSurface`: the base's tangent extension, or a surface of revolution of a
+/// circle's arc carried on as its circle), while the base itself continues otherwise (a
+/// B-spline's end spans carried on, a revolved generator's extrapolation). A round whose
+/// rails run on past the face (an edge's round run on past the edge's ends, or out to an
+/// End round a tube) had no foot on the plain base there: its first station missed the
+/// rails (by more than 1 on a twisted wall) and the round was built as the trace's skinned
+/// B-spline, which is the walls' round only at its sections. So where the offset holds an
+/// extension (the one it holds now, pending or stored, which contains every point the
+/// trace evaluated), the definition rolls on it. A plane, cylinder, cone, sphere or torus
+/// continues as itself and keeps its analytic kind in the definition, and a blend by its
+/// definition keeps its definition.
+fn rolled_on(offset: &crate::surface::offset_surface::OffsetSurface) -> Cow<'_, Surface> {
+    use crate::surface::surface::SurfaceKind;
     let base = offset.base_surface();
-    match offset.extended_base_surface() {
-        Some(extended)
-            if matches!(
-                base.kind(),
-                crate::surface::surface::SurfaceKind::SurfOfRevolution(_)
-            ) && offset_continues_as_itself(k, base) =>
-        {
-            extended
-        }
-        _ => base,
-    }
+    let extends = matches!(
+        base.kind(),
+        SurfaceKind::BSpline(_)
+            | SurfaceKind::SurfOfRevolution(_)
+            | SurfaceKind::SurfOfExtrusion(_)
+    );
+    let extended = if extends {
+        offset.with_extended_base_surface(|e| e.map(Surface::clone_keeping_owner))
+    } else {
+        None
+    };
+    extended.map_or(Cow::Borrowed(base), Cow::Owned)
 }
 
 impl CircularCrossSectionFsg {
@@ -3039,7 +3045,8 @@ impl CircularCrossSectionFsg {
         if !arcs.is_exact_circle() {
             return Ok(None);
         }
-        let bases = [rolled_on(k, o1), rolled_on(k, o2)];
+        let rolled = [rolled_on(o1), rolled_on(o2)];
+        let bases = [rolled[0].as_ref(), rolled[1].as_ref()];
         // (a face that is itself a blend by its definition takes a ball of one radius, on a
         // round of one radius between NURBS faces: the definition its certificate encloses;
         // c5b6bb7, WR-714)
@@ -3322,7 +3329,8 @@ impl super::p1::LinearCrossSectionFsg {
         else {
             return Ok(None);
         };
-        let bases = [rolled_on(k, o1), rolled_on(k, o2)];
+        let rolled = [rolled_on(o1), rolled_on(o2)];
+        let bases = [rolled[0].as_ref(), rolled[1].as_ref()];
         let mut planes = true;
         for b in bases {
             match b.kind() {
