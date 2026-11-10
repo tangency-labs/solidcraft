@@ -1158,53 +1158,59 @@ impl WalkExclusion {
 /// point the drop can measure its distance to, and from [`Vec3::UNDEF`] (where a failed
 /// evaluation leaves it).
 ///
-/// The boxes, each a certified enclosure: a line's points over the edge's interval (its
-/// drop clamps the foot into the interval), the box of its two ends; an ellipse's points
-/// over the interval widened by the solves' slack and cut to its domain (the ellipse
-/// evaluates, solves and is boxed through one NURB, which clamps a parameter into its
-/// domain: a circle's drop clamps into the interval, another ellipse's solves its cache's
-/// spans), the box of the control points of the spans over it, an enclosure for positive
-/// weights. Other curves give `false`.
+/// The boxes are built here from the curve's own data, each a certified enclosure (not
+/// `CalculateBoundingBox`, whose Bézier refinement of a single span assumes a clamped
+/// curve):
+/// - a line: its points over the edge's interval (its drop clamps the foot into the
+///   interval), the box of its points at the ends of that interval widened by the solves'
+///   slack;
+/// - an ellipse: it evaluates and solves through one NURB, which clamps a parameter into
+///   its knot range; with positive weights and every parameter the drop can evaluate in
+///   `[U[p], U[n]]` ([`in_hull_domain`]), its points lie in the box of all its control
+///   points (the convex hull property).
+///
+/// Other curves give `false`.
 fn drop_cannot_reach(k: &Kernel, edge: &crate::topology::Edge, point: Point3) -> bool {
     use crate::curve::curve::CurveKind;
-    use crate::nurbs::b_spline_curve::BoundingBoxRequest;
     use crate::nurbs::math::NOW;
     let Some(curve) = edge.curve.as_ref() else {
         return false;
     };
-    let interval = match curve.kind() {
-        CurveKind::Line(_) => edge.interval,
+    let mut lo = Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+    let mut hi = Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+    let mut add = |p: Vec3| {
+        lo = Vec3::new(lo.x.min(p.x), lo.y.min(p.y), lo.z.min(p.z));
+        hi = Vec3::new(hi.x.max(p.x), hi.y.max(p.y), hi.z.max(p.z));
+    };
+    match curve.kind() {
+        CurveKind::Line(_) => {
+            let widened = with_solve_slack(&edge.interval);
+            for t in [widened.min(), widened.max()] {
+                match curve.evaluate_point(k, t) {
+                    Ok(p) => add(p),
+                    Err(_) => return false,
+                }
+            }
+        }
         CurveKind::Ellipse(e) => {
             let base = e.base();
-            let positive = base.nurb.as_ref().is_some_and(|nurb| {
-                nurb.cpts()
-                    .iter()
-                    .all(|c| c.w == NOW || (c.w > 0.0 && c.w.is_finite()))
-                    && in_hull_domain(nurb, &edge.interval)
-            });
-            if !positive || base.is_out_of_bounds_enabled() {
+            let Some(nurb) = base.nurb.as_ref() else {
+                return false;
+            };
+            let positive = nurb
+                .cpts()
+                .iter()
+                .all(|c| c.w == NOW || (c.w > 0.0 && c.w.is_finite()));
+            if !positive || base.is_out_of_bounds_enabled() || !in_hull_domain(nurb, &edge.interval)
+            {
                 return false;
             }
-            match with_solve_slack(&edge.interval).intersect(&curve.natural_interval()) {
-                Ok(ivl) => ivl,
-                Err(_) => return false,
+            for c in nurb.cpts() {
+                add(c.to_euclid());
             }
         }
         _ => return false,
-    };
-    let req = BoundingBoxRequest {
-        normal: true,
-        pseudo: false,
-        polar: false,
-    };
-    let Some(enclosure) = curve
-        .calculate_bounding_box(k, &interval, req, true)
-        .ok()
-        .and_then(|boxes| boxes.normal)
-    else {
-        return false;
-    };
-    let (lo, hi) = (enclosure.min(), enclosure.max());
+    }
     let coords = [
         lo.x, lo.y, lo.z, hi.x, hi.y, hi.z, point.x, point.y, point.z,
     ];
@@ -1888,6 +1894,109 @@ mod tests {
         let (on, off) = classified_on_and_off(&b, uv);
         assert_eq!(on, off);
         assert!(off.contains("point_class: Unknown"), "{off}");
+    }
+
+    /// A loop with an unclamped circle edge, as a file can hold one (a quarter arc read
+    /// back with its NURB replaced by a degree-2 rational one on knots
+    /// `[-2, -1, 0, 1, 2, 3]`, the edge over `[0.1, 0.9]`, which reaches `x = 1`):
+    /// `CalculateBoundingBox` refines its single span as if clamped and ends its box at
+    /// `x = 0.7071`, so its box does not hold the curve. The drop's box is the circle's
+    /// control points', which does: `(1.00001, 0)`, within the edge's tolerance `2e-5` of
+    /// the circle, is walked and on it, and the face classifies it the same (on the edge)
+    /// with the shortcut on and off.
+    #[test]
+    fn a_loop_with_an_unclamped_circle_edge_is_walked_near_it() {
+        use crate::curve::ellipse::Ellipse;
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::topology::database_io::{DatabaseReader, DatabaseWriter, FileType, InputStream};
+        let k = Kernel::default();
+        let s = std::f64::consts::FRAC_1_SQRT_2;
+        let frame = Axis2Placement::new(Vec3::ZERO, Vec3::X, Vec3::Y);
+        let arc = Ellipse::create_canonical_circle(
+            &k,
+            &frame,
+            1.0,
+            Some(&Extent1d::from_min_max(-45.0, 45.0)),
+            None,
+        )
+        .unwrap();
+        let nurb = NurbCurve::new(
+            vec![
+                CPoint::new(2.0 * s - 1.0, -2.0 * s, 0.0, 2.0 - s),
+                CPoint::new(1.0, 0.0, 0.0, s),
+                CPoint::new(2.0 * s - 1.0, 2.0 * s, 0.0, 2.0 - s),
+            ],
+            2,
+            vec![-2.0, -1.0, 0.0, 1.0, 2.0, 3.0],
+        )
+        .unwrap();
+        // the arc as written, its base NURB swapped for the unclamped one, read back
+        let mut full = DatabaseWriter::open_for_write(FileType::Binary);
+        arc.write_to_db(&mut full, 30).unwrap();
+        let mut base = DatabaseWriter::open_for_write(FileType::Binary);
+        arc.base().write_to_db(&mut base, 30).unwrap();
+        let mut replacement = DatabaseWriter::open_for_write(FileType::Binary);
+        BSplineCurve::from_nurb(nurb, 3, false)
+            .write_to_db(&mut replacement, 30)
+            .unwrap();
+        let mut bytes = full.into_bytes();
+        bytes.truncate(bytes.len() - base.bytes().len());
+        bytes.extend_from_slice(replacement.bytes());
+        let mut reader = DatabaseReader::with_stream(FileType::Binary, InputStream::new(bytes));
+        let curve = Curve::from(Ellipse::read_from_db(&k, &mut reader, 3, 30, true).unwrap());
+        let trim_nurb = NurbCurve::new(
+            vec![
+                CPoint::new(s, -s, 0.0, 1.0),
+                CPoint::new((s + 1.0) / 2.0, -s / 2.0, 0.0, (1.0 + s) / 2.0),
+                CPoint::new((s + 1.0) / 2.0, 0.0, 0.0, (1.0 + s) / 2.0),
+                CPoint::new((s + 1.0) / 2.0, s / 2.0, 0.0, (1.0 + s) / 2.0),
+                CPoint::new(s, s, 0.0, 1.0),
+            ],
+            2,
+            vec![0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let trim_curve = || Curve::from(BSplineCurve::from_nurb(trim_nurb.clone(), 2, false));
+        let ivl = Extent1d::from_min_max(0.1, 0.9);
+        // the circle and its trim agree over the interval and reach x = 1
+        for j in 0..=20 {
+            let t = 0.1 + 0.8 * f64::from(j) / 20.0;
+            let p = curve.evaluate_point(&k, t).unwrap();
+            assert!(p.distance(trim_curve().evaluate_point(&k, t).unwrap()) < 1e-12);
+            assert!((p.x * p.x + p.y * p.y - 1.0).abs() < 1e-12);
+        }
+        assert!((curve.evaluate_point(&k, 0.5).unwrap().x - 1.0).abs() < 1e-12);
+        // a quad closed by three lines past the arc's ends
+        let p = curve.evaluate_point(&k, 0.1).unwrap();
+        let q = curve.evaluate_point(&k, 0.9).unwrap();
+        let v = [p, q, q * 0.67 + p * 0.33, q * 0.33 + p * 0.67];
+        let mut b = square(plane(), true, &[]);
+        let mut edge_curve = Some(curve);
+        for i in 0..4 {
+            let (p, q) = (v[i], v[(i + 1) % 4]);
+            b.vertex_mut(VertexId::from_index(i as u32)).unwrap().point = p;
+            let e = b.edge_mut(EdgeId::from_index(i as u32)).unwrap();
+            e.tolerance = 2e-5;
+            let trim = if i == 0 {
+                e.interval = ivl;
+                e.curve = edge_curve.take();
+                trim_curve()
+            } else {
+                e.curve = Some(Curve::from(Line::from_points(p, q, 3)));
+                Curve::from(Line::from_points(p, q, 2))
+            };
+            b.edgeuse_mut(EdgeuseId::from_index(i as u32))
+                .unwrap()
+                .uv_trim_curve = Some(trim);
+        }
+        let (l, uv) = (LoopId::from_index(0), [1.00001, 0.0]);
+        assert!(!exclusion_at(&k, &b, l, uv).is_some_and(|x| x.excludes(&k, &b, l)));
+        let walk = contains(&mut b.clone_standing_for_self().unwrap(), uv).unwrap();
+        assert_eq!(walk.containment, PointContainment::OnBoundary);
+        hold_in_outer_square(&mut b);
+        let (on, off) = classified_on_and_off(&b, uv);
+        assert_eq!(on, off);
+        assert!(off.contains("point_class: Edge"), "{off}");
     }
 
     /// A point on a side of the surface's natural domain is always walked (the walk then
