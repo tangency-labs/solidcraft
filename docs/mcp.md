@@ -508,6 +508,10 @@ For long modelling sessions, set `verbose: false` at the tool-argument level:
 {"name": "execute", "arguments": {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}, "verbose": false}}
 ```
 
+With `verbose: false`, a `created` list of more than 20 ids (a drawing of many curves) is left out and
+counted instead: `curve_count`, `constraint_count`, `dimension_count` and `point_count`.
+`sketch.inspect` lists every id.
+
 Feature replies omit the full `bodies` list while keeping `feature`, `name`,
 `created_bodies`, `changed_bodies` and `removed_bodies`. A cut can therefore report a
 changed body even when no body name was added or removed. Sketch replies keep new
