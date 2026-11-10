@@ -1862,7 +1862,9 @@ fn progressive_image_controls_route_to_the_registered_host() {
     assert_eq!(image_params(&h.app).unwrap(), checked);
     let started = h.app.run("render.start", checked).unwrap();
     let job = serde_json::from_value(started["job"].clone()).unwrap();
-    let status = h.app.session.render_job_handle(job).unwrap().wait_timeout(Duration::from_secs(30)).unwrap();
+    // A wait that returns the moment the job ends; the budget only matters on a loaded runner, where a
+    // software-GPU render of even this small image can take over a minute.
+    let status = h.app.session.render_job_handle(job).unwrap().wait_timeout(Duration::from_secs(180)).unwrap();
     assert_eq!(status.progress.phase, Phase::Completed, "{:?}", status.error);
     assert!(Arc::ptr_eq(&doc, &h.app.session.doc));
     assert_eq!(h.app.session.undo.len(), undo);
@@ -2930,7 +2932,7 @@ fn native_cpu_controls_check_and_start_the_same_capture_and_keep_it_exportable()
     let handle = h.app.session.render_job_handle(id).unwrap();
     // The job owns the source bytes captured by Start, even if the file changes.
     std::fs::write(&hdr_path, b"changed after capture").unwrap();
-    let status = handle.wait_timeout(std::time::Duration::from_secs(30)).unwrap();
+    let status = handle.wait_timeout(std::time::Duration::from_secs(180)).unwrap();
     assert_eq!(json!(status.environment), preflight["environment"]);
     assert_eq!(status.progress.phase, Phase::Completed);
     assert_eq!(status.request.integrator, Integrator::Raytrace);
@@ -9574,7 +9576,7 @@ fn native_cpu_output_ui_capture_keeps_common_effects_and_exports_its_actual_raw_
     h.step(&json!({"click":{"handle":"render:stage:render.start"}})).unwrap();
     let job: JobId = h.app.render_workspace.view.job.expect("the real UI Render action must capture the CPU setup");
     let handle = h.app.session.render_job_handle(job).unwrap();
-    let status = handle.wait_timeout(std::time::Duration::from_secs(30)).unwrap();
+    let status = handle.wait_timeout(std::time::Duration::from_secs(180)).unwrap();
     assert_eq!(status.progress.phase, Phase::Completed, "{:?}", status.error);
     assert!(status.request.raytrace.as_ref().unwrap().output.as_ref().unwrap().linear_exr);
     assert_eq!(json!(status.request.raytrace.as_ref().unwrap().output), checked["settings"]["job"]["options"]["output"]);
@@ -12572,7 +12574,7 @@ fn clicked_cpu_atmosphere_start_captures_saved_box_and_reopens_identical_png_and
     assert_eq!(checked["request"]["raytrace"]["volume"]["extinction_per_mm"], 0.001);
     h.step(&json!({"click":{"handle":"render:stage:render.start"}})).unwrap();
     let handle = h.app.session.render_job_handle(h.app.render_workspace.view.job.unwrap()).unwrap();
-    let terminal = handle.wait_timeout(std::time::Duration::from_secs(30)).unwrap();
+    let terminal = handle.wait_timeout(std::time::Duration::from_secs(180)).unwrap();
     assert_eq!(terminal.progress.phase, Phase::Completed, "{:?}", terminal.error);
     let image = handle.frame().unwrap().unwrap();
     let png = image.png().to_vec();
@@ -12593,7 +12595,7 @@ fn clicked_cpu_atmosphere_start_captures_saved_box_and_reopens_identical_png_and
     let capture = h.app.session.execute("render.start", &request).unwrap();
     let id = serde_json::from_value(capture["job"].clone()).unwrap();
     let again = h.app.session.render_job_handle(id).unwrap();
-    assert_eq!(again.wait_timeout(std::time::Duration::from_secs(30)).unwrap().progress.phase, Phase::Completed);
+    assert_eq!(again.wait_timeout(std::time::Duration::from_secs(180)).unwrap().progress.phase, Phase::Completed);
     let image = again.frame().unwrap().unwrap();
     assert_eq!(image.png(), png);
     assert_eq!(image.linear_exr().unwrap(), exr);
