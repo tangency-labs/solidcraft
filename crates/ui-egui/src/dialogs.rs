@@ -572,6 +572,10 @@ pub struct Dialog {
     /// Where the face that reopened this fillet or chamfer was clicked (Press Pull): its arrow
     /// sits on the edge nearest it. UI state only, never saved.
     pub(crate) anchor_hint: Option<Vec3>,
+    /// The open sketch an Extrude or Revolve ended on its way to opening (#14128). It stays
+    /// shown while this dialog is open, as an edited feature's sketch does, so its profiles can
+    /// be picked even when an earlier feature uses the sketch and hides it.
+    pub(crate) started_from_sketch: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -840,6 +844,7 @@ impl Dialog {
             press_pull: false,
             op_auto: Default::default(),
             anchor_hint: None,
+            started_from_sketch: None,
         }
     }
 
@@ -1356,10 +1361,13 @@ impl Dialog {
     }
 
     /// An Extrude or Revolve started from inside a sketch takes that sketch's profile, as it would
-    /// had the sketch stayed open.
+    /// had the sketch stayed open, and keeps the sketch shown while it is open (#14128).
     pub(crate) fn take_sketch_profile(&mut self, s: &Session, sketch: u64) {
-        if matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. })
-            && let Some(inp) = self.inputs.first_mut()
+        if !matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. }) {
+            return;
+        }
+        self.started_from_sketch = Some(sketch);
+        if let Some(inp) = self.inputs.first_mut()
             && inp.items.is_empty()
         {
             inp.items = single_profile(s, sketch);
@@ -3754,8 +3762,9 @@ fn picked_side(app: &SolveApp, d: &Dialog, first: &Sel) -> Option<usize> {
 
 /// Discard an editor whose target was removed, before its preview can draw again. Show the sketch
 /// of the Extrude, Revolve, sheet metal base or contour flange, or Hole at sketch
-/// points the open dialog edits, and only while it is open: whichever way the dialog closed (OK,
-/// Cancel, another tool, another design), the sketch returns to its own visibility.
+/// points the open dialog edits, or the sketch an Extrude or Revolve ended on its way to opening
+/// (#14128), and only while it is open: whichever way the dialog closed (OK, Cancel, another
+/// tool, another design), the sketch returns to its own visibility.
 pub(crate) fn sync_feature_edit(app: &mut SolveApp) {
     if app.dialog.as_ref().and_then(|d| d.editing).is_some_and(|(id, _)| app.session.doc.feature(id).is_none()) {
         // Undo or deletion already chose the current document and history. Cancel's rollback
@@ -3774,7 +3783,7 @@ pub(crate) fn sync_feature_edit(app: &mut SolveApp) {
         app.preview.reset();
         app.op_check.abandon();
     }
-    app.session.feature_edit_sketch = app.dialog.as_ref().and_then(|d| d.editing).and_then(|(id, _)| match &app.session.doc.feature(id)?.kind {
+    let edited = app.dialog.as_ref().and_then(|d| d.editing).and_then(|(id, _)| match &app.session.doc.feature(id)?.kind {
         FeatureKind::Extrude { sketch, .. }
         | FeatureKind::Revolve { sketch, .. }
         | FeatureKind::SheetBase { sketch, .. }
@@ -3782,6 +3791,8 @@ pub(crate) fn sync_feature_edit(app: &mut SolveApp) {
         | FeatureKind::Hole { points: Some(solidcraft_engine::doc::SketchPoints { sketch, single: false, .. }), .. } => Some(**sketch),
         _ => None,
     });
+    let started_from = app.dialog.as_ref().and_then(|d| d.started_from_sketch).filter(|&id| app.session.doc.feature(id).is_some());
+    app.session.feature_edit_sketch = edited.or(started_from);
 }
 
 /// Does this dialog dock as a card (at the view's edge or in the left column)? A delete
