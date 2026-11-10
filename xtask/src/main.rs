@@ -37,7 +37,7 @@ const USAGE: &str = "\
 usage: cargo xtask <command>
 
 commands:
-  ui-containers   enforce the universal container for all UI hosts
+  ui-containers   enforce the universal container for all UI hosts and the kit's tooltips
   layers          enforce the crate dependency layering (plan/architecture.md §3)
   shared          check that each shared crate (layers' Shared class) has workspace lints, a licence,
                   a README and no includes from outside its directory, then build and test it in a

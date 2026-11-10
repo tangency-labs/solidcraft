@@ -200,7 +200,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             });
             ui.add_enabled_ui(app.ui.ground_shadow, |ui| {
-                let response = setting::ground_shadow_follows_model(app, ui).on_hover_text(app.tr("prefs.ground_shadow_follows_model_help"));
+                let response = setting::ground_shadow_follows_model(app, ui).backing_on_hover_text(app.tr("prefs.ground_shadow_follows_model_help"));
                 crate::scenario::publish_handle("prefs:ground_shadow_follows_model", response.rect.center());
             });
             ui_kit::settings_form(ui, t.form_label_width + t.space_24, |ui| {
