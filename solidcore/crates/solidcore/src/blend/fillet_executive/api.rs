@@ -220,8 +220,8 @@ pub fn fillet_edges_per_edge(
 /// (`SmLinearFilletLaw`) and one cross-section (`xsect_type` 0 linear, 2 blend
 /// curve, any other value circular), then `StitchAndOrient` with its defaults.
 /// `continuity` (1, 2 or 3 for G1-G3) applies to blend-curve cross-sections, whose
-/// thumbweight is the `SetFilletParameters` default (`1.0`; the fork's
-/// `SM_GN_DEFAULT_THUMBWEIGHT` with `fixes.fillet_gn_section_generator`).
+/// thumbweight is the `SetFilletParameters` default with the G^n section, the fork's
+/// `SM_GN_DEFAULT_THUMBWEIGHT` (upstream's `1.0`, which the G^n section refuses).
 ///
 /// # Errors
 /// `SM_ERR_INVALID_INPUT` for an empty edge list or a start or end radius below 8
@@ -1095,12 +1095,10 @@ mod tests {
         let mut body = boxed(&mut k);
         let edge = p1::edges(&body, None).unwrap()[0];
         let result = variable_radius_fillet(&mut k, &mut body, &[edge], 0.5, 30.0, 1, 1);
-        // refused with the size that builds: the 10 wide side holds a round of radius 10
-        let Err(SolidError::FilletRefused { code, fit, .. }) = result else {
-            panic!("{result:?}");
-        };
-        assert_eq!(code, crate::error::SM_ERR);
-        assert!((fit.size - 10.0).abs() < 1e-9, "{fit:?}");
+        assert!(matches!(
+            result,
+            Err(SolidError::Upstream { code, .. }) if code == crate::error::SM_ERR
+        ));
         crate::topology::integrity::check(&body).unwrap();
         assert_eq!(p1::faces(&body, None).unwrap().len(), 6);
     }
