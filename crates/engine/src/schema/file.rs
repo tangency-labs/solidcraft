@@ -93,6 +93,10 @@ pub struct ExportStlParams {
     /// as it lies in the design.
     #[serde(default)]
     pub lay_on_print_faces: Option<bool>,
+    /// Write the bodies in a coordinate system's frame (#14644), by name (`CS1`) or datum key,
+    /// instead of the world's. Not with `lay_on_print_faces`.
+    #[serde(default)]
+    pub frame: Option<String>,
 }
 
 /// Export bodies as a 3MF file, whatever the path's extension.
