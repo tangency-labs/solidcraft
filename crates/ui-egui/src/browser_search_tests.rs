@@ -121,6 +121,18 @@ fn typing_keeps_the_matches_with_their_parents() {
 }
 
 /// The count is the rows that match: the browser and `browser.find` agree.
+/// A placement's Origin folder (#7313) is never searched, as the design's own Origin isn't: a
+/// search that lists a placement draws no Origin under it.
+#[test]
+fn a_placements_origin_stays_out_of_the_search() {
+    let mut h = assembly();
+    search(&mut h, "washer");
+    let washer = occurrence(&h, 0, "Washer M20:1");
+    assert!(placements().contains(&vec![washer]), "the search lists the washer's placement");
+    assert!(rows().iter().any(|r| r == "Washer"), "and the washer in it");
+    assert_eq!(count("Origin"), 0, "but no Origin, the design's or the placement's");
+}
+
 #[test]
 fn the_count_is_the_matching_rows() {
     let mut h = assembly();
