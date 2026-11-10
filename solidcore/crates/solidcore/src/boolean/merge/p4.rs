@@ -1845,18 +1845,16 @@ mod tests {
 
     #[test]
     fn paired_mark_contexts_survive_a_failing_action() {
-        for opt_in in [false, true] {
+        {
             let mut first = Kernel::default();
             let mut second = Kernel::default();
-            first.fixes.mark_lock_pair_advances_and_locks_second_context = opt_in;
             first.context.set_doing_boolean(true);
             let mut kernels = BooleanKernels {
                 primary: &mut first,
                 other: Some(&mut second),
             };
-            let fixes = kernels.primary.fixes;
             let mut lock = kernels
-                .mark_action(|contexts| MarkLock::new_pair_with_fixes(contexts, 0, 1, &fixes))
+                .mark_action(|contexts| MarkLock::new_pair(contexts, 0, 1))
                 .unwrap();
             let marks = (lock.mark_type1(), lock.mark_type2());
             let before = (

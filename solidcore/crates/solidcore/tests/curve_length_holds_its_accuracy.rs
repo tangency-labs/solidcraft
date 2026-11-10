@@ -72,8 +72,7 @@ fn holds(curve: &Curve, exact: f64) {
 /// The length at 1e-3 .. `10^-tightest`, failures propagated, within the accuracy of
 /// `exact`.
 fn holds_down_to(curve: &Curve, exact: f64, tightest: i32) {
-    let mut k = Kernel::default();
-    k.fixes.integrator_propagates_failure = true;
+    let k = Kernel::default();
     let interval = curve.natural_interval();
     for e in 3..=tightest {
         let accuracy = 10f64.powi(-e);
@@ -246,38 +245,31 @@ fn cubic(points: &[[f64; 3]; 5], w: Option<[f64; 5]>) -> Curve {
     Curve::from(BSplineCurve::from_data(3, 4, 8, 3, &cpw, &CUBIC_KNOTS).unwrap())
 }
 
-/// Lengths at 1e-3 .. 1e-12, by default and with failures propagated.
-fn lengths(curve: &Curve) -> Vec<(f64, bool, f64)> {
+/// Lengths at 1e-3 .. 1e-12 (failures propagate).
+fn lengths(curve: &Curve) -> Vec<(f64, f64)> {
+    let k = Kernel::default();
     let mut out = Vec::new();
-    for propagate in [false, true] {
-        let mut k = Kernel::default();
-        k.fixes.integrator_propagates_failure = propagate;
-        for e in 3..=12 {
-            let accuracy = 10f64.powi(-e);
-            let length = curve
-                .length(&k, &curve.natural_interval(), accuracy)
-                .unwrap_or_else(|err| panic!("at {accuracy:e}, propagate {propagate}: {err:?}"));
-            out.push((accuracy, propagate, length));
-        }
+    for e in 3..=12 {
+        let accuracy = 10f64.powi(-e);
+        let length = curve
+            .length(&k, &curve.natural_interval(), accuracy)
+            .unwrap_or_else(|err| panic!("at {accuracy:e}: {err:?}"));
+        out.push((accuracy, length));
     }
     out
 }
 
 /// A curve whose control points are all one point has length 0, exactly, at every
-/// accuracy and whether failures propagate or not. Its computed speed is rounding noise
-/// around zero, which the steps used to refuse at 1e-9 (step control 1001: 0 by
-/// default, an error with failures propagated). Weights that are powers of two keep the
+/// accuracy. Its computed speed is rounding noise around zero, which the steps used to
+/// refuse at 1e-9 (step control 1001). Weights that are powers of two keep the
 /// rational points exactly equal.
 #[test]
 fn a_point_curve_has_length_zero() {
     for m in [1e-3, 1.0, 1e6] {
         let p = [0.3 * m, -0.7 * m, 0.11 * m];
         for w in [None, Some([1.0, 0.5, 2.0, 0.25, 1.0])] {
-            for (accuracy, propagate, length) in lengths(&cubic(&[p; 5], w)) {
-                assert_eq!(
-                    length, 0.0,
-                    "|P| ~ {m:e}, weights {w:?}, at {accuracy:e} (propagate {propagate})"
-                );
+            for (accuracy, length) in lengths(&cubic(&[p; 5], w)) {
+                assert_eq!(length, 0.0, "|P| ~ {m:e}, weights {w:?}, at {accuracy:e}");
             }
         }
     }
@@ -337,10 +329,10 @@ fn a_near_point_curve_has_length_within_its_rounding() {
                         * (b - a)
                 })
                 .sum();
-            for (accuracy, propagate, length) in lengths(&curve) {
+            for (accuracy, length) in lengths(&curve) {
                 assert!(
                     (0.0..=polygon + rounding).contains(&length),
-                    "|P| ~ {m:e}, weights {w:?}, at {accuracy:e} (propagate {propagate}): \
+                    "|P| ~ {m:e}, weights {w:?}, at {accuracy:e}: \
                      length {length:e} beyond polygon {polygon:e} + rounding {rounding:e}"
                 );
             }
