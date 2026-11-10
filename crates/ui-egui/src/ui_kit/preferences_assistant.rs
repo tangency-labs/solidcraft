@@ -1,4 +1,4 @@
-//! Shared concise choice cards and the agent-pointer settings specimen.
+//! Shared concise choice cards and short settings notes.
 use super::{metrics::dimension, text::paint_text};
 use crate::ui_kit::BackingTooltipExt as _;
 use egui::{FontId, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
@@ -125,7 +125,7 @@ fn choice_card(ui: &mut Ui, width: f32, choice: &SettingsChoice<'_>, selected: b
         let mut at = pos2(radio.x + t.space_12, rect.top() + t.space_10);
         if let Some(icon) = choice.icon {
             let cue = Rect::from_min_size(at, vec2(t.space_14, t.space_14));
-            crate::icons::paint_icon(ui.painter(), cue, icon, 1.0);
+            crate::ui_kit::icons::paint_icon(ui.painter(), cue, icon, 1.0);
             solidcraft_ui_registry::publish_rect(&format!("{}:icon", choice.key), cue);
             at.x += icon_width;
         }
@@ -145,31 +145,6 @@ fn choice_card(ui: &mut Ui, width: f32, choice: &SettingsChoice<'_>, selected: b
     });
     solidcraft_ui_registry::publish_target(choice.key, rect);
     response.backing_on_hover_text(choice.detail).on_hover_cursor(egui::CursorIcon::PointingHand)
-}
-
-/// A static preview reuses the real agent cursor artwork; it never animates or requests frames.
-pub(crate) fn settings_pointer_preview(ui: &mut Ui, visible: bool, speed: &str, follows_camera: bool) {
-    let t = Tokens::get();
-    let width = dimension(ui.available_width());
-    let (rect, response) = ui.allocate_exact_size(vec2(width, t.space_24 * 3.0 + t.space_16), Sense::hover());
-    ui.painter().rect(rect, t.radius_lg, t.viewport_top, Stroke::new(1.0, t.dialog_rule), egui::StrokeKind::Inside);
-    let path = [pos2(rect.left() + t.space_24, rect.center().y), rect.center(), pos2(rect.right() - t.space_24 * 2.0, rect.center().y - t.space_12)];
-    ui.painter().extend(egui::Shape::dashed_line(&path, Stroke::new(1.0, t.control_border), t.space_3, t.space_4));
-    for point in path {
-        ui.painter().circle_filled(point, t.space_3, t.control_border);
-    }
-    if visible {
-        crate::icons::pointer::paint(&ui.painter().with_clip_rect(rect.shrink(t.space_4)), path.get(1).copied().unwrap_or(rect.center()));
-    }
-    let caption = if visible {
-        solidcraft_ui_text::format("ai.prefs.pointer_preview_speed", &[("speed", speed)])
-    } else {
-        solidcraft_ui_text::tr("ai.prefs.pointer_preview_hidden").to_owned()
-    };
-    let caption_rect = Rect::from_min_max(rect.min + vec2(t.space_8, t.space_4), pos2(rect.right() - t.space_8, rect.top() + t.space_24));
-    paint_text(ui, caption_rect, &caption, FontId::proportional(t.font_small), t.form_dim, false);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), &caption));
-    response.backing_on_hover_text(solidcraft_ui_text::tr(if follows_camera { "ai.prefs.follow_camera_on" } else { "ai.prefs.follow_camera_off" }));
 }
 
 /// One muted metadata line; full commands, endpoints and tool lists remain available on hover.

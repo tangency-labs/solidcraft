@@ -488,7 +488,7 @@ pub(crate) fn prepare_with_metadata(
         if let Some(camera) = s.camera {
             settings.camera = camera;
         } else {
-            settings.camera.fit(&scene.bounds);
+            settings.camera.fit(&solidcraft_render::view_bounds(&scene.bounds));
         }
         settings
     };
@@ -733,7 +733,7 @@ fn prepare_progressive(
         if let Some(camera) = s.camera {
             settings.camera = camera;
         } else {
-            settings.camera.fit(&scene.bounds);
+            settings.camera.fit(&solidcraft_render::view_bounds(&scene.bounds));
         }
         settings
     };

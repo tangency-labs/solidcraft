@@ -106,6 +106,7 @@ use crate::boolean::topology_intersector::p2::{
     EdgeEdgeIntersect, EdgeFaceCoincidence, IntersectorBrepP2,
 };
 use crate::curve::curve::p2::Curve;
+use crate::error::boolean::BooleanStage;
 use crate::error::{Result, SolidError};
 use crate::geom::context::Context;
 use crate::geom::extent1d::Extent1d;
@@ -469,10 +470,20 @@ pub fn merge_edge_with(
                     ctx.context(),
                 )?;
             }
-            *slot = Some(mate.ok_or(SolidError::null_pointer(OP_EDGE))?);
+            *slot = Some(mate.ok_or_else(|| {
+                SolidError::boolean_entity_missing(
+                    OP_EDGE,
+                    BooleanStage::Relate,
+                    "a vertex related to the edge's end",
+                )
+            })?);
         }
         let [Some(bv), Some(bv2)] = mates else {
-            return Err(SolidError::null_pointer(OP_EDGE));
+            return Err(SolidError::boolean_entity_missing(
+                OP_EDGE,
+                BooleanStage::Relate,
+                "a vertex related to the edge's end",
+            ));
         };
 
         // make the new Brep wire edge
@@ -572,16 +583,23 @@ fn orientation_to_find(
             Ok(reverse_orientation(orient))
         }
     } else {
-        let vb_rel = relations
-            .vertices
-            .primary(v)
-            .ok_or(SolidError::null_pointer(OP_FACEUSE))?;
+        let vb_rel = relations.vertices.primary(v).ok_or_else(|| {
+            SolidError::boolean_entity_missing(
+                OP_FACEUSE,
+                BooleanStage::Relate,
+                "a vertex related to the edge's vertex",
+            )
+        })?;
         if vb == vb_rel {
             eu::orientation(brep, prim)
         } else if vb2 == Some(vb_rel) {
             Ok(reverse_orientation(eu::orientation(brep, prim)?))
         } else {
-            Err(SolidError::sm_err(OP_FACEUSE))
+            Err(SolidError::boolean_stage_failed(
+                OP_FACEUSE,
+                BooleanStage::Relate,
+                "the related vertex is not an end of the edge use",
+            ))
         }
     }
 }
@@ -759,7 +777,12 @@ pub fn make_faceuse_attempt_with(
         )?,
     };
     // error - unable to classify input OtherBrep faceuse into a Brep region
-    let region = region.ok_or(SolidError::sm_err(OP_FACEUSE))?;
+    let region = region.ok_or_else(|| {
+        SolidError::stage_failed(
+            OP_FACEUSE,
+            "the face use of the other B-rep lies in no region of the primary B-rep",
+        )
+    })?;
 
     // Now merge all unrelated input face->vertices into Brep's Region as shell
     // vertices, and pick up the radial sector edge uses.
@@ -798,7 +821,13 @@ pub fn make_faceuse_attempt_with(
 
             // load VertexLoopuses into sLoopVertices
             if kk == 0 && vertex_loop {
-                loop_vertices.push(brep_vertex.ok_or(SolidError::null_pointer(OP_FACEUSE))?);
+                loop_vertices.push(brep_vertex.ok_or_else(|| {
+                    SolidError::boolean_entity_missing(
+                        OP_FACEUSE,
+                        BooleanStage::Relate,
+                        "a vertex related to the loop's vertex",
+                    )
+                })?);
             }
         }
 
@@ -851,7 +880,12 @@ pub fn make_faceuse_attempt_with(
                 Err(_) => None,
             };
             // add the classified radial sector's Edgeuse to the sFaceEdgeuses list
-            face_edgeuses.push(found.ok_or(SolidError::sm_err(OP_FACEUSE))?);
+            face_edgeuses.push(found.ok_or_else(|| {
+                SolidError::stage_failed(
+                    OP_FACEUSE,
+                    "no radial edge use classifies the face's edge use",
+                )
+            })?);
         }
     }
 
@@ -995,7 +1029,10 @@ fn copy_uv_trim_curves_of_other_face(
 ) -> Result<()> {
     let (fu1, fu2) = crate::topology::face::p2::faceuses(brep, new_face)?;
     let (Some(fu1), Some(fu2)) = (fu1, fu2) else {
-        return Err(SolidError::null_pointer(OP_FACEUSE));
+        return Err(SolidError::entity_missing(
+            OP_FACEUSE,
+            "a pair of face uses on the new face",
+        ));
     };
     let orientation = other.faceuse(other_fu)?.orientation;
     let new_fu = if brep.faceuse(fu1)?.orientation == orientation {
@@ -1006,7 +1043,10 @@ fn copy_uv_trim_curves_of_other_face(
     let other_uses = eu::faceuse_edgeuses(other, other_fu, false, None)?;
     let new_uses = eu::faceuse_edgeuses(brep, new_fu, false, None)?;
     if other_uses.len() != new_uses.len() {
-        return Err(SolidError::sm_err(OP_FACEUSE));
+        return Err(SolidError::stage_failed(
+            OP_FACEUSE,
+            "the new face and the other face have different numbers of edge uses",
+        ));
     }
     for (other_eu, new_eu) in other_uses.into_iter().zip(new_uses) {
         let Some(trim) = eu::uv_trim_curve(other, other_eu)?.0 else {

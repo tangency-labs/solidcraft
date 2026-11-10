@@ -1,5 +1,5 @@
 //! Shared chord keycaps and the Preferences title-bar search field.
-use crate::icons;
+use crate::ui_kit::icons;
 use egui::{FontId, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
 use solidcraft_theme::Tokens;
 
@@ -15,11 +15,12 @@ fn chord_parts(chord: &str) -> Vec<&str> {
     }
 }
 
-/// Natural width of a complete chord in the same mono keycaps used by command search.
-pub(crate) fn shortcut_binding_width(ui: &Ui, chord: &str) -> f32 {
+/// Natural width of a complete chord in the same mono keycaps used by command search, or of
+/// the host's `unassigned` text for an empty chord.
+pub(crate) fn shortcut_binding_width(ui: &Ui, chord: &str, unassigned: &str) -> f32 {
     let t = Tokens::get();
     if chord.is_empty() {
-        return super::ContentWidth::label(ui, solidcraft_ui_text::tr("prefs.shortcuts_not_assigned")) + t.space_8;
+        return super::ContentWidth::label(ui, unassigned) + t.space_8;
     }
     let parts = chord_parts(chord);
     parts
@@ -29,19 +30,21 @@ pub(crate) fn shortcut_binding_width(ui: &Ui, chord: &str) -> f32 {
         + t.space_4 * parts.len().saturating_sub(1) as f32
 }
 
-/// One focusable binding, with a separate full keycap for every modifier and key.
-/// Read-only callers keep exactly the same caps without an interactive recorder target.
-pub(crate) fn shortcut_binding(ui: &mut Ui, chord: &str, editable: bool) -> Response {
+/// One focusable binding, with a separate full keycap for every modifier and key; an empty
+/// chord shows the host's `unassigned` text. Read-only callers keep exactly the same caps
+/// without an interactive recorder target.
+pub(crate) fn shortcut_binding(ui: &mut Ui, chord: &str, unassigned: &str, editable: bool) -> Response {
     let t = Tokens::get();
-    let (rect, response) =
-        ui.allocate_exact_size(vec2(shortcut_binding_width(ui, chord), t.control_height), if editable { Sense::click() } else { Sense::hover() });
+    let (rect, response) = ui.allocate_exact_size(
+        vec2(shortcut_binding_width(ui, chord, unassigned), t.control_height),
+        if editable { Sense::click() } else { Sense::hover() },
+    );
     if editable && response.clicked() {
         response.request_focus();
     }
     let mut x = rect.left();
     if chord.is_empty() {
-        let text = solidcraft_ui_text::tr("prefs.shortcuts_not_assigned");
-        let galley = ui.painter().layout_no_wrap(text.to_owned(), FontId::proportional(t.font_label), t.form_dim);
+        let galley = ui.painter().layout_no_wrap(unassigned.to_owned(), FontId::proportional(t.font_label), t.form_dim);
         ui.painter().galley(pos2(x + t.space_4, rect.center().y - galley.size().y / 2.0), galley, t.form_dim);
     } else {
         for part in chord_parts(chord) {
@@ -57,7 +60,7 @@ pub(crate) fn shortcut_binding(ui: &mut Ui, chord: &str, editable: bool) -> Resp
         egui::WidgetInfo::labeled(
             if editable { egui::Role::Button } else { egui::Role::Label },
             ui.is_enabled(),
-            if chord.is_empty() { solidcraft_ui_text::tr("prefs.shortcuts_not_assigned") } else { chord },
+            if chord.is_empty() { unassigned } else { chord },
         )
     });
     response
@@ -127,4 +130,23 @@ fn search_with_icon(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, p
         info
     });
     response
+}
+
+/// A stored chord as this platform names it: on macOS Ctrl is the primary modifier, shown as
+/// Cmd, and Alt is Option; elsewhere the chord is unchanged. A recorded macOS Control+Command
+/// chord (`Ctrl+Cmd+…`) names both keys explicitly, so its Ctrl stays.
+pub(crate) fn chord_label(key: &str) -> String {
+    chord_label_for_platform(key, cfg!(target_os = "macos"))
+}
+
+pub(crate) fn chord_label_for_platform(key: &str, mac: bool) -> String {
+    let both = key.starts_with("Ctrl+Cmd+");
+    key.split('+')
+        .map(|part| match (mac, part) {
+            (true, "Ctrl") if !both => "Cmd",
+            (true, "Alt") => "Option",
+            _ => part,
+        })
+        .collect::<Vec<_>>()
+        .join("+")
 }

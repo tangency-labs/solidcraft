@@ -21,7 +21,7 @@
 //! | [`MAX_DIST_DEPTH`], [`MAX_PARAM_DEPTH`]  | recursion limits of `ST_curxcdr` / `ST_curxcrr` |
 //!
 //! Deviations:
-//! - Out-params become return values; errors are [`SolidError::Nlib`] values with the
+//! - Out-params become return values; errors are [`SolidError::Failed`] values (a [`NurbsFailure`] reason) with the
 //!   upstream `NL_*_ERR` number instead of a flag plus the global `NL_ERROR` record.
 //!   The `NL_STACKS` arguments and the memory error paths have no counterpart.
 //! - `N_CrvEvalEvenSpacedPts` writes the points and/or the parameters when the caller
@@ -64,7 +64,7 @@
 //!   [`SolidError::InvalidInput`], so index arithmetic and allocations sized from the
 //!   degree cannot overflow.
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::math::Vec3;
 use crate::nurbs::basis_basic::{basis_derivs, PTOL};
 use crate::nurbs::bezier::{binomial, check_short_degree};
@@ -102,10 +102,6 @@ const OP_MAX2: &str = "nurbs::crv_adv::p1::Curve::max_2nd_deriv";
 const OP_OFFSET: &str = "nurbs::crv_adv::p1::Curve::planar_offset_derivs";
 const OP_XCDR: &str = "nurbs::crv_adv::p1::Curve::extend_by_dist_at_depth";
 const OP_XCRR: &str = "nurbs::crv_adv::p1::Curve::extend_by_param_dist_at_depth";
-
-fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
-    SolidError::Nlib { operation, code }
-}
 
 fn depth_limit(operation: &'static str, depth: usize) -> SolidError {
     SolidError::NotConverged {
@@ -221,7 +217,7 @@ fn end_tangent(
 ) -> Result<(Vec3, f64)> {
     match normalize(a - b) {
         Ok(r) => Ok(r),
-        Err(_) => normalize(a - c()?).map_err(|_| nlib(op, NlibCode::Geometry)),
+        Err(_) => normalize(a - c()?).map_err(|_| SolidError::nurbs(op, NurbsFailure::Geometry)),
     }
 }
 
@@ -338,7 +334,7 @@ impl Curve {
     /// The point at `u` in homogeneous space (`N_CrvEvalPt`): the non-vanishing basis
     /// functions times their control points, not mapped to Euclidean space.
     ///
-    /// Errors with [`NlibCode::Parameter`] when `u` is outside the knot range, and
+    /// Errors with [`NurbsFailure::Parameter`] when `u` is outside the knot range, and
     /// with the errors of [`crate::nurbs::knots::KnotVector::basis_eval`].
     pub fn eval_pt(&self, u: f64, side: Side) -> Result<CPoint> {
         const OP: &str = OP_EVAL_PT;
@@ -350,7 +346,7 @@ impl Curve {
 
         // Check parameter.
         if knt.is_param_out_of_bounds(u) {
-            return Err(nlib(OP, NlibCode::Parameter));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Parameter));
         }
 
         // Compute non-vanishing B-splines.
@@ -369,7 +365,7 @@ impl Curve {
     /// basis function derivatives times their control points. At a knot, `side`
     /// picks the span (`Left`: right-hand derivatives, `Right`: left-hand ones).
     ///
-    /// Errors with [`NlibCode::Parameter`] when `u` is outside the knot range, and
+    /// Errors with [`NurbsFailure::Parameter`] when `u` is outside the knot range, and
     /// with the errors of [`basis_derivs`].
     pub fn derivs_at_knot(&self, u: f64, side: Side, der: usize) -> Result<Vec<CPoint>> {
         const OP: &str = OP_DERIVS_AT_KNOT;
@@ -381,7 +377,7 @@ impl Curve {
 
         // Check parameter.
         if knt.is_param_out_of_bounds(u) {
-            return Err(nlib(OP, NlibCode::Parameter));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Parameter));
         }
 
         // Compute basis function derivatives.
@@ -406,8 +402,8 @@ impl Curve {
     /// deviates from their average by at most `tol` times the average, or for
     /// [`ITER_LIMIT`] rounds (the best result so far is returned).
     ///
-    /// Errors with [`NlibCode::Parameter`] when `u0` or `u1` is outside the knot
-    /// range, [`NlibCode::Input`] when `n <= 1`, [`NlibCode::Numerical`] when an
+    /// Errors with [`NurbsFailure::Parameter`] when `u0` or `u1` is outside the knot
+    /// range, [`NurbsFailure::Input`] when `n <= 1`, [`NurbsFailure::Numerical`] when an
     /// interpolation quotient is not computable, and with the errors of
     /// [`Curve::eval`].
     pub fn eval_even_spaced_pts(
@@ -422,10 +418,10 @@ impl Curve {
 
         // Check parameters.
         if knt.is_param_out_of_bounds(u0) || knt.is_param_out_of_bounds(u1) {
-            return Err(nlib(OP, NlibCode::Parameter));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Parameter));
         }
         if n <= 1 {
-            return Err(nlib(OP, NlibCode::Input));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Input));
         }
         let ni = sx(n, OP)?;
         let nf = n as f64;
@@ -492,7 +488,7 @@ impl Curve {
                 let num = get(&oldt, k, OP)? - get(&oldt, k - 1, OP)?;
                 let den = get(&s, k, OP)? - get(&s, k - 1, OP)?;
                 if float_op_is_bad(num, den, FloatOp::Division) {
-                    return Err(nlib(OP, NlibCode::Numerical));
+                    return Err(SolidError::nurbs(OP, NurbsFailure::Numerical));
                 }
                 set(
                     &mut t,
@@ -552,7 +548,7 @@ impl Curve {
     /// `normal`: `O' = f1 C'` and `O'' = f1 C'' + f2 C'` with `f1 = 1 + s k d`,
     /// `f2 = s k' d` (`k` the curvature, `k'` its derivative, `s` the side sign).
     ///
-    /// Errors with [`NlibCode::Numerical`] when the curvature quotient is not
+    /// Errors with [`NurbsFailure::Numerical`] when the curvature quotient is not
     /// computable, and with the errors of [`Curve::derivs`] and
     /// [`Curve::curvature_deriv`].
     pub fn planar_offset_derivs(
@@ -573,7 +569,7 @@ impl Curve {
         let mut den = d1.dot(d1).sqrt();
         den = den * den * den;
         if float_op_is_bad(num, den, FloatOp::Division) {
-            return Err(nlib(OP, NlibCode::Numerical));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Numerical));
         }
         let kap = num / den;
         let den = b.dot(normal);
@@ -606,9 +602,9 @@ impl Curve {
     ///   any inserted knots are removed again.
     ///
     /// Errors with [`SolidError::NotConverged`] above [`MAX_DIST_DEPTH`] recursion
-    /// levels, [`NlibCode::Input`] for a curve shorter than the tolerances (relative
-    /// distance or `G2`), [`NlibCode::Geometry`] when no end tangent can be computed,
-    /// [`NlibCode::Weight`] when a rational `Cmax` extension keeps creating weights
+    /// levels, [`NurbsFailure::Input`] for a curve shorter than the tolerances (relative
+    /// distance or `G2`), [`NurbsFailure::Geometry`] when no end tangent can be computed,
+    /// [`NurbsFailure::Weight`] when a rational `Cmax` extension keeps creating weights
     /// outside `[NL_WMIN, NL_WMAX]`, and with the errors of [`Curve::arc_length`],
     /// [`Curve::insert_knot`], [`Curve::remove_knot`] and the knot span search.
     pub fn extend_by_dist_at_depth(
@@ -647,7 +643,7 @@ impl Curve {
             }
             // Upstream `d1 <= NL_MTOL AND d1 <= NL_PTOL` (the second implies the first).
             if d1 <= PTOL {
-                return Err(nlib(OP, NlibCode::Input));
+                return Err(SolidError::nurbs(OP, NurbsFailure::Input));
             }
 
             // Extend long G2 extensions in two steps.
@@ -954,7 +950,7 @@ impl Curve {
                         cmax_new_cpts(&mut qw, &dw, p, nr, u2, true, OP)?;
                         if rat && bad_weight(&qw, 0, p - 1, OP)? {
                             if ii == 4 || u2 <= u1 {
-                                return Err(nlib(OP, NlibCode::Weight));
+                                return Err(SolidError::nurbs(OP, NurbsFailure::Weight));
                             }
                             u2 = 0.5 * (u1 + u2);
                             continue;
@@ -1009,7 +1005,7 @@ impl Curve {
                         cmax_new_cpts(&mut qw, &dw, p, nr, u2, false, OP)?;
                         if rat && bad_weight(&qw, nr + 1, nr + p, OP)? {
                             if ii == 4 || u2 <= u1 {
-                                return Err(nlib(OP, NlibCode::Weight));
+                                return Err(SolidError::nurbs(OP, NurbsFailure::Weight));
                             }
                             u2 = 0.5 * (u1 + u2);
                             continue;
@@ -1064,8 +1060,8 @@ impl Curve {
     /// recursive steps, and `Cmax` uses the exact span length `|par - end knot|`.
     ///
     /// Errors with [`SolidError::NotConverged`] above [`MAX_PARAM_DEPTH`] recursion
-    /// levels, [`NlibCode::Geometry`] when no end tangent can be computed,
-    /// [`NlibCode::Weight`] when a rational `Cmax` extension creates weights outside
+    /// levels, [`NurbsFailure::Geometry`] when no end tangent can be computed,
+    /// [`NurbsFailure::Weight`] when a rational `Cmax` extension creates weights outside
     /// `[NL_WMIN, NL_WMAX]`, `InvalidInput` ([`BARE_FLAG_REASON`]) when the
     /// knot-inserted curve has an unexpected size, and with the errors of
     /// [`Curve::insert_knot`], [`Curve::remove_knot`] and the knot span search.
@@ -1240,7 +1236,8 @@ impl Curve {
                     // Reflection plane at the start point (no fallback tangent).
                     let p1 = get(pw, 0, OP)?.to_euclid();
                     let p2 = get(pw, 1, OP)?.to_euclid();
-                    let (v, _) = normalize(p1 - p2).map_err(|_| nlib(OP, NlibCode::Geometry))?;
+                    let (v, _) = normalize(p1 - p2)
+                        .map_err(|_| SolidError::nurbs(OP, NurbsFailure::Geometry))?;
                     let pln = Plane::new(p1, v);
                     kk = reflect_start(&mut qw, r, span, pln, OP)?;
                     let dd = 2.0 * up0;
@@ -1259,7 +1256,8 @@ impl Curve {
                     // Reflection plane at the end point (no fallback tangent).
                     let p1 = get(pw, n, OP)?.to_euclid();
                     let p2 = get(pw, n - 1, OP)?.to_euclid();
-                    let (v, _) = normalize(p1 - p2).map_err(|_| nlib(OP, NlibCode::Geometry))?;
+                    let (v, _) = normalize(p1 - p2)
+                        .map_err(|_| SolidError::nurbs(OP, NurbsFailure::Geometry))?;
                     let pln = Plane::new(p1, v);
                     reflect_end(&mut qw, r, n, p, span, pln, OP)?;
                     for ii in 0..=p {
@@ -1310,7 +1308,7 @@ impl Curve {
                     }
                     cmax_new_cpts(&mut qw, &dw, p, nr, u2, true, OP)?;
                     if rat && bad_weight(&qw, 0, p - 1, OP)? {
-                        return Err(nlib(OP, NlibCode::Weight));
+                        return Err(SolidError::nurbs(OP, NurbsFailure::Weight));
                     }
 
                     // Remove the original start knot.
@@ -1330,7 +1328,7 @@ impl Curve {
                     }
                     cmax_new_cpts(&mut qw, &dw, p, nr, u2, false, OP)?;
                     if rat && bad_weight(&qw, nr + 1, nr + p, OP)? {
-                        return Err(nlib(OP, NlibCode::Weight));
+                        return Err(SolidError::nurbs(OP, NurbsFailure::Weight));
                     }
 
                     // Remove the original end knot.
@@ -1544,10 +1542,7 @@ mod tests {
         assert!((q.y / q.w - e.y).abs() < 1e-15);
         assert!(matches!(
             c.eval_pt(1.5, Side::Left),
-            Err(SolidError::Nlib {
-                code: NlibCode::Parameter,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Parameter))
         ));
     }
 
@@ -1577,10 +1572,7 @@ mod tests {
         assert!(chords.iter().all(|c| (c - aver).abs() <= 1e-6 * aver));
         assert!(matches!(
             c.eval_even_spaced_pts(0.0, 1.0, 1, 1e-6),
-            Err(SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
     }
 

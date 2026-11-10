@@ -565,7 +565,7 @@ pub fn find_joint(app: &mut SolveApp, id: u64) {
         return;
     }
     let mut cam = app.cam;
-    cam.fit(&bb);
+    cam.fit(&solidcraft_engine::render::view_bounds(&bb));
     app.animate_to(cam);
 }
 
@@ -2008,7 +2008,7 @@ pub(crate) fn joint_chips(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Paint
     }
     if grouped(app, joints.len()) {
         let open = joints_open(app, joints.len(), set);
-        let accent = solidcraft_theme::TabAccent::for_tab(&t, &app.ui.tab);
+        let accent = crate::workspace::tab_accent(&t, &app.ui.tab);
         let (width, clicked) = joint_group_button(ui, p, egui::pos2(x, r.top() + 6.0), joints.len(), open, accent, set);
         if clicked {
             toggle_joints(app, set);

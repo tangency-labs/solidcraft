@@ -60,9 +60,9 @@ fn header_actions(
     if icon.0.is_empty() {
         ui.painter().circle_filled(icon_rect.center(), t.space_3, solidcraft_theme::TabAccent::current(ui.ctx()).ink);
     } else if let Some(ink) = icon.1 {
-        crate::icons::paint_ink(ui.painter(), icon_rect, icon.0, ink);
+        crate::ui_kit::icons::paint_ink(ui.painter(), icon_rect, icon.0, ink);
     } else {
-        crate::icons::paint_icon(ui.painter(), icon_rect, icon.0, 1.0);
+        crate::ui_kit::icons::paint_icon(ui.painter(), icon_rect, icon.0, 1.0);
     }
     let close_rect = egui::Rect::from_center_size(
         egui::pos2((rect.right() - t.space_8 - t.form_close_size / 2.0).max(rect.left()), rect.center().y),
@@ -223,7 +223,7 @@ impl<'a> TopHeader<'a> {
             ui.interact(self.icon, ui.scope_id().with("compute_status"), egui::Sense::hover()).backing_on_hover_text(status);
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
         } else {
-            crate::icons::paint_icon(ui.painter(), self.icon, icon, 1.0);
+            crate::ui_kit::icons::paint_icon(ui.painter(), self.icon, icon, 1.0);
         }
         let heading = crate::ui_kit::type_face::semibold(t.font_heading);
         match state.text.as_deref() {
@@ -247,18 +247,27 @@ pub(crate) enum InspectorAction {
     Remove,
 }
 
-pub(crate) fn inspector_header(ui: &mut Ui, icon: &str, title: &str, kind: &str) -> Option<InspectorAction> {
+/// The host's names for an inspector header's controls: the handle its close button publishes,
+/// and the id and label of the "…" menu's remove entry.
+#[derive(Clone, Copy)]
+pub(crate) struct InspectorNames<'a> {
+    pub close: &'a str,
+    pub remove: &'a str,
+    pub remove_label: &'a str,
+}
+
+pub(crate) fn inspector_header(ui: &mut Ui, icon: &str, title: &str, kind: &str, names: InspectorNames<'_>) -> Option<InspectorAction> {
     let t = Tokens::get();
     let mut action = None;
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), header_height()), egui::Sense::hover());
     let icon_rect = egui::Rect::from_center_size(egui::pos2(rect.left() + (t.space_16 + t.space_4), rect.center().y), vec2(t.space_14, t.space_14));
-    crate::icons::paint_ink(ui.painter(), icon_rect, icon, solidcraft_theme::TabAccent::current(ui.ctx()).ink);
+    crate::ui_kit::icons::paint_ink(ui.painter(), icon_rect, icon, solidcraft_theme::TabAccent::current(ui.ctx()).ink);
     let close_rect = egui::Rect::from_center_size(
         egui::pos2(rect.right() - (t.space_16 + t.space_4), rect.center().y),
         vec2(t.form_close_size, t.form_close_size),
     );
     let close = super::icon_button_at(ui, close_rect, "close", solidcraft_ui_text::tr_label("Close"));
-    solidcraft_ui_registry::publish_target("render:appearance:close", close.rect);
+    solidcraft_ui_registry::publish_target(names.close, close.rect);
     if close.clicked() {
         action = Some(InspectorAction::Close);
     }
@@ -267,7 +276,7 @@ pub(crate) fn inspector_header(ui: &mut Ui, icon: &str, title: &str, kind: &str)
         let mut more_ui = ui.new_child(egui::UiBuilder::new().id_salt("inspector_more").max_rect(more_rect));
         let ui = &mut more_ui;
         super::Menu::text(ui, "…", |ui| {
-            if super::MenuItem::new("render:appearance:remove", solidcraft_ui_text::tr("render.inspector_remove"), "").show(ui).clicked() {
+            if super::MenuItem::new(names.remove, names.remove_label, "").show(ui).clicked() {
                 action = Some(InspectorAction::Remove);
                 ui.close();
             }
@@ -303,6 +312,7 @@ pub(crate) struct Panel<'a> {
     frame: egui::Frame,
     width: f32,
     body_rows: Option<f32>,
+    body_height: Option<f32>,
     ok: &'a str,
     cancel: &'a str,
     reset_scroll: bool,
@@ -321,6 +331,8 @@ pub(crate) struct WorkspaceOptions<'a> {
     pub editor: bool,
     pub enabled: bool,
     pub header_actions: Option<&'a mut dyn FnMut(&mut Ui)>,
+    /// The host's command id of the grip menu's entry that moves the dock to the other side.
+    pub move_command: &'a str,
 }
 
 pub(crate) struct FeatureOptions<'a> {
@@ -542,7 +554,7 @@ impl<'a> Panel<'a> {
                 solidcraft_ui_registry::publish_target(&format!("{}:grip", options.id), grip.rect);
                 super::Menu::context(&grip, |ui| {
                     let (target, label) = if left { ("right", "Move to right side") } else { ("left", "Move to left side") };
-                    let item = super::MenuItem::new("view.render_dock", label, "").show(ui);
+                    let item = super::MenuItem::new(options.move_command, label, "").show(ui);
                     solidcraft_ui_registry::publish_target(&format!("{}:move_side", options.id), item.rect);
                     if item.clicked() {
                         move_side = Some(target);
@@ -632,6 +644,7 @@ impl<'a> Panel<'a> {
             frame,
             width: Tokens::get().form_card_width,
             body_rows: None,
+            body_height: None,
             ok: "OK",
             cancel: "Cancel",
             reset_scroll: false,
@@ -684,6 +697,25 @@ impl<'a> Panel<'a> {
             self.body_rows = Some(rows.clamp(1.0, 32.0));
         }
         self
+    }
+
+    /// Hold the scrolling body at a height the user chose by resizing the card, in points.
+    /// It replaces `body_rows`; short viewports still take precedence.
+    pub(crate) fn body_height(mut self, height: Option<f32>) -> Self {
+        self.body_height = height.filter(|h| h.is_finite() && *h > 0.0);
+        self
+    }
+
+    /// The scrolling body's height on the last frame, for a card the user resizes.
+    pub(crate) fn last_body_height(&self, ctx: &egui::Context) -> Option<f32> {
+        ctx.data(|d| d.get_temp(self.id.with("body_height")))
+    }
+
+    /// The body's viewport on the last frame when its content overflowed it, i.e. when a
+    /// vertical scrollbar is drawn along the viewport's right edge; `None` while nothing scrolls.
+    /// A resize grip on that edge must stay out of this rectangle (#13422 review).
+    pub(crate) fn last_body_scrollbar(&self, ctx: &egui::Context) -> Option<egui::Rect> {
+        ctx.data(|d| d.get_temp(self.id.with("body_scrollbar")))
     }
 
     /// The painted anchor also drives dragging, including the shell's edge clearance.
@@ -794,6 +826,9 @@ impl<'a> Panel<'a> {
         self.feature_impl(ui, heading, disabled, valid, Some(collapsed), body)
     }
 
+    /// The feature card behind `feature` and `feature_collapsible`: title band (and drag target),
+    /// a scrolling body held to the viewport, `body_rows` or `body_height`, then the footer or top
+    /// actions; returns whether the card closed and the action taken.
     fn feature_impl(
         &self,
         ui: &mut Ui,
@@ -829,7 +864,10 @@ impl<'a> Panel<'a> {
                 - self.frame.stroke.width;
             let footer_height = if top.is_some() { 0.0 } else { t.form_footer_height };
             let fields_height = (bottom - ui.cursor().top() - footer_height - ui.spacing().item_spacing.y).max(0.0);
-            let fields_height = self.body_rows.map_or(fields_height, |rows| fields_height.min(rows * t.control_height + t.space_12 * 2.0));
+            let fields_height = match self.body_height {
+                Some(height) => fields_height.min(height),
+                None => self.body_rows.map_or(fields_height, |rows| fields_height.min(rows * t.control_height + t.space_12 * 2.0)),
+            };
             let fields_rect = egui::Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), fields_height));
             let state = if collapsed.as_deref().copied().unwrap_or(false) {
                 solidcraft_ui_registry::publish_count("dialog:body:content_height", 0.0);
@@ -840,8 +878,12 @@ impl<'a> Panel<'a> {
                         // Clear persisted offset, animation and momentum once per opening.
                         egui::scroll_area::State::default().store(ui.ctx(), ui.make_persistent_id(egui::IdSalt::new("feature_fields")));
                     }
-                    let scroll =
-                        egui::ScrollArea::vertical().id_salt("feature_fields").min_scrolled_height(0.0).max_height(fields_height).show(ui, |ui| {
+                    let scroll = egui::ScrollArea::vertical()
+                        .id_salt("feature_fields")
+                        .min_scrolled_height(0.0)
+                        .max_height(fields_height)
+                        .auto_shrink([true, self.body_height.is_none()])
+                        .show(ui, |ui| {
                             if disabled {
                                 ui.disable();
                             }
@@ -855,6 +897,11 @@ impl<'a> Panel<'a> {
                                 .show(ui, body)
                                 .inner
                         });
+                    ui.ctx().data_mut(|d| {
+                        d.insert_temp(self.id.with("body_height"), scroll.inner_rect.height());
+                        let scrolls = scroll.content_size.y > scroll.inner_rect.height() + 0.5;
+                        d.insert_temp(self.id.with("body_scrollbar"), scrolls.then_some(scroll.inner_rect));
+                    });
                     solidcraft_ui_registry::publish_count("dialog:body:content_height", f64::from(scroll.content_size.y));
                     solidcraft_ui_registry::publish_count("dialog:body:scroll_y", f64::from(scroll.state.clamped_offset().y));
                     solidcraft_ui_registry::publish_rect("dialog:body:viewport", scroll.inner_rect);
@@ -1115,7 +1162,7 @@ impl<'a> Window<'a> {
         self.surface(ctx, false, |ui| self.content(ui, valid, body, left))
     }
 
-    pub(super) fn content(&self, ui: &mut Ui, valid: bool, body: impl FnOnce(&mut Ui), left: impl FnOnce(&mut Ui)) -> (bool, super::Action) {
+    pub(crate) fn content(&self, ui: &mut Ui, valid: bool, body: impl FnOnce(&mut Ui), left: impl FnOnce(&mut Ui)) -> (bool, super::Action) {
         super::scope(ui, |ui| {
             let t = Tokens::get();
             ui.spacing_mut().item_spacing.y = 0.0;
@@ -1309,7 +1356,7 @@ pub(crate) struct PageListHooks<'a, S> {
 }
 
 #[cfg(test)]
-pub(super) fn page_list<S>(ui: &mut Ui, selected: &mut usize, pages: &[WindowPage<'_, S>], state: &mut S) {
+pub(crate) fn page_list<S>(ui: &mut Ui, selected: &mut usize, pages: &[WindowPage<'_, S>], state: &mut S) {
     page_list_sized(ui, selected, pages, state, 16.0, egui::Margin::same(Tokens::get().space_16 as i8), None, None, false);
 }
 
@@ -1395,7 +1442,7 @@ fn page_list_sized<S>(
                 let icon =
                     egui::Rect::from_center_size(egui::pos2(rect.left() + t.space_10 + t.space_8, rect.center().y), vec2(t.space_16, t.space_16));
                 match page.icon {
-                    super::Icon::Kit(name) => crate::icons::paint_ink(ui.painter(), icon, name, if on { ink } else { t.form_dim }),
+                    super::Icon::Kit(name) => crate::ui_kit::icons::paint_ink(ui.painter(), icon, name, if on { ink } else { t.form_dim }),
                     host => host.paint(ui.painter(), icon, 1.0),
                 }
                 let text_rect = egui::Rect::from_min_max(egui::pos2(icon.right() + super::NAV_ROW_GAP, rect.top()), rect.right_bottom());

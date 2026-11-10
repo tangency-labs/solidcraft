@@ -1,5 +1,6 @@
 use super::*;
 use crate::prelude::*;
+use solidcore_ops::{label, pcurve, record_check as check};
 use solidcore_record::brep::*;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
@@ -288,7 +289,7 @@ fn every_form_validates_and_round_trips_without_a_kernel() {
         ("lower forms", sheet_with_lower_forms()),
     ] {
         check::validate(&body).unwrap_or_else(|e| panic!("{name}: {e}"));
-        geometry::check(&body).unwrap_or_else(|e| panic!("{name}: {e}"));
+        solidcore_ops::record_check::agreement(&body).unwrap_or_else(|e| panic!("{name}: {e}"));
         let bytes = serde_json::to_vec(&body).unwrap();
         let restored: Brep = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(body, restored, "{name}");
@@ -366,13 +367,13 @@ fn a_pcurve_a_rounding_short_of_its_edge_is_read_at_its_end() {
         *k = short;
     }
     check::validate(&b).unwrap();
-    geometry::check(&b).unwrap();
+    solidcore_ops::record_check::agreement(&b).unwrap();
 }
 
 /// One geometric defect each, structurally valid: every one is refused, naming the record.
 #[test]
 fn geometric_defects_are_refused_by_record() {
-    use geometry::{Problem, Record};
+    use solidcore_ops::record_check::{Problem, Record};
     let off = |what| move |p: &Problem| matches!(p, Problem::Off { what: w, .. } if *w == what);
     let cases: Vec<(&str, Record, Box<dyn Fn(&Problem) -> bool>, Brep)> = vec![
         ("vertex off its curve's start", Record::Edge(0), Box::new(off("curve start misses its start vertex")), {
@@ -462,7 +463,7 @@ fn geometric_defects_are_refused_by_record() {
     ];
     for (name, record, problem, body) in cases {
         check::validate(&body).unwrap_or_else(|e| panic!("{name}: structurally valid: {e}"));
-        let error = geometry::check(&body).err().unwrap_or_else(|| panic!("{name} was accepted"));
+        let error = solidcore_ops::record_check::agreement(&body).err().unwrap_or_else(|| panic!("{name} was accepted"));
         assert_eq!(error.record, record, "{name}: {error}");
         assert!(problem(&error.problem), "{name}: {error}");
     }
@@ -509,7 +510,7 @@ fn hostile_records_never_panic_the_geometry_check() {
     b.faces[0].surface = Surface::PlacedRevolution { profile: circle, origin: [0.; 3], axis: [0., 0., 1.], matrix: identity, forward: true };
     cases.push(b);
     for (i, b) in cases.iter().enumerate() {
-        let checked = std::panic::catch_unwind(|| geometry::check(b));
+        let checked = std::panic::catch_unwind(|| solidcore_ops::record_check::agreement(b));
         assert!(matches!(checked, Ok(Err(_))), "case {i}: {checked:?}");
     }
 }
@@ -744,4 +745,22 @@ fn a_form_on_arcs_of_its_own_is_the_surface_and_does_not_close_around_an_open_fa
     let (whole, _) = form::surface_on_own_arcs(&torus, [[0.3, 1.2], [-FRAC_PI_2, -FRAC_PI_2 + TAU]], tol).unwrap();
     assert_eq!(tube(&whole), (-1.0, 3.0));
     assert!(form::surface_on_own_arcs(&Surface::Plane { origin: [0.; 3], u_axis: [1., 0., 0.], v_axis: [0., 1., 0.] }, label, tol).is_none());
+}
+
+/// A whole turn whose seam lies a rounding short of a quarter line (as a file's seam on its
+/// frame's x axis measures, 2π − 2e-12 or −2e-12) has its form from that quarter line: four
+/// quarters that end where the seam's second use lies (#12760; from the quarter before, the
+/// form ended a quarter short of it and the face's last quarter was off its form).
+#[test]
+fn a_whole_turn_a_rounding_short_of_a_quarter_line_has_its_form_from_it() {
+    let cylinder = Surface::Cylinder { frame: a_frame(), radius: 21.2 };
+    let u_knots = |s: &Surface| match s {
+        Surface::RationalSpline { u_knots, .. } => (u_knots.first().copied().unwrap(), u_knots.last().copied().unwrap()),
+        _ => panic!("not a NURBS: {s:?}"),
+    };
+    for (start, q) in [(TAU - 2e-12, 4.0), (-2.2e-12, 0.0), (TAU + 2e-12, 4.0)] {
+        let (form, domain) = form::surface_within(&cylinder, [[start, start + TAU], [0., 10.]], 2e-5).unwrap();
+        assert_eq!(u_knots(&form), (q, q + 4.0), "seam at {start}");
+        assert_eq!(domain[0], [q, q + 4.0], "seam at {start}");
+    }
 }

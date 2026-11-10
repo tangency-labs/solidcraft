@@ -49,16 +49,22 @@
 //!   indices in use (`n`, `m`, `r`, `s`) are kept apart from the storage, which may be
 //!   larger; every index is checked against the storage, so the out-of-bounds accesses
 //!   upstream allows (e.g. `N_SrfSetSizeIndices` past the arrays) are `InvalidInput`.
+//! - `N_SrfFromCNetAndKnotVectors` takes any net; [`Surface::new`] and
+//!   [`Surface::with_indices`] refuse with `InvalidInput` control points in use that do
+//!   not all share the rationality of `Pw[0][0]`, so no surface they build holds such a
+//!   net. A net mixed later (through [`Surface::cpt_mut`], [`Surface::set_cpts_and_knots`]
+//!   or [`Surface::set_size_indices`] over storage of the other kind) is not refused;
+//!   [`Surface::counts_are_valid`] reports it.
 //! - The NULL surface of `N_SrfInitArrays` (null pointers, degrees `-1`) is `None`
 //!   in an `Option<Surface>`; partly NULL surfaces cannot be expressed. Storage that
 //!   upstream allocates uninitialised (`malloc`) is zero-filled.
 //! - The `NL_STACKS` arguments have no counterpart and allocation cannot fail, so
 //!   [`Surface::compress`], [`Surface::swap_uv`] and [`Surface::average_len`] have no
 //!   memory error path. [`size_arrays`] sizes new storage from caller indices and so
-//!   reserves it fallibly: [`NlibCode::Memory`] (upstream `NL_MEM_ERR`) instead of an
+//!   reserves it fallibly: [`NurbsFailure::Memory`] (upstream `NL_MEM_ERR`) instead of an
 //!   allocation abort, also for a net or knot array above
 //!   [`crate::limits::MAX_ALLOC_BYTES`].
-//! - Out-params become return values; errors are [`SolidError::Nlib`] values with the
+//! - Out-params become return values; errors are [`SolidError::Failed`] values (a [`NurbsFailure`] reason) with the
 //!   upstream `NL_*_ERR` number instead of a flag plus the global `NL_ERROR` record.
 //!   The routine-name argument (`rname`) is dropped.
 //! - Index arguments are `usize`, so `N_SrfGetENet`'s `ku < 0` / `kv < 0` tests cannot
@@ -77,7 +83,7 @@
 
 use std::sync::Arc;
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::kernel::Kernel;
 use crate::limits;
 use crate::math::Vec3;
@@ -95,6 +101,9 @@ pub const WEIGHT_MAX: f64 = 100.0;
 pub const WEIGHT_TOL: f64 = 1.0e-03;
 
 const OP_NEW: &str = "nurbs::srf_basic::Surface::new";
+/// Why [`Surface::new`] and [`Surface::with_indices`] refuse a net whose points mix
+/// weights with the non-rational marker [`NOW`].
+const MIXED_RATIONALITY: &str = "control points mix rational and non-rational";
 const OP_WITH_INDICES: &str = "nurbs::srf_basic::Surface::with_indices";
 const OP_CPT: &str = "nurbs::srf_basic::Surface::cpt";
 const OP_SET_CPTS: &str = "nurbs::srf_basic::Surface::set_cpts_and_knots";
@@ -105,10 +114,6 @@ const OP_SIZED: &str = "nurbs::srf_basic::Surface::is_sized";
 const OP_ENET: &str = "nurbs::srf_basic::Surface::enet";
 const OP_REPARAM: &str = "nurbs::srf_basic::Surface::reparam_to_interval";
 const OP_FLAT: &str = "nurbs::srf_basic::Surface::is_flat_cheap";
-
-fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
-    SolidError::Nlib { operation, code }
-}
 
 fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
     SolidError::InvalidInput { operation, reason }
@@ -220,6 +225,20 @@ fn net_holds(net: &[Vec<CPoint>], n: usize, m: usize) -> bool {
     }
 }
 
+/// `true` when every point of rows `0..=n`, columns `0..=m` shares the rationality
+/// of `Pw[0][0]` (all weighted, or all carrying the non-rational marker [`NOW`]).
+fn rationality_is_uniform(net: &[Vec<CPoint>], n: usize, m: usize) -> bool {
+    let mut points = net
+        .iter()
+        .take(n.saturating_add(1))
+        .flat_map(|row| row.iter().take(m.saturating_add(1)));
+    let Some(first) = points.next() else {
+        return true;
+    };
+    let rational = first.w != NOW;
+    points.all(|pw| (pw.w != NOW) == rational)
+}
+
 /// A zero-filled `(n+1) x (m+1)` net.
 fn zero_net(n: usize, m: usize) -> Vec<Vec<CPoint>> {
     vec![vec![CPoint::default(); m.saturating_add(1)]; n.saturating_add(1)]
@@ -230,8 +249,9 @@ impl Surface {
     /// (`n = net.len() - 1`, `m = net[0].len() - 1`, `r = u.len() - 1`,
     /// `s = v.len() - 1`).
     ///
-    /// Errors with `InvalidInput` for an empty net, rows of different lengths, or an
-    /// empty knot array. Nothing else is checked (see [`Surface::is_valid`]).
+    /// Errors with `InvalidInput` for an empty net, rows of different lengths, an empty
+    /// knot array, or control points that do not all share the rationality of
+    /// `Pw[0][0]`. Nothing else is checked (see [`Surface::is_valid`]).
     pub fn new(
         net: Vec<Vec<CPoint>>,
         p: usize,
@@ -258,6 +278,9 @@ impl Surface {
             .len()
             .checked_sub(1)
             .ok_or_else(|| invalid(OP_NEW, "empty v knot vector"))?;
+        if !rationality_is_uniform(&net, n, m) {
+            return Err(invalid(OP_NEW, MIXED_RATIONALITY));
+        }
         Ok(Self {
             net: Arc::new(net),
             n,
@@ -275,7 +298,8 @@ impl Surface {
     /// `r + 1` / `s + 1` knots of `u` / `v` (upstream `N_SrfFromCNetAndKnotVectors`
     /// with a net and knot vectors whose indices may be below their storage).
     ///
-    /// Errors with `InvalidInput` when the storage does not hold the indices.
+    /// Errors with `InvalidInput` when the storage does not hold the indices, or when
+    /// the control points in use do not all share the rationality of `Pw[0][0]`.
     pub fn with_indices(
         net: Vec<Vec<CPoint>>,
         u: Vec<f64>,
@@ -288,6 +312,9 @@ impl Surface {
         }
         if u.len() <= r || v.len() <= s {
             return Err(invalid(OP_WITH_INDICES, "knot array smaller than (r, s)"));
+        }
+        if !rationality_is_uniform(&net, n, m) {
+            return Err(invalid(OP_WITH_INDICES, MIXED_RATIONALITY));
         }
         Ok(Self {
             net: Arc::new(net),
@@ -619,7 +646,7 @@ impl Surface {
     /// Checks `n + p + 1 == r` and `m + q + 1 == s`, the degree limit and that all
     /// control points share the rationality of `Pw[0][0]` (`N_SrfCountsAreValid`).
     ///
-    /// Errors with [`NlibCode::Surface`] (`NL_SUR_ERR`) or [`NlibCode::Degree`]
+    /// Errors with [`NurbsFailure::SurfaceDefinition`] (`NL_SUR_ERR`) or [`NurbsFailure::DegreeTooHigh`]
     /// (`NL_DEG_ERR`, degree above [`MAX_DEGREE`]).
     pub fn counts_are_valid(&self) -> Result<()> {
         let (n, m, p, q, r, s) = (self.n, self.m, self.p, self.q, self.r, self.s);
@@ -628,21 +655,27 @@ impl Surface {
         if n.checked_add(p).and_then(|k| k.checked_add(1)) != Some(r)
             || m.checked_add(q).and_then(|k| k.checked_add(1)) != Some(s)
         {
-            return Err(nlib(OP_COUNTS, NlibCode::Surface));
+            return Err(SolidError::nurbs(
+                OP_COUNTS,
+                NurbsFailure::SurfaceDefinition,
+            ));
         }
         if p > MAX_DEGREE || q > MAX_DEGREE {
-            return Err(nlib(OP_COUNTS, NlibCode::Degree));
+            return Err(SolidError::nurbs(
+                OP_COUNTS,
+                NurbsFailure::DegreeTooHigh {
+                    given: p.max(q),
+                    max: MAX_DEGREE,
+                },
+            ));
         }
 
         // Check for consistency.
-        let oldrat = self.cpt(0, 0)?.w != NOW;
-        for row in self.rows() {
-            for pw in row {
-                let newrat = pw.w != NOW;
-                if newrat != oldrat {
-                    return Err(nlib(OP_COUNTS, NlibCode::Surface));
-                }
-            }
+        if !rationality_is_uniform(&self.net, n, m) {
+            return Err(SolidError::nurbs(
+                OP_COUNTS,
+                NurbsFailure::SurfaceDefinition,
+            ));
         }
         Ok(())
     }
@@ -650,14 +683,14 @@ impl Surface {
     /// For a rational surface, checks that every weight is in
     /// `[WEIGHT_MIN, WEIGHT_MAX]` (`N_SrfWeightsAreValid`; NaN weights pass).
     ///
-    /// Errors with [`NlibCode::Weight`] (`NL_WEI_ERR`).
+    /// Errors with [`NurbsFailure::Weight`] (`NL_WEI_ERR`).
     pub fn weights_are_valid(&self) -> Result<()> {
         if self.is_rational() {
             for row in self.rows() {
                 for pw in row {
                     let w = pw.w;
                     if w < WEIGHT_MIN || w > WEIGHT_MAX {
-                        return Err(nlib(OP_WEIGHTS, NlibCode::Weight));
+                        return Err(SolidError::nurbs(OP_WEIGHTS, NurbsFailure::Weight));
                     }
                 }
             }
@@ -670,8 +703,8 @@ impl Surface {
     /// Matches pinned C++ parity; see [`Surface::is_valid_with_kernel`] for the
     /// opt-in `WR-24` knot-vector span check.
     ///
-    /// Errors with the first failing check's code ([`NlibCode::Surface`],
-    /// [`NlibCode::Degree`], [`NlibCode::Weight`] or [`NlibCode::Knot`]).
+    /// Errors with the first failing check's code ([`NurbsFailure::SurfaceDefinition`],
+    /// [`NurbsFailure::Degree`], [`NurbsFailure::Weight`] or [`NurbsFailure::Knots`]).
     pub fn is_valid(&self) -> Result<()> {
         self.counts_are_valid()?;
         self.weights_are_valid()?;
@@ -685,8 +718,8 @@ impl Surface {
     /// [`crate::kernel::UpstreamFixes::knot_vector_valid_requires_span`] setting
     /// (`N_SrfIsValid`, `WR-24`).
     ///
-    /// Errors with the first failing check's code ([`NlibCode::Surface`],
-    /// [`NlibCode::Degree`], [`NlibCode::Weight`] or [`NlibCode::Knot`]).
+    /// Errors with the first failing check's code ([`NurbsFailure::SurfaceDefinition`],
+    /// [`NurbsFailure::Degree`], [`NurbsFailure::Weight`] or [`NurbsFailure::Knots`]).
     pub fn is_valid_with_kernel(&self, k: &Kernel) -> Result<()> {
         self.counts_are_valid()?;
         self.weights_are_valid()?;
@@ -699,10 +732,10 @@ impl Surface {
     /// Checks that the indices in use are at least `(np, mp, rk, sk)`
     /// (`N_SrfIsSized`).
     ///
-    /// Errors with [`NlibCode::Storage`] (`NL_STO_ERR`).
+    /// Errors with [`NurbsFailure::Storage`] (`NL_STO_ERR`).
     pub fn is_sized(&self, np: usize, mp: usize, rk: usize, sk: usize) -> Result<()> {
         if self.n < np || self.m < mp || self.r < rk || self.s < sk {
-            return Err(nlib(OP_SIZED, NlibCode::Storage));
+            return Err(SolidError::nurbs(OP_SIZED, NurbsFailure::Storage));
         }
         Ok(())
     }
@@ -820,21 +853,21 @@ impl Surface {
     /// Euclidean images of `Pw[ku..=lu][kv..=lv]`, as `P[i-ku][j-kv]`
     /// (`N_SrfGetENet`).
     ///
-    /// Errors with [`NlibCode::Index`] (`NL_IND_ERR`) when `ku > lu`, `lu > n`,
+    /// Errors with [`NurbsFailure::Index`] (`NL_IND_ERR`) when `ku > lu`, `lu > n`,
     /// `kv > lv` or `lv > m`.
     pub fn enet(&self, ku: usize, lu: usize, kv: usize, lv: usize) -> Result<Vec<Vec<Vec3>>> {
         if ku > lu || lu > self.n {
-            return Err(nlib(OP_ENET, NlibCode::Index));
+            return Err(SolidError::nurbs(OP_ENET, NurbsFailure::Index));
         }
         if kv > lv || lv > self.m {
-            return Err(nlib(OP_ENET, NlibCode::Index));
+            return Err(SolidError::nurbs(OP_ENET, NurbsFailure::Index));
         }
         (ku..=lu)
             .map(|i| {
                 let row = self.row(i)?;
                 let part = row
                     .get(kv..=lv)
-                    .ok_or_else(|| nlib(OP_ENET, NlibCode::Index))?;
+                    .ok_or_else(|| SolidError::nurbs(OP_ENET, NurbsFailure::Index))?;
                 Ok(part.iter().map(|pw| pw.to_euclid()).collect())
             })
             .collect()
@@ -916,7 +949,7 @@ impl Surface {
     /// closed in u is not flat and should be split in v ([`Direction::V`]); closed in
     /// v gives [`Direction::U`].
     ///
-    /// Errors with [`NlibCode::Geometry`] when the plane normal cannot be normalised.
+    /// Errors with [`NurbsFailure::Geometry`] when the plane normal cannot be normalised.
     pub fn is_flat_cheap(&self, eps: f64) -> Result<Flatness> {
         // Check if surface is closed.
         if self.is_closed(Direction::U) {
@@ -954,8 +987,8 @@ impl Surface {
                 dir: split,
             });
         }
-        let [pa, pb, pc, pd] =
-            plane_pt_normal_to_implicit(p, nrm).map_err(|_| nlib(OP_FLAT, NlibCode::Geometry))?;
+        let [pa, pb, pc, pd] = plane_pt_normal_to_implicit(p, nrm)
+            .map_err(|_| SolidError::nurbs(OP_FLAT, NurbsFailure::Geometry))?;
 
         // Check flatness.
         let mut flat = true;
@@ -1063,11 +1096,11 @@ pub fn make_rat_compatible(surfaces: &mut [Surface]) {
     }
 }
 
-/// `len_minus_1 + 1` copies of `v`, or [`NlibCode::Memory`] (upstream `NL_MEM_ERR`
+/// `len_minus_1 + 1` copies of `v`, or [`NurbsFailure::Memory`] (upstream `NL_MEM_ERR`
 /// from a failed allocation) when the storage cannot be reserved, would take more
 /// than [`limits::MAX_ALLOC_BYTES`] or the length overflows.
 fn try_filled<T: Clone>(len_minus_1: usize, v: T) -> Result<Vec<T>> {
-    let mem = || SolidError::nlib(OP_SIZE_ARRAYS, NlibCode::Memory);
+    let mem = || SolidError::nurbs(OP_SIZE_ARRAYS, NurbsFailure::Memory);
     let len = len_minus_1.checked_add(1).ok_or_else(mem)?;
     limits::try_filled(len, v).ok_or_else(mem)
 }
@@ -1085,7 +1118,7 @@ const OP_SIZE_ARRAYS: &str = "nurbs::srf_basic::size_arrays";
 ///
 /// # Errors
 ///
-/// [`NlibCode::Memory`] (upstream's failed `N_Malloc`, `NL_MEM_ERR`) when the new
+/// [`NurbsFailure::Memory`] (upstream's failed `N_Malloc`, `NL_MEM_ERR`) when the new
 /// storage cannot be allocated or an array of it would take more than
 /// [`limits::MAX_ALLOC_BYTES`]; the slot is then unchanged.
 pub fn size_arrays(slot: &mut Option<Surface>, idx: SurfaceIndices) -> Result<&mut Surface> {
@@ -1097,14 +1130,14 @@ pub fn size_arrays(slot: &mut Option<Surface>, idx: SurfaceIndices) -> Result<&m
             .zip(m.checked_add(1))
             .and_then(|(rows, cols)| rows.checked_mul(cols));
         if !points.is_some_and(limits::fits::<CPoint>) {
-            return Err(SolidError::nlib(OP_SIZE_ARRAYS, NlibCode::Memory));
+            return Err(SolidError::nurbs(OP_SIZE_ARRAYS, NurbsFailure::Memory));
         }
         let row = try_filled(m, CPoint::default())?;
         let mut net = try_filled(n, Vec::new())?;
         for r in &mut net {
             let mut copy = Vec::new();
             copy.try_reserve_exact(row.len())
-                .map_err(|_| SolidError::nlib(OP_SIZE_ARRAYS, NlibCode::Memory))?;
+                .map_err(|_| SolidError::nurbs(OP_SIZE_ARRAYS, NurbsFailure::Memory))?;
             copy.extend_from_slice(&row);
             *r = copy;
         }
@@ -1194,6 +1227,48 @@ mod tests {
     }
 
     #[test]
+    fn mixed_rationality_is_refused_where_built() {
+        let refused = |r: Result<Surface>| matches!(r, Err(SolidError::InvalidInput { reason, .. }) if reason == MIXED_RATIONALITY);
+        // A biquadratic 3 x 3 net whose weights are all `w`.
+        let net = |w: f64| -> Vec<Vec<CPoint>> {
+            (0..3)
+                .map(|i| {
+                    (0..3)
+                        .map(|j| CPoint::new(f64::from(i), f64::from(j), 0.0, w))
+                        .collect()
+                })
+                .collect()
+        };
+        let knots = || vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        let idx = SurfaceIndices {
+            n: 2,
+            m: 2,
+            p: 2,
+            q: 2,
+            r: 5,
+            s: 5,
+        };
+        // One weighted point among non-rational ones, and one non-rational point among
+        // weighted ones: at the first point, inside the net and on an edge.
+        for (base, odd) in [(NOW, 2.0), (1.0, NOW)] {
+            for (i, j) in [(0, 0), (1, 1), (2, 1)] {
+                let mut pw = net(base);
+                pw[i][j].w = odd;
+                assert!(refused(Surface::new(pw.clone(), 2, 2, knots(), knots())));
+                assert!(refused(Surface::with_indices(pw, knots(), knots(), idx)));
+            }
+        }
+        // Storage past the indices in use is not part of the surface.
+        let mut pw = net(NOW);
+        for row in &mut pw {
+            row.push(CPoint::new(0.0, 3.0, 0.0, 1.0));
+        }
+        pw.push(vec![CPoint::new(3.0, 0.0, 0.0, 1.0); 4]);
+        let s = Surface::with_indices(pw, knots(), knots(), idx).unwrap();
+        assert!(s.counts_are_valid().is_ok());
+    }
+
+    #[test]
     fn counts_and_weights() {
         let mut s = bilinear();
         s.set_size_indices(SurfaceIndices {
@@ -1207,19 +1282,13 @@ mod tests {
         .unwrap();
         assert!(matches!(
             s.counts_are_valid(),
-            Err(SolidError::Nlib {
-                code: NlibCode::Surface,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::SurfaceDefinition))
         ));
         let mut s = bilinear();
         s.cpt_mut(1, 1).unwrap().w = 2.0;
         assert!(matches!(
             s.counts_are_valid(),
-            Err(SolidError::Nlib {
-                code: NlibCode::Surface,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::SurfaceDefinition))
         ));
         let mut s = bilinear();
         s.non_rat_to_rat();
@@ -1228,10 +1297,7 @@ mod tests {
         s.cpt_mut(0, 1).unwrap().w = 1.0e-4;
         assert!(matches!(
             s.weights_are_valid(),
-            Err(SolidError::Nlib {
-                code: NlibCode::Weight,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Weight))
         ));
     }
 
@@ -1327,10 +1393,7 @@ mod tests {
         assert_eq!(e[1][0], Vec3::new(1.0, 1.0, 3.0));
         assert!(matches!(
             s.enet(0, 9, 0, 0),
-            Err(SolidError::Nlib {
-                code: NlibCode::Index,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Index))
         ));
     }
 }

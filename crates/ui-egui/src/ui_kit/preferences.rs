@@ -4,7 +4,7 @@ pub(crate) use super::preferences_figure_data::{paint_assembly_move, paint_direc
 use super::{metrics::dimension, text::paint_text};
 use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Color32, FontId, Pos2, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
-use solidcraft_theme::{ColorVision, Tokens};
+use solidcraft_theme::Tokens;
 
 pub(super) const PAGE_SCROLL_GUTTER: &str = "sc_page_scroll_gutter";
 
@@ -16,7 +16,7 @@ fn blur_meter_width(t: &Tokens) -> f32 {
     t.space_4 * 5.0 + t.space_2 * 4.0
 }
 
-fn blur_cost_meter(ui: &mut Ui, radius: f32) {
+fn blur_cost_meter(ui: &mut Ui, radius: f32, tip: &str) {
     let t = Tokens::get();
     let (rect, response) = ui.allocate_exact_size(vec2(blur_meter_width(&t), t.control_height), Sense::hover());
     let filled = blur_cost_bars(radius);
@@ -33,16 +33,16 @@ fn blur_cost_meter(ui: &mut Ui, radius: f32) {
         }
     }
     solidcraft_ui_registry::publish_rect("prefs:blur_cost", rect);
-    response.backing_on_hover_text(solidcraft_ui_text::tr("prefs.blur_cost"));
+    response.backing_on_hover_text(tip);
 }
 
 /// Theme problems stay inline when space permits, with stacked text and wrapping actions otherwise.
-pub(crate) fn theme_option_notice(ui: &mut Ui, id: &str, text: &str, can_undo: bool) -> (bool, bool) {
+/// `dismiss_label` is the host's name for the action that hides the notice.
+pub(crate) fn theme_option_notice(ui: &mut Ui, id: &str, text: &str, dismiss_label: &str, can_undo: bool) -> (bool, bool) {
     let mut undo = false;
     let mut dismiss = false;
     let response = ui.push_id(("theme_notice", id, text), |ui| {
         let t = Tokens::get();
-        let dismiss_label = solidcraft_ui_text::tr("prefs.theme_notice_dismiss");
         let actions = super::ContentWidth::button(ui, dismiss_label)
             + t.space_8
             + if can_undo { super::ContentWidth::button(ui, solidcraft_ui_text::tr("ui.undo")) + t.space_8 } else { 0.0 };
@@ -81,6 +81,20 @@ pub(crate) fn theme_option_notice(ui: &mut Ui, id: &str, text: &str, can_undo: b
     (undo, dismiss)
 }
 
+/// The host's text for [`theme_options_list`].
+pub(crate) struct ThemeOptionsText<'a> {
+    /// The note beside the theme's name for its number of options.
+    pub count: fn(usize) -> String,
+    /// The title of the fold holding the options past the first rows, for their number.
+    pub more: fn(usize) -> String,
+    /// Restores the theme's own values.
+    pub reset: &'a str,
+    /// A blur radius of 0, as its readout shows it.
+    pub blur_off: &'a str,
+    /// The blur cost meter's hover text.
+    pub blur_cost: &'a str,
+}
+
 /// Presentation data is resolved by the caller; controls never distinguish standard/custom ids.
 pub(crate) struct ThemeOptionRow<'a> {
     pub definition: &'a crate::theme_files::OptionDef,
@@ -104,7 +118,12 @@ fn theme_option_slider_minimum(t: &Tokens) -> f32 {
 }
 
 /// Measure the same fonts, gutters and control sizes used by `theme_option_control`.
-fn theme_option_metrics(ui: &Ui, option: &ThemeOptionRow<'_>, value: Option<&crate::theme_files::OptionValue>) -> ThemeOptionMetrics {
+fn theme_option_metrics(
+    ui: &Ui,
+    option: &ThemeOptionRow<'_>,
+    value: Option<&crate::theme_files::OptionValue>,
+    text: &ThemeOptionsText<'_>,
+) -> ThemeOptionMetrics {
     use crate::theme_files::{OptionKind, OptionValue};
     let t = Tokens::get();
     let label = super::ContentWidth::label(ui, &option.label) + t.space_4;
@@ -122,7 +141,7 @@ fn theme_option_metrics(ui: &Ui, option: &ThemeOptionRow<'_>, value: Option<&cra
                 .map(|n| super::ContentWidth::label(ui, &format!("{n}{}", unit.as_deref().unwrap_or(""))))
                 .fold(0.0, f32::max);
             if option.blur {
-                readout = readout.max(super::ContentWidth::label(ui, solidcraft_ui_text::tr("prefs.blur_off")));
+                readout = readout.max(super::ContentWidth::label(ui, text.blur_off));
             }
             theme_option_slider_minimum(&t) + t.space_8 + readout + if option.blur { blur_meter_width(&t) + t.space_8 } else { 0.0 }
         }
@@ -153,6 +172,7 @@ pub(crate) fn theme_options_list(
     name: &str,
     options: &[ThemeOptionRow<'_>],
     values: &mut std::collections::BTreeMap<String, crate::theme_files::OptionValue>,
+    text: &ThemeOptionsText<'_>,
 ) -> bool {
     use super::preferences_layout::{Entry, Width, choice_width, layout};
     use crate::theme_files::OptionKind;
@@ -179,7 +199,7 @@ pub(crate) fn theme_options_list(
         }
         cells.push(cell);
     }
-    let metrics: Vec<_> = options.iter().map(|option| theme_option_metrics(ui, option, values.get(&option.definition.id))).collect();
+    let metrics: Vec<_> = options.iter().map(|option| theme_option_metrics(ui, option, values.get(&option.definition.id), text)).collect();
     let entries: Vec<_> = cells
         .iter()
         .map(|cell| {
@@ -206,15 +226,9 @@ pub(crate) fn theme_options_list(
     let mut reset = false;
     let header = ui.horizontal_wrapped(|ui| {
         super::text(ui, name, super::Text::Inline);
-        super::settings_inline_note(
-            ui,
-            &solidcraft_ui_text::format(
-                if options.len() == 1 { "prefs.appearance.option_count_one" } else { "prefs.appearance.option_count" },
-                &[("count", &options.len().to_string())],
-            ),
-        );
+        super::settings_inline_note(ui, &(text.count)(options.len()));
         if options.iter().any(|option| values.get(&option.definition.id).is_some_and(|v| *v != option.definition.default_value())) {
-            let response = super::text_button(ui, solidcraft_ui_text::tr("prefs.theme_options_reset"), true);
+            let response = super::text_button(ui, text.reset, true);
             solidcraft_ui_registry::publish_target("prefs:theme_options_reset", response.rect);
             reset = response.clicked();
         }
@@ -256,7 +270,7 @@ pub(crate) fn theme_options_list(
                                         vec2(option_width.max(0.0), t.control_height),
                                         egui::Layout::left_to_right(egui::Align::Center),
                                         |ui| {
-                                            theme_option_control(ui, option, options, values, metrics, cell.len() == 1);
+                                            theme_option_control(ui, option, options, values, metrics, cell.len() == 1, text);
                                         },
                                     );
                                 }
@@ -276,7 +290,7 @@ pub(crate) fn theme_options_list(
     ui.push_id(("theme_options", theme_id), |ui| {
         draw_rows(ui, &plan.rows);
         if plan.more_count > 0 {
-            let title = solidcraft_ui_text::format("prefs.theme_options_more", &[("count", &plan.more_count.to_string())]);
+            let title = (text.more)(plan.more_count);
             super::section(ui, "more", &title, false, |ui| draw_rows(ui, &plan.more));
             if let Some(rect) = solidcraft_ui_registry::rect_of(&format!("dialog:section:{title}")) {
                 solidcraft_ui_registry::publish_target("prefs:theme_options_more", rect);
@@ -293,6 +307,7 @@ fn theme_option_control(
     values: &mut std::collections::BTreeMap<String, crate::theme_files::OptionValue>,
     metrics: &ThemeOptionMetrics,
     fill_range: bool,
+    text: &ThemeOptionsText<'_>,
 ) {
     use crate::theme_files::{OptionKind, OptionValue};
     let t = Tokens::get();
@@ -344,7 +359,7 @@ fn theme_option_control(
                                     egui::Layout::left_to_right(egui::Align::Center),
                                     |ui| {
                                         let label = if option.blur && *n == 0.0 {
-                                            solidcraft_ui_text::tr("prefs.blur_off").to_owned()
+                                            text.blur_off.to_owned()
                                         } else {
                                             format!("{}{}", *n, unit.as_deref().unwrap_or(""))
                                         };
@@ -353,7 +368,7 @@ fn theme_option_control(
                                 );
                                 solidcraft_ui_registry::publish_rect(&format!("prefs:theme_option_readout:{}", def.id), readout.response.rect);
                                 if option.blur {
-                                    blur_cost_meter(ui, *n);
+                                    blur_cost_meter(ui, *n, text.blur_cost);
                                 }
                             }
                             (OptionKind::Choice { values, .. }, OptionValue::Choice(selected)) => {
@@ -734,7 +749,7 @@ pub(crate) fn option_card(ui: &mut Ui, label: &str, note: Option<&str>, selected
     if enabled { response.on_hover_cursor(egui::CursorIcon::PointingHand) } else { response }
 }
 
-pub(super) fn centred_text(p: &egui::Painter, rect: Rect, label: &str, font: FontId, ink: Color32) {
+pub(crate) fn centred_text(p: &egui::Painter, rect: Rect, label: &str, font: FontId, ink: Color32) {
     centred_text_rows(p, rect, label, font, ink, 1);
 }
 
@@ -843,60 +858,10 @@ pub(crate) struct LayoutPreview {
     pub dialog_left: bool,
 }
 
-/// One live shell specimen follows workspace, toolbar, panel and dialog placement choices.
-pub(crate) fn layout_preview(ui: &mut Ui, state: LayoutPreview) {
-    super::preferences_figures::paint_layout(ui, state);
-}
-
-pub(crate) fn scale_specimen(ui: &mut Ui, scale: f32) {
-    let t = Tokens::get();
-    let scale = if scale.is_finite() { scale.clamp(0.5, 2.5) / ui.ctx().zoom_factor().max(0.5) } else { 1.0 };
-    let (r, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.space_24 * 4.0 + t.space_16), Sense::hover());
-    t.container_rect(ui.painter(), r, t.radius_lg, t.control_fill, t.dialog_rule);
-    let p = ui.painter().with_clip_rect(r.shrink(t.space_8));
-    let font = FontId::proportional(t.font_label * scale);
-    p.text(
-        r.right_top() + vec2(-t.space_8, t.space_8),
-        egui::Align2::RIGHT_TOP,
-        solidcraft_ui_text::tr("prefs.live_preview").to_uppercase(),
-        FontId::proportional(t.font_micro),
-        t.form_dim,
-    );
-    let origin = r.min + vec2(t.space_10, t.space_24);
-    let line_h = t.control_height * scale;
-    let distance = solidcraft_ui_text::tr_label("Distance");
-    let label = p.layout_no_wrap(distance.to_owned(), font.clone(), t.form_dim);
-    p.galley(origin + vec2(0.0, (line_h - label.size().y) / 2.0), label.clone(), t.form_dim);
-    let field = Rect::from_min_size(origin + vec2(label.size().x + t.space_8 * scale, 0.0), vec2((t.form_label_width + t.space_6) * scale, line_h));
-    p.rect(field, t.control_radius, t.input_fill(), t.control_border_stroke(t.control_border), egui::StrokeKind::Inside);
-    if let Some(bevel) = t.borders.bevel {
-        bevel.paint(&p, field, t.control_radius, true, true);
-    }
-    centred_text(&p, field, "12.50", FontId::monospace(t.font_body * scale), t.form_ink);
-    let button = Rect::from_min_size(field.right_top() + vec2(t.space_8 * scale, 0.0), vec2(t.space_24 * 1.5 * scale, line_h));
-    p.rect_filled(button, t.control_radius, if t.borders.bevel.is_some() { t.control_fill } else { t.form_primary });
-    if let Some(bevel) = t.borders.bevel {
-        bevel.paint(&p, button, t.control_radius, false, true);
-    }
-    centred_text(
-        &p,
-        button,
-        solidcraft_ui_text::tr_label("OK"),
-        crate::ui_kit::type_face::semibold(t.font_label * scale),
-        if t.borders.bevel.is_some() { t.form_ink } else { t.on_accent },
-    );
-    let feature = Rect::from_min_size(origin + vec2(0.0, line_h + t.space_8 * scale), vec2(r.width() - t.space_10 * 2.0, line_h));
-    p.rect_filled(feature, t.control_radius, t.selected_bg);
-    let icon = Rect::from_center_size(pos2(feature.left() + t.space_16 * scale, feature.center().y), vec2(t.space_16, t.space_16) * scale);
-    crate::icons::paint_icon(&p, icon, "extrude", 1.0);
-    p.text(
-        pos2(icon.right() + t.space_6 * scale, feature.center().y),
-        egui::Align2::LEFT_CENTER,
-        "Extrude1",
-        crate::ui_kit::type_face::semibold(t.font_label * scale),
-        t.selected_ink,
-    );
-    p.text(feature.right_center() - vec2(t.space_8, 0.0), egui::Align2::RIGHT_CENTER, "12.5 mm", font, t.selected_ink);
+/// One live shell specimen follows workspace, toolbar, panel and dialog placement choices;
+/// `note` is the host's hover text for it.
+pub(crate) fn layout_preview(ui: &mut Ui, state: LayoutPreview, note: &str) {
+    super::preferences_figures::paint_layout(ui, state, note);
 }
 
 /// Font picker and auxiliary actions share one line, with the specimen below.
@@ -973,36 +938,6 @@ pub(crate) fn settings_segments(ui: &mut Ui, label: &str, selected: &mut usize, 
         .inner
     })
     .inner
-}
-
-pub(crate) fn status_palette_sample(ui: &mut Ui, mode: ColorVision) {
-    if super::settings_search::suppress_chrome(ui) {
-        return;
-    }
-    let t = Tokens::get();
-    let colours = Tokens::themed(solidcraft_theme::is_dark(), mode);
-    ui.horizontal_wrapped(|ui| {
-        for (label, icon, fill) in [
-            ("prefs.status_selected", "finish", colours.form_primary),
-            ("prefs.status_warning", "warning", colours.warning),
-            ("prefs.status_error", "close", colours.error),
-            ("prefs.status_done", "finish", colours.form_success),
-        ] {
-            let ink = if solidcraft_theme::contrast_ratio(t.on_accent, fill) >= 4.5 { t.on_accent } else { t.tab_on_fill_dark };
-            let label = solidcraft_ui_text::tr(label);
-            let galley = ui.painter().layout_no_wrap(label.to_owned(), crate::ui_kit::type_face::semibold(t.font_small), ink);
-            let (r, _) = ui.allocate_exact_size(vec2(galley.size().x + t.space_24 + t.space_16, t.space_24), Sense::hover());
-            solidcraft_ui_registry::publish_rect(&format!("prefs:status_sample:{label}"), r);
-            ui.painter().rect_filled(r, t.radius_xl, fill);
-            crate::icons::paint_ink(
-                ui.painter(),
-                Rect::from_center_size(pos2(r.left() + t.space_12, r.center().y), vec2(t.space_12, t.space_12)),
-                icon,
-                ink,
-            );
-            ui.painter().galley(pos2(r.left() + t.space_24, r.center().y - galley.size().y / 2.0), galley, ink);
-        }
-    });
 }
 
 /// The names under the Colour vision sample (message ids).

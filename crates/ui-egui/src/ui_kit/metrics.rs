@@ -14,7 +14,7 @@ pub(crate) fn header_height() -> f32 {
 }
 
 /// Sanitize an input dimension. Tokens: `none`.
-pub(super) fn dimension(value: f32) -> f32 {
+pub(crate) fn dimension(value: f32) -> f32 {
     if value.is_finite() { value.max(0.0) } else { 0.0 }
 }
 
@@ -142,22 +142,5 @@ pub(super) fn label_gap(ui: &Ui, width: f32) -> f32 {
         t.space_10
     } else {
         t.space_8
-    }
-}
-
-#[cfg(test)]
-mod label_tests {
-    use super::indented_label;
-
-    /// `label_width` and `sized_row` share `indented_label`, so a label is translated once. German
-    /// `Profiles` is `Profile`, which is itself an English key that would translate again to
-    /// `Profil`; the row must show `Profile`, not the second translation.
-    #[test]
-    fn a_label_is_translated_once() {
-        crate::i18n::install();
-        let _de = solidcraft_ui_text::scope("de");
-        assert_eq!(indented_label("Profiles"), "Profile");
-        assert_eq!(indented_label("  Profiles"), "  Profile");
-        assert_eq!(indented_label("Profile"), "Profil");
     }
 }

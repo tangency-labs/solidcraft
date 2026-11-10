@@ -174,6 +174,47 @@ fn child() {
             let r = s.execute("diagnostics.crash_test", &json!({"mode": "kernel"}));
             assert!(matches!(&r, Err(crate::EngineError::Internal(id, _)) if id == "diagnostics.crash_test"), "{r:?}");
         }
+        // A Rayon worker panics while this command is inside the kernel guard. The hook must not
+        // write an unrecovered report at once; the command fails with the kernel's internal error
+        // and the report is recovered, with this command and the design.
+        "worker" => {
+            let r = s.execute("diagnostics.crash_test", &json!({"mode": "worker"}));
+            assert!(
+                matches!(&r, Err(crate::EngineError::Internal(id, msg)) if id == "diagnostics.crash_test" && msg.contains("on a worker")),
+                "{r:?}"
+            );
+            assert_eq!(s.doc.features.len(), 1, "the design is unchanged");
+        }
+        // Same worker, but the panic is not caught by the kernel guard. It stays a command panic.
+        "worker_raw" => {
+            let r = s.execute("diagnostics.crash_test", &json!({"mode": "worker_raw"}));
+            assert!(
+                matches!(&r, Err(crate::EngineError::Internal(id, msg)) if id == "diagnostics.crash_test" && msg.contains("a worker panic in a command")),
+                "{r:?}"
+            );
+            assert_eq!(s.doc.features.len(), 1, "the design is unchanged");
+        }
+        // Between commands: a worker panic is reported at once, as a panic on any other thread is.
+        "worker_idle" => {
+            let r = solidcraft_kernel::crash_test_worker_panic("rayon worker outside a command");
+            assert!(matches!(&r, Err(solidcraft_kernel::KernelError::Internal(_))), "{r:?}");
+        }
+        // The kernel's own parallel path: an item panics inside `guard` on a pool worker while a
+        // command is open (`map_with_local_pools` runs it on its one-thread pool). Nothing is
+        // written until the command ends; then one recovered report with the command's design.
+        "guarded_worker" => {
+            let before = s.doc.clone();
+            let params = json!({"case": "guarded_worker"});
+            command_begin(&s, "test.guarded_worker", &params);
+            let scope = Scope::enter();
+            let r = solidcraft_kernel::map_with_local_pools(&[0], 1, |_| -> solidcraft_kernel::Result<()> {
+                std::panic::panic_any(String::from("a guarded panic on a pool worker"))
+            });
+            drop(scope);
+            assert!(matches!(r.as_slice(), [Err(solidcraft_kernel::KernelError::Internal(_))]), "{r:?}");
+            assert!(list(&STATE.get().unwrap().dir).is_empty(), "the worker's panic waits for the command to end");
+            command_done(true, false, &before, &s.doc, "test.guarded_worker", &params, Err("the item failed".into()));
+        }
         // `thread_dies`: the panic ends the app, as one on the window's thread does.
         "thread" | "thread_dies" => {
             let r = std::thread::Builder::new()
@@ -312,6 +353,82 @@ fn a_kernel_panic_is_reported_as_recovered() {
     assert_eq!(s.kind, "kernel_panic_recovered");
     assert!(s.replayable);
     assert!(v["message"].as_str().unwrap().contains("in the kernel"), "{v}");
+    let _ = fs::remove_dir_all(&d);
+}
+
+/// A panic on a Rayon worker inside the kernel guard, during a command (child case `worker`):
+/// one `kernel_panic_recovered` report with the command, its design and its replay.
+#[test]
+fn a_worker_panic_during_a_command_is_recovered_with_the_command() {
+    let d = fresh_dir("worker");
+    let (_, ok) = run_child(&d, "worker");
+    assert!(ok, "the worker panic was caught");
+    let (s, v) = only_report(&d);
+    assert_eq!(s.kind, "kernel_panic_recovered");
+    assert_eq!(s.command.as_deref(), Some("diagnostics.crash_test"));
+    assert!(s.replayable);
+    assert_eq!(v["thread"], "solidcraft-kernel-0");
+    assert!(v["message"].as_str().unwrap().contains("on a worker"), "{v}");
+    assert_eq!(v["base"], "the design as it was when the command started");
+    let design = solidcraft_io::read_design(&fs::read(v["design_path"].as_str().unwrap()).unwrap()).unwrap();
+    assert_eq!(design.features.len(), 1);
+    let replay: Value = serde_json::from_slice(&fs::read(v["replay_path"].as_str().unwrap()).unwrap()).unwrap();
+    assert_eq!(replay["commands"], json!([{"command": "diagnostics.crash_test", "params": {"mode": "worker"}}]));
+    let _ = fs::remove_dir_all(&d);
+}
+
+/// The same worker panic resumed outside the guard (child case `worker_raw`): one
+/// `command_panic` with the command and its design, not a recovered kernel panic.
+#[test]
+fn a_worker_panic_outside_the_kernel_guard_is_a_command_panic() {
+    let d = fresh_dir("worker-raw");
+    let (_, ok) = run_child(&d, "worker_raw");
+    assert!(ok, "the worker panic was caught by the command");
+    let (s, v) = only_report(&d);
+    assert_eq!(s.kind, "command_panic");
+    assert_eq!(s.command.as_deref(), Some("diagnostics.crash_test"));
+    assert!(s.replayable);
+    assert_eq!(v["thread"], "solidcraft-kernel-0");
+    assert!(v["message"].as_str().unwrap().contains("a worker panic in a command"), "{v}");
+    assert_eq!(v["base"], "the design as it was when the command started");
+    let _ = fs::remove_dir_all(&d);
+}
+
+/// A worker panic while no command is open (child case `worker_idle`): written at once as a
+/// `panic`, with no command and the journal's base.
+#[test]
+fn a_worker_panic_outside_a_command_is_reported_at_once() {
+    let d = fresh_dir("worker-idle");
+    let (_, ok) = run_child(&d, "worker_idle");
+    assert!(ok, "the worker panic was caught");
+    let (s, v) = only_report(&d);
+    assert_eq!(s.kind, "panic");
+    assert_eq!(s.command, None, "no command was running");
+    assert_eq!(v["thread"], "solidcraft-kernel-0");
+    assert_eq!(v["message"], "rayon worker outside a command");
+    assert_eq!(v["base"], "new");
+    assert_eq!(v["recent_commands"][0]["command"], "solid.box");
+    let _ = fs::remove_dir_all(&d);
+}
+
+/// A panic inside `guard` on a kernel pool worker (`map_with_local_pools`, child case
+/// `guarded_worker`): nothing is written until the command ends, then one recovered report.
+#[test]
+fn a_guarded_panic_on_a_pool_worker_is_reported_when_the_command_ends() {
+    let d = fresh_dir("guarded-worker");
+    let (_, ok) = run_child(&d, "guarded_worker");
+    assert!(ok, "the worker panic was caught");
+    let (s, v) = only_report(&d);
+    assert_eq!(s.kind, "kernel_panic_recovered");
+    assert_eq!(s.command.as_deref(), Some("test.guarded_worker"));
+    assert!(s.replayable);
+    assert_ne!(v["thread"], "crash::tests::child", "it ran on the pool's worker");
+    assert_eq!(v["message"], "a guarded panic on a pool worker");
+    assert_eq!(v["base"], "the design as it was when the command started");
+    let design = solidcraft_io::read_design(&fs::read(v["design_path"].as_str().unwrap()).unwrap()).unwrap();
+    assert_eq!(design.features.len(), 1);
+    let replay: Value = serde_json::from_slice(&fs::read(v["replay_path"].as_str().unwrap()).unwrap()).unwrap();
+    assert_eq!(replay["commands"], json!([{"command": "test.guarded_worker", "params": {"case": "guarded_worker"}}]));
     let _ = fs::remove_dir_all(&d);
 }
 

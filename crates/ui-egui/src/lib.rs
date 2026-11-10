@@ -57,6 +57,8 @@ pub mod dialogs_view_dxf;
 pub mod dim_view;
 #[cfg(test)]
 mod dimension_create_ui_tests;
+#[cfg(test)]
+mod dock_dialog_ui_tests;
 pub mod documents;
 pub mod drag_extrude;
 pub mod drag_snap;
@@ -104,6 +106,8 @@ pub mod issue_report;
 pub mod joint_drag;
 pub(crate) mod joint_handles;
 pub mod keymap;
+#[cfg(test)]
+mod kit_gallery_tests;
 mod length_input;
 mod linked_source;
 #[cfg(test)]
@@ -198,6 +202,7 @@ mod nav_bar;
 pub(crate) mod navigation;
 pub mod navigation_bar;
 mod navigation_bar_view;
+pub mod navigation_slots;
 pub use navigation::WebWheelGestures;
 pub mod network_prompt;
 pub mod op_auto;
@@ -341,7 +346,7 @@ use std::sync::mpsc::Receiver;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use solidcraft_engine::Session;
-use solidcraft_engine::render::{Camera, CameraAnim, StandardView};
+use solidcraft_viewport::{Camera, CameraAnim, StandardView};
 
 pub(crate) use control::ControlRequest;
 
@@ -399,7 +404,7 @@ pub struct UiState {
     /// A soft shadow on the ground under the model (seen from above).
     pub ground_shadow: bool,
     /// The world's up axis (Z or Y; #3): the camera, axis view, home view and ground follow it.
-    pub up_axis: solidcraft_engine::render::UpAxis,
+    pub up_axis: solidcraft_viewport::UpAxis,
     /// The agent cursor: shown, speed, follow camera (#35).
     pub agent_cursor: agent_cursor::Settings,
     /// The running tool's icon rides beside the pointer in the viewport (View settings; off by
@@ -849,6 +854,12 @@ impl SolveApp {
     pub fn new(mut session: Session, services: Services) -> Self {
         // The app's catalogs, once per process; later calls find them installed.
         i18n::install();
+        // The app's icons, likewise, before the first frame.
+        icon_svg::install();
+        // The tab table theme files are read against, likewise.
+        workspace::install_tabs();
+        // The navigation slots stored bars are read against, likewise.
+        navigation_slots::install();
         #[cfg(test)]
         let image_host = Some(solidcraft_engine::render::job::CpuHost::cooperative());
         #[cfg(not(test))]
@@ -1054,14 +1065,19 @@ impl SolveApp {
     fn set_wgpu_targets(&mut self, rs: &egui_wgpu::RenderState, scene: crate::gpu::GpuTarget, window: crate::gpu::GpuTarget) {
         self.blur.install(rs, scene.depth.is_some() && window.depth.is_none() && window.samples == 1);
         #[allow(unused_mut)] // Only native hosts can wait for the startup readback.
-        let (mut installed, stats, tess_ready) = gpu::install(rs, scene, window, !self.cpu_meshing);
+        #[cfg(not(target_arch = "wasm32"))]
+        let force_cpu = solidcraft_gpu::env::force_cpu_tessellation();
+        #[cfg(target_arch = "wasm32")]
+        let force_cpu = false;
+        let (mut installed, stats, tess_ready) =
+            solidcraft_viewport_egui::install(rs, scene, window, !self.cpu_meshing, force_cpu, gpu::report_gpu_error);
         #[cfg(not(target_arch = "wasm32"))]
         if scene.depth.is_some() && window.depth.is_none() && window.samples == 1 {
             let mut renderer = rs.renderer.write();
             if let Some(res) = renderer.callback_resources.get_mut::<gpu::Renderer>() {
                 match res.check_msaa(&rs.device, &rs.queue) {
-                    Ok(solidcraft_gpu::view::MsaaCheck::Passed) => {}
-                    Ok(solidcraft_gpu::view::MsaaCheck::Fallback) => {
+                    Ok(solidcraft_viewport_gpu::view::MsaaCheck::Passed) => {}
+                    Ok(solidcraft_viewport_gpu::view::MsaaCheck::Fallback) => {
                         installed.samples = 1;
                         self.msaa_compatibility = true;
                         eprintln!(
@@ -1069,7 +1085,7 @@ impl SolveApp {
                             scene.samples
                         );
                     }
-                    Ok(solidcraft_gpu::view::MsaaCheck::FailedAtOne) => {
+                    Ok(solidcraft_viewport_gpu::view::MsaaCheck::FailedAtOne) => {
                         eprintln!("SolidCraft graphics: anti-aliasing check also failed at 1x; keeping {}x", scene.samples);
                     }
                     Err(error) => eprintln!("SolidCraft graphics: anti-aliasing check error; keeping {}x: {error}", scene.samples),
@@ -1727,16 +1743,23 @@ impl SolveApp {
         self.pick_open(|app, path| {
             let Some(path) = path else { return };
             if solidcraft_engine::io::is_design_path(&path) {
-                // Picked in the file dialog: its server is the user's choice.
-                let hosts: Vec<String> = solidcraft_engine::io::vfs::network_host(&path).into_iter().collect();
-                let inserted = solidcraft_engine::io::vfs::allowing_hosts(&hosts, || app.run("component.insert_design", json!({ "path": path })));
-                if inserted.is_ok() {
-                    app.fit_view();
-                }
+                app.insert_design_async(&path, None);
             } else {
                 app.insert_path_async(&path);
             }
         });
+    }
+
+    /// Insert the saved design at `path` as a linked component, read beside the window as Insert
+    /// STEP is: a large design rebuilds for a while, the window keeps drawing and Cancel changes
+    /// nothing (#11593). The user chose the file, so its network server is allowed. `note`: the
+    /// status line once it is in.
+    pub(crate) fn insert_design_async(&mut self, path: &str, note: Option<String>) {
+        let mut request = file_load::Request::new(path, file_load::Kind::InsertDesign);
+        request.allow_hosts = solidcraft_engine::io::vfs::network_host(path).into_iter().collect();
+        request.note = note;
+        // A request that could not be queued has said why in the status line.
+        let _ = file_load::begin_request(self, request);
     }
 
     /// A command that needs one choice from a short list: its menu under the button that started it
@@ -2859,8 +2882,13 @@ impl SolveApp {
     }
 
     /// A dropped CAD, mesh, drawing or point cloud (PLY, XYZ, PTS) file joins a design that has
-    /// features or point clouds; otherwise it opens.
+    /// features or point clouds; otherwise it opens. A dropped PNG or JPEG is a canvas to place,
+    /// not a design to open: it starts the Canvas tool with that image chosen (#13926).
     pub fn drop_path(&mut self, path: &str) {
+        if sketch_tools::is_canvas_image(path) {
+            sketch_tools::start_image_placement(self, "canvas.insert", path.to_string());
+            return;
+        }
         let import = solidcraft_engine::io::is_step_path(path)
             || solidcraft_engine::io::is_mesh_path(path)
             || solidcraft_engine::io::is_point_cloud_path(path)
@@ -2875,7 +2903,7 @@ impl SolveApp {
     /// Frame the model at once (programmatic use; the toolbar animates).
     /// Make `up` the world's up axis: the camera turns to the same standard view in that world
     /// (home) and frames the model.
-    pub fn set_up_axis(&mut self, up: solidcraft_engine::render::UpAxis) {
+    pub fn set_up_axis(&mut self, up: solidcraft_viewport::UpAxis) {
         self.ui.up_axis = up;
         self.cam_anim = None;
         self.cam.up = up;
@@ -3002,7 +3030,7 @@ impl SolveApp {
         // Framed at the angle the view draws with, keeping the camera's own.
         let previous = cam;
         cam.fov = self.view_fov();
-        cam.fit(bounds);
+        cam.fit(&solidcraft_engine::render::view_bounds(bounds));
         cam.fov = previous.fov;
         if cam.is_valid() { cam } else { previous }
     }

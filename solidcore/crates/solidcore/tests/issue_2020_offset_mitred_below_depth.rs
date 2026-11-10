@@ -223,7 +223,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.boolean_vertex_by_best_crossing = true;
     k.fixes.boolean_wire_edge_keeps_faceuse_shell = true;
     k.fixes.box_face_failures_propagate = true;
-    k.fixes.brep_area_between_solid_and_void = true;
     k.fixes.bspline_check_min_radius = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
     k.fixes.check_loop_projected_seam_ends = true;
@@ -288,7 +287,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.fillet_torus_span_from_start_section = true;
     k.fixes.fillet_trace_from_tangent_point_toward_next = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.fillet_trace_rejects_short_step = true;
     k.fixes.fillet_trim_inside_by_best_dot = true;
     k.fixes.fillet_trim_status = true;
     k.fixes.fillet_variable_span_follows_fillet = true;
@@ -319,7 +317,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.offset_analytic_mate_edges = true;
     k.fixes.offset_clip_right_side_out = true;
     k.fixes.offset_closed_curve_trim_arc = true;
-    k.fixes.offset_closes_loop_gaps = true;
     k.fixes.offset_collapsed_rounds_mated = true;
     k.fixes.offset_excess_faces_after_merge = true;
     k.fixes.offset_extended_edges_mated = true;
@@ -351,7 +348,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.revolve_holed_profile_void = true;
     k.fixes.revolve_nested_shells_as_cavities = true;
     k.fixes.revolve_splits_curves_on_axis = true;
-    k.fixes.seam_point_solutions_are_one = true;
     k.fixes.sheet_sweep_joins_profile_wires = true;
     k.fixes.shell_edges_on_analytics_exact = true;
     k.fixes.shell_empty_cavity_fails = true;

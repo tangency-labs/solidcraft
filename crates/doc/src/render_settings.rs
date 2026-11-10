@@ -4,7 +4,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
-use solidcraft_render::{BackendId, Camera, RenderFormat, RenderLimits, RenderMode, UpAxis};
+use solidcraft_render::{BackendId, RenderFormat, RenderLimits, RenderMode};
+use solidcraft_viewport::{Camera, UpAxis};
 
 pub use crate::render_job::{CpuJob, GpuJob, RenderJob, SkyEnvironment};
 use crate::{DocError, Result};
@@ -592,7 +593,7 @@ mod tests {
             exposure_ev: 2.5,
             mode: RenderMode::Final,
             format: RenderFormat::Exr,
-            camera: Camera { up: solidcraft_render::UpAxis::Y, ..Default::default() },
+            camera: Camera { up: solidcraft_viewport::UpAxis::Y, ..Default::default() },
             ..Default::default()
         };
         Arc::make_mut(&mut loaded.render).setups.insert("Studio".into(), setup);
