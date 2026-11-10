@@ -158,7 +158,7 @@ job (§5.1).
 | refusal | when | what it names | checked | file |
 |---|---|---|---|---|
 | `OffsetFailure::Collapses` | a NURB-based face's least radius on the displaced side is within the input's tolerance of \|d\| | the face, the distance and the radius | always, before the face's offset is built | `offset_executive/p2.rs`, `refuse_singular_offset`; `sheets.rs`, `proved_singular` |
-| `OffsetFailure::Folds` | the offset of a NURB-based face is not certified regular over its parameter box | the face, the distance and `largest`, the least radius on the displaced side | always but in the local operation, after the collapse test | `p2.rs`, `refuse_folding_offset`; `sheets.rs`, `certify_regular` |
+| `OffsetFailure::Folds`, `NotCertified` | the offset of a NURB-based face is not certified regular over its parameter box; `NotCertified` when no radius on the displaced side bounds the wall | the face, the distance and, for `Folds`, `largest`, the least radius on the displaced side | always but in the local operation, after the collapse test | `p2.rs`, `refuse_folding_offset`; `sheets.rs`, `certify_regular` |
 | `DistanceUnresolved`, `ToleranceUnresolved` | \|d\| below the input's tolerance; an approximation tolerance in (0, 1e-12] | the distance and the tolerance | always | `p2.rs`, `check_resolvable` |
 | `OffsetFailure::WallsTouch`, `LoopsCross` | an offset face's loops touch or cross | the face | per their flags | `error/offset.rs` |
 | `OffsetFailure::EdgeVanishes` | a vertex moves to or past its edge's end and the edge cannot be squeezed out | the original edge, or the face when available | during loop-gap closure | `offset_executive/step_gaps.rs` |
@@ -340,8 +340,9 @@ A reviewer checks each of these on a change to offsets or shells.
    offsets a net where a definition exists; the ledger `blend_definition_ledger/offset.md` only
    shrinks.
 2. **Exact or certified.** An analytic offset is exact; a net standing for S + d n is certified at
-   every parameter (`certified_offset`), never fitted and checked at samples. The fitted paths in
-   §3 and §3.2 are known exceptions, not precedents.
+   every parameter (`certified_offset`), never fitted and checked at samples. The revolved
+   generator's fit (§3) and the round offset as its net (§3.2) are known exceptions, not
+   precedents.
 3. **No folded body.** A face whose offset folds or collapses is refused before its offset is
    built, naming the face, the distance and the radius; it is never built and trimmed.
 4. **Typed refusals.** A refusal should name its entity and size in `OffsetFailure` and pass

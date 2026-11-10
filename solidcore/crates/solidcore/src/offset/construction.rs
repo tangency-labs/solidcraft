@@ -11,10 +11,13 @@
 //! | [`sheets`]        | none (S1; replaces `N_SrfOffset` and the fold check) |
 //!
 //! Built so far: S1. The stages after it (S2 to S5) are not built; until they are,
-//! S1 runs inside today's executive, for every offset but the local operation: B-spline
-//! faces whose offset folds are refused naming the largest wall that works
-//! ([`crate::error::offset::OffsetFailure::Folds`]), and every implicit offset surface is
-//! replaced by its certified B-spline instead of `N_SrfOffset`'s sampled one.
+//! S1 runs inside today's executive. For every offset but the local operation, B-spline
+//! faces whose offset is not proved regular are refused, naming the largest wall that works
+//! where a radius bounds it ([`crate::error::offset::OffsetFailure::Folds`],
+//! [`crate::error::offset::OffsetFailure::NotCertified`]). Where the shell and the thicken
+//! replace an implicit offset surface before their boolean or stitch, the replacement is its
+//! certified B-spline instead of `N_SrfOffset`'s sampled one; the plain offset keeps its
+//! implicit offset surfaces.
 //!
 //! Deviations: not upstream.
 
