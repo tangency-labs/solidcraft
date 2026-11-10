@@ -219,6 +219,19 @@ pub fn in_old_form(name: &str) -> bool {
     name.contains(":blend:") || name.contains(":inner:")
 }
 
+/// The name as it is written now: a name written in the older form reads as the name it was, and
+/// is written as today's name (`F5:blend(A|B)` for `F5:blend:A|B`). A name already written in
+/// today's form is kept as it is, and a name that does not read is kept as it is too.
+pub fn written_now(name: &str) -> std::borrow::Cow<'_, str> {
+    if !in_old_form(name) {
+        return std::borrow::Cow::Borrowed(name);
+    }
+    match FaceName::parse(name) {
+        Ok(f) => std::borrow::Cow::Owned(f.to_string()),
+        Err(_) => std::borrow::Cow::Borrowed(name),
+    }
+}
+
 /// Whether `current` (today's name) is the same face as `wanted` (a stored name, read).
 ///
 /// Only the names that hold a name inside a name can differ in text between the two forms, so

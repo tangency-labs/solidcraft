@@ -363,20 +363,53 @@ pub fn blend_seams(b: &ModelBody) -> Vec<BlendSeam> {
     out
 }
 
-/// The two faces of the edge a blend face replaced (`F<feature>:blend:<face>|<face>`), `None` for
-/// any other name (its copy's instance is not part of them). A fillet or chamfer face is named
-/// after the edge it rounds, so its name is what tells the two faces it now separates instead of
-/// that edge. The mark may sit inside another role (`F5:inner:F4:blend:A|B`).
+/// The two faces of the edge a blend face replaced (`F<feature>:blend(<face>|<face>)`, or the
+/// older form's `F<feature>:blend:<face>|<face>`), `None` for any other name (its copy's
+/// instance is not part of them). A fillet or chamfer face is named after the edge it rounds, so
+/// its name is what tells the two faces it now separates instead of that edge. The mark may sit
+/// inside another role (`F5:inner(F4:blend(A|B))`).
 pub(crate) fn blend_sides(name: &str) -> Option<(&str, &str)> {
-    const MARK: &str = ":blend:";
     let (name, _) = split_instance(name);
-    let at = name.find(MARK)?;
+    let (at, edge) = blend_mark(name)?;
     // The role right before the mark is the feature that made the blend (`F4`).
-    let feature = name.get(..at)?.rsplit(':').next()?;
+    let feature = name.get(..at)?.rsplit([':', '(']).next()?;
     if !feature.strip_prefix('F').is_some_and(|k| !k.is_empty() && k.bytes().all(|b| b.is_ascii_digit())) {
         return None;
     }
-    edge_sides(name.get(at + MARK.len()..)?)
+    edge_sides(edge)
+}
+
+/// The blend face a name names, whole again since: the blend of the edge's sides without their
+/// qualifiers (`F3:blend(side|start)` for `F3:blend(side#[start]|start)`), in the name's own form.
+pub(crate) fn blend_stem(name: &str) -> Option<String> {
+    let (name, _) = split_instance(name);
+    let (a, b) = blend_sides(name)?;
+    let sides = format!("{}|{}", strip_piece(a), strip_piece(b));
+    let (at, _) = blend_mark(name)?;
+    let prefix = name.get(..at)?;
+    if name.get(at..)?.starts_with(":blend(") { Some(format!("{prefix}:blend({sides})")) } else { Some(format!("{prefix}:blend:{sides}")) }
+}
+
+/// The edge a blend face's name holds, and where its mark is: inside its parentheses in today's
+/// form (`F5:blend(A|B)`), or after the mark of the older form (`F5:blend:A|B`). The outermost
+/// mark is the one that names the face.
+fn blend_mark(name: &str) -> Option<(usize, &str)> {
+    const PARENS: &str = ":blend(";
+    const COLON: &str = ":blend:";
+    let (at, parens) = match (name.find(PARENS), name.find(COLON)) {
+        (Some(a), Some(b)) if a < b => (a, true),
+        (Some(a), None) => (a, true),
+        (Some(_), Some(b)) => (b, false),
+        (None, Some(b)) => (b, false),
+        (None, None) => return None,
+    };
+    if parens {
+        let rest = name.get(at + PARENS.len()..)?;
+        let close = matching_close(rest)?;
+        Some((at, rest.get(..close)?))
+    } else {
+        Some((at, name.get(at + COLON.len()..)?))
+    }
 }
 
 /// The two faces an edge name `<face A>|<face B>` joins. A blend face's own name holds the edge it

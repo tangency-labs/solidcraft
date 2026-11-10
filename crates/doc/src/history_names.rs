@@ -555,15 +555,18 @@ pub(crate) fn matches(names: &Names, index: usize, name: &str) -> Option<Match> 
 /// [`matches`], with the wanted name already read: a name of many faces is compared with each of
 /// them, and reading it once keeps that cheap.
 pub(crate) fn matches_read(names: &Names, index: usize, name: &str, wanted: Option<crate::persistent_name::FaceName>) -> Option<Match> {
-    let current = names.faces.get(index)?;
+    let face = names.faces.get(index)?;
     let info = names.info.get(index);
-    if current == name || wanted.as_ref().is_some_and(|w| crate::persistent_name::same_face_read(current, w)) {
+    if face == name || wanted.as_ref().is_some_and(|w| crate::persistent_name::same_face_read(face, w)) {
         return Some(Match::Exact);
     }
     // A name in the older form reads as the name it was, and is compared in today's form: the
-    // checks below compare names as they are written now.
+    // checks below compare names as they are written now. The face's own name is written in
+    // today's form too, unless it too was written in the older one.
     let canonical = wanted.as_ref().filter(|_| crate::persistent_name::in_old_form(name)).map(|w| w.to_string());
     let name = canonical.as_deref().unwrap_or(name);
+    let today = crate::persistent_name::written_now(face);
+    let current: &str = &today;
     // Another name of this very face; of a piece of it, when the face was split since.
     if info.is_some_and(|i| i.synonyms.iter().any(|a| a == name)) {
         return Some(if crate::naming::strip_piece(current) == current { Match::Exact } else { Match::Piece });
@@ -595,10 +598,9 @@ pub(crate) fn matches_read(names: &Names, index: usize, name: &str, wanted: Opti
     }
     // A piece of a blend face: a blend is named after the edge it replaced, so the qualifier that
     // tells its pieces apart sits *inside* that name, on one of the edge's sides
-    // (`F4:blend:F2:side:c1#[F2:side:l3]|F2:side:l3`), and the face whole again since is the blend
+    // (`F4:blend(F2:side:c1#[F2:side:l3]|F2:side:l3)`), and the face whole again since is the blend
     // of the sides without their qualifiers (#4325).
-    if name.contains(":blend:")
-        && let Some((stem, around)) = blend_piece(name)
+    if let Some((stem, around)) = blend_piece(name)
         && (current == stem || crate::naming::parent_piece(current) == Some(stem.as_str()))
         && info.is_some_and(|i| around.iter().all(|f| i.bounds.contains(*f) || i.bounds.iter().any(|bound| rounds_the_edge(bound, &stem, f))))
     {
@@ -622,9 +624,7 @@ fn blend_piece(name: &str) -> Option<(String, Vec<&str>)> {
     if around.is_empty() {
         return None;
     }
-    let mark = name.find(":blend:")?;
-    let stem = format!("{}:blend:{}|{}", name.get(..mark)?, crate::naming::strip_piece(a), crate::naming::strip_piece(b));
-    Some((stem, around))
+    Some((crate::naming::blend_stem(name)?, around))
 }
 
 /// Whether the face named `bound` (one of the faces around face `here`) is a blend that rounds the

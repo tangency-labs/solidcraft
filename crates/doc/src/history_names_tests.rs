@@ -243,6 +243,20 @@ fn a_piece_of_a_blend_face_finds_it_once_it_is_one_face_again() {
     assert_eq!(matches(&copied, 0, "F3:blend:side#[start@F9.1]|start@F9.2"), None, "another copy");
 }
 
+/// A piece of a blend face is found by the name the blend is written in today as well: the
+/// qualifier that tells the piece apart sits inside the blend's name, on one of the edge's sides,
+/// and the face whole again since is the blend of the sides without their qualifiers.
+#[test]
+fn a_piece_of_a_blend_face_is_found_by_the_name_the_blend_is_written_in_today() {
+    let faces = named(&["F3:blend(side|start)", "side", "start"]);
+    let names = qualify(faces, &[(0, 1), (0, 2)]);
+    assert_eq!(names.faces[0], "F3:blend(side|start)");
+    assert_eq!(matches(&names, 0, "F3:blend(side#[start]|start)"), Some(Match::Piece));
+    assert_eq!(matches(&names, 0, "F3:blend(side#[side]|start)"), Some(Match::Piece));
+    // A face the blend no longer touches, inside its name: not its piece.
+    assert_eq!(matches(&names, 0, "F3:blend(side#[top]|start)"), None);
+}
+
 /// Two pieces of one face that a blend tells apart from the same face both answer to the stored
 /// name: one through the face itself, one through the blend that replaced its edge. The lookup
 /// chooses neither (#4325).
