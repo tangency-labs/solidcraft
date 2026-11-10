@@ -180,7 +180,7 @@ mod tests {
                             Vec3::new(x.sqrt() * phi.cos(), x.sqrt() * phi.sin(), (1.0 - x).sqrt())
                         } else {
                             let r = if component >= 1.0 - coat { 0.3_f64 } else { 0.5 };
-                            let h = crate::glass_model::visible_normal(v, Vec3::Z, r * r, [x, radical_inverse(i, 3)]).unwrap();
+                            let h = crate::surface::visible_normal(v, Vec3::Z, r * r, [x, radical_inverse(i, 3)]).unwrap();
                             h * (2.0 * v.dot(h)) - v
                         };
                         above += u32::from(l.z > 0.0);
