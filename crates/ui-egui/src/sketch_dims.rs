@@ -94,7 +94,7 @@ fn is_dimension(t: &Tool, label: &str) -> bool {
                 | ("sketch.construction_line.parallel" | "sketch.construction_line.horizontal" | "sketch.construction_line.vertical", "Offset")
         ) || label == "Length";
     }
-    !matches!(label, "Sides" | "Rho") && !(t.cmd == "sketch.rectangle.rounded" && label == "Radius")
+    !(matches!(label, "Sides" | "Rho") || t.cmd == "sketch.rectangle.rounded" && label == "Radius")
 }
 
 fn dir_or_x(v: Vec2) -> Vec2 {
@@ -514,7 +514,7 @@ pub fn sync(t: &mut Tool) {
         }
         t.dims_stage = t.pts.len();
         // Before the first click, the box waits for a digit: letters stay tool shortcuts.
-        t.dims_focus = !t.dims.is_empty() && !(construction && t.pts.is_empty());
+        t.dims_focus = !(t.dims.is_empty() || construction && t.pts.is_empty());
     }
 }
 

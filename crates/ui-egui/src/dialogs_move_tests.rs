@@ -810,3 +810,122 @@ fn a_click_on_an_arrow_puts_the_box_on_its_axis() {
         assert_eq!((x.as_str(), y.as_str(), z.as_str()), ("0 mm", "0 mm", "0 mm"), "a click moves nothing");
     }
 }
+
+/// A 60 × 40 × 10 plate with a Ø8 hole at (45, 20), Point to Point picking From.
+fn holed_plate_picking_from() -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 60, "width": 40, "height": 10})).unwrap();
+    h.app.run("solid.cylinder", json!({"radius": 4, "height": 12, "base": [45, 20, -1], "operation": "cut"})).unwrap();
+    h.app.cam.distance = 160.0;
+    h.settle();
+    h.app.start("solid.move");
+    let d = h.app.dialog.as_mut().unwrap();
+    d.kind = kind(POINT_TO_POINT, &h.app.session.doc);
+    d.inputs = inputs(POINT_TO_POINT);
+    d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    d.active = 1;
+    h
+}
+
+/// Hovering a hole's rim wakes its centre (#5912): a click there, in the hole's empty middle,
+/// picks the centre exactly.
+#[test]
+fn hovering_a_rim_wakes_its_centre_for_a_click() {
+    let mut h = holed_plate_picking_from();
+    h.step(&json!({ "move": { "world": [49, 20, 10] } })).unwrap();
+    let centre = Vec3::new(45.0, 20.0, 10.0);
+    assert!(h.app.viewport.woken.points.iter().any(|p| p.at.dist(centre) < 1e-6), "{:?}", h.app.viewport.woken);
+    h.step(&json!({ "click": { "world": [45, 20, 10] } })).unwrap();
+    let from = &h.app.dialog.as_ref().unwrap().inputs[1].items;
+    assert!(matches!(from.as_slice(), [Sel::Vertex { body, point }] if body == "Body1" && point.dist(centre) < 1e-6), "{from:?}");
+}
+
+/// Hovering another edge puts the woken points to sleep and wakes its own: a straight edge's
+/// middle is picked from further away than the edge itself is.
+#[test]
+fn another_edge_wakes_its_own_points_and_the_rest_sleep() {
+    let mut h = holed_plate_picking_from();
+    h.step(&json!({ "move": { "world": [49, 20, 10] } })).unwrap();
+    h.step(&json!({ "move": { "world": [20, 0, 10] } })).unwrap();
+    let woken: Vec<Vec3> = h.app.viewport.woken.points.iter().map(|p| p.at).collect();
+    assert!(!woken.iter().any(|p| p.dist(Vec3::new(45.0, 20.0, 10.0)) < 1e-6), "the rim's centre sleeps: {woken:?}");
+    let middle = Vec3::new(30.0, 0.0, 10.0);
+    assert!(woken.iter().any(|p| p.dist(middle) < 1e-6), "{woken:?}");
+    // 12 points below the middle: past an edge's reach, within a woken point's.
+    let at = h.call("ui.at", json!({ "world": [30, 0, 10] }))["result"].clone();
+    let below = json!([at[0].as_f64().unwrap(), at[1].as_f64().unwrap() + 12.0]);
+    h.step(&json!({ "click": below })).unwrap();
+    let from = &h.app.dialog.as_ref().unwrap().inputs[1].items;
+    assert!(matches!(from.as_slice(), [Sel::Vertex { point, .. }] if point.dist(middle) < 1e-6), "{from:?}");
+}
+
+/// An input that doesn't take hover pick points (Rotate's axis) wakes none.
+#[test]
+fn an_axis_input_wakes_no_points() {
+    let mut h = holed_plate_picking_from();
+    let d = h.app.dialog.as_mut().unwrap();
+    d.kind = kind(ROTATE, &h.app.session.doc);
+    d.inputs = inputs(ROTATE);
+    d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    d.active = 1;
+    h.step(&json!({ "move": { "world": [49, 20, 10] } })).unwrap();
+    assert!(h.app.viewport.woken.points.is_empty(), "{:?}", h.app.viewport.woken);
+}
+
+/// Hover references follow the Move preview's accumulated placement, and cannot survive a
+/// change to that placement or to the model beneath the cursor.
+#[test]
+fn woken_points_follow_the_move_and_expire_when_its_context_changes() {
+    let mut h = translated_box();
+    let mut d = h.app.dialog.take().unwrap();
+    switch_type(&h.app, &mut d, POINT_TO_POINT);
+    d.active = 1;
+    h.app.dialog = Some(d);
+    let edge = Sel::Edge { body: "Body1".into(), index: 0, point: Vec3::ZERO };
+    let original = solidcraft_engine::snap::snap_points(&h.app.session, &edge);
+    assert!(!original.is_empty());
+    let (_, placement) = chained(&h.app).expect("the earlier translation is previewed");
+    h.app.viewport.hover = Some(crate::viewport::Hit::Edge { body: "Body1".into(), index: 0, mid: Vec3::ZERO, point: Vec3::ZERO });
+    crate::snap_wake::update(&mut h.app);
+    for (shown, original) in h.app.viewport.woken.points.iter().zip(&original) {
+        assert!(shown.at.dist(solidcraft_engine::doc::apply_point(&placement, original.at)) < 1e-9);
+    }
+    h.app.viewport.hover = None;
+    crate::snap_wake::update(&mut h.app);
+    assert!(!h.app.viewport.woken.points.is_empty(), "empty space keeps targets awake");
+    let mut d = h.app.dialog.take().unwrap();
+    switch_type(&h.app, &mut d, FREE);
+    d.active = 1;
+    if let Kind::Move { x, .. } = &mut d.kind {
+        *x = "20 mm".into();
+    }
+    h.app.dialog = Some(d);
+    crate::snap_wake::update(&mut h.app);
+    assert!(h.app.viewport.woken.points.is_empty(), "a changed Move invalidates old targets");
+    h.app.viewport.hover = Some(crate::viewport::Hit::Edge { body: "Body1".into(), index: 0, mid: Vec3::ZERO, point: Vec3::ZERO });
+    crate::snap_wake::update(&mut h.app);
+    assert!(!h.app.viewport.woken.points.is_empty());
+    h.app.viewport.hover = None;
+    h.app.session.execute("document.units", &json!({"units":"in"})).unwrap();
+    crate::snap_wake::update(&mut h.app);
+    assert!(h.app.viewport.woken.points.is_empty(), "a model revision invalidates old targets");
+}
+
+/// A point woken before visibility or section changes cannot bypass normal picking rules.
+#[test]
+fn woken_points_respect_hidden_bodies_and_section_cuts() {
+    let mut h = holed_plate_picking_from();
+    h.step(&json!({"move":{"world":[49,20,10]}})).unwrap();
+    let centre = Vec3::new(45.0, 20.0, 10.0);
+    assert!(h.app.viewport.woken.points.iter().any(|p| p.at.dist(centre) < 1e-6));
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    let pos = proj.to_screen(centre).unwrap();
+    assert!(!crate::snap_wake::hits(&h.app, &proj, pos).is_empty());
+    h.app.session.visibility.hidden_bodies.push("Body1".into());
+    assert!(crate::snap_wake::hits(&h.app, &proj, pos).is_empty());
+    h.app.session.visibility.hidden_bodies.clear();
+    h.app.session.section = Some((Vec3::new(0.0, 0.0, 5.0), Vec3::Z));
+    assert!(crate::snap_wake::hits(&h.app, &proj, pos).is_empty());
+    h.app.session.section = None;
+    assert!(!crate::snap_wake::hits(&h.app, &proj, pos).is_empty(), "unclipped points remain available");
+}

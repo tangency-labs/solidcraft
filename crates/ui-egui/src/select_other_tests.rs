@@ -285,7 +285,7 @@ fn overlapping_bodies_list_both_and_the_hidden_one_can_be_picked() {
     let rows = labels(&h);
     assert!(rows.iter().any(|r| r == "Body · Outer") && rows.iter().any(|r| r == "Body · Inner"), "{rows:?}");
     let faces = rows.iter().filter(|r| r.starts_with("Face ")).count();
-    assert_eq!(faces, 2, "the nearest face of each body: {rows:?}");
+    assert_eq!(faces, 4, "the front and back faces of each body: {rows:?}");
     let i = rows.iter().position(|r| r == "Body · Inner").unwrap();
     h.call("ui.selectOther", json!({"pick": i}));
     assert_eq!(h.app.session.selection, [Sel::Body { name: "Inner".into() }]);
@@ -1140,4 +1140,38 @@ fn save_hidden_edge_evidence(h: &Harness, name: &str) {
     .expect("a GPU is required when evidence capture is requested");
     std::fs::create_dir_all(&dir).unwrap();
     image::save_buffer(std::path::Path::new(&dir).join(format!("{name}.png")), &rgba, size, size, image::ColorType::Rgba8).unwrap();
+}
+
+#[test]
+fn select_other_offers_obscured_edges_while_a_normal_click_keeps_the_front() {
+    let mut h = stacked_plates();
+    let at = h.call("ui.at", json!({"world":[4.9,0,22]}))["result"].clone();
+    let pos = egui::pos2(at[0].as_f64().unwrap() as f32, at[1].as_f64().unwrap() as f32);
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    let lower_edge =
+        |hit: &crate::viewport::Hit| matches!(hit, crate::viewport::Hit::Edge { body, mid, .. } if body == "Top" && (mid.z - 20.0).abs() < 1e-6);
+    assert!(!crate::viewport::pick(&h.app, &proj, pos).iter().any(lower_edge), "a normal click cannot see through the top face");
+    assert!(crate::select_other::rows(&h.app, &proj, pos).iter().any(|row| lower_edge(&row.hit)), "Select Other offers the obscured edge");
+}
+
+#[test]
+fn hidden_geometry_preference_preserves_the_nearest_face_list() {
+    let mut h = stacked_plates();
+    let at = h.call("ui.at", json!({"world":[2,1,22]}))["result"].clone();
+    let pos = egui::pos2(at[0].as_f64().unwrap() as f32, at[1].as_f64().unwrap() as f32);
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    assert!(serde_json::from_value::<crate::prefs::Prefs>(json!({})).unwrap().select_other_hidden);
+    for measure in [false, true] {
+        if measure {
+            h.app.start("inspect.measure");
+        }
+        for enabled in [true, false] {
+            h.call("ui.prefs", json!({"select_other_hidden":enabled}));
+            let restored: crate::prefs::Prefs = serde_json::from_value(serde_json::to_value(&h.app.preferences).unwrap()).unwrap();
+            assert_eq!(restored.select_other_hidden, enabled);
+            let rows = crate::select_other::rows(&h.app, &proj, pos);
+            let faces = rows.iter().filter(|r| matches!(&r.sel, Sel::Face { body, .. } if body == "Top")).count();
+            assert_eq!(faces, if enabled { 2 } else { 1 }, "measure={measure}, enabled={enabled}: {rows:?}");
+        }
+    }
 }

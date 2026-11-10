@@ -1338,8 +1338,9 @@ fn good_edges(e: &EdgeIn<'_>, n: usize, n_vertices: usize) -> bool {
         }
     }
     for i in 0..n_e {
-        if !(e.ellipse_x.get(i).is_some_and(|&r| r > 0.0) && e.ellipse_y.get(i).is_some_and(|&r| r > 0.0))
-            || !good_frame(e.ellipse_axis, e.ellipse_ref, i)
+        if !(e.ellipse_x.get(i).is_some_and(|&r| r > 0.0)
+            && e.ellipse_y.get(i).is_some_and(|&r| r > 0.0)
+            && good_frame(e.ellipse_axis, e.ellipse_ref, i))
         {
             return false;
         }

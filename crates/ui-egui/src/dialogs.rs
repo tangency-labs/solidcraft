@@ -114,7 +114,7 @@ const PROJECT_GEOMETRY: Accept = EDGES
 const INTERSECT_GEOMETRY: Accept = EDGES | FACES | selection::SKETCH_LINES;
 /// What Align's From and To pick: model geometry, planes and the origin, and sketch points and
 /// circles (a frame the bodies follow, #6257).
-const ALIGN_PICKS: Accept = FACES | EDGES | selection::VERTICES | PLANES | selection::ORIGIN | selection::POINTS | CURVES;
+const ALIGN_PICKS: Accept = FACES | EDGES | selection::VERTICES | PLANES | selection::ORIGIN | selection::POINTS | CURVES | selection::SNAP_POINTS;
 const HOLE_TYPES: [&str; 3] = ["simple", "counterbore", "countersink"];
 const HOLE_LABELS: [&str; 3] = ["Simple", "Counterbore", "Countersink"];
 
@@ -954,7 +954,8 @@ impl Dialog {
             "solid.align" => {
                 let components = s.selection.iter().any(|x| matches!(x, Sel::Occurrence { .. }));
                 // Bodies also take sketch points and circles: a frame the bodies follow (#6257).
-                let picks = if components { FACES | EDGES | selection::VERTICES | PLANES | selection::ORIGIN } else { ALIGN_PICKS };
+                let picks =
+                    if components { FACES | EDGES | selection::VERTICES | PLANES | selection::ORIGIN | selection::SNAP_POINTS } else { ALIGN_PICKS };
                 Dialog::new(
                     Kind::Align { flip: false, components, axes: [true; 3], angle: String::new() },
                     vec![
@@ -1017,7 +1018,8 @@ impl Dialog {
                         | PLANES
                         | AXES
                         | selection::CONSTRUCTION_POINTS
-                        | selection::ORIGIN,
+                        | selection::ORIGIN
+                        | selection::SNAP_POINTS,
                     true,
                 )],
             ),
@@ -1733,7 +1735,7 @@ impl Dialog {
         }
         if self.active != 0
             || !matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. })
-            || !self.inputs.first().is_some_and(|i| i.accept & PROFILES != 0)
+            || self.inputs.first().is_none_or(|i| i.accept & PROFILES == 0)
             || !s.doc.feature(id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. }))
         {
             return false;
@@ -2995,7 +2997,7 @@ fn stored_input_reference_key(d: &Dialog, index: usize) -> Option<&'static str> 
     if matches!(d.kind, Kind::Section { .. }) && index == 0 {
         return Some("plane");
     }
-    if !d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES) {
+    if d.inputs.first().is_none_or(|i| i.accept != selection::FEATURES) {
         return None;
     }
     match (&d.kind, index) {

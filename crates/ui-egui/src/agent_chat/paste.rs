@@ -122,7 +122,7 @@ pub fn handle(chat: &mut AgentChat, ui: &egui::Ui) -> Option<PanelAction> {
         (text, released)
     });
     let after_text = chat.text_pasted_at.is_some_and(|at| (0.0..SAME_PASTE_SECS).contains(&(now - at)));
-    if text.is_none() && !(released && !after_text) {
+    if text.is_none() && (!released || after_text) {
         if released {
             chat.text_pasted_at = None;
         }

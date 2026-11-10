@@ -57,7 +57,7 @@ pub(crate) fn line_midpoint(sk: &solidcraft_engine::sketch::Sketch, line: usize)
 }
 
 /// What a selection input accepts (bit set).
-pub type Accept = u16;
+pub type Accept = u32;
 pub const PROFILES: Accept = 1;
 pub const EDGES: Accept = 2;
 pub const FACES: Accept = 4;
@@ -91,6 +91,8 @@ pub const CONSTRUCTION_POINTS: Accept = 32768;
 /// has an axis (a straight or circular edge, a cylinder, cone or torus face; the dialog takes
 /// only those, `Dialog::candidate_on`).
 pub const AXIS_PICKS: Accept = AXES | EDGES | FACES;
+/// Hover pick points: an edge or face hovered wakes its centre, middle and ends (`snap_wake`).
+pub const SNAP_POINTS: Accept = 65536;
 
 /// One selection input of a command dialog ("Profiles", "Edges", "Plane", ...).
 #[derive(Clone, Debug, PartialEq)]
@@ -147,7 +149,10 @@ impl SelInput {
             Hit::SketchPoint { sketch, id, .. } if a & EXTERNAL_POINTS != 0 => Some(Sel::ExternalSketchPoint { sketch: *sketch, id: id.clone() }),
             Hit::SketchPoint { id, .. } if a & SKETCH_POINTS != 0 => Some(Sel::SketchPoint { id: id.clone() }),
             Hit::SketchPoint { sketch, id, .. } if a & POINTS != 0 => Some(Sel::SketchPoint { id: format!("{sketch}:{id}") }),
-            Hit::Vertex { body, point } if body.is_empty() && a & ORIGIN != 0 => Some(Sel::Vertex { body: String::new(), point: *point }),
+            // The origin, or a hover pick point of a sketch curve (a line's middle).
+            Hit::Vertex { body, point } if body.is_empty() && a & (ORIGIN | SNAP_POINTS) != 0 => {
+                Some(Sel::Vertex { body: String::new(), point: *point })
+            }
             Hit::Vertex { body, point } if !body.is_empty() && a & VERTICES != 0 => Some(Sel::Vertex { body: body.clone(), point: *point }),
             _ => None,
         }
@@ -384,6 +389,29 @@ mod tests {
     use super::*;
     use egui::pos2;
     use solidcraft_viewport::{Camera, StandardView};
+
+    #[test]
+    fn hover_points_do_not_enable_external_sketch_lines() {
+        let curve = Hit::SketchCurve { sketch: 42, id: "l1".into(), straight: true, point: Vec3::ZERO };
+        let points = SelInput::new("Point", VERTICES | SNAP_POINTS, false);
+        assert!(points.accepts(&curve, None, |_, _| true).is_none());
+        let lines = SelInput::new("Line", SKETCH_LINES, false);
+        assert_eq!(lines.accepts(&curve, None, |_, _| true), Some(Sel::ExternalSketchCurve { sketch: 42, id: "l1".into() }));
+        assert_eq!(lines.accept & SNAP_POINTS, 0, "external lines must not wake point targets");
+    }
+
+    #[test]
+    fn construction_point_inputs_do_not_enable_hover_targets() {
+        let named = Hit::ConstructionPoint { name: "Reference".into() };
+        let woken = Hit::Vertex { body: String::new(), point: Vec3::new(1.0, 2.0, 3.0) };
+        let construction = SelInput::new("Construction", CONSTRUCTION_POINTS, false);
+        let hover = SelInput::new("Hover", SNAP_POINTS, false);
+        assert_eq!(construction.accepts(&named, None, |_, _| true), Some(Sel::ConstructionPoint { name: "Reference".into() }));
+        assert!(hover.accepts(&named, None, |_, _| true).is_none(), "hover inputs must not accept named construction geometry");
+        assert!(construction.accepts(&woken, None, |_, _| true).is_none(), "construction inputs must not accept transient hover points");
+        assert!(hover.accepts(&woken, None, |_, _| true).is_some());
+        assert_eq!(construction.accept & SNAP_POINTS, 0, "construction inputs must not wake hover targets");
+    }
 
     #[test]
     fn origin_widget_keeps_its_screen_size() {

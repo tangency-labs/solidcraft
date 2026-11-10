@@ -1017,7 +1017,7 @@ pub(crate) fn corner_curves(sk: &solidcraft_engine::sketch::Sketch, pi: usize, a
     if curves.len() > 2 {
         curves = candidates.filter(|(_, c)| !c.construction).take(3).collect();
     }
-    if curves.iter().any(|(_, c)| !matches!(c.kind, CurveKind::Line { .. }) && !(arcs_ok && matches!(c.kind, CurveKind::Arc { .. }))) {
+    if curves.iter().any(|(_, c)| !(matches!(c.kind, CurveKind::Line { .. }) || arcs_ok && matches!(c.kind, CurveKind::Arc { .. }))) {
         return None;
     }
     match curves[..] {
@@ -1788,10 +1788,10 @@ fn glyph_constraints(sk: &solidcraft_engine::sketch::Sketch) -> impl Iterator<It
         {
             return false;
         }
-        !(matches!(
+        !matches!(
             c.kind,
             solidcraft_engine::sketch::ConstraintKind::PatternPoint { .. } | solidcraft_engine::sketch::ConstraintKind::PatternRadius { .. }
-        ) && !sk.patterns.iter().any(|p| p.instances.first().and_then(|i| i.constraints.first()) == Some(&c.id)))
+        ) || sk.patterns.iter().any(|p| p.instances.first().and_then(|i| i.constraints.first()) == Some(&c.id))
     })
 }
 

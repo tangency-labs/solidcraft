@@ -192,7 +192,7 @@ fn restarted(surface: &BSurface, s: f64, period: f64) -> Option<BSurface> {
     let n = rows.len();
     let p = u_knots.len().checked_sub(n + 1)?;
     let (u0, u1) = (*u_knots.get(p)?, *u_knots.get(n)?);
-    if !(u0 < s && s < u1) || !((u1 - u0 - period).abs() <= 1e-9 * period.max(1.0)) {
+    if !(u0 < s && s < u1 && (u1 - u0 - period).abs() <= 1e-9 * period.max(1.0)) {
         return None;
     }
     // Each v column of control points across u is a curve along u.

@@ -2172,7 +2172,7 @@ pub(crate) fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
 /// tool's button ends it" off, the click starts the tool again, as it did before. Returns whether
 /// the tool was ended. A persistent analysis button already turns its analysis off its own way.
 fn end_running_tool(app: &mut SolveApp, id: &str) -> bool {
-    if !app.preferences.ribbon_click_ends_tool || persistent_available(app, id) || !app.tool.as_ref().is_some_and(|t| t.cmd == id) {
+    if !app.preferences.ribbon_click_ends_tool || persistent_available(app, id) || app.tool.as_ref().is_none_or(|t| t.cmd != id) {
         return false;
     }
     crate::dim_view::cancel();

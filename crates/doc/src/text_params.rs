@@ -188,7 +188,7 @@ fn number_call(s: &str, cs: &[(usize, char)], i: usize) -> Result<(Term, usize)>
         decimals = Some(n);
         i = skip_blanks(cs, to);
     }
-    if !cs.get(i).is_some_and(|x| x.1 == ')') {
+    if cs.get(i).is_none_or(|x| x.1 != ')') {
         return Err(usage());
     }
     Ok((Term::Number { name, at: (at(start), at(end)), decimals }, i + 1))

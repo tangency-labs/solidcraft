@@ -1100,7 +1100,7 @@ fn hydrate_hdr_resources<R: Read + Seek>(metadata: &mut Value, reader: &mut Pack
     let mut total = 0usize;
     for (key, value) in resources.iter_mut() {
         let id: HdrId = serde_json::from_value(Value::String(key.clone())).map_err(invalid)?;
-        if !value.as_object().is_some_and(|fields| fields.len() == 3)
+        if value.as_object().is_none_or(|fields| fields.len() != 3)
             || value.get("kind").and_then(Value::as_str) != Some("radiance_hdr")
             || value.get("data").and_then(Value::as_str) != Some("")
         {
@@ -1229,7 +1229,7 @@ fn hydrate_texture_resources<R: Read + Seek>(metadata: &mut Value, reader: &mut 
     let mut total = 0usize;
     for (key, value) in resources.iter_mut() {
         let id: HdrId = serde_json::from_value(Value::String(key.clone())).map_err(invalid)?;
-        if !value.as_object().is_some_and(|fields| fields.len() == 4)
+        if value.as_object().is_none_or(|fields| fields.len() != 4)
             || value.get("kind").and_then(Value::as_str) != Some("opaque_texture")
             || value.get("data").and_then(Value::as_str) != Some("")
         {

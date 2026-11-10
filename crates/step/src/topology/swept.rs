@@ -634,7 +634,7 @@ fn map_surface_in(s: &Surface, ext: &Extent, tol: f64, depth: usize, reversed: &
             if let Some(plane) = flat_cone(position, *radius, *semi_angle, ext, tol, reversed) {
                 return Ok(plane);
             }
-            if !(*radius >= 0.0) || !(semi_angle.abs() > 1e-12 && semi_angle.abs() < FRAC_PI_2) {
+            if !(*radius >= 0.0 && semi_angle.abs() > 1e-12 && semi_angle.abs() < FRAC_PI_2) {
                 return Err(unsupported(format!("a cone of radius {radius} and semi-angle {semi_angle}")));
             }
             BSurface::Cone { frame: frame(position), radius_at_origin: *radius, half_angle: *semi_angle }

@@ -194,3 +194,31 @@ test('checkPicture fails a showcase PR with no picture, from 2026-11-02 on', asy
   assert.deepEqual(await pc.checkPicture(f), { skipped: 'nothing to show' });
   assert.equal(f.failures.length, 0);
 });
+
+test('syncDefaultLabel skips fork writes with a notice for adding and removing', async () => {
+  for (const [body, labels] of [
+    ['Changes a default: yes — a, old behaviour kept behind preference p', []],
+    ['Changes a default: no', [{ name: 'changes-default' }]],
+  ]) {
+    const f = fakes(mk(1, 'a', body, { labels, head: { repo: { full_name: 'a/solidcraft' } } }));
+    const notices = [];
+    f.core.notice = (message) => notices.push(message);
+    assert.deepEqual(await pc.syncDefaultLabel(f), { skipped: 'read-only fork token' });
+    assert.deepEqual(f.calls, []);
+    assert.equal(notices.length, 1);
+    assert.match(notices[0], /read-only/);
+  }
+});
+
+test('syncDefaultLabel keeps same-repository writes and propagates API errors', async () => {
+  const f = fakes(mk(1, 'a', 'Changes a default: yes — a, old behaviour kept behind preference p', {
+    head: { repo: { full_name: REPO.toUpperCase() } },
+  }));
+  await pc.syncDefaultLabel(f);
+  assert.deepEqual(f.calls, [['add', ['changes-default']]]);
+  for (const status of [500]) {
+    const error = Object.assign(new Error('API failed'), { status });
+    f.github.rest.issues.addLabels = async () => { throw error; };
+    await assert.rejects(pc.syncDefaultLabel(f), (actual) => actual === error);
+  }
+});

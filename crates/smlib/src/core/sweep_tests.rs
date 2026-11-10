@@ -579,6 +579,9 @@ fn hostile_arguments_are_refused() {
         assert_eq!(extrude(&sq, Z, dist, 0.0, d, true).err(), Some(Error::Argument), "distance {dist}");
     }
     assert_eq!(extrude(&sq, Z, 1.0, FRAC_PI_2, d, true).err(), Some(Error::Argument), "a right-angled draft");
+    for draft in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert_eq!(extrude(&sq, Z, 1.0, draft, d, true).err(), Some(Error::Argument), "non-finite draft {draft}");
+    }
     assert_eq!(extrude(&sq, [0.0; 3], 1.0, 0.0, d, true).err(), Some(Error::Argument), "no direction");
     assert_eq!(extrude(&[], Z, 1.0, 0.0, d, true).err(), Some(Error::Argument), "no profile");
     assert_eq!(extrude(&[line([0.0; 3], [0.0; 3])], Z, 1.0, 0.0, d, true).err(), Some(Error::Argument), "a point");
@@ -594,6 +597,9 @@ fn hostile_arguments_are_refused() {
     assert_eq!(extrude(&[unclamped], Z, 1.0, 0.0, d, false).err(), Some(Error::Argument), "unclamped knots");
     assert_eq!(revolve(&sq, [0.0; 3], Z, 0.0, true).err(), Some(Error::Argument), "no angle");
     assert_eq!(revolve(&sq, [0.0; 3], Z, 7.0, true).err(), Some(Error::Argument), "more than a turn");
+    for angle in [-1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        assert_eq!(revolve(&sq, [0.0; 3], Z, angle, true).err(), Some(Error::Argument), "invalid revolution angle {angle}");
+    }
     assert_eq!(revolve(&sq, [f64::INFINITY; 3], Z, 1.0, true).err(), Some(Error::Argument));
     assert_eq!(loft(std::slice::from_ref(&sq), 1, true).err(), Some(Error::Argument), "one section");
     assert_eq!(loft(&[sq.clone(), sq.clone()], 4, true).err(), Some(Error::Argument), "degree 4");
@@ -614,6 +620,13 @@ fn hostile_arguments_are_refused() {
     assert_eq!(screw_sweep(&sq, [0.0; 3], Z, 1.0, 300.0, None, 1e-3).err(), Some(Error::Argument), "too many turns");
     assert_eq!(screw_sweep(&sq, [0.0; 3], Z, 1.0, 1.0, Some(&[(0.5, 0.0), (0.2, 0.0)]), 1e-3).err(), Some(Error::Argument), "a law going back");
     assert_eq!(screw_sweep(&sq, [0.0; 3], Z, 1.0, 1.0, Some(&[]), 1e-3).err(), Some(Error::Argument), "an empty law");
+    for (turn, offset) in [(-0.1, 0.0), (1.1, 0.0), (0.5, 1e10), (f64::NAN, 0.0), (0.5, f64::NAN)] {
+        assert_eq!(
+            screw_sweep(&sq, [0.0; 3], Z, 1.0, 1.0, Some(&[(turn, offset)]), 1e-3).err(),
+            Some(Error::Argument),
+            "invalid law sample ({turn}, {offset})"
+        );
+    }
     let b = make_box([0.0; 3], [1.0; 3]).unwrap();
     assert_eq!(project_curves(&b, [0.5; 3], 0.01, &sq, [0.0; 3], 1e-6).err(), Some(Error::Argument), "no direction");
     assert_eq!(project_curves(&b, [0.5; 3], 0.0, &sq, Z, 1e-6).err(), Some(Error::Argument), "no pick tolerance");
