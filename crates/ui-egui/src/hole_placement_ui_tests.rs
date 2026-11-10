@@ -816,8 +816,8 @@ fn select_other_over_a_dense_cluster_looks_the_face_up_once() {
     for enabled in [false, true] {
         let face_count = if enabled { 2 } else { 1 };
         // The points on the cylinder's top face, a disc of a small part of the body's triangles. Select
-        // Other looks each candidate face up once, not once per point (#718 review). Only the
-        // nearest face supplies the snap: one pass over the body's triangles. Each point is then
+        // Other looks the nearest face up once, not once per point (#718 review), even when the
+        // opposite face is also offered. Its snap makes one pass over the body's triangles. Each point is then
         // tested against that face's triangles near the points only, not the face's or the body's;
         // every point on the nearest face is still counted.
         let mut c = cylinder_with_cluster(json!({"plane": {"face": [0, 0, 20]}}), [5.0, 4.0], "top");
@@ -829,7 +829,7 @@ fn select_other_over_a_dense_cluster_looks_the_face_up_once() {
         let (list, (lookups, tested)) = c.select_other();
         assert_eq!((rows_named(&list, "Point"), rows_named(&list, "Face")), (crate::select_other::MAX_PER_KIND, face_count), "{list}");
         assert_eq!(list["total"], json!(many + face_count), "every point on the face is counted: {list}");
-        assert_eq!(lookups, face_count, "each face is looked up once for {many} points (hidden={enabled})");
+        assert_eq!(lookups, 1, "the nearest face is looked up once for {many} points (hidden={enabled})");
         assert!(tested <= body + many * near, "{tested} triangles looked at for {many} points ({body} in the body, {near} near the points)");
     }
 }
@@ -847,7 +847,7 @@ fn select_other_over_a_dense_cluster_off_the_face_tests_no_triangles() {
         let (list, (lookups, tested)) = c.select_other();
         assert_eq!((rows_named(&list, "Point"), rows_named(&list, "Face")), (0, face_count), "{list}");
         assert_eq!(list["total"], json!(face_count), "{list}");
-        assert_eq!(lookups, face_count, "each face is looked up once for {many} points (hidden={enabled})");
+        assert_eq!(lookups, 1, "the nearest face is looked up once for {many} points (hidden={enabled})");
         assert_eq!(tested, body, "one pass over the body's {body} triangles, and no test for the {many} points off the face");
     }
 }
