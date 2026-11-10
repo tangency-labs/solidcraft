@@ -299,14 +299,25 @@ const MAX_FOLDER_FILES: usize = 10_000;
 
 /// Extensions that are never a board's fabrication file, left unread in a folder (a board's
 /// files picked in Downloads sit among all sorts).
-const NOT_FABRICATION: [&str; 30] = [
+const NOT_FABRICATION: [&str; 31] = [
     "7z", "avi", "bmp", "dll", "doc", "docx", "exe", "gif", "gz", "heic", "html", "iso", "jpeg", "jpg", "mkv", "mov", "mp3", "mp4", "msi", "pdf",
-    "png", "ppt", "pptx", "rar", "step", "stl", "stp", "webp", "xls", "xlsx",
+    "png", "ppt", "pptx", "rar", "step", "stl", "stp", "webp", "xls", "xlsx", "zip",
 ];
 
-/// The files in a folder that may be a board's, each at most [`MAX_DRAWING_BYTES`] (larger ones
-/// are left out): at most [`MAX_SET_FILES`] of them and [`MAX_SET_BYTES`] in all, the rest left
-/// unread, so that a board's files among many others are still found.
+/// Whether a file read from a folder is one [`classify_set`] keeps: the job file, or text that
+/// reads as a Gerber or drill file.
+fn is_board_file(name: &str, bytes: &[u8]) -> bool {
+    if ext_of(name) == "gbrjob" {
+        return true;
+    }
+    // `content_kind` looks at the first 8192 characters, at most four bytes each.
+    let head = bytes.get(..32_768).unwrap_or(bytes);
+    !bytes.contains(&0) && content_kind(&String::from_utf8_lossy(head)).is_some()
+}
+
+/// The board files in a folder, each at most [`MAX_DRAWING_BYTES`] (larger ones are left out):
+/// at most [`MAX_SET_FILES`] of them and [`MAX_SET_BYTES`] in all. Files that are not a board's
+/// do not count, so that a board's files among many others are still found.
 fn folder_files(dir: &str) -> std::io::Result<Vec<(String, Vec<u8>)>> {
     let mut out = Vec::new();
     let mut total = 0usize;
@@ -318,6 +329,9 @@ fn folder_files(dir: &str) -> std::io::Result<Vec<(String, Vec<u8>)>> {
             continue;
         }
         let Ok(bytes) = vfs::read(&path, MAX_DRAWING_BYTES) else { continue };
+        if !is_board_file(&path, &bytes) {
+            continue;
+        }
         if total.saturating_add(bytes.len()) > MAX_SET_BYTES {
             continue;
         }

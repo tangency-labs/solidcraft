@@ -78,6 +78,25 @@ fn a_boards_files_among_many_others_are_found() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// Files that are not a board's do not use up the set's file count, even when they come first
+/// in the folder: notes, other boards' zips and unknown files before the board's own.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn other_files_sorting_first_do_not_hide_the_board() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-gerber-set-first-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    for i in 0..MAX_SET_FILES + 20 {
+        std::fs::write(dir.join(format!("a{i:03}.zip")), "PK").unwrap();
+        std::fs::write(dir.join(format!("b{i:03}.txt")), "notes").unwrap();
+        std::fs::write(dir.join(format!("c{i:03}.dat")), "data").unwrap();
+    }
+    std::fs::write(dir.join("zboard.GKO"), GERBER).unwrap();
+    std::fs::write(dir.join("zboard.DRL"), DRILL).unwrap();
+    let s = read_gerber_set(&dir.join("zboard.GKO").to_string_lossy()).unwrap();
+    assert_eq!(roles(&s), [("zboard.DRL", SetRole::Drill), ("zboard.GKO", SetRole::Outline)]);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// The job file names the layers of files that don't say, and gives thickness and finish.
 #[test]
 fn the_job_file_names_layers_and_gives_thickness_and_finish() {
