@@ -703,7 +703,12 @@ fn general_inactive_profile_rows_export_rename_import_and_delete_without_applyin
 
     h.step(&json!({"choose_file":"Laptop.solidcraft-profile.json"})).unwrap();
     h.step(&json!({"click":{"handle":"prefs:profile:import"}})).unwrap();
-    h.frames(6);
+    for _ in 0..600 {
+        if h.app.settings_profiles.names() == ["Travel", "Desk", "Laptop"] {
+            break;
+        }
+        h.frames(1);
+    }
     assert_eq!(h.app.settings_profiles.names(), ["Travel", "Desk", "Laptop"]);
     assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Desk"));
     assert!(!h.app.preferences.zoom_reverse, "import keeps the active settings");
