@@ -1236,6 +1236,7 @@ fn mesh_data(name: String, positions: Vec<Vec3>, triangles: Vec<[u32; 3]>, color
         name,
         positions: positions.into_iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
         triangles: triangles.into_iter().flatten().collect(),
+        corner_normals: Default::default(),
         color,
     }
 }
@@ -1295,6 +1296,7 @@ fn model_body_meshes(name: &str, body: &solidcraft_kernel::Body, color: Option<[
             name,
             positions: positions.into_iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
             triangles: triangles.into(),
+            corner_normals: Default::default(),
             color: *color,
         });
     }

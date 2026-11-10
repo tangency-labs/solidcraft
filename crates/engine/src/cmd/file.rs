@@ -1408,7 +1408,7 @@ struct ImportedFile {
     #[serde(default)]
     board_path: Option<String>,
     #[serde(default)]
-    board_solid: Option<u64>,
+    board_solid: Option<bool>,
 }
 
 /// The name a design never given one by its user is shown under.
