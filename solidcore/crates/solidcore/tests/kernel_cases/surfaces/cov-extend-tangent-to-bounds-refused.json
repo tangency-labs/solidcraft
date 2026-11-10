@@ -1,0 +1,35 @@
+{
+  "area": "surfaces",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-extend-tangent-to-bounds-refused",
+  "expected": {
+    "method": "the bounds are the surface's own; a tangent continuation leaves the surface",
+    "outcome": "refused",
+    "refusal": "only a natural extension goes back to the surface's bounds",
+    "source": "invariants",
+    "sources": [],
+    "what": "a tangent extension back to the surface's bounds: refused, only a natural one goes there"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 5 (surface.extend): invalid parameters for `surface.extend`: only a natural extension goes back to the surface's bounds",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 5 (surface.extend): invalid parameters for `surface.extend`: only a natural extension goes back to the surface's bounds",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [],
+  "ungraded": [],
+  "what": "a tangent extension back to the surface's bounds: refused, only a natural one goes there",
+  "why_not": [
+    "no kernel operation ran before the failure: step 5 (surface.extend): invalid parameters for `surface.extend`: only a natural extension goes back to the surface's bounds"
+  ]
+}

@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::persistent_name::{Base, FaceName, FeatureId};
+use crate::persistent_name::{Base, EdgeName, FaceName, FeatureId};
 use crate::{FeatureKind, PlaneRef};
 
 /// Remap persistent topology tokens without rewriting arbitrary user expressions or labels.
@@ -18,9 +18,20 @@ pub fn remap_topology(name: &str, ids: &BTreeMap<u64, u64>, bodies: &BTreeMap<St
     }
     // Imported names belong to the complete canonical body prefix, even when that prefix
     // happens to contain text resembling a feature token.
-    if let Some((body, suffix)) = name.rsplit_once(":face:")
-        && let Some(new) = bodies.get(body)
+    let body_face = name.rsplit_once(":face:").and_then(|(body, suffix)| Some((bodies.get(body)?, body, suffix)));
+    // An edge name (`A|B`) is remapped one face at a time, so a body face on one side doesn't
+    // stop the other side's feature or body from being remapped (#13097). A body whose own
+    // name holds a `|` is a single face, not an edge.
+    if !body_face.is_some_and(|(_, body, _)| body.contains('|'))
+        && let Ok(edge) = EdgeName::parse(name)
+        && edge.faces.len() > 1
+        && edge.to_string() == name
     {
+        let faces: Vec<String> = edge.faces.iter().map(|face| remap_topology(&face.to_string(), ids, bodies)).collect();
+        let tie = edge.tie.map(|k| format!("~{k}")).unwrap_or_default();
+        return format!("{}{tie}", faces.join("|"));
+    }
+    if let Some((new, _, suffix)) = body_face {
         return format!("{new}:face:{suffix}");
     }
     // A name that reads is remapped by its structure: every feature it names, and a body
@@ -178,7 +189,7 @@ pub(crate) fn remap_link(
             remap_link(a, ids, names, bodies, depth + 1);
             remap_link(b, ids, names, bodies, depth + 1);
         }
-        LinkSource::Plane { name } => mapped_name(name, names),
+        LinkSource::Plane { name } | LinkSource::ConstructionPoint { name } => mapped_name(name, names),
         // A construction axis, by name (#9324); the origin axes are no feature's.
         LinkSource::Axis { name } if !matches!(name.as_str(), "X" | "Y" | "Z") => mapped_name(name, names),
         _ => {}
@@ -408,6 +419,19 @@ mod clone_tests {
         assert_eq!(remap_topology("F1:Housing:face:0", &ids, &bodies), "F1:Housing (copy):face:0");
         assert_eq!(remap_topology("F1:+x|F10:end@F1.2", &ids, &bodies), "F2:+x|F20:end@F2.2");
         assert_eq!(remap_topology("UserF1:label", &ids, &bodies), "UserF1:label");
+    }
+    #[test]
+    fn an_edge_name_with_a_body_face_maps_every_face() {
+        // #13097: a body face on either side of an edge must not stop the other side's
+        // feature or body from being remapped.
+        let ids: BTreeMap<u64, u64> = [(2, 20)].into_iter().collect();
+        let bodies: BTreeMap<String, String> =
+            [("Plate".to_string(), "Plate (copy)".to_string()), ("A|B".to_string(), "A|B (copy)".to_string())].into_iter().collect();
+        assert_eq!(remap_topology("Plate:face:3|F2:top", &ids, &bodies), "Plate (copy):face:3|F20:top");
+        assert_eq!(remap_topology("F2:top|Plate:face:3", &ids, &bodies), "F20:top|Plate (copy):face:3");
+        assert_eq!(remap_topology("Plate:face:3|F2:top~1", &ids, &bodies), "Plate (copy):face:3|F20:top~1");
+        // A body whose name holds a `|` is still one face.
+        assert_eq!(remap_topology("A|B:face:0", &ids, &bodies), "A|B (copy):face:0");
     }
     #[test]
     fn a_sheet_face_follows_its_body_and_its_flange() {

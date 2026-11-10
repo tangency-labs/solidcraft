@@ -40,13 +40,24 @@ pub(crate) fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
             editor: appearance,
             enabled: true,
             header_actions: None,
+            move_command: "view.render_dock",
         },
         &mut side,
         &mut width,
         false,
         |ui, options| {
             if appearance {
-                action.set(ui_kit::inspector_header(ui, options.icon, options.title, &scope));
+                action.set(ui_kit::inspector_header(
+                    ui,
+                    options.icon,
+                    options.title,
+                    &scope,
+                    ui_kit::InspectorNames {
+                        close: "render:appearance:close",
+                        remove: "render:appearance:remove",
+                        remove_label: solidcraft_ui_text::tr("render.inspector_remove"),
+                    },
+                ));
             } else {
                 ui_kit::panel::header(ui, options.icon, options.title, || action.set(Some(ui_kit::InspectorAction::Close)));
             }

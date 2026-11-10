@@ -691,7 +691,7 @@ fn retake(app: &mut SolveApp, ctx: &egui::Context, dialog: Option<&dialogs::Dial
 fn cancel_capture(app: &mut SolveApp) {
     app.issue_report.waiting = None;
     if let Some(pending) = app.issue_report.pending.take() {
-        app.queued_shots.retain(|(token, ..)| *token != pending.token);
+        app.shots.queued.retain(|(token, ..)| *token != pending.token);
     }
 }
 
@@ -705,7 +705,7 @@ fn capture_unless_busy(app: &mut SolveApp, ctx: &egui::Context, dialog: Option<&
     cancel_capture(app);
     let current_source = source_signature(app, dialog);
     let context = context_signature(app, dialog);
-    let full = app.queued_shots.len() >= 16;
+    let full = app.shots.queued.len() >= 16;
     let busy = app.preview.busy;
     // The screenshot the draft has stays until a new one is taken (#7350).
     let Some(draft) = app.issue_report.draft.as_mut() else { return };
@@ -744,11 +744,11 @@ fn capture_unless_busy(app: &mut SolveApp, ctx: &egui::Context, dialog: Option<&
     if draft.focus_requested {
         app.issue_report.refocus = ctx.memory(|m| m.focused());
     }
-    let Some(token) = app.shot_token.checked_add(1) else {
+    let Some(token) = app.shots.token.checked_add(1) else {
         draft.note = "Screenshot request limit reached; restart the app to capture another frame.".into();
         return;
     };
-    app.shot_token = token;
+    app.shots.token = token;
     if !busy {
         draft.note = "Capturing the current app view locally…".into();
     }
@@ -761,7 +761,7 @@ fn capture_unless_busy(app: &mut SolveApp, ctx: &egui::Context, dialog: Option<&
         pixels_per_point: ctx.pixels_per_point(),
         max_side: ctx.input(|i| i.max_texture_side),
     });
-    app.queued_shots.push((token, now + 150.0, 0));
+    app.shots.queued.push((token, now + 150.0, 0));
     ctx.request_repaint();
 }
 
@@ -805,7 +805,7 @@ pub(crate) fn typing(event: &egui::Event) -> bool {
 
 pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     if let Some(waiting) = &app.issue_report.waiting {
-        let settled = !app.preview.busy && app.queued_shots.len() < 16;
+        let settled = !app.preview.busy && app.shots.queued.len() < 16;
         let (late, context) = (crate::now_ms() >= waiting.deadline, waiting.context);
         if settled || late {
             app.issue_report.waiting = None;
@@ -2219,15 +2219,15 @@ mod tests {
         begin(&mut app, &ctx, None, None);
         let token = app.issue_report.pending.as_ref().unwrap().token;
         let (reply, _receiver) = std::sync::mpsc::channel();
-        app.pending_shots.push((token + 1, None, reply, crate::now_ms() + 8000.0));
-        app.shot_token = token + 1;
+        app.shots.pending.push((token + 1, None, reply, crate::now_ms() + 8000.0));
+        app.shots.token = token + 1;
         let image = Arc::new(ColorImage::new([4, 3], vec![egui::Color32::GREEN; 12]));
         receive(&mut app, token + 1, image.clone());
         assert!(pending(&app) && app.issue_report.draft.as_ref().unwrap().image.is_none());
         receive(&mut app, token, image.clone());
         assert!(!pending(&app));
         assert_eq!(app.issue_report.draft.as_ref().unwrap().image.as_ref().unwrap().size, [4, 3]);
-        assert_eq!(app.pending_shots.len(), 1, "report cannot consume the control request");
+        assert_eq!(app.shots.pending.len(), 1, "report cannot consume the control request");
         begin(&mut app, &ctx, None, None);
         let token = app.issue_report.pending.as_ref().unwrap().token;
         app.cam.distance *= 2.0;
@@ -2269,7 +2269,7 @@ mod tests {
         h.app.home.open = false;
         let ctx = h.ctx.clone();
         begin(&mut h.app, &ctx, None, None);
-        let token = h.app.shot_token;
+        let token = h.app.shots.token;
         receive(&mut h.app, token, Arc::new(ColorImage::new([10_320, 1440], vec![egui::Color32::GREEN; 10_320 * 1440])));
         h.frames(4);
         let max_side = h.ctx.input(|i| i.max_texture_side);

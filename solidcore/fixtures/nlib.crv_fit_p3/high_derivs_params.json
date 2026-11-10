@@ -1,0 +1,3922 @@
+{
+ "cases": [
+  {
+   "name": "high_params_plane12_plain_p3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "ds": [],
+    "de": [],
+    "par": 1
+   }
+  },
+  {
+   "name": "high_params_plane12_plain_p3_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "ds": [],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_plane12_plain_p3_par3",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "ds": [],
+    "de": [],
+    "par": 3
+   }
+  },
+  {
+   "name": "high_params_plane12_zero_d1_d2_start_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [],
+    "par": 1
+   }
+  },
+  {
+   "name": "high_params_plane12_zero_d1_d2_start_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_plane12_zero_d1_d2_start_par3",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [],
+    "par": 3
+   }
+  },
+  {
+   "name": "high_params_plane12_zero_d1_d2_both_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "par": 1
+   }
+  },
+  {
+   "name": "high_params_plane12_zero_d1_d2_both_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_plane12_zero_d1_d2_both_par3",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "par": 3
+   }
+  },
+  {
+   "name": "high_params_plane12_zero_d1_d2_start_d1_end_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      2.0,
+      3.0,
+      0.0
+     ]
+    ],
+    "par": 1
+   }
+  },
+  {
+   "name": "high_params_plane12_zero_d1_d2_start_d1_end_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      2.0,
+      3.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_plane12_zero_d1_d2_start_d1_end_par3",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      2.0,
+      3.0,
+      0.0
+     ]
+    ],
+    "par": 3
+   }
+  },
+  {
+   "name": "high_params_plane12_zero_d1_d2_d3_start_p4_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 4,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      6.0,
+      0.0
+     ]
+    ],
+    "de": [],
+    "par": 1
+   }
+  },
+  {
+   "name": "high_params_plane12_zero_d1_d2_d3_start_p4_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 4,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      6.0,
+      0.0
+     ]
+    ],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_plane12_zero_d1_d2_d3_start_p4_par3",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 4,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      6.0,
+      0.0
+     ]
+    ],
+    "de": [],
+    "par": 3
+   }
+  },
+  {
+   "name": "high_params_plane12_zero_d1_d2_both_p5_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 5,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      1.0
+     ]
+    ],
+    "par": 1
+   }
+  },
+  {
+   "name": "high_params_plane12_zero_d1_d2_both_p5_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 5,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      1.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_plane12_zero_d1_d2_both_p5_par3",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 5,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      1.0
+     ]
+    ],
+    "par": 3
+   }
+  },
+  {
+   "name": "high_params_plane12_d1_both_p2_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 2,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "par": 1
+   }
+  },
+  {
+   "name": "high_params_plane12_d1_both_p2_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 2,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_plane12_d1_both_p2_par3",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 2,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "par": 3
+   }
+  },
+  {
+   "name": "high_params_plane12_err_p0",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 0,
+    "ds": [],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_plane12_err_kk_ge_p",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      -11.0,
+      2.0,
+      0.0
+     ],
+     [
+      -11.0,
+      5.0,
+      0.0
+     ],
+     [
+      -10.0,
+      7.0,
+      0.0
+     ],
+     [
+      -6.0,
+      4.0,
+      0.0
+     ],
+     [
+      -2.0,
+      7.0,
+      0.0
+     ],
+     [
+      2.0,
+      6.0,
+      0.0
+     ],
+     [
+      4.0,
+      6.0,
+      0.0
+     ],
+     [
+      6.0,
+      7.0,
+      0.0
+     ],
+     [
+      9.0,
+      8.0,
+      0.0
+     ],
+     [
+      12.0,
+      6.0,
+      0.0
+     ],
+     [
+      13.0,
+      4.0,
+      0.0
+     ],
+     [
+      13.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "p": 2,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_rib5_plain_p3_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "ds": [],
+    "de": [],
+    "par": 1
+   }
+  },
+  {
+   "name": "high_params_rib5_plain_p3_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "ds": [],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_rib5_plain_p3_par3",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "ds": [],
+    "de": [],
+    "par": 3
+   }
+  },
+  {
+   "name": "high_params_rib5_zero_d1_d2_start_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [],
+    "par": 1
+   }
+  },
+  {
+   "name": "high_params_rib5_zero_d1_d2_start_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_rib5_zero_d1_d2_start_par3",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [],
+    "par": 3
+   }
+  },
+  {
+   "name": "high_params_rib5_zero_d1_d2_both_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "par": 1
+   }
+  },
+  {
+   "name": "high_params_rib5_zero_d1_d2_both_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_rib5_zero_d1_d2_both_par3",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "par": 3
+   }
+  },
+  {
+   "name": "high_params_rib5_zero_d1_d2_start_d1_end_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      2.0,
+      3.0,
+      0.0
+     ]
+    ],
+    "par": 1
+   }
+  },
+  {
+   "name": "high_params_rib5_zero_d1_d2_start_d1_end_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      2.0,
+      3.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_rib5_zero_d1_d2_start_d1_end_par3",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "p": 3,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      2.0,
+      3.0,
+      0.0
+     ]
+    ],
+    "par": 3
+   }
+  },
+  {
+   "name": "high_params_rib5_zero_d1_d2_d3_start_p4_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "p": 4,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      6.0,
+      0.0
+     ]
+    ],
+    "de": [],
+    "par": 1
+   }
+  },
+  {
+   "name": "high_params_rib5_zero_d1_d2_d3_start_p4_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "p": 4,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      6.0,
+      0.0
+     ]
+    ],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_rib5_zero_d1_d2_d3_start_p4_par3",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "p": 4,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      6.0,
+      0.0
+     ]
+    ],
+    "de": [],
+    "par": 3
+   }
+  },
+  {
+   "name": "high_params_rib5_zero_d1_d2_both_p5_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "p": 5,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      1.0
+     ]
+    ],
+    "par": 1
+   }
+  },
+  {
+   "name": "high_params_rib5_zero_d1_d2_both_p5_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "p": 5,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      1.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_rib5_zero_d1_d2_both_p5_par3",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "p": 5,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      1.0
+     ]
+    ],
+    "par": 3
+   }
+  },
+  {
+   "name": "high_params_rib5_d1_both_p2_par1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "p": 2,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "par": 1
+   }
+  },
+  {
+   "name": "high_params_rib5_d1_both_p2_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "p": 2,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_rib5_d1_both_p2_par3",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "p": 2,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "par": 3
+   }
+  },
+  {
+   "name": "high_params_rib5_err_p0",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "p": 0,
+    "ds": [],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_rib5_err_kk_ge_p",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0625,
+      0.015625,
+      0.0
+     ],
+     [
+      0.25,
+      0.125,
+      0.0
+     ],
+     [
+      0.5625,
+      0.421875,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ]
+    ],
+    "p": 2,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_space6_plain_p3_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.2,
+      0.1
+     ],
+     [
+      2.0,
+      0.8,
+      0.4
+     ],
+     [
+      2.5,
+      1.9,
+      1.0
+     ],
+     [
+      2.4,
+      3.0,
+      1.8
+     ],
+     [
+      1.8,
+      4.1,
+      2.9
+     ]
+    ],
+    "p": 3,
+    "ds": [],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_space6_zero_d1_d2_start_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.2,
+      0.1
+     ],
+     [
+      2.0,
+      0.8,
+      0.4
+     ],
+     [
+      2.5,
+      1.9,
+      1.0
+     ],
+     [
+      2.4,
+      3.0,
+      1.8
+     ],
+     [
+      1.8,
+      4.1,
+      2.9
+     ]
+    ],
+    "p": 3,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_space6_zero_d1_d2_both_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.2,
+      0.1
+     ],
+     [
+      2.0,
+      0.8,
+      0.4
+     ],
+     [
+      2.5,
+      1.9,
+      1.0
+     ],
+     [
+      2.4,
+      3.0,
+      1.8
+     ],
+     [
+      1.8,
+      4.1,
+      2.9
+     ]
+    ],
+    "p": 3,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_space6_zero_d1_d2_start_d1_end_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.2,
+      0.1
+     ],
+     [
+      2.0,
+      0.8,
+      0.4
+     ],
+     [
+      2.5,
+      1.9,
+      1.0
+     ],
+     [
+      2.4,
+      3.0,
+      1.8
+     ],
+     [
+      1.8,
+      4.1,
+      2.9
+     ]
+    ],
+    "p": 3,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      2.0,
+      3.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_space6_zero_d1_d2_d3_start_p4_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.2,
+      0.1
+     ],
+     [
+      2.0,
+      0.8,
+      0.4
+     ],
+     [
+      2.5,
+      1.9,
+      1.0
+     ],
+     [
+      2.4,
+      3.0,
+      1.8
+     ],
+     [
+      1.8,
+      4.1,
+      2.9
+     ]
+    ],
+    "p": 4,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      6.0,
+      0.0
+     ]
+    ],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_space6_zero_d1_d2_both_p5_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.2,
+      0.1
+     ],
+     [
+      2.0,
+      0.8,
+      0.4
+     ],
+     [
+      2.5,
+      1.9,
+      1.0
+     ],
+     [
+      2.4,
+      3.0,
+      1.8
+     ],
+     [
+      1.8,
+      4.1,
+      2.9
+     ]
+    ],
+    "p": 5,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      1.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_space6_d1_both_p2_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      0.2,
+      0.1
+     ],
+     [
+      2.0,
+      0.8,
+      0.4
+     ],
+     [
+      2.5,
+      1.9,
+      1.0
+     ],
+     [
+      2.4,
+      3.0,
+      1.8
+     ],
+     [
+      1.8,
+      4.1,
+      2.9
+     ]
+    ],
+    "p": 2,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_three_plain_p3_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "p": 3,
+    "ds": [],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_three_zero_d1_d2_start_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "p": 3,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_three_zero_d1_d2_both_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "p": 3,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      2.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_three_zero_d1_d2_start_d1_end_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "p": 3,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      2.0,
+      3.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_three_zero_d1_d2_d3_start_p4_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "p": 4,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ],
+     [
+      0.0,
+      6.0,
+      0.0
+     ]
+    ],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_three_zero_d1_d2_both_p5_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "p": 5,
+    "ds": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      1.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_three_d1_both_p2_par2",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "p": 2,
+    "ds": [
+     [
+      3.0,
+      4.0,
+      0.0
+     ]
+    ],
+    "de": [
+     [
+      0.0,
+      -5.0,
+      0.0
+     ]
+    ],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_three_err_p_gt_n",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      0.0,
+      0.0,
+      0.0
+     ],
+     [
+      1.0,
+      1.0,
+      0.0
+     ],
+     [
+      2.0,
+      0.0,
+      1.0
+     ]
+    ],
+    "p": 5,
+    "ds": [],
+    "de": [],
+    "par": 2
+   }
+  },
+  {
+   "name": "high_params_one_point_err_p1",
+   "upstream_ref": "fork tangency-labs/smlib#76 68f6913 (N_FitCrvHighDerivsParams) against the pinned N_FitCrvHighDerivs",
+   "inputs": {
+    "op": "high_derivs_params",
+    "pts": [
+     [
+      1.0,
+      2.0,
+      3.0
+     ]
+    ],
+    "p": 1,
+    "ds": [],
+    "de": [],
+    "par": 2
+   }
+  }
+ ]
+}

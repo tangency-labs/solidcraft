@@ -1,0 +1,12 @@
+id = "nlib.crv_approx"
+upstream = ["source/SMLib/src/NL_CrvApprox.cpp"]
+rust_module = "nurbs::crv_approx"
+depends_on = ["nlib.crv_basic", "nlib.crv_fit_p1", "nlib.funcs_basic", "nlib.geom", "nlib.math"]
+soft_depends_on = ["nlib.crv_adv_p1", "nlib.crv_adv_p2", "nlib.crv_fit_p2", "nlib.crv_fit_p3", "nlib.crv_geom", "nlib.crv_nurb", "nlib.crv_tool_p1", "nlib.knots", "nlib.srf_fit"]
+est_lines = 908
+layer = 10
+tests = ["prog_test:my_test_parallel_projection", "prog_test:my_test_tsurf_projection", "prog_test:my_test_surface_interface", "prog_test:my_test_ssi", "prog_test:my_test_tsurf_section", "prog_test:my_test_bsplinesurface_nlib"]
+status = "green"
+claimed_by = "swarm-nlib.crv_approx-a1"
+claimed_at = "2026-10-12T22:47:24Z"
+notes = "3 fns; largest: N_CalcNumCPtsToApproxArc, N_ApproxCircArcWithCrvData, N_ApproxNurbsWithNonRatCrv; 151 upstream test entry points reach this unit; difftest: 1646 cases (146 fixture + 1500 generated), 0 deferred, max_rel_err 0"

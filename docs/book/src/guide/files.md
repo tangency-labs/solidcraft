@@ -85,7 +85,7 @@ origin; the design itself does not move. The face is tinted and outlined in the 
 copy made with Move/Copy or Mirror keeps it. A print face that is gone or no longer flat is
 reported, and the body is sent as it lies. Curved faces and mesh bodies can't be print faces.
 Known limitation: after a shell of a body that is already shelled, no face of that body can be
-marked, as no sketch can be attached to one either; this needs kernel work, which is paused.
+marked, as no sketch can be attached to one either; this needs kernel work in solidcore.
 
 The list also has a plain **EasyPrint (Printables, in the browser)** row, and it is the one entry
 that works in the browser build too. EasyPrint is Printables' slicer, so choosing it uploads the
@@ -117,8 +117,9 @@ is started on its own first, SolidCraft waits up to ten seconds for it to be rea
 file. If the version can't be read, the command decides: the `slic3r-app-launcher` launcher is
 treated as PrusaSlicer 3, and any other entry is left as it is.
 
-Closed mechanical meshes with a constant cross-section can be rebuilt as solids with the
-`mesh.convert` command (command palette, scripts and the control channel).
+Closed meshes can be rebuilt as solids with the `mesh.convert` command (command palette,
+scripts and the control channel): a mesh with a constant cross-section as analytic planar and
+cylindrical faces, any other closed mesh as the faceted solid its triangles describe.
 
 **File → Export 3MF…** with the format changed to **3MF with face tags** (`file.export` or `file.save_mesh` with `format: "3mf-tagged"`) writes an
 ordinary 3MF in which every triangle also names the B-rep face it lies on and every coordinate

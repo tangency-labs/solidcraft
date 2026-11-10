@@ -91,6 +91,7 @@ inspect.colored_components        display: component colours
 inspect.compare_picture           display analysis: a picture compared with the outline
 inspect.curvature_map             display analysis: shading
 inspect.environment_map           display analysis: shading
+inspect.parameter_variants        inspect: independent rebuilds and regressions in crates/engine/src/cmd/parameter_sweep_tests.rs
 inspect.silhouette                display analysis: outline
 inspect.zebra                     display analysis: shading
 layout.apply                      application panel layout; no geometry (engine/UI/MCP tests)
@@ -330,6 +331,7 @@ timeline.play                     plays the history back in the view: no new geo
 timeline.rename                   a feature name
 timeline.rename_group             a group name
 ui.assistant                      the view: camera, layout, display
+ui.palette                        the view: the command search; tested in crates/ui-egui/src/keymap.rs
 view.ambient_occlusion            the view: camera, layout, display
 view.angle_readout                the view: camera, layout, display
 view.apply                        the view: camera, layout, display

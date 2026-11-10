@@ -539,6 +539,8 @@ mod tests {
                 preview(ui, &form, false, choice, &|_, _| Some(10.0));
                 size = ui.min_rect().size() - before.size();
             });
+            // egui hands back a texture delta this test never uploads; epaint panics when one is
+            // dropped unapplied.
             output.textures_delta.clear();
             assert!(size.x > 0.0 && size.y > 0.0, "{choice:?} drew nothing");
             output.shapes.into_iter().map(|c| c.shape).collect::<Vec<_>>()

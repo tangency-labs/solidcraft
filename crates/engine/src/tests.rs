@@ -1,3 +1,4 @@
+use solidcraft_geom::MeshGeom;
 use std::f64::consts::PI;
 
 use serde_json::{Value, json};
@@ -1137,6 +1138,8 @@ fn hostile_params_never_panic() {
         "density",
         "names",
         "references",
+        "head",
+        "head_gap",
     ];
     // Commands are independent; worker threads take them one at a time (their costs vary a lot).
     let ids: Vec<&str> = command_specs()
@@ -3056,6 +3059,7 @@ fn fillet_follows_its_edge_after_an_upstream_resize() {
 
 mod naming {
     use serde_json::{Value, json};
+    use solidcraft_geom::MeshGeom;
 
     use super::run;
     use crate::Session;
@@ -3305,6 +3309,48 @@ fn tapped_and_clearance_holes() {
     assert!(rel(v2 - volume(&mut s), PI * 2.15 * 2.15 * 10.0) < 1e-3);
     assert!(s.execute("solid.hole", &json!({"position": [20, 25, 10], "clearance": "M7"})).is_err());
     assert!(s.execute("solid.hole", &json!({"position": [20, 25, 10]})).is_err());
+}
+
+/// A counterbore sized to the screw's head: `head` names the standard and `clearance` the size.
+/// ISO 4762 M4 has dk 7 and k 4; with the default 0.5 mm gap the recess is Ø8, 4.5 deep.
+#[test]
+fn counterbore_for_a_cap_screw_head() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 80, "width": 30, "height": 10}));
+    let v0 = volume(&mut s);
+    // The material a through hole of diameter `hole` with a counterbore `dk` wide and `k` deep removes.
+    let removed = |hole: f64, dk: f64, k: f64| PI * hole * hole / 4.0 * (10.0 - k) + PI * dk * dk / 4.0 * k;
+    let recess = |s: &Session| match s.doc.features.last().map(|f| &f.kind) {
+        Some(solidcraft_doc::FeatureKind::Hole { hole: solidcraft_doc::HoleKind::Counterbore { cb_diameter, cb_depth, .. }, .. }) => {
+            (cb_diameter.as_str().to_string(), cb_depth.as_str().to_string())
+        }
+        other => panic!("not a counterbore: {other:?}"),
+    };
+    run(&mut s, "solid.hole", json!({"position": [10, 15, 10], "clearance": "M4", "head": "ISO 4762"}));
+    let v1 = volume(&mut s);
+    assert!(rel(v0 - v1, removed(4.5, 8.0, 4.5)) < 1e-3, "{}", v0 - v1);
+    assert_eq!(recess(&s), ("8 mm".to_string(), "4.5 mm".to_string()));
+    // A button head (ISO 7380-1 M4: dk 7.6, k 2.2), a closer gap, and the depth given by hand.
+    run(&mut s, "solid.hole", json!({"position": [30, 15, 10], "clearance": "M4", "head": "ISO 7380-1", "head_gap": 0.25, "cb_depth": 3}));
+    let v2 = volume(&mut s);
+    assert!(rel(v1 - v2, removed(4.5, 8.1, 3.0)) < 1e-3, "{}", v1 - v2);
+    assert_eq!(recess(&s), ("8.1 mm".to_string(), "3".to_string()));
+    // The family name parts.insert takes, a close fit, the pitch written out, and no gap at all.
+    run(
+        &mut s,
+        "solid.hole",
+        json!({"position": [50, 15, 10], "clearance": "M5x0.8", "fit": "close", "head": "socket_head_cap_screw", "head_gap": "0 mm"}),
+    );
+    let v3 = volume(&mut s);
+    assert!(rel(v2 - v3, removed(5.3, 8.5, 5.0)) < 1e-3, "{}", v2 - v3);
+    // A gap that names a parameter: the recess follows the parameter.
+    run(&mut s, "parameters.add", json!({"name": "gap", "expression": "0.5 mm"}));
+    run(&mut s, "solid.hole", json!({"position": [70, 15, 10], "clearance": "M4", "head": "ISO 4762", "head_gap": "gap"}));
+    let v4 = volume(&mut s);
+    assert!(rel(v3 - v4, removed(4.5, 8.0, 4.5)) < 1e-3, "{}", v3 - v4);
+    assert_eq!(recess(&s), ("7 mm + 2 * (gap)".to_string(), "4 mm + (gap)".to_string()));
+    run(&mut s, "parameters.change", json!({"name": "gap", "expression": "1 mm"}));
+    assert!(rel(v3 - volume(&mut s), removed(4.5, 9.0, 5.0)) < 1e-3);
 }
 
 /// In an inch design, a bare length typed into a feature means inches (stored with the unit);
@@ -4068,6 +4114,62 @@ fn hole_to_object_and_at_sketch_points() {
     let w0 = volume(&mut t);
     let r = run(&mut t, "solid.hole", json!({"sketch": "Spots", "diameter": 3}));
     assert!(rel(w0 - volume(&mut t), 3.0 * PI * 2.25 * 10.0) < 1e-3, "{r} {}", w0 - volume(&mut t));
+}
+
+/// #8087: deleting one sketch point of a Hole drilled at several points drops only that point's
+/// hole, and the Hole's warning names it; the feature keeps the point's id, so undo brings the hole
+/// back. With every point gone the Hole fails, naming them.
+#[test]
+fn a_deleted_sketch_point_drops_only_its_own_hole() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 60, "width": 20, "height": 10}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Pts"}));
+    run(&mut s, "sketch.point", json!({"point": [15, 10], "id": "a"}));
+    run(&mut s, "sketch.point", json!({"point": [45, 10], "id": "b"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "Pts", "points": ["a", "b"], "diameter": 8, "name": "Holes"}));
+    let bore = PI * 16.0 * 10.0;
+    assert!(rel(volume(&mut s), 12000.0 - 2.0 * bore) < 1e-4, "{}", volume(&mut s));
+    let delete = |s: &mut Session, points: Value| {
+        run(s, "sketch.edit", json!({"sketch": "Pts"}));
+        run(s, "sketch.delete", json!({ "entities": points }));
+        run(s, "sketch.finish", json!({}));
+    };
+    let holes = |s: &Session| s.model.results.iter().find(|r| r.name == "Holes").cloned().unwrap();
+
+    delete(&mut s, json!(["b"]));
+    assert!(rel(volume(&mut s), 12000.0 - bore) < 1e-4, "one Ø8 hole is left: {}", volume(&mut s));
+    let h = holes(&s);
+    assert_eq!(h.error, None);
+    assert_eq!(h.warning.as_deref(), Some("sketch point(s) `b` no longer in the sketch: not drilled there (edit the Hole to drop them)"));
+    assert!(
+        s.model.state().bodies.iter().all(|b| b
+            .body
+            .classify_point(solidcore_record::Vec3::new(15.0, 10.0, 5.0))
+            .expect("classify the point at `a`")
+            == solidcraft_kernel::PointClass::Outside),
+        "the hole at `a` is drilled"
+    );
+    assert!(
+        s.model.state().bodies.iter().any(|b| b
+            .body
+            .classify_point(solidcore_record::Vec3::new(45.0, 10.0, 5.0))
+            .expect("classify the point at `b`")
+            == solidcraft_kernel::PointClass::Inside),
+        "`b`'s spot is solid"
+    );
+    let f = s.doc.find_feature("Holes").unwrap();
+    assert!(matches!(&f.kind, solidcraft_doc::FeatureKind::Hole { points: Some(sp), .. } if sp.ids == ["a", "b"]), "{:?}", f.kind);
+
+    // Undo puts `b` back, and its hole with it.
+    run(&mut s, "edit.undo", json!({}));
+    assert!(rel(volume(&mut s), 12000.0 - 2.0 * bore) < 1e-4, "{}", volume(&mut s));
+    assert_eq!(holes(&s).warning, None);
+
+    delete(&mut s, json!(["a", "b"]));
+    let h = holes(&s);
+    assert_eq!(h.error.as_deref(), Some("unknown sketch point(s) `a`, `b` (none of the hole's points is left in its sketch)"));
+    assert!(rel(volume(&mut s), 12000.0) < 1e-9, "{}", volume(&mut s));
 }
 
 /// Combine keeps its tools on request and can put its result in a new component.

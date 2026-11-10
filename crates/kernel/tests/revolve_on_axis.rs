@@ -4,6 +4,7 @@
 //! a centreline lying in a face of a plate, as a cut, takes what it should.
 
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
+use solidcraft_geom::MeshGeom;
 use solidcraft_kernel::{BoolOp, boolean, box_solid, measure, revolve};
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 

@@ -416,6 +416,7 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
         "Type" if matches!(command, "sheet.flange" | "sheet.hem" | "solid.revolve" | "solid.emboss" | "solid.scale") => return None,
         "Direction" => return None, // segmented buttons, labelled by each choice
         "ui.fair_strength" | "ui.fair_iterations" => return None,
+        "Size" if matches!(command, "solid.cylinder" | "solid.sphere") => return None, // Diameter | Radius
         "Continuity" | "Corners" | "Cells" | "Profile" => return None,
         "Operation" if command == "solid.mirror" => return None,
         "Operation" | "Type" | "Orientation" | "Move Type" | "Object Type" | "Rule" | "Rim Edge" | "Catch Direction" | "Shape" | "Holes" | "Size"
@@ -561,6 +562,26 @@ fn rectangular_pattern_takes_features_from_every_history_layout() {
     }
 }
 
+/// #13170: with the History in the Browser, a click on one of its feature rows goes to the open
+/// Pattern or Mirror dialog like a click in the bottom or left History.
+#[test]
+fn a_dialog_takes_features_from_the_browser_history_rows() {
+    let mut h = Harness::new();
+    h.app.preferences.history_in_browser = true;
+    h.app.run("solid.box", json!({"length": 80, "width": 60, "height": 20})).unwrap();
+    h.app.run("solid.cylinder", json!({"base": [20, 20, 20], "radius": 5, "height": 10, "operation": "join"})).unwrap();
+    let id = h.app.session.doc.find_feature("Cylinder1").unwrap().id;
+    h.app.run("select.clear", json!({})).unwrap();
+    h.app.start("solid.pattern.rectangular");
+    h.frames(4);
+    mirror_object_type(&mut h, "Features");
+    h.frames(3);
+    h.step(&json!({"click": {"handle": format!("row:browser-feature:c0:{id}")}})).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(d.inputs[0].items, vec![Sel::Feature { id }], "the dialog receives the Browser History feature");
+    assert!(h.app.session.selection.is_empty(), "a dialog pick does not replace the ordinary selection");
+}
+
 form_case!(loft, "solid.loft", ["Operation"]);
 form_case!(sweep, "solid.sweep", ["Orientation"]);
 form_case!(offset_plane, "construct.plane.offset", ["Distance"]);
@@ -677,8 +698,8 @@ form_case!(stock, "solid.bounding_solid", ["Margin"]);
 form_case!(frame_member, "frame.member", ["All Lines", "Anchor", "Angle", "Mirror", "Name"]);
 form_case!(thread, "solid.thread", ["Form", "Size", "Pitch", "Designation", "Hand", "Starts", "Extent", "Start", "End"]);
 form_case!(primitive_box, "solid.box", ["ui.length", "ui.width", "ui.height", "Operation"]);
-form_case!(cylinder, "solid.cylinder", ["ui.diameter", "ui.height", "Operation"]);
-form_case!(sphere, "solid.sphere", ["ui.diameter", "Operation"]);
+form_case!(cylinder, "solid.cylinder", ["Size", "ui.diameter", "ui.height", "Operation"]);
+form_case!(sphere, "solid.sphere", ["Size", "ui.diameter", "Operation"]);
 form_case!(torus, "solid.torus", ["ui.major_radius", "ui.minor_radius", "Operation"]);
 form_case!(cone, "solid.cone", ["ui.diameter", "ui.top_diameter", "ui.height", "Operation"]);
 form_case!(coil, "solid.coil", ["ui.diameter", "ui.revolutions", "ui.pitch", "ui.section_size", "Operation"]);
@@ -1115,6 +1136,7 @@ fn draft_uses_the_picked_solid_beside_a_hidden_overlapping_mesh() {
                 positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
                 triangles: mesh.triangles.iter().flatten().copied().collect(),
                 color: None,
+                corner_normals: Default::default(),
             }],
         },
         Some("Imported mesh"),
@@ -1151,6 +1173,35 @@ fn draft_uses_the_picked_solid_beside_a_hidden_overlapping_mesh() {
         &h.app.session.doc.features.last().unwrap().kind,
         FeatureKind::Draft { body: Some(body), .. } if *body == target
     ));
+}
+
+/// The Offset Face dialog sends the body clicked where two bodies touch flush, so that body moves.
+#[test]
+fn offset_face_dialog_moves_the_body_clicked_where_two_bodies_touch_flush() {
+    use solidcraft_engine::doc::naming;
+    let mut h = Harness::new();
+    // Big (40 × 30 × 20, made first) and Small (10 × 10 × 5) touch flush at Y=0.
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20, "operation": "new", "body_name": "Big"})).unwrap();
+    h.app
+        .run("solid.box", json!({"length": 10, "width": 10, "height": 5, "corner": [10, -10, 5], "operation": "new", "body_name": "Small"}))
+        .unwrap();
+    let state = h.app.session.model.state();
+    let small = state.body("Small").unwrap();
+    let point = Vec3::new(15.0, 0.0, 7.5);
+    let name = naming::face_name_at_body(small, point).unwrap();
+    let (index, _) = naming::face_on_body(small, &name, point).unwrap();
+    h.app.session.selection = vec![Sel::Face { body: "Small".into(), index, point }];
+    let mut d = Dialog::for_command(&h.app, "solid.offset_face").unwrap();
+    d.kind = Kind::OffsetFaces { distance: "2".into() };
+    let commands = apply_commands(&h.app, &d).unwrap();
+    let (command, params) = &commands[0];
+    assert_eq!(params["body"], "Small");
+    h.app.run(command, params.clone()).unwrap();
+    let state = h.app.session.model.state();
+    let volume = |n: &str| solidcraft_engine::kernel::measure(&state.body(n).unwrap().body).unwrap().volume;
+    // Small grows to 10 × 12 × 5; Big keeps 40 × 30 × 20.
+    assert!((volume("Small") - 600.0).abs() < 1e-6, "{}", volume("Small"));
+    assert!((volume("Big") - 24000.0).abs() < 1e-6, "{}", volume("Big"));
 }
 
 #[test]
@@ -1203,6 +1254,42 @@ fn solid_pattern_quantity_arrows_step_the_count_the_command_receives() {
         set(&mut h, "copies");
         h.step(&json!({"click":{"handle":format!("dialog:{label} up")}})).unwrap();
         assert_eq!(sent(&h), json!("copies + 1"), "{command}");
+        h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
+        h.settle();
+    }
+}
+
+/// The Rectangular Pattern dialog shows each direction as its own group, with its pick, Quantity,
+/// Spacing and (for features) Alignment in the same order for both directions, under a heading
+/// that separates the two (#9634).
+#[test]
+fn rectangular_pattern_groups_each_direction_in_the_same_order() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 10})).unwrap();
+    for features in [false, true] {
+        h.app.start("solid.pattern.rectangular");
+        h.frames(4);
+        if features {
+            mirror_object_type(&mut h, "Features");
+            h.frames(2);
+        }
+        let objects = h.app.dialog.as_ref().unwrap().inputs[0].label;
+        let group = |n: &str, rows: [&str; 3]| {
+            let mut keys = vec![format!("dialog:section:Direction {n}")];
+            keys.extend(rows.iter().map(|row| format!("dialog:row:{row}")));
+            if features {
+                keys.push(format!("dialog:row:{}", if n == "1" { "Alignment" } else { "Alignment 2" }));
+            }
+            keys
+        };
+        let mut order = vec![format!("dialog:row:{objects}")];
+        order.extend(group("1", ["Direction", "Quantity", "Spacing"]));
+        order.extend(group("2", ["Direction 2", "Quantity 2", "Spacing 2"]));
+        let tops: Vec<f32> =
+            order.iter().map(|key| scenario::rect_of(key).unwrap_or_else(|| panic!("features {features}: {key} is shown")).top()).collect();
+        for (pair, keys) in tops.windows(2).zip(order.windows(2)) {
+            assert!(pair[0] < pair[1], "features {features}: {} shows above {}", keys[0], keys[1]);
+        }
         h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
         h.settle();
     }

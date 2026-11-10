@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1120" height="780" viewBox="0 0 1120 780">
+  <title>layers</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <path d="M0 0 L1120 0 L1120 780 L0 780 Z" fill="#ffffff"/>
+    <text transform="matrix(1 0 0 1 40 44)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">One operation through the layers</tspan></text>
+    <path d="M108 80 L952 80 C956.418 80 960 83.582 960 88 L960 164 C960 168.418 956.418 172 952 172 L108 172 C103.582 172 100 168.418 100 164 L100 88 C100 83.582 103.582 80 108 80 Z" fill="#f0f0f0" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 116 108)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="15" font-weight="bold" fill="#000000"><tspan x="0" y="0">App (SolidCraft, or any app)</tspan></text>
+    <text transform="matrix(1 0 0 1 116 130)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">The user picks two edges and r = 2. The app turns that into the command solid.fillet(edges, r),</tspan></text>
+    <text transform="matrix(1 0 0 1 116 148)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">and draws what comes back. It holds the document and computes no geometry.</tspan></text>
+    <path d="M30 222 L1090 222" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="8 6"/>
+    <text transform="matrix(1 0 0 1 40 214)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" font-weight="bold" fill="#555555"><tspan x="0" y="0">App</tspan></text>
+    <text transform="matrix(1 0 0 1 40 242)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" font-weight="bold" fill="#555555"><tspan x="0" y="0">solidcore</tspan></text>
+    <text transform="matrix(1 0 0 1 505 214)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#555555"><tspan x="0" y="0">crossed only through ops and tess</tspan></text>
+    <path d="M108 280 L472 280 C476.418 280 480 283.582 480 288 L480 364 C480 368.418 476.418 372 472 372 L108 372 C103.582 372 100 368.418 100 364 L100 288 C100 283.582 103.582 280 108 280 Z" fill="#f0f0f0" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 116 308)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="15" font-weight="bold" fill="#000000"><tspan x="0" y="0">solidcore-ops</tspan></text>
+    <text transform="matrix(1 0 0 1 116 330)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">The fillet recipe: resolves the picked edges, chooses</tspan></text>
+    <text transform="matrix(1 0 0 1 116 348)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">the defaults, calls the kernel in order, returns the result.</tspan></text>
+    <path d="M648 280 L1012 280 C1016.418 280 1020 283.582 1020 288 L1020 364 C1020 368.418 1016.418 372 1012 372 L648 372 C643.582 372 640 368.418 640 364 L640 288 C640 283.582 643.582 280 648 280 Z" fill="#f0f0f0" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 656 308)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="15" font-weight="bold" fill="#000000"><tspan x="0" y="0">solidcore-tess</tspan></text>
+    <text transform="matrix(1 0 0 1 656 330)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">Meshes the new faces for display. The mesh only</tspan></text>
+    <text transform="matrix(1 0 0 1 656 348)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">shows the body; it decides nothing.</tspan></text>
+    <path d="M108 430 L472 430 C476.418 430 480 433.582 480 438 L480 514 C480 518.418 476.418 522 472 522 L108 522 C103.582 522 100 518.418 100 514 L100 438 C100 433.582 103.582 430 108 430 Z" fill="#f0f0f0" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 116 458)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="15" font-weight="bold" fill="#000000"><tspan x="0" y="0">solidcore-convert</tspan></text>
+    <text transform="matrix(1 0 0 1 116 480)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">The body&apos;s record becomes the kernel&apos;s B-rep, field</tspan></text>
+    <text transform="matrix(1 0 0 1 116 498)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">by field, and the result goes back the same way.</tspan></text>
+    <path d="M648 430 L1012 430 C1016.418 430 1020 433.582 1020 438 L1020 514 C1020 518.418 1016.418 522 1012 522 L648 522 C643.582 522 640 518.418 640 514 L640 438 C640 433.582 643.582 430 648 430 Z" fill="#f0f0f0" stroke="#000000" stroke-width="1.5" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 656 458)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="15" font-weight="bold" fill="#000000"><tspan x="0" y="0">solidcore-record</tspan></text>
+    <text transform="matrix(1 0 0 1 656 480)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">The new body as data: faces, edges, surfaces and</tspan></text>
+    <text transform="matrix(1 0 0 1 656 498)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">curves, each face&apos;s definition with its net.</tspan></text>
+    <path d="M108 580 L472 580 C476.418 580 480 583.582 480 588 L480 664 C480 668.418 476.418 672 472 672 L108 672 C103.582 672 100 668.418 100 664 L100 588 C100 583.582 103.582 580 108 580 Z" fill="#dce9f5" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 116 608)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="15" font-weight="bold" fill="#000000"><tspan x="0" y="0">solidcore (the kernel)</tspan></text>
+    <text transform="matrix(1 0 0 1 116 630)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">Builds the round (spine, rails, section), certifies its</tspan></text>
+    <text transform="matrix(1 0 0 1 116 648)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">net against its definition, or refuses, naming the</tspan></text>
+    <text transform="matrix(1 0 0 1 116 666)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">size that fits.</tspan></text>
+    <g>
+      <g>
+        <path d="M210.9 172 L210.9 277.48 L209.1 277.48 L209.1 172 Z" fill="#555555"/>
+        <path d="M210 280 L206.4 272.8 L210 274.96 L213.6 272.8 Z" fill="#555555"/>
+      </g>
+    </g>
+    <path d="M199 250 C199 243.925 203.925 239 210 239 C216.075 239 221 243.925 221 250 C221 256.075 216.075 261 210 261 C203.925 261 199 256.075 199 250 Z" fill="#1f6fb2"/>
+    <text transform="matrix(1 0 0 1 206 254.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" font-weight="bold" fill="#ffffff"><tspan x="0" y="0">1</tspan></text>
+    <text transform="matrix(1 0 0 1 228 254.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">intent</tspan></text>
+    <g>
+      <g>
+        <path d="M329.1 280 L329.1 174.52 L330.9 174.52 L330.9 280 Z" fill="#555555"/>
+        <path d="M330 172 L333.6 179.2 L330 177.04 L326.4 179.2 Z" fill="#555555"/>
+      </g>
+    </g>
+    <path d="M319 250 C319 243.925 323.925 239 330 239 C336.075 239 341 243.925 341 250 C341 256.075 336.075 261 330 261 C323.925 261 319 256.075 319 250 Z" fill="#1f6fb2"/>
+    <text transform="matrix(1 0 0 1 326 254.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" font-weight="bold" fill="#ffffff"><tspan x="0" y="0">6</tspan></text>
+    <text transform="matrix(1 0 0 1 348 254.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">result / refusal</tspan></text>
+    <g>
+      <g>
+        <path d="M230.9 372 L230.9 427.48 L229.1 427.48 L229.1 372 Z" fill="#555555"/>
+        <path d="M230 430 L226.4 422.8 L230 424.96 L233.6 422.8 Z" fill="#555555"/>
+      </g>
+    </g>
+    <path d="M219 401 C219 394.925 223.925 390 230 390 C236.075 390 241 394.925 241 401 C241 407.075 236.075 412 230 412 C223.925 412 219 407.075 219 401 Z" fill="#1f6fb2"/>
+    <text transform="matrix(1 0 0 1 226 405.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" font-weight="bold" fill="#ffffff"><tspan x="0" y="0">2</tspan></text>
+    <g>
+      <g>
+        <path d="M230.9 522 L230.9 577.48 L229.1 577.48 L229.1 522 Z" fill="#555555"/>
+        <path d="M230 580 L226.4 572.8 L230 574.96 L233.6 572.8 Z" fill="#555555"/>
+      </g>
+    </g>
+    <path d="M219 551 C219 544.925 223.925 540 230 540 C236.075 540 241 544.925 241 551 C241 557.075 236.075 562 230 562 C223.925 562 219 557.075 219 551 Z" fill="#1f6fb2"/>
+    <text transform="matrix(1 0 0 1 226 555.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" font-weight="bold" fill="#ffffff"><tspan x="0" y="0">3</tspan></text>
+    <g>
+      <g>
+        <path d="M760.9 172 L760.9 277.48 L759.1 277.48 L759.1 172 Z" fill="#555555"/>
+        <path d="M760 280 L756.4 272.8 L760 274.96 L763.6 272.8 Z" fill="#555555"/>
+      </g>
+    </g>
+    <path d="M749 250 C749 243.925 753.925 239 760 239 C766.075 239 771 243.925 771 250 C771 256.075 766.075 261 760 261 C753.925 261 749 256.075 749 250 Z" fill="#1f6fb2"/>
+    <text transform="matrix(1 0 0 1 756 254.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" font-weight="bold" fill="#ffffff"><tspan x="0" y="0">7</tspan></text>
+    <text transform="matrix(1 0 0 1 778 254.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">request mesh</tspan></text>
+    <g>
+      <g>
+        <path d="M879.1 280 L879.1 174.52 L880.9 174.52 L880.9 280 Z" fill="#555555"/>
+        <path d="M880 172 L883.6 179.2 L880 177.04 L876.4 179.2 Z" fill="#555555"/>
+      </g>
+    </g>
+    <path d="M869 250 C869 243.925 873.925 239 880 239 C886.075 239 891 243.925 891 250 C891 256.075 886.075 261 880 261 C873.925 261 869 256.075 869 250 Z" fill="#1f6fb2"/>
+    <text transform="matrix(1 0 0 1 876 254.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" font-weight="bold" fill="#ffffff"><tspan x="0" y="0">8</tspan></text>
+    <text transform="matrix(1 0 0 1 40 740)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#555555"><tspan x="0" y="0">The kernel computes; ops decides and sequences; convert translates between record and kernel; the app only maps input to a command and draws.</tspan></text>
+    <g>
+      <g>
+        <path d="M369.1 580 L369.1 524.52 L370.9 524.52 L370.9 580 Z" fill="#555555"/>
+        <path d="M370 522 L373.6 529.2 L370 527.04 L366.4 529.2 Z" fill="#555555"/>
+      </g>
+    </g>
+    <path d="M359 551 C359 544.925 363.925 540 370 540 C376.075 540 381 544.925 381 551 C381 557.075 376.075 562 370 562 C363.925 562 359 557.075 359 551 Z" fill="#1f6fb2"/>
+    <text transform="matrix(1 0 0 1 366 556.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" font-weight="bold" fill="#ffffff"><tspan x="0" y="0">4</tspan></text>
+    <text transform="matrix(1 0 0 1 388 556.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">B-rep</tspan></text>
+    <g>
+      <g>
+        <path d="M369.1 430 L369.1 374.52 L370.9 374.52 L370.9 430 Z" fill="#555555"/>
+        <path d="M370 372 L373.6 379.2 L370 377.04 L366.4 379.2 Z" fill="#555555"/>
+      </g>
+    </g>
+    <path d="M359 401 C359 394.925 363.925 390 370 390 C376.075 390 381 394.925 381 401 C381 407.075 376.075 412 370 412 C363.925 412 359 407.075 359 401 Z" fill="#1f6fb2"/>
+    <text transform="matrix(1 0 0 1 366 406.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" font-weight="bold" fill="#ffffff"><tspan x="0" y="0">5</tspan></text>
+    <text transform="matrix(1 0 0 1 388 406.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">record</tspan></text>
+    <text transform="matrix(1 0 0 1 248 406.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">record</tspan></text>
+    <text transform="matrix(1 0 0 1 248 556.5)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="12" fill="#000000"><tspan x="0" y="0">B-rep</tspan></text>
+    <path d="M480 476 L648 476" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="8 6"/>
+    <text transform="matrix(1 0 0 1 500 468)" x="0" y="0" xml:space="preserve" font-family="Helvetica" font-size="11" fill="#555555"><tspan x="0" y="0">reads and writes</tspan></text>
+  </g>
+</svg>

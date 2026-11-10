@@ -191,8 +191,9 @@ mod web {
 
     const CANVAS_ID: &str = "solidcraft_canvas";
     const LOADING_ID: &str = "solidcraft_loading";
-    /// A 32-bit float depth buffer (no stencil): WebGPU and WebGL2 both have it, and the viewport
-    /// draws it with reversed depth, whose precision follows the distance from the eye (#1434).
+    /// The viewport scene's depth buffer, a 32-bit float one (no stencil): WebGPU and WebGL2 both
+    /// have it, and the viewport draws it with reversed depth, whose precision follows the
+    /// distance from the eye (#1434). egui's own pass has none: the scene is drawn offscreen.
     const DEPTH_BITS: u8 = 32;
 
     /// The loading animation (assets/styles/web/loading-logo.svg) settles into the finished mark
@@ -360,7 +361,7 @@ mod web {
         /// The start page's recent designs were filled from the stored ones.
         recents_synced: bool,
         /// On-demand script fonts: fetched only when a CJK language is selected.
-        font: solidcraft_ui_egui::fonts::CjkFontLoader,
+        font: solidcraft_ui_egui::ui_kit::type_face::CjkFontLoader,
         font_result: FontLoadResult,
         /// The fetched Japanese font's bytes: kept so a language change can re-order the fallbacks.
         cjk_bytes: Option<Vec<u8>>,
@@ -1059,7 +1060,7 @@ mod web {
                     }
                 };
                 let effective = solidcraft_ui_text::effective_language(&self.app.preferences.language);
-                if !installed && solidcraft_ui_egui::fonts::needs_cjk_font(effective) {
+                if !installed && solidcraft_ui_egui::ui_kit::type_face::needs_cjk_font(effective) {
                     log::warn!("script font unavailable; showing English for this session");
                 }
                 self.font.finished(installed, &mut self.app.preferences.language);
@@ -1093,7 +1094,7 @@ mod web {
         /// CJK text on screen with no Japanese font yet (an English UI showing a Japanese name):
         /// fetch the Japanese font, so the text does not stay tofu (#720).
         fn watch_text_for_font(&mut self, ctx: &egui::Context) {
-            if self.font.watching_text() && solidcraft_ui_egui::fonts::painted_cjk(ctx) && self.font.text_needs_font() {
+            if self.font.watching_text() && solidcraft_ui_egui::ui_kit::type_face::painted_cjk(ctx) && self.font.text_needs_font() {
                 self.fetch_font(ctx, "ja");
             }
         }
@@ -1210,6 +1211,25 @@ mod web {
         storage.and_then(|s| s.get_item(&crate::channel::key(WEBGL_KEY)).ok().flatten()).is_some()
     }
 
+    /// Install the GPU viewport the desktop's way: the scene is drawn offscreen with its own depth
+    /// buffer and the saved anti-aliasing, then copied into egui's pass, which has neither. Drawn
+    /// straight into egui's pass, the view was 1x whatever Graphics said (#11622).
+    ///
+    /// The sample count follows the desktop's rule (`gpu::scene_samples`): the saved choice where
+    /// the browser's device draws it, else the supported default. WebGL draws 1x, as desktop
+    /// OpenGL does. eframe's web painter has no stencil buffer.
+    fn install_viewport(app: &mut SolveApp, rs: &eframe::egui_wgpu::RenderState) {
+        let backend = rs.adapter.get_info().backend;
+        let depth = eframe::egui_wgpu::depth_format_from_bits(DEPTH_BITS, 0);
+        let supported = eframe::egui_wgpu::supported_msaa_samples(&rs.adapter, &rs.device, rs.target_format, depth);
+        let requested = solidcraft_ui_egui::gpu::scene_samples(backend, app.preferences.msaa, &supported);
+        let drawn = app.set_wgpu_split(rs, DEPTH_BITS, 0, requested);
+        // After the install, which sets egui's own counts: those leave out the scene's depth
+        // buffer, and they include counts WebGL would draw at 1x.
+        app.msaa_supported = solidcraft_ui_egui::gpu::scene_sample_choices(backend, supported);
+        log::info!("SolidCraft graphics: {backend:?}, MSAA {drawn}x (saved {}x)", app.preferences.msaa);
+    }
+
     /// Fetch font bytes asynchronously through the browser.
     async fn fetch_font_bytes(url: &str) -> Result<Vec<u8>, String> {
         let window = web_sys::window().ok_or("no window")?;
@@ -1226,6 +1246,10 @@ mod web {
     pub fn start() {
         eframe::WebLogger::init(log::LevelFilter::Info).ok();
         solidcraft_ui_egui::i18n::install();
+        solidcraft_ui_egui::icon_svg::install();
+        solidcraft_ui_egui::workspace::install_tabs();
+        solidcraft_ui_egui::navigation_slots::install();
+        solidcraft_ui_egui::theme::install_builtin_themes();
         wasm_bindgen_futures::spawn_local(async {
             let Some(window) = web_sys::window() else { return };
             let launch = crate::Launch::parse(&query());
@@ -1239,7 +1263,9 @@ mod web {
                 log::error!("missing <canvas id=\"{CANVAS_ID}\">");
                 return;
             };
-            let mut options = eframe::WebOptions { depth_buffer: DEPTH_BITS, ..Default::default() };
+            // The window's pass (egui's) has no depth buffer: the scene has its own
+            // (`install_viewport`).
+            let mut options = eframe::WebOptions { depth_buffer: 0, ..Default::default() };
             if webgl()
                 && let eframe::egui_wgpu::WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup
             {
@@ -1313,8 +1339,7 @@ mod web {
                             app.load_prefs(&p);
                         }
                         if let Some(rs) = &cc.wgpu_render_state {
-                            // eframe's web painter has no stencil buffer.
-                            app.set_wgpu(rs, DEPTH_BITS, 0, 1);
+                            install_viewport(&mut app, rs);
                         }
                         if launch.open.is_none() && crate::query_flag(&query(), "sample") {
                             if let Err(e) = app.session.run_script(&solidcraft_engine::sample::script()) {
