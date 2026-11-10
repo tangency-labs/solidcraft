@@ -215,6 +215,12 @@ construction_point_along
   inputs:
     Distance (0 to 1) = pt.t (Unitless)
   expressions: pt.t
+coordinate_system_refs
+  inputs:
+    Angle = cs_z.angle (Angle)
+    Offset = cs_z.offset (Length)
+  expressions: cs_z.angle, cs_z.offset
+coordinate_system_typed
 split_face
   inputs:
     Angle = split_face.angle (Angle)

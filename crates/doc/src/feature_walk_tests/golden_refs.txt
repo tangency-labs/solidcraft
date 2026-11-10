@@ -96,6 +96,8 @@ construction_axis
 construction_point_planes
   remap_refs: def.a.plane.base.base.feature, def.b.plane.base.base.feature, def.c.plane.base.base.feature
 construction_point_along
+coordinate_system_refs
+coordinate_system_typed
 split_face
   sketches: [6]
   remap_refs: plane.base.base.feature, sketch
