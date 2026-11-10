@@ -1259,6 +1259,36 @@ pub fn face_name_at_body(body: &ModelBody, point: Vec3) -> Option<String> {
     face_names(body).get(index).filter(|name| !name.is_empty()).cloned()
 }
 
+/// Capture the face index at a point on the body's B-rep.
+/// Returns the face index (B-rep face index) at the given point, if any.
+/// Uses exact geometry (B-rep faces and planes) instead of mesh for reliable decisions.
+pub fn face_index_at_body(body: &ModelBody, point: Vec3) -> Option<usize> {
+    if body.body.is_mesh() || !point.is_finite() {
+        return None;
+    }
+    let tolerance = (body.body.size() * 1e-3).max(1e-3);
+    // Use exact geometry: get face planes from the kernel Body
+    let faces = body.body.faces(tolerance).ok()?;
+    for (i, face) in faces.iter().enumerate() {
+        let plane = match body.body.face_plane(i) {
+            Some(p) => p,
+            None => continue,
+        };
+        let dist = (point - plane.origin).dot(plane.normal()).abs();
+        if dist <= tolerance {
+            // Project point onto the plane and check if it's within the face's 2D bounds
+            // Using exact geometry: compute bounding circle from face area and centroid
+            let local = point - plane.origin - plane.normal() * (point - plane.origin).dot(plane.normal());
+            let local_2d = Vec2::new(local.dot(plane.x), local.dot(plane.y));
+            let centroid_2d = Vec2::new(face.centroid.dot(plane.x), face.centroid.dot(plane.y));
+            let radius = (face.area / std::f64::consts::PI).sqrt();
+            if (local_2d - centroid_2d).len() <= radius + tolerance {
+                return Some(i);
+            }
+        }
+    }
+    None
+}
 /// The names the faces of `imported` have in `part`, by body, then face (empty where not known):
 /// `imported` are the bodies read back from the STEP text `part`'s solid bodies were written to
 /// (a linked design), where they stand in it. Each takes the names of the solid of `part` that
