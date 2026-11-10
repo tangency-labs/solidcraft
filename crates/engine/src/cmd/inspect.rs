@@ -428,6 +428,23 @@ fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Opti
             holes: p.hole_curves.iter().map(|h| solidcraft_sketch::distinct_curves(h)).collect(),
         })
         .collect();
+    // Planar loops the 3D sketch curves close in planes of their own (#741): the plane is given
+    // as an origin and a unit normal, and the centroid is in the same frame as the sketch plane.
+    let profiles_3d: Vec<Value> = ss
+        .profiles_3d
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            json!({
+                "index": i,
+                "area_mm2": p.area,
+                "plane": { "origin": p.plane.origin, "normal": p.plane.normal() },
+                "centroid": p.centroid,
+                "curves": p.outer_curves,
+                "holes": p.hole_curves,
+            })
+        })
+        .collect();
     let wires = sk
         .wires
         .iter()
@@ -458,6 +475,7 @@ fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Opti
         points,
         constraints,
         profiles,
+        profiles_3d,
         links: serde_json::to_value(&sk.links).unwrap_or_default(),
         wires,
         visible: crate::view::sketch_shown(s, id),
