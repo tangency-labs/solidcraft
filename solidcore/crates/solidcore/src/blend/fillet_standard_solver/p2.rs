@@ -147,7 +147,7 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
 use crate::nurbs::knots::Side;
-use crate::surface::offset_surface::{offset_continues_as_itself, SS_UNKNOWN};
+use crate::surface::offset_surface::{closed_turn, offset_continues_as_itself, SS_UNKNOWN};
 use crate::surface::surface::p3::{out_of_bounds_enabled, set_out_of_bounds_enabled};
 use crate::surface::surface::Surface;
 use crate::topology::edgeuse::p1 as edgeuse;
@@ -741,15 +741,31 @@ fn cr_initial_body<S: ConstantRadiusOps + ?Sized>(
     // the next two entries in rIntervals and rPeriodicities.
     let mut domain = base2.natural_uv_domain_with_nurb(k)?;
     solver.setup_offset_extension(k, base2, &mut domain)?; // expands sDomain
+    let mut ivls = [
+        Extent1d::from_min_max(domain.min().x, domain.max().x),
+        Extent1d::from_min_max(domain.min().y, domain.max().y),
+    ];
+    let mut periodic = [false, false];
+    // Not upstream (#13538): an offset continued as itself names each of its points by one
+    // parameter pair inside its closed turn (`closed_turn`): round the axis it wraps there
+    // (WR-650), along a circle generator it ends there. Solved on the extension's multiple
+    // turns, a rail end found the right point by another turn's parameters, which the face's
+    // trim reads as off the face.
+    if let Some(dirs) = closed_turn(k, base2)? {
+        for ((ivl, p), dir) in ivls.iter_mut().zip(periodic.iter_mut()).zip(dirs) {
+            if let Some((closed, wraps)) = dir {
+                *ivl = closed;
+                *p = wraps;
+            }
+        }
+    }
 
     let surface2_index = guess_t.len();
-    *interval_at(intervals, surface2_index, OP)? =
-        Extent1d::from_min_max(domain.min().x, domain.max().x);
-    *interval_at(intervals, plus(surface2_index, 1, OP)?, OP)? =
-        Extent1d::from_min_max(domain.min().y, domain.max().y);
+    let [ivl_u, ivl_v] = ivls;
+    *interval_at(intervals, surface2_index, OP)? = ivl_u;
+    *interval_at(intervals, plus(surface2_index, 1, OP)?, OP)? = ivl_v;
 
-    periodicities.push(false);
-    periodicities.push(false);
+    periodicities.extend(periodic);
 
     // set output
     guess_t.push(srf2_guess_uv.x);
