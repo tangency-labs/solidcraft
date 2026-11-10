@@ -5350,6 +5350,85 @@ fn hole_axis_size(st: &ModelState, position: &Vec3, dir: Vec3) -> f64 {
     if met > 0.0 { met } else { st.bodies.iter().map(|b| b.body.size()).fold(1.0, f64::max) }
 }
 
+/// How close to a hole's entry face material above it may come and still only shorten the
+/// tools' run-on (to half the gap, never under 0.1 mm); closer material is cut out of the tools.
+const RUN_ON_CLEAR: f64 = 0.2;
+
+/// How far a hole's tools run on above its entry face, and the material there they must leave
+/// (#10695). Each tool starts `top` above the face so that it passes cleanly through it, but the
+/// material within `reach` of the axis there is not the hole's to cut: a body floating over the
+/// face or standing on it, a wall of the part beside the hole, the wall of a bore whose floor the
+/// hole is drilled from. Material at least [`RUN_ON_CLEAR`] above the face shortens the run-on to
+/// half its gap; material nearer is returned, to be cut out of the tools. The body the hole
+/// enters rises above the face's plane around the entry when the face is curved or slants across
+/// the axis: those parts of it, touching the entry point, are drilled as before. Exact: a body
+/// that may reach above the face is intersected with the run-on's column; one whose exact box
+/// lies wholly below the face (the part being drilled, as a rule) costs nothing more. Best
+/// effort: where the kernel cannot answer for a body (or for the column), that body keeps the
+/// run-on in its way as before, so a hole that drilled before never fails over a neighbour.
+fn hole_run_on(st: &ModelState, plane: &Plane, reach: f64, top: f64) -> (f64, Vec<Body>) {
+    let disc = Region2 { outer: solidcore_record::Loop2::circle_from(Vec2::ZERO, reach, 0.0), holes: vec![] };
+    let Some(column) = kernel::extrude(plane, &[disc], 0.0, top).ok().and_then(|mut c| c.pop()) else { return (top, Vec::new()) };
+    let column_box = more::exact_box(&column);
+    let (o, n, x) = (plane.origin, plane.normal(), plane.x);
+    let y = n.cross(x);
+    // Into the hole's frame: x and y across the axis, z the height above the face.
+    let frame = [[x.x, y.x, n.x, 0.0], [x.y, y.y, n.y, 0.0], [x.z, y.z, n.z, 0.0], [-x.dot(o), -y.dot(o), -n.dot(o), 1.0]];
+    let mut lowest = f64::INFINITY;
+    let mut near = Vec::new();
+    for b in st.bodies.iter().filter(|b| !b.body.is_mesh()) {
+        let slack = 2.0 * b.body.record().tolerance + 1e-6;
+        // The body's exact box (grown by its tolerance), when the kernel gives one: clear of the
+        // column, or wholly at or below the face, it has nothing in the run-on's way.
+        let bb = more::exact_box(&b.body);
+        if more::boxes_apart(&bb, &column_box) {
+            continue;
+        }
+        if let Some(bb) = bb {
+            let corner = |i: u8| {
+                Vec3::new(
+                    if i & 1 == 0 { bb.min.x } else { bb.max.x },
+                    if i & 2 == 0 { bb.min.y } else { bb.max.y },
+                    if i & 4 == 0 { bb.min.z } else { bb.max.z },
+                )
+            };
+            if (0..8).all(|i| (corner(i) - o).dot(n) <= 2.0 * slack) {
+                continue;
+            }
+        }
+        // The same in the hole's frame, where the box is tight about its axis: a convex face (a
+        // radial hole into a round bar) has all its body below the face's plane. Much cheaper
+        // than the intersect below; unknown goes on to it.
+        if kernel::transform_matrix(&b.body, frame).and_then(|t| t.exact_bounds()).is_ok_and(|t| t.max.z <= 2.0 * slack) {
+            continue;
+        }
+        // The piece of the body in the column and how high its lowest point is, or nothing.
+        let found = || -> Result<Option<(Body, f64)>> {
+            let Some(piece) = kernel::boolean(&b.body, &column, BoolOp::Intersect)? else { return Ok(None) };
+            // The body being drilled, around the entry point: drilled as before. The entry point
+            // lies on the face, or just inside the body under a curved face's rim (a counterbore
+            // on a round bar measures from the rim's lowest point): the piece over it is the
+            // face's own rise, the hole's to cut.
+            if piece.classify_point(o)? != kernel::PointClass::Outside {
+                let probe = (b.body.size() * 1e-5).max(10.0 * slack);
+                if b.body.classify_point(o - n * probe)? == kernel::PointClass::Inside {
+                    return Ok(None);
+                }
+            }
+            let low = kernel::transform_matrix(&piece, frame)?.exact_bounds()?.min.z;
+            Ok(Some((piece, low)))
+        };
+        // A kernel error for this body: it keeps the run-on in its way, as before.
+        let Ok(Some((piece, low))) = found() else { continue };
+        if low >= RUN_ON_CLEAR {
+            lowest = lowest.min(low);
+        } else {
+            near.push(piece);
+        }
+    }
+    (if lowest.is_finite() { top.min(lowest / 2.0) } else { top }, near)
+}
+
 /// [`hole_tools`], each with its exact geometry when it is a straight cylinder along the axis
 /// (a plain hole, a counterbore, a drill point left in the air past a through hole), so sheet
 /// metal can keep it as a flat cut-out or pocket. Each tool's faces are named by the part of the
@@ -5369,7 +5448,17 @@ fn hole_tools_and_prisms(
         return Err(DocError::Invalid("hole diameter must be positive".into()));
     }
     let size = hole_axis_size(st, position, dir);
-    let top = (size * 0.01).max(0.1);
+    // Tools are cylinders and cones made by (tapered) extrudes along the axis, cut one
+    // after another, widest first.
+    let plane = Plane::from_normal(*position, -dir).ok_or_else(|| DocError::Invalid("hole axis".into()))?;
+    // The widest tool's radius at the face, where it runs on above it.
+    let wide = match hole {
+        HoleKind::Counterbore { cb_diameter: w, .. } | HoleKind::Countersink { cs_diameter: w, .. } => {
+            val(vals, w, Kind::Length).map_or(r, |d| (d / 2.0).max(r))
+        }
+        HoleKind::Simple | HoleKind::Drilled { .. } => r,
+    };
+    let (top, above) = hole_run_on(st, &plane, if wide.is_finite() { wide } else { r }, (size * 0.01).max(0.1));
     let bottom = match depth {
         Some(d) => -val(vals, d, Kind::Length)?,
         None => -(size * 2.0 + 1.0),
@@ -5377,9 +5466,6 @@ fn hole_tools_and_prisms(
     if bottom >= 0.0 {
         return Err(DocError::Invalid("hole depth must be positive".into()));
     }
-    // Tools are cylinders and cones made by (tapered) extrudes along the axis, cut one
-    // after another, widest first.
-    let plane = Plane::from_normal(*position, -dir).ok_or_else(|| DocError::Invalid("hole axis".into()))?;
     // Each tool's circle seam at its own angle, so seams don't line up between tools.
     let seam = std::cell::Cell::new(0.0);
     let disc = |rad: f64| {
@@ -5485,7 +5571,25 @@ fn hole_tools_and_prisms(
             tools.extend(bore(tip_angle.as_ref())?);
         }
     }
-    Ok(tools)
+    if above.is_empty() {
+        return Ok(tools);
+    }
+    // The material above the face the run-on would reach, left out of each tool it meets; such
+    // a tool is no longer a plain cylinder.
+    let mut kept = Vec::with_capacity(tools.len());
+    for (mut tool, mut prism) in tools {
+        for piece in &above {
+            // Best effort: where the kernel cannot answer, the tool stays as it was before.
+            if !matches!(kernel::boolean(&tool.body, piece, BoolOp::Intersect), Ok(Some(_))) {
+                continue;
+            }
+            let Ok(Some(cut)) = kernel::boolean(&tool.body, piece, BoolOp::Cut) else { continue };
+            tool = Traced::step(cut, &[&tool, &Traced::unnamed(piece.clone())]);
+            prism = None;
+        }
+        kept.push((tool, prism));
+    }
+    Ok(kept)
 }
 
 /// How much wider than the hole a bridged counterbore's slot and square are, in mm.
