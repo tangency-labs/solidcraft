@@ -1,0 +1,5 @@
+{
+  "en": {
+    "ui.agent_chat_context_write_failed": "This conversation isn't being saved: {reason}"
+  }
+}
