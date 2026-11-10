@@ -1,109 +1,78 @@
-//! Stored navigation slots and their catalogue. Painting lives in `navigation_bar_view`.
-use crate::{
-    SolveApp,
-    navigation::NavCaps,
-    ui_kit::{NavigationEdge, NavigationIdle, NavigationKind, NavigationSize},
-};
+//! Stored navigation slots, checked against the host's slot catalogue. Painting lives in
+//! `navigation_bar_view`; SolidCraft's catalogue is `navigation_slots`.
+use crate::ui_kit::{NavigationEdge, NavigationIdle, NavigationKind, NavigationSize};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub const MAX_SLOTS: usize = 16;
 pub const MAX_SEPARATORS: usize = 4;
 
-// Reserved for the selection-mode slot in #6326; no runtime consumer yet.
-#[cfg(test)]
-pub(crate) const SELECTION_MODE_ICONS: &[(&str, &str)] = &[
-    ("faces_edges", "select_faces_edges"),
-    ("bodies", "select_bodies"),
-    ("features", "select_features"),
-    ("parts", "select_parts"),
-    ("components", "select_components"),
-    ("sketch", "select_sketch"),
-];
-
-/// The engine's style ids in index order (`ui.visual_style` 0..3), with the English menu label.
-pub(crate) const VISUAL_STYLES: [(&str, &str); 4] = [
-    ("shaded_with_edges", "Shaded with edges"),
-    ("shaded", "Shaded"),
-    ("wireframe", "Wireframe"),
-    ("shaded_with_hidden_edges", "Shaded with hidden edges"),
-];
-
-pub(crate) fn visual_style_icon(style: u8) -> &'static str {
-    match style {
-        1 => "style_shaded",
-        2 => "style_wireframe",
-        3 => "style_hidden_edges",
-        _ => "style_shaded_edges",
-    }
-}
-
+/// One slot the bar can hold, as the host's catalogue describes it.
+#[derive(Debug, PartialEq)]
 pub(crate) struct Slot {
     pub id: &'static str,
     pub kind: NavigationKind,
     pub icon: &'static str,
+    /// Message ids of the slot's name and of what it does.
     pub label: &'static str,
     pub description: &'static str,
+    /// The command the slot runs, if any.
     pub command: Option<&'static str>,
+    /// The slot works only on a canvas whose camera may orbit.
+    pub needs_orbit: bool,
+    /// The slot works only where what is under the pointer can be picked.
+    pub needs_pick: bool,
+    /// The icons a menu slot shows by its current value (`value_icons[value]`); `icon` for a
+    /// value past the end and for a slot without any.
+    pub value_icons: &'static [&'static str],
 }
 
-macro_rules! slot {
-    ($id:literal, $kind:ident, $icon:literal, $command:expr) => {
-        Slot {
-            id: $id,
-            kind: NavigationKind::$kind,
-            icon: $icon,
-            label: concat!("navbar.", $id),
-            description: concat!("navbar.description.", $id),
-            command: $command,
-        }
-    };
+/// The host's navigation bar: the slots a bar may hold and how a new bar looks.
+#[derive(Debug, PartialEq)]
+pub(crate) struct Catalogue {
+    /// The slots, in the order the customiser lists them.
+    pub slots: &'static [Slot],
+    /// The slot ids a new bar holds, in order.
+    pub default_bar: &'static [&'static str],
+    /// Menu slots that show their value beside the icon until the user chooses otherwise.
+    pub value_menus: &'static [&'static str],
+    /// Menu slots that show only their icon, whatever the stored options say.
+    pub icon_menus: &'static [&'static str],
 }
 
-pub(crate) const CATALOGUE: &[Slot] = &[
-    slot!("orbit", Tool, "orbit", Some("view.tool")),
-    slot!("pan", Tool, "pan", Some("view.tool")),
-    slot!("zoom", Tool, "zoom", Some(crate::keymap::DRAG_ZOOM)),
-    slot!("spin", Toggle, "spin", Some("view.spin")),
-    slot!("fit", Action, "fit", Some("view.fit")),
-    slot!("look_at", Action, "lookat", Some("view.normal_to")),
-    slot!("home", Action, "home", Some("view.home")),
-    slot!("visual_style", Menu, "style_shaded_edges", Some("view.visual_style")),
-    slot!("projection", Toggle, "perspective", None),
-    slot!("display", Menu, "display", None),
-    slot!("grid", Toggle, "grid", Some("view.grid")),
-    slot!("ground_shadow", Toggle, "ground_shadow", Some("view.ground_shadow")),
-    slot!("ambient_occlusion", Toggle, "ambient_occlusion", Some("view.ambient_occlusion")),
-    slot!("separator", Separator, "", None),
-];
+/// The host's catalogue, installed once per process ([`install_catalogue`]).
+static CATALOGUE: std::sync::OnceLock<&'static Catalogue> = std::sync::OnceLock::new();
+
+/// Installs the host's catalogue. The first call installs it; a later call with the same table
+/// does nothing and one with another table is ignored. Returns whether `catalogue` is the
+/// installed one.
+pub(crate) fn install_catalogue(catalogue: &'static Catalogue) -> bool {
+    *CATALOGUE.get_or_init(|| catalogue) == catalogue
+}
+
+fn installed() -> Option<&'static Catalogue> {
+    CATALOGUE.get().copied()
+}
+
+/// The installed slots, or none before [`install_catalogue`].
+pub(crate) fn catalogue() -> &'static [Slot] {
+    installed().map_or(&[], |catalogue| catalogue.slots)
+}
 
 pub(crate) fn find(id: &str) -> Option<&'static Slot> {
-    CATALOGUE.iter().find(|slot| slot.id == id)
+    catalogue().iter().find(|slot| slot.id == id)
 }
 
 impl Slot {
-    pub(crate) fn current_icon(&self, visual_style: u8) -> &'static str {
-        if self.id == "visual_style" { visual_style_icon(visual_style) } else { self.icon }
+    /// The icon the slot shows while its menu's current value is `value`.
+    pub(crate) fn current_icon(&self, value: u8) -> &'static str {
+        self.value_icons.get(usize::from(value)).copied().unwrap_or(self.icon)
     }
 
-    pub(crate) fn available(&self, caps: NavCaps) -> bool {
-        if !caps.orbit {
-            return !matches!(self.id, "orbit" | "spin" | "look_at" | "projection" | "visual_style");
-        }
-        if !caps.pick && matches!(self.id, "look_at" | "visual_style") {
-            return false;
-        }
-        true
-    }
-}
-
-pub(crate) fn canvas_caps(app: &SolveApp) -> NavCaps {
-    if crate::dialogs_sheet::flat_active(app) || crate::render_workspace::result_active(app) {
-        NavCaps { orbit: false, pick: false }
-    } else if crate::render_workspace::active(app) {
-        NavCaps::RENDER
-    } else {
-        NavCaps::MODEL
+    /// Whether the slot works on the current canvas: `orbit` when its camera may orbit, `pick`
+    /// when what is under the pointer can be picked.
+    pub(crate) fn available(&self, orbit: bool, pick: bool) -> bool {
+        (orbit || !self.needs_orbit) && (pick || !self.needs_pick)
     }
 }
 
@@ -154,10 +123,7 @@ pub struct NavigationBar {
 impl Default for NavigationBar {
     fn default() -> Self {
         Self {
-            slots: ["orbit", "pan", "zoom", "separator", "fit", "look_at", "home", "separator", "visual_style", "display"]
-                .into_iter()
-                .map(str::to_owned)
-                .collect(),
+            slots: installed().map_or(&[][..], |catalogue| catalogue.default_bar).iter().map(|id| (*id).to_owned()).collect(),
             slot_options: Default::default(),
             position: Position::default(),
             edge: NavigationEdge::default(),
@@ -250,14 +216,16 @@ pub(crate) fn validate(value: &Value) -> Result<(), String> {
 }
 
 impl NavigationBar {
+    /// What the menu slot `id` shows: the stored choice, else the host's default for it.
     pub(crate) fn menu_display(&self, id: &str) -> MenuDisplay {
-        if id == "display" {
+        let listed = |menus: fn(&Catalogue) -> &'static [&'static str]| installed().is_some_and(|catalogue| menus(catalogue).contains(&id));
+        if listed(|catalogue| catalogue.icon_menus) {
             return MenuDisplay::IconOnly;
         }
         self.slot_options
             .get(id)
             .map(|option| option.shows)
-            .unwrap_or_else(|| if matches!(id, "selection_mode" | "render_mode") { MenuDisplay::IconAndValue } else { MenuDisplay::IconOnly })
+            .unwrap_or_else(|| if listed(|catalogue| catalogue.value_menus) { MenuDisplay::IconAndValue } else { MenuDisplay::IconOnly })
     }
 
     /// Apply a drag only to the list it began on, including repeated separator occurrences.

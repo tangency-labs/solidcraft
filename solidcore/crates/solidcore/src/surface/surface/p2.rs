@@ -5510,9 +5510,7 @@ fn eval_second_derivatives_with_output(
                     Err(error) => {
                         // SmCone::Evaluate leaves the inherited NURB derivatives in
                         // the caller's buffer when zero-tangent correction fails.
-                        let values = if !step
-                            && matches!(&error, SolidError::Upstream { code, .. } if *code == SM_ERR)
-                        {
+                        let values = if !step && error.upstream_status() == Some(SM_ERR) {
                             cone.rev().base().evaluate_with_partial_output(uv, flags).1
                         } else {
                             Vec::new()

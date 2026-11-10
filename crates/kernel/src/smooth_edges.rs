@@ -189,9 +189,8 @@ fn join(record: &Brep, faces: &[Option<FaceEval>], e: usize, length: f64, work: 
     for (t, end) in middles.chain([(t0, true), (t1, true)]) {
         let Some(left) = work.checked_sub(2) else { return unknown };
         *work = left;
-        let evaluated = solidcraft_geom::brep::pcurve::eval(pa, t)
-            .zip(solidcraft_geom::brep::pcurve::eval(pb, t))
-            .and_then(|(ua, ub)| station(fa, ua).zip(station(fb, ub)));
+        let evaluated =
+            solidcore_ops::pcurve::eval(pa, t).zip(solidcore_ops::pcurve::eval(pb, t)).and_then(|(ua, ub)| station(fa, ua).zip(station(fb, ub)));
         let (sa, sb) = match evaluated {
             Some((Some(sa), Some(sb))) => (sa, sb),
             Some(_) => continue,

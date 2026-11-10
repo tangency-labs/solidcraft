@@ -4641,16 +4641,19 @@ fn naming_feature<'a>(vals: &BTreeMap<String, Value>, f: &'a Feature) -> std::bo
 
 /// The revolve axis in the sketch's plane coordinates (a point and a direction). `st` is the model
 /// an axis on an edge or face of it is found in; `construct` gives a construction axis, by name, in
-/// the sketch's 3D frame; `vals` are the parameter values an explicit axis's origin is read with.
+/// the sketch's 3D frame; `vals` are the parameter values an explicit axis's origin is read with;
+/// `sketch_line` gives a line of another sketch, by owning sketch feature and curve id, in the
+/// same frame as `ss` (#6548).
 pub(crate) fn revolve_axis(
     vals: &BTreeMap<String, Value>,
     ss: &SolvedSketch,
     axis: &AxisRef,
     st: &ModelState,
     construct: &dyn Fn(&str) -> Result<(Vec3, Vec3)>,
+    sketch_line: &dyn Fn(u64, &str) -> Result<(Vec3, Vec3)>,
 ) -> Result<(Vec2, Vec2)> {
     match axis {
-        AxisRef::SketchLine { curve } => {
+        AxisRef::SketchLine { curve, sketch: None } => {
             let ci = ss.sketch.curve_index(curve).ok_or_else(|| DocError::Unknown(format!("sketch line `{curve}`")))?;
             match ss.sketch.curves.get(ci).map(|c| &c.kind) {
                 Some(CurveKind::Line { a, b }) => {
@@ -4659,6 +4662,10 @@ pub(crate) fn revolve_axis(
                 }
                 _ => Err(DocError::Invalid(format!("`{curve}` is not a line"))),
             }
+        }
+        AxisRef::SketchLine { curve, sketch: Some(owner) } => {
+            let (o, d) = sketch_line(*owner, curve)?;
+            line_in_sketch_plane(ss, o, d)
         }
         AxisRef::SketchAxis { axis } => match axis.to_ascii_lowercase().as_str() {
             "x" => Ok((Vec2::ZERO, Vec2::X)),
@@ -4687,6 +4694,19 @@ pub(crate) fn revolve_axis(
             let (o, d) = construct(name)?;
             line_in_sketch_plane(ss, o, d)
         }
+    }
+}
+
+/// The line `curve` of a solved sketch, as a world-space point and direction in the sketch's
+/// plane frame. Used to carry a revolve axis picked in another sketch (#6548).
+pub(crate) fn sketch_line_world(ss: &SolvedSketch, curve: &str) -> Result<(Vec3, Vec3)> {
+    let ci = ss.sketch.curve_index(curve).ok_or_else(|| DocError::Unknown(format!("sketch line `{curve}`")))?;
+    match ss.sketch.curves.get(ci).map(|c| &c.kind) {
+        Some(CurveKind::Line { a, b }) => {
+            let (pa, pb) = (ss.sketch.point(*a).unwrap_or_default(), ss.sketch.point(*b).unwrap_or_default());
+            Ok((ss.plane.to_world(pa), ss.plane.dir_to_world(pb - pa)))
+        }
+        _ => Err(DocError::Invalid(format!("`{curve}` is not a line"))),
     }
 }
 
@@ -5825,9 +5845,18 @@ fn feature_tools_with_constructor(
                 f,
             )?;
             let regions = solidcraft_sketch::merge_regions(&select_profiles(&ss, profiles)?);
-            let (o, d) = revolve_axis(vals, &ss, axis, &*axis_state(doc, st, f.component, axis)?, &|name| {
-                construction_axis_in(Some(doc), st, name, f.component)
-            })?;
+            let (o, d) = revolve_axis(
+                vals,
+                &ss,
+                axis,
+                &*axis_state(doc, st, f.component, axis)?,
+                &|name| construction_axis_in(Some(doc), st, name, f.component),
+                &|owner, curve| {
+                    let solved =
+                        st.sketch(owner).ok_or_else(|| DocError::Unknown(format!("sketch {owner} (it must come earlier in the timeline)")))?;
+                    sketch_line_world(&sketch_in_feature_frame(doc, solved, f.component)?, curve)
+                },
+            )?;
             // To Object is in this feature's component frame: the model as seen from there.
             let tst = if to.is_some() { state_in_frame(doc, st, f.component)? } else { std::borrow::Cow::Borrowed(st) };
             let angles = if to.is_some() {
@@ -7117,6 +7146,10 @@ fn replay(
     kept.dedup();
     let (mut missed, mut total) = (0usize, 0usize);
     let plan = copy_plan(doc, vals, st, &kept, mats)?;
+    // A source's named faces are looked up in the model as it was before any copy was made: the
+    // copy of an earlier source (a boss joined to the body) changes the faces a later source (a cut
+    // starting on the boss) names, though the later source means the original's (#11792).
+    let named_from = plan.iter().any(|(src, _, _)| src.face_names.iter().any(|n| !n.is_empty())).then(|| st.clone());
     for (src, mats, first) in &plan {
         // A fillet or chamfer repeats at the copied edges.
         if let FeatureKind::Fillet { edges, radius, .. } | FeatureKind::Chamfer { edges, distance: radius, .. } = &src.kind {
@@ -7271,7 +7304,7 @@ fn replay(
             // Each copy's faces are named as the source feature's, with the instance. Its face
             // points follow their named faces, as the feature's own did (#2121): a To Object
             // extrude's copies reach the face where it is now, not where it was picked.
-            let moved = with_named_face_points(doc, st, src)?.map(|(g, _)| g);
+            let moved = with_named_face_points(doc, named_from.as_ref().unwrap_or(st), src)?.map(|(g, _)| g);
             let tools = feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), st, &mut None, &mut None, &mut None)?;
             for (k, m) in mats.iter().enumerate() {
                 let start = copies.len();

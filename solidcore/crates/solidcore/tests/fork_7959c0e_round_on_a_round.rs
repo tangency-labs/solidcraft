@@ -381,6 +381,10 @@ fn round_on_a_round(k: &mut Kernel) -> Outcome {
 /// round on the round took 35488 here and 36376 in the fork when this was ported. Main
 /// after #2274 (step 7) raised both runs by the same amount, with or without WR-714: they
 /// were 181076 and 122690 with it, 134718 and 71986 without, on #2274's earlier head.
+///
+/// The spans are not the fork's 45 since #13984: each proved feet's box is tightened before
+/// the Taylor solve (32 spans), and a halved span's halves start from its finest proved
+/// level (31), so more spans certify unhalved; the net stays at 0.36 of its bound.
 #[test]
 fn round_on_a_definition_is_its_definition() {
     let mut k = solidcraft_kernel();
@@ -398,7 +402,7 @@ fn round_on_a_definition_is_its_definition() {
     );
     assert!(o.sound, "{o:?}");
     assert!(
-        o.graded == 1 && o.spans == 45 && o.circle <= 1e-11 && o.net <= 1.0,
+        o.graded == 1 && o.spans == 31 && o.circle <= 1e-11 && o.net <= 1.0,
         "{o:?}"
     );
     assert!(

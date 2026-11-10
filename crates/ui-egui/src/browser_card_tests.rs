@@ -335,7 +335,7 @@ fn selected_row_paints_tab_soft_fill_and_accent_text_in_both_layouts() {
                 app.ui.layout = mode;
                 app.ui.tab = tab.into();
                 app.publish_tab_accent(&ctx);
-                let accent = solidcraft_theme::TabAccent::for_tab(&Tokens::get(), tab);
+                let accent = crate::workspace::tab_accent(&Tokens::get(), tab);
                 let mut row_rect = Rect::NOTHING;
                 let out = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
                     let row = Row { selected: true, label: "Selected body", dim: true, color: Some(Tokens::get().error), ..Default::default() };

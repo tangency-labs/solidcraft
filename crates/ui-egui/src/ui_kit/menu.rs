@@ -1,6 +1,6 @@
 //! Menus share one popup surface and one row painter. Command dispatch stays with callers.
 use crate::ui_kit::{Container, Surface};
-use crate::{icons, ui_kit::type_face::RichTextExt as _};
+use crate::ui_kit::{icons, type_face::RichTextExt as _};
 use egui::{Color32, FontId, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
 use serde::Serialize;
 use serde_json::Value;
@@ -525,7 +525,26 @@ pub fn list_row_lit(ui: &mut Ui, item: &Item, lit: bool) -> Option<Item> {
     (row.show(ui).clicked() && item.enabled).then(|| item.clone())
 }
 
-pub(crate) fn workspace_menu(ui: &mut egui::Ui, items: &[Item], key_row: Option<usize>, height: f32) -> Option<Item> {
+/// How the workspace menu shows one of the host's workspaces: the slug of its handle
+/// (`workspace:menu:<slug>`), the message ids of its description and of its tab list (`None`: a
+/// planned workspace, not yet available) and its accent ramp (`None`: the main accent, tinted).
+#[derive(Clone, Copy)]
+pub(crate) struct WorkspaceStyle {
+    pub slug: &'static str,
+    pub description: &'static str,
+    pub tabs: Option<&'static str>,
+    pub ramp: Option<solidcraft_theme::AccentRamp>,
+}
+
+/// The host's workspace menu: its entries, how each is shown (an entry without a style is not
+/// listed) and the footer note under them.
+pub(crate) struct WorkspaceMenu<'a> {
+    pub items: &'a [Item],
+    pub style: &'a dyn Fn(&Item) -> Option<WorkspaceStyle>,
+    pub footer: &'a str,
+}
+
+pub(crate) fn workspace_menu(ui: &mut egui::Ui, menu: &WorkspaceMenu<'_>, key_row: Option<usize>, height: f32) -> Option<Item> {
     let t = Tokens::get();
     let width = t.form_card_width + t.form_label_width * 2.0 + t.space_24 + t.space_16 + t.space_6;
     let mut picked = None;
@@ -541,23 +560,19 @@ pub(crate) fn workspace_menu(ui: &mut egui::Ui, items: &[Item], key_row: Option<
         );
         ui.add_space(t.space_8);
         egui::ScrollArea::vertical().id_salt("workspace_menu_rows").max_height((height - 116.0).max(60.0)).show(ui, |ui| {
-            for (k, item) in items.iter().enumerate() {
-                let (slug, description, tabs) = match item.label.as_str() {
-                    "Design" => ("design", "ui.workspace_design_description", Some("ui.workspace_design_tabs")),
-                    "Render" => ("render", "ui.workspace_render_description", Some("ui.workspace_render_tabs")),
-                    "Animation" => ("animation", "ui.workspace_animation_description", None),
-                    "Simulation" => ("simulation", "ui.workspace_simulation_description", None),
-                    "Manufacture" => ("manufacture", "ui.workspace_manufacture_description", None),
-                    "Drawing" => ("drawing", "ui.workspace_drawing_description", None),
-                    _ => continue,
-                };
+            for (k, item) in menu.items.iter().enumerate() {
+                let Some(WorkspaceStyle { slug, description, tabs, ramp }) = (menu.style)(item) else { continue };
                 let planned = tabs.is_none();
                 let current = item.shortcut == "current";
-                let (accent, soft) = if !planned && slug == "render" {
-                    (t.render_fill, t.render_soft)
-                } else {
-                    let accent = if planned { t.text_dim } else { t.accent };
-                    (accent, t.panel.lerp_to_gamma(accent, 0.10))
+                let (accent, soft) = match ramp.filter(|_| !planned) {
+                    Some(ramp) => {
+                        let accent = solidcraft_theme::TabAccent::for_ramp(&t, ramp);
+                        (accent.color, accent.soft)
+                    }
+                    None => {
+                        let accent = if planned { t.text_dim } else { t.accent };
+                        (accent, t.panel.lerp_to_gamma(accent, 0.10))
+                    }
                 };
                 let (r, resp) = ui.allocate_exact_size(
                     vec2(width, if planned { t.space_24 * 2.0 + t.space_12 } else { t.space_24 * 3.0 }),
@@ -637,12 +652,7 @@ pub(crate) fn workspace_menu(ui: &mut egui::Ui, items: &[Item], key_row: Option<
         ui.add_space(t.space_6);
         ui.separator();
         ui.add_space(t.space_6);
-        ui.add(
-            egui::Label::new(
-                egui::RichText::new(solidcraft_ui_text::tr("ui.workspace_footer")).size(solidcraft_theme::Tokens::get().font_small).color(t.text_dim),
-            )
-            .wrap(),
-        );
+        ui.add(egui::Label::new(egui::RichText::new(menu.footer).size(solidcraft_theme::Tokens::get().font_small).color(t.text_dim)).wrap());
         ui.add_space(t.space_4);
     });
     picked

@@ -392,6 +392,12 @@ pub(crate) fn help_icon(ui: &mut Ui, text: &str) -> Response {
     response.backing_on_hover_text(text)
 }
 
+/// The host's text on a plugin card: its folder action and the enable check's name.
+pub(crate) struct PluginCardLabels<'a> {
+    pub show_in_folder: &'a str,
+    pub enabled: &'a str,
+}
+
 /// Installed add-on row: 12 pt padding, 36 pt mark and centred, unframed folder action.
 pub(crate) fn settings_plugin_card(
     ui: &mut Ui,
@@ -400,6 +406,7 @@ pub(crate) fn settings_plugin_card(
     version: &str,
     description: &str,
     enabled: &mut bool,
+    labels: &PluginCardLabels<'_>,
 ) -> egui::InnerResponse<(Response, Response)> {
     let t = Tokens::get();
     let container = super::Container::new(ui.ctx(), super::Surface::Navigation);
@@ -415,7 +422,7 @@ pub(crate) fn settings_plugin_card(
         }
         let width = dimension(ui.available_width());
         let tile_side = t.space_24 + t.space_12;
-        let folder_label = solidcraft_ui_text::tr_label("Show in folder");
+        let folder_label = labels.show_in_folder;
         let folder_font = FontId::proportional(t.font_body);
         let folder_galley = ui.painter().layout_no_wrap(folder_label.into(), folder_font, t.form_dim);
         let folder_width = folder_galley.size().x + t.space_8 * 2.0 + t.space_14 + t.space_6;
@@ -465,7 +472,7 @@ pub(crate) fn settings_plugin_card(
         if folder.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
-        let check = super::checkbox_at(ui, check_rect, &format!("{name}: {}", solidcraft_ui_text::tr("prefs.plugins_enabled")), enabled);
+        let check = super::checkbox_at(ui, check_rect, &format!("{name}: {}", labels.enabled), enabled);
         (folder, check)
     })
 }

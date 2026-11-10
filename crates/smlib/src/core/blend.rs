@@ -33,6 +33,7 @@ use solidcore::blend::fillet_executive::session::{FilletObject, FilletSession};
 use solidcore::blend::fillet_geom::p1::{FilletCornerType, FilletErrorType};
 use solidcore::blend::fillet_section::section::GN_THUMBWEIGHT_EQUAL_AREA;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
+use solidcore::error::nurbs::NurbsFailure;
 use solidcore::geom::attribute::{Attribute, AttributeHandlers, Behavior, ids as attribute_ids};
 use solidcore::geom::vector3d::{Point3, Vec3};
 use solidcore::kernel::Kernel;
@@ -75,6 +76,7 @@ const INVALID_INPUT: i32 = 1007;
 pub(super) fn status(e: SolidError) -> Error {
     match e {
         SolidError::Upstream { code, .. } => Error::Status(code),
+        e if is_b_spline_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
         SolidError::InvalidInput { .. } => Error::Status(INVALID_INPUT),
         SolidError::Unsupported { reason, .. } if reason == MIXED_CORNER_RAILS_CROSS => Error::Unported(MIXED_CORNER_UNSUPPORTED),
         e if is_boolean_failure(&e) => boolean_status(e),
@@ -100,6 +102,12 @@ fn boolean_status(e: SolidError) -> Error {
         _ if e.root_cause().is_unported() => Error::Unsupported,
         _ => Error::Solidcore(e.to_string()),
     }
+}
+
+/// A B-spline method's failure (solidcore's `BSplineFailure`): it stands for the status the
+/// method returned (`Upstream` before solidcore described it), and passes on as that status.
+fn is_b_spline_failure(e: &SolidError) -> bool {
+    matches!(e.nurbs_failure(), Some(NurbsFailure::BSpline(_)))
 }
 
 /// `size_ok`.
@@ -1403,6 +1411,21 @@ pub(crate) fn fillet_variable(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A B-spline method's failure passes on as the status it stands for, as the `Upstream` it
+    /// replaced did; a cancellation or unported call a B-spline method passes through is not one.
+    #[test]
+    fn b_spline_failures_pass_on_as_their_status() {
+        use solidcore::error::Failure;
+        use solidcore::error::nurbs::BSplineFailure;
+        let op = "nurbs::b_spline_surface::p2::BSplineSurface::split_at";
+        let failed = |b| Failure::new(op, NurbsFailure::BSpline(b)).into_error();
+        assert!(matches!(status(failed(BSplineFailure::NoNurbsForm)), Error::Status(1001)));
+        assert!(matches!(status(failed(BSplineFailure::RoutineFailed)), Error::Status(1001)));
+        assert!(matches!(status(failed(BSplineFailure::Missing("the NURBS form"))), Error::Status(1006)));
+        assert!(matches!(status(failed(BSplineFailure::ZeroAxis)), Error::Status(1007)));
+        assert!(matches!(status(SolidError::unported("SmX", "x")), Error::Unsupported));
+    }
 
     #[test]
     fn laws_are_checked_as_the_capi_checks_them() {

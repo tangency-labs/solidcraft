@@ -94,14 +94,11 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.refine_cc_range_ends = true;
     f.flat_corners_test_bits = true;
     f.cylinder_rebuild_mean_radius = true;
-    f.planar_path_uncapped_open_profiles = true;
     f.revolve_analytic_profile_faces = true;
     f.revolve_arc_centre_near_axis_is_sphere = true;
-    f.taper_pivot_nearest_corner = true;
     f.taper_tangent_corner_planes = true;
     f.revolve_nested_shells_as_cavities = true;
     f.revolve_holed_profile_void = true;
-    f.curve_sweep_caps_at_sweep_ends = true;
     f.join_touching_loops = true;
     f.uv_trim_reversal_on_surface = true;
     f.offset_resolve_crossing_loops = true;
@@ -153,7 +150,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_cleanup_keeps_target_faces = true;
     f.fillet_nx1_tangent_side_edge = true;
     f.fillet_3x2_mixed_concave_side_edge = true;
-    f.offset_closed_curve_trim_arc = true;
     f.offset_stitch_at_body_tolerance = true;
     f.curve_contacts_at_curve_ends = true;
     f.shell_empty_cavity_fails = true;
@@ -174,9 +170,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.corner_blend_coons_patch_tangent_to_sides = true;
     f.fillet_patch_keeps_fillet_edges = true;
     f.fillet_corner_ball_center_from_axes = true;
-    f.seam_point_solutions_are_one = true;
     f.boolean2d_plane_covers_far_faces = true;
-    f.brep_area_between_solid_and_void = true;
     f.boolean_splits_definition_across_split = true;
     f.curve_tight_box_interval_knots = true;
     f.fillet_refuse_overlapping_bands = true;
@@ -189,7 +183,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.thicken_planar_side_walls = true;
     f.fillet_torus_span_from_start_section = true;
     f.fillet_knife_edge_rounds = true;
-    f.taper_wall_closes_at_apex = true;
     f.revolution_round_offset_collapses = true;
     f.fillet_chamfer_cone_stored_as_cone = true;
     f.offset_point_vertex_caps = true;
@@ -197,7 +190,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.proto_edge_splits_at_captured_vertices = true;
     f.stitch_solid_nests_cavities = true;
     f.local_operation_closes_walls_to_nothing = true;
-    f.linear_sweep_arc_to_cylinder_zero = true;
     f.imprint_reuses_coincident_face_edge = true;
     f.boolean_new_face_closure_both_sides = true;
     f.linear_sweep_arc_is_cylinder = true;
@@ -247,10 +239,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_corner_face_curve_halves = true;
     f.brep_edit_statuses_pass_on = true;
     f.fillet_run_on_bspline_trims = true;
-    f.offset_tangent_gap_statuses = true;
-    f.ssi_alignment_statuses = true;
-    f.fillet_corner_statuses = true;
-    f.fillet_edge_curve_domain_statuses = true;
     f.query_statuses_pass_on = true;
     f.sweep_statuses_pass_on = true;
     f.ssi_proto_topology_statuses_pass_on = true;
@@ -280,12 +268,10 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.twist_simple_duw_sign = true;
     f.offset_swap_uv_extended_distance = true;
     f.circumscribe_axis_map_by_basis = true;
-    f.planar_path_profile_in_path_frame = true;
     f.validation_does_not_make_uv_trims = true;
     f.iso_curve_uv_line_both_params = true;
     f.extrusion_step_uses_clamped_uv = true;
     f.analytic_corner_failure_is_false = true;
-    f.ssi_start_loop_trace_budget = true;
     f.fillet_refuse_crossing_rails = true;
     f.proto_edge_split_upper_keeps_the_old_max = true;
     f.point_on_start_point_squared_tolerance = true;
@@ -306,7 +292,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.surface_continuity_checks_last_v_knot = true;
     f.surface_point_solver_propagates_bbox_failure = true;
     f.volume_lift_third_derivative_terms = true;
-    f.volume_discontinuity_checks_vw_unaligned = true;
     f.periodic_extent_add_empty_interval = true;
     f.stop_tracking_checks_own_callback = true;
     f.plane_reparameterize_moves_origin = true;
@@ -338,7 +323,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.mark_lock_pair_advances_and_locks_second_context = true;
     f.is_iso_curve_at_propagates_canonical_failure = true;
     f.database_io_byte_swaps_read_boolean_and_u16 = true;
-    f.is_point_on_curve_propagates_eval_failure = true;
     f.is_topological_vertex_rejects_cusps_and_tangent_errors = true;
     f.cone_create_canonical_preserves_inside_out_and_checks_height = true;
     f.point_class_gap_3d_propagates_no_drop_error = true;

@@ -247,7 +247,16 @@ pub(crate) enum InspectorAction {
     Remove,
 }
 
-pub(crate) fn inspector_header(ui: &mut Ui, icon: &str, title: &str, kind: &str) -> Option<InspectorAction> {
+/// The host's names for an inspector header's controls: the handle its close button publishes,
+/// and the id and label of the "…" menu's remove entry.
+#[derive(Clone, Copy)]
+pub(crate) struct InspectorNames<'a> {
+    pub close: &'a str,
+    pub remove: &'a str,
+    pub remove_label: &'a str,
+}
+
+pub(crate) fn inspector_header(ui: &mut Ui, icon: &str, title: &str, kind: &str, names: InspectorNames<'_>) -> Option<InspectorAction> {
     let t = Tokens::get();
     let mut action = None;
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), header_height()), egui::Sense::hover());
@@ -258,7 +267,7 @@ pub(crate) fn inspector_header(ui: &mut Ui, icon: &str, title: &str, kind: &str)
         vec2(t.form_close_size, t.form_close_size),
     );
     let close = super::icon_button_at(ui, close_rect, "close", solidcraft_ui_text::tr_label("Close"));
-    solidcraft_ui_registry::publish_target("render:appearance:close", close.rect);
+    solidcraft_ui_registry::publish_target(names.close, close.rect);
     if close.clicked() {
         action = Some(InspectorAction::Close);
     }
@@ -267,7 +276,7 @@ pub(crate) fn inspector_header(ui: &mut Ui, icon: &str, title: &str, kind: &str)
         let mut more_ui = ui.new_child(egui::UiBuilder::new().id_salt("inspector_more").max_rect(more_rect));
         let ui = &mut more_ui;
         super::Menu::text(ui, "…", |ui| {
-            if super::MenuItem::new("render:appearance:remove", solidcraft_ui_text::tr("render.inspector_remove"), "").show(ui).clicked() {
+            if super::MenuItem::new(names.remove, names.remove_label, "").show(ui).clicked() {
                 action = Some(InspectorAction::Remove);
                 ui.close();
             }
@@ -322,6 +331,8 @@ pub(crate) struct WorkspaceOptions<'a> {
     pub editor: bool,
     pub enabled: bool,
     pub header_actions: Option<&'a mut dyn FnMut(&mut Ui)>,
+    /// The host's command id of the grip menu's entry that moves the dock to the other side.
+    pub move_command: &'a str,
 }
 
 pub(crate) struct FeatureOptions<'a> {
@@ -543,7 +554,7 @@ impl<'a> Panel<'a> {
                 solidcraft_ui_registry::publish_target(&format!("{}:grip", options.id), grip.rect);
                 super::Menu::context(&grip, |ui| {
                     let (target, label) = if left { ("right", "Move to right side") } else { ("left", "Move to left side") };
-                    let item = super::MenuItem::new("view.render_dock", label, "").show(ui);
+                    let item = super::MenuItem::new(options.move_command, label, "").show(ui);
                     solidcraft_ui_registry::publish_target(&format!("{}:move_side", options.id), item.rect);
                     if item.clicked() {
                         move_side = Some(target);

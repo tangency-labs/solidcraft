@@ -4666,6 +4666,20 @@ pub(crate) fn stored_length(s: &Session, e: &str) -> String {
     if s.doc.with_design_unit(e, ValueKind::Length) == e { e.to_string() } else { format!("{} mm", e.trim()) }
 }
 
+/// A Cylinder's or Sphere's size as its edit field shows it (#6609): a radius worked out from a
+/// diameter, `(D) / 2`, shows as the diameter it was made with, so OK sends that diameter and
+/// keeps the radius. A bare number in `D` (kept before #779) is in the design's units, as any
+/// bare number inside an expression is, so it shows with that unit written out. Any other radius
+/// shows as stored, on Radius.
+fn round_size(s: &Session, radius: &str) -> (&'static str, String) {
+    use solidcraft_engine::doc::expr::is_bare_number;
+    match crate::length_input::diameter_of(radius) {
+        Some(diameter) if is_bare_number(diameter) => ("diameter", crate::length_input::default(&s.doc, diameter)),
+        Some(diameter) => ("diameter", diameter.to_string()),
+        None => ("radius", stored_length(s, radius)),
+    }
+}
+
 /// A stored value as its edit field shows it (#1936): a bare number is written with the unit the
 /// engine reads it in, "2" as "2 mm" for a length and "5" as "5 deg" for an angle, so the field
 /// and the on-canvas tag name the unit as the other dialogs do. The number keeps its stored text.
@@ -6312,18 +6326,26 @@ pub(crate) fn takes_as_axis(s: &Session, sel: &Sel) -> bool {
 /// active sketch when it does not). Eval resolves a bare curve id on the profile sketch, and
 /// curve ids repeat from sketch to sketch (#3726), so that line can be a different edge — often
 /// the opposite side of a rectangle. Keep the id when the profile sketch's line is the
-/// highlighted one, so a same-sketch axis stays a sketch line. Otherwise pass the highlighted
-/// line as `{origin, dir}` in world coordinates (the command stores it in the component frame).
+/// highlighted one, so a same-sketch axis stays a sketch line. When the pick names another sketch,
+/// name its owner as `{sketch, curve}`: the revolve resolves the line in that sketch and follows
+/// it when that sketch is edited (#6548). Otherwise pass the highlighted line as `{origin, dir}`
+/// in world coordinates (the command stores it in the component frame).
 /// A face profile has no sketch yet — its generated sketch numbers edges from `l1` again — so
 /// that pick is always the geometric line.
 pub(crate) fn sketch_curve_axis(app: &SolveApp, sel: &Sel, profile_sketch: Option<u64>) -> Result<Value, String> {
-    let Sel::SketchCurve { id, .. } = sel else { return axis_param(app, sel) };
+    let Sel::SketchCurve { id, sketch } = sel else { return axis_param(app, sel) };
     let (origin, dir) = axis_of(app, sel).ok_or(AXIS_PICK)?;
     if !origin.is_finite() || !dir.is_finite() {
         return Err(AXIS_PICK.into());
     }
     let same = profile_sketch.and_then(|sketch| profile_axis_line(app, sketch, id)).is_some_and(|line| same_axis(line, (origin, dir)));
-    if same { Ok(json!(id)) } else { Ok(json!({"origin": pt(origin), "dir": pt(dir)})) }
+    if same {
+        Ok(json!(id))
+    } else if let Some(owner) = sketch.filter(|owner| Some(*owner) != profile_sketch) {
+        Ok(json!({"sketch": owner, "curve": id}))
+    } else {
+        Ok(json!({"origin": pt(origin), "dir": pt(dir)}))
+    }
 }
 
 /// The world line of curve `id` on `sketch`, when that curve is a line.
@@ -6805,7 +6827,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             let ax = match axis {
                 AxisRef::World { axis } => Some(Sel::Axis { name: axis.to_ascii_uppercase() }),
                 AxisRef::SketchAxis { axis } => Some(Sel::Axis { name: axis.to_ascii_lowercase() }),
-                AxisRef::SketchLine { curve } => Some(crate::selection::curve_pick(curve, sketch.0, s.active_sketch)),
+                AxisRef::SketchLine { curve, sketch: Some(owner) } => Some(crate::selection::curve_pick(curve, *owner, s.active_sketch)),
+                AxisRef::SketchLine { curve, sketch: None } => Some(crate::selection::curve_pick(curve, sketch.0, s.active_sketch)),
                 AxisRef::Model { geo } => model_axis_sel(s, geo),
                 AxisRef::Construction { name } => Some(Sel::Axis { name: name.to_string() }),
                 AxisRef::Line { .. } => None,
@@ -7110,7 +7133,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             let mut d = start("solid.cylinder")?;
             d.kind = Kind::Primitive {
                 cmd: "solid.cylinder",
-                fields: vec![("radius", stored_length(s, radius)), ("height", stored_length(s, height))],
+                fields: vec![round_size(s, radius), ("height", stored_length(s, height))],
                 operation: op_index(operation),
                 at: None,
                 refs: Default::default(),
@@ -7140,7 +7163,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             let mut d = start("solid.sphere")?;
             d.kind = Kind::Primitive {
                 cmd: "solid.sphere",
-                fields: vec![("radius", stored_length(s, radius))],
+                fields: vec![round_size(s, radius)],
                 operation: op_index(operation),
                 at: None,
                 refs: Default::default(),

@@ -2527,8 +2527,9 @@ pub(crate) fn glue_edges_general(
     // (not upstream) with `b`'s own attributes, given back afterwards, and the kernel's
     // reused record map (the same records a fresh state has)
     let (tag, records) = take_arena_records(k, b);
+    let serial = k.context.issued_brep_serial(b.notify_identity());
     let mut state =
-        crate::topology::brep::p2::ArenaNotifyState::with_attributes_of_reusing(records, b);
+        crate::topology::brep::p2::ArenaNotifyState::with_attributes_of_reusing(records, b, serial);
     let r = Context::with_notification_context(k, |k, context| {
         let mut env = state.env(Some(context));
         crate::topology::brep::p7::glue_edges_general(
@@ -2553,7 +2554,7 @@ pub(crate) fn glue_edges_general(
 /// `b`'s progress tag to keep it under: the map kept for this B-rep value, or an empty
 /// one when it was kept for another value (record keys are arena identities, which
 /// repeat across B-reps).
-fn take_arena_records(
+pub(crate) fn take_arena_records(
     k: &mut Kernel,
     b: &mut Brep,
 ) -> (
@@ -2607,8 +2608,9 @@ pub(crate) fn make_vertex_split_edge(
     // a default record per object (upstream every object has its `SmTopology` part), in
     // the kernel's reused record map
     let (tag, records) = take_arena_records(k, b);
+    let serial = k.context.issued_brep_serial(b.notify_identity());
     let mut state =
-        crate::topology::brep::p2::ArenaNotifyState::with_attributes_of_reusing(records, b);
+        crate::topology::brep::p2::ArenaNotifyState::with_attributes_of_reusing(records, b, serial);
     // The kernel's context is the split's own `k`; no separate object context.
     let out = crate::topology::brep::p9::make_vertex_split_edge(
         k,
@@ -3123,7 +3125,7 @@ mod tests {
         let edit = |k: &mut Kernel, b: &mut Brep, reused: bool| {
             let (tag, records) = take_arena_records(k, b);
             assert_eq!(records.is_empty(), !reused);
-            let mut state = ArenaNotifyState::with_attributes_of_reusing(records, b);
+            let mut state = ArenaNotifyState::with_attributes_of_reusing(records, b, None);
             assert_eq!(*state.records, fresh(b));
             let key = *state.records.keys().next().unwrap();
             state.records.get_mut(&key).unwrap().set_user_index1(5);

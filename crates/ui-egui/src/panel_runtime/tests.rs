@@ -26,6 +26,7 @@ fn panel_surface_policy_keeps_disabled_host_storage_small() {
 
 #[test]
 fn panel_surface_contrast_covers_actual_light_dark_and_bundled_high_contrast() {
+    crate::test_support::host_data();
     use egui::Color32;
     use solidcraft_color::srgb::{decode8, encode8};
     let high_contrast = crate::theme_files::resolve(crate::theme_files::find("high-contrast", &[]).unwrap());

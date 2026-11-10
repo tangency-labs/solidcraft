@@ -1296,3 +1296,216 @@ mod disclosure_artwork {
         }
     }
 }
+
+/// String literals in a file's non-test code that are one of the host's `names`, whole or as a
+/// dotted/colon-separated part of a longer literal (`menu:view.render_dock`).
+struct HostNames<'n> {
+    names: &'n std::collections::BTreeSet<String>,
+    found: Vec<String>,
+}
+
+impl<'ast> Visit<'ast> for HostNames<'_> {
+    fn visit_item(&mut self, item: &'ast syn::Item) {
+        let attrs = match item {
+            syn::Item::Mod(i) => &i.attrs,
+            syn::Item::Fn(i) => &i.attrs,
+            syn::Item::Impl(i) => &i.attrs,
+            syn::Item::Const(i) => &i.attrs,
+            syn::Item::Static(i) => &i.attrs,
+            _ => return visit::visit_item(self, item),
+        };
+        if !test_only(attrs) {
+            visit::visit_item(self, item);
+        }
+    }
+
+    /// Macro bodies (`format!`, a table macro's rows) are tokens, not expressions: read their
+    /// string literals too.
+    fn visit_macro(&mut self, mac: &'ast syn::Macro) {
+        fn literals(tokens: proc_macro2::TokenStream, out: &mut Vec<syn::LitStr>) {
+            for token in tokens {
+                match token {
+                    proc_macro2::TokenTree::Group(group) => literals(group.stream(), out),
+                    proc_macro2::TokenTree::Literal(literal) => {
+                        if let Ok(literal) = syn::parse2::<syn::LitStr>(proc_macro2::TokenTree::Literal(literal).into()) {
+                            out.push(literal);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let mut found = Vec::new();
+        literals(mac.tokens.clone(), &mut found);
+        for literal in &found {
+            self.visit_lit_str(literal);
+        }
+    }
+
+    fn visit_lit_str(&mut self, literal: &'ast syn::LitStr) {
+        let value = literal.value();
+        let parts = value.split(|c: char| c.is_whitespace() || matches!(c, ':' | '/' | ',' | '(' | ')' | '"'));
+        if let Some(name) = std::iter::once(value.as_str()).chain(parts).find(|part| self.names.contains(*part)) {
+            self.found.push(name.to_owned());
+        }
+    }
+}
+
+fn host_names_in(source: &str, names: &std::collections::BTreeSet<String>) -> Vec<String> {
+    let mut guard = HostNames { names, found: Vec::new() };
+    guard.visit_file(&syn::parse_file(source).unwrap());
+    guard.found
+}
+
+/// SolidCraft's tab names and every command id in the engine's registry: what a shared crate
+/// (the theme) and the kit and its components must take from the host as data.
+fn host_names() -> std::collections::BTreeSet<String> {
+    let mut names: std::collections::BTreeSet<String> = crate::workspace::TAB_ACCENTS.names().map(str::to_owned).collect();
+    names.extend(solidcraft_engine::command_specs().into_iter().map(|spec| spec.id.to_owned()));
+    names
+}
+
+/// Host names still in a component, until they move to the host as data. Only shrinks: the
+/// test fails on a listed name the file no longer holds.
+const PENDING_HOST_NAMES: &[(&str, &[&str])] = &[];
+
+#[test]
+fn shared_code_holds_no_host_tab_names_or_command_ids() {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let names = host_names();
+    let mut failures = Vec::new();
+    fn scan(path: &Path, relative: &str, names: &std::collections::BTreeSet<String>, failures: &mut Vec<String>) {
+        if path.is_dir() {
+            for entry in std::fs::read_dir(path).unwrap() {
+                let path = entry.unwrap().path();
+                let name = path.file_name().unwrap().to_str().unwrap().to_owned();
+                scan(&path, &format!("{relative}/{name}"), names, failures);
+            }
+            return;
+        }
+        // Test files (the kit's gallery among them) may use any sample data.
+        if path.extension().is_none_or(|e| e != "rs") || relative.ends_with("_tests.rs") {
+            return;
+        }
+        let mut found = host_names_in(&std::fs::read_to_string(path).unwrap(), names);
+        let pending = PENDING_HOST_NAMES.iter().find(|(file, _)| *file == relative).map_or(&[][..], |(_, names)| *names);
+        found.retain(|name| !pending.contains(&name.as_str()));
+        if !found.is_empty() {
+            failures.push(format!("{relative}: {found:?}"));
+        }
+    }
+    let src = manifest.join("src");
+    scan(&manifest.join("../theme/src"), "crates/theme/src", &names, &mut failures);
+    scan(&src.join("ui_kit"), "ui_kit", &names, &mut failures);
+    for component in [
+        "app_bar.rs",
+        "blur.rs",
+        "blur_native.rs",
+        "frame.rs",
+        "history_bar.rs",
+        "navigation_bar.rs",
+        "prefs_window.rs",
+        "ribbon.rs",
+        "start_page.rs",
+        "theme_files.rs",
+        "theme_options.rs",
+        "view_compass.rs",
+        "window_chrome.rs",
+        "window_chrome",
+    ] {
+        scan(&src.join(component), component, &names, &mut failures);
+    }
+    for (file, pending) in PENDING_HOST_NAMES {
+        let held = host_names_in(&std::fs::read_to_string(src.join(file)).unwrap(), &names);
+        for name in *pending {
+            if !held.iter().any(|found| found == name) {
+                failures.push(format!("{file}: {name} is gone; drop it from PENDING_HOST_NAMES"));
+            }
+        }
+    }
+    failures.sort();
+    assert!(failures.is_empty(), "shared code names the host's tabs or commands; take them from the host as data:\n{}", failures.join("\n"));
+}
+
+#[test]
+fn host_name_guard_finds_tab_names_and_command_ids_but_skips_tests() {
+    let names = host_names();
+    assert!(names.contains("SKETCH") && names.contains("solid.extrude"));
+    let source = r#"
+        fn tab() -> &'static str { "SKETCH" }
+        fn item() -> String { format!("{}", "menu:solid.extrude") }
+        fn neutral() -> &'static str { "sample.action_a" }
+        #[cfg(test)]
+        mod tests { fn sample() -> &'static str { "MODEL" } }
+        #[test]
+        fn sample() { let _ = "solid.fillet"; }
+    "#;
+    assert_eq!(host_names_in(source, &names), ["SKETCH", "solid.extrude"]);
+}
+
+/// Message-id prefixes of the kit's own vocabulary: the generic words its widgets say
+/// themselves (OK, Undo, the History controls), the colour picker's, the search field's and the
+/// navigation bar customiser's. Every other id in the host's catalogs names the host's screens.
+const KIT_MESSAGE_PREFIXES: &[&str] = &["color.", "navbar.custom.", "search.", "ui."];
+
+/// The message ids (`area.thing`) of SolidCraft's English catalog outside the kit's vocabulary:
+/// labels the kit must take from the host as data.
+fn host_message_ids() -> std::collections::BTreeSet<String> {
+    let english = crate::i18n::LOCALES.first().expect("the English catalog");
+    english
+        .messages()
+        .keys()
+        .filter(|key| {
+            let mut parts = key.split('.');
+            let dotted = key.contains('.')
+                && parts.all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_'));
+            dotted && !KIT_MESSAGE_PREFIXES.iter().any(|prefix| key.starts_with(prefix))
+        })
+        .map(|key| key.to_string())
+        .collect()
+}
+
+#[test]
+fn kit_code_names_no_host_message_ids() {
+    let names = host_message_ids();
+    let mut failures = Vec::new();
+    fn scan(path: &Path, relative: &str, names: &std::collections::BTreeSet<String>, failures: &mut Vec<String>) {
+        if path.is_dir() {
+            for entry in std::fs::read_dir(path).unwrap() {
+                let path = entry.unwrap().path();
+                let name = path.file_name().unwrap().to_str().unwrap().to_owned();
+                scan(&path, &format!("{relative}/{name}"), names, failures);
+            }
+            return;
+        }
+        if path.extension().is_none_or(|e| e != "rs") || relative.ends_with("_tests.rs") {
+            return;
+        }
+        let found = host_names_in(&std::fs::read_to_string(path).unwrap(), names);
+        if !found.is_empty() {
+            failures.push(format!("{relative}: {found:?}"));
+        }
+    }
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    scan(&src.join("ui_kit"), "ui_kit", &names, &mut failures);
+    // The components that move with the kit: the theme options and the navigation bar.
+    for component in ["navigation_bar.rs", "theme_files.rs", "theme_options.rs"] {
+        scan(&src.join(component), component, &names, &mut failures);
+    }
+    failures.sort();
+    assert!(failures.is_empty(), "kit code names the host's messages; take the text from the host as data:\n{}", failures.join("\n"));
+}
+
+#[test]
+fn message_id_guard_finds_host_ids_but_skips_kit_vocabulary_and_tests() {
+    let names = host_message_ids();
+    assert!(names.contains("prefs.blur_off") && !names.contains("ui.undo") && !names.contains("Invert"));
+    let source = r#"
+        fn host() -> &'static str { solidcraft_ui_text::tr("prefs.blur_off") }
+        fn kit() -> &'static str { solidcraft_ui_text::tr("ui.undo") }
+        fn handle() -> String { format!("prefs:blur_cost:{}", "ai.prefs.pointer_preview_hidden") }
+        #[cfg(test)]
+        mod tests { fn sample() -> &'static str { "sketch_text.bold" } }
+    "#;
+    assert_eq!(host_names_in(source, &names), ["prefs.blur_off", "ai.prefs.pointer_preview_hidden"]);
+}
