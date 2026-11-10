@@ -1117,14 +1117,16 @@ fn strip(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, prefs: &mut 
     }
     ui_kit::disclosure(ui.painter(), button.center(), false, t.text);
     let state = chat.state();
-    ui.painter().circle_filled(pos2(r.center().x, button.bottom() + 10.0), 3.5, state_color(state));
+    let dot = if chat.without_design() { t.warning } else { state_color(state) };
+    ui.painter().circle_filled(pos2(r.center().x, button.bottom() + 10.0), 3.5, dot);
     let waiting = chat.waiting();
     if waiting > 0 {
         ui_kit::attention_mark(ui.painter(), button, Some(waiting));
     }
     ui.painter()
         .line_segment(if prefs.left { [r.right_top(), r.right_bottom()] } else { [r.left_top(), r.left_bottom()] }, t.primary_border(t.border));
-    let tip = format!("{} · {}", view.tip, state.label());
+    let label = if chat.without_design() { tr("ui.agent_chat_state_no_design") } else { state.label() };
+    let tip = format!("{} · {}", view.tip, label);
     if resp.backing_on_hover_text(tip).clicked() {
         prefs.minimized = false;
     }
@@ -1146,12 +1148,20 @@ fn header(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, left: bool,
                 grip.union(l.rect)
             };
             let waiting = chat.waiting();
-            let s = if waiting > 0 { tr("ui.agent_chat_waiting").to_string() } else { state.label().to_string() };
+            // Ready without SolidCraft's tools can't reach the design: say so, and how to fix it (#12283).
+            let without_design = waiting == 0 && chat.without_design();
+            let s = if waiting > 0 {
+                tr("ui.agent_chat_waiting").to_string()
+            } else if without_design {
+                tr("ui.agent_chat_state_no_design").to_string()
+            } else {
+                state.label().to_string()
+            };
             if ui.available_width() > t.space_24 * 9.0 {
-                ui_kit::assistant_badge(
+                let badge = ui_kit::assistant_badge(
                     ui,
                     &s,
-                    if waiting > 0 {
+                    if waiting > 0 || without_design {
                         ui_kit::AssistantTone::Warning
                     } else {
                         match state {
@@ -1163,6 +1173,9 @@ fn header(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, left: bool,
                         }
                     },
                 );
+                if without_design {
+                    badge.backing_on_hover_text(chat.no_design_hint());
+                }
             }
             // Drag the header across the window to dock on the other side.
             if !popped {
