@@ -1718,7 +1718,7 @@ mod tests {
 
     #[test]
     fn issue_report_short_screenshot_handoff_copies_the_image_and_explains_pasting() {
-        for (os, shortcut) in [(egui::os::OperatingSystem::Linux, "Ctrl+V"), (egui::os::OperatingSystem::Mac, "Cmd+V")] {
+        for (os, shortcut) in [(egui::os::OperatingSystem::Nix, "Ctrl+V"), (egui::os::OperatingSystem::Mac, "Cmd+V")] {
             let mut h = crate::scenario::Harness::new();
             h.ctx.set_os(os);
             h.app.home.open = false;
