@@ -1819,15 +1819,20 @@ fn hash_placement(m: &Mat, h: &mut impl Hasher) {
 /// relative to it (a sketch projecting a face of another part, To Object, a mirror of a placed
 /// body) is evaluated again. `st` is the model the feature starts from, which says what
 /// component a body it names belongs to (without it, every component is taken as read).
-/// [`placement_digest`] of a mirror of placed bodies: its own component's frame, each placement it
-/// was picked at (the copy's component, frame and the frame it was picked in) and the offsets of
-/// the bodies it mirrors (#1938).
-fn mirror_placements_digest(doc: &Document, f: &Feature, placements: &[Vec<u64>], bodies: &[crate::BodyName]) -> u64 {
+/// [`placement_digest`] of a mirror of placed bodies: each placement it was picked at (the copy's
+/// component, that component's frame and the frame it was picked in, both in its own component's
+/// frame as [`mirror_copy_frame`] gives them) and the offsets of the bodies it mirrors (#1938).
+/// It mirrors in a plane of its own component by just those frames, so a joint that moves its own
+/// part together with what it mirrors leaves it, bit for bit, as it was (#14271). A plane read from
+/// model geometry can lie in another part, so its own component's world frame counts then too.
+fn mirror_placements_digest(doc: &Document, f: &Feature, plane: &PlaneRef, placements: &[Vec<u64>], bodies: &[crate::BodyName]) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    doc.component_transform(f.component).iter().flatten().for_each(|x| x.to_bits().hash(&mut h));
+    if !placement_reuse::local_plane(plane, 0) {
+        doc.component_transform(f.component).iter().flatten().for_each(|x| x.to_bits().hash(&mut h));
+    }
     // A feature added after the mirror that builds on its copies needs them made for that.
     placement_reuse::copies_only_shown(doc, f).hash(&mut h);
-    for placed in placements.iter().map(|path| mirror_copy_frame(doc, path)) {
+    for placed in placements.iter().map(|path| mirror_copy_frame(doc, f.component, path)) {
         placed.is_some().hash(&mut h);
         if let Some((component, frame, picked)) = placed {
             component.hash(&mut h);
@@ -1980,9 +1985,12 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
                 reads.drawn_targets(st, f);
             }
         }
-        // A mirror of placed bodies follows the placements it was picked at and its own component's
-        // frame, not every occurrence: moving an unrelated one leaves it (and its cache) alone.
-        FeatureKind::Mirror { placements, bodies, .. } if !placements.is_empty() => return mirror_placements_digest(doc, f, placements, bodies),
+        // A mirror of placed bodies follows the placements it was picked at, as its own component
+        // sees them, not every occurrence: moving an unrelated one, or its own part together with
+        // them, leaves it (and its cache) alone.
+        FeatureKind::Mirror { placements, bodies, plane, .. } if !placements.is_empty() => {
+            return mirror_placements_digest(doc, f, plane, placements, bodies);
+        }
         // A combine moves tools placed differently from its target into the target's frame (#3383).
         FeatureKind::Combine { target, tools, .. } => {
             frame = st.and_then(|st| st.body(target)).map(|b| body_world(doc, b));
@@ -6671,11 +6679,11 @@ fn mirror_matrix(pl: &Plane) -> Mat {
 
 const MAX_INSTANCES: usize = 1000;
 
-/// Where a mirrored body was picked and where its copy goes: the component the copy joins and
-/// that component's world frame, and the frame the body's own geometry is in where it was picked
-/// (its placement `path`, with its offset). `None` in older designs, which saved no placement and
-/// mirror the body's own geometry.
-fn mirrored_placement(doc: &Document, mb: &ModelBody, path: Option<&[u64]>) -> Result<Option<(u64, Mat, Mat)>> {
+/// Where a mirrored body was picked and where its copy goes, for a mirror in component `own`: the
+/// component the copy joins and that component's frame, and the frame the body's own geometry is
+/// in where it was picked (its placement `path`, with its offset), both in `own`'s frame. `None` in
+/// older designs, which saved no placement and mirror the body's own geometry.
+fn mirrored_placement(doc: &Document, own: u64, mb: &ModelBody, path: Option<&[u64]>) -> Result<Option<(u64, Mat, Mat)>> {
     let Some(path) = path else { return Ok(None) };
     let lost = || DocError::Invalid(format!("the placement `{}` was mirrored at no longer exists", mb.name));
     // A stale or edited path that leads to another component no longer shows the body.
@@ -6683,7 +6691,8 @@ fn mirrored_placement(doc: &Document, mb: &ModelBody, path: Option<&[u64]>) -> R
     if !placement_shows(doc, mb, at) {
         return Err(lost());
     }
-    let (component, frame, picked) = mirror_copy_frame(doc, path).ok_or_else(lost)?;
+    let singular = || DocError::Invalid(format!("the placement `{}` was mirrored at is singular", mb.name));
+    let (component, frame, picked) = mirror_copy_frame(doc, own, path).ok_or_else(singular)?;
     let source = doc.model_body_offset(mb).map(|offset| crate::mat_mul(&picked, offset)).unwrap_or(picked);
     Ok(Some((component, frame, source)))
 }
@@ -6721,19 +6730,69 @@ fn component_within(doc: &Document, mut c: u64, ancestor: u64) -> bool {
 }
 
 /// For a body mirrored at placement `path` (which, not the body's name, says where it is: a later
-/// insert can reuse the name): the component its copy joins, that component's world frame, and
-/// the placement's world frame. The copy joins the body's component, or, when that component is
-/// placed more than once (a copy there would show at every placement), the innermost component
-/// around it that is placed once.
-fn mirror_copy_frame(doc: &Document, path: &[u64]) -> Option<(u64, Mat, Mat)> {
-    let (_, picked) = doc.path_placement(path)?;
+/// insert can reuse the name) by a mirror in component `own`: the component its copy joins, that
+/// component's frame, and the placement's frame, both in `own`'s frame ([`frame_in_own`]). The copy
+/// joins the body's component, or, when that component is placed more than once (a copy there
+/// would show at every placement), the innermost component around it that is placed once.
+fn mirror_copy_frame(doc: &Document, own: u64, path: &[u64]) -> Option<(u64, Mat, Mat)> {
     let placed_once = |id: &u64| {
         let component = doc.occurrences.iter().find(|o| o.id == *id).map(|o| o.component);
         doc.occurrences.iter().filter(|o| Some(o.component) == component).count() == 1
     };
     let once = path.iter().take_while(|id| placed_once(id)).count();
-    let (component, frame) = doc.path_placement(path.get(..once)?)?;
-    Some((component, frame, picked))
+    let (component, _) = doc.path_placement(path.get(..once)?)?;
+    Some((component, frame_in_own(doc, own, path.get(..once)?)?, frame_in_own(doc, own, path)?))
+}
+
+/// The frame placement `path` leads to, in the frame of `component` (its first placement, as
+/// [`Document::component_transform`] places it): the occurrences of `path` past those the two
+/// placements share, after the inverse of `component`'s own past them. What they share cancels
+/// exactly, so a joint that moves both together changes nothing, not even by rounding (#14271).
+/// Through the world when `component`'s placement cannot be walked. `None` when `path` leads
+/// nowhere or the frame is singular.
+fn frame_in_own(doc: &Document, component: u64, path: &[u64]) -> Option<Mat> {
+    let Some(own) = first_placement_path(doc, component) else {
+        let (_, world) = doc.path_placement(path)?;
+        return Some(crate::mat_mul(&crate::mat_inverse(&doc.component_transform(component))?, &world));
+    };
+    let shared = own.iter().zip(path).take_while(|(a, b)| a == b).count();
+    let (at, _) = doc.path_placement(path.get(..shared)?)?;
+    let down = occurrences_from(doc, at, path.get(shared..)?)?;
+    match own.get(shared..) {
+        Some([]) => Some(down),
+        Some(up) => Some(crate::mat_mul(&crate::mat_inverse(&occurrences_from(doc, at, up)?)?, &down)),
+        None => None,
+    }
+}
+
+/// The occurrences of `component`'s first placement from the root, as
+/// [`Document::component_transform`] walks them. `None` when a component on the way has no
+/// occurrence or the walk is deeper than any placement.
+fn first_placement_path(doc: &Document, component: u64) -> Option<Vec<u64>> {
+    let mut ids = Vec::new();
+    let mut c = component;
+    while c != 0 {
+        if ids.len() > crate::MAX_PLACEMENT_DEPTH {
+            return None;
+        }
+        let o = doc.occurrence_of(c)?;
+        ids.push(o.id);
+        c = o.parent;
+    }
+    ids.reverse();
+    Some(ids)
+}
+
+/// The transform of the occurrences `ids` in turn from component `from`: the frame they lead to,
+/// in `from`'s frame. `None` when they no longer lead anywhere.
+fn occurrences_from(doc: &Document, from: u64, ids: &[u64]) -> Option<Mat> {
+    let (mut m, mut c) = (crate::IDENTITY, from);
+    for id in ids {
+        let o = doc.occurrences.iter().find(|o| o.id == *id && o.parent == c)?;
+        m = crate::mat_mul(&m, &o.transform);
+        c = o.component;
+    }
+    Some(m)
 }
 
 /// The placements (column-major matrices) of a pattern's copies, the original excluded.
@@ -8374,14 +8433,14 @@ fn eval_feature(
                 let Some(mb) = st.bodies.get(i).cloned() else { continue };
                 // A body picked where a placement shows it is mirrored there: the copy goes beside
                 // it into the component that placement shows, a joined body stays in its own frame.
-                let (component, copy, own) = match mirrored_placement(doc, &mb, placements.get(k).map(Vec::as_slice))? {
+                let (component, copy, own) = match mirrored_placement(doc, f.component, &mb, placements.get(k).map(Vec::as_slice))? {
                     Some((component, frame, source)) => {
                         let singular = || DocError::Invalid(format!("the placement `{n}` was mirrored at is singular"));
                         let inverse = |m: &Mat| crate::mat_inverse(m).ok_or_else(singular);
-                        // The plane is in this feature's component: the body mirrored in the world.
-                        let here = doc.component_transform(f.component);
-                        let world = crate::mat_mul(&crate::mat_mul(&here, &m), &crate::mat_mul(&inverse(&here)?, &source));
-                        (Some(component), crate::mat_mul(&inverse(&frame)?, &world), crate::mat_mul(&inverse(&source)?, &world))
+                        // The plane and both frames are in this feature's component: the body
+                        // mirrored there, so where the component itself is placed does not count.
+                        let mirrored = crate::mat_mul(&m, &source);
+                        (Some(component), crate::mat_mul(&inverse(&frame)?, &mirrored), crate::mat_mul(&inverse(&source)?, &mirrored))
                     }
                     None => (None, m, m),
                 };
