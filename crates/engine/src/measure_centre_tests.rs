@@ -151,6 +151,38 @@ fn solid_edges_measure_the_obtuse_corner() {
     }
 }
 
+/// A face or edge named by body and index alone measures as it does with a point on it (#14011).
+#[test]
+fn faces_and_edges_measure_by_index_without_a_point() {
+    let mut s = Session::default();
+    plate(&mut s);
+    let strip = |mut v: Value| {
+        v.as_object_mut().unwrap().remove("point");
+        v
+    };
+    let (a, b) = (hole(&s, 3.0), hole(&s, 4.0));
+    let r = measure(&mut s, vec![strip(a.clone()), strip(b.clone())]);
+    assert!(close(&r["center_distance"], 30.0, 1e-9) && close(&r["min"], 23.0, 1e-9), "{r}");
+    assert_eq!(r, measure(&mut s, vec![a, b]));
+    let top = flat(&s, |p| (p.z - 10.0).abs() < 1e-9);
+    let r = measure(&mut s, vec![strip(top.clone())]);
+    assert!(r["items"][0]["planar"] == true && r["items"][0]["area_mm2"].as_f64().is_some_and(|a| a > 2300.0 && a < 2400.0), "{r}");
+    assert_eq!(r, measure(&mut s, vec![top]));
+    let e = edge(&s, |p| p.z.abs() < 1e-9 && p.y.abs() < 1e-9);
+    let r = measure(&mut s, vec![strip(e.clone())]);
+    assert!(close(&r["items"][0]["length_mm"], 60.0, 1e-9), "{r}");
+    assert_eq!(r, measure(&mut s, vec![e]));
+    // Neither a point nor an index, or an index the body doesn't have, is refused, not a panic.
+    let name = body(&s);
+    for bad in [
+        json!({"type": "face", "body": name}),
+        json!({"type": "face", "body": name, "index": 9999}),
+        json!({"type": "edge", "body": name, "index": 9999}),
+    ] {
+        assert!(s.execute("inspect.measure", &json!({"items": [bad]})).is_err(), "{bad}");
+    }
+}
+
 #[test]
 fn separate_and_duplicate_lines_keep_the_undirected_angle() {
     let mut s = Session::default();
