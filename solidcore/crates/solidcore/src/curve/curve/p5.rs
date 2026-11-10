@@ -79,8 +79,8 @@
 //!   matrix, an upstream assert, could tell). Option vectors that upstream reads
 //!   without a `NULL` check are `InvalidInput` when missing.
 //! - **Length.** Spans of degree above 1 use the ported `SmIntegrator` (unit
-//!   `mass.integrator`; with `Kernel::fixes.integrator_propagates_failure`, WR-94,
-//!   failed span integrals propagate instead of contributing zero). `Length` needs the
+//!   `mass.integrator`; failed span integrals propagate instead of contributing zero,
+//!   WR-94). `Length` needs the
 //!   kernel (the cache tessellation reads its tolerances). Not upstream: the accuracy
 //!   is held over the whole curve, not per span. Upstream integrates each span to
 //!   `dDesiredAccuracy / span count` relative to that span's integral so far, so each of
@@ -1847,15 +1847,13 @@ impl Curve {
     /// within half the accuracy of the span's share of the curve and its length:
     /// [`crate::mass::integrator::OdeOptions::rounding`]), or the span is
     /// refused (`SM_ERR`, operation `mass::integrator::step_control`): the accuracy asks
-    /// for less than the computed speed resolves. The refusal is returned with
-    /// [`crate::kernel::UpstreamFixes::integrator_propagates_failure`] and is a zero
-    /// length without it, as every failed span integration (WR-94).
+    /// for less than the computed speed resolves. The refusal is returned, as every
+    /// failed span integration (WR-94; upstream counts a failed span as zero length).
     ///
     /// # Errors
     ///
-    /// Those of the length estimate and of the degree query (and of the span
-    /// integration when [`crate::kernel::UpstreamFixes::integrator_propagates_failure`]
-    /// is enabled, WR-94); those of [`BSplineCurve::span_speed`];
+    /// Those of the length estimate, of the degree query and of the span
+    /// integration (WR-94); those of [`BSplineCurve::span_speed`];
     /// [`SolidError::Unported`] from the tessellation or curve evaluator, and for an
     /// edge's curve borrowed from its record (`SmTol::GetZoneTol3d`: the cache's
     /// tolerance is the edge's, which the curve cannot reach; use
