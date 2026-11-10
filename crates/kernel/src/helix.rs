@@ -74,9 +74,11 @@ fn helix_profile(
     let extent = along.iter().cloned().fold(f64::NEG_INFINITY, f64::max) - along.iter().cloned().fold(f64::INFINITY, f64::min);
     if turns > 1.0 && pitch.abs() <= extent {
         // A section exactly one pitch wide makes neighbouring turns share a face, which a single solid cannot hold yet.
-        if (pitch.abs() - extent).abs() <= 1e-6 * extent.max(1.0) {
+        if pitch.abs() > 0.0 && (pitch.abs() - extent).abs() <= 1e-6 * extent {
+            // Enough decimals that the example stays below the pitch when rounded (0.04 mm gives 0.03960, not 0.040).
+            let places = (3.0 - extent.log10().floor()).clamp(3.0, 12.0) as usize;
             return Err(KernelError::Invalid(format!(
-                "the coil runs into itself: neighbouring turns touch because the pitch equals the section ({extent:.3} mm); make the section slightly smaller than the pitch, for example {:.3} mm",
+                "the coil runs into itself: neighbouring turns touch because the pitch equals the section ({extent:.places$} mm); make the section slightly smaller than the pitch, for example {:.places$} mm",
                 extent * 0.99
             )));
         }
