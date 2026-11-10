@@ -17,12 +17,14 @@ use solidcraft_theme::Tokens;
 /// More picks than this aren't summed every time the selection changes.
 const MAX_ITEMS: usize = 500;
 
-/// The readout measured for a selection, kept while the selection and the model stay the same.
+/// The length measured for a selection, kept while the selection and the model stay the same.
+/// Only the measurement is kept: the text is formatted every frame, so a change of units or
+/// length decimals shows at once.
 #[derive(Clone)]
 struct Cached {
     selection: Vec<Sel>,
     state: Arc<ModelState>,
-    text: Option<String>,
+    measured: Option<(f64, usize)>,
 }
 
 fn polyline_len(pts: &[Vec3]) -> f64 {
@@ -66,15 +68,21 @@ pub(crate) fn measure(app: &SolveApp, st: &ModelState, selection: &[Sel]) -> Opt
 }
 
 /// The readout's text for the current selection, or nothing to show.
+#[cfg(test)]
 pub(crate) fn text(app: &SolveApp) -> Option<String> {
     let st = app.session.world_state().ok()?;
     let (length, count) = measure(app, &st, &app.session.selection)?;
+    Some(format_readout(app, length, count))
+}
+
+/// The readout for `length` over `count` edges, in the design's units and length decimals.
+fn format_readout(app: &SolveApp, length: f64, count: usize) -> String {
     let length = crate::prefs::show_mm(app, length, 1);
-    Some(if count == 1 {
+    if count == 1 {
         solidcraft_ui_text::format("selection.length", &[("length", &length)])
     } else {
         solidcraft_ui_text::format("selection.length_total", &[("length", &length), ("count", &count.to_string())])
-    })
+    }
 }
 
 /// Paints the readout in the bottom left corner of `free`, the area the corner legends leave
@@ -88,15 +96,16 @@ pub(crate) fn paint(app: &SolveApp, painter: &Painter, free: Rect) {
     // A model that cannot be placed has nothing to measure.
     let Ok(state) = app.session.world_state() else { return };
     let cached = painter.ctx().data(|d| d.get_temp::<Cached>(id));
-    let text = match cached {
-        Some(c) if c.selection == app.session.selection && Arc::ptr_eq(&c.state, &state) => c.text,
+    let measured = match cached {
+        Some(c) if c.selection == app.session.selection && Arc::ptr_eq(&c.state, &state) => c.measured,
         _ => {
-            let text = text(app);
-            painter.ctx().data_mut(|d| d.insert_temp(id, Cached { selection: app.session.selection.clone(), state, text: text.clone() }));
-            text
+            let measured = measure(app, &state, &app.session.selection);
+            painter.ctx().data_mut(|d| d.insert_temp(id, Cached { selection: app.session.selection.clone(), state, measured }));
+            measured
         }
     };
-    let Some(text) = text else { return };
+    let Some((length, count)) = measured else { return };
+    let text = format_readout(app, length, count);
     let t = Tokens::get();
     let galley = painter.layout_no_wrap(text, FontId::proportional(t.font_body), t.text);
     let size = galley.size() + vec2(16.0, 8.0);

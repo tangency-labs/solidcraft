@@ -2872,6 +2872,13 @@ fn selected_edges_show_their_length_at_the_bottom_left() {
     let viewport = h.app.viewport.layout.as_ref().unwrap().viewport;
     let readout = crate::scenario::rect_of("viewport:selection_length").unwrap();
     assert!(viewport.contains_rect(readout), "{readout:?} in {viewport:?}");
+    // More length decimals show at once, with the same edge still selected.
+    let decimals = h.app.preferences.length_decimals;
+    h.call("ui.prefs", json!({"length_decimals": decimals + 2}));
+    h.frame();
+    let wider = crate::scenario::rect_of("viewport:selection_length").unwrap();
+    assert!(wider.width() > readout.width(), "{wider:?} is not wider than {readout:?}");
+    h.call("ui.prefs", json!({"length_decimals": decimals}));
 
     h.app.session.selection = vec![x.clone(), y];
     let total = solidcraft_ui_text::format("selection.length_total", &[("length", &crate::prefs::show_mm(&h.app, 70.0, 1)), ("count", "2")]);
@@ -2891,6 +2898,7 @@ fn selected_edges_show_their_length_at_the_bottom_left() {
     let legend = crate::scenario::rect_of("analysis:legend").unwrap();
     let readout = crate::scenario::rect_of("viewport:selection_length").unwrap();
     assert!(readout.bottom() <= legend.top(), "{readout:?} overlaps {legend:?}");
+    assert_eq!(readout.left(), legend.left(), "the readout lines up with the legend below it");
 }
 
 #[test]
