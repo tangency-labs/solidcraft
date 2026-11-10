@@ -690,7 +690,7 @@ fn compass_negative_ends_are_hollow_and_positive_ends_are_chunkier() {
             let original = c + vec2(38.0, 0.0);
             let painted = c + (original - c) * 0.84;
             let output = draw(&ctx, |ui| {
-                crate::icons::navigation::axis_tip(ui.painter(), c, name, direction.into(), painted, 0.5, false, t);
+                crate::icons::navigation::axis_tip_scaled(ui.painter(), c, name, direction.into(), painted, 0.5, false, t, 1.0);
             });
             let circles: Vec<_> = output.shapes.iter().filter_map(|s| if let Shape::Circle(c) = &s.shape { Some(c) } else { None }).collect();
             let end = circles.iter().find(|circle| circle.center == painted).unwrap();
@@ -934,7 +934,7 @@ fn a_hovered_compass_end_turns_white_and_its_letter_takes_the_axis_colour() {
             let original = c + vec2(38.0, 0.0);
             let painted = c + (original - c) * 0.84;
             let output = draw(&ctx, |ui| {
-                crate::icons::navigation::axis_tip(ui.painter(), c, name, direction.into(), painted, 0.5, true, t);
+                crate::icons::navigation::axis_tip_scaled(ui.painter(), c, name, direction.into(), painted, 0.5, true, t, 1.0);
             });
             let circles: Vec<_> = output.shapes.iter().filter_map(|s| if let Shape::Circle(c) = &s.shape { Some(c) } else { None }).collect();
             assert!(circles.iter().any(|circle| circle.center == painted && circle.fill == t.on_accent), "{name}: the hovered end is filled white");
@@ -1371,7 +1371,7 @@ fn view_analysis_buttons_are_one_toggle_group() {
 /// through `view.apply`, without touching the design or its history.
 #[test]
 fn view_angles_readout_shows_only_when_on_and_applies_typed_angles() {
-    use solidcraft_engine::render::ViewAngles;
+    use solidcraft_viewport::ViewAngles;
     for style in ["axes", "cube"] {
         let mut h = Harness::new();
         h.call("ui.prefs", json!({"navigator_style": style}));
@@ -1438,7 +1438,7 @@ fn view_angles_readout_shows_only_when_on_and_applies_typed_angles() {
 /// while only the pitch is adjusted.
 #[test]
 fn view_angles_card_zero_buttons_and_axis_locks() {
-    use solidcraft_engine::render::ViewAngles;
+    use solidcraft_viewport::ViewAngles;
     let mut h = Harness::new();
     h.app.preferences.look_at_anim = false;
     h.call("engine.execute", json!({"command": "view.angle_readout", "params": {"enabled": true}}));

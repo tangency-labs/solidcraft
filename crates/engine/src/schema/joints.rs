@@ -652,6 +652,10 @@ pub struct DriveJointParams {
     /// Default: false.
     #[serde(default)]
     pub continuous: Option<bool>,
+    /// Where a contact check runs past its sample or work budget: false fails the drive; true
+    /// stops it at the last placement checked clear (`stopped_by_budget`). Default: false.
+    #[serde(default)]
+    pub stop_at_budget: Option<bool>,
 }
 
 fn drive_required(schema: &mut Schema) {
@@ -683,7 +687,15 @@ impl<'de> Deserialize<'de> for DriveJointParams {
             let value = if values.is_some() { None } else { given(&m, "value", JointValue::read)? };
             (values, value)
         };
-        Ok(DriveJointParams { joint, values, value, index, quiet: flag(&m, "quiet")?, continuous: flag(&m, "continuous")? })
+        Ok(DriveJointParams {
+            joint,
+            values,
+            value,
+            index,
+            quiet: flag(&m, "quiet")?,
+            continuous: flag(&m, "continuous")?,
+            stop_at_budget: flag(&m, "stop_at_budget")?,
+        })
     }
 }
 
@@ -1340,6 +1352,15 @@ pub struct LoopStop {
     pub fraction: f64,
 }
 
+/// Where a contact check's budget stopped a drive (`stop_at_budget`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct BudgetStop {
+    /// Which budget ran out: `samples`, `work` or `intersections`.
+    pub budget: String,
+    /// How far from the start to the asked-for values the drive got (0 to 1).
+    pub fraction: f64,
+}
+
 /// What `joint.drive` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct DriveJointResult {
@@ -1356,6 +1377,9 @@ pub struct DriveJointResult {
     pub stopped_by_contact: Option<ContactStop>,
     /// The closed loop that stopped the drive short; `null` otherwise.
     pub stopped_by_loop: Option<LoopStop>,
+    /// With `stop_at_budget`: the budget that stopped the drive short; left out otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stopped_by_budget: Option<BudgetStop>,
     /// Whether any occurrence moved.
     pub moved: bool,
     /// The values asked for, in the same form as `values`.

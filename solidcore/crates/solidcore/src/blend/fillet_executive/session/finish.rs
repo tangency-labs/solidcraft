@@ -773,6 +773,25 @@ impl FilletSession<'_> {
         // (not the fork, #2933) a corner at a vertex marked set back is classified now, where
         // the setback set on it is first read: the Setback where it is one
         self.set_back_marked_corners(k)?;
+        // not the fork's (#3145): setbacks that overlap on an edge, before the trace
+        if let Some((vertex, refusal)) = crate::blend::blend_corner::setback::overlapping_setbacks(
+            k,
+            &*self.objects.target,
+            &self.objects.corners,
+            &self.objects.set_back_fills,
+        )? {
+            super::note_setback_refusal(
+                &mut self.executive,
+                &*self.objects.target,
+                Some(vertex),
+                &refusal,
+            );
+            self.objects.setback_refusal = refusal.refusal;
+            return Err(super::setback_refused(
+                "blend::fillet_executive::session::overlapping_setbacks",
+                &refusal,
+            ));
+        }
         // WR-459: the clean-up after filleting leaves the target's own edges and faces.
         self.objects.cleanup_kept = if k.fixes.fillet_cleanup_keeps_target_faces {
             Some((

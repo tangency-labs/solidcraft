@@ -152,7 +152,7 @@ pub(super) fn validate_punctual_origins(scene: &ProductScene, origin: Vec3, opti
                     if !bounds.inflated(uncertainty).contains(point) {
                         continue;
                     }
-                    if let Ok(normal) = solidcraft_render::surface::unit_direction((points[1] - points[0]).cross(points[2] - points[0]))
+                    if let Ok(normal) = solidcraft_viewport::surface::unit_direction((points[1] - points[0]).cross(points[2] - points[0]))
                         && (point - points[0]).dot(normal).abs() <= uncertainty
                     {
                         return Err(JobError::new(

@@ -102,7 +102,7 @@ pub struct Harness {
     time: f64,
     size: egui::Vec2,
     /// The camera as the last `camera` step left it.
-    cam_mark: Option<solidcraft_engine::render::Camera>,
+    cam_mark: Option<solidcraft_viewport::Camera>,
 }
 
 impl Default for Harness {
@@ -375,7 +375,7 @@ impl Harness {
     /// frame may turn the view (its right or back vector) by more than `max_deg`, the last
     /// included, so the move ends without a jump.
     fn view_anim(&mut self, v: &str, max_deg: f64) -> Result<(), String> {
-        let basis = |c: &solidcraft_engine::render::Camera| c.basis();
+        let basis = |c: &solidcraft_viewport::Camera| c.basis();
         let mut prev = basis(&self.app.cam);
         self.app.animate_view(v);
         if self.app.cam_anim.is_none() {
@@ -516,7 +516,7 @@ impl Harness {
                     #[cfg(not(target_arch = "wasm32"))]
                     if solidcraft_engine::capture::installed().is_none() {
                         solidcraft_engine::capture::install(std::sync::Arc::new(|scene, cam, w, h| {
-                            let (rgba, renderer) = solidcraft_gpu::capture::headless_rgba(scene, cam, w, h)?;
+                            let (rgba, renderer) = solidcraft_gpu::env::headless_rgba(scene, cam, w, h)?;
                             Ok(solidcraft_engine::capture::Picture { rgba, renderer })
                         }));
                     }

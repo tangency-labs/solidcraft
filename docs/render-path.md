@@ -151,7 +151,9 @@ has at most two live jobs across both executors.
 
 Validation lives in `gpu::path::tests` and engine render job tests. Set
 `SOLIDCRAFT_REQUIRE_GPU=1` to make absence of an adapter fail device tests rather
-than skip them. BRDF parity is checked against the f64 oracle with 0.3% relative
+than skip them. The shared viewport crates (`solidcraft-viewport`, `-gpu`, `-egui`) read none of SolidCraft's
+variables: its own GPU tests take `VIEWPORT_TEST_GPU` (the adapter policy, as `SOLIDCRAFT_GPU`)
+and `VIEWPORT_TEST_REQUIRE_GPU=1` (a missing adapter fails), and CI sets both beside the app's. BRDF parity is checked against the f64 oracle with 0.3% relative
 plus 2e-5 absolute tolerance. The near-white furnace allows 0.07 absolute error:
 the existing single-scattering Schlick model is not a perfectly conserving pure
 Lambertian surface, even at IOR 1. Same-adapter determinism compares the actual

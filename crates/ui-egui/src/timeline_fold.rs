@@ -509,11 +509,11 @@ fn fold(app: &mut SolveApp, group: &Group, view: &View) {
 
 fn group_menu(app: &mut SolveApp, ui: &mut egui::Ui, group: &Group, view: &View) {
     let fold_label = if group.open { "Fold Features" } else { "Show Each Feature" };
-    if crate::context_menu::button(ui, fold_label, "list").clicked() {
+    if crate::ui_kit::menu::button(ui, fold_label, "list").clicked() {
         fold(app, group, view);
         ui.close();
     }
-    if crate::context_menu::button(ui, "Select Features", "select").clicked() {
+    if crate::ui_kit::menu::button(ui, "Select Features", "select").clicked() {
         let features = &app.session.doc.features;
         let items: Vec<_> = view
             .indices(group.start, group.end)
@@ -526,7 +526,7 @@ fn group_menu(app: &mut SolveApp, ui: &mut egui::Ui, group: &Group, view: &View)
         let _ = app.run("select.set", json!({ "items": items }));
         ui.close();
     }
-    if crate::context_menu::button(ui, solidcraft_ui_text::tr_label("Roll History Marker Here"), "rollback").clicked() {
+    if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr_label("Roll History Marker Here"), "rollback").clicked() {
         let end = view.index(group.end);
         let position = if end >= app.session.doc.features.len() { json!({}) } else { json!({ "position": end }) };
         let _ = app.run_heavy("timeline.roll_to", position);

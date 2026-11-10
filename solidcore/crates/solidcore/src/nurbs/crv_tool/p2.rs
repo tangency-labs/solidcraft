@@ -23,7 +23,7 @@
 //!   produce the same curve. The curve-set routines work in place on a `&mut [Curve]`
 //!   (upstream: an array of curve pointers and its highest index `k`), so an error
 //!   leaves the curves modified as far as upstream got.
-//! - Out-params become return values; errors are [`SolidError::Nlib`] values with the
+//! - Out-params become return values; errors are [`SolidError::Failed`] values (a [`NurbsFailure`] reason) with the
 //!   upstream `NL_*_ERR` number instead of a flag plus the global `NL_ERROR` record.
 //!   The `NL_STACKS` arguments and the memory error paths have no counterpart.
 //! - `N_CrvRemoveKnots` and `N_CrvReduceDegreeOnce` keep going when
@@ -52,7 +52,7 @@
 // goes through `get`/`set`, which reject negative or too-large indices.
 
 use super::p1::REMOVAL_PARAM_TOL;
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::math::max2;
 use crate::nurbs::basis_basic::{
     compatible_knot_array, compatible_knot_vectors_to_tol, find_all_span_maxima, SpanMaxima,
@@ -102,7 +102,7 @@ fn span_maxima(
 ) -> Result<std::result::Result<SpanMaxima, SolidError>> {
     match find_all_span_maxima(knt, ux(i, op)?, p, tol) {
         Ok(sm) => Ok(Ok(sm)),
-        Err(e @ SolidError::Nlib { .. }) => Ok(Err(e)),
+        Err(e) if e.is_nurbs_failure() => Ok(Err(e)),
         Err(e) => Err(e),
     }
 }
@@ -1403,7 +1403,7 @@ pub fn make_compatible(curves: &mut [Curve]) -> Result<()> {
 /// knot lies within `tol` of the (smallest) end parameter has that knot removed
 /// (with unlimited tolerance), so every last span is longer than `tol`.
 ///
-/// Errors with `InvalidInput` for an empty set, [`NlibCode::Input`] when that knot
+/// Errors with `InvalidInput` for an empty set, [`NurbsFailure::Input`] when that knot
 /// would have to be removed from a Bezier curve, and with the errors of degree
 /// elevation, knot removal, knot merging and refinement (the curves keep the
 /// changes made before).
@@ -1448,7 +1448,7 @@ pub fn make_compatible_adj_knots(curves: &mut [Curve], tol: f64) -> Result<()> {
         if dd - v <= tol {
             // Must remove this knot.
             if m == 2 * phs + 1 {
-                return Err(SolidError::nlib(OP, NlibCode::Input));
+                return Err(SolidError::nurbs(OP, NurbsFailure::Input));
             }
             *c = c.remove_knot(v, ph, BIGD)?.curve;
         }

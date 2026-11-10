@@ -20,7 +20,7 @@
 //!   (`(NL_INDEX)ceil(dd)`; a value outside `i64` saturates).
 //! - Out-params become return values (the fitted curves). The `NL_STACKS` arguments
 //!   have no counterpart; a work array that cannot be reserved returns `NL_MEM_ERR`
-//!   as upstream's failed `N_Malloc` does. Errors are [`SolidError::Nlib`] values
+//!   as upstream's failed `N_Malloc` does. Errors are [`SolidError::Failed`] values (a [`NurbsFailure`] reason)
 //!   with the upstream `NL_*_ERR` number. An `nc` so large that `nc + p + 1` or
 //!   `4 nc` overflows `NL_INDEX` (undefined behaviour upstream) returns
 //!   [`SolidError::InvalidInput`].
@@ -44,7 +44,7 @@
 //!   fuzz05147; upstream fixtures and the committed difftest cases need at most
 //!   11,104).
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::math::{max2, Vec3};
 use crate::nurbs::crv_adv::p2::ConstrainedEnds;
 use crate::nurbs::crv_basic::Curve;
@@ -128,14 +128,14 @@ const TABLE_DEG4: [[f64; 7]; 9] = [
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] for a degree other than 2, 3 or 4; errors of
+/// [`NurbsFailure::Input`] for a degree other than 2, 3 or 4; errors of
 /// [`func_interp`].
 pub fn arc_cpts_function(deg: usize) -> Result<SurfaceFunction> {
     let table = match deg {
         2 => &TABLE_DEG2,
         3 => &TABLE_DEG3,
         4 => &TABLE_DEG4,
-        _ => return Err(SolidError::nlib(OP_TABLE, NlibCode::Input)),
+        _ => return Err(SolidError::nurbs(OP_TABLE, NurbsFailure::Input)),
     };
     let fv: Vec<Vec<f64>> = table.iter().map(|row| row.to_vec()).collect();
     func_interp(&fv, 1, 1, &TABLE_ANGLES, &TABLE_TOLS)
@@ -150,7 +150,7 @@ pub fn arc_cpts_function(deg: usize) -> Result<SurfaceFunction> {
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] for a degree other than 2, 3 or 4 or an angle outside
+/// [`NurbsFailure::Input`] for a degree other than 2, 3 or 4 or an angle outside
 /// `(0, 360]`; errors of [`arc_cpts_function`] and of [`SurfaceFunction::eval`].
 pub fn calc_num_cpts_to_approx_arc(
     tol: f64,
@@ -162,10 +162,10 @@ pub fn calc_num_cpts_to_approx_arc(
 
     // Check for errors.
     if !(2..=4).contains(&deg) {
-        return Err(SolidError::nlib(OP_NUM, NlibCode::Input));
+        return Err(SolidError::nurbs(OP_NUM, NurbsFailure::Input));
     }
     if ang <= 0.0 || ang > 360.0 {
-        return Err(SolidError::nlib(OP_NUM, NlibCode::Input));
+        return Err(SolidError::nurbs(OP_NUM, NurbsFailure::Input));
     }
     // `if tol < 1e-6 { tol = 1e-6 }` then `if tol > 1 { tol = 1 }`.
     tol = tol.clamp(1.0e-6, 1.0);
@@ -216,7 +216,7 @@ pub struct CircArcData {
 fn unit_axis(v: Vec3) -> Result<Vec3> {
     normalize(v)
         .map(|(u, _)| u)
-        .map_err(|_| SolidError::nlib(OP_ARC, NlibCode::Input))
+        .map_err(|_| SolidError::nurbs(OP_ARC, NurbsFailure::Input))
 }
 
 /// Projection of `q` onto the unbounded line `lsg` (`N_ProjectPtLine`).
@@ -309,7 +309,7 @@ fn lst_sq_data(
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] for a degree other than 2, 3 or 4, `nc < deg`, a radius
+/// [`NurbsFailure::Input`] for a degree other than 2, 3 or 4, `nc < deg`, a radius
 /// `<= 0`, or axes that cannot be normalised; `InvalidInput` for parallel end
 /// tangents of a degree 2 parabolic arc (see the module deviations); errors of the
 /// fits ([`approx_lst_sq`], [`interp_end_derivs`], [`weighted_lst_sq_knots`]) and of
@@ -319,13 +319,13 @@ pub fn approx_circ_arc_with_crv_data(arc: &CircArcData, deg: usize, nc: usize) -
 
     // Check for errors.
     if !(2..=4).contains(&deg) {
-        return Err(SolidError::nlib(op, NlibCode::Input));
+        return Err(SolidError::nurbs(op, NurbsFailure::Input));
     }
     if nc < deg {
-        return Err(SolidError::nlib(op, NlibCode::Input));
+        return Err(SolidError::nurbs(op, NurbsFailure::Input));
     }
     if arc.radius <= 0.0 {
-        return Err(SolidError::nlib(op, NlibCode::Input));
+        return Err(SolidError::nurbs(op, NurbsFailure::Input));
     }
     let nci = sg(nc, op)?;
     let (cen, rad, ps, pe) = (arc.center, arc.radius, arc.start, arc.end);
@@ -453,7 +453,7 @@ pub fn approx_circ_arc_with_crv_data(arc: &CircArcData, deg: usize, nc: usize) -
                 weighted_lst_sq_knots(&wdata, &data.up, &knt, nc, deg)
             }
         }
-        _ => Err(SolidError::nlib(op, NlibCode::Input)),
+        _ => Err(SolidError::nurbs(op, NurbsFailure::Input)),
     }
 }
 
@@ -470,7 +470,7 @@ pub fn approx_circ_arc_with_crv_data(arc: &CircArcData, deg: usize, nc: usize) -
 ///
 /// # Errors
 ///
-/// [`NlibCode::Numerical`] when `1 / tol` is a bad division; errors of the Bezier
+/// [`NurbsFailure::Numerical`] when `1 / tol` is a bad division; errors of the Bezier
 /// decomposition, the second derivative bound, evaluation, parametrisation, knot
 /// vectors, interpolation, arc length, normalisation, knot removal and
 /// reparametrisation; `InvalidInput` where upstream would index outside its
@@ -494,7 +494,7 @@ pub fn approx_nurbs_with_non_rat_crv(
     // Initialize.
     let exp = if deg == 1 { 0.5 } else { 0.34 };
     if float_op_is_bad(1.0, tol, FloatOp::Division) {
-        return Err(SolidError::nlib(op, NlibCode::Numerical));
+        return Err(SolidError::nurbs(op, NurbsFailure::Numerical));
     }
     let mut f1 = 1.0 / tol;
     f1 = f1.powf(exp);

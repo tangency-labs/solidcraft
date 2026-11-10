@@ -44,7 +44,7 @@
 //!   [`remove_all_knots`] detects exactly that and returns
 //!   [`SolidError::NotConverged`].
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::math::max2;
 use crate::nurbs::basis_basic::{compatible_knot_array, find_all_span_maxima};
 use crate::nurbs::geom::Rectangle;
@@ -163,7 +163,7 @@ fn span_maxima(
             *error = None;
             Ok((sm.min, sm.max))
         }
-        Err(e @ SolidError::Nlib { .. }) => {
+        Err(e) if e.is_nurbs_failure() => {
             *error = Some(e);
             Ok((vec![0.0; degu + 1], vec![1.0; degu + 1]))
         }
@@ -211,7 +211,7 @@ struct RemoveAll {
 /// surfaces by `wmin / (1 + pmax)`.
 ///
 /// Errors: the error of the last basis-maximum search when it failed and nothing was
-/// removed (see the module deviations); [`NlibCode::Call`] from the one-step error
+/// removed (see the module deviations); [`NurbsFailure::CallFailed`] from the one-step error
 /// bound; `InvalidInput` for invalid surfaces.
 pub fn remove_all_knots(sur: &Surface, tol: f64, dir: Direction) -> Result<Surface> {
     remove_knots_kept(
@@ -940,7 +940,7 @@ fn merge_knots(sur: &mut [Surface], d: Direction) -> Result<Vec<Vec<f64>>> {
 /// joint knot is then removed as often as `tol` allows. Any `dir` other than
 /// [`Direction::U`] joins in v.
 ///
-/// Errors: [`NlibCode::Input`] when the net sizes or degrees across `dir` differ;
+/// Errors: [`NurbsFailure::Input`] when the net sizes or degrees across `dir` differ;
 /// errors of the degree elevation; `InvalidInput` for invalid surfaces.
 pub fn join(sur1: &Surface, sur2: &Surface, dir: Direction, tol: f64) -> Result<Surface> {
     const OP: &str = "nurbs::srf_tool::p3::join";
@@ -963,7 +963,7 @@ pub fn join(sur1: &Surface, sur2: &Surface, dir: Direction, tol: f64) -> Result<
     let (n1, n2) = (a.n(), b.n());
     let (p1, p2) = (a.p(), b.p());
     if n1 != n2 || p1 != p2 {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     let (a, b) = match a.q().cmp(&b.q()) {
         core::cmp::Ordering::Equal => (a, b),
@@ -1037,7 +1037,7 @@ pub fn join(sur1: &Surface, sur2: &Surface, dir: Direction, tol: f64) -> Result<
     let t = at(v1, s1, OP)?;
     match remove_knot_conditional_with_status(&surj, t, ix(qj, OP)?, tol, Direction::V) {
         Ok((rm, _)) => surj = rm.surface,
-        Err(SolidError::Nlib { .. }) => {}
+        Err(e) if e.is_nurbs_failure() => {}
         Err(e) => return Err(e),
     }
 
@@ -1127,10 +1127,7 @@ mod tests {
         assert!(max_dist(&s, &j) < 1e-9);
         assert!(matches!(
             join(&s, &a, Direction::U, 1e-9),
-            Err(SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
     }
 

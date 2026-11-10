@@ -7,7 +7,8 @@ use serde::Serialize;
 use solidcore_record::Vec3;
 
 use super::{CancelToken, ErrorCode, ImageRequest, JobError, Phase, Progress, Result};
-use crate::{FaceAppearance, Mat4, ProductScene, RenderFormat, RenderMode, RenderOperation, RenderRequest};
+use crate::{FaceAppearance, ProductScene, RenderFormat, RenderMode, RenderOperation, RenderRequest};
+use solidcraft_viewport::Mat4;
 
 #[cfg(test)]
 #[path = "image_tests.rs"]
@@ -380,8 +381,12 @@ impl Projection {
             return Err(invalid("opaque PBR requires opacity 1"));
         }
         let normals = if surface.is_some() {
-            [crate::surface::unit_direction(na), crate::surface::unit_direction(nb), crate::surface::unit_direction(nc)]
-                .map(|n| n.map_err(|e| invalid(&e.to_string())))
+            [
+                solidcraft_viewport::surface::unit_direction(na),
+                solidcraft_viewport::surface::unit_direction(nb),
+                solidcraft_viewport::surface::unit_direction(nc),
+            ]
+            .map(|n| n.map_err(|e| invalid(&e.to_string())))
         } else {
             [Ok(normals[0]), Ok(normals[1]), Ok(normals[2])]
         };
@@ -496,7 +501,7 @@ struct Triangle {
     inv_w: [f64; 3],
     colour: [f64; 3],
     opacity: f64,
-    surface: Option<crate::surface::OpaqueSurface>,
+    surface: Option<solidcraft_viewport::surface::OpaqueSurface>,
     centre_depth: f64,
     area: f64,
     bounds: [usize; 4],
@@ -892,12 +897,12 @@ fn raster_pixel(
         [mapped.x, mapped.y, mapped.z]
     } else if let Some(weights) = studio_weights {
         let [r, g, b] = t.colour;
-        let surface = crate::surface::OpaqueSurface::new(Vec3::new(r, g, b), 0.0, 1.0, 1.5).map_err(|e| invalid(&e.to_string()))?;
+        let surface = solidcraft_viewport::surface::OpaqueSurface::new(Vec3::new(r, g, b), 0.0, 1.0, 1.5).map_err(|e| invalid(&e.to_string()))?;
         let radiance = crate::studio::shade_weighted(surface, n, back, weights).map_err(|e| invalid(&e.to_string()))?;
         let mapped = crate::studio::tone_map(radiance).map_err(|e| invalid(&e.to_string()))?;
         [mapped.x, mapped.y, mapped.z]
     } else {
-        crate::raster::shade(n, back, t.colour)
+        solidcraft_viewport::shade(n, back, t.colour)
     };
     if colour.iter().any(|v| !v.is_finite()) {
         return Err(invalid("non-finite shaded colour"));
