@@ -25,7 +25,6 @@ solid.pattern.path
 solid.pattern.rectangular
 solid.shell
 solid.thread
-surface.blend
 surface.extrude
 surface.loft
 surface.patch
