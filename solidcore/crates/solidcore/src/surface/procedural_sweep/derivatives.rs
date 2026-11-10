@@ -73,7 +73,7 @@ impl ProceduralSweep {
                 "a screw profile needs ordered parameter bounds",
             ));
         }
-        let w = wt.x.clamp(domain.min(), domain.max());
+        let w = crate::math::clamp_between(wt.x, domain.min(), domain.max());
         let (dw, dt) = if self.map.swapped { (dv, du) } else { (du, dv) };
         let (w_side, t_side) = if self.map.swapped {
             (flags.v_side, flags.u_side)
@@ -93,7 +93,7 @@ impl ProceduralSweep {
         let (Some(&first), Some(&last)) = (self.stations.first(), self.stations.last()) else {
             return Err(SolidError::invalid_input(OP, "empty screw stations"));
         };
-        let t = wt.y.clamp(first, last);
+        let t = crate::math::clamp_between(wt.y, first, last);
         let index = self
             .stations
             .partition_point(|&s| if ending_t { s < t } else { s <= t })
