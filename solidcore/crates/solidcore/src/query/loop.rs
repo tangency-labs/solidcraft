@@ -862,7 +862,9 @@ pub(crate) fn contains_uv_point_with_topology(
 ///   positive knot gap short enough for their `1e-24` divisor guards, which only ever
 ///   divide by knot differences spanning the evaluated span), without out-of-bounds
 ///   evaluation (so a parameter past its domain is clamped into it) and with its edge's
-///   interval in its domain: its points lie in the box of its control points; or
+///   interval, widened, in `[U[p], U[n]]` (where the convex hull property holds; an
+///   unclamped curve extrapolates past it): its points lie in the box of its control
+///   points; or
 /// - a line, whose points over the widened interval lie between its points at the
 ///   widened interval's ends (a line extends past them);
 ///
@@ -964,7 +966,9 @@ impl WindingHull {
                     .windows(2)
                     .all(|w| matches!(w, [a, b] if a <= b));
             let domain = trim.natural_interval();
-            let within = edge.interval.min() >= domain.min() && edge.interval.max() <= domain.max();
+            let within = edge.interval.min() >= domain.min()
+                && edge.interval.max() <= domain.max()
+                && in_hull_domain(nurb, &edge.interval);
             if !(well_made && within && evaluates_everywhere(nurb.knots(), p))
                 || trim.is_out_of_bounds_enabled()
             {
@@ -1022,6 +1026,24 @@ fn with_solve_slack(ivl: &Extent1d) -> Extent1d {
     let mut widened = *ivl;
     widened.expand_absolute(EFF_ZERO + 4.0 * f64::EPSILON * (1.0 + ivl.max_dimension()));
     widened
+}
+
+/// Not upstream: whether every parameter the walk or a drop may evaluate the NURB at for
+/// interval `ivl` ([`with_solve_slack`], clamped into the knot range `[U[0], U[m]]` as
+/// the evaluators clamp it) lies in `[U[p], U[n]]` (`n` its number of control points),
+/// where the curve is a combination of its control points with nonnegative weights and
+/// so lies in their box (the convex hull property). Past those knots an unclamped curve
+/// extrapolates out of the box.
+fn in_hull_domain(nurb: &crate::nurbs::crv_basic::Curve, ivl: &Extent1d) -> bool {
+    let (p, knots) = (nurb.degree(), nurb.knots());
+    let n = nurb.cpts().len();
+    let (Some(&first), Some(&last), Some(&lo), Some(&hi)) =
+        (knots.first(), knots.last(), knots.get(p), knots.get(n))
+    else {
+        return false;
+    };
+    let widened = with_solve_slack(ivl);
+    widened.min().max(first) >= lo && widened.max().min(last) <= hi
 }
 
 /// Not upstream: whether a B-spline of degree `p` on `knots` (nondecreasing, as many as
@@ -1158,6 +1180,7 @@ fn drop_cannot_reach(k: &Kernel, edge: &crate::topology::Edge, point: Point3) ->
                 nurb.cpts()
                     .iter()
                     .all(|c| c.w == NOW || (c.w > 0.0 && c.w.is_finite()))
+                    && in_hull_domain(nurb, &edge.interval)
             });
             if !positive || base.is_out_of_bounds_enabled() {
                 return false;
@@ -1654,44 +1677,10 @@ mod tests {
         );
     }
 
-    /// A loop with an edge whose interval is within `SM_EFF_ZERO` (the square
-    /// `[-20, -10]^2` clockwise, its first 10-long side parameterised over `[0, 5e-13]`):
-    /// the walk does not step along it and tests the next chord from the undefined
-    /// point, finding `(-5, -5)`, far outside the square, on the first edge. Such a loop
-    /// has no hull, so it is walked, and a face holding it as an inner loop of an outer
-    /// square classifies the point the same with the shortcut on and off.
-    #[test]
-    fn a_loop_with_an_edge_the_walk_does_not_step_along_has_no_hull() {
-        let mut b = square(plane(), true, &[]);
-        let v = [
-            [-20.0, -10.0],
-            [-10.0, -10.0],
-            [-10.0, -20.0],
-            [-20.0, -20.0],
-        ];
-        for i in 0..4_usize {
-            let p = Vec3::new(v[i][0], v[i][1], 0.0);
-            let q = Vec3::new(v[(i + 1) % 4][0], v[(i + 1) % 4][1], 0.0);
-            let (end, max) = if i == 0 {
-                (p + (q - p) / 5e-13, 5e-13)
-            } else {
-                (q, 1.0)
-            };
-            b.vertex_mut(VertexId::from_index(i as u32)).unwrap().point = p;
-            let e = b.edge_mut(EdgeId::from_index(i as u32)).unwrap();
-            e.interval = Extent1d::from_min_max(0.0, max);
-            e.curve = Some(Curve::from(Line::from_points(p, end, 3)));
-            b.edgeuse_mut(EdgeuseId::from_index(i as u32))
-                .unwrap()
-                .uv_trim_curve = Some(Curve::from(Line::from_points(p, end, 2)));
-        }
-        let (k, l, uv) = (Kernel::default(), LoopId::from_index(0), [-5.0, -5.0]);
-        assert_eq!(WindingHull::of(&k, &b, l), None);
-        assert!(!exclusion_at(&k, &b, l, uv).is_some_and(|x| x.excludes(&k, &b, l)));
-        let walk = contains(&mut b.clone_standing_for_self().unwrap(), uv).unwrap();
-        assert_eq!(walk.containment, PointContainment::OnBoundary);
-
-        // the loop as an inner loop of the outer square [-30, 10]^2
+    /// Puts loop 0 of the square B-rep `b` (face 0) as the inner loop of the outer
+    /// square `[-30, 10]^2` (loop 1), with vertex uses on every edge use.
+    fn hold_in_outer_square(b: &mut Brep) {
+        let l = LoopId::from_index(0);
         let o = [[-30.0, -30.0], [10.0, -30.0], [10.0, 10.0], [-30.0, 10.0]];
         b.add_loop_record(Loop {
             face: FaceId::from_index(0),
@@ -1758,6 +1747,11 @@ mod tests {
                 .unwrap();
             b.edgeuse_mut(EdgeuseId::from_index(i)).unwrap().vertexuse = Some(vu);
         }
+    }
+
+    /// Face 0's point classification at `uv` (`SmFace::PointClassify`, every loop) with
+    /// the shortcuts on and off, as debug text.
+    fn classified_on_and_off(b: &Brep, uv: [f64; 2]) -> (String, String) {
         let classify = |memo: bool| {
             let mut k = Kernel::new(&crate::kernel::KernelOptions::default());
             k.memoize_curve_caches = memo;
@@ -1767,14 +1761,133 @@ mod tests {
             let r = crate::query::face::p2::point_classify(
                 &k,
                 &mut copy,
-                f,
+                FaceId::from_index(0),
                 Point2::new(uv[0], uv[1]),
                 &mut pc,
                 crate::query::face::p2::PointClassifyOptions::default(),
             );
             format!("{r:?} {pc:?}")
         };
-        assert_eq!(classify(true), classify(false));
+        (classify(true), classify(false))
+    }
+
+    /// A loop with an edge whose interval is within `SM_EFF_ZERO` (the square
+    /// `[-20, -10]^2` clockwise, its first 10-long side parameterised over `[0, 5e-13]`):
+    /// the walk does not step along it and tests the next chord from the undefined
+    /// point, finding `(-5, -5)`, far outside the square, on the first edge. Such a loop
+    /// has no hull, so it is walked, and a face holding it as an inner loop of an outer
+    /// square classifies the point the same with the shortcut on and off.
+    #[test]
+    fn a_loop_with_an_edge_the_walk_does_not_step_along_has_no_hull() {
+        let mut b = square(plane(), true, &[]);
+        let v = [
+            [-20.0, -10.0],
+            [-10.0, -10.0],
+            [-10.0, -20.0],
+            [-20.0, -20.0],
+        ];
+        for i in 0..4_usize {
+            let p = Vec3::new(v[i][0], v[i][1], 0.0);
+            let q = Vec3::new(v[(i + 1) % 4][0], v[(i + 1) % 4][1], 0.0);
+            let (end, max) = if i == 0 {
+                (p + (q - p) / 5e-13, 5e-13)
+            } else {
+                (q, 1.0)
+            };
+            b.vertex_mut(VertexId::from_index(i as u32)).unwrap().point = p;
+            let e = b.edge_mut(EdgeId::from_index(i as u32)).unwrap();
+            e.interval = Extent1d::from_min_max(0.0, max);
+            e.curve = Some(Curve::from(Line::from_points(p, end, 3)));
+            b.edgeuse_mut(EdgeuseId::from_index(i as u32))
+                .unwrap()
+                .uv_trim_curve = Some(Curve::from(Line::from_points(p, end, 2)));
+        }
+        let (k, l, uv) = (Kernel::default(), LoopId::from_index(0), [-5.0, -5.0]);
+        assert_eq!(WindingHull::of(&k, &b, l), None);
+        assert!(!exclusion_at(&k, &b, l, uv).is_some_and(|x| x.excludes(&k, &b, l)));
+        let walk = contains(&mut b.clone_standing_for_self().unwrap(), uv).unwrap();
+        assert_eq!(walk.containment, PointContainment::OnBoundary);
+        hold_in_outer_square(&mut b);
+        let (on, off) = classified_on_and_off(&b, uv);
+        assert_eq!(on, off);
+    }
+
+    /// A loop whose trims are unclamped B-splines (degree 1, knots `[-1, 0.25, 0.75, 2]`,
+    /// so the convex hull property holds only over `[0.25, 0.75]`) over edge intervals
+    /// `[0, 1]`: they extrapolate past their control points to the diamond
+    /// `(-20, -15) (-15, -10) (-10, -15) (-15, -20)`, the hole. `(-11, -15)` is inside it
+    /// and outside the control points' box `[-18.75, -11.25]^2`. Such a loop has no hull,
+    /// so it is walked (inside), and the face holding it as a hole of the outer square
+    /// classifies the point the same (outside the face) with the shortcut on and off. The
+    /// plane is turned an eighth of a turn so the 3D edges' boxes do not reach the point
+    /// either: only the hull's domain decides.
+    #[test]
+    fn a_loop_of_unclamped_trims_past_their_hull_domain_has_no_hull() {
+        let k = Kernel::default();
+        let mut b = square(plane(), true, &[]);
+        let v = [
+            [-20.0, -15.0],
+            [-15.0, -10.0],
+            [-10.0, -15.0],
+            [-15.0, -20.0],
+        ];
+        for i in 0..4_usize {
+            let p = Vec3::new(v[i][0], v[i][1], 0.0);
+            let q = Vec3::new(v[(i + 1) % 4][0], v[(i + 1) % 4][1], 0.0);
+            b.vertex_mut(VertexId::from_index(i as u32)).unwrap().point = p;
+            let e = b.edge_mut(EdgeId::from_index(i as u32)).unwrap();
+            e.interval = Extent1d::from_min_max(0.0, 1.0);
+            e.curve = Some(Curve::from(Line::from_points(p, q, 3)));
+            let (a, c) = (p * 0.75 + q * 0.25, p * 0.25 + q * 0.75);
+            let nurb = NurbCurve::new(
+                vec![
+                    CPoint::new(a.x, a.y, 0.0, NOW),
+                    CPoint::new(c.x, c.y, 0.0, NOW),
+                ],
+                1,
+                vec![-1.0, 0.25, 0.75, 2.0],
+            )
+            .unwrap();
+            let trim = Curve::from(BSplineCurve::from_nurb(nurb, 2, false));
+            // the trim is the edge's line in UV over [0, 1] (as the walk evaluates it)
+            for j in 0..=20 {
+                let t = f64::from(j) / 20.0;
+                let at = trim.evaluate(&k, t, 1, false, true).unwrap()[0];
+                assert!(at.distance(p + (q - p) * t) < 1e-12, "edge {i} at {t}");
+            }
+            b.edgeuse_mut(EdgeuseId::from_index(i as u32))
+                .unwrap()
+                .uv_trim_curve = Some(trim);
+        }
+        let (l, uv) = (LoopId::from_index(0), [-11.0, -15.0]);
+        assert_eq!(WindingHull::of(&k, &b, l), None);
+        let walk = contains(&mut b.clone_standing_for_self().unwrap(), uv).unwrap();
+        assert_eq!(walk.containment, PointContainment::Inside);
+        hold_in_outer_square(&mut b);
+        // the turned plane, with every vertex and edge moved onto it
+        let turned = Surface::from(Plane::new(
+            Vec3::ZERO,
+            Vec3::new(1.0, -1.0, 0.0),
+            Vec3::new(1.0, 1.0, 0.0),
+            Vec2::new(1.0, 1.0),
+            &Extent2d::from_bounds(-40.0, -40.0, 40.0, 40.0),
+        ));
+        let on_plane = |p: Vec3| turned.evaluate_point(&k, Point2::new(p.x, p.y)).unwrap();
+        for i in 0..8_u32 {
+            let vertex = b.vertex_mut(VertexId::from_index(i)).unwrap();
+            vertex.point = on_plane(vertex.point);
+            let edge = b.edge_mut(EdgeId::from_index(i)).unwrap();
+            let line = edge.curve.as_ref().unwrap();
+            let (p, q) = (
+                on_plane(line.evaluate_point(&k, 0.0).unwrap()),
+                on_plane(line.evaluate_point(&k, 1.0).unwrap()),
+            );
+            edge.curve = Some(Curve::from(Line::from_points(p, q, 3)));
+        }
+        b.face_mut(FaceId::from_index(0)).unwrap().surface = Some(turned);
+        let (on, off) = classified_on_and_off(&b, uv);
+        assert_eq!(on, off);
+        assert!(off.contains("point_class: Unknown"), "{off}");
     }
 
     /// A point on a side of the surface's natural domain is always walked (the walk then
