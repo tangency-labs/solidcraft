@@ -45,6 +45,7 @@ pub mod measure;
 pub mod offset;
 pub mod order;
 pub mod pcurve;
+pub mod pick;
 pub mod prism;
 pub mod provenance;
 pub mod record_check;
