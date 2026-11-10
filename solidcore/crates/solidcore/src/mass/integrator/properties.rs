@@ -23,8 +23,7 @@
 //! has a fixed two-level call structure, not input-driven recursion. Both levels split
 //! at the surface's knots, as the SolidCraft fork's tangency-labs/smlib@08d9a14 does
 //! (WR-494, #1435): upstream steps across them.
-//! With `UpstreamFixes::brep_area_between_solid_and_void` (WR-535) a volume-separating
-//! faceuse adds its volume only where it bounds a non void region and its area only
+//! A volume-separating faceuse (WR-535) adds its volume only where it bounds a non void region and its area only
 //! where the area behaviour selects it (tangency-labs/smlib@d2d9586).
 //! The iso-u integrals start at the trims' lowest v, not at the face UV domain's
 //! (WR-563, #1556).
@@ -723,7 +722,7 @@ pub fn brep_properties(
                     if separating { 0.0 } else { mass.y },
                     PPF_ALL,
                 )?;
-                if separating && k.fixes.brep_area_between_solid_and_void {
+                if separating {
                     // Not upstream (WR-535, the fork's tangency-labs/smlib@d2d9586): the
                     // faceuse's volume and mass enter only when it bounds a non void region,
                     // its area and area moments only when the area behaviour selects it: a
@@ -1058,9 +1057,8 @@ pub struct MassPropertyRequest {
     pub manifold_solid_only: bool,
     /// Add the area of the [`sheet_face`]s (void on both sides, or one material region on
     /// both sides) to the solid boundary's: the area then counts every face once but the
-    /// partitions between two material regions, which are no part of it. That needs
-    /// `brep_area_between_solid_and_void` (WR-535), without which the boundary counts a
-    /// partition once from each side: a body with a partition is then refused.
+    /// partitions between two material regions, which are no part of it (WR-535;
+    /// upstream's boundary counts a partition once from each side).
     pub sheet_faces_area: bool,
     /// For a body with no material region: its faces' area, volume and mass 0, the
     /// centroid of the area, no moments (otherwise refused as no mass).
@@ -1156,9 +1154,7 @@ impl EstimatedMassProperties {
 /// integrator's step control fails (it cannot meet the requested accuracy's estimate:
 /// #2545, WR-472's error scale off; the step count is not reported, `iterations` is 0);
 /// [`SolidError::Degenerate`] for a non-finite integrand; [`SolidError::Unsupported`]
-/// for a span the integrator took no step over, or for `sheet_faces_area` on a body with a
-/// partition without `brep_area_between_solid_and_void` (WR-535: without it each side of a
-/// partition adds its area, so the area would count it twice); [`SolidError::UnsureRegion`]
+/// for a span the integrator took no step over; [`SolidError::UnsureRegion`]
 /// for a body with a region the kernel is unsure of (its volume and its faces' area depend
 /// on whether it is material: refused, not read as void); those of the integration.
 pub fn brep_mass_properties_estimated(
@@ -1170,17 +1166,6 @@ pub fn brep_mass_properties_estimated(
 ) -> Result<EstimatedMassProperties> {
     let accuracy = estimate_accuracy(accuracy)?;
     no_unsure_region(b)?;
-    if request.sheet_faces_area && !k.fixes.brep_area_between_solid_and_void {
-        for f in faces(b)? {
-            if partition_face(b, f)? {
-                return Err(SolidError::Unsupported {
-                    operation: OP,
-                    reason: "a partition's area is counted from both sides without \
-                             brep_area_between_solid_and_void",
-                });
-            }
-        }
-    }
     estimate(k, b, accuracy, request, attributes).map_err(typed_failure)
 }
 
@@ -1419,7 +1404,7 @@ fn has_material(b: &Brep) -> Result<bool> {
 /// both void (a sheet, standing free or hung on a solid) or are one material region (a
 /// fin inside the material, the same region on both sides). A face between two distinct
 /// material regions (a partition) is in neither: it bounds no part of the area
-/// (`brep_area_between_solid_and_void`, WR-535). A side with no faceuse, no shell or no
+/// (WR-535). A side with no faceuse, no shell or no
 /// region is void; a region the kernel is unsure of is refused ([`region_material`]).
 ///
 /// # Errors
@@ -1780,7 +1765,6 @@ mod tests {
     fn a_fin_inside_the_material_is_counted_once() {
         use crate::primitive::api_primitives::{create_box, create_plane};
         let mut k = Kernel::default();
-        k.fixes.brep_area_between_solid_and_void = true;
         k.fixes.precise_properties_body_length_scale = true;
         let a = create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0).unwrap();
         let fin = create_plane(&mut k, Point3::new(0.25, 0.5, 1.5), 0.5, 0.5).unwrap();
@@ -1812,7 +1796,6 @@ mod tests {
     fn merged_cubes_area_counts_solid_void_faces_only() {
         use crate::primitive::api_primitives::create_box;
         let mut k = Kernel::default();
-        k.fixes.brep_area_between_solid_and_void = true;
         let a = create_box(&mut k, Point3::ZERO, 10.0, 10.0, 10.0).unwrap();
         let b = create_box(&mut k, Point3::new(5.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
         let mut merged = crate::boolean::api_brep::boolean_merge(&mut k, a, b).unwrap();
@@ -1862,11 +1845,10 @@ mod tests {
         assert!(!upstream_region_is_material(&b, inner[0]).unwrap());
     }
 
-    /// Without WR-535 each side of a partition adds its area, so an area counting every
-    /// face once would count the partition twice: the request is refused; with WR-535 the
-    /// partitions are no part of the area (800).
+    /// Upstream's boundary adds a partition's area from each side, so an area counting every
+    /// face once would count it twice; with WR-535 the partitions are no part of the area (800).
     #[test]
-    fn a_partition_s_area_needs_wr535() {
+    fn a_partition_is_no_part_of_the_area() {
         use crate::primitive::api_primitives::create_box;
         let mut k = Kernel::default();
         let a = create_box(&mut k, Point3::ZERO, 10.0, 10.0, 10.0).unwrap();
@@ -1878,11 +1860,6 @@ mod tests {
             .filter(|&f| partition_face(&merged, f).unwrap())
             .count();
         assert_eq!(partitions, 2);
-        assert!(matches!(
-            estimated(&k, &mut merged, &MassPropertyRequest::centroidal()),
-            Err(SolidError::Unsupported { .. })
-        ));
-        k.fixes.brep_area_between_solid_and_void = true;
         let r = estimated(&k, &mut merged, &MassPropertyRequest::centroidal()).unwrap();
         assert!(near(r.area, 800.0, 1e-9), "{r:?}");
         assert!(near(r.volume, 1500.0, 1e-9), "{r:?}");
