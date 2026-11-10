@@ -16,6 +16,7 @@ use egui::Color32;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::ui_kit::icons::Palette;
 use solidcraft_theme::{IconColors, Tokens};
 
 /// The `format` tag of a theme file.
@@ -382,18 +383,20 @@ pub(crate) fn parse_borders(values: &BTreeMap<String, Value>) -> Result<solidcra
 }
 
 /// Import only known, opaque SVG roles and bounded semantic ramps. GAP remains an eraser.
-pub(crate) fn parse_icon_palette(values: &BTreeMap<String, Value>) -> Result<Option<crate::icon_svg::Palette>, String> {
-    use crate::icon_svg::{ACCENT_NAMES, Palette, ROLE_NAMES};
+/// The roles and ramps are the installed icon set's (`ui_kit::icons`).
+pub(crate) fn parse_icon_palette(values: &BTreeMap<String, Value>) -> Result<Option<Palette>, String> {
+    let data = crate::ui_kit::icons::installed().data();
+    let (role_names, accent_names) = (data.role_names, data.accent_names);
     if values.is_empty() {
         return Ok(None);
     }
-    if values.len() > ROLE_NAMES.len() + ACCENT_NAMES.len() + 1 {
+    if values.len() > role_names.len() + accent_names.len() + 1 {
         return Err("too many icon palette entries".into());
     }
     let mut palette = Palette::default();
     for (name, value) in values {
-        let ramp = if name == "solid" { Some(0) } else { ACCENT_NAMES.iter().position(|a| *a == name).map(|a| a + 1) };
-        let role = ROLE_NAMES.iter().position(|r| *r == name && *r != "gap");
+        let ramp = if name == "solid" { Some(0) } else { accent_names.iter().position(|a| *a == name).map(|a| a + 1) };
+        let role = role_names.iter().position(|r| *r == name && *r != "gap");
         if ramp.is_none() && role.is_none() {
             return Err(format!("`icon_palette.{name}` is not an SVG role or semantic ramp"));
         }
@@ -413,16 +416,17 @@ pub(crate) fn parse_icon_palette(values: &BTreeMap<String, Value>) -> Result<Opt
     Ok(Some(palette))
 }
 
-fn export_icon_palette(palette: Option<crate::icon_svg::Palette>) -> BTreeMap<String, Value> {
+fn export_icon_palette(palette: Option<Palette>) -> BTreeMap<String, Value> {
     let mut out = BTreeMap::new();
     let Some(palette) = palette else { return out };
+    let data = crate::ui_kit::icons::installed().data();
     let hex = |[r, g, b]: [u8; 3]| format!("#{r:02x}{g:02x}{b:02x}");
-    for (name, color) in crate::icon_svg::ROLE_NAMES.iter().zip(palette.roles) {
+    for (name, color) in data.role_names.iter().zip(palette.roles) {
         if let Some(rgb) = color {
             out.insert((*name).into(), json!(hex(rgb)));
         }
     }
-    for (name, ramp) in std::iter::once("solid").chain(crate::icon_svg::ACCENT_NAMES.iter().copied()).zip(palette.accents) {
+    for (name, ramp) in std::iter::once("solid").chain(data.accent_names.iter().copied()).zip(palette.accents) {
         if let Some(colors) = ramp {
             out.insert(name.into(), json!(colors.map(hex)));
         }
@@ -1158,7 +1162,7 @@ fn merge(theme: &ThemeFile, saved: &BTreeMap<String, OptionValue>) -> Option<Mer
 /// The icon palette a theme sets for the icon renderer, after its matching overlays (as [`resolve_with`] resolves its
 /// tokens). `None`: the theme keeps the built-in artwork colours, as does an icon palette saved preferences hold that
 /// this version cannot read.
-pub fn resolve_icon_palette(theme: &ThemeFile, saved: &BTreeMap<String, OptionValue>) -> Option<crate::icon_svg::Palette> {
+pub fn resolve_icon_palette(theme: &ThemeFile, saved: &BTreeMap<String, OptionValue>) -> Option<Palette> {
     let merged = merge(theme, saved);
     parse_icon_palette(&merged.as_ref().map_or(theme, |m| &m.file).icon_palette).unwrap_or_default()
 }
@@ -1268,7 +1272,7 @@ fn file_view_from_theme(t: &mut Tokens, dark: bool, set: impl Fn(&str) -> bool) 
 }
 
 /// A complete theme file of a palette and its icon palette: every key, so it is a starting point for a new theme.
-pub fn export(name: &str, base: Base, t: &Tokens, icons: Option<crate::icon_svg::Palette>) -> Value {
+pub fn export(name: &str, base: Base, t: &Tokens, icons: Option<Palette>) -> Value {
     let mut t = *t;
     let mut colors = serde_json::Map::new();
     for k in keys() {
