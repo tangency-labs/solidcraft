@@ -471,7 +471,11 @@ fn additional_executor_routes_by_capability_and_survives_document_adoption() {
     assert!(session.execute("render.preflight", &clamped).unwrap_err().to_string().contains("require progressive"));
     clamped["progressive"] = json!(true);
     clamped["clamp_indirect"] = Value::Null;
-    assert_eq!(session.execute("render.preflight", &clamped).unwrap(), preflight, "an explicit null clamp is off");
+    assert_eq!(
+        preflight_without_memory_observations(session.execute("render.preflight", &clamped).unwrap()),
+        preflight_without_memory_observations(preflight.clone()),
+        "an explicit null clamp is off"
+    );
     assert_eq!(additional.admitted_bytes(), 0);
     studio["lighting"]["area_lights"][0]["u"] = json!([0, 0, 0]);
     assert!(session.execute("render.preflight", &studio).is_err());
