@@ -251,6 +251,7 @@ fn a_dome_1e_8_off_its_circle_joins_to_its_mirror() {
         .unwrap()
         .unwrap();
     one_valid_solid(&r, [2, 3, 3], 4.0 / 3.0 * PI * 1e3);
+}
 
 /// Cancel stops the full check of a long coil cut (solidcore#3247): a 20-turn square coil cut
 /// from a cylinder, the case of tangency-labs/solidcraft#3962, whose check takes seconds (most
