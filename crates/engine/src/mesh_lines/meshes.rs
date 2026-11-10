@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use solidcore_record::Vec3;
-use solidcraft_doc::{IDENTITY, Mat, ModelBody, mat_inverse, mat_mul};
+use solidcraft_doc::{IDENTITY, Mat, ModelBody, ModelState, mat_inverse, mat_mul};
 use solidcraft_geom::{Aabb3, Mesh};
 use solidcraft_kernel::{KernelError, map_with_local_pools};
 
@@ -61,11 +61,16 @@ struct Group {
     first: usize,
     inverse: Mat,
 }
-struct Item<'a> {
-    body: &'a ModelBody,
-    group: usize,
-    keep: bool,
-    transform: Mat,
+
+/// A shown body as a view places it ([`placed`]).
+pub(crate) struct Placed<'a> {
+    pub body: &'a ModelBody,
+    /// The placements that share one copy of the geometry: their group's first body's, at identity.
+    pub group: usize,
+    /// It is its group's first body, whose geometry the group shares.
+    pub first: bool,
+    /// Where it is from its group's first body: identity for the first, a rigid motion for the rest.
+    pub transform: Mat,
 }
 struct Prepared {
     mesh: Option<Arc<Mesh>>,
@@ -127,6 +132,79 @@ pub(crate) fn prepare(
     says: fn(Refused) -> String,
 ) -> Result<Scene> {
     let world = s.world_state()?;
+    let items = placed(s, &world, shown, cmd)?;
+    let progress = Stage::new("dxf_meshes", items.len());
+    let bytes = AtomicUsize::new(0);
+    // Each worker answers the kernel's error, or its body's mesh or why it was refused.
+    let results = map_with_local_pools(&items, WORKERS, |item| {
+        if let Err(refused) = progress.check() {
+            return Ok(Err(refused));
+        }
+        let mut mesh = item.body.body.mesh(&solidcraft_kernel::MeshTolerance { chord: tolerance, angle: Some(solidcraft_kernel::DISPLAY_ANGLE) })?;
+        if mesh.triangles.is_empty() {
+            return Err(KernelError::Invalid(format!("{} has no surface to mesh", item.body.name)));
+        }
+        let (visibility, tangent) = drawn_edges(&mesh, ask);
+        let joins = drawn_joins(&mesh, &visibility);
+        let triangles = mesh.triangles.len();
+        let mesh = if item.first {
+            // These are owned export buffers, not the document's cached mesh. Picking and
+            // shading data are unused by vector occlusion; edge choices were captured above.
+            // The faces stay (4 bytes a triangle, counted below): they name a silhouette's face,
+            // and tell a silhouette along a drawn edge from one across a face. So do the normals
+            // (a position's size again): they tell a surface seen edge on from a facet's lean.
+            mesh.seams = Vec::new();
+            mesh.smooth_edges = Vec::new();
+            mesh.sharp_edges = Vec::new();
+            mesh.edge_faces = Vec::new();
+            if !claim(&bytes, buffer_bytes(&mesh), MESH_BYTES) {
+                return Ok(Err(Refused::Memory));
+            }
+            Some(Arc::new(mesh))
+        } else {
+            None
+        };
+        if let Err(refused) = progress.advance(1) {
+            return Ok(Err(refused));
+        }
+        Ok(Ok(Prepared { mesh, visibility, tangent, joins, triangles }))
+    });
+    let answered = results.into_iter().collect::<solidcraft_kernel::Result<Vec<_>>>()?;
+    let mut prepared = answered.into_iter().collect::<std::result::Result<Vec<_>, Refused>>().map_err(|e| bad(cmd, says(e)))?;
+    let groups = items.iter().map(|item| item.group + 1).max().unwrap_or(0);
+    let mut meshes: Vec<Option<Arc<Mesh>>> = vec![None; groups];
+    for (item, p) in items.iter().zip(&mut prepared) {
+        if let Some(mesh) = p.mesh.take()
+            && let Some(slot) = meshes.get_mut(item.group)
+        {
+            *slot = Some(mesh);
+        }
+    }
+    let meshes = meshes.into_iter().map(|m| m.ok_or_else(|| bad(cmd, "missing export geometry"))).collect::<Result<Vec<_>>>()?;
+    let mut placements = Vec::with_capacity(items.len());
+    let mut triangles = 0usize;
+    for (item, p) in items.iter().zip(prepared) {
+        if meshes.get(item.group).is_none_or(|m| m.edges.len() != p.visibility.len()) {
+            return Err(bad(cmd, "placed edge identity changed"));
+        }
+        triangles = triangles.saturating_add(p.triangles);
+        placements.push(Placement {
+            mesh: item.group,
+            transform: item.transform,
+            visibility: p.visibility,
+            tangent: p.tangent,
+            joins: p.joins,
+            reference: false,
+        });
+    }
+    Ok(Scene { meshes, placements, triangles, bytes: bytes.load(Ordering::Relaxed), sources: ask.sources, reference_hides_model: true })
+}
+
+/// The bodies of `world` that `shown` keeps, in its order, each placed in a group that shares one
+/// copy of its geometry. A definition the model state holds once shares its first placement's
+/// geometry with its later ones whose motion from it is rigid; any other placement (a mirror, a
+/// scale, a definition held twice) is a group of its own, at identity. Errors name `cmd`.
+pub(crate) fn placed<'a>(s: &Session, world: &'a ModelState, shown: impl Fn(&ModelBody) -> bool, cmd: &str) -> Result<Vec<Placed<'a>>> {
     let state = s.model.state();
     let mut definitions = BTreeMap::new();
     for body in &state.bodies {
@@ -156,76 +234,22 @@ pub(crate) fn prepare(
             }
             (g, IDENTITY)
         };
-        let keep = groups.get(group).is_some_and(|g| g.first == index);
-        items.push(Item { body, group, keep, transform });
+        let first = groups.get(group).is_some_and(|g| g.first == index);
+        items.push(Placed { body, group, first, transform });
     }
-    let progress = Stage::new("dxf_meshes", items.len());
-    let bytes = AtomicUsize::new(0);
-    // Each worker answers the kernel's error, or its body's mesh or why it was refused.
-    let results = map_with_local_pools(&items, WORKERS, |item| {
-        if let Err(refused) = progress.check() {
-            return Ok(Err(refused));
-        }
-        let mut mesh = item.body.body.mesh(&solidcraft_kernel::MeshTolerance { chord: tolerance, angle: Some(solidcraft_kernel::DISPLAY_ANGLE) })?;
-        if mesh.triangles.is_empty() {
-            return Err(KernelError::Invalid(format!("{} has no surface to mesh", item.body.name)));
-        }
-        let drawn = |i: usize| if ask.tangent_edges { mesh.edge_pickable(i) } else { mesh.shaded_edge_visible(i) };
-        let visibility: Vec<bool> = (0..mesh.edges.len()).map(drawn).collect();
-        let tangent =
-            if ask.sources { (0..mesh.edges.len()).map(|i| mesh.edge_pickable(i) && !mesh.shaded_edge_visible(i)).collect() } else { Vec::new() };
-        let joins = drawn_joins(&mesh, &visibility);
-        let triangles = mesh.triangles.len();
-        let mesh = if item.keep {
-            // These are owned export buffers, not the document's cached mesh. Picking and
-            // shading data are unused by vector occlusion; edge choices were captured above.
-            // The faces stay (4 bytes a triangle, counted below): they name a silhouette's face,
-            // and tell a silhouette along a drawn edge from one across a face. So do the normals
-            // (a position's size again): they tell a surface seen edge on from a facet's lean.
-            mesh.seams = Vec::new();
-            mesh.smooth_edges = Vec::new();
-            mesh.sharp_edges = Vec::new();
-            mesh.edge_faces = Vec::new();
-            if !claim(&bytes, buffer_bytes(&mesh), MESH_BYTES) {
-                return Ok(Err(Refused::Memory));
-            }
-            Some(Arc::new(mesh))
-        } else {
-            None
-        };
-        if let Err(refused) = progress.advance(1) {
-            return Ok(Err(refused));
-        }
-        Ok(Ok(Prepared { mesh, visibility, tangent, joins, triangles }))
-    });
-    let answered = results.into_iter().collect::<solidcraft_kernel::Result<Vec<_>>>()?;
-    let mut prepared = answered.into_iter().collect::<std::result::Result<Vec<_>, Refused>>().map_err(|e| bad(cmd, says(e)))?;
-    let mut meshes: Vec<Option<Arc<Mesh>>> = vec![None; groups.len()];
-    for (item, p) in items.iter().zip(&mut prepared) {
-        if let Some(mesh) = p.mesh.take()
-            && let Some(slot) = meshes.get_mut(item.group)
-        {
-            *slot = Some(mesh);
-        }
-    }
-    let meshes = meshes.into_iter().map(|m| m.ok_or_else(|| bad(cmd, "missing export geometry"))).collect::<Result<Vec<_>>>()?;
-    let mut placements = Vec::with_capacity(items.len());
-    let mut triangles = 0usize;
-    for (item, p) in items.iter().zip(prepared) {
-        if meshes.get(item.group).is_none_or(|m| m.edges.len() != p.visibility.len()) {
-            return Err(bad(cmd, "placed edge identity changed"));
-        }
-        triangles = triangles.saturating_add(p.triangles);
-        placements.push(Placement {
-            mesh: item.group,
-            transform: item.transform,
-            visibility: p.visibility,
-            tangent: p.tangent,
-            joins: p.joins,
-            reference: false,
-        });
-    }
-    Ok(Scene { meshes, placements, triangles, bytes: bytes.load(Ordering::Relaxed), sources: ask.sources, reference_hides_model: true })
+    Ok(items)
+}
+
+/// Which of `mesh`'s edges a view draws, by index, and with `ask.sources` which of them are tangent
+/// edges (else none). Every edge a pick can name is drawn when `ask.tangent_edges` asks for them;
+/// otherwise only those the shaded view draws, so a smooth join is a tangent edge, and a fillet's
+/// boundary, tangent but a crease in curvature, is drawn as any other edge.
+pub(crate) fn drawn_edges(mesh: &Mesh, ask: Ask) -> (Vec<bool>, Vec<bool>) {
+    let drawn = |i: usize| if ask.tangent_edges { mesh.edge_pickable(i) } else { mesh.shaded_edge_visible(i) };
+    let visibility = (0..mesh.edges.len()).map(drawn).collect();
+    let tangent =
+        if ask.sources { (0..mesh.edges.len()).map(|i| mesh.edge_pickable(i) && !mesh.shaded_edge_visible(i)).collect() } else { Vec::new() };
+    (visibility, tangent)
 }
 
 /// The pairs of faces (smaller first, sorted) every edge between which is drawn: a mesh side
@@ -268,5 +292,37 @@ mod tests {
         assert!(!rigid(&m));
         m[0][0] = f64::NAN;
         assert!(!rigid(&m));
+    }
+
+    /// Two placements of one part share its first placement's geometry, the second at the move
+    /// from it; a body and its mirror image are two groups, each its own first, at identity; a
+    /// body left out isn't placed.
+    #[test]
+    fn placements_share_geometry_and_a_mirror_image_has_its_own() {
+        let mut s = Session::default();
+        let run = |s: &mut Session, id: &str, p: serde_json::Value| s.execute(id, &p).unwrap();
+        let first = run(&mut s, "component.create", serde_json::json!({"name": "Part"}))["occurrence"].as_u64().unwrap();
+        run(&mut s, "solid.box", serde_json::json!({"length": 10, "width": 10, "height": 5, "body_name": "Plate", "operation": "new"}));
+        run(&mut s, "occurrence.copy", serde_json::json!({"occurrence": first, "translate": [30, 0, 0]}));
+        run(&mut s, "component.activate", serde_json::json!({"component": 0}));
+        run(
+            &mut s,
+            "solid.box",
+            serde_json::json!({"length": 4, "width": 4, "height": 4, "corner": [0, 30, 0], "body_name": "Block", "operation": "new"}),
+        );
+        run(&mut s, "solid.mirror", serde_json::json!({"bodies": ["Block"], "plane": "XZ"}));
+        let world = s.world_state().unwrap();
+        let all = placed(&s, &world, |_| true, "test").unwrap();
+        let by_group =
+            |name: &str| all.iter().filter(|p| p.body.definition_name() == name).map(|p| (p.group, p.first, p.transform)).collect::<Vec<_>>();
+        let plates = by_group("Plate");
+        let [(g0, true, t0), (g1, false, t1)] = plates.as_slice() else { panic!("{plates:?}") };
+        assert_eq!((g0, *t0), (g1, IDENTITY));
+        assert_eq!([t1[3][0], t1[3][1], t1[3][2]], [30., 0., 0.]);
+        assert!(rigid(t1));
+        let others: Vec<_> = all.iter().filter(|p| p.body.definition_name() != "Plate").map(|p| (p.group, p.first, p.transform)).collect();
+        let [(a, true, ta), (b, true, tb)] = others.as_slice() else { panic!("{others:?}") };
+        assert!(a != b && a != g0 && b != g0 && *ta == IDENTITY && *tb == IDENTITY, "{others:?}");
+        assert_eq!(placed(&s, &world, |b| b.definition_name() != "Plate", "test").unwrap().len(), 2);
     }
 }
