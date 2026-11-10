@@ -79,18 +79,14 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.perspective_sphere_offsets = true;
     k.fixes.cylinder_rebuild_mean_radius = true;
     k.fixes.nurb_cylinder_inside_out_frame = true;
-    k.fixes.planar_path_uncapped_open_profiles = true;
     k.fixes.revolve_analytic_profile_faces = true;
     k.fixes.revolve_arc_centre_near_axis_is_sphere = true;
     k.fixes.revolve_arc_touching_axis_is_horn_torus = true;
-    k.fixes.taper_pivot_nearest_corner = true;
     k.fixes.taper_tangent_corner_planes = true;
-    k.fixes.taper_wall_closes_at_apex = true;
     k.fixes.revolve_nested_shells_as_cavities = true;
     k.fixes.revolve_holed_profile_void = true;
     k.fixes.revolve_splits_curves_on_axis = true;
     k.fixes.loops_go_on_round_the_vertex = true;
-    k.fixes.curve_sweep_caps_at_sweep_ends = true;
     k.fixes.linear_sweep_arc_is_cylinder = true;
     k.fixes.join_touching_loops = true;
     k.fixes.uv_trim_reversal_on_surface = true;
@@ -99,7 +95,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.offset_walls_touch_refused = true;
     k.fixes.local_operation_refuses_loose_tangent_edges = true;
     k.fixes.local_operation_step_walls = true;
-    k.fixes.offset_closes_loop_gaps = true;
     k.fixes.local_operation_closes_walls_to_nothing = true;
     k.fixes.offset_collapsed_rounds_mated = true;
     k.fixes.offset_missing_surface_fails = true;
@@ -121,7 +116,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.topology_failed_evaluations_propagate = true;
     k.fixes.heal_stage3_failures_propagate = true;
     k.fixes.sweep_frame_on_planar_path_normal = true;
-    k.fixes.linear_sweep_arc_to_cylinder_zero = true;
     k.fixes.cover_refuses_folded_continuation = true;
     k.fixes.cover_wraps_across_closed_seam = true;
     k.fixes.boolean2d_plane_covers_far_faces = true;
@@ -130,7 +124,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.proto_edge_splits_at_captured_vertices = true;
     k.fixes.boolean_cleanup_removes_slits = true;
     k.fixes.classify_edge_interval = true;
-    k.fixes.seam_point_solutions_are_one = true;
     k.fixes.ellipse_trim_seam_lines_span_cone_height = true;
     k.fixes.degenerate_proto_edge_in_one_vertex = true;
     k.fixes.new_edge_vertex_tolerance_covers_gap = true;
@@ -155,7 +148,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.analytic_copy_keeps_parameterization = true;
     k.fixes.fillet_tangent_point_one_sided_step = true;
     k.fixes.precise_properties_body_length_scale = true;
-    k.fixes.brep_area_between_solid_and_void = true;
     k.fixes.offset_extension_from_base = true;
     k.fixes.corner_blend_stays_inside_neighbours = true;
     k.fixes.fillet_cleanup_keeps_target_faces = true;
@@ -165,13 +157,11 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.fillet_rails_meet_at_one_end_point = true;
     k.fixes.fillet_nx1_tangent_corner_edge = true;
     k.fixes.fillet_3x2_mixed_concave_side_edge = true;
-    k.fixes.offset_closed_curve_trim_arc = true;
     k.fixes.offset_analytic_mate_edges = true;
     k.fixes.shell_edges_on_analytics_exact = true;
     k.fixes.offset_stitch_at_body_tolerance = true;
     k.fixes.curve_contacts_at_curve_ends = true;
     k.fixes.shell_empty_cavity_fails = true;
-    k.fixes.fillet_refuse_ball_not_fitting = true;
     k.fixes.fillet_trace_reaches_rails = true;
     k.fixes.fillet_rail_end_on_continued_surface = true;
     k.fixes.boolean_lists_virtual_surface_copies = true;
@@ -273,7 +263,6 @@ fn run_memo(nd_fix: bool, memo: Option<bool>) -> (usize, usize, usize, f64, Vec<
     );
     {
         let mut s = FilletSession::new(&mut k, &mut b).unwrap();
-        s.set_blend_curve_at_thirds(false);
         s.prepare_per_edge_constant_radius(
             &mut k,
             &[top, section],

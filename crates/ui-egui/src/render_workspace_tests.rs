@@ -307,7 +307,7 @@ fn environment_ring_fixture() -> Harness {
     enter(&mut h.app, true).unwrap();
     inspector::select_editor(&mut h.app, inspector::Editor::Environment);
     h.app.preferences.nav = crate::prefs::OPENSCAD_NAV.into();
-    h.app.cam.fit(&solidcraft_engine::product_scene::extract(&h.app.session).unwrap().bounds);
+    h.app.cam.fit(&solidcraft_engine::render::view_bounds(&solidcraft_engine::product_scene::extract(&h.app.session).unwrap().bounds));
     environment_ring_frame(&mut h, egui::Modifiers::NONE, vec![]);
     h
 }
@@ -1295,10 +1295,8 @@ mod async_path_host {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn opaque_pbr_product_gpu_and_cpu_share_color_and_material_semantics() {
-    use solidcraft_engine::render::{
-        StandardView,
-        job::{CancelToken, ImageRequest, ImageTask, TaskPoll},
-    };
+    use solidcraft_engine::render::job::{CancelToken, ImageRequest, ImageTask, TaskPoll};
+    use solidcraft_viewport::StandardView;
     let mut s = Session::default();
     s.execute("solid.sphere", &json!({"radius":10,"body_name":"Original sphere"})).unwrap();
     const SIZE: u32 = 256;
@@ -1317,7 +1315,7 @@ fn opaque_pbr_product_gpu_and_cpu_share_color_and_material_semantics() {
         previous = Some(key);
         let mut camera = Camera { fov: 0.0, ..Default::default() };
         camera.set_view(StandardView::Iso);
-        camera.fit(&scene.bounds);
+        camera.fit(&solidcraft_engine::render::view_bounds(&scene.bounds));
         let radius = scene.bounds.diagonal().max(10.0) + scene.bounds.center().dist(camera.target);
         let eye = camera.eye().to_f32();
         let mut task = ImageTask::new(
@@ -1391,7 +1389,7 @@ fn opaque_pbr_product_gpu_and_cpu_share_color_and_material_semantics() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn product_preview_lights_decode_simple_colours_as_the_cpu_image_does() {
-    use solidcraft_engine::render::StandardView;
+    use solidcraft_viewport::StandardView;
     // The CPU image's transfer (`job::image` decode/encode, `studio::tone_map`).
     let decode = |s: f64| if s <= 0.04045 { s / 12.92 } else { ((s + 0.055) / 1.055).powf(2.4) };
     let encode = |l: f64| if l <= 0.0031308 { l * 12.92 } else { 1.055 * l.powf(1.0 / 2.4) - 0.055 };
@@ -1409,7 +1407,7 @@ fn product_preview_lights_decode_simple_colours_as_the_cpu_image_does() {
         let (_, gpu) = gpu_scene(&scene).unwrap();
         let mut camera = Camera { fov: 0.0, ..Default::default() };
         camera.set_view(StandardView::Iso);
-        camera.fit(&scene.bounds);
+        camera.fit(&solidcraft_engine::render::view_bounds(&scene.bounds));
         let radius = scene.bounds.diagonal().max(10.0) + scene.bounds.center().dist(camera.target);
         let eye = camera.eye().to_f32();
         let expected: Vec<u8> = (0..3)
@@ -1559,7 +1557,7 @@ fn saved_camera_survives_frames_and_product_fit_ignores_selection() {
     let mut h = Harness::new();
     h.app.run("solid.box", json!({"length":10,"width":20,"height":5,"body_name":"Product"})).unwrap();
     h.app.run("solid.box", json!({"corner":[100,0,0],"length":10,"width":20,"height":5,"body_name":"Other"})).unwrap();
-    let camera = Camera { up: solidcraft_engine::render::UpAxis::Y, roll: 0.2, ..Default::default() };
+    let camera = Camera { up: solidcraft_viewport::UpAxis::Y, roll: 0.2, ..Default::default() };
     h.app.run("render.settings.set", json!({"name":"Studio","set":{"camera":camera,"background":[21,43,65]}})).unwrap();
     h.frames(3);
     let design = h.app.cam;
@@ -1741,13 +1739,13 @@ fn progressive_image_controls_route_to_the_registered_host() {
     use solidcraft_engine::render::job::Phase;
     use std::time::{Duration, Instant};
 
-    let host = solidcraft_gpu::select::Policy::from_env()
-        .and_then(|policy| solidcraft_gpu::select::pick(policy).ok_or_else(|| "no qualifying adapter".to_string()))
+    let host = solidcraft_gpu::env::policy()
+        .and_then(|policy| solidcraft_viewport_gpu::select::pick(policy).ok_or_else(|| "no qualifying adapter".to_string()))
         .and_then(|(adapter, _)| solidcraft_gpu::path::host_on_adapter(&adapter).map_err(|e| e.to_string()));
     let host = match host {
         Ok(host) => host,
         Err(e) => {
-            let expected = !solidcraft_gpu::select::path_backends().is_empty();
+            let expected = !solidcraft_viewport_gpu::select::path_backends().is_empty();
             assert!(!expected || std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "required GPU unavailable: {e}");
             eprintln!("skipping progressive UI device test: {e}");
             return;
@@ -3048,8 +3046,8 @@ fn nav_app(render: bool, preset: &str, around: crate::prefs::OrbitAround) -> cra
     app.preferences.zoom_to_cursor = true;
     app.ui.perspective = true;
     let mut cam = Camera { fov: 0.6, ..Default::default() };
-    cam.set_view(solidcraft_engine::render::StandardView::Iso);
-    cam.fit(&solidcraft_engine::product_scene::extract(&app.session).unwrap().bounds);
+    cam.set_view(solidcraft_viewport::StandardView::Iso);
+    cam.fit(&solidcraft_engine::render::view_bounds(&solidcraft_engine::product_scene::extract(&app.session).unwrap().bounds));
     app.cam = cam;
     app
 }
@@ -3143,7 +3141,7 @@ fn render_workspace_view_keys_double_middle_click_and_navigators_work() {
         inspector::select_editor(&mut h.app, inspector::Editor::Output);
         h.frames(3);
         let mut home = h.app.cam;
-        home.set_view(solidcraft_engine::render::StandardView::Iso);
+        home.set_view(solidcraft_viewport::StandardView::Iso);
         let off = |h: &mut Harness| {
             h.app.cam.yaw += 0.7;
             h.app.cam.pitch = 0.1;
@@ -4588,7 +4586,8 @@ fn product_preview_exact_payload_preserves_mixed_surfaces_and_refuses_overflow()
 fn full_detail_preview_source_can_exceed_legacy_128_mib_without_mesh_reduction() {
     use solidcore_record::Vec3;
     use solidcraft_engine::geom::Mesh;
-    use solidcraft_engine::render::{ProductMesh, surface::OpaqueSurface};
+    use solidcraft_engine::render::ProductMesh;
+    use solidcraft_viewport::surface::OpaqueSurface;
     // One immutable original triangle repeated in the index list; this tests
     // payload admission only. Actual SELENE upload is separate native evidence.
     let count = (128 * 1024 * 1024) / (3 * crate::gpu::PBR_SIZE) + 1;
@@ -5931,7 +5930,7 @@ fn navigation_bar_render_canvases_filter_slots_and_keep_product_fit() {
     enter(&mut h.app, true).unwrap();
     h.app.preferences.look_at_anim = false;
     h.settle();
-    assert_eq!(crate::navigation_bar::canvas_caps(&h.app), crate::navigation::NavCaps::RENDER);
+    assert_eq!(crate::navigation_bar_view::canvas_caps(&h.app), crate::navigation::NavCaps::RENDER);
     // The product preview picks (#6426), so the slots that need a pick are on the bar there too.
     for slot in ["orbit", "pan", "zoom", "fit", "look_at", "home", "visual_style", "display"] {
         assert!(crate::scenario::handle_at(&format!("nav:slot:{slot}")).is_some(), "{slot}");
@@ -5942,7 +5941,7 @@ fn navigation_bar_render_canvases_filter_slots_and_keep_product_fit() {
     assert_ne!(h.app.cam.target, panned.target, "Fit recentres the product");
     assert_product_fits_canvas(&h.app);
     let mut iso = h.app.cam;
-    iso.set_view(solidcraft_engine::render::StandardView::Iso);
+    iso.set_view(solidcraft_viewport::StandardView::Iso);
     h.app.cam.orbit(0.4, 0.2);
     h.step(&json!({"click":{"handle":"nav:slot:home"}})).unwrap();
     assert_eq!((h.app.cam.yaw, h.app.cam.pitch), (iso.yaw, iso.pitch), "Home returns to the isometric view");
@@ -5952,7 +5951,7 @@ fn navigation_bar_render_canvases_filter_slots_and_keep_product_fit() {
     h.app.render_workspace.view.job = Some(job);
     h.app.render_workspace.view.result = true;
     h.settle();
-    assert_eq!(crate::navigation_bar::canvas_caps(&h.app), crate::navigation::NavCaps { orbit: false, pick: false });
+    assert_eq!(crate::navigation_bar_view::canvas_caps(&h.app), crate::navigation::NavCaps { orbit: false, pick: false });
     for slot in ["orbit", "look_at", "visual_style"] {
         assert!(crate::scenario::handle_at(&format!("nav:slot:{slot}")).is_none(), "{slot}");
     }
@@ -6646,7 +6645,7 @@ fn render_workspace_shots_thumbnail_keys_include_name_scene_revision_and_complet
         Camera { yaw: camera.yaw + 0.1, ..camera },
         Camera { roll: camera.roll + 0.1, ..camera },
         Camera { fov: 0.7, ..camera },
-        Camera { up: solidcraft_engine::render::UpAxis::Y, ..camera },
+        Camera { up: solidcraft_viewport::UpAxis::Y, ..camera },
     ] {
         assert_ne!(key, thumbnails::Key::new("Hero".into(), 1, 2, changed));
     }
@@ -8144,7 +8143,7 @@ fn geometry_refusal_reports_scene_size_limit_and_recovery() {
             mesh: Arc::new(Mesh { triangles: vec![[0; 3]; 1 << 20], ..Default::default() }),
             color: [128; 3],
             opacity: 1.0,
-            surface: Some(solidcraft_engine::render::surface::OpaqueSurface::new(solidcore_record::Vec3::new(0.5, 0.5, 0.5), 0.0, 0.5, 1.5).unwrap()),
+            surface: Some(solidcraft_viewport::surface::OpaqueSurface::new(solidcore_record::Vec3::new(0.5, 0.5, 0.5), 0.0, 0.5, 1.5).unwrap()),
             transmission: None,
             faces: Vec::new(),
         }],
@@ -8220,13 +8219,13 @@ fn fit_aspect_keeps_the_product_inside_a_tall_image() {
     let radius = bounds.diagonal();
     for fov in [0.0, std::f64::consts::FRAC_PI_4] {
         let mut landscape = Camera { fov, ..Default::default() };
-        assert!(landscape.fit_aspect(&bounds, 2.0));
+        assert!(landscape.fit_aspect(&solidcraft_engine::render::view_bounds(&bounds), 2.0));
         let mut plain = Camera { fov, ..Default::default() };
-        plain.fit(&bounds);
+        plain.fit(&solidcraft_engine::render::view_bounds(&bounds));
         assert_eq!(landscape, plain, "a wide picture keeps the standard fit");
         for aspect in [0.5, 0.25] {
             let mut cam = Camera { fov, ..Default::default() };
-            assert!(cam.fit_aspect(&bounds, aspect));
+            assert!(cam.fit_aspect(&solidcraft_engine::render::view_bounds(&bounds), aspect));
             for p in corners(&bounds) {
                 let q = cam.view_proj(aspect, radius).apply(p);
                 let (x, y) = (q[0] / q[3], q[1] / q[3]);
@@ -8235,7 +8234,7 @@ fn fit_aspect_keeps_the_product_inside_a_tall_image() {
         }
         // Nothing to fit leaves the camera alone.
         let mut cam = Camera { fov, distance: 123.0, ..Default::default() };
-        assert!(!cam.fit_aspect(&Aabb3::EMPTY, 0.5));
+        assert!(!cam.fit_aspect(&solidcraft_engine::render::view_bounds(&Aabb3::EMPTY), 0.5));
         assert_eq!(cam.distance, 123.0);
     }
 }
@@ -8772,8 +8771,8 @@ fn current_live_pixels_use_only_the_depth_correct_feedback_callback_and_stale_pi
             if let egui::Shape::Callback(callback) = &shape.shape
                 && let Some(callback) = callback.callback.downcast_ref::<egui_wgpu::Callback>()
             {
-                feedback += usize::from(callback.downcast_ref::<crate::gpu::ProductHighlightCallback>().is_some());
-                model += usize::from(callback.downcast_ref::<crate::gpu::ViewportCallback>().is_some());
+                feedback += usize::from(callback.downcast_ref::<solidcraft_viewport_egui::ProductHighlightCallback>().is_some());
+                model += usize::from(callback.downcast_ref::<solidcraft_viewport_egui::ViewportCallback>().is_some());
             }
         }
         (feedback, model)
@@ -8793,7 +8792,7 @@ fn current_live_pixels_use_only_the_depth_correct_feedback_callback_and_stale_pi
                 callback
                     .callback
                     .downcast_ref::<egui_wgpu::Callback>()
-                    .and_then(|callback| callback.downcast_ref::<crate::gpu::ProductHighlightCallback>())
+                    .and_then(|callback| callback.downcast_ref::<solidcraft_viewport_egui::ProductHighlightCallback>())
             } else {
                 None
             }
@@ -8908,7 +8907,7 @@ fn live_image_imported_mesh_keeps_selected_and_hovered_face_and_body_feedback() 
     h.app.ui.show_grid = false;
     h.app.ui.ground_shadow = false;
     h.app.set_origin_shown(false);
-    h.app.cam.set_view(solidcraft_engine::render::StandardView::Top);
+    h.app.cam.set_view(solidcraft_viewport::StandardView::Top);
     h.app.fit_view();
     // The real workflow draws Design before entering Render. Keep its shared
     // reference triangles so whole-body feedback uses the actual instance path.
@@ -9919,7 +9918,7 @@ fn clicked_cpu_alpha_saves_reopens_and_exports_exact_straight_png_with_unchanged
         std::fs::write(&path, "o Half\nv -4 -4 0\nv 0 -4 0\nv 0 4 0\nv -4 4 0\nf 1 2 3\nf 1 3 4\n").unwrap();
         h.app.run("file.insert_mesh", json!({"path":path})).unwrap();
         let mut camera = Camera { distance: 10.0, ..Default::default() };
-        camera.set_view(solidcraft_engine::render::StandardView::Top);
+        camera.set_view(solidcraft_viewport::StandardView::Top);
         h.app
             .run(
                 "render.settings.set",
@@ -10298,7 +10297,7 @@ fn saved_zero_thickness_glass_hydration_never_creates_a_prospective_edit_on_pain
         h.app.run("file.insert_mesh", json!({"path":path})).unwrap();
         let body = h.app.run("render.scene", json!({})).unwrap()["bodies"][0]["name"].as_str().unwrap().to_owned();
         let mut camera = Camera { distance: 10.0, ..Default::default() };
-        camera.set_view(solidcraft_engine::render::StandardView::Top);
+        camera.set_view(solidcraft_viewport::StandardView::Top);
         h.app.run("render.settings.set", json!({"name":"Studio","set":{"camera":camera,"width":8,"height":8,"job":{"method":method}}})).unwrap();
         h.app
             .run(
@@ -11924,7 +11923,7 @@ fn cpu_subsurface_real_glass_pointer_enable_render_save_undo_and_cold_hydration_
 
 fn celestial_editor_fixture(gpu: bool) -> Harness {
     let mut h = Harness::new();
-    let camera = solidcraft_engine::render::Camera { distance: 30.0, fov: 0.7, ..Default::default() };
+    let camera = solidcraft_viewport::Camera { distance: 30.0, fov: 0.7, ..Default::default() };
     let sun = json!({"direction":[0.2,-0.3,0.9],"angular_radius_rad":0.02,"radiance":[301.25,202.5,103.75]});
     let sky = json!({"kind":"sky","gradient":{"zenith":[0.25,0.5,1.0],"horizon":[0.75,0.5,0.25],"ground":[0.125,0.25,0.5]},"rotation_rad":0.731,"intensity":1.75});
     let job = if gpu {
@@ -14368,7 +14367,7 @@ fn stable_glass_draft_fixture(method: ImageMethod, with_maps: bool) -> Harness {
     for (index, name) in ["Glass A", "Glass B", "Map", "Coat"].into_iter().enumerate() {
         h.app.run("solid.box", json!({"body_name":name,"length":5,"width":5,"height":5,"corner":[index * 15,0,0],"operation":"new"})).unwrap();
     }
-    let camera = solidcraft_engine::render::Camera { fov: 0.6, distance: 80.0, ..Default::default() };
+    let camera = solidcraft_viewport::Camera { fov: 0.6, distance: 80.0, ..Default::default() };
     let lens = json!({"aperture_radius_mm":0.02,"focus_distance_mm":80.0});
     let job = if method == ImageMethod::CpuRaytrace {
         json!({"method":"cpu_raytrace","options":{"path":{"max_depth":4},

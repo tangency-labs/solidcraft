@@ -1880,7 +1880,7 @@ pub struct CollapsedOffset {
     pub partial: bool,
 }
 
-/// Not the fork's (#2401; with `fixes.fillet_gn_section_generator`): for a constant ball of
+/// Not the fork's (#2401): for a constant ball of
 /// `radius` (`None`: the solver's own) whose offset of one of its faces collapses (the face
 /// a cylinder or sphere as wide as the ball, the ball inside it: its offset is the axis or
 /// the centre, [`QuadricKind::Line`] or [`QuadricKind::Point`]), the radius of that face
@@ -2521,9 +2521,47 @@ fn keep_definition(
     let Some(surface) = pseudo.geom_mut(g)?.fillet_surface_mut(None)? else {
         return Err(SolidError::null_pointer(OP));
     };
-    round.recertify(k, surface)?;
-    surface.set_exact_round(Some(round));
+    keep_round_if_proved(k, surface, round, inputs.tol)?;
     Ok(())
+}
+
+/// `round` kept on `net` where it is proved ([`ExactRound::recertify`]), returning whether it
+/// was. The class is read within `tol`, the body's tolerance, and the certificate to rounding.
+/// A net the certificate cannot prove on its class's surface (`check_exact_net`'s refusal),
+/// but that lies within `tol` of it ([`ExactRound::miss`]), is the round all the same: it
+/// keeps no definition and is built. A canal round whose computed spine is not exactly on
+/// both supports' offsets (a plane and a cylinder a few degrees off square,
+/// tangency-labs/solidcraft#14000) is one.
+/// A net further off the class than `tol` is built wrongly, and stays an error, as does the
+/// circle class's own refusal (its net certified on its own torus, #3066).
+///
+/// # Errors
+///
+/// The certificate's refusal of a net more than `tol` off the class, or of supports that
+/// give the class no surface; those of the certificate and of [`ExactRound::miss`].
+pub fn keep_round_if_proved(
+    k: &Kernel,
+    net: &mut Surface,
+    round: ExactRound,
+    tol: f64,
+) -> Result<bool> {
+    match round.recertify(k, net) {
+        Ok(_) => {
+            net.set_exact_round(Some(round));
+            Ok(true)
+        }
+        Err(e) => {
+            let off = matches!(
+                &e,
+                SolidError::InvalidInput { operation, .. }
+                    if *operation == crate::surface::implicit::OP_EXACT
+            );
+            match off.then(|| round.miss(k, net)).transpose()?.flatten() {
+                Some(miss) if miss <= tol => Ok(false),
+                _ => Err(e),
+            }
+        }
+    }
 }
 
 /// [`calc_exact_fillet_geom`]'s build by the class (`CalcExactFilletGeom`), without the

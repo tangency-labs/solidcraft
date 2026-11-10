@@ -1707,6 +1707,35 @@ fn copies_of_a_hole_that_come_close_are_cut_one_by_one() {
     assert!((v - (disc - 16.0 * hole)).abs() < 1e-3 * hole, "{v}");
 }
 
+#[test]
+fn many_copies_cut_in_groups_leave_what_one_cut_leaves() {
+    // 48 holes on a 40 mm circle, 5.2 mm apart: the 47 copies are more than one joined tool
+    // takes, so they are cut as two (#8765). The disc comes out as cutting all of them in one go
+    // leaves it: the same volume, the same faces, named the same.
+    let disc = |limit: usize| {
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(limit));
+        let mut doc = Document::new("perforated");
+        disc_with_hole_pattern(&mut doc, 40.0, 48);
+        let mut model = Model::new();
+        let work = counted(|| model.evaluate(&doc));
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(super::MAX_JOINED_TOOLS));
+        assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+        let st = model.state();
+        assert_eq!(st.bodies.len(), 1);
+        let mut names = crate::naming::face_names(&st.bodies[0]).to_vec();
+        names.sort();
+        (disc_volume(&model), st.bodies[0].body.face_count(), names, work.cut_tools)
+    };
+    let (volume, faces, names, tools) = disc(super::MAX_JOINED_TOOLS);
+    let (one_volume, one_faces, one_names, one_tools) = disc(usize::MAX);
+    assert_eq!((tools, one_tools), (2, 1));
+    let hole = std::f64::consts::PI * 1.75 * 1.75 * 1.5;
+    assert!((volume - one_volume).abs() < 1e-6 * hole, "{volume} vs {one_volume}");
+    assert!((one_volume - (std::f64::consts::PI * 2500.0 * 1.5 - 48.0 * hole)).abs() < 1e-3 * hole, "{one_volume}");
+    assert_eq!(faces, one_faces);
+    assert_eq!(names, one_names);
+}
+
 /// A ring (25 mm outside, 16 mm bore, 55 mm high) with a blind groove, 8 mm wide and 30 mm deep,
 /// cut into its bore from below, in a circular pattern of ten about Z: their boxes, grown as the
 /// kernel grows them, meet, their exact shapes are 1.9 mm apart. The ring's faces counted as its

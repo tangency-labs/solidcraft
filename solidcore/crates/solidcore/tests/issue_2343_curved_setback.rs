@@ -25,7 +25,7 @@
     clippy::indexing_slicing
 )] // test helpers
 use solidcore::blend::blend_corner::BlendCornerEvent;
-use solidcore::blend::blend_refusal::BlendRefusal;
+use solidcore::blend::blend_refusal::{BlendRefusal, SetbackTooLongWhy};
 use solidcore::blend::blend_setback::SpringCurve;
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
@@ -1439,8 +1439,13 @@ fn d_prism_asked_past_the_rails_names_the_setback_that_fits() {
         assert_eq!(r.event, Some(BlendCornerEvent::Setback), "{}", r.reason);
         assert!(!r.ok, "{}: built", case.name);
         let named = match r.refusal {
-            Some(BlendRefusal::SetbackTooLong { vertex, largest }) => {
+            Some(BlendRefusal::SetbackTooLong {
+                vertex,
+                largest,
+                why,
+            }) => {
                 assert_eq!(vertex, v, "{}", case.name);
+                assert_eq!(why, SetbackTooLongWhy::PastRails, "{}", case.name);
                 assert!(
                     (largest - want).abs() <= 1e-9,
                     "{}: {largest} against {want}",
@@ -1527,8 +1532,13 @@ fn bored_d_prism_spring_curve_leaving_the_top_names_the_setback_that_keeps_it() 
     assert_eq!(r.event, Some(BlendCornerEvent::Setback), "{}", r.reason);
     assert!(!r.ok, "asked {asked}: built");
     let named = match r.refusal {
-        Some(BlendRefusal::SetbackTooLong { vertex, largest }) => {
+        Some(BlendRefusal::SetbackTooLong {
+            vertex,
+            largest,
+            why,
+        }) => {
             assert_eq!(vertex, v);
+            assert_eq!(why, SetbackTooLongWhy::SpringLeaves);
             largest
         }
         other => panic!("{other:?}, {}", r.reason),

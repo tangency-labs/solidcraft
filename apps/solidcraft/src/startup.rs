@@ -260,7 +260,7 @@ pub const FLOAT_DEPTH_STENCIL: eframe::wgpu::Features = eframe::wgpu::Features::
 /// asks for a float one only when whichever it picks has it.
 pub fn float_depth_everywhere(options: &eframe::egui_wgpu::WgpuConfiguration) -> bool {
     let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &options.wgpu_setup else { return false };
-    let mut desc = solidcraft_gpu::instance_descriptor_from_env();
+    let mut desc = solidcraft_viewport_gpu::instance_descriptor_from_env();
     desc.backends = setup.instance_descriptor.backends;
     let instance = eframe::wgpu::Instance::new(desc);
     let adapters = pollster::block_on(instance.enumerate_adapters(setup.instance_descriptor.backends));
@@ -277,7 +277,7 @@ pub fn has_hardware_adapter(backends: eframe::wgpu::Backends) -> bool {
     let mut desc = eframe::wgpu::InstanceDescriptor::new_without_display_handle();
     desc.backends = backends;
     desc.flags = eframe::wgpu::InstanceFlags::from_build_config().with_env();
-    desc.backend_options.dx12.shader_compiler = solidcraft_gpu::dx12_compiler();
+    desc.backend_options.dx12.shader_compiler = solidcraft_viewport_gpu::dx12_compiler();
     let instance = eframe::wgpu::Instance::new(desc);
     let adapters = pollster::block_on(instance.enumerate_adapters(backends));
     let found: Vec<String> = adapters.iter().map(|a| format!("{} ({:?})", a.get_info().name, a.get_info().device_type)).collect();
@@ -698,7 +698,7 @@ mod tests {
         if cfg!(target_os = "windows") && std::env::var_os(WGPU_BACKEND_ENV).is_none() {
             assert_eq!(backends, eframe::wgpu::Backends::DX12);
         }
-        let mut desc = solidcraft_gpu::instance_descriptor_from_env();
+        let mut desc = solidcraft_viewport_gpu::instance_descriptor_from_env();
         desc.backends = backends;
         let instance = eframe::wgpu::Instance::new(desc);
         let adapters = pollster::block_on(instance.enumerate_adapters(backends));

@@ -154,8 +154,10 @@ pub struct DropCurveOut {
 
 /// The status upstream stores for a failed `GetNextPoint` (see the module notes).
 fn status_of(e: &SolidError) -> i32 {
+    if let Some(code) = e.upstream_status() {
+        return code;
+    }
     match e {
-        SolidError::Upstream { code, .. } => *code,
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => SM_ERR_INVALID_INPUT,
         SolidError::NotConverged { .. } => SM_ERR_NOT_CONVERGING,
         _ => SM_ERR,

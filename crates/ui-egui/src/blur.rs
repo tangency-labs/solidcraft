@@ -234,7 +234,7 @@ mod implementation {
     pub fn decorate(_: &Painter, _: Frame, _: Rect, shape: Shape) -> Shape {
         shape
     }
-    pub fn viewport(painter: &Painter, rect: Rect, cb: crate::gpu::ViewportCallback, _: Rect, _: [Color32; 2]) {
+    pub fn viewport(painter: &Painter, rect: Rect, cb: solidcraft_viewport_egui::ViewportCallback, _: Rect, _: [Color32; 2]) {
         painter.add(egui_wgpu::Callback::new_paint_callback(rect, cb));
     }
 }

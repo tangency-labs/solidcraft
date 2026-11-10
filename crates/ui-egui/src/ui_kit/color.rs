@@ -457,9 +457,9 @@ fn spin_buttons(ui: &mut Ui, key: &str, height: f32) -> i32 {
         let side = half.height().min(half.width());
         let icon = egui::Rect::from_center_size(half.center(), vec2(side, side));
         if direction > 0 {
-            crate::icons::paint_ink_flipped(ui.painter(), icon, "chevron", ink);
+            crate::ui_kit::icons::paint_ink_flipped(ui.painter(), icon, "chevron", ink);
         } else {
-            crate::icons::paint_ink(ui.painter(), icon, "chevron", ink);
+            crate::ui_kit::icons::paint_ink(ui.painter(), icon, "chevron", ink);
         }
         let repeat = id.with("repeat");
         if held {

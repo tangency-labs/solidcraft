@@ -55,6 +55,9 @@ pub struct ModelBody {
     /// The display plan (none when the body has no plan: a mesh body, or one the planner
     /// refuses), shared like the mesh. A GPU viewport draws it.
     plan: Arc<[OnceLock<Option<Arc<TessPlan>>>; 4]>,
+    /// Each display plan in the form the GPU evaluates ([`crate::gpu_plan`]), made once from it
+    /// and shared like it, so the viewport sees the same allocation every frame.
+    gpu_plan: Arc<[OnceLock<Option<Arc<solidcore_tess::TessPlan>>>; 4]>,
     /// The plan evaluated on the CPU (none without a plan), shared like the mesh: the triangles a
     /// GPU viewport draws, so a highlight over a face lies exactly on it.
     plan_mesh: Arc<[OnceLock<Option<Arc<Mesh>>>; 4]>,
@@ -104,6 +107,7 @@ impl ModelBody {
             mirrored_mesh: None,
             opposite_hand: Arc::new(OnceLock::new()),
             plan: Arc::new(Default::default()),
+            gpu_plan: Arc::new(Default::default()),
             plan_mesh: Arc::new(Default::default()),
             key: 0,
             names: Default::default(),
@@ -226,6 +230,13 @@ impl ModelBody {
             Some(placed) => cell.get_or_init(|| placed.plan(q, &self.name)).clone(),
             None => placed_mesh::definition_plan(&self.body, cell, q, &self.name),
         }
+    }
+
+    /// The display plan at a given display quality in the form the GPU evaluates
+    /// ([`crate::gpu_plan`]): made once per level from [`ModelBody::display_plan_at`], the same
+    /// allocation on every call.
+    pub fn gpu_plan_at(&self, q: crate::display_quality::DisplayQuality) -> Option<Arc<solidcore_tess::TessPlan>> {
+        self.gpu_plan.get(q.index())?.get_or_init(|| self.display_plan_at(q).map(|plan| Arc::new(crate::gpu_plan::gpu_plan(&plan)))).clone()
     }
 
     /// The display plan's mesh, evaluated on the CPU once per level: the same triangles a GPU
@@ -354,13 +365,14 @@ impl ModelBody {
         self.plan_mesh_at(q)
     }
 
-    /// The display plan and its mesh `k` steps finer than `q` (view-dependent refinement, #1320;
+    /// The display plan in the form the GPU evaluates ([`ModelBody::gpu_plan_at`]) and its mesh
+    /// `k` steps finer than `q` (view-dependent refinement, #1320;
     /// see [`crate::display_quality::refinement_for`]). Step 0 is the cached plan at `q`; finer
     /// steps are made on each call and kept by the viewport, which evicts them when it runs over
     /// its budget. `None` when the body has no plan at that step.
-    pub fn refined_display(&self, q: crate::display_quality::DisplayQuality, k: u8) -> Option<(Arc<TessPlan>, Arc<Mesh>)> {
+    pub fn refined_display(&self, q: crate::display_quality::DisplayQuality, k: u8) -> Option<(Arc<solidcore_tess::TessPlan>, Arc<Mesh>)> {
         if k == 0 {
-            return Some((self.display_plan_at(q)?, self.plan_mesh_at(q)?));
+            return Some((self.gpu_plan_at(q)?, self.plan_mesh_at(q)?));
         }
         let plan = match self
             .body
@@ -373,7 +385,7 @@ impl ModelBody {
             }
         };
         let mesh = self.body.mesh_of(&plan).ok()?;
-        Some((Arc::new(plan), Arc::new(mesh)))
+        Some((Arc::new(crate::gpu_plan::gpu_plan(&plan)), Arc::new(mesh)))
     }
 
     /// The chord tolerance of [`ModelBody::mesh`] (mm): 1/1000 of the definition's size, at least
@@ -1749,6 +1761,14 @@ impl PlacementReads {
                 self.link(doc, st, b);
             }
             // In the sketch's own frame: the component's origin, axes and planes, its own axes, text.
+            // A construction point is kept in its own component's frame: the sketch reads where
+            // that component is placed (#12075).
+            L::ConstructionPoint { name } => match doc.find_feature(name) {
+                Some(point) => {
+                    self.components.insert(point.component);
+                }
+                None => self.all = true,
+            },
             L::Origin | L::Axis { .. } | L::SketchAxis { .. } | L::Plane { .. } | L::Text { .. } => {}
         }
     }
@@ -3274,10 +3294,53 @@ fn apply_op(doc: &Document, state: &mut ModelState, f: &Feature, tools: Vec<Body
     apply_traced(doc, state, f, tools.into_iter().map(Traced::unnamed).collect(), op, targets)
 }
 
+/// The most cut tools [`clear_tools_as_one`] joins into one tool. The kernel's boolean takes
+/// far longer for a tool of many pieces than for several of fewer: one cut of 20 apart pieces
+/// into a ring took 0.34 s, of 40 1.75 s, of 60 6.4 s, of about 105 (a pattern of a pattern,
+/// #8765) 23 s. So more tools are joined in groups of at most this many, each cut in turn. This
+/// works around the boolean's cost; it does not change what is cut.
+const MAX_JOINED_TOOLS: usize = 32;
+
+#[cfg(test)]
+thread_local! {
+    /// [`MAX_JOINED_TOOLS`] for this thread's tests: a test cuts the same tools in one go.
+    static JOINED_TOOLS_LIMIT: std::cell::Cell<usize> = const { std::cell::Cell::new(MAX_JOINED_TOOLS) };
+}
+
+#[cfg(test)]
+fn joined_tools_limit() -> usize {
+    JOINED_TOOLS_LIMIT.with(std::cell::Cell::get)
+}
+
+#[cfg(not(test))]
+fn joined_tools_limit() -> usize {
+    MAX_JOINED_TOOLS
+}
+
 /// Many cut tools clear of each other (a pattern's copies, the circles of a vent field in one
 /// sketch) as one tool of many pieces, so the target is cut once instead of rebuilding an ever
 /// more complex body for every tool (#261, #368). Tools that may meet are left as they are.
+/// More than [`MAX_JOINED_TOOLS`] tools are joined in even groups, one tool for each (#8765).
 fn clear_tools_as_one(tools: Vec<Traced>) -> Result<Vec<Traced>> {
+    let limit = joined_tools_limit().max(1);
+    if tools.len() <= limit {
+        return clear_group_as_one(tools);
+    }
+    let groups = tools.len().div_ceil(limit);
+    let size = tools.len().div_ceil(groups);
+    let mut rest = tools.into_iter();
+    let mut out = Vec::new();
+    loop {
+        let group: Vec<Traced> = rest.by_ref().take(size).collect();
+        if group.is_empty() {
+            return Ok(out);
+        }
+        out.extend(clear_group_as_one(group)?);
+    }
+}
+
+/// [`clear_tools_as_one`] for one group of tools.
+fn clear_group_as_one(tools: Vec<Traced>) -> Result<Vec<Traced>> {
     if tools.len() < 8 {
         return Ok(tools);
     }
@@ -4578,16 +4641,19 @@ fn naming_feature<'a>(vals: &BTreeMap<String, Value>, f: &'a Feature) -> std::bo
 
 /// The revolve axis in the sketch's plane coordinates (a point and a direction). `st` is the model
 /// an axis on an edge or face of it is found in; `construct` gives a construction axis, by name, in
-/// the sketch's 3D frame; `vals` are the parameter values an explicit axis's origin is read with.
+/// the sketch's 3D frame; `vals` are the parameter values an explicit axis's origin is read with;
+/// `sketch_line` gives a line of another sketch, by owning sketch feature and curve id, in the
+/// same frame as `ss` (#6548).
 pub(crate) fn revolve_axis(
     vals: &BTreeMap<String, Value>,
     ss: &SolvedSketch,
     axis: &AxisRef,
     st: &ModelState,
     construct: &dyn Fn(&str) -> Result<(Vec3, Vec3)>,
+    sketch_line: &dyn Fn(u64, &str) -> Result<(Vec3, Vec3)>,
 ) -> Result<(Vec2, Vec2)> {
     match axis {
-        AxisRef::SketchLine { curve } => {
+        AxisRef::SketchLine { curve, sketch: None } => {
             let ci = ss.sketch.curve_index(curve).ok_or_else(|| DocError::Unknown(format!("sketch line `{curve}`")))?;
             match ss.sketch.curves.get(ci).map(|c| &c.kind) {
                 Some(CurveKind::Line { a, b }) => {
@@ -4596,6 +4662,10 @@ pub(crate) fn revolve_axis(
                 }
                 _ => Err(DocError::Invalid(format!("`{curve}` is not a line"))),
             }
+        }
+        AxisRef::SketchLine { curve, sketch: Some(owner) } => {
+            let (o, d) = sketch_line(*owner, curve)?;
+            line_in_sketch_plane(ss, o, d)
         }
         AxisRef::SketchAxis { axis } => match axis.to_ascii_lowercase().as_str() {
             "x" => Ok((Vec2::ZERO, Vec2::X)),
@@ -4627,6 +4697,19 @@ pub(crate) fn revolve_axis(
     }
 }
 
+/// The line `curve` of a solved sketch, as a world-space point and direction in the sketch's
+/// plane frame. Used to carry a revolve axis picked in another sketch (#6548).
+pub(crate) fn sketch_line_world(ss: &SolvedSketch, curve: &str) -> Result<(Vec3, Vec3)> {
+    let ci = ss.sketch.curve_index(curve).ok_or_else(|| DocError::Unknown(format!("sketch line `{curve}`")))?;
+    match ss.sketch.curves.get(ci).map(|c| &c.kind) {
+        Some(CurveKind::Line { a, b }) => {
+            let (pa, pb) = (ss.sketch.point(*a).unwrap_or_default(), ss.sketch.point(*b).unwrap_or_default());
+            Ok((ss.plane.to_world(pa), ss.plane.dir_to_world(pb - pa)))
+        }
+        _ => Err(DocError::Invalid(format!("`{curve}` is not a line"))),
+    }
+}
+
 /// The model a revolve axis is found in: what construction geometry of component `comp` is built
 /// on when the axis is an edge or face of it (only then is it worth placing); a model that cannot
 /// be placed is the error.
@@ -4646,6 +4729,33 @@ fn line_in_sketch_plane(ss: &SolvedSketch, origin: Vec3, dir: Vec3) -> Result<(V
         return Err(DocError::Invalid("the revolve axis does not lie in the sketch plane".into()));
     }
     Ok((pl.to_local(origin), Vec2::new(d.dot(pl.x), d.dot(pl.y))))
+}
+
+/// A construction point `name` of the timeline so far, as evaluated, in the frame `frame` places
+/// in the world: the frame a sketch is evaluated in, its component's placement or the placement
+/// of the face it is attached to (#12075). The point is kept in its own component's frame.
+pub(crate) fn construction_point_in(doc: &Document, st: &ModelState, name: &str, author: u64, frame: &Mat) -> Result<Vec3> {
+    let c = st
+        .construct
+        .iter()
+        .find(|c| c.name == name)
+        .ok_or_else(|| DocError::Unknown(format!("construction point `{name}` (it must come earlier in the timeline)")))?;
+    let crate::construct::ConstructGeom::Point(p) = &c.geom else {
+        return Err(DocError::Invalid(format!("`{name}` is not a construction point")));
+    };
+    if doc.occurrences.is_empty() {
+        return Ok(*p);
+    }
+    let owner = doc.feature(c.feature).map_or(0, |f| f.component);
+    // The same definition is authored in this occurrence, even when it is not the first.
+    // Its point is already in the author coordinates; using the first occurrence here
+    // would introduce the difference between the two placements.
+    if owner == author {
+        return Ok(*p);
+    }
+    let inverse = crate::mat_inverse(frame).ok_or_else(|| DocError::Invalid("the sketch's frame cannot be inverted".into()))?;
+    let relative = crate::mat_mul(&inverse, &doc.component_transform(owner));
+    Ok(crate::apply_point(&relative, *p))
 }
 
 /// A construction axis `name` of the timeline so far, as evaluated, in the frame of component
@@ -5735,9 +5845,18 @@ fn feature_tools_with_constructor(
                 f,
             )?;
             let regions = solidcraft_sketch::merge_regions(&select_profiles(&ss, profiles)?);
-            let (o, d) = revolve_axis(vals, &ss, axis, &*axis_state(doc, st, f.component, axis)?, &|name| {
-                construction_axis_in(Some(doc), st, name, f.component)
-            })?;
+            let (o, d) = revolve_axis(
+                vals,
+                &ss,
+                axis,
+                &*axis_state(doc, st, f.component, axis)?,
+                &|name| construction_axis_in(Some(doc), st, name, f.component),
+                &|owner, curve| {
+                    let solved =
+                        st.sketch(owner).ok_or_else(|| DocError::Unknown(format!("sketch {owner} (it must come earlier in the timeline)")))?;
+                    sketch_line_world(&sketch_in_feature_frame(doc, solved, f.component)?, curve)
+                },
+            )?;
             // To Object is in this feature's component frame: the model as seen from there.
             let tst = if to.is_some() { state_in_frame(doc, st, f.component)? } else { std::borrow::Cow::Borrowed(st) };
             let angles = if to.is_some() {
@@ -7027,6 +7146,10 @@ fn replay(
     kept.dedup();
     let (mut missed, mut total) = (0usize, 0usize);
     let plan = copy_plan(doc, vals, st, &kept, mats)?;
+    // A source's named faces are looked up in the model as it was before any copy was made: the
+    // copy of an earlier source (a boss joined to the body) changes the faces a later source (a cut
+    // starting on the boss) names, though the later source means the original's (#11792).
+    let named_from = plan.iter().any(|(src, _, _)| src.face_names.iter().any(|n| !n.is_empty())).then(|| st.clone());
     for (src, mats, first) in &plan {
         // A fillet or chamfer repeats at the copied edges.
         if let FeatureKind::Fillet { edges, radius, .. } | FeatureKind::Chamfer { edges, distance: radius, .. } = &src.kind {
@@ -7068,6 +7191,21 @@ fn replay(
                     if let Some(slot) = st.bodies.get_mut(ti) {
                         *slot = ModelBody::traced_new(mb.name, nb, mb.feature);
                     }
+                }
+            }
+            continue;
+        }
+        // An Offset Face repeats at the copied faces of the body they lie on.
+        if let FeatureKind::OffsetFace { faces, distance, body } = &src.kind {
+            let d = val(vals, distance, Kind::Length)?;
+            let picked = crate::plain(faces);
+            for m in mats {
+                let moved: Vec<Vec3> = picked.iter().map(|p| crate::apply_point(m, *p)).collect();
+                let i = body_at(st, body, &moved)?;
+                let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
+                let nb = mb.traced().then(kernel::offset_faces(&mb.body, &moved, d)?);
+                if let Some(slot) = st.bodies.get_mut(i) {
+                    *slot = ModelBody::traced_new(mb.name, nb, mb.feature);
                 }
             }
             continue;
@@ -7166,7 +7304,7 @@ fn replay(
             // Each copy's faces are named as the source feature's, with the instance. Its face
             // points follow their named faces, as the feature's own did (#2121): a To Object
             // extrude's copies reach the face where it is now, not where it was picked.
-            let moved = with_named_face_points(doc, st, src)?.map(|(g, _)| g);
+            let moved = with_named_face_points(doc, named_from.as_ref().unwrap_or(st), src)?.map(|(g, _)| g);
             let tools = feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), st, &mut None, &mut None, &mut None)?;
             for (k, m) in mats.iter().enumerate() {
                 let start = copies.len();
@@ -7650,12 +7788,28 @@ fn eval_feature(
             let mut constructor = None;
             let mut to_body = None;
             let tools = feature_tools_with_constructor(doc, vals, f, st, &mut constructor, &mut to_body, warning)?;
+            // #9969: a cut whose tool lies clear of the body (a profile drawn beside it, a
+            // distance that stops short, the wrong direction) reported success and changed
+            // nothing. Say so, as a hole does (#10701): the bodies are compared before and after,
+            // whether the cut went through sheet metal's flat pattern or the generic path.
+            let before: Option<Vec<Body>> = (*operation == Operation::Cut).then(|| st.bodies.iter().map(|b| b.body.clone()).collect());
+            let unchanged = |st: &ModelState, warning: &mut Option<String>| {
+                if let Some(before) = &before
+                    && !before.is_empty()
+                    && st.bodies.len() == before.len()
+                    && st.bodies.iter().zip(before).all(|(b, old)| old.same(&b.body))
+                {
+                    append_warning(warning, "the cut removes no material; check where its profile lies, the direction and the distance".into());
+                }
+            };
             // Cuts through sheet metal become cut-outs of its flat pattern.
             if matches!(operation, Operation::Cut | Operation::Intersect) && matches!(f.kind, FeatureKind::Extrude { .. }) && !st.sheets.is_empty() {
                 let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
                 let handled = more::sheet_cut(f, st, &bodies, &crate::plain(targets), constructor.as_ref(), warning)?;
                 if !handled.is_empty() {
-                    return apply_beside_sheet_cut(doc, st, f, tools, *operation, &crate::plain(targets), &handled);
+                    apply_beside_sheet_cut(doc, st, f, tools, *operation, &crate::plain(targets), &handled)?;
+                    unchanged(st, warning);
+                    return Ok(());
                 }
             }
             // A join one sheet thick in the plane of a panel becomes part of that panel. A Join to an
@@ -7669,7 +7823,9 @@ fn eval_feature(
             // A Join extrude to an object joins that object too (#6424): the tool and the body
             // it runs to are one body, not only the body the profile was sketched on.
             let extra: Vec<String> = if *operation == Operation::Join { to_body.into_iter().collect() } else { Vec::new() };
-            apply_traced_with(doc, st, f, tools, *operation, &crate::plain(targets), &extra)
+            apply_traced_with(doc, st, f, tools, *operation, &crate::plain(targets), &extra)?;
+            unchanged(st, warning);
+            Ok(())
         }
         FeatureKind::Hole { thread, thread_depth, diameter, hand, modeled, ease_out, depth, to, .. } => {
             let thread_depth = thread_depth.as_ref().map(|d| val(vals, d, Kind::Length)).transpose()?;
@@ -7901,7 +8057,12 @@ fn eval_feature(
                 // A plane of numbers alone reads no body: placing them all is the design's size.
                 None if plane_is_fixed(plane) => doc.resolve_plane_in(vals, plane, 0, Some(st))?,
                 // Picks on bodies of other (moved) components are where those bodies are shown.
-                None => doc.resolve_plane_in(vals, plane, 0, Some(&*construction_state(doc, st, f.component)?))?,
+                None => doc.resolve_plane_in(
+                    vals,
+                    &*construction_planes_in_frame(doc, st, f.component, plane)?,
+                    0,
+                    Some(&*construction_state(doc, st, f.component)?),
+                )?,
             };
             st.construct.push(crate::construct::Construct {
                 feature: f.id,
@@ -8546,17 +8707,19 @@ fn eval_sketch(
             (doc.resolve_plane_in(vals, &sheet_face_plane_in_frame(doc, st, f.component, plane)?, 0, Some(&fst))?, None)
         }
         (None, PlaneRef::Face { plane: picked, at, name, anchor: None }) => face_plane(&fst, picked, *at, name.as_deref())?,
-        (None, other) => (doc.resolve_plane_in(vals, other, 0, Some(&fst))?, None),
+        (None, other) => (doc.resolve_plane_in(vals, &*construction_planes_in_frame(doc, st, f.component, other)?, 0, Some(&fst))?, None),
     };
     let mut sk = sketch.clone();
     // A text's outlines are rebuilt from its numbers when the links are refreshed: the
     // ones its expressions give come first.
     doc.apply_text_values(vals, &mut sk)?;
-    let mut warns = match (anchor, lost_names) {
-        (Some(anchor), crate::project::LostNames::Fail) => crate::project::refresh_face_anchor_links(doc, vals, &fst, &plane, &mut sk, anchor)?,
-        (None, crate::project::LostNames::Fail) => crate::project::refresh_links(doc, vals, &fst, &plane, &mut sk)?,
-        (anchor, crate::project::LostNames::Mark) => crate::project::refresh_links_marking_lost(doc, vals, &fst, &plane, &mut sk, anchor)?,
+    // The frame the sketch is evaluated in, where a construction point it projects is
+    // brought from its own component's (#12075).
+    let link_frame = match anchor.map(|anchor| anchor.author_frame(doc, f.component)) {
+        Some(Ok(frame)) => frame,
+        _ => doc.component_transform(f.component),
     };
+    let mut warns = crate::project::refresh_links_with(doc, vals, &fst, &plane, &mut sk, anchor, lost_names, Some(&(f.component, link_frame)))?;
     drop(fst);
     sk.refresh_offsets()?;
     if let Some(w) = face_warning {
@@ -9077,6 +9240,7 @@ impl PlacedBodies {
             fresh.joint_faces = placed.joint_faces.clone();
             fresh.mesh_placement = placed.mesh_placement.clone();
             fresh.plan = placed.plan.clone();
+            fresh.gpu_plan = placed.gpu_plan.clone();
             fresh.plan_mesh = placed.plan_mesh.clone();
             fresh
         })
@@ -9146,6 +9310,7 @@ fn in_frame(b: &ModelBody, m: &crate::Mat, placed: &ModelBody) -> ModelBody {
     let mut moved = ModelBody::new(b.name.clone(), placed.body.clone(), b.feature);
     moved.mesh = placed.mesh.clone();
     moved.plan = placed.plan.clone();
+    moved.gpu_plan = placed.gpu_plan.clone();
     moved.plan_mesh = placed.plan_mesh.clone();
     moved.component = b.component;
     moved.transferred = b.transferred;
@@ -9310,6 +9475,55 @@ pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut 
     }
     *placed_before = placed_now;
     Ok(out)
+}
+
+/// `plane` for a feature of component `comp`, with each construction plane of another component
+/// (under any offset or flip of it) given as the plane where that component puts it, in `comp`'s
+/// frame (#11734). A construction plane is kept in its own component's frame, as the axes are
+/// (`construction_axis_in`), so a plane read as it is would fall in the wrong place for a feature
+/// of a component placed differently.
+fn construction_planes_in_frame<'a>(doc: &Document, st: &ModelState, comp: u64, plane: &'a PlaneRef) -> Result<std::borrow::Cow<'a, PlaneRef>> {
+    use std::borrow::Cow;
+    // The component of a feature, read from the timeline without `Document::feature`'s search counter.
+    fn owner_of(doc: &Document, id: u64) -> Option<u64> {
+        doc.features.iter().find(|f| f.id == id).map(|f| f.component)
+    }
+    fn foreign(doc: &Document, comp: u64, plane: &PlaneRef) -> bool {
+        match plane {
+            PlaneRef::Construction { feature } => owner_of(doc, feature.0).is_some_and(|owner| owner != comp),
+            PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::ThroughPoint { base, .. } => {
+                foreign(doc, comp, base)
+            }
+            _ => false,
+        }
+    }
+    fn map(doc: &Document, st: &ModelState, comp: u64, plane: &mut PlaneRef) -> Result<()> {
+        match plane {
+            PlaneRef::Construction { feature } => {
+                let owner = owner_of(doc, feature.0).unwrap_or(comp);
+                if owner == comp {
+                    return Ok(());
+                }
+                if let Some(crate::construct::ConstructGeom::Plane(pl)) = st.construct.iter().find(|c| c.feature == feature.0).map(|c| &c.geom) {
+                    let inverse = crate::mat_inverse(&doc.component_transform(comp))
+                        .ok_or_else(|| DocError::Invalid("the feature's component frame is invalid".into()))?;
+                    let m = crate::mat_mul(&inverse, &doc.component_transform(owner));
+                    *plane = PlaneRef::Custom { plane: placed_plane(&m, pl)? };
+                }
+            }
+            PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::ThroughPoint { base, .. } => {
+                map(doc, st, comp, base)?
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+    if doc.occurrences.is_empty() || !foreign(doc, comp, plane) {
+        return Ok(Cow::Borrowed(plane));
+    }
+    let mut mapped = plane.clone();
+    map(doc, st, comp, &mut mapped)?;
+    Ok(Cow::Owned(mapped))
 }
 
 /// `plane` moved by the placement `m`; an error when `m` does not keep it a plane (a placement

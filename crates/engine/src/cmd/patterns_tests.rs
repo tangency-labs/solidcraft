@@ -1,3 +1,4 @@
+use solidcraft_geom::MeshGeom;
 use std::f64::consts::PI;
 
 use serde_json::{Value, json};
@@ -992,6 +993,29 @@ fn copies_of_a_to_object_extrude_follow_the_moved_face() {
     assert!(rel(thick, 2.0 * thin) < 1e-6, "5 mm: {thin} mm³, 10 mm: {thick} mm³ (expected {})", 2.0 * thin);
 }
 
+/// The lid of #11792: a boss (`Extrude1`) joined to a half-ring, and a cut (`Extrude2`) that starts
+/// on the boss's `F5:bottom` face. Mirroring both across the front plane copies the boss and the
+/// cut, so the part gains what the two features added a second time.
+#[test]
+fn mirror_of_a_boss_and_a_cut_from_its_face_makes_both_copies() {
+    let text = include_str!("../../../../examples/regressions/mirror_from_object_lid.json");
+    let open = |through: i64| {
+        let mut value: Value = serde_json::from_str(text).unwrap_or_default();
+        if let Some(features) = value.get_mut("features").and_then(Value::as_array_mut) {
+            features.retain(|f| f.get("id").and_then(Value::as_i64).is_some_and(|id| id <= through));
+        }
+        let doc = solidcraft_doc::Document::from_json(&value.to_string()).unwrap_or_else(|e| panic!("{e}"));
+        Session::opened(doc, None)
+    };
+    let ring = volume(&mut open(4));
+    let mut s = open(6);
+    let lid = volume(&mut s);
+    run(&mut s, "solid.mirror", json!({"features":["Extrude1","Extrude2"],"plane":"XZ"}));
+    let both = volume(&mut s);
+    let want = lid + (lid - ring);
+    assert!(rel(both, want) < 1e-6, "ring {ring} mm³, lid {lid} mm³, mirrored {both} mm³ (expected {want})");
+}
+
 /// A disc with an off-centre hole whose top and bottom edges are chamfered.
 fn disc_with_chamfered_hole() -> Session {
     let mut s = Session::default();
@@ -1238,6 +1262,28 @@ fn circular_pattern_of_a_moved_copy_adds_one_body_per_instance() {
     assert_eq!(s.world_state().unwrap().bodies.len(), 5);
     let far = s.world_state().unwrap().bodies.iter().map(|b| b.mesh().bounds().max.x).fold(f64::MIN, f64::max);
     assert!(far > 20.0, "the repeats follow the redefined Move: {far}");
+}
+
+/// #12585: a pattern or mirror of an Offset Face repeats it at the copied faces instead of
+/// failing with "cannot be patterned or mirrored yet". A 40 x 30 x 20 box whose top is split into
+/// strips at x = 10 and x = 30 has its left strip raised 5; the copy raises the right strip.
+#[test]
+fn pattern_and_mirror_of_an_offset_face_raise_the_copied_face() {
+    for (copy, params) in [
+        ("solid.mirror", json!({"features": ["Raise"], "plane": {"origin": [20, 0, 0], "normal": [1, 0, 0]}})),
+        ("solid.pattern.rectangular", json!({"features": ["Raise"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 30})),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Block"}));
+        run(&mut s, "solid.split_face", json!({"faces": [[20, 15, 20]], "plane": {"origin": [10, 0, 0], "normal": [1, 0, 0]}}));
+        run(&mut s, "solid.split_face", json!({"faces": [[20, 15, 20]], "plane": {"origin": [30, 0, 0], "normal": [1, 0, 0]}}));
+        run(&mut s, "solid.offset_face", json!({"faces": [[5, 15, 20]], "distance": 5, "name": "Raise"}));
+        let strip = 10.0 * 30.0 * 5.0;
+        assert!(rel(volume(&mut s), 24000.0 + strip) < 1e-6, "{copy}: the source raises one strip");
+        let r = run(&mut s, copy, params);
+        assert!(r["error"].is_null(), "{copy}: {r}");
+        assert!(rel(volume(&mut s), 24000.0 + 2.0 * strip) < 1e-6, "{copy}: {} vs {}", volume(&mut s), 24000.0 + 2.0 * strip);
+    }
 }
 
 /// #13278: a mirror of a Thread repeats it on the mirrored hole, whether the hole was mirrored

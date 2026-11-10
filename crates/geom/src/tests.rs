@@ -1043,3 +1043,12 @@ fn a_similarity_moves_each_kind_of_segment_exactly() {
         assert!(Similarity2::new(scale, angle, shift).is_none(), "{scale} {angle} {shift:?}");
     }
 }
+
+/// The display mesh and its levels of detail are solidcore-tess's own types, not copies: a mesh
+/// the kernel's tessellation makes is the one the viewport draws, with nothing converted.
+#[test]
+fn the_display_mesh_and_its_levels_are_solidcore_tess_types() {
+    let mesh: solidcore_tess::Mesh = crate::Mesh { positions: vec![Vec3::X], ..Default::default() };
+    let level: solidcore_tess::simplify::Level = crate::simplify::Level { error: 0.5, ..Default::default() };
+    assert_eq!((mesh.positions, level.error), (vec![Vec3::X], 0.5));
+}

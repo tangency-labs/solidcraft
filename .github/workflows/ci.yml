@@ -402,7 +402,7 @@ jobs:
     name: Format and repository checks
     if: (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (github.event.action != 'labeled' || github.event.label.name == 'approved-for-ci')
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@stable
@@ -430,8 +430,11 @@ jobs:
       - name: Sorted lists
         run: cargo xtask lists
       # New UI text must reach every complete catalog; report it here, before review (#8542).
+      # Catalog coverage only: the command labels need the app's command table, which this job
+      # never builds (a release build of the CLI took 9-15 minutes). The `tests` job checks them
+      # against the CLI it builds anyway.
       - name: Translations in the complete catalogs
-        run: cargo xtask i18n --check
+        run: cargo xtask i18n --check --no-registry
       - name: Model decisions use exact geometry, not meshes
         run: |
           cargo xtask mesh-decisions
@@ -577,6 +580,9 @@ jobs:
       # would skip for want of an adapter fails instead.
       SOLIDCRAFT_GPU: software
       SOLIDCRAFT_REQUIRE_GPU: "1"
+      # The same for the shared viewport crate's own GPU tests, which read no SolidCraft variable.
+      VIEWPORT_TEST_GPU: software
+      VIEWPORT_TEST_REQUIRE_GPU: "1"
       ACTION_MATRIX_JOBS: "12"
       CARGO_INCREMENTAL: "0"
       RUSTC_WRAPPER: sccache
@@ -654,6 +660,20 @@ jobs:
             --ignore-default-filter -E "($base) & not (package(=solidcraft-gpu) & test(/^path::/))" || status=$?
           if [ "$status" -ne 0 ] && [ "$status" -ne 100 ]; then exit "$status"; fi
           cargo xtask known-failing --junit "$junit"
+      # Every command label needs an English catalog entry (#8542). The label table is the CLI's
+      # command registry, so this builds the CLI in the profile the tests just used (the shared
+      # crates are cached) and reads it. Skipped when no selected package can change the table.
+      - name: Command labels in the translation catalogs
+        env:
+          FULL: ${{ needs.changes.outputs.full }}
+          PACKAGES: ${{ needs.changes.outputs.packages }}
+        run: |
+          case "$FULL $PACKAGES " in
+            true*|*" solidcraft-cli "*|*" solidcraft-ui-egui "*|*" xtask "*) ;;
+            *) echo "No package that feeds the command table changed."; exit 0 ;;
+          esac
+          cargo build -p solidcraft-cli --profile ci --locked
+          cargo xtask i18n --check --cli "${CARGO_TARGET_DIR:-target}/ci/solidcraft-cli"
       - name: Compiler cache statistics
         if: always()
         run: if command -v sccache >/dev/null; then sccache --show-stats; else echo "sccache was not set up; built without it"; fi
@@ -686,6 +706,9 @@ jobs:
       # As in Native Linux tests: lavapipe draws, and a test without an adapter fails.
       SOLIDCRAFT_GPU: software
       SOLIDCRAFT_REQUIRE_GPU: "1"
+      # The same for the shared viewport crate's own GPU tests, which read no SolidCraft variable.
+      VIEWPORT_TEST_GPU: software
+      VIEWPORT_TEST_REQUIRE_GPU: "1"
       # lavapipe's own shader cache (below).
       MESA_SHADER_CACHE_DIR: /home/runner/.cache/mesa-gpu
       CARGO_INCREMENTAL: "0"
@@ -992,6 +1015,9 @@ jobs:
       # WARP is a software (Cpu) adapter.
       SOLIDCRAFT_GPU: software
       SOLIDCRAFT_REQUIRE_GPU: "1"
+      # The same for the shared viewport crate's own GPU tests, which read no SolidCraft variable.
+      VIEWPORT_TEST_GPU: software
+      VIEWPORT_TEST_REQUIRE_GPU: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@stable
@@ -1361,6 +1387,9 @@ jobs:
         if: matrix.check == 'kernel rig and goldens'
         env:
           KERNEL_CASES_REPORT: ${{ github.workspace }}/solidcore/reports/kernel-rig/table.md
+          # each case in a process of its own, one per vCPU of the 16-vCPU, 64 GB runner, with a
+          # CPU-time hang limit (#14277)
+          KERNEL_CASES_JOBS: "16"
         run: |
           mkdir -p reports/kernel-rig
           cd crates/solidcore-ops

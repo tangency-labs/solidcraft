@@ -1,6 +1,8 @@
 use super::*;
+use solidcraft_geom::MeshGeom;
 use solidcraft_geom::{Aabb3, Mesh};
-use solidcraft_render::{Camera, ProductMesh, StandardView, surface::OpaqueSurface};
+use solidcraft_render::ProductMesh;
+use solidcraft_viewport::{Camera, StandardView, surface::OpaqueSurface};
 
 fn executor() -> Option<Executor> {
     let (adapter, device, queue) = match open_headless() {
@@ -8,7 +10,7 @@ fn executor() -> Option<Executor> {
         Err(e) => {
             // The path tracer runs on Vulkan or Metal only: where the backends in use leave both out
             // (`WGPU_BACKEND=dx12`), it is unavailable by design, not missing.
-            let available = !crate::select::path_backends().is_empty();
+            let available = !solidcraft_viewport_gpu::select::path_backends().is_empty();
             assert!(!available || std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "required GPU unavailable: {e}");
             eprintln!("gpu-path device test skipped: {e}");
             return None;
@@ -2439,11 +2441,11 @@ fn render_lights_path_visibility_uniform_keeps_the_shader_contract() {
 /// #3217: the path tracer opens Vulkan adapters, or Metal on macOS, never D3D12 or GL.
 #[test]
 fn path_devices_are_vulkan_or_metal_only() {
-    let picked = crate::select::pick_path(crate::select::Policy::Auto, |_| true);
+    let picked = solidcraft_viewport_gpu::select::pick_path(solidcraft_viewport_gpu::select::Policy::Auto, |_| true);
     if let Some((adapter, _)) = &picked {
         assert!(matches!(adapter.get_info().backend, wgpu::Backend::Vulkan | wgpu::Backend::Metal));
     }
-    if crate::select::path_backends().is_empty() {
+    if solidcraft_viewport_gpu::select::path_backends().is_empty() {
         assert!(picked.is_none());
     }
 }
@@ -2479,7 +2481,7 @@ fn viewport_path_backends_keep_windows_on_its_selected_backend() {
 #[test]
 fn viewport_path_backends_preserve_other_platforms() {
     for backend in [wgpu::Backend::Vulkan, wgpu::Backend::Gl, wgpu::Backend::Metal] {
-        assert_eq!(viewport_path_backends(backend, false), crate::select::path_backends());
+        assert_eq!(viewport_path_backends(backend, false), solidcraft_viewport_gpu::select::path_backends());
     }
 }
 
@@ -2636,8 +2638,8 @@ fn gpu_brdf_matches_f64_surface_oracle() {
 fn viewport_brdf_probe_source() -> String {
     format!(
         "{}\n{}\n{}",
-        crate::view::SHADER,
-        crate::pbr::SOURCE,
+        solidcraft_viewport_gpu::view::SHADER,
+        solidcraft_viewport_gpu::pbr::SOURCE,
         r#"
 struct Probe { base: vec4<f32>, parameters: vec4<f32>, view: vec4<f32>, light: vec4<f32>, };
 // Bindings 0 and 1 belong to the production viewport uniform and palette.
@@ -3003,7 +3005,7 @@ fn gpu_clear_coat_brdf_matches_f64_surface_oracle() {
             for ior in [1.5, 3.0] {
                 let surface = OpaqueSurface::new(Vec3::new(0.8, 0.5, 0.2), metallic, 0.3, 1.5)
                     .unwrap()
-                    .with_clear_coat(solidcraft_render::clear_coat::ClearCoat::new(1.0, roughness, ior).unwrap());
+                    .with_clear_coat(solidcraft_viewport::clear_coat::ClearCoat::new(1.0, roughness, ior).unwrap());
                 let mut task = Task::new(context.clone(), sphere(surface), request(1), JobOptions::default(), CancelToken::default()).unwrap();
                 for (view, light) in [
                     (Vec3::Z, Vec3::Z),
@@ -3063,7 +3065,7 @@ fn gpu_clear_coat_pdf_matches_f64_surface_oracle() {
             for ior in [1.5, 3.0] {
                 let surface = OpaqueSurface::new(Vec3::new(0.8, 0.5, 0.2), metallic, 0.3, 1.5)
                     .unwrap()
-                    .with_clear_coat(solidcraft_render::clear_coat::ClearCoat::new(1.0, roughness, ior).unwrap());
+                    .with_clear_coat(solidcraft_viewport::clear_coat::ClearCoat::new(1.0, roughness, ior).unwrap());
                 let mut task = Task::new(context.clone(), sphere(surface), request(1), JobOptions::default(), CancelToken::default()).unwrap();
                 for (view, light) in [
                     (Vec3::Z, Vec3::Z),
@@ -3088,7 +3090,7 @@ fn gpu_clear_coat_pdf_matches_f64_surface_oracle() {
                     context.queue.submit([encoder.finish()]);
                     task.sample = 1;
                     let actual = task.read_linear().unwrap()[0];
-                    let expected = solidcraft_render::clear_coat::surface_pdf(surface, Vec3::Z, view, light).unwrap();
+                    let expected = solidcraft_viewport::clear_coat::surface_pdf(surface, Vec3::Z, view, light).unwrap();
                     for (a, b) in actual.iter().zip([expected, 0.0, 0.0]) {
                         assert!((f64::from(*a) - b).abs() <= 3e-3 * b.abs() + 2e-5, "m={metallic}, r={roughness}, ior={ior}: {a} vs {b}");
                     }
@@ -3121,7 +3123,7 @@ fn gpu_clear_coat_samples_the_pdf_mixture_components() {
     for weight in [0.0, 0.4, 1.0] {
         let surface = OpaqueSurface::new(Vec3::new(0.02, 0.02, 0.02), 0.0, 0.45, 1.5)
             .unwrap()
-            .with_clear_coat(solidcraft_render::clear_coat::ClearCoat::new(weight, 0.12, 1.5).unwrap());
+            .with_clear_coat(solidcraft_viewport::clear_coat::ClearCoat::new(weight, 0.12, 1.5).unwrap());
         let mut task = Task::new(context.clone(), sphere(surface), request(1), JobOptions::default(), CancelToken::default()).unwrap();
         let p = weight * 0.5;
         // One variate strictly inside each nonempty mixture interval.
@@ -3968,9 +3970,9 @@ fn gpu_quality_texture_preserves_minor_axis_detail_and_linear_mip_precision() {
     use image::ImageEncoder;
     use solidcraft_render::{
         job::textures::{PlanarFrame, RuntimeTextures, TextureMap},
-        surface::srgb8_to_linear,
         texture_input::MapRole,
     };
+    use solidcraft_viewport::surface::srgb8_to_linear;
     let Some(executor) = executor() else { return };
     let context = &executor.context;
     let source = texture_fixture(PlanarFrame { origin: [0.0; 3], u: [2.0, 0.0, 0.0], v: [0.0, 2.0, 0.0] });
@@ -5264,7 +5266,7 @@ fn packed_gpu_mips_preserve_odd_size_linear_color_and_data_means() {
         let expected = (0..15)
             .map(|i| {
                 let value = if i & 1 == 0 { 64 } else { 192 };
-                if linear { solidcraft_render::surface::srgb8_to_linear(value) } else { f64::from(value) / 255. }
+                if linear { solidcraft_viewport::surface::srgb8_to_linear(value) } else { f64::from(value) / 255. }
             })
             .sum::<f64>()
             / 15.;
@@ -6173,7 +6175,7 @@ fn display_bloom_slices_refuse_invalid_ranges_without_panicking() {
 fn cancelled_environment_preparation_unwinds_gpu_error_scopes() {
     use solidcraft_render::lighting::environment::EnvironmentSource;
     let Ok((_, device, _queue)) = open_headless() else {
-        let available = !crate::select::path_backends().is_empty();
+        let available = !solidcraft_viewport_gpu::select::path_backends().is_empty();
         assert!(!available || std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "required Vulkan device unavailable");
         return;
     };
@@ -6199,7 +6201,7 @@ fn cancelled_environment_preparation_unwinds_gpu_error_scopes() {
 #[test]
 fn failed_resource_creation_unwinds_gpu_error_scopes() {
     let Ok((_, device, _queue)) = open_headless() else {
-        let available = !crate::select::path_backends().is_empty();
+        let available = !solidcraft_viewport_gpu::select::path_backends().is_empty();
         assert!(!available || std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "required Vulkan device unavailable");
         return;
     };
@@ -6406,11 +6408,10 @@ fn gpu_ui_box_coat_and_color_map_keep_every_raw_sample_finite() {
     use image::ImageEncoder;
     use serde_json::json;
     use solidcraft_render::{
-        clear_coat::ClearCoat,
         job::textures::{PlanarFrame, RuntimeTextures, TextureBinding, TextureMap},
-        surface::srgb8_to_linear,
         texture_input::MapRole,
     };
+    use solidcraft_viewport::{clear_coat::ClearCoat, surface::srgb8_to_linear};
     let Some(executor) = executor() else { return };
     let mut session = solidcraft_engine::Session::default();
     session.execute("solid.box", &json!({"length":10,"width":20,"height":5})).unwrap();
@@ -6428,7 +6429,7 @@ fn gpu_ui_box_coat_and_color_map_keep_every_raw_sample_finite() {
         roll: 0.0,
         distance: 61.06594959585294,
         fov: 0.0,
-        up: solidcraft_render::UpAxis::Z,
+        up: solidcraft_viewport::UpAxis::Z,
     };
     let options: JobOptions = serde_json::from_value(json!({
         "samples":4,"max_depth":3,"seed":7,"exposure_ev":0.5,"tone_map":"aces_fitted",

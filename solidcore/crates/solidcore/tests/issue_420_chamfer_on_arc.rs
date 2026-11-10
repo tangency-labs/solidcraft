@@ -92,7 +92,6 @@ use solidcore::SolidError;
 /// The section generator and rounds (and chamfers) as their definitions.
 fn definition_kernel() -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.fillet_gn_section_generator = true;
     k.fixes.fillet_round_as_definition = true;
     k
 }
@@ -128,7 +127,9 @@ fn definitions(b: &Brep) -> Vec<ProceduralBlend> {
             |&f| match b.face(f).unwrap().surface.as_ref()?.procedural_blend()? {
                 BlendRef::Procedural(pb) => Some(pb.clone()),
                 BlendRef::Exact { .. } => panic!("a chamfer on a cylinder is certified"),
-                BlendRef::Corner { .. } | BlendRef::Draft { .. } => None,
+                BlendRef::Corner { .. }
+                | BlendRef::Draft { .. }
+                | BlendRef::SectionBlend { .. } => None,
             },
         )
         .collect()
@@ -308,7 +309,9 @@ fn issue_2546_chamfers_within_the_resolution_of_the_rounds_are_refused_naming_th
 /// axis, the section through the axis. That is no chamfer of the corner, whether the part
 /// resolves the arc or not (just past 5, within the resolution; at 5.1, beyond it, where a
 /// body of more volume than at 5 was built). Refused, naming 5, the largest size on the
-/// edge's side of the axis, which builds.
+/// edge's side of the axis, which builds. The chamfer's regularity (`BallIsRegular`,
+/// WR-696) finds it first: the R5 rounds curve tighter than its offset of d, which does not
+/// fit them (`BallDoesNotFit`), naming the same 5.
 #[test]
 fn issue_2546_chamfers_past_the_rounds_radius_are_refused_naming_it() {
     for d in [5.0001, 5.0002, 5.1] {
@@ -317,7 +320,7 @@ fn issue_2546_chamfers_past_the_rounds_radius_are_refused_naming_it() {
         let SolidError::FilletRefused { reason, fit, .. } = err else {
             panic!("d {d}: {err:?}");
         };
-        assert_eq!(reason, Some(NoRoomReason::RailPastAxis), "d {d}");
+        assert_eq!(reason, Some(NoRoomReason::BallDoesNotFit), "d {d}");
         assert_eq!(fit.kind, FitKind::Radius, "d {d}");
         assert!((fit.size - 5.0).abs() < 1e-12, "d {d}: {}", fit.size);
     }
