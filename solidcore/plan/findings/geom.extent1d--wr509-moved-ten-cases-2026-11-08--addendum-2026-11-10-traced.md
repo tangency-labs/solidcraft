@@ -13,9 +13,10 @@ WR-509. With the fix, they give their current goldens. Nothing else in these cas
 
 Each case's record changes in one entry, an angle in degrees that `step_inversion` maps through
 `contains_periodic_value`. The check is the closed form the angle is defined by:
-`atan2(rx / ry * dy, dx)` of the point's coordinates in the ellipse's frame (x the unit x axis,
-y the y axis made orthogonal to it), put into the period that starts at the domain's start.
-It was computed in Python from the case's inputs, apart from the kernel.
+`atan2(rx / ry * dy, dx)` of the point's coordinates in the ellipse's frame (x the unit x-axis,
+y the y-axis made orthogonal to it), moved by whole periods to lie within 180 degrees of the
+domain's start. That is why two of the angles are just below a start of 0. It was computed in
+Python from the case's inputs, apart from the kernel.
 
 | Case | Entry | Domain | Was (C++ rule) | Now | Closed form |
 |---|---|---|---|---|---|
@@ -28,8 +29,9 @@ whole move (1.9e-5, 3.7e-6 and 3.3e-6 degrees). In `gen0855` the point lies insi
 3.7e-6 degrees past its start. `atan2`'s [0, 360) put it at the top of the period, and the C++
 rule then moved it to the start. In the other two cases the point lies that far before the start,
 within the containment tolerance. Each entry accounts for its block's whole change: one entry
-changed by d, at index j, moves the three sums by d, |d| and (j + 1) d, which is the change
-recorded.
+changed from `old` to `old + d`, at index j, moves the three sums by d, |old + d| - |old| and
+(j + 1) d, which is the change recorded. For `gen0042` and `gen1601` the old value is 0, so the
+absolute sum grows by |d|. In `gen0855` the negative angle moves towards 0, so it shrinks by 3.7e-6.
 
 ## `query.face_p3` `adv_sec_b8_e2_m0_f1e-09_c2_t0.0_0.0`: why it now reaches the query
 
@@ -43,10 +45,9 @@ that crossing to the face's UV corner (0, 0).
   < 1e-9`) rejected the case. None of the face or edge-use checks in `sector_setup` was involved.
 - **Now.** `DropPoint` returns (0, 1.5307338653379647e-8). That v is the crossing's edge
   parameter to 1.4e-15. The line is 1.53e-8 long, and the case reaches `sector_classify_curve_on`.
-- **The sector `[1, 1, 5]`.** The query's step-off distance starts at the intersection tolerance
-  of the zone tolerances (edge 0, curve 1.0). That is far longer than this 1.53e-8 line, so the
-  step runs off the curve on its first round. The query reports that with possible problem 1 and
-  `ClassifyProblem::ShortInterval` (5), the code for "the curve interval is shorter than the
-  step-off". This half of the result follows from the line's length. The inside flag that comes
+- **The sector `[1, 1, 5]`.** Possible problem 1 and `ClassifyProblem::ShortInterval` (5) mean a
+  step along the curve ran off its end (the step was clamped). The query's step-off distance is
+  built from the zone tolerances (edge 0, curve 1.0), and the curve is short (1.53e-8 in UV).
+  Which round clamped, and the step's length in 3D, were not traced. The inside flag that comes
   with it is marked doubtful by the query itself (the line lies along the face's u = 0 side), and
   it is not checked here against an independent classification.
