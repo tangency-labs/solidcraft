@@ -73,6 +73,13 @@ fn helix_profile(
         lp.segs.iter().flat_map(|s| (0..8).map(move |i| s.point_at(i as f64 / 8.0))).map(|q| (plane.to_world(q) - axis_origin).dot(k)).collect();
     let extent = along.iter().cloned().fold(f64::NEG_INFINITY, f64::max) - along.iter().cloned().fold(f64::INFINITY, f64::min);
     if turns > 1.0 && pitch.abs() <= extent {
+        // A section exactly one pitch wide makes neighbouring turns share a face, which a single solid cannot hold yet.
+        if (pitch.abs() - extent).abs() <= 1e-6 * extent.max(1.0) {
+            return Err(KernelError::Invalid(format!(
+                "the coil runs into itself: neighbouring turns touch because the pitch equals the section ({extent:.3} mm); make the section slightly smaller than the pitch, for example {:.3} mm",
+                extent * 0.99
+            )));
+        }
         return Err(KernelError::Invalid(format!("the coil runs into itself: the pitch must exceed the section ({extent:.3} mm)")));
     }
     Ok((k, profile))

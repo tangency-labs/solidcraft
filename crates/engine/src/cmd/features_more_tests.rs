@@ -2410,6 +2410,9 @@ fn a_sketch_coil_refuses_profiles_it_cannot_sweep() {
     run(&mut s, "sketch.finish", json!({}));
     let e = s.execute("solid.coil", &json!({"sketch": "Section", "revolutions": 3, "pitch": 0.5})).unwrap_err().to_string();
     assert!(e.contains("runs into itself"), "{e}");
+    // A section exactly one pitch wide is named as touching turns, with the way out, not as a bad profile (#14490).
+    let e = s.execute("solid.coil", &json!({"sketch": "Section", "revolutions": 3, "pitch": 1})).unwrap_err().to_string();
+    assert!(e.contains("turns touch") && e.contains("slightly smaller"), "{e}");
 }
 
 #[test]
