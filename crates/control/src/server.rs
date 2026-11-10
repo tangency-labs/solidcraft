@@ -94,28 +94,101 @@ impl Hub {
     /// on it). A listener that is not on a loopback address is refused: the channel never goes on
     /// the network.
     pub fn listen(self: &Arc<Self>, listener: TcpListener, token: String, requests: Sender<ControlRequest>, patient: bool) -> std::io::Result<()> {
+        self.listen_stoppable(listener, token, requests, patient).map(drop)
+    }
+
+    /// [`Hub::listen`], and a [`Stop`] that closes the listener and the connections it accepted
+    /// (a channel turned off in the app's settings). Dropping the [`Stop`] leaves it serving.
+    pub fn listen_stoppable(
+        self: &Arc<Self>,
+        listener: TcpListener,
+        token: String,
+        requests: Sender<ControlRequest>,
+        patient: bool,
+    ) -> std::io::Result<Stop> {
         let addr = listener.local_addr()?;
         if !addr.ip().is_loopback() {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("the control channel listens on loopback only, not {addr}")));
         }
         let hub = Arc::clone(self);
         let token = Arc::new(token);
+        let shared = Arc::new(Accepted::default());
+        let (closed_tx, closed) = channel::<()>();
+        let stop = Stop { addr, shared: Arc::clone(&shared), closed };
         std::thread::spawn(move || {
+            // Dropped when this thread ends, with the listener: `Stop::stop` waits for that.
+            let _closed = closed_tx;
             for stream in listener.incoming().flatten() {
+                if shared.stopped.load(Ordering::SeqCst) {
+                    break;
+                }
                 if hub.open.fetch_add(1, Ordering::Relaxed) >= MAX_CONNECTIONS {
                     hub.open.fetch_sub(1, Ordering::Relaxed);
                     let mut refused = stream;
                     let _ = send(&mut refused, &json!({"ok": false, "error": "too many connections"}));
                     continue;
                 }
-                let (hub, tx, token) = (Arc::clone(&hub), requests.clone(), Arc::clone(&token));
+                let id = shared.next.fetch_add(1, Ordering::Relaxed);
+                if let Ok(copy) = stream.try_clone() {
+                    shared.lock().push((id, copy));
+                }
+                // Stopped while this one was being accepted: it is closed with the rest.
+                if shared.stopped.load(Ordering::SeqCst) {
+                    shared.close_all();
+                }
+                let (hub, tx, token, shared) = (Arc::clone(&hub), requests.clone(), Arc::clone(&token), Arc::clone(&shared));
                 std::thread::spawn(move || {
                     hub.serve(stream, &token, tx, patient);
                     hub.open.fetch_sub(1, Ordering::Relaxed);
+                    shared.lock().retain(|(i, _)| *i != id);
                 });
             }
         });
-        Ok(())
+        Ok(stop)
+    }
+}
+
+/// The connections a stoppable listener accepted, so stopping it can close them too.
+#[derive(Default)]
+struct Accepted {
+    stopped: AtomicBool,
+    next: AtomicU64,
+    streams: Mutex<Vec<(u64, TcpStream)>>,
+}
+
+impl Accepted {
+    fn lock(&self) -> MutexGuard<'_, Vec<(u64, TcpStream)>> {
+        self.streams.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn close_all(&self) {
+        for (_, stream) in self.lock().drain(..) {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+        }
+    }
+}
+
+/// Stops a listener started with [`Hub::listen_stoppable`].
+pub struct Stop {
+    addr: std::net::SocketAddr,
+    shared: Arc<Accepted>,
+    closed: Receiver<()>,
+}
+
+impl Stop {
+    /// The port the listener is on.
+    pub fn port(&self) -> u16 {
+        self.addr.port()
+    }
+
+    /// Stop accepting, close the port and end every connection it accepted. Returns once the
+    /// port is closed (at most a couple of seconds), so the same port can be bound again at once.
+    pub fn stop(self) {
+        self.shared.stopped.store(true, Ordering::SeqCst);
+        // The listener waits in `accept`: a connection of our own wakes it to see the flag.
+        let _ = TcpStream::connect_timeout(&self.addr, Duration::from_secs(1));
+        let _ = self.closed.recv_timeout(Duration::from_secs(2));
+        self.shared.close_all();
     }
 }
 
@@ -1153,5 +1226,36 @@ mod tests {
         assert_eq!(out.writes, 1);
         assert_eq!(out.bytes.last(), Some(&b'\n'));
         assert_eq!(serde_json::from_slice::<Value>(&out.bytes).unwrap(), reply);
+    }
+
+    /// A stopped listener frees its port at once and ends the connections it had, so a channel
+    /// turned off in the settings leaves nothing listening and can be turned on again on the
+    /// same port.
+    #[test]
+    fn a_stopped_listener_closes_its_port_and_its_connections() {
+        use std::io::Read;
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (tx, _rx) = channel();
+        let stop = hub(Waits::default(), &DOCUMENT_WATCH).listen_stoppable(listener, "0123456789abcdef0123456789abcdef".into(), tx, false).unwrap();
+        assert_eq!(stop.port(), port);
+        let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(4))).unwrap();
+        // Wait until the server holds the connection, so stopping has one to close.
+        let held = Instant::now();
+        while stop.shared.lock().is_empty() && held.elapsed() < Duration::from_secs(4) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let started = Instant::now();
+        stop.stop();
+        let mut byte = [0u8; 1];
+        match client.read(&mut byte) {
+            Ok(n) => assert_eq!(n, 0, "the connection ends"),
+            Err(e) => {
+                assert!(!matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut), "the connection ends, not waits: {e}")
+            }
+        }
+        assert!(started.elapsed() < Duration::from_secs(3), "before the token wait runs out");
+        assert!(TcpListener::bind(("127.0.0.1", port)).is_ok(), "the port is free again");
     }
 }

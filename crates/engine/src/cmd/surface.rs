@@ -16,7 +16,8 @@ use super::features::{add_feature, axis_param, check_expr, extent_param, feature
 use crate::params::{bad, bool_, expr, num, str_, string_list, vec3};
 use crate::schema::features::{FeatureResult, SurfaceSweepParams};
 use crate::schema::surface::{
-    FairParams, OffsetParams, ReverseNormalParams, StitchParams, SurfaceExtendParams, SurfaceTrimParams, ThickenParams, UnstitchParams, UntrimParams,
+    FairParams, OffsetParams, ReverseNormalParams, StitchParams, SurfaceExtendParams, SurfaceLoftParams, SurfaceTrimParams, ThickenParams,
+    UnstitchParams, UntrimParams,
 };
 use crate::schema::surface_blend::BlendParams;
 use crate::schema::{TypedContract, output_schema_for};
@@ -32,6 +33,7 @@ const FAIR_CONTRACT: TypedContract<FairParams> = TypedContract::new();
 const SURFACE_EXTEND_CONTRACT: TypedContract<SurfaceExtendParams> = TypedContract::new();
 const SURFACE_TRIM_CONTRACT: TypedContract<SurfaceTrimParams> = TypedContract::new();
 const SURFACE_SWEEP_CONTRACT: TypedContract<SurfaceSweepParams> = TypedContract::new();
+const SURFACE_LOFT_CONTRACT: TypedContract<SurfaceLoftParams> = TypedContract::new();
 const BLEND_CONTRACT: TypedContract<BlendParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
@@ -77,9 +79,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SURFACE_SWEEP_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("sketch?: id|name; curves?: [curve ids] and/or profiles? (as surface.extrude); path_sketch: sketch; path: [curve ids in order] (a path with corners, or 3D curves, gives ruled walls mitred at the corners); orientation?, twist?, scale?, rails?, rail_fit? (as solid.sweep); name?, body_name? (a surface body, no caps)"),
-    CommandSpec::new("surface.loft", "Surface Loft", surface_loft)
+    CommandSpec::new("surface.loft", "Surface Loft", crate::checked!("surface.loft", surface_loft))
         .at("SURFACE", "CREATE")
         .icon("surface_loft")
+        .contract(&SURFACE_LOFT_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("sections: [{sketch, curves?: [curve ids], profiles?} | {body, edges: [[x,y,z]]}] (2…50 in order; each one chain: a profile without holes, or curves meeting end to end; all open or all closed; a body edge chain takes the face the chain bounds as the surface the end repeats); continuity?: [g0|g1|g2|g3, g0|g1|g2|g3] (each end, default g0: how much of the surface at the first and last section the loft repeats — the tangent plane, the curvature, or how that curvature changes); crown?: [number, number] (default 0: how full each end leaves, -0.9 flattest to 3 fullest); rails?, rail_fit? (as solid.loft; sketch sections only, both ends g0); name?, body_name? (a surface body: ruled between two sections, smooth through three or more; no caps)"),
     CommandSpec::new("surface.offset", "Offset Surface", crate::checked!("surface.offset", offset))
         .at("SURFACE", "CREATE")

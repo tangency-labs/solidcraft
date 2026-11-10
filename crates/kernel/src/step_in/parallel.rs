@@ -99,7 +99,7 @@ fn placed(body: &Body, m: &M4) -> crate::Result<Body> {
 /// refuses fails with the reason ([`surface_part`] then imports what it can of it).
 pub(super) fn smlib_part(ex: &Exchange, item: u64, units: Units) -> std::result::Result<(Part, Vec<Note>), Failure> {
     let solid = solidcraft_profile::scope("import", "step.read_solid", || {
-        solidcraft_step::topology::read_solid_with(ex, item, units, &solidcraft_smlib::pcurves::SmlibTrims)
+        solidcore_step::topology::read_solid_with(ex, item, units, &solidcraft_smlib::pcurves::SmlibTrims)
     })
     .map_err(|msg| Failure { read: true, msg })?;
     let part = solid_part(&solid)?;
@@ -112,7 +112,7 @@ pub(super) fn smlib_part(ex: &Exchange, item: u64, units: Units) -> std::result:
 /// normal, so a sheet whose file uses some faces the other way is given to SMLib with those faces
 /// turned over (exactly, on the record) and they are turned back on SMLib's body: the body faces
 /// as the file does, and each of its faces is known to be the record's face it was.
-fn solid_part(solid: &solidcraft_step::topology::Solid) -> std::result::Result<Part, Failure> {
+fn solid_part(solid: &solidcore_step::topology::Solid) -> std::result::Result<Part, Failure> {
     let failed = |e: KernelError| Failure { read: false, msg: e.to_string().trim_start_matches("the operation failed: ").to_string() };
     let r = &solid.brep;
     let mut reversed = vec![false; r.faces.len()];
@@ -243,7 +243,7 @@ const MAX_LEFT_OUT_ROUNDS: usize = 8;
 
 /// A solid the reader or SMLib refuses, imported as an open surface body of its exact faces, the
 /// faces that make it refused left out and named in the notes; `refused` says why the solid was.
-/// Each face is read on its own first ([`solidcraft_step::topology::read_faces_with`]); then:
+/// Each face is read on its own first ([`solidcore_step::topology::read_faces_with`]); then:
 /// 1. the solid is read again without the faces that cannot be read alone and the face the
 ///    refusal names, as one sheet whose faces share their edges as the file has them, and made
 ///    by SMLib; a refusal of that naming another face of the solid leaves it out too (up to
@@ -256,7 +256,7 @@ const MAX_LEFT_OUT_ROUNDS: usize = 8;
 fn surface_part(ex: &Exchange, item: u64, units: Units, refused: Failure) -> std::result::Result<(Part, Vec<Note>), Failure> {
     let _span = solidcraft_profile::span("import", "step.refused_surfaces");
     let trims = &solidcraft_smlib::pcurves::SmlibTrims;
-    let Ok(faces) = solidcraft_step::topology::read_faces_with(ex, item, units, trims) else { return Err(refused) };
+    let Ok(faces) = solidcore_step::topology::read_faces_with(ex, item, units, trims) else { return Err(refused) };
     let of_solid: std::collections::HashSet<u64> = faces.iter().map(|f| f.face).collect();
     // The faces left out, each with the refusal that names it, in the order they were found.
     let mut left_out: Vec<(u64, String)> = faces.iter().filter_map(|f| f.record.as_ref().err().map(|m| (f.face, m.clone()))).collect();
@@ -264,7 +264,7 @@ fn surface_part(ex: &Exchange, item: u64, units: Units, refused: Failure) -> std
     let mut rounds = 0;
     loop {
         // The face the last refusal names, if it is one of the solid's still in, is left out too.
-        let named = solidcraft_step::topology::named_face(&why).filter(|f| of_solid.contains(f) && !left_out.iter().any(|(g, _)| g == f));
+        let named = solidcore_step::topology::named_face(&why).filter(|f| of_solid.contains(f) && !left_out.iter().any(|(g, _)| g == f));
         match named {
             Some(f) => left_out.push((f, why.clone())),
             None if rounds > 0 => break,
@@ -276,7 +276,7 @@ fn surface_part(ex: &Exchange, item: u64, units: Units, refused: Failure) -> std
         rounds += 1;
         let skip: std::collections::HashSet<u64> = left_out.iter().map(|(f, _)| *f).collect();
         let read =
-            solidcraft_profile::scope("import", "step.read_without", || solidcraft_step::topology::read_solid_without(ex, item, units, trims, &skip));
+            solidcraft_profile::scope("import", "step.read_without", || solidcore_step::topology::read_solid_without(ex, item, units, trims, &skip));
         match read
             .map_err(|msg| Failure { read: true, msg })
             .and_then(|solid| Ok((solid_part(&solid)?, solid.notes.into_iter().map(Note::Repaired).collect::<Vec<_>>())))

@@ -347,6 +347,72 @@ fn a_variable_round_runs_from_its_start() {
     assert!(rel(volume(&b), ABC) < 1e-12);
 }
 
+/// #14405: a variable round's definition net is certified on wide pieces. Over a piece of
+/// the round the touch circle's rows are bounded by Taylor models in s as well as by
+/// interval series, which take the rails and the ball's centre (they move together) as
+/// independent ranges: with those alone the circle proved only on pieces some hundredths of
+/// the round long, and this round took 113 span certificates and 8,592 enclosures (about
+/// 10 s at opt 3), its net 23 inner knots along the round; now 3 and 66 (0.6 s), and 1.
+/// The net is the balls' envelope within its certified bound wherever sampled (its distance
+/// from the law's balls, measured without the certificate: 1.6e-14, the bound 3.2e-6), and
+/// the body is sound.
+#[test]
+fn a_variable_round_s_net_is_certified_on_wide_pieces() {
+    all_fixes();
+    let b = make_box([0.0; 3], [10.0, 20.0, 30.0]).unwrap();
+    let (from, middle) = ([10.0, 0.0, 30.0], [10.0, 10.0, 30.0]);
+    let e = edge_at(&b, middle);
+    let start = vertex_at(&b, from);
+    fillet_variable(&b, e, start, 1, &[0.0, 0.0, 1.0, 1.0], &[2.0, 5.0]).unwrap();
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    let (_, made) = kernel_copy(&b);
+    // the ball of radius 2 at the start touches the faces x = 10 and z = 30
+    let balls = LawPieces::new(from, middle, [[10.0, 0.0, 28.0], [8.0, 0.0, 30.0]], 2.0);
+    let mut rounds = 0;
+    for &f in made.face_list() {
+        let s = made.face(f).unwrap().surface.as_ref().unwrap();
+        let Some(round @ BlendRef::Procedural(pb)) = s.procedural_blend() else {
+            continue;
+        };
+        rounds += 1;
+        let net = pb.net();
+        let d = net.natural_uv_domain();
+        let (_, _, swapped) = pb.definition_map();
+        let nurb = net.gw_nurb().unwrap();
+        let (knots, lo, hi) = if swapped {
+            (nurb.v_knots(), d.min().y, d.max().y)
+        } else {
+            (nurb.u_knots(), d.min().x, d.max().x)
+        };
+        let mut inner: Vec<f64> = knots
+            .iter()
+            .copied()
+            .filter(|&x| x > lo && x < hi)
+            .collect();
+        inner.dedup();
+        let bound = round.bound();
+        let mut worst = 0.0_f64;
+        for i in 0..=80 {
+            for j in 0..=8 {
+                let (a, c) = (f64::from(i) / 80.0, f64::from(j) / 8.0);
+                let uv = Point2::new(
+                    d.min().x + a * (d.max().x - d.min().x),
+                    d.min().y + c * (d.max().y - d.min().y),
+                );
+                let p = net.evaluate_point(uv).unwrap();
+                worst = worst.max(balls.off(p, |y| 2.0 + 3.0 * y));
+            }
+        }
+        eprintln!(
+            "{} inner knots, bound {bound:e}, off the balls {worst:e}",
+            inner.len()
+        );
+        assert!(inner.len() <= 2, "{} inner knots", inner.len());
+        assert!(worst <= bound, "{worst} over {bound}");
+    }
+    assert_eq!(rounds, 1);
+}
+
 /// A law with a corner rounds its edge as the union of its balls (`docs/generic-blend.md` §3.2,
 /// "Corners in a radius law"): at a peak the two sides' rounds cross and end on their crossing,
 /// at a dip the corner ball's zone lies between them. Each removes its balls' union, integrated

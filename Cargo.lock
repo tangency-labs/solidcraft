@@ -4235,6 +4235,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcore-step"
+version = "0.1.0"
+dependencies = [
+ "solidcore",
+ "solidcore-convert",
+ "solidcore-ops",
+ "solidcore-record",
+]
+
+[[package]]
 name = "solidcore-tess"
 version = "0.1.0"
 dependencies = [
@@ -4275,6 +4285,7 @@ dependencies = [
  "solidcraft-control",
  "solidcraft-engine",
  "solidcraft-gpu",
+ "solidcraft-look",
  "solidcraft-space-mouse",
  "solidcraft-theme",
  "solidcraft-ui-egui",
@@ -4477,14 +4488,26 @@ dependencies = [
  "serde_json",
  "solidcore-ops",
  "solidcore-record",
+ "solidcore-step",
  "solidcore-tess",
  "solidcraft-geom",
  "solidcraft-profile",
  "solidcraft-smlib",
- "solidcraft-step",
  "spade",
  "thiserror 2.0.21",
  "web-time",
+]
+
+[[package]]
+name = "solidcraft-look"
+version = "0.40.0-rc.3"
+dependencies = [
+ "egui",
+ "log",
+ "solidcraft-theme",
+ "solidcraft-ui-kit",
+ "tiny-skia",
+ "toml",
 ]
 
 [[package]]
@@ -4575,16 +4598,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "solidcraft-step"
-version = "0.40.0-rc.3"
-dependencies = [
- "solidcore-ops",
- "solidcore-record",
- "solidcraft-geom",
- "solidcraft-profile",
-]
-
-[[package]]
 name = "solidcraft-testkit"
 version = "0.40.0-rc.3"
 
@@ -4623,6 +4636,7 @@ dependencies = [
  "solidcraft-control-egui",
  "solidcraft-engine",
  "solidcraft-gpu",
+ "solidcraft-look",
  "solidcraft-space-mouse",
  "solidcraft-theme",
  "solidcraft-ui-kit",
@@ -4633,7 +4647,6 @@ dependencies = [
  "solidcraft-viewport-gpu",
  "syn 2.0.119",
  "tiny-skia",
- "toml",
  "ttf-parser",
  "web-time",
  "winreg",
@@ -4731,6 +4744,7 @@ dependencies = [
  "serde_json",
  "solidcraft-control",
  "solidcraft-engine",
+ "solidcraft-look",
  "solidcraft-ui-egui",
  "solidcraft-ui-text",
  "url",

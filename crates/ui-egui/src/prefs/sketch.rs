@@ -241,6 +241,29 @@ fn drawing(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::ui_kit::settings_search::commit_search_child(ui, &child, before);
         }
         dimension_values(app, ui, t.space_24 * 8.0 + t.space_8);
+        sketch_size(app, ui, t.space_24 * 8.0 + t.space_8);
+    });
+}
+
+/// The most points or curves one sketch holds (#10874): a dense SVG or DXF drawing needs more
+/// than the default.
+fn sketch_size(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
+    use solidcraft_engine::sketch::limits::{CEILING_POINTS, DEFAULT_POINTS};
+    let label = app.tr("prefs.sketch.max_points").to_string();
+    let unit = app.tr("prefs.sketch.max_points_unit").to_string();
+    ui_kit::settings_block_hint(ui, &label, app.tr("prefs.sketch.max_points_note"), label_width, |ui| {
+        ui.horizontal(|ui| {
+            let t = Tokens::get();
+            ui.spacing_mut().item_spacing.x = t.space_4;
+            let field = ui
+                .scope(|ui| {
+                    ui.spacing_mut().interact_size.x = t.space_24 * 3.0;
+                    ui_kit::number_field(ui, &mut app.preferences.max_sketch_points, DEFAULT_POINTS..=CEILING_POINTS, 100.0, "")
+                })
+                .inner;
+            crate::scenario::publish_rect("prefs:max_sketch_points", field.rect);
+            ui_kit::settings_inline_note(ui, &unit);
+        });
     });
 }
 
@@ -390,6 +413,11 @@ fn marks(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
         });
+        // Larger constraint glyphs, readable at any zoom (#10794).
+        let label_width = ui_kit::ContentWidth::label(ui, app.tr("prefs.constraint_glyph_size"));
+        ui_kit::settings_form(ui, label_width, |ui| {
+            setting::constraint_glyph_scale(app, ui).backing_on_hover_text(app.tr("prefs.constraint_glyph_size_note"));
+        });
     });
 }
 
@@ -470,6 +498,13 @@ fn selecting(app: &mut SolveApp, ui: &mut egui::Ui) {
             "prefs.select_hidden_edges",
             Some("prefs.select_hidden_edges_help"),
             &mut app.preferences.select_hidden_edges,
+        );
+        check(
+            ui,
+            "select_3d_curve_points",
+            "prefs.sketch.select_3d_curve_points",
+            Some("prefs.sketch.select_3d_curve_points_help"),
+            &mut app.preferences.select_3d_curve_points,
         );
         check(
             ui,
@@ -586,11 +621,11 @@ fn dimension_values(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
                 ui_kit::settings_control_width(ui, t.form_label_width, |ui| {
                     let p = &mut app.preferences;
                     ui_kit::bounded_length_field(ui, &mut p.dimension_step_mm, &units, decimals, DIMENSION_STEP_MM, 0.1)
-                        .on_hover_text(solidcraft_ui_text::tr("prefs.dimension_step_length"));
+                        .backing_on_hover_text(solidcraft_ui_text::tr("prefs.dimension_step_length"));
                 });
                 ui_kit::settings_control_width(ui, t.form_label_width, |ui| {
                     ui_kit::number_field(ui, &mut app.preferences.dimension_step_deg, DIMENSION_STEP_DEG, 0.1, "°")
-                        .on_hover_text(solidcraft_ui_text::tr("prefs.dimension_step_angle"));
+                        .backing_on_hover_text(solidcraft_ui_text::tr("prefs.dimension_step_angle"));
                 });
             });
         });

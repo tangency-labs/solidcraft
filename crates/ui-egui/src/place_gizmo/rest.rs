@@ -3,7 +3,7 @@
 
 use solidcore_record::Vec3;
 
-use super::{Spec, Turn, angle_of, circle, dir_at, len, pt, pulled, rect, vec3_of};
+use super::{PlaceSource, Spec, Turn, angle_of, circle, dir_at, len, pt, pulled, rect, vec3_of};
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
 use crate::dialogs_plastic::Pl;
@@ -14,8 +14,7 @@ pub(super) static SPEC: Spec = Spec {
     snap_commands: &["plastic.rest"],
     move_tip: "Drag to move the rest across the model. It snaps to sketch points on the face.",
     many: false,
-    places: |app, d| super::one(crate::dialogs_plastic::handle_frame(app, d)),
-    move_to: |app, d, hits, _| crate::dialogs_plastic::handle_move(app, d, hits),
+    place: PlaceSource::Input(0),
     click: None,
     footprint,
     freedom: super::anywhere,

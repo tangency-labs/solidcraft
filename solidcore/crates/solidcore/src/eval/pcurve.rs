@@ -8,8 +8,9 @@
 //! control points mapped); a circle about the axis of a cylinder, cone, sphere or torus (v
 //! constant, u the circle's angle plus a constant, or minus it where the circle turns the other
 //! way); a line along a ruling of a cylinder or cone (u constant, v linear). Each exact pcurve is
-//! checked by lifting it; anything else, and any exact one that misses, is a cubic B-spline fitted
-//! within the tolerance, never a polyline.
+//! checked by lifting it. On a spline face, a straight (u, v) line is taken where it lifts onto
+//! the edge within the tolerance. Anything else, and any exact one that misses, is refused
+//! (`Failed`, "no exact pcurve"): nothing is fitted.
 //!
 //! Periodic parameters are unwrapped along each curve, and each loop's uses are moved by whole
 //! periods so every use starts where the one before it ends: a seam edge used twice gets two
@@ -952,7 +953,7 @@ fn basis(knots: &[f64], p: usize, span: usize, t: f64) -> Option<Vec<f64>> {
 /// Whether `uv` is at a pole along each direction, or within `reach` of one, by the surface's
 /// speeds there: a speed below 10⁻⁹ of the other's, or one that moves the point no more than
 /// `reach` over half the period (or the whole range) of its parameter.
-pub(crate) fn pole_by_speed(s: &SurfaceEval, dom: &Domain, uv: [f64; 2], reach: f64) -> [bool; 2] {
+pub fn pole_by_speed(s: &SurfaceEval, dom: &Domain, uv: [f64; 2], reach: f64) -> [bool; 2] {
     let Some((_, su, sv)) = s.derivs(uv[0], uv[1]) else {
         return [false; 2];
     };
@@ -1052,7 +1053,10 @@ fn insert_knot(
 /// sub-interval of its domain, as a clamped B-spline whose domain is exactly `[a, b]`: Boehm
 /// insertion of `a` and `b` until each has multiplicity `p` (NURBS Book §5.3), then the knots and
 /// control points between them.
-fn segment(
+///
+/// # Errors
+/// Counts that do not match the degree, an interval outside the domain, or too many knots.
+pub fn segment(
     p: usize,
     knots: &[f64],
     ctrl: &[[f64; 4]],

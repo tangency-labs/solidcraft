@@ -285,6 +285,12 @@ pub struct ViewportState {
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Hit {
+    /// A drawn wire's fit/control node, in world coordinates; never a planar solver point.
+    SketchPoint3d {
+        sketch: u64,
+        id: String,
+        at: Vec3,
+    },
     SketchPoint {
         sketch: u64,
         id: String,
@@ -2595,6 +2601,13 @@ fn measuring_mesh_edges(app: &SolveApp) -> bool {
     app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Measure { .. }))
 }
 
+/// Unsupported dialogs must not let wire nodes displace usable planar point hits.
+/// The same policy participates in the pick cache when the active dialog changes.
+fn picking_3d_curve_points(app: &SolveApp) -> bool {
+    app.preferences.select_3d_curve_points
+        && app.dialog.as_ref().is_none_or(|d| matches!(d.kind, crate::dialogs::Kind::OffsetPlane { .. } | crate::dialogs::Kind::Construct { .. }))
+}
+
 fn edge_pickable(app: &SolveApp, mesh: &solidcraft_engine::geom::Mesh, index: usize) -> bool {
     mesh.edge_pickable(index) || (measuring_mesh_edges(app) && mesh.display_only_edges && mesh.edge_visible(index))
 }
@@ -2618,6 +2631,7 @@ pub(crate) fn pick_cached(app: &mut SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit
     app.preferences.prefer_free_sketch_points.hash(&mut h);
     app.preferences.select_hidden_edges.hash(&mut h);
     app.ui.visual_style.hash(&mut h);
+    picking_3d_curve_points(app).hash(&mut h);
     app.viewport.woken_centre.hash(&mut h);
     crate::sketch3d::drawing(app).hash(&mut h);
     app.dialog.as_ref().and_then(|d| d.active_input()).map(|i| i.accept).hash(&mut h);
@@ -2702,6 +2716,7 @@ pub fn same_target(a: &Hit, b: &Hit) -> bool {
     match (a, b) {
         (Hit::SketchMidpoint { sketch: s, id: i, .. }, Hit::SketchMidpoint { sketch: t, id: j, .. })
         | (Hit::SketchPoint { sketch: s, id: i, .. }, Hit::SketchPoint { sketch: t, id: j, .. })
+        | (Hit::SketchPoint3d { sketch: s, id: i, .. }, Hit::SketchPoint3d { sketch: t, id: j, .. })
         | (Hit::SketchCurve { sketch: s, id: i, .. }, Hit::SketchCurve { sketch: t, id: j, .. }) => s == t && i == j,
         (Hit::Vertex { body: a, point: p }, Hit::Vertex { body: b, point: q }) => a == b && p.dist(*q) < 1e-9,
         (Hit::Edge { body: a, index: i, .. }, Hit::Edge { body: b, index: j, .. })
@@ -2836,6 +2851,19 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
         let sid = ss.feature;
         let shown = snapping.then(|| crate::dialogs::SnapPoints::of(&ss.sketch));
         let visible = solidcraft_engine::view::SketchPointVisibility::new(&ss.sketch);
+        if picking_3d_curve_points(app) && !ss.sketch.view.hide_points {
+            for wire in &ss.sketch.wires {
+                for (index, at) in wire.fit.iter().enumerate() {
+                    if let Some(sp) = proj.to_screen(*at) {
+                        let dd = sp.distance(pos) - if s.active_sketch == Some(sid) { 2.0 } else { 0.0 };
+                        let rank = (dd, false);
+                        if dd < 8.0 && best.wants(rank) {
+                            best.offer(rank, Hit::SketchPoint3d { sketch: sid, id: format!("{}:{index}", wire.id), at: *at });
+                        }
+                    }
+                }
+            }
+        }
         for (p, locked) in ss.sketch.points.iter().zip(ss.sketch.locked_points()) {
             if !visible.takes(p) || shown.as_ref().is_some_and(|f| !f.takes(p)) {
                 continue;
@@ -3513,6 +3541,7 @@ const AXIS_LEN: f64 = 1.8;
 /// The hit as a plain selection (no command filter).
 pub fn hit_sel(h: &Hit) -> Option<Sel> {
     Some(match h {
+        Hit::SketchPoint3d { sketch, id, .. } => Sel::SketchPoint { id: format!("{sketch}:{id}") },
         Hit::SketchMidpoint { id, .. } => Sel::SketchMidpoint { id: id.clone() },
         Hit::SketchPoint { id, .. } => Sel::SketchPoint { id: id.clone() },
         Hit::SketchCurve { id, .. } => Sel::SketchCurve { id: id.clone(), sketch: None },
@@ -3630,7 +3659,7 @@ fn pick_allowed(app: &SolveApp, h: &Hit) -> bool {
     let off = |k: &str| app.ui.pick_off.iter().any(|x| x == k);
     match h {
         Hit::SketchCurve { .. } => !off("sketch") && !off("sketch_curves"),
-        Hit::SketchPoint { .. } | Hit::SketchMidpoint { .. } => !off("sketch") && !off("sketch_points"),
+        Hit::SketchPoint { .. } | Hit::SketchPoint3d { .. } | Hit::SketchMidpoint { .. } => !off("sketch") && !off("sketch_points"),
         Hit::Profile { .. } => !off("sketch"),
         Hit::Vertex { .. } => !off("vertices") && !app.ui.pick_bodies && !app.ui.pick_components,
         Hit::Edge { .. } => !off("edges") && !app.ui.pick_bodies && !app.ui.pick_components,
@@ -3704,7 +3733,8 @@ pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
     let Some(mut d) = app.dialog.take() else { return };
     // With several holes on a face (Preferences), a Single hole's pick adds a hole or takes one
     // out; with holes moving by clicking, a Single hole picked again on its face moves there.
-    let picked = if crate::hole_place::pick_several(app, &mut d, &sel) {
+    // With Placement handles on, a Cylinder held by one reference edge moves along it on a pick.
+    let picked = if crate::place_gizmo::pick_held(app, &mut d, &sel) || crate::hole_place::pick_several(app, &mut d, &sel) {
         crate::hole_place::PickMove::Moved
     } else if app.preferences.hole_moves {
         crate::hole_place::pick_moves(&mut d, &app.session, &sel)
@@ -5250,7 +5280,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             } else if app.tool.is_some() {
                 crate::tools::on_click(app, &proj, p, mods.shift);
             } else if app.dialog.as_ref().is_some_and(|d| d.wants_picks()) {
-                if let Some((hit, Some(sel))) = cand {
+                if add && crate::dialogs_move::add_body_click(app, &hits, allow_toggle) {
+                    // Ctrl/Shift+click: one more body for Move, which stays on From, Point or Axis.
+                } else if let Some((hit, Some(sel))) = cand {
                     dialog_pick(app, &hit, sel);
                 } else if let Some(mut dialog) = app.dialog.take() {
                     // A pick field clicked into says what it is for when the click is not one (#10428).
@@ -5697,10 +5729,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     crate::viewport_status::show(app, ui.ctx(), rect);
     crate::viewport_status_fixture::show(app, ui.ctx(), rect);
-    // The notices and the agent chip first, so the 3D mouse picture can keep clear of them.
-    // The selection's measurement in the corner, before the notices so they keep clear of it.
+    // The operations under way first, then the selection's measurement in the corner (clear of
+    // them), then the notices and the agent chip above both, so the 3D mouse picture can keep
+    // clear of them all.
+    crate::operations::show(app, ui, crate::shell::bottom_overlay_rect(app, rect));
     let readout = quick_measure_readout(app, ui, rect);
-    let toasts = transient_messages(app, ui, rect, readout);
+    let mut toasts = transient_messages(app, ui, rect, readout);
+    toasts.extend(app.operations.rect);
     if app.preferences.space_mouse_in_view
         && app.space_mouse.calibrating.is_none()
         && let Some(device) = &app.space_mouse.device
@@ -5787,9 +5822,9 @@ fn agent_chip(app: &mut SolveApp, ui: &egui::Ui, view: Rect, taken: &[Rect]) -> 
         let pos = r.min;
         crate::scenario::publish_rect("agent:chip", r);
         painter.rect_filled(r, t.radius_sm, t.overlay);
-        painter.rect_stroke(r, t.radius_sm, Stroke::new(1.0, crate::icons::pointer::agent()), egui::StrokeKind::Inside);
+        painter.rect_stroke(r, t.radius_sm, Stroke::new(1.0, solidcraft_look::pointer::agent()), egui::StrokeKind::Inside);
         egui::Spinner::new()
-            .color(crate::icons::pointer::agent())
+            .color(solidcraft_look::pointer::agent())
             .size(t.space_12)
             .paint_at(ui, Rect::from_center_size(pos2(r.left() + 13.0, r.center().y), vec2(12.0, 12.0)));
         painter.galley(pos + vec2(26.0, 4.0), galley.clone(), t.text);
@@ -5818,6 +5853,7 @@ fn quick_measure_readout(app: &mut SolveApp, ui: &egui::Ui, viewport: Rect) -> O
     if let Some(layout) = &app.viewport.layout {
         taken.extend([layout.navigation, layout.axis_view]);
     }
+    taken.extend(app.operations.rect);
     let view = crate::shell::content_rect(app, viewport);
     crate::quick_measure::show(app, ui, view, &taken)
 }
@@ -5827,12 +5863,18 @@ fn quick_measure_readout(app: &mut SolveApp, ui: &egui::Ui, viewport: Rect) -> O
 pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Rect, readout: Option<Rect>) -> Vec<Rect> {
     let placement_hint =
         app.tool.as_ref().filter(|tool| matches!(tool.cmd, "canvas.insert" | "canvas.decal")).map(|tool| crate::tools::hint(tool.cmd));
+    // The operations panel shows the work computing, with its Cancel, instead of the computing
+    // toast and the agent's chip — where it has rows and room to draw them. A panel that cannot
+    // fit must not take away the only control the toast and the chip still give.
+    let panel = app.preferences.operations_panel && app.operations.rect.is_some();
+    let computing_since = app.computing_since().filter(|_| !panel);
+    let agent_computing = app.agent_computing().is_some() && !panel;
     // Nothing to show or time: an idle window skips the layout. The offer is checked too, as its clock
     // runs from the frames `due` sees.
     if placement_hint.is_none()
         && app.status.is_none()
-        && app.computing_since().is_none()
-        && app.agent_computing().is_none()
+        && computing_since.is_none()
+        && !agent_computing
         && crate::space_mouse_offer::offerable(app).is_none()
         && !crate::stand_up::note_pending(app)
     {
@@ -5845,6 +5887,7 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
         obstacles.extend([layout.navigation, layout.axis_view]);
     }
     obstacles.extend(readout);
+    obstacles.extend(app.operations.rect);
     let view = crate::shell::content_rect(app, viewport);
     let mut free = crate::viewport_layout::free_rect(view, &obstacles).shrink(t.space_8);
     if ToastPlace::current(ui.ctx()) == ToastPlace::Corner {
@@ -5962,7 +6005,7 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
             app.status = None;
         }
     }
-    if let Some(since) = app.computing_since() {
+    if let Some(since) = computing_since {
         let seconds = ((crate::now_ms() - since) / 1000.0).floor().max(0.0);
         let text = solidcraft_ui_text::format("dialog.computing", &[("seconds", &format!("{seconds:.0}"))]);
         // A history command or a delete's check can be given up on (#8266); a feature edit
@@ -5988,7 +6031,9 @@ pub(crate) fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Re
     // The navigation bar is the chip's anchor, so it doesn't count as something to move past.
     let nav = app.viewport.layout.as_ref().map(|l| l.navigation);
     obstacles.retain(|o| Some(*o) != nav);
-    shown.extend(agent_chip(app, ui, view, &obstacles));
+    if agent_computing {
+        shown.extend(agent_chip(app, ui, view, &obstacles));
+    }
     shown
 }
 
@@ -6879,6 +6924,11 @@ fn hover_highlight(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         !matches!(h, Hit::SketchCurve { sketch, .. } | Hit::SketchMidpoint { sketch, .. } | Hit::SketchPoint { sketch, .. } if previewed == Some(*sketch))
     });
     match hover {
+        Some(Hit::SketchPoint3d { at, .. }) => {
+            if let Some(p) = proj.to_screen(*at) {
+                painter.circle_stroke(p, 6.0, Stroke::new(2.0, col));
+            }
+        }
         // Trim shows the piece it would take away instead (`sketch_tools::preview`, #3052).
         Some(Hit::SketchCurve { sketch, id, .. }) if crate::sketch_tools::trim_hover_piece(app, *sketch, id).is_some() => {}
         Some(Hit::SketchCurve { sketch, id, .. }) => {
@@ -6983,6 +7033,9 @@ pub(crate) fn standalone_points(app: &SolveApp) -> Vec<Vec3> {
         if sk.view.hide_points {
             continue;
         }
+        if app.preferences.select_3d_curve_points {
+            out.extend(sk.wires.iter().flat_map(|wire| wire.fit.iter().copied()));
+        }
         let used: std::collections::HashSet<usize> = sk.curves.iter().flat_map(|c| c.kind.point_ids()).collect();
         let visible = solidcraft_engine::view::SketchPointVisibility::new(sk);
         for (i, p) in sk.points.iter().enumerate().skip(1) {
@@ -7008,6 +7061,18 @@ fn paint_device_pivot(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
 fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let t = Tokens::get();
     let st = crate::open_meshing::shown_world(app);
+    for item in app.session.selection.iter().chain(app.dialog.iter().flat_map(|d| d.inputs.iter().flat_map(|i| i.items.iter()))) {
+        if let Sel::SketchPoint { id } = item
+            && let Some((sketch, point)) = id.split_once(':')
+            && let Ok(sketch) = sketch.parse::<u64>()
+            // Only a drawn wire's node: a planar point's ring is drawn with the sketch's own points.
+            && st.sketch(sketch).is_some_and(|ss| ss.sketch.point_index(point).is_none())
+            && let Some(at) = solidcraft_engine::doc::construct::sketch_point_position(&st, sketch, point)
+            && let Some(pos) = proj.to_screen(at)
+        {
+            painter.circle_stroke(pos, 6.0, Stroke::new(2.0, t.sel_edge));
+        }
+    }
     for item in &app.session.selection {
         if let Sel::ExternalSketchPoint { sketch, id } = item
             && let Some(ss) = st.sketch(*sketch)
@@ -8995,7 +9060,9 @@ mod tests {
             }
             let stored = app.session.visibility.clone();
             let rect = Rect::from_min_size(Pos2::ZERO, vec2(640., 480.));
-            for (position, expected) in [(0, None), (1, sketches.first().copied()), (2, None), (3, sketches.get(1).copied()), (4, None)] {
+            for (position, at_marker) in [(0, None), (1, sketches.first().copied()), (2, None), (3, sketches.get(1).copied()), (4, None)] {
+                // A sketch hidden with its own eye stays hidden at the marker too (#12125).
+                let expected = at_marker.filter(|_| !explicitly_hidden);
                 app.run("timeline.roll_to", json!({"position":position}))?;
                 assert_eq!(visible_sketches(&app), expected.into_iter().collect::<Vec<_>>(), "position {position}, hidden {explicitly_hidden}");
                 let scene = build_sketch_scene(&app, &projection(&app, rect)).merged();

@@ -44,8 +44,10 @@ const UPDATE_TIMEOUT_MS = 20000;
 const COMPLETE = "build-complete";
 /** The entry that marks a build replaced by a newer worker. */
 const RETIRED = "build-retired";
-/** A page remembered this recently may still be loading (not yet listed among the clients). */
-const PAGE_LOADING_MS = 30 * 1000;
+/** A page remembered this recently may still be loading (not yet listed among the clients). A slow
+ * device can take minutes between the launch's answer and the page appearing; a live page's record is
+ * kept for as long as it is listed. */
+const PAGE_LOADING_MS = 10 * 60 * 1000;
 
 const url = (file) => new URL(file, self.registration.scope).href;
 const has = (name, entry) => caches.match(url(entry), { cacheName: name }).then(Boolean);
@@ -102,10 +104,13 @@ async function started(id, build) {
   await (await caches.open(PAGES)).put(pageEntry(id), new Response(record));
 }
 
-/** The build a page started; a page started before it was remembered gets this worker's. */
+/**
+ * The build a page started, or null when it was not remembered. Never this worker's build instead:
+ * after an update that is another build than the page's, and its files would be mixed into the page.
+ */
 async function startedBy(id) {
   const response = id ? await caches.match(pageEntry(id), { cacheName: PAGES }) : null;
-  return response ? (await response.json()).build : CACHE;
+  return response ? (await response.json()).build : null;
 }
 
 /** The builds open pages use (pages closed since are forgotten). */
@@ -148,6 +153,10 @@ self.addEventListener("activate", (event) => {
       }
       await sweep();
       await self.clients.claim();
+      // Pages open when the worker first takes over came from the network, and get their files from it.
+      for (const client of await self.clients.matchAll({ includeUncontrolled: true })) {
+        if (!(await startedBy(client.id).catch(() => null))) await started(client.id, NETWORK).catch(() => {});
+      }
     })(),
   );
 });
@@ -221,7 +230,12 @@ async function launchOrKept(event) {
 
 /** A page's files come from the build it started, else the network. */
 async function asset(event) {
-  const build = await startedBy(event.clientId).catch(() => CACHE);
+  const build = await startedBy(event.clientId).catch(() => null);
+  // A page whose build is not known, or whose build's copy is gone, would get another build's files
+  // (a mixed page that never starts). It fails visibly instead: reloading starts a whole build.
+  if (!build || (build !== NETWORK && !(await caches.has(build)))) {
+    return new Response("This page's version of the app is no longer kept. Reload the page.", { status: 503, headers: { "Content-Type": "text/plain" } });
+  }
   const kept = build === NETWORK ? null : await caches.match(event.request, { cacheName: build, ignoreSearch: true });
   return kept || fetch(event.request);
 }

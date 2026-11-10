@@ -843,18 +843,13 @@ impl Dialog {
         }
     }
 
-    /// The picker for the agent chat's context, holding what is already picked.
-    pub fn chat_context(picked: &[Sel]) -> Dialog {
-        let mut inputs = vec![
+    /// The picker for a pill in the agent chat's message: elements, features and bodies.
+    pub fn chat_context() -> Dialog {
+        let inputs = vec![
             SelInput::new("Elements", FACES | EDGES | selection::VERTICES, true),
             SelInput::new("Features", selection::FEATURES, true),
             SelInput::new("Bodies", BODIES, true),
         ];
-        for sel in picked {
-            if let Some(input) = inputs.iter_mut().find(|i| fits(i.accept, sel)) {
-                input.items.push(sel.clone());
-            }
-        }
         Dialog::new(Kind::ChatContext, inputs)
     }
 
@@ -1163,6 +1158,9 @@ impl Dialog {
         // text it edits, not its path.)
         let preselection: &[Sel] = if matches!(d.kind, Kind::Text(_)) { &[] } else { &s.selection };
         for sel in preselection {
+            if !matches!(d.kind, Kind::OffsetPlane { .. } | Kind::Construct { .. }) && is_wire_point(s, sel) {
+                continue;
+            }
             // A sketch line drawn over a body edge is what a click there picks; a command that
             // takes edges and no sketch curves takes it as that edge (#8927).
             let as_edge = (!d.inputs.iter().any(|i| fits(i.accept, sel)) && d.inputs.iter().any(|i| i.accept & EDGES != 0))
@@ -1243,6 +1241,7 @@ impl Dialog {
                     && (i.multi || i.items.is_empty())
                     && (planar_ok || i.accept & FACES != 0 || !matches!(sel, Sel::Face { .. }))
                     && (i.accept != AXIS_PICKS || takes_as_axis(s, sel))
+                    && !i.rejects(sel)
             };
             if let Some(inp) = d.inputs.iter_mut().find(|i| takes(i)) {
                 if matches!(d.kind, Kind::Fillet { .. }) {
@@ -1502,6 +1501,18 @@ impl Dialog {
         self.inputs.get(self.active)
     }
 
+    /// The chat's picker takes a step or a body clicked in the History or the Browser into the
+    /// list that takes it, whichever list is active (#11318): make that list the active one.
+    /// Other dialogs keep their active input.
+    pub(crate) fn activate_input_taking(&mut self, accept: Accept) {
+        if !matches!(self.kind, Kind::ChatContext) || self.active_input().is_some_and(|i| i.accept & accept != 0) {
+            return;
+        }
+        if let Some(i) = self.inputs.iter().position(|i| i.accept & accept != 0) {
+            self.active = i;
+        }
+    }
+
     /// Whether a round edge kept in `inp` stands for its centre: a construction point's input,
     /// or Move's pivot and points (`dialogs_move::sel_point`). Other point inputs take the
     /// centre as a vertex (`circle_centre_pick`).
@@ -1618,6 +1629,11 @@ impl Dialog {
                 _ => None,
             };
         }
+        // Only construction tools resolve wire-node references. In particular, Hole must
+        // not silently freeze a wire node into a face position or accept an unresolved ID.
+        if matches!(h, Hit::SketchPoint3d { .. }) && !matches!(self.kind, Kind::OffsetPlane { .. } | Kind::Construct { .. }) {
+            return None;
+        }
         // Features are also picked on the canvas: a face stands for the feature that made it.
         if inp.accept == selection::FEATURES {
             return match h {
@@ -1638,6 +1654,9 @@ impl Dialog {
         let sel = inp.accepts(h, s.active_sketch, |body, face| {
             snap.and_then(|f| f.planar(body, face)).unwrap_or_else(|| planar_face(s, body, face).is_some())
         })?;
+        if inp.rejects(&sel) {
+            return None;
+        }
         (inp.accept != AXIS_PICKS || takes_as_axis(s, &sel)).then_some(sel)
     }
 
@@ -1779,6 +1798,9 @@ impl Dialog {
     pub fn pick(&mut self, s: &Session, sel: Sel) {
         self.awaiting_pick = false;
         self.pick_refused = None;
+        if self.active_input().is_some_and(|i| i.rejects(&sel)) {
+            return;
+        }
         if self.take_extrude_target(s, &sel) {
             return;
         }
@@ -1879,6 +1901,9 @@ impl Dialog {
         }
         let mut accepted = false;
         for x in sels {
+            if inp.rejects(&x) {
+                continue;
+            }
             if takes_components {
                 let occ = match x {
                     Sel::Occurrence { path } if !path.is_empty() => Some(Sel::Occurrence { path }),
@@ -2179,6 +2204,15 @@ fn single_hole_point(app: &SolveApp, d: &Dialog, x: &Sel) -> Option<(u64, String
         let p = ss.sketch.points.iter().find(|p| shown.takes(p) && ss.plane.to_world(p.pos).dist(*point) < 1e-9)?;
         Some((sid, p.id.clone()))
     })
+}
+
+/// A selected drawn wire node, distinguished from an ordinary planar sketch point.
+fn is_wire_point(s: &Session, sel: &Sel) -> bool {
+    let Sel::SketchPoint { id } = sel else { return false };
+    let Some((sketch, point)) = id.split_once(':') else { return false };
+    let Ok(sketch) = sketch.parse::<u64>() else { return false };
+    let Some((wire, index)) = point.rsplit_once(':') else { return false };
+    index.parse::<usize>().is_ok() && s.model.state().sketch(sketch).is_some_and(|ss| ss.sketch.wire_index(wire).is_some())
 }
 
 /// Does an input take face places that snap to sketch points on the face (the Single hole's)?
@@ -2659,7 +2693,7 @@ fn title_of(d: &Dialog) -> &'static str {
     if press_pull_extrude(d) { "PRESS PULL" } else { title(&d.kind) }
 }
 
-fn hint(inp: &SelInput) -> &'static str {
+pub(crate) fn hint(inp: &SelInput) -> &'static str {
     let a = inp.accept;
     if a & PROFILES != 0 {
         "click profiles in the view"
@@ -2682,6 +2716,8 @@ fn hint(inp: &SelInput) -> &'static str {
     } else if inp.label == "Faces/Body" {
         // Shell (#794): faces open the hollow; a body alone seals a closed void inside.
         "click faces to remove, or a body in the Browser for a closed hollow"
+    } else if a & selection::FEATURES != 0 {
+        "click steps in the History or the Browser"
     } else if a & BODIES != 0 {
         "click bodies"
     } else {
@@ -3885,7 +3921,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let has_ok = !matches!(d.kind, Kind::Sketch | Kind::Measure { .. });
     let valid = match &d.kind {
         Kind::Sketch => false,
-        // Nothing picked is an answer too: OK empties the chat's tray.
+        // Nothing picked is an answer too: OK adds no pill.
         Kind::ChatContext => true,
         Kind::Material { editor, .. } => !editor.editing() && apply_commands(app, &d).is_ok(),
         Kind::SaveMesh(_) => crate::dialogs_save_mesh::ready(&d.inputs),

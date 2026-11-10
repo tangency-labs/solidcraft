@@ -1,7 +1,7 @@
 //! Keyboard shortcuts: every command's default key comes from its `CommandSpec`; the user can
 //! rebind or clear any of them, or give one several keys (Preferences › Keyboard Shortcuts). A new key that another command
-//! already uses is reported and only taken over on request; keys the app itself handles (Esc, S,
-//! V, Delete, Ctrl+Z…) can't be bound. Changes are kept between runs.
+//! already uses is reported and only taken over on request; keys the app itself handles (Esc,
+//! Delete, Ctrl+Z…) can't be bound. Changes are kept between runs.
 
 use crate::ui_kit::BackingTooltipExt as _;
 use std::collections::BTreeMap;
@@ -17,7 +17,6 @@ pub(crate) const DRAG_ZOOM: &str = crate::navigation_slots::ZOOM_TOOL;
 /// Keys the application handles before any command shortcut.
 pub const RESERVED: &[&str] = &[
     "Escape",
-    "V",
     "F2",
     "F6",
     "Delete",
@@ -480,7 +479,9 @@ pub fn command_for(app: &SolveApp, key: &str) -> Option<&'static str> {
 /// Sketch (on the selected plane or planar face, else on the plane picked next) and the tool
 /// starts in the new sketch.
 pub fn press(app: &mut SolveApp, key: &str, repeat: bool) {
-    if let Some(id) = command_for(app, key) {
+    if keeps_old_show_hide(app, key) {
+        app.start("ui.toggle_visibility");
+    } else if let Some(id) = command_for(app, key) {
         if id == DRAG_ZOOM {
             // The viewport reads the held chord. A key press must not latch Zoom.
             return;
@@ -508,6 +509,14 @@ pub fn press(app: &mut SolveApp, key: &str, repeat: bool) {
             d.then_start = Some(then);
         }
     }
+}
+
+/// V with Shift or Alt has always toggled visibility too. It still does while Show/Hide is on V
+/// and nothing else is bound to that chord.
+fn keeps_old_show_hide(app: &SolveApp, key: &str) -> bool {
+    matches!(key, "Shift+V" | "Alt+V" | "Alt+Shift+V")
+        && effective(app, "ui.toggle_visibility").as_deref() == Some("V")
+        && commands_for(app, key).is_empty()
 }
 
 /// What a family's key starts: the variant used last (#4308), unless that variant has a key of
@@ -1913,6 +1922,74 @@ mod tests {
         h.frames(1);
         assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.box"), "S starts the command given it");
         assert!(!h.app.ui.palette_open);
+    }
+
+    /// Show/Hide keeps V out of the box, can move to another key (#13241), and V can then start
+    /// another command. A menu's Show/Hide row names the key and answers it.
+    #[test]
+    fn show_hide_can_move_off_v_and_v_can_start_another_command() {
+        use crate::context_menu::{self, Target};
+        const ID: &str = "ui.toggle_visibility";
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length": 10, "width": 20, "height": 30})).unwrap();
+        let body = h.app.session.model.state().bodies[0].name.clone();
+        h.app.run("select.set", json!({"items": [{"type": "body", "name": body}]})).unwrap();
+        h.frames(2);
+        let hidden = |h: &crate::scenario::Harness| h.app.session.visibility.hidden_bodies.contains(&body);
+        assert_eq!(effective(&h.app, ID).as_deref(), Some("V"));
+        assert_eq!(context_menu::shortcut_shown(&h.app, "V"), "V");
+        h.step(&json!({"key": "V"})).unwrap();
+        assert!(hidden(&h), "V hides the selection by default");
+        h.step(&json!({"key": "V"})).unwrap();
+        assert!(!hidden(&h), "and shows it again");
+        for chord in ["Shift+V", "Alt+V", "Alt+Shift+V"] {
+            press(&mut h.app, chord, false);
+            assert!(hidden(&h), "{chord} still toggles while Show/Hide is on V");
+            press(&mut h.app, chord, false);
+            assert!(!hidden(&h), "{chord} toggles back");
+        }
+
+        bind(&mut h.app, ID, "Shift+J", true).unwrap();
+        press(&mut h.app, "Shift+V", false);
+        assert!(!hidden(&h), "the old chords leave with V");
+        h.step(&json!({"key": "V"})).unwrap();
+        assert!(!hidden(&h), "V no longer hides");
+        h.step(&json!({"key": "J", "shift": true})).unwrap();
+        assert!(hidden(&h), "its new key does");
+        h.step(&json!({"key": "J", "shift": true})).unwrap();
+        assert!(!hidden(&h));
+
+        // With a menu open the new key runs the menu's own Show/Hide, and the row names that key.
+        assert_eq!(context_menu::shortcut_shown(&h.app, "V"), "Shift+J");
+        let mut rows = [
+            crate::ui_kit::Item { shortcut: "V".into(), ..crate::ui_kit::Item::action("solid.extrude", "Extrude", "") },
+            crate::ui_kit::Item { shortcut: "V".into(), ..crate::ui_kit::Item::action("ui.hide", "Show/Hide", "") },
+        ];
+        context_menu::show_current_keys(&h.app, &mut rows);
+        assert_eq!(rows[0].shortcut, "V", "another command's V stays on its row");
+        assert_eq!(rows[1].shortcut, "Shift+J");
+        // A command above Show/Hide in the menu now has V: Show/Hide's key still runs Show/Hide.
+        bind(&mut h.app, "component.from_bodies", "V", true).unwrap();
+        context_menu::open_for(&mut h.app, egui::pos2(300.0, 200.0), Target::Body { name: body.clone() });
+        h.frames(2);
+        let report = context_menu::describe(&h.app);
+        let show_hide = report["items"].as_array().and_then(|rows| rows.iter().find(|row| row["label"] == "Show/Hide")).unwrap();
+        assert_eq!(show_hide["shortcut"], "Shift+J", "`ui.menu` reports the current key");
+        h.step(&json!({"key": "J", "shift": true})).unwrap();
+        h.frames(2);
+        assert!(hidden(&h), "the menu's Show/Hide ran");
+        assert!(h.app.viewport.context_menu.is_none(), "the menu closes as after a click");
+        bind(&mut h.app, "component.from_bodies", "", false).unwrap();
+        h.app.run("browser.visibility", json!({"items": [body], "visible": true})).unwrap();
+
+        bind(&mut h.app, ID, "", false).unwrap();
+        assert_eq!(context_menu::shortcut_shown(&h.app, "V"), "", "no key, none on the row");
+        bind(&mut h.app, "solid.box", "V", true).unwrap();
+        h.step(&json!({"key": "V"})).unwrap();
+        h.frames(1);
+        assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.box"), "V starts the command given it");
+        assert!(!hidden(&h));
     }
 }
 
