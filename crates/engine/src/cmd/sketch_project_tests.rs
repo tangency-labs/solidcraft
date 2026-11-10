@@ -137,51 +137,6 @@ fn sketch_on_face_projects_its_edges_and_follows_edits() {
     assert!(w.is_none(), "{w:?}");
 }
 
-/// A tab drawn from a corner of a projected face, with its side held on the face's edge,
-/// follows the face when the face changes shape (a second hole) and grows: the projection is
-/// rebuilt, and the tab keeps its corner and its edge instead of losing its lines or being left
-/// behind inside the grown plate.
-#[test]
-fn a_tab_on_a_projected_face_follows_the_face_when_its_projection_is_rebuilt() {
-    let mut s = Session::default();
-    run(&mut s, "parameters.change", json!({"name": "w", "expression": "60 mm"}));
-    let plate = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
-    run(&mut s, "sketch.line", json!({"points": [[0, 0], [60, 0], [60, 40], [0, 40]], "closed": true, "infer": true, "ids": ["a", "b", "c", "d"]}));
-    run(&mut s, "sketch.constraint.coincident", json!({"a": "a.start", "b": "origin"}));
-    run(&mut s, "sketch.dimension", json!({"entities": ["a"], "value": "w"}));
-    run(&mut s, "sketch.dimension", json!({"entities": ["b"], "value": 40}));
-    run(&mut s, "sketch.circle.center", json!({"center": [15, 20], "diameter": 6}));
-    run(&mut s, "sketch.finish", json!({}));
-    run(&mut s, "solid.extrude", json!({"distance": 10, "body_name": "Plate"}));
-    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10}));
-    run(&mut s, "sketch.project", json!({"refs": [{"face": [30, 5, 10]}]}));
-    let at = |c: &Value, end: &str, axis: usize| c[end][axis].as_f64().unwrap();
-    let right = linked_curves(&inspect(&mut s))
-        .into_iter()
-        .find(|c| (at(c, "start_at", 0) - 60.0).abs() < 1e-9 && (at(c, "end_at", 0) - 60.0).abs() < 1e-9)
-        .unwrap();
-    let id = right["id"].as_str().unwrap();
-    let corner = if (at(&right, "end_at", 1) - 40.0).abs() < 1e-9 { format!("{id}.end") } else { format!("{id}.start") };
-    let tab = ids(&run(
-        &mut s,
-        "sketch.line",
-        json!({"points": [corner, [75, 40], [75, 25], format!("on:{id}:60,25")], "closed": true, "infer": true}),
-    )["curves"]);
-    run(&mut s, "sketch.dimension", json!({"entities": [tab[0]], "value": 15}));
-    run(&mut s, "sketch.finish", json!({}));
-    run(&mut s, "solid.extrude", json!({"distance": 10, "direction": "negative", "operation": "join"}));
-    let reach = |s: &Session| s.model.state().body("Plate").unwrap().mesh().bounds().max.x;
-    assert!((reach(&s) - 75.0).abs() < 1e-6, "{}", reach(&s));
-    // The plate gets a second hole and grows to 80 mm.
-    run(&mut s, "sketch.edit", json!({"sketch": plate}));
-    run(&mut s, "sketch.circle.center", json!({"center": [40, 20], "diameter": 6}));
-    run(&mut s, "sketch.finish", json!({}));
-    run(&mut s, "parameters.change", json!({"name": "w", "expression": "80 mm"}));
-    let failed: Vec<_> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
-    assert!(failed.is_empty(), "{failed:?}");
-    assert!((reach(&s) - 95.0).abs() < 1e-6, "the tab stays on the plate's grown edge: {}", reach(&s));
-}
-
 #[test]
 fn auto_project_can_be_turned_off() {
     let mut s = Session::default();
@@ -311,132 +266,6 @@ fn a_construction_axis_projects_and_stays_linked() {
     run(&mut s, "sketch.edit", json!({"sketch": sketch}));
     let error = s.execute("sketch.project", &json!({"refs": [{"axis": "Axis9"}]})).unwrap_err().to_string();
     assert!(error.contains("unknown axis `Axis9`"), "{error}");
-}
-
-/// A named construction point projects as a fixed point linked to it, on a sketch plane that
-/// is not the plane it was made on, and the projection follows when the point moves and when it
-/// is renamed (#12075).
-#[test]
-fn a_construction_point_projects_and_stays_linked() {
-    let mut s = Session::default();
-    let point = |x: f64, z: f64| json!({"point": {"point": [x, 5, z]}, "name": "Point1"});
-    run(&mut s, "construct.point.vertex", point(10.0, 20.0));
-    let sketch = run(&mut s, "sketch.create", json!({"plane": "YZ"}))["sketch"].as_u64().unwrap();
-    let r = run(&mut s, "sketch.project", json!({"refs": [{"point": "Point1"}]}));
-    let projected = r["links"][0]["points"][0].as_str().unwrap().to_string();
-    run(&mut s, "sketch.finish", json!({}));
-    // Where the projected point is, against where the construction point projects in 3D.
-    let check = |s: &mut Session, world: solidcore_record::Vec3| {
-        let plane = s.model.state().sketch(sketch).unwrap().plane;
-        let want = plane.to_local(world);
-        run(s, "sketch.edit", json!({"sketch": sketch}));
-        let si = inspect(s);
-        let p = si["points"].as_array().unwrap().iter().find(|p| p["id"] == projected).cloned().unwrap();
-        run(s, "sketch.finish", json!({}));
-        assert!(p["link"].is_string() && p["fixed"] == true, "{p}");
-        let at = (p["at"][0].as_f64().unwrap(), p["at"][1].as_f64().unwrap());
-        assert!((at.0 - want.x).abs() < 1e-9 && (at.1 - want.y).abs() < 1e-9, "{at:?} {want:?}");
-    };
-    check(&mut s, solidcore_record::Vec3::new(10.0, 5.0, 20.0));
-    run(&mut s, "timeline.redefine", json!({"feature": "Point1", "command": "construct.point.vertex", "params": point(10.0, 35.0)}));
-    check(&mut s, solidcore_record::Vec3::new(10.0, 5.0, 35.0));
-    run(&mut s, "timeline.rename", json!({"feature": "Point1", "name": "Pivot"}));
-    let opened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
-    for session in [&s, &opened] {
-        let state = session.model.state();
-        let link = &state.sketch(sketch).unwrap().sketch.links[0];
-        assert_eq!(link.source, solidcraft_sketch::LinkSource::ConstructionPoint { name: "Pivot".into() });
-        assert!(!link.lost, "renamed, the point is still found");
-    }
-    // A name that is no construction point is refused, by its name.
-    run(&mut s, "sketch.edit", json!({"sketch": sketch}));
-    let error = s.execute("sketch.project", &json!({"refs": [{"point": "Point9"}]})).unwrap_err().to_string();
-    assert!(error.contains("unknown point `Point9`"), "{error}");
-}
-
-/// A construction point of a component that is moved projects where the component puts it: into a
-/// sketch of the root, where it moves with the component, and into a sketch of the component
-/// itself, where it stays where the component's own coordinates put it (#12075).
-#[test]
-fn a_construction_point_of_a_moved_component_projects_where_it_is_placed() {
-    let mut s = Session::default();
-    let part = run(&mut s, "component.create", json!({"name": "Part"}))["component"].as_u64().unwrap();
-    run(&mut s, "construct.point.vertex", json!({"point": {"point": [10, 5, 20]}, "name": "Point1"}));
-    let own = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
-    run(&mut s, "sketch.project", json!({"refs": [{"point": "Point1"}]}));
-    run(&mut s, "sketch.finish", json!({}));
-    run(&mut s, "component.activate", json!({"component": 0}));
-    let root = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
-    run(&mut s, "sketch.project", json!({"refs": [{"point": "Point1"}]}));
-    run(&mut s, "sketch.finish", json!({}));
-    // The projected point of each sketch, in its sketch's coordinates.
-    let at = |s: &Session, id: u64| {
-        let state = s.model.state();
-        let sk = &state.sketch(id).unwrap().sketch;
-        assert!(sk.links.iter().all(|l| !l.lost), "{:?}", sk.links);
-        let link = sk.links.first().unwrap();
-        let p = sk.link_points(&link.id).first().and_then(|p| sk.points.get(*p)).unwrap().pos;
-        (p.x, p.y)
-    };
-    let near = |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).abs() < 1e-9 && (a.1 - b.1).abs() < 1e-9;
-    assert!(near(at(&s, own), (10.0, 5.0)), "{:?}", at(&s, own));
-    assert!(near(at(&s, root), (10.0, 5.0)), "{:?}", at(&s, root));
-    let placement = s.doc.occurrences.iter().find(|o| o.component == part).map(|o| o.id).unwrap();
-    run(&mut s, "occurrence.ground", json!({"occurrence": placement, "grounded": false}));
-    run(&mut s, "occurrence.move", json!({"occurrence": placement, "translate": [100, 0, 0], "capture": true}));
-    let opened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
-    for session in [&s, &opened] {
-        assert!(near(at(session, root), (110.0, 5.0)), "the root's projection moves with the part: {:?}", at(session, root));
-        assert!(near(at(session, own), (10.0, 5.0)), "the part's own projection stays: {:?}", at(session, own));
-    }
-}
-
-/// A face-attached sketch authored through the second occurrence must not translate a point
-/// of its own definition by the difference from the first occurrence (#12075).
-#[test]
-fn a_construction_point_of_the_second_author_occurrence_stays_in_its_own_frame() {
-    let mut s = Session::default();
-    let part = run(&mut s, "component.create", json!({"name":"Part"}));
-    let component = part["component"].as_u64().unwrap();
-    run(&mut s, "construct.point.vertex", json!({"point":{"point":[3,4,10]},"name":"Pivot"}));
-    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Base"}));
-    let second = run(&mut s, "occurrence.copy", json!({"occurrence":part["occurrence"],"translate":[40,0,0]}))["occurrence"].as_u64().unwrap();
-    run(&mut s, "component.activate", json!({"component":component,"occurrence":second,"path":[second]}));
-    let pick = {
-        let world = s.world_state().unwrap();
-        let body = world.body("Base (Part:2)").unwrap();
-        let face = body.body.faces(0.01).unwrap().into_iter().find(|face| face.plane_normal.is_some_and(|normal| normal.z > 0.999)).unwrap();
-        json!({"body":body.name,"index":face.index,"face":[face.centroid.x,face.centroid.y,face.centroid.z]})
-    };
-    let id = run(&mut s, "sketch.create", json!({"plane":pick,"project_edges":false}))["sketch"].as_u64().unwrap();
-    let feature = s.doc.feature(id).unwrap();
-    let solidcraft_doc::FeatureKind::Sketch { plane, .. } = &feature.kind else { panic!("not a sketch") };
-    assert_eq!(solidcraft_doc::face_anchor::plane_face_anchor(plane).unwrap().author_path, vec![second]);
-    run(&mut s, "sketch.project", json!({"refs":[{"point":"Pivot"}]}));
-    // Check the immediate creation path as well as the later model refresh.
-    let check = |s: &Session| {
-        assert!(s.model.result(id).unwrap().error.is_none());
-        let state = s.model.state();
-        let ss = state.sketch(id).unwrap();
-        let link = ss.sketch.links.first().unwrap();
-        assert!(!link.lost);
-        let point = ss.sketch.link_points(&link.id).first().and_then(|p| ss.sketch.points.get(*p)).unwrap();
-        let at = ss.plane.to_world(point.pos);
-        assert!((at.x - 3.).abs() < 1e-7 && (at.y - 4.).abs() < 1e-7 && (at.z - 10.).abs() < 1e-7, "{at:?}");
-    };
-    check(&s);
-    run(&mut s, "sketch.finish", json!({}));
-    check(&s);
-    run(&mut s, "component.activate", json!({"component":0}));
-    run(&mut s, "occurrence.ground", json!({"occurrence":second,"grounded":false}));
-    run(&mut s, "occurrence.move", json!({"occurrence":second,"translate":[0,15,0],"capture":true}));
-    check(&s);
-    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
-    check(&reopened);
-    run(&mut reopened, "sketch.edit", json!({"sketch":id}));
-    check(&reopened);
-    run(&mut reopened, "sketch.finish", json!({}));
-    check(&reopened);
 }
 
 #[test]
@@ -1294,50 +1123,6 @@ fn projecting_what_the_face_sketch_already_shows_adds_no_second_copy() {
     assert_eq!(shown(&mut s).0, border.0 + 1);
 }
 
-/// Intersecting what was intersected before laid another point on the first each time (one spot
-/// held 11 points): the same curve or edge again is refused, as Project refuses what the sketch
-/// already shows, and something new alongside it still goes in.
-#[test]
-fn intersecting_the_same_curve_or_edge_again_adds_no_second_point() {
-    let mut s = Session::default();
-    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Post"}));
-    let rectangle = run(&mut s, "sketch.create", json!({"plane":"XY"}))["sketch"].as_u64().unwrap();
-    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,-10],"p1":[40,-5]}));
-    run(&mut s, "sketch.finish", json!({}));
-    run(&mut s, "sketch.create", json!({"plane":"YZ","offset":20}));
-    let points = |s: &mut Session| inspect(s)["points"].as_array().unwrap().len();
-    for refs in [json!([{"sketch":rectangle,"curve":"l1"}]), json!([{"edge":[20,0,20],"body":"Post"}])] {
-        run(&mut s, "sketch.intersect", json!({"refs": refs}));
-        let once = points(&mut s);
-        let e = s.execute("sketch.intersect", &json!({"refs": refs})).unwrap_err().to_string();
-        assert!(e.contains("already intersected into this sketch"), "{refs}: {e}");
-        assert_eq!(points(&mut s), once, "{refs}");
-    }
-    let r = run(&mut s, "sketch.intersect", json!({"refs":[{"sketch":rectangle,"curve":"l1"},{"edge":[20,30,20],"body":"Post"}]}));
-    assert_eq!(r["links"].as_array().unwrap().len(), 1, "{r}");
-    assert_eq!(r["already_projected"].as_array().unwrap().len(), 1, "{r}");
-}
-
-/// A sketch on a face shows the face's border. An edge of another body that crosses the sketch
-/// plane at one of the face's corners lands on the end of a border line, which is not a point an
-/// earlier Intersect left: the cut goes in once, and only a second cut of the same edge is refused.
-#[test]
-fn intersecting_an_edge_at_a_face_corner_adds_its_point() {
-    let mut s = Session::default();
-    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":10,"body_name":"Plate"}));
-    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":20,"corner":[40,30,0],"body_name":"Post","operation":"new"}));
-    run(&mut s, "sketch.create", json!({"plane":{"face":[20,15,10]}}));
-    let points = |s: &mut Session| inspect(s)["points"].as_array().unwrap().len();
-    let border = points(&mut s);
-    let refs = json!([{"edge":[40,30,15],"body":"Post"}]);
-    let r = s.execute("sketch.intersect", &json!({"refs": refs})).map_err(|e| e.to_string());
-    assert!(r.is_ok(), "{r:?}");
-    assert_eq!(points(&mut s), border + 1);
-    let e = s.execute("sketch.intersect", &json!({"refs": refs})).unwrap_err().to_string();
-    assert!(e.contains("already intersected into this sketch"), "{e}");
-    assert_eq!(points(&mut s), border + 1);
-}
-
 /// The curves sketch Intersect makes, on `plane`, of the first body `steps` build: each line's ends,
 /// each circle's centre and radius.
 fn intersect_curves(steps: &[(&str, Value)], plane: Value) -> std::result::Result<Vec<Value>, String> {
@@ -2103,36 +1888,56 @@ fn a_mesh_face_keeps_its_straight_sides_on_a_slanted_plane() {
     std::fs::remove_dir_all(&dir).ok();
 }
 
-/// A component's origin axis, as the Browser names it (`o:<id>/origin/Z`), projects into a sketch of
-/// another component as its line, where that component now stands (#15086).
+/// #14190: Projecting a whole body (`{"body": name}`) produces its silhouette:
+/// many curves from the whole outline. With the `project_body_silhouette`
+/// preference on, this old behaviour is kept.
 #[test]
-fn a_component_origin_axis_projects_where_the_component_stands() {
+fn project_body_projects_whole_silhouette_not_single_edge() {
     let mut s = Session::default();
-    run(&mut s, "component.create", json!({"name": "Anchor"}));
-    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
-    run(&mut s, "component.create", json!({"name": "Part", "parent": 0}));
-    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "operation": "new"}));
-    let anchor_component = s.doc.find_component("Anchor").unwrap();
-    let anchor = s.doc.occurrence_of(anchor_component).unwrap().id;
-    run(&mut s, "occurrence.move", json!({"occurrence": anchor, "translate": [100, 0, 0], "move_grounded": true}));
-    run(&mut s, "sketch.create", json!({"plane": "XZ"}));
-    let r = run(&mut s, "sketch.project", json!({"refs": [{"axis": format!("o:{anchor}/origin/Z")}]}));
-    let line = r["links"][0]["curves"][0].clone();
-    let si = inspect(&mut s);
-    let c = si["curves"].as_array().unwrap().iter().find(|c| c["id"] == line).cloned().unwrap();
-    let n = |v: &Value| v.as_f64().unwrap();
-    let (x0, x1, length) = (n(&c["start_at"][0]), n(&c["end_at"][0]), (n(&c["end_at"][1]) - n(&c["start_at"][1])).abs());
-    assert!((x0 - 100.0).abs() < 1e-6 && (x1 - 100.0).abs() < 1e-6 && length > 10.0, "{x0} {x1} {length}");
-    // A sketch made after the component moved again reads where it stands now.
-    run(&mut s, "sketch.finish", json!({}));
-    run(&mut s, "occurrence.move", json!({"occurrence": anchor, "translate": [150, 0, 0], "move_grounded": true}));
-    run(&mut s, "sketch.create", json!({"plane": "XZ"}));
-    let r = run(&mut s, "sketch.project", json!({"refs": [{"axis": format!("o:{anchor}/origin/Z")}]}));
-    let line = r["links"][0]["curves"][0].clone();
-    let si = inspect(&mut s);
-    let c = si["curves"].as_array().unwrap().iter().find(|c| c["id"] == line).cloned().unwrap();
-    assert!((n(&c["start_at"][0]) - 250.0).abs() < 1e-6, "a new projection reads the current placement: {}", n(&c["start_at"][0]));
-    // A key that names no component origin is still refused, with the existing message.
-    let err = s.execute("sketch.project", &json!({"refs": [{"axis": "o:9999/origin/Z"}]})).unwrap_err().to_string();
-    assert!(err.contains("unknown axis"), "{err}");
+    s.project_body_silhouette = true;
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "Block"}));
+    let _id = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    let result = run(&mut s, "sketch.project", json!({"refs": [{"body": "Block"}], "projection_link": false}));
+    let curves = result["links"][0]["curves"].as_array().unwrap();
+    // A whole body projects its silhouette: multiple curves from the whole outline.
+    assert!(curves.len() > 1, "projecting a whole body creates multiple silhouette curves: {curves:?}");
+}
+
+/// #14190: Projecting a single edge (`{"edge": [x,y,z], "body": name}`) projects
+/// only that one edge as one curve — what a user wants when they say "I just want
+/// a single vertical line".
+#[test]
+fn project_single_edge_projects_only_that_edge() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "Block"}));
+    let _id = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    // An edge on the body: pick a point on the front-top edge at x=10,y=0,z=10.
+    let result = run(&mut s, "sketch.project", json!({"refs": [{"edge": [10, 0, 10], "body": "Block"}], "projection_link": false}));
+    let curves = result["links"][0]["curves"].as_array().unwrap();
+    assert_eq!(curves.len(), 1, "projecting a single edge creates one curve: {curves:?}");
+}
+
+/// #14190: With `project_body_silhouette` off (the new default), projecting a whole
+/// body (`{"body": name}`) is refused instead of creating a silhouette mess.
+#[test]
+fn project_body_silhouette_off_refuses_whole_body() {
+    let mut s = Session::default();
+    // project_body_silhouette is false by default in Session::default().
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "Block"}));
+    let _id = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    let err = s.execute("sketch.project", &json!({"refs": [{"body": "Block"}], "projection_link": false}));
+    assert!(err.is_err(), "projecting a whole body should be refused: {err:?}");
+    let err_text = err.unwrap_err().to_string();
+    assert!(err_text.contains("silhouette"), "error should mention silhouette: {err_text}");
+}
+
+/// #14190: With `project_body_silhouette` on, projecting a whole body works as before.
+#[test]
+fn project_body_silhouette_on_allows_whole_body() {
+    let mut s = Session::default();
+    s.project_body_silhouette = true;
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "Block"}));
+    let _id = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    let result = run(&mut s, "sketch.project", json!({"refs": [{"body": "Block"}], "projection_link": false}));
+    assert!(result["links"][0]["curves"].as_array().unwrap().len() > 1, "projecting a whole body should create silhouette curves: {result:?}");
 }

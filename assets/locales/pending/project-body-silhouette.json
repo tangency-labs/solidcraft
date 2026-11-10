@@ -1,0 +1,4 @@
+{
+  "ui.project_body_silhouette": "Project whole body silhouette",
+  "ui.project_body_silhouette_note": "When on, projecting a whole body into a sketch produces its silhouette: many curves from the whole outline. When off (the default), projecting a whole body is refused — pick a single edge or face instead (#14190)."
+}
