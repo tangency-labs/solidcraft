@@ -24,13 +24,18 @@ use crate::schema::motion::{
 use crate::schema::motion_play::{
     DriveReport, ExportParams, PartPose, PlayParams, Pose, StudyExport, StudyExported, StudyPlayed, StudySample, UnmovedJoint,
 };
+use crate::schema::motion_trace::{EditTraceParams, KeepTraceParams, MotionTraceEdited, MotionTraceKept, MotionTraced, TraceParams, TraceRun};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 const FIND_LIMITS_CONTRACT: TypedContract<FindLimitsParams> = TypedContract::new();
+const TRACE_CONTRACT: TypedContract<TraceParams> = TypedContract::new();
+const KEEP_TRACE_CONTRACT: TypedContract<KeepTraceParams> = TypedContract::new();
+const EDIT_TRACE_CONTRACT: TypedContract<EditTraceParams> = TypedContract::new();
 
 #[path = "motion_analysis.rs"]
 mod analysis;
+pub(crate) use analysis::part_place;
 #[path = "motion_animation.rs"]
 mod animation;
 #[path = "motion_trace.rs"]
@@ -144,21 +149,35 @@ pub static COMMANDS: &[CommandSpec] = &[
          path, format, frames, width, height, fps (GIF), bytes, renderer, stopped_at, stopped_by_loop, stopped_by_contact (the \
          design is not changed, nor its placements)",
     ),
-    CommandSpec::new("motion.trace", "Motion Trace", trace).at("SOLID", "ASSEMBLE").icon("trace").noundo().params(concat!(
-        trace_doc!(),
-        " → points: [[x,y,z]…] world positions, samples (taken), stopped_at (the sample where the motion stopped short; the trace \
+    CommandSpec::new("motion.trace", "Motion Trace", crate::checked!("motion.trace", trace))
+        .at("SOLID", "ASSEMBLE")
+        .icon("trace")
+        .noundo()
+        .contract(&TRACE_CONTRACT)
+        .output(output_schema_for::<MotionTraced>)
+        .params(concat!(
+            trace_doc!(),
+            " → points: [[x,y,z]…] world positions, samples (taken), stopped_at (the sample where the motion stopped short; the trace \
          ends there), stopped_by_loop, stopped_by_contact (the design is not changed)"
-    )),
-    CommandSpec::new("motion.trace.keep", "Keep Motion Trace", keep_trace).icon("trace").params(concat!(
-        trace_doc!(),
-        "; name? (default Motion TraceN); auto_update?: bool (default true); point_ref?: joint origin snap - keeps the trace as a \
+        )),
+    CommandSpec::new("motion.trace.keep", "Keep Motion Trace", crate::checked!("motion.trace.keep", keep_trace))
+        .icon("trace")
+        .contract(&KEEP_TRACE_CONTRACT)
+        .output(output_schema_for::<MotionTraceKept>)
+        .params(concat!(
+            trace_doc!(),
+            "; name? (default Motion TraceN); auto_update?: bool (default true); point_ref?: joint origin snap - keeps the trace as a \
          root 3D sketch spline. Associative curves follow mechanism and driving-input edits; false keeps a fixed curve. \
          point_ref retains a geometry snap; otherwise point is retained in component coordinates → sketch, name, curves, points"
-    )),
-    CommandSpec::new("motion.trace.edit", "Edit Motion Trace", associative::edit).icon("trace").params(
-        "sketch: id|name; joint? with from and to, or study?; index?; samples? (2…500); auto_update?: false to detach. \
+        )),
+    CommandSpec::new("motion.trace.edit", "Edit Motion Trace", crate::checked!("motion.trace.edit", associative::edit))
+        .icon("trace")
+        .contract(&EDIT_TRACE_CONTRACT)
+        .output(output_schema_for::<MotionTraceEdited>)
+        .params(
+            "sketch: id|name; joint? with from and to, or study?; index?; samples? (2…500); auto_update?: false to detach. \
          Edits a saved associative trace's driving conditions in one undo step",
-    ),
+        ),
     CommandSpec::new("motion.plot", "Plot Motion Study", crate::checked!("motion.plot", analysis::plot))
         .contract(&TypedContract::<crate::schema::motion_analysis::PlotParams>::new())
         .output(output_schema_for::<crate::schema::motion_analysis::MotionPlot>)
@@ -481,6 +500,18 @@ fn closest(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
 /// `given` values (joint, index) are driven; in a closed loop the others follow. Returns the
 /// answer and the last solve.
 fn drive_with_contact(s: &mut Session, want: &[(u64, Vec<f64>)], given: &BTreeSet<(u64, usize)>) -> Result<(Value, joints::Solution)> {
+    drive_with_contact_within(s, want, given, false)
+}
+
+/// [`drive_with_contact`], which with `stop_at_budget` stops at the last placement checked clear
+/// where a contact check runs out of samples or work, rather than failing (#5963):
+/// `stopped_by_budget` {budget, fraction}.
+fn drive_with_contact_within(
+    s: &mut Session,
+    want: &[(u64, Vec<f64>)],
+    given: &BTreeSet<(u64, usize)>,
+    stop_at_budget: bool,
+) -> Result<(Value, joints::Solution)> {
     let baseline = s.doc.clone();
     let start: Vec<(u64, Vec<f64>)> =
         want.iter().map(|(id, _)| (*id, s.doc.assembly.joints.iter().find(|j| j.id == *id).map(|j| j.values.clone()).unwrap_or_default())).collect();
@@ -513,26 +544,52 @@ fn drive_with_contact(s: &mut Session, want: &[(u64, Vec<f64>)], given: &BTreeSe
     let cache = if s.doc.assembly.contact_enabled { Some(contact_sweep::ContactGeometry::new(s)?) } else { None };
     let mut sol;
     let mut stopped = None;
+    let mut ran: Option<&'static str> = None;
+    let mut budget_lo: Option<f64> = None;
     if let Some(cache) = cache.filter(|cache| cache.has_pairs()) {
         let mut end = s.scratch();
         set(&mut end, 1.0);
-        let samples = cache.samples(s, &end)?;
+        // With `stop_at_budget`, the samples the budgets allow are taken (at the spacing the
+        // motion needs), and a check that runs out stops the drive at the last clear one.
+        let (samples, allowed) = if stop_at_budget {
+            let (required, allowed) = cache.samples_within(s, &end)?;
+            (required, allowed.min(required))
+        } else {
+            let n = cache.samples(s, &end)?;
+            (n, n)
+        };
+        let samples = samples.max(1);
         let mut intersections = 0;
         set(s, 0.0);
+        let overlaps = |s: &Session, intersections: &mut usize, all: bool, ran: &mut Option<&'static str>| match cache.overlaps(s, intersections, all)
+        {
+            Err(e) if stop_at_budget && contact_sweep::ran_out(&e).is_some() => {
+                *ran = contact_sweep::ran_out(&e);
+                Ok(None)
+            }
+            r => r.map(Some),
+        };
         // Keep the existing recovery behaviour: an initially overlapping assembly may move
         // out of its invalid placement. Sweeps constrain motions that start collision-free.
-        if cache.overlaps(s, &mut intersections, false)?.is_empty() {
+        if overlaps(s, &mut intersections, false, &mut ran)?.is_some_and(|o| o.is_empty()) {
             let mut lo = 0.0;
             let mut bracket = None;
             for sample in 1..=samples {
                 let hi = sample as f64 / samples as f64;
+                if sample > allowed {
+                    ran = Some(if samples > allowed && allowed < contact_sweep::MAX_SAMPLES { "work" } else { "samples" });
+                    break;
+                }
                 set(s, hi);
-                let hits = cache.overlaps(s, &mut intersections, true)?;
+                let Some(hits) = overlaps(s, &mut intersections, true, &mut ran)? else { break };
                 if !hits.is_empty() {
                     bracket = Some((lo, hi, hits));
                     break;
                 }
                 lo = hi;
+            }
+            if ran.is_some() {
+                budget_lo = Some(lo);
             }
             // Where the bodies found passing into each other first touch, closed in on from the
             // clear side (conservative advancement): from a clear placement, a move in which no
@@ -573,9 +630,15 @@ fn drive_with_contact(s: &mut Session, want: &[(u64, Vec<f64>)], given: &BTreeSe
                 sol = set(s, lo);
                 let (a, b) = hits.first().map(|h| (h.a.clone(), h.b.clone())).unwrap_or_default();
                 stopped = Some(json!({"a": a, "b": b, "fraction": lo}));
+            } else if let Some(lo) = budget_lo {
+                sol = set(s, lo);
             } else {
                 sol = set(s, 1.0);
             }
+        } else if ran.is_some() {
+            // The check at the start ran out: nothing past it is known clear.
+            budget_lo = Some(0.0);
+            sol = set(s, 0.0);
         } else {
             sol = set(s, 1.0);
         }
@@ -586,7 +649,7 @@ fn drive_with_contact(s: &mut Session, want: &[(u64, Vec<f64>)], given: &BTreeSe
     if let Some(mut name) = opened(&sol) {
         // The furthest the loops still close, short of where contact stopped; the joint named is
         // the one whose loop opens first.
-        let (mut lo, mut hi) = (0.0, stopped.as_ref().and_then(|v| v["fraction"].as_f64()).unwrap_or(1.0));
+        let (mut lo, mut hi) = (0.0, stopped.as_ref().and_then(|v| v["fraction"].as_f64()).or(budget_lo).unwrap_or(1.0));
         for _ in 0..14 {
             let mid = (lo + hi) / 2.0;
             match opened(&set(s, mid)) {
@@ -596,10 +659,14 @@ fn drive_with_contact(s: &mut Session, want: &[(u64, Vec<f64>)], given: &BTreeSe
         }
         sol = set(s, lo);
         stopped = None;
+        budget_lo = None;
         stopped_by_loop = Some(json!({"joint": name, "fraction": lo}));
     }
     let values: Vec<Value> = want.iter().map(|(id, _)| json!({"joint": id, "values": effective_values(s, *id)})).collect();
-    let out = json!({"values": values, "stopped_by_contact": stopped, "stopped_by_loop": stopped_by_loop, "conflicts": sol.conflicts.len()});
+    let mut out = json!({"values": values, "stopped_by_contact": stopped, "stopped_by_loop": stopped_by_loop, "conflicts": sol.conflicts.len()});
+    if let (Some(fraction), Some(budget)) = (budget_lo, ran) {
+        out["stopped_by_budget"] = json!({"budget": budget, "fraction": fraction});
+    }
     Ok((out, sol))
 }
 
@@ -608,14 +675,14 @@ fn drive_with_contact(s: &mut Session, want: &[(u64, Vec<f64>)], given: &BTreeSe
 const MAX_ADVANCES: usize = 200;
 
 /// Drive one joint (joint.drive), honouring contact sets.
-pub fn drive_joint(s: &mut Session, id: u64, q: Vec<f64>, given: usize) -> Result<Value> {
+pub fn drive_joint(s: &mut Session, id: u64, q: Vec<f64>, given: usize, stop_at_budget: bool) -> Result<Value> {
     let given = (0..given.min(q.len())).map(|i| (id, i)).collect();
-    Ok(drive_with_contact(s, &[(id, q)], &given)?.0)
+    Ok(drive_with_contact_within(s, &[(id, q)], &given, stop_at_budget)?.0)
 }
 
 /// Drive exactly one coordinate, letting the other values follow loops and preserving expressions.
-pub fn drive_joint_index(s: &mut Session, id: u64, q: Vec<f64>, index: usize) -> Result<Value> {
-    Ok(drive_with_contact(s, &[(id, q)], &[(id, index)].into_iter().collect())?.0)
+pub fn drive_joint_index(s: &mut Session, id: u64, q: Vec<f64>, index: usize, stop_at_budget: bool) -> Result<Value> {
+    Ok(drive_with_contact_within(s, &[(id, q)], &[(id, index)].into_iter().collect(), stop_at_budget)?.0)
 }
 
 /// A command's reply as JSON: the contact and motion study commands build their replies from the
@@ -988,7 +1055,7 @@ fn path_world(t: &Session, path: &[u64], cmd: &str) -> Result<Mat> {
 /// positions, sampled on a copy (the design is not changed). Each sample is driven from the one
 /// before, so closed loops follow on their branch and contact sets stop them; the trace ends at
 /// the sample where the motion stops short. Returns the points and the answer without them.
-fn sample_trace(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<Vec3>, Value)> {
+fn sample_trace(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<Vec3>, TraceRun)> {
     let (path, local) = traced_point(s, p, cmd)?;
     let mut t = s.scratch();
     // Traced from where the parts are placed: moves only shown (an exploded view, a move not
@@ -998,19 +1065,21 @@ fn sample_trace(s: &Session, p: &Value, cmd: &str) -> Result<(Vec<Vec3>, Value)>
     let (default, given, plan) = motion_plan(s, p, cmd)?;
     let n = sample_count(p, default.min(MAX_TRACE), MAX_TRACE, cmd)?;
     let mut points = Vec::new();
-    let mut stop = (Value::Null, Value::Null, Value::Null);
+    let mut stop = (None, Value::Null, Value::Null);
     for k in 0..n {
         let want = plan(&t, k, n);
         let (r, _) = drive_with_contact(&mut t, &want, &given)?;
         points.push(solidcraft_doc::apply_point(&world(&t)?, local));
         if r["stopped_by_loop"].is_object() || r["stopped_by_contact"].is_object() {
-            stop = (json!(k), r["stopped_by_loop"].clone(), r["stopped_by_contact"].clone());
+            stop = (Some(k), r["stopped_by_loop"].clone(), r["stopped_by_contact"].clone());
             break;
         }
     }
     let name = s.doc.occurrences.iter().find(|o| Some(&o.id) == path.last()).map_or_else(|| "root".to_string(), |o| o.name.clone());
-    let out = json!({"occurrence": name, "samples": points.len(), "stopped_at": stop.0, "stopped_by_loop": stop.1, "stopped_by_contact": stop.2});
-    Ok((points, out))
+    let stopped_by_loop = serde_json::from_value(stop.1).map_err(|e| bad(cmd, e.to_string()))?;
+    let stopped_by_contact = serde_json::from_value(stop.2).map_err(|e| bad(cmd, e.to_string()))?;
+    let run = TraceRun { occurrence: name, samples: points.len(), stopped_at: stop.0, stopped_by_loop, stopped_by_contact };
+    Ok((points, run))
 }
 
 /// `samples`, 2…`max`, or `default` without it.
@@ -1071,9 +1140,9 @@ fn motion_plan(s: &Session, p: &Value, cmd: &str) -> Result<(usize, BTreeSet<(u6
 }
 
 fn trace(s: &mut Session, p: &Value) -> Result<Value> {
-    let (points, mut out) = sample_trace(s, p, "motion.trace")?;
-    out["points"] = points.iter().map(|v| json!([v.x, v.y, v.z])).collect();
-    Ok(out)
+    let (points, run) = sample_trace(s, p, "motion.trace")?;
+    let points = points.iter().map(|v| [v.x, v.y, v.z]).collect();
+    typed_reply("motion.trace", MotionTraced { run, points, param_warnings: Vec::new() })
 }
 
 /// The trace as a 3D sketch spline, in one undo step: a new sketch of the root component (the
@@ -1081,12 +1150,12 @@ fn trace(s: &mut Session, p: &Value) -> Result<Value> {
 fn keep_trace(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "motion.trace.keep";
     let source = if bool_(p, "auto_update") != Some(false) { Some(associative::source(s, p, cmd)?) } else { None };
-    let (mut points, out) = sample_trace(s, p, cmd)?;
+    let (mut points, run) = sample_trace(s, p, cmd)?;
     finish_trace(&mut points);
     if points.len() < 2 {
         return Err(bad(cmd, "the point does not move: there is no trace to keep"));
     }
-    keep_sampled_trace(s, p, cmd, points, out, source)
+    keep_sampled_trace(s, p, cmd, points, run, source)
 }
 
 fn finish_trace(points: &mut Vec<Vec3>) {
@@ -1111,7 +1180,7 @@ fn keep_sampled_trace(
     p: &Value,
     cmd: &str,
     points: Vec<Vec3>,
-    mut out: Value,
+    run: TraceRun,
     source: Option<solidcraft_doc::motion::MotionTrace>,
 ) -> Result<Value> {
     let name = match str_(p, "name").map(str::trim).filter(|n| !n.is_empty()) {
@@ -1133,24 +1202,17 @@ fn keep_sampled_trace(
     (s.active_sketch, s.active_component, s.active_occurrence_path) = before;
     s.revision += 1;
     let (made, spline) = made?;
-    let sketch = made.get("sketch").cloned().unwrap_or(Value::Null);
-    out["sketch"] = sketch.clone();
-    out["name"] = made.get("name").cloned().unwrap_or(Value::Null);
-    out["curves"] = spline.get("curves").cloned().unwrap_or(Value::Null);
-    out["points"] = json!(points.len());
+    let sketch = made.get("sketch").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "trace sketch is missing"))?;
+    let name = made.get("name").and_then(Value::as_str).unwrap_or_default().to_string();
+    let curves: Vec<String> =
+        spline.get("curves").and_then(Value::as_array).map(|c| c.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
     if let Some(mut source) = source {
-        source.sketch = sketch.as_u64().ok_or_else(|| bad(cmd, "trace sketch is missing"))?;
-        source.wire = spline
-            .get("curves")
-            .and_then(Value::as_array)
-            .and_then(|v| v.first())
-            .and_then(Value::as_str)
-            .ok_or_else(|| bad(cmd, "trace curve is missing"))?
-            .to_string();
+        source.sketch = sketch;
+        source.wire = curves.first().cloned().ok_or_else(|| bad(cmd, "trace curve is missing"))?;
         associative::remember(s, &source);
         s.doc_mut().assembly.traces.push(source);
     }
-    Ok(out)
+    typed_reply(cmd, MotionTraceKept { run, sketch, name, curves, points: points.len(), param_warnings: Vec::new() })
 }
 
 fn list_studies(s: &mut Session, _p: &Value) -> Result<Value> {
@@ -1298,11 +1360,29 @@ pub(crate) fn shows_exploded_view(s: &Session) -> bool {
 }
 
 /// What exploded view `v` moves: (occurrence, its placement, the translation the view adds). Moves
-/// of occurrences no longer in the design, or not finite (a hostile design file), are left out;
+/// of occurrences no longer in the design, not finite, or under a parent placed by a singular
+/// matrix (a hostile design file), are left out;
 /// a later move of one occurrence replaces an earlier one.
+///
+/// The view stores world translations, and an occurrence's placement is relative to its parent
+/// component, so each translation is turned into the parent's frame: a part inside a turned
+/// component moves the way the view gives, not along the component's axes (#13939). A component
+/// placed more than once shares its parts' placements, so there a part moves the way given in
+/// the component's first placement ([`solidcraft_doc::joints::occurrence_world`]).
 fn explode_moves(s: &Session, v: &ExplodedView) -> Vec<(u64, Mat, Vec3)> {
-    let placed: std::collections::BTreeMap<u64, Mat> = s.doc.occurrences.iter().map(|o| (o.id, o.transform)).collect();
-    v.moves.iter().filter(|(_, t)| t.len() < 1e7).filter_map(|(o, t)| Some((*o, *placed.get(o)?, *t))).collect()
+    let placed: std::collections::BTreeMap<u64, (Mat, u64)> = s.doc.occurrences.iter().map(|o| (o.id, (o.transform, o.parent))).collect();
+    v.moves
+        .iter()
+        .filter(|(_, t)| t.len() < 1e7)
+        .filter_map(|(o, t)| {
+            let (transform, parent) = *placed.get(o)?;
+            let Some(frame) = (parent != 0).then(|| s.doc.occurrence_of(parent)).flatten() else {
+                return Some((*o, transform, *t));
+            };
+            let to_parent = solidcraft_doc::mat_inverse(&solidcraft_doc::joints::occurrence_world(&s.doc, frame.id))?;
+            Some((*o, transform, solidcraft_doc::apply_vector(&to_parent, *t)))
+        })
+        .collect()
 }
 
 /// The pending moves that show `moves` `amount` of the way out: 0 assembled, 1 exploded.

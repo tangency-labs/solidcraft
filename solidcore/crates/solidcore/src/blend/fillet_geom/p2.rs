@@ -1071,9 +1071,7 @@ pub fn srf_srf_intersection_with_context(
     // analytic intersector gives exactly. Points off a surface, and an end where the surface
     // touches the plane, are met by the intersectors below. A round of touch circles needs it
     // (#2704): its end section leaves the end face's plane, so its side curve is this one.
-    if (k.fixes.fillet_surface_plane_curve_on_plane_equation || k.fixes.fillet_gn_section_generator)
-        && curves_3d.is_empty()
-    {
+    if curves_3d.is_empty() {
         let plane_first = matches!(surf1.kind(), SurfaceKind::Plane(_));
         if let (Some(start_pnt), Some(end_pnt), true) = (
             start,
@@ -1085,7 +1083,9 @@ pub fn srf_srf_intersection_with_context(
             } else {
                 (surf1, surf2)
             };
-            if !surface.is_planar(k, approx_tol)?.is_planar
+            // a curve between two points: ends that coincide are no such curve
+            if start_pnt.distance(end_pnt) > approx_tol
+                && !surface.is_planar(k, approx_tol)?.is_planar
                 && ends_on_both(k, [surf1, surf2], [start_pnt, end_pnt], approx_tol)?
             {
                 let c = surface_plane_curve(
@@ -1840,6 +1840,70 @@ impl FilletBrep {
                 k.fixes.fillet_statuses_pass_on,
             )?)?
             .unwrap_or(0);
+
+            // Not upstream (solidcore-native, [`crate::blend::fillet_tangent_rollover`]): a rail rolled over a smooth far
+            // edge of its solver's face, the whole length, lies on the face beyond, which the
+            // side edge at the corner does not bound. The rail ends on the next side edge, across
+            // the vertex where the rolled-over edge meets this one; it is solved there, on that
+            // edge's use on the rail's face (the side edge's UV curve must be on the rail's
+            // surface), as a rail continues across a seam's vertex.
+            let rolled = {
+                let si = RailSolvers::geom_solver(self, g1)?;
+                let solver = solvers.solver(si)?;
+                solver
+                    .rolled_faces
+                    .get(rail_index)
+                    .copied()
+                    .flatten()
+                    .map(|face| (face, solver.tangency_tolerance))
+            };
+            if let Some((rolled, tol_rad)) = rolled {
+                let on_rolled = eu1::face(target, side_eu1)? == Some(rolled)
+                    || match eu1::radial(target, side_eu1)? {
+                        Some(r) => eu1::face(target, r)? == Some(rolled),
+                        None => false,
+                    };
+                let far = if edge::start_vertex(target, side_edge)? == cp_vertex {
+                    edge::end_vertex(target, side_edge)?
+                } else if edge::end_vertex(target, side_edge)? == cp_vertex {
+                    edge::start_vertex(target, side_edge)?
+                } else {
+                    None
+                };
+                if let (false, Some(far)) = (on_rolled, far) {
+                    let beyond = crate::blend::blend_corner::end::side_edgeuse_across_rolled_edge(
+                        k,
+                        target,
+                        side_eu1,
+                        far,
+                        Some(rolled),
+                        tol_rad,
+                    )?;
+                    let on_face = match beyond {
+                        Some(b) => eu1::radial(target, b)?,
+                        None => None,
+                    };
+                    if let Some(next) = on_face {
+                        if depth >= crate::blend::blend_corner::end::SIDE_EDGE_CHAIN_STEPS {
+                            return Err(SolidError::sm_err(OP));
+                        }
+                        self.fillet_vertex_mut(v)?.set_point_class(
+                            crate::intersect::point_class::PointClassType::Edgeuse,
+                            Some(EntityRef::Edgeuse(next)),
+                        );
+                        return self.calc_rail_int_edgeuse_with_solvers(
+                            k,
+                            v,
+                            opt_fg,
+                            corners,
+                            solvers,
+                            target,
+                            Some(far),
+                            depth + 1,
+                        );
+                    }
+                }
+            }
 
             let vu1 = vu1.ok_or_else(|| SolidError::null_pointer(OP))?;
             let mut tsect1 = self.fillet_vertexuse(vu1)?.tsect_pnt().clone();

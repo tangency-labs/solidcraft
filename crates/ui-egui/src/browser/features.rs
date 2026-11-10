@@ -372,8 +372,13 @@ fn feature_row(
         // Inside a placement, the feature's component is active while it is edited, and the one
         // active before comes back when the editor ends (#12720).
         app.edit_feature_in(id, Some((component, path)));
-    } else if r.clicked {
+    } else if r.clicked && !crate::timeline::pick_feature_into_dialog(app, id, ui.input(|i| i.modifiers)) {
+        // An open dialog whose active input takes features gets the row, as in the other
+        // History layouts (#13170).
         click_select(app, ui, order_key, Some(Sel::Feature { id }));
+    }
+    if r.hovered {
+        acts.hover_feature = Some(id);
     }
     if let Some(at) = r.secondary {
         acts.menu = Some((at, if is_sketch { Target::Sketch { id } } else { Target::Feature { id } }));
@@ -395,7 +400,7 @@ fn marker_row(app: &SolveApp, ui: &mut egui::Ui, depth: usize) -> egui::Response
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), t.space_12), Sense::drag());
     crate::semantic_content::record_capture(ui, &response);
     let line = Rect::from_min_max(pos2(rect.left() + 2.0 + depth as f32 * INDENT, rect.top()), rect.max);
-    crate::ui_kit::history_marker(ui.painter(), line, true, solidcraft_theme::TabAccent::for_tab(&t, &app.ui.tab));
+    crate::ui_kit::history_marker(ui.painter(), line, true, crate::workspace::tab_accent(&t, &app.ui.tab));
     crate::scenario::publish_handle("browser:rollback", rect.center());
     if response.hovered() || response.dragged() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
@@ -634,6 +639,41 @@ mod tests {
         h.step(&json!({"click": row(ids[4]), "shift": true})).unwrap();
         h.frames(2);
         assert_eq!(sorted(&h.app.session.selection), sorted(&all), "Shift+click below the anchor");
+    }
+
+    #[test]
+    fn browser_feature_hover_lights_what_its_timeline_item_lights() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.ui.show_browser = true;
+        h.app.run("solid.box", json!({"length":20,"width":20,"height":20})).unwrap();
+        let round = h.app.run("solid.fillet", json!({"edges":[[0,0,10]],"radius":2,"name":"Round"})).unwrap()["feature"].as_u64().unwrap();
+        h.app.tree.expanded.insert("c0/features".into());
+        h.frames(2);
+        let row = crate::scenario::handle_at(&format!("row:browser-feature:c0:{round}")).unwrap();
+        h.step(&json!({"move":[row.x,row.y]})).unwrap();
+        assert_eq!(h.app.viewport.hover_feature, Some(round));
+        assert!(h.app.session.selection.is_empty(), "hovering doesn't select");
+        h.step(&json!({"move":[5,5]})).unwrap();
+        assert_eq!(h.app.viewport.hover_feature, None);
+        // The timeline's own hover still lights it: the browser clears only what it set.
+        let item = crate::scenario::handle_at("timeline:Round").unwrap();
+        h.step(&json!({"move":[item.x,item.y]})).unwrap();
+        assert_eq!(h.app.viewport.hover_feature, Some(round));
+        // With the timeline hidden, leaving the row still clears the browser's hover.
+        h.app.ui.show_timeline = false;
+        h.frames(2);
+        let row = crate::scenario::handle_at(&format!("row:browser-feature:c0:{round}")).unwrap();
+        h.step(&json!({"move":[row.x,row.y]})).unwrap();
+        assert_eq!(h.app.viewport.hover_feature, Some(round));
+        h.step(&json!({"move":[5,5]})).unwrap();
+        assert_eq!(h.app.viewport.hover_feature, None);
+        // The timeline taking over the same feature the row lit (the pointer going straight from
+        // one to the other) keeps it lit when the row's hover expires.
+        h.step(&json!({"move":[row.x,row.y]})).unwrap();
+        crate::semantic_content::set_timeline_feature_hover(&mut h.app, Some(round));
+        h.step(&json!({"move":[5,5]})).unwrap();
+        assert_eq!(h.app.viewport.hover_feature, Some(round));
     }
 
     fn find_in_timeline(app: &mut SolveApp, feature: u64, body: &str) {

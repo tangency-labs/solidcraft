@@ -1,8 +1,7 @@
 //! tangency-labs/solidcore#1507 (WR-576): `SmPrimitiveCreation::CreateLinearSweep` tests a
 //! profile curve for an arc to the B-rep's tolerance, so a curve that is only near a
 //! circle is swept as the `SmCylinder` of its fitted circle, a body that is not the sweep
-//! of the curve. The opt-in `Kernel::fixes.linear_sweep_arc_to_cylinder_zero` (SolidCraft
-//! change, tangency-labs/smlib fd59111) tests it to the zero an `SmCylinder`'s own check
+//! of the curve. `CreateLinearSweep` (SolidCraft change, tangency-labs/smlib fd59111) tests it to the zero an `SmCylinder`'s own check
 //! holds its generating curve to, `SM_EFF_ZERO * 1000 * (1 + size)`: only a curve that is
 //! a circle becomes a cylinder, any other is swept as itself (`SmSurfOfExtrusion`).
 //!
@@ -50,12 +49,11 @@ fn kinds(b: &Brep) -> Vec<&'static str> {
         .collect()
 }
 
-/// `curves` (in z = -1) swept 1 along +z and capped, with the fix `on`: the body, its
+/// `curves` (in z = -1) swept 1 along +z and capped: the body, its
 /// volume's error relative to `area` (the exact volume) and the number of failed checks
 /// of SMLib's whole-body check (`smlib_brep_check`, level 2).
-fn sweep(curves: &[Curve], on: bool, area: f64) -> (Brep, f64, usize) {
+fn sweep(curves: &[Curve], area: f64) -> (Brep, f64, usize) {
     let mut k = Kernel::default();
-    k.fixes.linear_sweep_arc_to_cylinder_zero = on;
     let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
     let mut b = create_linear_sweep(&mut k, &refs, Vec3::Z, 1.0, true).unwrap();
     let store = AttributeStore::default();
@@ -104,18 +102,11 @@ fn issue_1507_a_curve_near_a_circle_is_swept_as_itself() {
     let near = [nurbs_circle(Vec3::new(0.5, 0.5, -1.0), r, stretch)];
     let area = PI * r * r * (1.0 + stretch);
 
-    // the fix off (upstream): the cylinder of the fitted circle, not the sweep of the
-    // curve; its volume is off by about 5e-8 of itself
-    let (b, error, failures) = sweep(&near, false, area);
-    assert_eq!(kinds(&b), ["cylinder", "plane", "plane"]);
-    assert!(error > 1e-8, "fix off: volume error {error:e}");
-    assert_eq!(failures, 0, "fix off");
-
-    // the fix on: the curve's own extrusion, of the curve's exact volume
-    let (b, error, failures) = sweep(&near, true, area);
+    // the curve's own extrusion, of the curve's exact volume
+    let (b, error, failures) = sweep(&near, area);
     assert_eq!(kinds(&b), ["extrusion", "plane", "plane"]);
-    assert!(error < 1e-12, "fix on: volume error {error:e}");
-    assert_eq!(failures, 0, "fix on");
+    assert!(error < 1e-12, "volume error {error:e}");
+    assert_eq!(failures, 0, "failures");
 }
 
 #[test]
@@ -133,12 +124,10 @@ fn issue_1507_a_circle_is_still_a_cylinder() {
         ),
     ];
     for (name, circle) in circles {
-        for on in [false, true] {
-            let (b, error, failures) = sweep(std::slice::from_ref(&circle), on, PI * r * r);
-            assert_eq!(kinds(&b), ["cylinder", "plane", "plane"], "{name} fix {on}");
-            assert!(error < 1e-12, "{name} fix {on}: volume error {error:e}");
-            assert_eq!(failures, 0, "{name} fix {on}");
-        }
+        let (b, error, failures) = sweep(std::slice::from_ref(&circle), PI * r * r);
+        assert_eq!(kinds(&b), ["cylinder", "plane", "plane"], "{name}");
+        assert!(error < 1e-12, "{name}: volume error {error:e}");
+        assert_eq!(failures, 0, "{name}");
     }
 }
 
@@ -217,15 +206,9 @@ fn issue_1507_a_text_outline_is_swept_exactly() {
     o.extend(bowl(1.5, 0.5, 0.25, true));
     for (name, letter) in [("D", d), ("o", o)] {
         let curves = outline(&letter);
-        for on in [false, true] {
-            let (b, error, failures) = sweep(&curves, on, area(&letter));
-            assert!(
-                !kinds(&b).contains(&"cylinder"),
-                "{name} fix {on}: {:?}",
-                kinds(&b)
-            );
-            assert!(error < 1e-12, "{name} fix {on}: volume error {error:e}");
-            assert_eq!(failures, 0, "{name} fix {on}");
-        }
+        let (b, error, failures) = sweep(&curves, area(&letter));
+        assert!(!kinds(&b).contains(&"cylinder"), "{name}: {:?}", kinds(&b));
+        assert!(error < 1e-12, "{name}: volume error {error:e}");
+        assert_eq!(failures, 0, "{name}");
     }
 }

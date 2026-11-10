@@ -352,7 +352,7 @@ fn scene_stage(app: &mut SolveApp, stage: super::Stage) {
     };
     let _ = app.run("view.render_select", params);
 }
-pub(super) fn apply_camera_draft(app: &mut SolveApp, camera: solidcraft_engine::render::Camera) -> Result<(), String> {
+pub(super) fn apply_camera_draft(app: &mut SolveApp, camera: solidcraft_viewport::Camera) -> Result<(), String> {
     app.run("render.camera.set", json!({"camera":camera}))?;
     app.follow_view_request(false);
     app.render_workspace.view.dirty = true;

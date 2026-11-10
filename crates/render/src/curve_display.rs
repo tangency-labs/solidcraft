@@ -3,7 +3,7 @@
 use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
 
-use crate::Mat4;
+use solidcraft_viewport::Mat4;
 
 const MAX_VERTICES: usize = 4096;
 const MAX_DEPTH: u8 = 24;

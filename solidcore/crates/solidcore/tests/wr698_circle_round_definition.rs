@@ -18,8 +18,11 @@
 //!
 //! The certified bounds are solidcore's own since #2559: its intervals take knot
 //! differences, factorials and radii outward-rounded, where the fork rounds them to
-//! nearest first, so a bound is a few ulps of the part above the fork's. The spans and
-//! points are the fork's, bit for bit.
+//! nearest first, so a bound is a few ulps of the part above the fork's. Since #13984 they
+//! are tighter than the fork's: each proved feet's box is tightened before the Taylor
+//! solve, and the series leave out their structural zeros (the root round's 9.03e-5 is
+//! 7.81e-5, still above the net's distance at every point checked). The spans and points
+//! are the fork's, bit for bit.
 
 #![allow(clippy::unwrap_used, clippy::panic)]
 
@@ -35,7 +38,6 @@ use solidcore::surface::surface::{Surface, SurfaceKind};
 
 fn kernel(definition: bool) -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.fillet_gn_section_generator = true;
     k.fixes.fillet_round_as_definition = definition;
     k
 }
@@ -239,7 +241,8 @@ fn the_root_round_is_the_fork_s_order_1_definition() {
     let (s, bound, spans) = root_round(&k);
     assert!(matches!(s.kind(), SurfaceKind::ProceduralBlend(_)));
     assert_eq!(spans, 16);
-    assert_eq!(bound, 9.034_561_390_963_572e-5);
+    // the fork's 9.034_561_390_963_572e-5; tighter here (module docs, #13984)
+    assert_eq!(bound, 7.805_948_063_924_082e-5);
     let net = net_of(&s);
     assert_pt(
         net.evaluate_point(Point2::new(0.37, 0.5)).unwrap(),
@@ -285,7 +288,8 @@ fn the_square_corner_s_circle_is_one_span() {
     let k = kernel(true);
     let (s, bound, spans) = corner_round(&k);
     assert_eq!(spans, 1);
-    assert_eq!(bound, 1.036_985_213_585_547_6e-24);
+    // the fork's 1.036_985_213_585_547_6e-24, at rounding either way (module docs, #13984)
+    assert_eq!(bound, 1.001_275_944_884_096_2e-24);
     assert_pt(
         net_of(&s).evaluate_point(Point2::new(1.0, 0.25)).unwrap(),
         [
@@ -312,7 +316,7 @@ fn flag_off_returns_the_net() {
     let k = kernel(false);
     let (s, bound, spans) = root_round(&k);
     assert!(matches!(s.kind(), SurfaceKind::BSpline(_)));
-    assert_eq!((spans, bound), (16, 9.034_561_390_963_572e-5));
+    assert_eq!((spans, bound), (16, 7.805_948_063_924_082e-5));
 }
 
 /// An approximated, mirrored or larger arc is not the order-1 section `Build` takes.

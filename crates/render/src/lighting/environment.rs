@@ -467,7 +467,7 @@ impl PreparedEnvironment {
         self.texels.get(row * self.width as usize + column).map(|texel| texel.pdf).ok_or_else(|| invalid("environment PDF index"))
     }
     pub fn evaluate(&self, direction: Vec3) -> Result<([f32; 3], f32)> {
-        let d = crate::surface::unit_direction(direction).map_err(|_| invalid("invalid environment direction"))?;
+        let d = solidcraft_viewport::surface::unit_direction(direction).map_err(|_| invalid("invalid environment direction"))?;
         let column = ((d.y.atan2(d.x).rem_euclid(TAU) / TAU * f64::from(self.width)) as usize).min(self.width as usize - 1);
         let row = ((d.z.clamp(-1.0, 1.0).acos() / PI * f64::from(self.height)) as usize).min(self.height as usize - 1);
         let texel = self.texels.get(row * self.width as usize + column).ok_or_else(|| invalid("environment lookup index"))?;

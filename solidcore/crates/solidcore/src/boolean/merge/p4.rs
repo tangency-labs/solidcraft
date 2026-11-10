@@ -38,7 +38,8 @@
 //! (the face in the error) instead of returning a body whose solid merged into the outside.
 
 use super::p1::{self, MergeOptions};
-use crate::error::{Result, SolidError, SM_ERR};
+use crate::error::boolean::BooleanFailure;
+use crate::error::{Failure, Result, SolidError};
 use crate::geom::a_object::BooleanOperation;
 use crate::geom::attribute::{
     ids, Attribute, AttributeStore, Behavior, MergeRegionData, ObjectKey,
@@ -369,7 +370,7 @@ pub enum MergeEntity {
 }
 
 fn required<T>(value: Option<T>) -> Result<T> {
-    value.ok_or_else(|| SolidError::null_pointer(OP))
+    value.ok_or_else(|| SolidError::entity_missing(OP, "a topology entity the Boolean needs"))
 }
 
 fn ignored<T>(result: Result<T>) -> Result<Option<T>> {
@@ -793,7 +794,10 @@ fn classify_edge_faces(
                 }
             }
         } else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::stage_failed(
+                OP,
+                "the faces are neither in a shell nor classified",
+            ));
         }
     }
     Ok(true)
@@ -871,7 +875,9 @@ fn classify_remaining(
                 let selected = if reverse {
                     edge_id
                 } else {
-                    *edges.first().ok_or_else(|| SolidError::null_pointer(OP))?
+                    *edges.first().ok_or_else(|| {
+                        SolidError::entity_missing(OP, "the edge list has an edge")
+                    })?
                 };
                 let e = source.edge(selected)?;
                 let curve = required(e.curve.as_ref())?;
@@ -1467,11 +1473,7 @@ fn editing_stages(
         && operation == BooleanOperation::Union
     {
         if let Some(f) = face_leaking_solid(primary, &faces.delete)? {
-            return Err(SolidError::Upstream {
-                operation: OP,
-                code: SM_ERR,
-                entity: Some(EntityRef::Face(f)),
-            });
+            return Err(Failure::new(OP, BooleanFailure::SolidLeaks { face: f }).into_error());
         }
     }
     intersector.delete_faces(
@@ -1639,7 +1641,10 @@ fn manifold_boolean_translated(
     }
     if operation == BooleanOperation::Slice {
         if !is_sheet(kernels, b)? {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::stage_failed(
+                OP,
+                "a slice needs a sheet, and the B-rep is not one",
+            ));
         }
         if !is_oriented_sheet(kernels, b)? {
             let first = required(bp::faces(b, None)?.first().copied())?;
@@ -1905,7 +1910,7 @@ mod tests {
                                 0 => Ok(()),
                                 1 => Err(SolidError::sm_err("test::cache")),
                                 _ => Err(SolidError::unported(
-                                    "SmBrep::DeleteStaleCaches",
+                                    "topology::brep::p2::delete_stale_caches",
                                     "topology.brep_p2",
                                 )),
                             }

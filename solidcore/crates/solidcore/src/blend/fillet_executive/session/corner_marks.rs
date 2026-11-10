@@ -1,19 +1,19 @@
-//! The fork's section placement and corner-patch marks of the live session.
+//! The fork's corner-patch marks of the live session.
 //!
-//! Upstream: the fork tangency-labs/smlib `fd3b6a7` (`SmFilletExecutive::SetBlendCurveAtThirds`)
-//! and `60af574` (`SmFilletExecutive::SetMarkCornerPatches`, `SmFilletCorner::GetPatchFaces`,
-//! the marking loop of `DoFilleting`); neither is in SMLib at the pin.
+//! Upstream: the fork tangency-labs/smlib `60af574` (`SmFilletExecutive::SetMarkCornerPatches`,
+//! `SmFilletCorner::GetPatchFaces`, the marking loop of `DoFilleting`); not in SMLib at the
+//! pin. The fork's `SetBlendCurveAtThirds` (`fd3b6a7`) went when the G^n section replaced the
+//! blend curve (WR-685 addendum 2026-11-06).
 //!
 //! | Rust | Upstream (fork) |
 //! |------|-----------------|
-//! | [`FilletSession::set_blend_curve_at_thirds`] | `SmFilletExecutive::SetBlendCurveAtThirds` |
 //! | [`FilletSession::set_mark_corner_patches`] | `SmFilletExecutive::SetMarkCornerPatches` |
 //! | `mark_corner_patches` (private) | the `m_bMarkCornerPatches` loop of `DoFilleting` |
 //! | `patch_faces` (private) | `SmFilletCorner::GetPatchFaces` |
 //! | [`FilletSession::corner_patch_faces`] | `round_edges` reading the `SM_AI_FILLET_CORNER_FACE` marks |
 //!
-//! Deviations: both settings are per session and off by default, so a session that
-//! does not set them is the pinned C++'s. The marks live in the session's attribute
+//! Deviations: the setting is per session and off by default, so a session that
+//! does not set it is the pinned C++'s. The marks live in the session's attribute
 //! store (keyed by the intermediate faces, then by the target copies the merge makes,
 //! as the fork's attributes travel with the copy); [`FilletSession::corner_patch_faces`]
 //! reads them from the target faces, and they go with the session. No recursion.
@@ -27,18 +27,6 @@ use crate::topology::FaceId;
 const OP: &str = "blend::fillet_executive::session::corner_marks";
 
 impl FilletSession<'_> {
-    /// `SetBlendCurveAtThirds` (the fork's, tangency-labs/smlib `fd3b6a7`; off by
-    /// default): the blend-curve generators the prepare calls create
-    /// (`SetFilletParameters`) place each section's inner control points a third and
-    /// two thirds of the way from each contact to where the contacts' tangent lines
-    /// meet (the end derivatives scaled to `n/3` of that distance for degree `n`, the
-    /// second and third derivatives by its square and cube). Set it before preparing
-    /// the edges. Off, the sections are the pinned C++'s faired Hermite scaled by the
-    /// thumbweight.
-    pub fn set_blend_curve_at_thirds(&mut self, at_thirds: bool) {
-        self.executive.set_blend_curve_at_thirds(at_thirds);
-    }
-
     /// `SetMarkCornerPatches` (the fork's, tangency-labs/smlib `60af574`; off by
     /// default): before the merge, `do_filleting` marks each face of every set-back
     /// corner's patch (the faces on the surfaces the corner made) with an
