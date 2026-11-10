@@ -10995,6 +10995,142 @@ mod tests {
         );
     }
 
+    /// #2130: the face that was lit when the movement started stays lit while the view is
+    /// panned, and no other face lights up until the view stops.
+    ///
+    /// The maintainer's question is about the cursor passing over OTHER faces while the view
+    /// moves: does the highlight jump between faces, or flash? The answer needs two identities
+    /// per frame, and they are not the same thing:
+    ///
+    /// - the geometric face under the pointer (`viewport::pick`), which DOES change as the view
+    ///   moves under a still pointer;
+    /// - the lit face (`app.viewport.hover`), which must NOT change during the movement.
+    ///
+    /// So the test asserts both: the pick moves to another face (otherwise the scene proves
+    /// nothing) and the lit face stays the same one for every frame of the gesture.
+    #[test]
+    fn the_lit_face_does_not_change_while_the_view_is_panned() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 400, "width": 400, "height": 200}}));
+        h.app.cam = solidcraft_engine::render::Camera {
+            target: Vec3::new(200.0, 200.0, 100.0),
+            yaw: 0.6,
+            pitch: 0.9,
+            roll: 0.0,
+            distance: 700.0,
+            fov: 0.0,
+            up: Default::default(),
+        };
+        h.frames(3);
+        let at = face_pixel(&h);
+        h.call("ui.move", json!({"x": at.x, "y": at.y}));
+        h.frames(2);
+        let lit = face_of(&h.app.viewport.hover);
+        assert!(lit.is_some(), "the face under the pointer must light up: {:?}", h.app.viewport.hover);
+
+        let pan = |phase, delta| egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Trackpad,
+            unit: egui::MouseWheelUnit::Point,
+            delta,
+            modifiers: egui::Modifiers::NONE,
+            phase,
+        };
+        h.frame_with(vec![pan(egui::TouchPhase::Start, egui::vec2(60.0, -40.0))]);
+        let mut picked = Vec::new();
+        for step in 1..=4 {
+            h.frame_with(vec![pan(egui::TouchPhase::Move, egui::vec2(60.0 * step as f32, -40.0 * step as f32))]);
+            assert_eq!(
+                face_of(&h.app.viewport.hover),
+                lit,
+                "the lit face must not change while the view is panned (frame {step}): {:?}",
+                h.app.viewport.hover
+            );
+            picked.push(picked_face(&h, at));
+        }
+        h.frame_with(vec![pan(egui::TouchPhase::End, egui::vec2(0.0, 0.0))]);
+
+        // The pointer travelled over another face, so the scene really does exercise the case:
+        // the geometry under the pointer moved on, the lit face did not.
+        assert!(
+            picked.iter().any(|face| *face != lit),
+            "the pointer must travel over another face while the view pans, picked {picked:?} against {lit:?}"
+        );
+    }
+
+    /// #2130: the same for a rotation. With the default fusion navigation, Shift and two
+    /// fingers orbit the view, and that gesture does not go through the pan path at all: the
+    /// camera turns under the pointer without the pointer moving.
+    #[test]
+    fn the_lit_face_does_not_change_while_the_view_is_rotated() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 400, "width": 400, "height": 200}}));
+        h.app.cam = solidcraft_engine::render::Camera {
+            target: Vec3::new(200.0, 200.0, 100.0),
+            yaw: 0.6,
+            pitch: 0.9,
+            roll: 0.0,
+            distance: 700.0,
+            fov: 0.0,
+            up: Default::default(),
+        };
+        h.frames(3);
+        let at = face_pixel(&h);
+        h.call("ui.move", json!({"x": at.x, "y": at.y}));
+        h.frames(2);
+        let lit = face_of(&h.app.viewport.hover);
+        assert!(lit.is_some(), "the face under the pointer must light up: {:?}", h.app.viewport.hover);
+        let yaw_before = h.app.cam.yaw;
+
+        let rotate = |phase, delta| egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Trackpad,
+            unit: egui::MouseWheelUnit::Point,
+            delta,
+            modifiers: egui::Modifiers { shift: true, ..egui::Modifiers::NONE },
+            phase,
+        };
+        h.frame_with(vec![rotate(egui::TouchPhase::Start, egui::vec2(40.0, 0.0))]);
+        let mut picked = Vec::new();
+        for step in 1..=4 {
+            h.frame_with(vec![rotate(egui::TouchPhase::Move, egui::vec2(40.0 * step as f32, 0.0))]);
+            assert_eq!(
+                face_of(&h.app.viewport.hover),
+                lit,
+                "the lit face must not change while the view is rotated (frame {step}): {:?}",
+                h.app.viewport.hover
+            );
+            picked.push(picked_face(&h, at));
+        }
+        h.frame_with(vec![rotate(egui::TouchPhase::End, egui::vec2(0.0, 0.0))]);
+
+        // The camera really turned: a rotation that did not move the view would prove nothing.
+        assert!(
+            (h.app.cam.yaw - yaw_before).abs() > 0.1,
+            "the rotation must have turned the camera: yaw went from {yaw_before} to {}",
+            h.app.cam.yaw
+        );
+        assert!(
+            picked.iter().any(|face| *face != lit),
+            "the pointer must travel over another face while the view rotates, picked {picked:?} against {lit:?}"
+        );
+    }
+
+    /// The index of the lit face, if a face is lit.
+    fn face_of(hit: &Option<crate::viewport::Hit>) -> Option<usize> {
+        match hit {
+            Some(crate::viewport::Hit::Face { index, .. }) => Some(*index),
+            _ => None,
+        }
+    }
+
+    /// The index of the face under the pointer, as the geometry sees it.
+    fn picked_face(h: &crate::scenario::Harness, at: egui::Pos2) -> Option<usize> {
+        let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+        crate::viewport::pick(&h.app, &proj, at).iter().find_map(|hit| match hit {
+            crate::viewport::Hit::Face { index, .. } => Some(*index),
+            _ => None,
+        })
+    }
+
     /// #2130: the freeze is for a still pointer. A mouse drag owns the pointer, so the
     /// highlight goes off even while a trackpad gesture moves the view under it.
     #[test]
