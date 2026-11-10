@@ -618,7 +618,8 @@ fn circular(samples: &[Vec2]) -> Option<(LinkGeom, f64)> {
         sweep += d;
     }
     let turn = sweep.abs();
-    if turn > std::f64::consts::TAU + 1e-6 || turn < CIRCLE_MIN_TURN {
+    // A NaN turn is not refused here, as before.
+    if !turn.is_nan() && !(CIRCLE_MIN_TURN..=std::f64::consts::TAU + 1e-6).contains(&turn) {
         return None;
     }
     if first.dist(last) <= tol {

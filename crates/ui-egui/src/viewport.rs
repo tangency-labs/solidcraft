@@ -1740,7 +1740,8 @@ fn body_scene(
         }
         let closed = b.is_closed();
         let class = plan_class(app, &face_classes);
-        let planned = class.and_then(|class| drawn_plan(app, b, true).map(|plan| (plan, class)));
+        // The plan is built only for a body with a class.
+        let planned = class.and_then(|class| Some((drawn_plan(app, b, true)?, class)));
         let on_gpu = planned.is_some();
         if let Some((plan, class)) = planned {
             sc.planned.push(crate::gpu::PlannedBody { plan, face_colors: face_colors.clone(), class, closed });
