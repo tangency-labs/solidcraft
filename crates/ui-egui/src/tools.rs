@@ -1280,6 +1280,12 @@ pub(crate) fn polygon_outline(t: &Tool, hover: Vec2, sides: f64) -> Option<Vec<V
     Some(corners)
 }
 
+/// The pointer ring is left out where a dimension's value follows the pointer: drawn after the
+/// value, it would sit on the number (#14231).
+pub(crate) fn pointer_ring_shown(t: &Tool, at: Pos2) -> bool {
+    !(t.kind == Kind::Dimension && crate::dim_view::draft_text().is_some_and(|r| r.contains(at)))
+}
+
 pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
     if crate::sketch3d::preview(app, t, painter, proj) {
         return;
@@ -1297,7 +1303,9 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
     if let Some((hp, snap)) = &t.hover
         && let Some(sp) = to(*hp)
     {
-        painter.circle_stroke(sp, if snap.is_some() { 6.0 } else { 3.0 }, stroke);
+        if pointer_ring_shown(t, sp) {
+            painter.circle_stroke(sp, if snap.is_some() { 6.0 } else { 3.0 }, stroke);
+        }
         if snap.as_deref() == Some("Midpoint") && t.kind == Kind::HorizontalVertical {
             painter.circle_stroke(sp, 8.0, Stroke::new(2.0, tk.accent));
         }
