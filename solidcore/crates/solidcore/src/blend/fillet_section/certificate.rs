@@ -1995,6 +1995,17 @@ struct LevelCtx {
     rows_vary: bool,
     touch: bool,
     target: f64,
+    halving: Halving,
+}
+
+/// Whether a proved level over the target goes on to a finer one only where it halved the
+/// last level's bound ([`SpanReuse::to_target`]).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Halving {
+    /// Only where it halved the bound.
+    Steers,
+    /// While over the target.
+    Ignored,
 }
 
 /// A level's terms, folded in piece by piece ([`absorb_piece`]): the jets' and the uv
@@ -2218,8 +2229,9 @@ fn close_level(
     if round_down(lower * (1.0 - 1.0e-12)) > ctx.target {
         return Flow::Stop;
     }
-    // once proved, one finer level more only where the last one halved the bound
-    if bound > 0.5 * *last {
+    // once proved, one finer level more only where the last one halved the bound (or, to
+    // the target, while over it)
+    if ctx.halving == Halving::Steers && bound > 0.5 * *last {
         return Flow::Stop;
     }
     *last = bound;
@@ -2286,6 +2298,12 @@ pub struct SpanReuse<'a> {
     pub kept: Option<CertifiedLevel>,
     /// Out: the first level this span proved (an inherited one as its level here).
     pub first: Option<u32>,
+    /// In: go on to a finer level while the bound is over the target, not only where the
+    /// last level halved it (a target proved before, which a re-certificate must reach: the
+    /// halving is a guess at the cost of the next level, and on bounds that differ in
+    /// their rounding it stops one run a level before the other). The least value still
+    /// stops the levels: past it no level certifies the span.
+    pub to_target: bool,
 }
 
 /// [`gn_certify_span`] taking from and giving to its neighbours ([`SpanReuse`]), not the
@@ -2360,6 +2378,11 @@ pub fn gn_certify_span_reusing(
         rows_vary,
         touch: law.is_some(),
         target,
+        halving: if reuse.to_target {
+            Halving::Ignored
+        } else {
+            Halving::Steers
+        },
     };
     // a halved span's pieces over this half: its level one coarser than theirs
     let mut start = reuse.start.min(6);
