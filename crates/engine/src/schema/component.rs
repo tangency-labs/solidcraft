@@ -1023,14 +1023,14 @@ pub struct PropertiesResult {
     pub param_warnings: Vec<String>,
 }
 
-/// The new name `component.rename` reads: text of 1 to 128 bytes once trimmed.
+/// The new name `component.rename` reads: text of 1 to 128 characters once trimmed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ComponentName(pub String);
 
 impl<'de> Deserialize<'de> for ComponentName {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         match Value::deserialize(d)? {
-            Value::String(s) if !s.trim().is_empty() && s.trim().len() <= 128 => Ok(ComponentName(s)),
+            Value::String(s) if !s.trim().is_empty() && s.trim().chars().count() <= 128 => Ok(ComponentName(s)),
             _ => Err(D::Error::custom(whole("`name` must be 1…128 characters"))),
         }
     }
@@ -1042,7 +1042,7 @@ impl JsonSchema for ComponentName {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "Text with something in it; once surrounding blanks are cut, at most 128 bytes.",
+            "description": "Text with something in it; once surrounding blanks are cut, at most 128 characters.",
             "type": "string",
             "pattern": not_blank_pattern()
         })
