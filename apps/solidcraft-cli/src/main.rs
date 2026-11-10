@@ -908,9 +908,10 @@ fn serve_mcp(
     scope: Option<solidcraft_engine::io::vfs::PathScope>,
     options: solidcraft_mcp::Options,
 ) -> Result<(), String> {
-    let stdin = std::io::stdin();
+    // Not the locked handles: the server reads stdin on a thread of its own (#14007).
+    let stdin = std::io::BufReader::new(std::io::stdin());
     let stdout = std::io::stdout();
-    solidcraft_mcp::Server::new(backend).with_path_scope(scope).with_options(options).serve(stdin.lock(), stdout.lock()).map_err(|e| e.to_string())
+    solidcraft_mcp::Server::new(backend).with_path_scope(scope).with_options(options).serve(stdin, stdout).map_err(|e| e.to_string())
 }
 
 /// The port of the running desktop app: the one its discovery file names, if something listens

@@ -222,9 +222,9 @@ pub struct PanelView {
     pub history: Option<Rect>,
     /// The open design's name, for the chat window's title.
     pub document: String,
-    /// The open design, to mark which messages changed it. A follow-up gives conversation items a
-    /// host-neutral handle in place of the engine's document.
-    pub doc: Arc<solidcraft_engine::doc::Document>,
+    /// The open design's revision: a message's changes can be undone from the chat while they
+    /// left this very design.
+    pub revision: super::Revision,
     /// Length units and decimals for the summaries of what the agent did.
     pub units: String,
     pub decimals: u8,
@@ -269,7 +269,7 @@ impl PanelView {
             layout: app.ui.layout,
             history: app.shell.history.filter(|_| app.ui.show_timeline && !app.preferences.timeline_left),
             document: app.session.doc.name.clone(),
-            doc: app.session.doc.clone(),
+            revision: super::Revision::of(&app.session.doc),
             units: app.session.doc.units.clone(),
             decimals: app.preferences.length_decimals,
             agents: agents::entries(app),
@@ -2280,7 +2280,7 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
     let mut open_gallery: Option<Gallery> = None;
     // The pill or chip under the pointer, for the host to light.
     let mut hovered: Option<Hovered> = None;
-    let current_doc = view.doc.clone();
+    let current = &view.revision;
     let units = summary::Units { units: &view.units, decimals: view.decimals };
     for (n, item) in chat.items.iter().enumerate() {
         match item {
@@ -2442,13 +2442,13 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
                     }
                 });
             }
-            Item::Changes { steps, doc, undone } => {
+            Item::Changes { steps, revision, undone } => {
                 ui.horizontal(|ui| {
                     let text = trf("ui.agent_chat_changes", &[("n", &steps.to_string())]);
                     ui.label(RichText::new(text).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_caption));
                     if *undone {
                         ui.label(RichText::new(tr("ui.agent_chat_undone")).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_caption));
-                    } else if Arc::ptr_eq(doc, &current_doc) {
+                    } else if revision.same(current) {
                         let b =
                             ui_kit::button(ui, tr("ui.agent_chat_undo_changes"), ui_kit::Button::Normal).backing_on_hover_text(tr("ui.ai_undo_tip"));
                         solidcraft_ui_registry::publish_handle("agent_chat:undo", b.rect.center());
@@ -3266,7 +3266,7 @@ mod tests {
             layout: ui_kit::LayoutMode::default(),
             history: None,
             document: "Plate".into(),
-            doc: solidcraft_engine::Session::default().doc,
+            revision: Revision::of(&solidcraft_engine::Session::default().doc),
             units: "mm".into(),
             decimals: 2,
             agents: Vec::new(),

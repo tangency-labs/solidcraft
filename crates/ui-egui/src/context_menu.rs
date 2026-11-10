@@ -11,8 +11,9 @@
 //! state; [`items`] lists them and [`run_item`] runs one, so the control channel (`ui.menu`,
 //! `ui.menuPick`) and tests reach everything a click does.
 
-use crate::ui_kit::{BackingTooltipExt as _, Container, Item, LIST_W, Surface};
-use egui::{Color32, Pos2, Rect, Sense, Vec2, pos2, vec2};
+use crate::ui_kit::menu::{list_row_lit, menu_frame};
+use crate::ui_kit::{BackingTooltipExt as _, Container, Item, LIST_W, MenuItem, Surface};
+use egui::{Pos2, Rect, Sense, Vec2, pos2, vec2};
 use serde::Serialize;
 use serde_json::{Value, json};
 use solidcraft_engine::geom::prelude::*;
@@ -985,7 +986,11 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
             item.params = Some(json!({"path": path}));
         }
         "ui.export" | "ui.saveMesh" | "ui.sendToSlicer" => item.params = Some(json!({"bodies": bodies})),
-        "browser.expand_all" | "browser.collapse_all" => item.params = Some(json!({"path": path})),
+        // Expand Below and Collapse Below fold this placement's branch; Collapse All keeps the
+        // whole tree.
+        "browser.expand_all" | "browser.collapse_all" if item.params.as_ref().is_some_and(|p| p.get("component").is_some()) => {
+            item.params = Some(json!({"path": path}))
+        }
         _ => {}
     });
     entries
@@ -1158,8 +1163,16 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         );
     }
     organize.push(Item::sep());
-    organize.push(cmd(app, "browser.expand_all", "Expand All").with(json!({ "component": id })));
-    organize.push(cmd(app, "browser.collapse_all", "Collapse All").with(json!({ "component": id })));
+    if id == 0 {
+        organize.push(cmd(app, "browser.expand_all", "Expand All").with(json!({ "component": id })));
+        organize.push(cmd(app, "browser.collapse_all", "Collapse All").with(json!({ "component": id })));
+    } else {
+        // A component folds its own branch; Collapse All still rolls up the whole tree, every
+        // placement at every level, as it does from the design row (#11866).
+        organize.push(cmd(app, "browser.expand_all", "Expand Below").with(json!({ "component": id })));
+        organize.push(cmd(app, "browser.collapse_all", "Collapse Below").with(json!({ "component": id })));
+        organize.push(cmd(app, "browser.collapse_all", "Collapse All").with(json!({})));
+    }
     v.push(group("Organize", "folder", organize));
     v
 }
@@ -2695,38 +2708,6 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
-/// Shared kit surface; legacy callers retain their menu positioning and dispatch.
-pub fn menu_frame<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
-    crate::ui_kit::Menu::show(ui, LIST_W, add)
-}
-
-pub fn button(ui: &mut egui::Ui, label: &str, icon: &str) -> egui::Response {
-    button_enabled(ui, label, icon, true)
-}
-
-pub fn button_enabled(ui: &mut egui::Ui, label: &str, icon: &str, enabled: bool) -> egui::Response {
-    let mut item = crate::ui_kit::MenuItem::new(label, label, icon);
-    item.enabled = enabled;
-    item.show(ui)
-}
-
-pub fn list_row(ui: &mut egui::Ui, item: &Item) -> Option<Item> {
-    list_row_lit(ui, item, false)
-}
-
-pub fn list_row_lit(ui: &mut egui::Ui, item: &Item, lit: bool) -> Option<Item> {
-    if item.is_sep() {
-        crate::ui_kit::Menu::separator(ui);
-        return None;
-    }
-    if item.is_heading() {
-        crate::ui_kit::Menu::heading(ui, &item.label);
-        return None;
-    }
-    let row = kit_item(item, lit);
-    (row.show(ui).clicked() && item.enabled).then(|| item.clone())
-}
-
 /// The rows of each open level: the menu itself, then every open flyout in turn. It stops at a
 /// row that is gone or has no flyout.
 fn open_levels<'a>(list: &'a [Item], path: &[usize]) -> Vec<&'a [Item]> {
@@ -2776,7 +2757,7 @@ fn level_rows(
         }
         // Flyout entries may share an id (swatches): their handles add the label.
         let handle = format!("{}:{}", item.id, item.label);
-        let mut kit = kit_item(item, cursor == Some(k) || (open == Some(k) && !leaving));
+        let mut kit = MenuItem::from_item(item, cursor == Some(k) || (open == Some(k) && !leaving));
         if depth > 0 {
             kit.id = &handle;
         }
@@ -2802,21 +2783,6 @@ fn level_rows(
         }
     }
     seen
-}
-
-fn kit_item(item: &Item, lit: bool) -> crate::ui_kit::MenuItem<'_> {
-    crate::ui_kit::MenuItem {
-        id: &item.id,
-        label: &item.label,
-        icon: &item.icon,
-        shortcut: if item.shortcut == "current" { "" } else { &item.shortcut },
-        enabled: item.enabled,
-        highlighted: lit,
-        danger: item.icon == "delete",
-        checked: (item.shortcut == "current").then_some(true),
-        swatch: item.swatch.map(|c| Color32::from_rgb(c[0], c[1], c[2])),
-        submenu: !item.children.is_empty(),
-    }
 }
 
 fn show_rename(app: &mut SolveApp, ctx: &egui::Context) {

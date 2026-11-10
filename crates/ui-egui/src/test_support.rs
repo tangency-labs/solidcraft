@@ -1,8 +1,10 @@
 //! Headless test fixtures. Callers retain frame counts, input and command parameters.
 use crate::{Services, SolveApp, scenario::Harness};
-use egui::{Event, FullOutput, RawInput, Shape, Ui};
 use serde_json::{Value, json};
 use solidcraft_engine::{Sel, Session};
+
+// The generic frame and event helpers are the kit's; SolidCraft's tests use them under these names.
+pub(crate) use crate::ui_kit::test_support::{each_shape, key, pointer, raw_frame as frame, text_shapes};
 
 pub(crate) fn app_with_script(script: Value) -> SolveApp {
     let mut session = Session::default();
@@ -65,35 +67,4 @@ pub(crate) fn selected_text(text: &str, at: [i32; 2]) -> (Harness, String, Strin
     let curve = result["curves"][0].as_str().unwrap().to_owned();
     h.app.session.selection = vec![Sel::SketchCurve { id: curve.clone(), sketch: None }];
     (h, link, curve)
-}
-
-/// A frame without a renderer. Preserve all caller-supplied timing and viewport options.
-pub(crate) fn frame(ctx: &egui::Context, input: RawInput, add: impl FnMut(&mut Ui)) -> FullOutput {
-    let mut output = ctx.run_ui(input, add);
-    output.textures_delta.clear();
-    output
-}
-
-pub(crate) fn pointer(pos: egui::Pos2, pressed: bool) -> Vec<Event> {
-    vec![Event::PointerMoved(pos), Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() }]
-}
-
-pub(crate) fn key(key: egui::Key) -> Vec<Event> {
-    vec![Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() }]
-}
-
-/// Top-level text shapes only, in their original paint order.
-pub(crate) fn text_shapes(output: &FullOutput) -> impl Iterator<Item = &egui::epaint::TextShape> {
-    output.shapes.iter().filter_map(|clipped| match &clipped.shape {
-        Shape::Text(text) => Some(text),
-        _ => None,
-    })
-}
-
-/// Every leaf of a shape list, in paint order.
-pub(crate) fn each_shape(shape: &Shape, visit: &mut impl FnMut(&Shape)) {
-    match shape {
-        Shape::Vec(shapes) => shapes.iter().for_each(|shape| each_shape(shape, visit)),
-        shape => visit(shape),
-    }
 }

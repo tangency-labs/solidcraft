@@ -208,7 +208,9 @@ fn draw_required(schema: &mut Schema) {
 #[schemars(transform = creator_reply)]
 pub struct DrawDimensionedResult {
     /// What the creator returned, as that command returns it (`curves`, `constraints`, `sketch`,
-    /// `created`, and for some creators `sides`, `corners`, `centre_arc` or `support_circle`).
+    /// `created`, and for some creators `sides`, `corners`, `centre_arc` or `support_circle`),
+    /// except `sketch`: it is the sketch's solve after the dimensions and any `locate` placement,
+    /// not the creator's own.
     #[serde(flatten)]
     pub drawn: Map<String, Value>,
     /// The `sketch.dimension` reply of each dimension placed, by role.
@@ -259,7 +261,7 @@ fn creator_reply(schema: &mut Schema) {
     let properties = json!({
         "curves": strings,
         "constraints": strings,
-        "sketch": {"type": "object", "description": "The sketch's solve: `{solved, dof}`."},
+        "sketch": {"type": "object", "description": "The sketch's solve after the dimensions and any `locate` placement: `{solved, dof}`."},
         "created": {"type": "object", "description": "What the creator added: `{points, curves, constraints, dimensions}`."},
         "sides": {"type": "object", "description": "A rectangle's sides {bottom, right, top, left}, line ids."},
         "corners": {"type": "object", "description": "A rectangle's corners {bottom_left, bottom_right, top_right, top_left}, point ids."},

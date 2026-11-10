@@ -1,7 +1,7 @@
 //! Preference compositions for the approved Navigation bar board.
 use super::{Container, Surface, navigation::*};
-use crate::icons;
 use crate::ui_kit::BackingTooltipExt as _;
+use crate::ui_kit::icons;
 use egui::{FontId, Rect, Response, Sense, Ui, pos2, vec2};
 use solidcraft_theme::Tokens;
 
