@@ -29,6 +29,8 @@
 //! | [`offset::OffsetFailure`]   | none: the offset subsystem's refusals (#2615)    |
 //! | [`boolean::BooleanFailure`] | none: the Boolean operation's failures           |
 //! | [`nurbs::NurbsFailure`]     | `NL_*_ERR` numbers, in solidcore's terms         |
+//! | [`defeature::DefeatureFailure`] | none: why a defeature keeps a feature (#3218) |
+//! | [`sweep::SweepFailure`]     | none: why a sweep or loft refuses (#3140)         |
 //!
 //! NLib routines (`NL_*.cpp`) report failure by returning an error flag and storing an
 //! error number in the process-wide `NL_ERROR` record; solidcore returns
@@ -76,8 +78,12 @@
 //! difftest and the FFI), since nothing but the comparison needs them.
 
 pub mod boolean;
+pub mod defeature;
+pub mod intersect;
 pub mod nurbs;
 pub mod offset;
+pub mod primitive;
+pub mod sweep;
 
 use crate::topology::{
     BrepId, EdgeId, EdgeuseId, FaceId, FaceuseId, LoopId, LoopuseId, RegionId, ShellId, VertexId,
@@ -352,8 +358,8 @@ pub enum SolidError {
         operation: &'static str,
     },
 
-    /// A fillet refused as too large, with the largest size that builds it (opt-in
-    /// `fixes.fillet_gn_section_generator`; the fork's `GetFitRadius`, `GetFitEdge` and
+    /// A fillet refused as too large, with the largest size that builds it (the fork's
+    /// `GetFitRadius`, `GetFitEdge` and
     /// `GetFitKind`, which its capi's `smlib_blend_fit_size` reads, tangency-labs/smlib#79,
     /// WR-696). Returned in place of [`SolidError::Upstream`] with the same `code` (so
     /// [`SolidError::sm_status`] is unchanged) only when the refusal's cause has a size; a
@@ -722,6 +728,14 @@ pub enum Reason {
     Nurbs(nurbs::NurbsFailure),
     /// A Boolean operation failed.
     Boolean(boolean::BooleanFailure),
+    /// A defeature kept a feature on its base: its patch is not built (#3218).
+    Defeature(defeature::DefeatureFailure),
+    /// An intersection or classification failed.
+    Intersect(intersect::IntersectFailure),
+    /// A primitive, extrusion, revolution, skin or taper failed.
+    Primitive(primitive::PrimitiveFailure),
+    /// A sweep or loft refused (#3140).
+    Sweep(sweep::SweepFailure),
 }
 
 impl Reason {
@@ -729,7 +743,12 @@ impl Reason {
     #[must_use]
     pub fn entity(&self) -> Option<EntityRef> {
         match self {
-            Self::Failed(_) | Self::Nurbs(_) => None,
+            Self::Failed(_)
+            | Self::Nurbs(_)
+            | Self::Defeature(_)
+            | Self::Intersect(_)
+            | Self::Primitive(_)
+            | Self::Sweep(_) => None,
             Self::Offset(o) => o.entity(),
             Self::Boolean(b) => b.entity(),
         }
@@ -741,8 +760,12 @@ impl Reason {
         match self {
             Self::Failed(_) => SM_ERR,
             Self::Offset(o) => o.comparison_status(),
-            Self::Nurbs(_) => nurbs::NurbsFailure::COMPARISON_STATUS,
+            Self::Nurbs(n) => n.comparison_status(),
             Self::Boolean(b) => b.comparison_status(),
+            Self::Defeature(d) => d.comparison_status(),
+            Self::Intersect(i) => i.comparison_status(),
+            Self::Primitive(p) => p.comparison_status(),
+            Self::Sweep(w) => w.comparison_status(),
         }
     }
 
@@ -754,6 +777,10 @@ impl Reason {
             Self::Offset(o) => o.kind(),
             Self::Nurbs(n) => n.kind(),
             Self::Boolean(b) => b.kind(),
+            Self::Defeature(d) => d.kind(),
+            Self::Intersect(i) => i.kind(),
+            Self::Primitive(p) => p.kind(),
+            Self::Sweep(w) => w.kind(),
         }
     }
 }
@@ -765,6 +792,10 @@ impl core::fmt::Display for Reason {
             Self::Offset(o) => o.fmt(f),
             Self::Nurbs(n) => n.fmt(f),
             Self::Boolean(b) => b.fmt(f),
+            Self::Defeature(d) => d.fmt(f),
+            Self::Intersect(i) => i.fmt(f),
+            Self::Primitive(p) => p.fmt(f),
+            Self::Sweep(w) => w.fmt(f),
         }
     }
 }
@@ -781,9 +812,33 @@ impl From<nurbs::NurbsFailure> for Reason {
     }
 }
 
+impl From<defeature::DefeatureFailure> for Reason {
+    fn from(d: defeature::DefeatureFailure) -> Self {
+        Self::Defeature(d)
+    }
+}
+
+impl From<intersect::IntersectFailure> for Reason {
+    fn from(i: intersect::IntersectFailure) -> Self {
+        Self::Intersect(i)
+    }
+}
+
+impl From<primitive::PrimitiveFailure> for Reason {
+    fn from(p: primitive::PrimitiveFailure) -> Self {
+        Self::Primitive(p)
+    }
+}
+
 impl From<offset::OffsetFailure> for Reason {
     fn from(o: offset::OffsetFailure) -> Self {
         Self::Offset(o)
+    }
+}
+
+impl From<sweep::SweepFailure> for Reason {
+    fn from(w: sweep::SweepFailure) -> Self {
+        Self::Sweep(w)
     }
 }
 
@@ -948,7 +1003,8 @@ impl SolidError {
 
     /// Maps the error of a failed NLib call inside an `Sm*` method to `SM_ERR` (upstream
     /// `if (NL_YES == N_...) SER(SM_ERR)`), letting [`SolidError::Unported`] and
-    /// [`SolidError::Cancelled`] through.
+    /// [`SolidError::Cancelled`] through. Being replaced by
+    /// [`SolidError::nurbs_routine`], which keeps the error as the cause.
     /// Use as `.map_err(SolidError::nl_ser(OP))`.
     pub(crate) fn nl_ser(operation: &'static str) -> impl Fn(Self) -> Self {
         move |e| match e {
@@ -1011,6 +1067,26 @@ impl SolidError {
             | Self::UnsureRegion { .. }
             | Self::ExtendRefused { .. }
             | Self::Unported { .. } => None,
+        }
+    }
+
+    /// The status of an error that answers with an `SmStatus` the way a
+    /// [`SolidError::Upstream`] does: its `code`, or the status of a failure that replaced
+    /// an `Upstream` site ([`nurbs::BSplineFailure`], [`intersect::IntersectFailure`],
+    /// [`primitive::PrimitiveFailure`]). The callers that branch on an upstream status
+    /// use it so that they treat both alike; it goes with `Upstream` in the last PR of
+    /// the typed-errors work.
+    #[must_use]
+    pub(crate) fn upstream_status(&self) -> Option<i32> {
+        match self {
+            Self::Upstream { code, .. } => Some(*code),
+            Self::Failed(f) => match &f.reason {
+                Reason::Nurbs(nurbs::NurbsFailure::BSpline(_))
+                | Reason::Intersect(_)
+                | Reason::Primitive(_) => Some(f.status),
+                _ => None,
+            },
+            _ => None,
         }
     }
 
@@ -1237,6 +1313,19 @@ impl SolidError {
     }
 }
 
+/// The status `error` answers with the way a [`SolidError::Upstream`] does: an
+/// `Upstream`'s code, or the status of a failure that replaced an `Upstream` site
+/// ([`nurbs::BSplineFailure`], [`intersect::IntersectFailure`],
+/// [`primitive::PrimitiveFailure`]).
+///
+/// For difftest's comparison only: it is removed with `Upstream` and `sm_status` in the
+/// last PR of the typed-errors work. Callers match [`SolidError::kind`] and the
+/// [`Reason`].
+#[must_use]
+pub fn upstream_status(error: &SolidError) -> Option<i32> {
+    error.upstream_status()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1281,6 +1370,10 @@ mod tests {
             Err(request.clone())
         );
         assert_eq!(SolidError::nl_ser("native")(request.clone()), request);
+        assert_eq!(
+            SolidError::nurbs_routine("native")(request.clone()),
+            request
+        );
     }
 
     #[test]
@@ -1365,9 +1458,13 @@ mod tests {
         // an ignored upstream status swallows it as it did the `InvalidInput` it was
         assert_eq!(ignored::<()>(Err(e.clone())), Ok(None));
         assert_eq!(
-            SolidError::nl_ser("native")(e),
+            SolidError::nl_ser("native")(e.clone()),
             SolidError::sm_err("native")
         );
+        // a B-spline method keeps it as the cause of its own failure
+        let wrapped = SolidError::nurbs_routine("native")(e.clone());
+        assert_eq!(wrapped.sm_status(), Some(SM_ERR));
+        assert_eq!(wrapped.cause(), Some(&e));
     }
 
     fn walls_touch(face: Option<FaceId>) -> SolidError {
@@ -1848,6 +1945,176 @@ mod tests {
         assert_eq!(collapsed.root_cause().nurbs_failure(), Some(&N::Singular));
     }
 
+    #[test]
+    fn b_spline_failures_keep_the_status_their_methods_returned() {
+        use nurbs::{BSplineFailure as B, NurbsFailure as N};
+
+        // (failure, message, kind, the status the C++ method returns)
+        let cases = [
+            (
+                B::RoutineFailed,
+                "a NURBS routine it calls failed",
+                ErrorKind::Failed,
+                SM_ERR,
+            ),
+            (
+                B::NoNurbsForm,
+                "it holds no NURBS form",
+                ErrorKind::Failed,
+                SM_ERR,
+            ),
+            (
+                B::Missing("the spine rail"),
+                "the spine rail is missing",
+                ErrorKind::Missing,
+                SM_ERR_NULL_POINTER,
+            ),
+            (
+                B::ZeroAxis,
+                "the axis direction is a zero vector",
+                ErrorKind::InvalidInput,
+                SM_ERR_INVALID_INPUT,
+            ),
+            (
+                B::DegreeOutside {
+                    given: 1,
+                    min: 2,
+                    max: 17,
+                },
+                "degree 1 is outside [2, 17]",
+                ErrorKind::Failed,
+                SM_ERR,
+            ),
+            (
+                B::ParameterOutside {
+                    parameter: 1.5,
+                    lo: 0.0,
+                    hi: 1.0,
+                },
+                "parameter 1.5 is outside the domain [0, 1]",
+                ErrorKind::Failed,
+                SM_ERR,
+            ),
+            (
+                B::Failed("the arcs have different radii"),
+                "the arcs have different radii",
+                ErrorKind::Failed,
+                SM_ERR,
+            ),
+        ];
+        for (failure, message, kind, status) in cases {
+            let op = "nurbs::b_spline_surface::p2::BSplineSurface::create_sphere_from_arcs";
+            let error = SolidError::b_spline(op, failure);
+            assert_eq!(error.to_string(), format!("{op}: {message}"));
+            assert_eq!(error.operation(), op);
+            assert_eq!(error.nurbs_failure(), Some(&N::BSpline(failure)));
+            // the same kind and statuses as the `Upstream` the method returned before
+            let before = SolidError::Upstream {
+                operation: op,
+                code: status,
+                entity: None,
+            };
+            assert_eq!(error.kind(), kind, "{error}");
+            assert_eq!(error.kind(), before.kind(), "{error}");
+            assert_eq!(error.sm_status(), before.sm_status(), "{error}");
+            assert_eq!(error.upstream_status(), Some(status), "{error}");
+            assert_eq!(error.is_port_failure(), before.is_port_failure());
+            assert_eq!(error.entity(), None);
+            // not an NLib routine's failure: no NL number, and no caller drops it as one
+            assert_eq!(nurbs::nlib_number(&error), None);
+            assert!(!error.is_nurbs_failure());
+            let text = error.to_string();
+            let reason = text.trim_start_matches(op);
+            for forbidden in ["NL_", "Nlib", "NLib", "Sm", "SM_ERR", "status"] {
+                assert!(!reason.contains(forbidden), "{forbidden} in {text}");
+            }
+        }
+        // only `Upstream` and the B-spline failures answer with an upstream status
+        assert_eq!(
+            SolidError::null_pointer("op").upstream_status(),
+            Some(SM_ERR_NULL_POINTER)
+        );
+        assert_eq!(SolidError::nurbs("op", N::Knots).upstream_status(), None);
+        assert_eq!(
+            SolidError::failed_after("op", "a stage failed", SolidError::sm_err("in"))
+                .upstream_status(),
+            None
+        );
+        assert_eq!(
+            SolidError::invalid_input("op", "bad").upstream_status(),
+            None
+        );
+    }
+
+    /// A B-spline method whose NLib call fails keeps that failure as its cause, with the
+    /// status `SM_ERR` it returned before; the answers no upstream status stands for pass
+    /// through unwrapped, so callers (and SolidCraft through solidcore-ops) still see
+    /// them at the top.
+    #[test]
+    fn a_failed_nurbs_routine_is_kept_as_the_cause_and_port_answers_pass_through() {
+        use nurbs::{BSplineFailure as B, NurbsFailure as N};
+        let op = "nurbs::b_spline_curve_n_lib::BSplineCurve::degree_reduction";
+        let wrap = SolidError::nurbs_routine(op);
+
+        let inner = SolidError::nurbs("nurbs::crv_approx::reduce_degree", N::Singular);
+        let e = wrap(inner.clone());
+        assert_eq!(e.nurbs_failure(), Some(&N::BSpline(B::RoutineFailed)));
+        assert_eq!(e.cause(), Some(&inner));
+        assert_eq!(e.root_cause().nurbs_failure(), Some(&N::Singular));
+        assert_eq!(e.operation(), op);
+        // what `nl_ser` gave: SM_ERR, kind Failed, no NL number, not an NLib failure
+        let collapsed = SolidError::nl_ser(op)(inner.clone());
+        assert_eq!(e.sm_status(), collapsed.sm_status());
+        assert_eq!(e.sm_status(), Some(SM_ERR));
+        assert_eq!(e.kind(), collapsed.kind());
+        assert_eq!(e.upstream_status(), collapsed.upstream_status());
+        assert_eq!(nurbs::nlib_number(&e), None);
+        assert!(!e.is_nurbs_failure());
+        assert!(!e.is_port_failure());
+        assert_eq!(
+            e.to_string(),
+            format!(
+                "{op}: a NURBS routine it calls failed; caused by \
+                 nurbs::crv_approx::reduce_degree: the system of equations is singular"
+            )
+        );
+
+        // any other error is kept as the cause the same way
+        let invalid = SolidError::invalid_input("nurbs::knots::insert", "bad knot");
+        assert_eq!(wrap(invalid.clone()).cause(), Some(&invalid));
+        assert_eq!(wrap(invalid).sm_status(), Some(SM_ERR));
+
+        // the answers no upstream status stands for come through as they are
+        let passed = [
+            SolidError::unported(
+                "SmBSplineCurve::DegreeReduction",
+                "nurbs.b_spline_curve_n_lib",
+            ),
+            SolidError::cancelled("nurbs::crv_approx::reduce_degree"),
+            SolidError::PreparationRequired {
+                operation: "nurbs::crv_approx::reduce_degree",
+            },
+        ];
+        for p in passed {
+            let out = wrap(p.clone());
+            assert_eq!(out, p);
+            assert_eq!(out, SolidError::nl_ser(op)(p.clone()));
+            assert_eq!(out.kind(), p.kind());
+            assert_eq!(out.sm_status(), None);
+            assert!(out.cause().is_none());
+        }
+        assert!(wrap(SolidError::cancelled("x")).is_cancelled());
+        assert!(wrap(SolidError::unported("SmX", "x")).is_unported());
+        // a routine that failed on its input is a status answer, as the collapsed SM_ERR was
+        assert!(e.is_status_answer());
+        // a solidcore-side failure kept as the cause makes the method's failure one too
+        // (is_port_failure follows the cause chain): it is no answer of the operation
+        let port = wrap(SolidError::port_invariant("nurbs::crv_basic", "no curve"));
+        assert!(port.is_port_failure());
+        assert!(!port.is_status_answer());
+        assert_eq!(port.sm_status(), Some(SM_ERR));
+    }
+
     /// The NURBS routines report their failures as `NurbsFailure`s: no source file of
     /// `src/nurbs` builds or names an NLib error number any more. (`crv_common.rs` is
     /// the one file left, until the change that edits it lands.)
@@ -1879,6 +2146,53 @@ mod tests {
             for needle in ["SolidError::Nlib", "NlibCode", "SolidError::nlib("] {
                 assert!(!text.contains(needle), "{needle} in {path:?}");
             }
+        }
+    }
+
+    /// The B-spline methods describe their failures ([`nurbs::BSplineFailure`]): their
+    /// library code builds no bare `Upstream` status, and no source file but the one
+    /// held back collapses an NLib failure without keeping it (`nl_ser`).
+    #[test]
+    fn the_b_spline_methods_build_no_bare_statuses() {
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let library = |rel: &str| {
+            let text = std::fs::read_to_string(src.join(rel)).expect("read");
+            match text.find("#[cfg(test)]\nmod tests") {
+                Some(at) => text[..at].to_owned(),
+                None => text,
+            }
+        };
+        for rel in [
+            "nurbs/b_spline_curve_n_lib.rs",
+            "nurbs/b_spline_surface_n_lib/p1.rs",
+            "nurbs/b_spline_surface_n_lib/p2.rs",
+            "nurbs/b_spline_surface_n_lib/approx.rs",
+            "nurbs/b_spline_surface/p1.rs",
+            "nurbs/b_spline_surface/p2.rs",
+            "nurbs/b_spline_curve/p2.rs",
+            "nurbs/nurbs_crv.rs",
+        ] {
+            let text = library(rel);
+            for needle in [
+                "SolidError::sm_err(",
+                "SolidError::null_pointer(",
+                "SolidError::Upstream {",
+                "nl_ser(",
+            ] {
+                assert!(!text.contains(needle), "{needle} in {rel}");
+            }
+        }
+        for rel in [
+            "surface/surface/approximate.rs",
+            "surface/step_window.rs",
+            "surface/surface_cache/p2.rs",
+            "surface/surface/p9.rs",
+            "curve/curve_cache.rs",
+            "curve/ellipse/p1.rs",
+            "offset/offset_executive/reach.rs",
+            "mass/integrator.rs",
+        ] {
+            assert!(!library(rel).contains("nl_ser("), "nl_ser in {rel}");
         }
     }
 
@@ -1973,5 +2287,6 @@ mod tests {
         assert_eq!(ignore_status::<()>(Err(c.clone())), Err(c.clone()));
         assert_eq!(native_failure::<()>(Err(c.clone())), Err(c.clone()));
         assert_eq!(SolidError::nl_ser("native")(c.clone()), c);
+        assert_eq!(SolidError::nurbs_routine("native")(c.clone()), c);
     }
 }

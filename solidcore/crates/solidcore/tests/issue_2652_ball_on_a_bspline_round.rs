@@ -15,9 +15,13 @@
 //!   1001 before; now it is the ball's piece about (8, 8, -2), and the part is the box's
 //!   whose upright round is an exact cylinder, to 1e-12 of the volume removed.
 //! - **Along part of the edge.** The same block with a corner of radius 2 for half its turn
-//!   and 2.5 for the rest: refused (`OffsetCollapses`), naming 2 less the fit margin. The
-//!   twisted disc's side rounds, two of which miss 2 mm by up to 1.8e-3, are refused the same
-//!   way, before the trace that failed with 1001.
+//!   and 2.5 for the rest: refused (`OffsetCollapses`), naming 2 less the fit margin.
+//! - **The twisted disc (#13774).** Its 4 twisted side rounds R2 are their definitions, the
+//!   walls' 2 mm round between their sections as at them (they were the trace's skinned
+//!   B-splines, two of them off 2 mm by up to 1.9e-3, so the disc's top round R2 was
+//!   refused as wide as the ball along part of the edge only). Its top round R2 is the
+//!   ball's piece over each side round, and its round at the fit that refusal named,
+//!   1.9586 (#13773), builds.
 //! - **Nowhere.** The B-spline block at R1.5 rounds as the exact cylinder's box does.
 #![allow(
     clippy::unwrap_used,
@@ -39,8 +43,11 @@ use solidcore::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, Canonical
 use solidcore::nurbs::b_spline_surface::{
     BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData,
 };
+use solidcore::nurbs::knots::Side;
 use solidcore::primitive::api_primitives::create_box;
-use solidcore::surface::surface::Surface;
+use solidcore::surface::surface::p4::NoObject;
+use solidcore::surface::surface::p5::DropPointOptions;
+use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::brep::p8::{create_planar_faces_with_3d_curves, FaceBuildEnv};
@@ -305,7 +312,13 @@ fn the_round_over_a_bspline_round_of_its_radius_is_the_ball_s_piece() {
 }
 
 /// A ball smaller than the B-spline round (R1.5 against 2): it matches the face nowhere, so
-/// nothing collapses and the round is the one the exact cylinder's box gets.
+/// nothing collapses and the round is the one the exact cylinder's box gets. There that
+/// round is the exact torus (R 0.5 about the wall's axis, r 1.5); here the wall's top spans
+/// are the same quarter cylinder, and the round is its definition with a certified net: at
+/// every point the net is within its bound of the torus, and the volumes removed differ by
+/// at most the round's area times that bound, plus the integration's 1e-9. (Since #14405
+/// the net has 24 knots, not 57, and its bound is 1.05e-6, not 3.86e-6: the volumes moved
+/// from 1.6e-8 apart to 3.2e-7, the net from the torus to 1.03e-6.)
 #[test]
 fn a_ball_narrower_than_the_bspline_round_rolls_as_on_the_cylinder() {
     let mut k = kernel();
@@ -318,9 +331,39 @@ fn a_ball_narrower_than_the_bspline_round_rolls_as_on_the_cylinder() {
     let mut kr = kernel();
     let r = reference(&mut kr);
     let (want, _) = round_top_at(&mut kr, r, 1.5).unwrap();
+    let torus = |p: Point3| {
+        let rho = ((p.x - 8.0).powi(2) + (p.y - 8.0).powi(2)).sqrt();
+        (((rho - 0.5).powi(2) + (p.z + 1.5).powi(2)).sqrt() - 1.5).abs()
+    };
+    let mut slack = 0.0_f64;
+    let ids: Vec<FaceId> = b.faces().ids().collect();
+    for f in ids {
+        let s = b.face(f).unwrap().surface.as_ref().unwrap().clone();
+        let SurfaceKind::ProceduralBlend(pb) = s.kind() else {
+            continue;
+        };
+        let d = pb.net().natural_uv_domain();
+        for i in 0..=200 {
+            for j in 0..=20 {
+                let uv = Point2::new(
+                    d.min().x + (d.max().x - d.min().x) * f64::from(i) / 200.0,
+                    d.min().y + (d.max().y - d.min().y) * f64::from(j) / 20.0,
+                );
+                let off = torus(pb.net().evaluate_point(uv).unwrap());
+                assert!(
+                    off <= pb.bound(),
+                    "{off:e} off the torus, bound {:e}",
+                    pb.bound()
+                );
+            }
+        }
+        let area = solidcore::mass::integrator::properties::face_area(&k, &mut b, f, 1e-9);
+        slack += area.unwrap() * pb.bound();
+    }
+    assert!(slack > 0.0, "no round by its definition");
     assert!(
-        (removed - want).abs() <= 1e-9 * want,
-        "removed {removed}, the cylinder's {want}"
+        (removed - want).abs() <= slack + 1e-9 * want,
+        "removed {removed}, the cylinder's {want}, the nets' slack {slack:e}"
     );
 }
 
@@ -354,36 +397,302 @@ fn a_ball_as_wide_as_the_bspline_along_part_of_the_edge_is_refused_with_its_fit(
     }
 }
 
+/// The centre of the ball of radius `r` that `s` lies on, if it does: over a 5 x 5 grid
+/// inside its domain, every point x with unit normal n has the same x + r n (or x - r n)
+/// to 1e-6.
+fn ball_centre(k: &Kernel, s: &Surface, r: f64) -> Option<Point3> {
+    let d = s.natural_uv_domain_with_nurb(k).unwrap();
+    let mut sides: [Vec<Point3>; 2] = [Vec::new(), Vec::new()];
+    for i in 1..=5 {
+        for j in 1..=5 {
+            let uv = Point2::new(
+                d.min().x + (d.max().x - d.min().x) * f64::from(i) / 6.0,
+                d.min().y + (d.max().y - d.min().y) * f64::from(j) / 6.0,
+            );
+            let x = s.evaluate_point(k, uv).unwrap();
+            let n = s.evaluate_normal(k, uv, Side::Left, Side::Left).ok()?;
+            sides[0].push(x + n * r);
+            sides[1].push(x - n * r);
+        }
+    }
+    sides.into_iter().find_map(|c| {
+        let first = *c.first()?;
+        c.iter().all(|p| p.distance(first) <= 1e-6).then_some(first)
+    })
+}
+
 /// The twisted disc of solidcraft#11848 (2 slots), its side edges rounded 2 mm, then its
-/// top outline 2 mm: over each side round's top edge the ball is as wide as the side round,
-/// but two of the four side rounds miss 2 mm by up to 1.8e-3 between their traced sections
-/// (`plan/findings/general--twisted-disc-side-round-fit-and-vertex-gaps.md`), so there the
-/// face is as wide as the ball along part of the edge only. Refused (`OffsetCollapses`)
-/// before the trace, naming the side round's least radius of curvature along the edge less
-/// the fit margin, on a side round's top edge. Before, it failed with 1001 in the trace.
+/// top outline 2 mm: over each side round's top edge the ball is as wide as the side round.
+/// With the side rounds their definitions, the walls' 2 mm rounds everywhere (#13774), the
+/// ball is as wide as the side round along the whole edge: its offset of the side round
+/// collapses onto the side round's centre line, which the top's offset crosses at one
+/// point, and the top round over each side round is a piece of that one ball (#2403's
+/// ball triangle). The part is a clean manifold solid. Before, two of the side rounds
+/// missed 2 mm by up to 1.9e-3 between their traced sections, so the ball was as wide as
+/// them along part of the edge only, and the round was refused (`OffsetCollapses`, naming
+/// 1.9586, the side round's least radius of curvature along the edge, 1.9988, less the
+/// fit margin; before that, 1001 in the trace).
 #[test]
-fn the_twisted_disc_s_top_round_at_its_side_rounds_radius_is_refused_with_its_fit() {
+fn the_twisted_disc_s_top_round_at_its_side_rounds_radius_is_the_ball_s_piece() {
     let mut k = kernel();
     let mut b = side_rounded_disc(&mut k, 2);
     let top = top_edges(&b);
     assert_eq!(top.len(), 12);
-    match fillet_edges(&mut k, &mut b, &top, 2.0, 1, 1, 1.0) {
-        Err(SolidError::FilletRefused {
-            reason: Some(NoRoomReason::OffsetCollapses),
-            fit,
-            ..
-        }) => {
-            assert_eq!(fit.kind, FitKind::Radius);
-            // the side round's least radius along its top edge, 1.9988, less the margin
-            assert!(
-                (fit.size - 1.958_612_597_062_46).abs() <= 1e-9,
-                "fit {}",
-                fit.size
+    fillet_edges(&mut k, &mut b, &top, 2.0, 1, 1, 1.0).unwrap();
+    b.refresh_cached_topology();
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    assert!(is_manifold_solid(&b).unwrap());
+    // a piece of a 2 mm ball over each of the 4 side rounds, its centre 2 below the top
+    let balls: Vec<Point3> = b
+        .faces()
+        .ids()
+        .filter_map(|f| ball_centre(&k, b.face(f).unwrap().surface.as_ref().unwrap(), 2.0))
+        .collect();
+    assert_eq!(balls.len(), 4, "{balls:?}");
+    for c in &balls {
+        assert!((c.z - (HEIGHT - 2.0)).abs() <= 1e-6, "{c:?}");
+    }
+}
+
+/// The twisted disc (2 slots), its side edges rounded 2 mm, then its 12 top edges rounded
+/// below the side rounds' radius, at 1 and at 1.101826756514697 (#13772): a clean manifold
+/// solid. With the side rounds their definitions (#13774), every vertex of the top round
+/// lies on its faces to within 3.6e-7. Before, the side rounds' skinned nets missed the
+/// walls' 2 mm rounds by up to 1.9e-3 between their sections, the top round's rails and
+/// vertices on them took that error, and Level2 reported vertices 2.5e-5 (r = 1) and
+/// 5.6e-5 (r = 1.1018) off their faces, over the 2e-5 limit.
+#[test]
+fn the_twisted_disc_s_top_round_below_its_side_rounds_radius_is_clean() {
+    for r in [1.0, 1.101_826_756_514_697] {
+        let mut k = kernel();
+        let mut b = side_rounded_disc(&mut k, 2);
+        let top = top_edges(&b);
+        assert_eq!(top.len(), 12);
+        fillet_edges(&mut k, &mut b, &top, r, 1, 1, 1.0).unwrap();
+        b.refresh_cached_topology();
+        let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+            .unwrap()
+            .lines();
+        assert!(lines.is_empty(), "r = {r}: {lines:?}");
+        assert!(is_manifold_solid(&b).unwrap(), "r = {r}");
+    }
+}
+
+/// #13773: the disc's top round at 1.95861259706246, the fit the refusal at R2 named while
+/// the side rounds were skinned nets (above). It ran 877 s and failed with a bare 1001 from
+/// the crossing-rails refusal (WR-460, since retired), as 1.9 did. With the side rounds
+/// their definitions it builds, `check_brep` L2 clean and manifold.
+#[test]
+fn the_twisted_disc_s_top_round_at_its_old_named_fit_builds() {
+    let mut k = kernel();
+    let mut b = side_rounded_disc(&mut k, 2);
+    let top = top_edges(&b);
+    assert_eq!(top.len(), 12);
+    fillet_edges(&mut k, &mut b, &top, 1.958_612_597_062_46, 1, 1, 1.0).unwrap();
+    b.refresh_cached_topology();
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    assert!(is_manifold_solid(&b).unwrap());
+}
+
+/// The disc's side rounds, each with the two walls of the edge it rounds.
+struct SideRounds {
+    brep: Brep,
+    rounds: Vec<(FaceId, [usize; 2])>,
+    walls: Vec<Surface>,
+}
+
+/// The disc (2 slots) with its 4 side edges rounded 2 mm. The walls' surfaces are kept from
+/// before (the fillet replaces their faces); a round is a face on none of them nor a cap,
+/// matched to the side edge whose ends' middle it is nearest, with that edge's walls (the
+/// two through both its ends).
+fn side_rounds(k: &mut Kernel) -> SideRounds {
+    let mut b = twisted_disc(k, 2);
+    let sides = side_edges(&b);
+    assert_eq!(sides.len(), 4);
+    let walls: Vec<Surface> = b
+        .faces()
+        .ids()
+        .map(|f| b.face(f).unwrap().surface.clone().unwrap())
+        .filter(|s| matches!(s.kind(), SurfaceKind::BSpline(_)))
+        .collect();
+    let edges: Vec<(Point3, [usize; 2])> = sides
+        .iter()
+        .map(|&e| {
+            let [p, q] = ends(&b, e);
+            let mut by_gap: Vec<(f64, usize)> = walls
+                .iter()
+                .enumerate()
+                .map(|(w, s)| (gap(k, s, p).max(gap(k, s, q)), w))
+                .collect();
+            by_gap.sort_by(|a, b| a.0.total_cmp(&b.0));
+            assert!(by_gap[1].0 < 1e-6, "{by_gap:?}");
+            ((p + q) * 0.5, [by_gap[0].1, by_gap[1].1])
+        })
+        .collect();
+    fillet_edges(k, &mut b, &sides, 2.0, 1, 1, 1.0).unwrap();
+    b.refresh_cached_topology();
+    let rounds = b
+        .faces()
+        .ids()
+        .filter_map(|f| {
+            let s = b.face(f).unwrap().surface.as_ref().unwrap();
+            if matches!(s.kind(), SurfaceKind::Plane(_)) {
+                return None;
+            }
+            let d = s.natural_uv_domain_with_nurb(k).unwrap();
+            let x = s.evaluate_point(k, (d.min() + d.max()) * 0.5).unwrap();
+            if walls.iter().any(|w| gap(k, w, x) < 1e-6) {
+                return None;
+            }
+            let (_, on) = edges
+                .iter()
+                .min_by(|a, c| a.0.distance(x).total_cmp(&c.0.distance(x)))
+                .unwrap();
+            Some((f, *on))
+        })
+        .collect();
+    SideRounds {
+        brep: b,
+        rounds,
+        walls,
+    }
+}
+
+/// The distance from `p` to `s`.
+fn gap(k: &Kernel, s: &Surface, p: Point3) -> f64 {
+    let d = s.natural_uv_domain_with_nurb(k).unwrap();
+    s.drop_point::<NoObject>(k, p, &d, &DropPointOptions::default())
+        .unwrap()
+        .gap
+}
+
+/// The distance from `p` to `s` where its foot is inside `s`'s domain (`None` on its
+/// boundary: the nearest point of the wall's continuation is past it).
+fn gap_inside(k: &Kernel, s: &Surface, p: Point3) -> Option<f64> {
+    let d = s.natural_uv_domain_with_nurb(k).unwrap();
+    let drop = s
+        .drop_point::<NoObject>(k, p, &d, &DropPointOptions::default())
+        .unwrap();
+    let uv = drop.result_uv;
+    let margin = 1e-6;
+    let inside = drop.success
+        && uv.x > d.min().x + margin
+        && uv.x < d.max().x - margin
+        && uv.y > d.min().y + margin
+        && uv.y < d.max().y - margin;
+    inside.then_some(drop.gap)
+}
+
+/// The largest error of a side round against the 2 mm round of its two walls, and the
+/// number of points judged: over a 201 x 9 grid (v from a tenth to nine tenths across),
+/// the points whose ball has its feet inside both walls. For a point x with unit normal n
+/// the ball's centre is x + 2n or x - 2n (the side nearer), 2 from each wall.
+fn worst_error(k: &Kernel, r: &SideRounds, round: FaceId, walls: [usize; 2]) -> (f64, usize) {
+    let s = r.brep.face(round).unwrap().surface.as_ref().unwrap();
+    let d = s.natural_uv_domain_with_nurb(k).unwrap();
+    let mut worst = 0.0_f64;
+    let mut judged = 0;
+    for i in 0..=200 {
+        for j in 1..=9 {
+            let uv = Point2::new(
+                d.min().x + (d.max().x - d.min().x) * f64::from(i) / 200.0,
+                d.min().y + (d.max().y - d.min().y) * f64::from(j) / 10.0,
             );
-            let e = fit.edge.unwrap();
-            assert!(top.contains(&e));
+            let x = s.evaluate_point(k, uv).unwrap();
+            let n = s.evaluate_normal(k, uv, Side::Left, Side::Left).unwrap();
+            let mut err: Option<f64> = None;
+            for sign in [1.0, -1.0] {
+                let c = x + n * (2.0 * sign);
+                let gaps: Option<Vec<f64>> = walls
+                    .iter()
+                    .map(|&w| gap_inside(k, &r.walls[w], c))
+                    .collect();
+                if let Some(gaps) = gaps {
+                    let e = gaps.iter().map(|g| (g - 2.0).abs()).fold(0.0, f64::max);
+                    err = Some(err.map_or(e, |o: f64| o.min(e)));
+                }
+            }
+            if let Some(e) = err {
+                worst = worst.max(e);
+                judged += 1;
+            }
         }
-        other => panic!("expected OffsetCollapses, got {other:?}"),
+    }
+    (worst, judged)
+}
+
+/// The largest distance between a round by its definition and its net (the B-spline
+/// surface its certificate encloses, which tessellation and intersections read), over a
+/// 1001 x 11 grid; `None` for a round that is not its definition.
+fn net_off_definition(k: &Kernel, s: &Surface) -> Option<f64> {
+    let SurfaceKind::ProceduralBlend(pb) = s.kind() else {
+        return None;
+    };
+    let d = s.natural_uv_domain_with_nurb(k).unwrap();
+    let mut worst = 0.0_f64;
+    for i in 0..=1000 {
+        for j in 0..=10 {
+            let uv = Point2::new(
+                d.min().x + (d.max().x - d.min().x) * f64::from(i) / 1000.0,
+                d.min().y + (d.max().y - d.min().y) * f64::from(j) / 10.0,
+            );
+            let x = s.evaluate_point(k, uv).unwrap();
+            worst = worst.max(x.distance(pb.net().evaluate_point(uv).unwrap()));
+        }
+    }
+    Some(worst)
+}
+
+/// #13774: each of the disc's 4 twisted side rounds is the round by its definition (a
+/// `ProceduralBlend`), and the rounded disc is a clean manifold solid.
+#[test]
+fn a_twisted_side_round_is_its_definition() {
+    let mut k = kernel();
+    let r = side_rounds(&mut k);
+    assert_eq!(r.rounds.len(), 4);
+    for &(f, _) in &r.rounds {
+        let s = r.brep.face(f).unwrap().surface.as_ref().unwrap();
+        // the definition, and its net within the round's tolerance of it (on the old
+        // boundary of a wall's extension, which is only G1, a net whose stations took one
+        // side's series left the definition by 2e-3)
+        let net = net_off_definition(&k, s);
+        let net = net.unwrap_or_else(|| panic!("{f:?} is not its definition"));
+        assert!(net <= 4e-5, "{f:?} net off its definition by {net:e}");
+        // and within its certified bound at every one of the 11011 samples
+        let bound = s.procedural_blend().unwrap().bound();
+        assert!(
+            net <= bound,
+            "{f:?} net off by {net:e}, over its bound {bound:e}"
+        );
+    }
+    let mut b = r.brep;
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    assert!(is_manifold_solid(&b).unwrap());
+}
+
+/// #13774: between its traced sections as at them, each side round is the 2 mm round of
+/// its walls: the ball's centre off a point of the round is 2 from both walls (it missed
+/// by up to 1.8e-3 on two of them, the trace's skinned B-spline exact only at its
+/// sections).
+#[test]
+fn a_twisted_side_round_is_its_walls_round_between_sections() {
+    let mut k = kernel();
+    let r = side_rounds(&mut k);
+    assert_eq!(r.rounds.len(), 4);
+    for &(f, walls) in &r.rounds {
+        let (worst, judged) = worst_error(&k, &r, f, walls);
+        eprintln!("{f:?} {walls:?} worst {worst:e} over {judged} points");
+        assert!(judged > 1000, "{f:?} judged {judged}");
+        assert!(worst <= 1e-6, "{f:?} worst {worst:e}");
     }
 }
 

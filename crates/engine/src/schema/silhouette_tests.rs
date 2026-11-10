@@ -70,7 +70,7 @@ fn strict_keeps_todays_errors() {
         (DXF, json!({"camera": {"target": [0, 0, 0], "yaw": 2e6, "pitch": 0, "distance": 1, "fov": 0}})),
         (DXF, json!({"camera": {"target": [0, 0, 0], "yaw": 0, "pitch": 0, "roll": 2e6, "distance": 1, "fov": 0}})),
         (DXF, json!({"camera": {"target": [0, 0, 0], "yaw": 0, "pitch": 0, "distance": 1, "fov": 3.2}})),
-        (DXF, json!({"camera": {"target": [0, 0, 0], "yaw": 0, "pitch": 0, "distance": 1}})),
+        (DXF, json!({"camera": {"target": [0, 0, 0], "yaw": 0, "pitch": 0, "fov": 0}})),
         (DXF, json!({"camera": camera(), "hidden": "dash"})),
         (DXF, json!({"camera": camera(), "hidden": "Omit"})),
         (DXF, json!({"camera": camera(), "hidden": null})),
@@ -132,6 +132,8 @@ fn the_types_read_each_key_as_the_handlers_do() {
         (DXF, json!({"camera": named(json!({"roll": 1, "up": "y", "pitch": 1.5}))})),
         (DXF, json!({"camera": named(json!({"pitch": std::f64::consts::FRAC_PI_2, "yaw": 1e6, "roll": -1e6}))})),
         (DXF, json!({"camera": named(json!({"fov": 3.1}))})),
+        // No `fov` is an orthographic view, as for the view commands (#13112).
+        (DXF, json!({"camera": {"target": [0, 0, 0], "yaw": 0, "pitch": 0, "distance": 100}})),
         (DXF, json!({"camera": camera(), "hidden": "omit"})),
         (DXF, json!({"camera": camera(), "hidden": "dashed", "tolerance": 1})),
         (DXF, json!({"camera": camera(), "tolerance": 0.0001})),

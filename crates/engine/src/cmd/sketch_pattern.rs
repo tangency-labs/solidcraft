@@ -10,7 +10,7 @@ use crate::schema::sketch_modify::PatternResult;
 pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
     let cmd = if circular { "sketch.pattern.circular" } else { "sketch.pattern.rectangular" };
     let (out, info) = edit(s, p, cmd, true, |sk, doc| {
-        if sk.patterns.len() >= solidcraft_sketch::MAX_CONSTRAINTS {
+        if sk.patterns.len() >= solidcraft_sketch::limits::max_constraints() {
             return Err(bad(cmd, "too many sketch patterns"));
         }
         let old_index = str_(p, "pattern").and_then(|id| sk.patterns.iter().position(|x| x.id == id));

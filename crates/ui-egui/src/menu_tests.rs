@@ -950,6 +950,9 @@ fn canvas_menu_hides_renames_calibrates_and_deletes() {
     act(&mut app, &t, "Calibrate");
     let p = app.tree.canvas_panel.clone().unwrap();
     assert!(p.calibrate && (p.distance - 80.0).abs() < 1e-9, "starts from the image's width");
+    act(&mut app, &t, "Straighten");
+    let p = app.tree.canvas_panel.clone().unwrap();
+    assert!(p.straighten && !p.calibrate && p.picks_points() && p.target_angle() == 0.0, "{p:?}");
     act(&mut app, &t, "Delete");
     assert!(app.session.doc.canvases.is_empty());
     app.run("edit.undo", json!({})).unwrap();
@@ -958,7 +961,7 @@ fn canvas_menu_hides_renames_calibrates_and_deletes() {
     act(&mut app, &t, "Lock");
     assert!(app.session.doc.canvases[0].locked);
     let items = context_menu::items(&app, &t);
-    for label in ["Edit Canvas", "Calibrate", "Delete"] {
+    for label in ["Edit Canvas", "Calibrate", "Straighten", "Delete"] {
         let item = find(&items, label);
         assert!(!item.enabled && item.tip.as_deref() == Some(solidcraft_ui_text::tr("browser.canvas_locked")), "{label}: {item:?}");
     }
@@ -1050,6 +1053,18 @@ fn menus_follow_fusion_order() {
     order(&empty, &["Pan", "Zoom", "Orbit", "Show All", "Unisolate", "Extrude", "Fillet"]);
     context_menu::run_item(&mut app, &find(&empty, "Pan"), pos2(0.0, 0.0));
     assert!(matches!(app.viewport.nav, Some(crate::viewport::NavMode::Pan)));
+}
+
+#[test]
+fn v_on_a_selected_profile_toggles_its_sketch() {
+    let mut app = sample_app();
+    let sk = app.session.doc.features.iter().find(|f| f.name == "Base").unwrap().id;
+    crate::browser::set_sketch_visible(&mut app, sk, true);
+    app.session.selection = vec![solidcraft_engine::Sel::Profile { sketch: sk, index: 0 }];
+    context_menu::toggle_visibility(&mut app);
+    assert!(!crate::browser::sketch_visible(&app, sk), "V on a picked profile hides its sketch");
+    context_menu::toggle_visibility(&mut app);
+    assert!(crate::browser::sketch_visible(&app, sk), "and shows it again");
 }
 
 #[test]
@@ -1794,6 +1809,19 @@ fn appearance_submenu_swatches_apply_to_the_clicked_body_and_keep_library_action
     assert_eq!(app.session.doc.appearances.bodies[&name].color, swatch.swatch.unwrap());
 }
 
+/// The A key opens the Appearance editor, so the quick looks and Remove override show no key.
+#[test]
+fn appearance_quick_choices_show_no_shortcut() {
+    let app = sample_app();
+    let appearance = find(&context_menu::items(&app, &Target::Body { name: body(&app) }), "Appearance");
+    assert_eq!(appearance.children[0].shortcut, "A");
+    let quick: Vec<_> = appearance.children.iter().filter(|row| row.id == "appearance.assign").collect();
+    assert!(quick.len() > 1, "quick looks and Remove override expected");
+    for row in quick {
+        assert_eq!(row.shortcut, "", "{}", row.label);
+    }
+}
+
 fn appearance_selection_app() -> SolveApp {
     let mut app = SolveApp::new(Session::default(), Services::default());
     for (name, x) in [("One", 0), ("Two", 20), ("Other", 40)] {
@@ -2293,6 +2321,8 @@ fn insert_design_offers_the_other_open_designs_then_browse() {
     h.app.start("component.insert_design");
     assert!(!menu_open(&h.app));
     h.frames(3);
+    // The picked file is read beside the window (#11593); `run` refuses until that is done (#14390).
+    h.settle();
     context_menu::close(&mut h.app);
 
     let dir = h.dir.clone();
