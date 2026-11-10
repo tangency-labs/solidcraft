@@ -840,10 +840,17 @@ pub(crate) fn reveal_for(page: usize, label: &str, prefix: &str) -> Reveal {
     Reveal { page, label: label.to_string(), until: now_ms() + REVEAL_MS, prefix: prefix.to_string() }
 }
 
+impl Reveal {
+    /// Whether the outline's time is up, on the same clock that set [`Reveal::until`].
+    pub(crate) fn expired(&self) -> bool {
+        now_ms() > self.until
+    }
+}
+
 /// Scroll the opened setting into view and outline it until [`Reveal::until`].
 pub(crate) fn follow(ui: &Ui, label: &str, rect: Rect) {
     let Some(reveal) = ui.data(|data| data.get_temp::<Reveal>(Id::unique(REVEAL_ID))) else { return };
-    if now_ms() > reveal.until || fold(label) != fold(&reveal.label) {
+    if reveal.expired() || fold(label) != fold(&reveal.label) {
         return;
     }
     let page = with(ui, |state| state.page_index);
