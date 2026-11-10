@@ -222,7 +222,6 @@ crates/solidcore/src/blend/fillet_executive/session/band_cuts.rs	section_breaks_
 crates/solidcore/src/blend/fillet_executive/session/band_cuts.rs	section_breaks_through	with_capacity	1	open	Vec::with_capacity(meets.len() + 2)	
 crates/solidcore/src/blend/fillet_executive/session/cliff_overflow.rs	FilletSession::holds_its_law	int-rem	1	proven	c % 2	constant non-zero divisor
 crates/solidcore/src/blend/fillet_executive/session/cliff_overflow.rs	FilletSession::holds_its_law	int-rem	2	proven	c % 2	constant non-zero divisor
-crates/solidcore/src/blend/fillet_executive/session/crossing_rails.rs	FilletSession::collect_rails	with_capacity	1	proven	Vec::with_capacity(SAMPLES)	constant capacity (SAMPLES = 9)
 crates/solidcore/src/blend/fillet_executive/session/fit_size.rs	corner_takes_per_radius	int-rem	1	proven	(i + 1) % 3	constant non-zero divisor
 crates/solidcore/src/blend/fillet_executive/session/fit_size.rs	corner_takes_per_radius	int-rem	2	proven	(i + 2) % 3	constant non-zero divisor
 crates/solidcore/src/blend/fillet_executive/session/keep_features.rs	FilletSession::keep_features_on	with_capacity	1	proven	Vec::with_capacity(rim.len())	rim.len(), an in-memory collection
