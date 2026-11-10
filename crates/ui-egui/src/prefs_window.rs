@@ -118,6 +118,16 @@ pub struct State<H> {
     restore_error: Option<String>,
 }
 
+impl<H> State<H> {
+    /// Keeps the outline of the row a search result revealed on screen until the test is done.
+    #[cfg(test)]
+    pub(crate) fn keep_reveal_visible(&mut self) -> bool {
+        let Some(reveal) = self.reveal.as_mut() else { return false };
+        reveal.until = f64::INFINITY;
+        true
+    }
+}
+
 impl<H> Default for State<H> {
     fn default() -> Self {
         State { open: false, section: 0, filter: String::new(), search_from: None, reveal: None, snapshot: None, restore_error: None }

@@ -655,6 +655,15 @@ pub struct DrawResult {
     pub param_warnings: Vec<String>,
 }
 
+/// What a straight slot returns, including its construction centre and middle point.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SlotResult {
+    #[serde(flatten)]
+    pub drawn: DrawResult,
+    pub centre_line: Option<String>,
+    pub middle: Option<String>,
+}
+
 /// What `sketch.point` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct PointResult {
@@ -956,6 +965,10 @@ pub struct RectResult {
 /// What `sketch.rectangle.rounded` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct RoundedRectResult {
+    /// The construction diagonal between opposite corner-arc centres.
+    pub diagonal: Option<String>,
+    /// The point held at the midpoint of the construction diagonal.
+    pub centre: Option<String>,
     /// The ids of the four sides, then the four corner arcs.
     pub curves: Vec<String>,
     /// The ids of the constraints added: the rectangle's, then the fillet's (tangencies and the

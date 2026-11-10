@@ -1,7 +1,4 @@
 {
-  "blend.feature_executive": {
-    "single_face_fillet1019_6": "tangency-labs/solidcore#3093: success with a body that fails check_brep level 2 (11 lines, the first Bad Repeated CPts)"
-  },
   "blend.fillet_executive_p3": {
     "issue-2349-teardrop-full-r0.5": "tangency-labs/solidcore#2349: the closed round's first span is off the true round by 7.9e-4 against a 4e-5 edge tolerance; the curved-spine mitre and both exact pcurves remain unimplemented",
     "issue-2349-teardrop-full-r3": "tangency-labs/solidcore#2349: the closed-angle mitre is not certified; tangency-labs/solidcore#2404 tracks the refusal size whose fresh build fails validity",
@@ -253,5 +250,11 @@
   },
   "surface.surface_approximate": {
     "gen0381": "tangency-labs/solidcore#2507: approximation reports success and a returned surface although achieved tolerance 0.5459967665063701 exceeds requested tolerance 0.0013812901040403118"
+  },
+  "topology.brep_local_operation": {
+    "gen0014": "tangency-labs/solidcore#2981: tilted disk returns three non-collinear straight boundary carriers; an affine image of the semicircle-and-diameter boundary has only one",
+    "gen0019": "tangency-labs/solidcore#2981: tilted disk returns three non-collinear straight boundary carriers; an affine image of the semicircle-and-diameter boundary has only one",
+    "gen0073": "tangency-labs/solidcore#2981: tilted disk returns three non-collinear straight boundary carriers; an affine image of the semicircle-and-diameter boundary has only one",
+    "gen0078": "tangency-labs/solidcore#2981: tilted disk returns three non-collinear straight boundary carriers; an affine image of the semicircle-and-diameter boundary has only one"
   }
 }
