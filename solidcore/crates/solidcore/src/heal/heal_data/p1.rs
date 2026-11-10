@@ -31,7 +31,7 @@
 //! - **Statuses.** Upstream ignores the `SmFaceProps::SetProps` statuses of
 //!   `Cache_FaceProps_Stage2` and every `CreateUVTrimCurves` failure (a `WARN`), and
 //!   `Cache_FaceProps_Stage3` reacts only to `SM_ERR_NOTYET_HEAL_FACE`. Those
-//!   statuses ([`SolidError::Upstream`], [`SolidError::Nlib`]) are ignored here too;
+//!   statuses ([`SolidError::Upstream`], NURBS failures) are ignored here too;
 //!   [`SolidError::Unported`], [`SolidError::InvalidInput`] (a null pointer upstream
 //!   dereferences) and [`SolidError::NotFound`] (a dangling id) propagate.
 //!   Stage two takes `&mut Brep` to retain the gap-cache writes of its seam queries,
@@ -80,7 +80,8 @@ const OP: &str = "heal::heal_data::p1";
 /// [`SolidError::NotFound`] propagate.
 fn ignore_status(r: Result<()>) -> Result<()> {
     match r {
-        Err(SolidError::Upstream { .. } | SolidError::Nlib { .. }) | Ok(()) => Ok(()),
+        Ok(()) => Ok(()),
+        Err(e) if e.upstream_status().is_some() || e.is_nurbs_failure() => Ok(()),
         Err(e) => Err(e),
     }
 }

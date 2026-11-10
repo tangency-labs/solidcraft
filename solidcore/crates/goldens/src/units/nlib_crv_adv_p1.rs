@@ -31,6 +31,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use solidcore::error::nurbs::nlib_number;
 use solidcore::nurbs::crv_adv::p1::{Continuity, CurveEnd, BARE_FLAG_REASON};
 use solidcore::nurbs::crv_basic::Curve;
 use solidcore::nurbs::crv_geom::ToleranceKind;
@@ -332,7 +333,7 @@ fn to_output(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
 /// `ST_curxcrr`), `-1` for anything else.
 fn status(e: &SolidError) -> f64 {
     match e {
-        SolidError::Nlib { code, .. } => f64::from(code.code()),
+        e if nlib_number(e).is_some() => f64::from(nlib_number(e).unwrap_or_default()),
         SolidError::NotConverged { operation, .. }
             if operation.starts_with("nurbs::bezier")
                 || operation.ends_with("extend_by_param_dist_at_depth")

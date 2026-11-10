@@ -244,7 +244,9 @@ fn setup<T>(r: solidcore::Result<T>, what: &str) -> Result<T, Fail> {
 fn status(e: &SolidError) -> i64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007,
-        SolidError::Upstream { code, .. } => i64::from(*code),
+        e if solidcore::error::nurbs::upstream_status(e).is_some() => {
+            i64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
+        }
         _ => -1,
     }
 }

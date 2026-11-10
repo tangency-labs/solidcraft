@@ -251,10 +251,8 @@ fn solids_touching_along_an_edge_pair_their_sides() {
 
 #[test]
 fn a_g2_round_decides_around_its_volume() {
-    // the G^n section's flag and the one its plane rails need: the round a bare net
-    let mut bare = Kernel::default();
-    bare.fixes.fillet_gn_section_generator = true;
-    bare.fixes.fillet_surface_plane_curve_on_plane_equation = true;
+    // the default kernel: the round a bare net
+    let bare = Kernel::default();
     let v = 24000.0 - 40.0 * 9.0 * (1.0 - PI / 4.0);
     for (name, mut k, certified) in [
         ("bare net", bare, false),

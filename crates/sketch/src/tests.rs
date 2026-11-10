@@ -35,6 +35,15 @@ pub(crate) fn count_id_search() {
     ID_SEARCHES.with(|c| c.set(c.get() + 1));
 }
 
+thread_local! {
+    static ID_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// A search of every id in a sketch (is this id taken?) on this thread.
+pub(crate) fn count_id_scan() {
+    ID_SCANS.with(|c| c.set(c.get() + 1));
+}
+
 /// Run `f` with the constructive seed on or off, without the seed-on/seed-off comparison (for
 /// tests that measure the difference).
 pub(crate) fn seeded<T>(on: bool, f: impl FnOnce() -> T) -> T {
@@ -205,6 +214,39 @@ fn zero_distance_edits_preserve_dimension_rank() {
                         assert!(constraint_residual(&sk, 0).unwrap() < 1e-6);
                         assert!((sk.point(p).unwrap().len() - value).abs() < 1e-6);
                     }
+                }
+            }
+        });
+    }
+}
+
+/// A horizontal or vertical distance edited from 0 to a positive value moves the point off the
+/// axis again, on the side the dimension measures towards (`q` past the origin).
+#[test]
+fn component_distance_edited_from_zero_opens_again() {
+    for seed in [false, true] {
+        seeded(seed, || {
+            for vertical in [false, true] {
+                let mut sk = Sketch::new();
+                let q = sk.add_point(v(3.0, 4.0), None).unwrap();
+                let (edited, other) = if vertical {
+                    (ConstraintKind::DistanceY { p: 0, q, value: 4.0 }, ConstraintKind::DistanceX { p: 0, q, value: 3.0 })
+                } else {
+                    (ConstraintKind::DistanceX { p: 0, q, value: 3.0 }, ConstraintKind::DistanceY { p: 0, q, value: 4.0 })
+                };
+                let id = sk.add_constraint(edited, None).unwrap();
+                sk.add_constraint(other, None).unwrap();
+                let last = sk.constraints.len() - 2;
+                for value in [0.0, 0.5, 0.0, 3.0] {
+                    let old = sk.driving_values();
+                    sk.constraints[last].kind.set_value(value);
+                    let report = solve_after_value_edit(&mut sk, &old);
+                    assert!(report.ok(), "{vertical}, {value}: {report:?}");
+                    assert_eq!(report.dof, 0, "{vertical}, {value}: {report:?}");
+                    assert!(!report.redundant.contains(&id), "{report:?}");
+                    assert!(constraint_residual(&sk, last).unwrap() < 1e-6);
+                    let at = sk.point(q).unwrap();
+                    assert!(((if vertical { at.y } else { at.x }) - value).abs() < 1e-6, "{vertical}, {value}: {at:?}");
                 }
             }
         });
@@ -1189,6 +1231,85 @@ fn projected_boundary_keeps_its_pieces_when_only_stations_go() {
     assert_eq!(sk.link_curves(&j).len(), 4);
 }
 
+/// A projection that changes shape is rebuilt, and what was drawn on it stays: a line from a
+/// projected corner starts at that corner again, points held on a side or a corner stay held
+/// there (on a piece of a side that was split), and a line whose corner is gone is left where
+/// it was, loose, instead of being deleted with the corner.
+#[test]
+fn rebuilt_projection_keeps_the_lines_drawn_on_it() {
+    use crate::{LinkGeom, LinkKind, LinkSource};
+    let mut sk = Sketch::new();
+    let square = |s: f64| {
+        vec![
+            LinkGeom::Line(v(0.0, 0.0), v(s, 0.0)),
+            LinkGeom::Line(v(s, 0.0), v(s, s)),
+            LinkGeom::Line(v(s, s), v(0.0, s)),
+            LinkGeom::Line(v(0.0, s), v(0.0, 0.0)),
+        ]
+    };
+    let j = sk.add_link(LinkKind::Project, LinkSource::Origin, &square(10.0)).unwrap();
+    let sides = sk.link_curves(&j);
+    let corner = |sk: &Sketch, at: Vec2| sk.link_points(&j).into_iter().find(|p| sk.points[*p].pos.dist(at) < 1e-9).unwrap();
+    let ends = |sk: &Sketch, id: &str| match sk.curves[sk.curve_index(id).unwrap()].kind {
+        CurveKind::Line { a, b } => (a, b),
+        _ => panic!("{id} is not a line"),
+    };
+    // A line drawn from the top right corner shares the projected point.
+    let from_corner = sk.add_line(v(10.0, 10.0), v(20.0, 20.0), Some(corner(&sk, v(10.0, 10.0))), None, None).unwrap();
+    // Lines held on the bottom side, on the right side and on the top left corner.
+    let on_bottom = sk.add_line(v(4.0, 0.0), v(4.0, -6.0), None, None, None).unwrap();
+    let on_right = sk.add_line(v(10.0, 3.0), v(16.0, 3.0), None, None, None).unwrap();
+    let to_corner = sk.add_line(v(-5.0, 15.0), v(0.0, 10.0), None, None, None).unwrap();
+    let ids: Vec<String> = [from_corner, on_bottom, on_right, to_corner].iter().map(|c| sk.curves[*c].id.clone()).collect();
+    let (bottom_foot, _) = ends(&sk, &ids[1]);
+    let (right_foot, _) = ends(&sk, &ids[2]);
+    let (_, tip) = ends(&sk, &ids[3]);
+    sk.add_constraint(ConstraintKind::PointOnCurve { p: bottom_foot, c: sides[0] }, None).unwrap();
+    sk.add_constraint(ConstraintKind::PointOnCurve { p: right_foot, c: sides[1] }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Coincident { p: tip, q: corner(&sk, v(0.0, 10.0)) }, None).unwrap();
+    let (corner_id, bottom_id) = (sk.points[corner(&sk, v(10.0, 10.0))].id.clone(), sk.curves[sides[0]].id.clone());
+    // The projection grows and its right side comes in two pieces: another shape, rebuilt.
+    let grown = vec![
+        LinkGeom::Line(v(0.0, 0.0), v(15.0, 0.0)),
+        LinkGeom::Line(v(15.0, 0.0), v(15.0, 7.0)),
+        LinkGeom::Line(v(15.0, 7.0), v(15.0, 15.0)),
+        LinkGeom::Line(v(15.0, 15.0), v(0.0, 15.0)),
+        LinkGeom::Line(v(0.0, 15.0), v(0.0, 0.0)),
+    ];
+    assert!(sk.update_link(&j, &grown).unwrap());
+    assert_eq!(sk.link_curves(&j).len(), 5);
+    for id in &ids {
+        assert!(sk.curve_index(id).is_some(), "{id} was deleted with the projection");
+    }
+    let (start, _) = ends(&sk, &ids[0]);
+    assert_eq!(sk.points[start].link.as_deref(), Some(j.as_str()), "the line starts at the new projected corner");
+    assert!(sk.points[start].pos.dist(v(15.0, 15.0)) < 1e-9);
+    // The corner and the side that were matched keep their ids: they moved, they are not new.
+    assert_eq!(sk.points[start].id, corner_id);
+    assert!(sk.curve_index(&bottom_id).is_some_and(|c| sk.is_linked_curve(c)));
+    assert_eq!(sk.constraints.len(), 3, "{:?}", sk.constraints);
+    assert!(solve(&mut sk).ok());
+    let at = |sk: &Sketch, id: &str, end: usize| {
+        let (a, b) = ends(sk, id);
+        sk.points[if end == 0 { a } else { b }].pos
+    };
+    assert!(at(&sk, &ids[1], 0).y.abs() < 1e-9, "held on the bottom side");
+    assert!((at(&sk, &ids[2], 0).x - 15.0).abs() < 1e-9, "held on the right side");
+    assert!(at(&sk, &ids[3], 1).dist(v(0.0, 15.0)) < 1e-9, "held on the top left corner");
+    // The projection becomes a circle: no corner or side is left to hold the lines. They stay
+    // where they were, and the one that shared a corner gets a point of its own there.
+    let before: Vec<(Vec2, Vec2)> = ids.iter().map(|id| (at(&sk, id, 0), at(&sk, id, 1))).collect();
+    assert!(sk.update_link(&j, &[LinkGeom::Circle(v(7.5, 7.5), 4.0)]).unwrap());
+    for (id, (a, b)) in ids.iter().zip(&before) {
+        assert!(sk.curve_index(id).is_some(), "{id} was deleted with the projection");
+        assert_eq!((at(&sk, id, 0), at(&sk, id, 1)), (*a, *b));
+    }
+    let (start, _) = ends(&sk, &ids[0]);
+    assert!(sk.points[start].link.is_none() && !sk.points[start].fixed);
+    assert!(sk.constraints.is_empty(), "{:?}", sk.constraints);
+    assert!(solve(&mut sk).ok());
+}
+
 #[test]
 fn a_degree_nine_control_spline_stays_exact_and_closes_a_profile_exactly() {
     // A G4 blend curve is one degree-9 Bézier; a sketch keeps it as a control spline whose exact
@@ -1861,6 +1982,42 @@ fn pattern_upkeep_does_not_search_ids_per_copy() {
     sk.refresh_pattern_shapes();
     assert_eq!(ID_SEARCHES.with(std::cell::Cell::get), 0, "id searches in pattern upkeep");
     assert!(sk.curves.iter().all(|c| c.reversed));
+}
+
+/// Inserting a dense drawing searched the whole sketch for every new id, so the insert took time
+/// in proportion to the square of its size (about 40 s for 60000 lines). A batch searches no
+/// sketch for an id, and gives the points and curves exactly the ids, checks and refusals that
+/// adding them one at a time does, including after ids a damaged counter would reuse.
+#[test]
+fn a_batch_adds_points_and_curves_without_searching_for_ids() {
+    let mut base = Sketch::new();
+    base.add_point(v(0.0, 0.0), Some("p2")).unwrap();
+    base.add_point(v(1.0, 0.0), Some("l1")).unwrap();
+    let mut one_by_one = base.clone();
+    let mut batched = base.clone();
+    let lines = 2000;
+    for i in 0..lines {
+        let (x, y) = (f64::from(i % 50), f64::from(i / 50));
+        let a = one_by_one.add_point(v(x, y), None).unwrap();
+        let b = one_by_one.add_point(v(x + 0.5, y + 0.5), None).unwrap();
+        one_by_one.add_curve(CurveKind::Line { a, b }, None).unwrap();
+    }
+    ID_SCANS.with(|c| c.set(0));
+    {
+        let mut batch = batched.batch();
+        for i in 0..lines {
+            let (x, y) = (f64::from(i % 50), f64::from(i / 50));
+            let a = batch.add_point(v(x, y), None).unwrap();
+            let b = batch.add_point(v(x + 0.5, y + 0.5), None).unwrap();
+            batch.add_curve(CurveKind::Line { a, b }, None).unwrap();
+        }
+        assert!(matches!(batch.add_point(v(0.0, 0.0), Some("p2")), Err(SketchError::Duplicate(_))), "a taken id is refused");
+        assert!(matches!(batch.add_curve(CurveKind::Line { a: 0, b: usize::MAX }, None), Err(SketchError::Invalid(_))), "the same checks");
+        assert_eq!(batch.sketch().points.len(), one_by_one.points.len());
+    }
+    assert_eq!(ID_SCANS.with(std::cell::Cell::get), 0, "id searches of the whole sketch in a batch");
+    assert_eq!(batched, one_by_one, "the same ids as one at a time");
+    assert_eq!(batched.fresh("p").unwrap(), one_by_one.fresh("p").unwrap(), "the counters carry on alike");
 }
 
 /// A fillet whose corner the solve leaves where it is stays that corner's arc, even when the

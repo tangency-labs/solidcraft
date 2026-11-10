@@ -189,7 +189,7 @@ pub(crate) fn remap_link(
             remap_link(a, ids, names, bodies, depth + 1);
             remap_link(b, ids, names, bodies, depth + 1);
         }
-        LinkSource::Plane { name } => mapped_name(name, names),
+        LinkSource::Plane { name } | LinkSource::ConstructionPoint { name } => mapped_name(name, names),
         // A construction axis, by name (#9324); the origin axes are no feature's.
         LinkSource::Axis { name } if !matches!(name.as_str(), "X" | "Y" | "Z") => mapped_name(name, names),
         _ => {}
@@ -211,6 +211,11 @@ impl crate::Feature {
                 checked_plane(plane, 0)?;
                 for link in &sketch.links {
                     checked_link(&link.source, 0)?;
+                }
+            }
+            K::FrameEndCap { ends, .. } => {
+                for end in ends {
+                    checked_plane(&end.plane, 0)?;
                 }
             }
             K::ConstructionPlane { plane }
@@ -281,6 +286,11 @@ impl crate::Feature {
                     for n in link.face_name.iter_mut().chain(&mut link.edge_name) {
                         *n = remap_topology(n, ids, bodies);
                     }
+                }
+            }
+            K::FrameEndCap { ends, .. } => {
+                for end in ends {
+                    remap_plane(&mut end.plane, ids, bodies, 0)?;
                 }
             }
             K::ConstructionPlane { plane }

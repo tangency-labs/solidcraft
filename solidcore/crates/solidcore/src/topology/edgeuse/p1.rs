@@ -892,10 +892,7 @@ pub fn set_member_uv_trim_curve(
 /// upstream dereferences) and [`SolidError::NotFound`] propagate.
 fn ignore_status<T>(r: Result<T>) -> Result<()> {
     match r {
-        Err(e @ (SolidError::Upstream { .. } | SolidError::Nlib { .. })) => {
-            let _ = e;
-            Ok(())
-        }
+        Err(e) if e.upstream_status().is_some() || e.is_nurbs_failure() => Ok(()),
         Err(e) => Err(e),
         Ok(_) => Ok(()),
     }

@@ -1,7 +1,7 @@
 //! Stateless camera commands shared by the navigation cube and programmatic callers.
 use serde_json::{Value, json};
 use solidcraft_geom::prelude::*;
-use solidcraft_render::{Camera, StandardView};
+use solidcraft_viewport::{Camera, StandardView};
 
 use super::CommandSpec;
 use crate::params::{bad, num, req_vec2, req_vec3, vec3};
@@ -653,7 +653,7 @@ pub(crate) fn square_heading(yaw: f64) -> f64 {
 mod tests {
     use super::*;
     use solidcore_record::Vec3;
-    use solidcraft_render::UpAxis;
+    use solidcraft_viewport::UpAxis;
 
     #[test]
     fn view_bar_commands_validate_json_without_editing_design_or_history() {

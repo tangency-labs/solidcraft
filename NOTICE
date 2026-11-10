@@ -3,6 +3,15 @@ Copyright (c) 2026 SolidCraft contributors.
 Licensed under the MIT License or the Apache License, Version 2.0, at your option
 (LICENSE-MIT, LICENSE-APACHE).
 
+Brand and interface
+
+SolidCraft's brand and interface are not under MIT OR Apache-2.0. The UI kit (crates/ui-kit), the
+look (crates/look: the interface icons, glyphs and built-in themes), the theme (crates/theme: the
+design tokens and palettes), and the SolidCraft name, logo, app icon and brand kit are under the
+SolidCraft Brand and Interface Licence (LICENSE-BRAND). They may be used, changed and contributed
+to as part of SolidCraft; using them in anything else needs the maintainers' written permission.
+Third-party fonts in those folders keep their own licences.
+
 Third-party material
 
 Software dependencies are listed in Cargo.lock; their licences are in THIRD-PARTY-LICENSES.txt
