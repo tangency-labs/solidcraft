@@ -157,7 +157,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_stitch_at_body_tolerance = true;
     f.curve_contacts_at_curve_ends = true;
     f.shell_empty_cavity_fails = true;
-    f.fillet_refuse_ball_not_fitting = true;
     f.boolean_lists_virtual_surface_copies = true;
     f.ssi_tangent_contact_points = true;
     f.ssi_trace_tangent_curves_once = true;
@@ -244,7 +243,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_trim_status = true;
     f.perspective_sphere_offsets = true;
     f.plane_recognition_origin_after_axes = true;
-    f.fillet_corner_face_curve_halves = true;
     f.brep_edit_statuses_pass_on = true;
     f.fillet_run_on_bspline_trims = true;
     f.offset_tangent_gap_statuses = true;
@@ -261,7 +259,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_keep_cavity_regions = true;
     f.gap_samples_non_bspline_v_stride = true;
     f.imprint_skips_collapsed_definition = true;
-    f.fillet_blend_curve_revolved_on_arc = true;
     f.temporary_radius_setup_errors = true;
     f.ellipse_step_interval_checks = true;
     f.corner_patch_face_side_twist = true;
@@ -342,8 +339,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.is_topological_vertex_rejects_cusps_and_tangent_errors = true;
     f.cone_create_canonical_preserves_inside_out_and_checks_height = true;
     f.point_class_gap_3d_propagates_no_drop_error = true;
-    f.fillet_surface_plane_curve_on_plane_equation = true;
-    f.fillet_gn_section_generator = true;
     f.offset_updates_result_tolerances = true;
     f.cone_iso_circle_at_axial_height = true;
     f.boolean_coincident_strip_drops_crossing = true;

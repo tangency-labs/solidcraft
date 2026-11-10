@@ -251,8 +251,8 @@ enum Section<'a> {
     /// such rounds at a side edge as the [`Turn`] says (`SetSweptTurns`).
     Round(Turn),
     /// The curvature-continuous section (`SM_FSG_BLEND_CURVE`): the Gⁿ generator's order 2 at the
-    /// equal-area thumbweight (`SMLIB_BLEND_THUMBWEIGHT`, fork 6148773; solidcore#2261 under
-    /// `fillet_gn_section_generator`), which takes off what the ball's circle does.
+    /// equal-area thumbweight (`SMLIB_BLEND_THUMBWEIGHT`, fork 6148773; solidcore#2261, the
+    /// kernel's default since WR-685), which takes off what the ball's circle does.
     Curvature,
     Chord,
     /// A chamfer of the sizes asked: one for all the edges or one per edge, and for each edge
@@ -288,8 +288,8 @@ fn face_set(b: &Brep) -> solidcore::Result<HashSet<FaceId>> {
 /// reason) are [`Error::NoRoom`] like the fork's.
 ///
 /// A blend too large that solidcore sizes (the session's fit, as the fork's capi reads it with
-/// `smlib_blend_fit_size`, or [`SolidError::FilletRefused`] carrying it; under
-/// `fixes.fillet_gn_section_generator`) is [`Error::TooLarge`] with that size, its edge's point
+/// `smlib_blend_fit_size`, or [`SolidError::FilletRefused`] carrying it) is
+/// [`Error::TooLarge`] with that size, its edge's point
 /// filled in by the caller from the edge returned with it ([`sized_on`]); a corner solidcore
 /// refuses as not supported (the mixed corner whose rails cross, solidcore#2256) is
 /// [`Error::Unported`] naming it.
@@ -1386,8 +1386,8 @@ pub(crate) fn fillet_variable(
         if law_has_corner(degree, knots, radii) {
             return Ok(Err(Error::Unsupported));
         }
-        // The round is the union of its balls (smlib#78, solidcore#2262 with
-        // `fillet_gn_section_generator`): each ball touches it along the circle shifted
+        // The round is the union of its balls (smlib#78, solidcore#2262):
+        // each ball touches it along the circle shifted
         // -r r'/|c'| from its great circle. A law whose balls fold over one another is refused
         // (`NoRoomReason::BallsFold`), [`Error::NoRoom`].
         let solid_in = brep_p2::is_manifold_solid(&w)?;
