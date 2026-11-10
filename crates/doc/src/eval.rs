@@ -2745,6 +2745,7 @@ impl Model {
                     }
                     track_altered_sheets(&state, &mut next, f, &mut warning);
                     note_join_apart(&state, &next, f, &mut warning);
+                    note_cut_cavity(&state, &next, f, &mut warning);
                 }
                 let ms = refused.map_or(t0.elapsed().as_secs_f64() * 1000.0, |x| x.ms);
                 let internal = matches!(r, Err(kernel::KernelError::Internal(_)));
@@ -3330,7 +3331,56 @@ fn track_altered_sheets(before: &ModelState, after: &mut ModelState, f: &Feature
 /// when Join was left on by mistake. Says so when a feature's Join leaves the bodies it changed
 /// in more pieces than they had (#4434). Combine joins the bodies it is given, apart or not.
 fn note_join_apart(before: &ModelState, after: &ModelState, f: &Feature, warning: &mut Option<String>) {
-    let operation = match &f.kind {
+    if feature_operation(f) != Some(Operation::Join) {
+        return;
+    }
+    for (name, n) in join_pieces_added(before, after) {
+        append_warning(
+            warning,
+            format!("the joined piece doesn't touch `{name}`, so `{name}` is now in {n} separate pieces (New Body makes it a body of its own)"),
+        );
+    }
+}
+
+/// A Cut whose tool never reaches the outside of a body leaves a closed cavity in it: valid, but
+/// rarely meant (a pocket whose tool was shortened until it stopped short of the face, #7317).
+/// Says so, with the volume the cut took, when a feature's Cut leaves a body with more closed
+/// voids than it had.
+fn note_cut_cavity(before: &ModelState, after: &ModelState, f: &Feature, warning: &mut Option<String>) {
+    if feature_operation(f) != Some(Operation::Cut) {
+        return;
+    }
+    for was in &before.bodies {
+        let Some(now) = after.body(&was.name) else { continue };
+        // Only a body with more shells can have gained a void, and it is the cheap test.
+        if now.body.shell_count() <= was.body.shell_count() || now.body.same_shape(&was.body) || voids(&now.body) <= voids(&was.body) {
+            continue;
+        }
+        // The exact volumes before and after: what the cut took, the cavity when it took nothing else.
+        let removed = match (kernel::measure_mass(&was.body), kernel::measure_mass(&now.body)) {
+            (Ok(a), Ok(b)) if (a.volume - b.volume).is_finite() && a.volume > b.volume => {
+                format!(", taking {} mm³", show_mm(((a.volume - b.volume) * 100.0).round() / 100.0))
+            }
+            _ => String::new(),
+        };
+        append_warning(
+            warning,
+            format!(
+                "the cut leaves a closed cavity inside `{}` that opens on no face{removed} (extend the tool through the face to open it)",
+                now.name
+            ),
+        );
+    }
+}
+
+/// The closed voids of a body: its shells beyond the one outside each of its pieces.
+fn voids(b: &Body) -> usize {
+    b.shell_count().saturating_sub(b.lumps().map_or(1, |l| l.len()))
+}
+
+/// The operation of a feature that makes or changes bodies with one.
+fn feature_operation(f: &Feature) -> Option<Operation> {
+    Some(match &f.kind {
         FeatureKind::Extrude { operation, .. }
         | FeatureKind::Revolve { operation, .. }
         | FeatureKind::Box { operation, .. }
@@ -3345,17 +3395,8 @@ fn note_join_apart(before: &ModelState, after: &ModelState, f: &Feature, warning
         | FeatureKind::BoundaryFill { operation, .. }
         | FeatureKind::Thicken { operation, .. }
         | FeatureKind::SurfaceNetwork { operation, .. } => *operation,
-        _ => return,
-    };
-    if operation != Operation::Join {
-        return;
-    }
-    for (name, n) in join_pieces_added(before, after) {
-        append_warning(
-            warning,
-            format!("the joined piece doesn't touch `{name}`, so `{name}` is now in {n} separate pieces (New Body makes it a body of its own)"),
-        );
-    }
+        _ => return None,
+    })
 }
 
 /// The bodies a Join from `before` to `after` left in more separate pieces than it found, with
