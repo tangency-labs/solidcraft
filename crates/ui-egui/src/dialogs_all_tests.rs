@@ -363,7 +363,7 @@ fn check_form(command: &str, labels: &[&str]) {
     for input in &d.inputs {
         assert!(scenario::rect_of(&format!("dialog:field:{}", input.label)).is_some(), "{command}: selection field {}", input.label);
         assert!(
-            nodes.iter().any(|(_, n)| n.role() == egui::accesskit::Role::Button && n.label() == Some(crate::i18n::tr(input.label))),
+            nodes.iter().any(|(_, n)| n.role() == egui::accesskit::Role::Button && n.label() == Some(solidcraft_ui_text::tr_label(input.label))),
             "{command}: picker {} is a button",
             input.label
         );
