@@ -122,6 +122,9 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
     if r.fold || r.clicked {
         toggle(app, &key, compact);
     }
+    if compact && let Some(at) = r.secondary {
+        acts.menu = Some((at, Target::HistoryFolder));
+    }
     if !open {
         return;
     }
