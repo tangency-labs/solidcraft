@@ -26,7 +26,6 @@
 //! | `impl FilletSolverOps for VariableRadiusFs`              | the `SmVariableRadiusFS` virtuals (`GetJacobianSize`, `SetupOffsetValues`, `OffsetRadiiCanChange`, `LoadJacobian`, `LoadInitialValues`, `GetType`, `IsKindOf`, `GetSolverType`) |
 //! | `impl FilletSolverOps for ConstantDistanceFs`            | the `SmConstantDistanceFS` virtuals (`CanMakeAnalytic`, `GetJacobianSize`, `GetSolverType`, `LoadJacobian`, `LoadInitialValues`, `SetupOffsetValues`, `GetType`, `IsKindOf`) and `GetDistance` |
 //! | [`CircularCrossSectionFsg::create_surface`]              | `SmCircularCrossSectionFSG::CreateSurface`            |
-//! | [`BlendCurveCrossSectionFsg::create_surface`]            | `SmBlendCurveCrossSectionFSG::CreateSurface`          |
 //! | [`SurfaceSurfaceFs::new`]                                | `SmSurfaceSurfaceFS::SmSurfaceSurfaceFS`              |
 //! | [`SurfaceSurfaceFs::calc_fillet_geom`], [`SurfaceSurfaceFs::calc_fillet_start`], [`SurfaceSurfaceStart`] | `SmSurfaceSurfaceFS::CalcFilletGeom` (up to `GetPseudoBrep`; the rest is `surface_surface`'s) |
 //! | [`SurfaceSurfaceFs::is_kind_of`]                         | `SmSurfaceSurfaceFS::IsKindOf`                        |
@@ -110,6 +109,8 @@
 //!   domain, not the extended one, which holds a second root of the rail-end solve on the far
 //!   side of the whole circle (the solve's interval is the extended one, as upstream's).
 
+use std::borrow::Cow;
+
 use crate::blend::fillet_custom_solver::{
     face_owner, offset_compute_inward_vector, offset_evaluate_1st, offset_evaluate_point,
     offset_local_point_solve, surface_global_point_solve, ConstantRadiusAssistedFs, InitialValues,
@@ -126,10 +127,10 @@ use crate::blend::fillet_solver::p3::StepSolveOutcome;
 use crate::blend::fillet_solver::p4::IntersectorSolver;
 use crate::blend::fillet_standard_solver::p1::SolverRails;
 use crate::blend::fillet_standard_solver::p1::{
-    constant_radius_is_kind_of, BlendCurveCrossSectionFsg, BoundaryTrimmingType,
-    CircularCrossSectionFsg, ConstantDistanceFs, ConstantRadiusFs, CurveBasedFs,
-    DistanceInitialValues, FilletLaw, FilletSolverType, JacobianSurfaces, RailSurface,
-    SurfaceSurfaceFs, VariableRadiusFs, CONSTANT_RADIUS_ASSISTED_FS_TYPE, CURVE_BASED_FS_TYPE,
+    constant_radius_is_kind_of, BoundaryTrimmingType, CircularCrossSectionFsg, ConstantDistanceFs,
+    ConstantRadiusFs, CurveBasedFs, DistanceInitialValues, FilletLaw, FilletSolverType,
+    JacobianSurfaces, SurfaceSurfaceFs, VariableRadiusFs, CONSTANT_RADIUS_ASSISTED_FS_TYPE,
+    CURVE_BASED_FS_TYPE,
 };
 use crate::blend::law_corners::{ArcApproximation, LawCornerPieces};
 use crate::curve::curve::p1::GlobalPointSolveOptions;
@@ -2477,9 +2478,8 @@ impl CircularCrossSectionFsg {
     /// pRail1Curve, pRail2Curve, crFilletPoints, pSurf1, pUV1, pSurf2, pUV2,
     /// rpFilletSurface)`: [`CircularCrossSectionFsg::create_surface_from_curves`] at the
     /// solver's tolerance, without `G1` continuity (upstream keeps it off for every
-    /// solver type). The fillet points and surfaces are not used. With
-    /// `fixes.fillet_gn_section_generator` a variable-radius or constant-distance
-    /// solver's sections are the balls' touch circles
+    /// solver type). The fillet points and surfaces are not used. A variable-radius or
+    /// constant-distance solver's sections are the balls' touch circles
     /// ([`CircularCrossSectionFsg::create_surface_from_curves_of_balls`]; WR-685).
     ///
     /// # Errors
@@ -2501,11 +2501,10 @@ impl CircularCrossSectionFsg {
         // ball changes its radius along the round (a radius law, or a constant chord
         // between faces whose angle changes); the others' balls touch the round along
         // their great circles.
-        let ball_radius_varies = k.fixes.fillet_gn_section_generator
-            && matches!(
-                solver_type,
-                FilletSolverType::VariableRadius | FilletSolverType::ConstDist
-            );
+        let ball_radius_varies = matches!(
+            solver_type,
+            FilletSolverType::VariableRadius | FilletSolverType::ConstDist
+        );
         // the centre line is a plain SmBSplineCurve here, so its virtuals are the
         // B-spline ones
         let mut cl = Curve::from(core::mem::take(center_line));
@@ -2941,37 +2940,40 @@ pub fn law_in_parameter(lb: &LawBall) -> Result<Option<BSplineCurve>> {
 
 const OP_LAW: &str = "blend::fillet_standard_solver::p2::law_in_parameter";
 
-/// Not the fork's (#2500): the face a round's ball rolls on, for the round by its
-/// definition: the offset's base surface, or, for a surface of revolution of a circle's arc
-/// that the offset extends as itself (`offset_extension_as_itself`, the fork's 43fd6b6) and
-/// whose extension it holds, that extension. Past its generator's interval a surface of
-/// revolution revolves the generator's extrapolation, not its circle, so a ball the trace
-/// rolls on past the face (out to an End, round the tube) has no foot on the base there: the
-/// station solve failed and the round was built as the trace's B-spline. A cylinder, cone,
-/// sphere or torus continues as itself on its own, and keeps its analytic kind in the
-/// definition.
-fn rolled_on<'a>(
-    k: &Kernel,
-    offset: &'a crate::surface::offset_surface::OffsetSurface,
-) -> &'a Surface {
+/// Not the fork's: the face a round's ball rolls on, for the round by its definition: the
+/// surface the trace rolled the ball on. Past its domain the offset of a B-spline, surface
+/// of revolution or surface of extrusion is evaluated on its extended base
+/// (`m_pExtendedSurface`: the base's tangent extension, or a surface of revolution of a
+/// circle's arc carried on as its circle), while the base itself continues otherwise (a
+/// B-spline's end spans carried on, a revolved generator's extrapolation). A round whose
+/// rails run on past the face (an edge's round run on past the edge's ends, or out to an
+/// End round a tube) had no foot on the plain base there: its first station missed the
+/// rails (by more than 1 on a twisted wall) and the round was built as the trace's skinned
+/// B-spline, which is the walls' round only at its sections. So where the offset holds an
+/// extension (the one it holds now, pending or stored, which contains every point the
+/// trace evaluated), the definition rolls on it. A plane, cylinder, cone, sphere or torus
+/// continues as itself and keeps its analytic kind in the definition, and a blend by its
+/// definition keeps its definition.
+fn rolled_on(offset: &crate::surface::offset_surface::OffsetSurface) -> Cow<'_, Surface> {
+    use crate::surface::surface::SurfaceKind;
     let base = offset.base_surface();
-    match offset.extended_base_surface() {
-        Some(extended)
-            if matches!(
-                base.kind(),
-                crate::surface::surface::SurfaceKind::SurfOfRevolution(_)
-            ) && offset_continues_as_itself(k, base) =>
-        {
-            extended
-        }
-        _ => base,
-    }
+    let extends = matches!(
+        base.kind(),
+        SurfaceKind::BSpline(_)
+            | SurfaceKind::SurfOfRevolution(_)
+            | SurfaceKind::SurfOfExtrusion(_)
+    );
+    let extended = if extends {
+        offset.with_extended_base_surface(|e| e.map(Surface::clone_keeping_owner))
+    } else {
+        None
+    };
+    extended.map_or(Cow::Borrowed(base), Cow::Owned)
 }
 
 impl CircularCrossSectionFsg {
     /// The fork's `SmGnSectionFSG::CircleSurface` gate (cc08236, 308cc40, c596548; with
-    /// `fixes.fillet_gn_section_generator` and `fixes.fillet_round_as_definition`,
-    /// WR-698): a ball of one radius between faces that are NURBS surfaces is the round by
+    /// `fixes.fillet_round_as_definition`, WR-698): a ball of one radius between faces that are NURBS surfaces is the round by
     /// its definition, the order-1 section's `Build` with the rails and uv curves
     /// replaced ([`GnSectionFsg::build_given_ball`]), unless the rails or the centre line
     /// turn at a knot (`sm_FilletCurveCorners`: the pieces are built as before), a face is
@@ -3015,7 +3017,7 @@ impl CircularCrossSectionFsg {
             corner_angle, fillet_curve_corners,
         };
         use crate::surface::surface::SurfaceKind;
-        if !(k.fixes.fillet_gn_section_generator && k.fixes.fillet_round_as_definition) {
+        if !k.fixes.fillet_round_as_definition {
             return Ok(None);
         }
         let [rail1, rail2] = rails;
@@ -3039,7 +3041,8 @@ impl CircularCrossSectionFsg {
         if !arcs.is_exact_circle() {
             return Ok(None);
         }
-        let bases = [rolled_on(k, o1), rolled_on(k, o2)];
+        let rolled = [rolled_on(o1), rolled_on(o2)];
+        let bases = [rolled[0].as_ref(), rolled[1].as_ref()];
         // (a face that is itself a blend by its definition takes a ball of one radius, on a
         // round of one radius between NURBS faces: the definition its certificate encloses;
         // c5b6bb7, WR-714)
@@ -3275,7 +3278,7 @@ impl CircularCrossSectionFsg {
 
 impl super::p1::LinearCrossSectionFsg {
     /// A chamfer by its definition (solidcore's, #2486; with
-    /// `fixes.fillet_gn_section_generator` and `fixes.fillet_round_as_definition`): the
+    /// `fixes.fillet_round_as_definition`): the
     /// section generator's chord, order 0, between the feet of the point at the solver's
     /// offsets off the two faces ([`GnSectionFsg::build_chord`]), keeping the chamfer's
     /// sizes: those the solver was made for, else its two offsets' setbacks at the wedge
@@ -3307,7 +3310,7 @@ impl super::p1::LinearCrossSectionFsg {
         };
         use crate::surface::procedural_blend::chamfer::{ChamferDefinition, ChamferSize};
         use crate::surface::surface::SurfaceKind;
-        if !(k.fixes.fillet_gn_section_generator && k.fixes.fillet_round_as_definition) {
+        if !k.fixes.fillet_round_as_definition {
             return Ok(None);
         }
         let [rail1, rail2] = rails;
@@ -3322,7 +3325,8 @@ impl super::p1::LinearCrossSectionFsg {
         else {
             return Ok(None);
         };
-        let bases = [rolled_on(k, o1), rolled_on(k, o2)];
+        let rolled = [rolled_on(o1), rolled_on(o2)];
+        let bases = [rolled[0].as_ref(), rolled[1].as_ref()];
         let mut planes = true;
         for b in bases {
             match b.kind() {
@@ -3573,46 +3577,6 @@ fn chord_between_planes(
 
 const OP_LINEAR_DEF: &str =
     "blend::fillet_standard_solver::p2::LinearCrossSectionFsg::definition_surface";
-
-impl BlendCurveCrossSectionFsg {
-    /// `SmBlendCurveCrossSectionFSG::CreateSurface(rFilletSolver, pCenterLine,
-    /// pRail1Curve, pRail2Curve, crFilletPoints, pSurf1, pUV1, pSurf2, pUV2,
-    /// rpFilletSurface)`:
-    /// [`BlendCurveCrossSectionFsg::create_surface_from_curves`] at the solver's
-    /// tolerance, with `G1` continuity for a constant-radius solver
-    /// (`SM_FS_CONST_RADIUS`). The fillet points are not used.
-    ///
-    /// # Errors
-    ///
-    /// Those of [`BlendCurveCrossSectionFsg::create_surface_from_curves`].
-    #[allow(clippy::too_many_arguments)]
-    pub fn create_surface(
-        &self,
-        k: &Kernel,
-        approx_tol_3d: f64,
-        solver_type: FilletSolverType,
-        center_line: &mut BSplineCurve,
-        rail1: &mut BSplineCurve,
-        rail2: &mut BSplineCurve,
-        side1: RailSurface<'_>,
-        side2: RailSurface<'_>,
-    ) -> Result<BSplineSurface> {
-        let mut need_g1_continuity = false;
-        if solver_type == FilletSolverType::ConstRadius {
-            need_g1_continuity = true;
-        }
-        self.create_surface_from_curves(
-            k,
-            center_line,
-            rail1,
-            rail2,
-            approx_tol_3d,
-            need_g1_continuity,
-            side1,
-            side2,
-        )
-    }
-}
 
 // ---- SmSurfaceSurfaceFS ---------------------------------------------------------------------------
 
@@ -4209,23 +4173,5 @@ mod tests {
             .expect("circular");
         let corner = s.evaluate_point(Point2::new(0.0, 0.0)).expect("point");
         assert!(corner.distance(p(0.0, 0.0, 1.0)) < 1e-6);
-        let none = RailSurface {
-            surface: None,
-            uv_curve: None,
-        };
-        let mut c = line(p(0.0, 1.0, 1.0), p(5.0, 1.0, 1.0));
-        let (mut a, mut b) = (r1.copy(), r2.copy());
-        b.insert_one_knot(0.5, 1).expect("knot");
-        let r = BlendCurveCrossSectionFsg::default().create_surface(
-            &k,
-            1e-6,
-            FilletSolverType::VariableRadius,
-            &mut c,
-            &mut a,
-            &mut b,
-            none,
-            none,
-        );
-        assert!(matches!(r, Err(SolidError::Upstream { .. })));
     }
 }

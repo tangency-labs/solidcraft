@@ -1387,6 +1387,9 @@ jobs:
         if: matrix.check == 'kernel rig and goldens'
         env:
           KERNEL_CASES_REPORT: ${{ github.workspace }}/solidcore/reports/kernel-rig/table.md
+          # each case in a process of its own, one per vCPU of the 16-vCPU, 64 GB runner, with a
+          # CPU-time hang limit (#14277)
+          KERNEL_CASES_JOBS: "16"
         run: |
           mkdir -p reports/kernel-rig
           cd crates/solidcore-ops

@@ -937,6 +937,7 @@ fn main() -> eframe::Result {
     solidcraft_ui_egui::icon_svg::install();
     solidcraft_ui_egui::workspace::install_tabs();
     solidcraft_ui_egui::navigation_slots::install();
+    solidcraft_ui_egui::theme::install_builtin_themes();
     // On OCLP-patched Macs, wgpu picks a Metal Shading Language standard that the system's
     // compiler refuses (`invalid value 'metal3.2'`), because the patched OS reports a newer
     // macOS version than the GPU's Metal compiler supports. Re-launching with
@@ -1347,7 +1348,10 @@ fn startup_step(step: &'static str, detail: &str) {
 /// backends come from `startup::choose_backends` (on Windows D3D12 first, and only the backend
 /// in use is started); `preference` is `graphics.json`'s `backend`.
 fn wgpu_options(cpu: bool, preference: Option<&str>) -> eframe::egui_wgpu::WgpuConfiguration {
-    let mut options = eframe::egui_wgpu::WgpuConfiguration::default();
+    // One frame in flight, as eframe's own default (`NativeOptions::default`): egui-wgpu's
+    // `WgpuConfiguration::default()` is HIGH_THROUGHPUT (two frames queued), which added a frame
+    // of input-to-display latency to every pan, orbit and drag.
+    let mut options = eframe::egui_wgpu::WgpuConfiguration::default().with_surface_config(eframe::egui_wgpu::SurfaceConfig::LOW_LATENCY);
     if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut options.wgpu_setup {
         let env_set = std::env::var(startup::WGPU_BACKEND_ENV).is_ok_and(|v| !v.trim().is_empty());
         // A retry applies only to this launch. WGPU_BACKEND always has priority.

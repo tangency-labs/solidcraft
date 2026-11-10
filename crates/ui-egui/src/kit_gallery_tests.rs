@@ -3,7 +3,8 @@
 //! of its surface dialogs) and the boards that need a running app. The kit's own gallery,
 //! drawn from plain data, is `ui_kit::gallery`; these are checked with its `check_elements`.
 use crate::dialogs_surface::{continuity_row, continuity_row_explained, continuity_tip};
-use crate::ui_kit::gallery::{ELEMENTS, Element, check_elements, element, example};
+use crate::ui_kit::element;
+use crate::ui_kit::gallery::{ELEMENTS, Element, Sample, check_elements, example};
 use crate::ui_kit::*;
 use egui::{Ui, vec2};
 use solidcraft_engine::kernel::Continuity;
@@ -35,8 +36,19 @@ const APP_ELEMENTS: &[Element] = &[
     element!("preference_specimens", |ui, _| {
         crate::prefs::figures::scale_specimen(ui, 1.1);
         crate::prefs::figures::status_palette_sample(ui, solidcraft_theme::ColorVision::Deutan);
+        crate::prefs::figures::colour_vision_sample(ui, &Tokens::get());
         crate::prefs::figures::autosave_timeline(ui, 5.0);
         crate::prefs::figures::pointer_preview(ui, true, "Normal", true);
+    }),
+    element!("visual_style_dropdown", "dialog:row:Visual style", Some("dialog:Visual style"), |ui, s| {
+        row(ui, "Visual style", |ui| {
+            let options: Vec<_> = crate::navigation_slots::VISUAL_STYLES
+                .iter()
+                .enumerate()
+                .map(|(index, (_, label))| (*label, crate::navigation_slots::visual_style_icon(index as u8)))
+                .collect();
+            dropdown_icons(ui, "gallery_visual_style", &mut s.selected, &options);
+        });
     }),
     element!("continuity_tip", "dialog:row:Gallery", None, |ui, _| {
         let tip = continuity_tip(&[Continuity::G0, Continuity::G1]);
@@ -46,7 +58,48 @@ const APP_ELEMENTS: &[Element] = &[
 
 #[test]
 fn app_elements_have_geometry_and_stay_in_their_allocation_in_both_themes() {
-    check_elements(APP_ELEMENTS);
+    check_elements(APP_ELEMENTS, crate::fonts::test_context);
+}
+
+#[test]
+fn visual_style_dropdown_specimen_selects_real_options_and_paints_their_icons() {
+    let previous = solidcraft_theme::is_dark();
+    let element = APP_ELEMENTS.iter().find(|element| element.name == "visual_style_dropdown").unwrap();
+    for dark in [false, true] {
+        solidcraft_theme::set_dark(dark);
+        let ctx = crate::fonts::test_context();
+        let sample = std::cell::RefCell::new(Sample { value: String::new(), second: String::new(), selected: 0, checked: false });
+        let mut draw = |ui: &mut Ui| {
+            (element.draw)(ui, &mut sample.borrow_mut());
+        };
+        for _ in 0..3 {
+            crate::ui_kit::test_support::frame(&ctx, vec![], &mut draw);
+        }
+        for (index, (_, label)) in crate::navigation_slots::VISUAL_STYLES.into_iter().enumerate() {
+            let trigger = solidcraft_ui_registry::handle_at("dialog:Visual style").unwrap();
+            crate::ui_kit::test_support::frame(&ctx, crate::ui_kit::test_support::pointer(trigger, true), &mut draw);
+            crate::ui_kit::test_support::frame(&ctx, crate::ui_kit::test_support::pointer(trigger, false), &mut draw);
+            crate::ui_kit::test_support::frame(&ctx, vec![], &mut draw);
+            for (option, (_, name)) in crate::navigation_slots::VISUAL_STYLES.into_iter().enumerate() {
+                let rect = solidcraft_ui_registry::rect_of(&format!("dialog:Visual style:{name}")).unwrap();
+                let icon = crate::navigation_slots::visual_style_icon(option as u8);
+                let painted = solidcraft_ui_registry::rect_of(&format!("dialog:dropdown_icon:{icon}")).unwrap();
+                let owner =
+                    if option == sample.borrow().selected { solidcraft_ui_registry::rect_of("dialog:widget:Visual style").unwrap() } else { rect };
+                assert!(owner.contains_rect(painted), "{name}: its real icon is in its option or selected trigger");
+            }
+            let option = solidcraft_ui_registry::handle_at(&format!("dialog:Visual style:{label}")).unwrap();
+            crate::ui_kit::test_support::frame(&ctx, crate::ui_kit::test_support::pointer(option, true), &mut draw);
+            crate::ui_kit::test_support::frame(&ctx, crate::ui_kit::test_support::pointer(option, false), &mut draw);
+            crate::ui_kit::test_support::frame(&ctx, vec![], &mut draw);
+            assert_eq!(sample.borrow().selected, index, "the specimen edits the real selection index");
+            let icon = crate::navigation_slots::visual_style_icon(index as u8);
+            let trigger = solidcraft_ui_registry::rect_of("dialog:widget:Visual style").unwrap();
+            assert!(trigger.contains_rect(solidcraft_ui_registry::rect_of(&format!("dialog:dropdown_icon:{icon}")).unwrap()));
+            assert!(solidcraft_ui_registry::handle_at("dialog:Visual style:Wireframe").is_none(), "the native popup closes after selection");
+        }
+    }
+    solidcraft_theme::set_dark(previous);
 }
 
 #[cfg(test)]

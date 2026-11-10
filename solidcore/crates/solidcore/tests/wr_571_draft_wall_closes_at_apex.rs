@@ -1,9 +1,8 @@
 //! Regression test for WR-571 (the fork's tangency-labs/smlib@183ea65, capi sweeps cases):
 //! the curvature-keeping and tangent corner rules of `create_taper_extrude` refused a
 //! draft in which a wall's section shrinks to nothing below the far end
-//! (`TaperCornerRefusal::WallCloses`), though the solid exists. With
-//! `Kernel::fixes.taper_wall_closes_at_apex` the wall ends at its apex and its
-//! neighbours meet from there up.
+//! (`TaperCornerRefusal::WallCloses`), though the solid exists. The wall now ends at its
+//! apex and its neighbours meet from there up.
 //!
 //! - A wedge (0,-2) (20,-0.01) (20,0.01) (0,2) drafted 5 degrees in over 2: the tip's
 //!   wall closes at z* = 0.126237833 and the long sides meet along a ridge above. The
@@ -25,7 +24,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::{Kernel, KernelOptions};
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::sweep::api_brep::{
-    create_taper_extrude_with_corner, OffsetCornerType, TaperCornerRefusal, TaperExtrude,
+    create_taper_extrude_with_corner, OffsetCornerType, TaperExtrude,
 };
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::Vec3;
@@ -64,14 +63,12 @@ fn slotted_square() -> Vec<Curve> {
 
 /// The draft of `curves` over a height of 2 (positive degrees inward).
 fn draft(
-    fixed: bool,
     tangent: bool,
     curves: &[Curve],
     draft_deg: f64,
     corner: OffsetCornerType,
 ) -> (Kernel, TaperExtrude) {
     let mut k = Kernel::new(&KernelOptions::default());
-    k.fixes.taper_wall_closes_at_apex = fixed;
     k.fixes.taper_tangent_corner_planes = tangent;
     let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
     let result =
@@ -109,24 +106,13 @@ fn slot_volume() -> f64 {
 }
 
 #[test]
-fn wr_571_without_the_opt_in_a_wall_closing_partway_is_refused() {
-    for (curves, deg) in [(wedge(), 5.0), (slotted_square(), -10.0)] {
-        let (_, result) = draft(false, false, &curves, deg, OffsetCornerType::CurveExtension);
-        let TaperExtrude::Refused(refusal) = result else {
-            panic!("built");
-        };
-        assert_eq!(refusal.reason, TaperCornerRefusal::WallCloses);
-    }
-}
-
-#[test]
 fn wr_571_the_wedge_tip_closes_into_a_ridge() {
-    let (k, result) = draft(true, false, &wedge(), 5.0, OffsetCornerType::CurveExtension);
+    let (k, result) = draft(false, &wedge(), 5.0, OffsetCornerType::CurveExtension);
     let (faces, v) = solid(&k, result);
     assert_eq!(faces, 6);
     assert_rel(v, WEDGE_VOLUME, 1e-8);
     // the tangent rule (lines: the same walls)
-    let (k, result) = draft(true, true, &wedge(), 5.0, OffsetCornerType::LinearExtension);
+    let (k, result) = draft(true, &wedge(), 5.0, OffsetCornerType::LinearExtension);
     let (faces, v) = solid(&k, result);
     assert_eq!(faces, 6);
     assert_rel(v, WEDGE_VOLUME, 1e-8);
@@ -135,7 +121,6 @@ fn wr_571_the_wedge_tip_closes_into_a_ridge() {
 #[test]
 fn wr_571_the_slot_closes_face_to_face() {
     let (k, result) = draft(
-        true,
         false,
         &slotted_square(),
         -10.0,

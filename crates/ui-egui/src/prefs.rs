@@ -948,6 +948,9 @@ preference_settings! {
     /// An orbit drag that reaches the edge of the view moves the cursor to the opposite edge and
     /// keeps turning; false stops the drag at the edge of the screen, as before.
     orbit_cursor_wrap: bool = true, PAGE_NAVIGATION => check_tr("nav.orbit_cursor_wrap.label");
+    /// A right-click in the view with a dialog open confirms its input: on to the next one, then OK.
+    /// Off: it does nothing there, as before (#6159).
+    right_click_confirms: bool = false, PAGE_GENERAL => check("Right-click confirms dialog inputs", "With a dialog open, a right-click in the view goes on to its next empty input, and on the last one runs OK");
     /// View orientation widget: original signed axes (default) or compact cube.
     navigator_style: NavigatorStyle = NavigatorStyle::default(), PAGE_NAVIGATION;
     /// The custom view gizmo's colours: the cube's (themed) or the body's own (modeled).
@@ -1373,6 +1376,11 @@ preference_settings! {
     auto_operation: bool = true, PAGE_TOOLS => check_id("prefs.auto_operation");
     /// Reuse a command's safe values and options after it succeeds, until the app closes. Off by default: each dialog opens with its usual defaults.
     remember_dialog_values: bool = false, PAGE_TOOLS => check_id_help("prefs.remember_dialog_values", "prefs.remember_dialog_values.help");
+    /// A new Solid Fillet opens at the radius the tool ships with, 2 mm, shown in the design's
+    /// unit ("0.07874 in" in an inch design): a radius is bound by the faces beside its edges, and
+    /// the number read in the design's unit ("2 in" = 50.8 mm) never fits the part (#12418). On: it
+    /// opens at the number 2 read in the design's unit, as before.
+    fillet_legacy_radius: bool = false, PAGE_TOOLS => check_id_help("prefs.fillet_legacy_radius", "prefs.fillet_legacy_radius.help");
     /// Placing a Single hole snaps to the middle of the face and the centres of its round edges
     /// (`hole_place`). Off by default: a hole goes where it is clicked.
     hole_snaps: bool = false, PAGE_TOOLS => check("Snap to face and edge centres");
@@ -1592,6 +1600,10 @@ preference_settings! {
     /// The first length dimension of a sketch with nothing sized yet scales the whole drawing to
     /// its value (#1365). Off: it sizes only what it measures (#4109).
     first_dimension_scales: bool = true, PAGE_SKETCH;
+    /// With `first_dimension_scales`: the drawing scales about the sketch origin even when nothing
+    /// ties it there, so a shape drawn away from the origin moves as it grows (the behaviour
+    /// before #11043). Off (the default): such a shape scales about its own middle and stays put.
+    first_dimension_scales_about_origin: bool = false, PAGE_SKETCH;
     /// When true: Shift+click adds without removing; Primary toggles.
     /// When false (default): Shift and Primary both toggle.
     selection_shift_add_only: bool = false, PAGE_SKETCH;
@@ -8023,7 +8035,7 @@ mod tests {
     fn tabs_preferences_validate_atomically_restore_safely_and_preserve_export_defaults() {
         crate::test_support::host_data();
         for base in ["dark", "light"] {
-            let file = crate::theme_files::tab_fixture(base);
+            let file = crate::test_support::tab_fixture(base);
             let source = serde_json::to_value(&file).unwrap();
             let mut h = crate::scenario::Harness::new();
             for invalid in [json!(false), json!({"sketch":{}}), json!({"SKETCH":{"error":"#ffffff"}}), json!({"SKETCH":{"panel":"bad"}})] {
@@ -8056,7 +8068,7 @@ mod tests {
     #[test]
     fn tabs_followed_reload_updates_surfaces_without_losing_saved_options() {
         let mut h = crate::scenario::Harness::new();
-        let mut source = crate::theme_files::export_file(&crate::theme_files::tab_fixture("dark"));
+        let mut source = crate::theme_files::export_file(&crate::test_support::tab_fixture("dark"));
         let path = h.dir.join("tabs.json");
         std::fs::write(&path, source.to_string()).unwrap();
         control(&mut h.app, &json!({"theme_follow":path,"theme_options":{"file-tabs-dark":{"tab_fade_ms":0}}})).unwrap();

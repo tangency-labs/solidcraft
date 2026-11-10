@@ -1624,7 +1624,7 @@ fn render_preview_background_frame(h: &mut Harness, time: f64) -> [Color32; 4] {
 fn render_preview_tab_surfaces_use_published_gradient_through_fade() {
     for base in ["dark", "light"] {
         let mut h = Harness::new();
-        let file = crate::theme_files::tab_fixture(base);
+        let file = crate::test_support::tab_fixture(base);
         crate::prefs::control(&mut h.app, &json!({"theme_import":crate::theme_files::export_file(&file)})).unwrap();
         let app = &mut h.app;
         h.ctx.run_ui(egui::RawInput { time: Some(1.0), ..Default::default() }, |ui| app.logic(ui.ctx())).textures_delta.clear();
@@ -1666,7 +1666,7 @@ fn render_preview_tab_surfaces_use_published_gradient_through_fade() {
 fn render_preview_tab_surfaces_preserve_scene_backplates_and_viewport_overrides() {
     for base in ["dark", "light"] {
         let mut h = Harness::new();
-        let file = crate::theme_files::tab_fixture(base);
+        let file = crate::test_support::tab_fixture(base);
         crate::prefs::control(
             &mut h.app,
             &json!({
