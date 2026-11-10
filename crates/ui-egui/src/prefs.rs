@@ -980,6 +980,8 @@ preference_settings! {
     mouse_gestures: crate::mouse_gesture::Config = Default::default(), PAGE_NAVIGATION;
     /// The wheel zooms out when turned forward.
     zoom_reverse: bool = false, PAGE_NAVIGATION => check("Reverse zoom direction");
+    /// Maya Alt+right drag uses horizontal motion; off restores the former vertical zoom.
+    maya_horizontal_zoom: bool = true, PAGE_NAVIGATION => check_id("nav.maya_horizontal_zoom.label");
     /// What an orbit turns around.
     orbit_around: OrbitAround = OrbitAround::default(), PAGE_NAVIGATION;
     /// The cursor preference as releases before the origin option saved it (`true` = the point
@@ -1501,9 +1503,13 @@ preference_settings! {
     /// so the window stays live while they run (#1989, [`crate::control_job`]). Off: they run on
     /// the window thread, and the window waits for each, as before (the default).
     agent_off_thread: bool = false, PAGE_ASSISTANT;
-    /// Let AI agents connect: the localhost control channel (MCP) opens on the default port at
-    /// start-up, unless `--control`/`SOLIDCRAFT_CONTROL_PORT` name one. Read at start-up.
-    agent_control: bool = true, PAGE_ASSISTANT;
+    /// Let AI agents connect: the localhost control channel (MCP) listens on
+    /// `agent_control_port`, unless `--control`/`SOLIDCRAFT_CONTROL_PORT` name one for the run.
+    /// Turning it on or off, or changing the port, takes effect at once ([`crate::control_switch`]).
+    /// Off until the user turns it on, so a new install listens on no port.
+    agent_control: bool = false, PAGE_ASSISTANT;
+    /// The control channel's port. The default one takes the next free port when it is taken.
+    agent_control_port: u16 = 27878, PAGE_ASSISTANT;
     /// Add SolidCraft's MCP server to the AI apps installed on this computer at start-up
     /// ([`crate::ai_connect`]); off takes the entries out again.
     connect_ai_apps: bool = true, PAGE_ASSISTANT;
@@ -1663,6 +1669,9 @@ preference_settings! {
     /// In an open sketch with no tool running, the pointer's sketch coordinates beside it (#11070).
     /// Off: only a sketch tool shows them, while it places a point, as before.
     sketch_cursor_coordinates: bool = true, PAGE_SKETCH;
+    /// How large constraint glyphs are drawn: a multiple of their 15-pixel badge, letter and icon
+    /// included, so they can be read at any zoom (#10794). 1 (the default) is the size they always had.
+    constraint_glyph_scale: f32 = 1.0, PAGE_SKETCH, accept(crate::sketch_tools::GLYPH_SCALES) => slider("prefs.constraint_glyph_size", crate::sketch_tools::GLYPH_SCALES, 0.25, |v| format!("{:.0}%", v * 100.0), "prefs:constraint_glyph_size");
     /// Drive Joints shows the moved parts' old place as a ghost (its Show ghost box, #5905).
     drive_joints_ghost: bool = true, PAGE_TOOLS => check_tr("prefs.design_tools.ghost");
     /// While Move's triad drags a component drawn as a layer of its own, what is under the pointer
@@ -3984,6 +3993,9 @@ pub fn migrate(mut p: Prefs) -> Prefs {
     if !accepted::home_fit_size(&p) {
         p.home_fit_size = Prefs::default().home_fit_size;
     }
+    if !accepted::constraint_glyph_scale(&p) {
+        p.constraint_glyph_scale = Prefs::default().constraint_glyph_scale;
+    }
     if p.orbit_cursor {
         p.orbit_around = OrbitAround::Cursor;
         p.orbit_cursor = false;
@@ -4160,6 +4172,9 @@ fn prepare_preferences(
     }
     if !accepted::home_fit_size(&new) {
         return Err("`home_fit_size` must be 0.1…1".into());
+    }
+    if !accepted::constraint_glyph_scale(&new) {
+        return Err("`constraint_glyph_scale` must be 1…3".into());
     }
     let new = migrate(new);
     if !UNITS.contains(&new.default_units.as_str()) {
@@ -6539,6 +6554,7 @@ mod tests {
             ("select_hidden_edges", json!(true), PAGE_SKETCH),
             ("sketch_conflict_colour", json!(false), PAGE_SKETCH),
             ("hide_constraint_glyphs_zoomed_out", json!(false), PAGE_SKETCH),
+            ("constraint_glyph_scale", json!(2.0), PAGE_SKETCH),
             ("suppress_sketch_snap", json!(ModifierCombo::NONE), PAGE_SKETCH),
             ("sketch_state_icons", json!(false), PAGE_SKETCH),
             ("sketch_mirror_auto_line", json!(false), PAGE_SKETCH),
@@ -9940,17 +9956,37 @@ mod tests {
         assert_eq!(app.preferences.msaa, Prefs::default().msaa);
     }
 
-    /// "Let AI agents connect" is on for a new install and for preferences saved before it existed;
-    /// an explicit off stays off.
+    /// "Let AI agents connect" is off for a new install and for preferences saved before it existed;
+    /// an explicit on stays on.
     #[test]
-    fn agent_control_is_on_unless_saved_off() {
-        assert!(Prefs::default().agent_control);
+    fn agent_control_is_off_unless_saved_on() {
+        assert!(!Prefs::default().agent_control);
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
-        app.preferences.agent_control = false;
+        app.preferences.agent_control = true;
         app.load_prefs(&serde_json::json!({ "preferences": { "msaa": 4 } }).to_string());
-        assert!(app.preferences.agent_control);
-        app.load_prefs(&serde_json::json!({ "preferences": { "agent_control": false } }).to_string());
         assert!(!app.preferences.agent_control);
+        app.load_prefs(&serde_json::json!({ "preferences": { "agent_control": true } }).to_string());
+        assert!(app.preferences.agent_control);
+    }
+
+    /// "Let AI agents connect" and its port sit in Agents through MCP, there with the chat off
+    /// too; the port is 27878 unless saved otherwise, and Restore Defaults puts it back.
+    #[test]
+    fn agent_control_and_its_port_are_in_agents_through_mcp() {
+        use serde_json::json;
+        assert_eq!(Prefs::default().agent_control_port, 27878);
+        let mut h = crate::scenario::Harness::new();
+        h.app.load_prefs(&json!({ "preferences": { "agent_control_port": 7999 } }).to_string());
+        assert_eq!(h.app.preferences.agent_control_port, 7999);
+        h.call("ui.prefs", json!({"ai_features": false, "open": "AI"}));
+        h.frames(3);
+        assert!(crate::scenario::handle_at("prefs:agent_control").is_some(), "the checkbox is on the AI page with the chat off");
+        assert!(crate::scenario::handle_at("prefs:agent_control_port").is_some(), "so is the port");
+        h.call("ui.prefs", json!({"agent_control_port": 8123}));
+        assert_eq!(h.app.preferences.agent_control_port, 8123);
+        h.call("ui.prefs", json!({"button": "defaults"}));
+        assert_eq!(h.app.preferences.agent_control_port, 27878);
+        assert!(!h.app.preferences.agent_control, "Restore Defaults turns it off");
     }
 
     #[test]
@@ -11244,6 +11280,23 @@ mod tests {
         assert_eq!(other.preferences.nav, "hfss");
     }
 
+    #[test]
+    fn maya_zoom_axis_preference_is_saved_and_reset_with_navigation() {
+        let mut h = crate::scenario::Harness::new();
+        assert!(h.app.preferences.maya_horizontal_zoom);
+        control(&mut h.app, &json!({"open":"Navigation","nav":"maya","maya_horizontal_zoom":false})).unwrap();
+        control(&mut h.app, &json!({"button":"apply"})).unwrap();
+        let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        other.load_prefs(&h.app.prefs());
+        assert_eq!(other.preferences.nav, "maya");
+        assert!(!other.preferences.maya_horizontal_zoom, "the legacy direction survives reopening");
+        control(&mut h.app, &json!({"button":"defaults"})).unwrap();
+        assert!(h.app.preferences.maya_horizontal_zoom);
+        control(&mut h.app, &json!({"button":"cancel"})).unwrap();
+        assert!(!h.app.preferences.maya_horizontal_zoom, "Cancel restores the applied legacy choice");
+        assert!(set(&mut h.app, &json!({"maya_horizontal_zoom":"sideways"})).is_err());
+    }
+
     /// The dialog: changes apply at once, Cancel puts back what was there when it opened, Apply
     /// keeps them, Restore Defaults resets one page, and the shortcuts menus open its page.
     #[test]
@@ -11448,6 +11501,21 @@ mod tests {
         set(&mut app, &json!({"orbit_cursor": true})).unwrap();
         assert_eq!(app.preferences.orbit_around, OrbitAround::Cursor, "the old key still moves the choice");
         assert!(!app.preferences.orbit_cursor, "and is folded away");
+    }
+
+    /// Constraint glyphs keep their size unless a larger one is chosen (#10794); `ui.prefs` takes
+    /// only the offered range, and a hand-edited file out of it reads as the default.
+    #[test]
+    fn constraint_glyph_size_defaults_to_the_old_size_and_stays_in_range() {
+        assert_eq!(Prefs::default().constraint_glyph_scale, 1.0);
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        set(&mut app, &json!({"constraint_glyph_scale": 2.0})).unwrap();
+        assert_eq!(app.preferences.constraint_glyph_scale, 2.0);
+        for bad in [0.5, 3.5, -1.0] {
+            assert!(set(&mut app, &json!({"constraint_glyph_scale": bad})).is_err(), "{bad} is refused");
+        }
+        assert_eq!(app.preferences.constraint_glyph_scale, 2.0, "a refused value changes nothing");
+        assert_eq!(migrate(lenient(&json!({"constraint_glyph_scale": 40.0}))).constraint_glyph_scale, 1.0);
     }
 
     #[test]

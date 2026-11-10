@@ -721,7 +721,7 @@ impl Body {
 
     /// The record as solidcore-ops' body and the order of its entities, made on first use and
     /// kept for every later face; a conversion that fails is not kept. None for a mesh body.
-    fn ops_body(&self) -> Option<&(solidcore_ops::Body, solidcore_ops::Order)> {
+    pub(crate) fn ops_body(&self) -> Option<&(solidcore_ops::Body, solidcore_ops::Order)> {
         if self.is_mesh() {
             return None;
         }

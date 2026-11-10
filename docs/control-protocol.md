@@ -419,9 +419,11 @@ agents can read the same structured settings and retained Continuity records wit
 `view.status_details` engine command. Its `current` flag guards geometry targets, and its
 per-record limits prevent mixed measurements from being mistaken for one global tolerance.
 
-The control channel is **on by default**. SolidCraft listens on `127.0.0.1` only, for JSON lines,
-so agents can drive the app without a launch flag. Every connection still needs this launch's
-token (below); nothing else on the machine, and nothing off it, can send a command.
+The control channel is **off by default**: Preferences > Assistant > Agents through MCP > "Let AI
+agents connect" turns it on, and `--control PORT` opens it for one run. Once on, SolidCraft listens on
+`127.0.0.1` only, for JSON lines, so agents can drive the app without a launch flag. Every connection
+still needs this launch's token (below); nothing else on the machine, and nothing off it, can send a
+command.
 
 Internal rendering harness: `ui.blur {radius_px?, surface_alpha?, fixture?}` queries or sets
 session-only panel blur. Radius is finite physical pixels in 0..60; the optional
@@ -455,10 +457,10 @@ evidence description, and clear the fixture before checking real capabilities.
 | Launch | What listens |
 |---|---|
 | `solidcraft --control PORT`, or `SOLIDCRAFT_CONTROL_PORT=PORT` | exactly `127.0.0.1:PORT` (the flag wins over the variable), whatever the setting |
-| neither, and Preferences > Assistant > "Let AI agents connect (control channel / MCP)" on (the default) | the default port **27878**, or the next free one up to 27893 when it is taken (a second window, another program) |
+| neither, and Preferences > Assistant > Agents through MCP > "Let AI agents connect" on (the default) | the setting's port: the default **27878**, or the next free one up to 27893 when it is taken (a second window, another program); any other port exactly, or nothing when it is taken (the panel says so) |
 | neither, and the setting off | nothing |
 
-The setting is read at start-up. Old preference files, which don't have it, load with it on. A
+Turning the setting on or off, or changing its port, takes effect at once: the channel closes (with its connections, token file and discovery file) and opens again where the setting asks. A launch with `--control` or the variable keeps its port for that run, and the setting waits for the next launch. Old preference files, which don't have it, load with it on. A
 launch with `--control` or the variable behaves as it always did (the start page stays hidden,
 the window doesn't ask for the foreground), because a scripted launch expects that; the default
 channel changes neither for a normal launch.
@@ -904,6 +906,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `browser_eye_left` (default false: each browser and History tree row's eye, handle `eye:<name>`, sits in a column at the rows' right end, clear of the fold arrow and the radio; true: between them, as before #8718)
 - `check_updates` (default true; [updates](book/src/guide/updates.md))
 - `color_vision` (`off` (default), `protan`, `deutan`, `tritan`: colour vision modes, #778)
+- `constraint_glyph_scale` (1…3, default 1: how large the open sketch's constraint glyphs are drawn, a multiple of their 15-pixel badge, letter and icon included; Preferences › Sketch › Constraint glyph size, #10794)
 - `default_units`
 - `dialog_buttons` (`bottom` (default), `top`: a feature dialog's OK, Cancel and Apply sit in its title row instead of under its inputs, #6708; the buttons keep their handles, and `dialog:close` is then Cancel's; the Sketch panel's Finish Sketch row moves above its options, #9860)
 - `dialog_place` (`edge` (default) or `left_column`: command dialogs open in the left column in place of the browser and the History, #6707)
@@ -940,10 +943,11 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `look_at_speed`
 - `max_design_file_mb` (default 256): the largest design file opened, in MB, from the default up to 16384 (16 GB) (Preferences › General › Largest file to open, #4086; a `--max-file-size` launch flag overrides both for that run; the web app keeps the defaults and refuses other values; [large files](book/src/guide/files.md#large-files))
 - `max_step_file_mb` (default 512): the largest STEP or import file opened, in MB, from the default up to 16384 (16 GB) (Preferences › General › Largest file to open, #4086; a `--max-file-size` launch flag overrides both for that run; the web app keeps the defaults and refuses other values; [large files](book/src/guide/files.md#large-files))
+- `maya_horizontal_zoom`: Maya Alt+right drag zooms horizontally (right in, left out), default `true`; `false` restores vertical drag zoom. Other presets and the fixed Zoom tool are unchanged.
 - `mcp_compact` (default false): compact tool output for agents bridged to this app through the MCP server (Preferences › AI › Agents through MCP; the server reads it with `mcp.options`; [MCP compact output](mcp.md#compact-output))
 - `middle_double_click` (`home` (default), `fit`, `off`)
 - `msaa`
-- `nav` (`fusion`, `solidworks`, `creo`, `inventor`, `alias`, `blender`, `tinkercad`, `openscad`, `touchpad`)
+- `nav` (`fusion`, `solidworks`, `creo`, `inventor`, `alias`, `maya`, `blender`, `tinkercad`, `openscad`, `touchpad`)
 - `nav_bridge_enabled` (default false) and `nav_bridge_port` (default 8765: a device's own app on this computer moves the view, [the navigation bridge](3d-mouse.md#device-apps-the-navigation-bridge))
 - `navigator_arrows` (default true: the custom view navigator has the cube's orbit and roll arrows around its body; also `view.navigator {arrows}`)
 - `navigator_fit` (default false: a view chosen on the view cube or the axis gizmo also looks at the middle of the model from the one distance that fits its bounding sphere in the free part of the view, at `home_fit_size`; Home and an opened design use the same zoom and centre while it is on, so views chosen after them only turn; #10091)
