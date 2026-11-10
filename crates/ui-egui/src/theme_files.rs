@@ -1344,8 +1344,16 @@ pub fn export_file(theme: &ThemeFile) -> Value {
     value
 }
 
-// Theme sources are collected at build time; picker order is validated below.
-include!(concat!(env!("OUT_DIR"), "/builtin_themes.rs"));
+/// The host's built-in theme files, `(id, JSON text)` sorted by id: host data, installed once per
+/// process with [`install_builtin`].
+static SOURCES: OnceLock<&'static [(&'static str, &'static str)]> = OnceLock::new();
+
+/// Installs the host's built-in theme files, `(id, JSON text)` sorted by id, before the first theme
+/// is read. The first call installs them; a later call with the same table does nothing and one
+/// with another table is ignored. Returns whether `sources` is the installed table.
+pub fn install_builtin(sources: &'static [(&'static str, &'static str)]) -> bool {
+    std::ptr::eq(*SOURCES.get_or_init(|| sources), sources)
+}
 
 /// The two-colour built-in themes (1-bit and 1-bit Dark): pure black and white, so a few looks
 /// other themes tell apart by colour are told apart by text or shape instead.
@@ -1360,10 +1368,11 @@ pub(crate) fn tab_fixture(base: &str) -> ThemeFile {
     from_value(&catalog[base]).unwrap()
 }
 
-/// The built-in themes, validated and ordered once; a test checks every shipped file.
+/// The built-in themes, validated and ordered once; none before [`install_builtin`].
 pub fn builtin() -> &'static [ThemeFile] {
     static THEMES: OnceLock<Vec<ThemeFile>> = OnceLock::new();
-    THEMES.get_or_init(|| match read_builtin(BUILTIN) {
+    let Some(sources) = SOURCES.get() else { return &[] };
+    THEMES.get_or_init(|| match read_builtin(sources) {
         Ok(themes) => themes,
         Err(e) => {
             log::error!("built-in themes: {e}");
@@ -1751,6 +1760,7 @@ mod tests {
 
     #[test]
     fn reserved_options_are_app_owned_and_ordered_with_their_children() {
+        crate::test_support::host_data();
         let file = from_value(&option_theme(
             json!([
                 {"id":"custom_first","type":"bool","default":false},
@@ -2079,7 +2089,7 @@ mod tests {
     #[test]
     fn original_shipped_themes_keep_the_original_resolver_output_and_serialization() {
         crate::test_support::host_data();
-        assert_eq!(builtin().len(), BUILTIN.len());
+        assert_eq!(builtin().len(), crate::theme::BUILTIN.len());
         for id in ORIGINAL_BUILTIN_IDS {
             let theme = find(id, &[]).unwrap();
             assert!(theme.tabs.is_empty(), "{}", theme.id);
@@ -2100,7 +2110,7 @@ mod tests {
     #[test]
     fn shipped_theme_defaults_and_definition_roundtrips_preserve_all_tables() {
         crate::test_support::host_data();
-        assert_eq!(builtin().len(), BUILTIN.len());
+        assert_eq!(builtin().len(), crate::theme::BUILTIN.len());
         for theme in builtin() {
             assert!(!theme.needs_newer(), "{}", theme.id);
             let (defaults, notices) = effective_values(theme, &BTreeMap::new());
@@ -2240,6 +2250,7 @@ mod tests {
 
     #[test]
     fn bevel_settings_roundtrip_and_reject_invalid_values() {
+        crate::test_support::host_data();
         let bevel = json!({"width":1,"highlight":"#ffffff","light":"#dfdfdf","shadow":"#808080","dark_shadow":"#000000"});
         for base in ["light", "dark"] {
             let source = json!({"format":FORMAT,"name":"Beveled","base":base,"borders":{"bevel":bevel}});
@@ -2299,7 +2310,7 @@ mod tests {
     fn shipped_themes_have_readable_distinct_workspace_colours_and_icon_palettes() {
         crate::test_support::host_data();
         use solidcraft_theme::contrast_ratio;
-        assert_eq!(builtin().len(), BUILTIN.len(), "all shipped themes must be valid");
+        assert_eq!(builtin().len(), crate::theme::BUILTIN.len(), "all shipped themes must be valid");
         for file in builtin() {
             let gruvbox = matches!(file.id.as_str(), "gruvbox-dark" | "gruvbox-light");
             let contrasts: &[&str] = if gruvbox { &["soft", "standard", "hard"] } else { &["standard"] };
@@ -2442,6 +2453,7 @@ mod tests {
 
     #[test]
     fn gruvbox_retired_ids_stay_reserved_for_imported_names() {
+        crate::test_support::host_data();
         let mut custom = Vec::new();
         for (old, _, _) in GRUVBOX_ALIASES {
             let file = from_value(&json!({"format":FORMAT,"name":old,"base":"dark"})).unwrap();
@@ -2884,10 +2896,10 @@ mod tests {
     #[test]
     fn builtin_order_preserves_the_existing_picker_sequence() {
         crate::test_support::host_data();
-        let themes = read_builtin(BUILTIN).unwrap();
+        let themes = read_builtin(crate::theme::BUILTIN).unwrap();
         let retained: Vec<_> = themes.iter().map(|t| t.id.as_str()).filter(|id| ORIGINAL_BUILTIN_IDS.contains(id)).collect();
         assert_eq!(retained, ORIGINAL_BUILTIN_IDS);
-        assert!(BUILTIN.windows(2).all(|pair| pair[0].0 < pair[1].0), "source entries are sorted by id");
+        assert!(crate::theme::BUILTIN.windows(2).all(|pair| pair[0].0 < pair[1].0), "source entries are sorted by id");
     }
 
     #[test]
@@ -2910,7 +2922,7 @@ mod tests {
     #[test]
     fn built_in_themes_read_and_differ_from_their_base() {
         crate::test_support::host_data();
-        assert_eq!(builtin().len(), BUILTIN.len(), "every built-in theme file reads");
+        assert_eq!(builtin().len(), crate::theme::BUILTIN.len(), "every built-in theme file reads");
         for t in builtin() {
             let base = if t.base.is_dark() { Tokens::dark() } else { Tokens::light() };
             assert_ne!(resolve(t), base, "{}", t.id);
@@ -2937,7 +2949,7 @@ mod tests {
                 _ => {}
             }
         }
-        let text = BUILTIN.iter().find(|(id, _)| *id == "cga").map(|(_, text)| *text).unwrap();
+        let text = crate::theme::BUILTIN.iter().find(|(id, _)| *id == "cga").map(|(_, text)| *text).unwrap();
         let file: Value = serde_json::from_str(text).unwrap();
         let mut found = Vec::new();
         colours(&file, &mut found);
@@ -3023,6 +3035,7 @@ mod tests {
     /// `error` when the theme leaves `sketch_conflict` out, and takes the theme's own key when set.
     #[test]
     fn sketch_conflict_defaults_to_the_error_colour_and_a_theme_can_set_its_own() {
+        crate::test_support::host_data();
         for t in [Tokens::light(), Tokens::dark()] {
             assert_eq!(t.sketch_conflict, t.error);
         }

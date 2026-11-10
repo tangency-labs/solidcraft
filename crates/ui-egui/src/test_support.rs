@@ -7,13 +7,14 @@ use solidcraft_engine::{Sel, Session};
 pub(crate) use crate::ui_kit::test_support::{each_shape, key, pointer, raw_frame as frame, text_shapes};
 
 /// What SolidCraft installs into the shared crates before its first frame: its catalogs, its
-/// icons, its tab table and its navigation slots. A test that reads theme files or draws icons without an app or a
+/// icons, its tab table, its navigation slots and its built-in themes. A test that reads theme files or draws icons without an app or a
 /// test context ([`crate::fonts::test_context`]) calls it first.
 pub(crate) fn host_data() {
     crate::i18n::install();
     crate::icon_svg::install();
     crate::workspace::install_tabs();
     crate::navigation_slots::install();
+    crate::theme::install_builtin_themes();
 }
 
 pub(crate) fn app_with_script(script: Value) -> SolveApp {

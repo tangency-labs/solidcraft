@@ -281,6 +281,7 @@ mod active_ink_tests {
 
     #[test]
     fn active_navigation_slots_stay_readable_in_every_built_in_theme() {
+        crate::test_support::host_data();
         let mut themes = vec![("Dark", solidcraft_theme::Tokens::dark()), ("Light", solidcraft_theme::Tokens::light())];
         themes.extend(crate::theme_files::builtin().iter().map(|theme| (theme.name.as_str(), crate::theme_files::resolve(theme))));
         let mut failures = Vec::new();

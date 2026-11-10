@@ -983,6 +983,7 @@ mod selection_ink_tests {
     /// (#11804): none draws it in the selection's own colour.
     #[test]
     fn selected_form_text_reads_in_every_built_in_theme() {
+        crate::test_support::host_data();
         let mut themes = vec![("Dark".to_string(), Tokens::dark()), ("Light".to_string(), Tokens::light())];
         themes.extend(crate::theme_files::builtin().iter().map(|theme| (theme.id.clone(), crate::theme_files::resolve(theme))));
         let mut failures = Vec::new();

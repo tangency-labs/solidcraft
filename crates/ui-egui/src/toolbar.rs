@@ -4225,6 +4225,7 @@ mod ribbon_label_tests {
     }
 
     fn tab_test_themes() -> Vec<Tokens> {
+        crate::test_support::host_data();
         let mut themes = Vec::new();
         for dark in [false, true] {
             for vision in solidcraft_theme::ColorVision::ALL {

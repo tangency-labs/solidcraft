@@ -204,6 +204,7 @@ mod tests {
 
     #[test]
     fn shipped_icon_palettes_preserve_alpha_shading_and_colour_vision_overrides() {
+        crate::test_support::host_data();
         for file in crate::theme_files::builtin() {
             let palette = crate::theme_files::resolve_icon_palette(file, &Default::default()).expect("shipped icon palette");
             // Two colours can't make a pale/medium/strong ramp three distinct shades (1-bit, 1-bit Dark).

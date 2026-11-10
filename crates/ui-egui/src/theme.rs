@@ -10,6 +10,15 @@ use solidcraft_theme::{
     AccentRamp, Custom, Environment, Fade, PublishedTab, Surfaces, TabAccent, Tokens, is_dark, set_custom, set_published, viewport_dark, vision,
 };
 
+// SolidCraft's theme files (`assets/styles/ui/themes`), collected at build time.
+include!(concat!(env!("OUT_DIR"), "/builtin_themes.rs"));
+
+/// Installs SolidCraft's built-in theme files ([`BUILTIN`]) as `theme_files`' built-in themes, once
+/// per process, before preferences are read or the first frame; later calls find them installed.
+pub fn install_builtin_themes() {
+    crate::theme_files::install_builtin(BUILTIN);
+}
+
 #[derive(Clone)]
 struct PreparedTheme {
     file: crate::theme_files::ThemeFile,
@@ -522,6 +531,7 @@ mod tests {
 
     #[test]
     fn built_in_selected_tab_labels_hold_wcag_small_text_contrast() {
+        crate::test_support::host_data();
         let mut themes = vec![("Dark", super::Tokens::dark()), ("Light", super::Tokens::light())];
         themes.extend(crate::theme_files::builtin().iter().map(|theme| (theme.name.as_str(), crate::theme_files::resolve(theme))));
         let mut failures = Vec::new();

@@ -859,6 +859,7 @@ fn count_step_arrows_do_not_take_the_text_cursor() {
 
 #[test]
 fn selection_field_has_three_distinct_looks_in_every_theme() {
+    crate::test_support::host_data();
     type Look = (Vec<(egui::Color32, egui::Color32)>, Option<egui::Color32>);
     let look = |active: bool, filled: bool| -> Look {
         let ctx = crate::ui_kit::test_support::context();

@@ -997,6 +997,7 @@ fn validation_badges_are_distinct_and_readable_in_every_mode() {
 /// two-colour themes (1-bit) tell them apart by shape alone.
 #[test]
 fn shipped_themes_draw_dimensions_in_their_own_readable_colour() {
+    crate::test_support::host_data();
     use crate::theme_files::{builtin, is_two_colour, resolve};
     use solidcraft_theme::contrast_ratio;
     let themes = [("light", Tokens::light()), ("dark", Tokens::dark())]

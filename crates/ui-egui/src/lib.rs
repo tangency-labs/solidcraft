@@ -860,6 +860,8 @@ impl SolveApp {
         workspace::install_tabs();
         // The navigation slots stored bars are read against, likewise.
         navigation_slots::install();
+        // The built-in theme files, likewise.
+        theme::install_builtin_themes();
         #[cfg(test)]
         let image_host = Some(solidcraft_engine::render::job::CpuHost::cooperative());
         #[cfg(not(test))]
