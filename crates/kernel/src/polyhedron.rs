@@ -212,7 +212,18 @@ pub fn offset_faces(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
     if !distance.is_finite() || distance.abs() > 1e6 {
         return Err(KernelError::Invalid("offset distance".into()));
     }
-    let healed = crate::boolean_record::healed(b)?.with_split_lines(b.splits.clone());
+    // Healing joins faces split on one surface, so the offset moves them together. Where SMLib's
+    // check refuses the healed body (a thread's half-turn cylinder pieces joined across their
+    // seam, #11582), the faces are moved as they are: `with_same_surface` still takes the pieces
+    // of a picked face together.
+    let healed = match crate::boolean_record::healed(b) {
+        Ok(h) => h,
+        Err(e) => {
+            log::debug!(target: "smlib", "offset faces: healing refused, moving the faces as they are: {e}");
+            b.clone()
+        }
+    }
+    .with_split_lines(b.splits.clone());
     let size = healed.size();
     let mesh = healed.mesh(&crate::MeshTolerance::chord((size * 1e-3).max(1e-3)))?;
     let mut chosen: Vec<usize> = Vec::new();
