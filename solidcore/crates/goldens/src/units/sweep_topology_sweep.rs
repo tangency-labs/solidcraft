@@ -90,6 +90,7 @@ fn status(e: &SolidError) -> i64 {
         SolidError::Upstream { code, .. } => i64::from(*code),
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007,
         e if nlib_number(e).is_some() => 1001,
+        SolidError::Failed(_) => e.sm_status().map_or(-1, i64::from),
         _ => -1,
     }
 }

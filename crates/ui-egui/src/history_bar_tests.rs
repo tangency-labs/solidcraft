@@ -75,7 +75,7 @@ struct Rig {
 impl Rig {
     fn new(labels: &[&'static str], marker: usize) -> Rig {
         let rig = Rig {
-            ctx: crate::fonts::test_context(),
+            ctx: crate::ui_kit::test_support::context(),
             bar: bar(labels.len(), marker, true),
             rect: Rect::from_min_size(pos2(0.0, 100.0), vec2(700.0, 40.0)),
             labels: labels.to_vec(),
@@ -105,7 +105,7 @@ impl Rig {
             focused: true,
             ..Default::default()
         };
-        let output = crate::test_support::frame(&self.ctx, input, |ui| {
+        let output = crate::ui_kit::test_support::raw_frame(&self.ctx, input, |ui| {
             let head = header(ui, &self.bar, self.rect);
             actions.extend(head.actions);
             let strip_rect = Rect::from_min_max(pos2(head.x, self.rect.top()), self.rect.right_bottom());
@@ -284,7 +284,7 @@ fn a_step_after_the_marker_dropped_at_the_marker_returns_the_side_it_is_dropped_
 fn painted(output: &egui::FullOutput) -> (Vec<egui::epaint::RectShape>, Vec<egui::epaint::CircleShape>) {
     let (mut rects, mut circles) = (Vec::new(), Vec::new());
     for clipped in &output.shapes {
-        crate::test_support::each_shape(&clipped.shape, &mut |shape| match shape {
+        crate::ui_kit::test_support::each_shape(&clipped.shape, &mut |shape| match shape {
             egui::Shape::Rect(rect) => rects.push(rect.clone()),
             egui::Shape::Circle(circle) => circles.push(*circle),
             _ => {}

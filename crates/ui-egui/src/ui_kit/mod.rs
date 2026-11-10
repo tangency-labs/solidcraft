@@ -16,13 +16,14 @@ mod details;
 mod disclosure;
 mod drag;
 mod fields;
-mod file_view;
+pub(crate) mod file_view;
 mod framing;
 mod history;
 mod history_group;
+pub mod icons;
 mod layout;
 mod look_chain;
-mod menu;
+pub mod menu;
 mod metrics;
 mod name_list;
 mod navigation;
@@ -33,12 +34,12 @@ mod panel_host;
 mod preferences;
 mod preferences_assistant;
 #[allow(dead_code, reason = "composed by the Preferences pages of #9875 to #9883")]
-mod preferences_cards;
+pub(crate) mod preferences_cards;
 #[allow(dead_code, reason = "painted by the Preferences pages of #9875 to #9883")]
-mod preferences_figure_data;
+pub(crate) mod preferences_figure_data;
 #[allow(dead_code, reason = "painted by the Preferences pages of #9875 to #9883")]
 mod preferences_figure_ops;
-mod preferences_figures;
+pub(crate) mod preferences_figures;
 mod preferences_layout;
 mod preferences_navigation;
 mod preferences_small;
@@ -68,9 +69,9 @@ pub(crate) use assistant::*;
 pub(crate) use assistant_entry::*;
 pub(crate) use attention::*;
 #[cfg(test)]
-pub(crate) use checks::tests::{raster as raster_ui, textures_update as update_test_textures};
+pub(crate) use checks::tests::{checkbox_shapes as test_checkbox_shapes, raster as test_raster, textures_update as test_textures_update};
 #[cfg(test)]
-pub(crate) use checks::tests::{raster as test_raster, textures_update as test_textures_update};
+pub(crate) use checks::tests::{raster as raster_ui, textures_update as update_test_textures};
 pub(crate) use checks::*;
 pub(crate) use choice::*;
 pub(crate) use color::*;
@@ -138,12 +139,12 @@ pub(crate) use value_focus::*;
 pub(crate) use viewport_status::*;
 
 #[cfg(test)]
-mod gallery;
+pub(crate) mod gallery;
 #[cfg(test)]
 mod slider_tests;
 #[cfg(test)]
 #[path = "test_support_tests.rs"]
-mod test_support;
+pub(crate) mod test_support;
 
 pub(crate) use layout::label as row_label;
 

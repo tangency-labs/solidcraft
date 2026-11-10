@@ -17,12 +17,14 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 use super::check::whole;
-use super::motion::{JointRef, PartRef, Stop, require};
+use super::motion::{JointRef, PartPlace, PartRef, Stop, require};
 
 /// The largest `refine` the handler takes, in mm (`positive(p, "refine", 1e3, …)`).
 const MAX_REFINE_MM: f64 = 1e3;
 /// The largest `step` the handler takes, in the value's unit (`positive(p, "step", 1e9, …)`).
 const MAX_STEP: f64 = 1e9;
+/// The largest `budget_s` the handler takes, in seconds (`MAX_BUDGET_S` in `cmd/motion_analysis.rs`).
+const MAX_BUDGET_S: f64 = 86_400.0;
 
 /// Drive one value of a joint from `from` toward `to` on a copy of the design, and stop at the
 /// first contact between the parts checked (bisected to `refine`), where a closed loop can't
@@ -66,6 +68,17 @@ pub struct SweepParams {
     /// Check the pairs of the design's contact sets instead (not with `occurrences`).
     #[serde(default)]
     pub contact_sets: Option<bool>,
+    /// Pairs left out, such as a pin in its hole: `[a, b]`, each an occurrence's id or name; a
+    /// pair of bodies is left out when one is under `a` and the other under `b`. Default: none.
+    #[serde(default)]
+    pub exclude_pairs: Option<Vec<[PartRef; 2]>>,
+    /// Seconds the sweep may take (above 0, at most 86400): past them it stops and returns what
+    /// it found, `stopped_by` `budget`, and its work is then not capped. Default: no time budget;
+    /// the work caps (4096 samples, 64 bisection steps, 500 million triangle tests) stop it the
+    /// same way.
+    #[serde(default, deserialize_with = "budget_s")]
+    #[schemars(schema_with = "budget_s_schema")]
+    pub budget_s: Option<f64>,
     /// Report the nearest gap at every sample, and the nearest each part came to another
     /// (`min_gap`). Default: false.
     #[serde(default)]
@@ -130,6 +143,26 @@ fn refine<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
     positive(Value::deserialize(d)?, MAX_REFINE_MM)
 }
 
+fn budget_s<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        v => v
+            .as_f64()
+            .filter(|x| x.is_finite() && *x > 0.0 && *x <= MAX_BUDGET_S)
+            .map(Some)
+            .ok_or_else(|| D::Error::custom(format!("must be a number of seconds above 0, at most {MAX_BUDGET_S}"))),
+    }
+}
+
+fn budget_s_schema(_: &mut SchemaGenerator) -> Schema {
+    positive_schema(
+        "Seconds the sweep may take (above 0, at most 86400): past them it stops and returns what it found, `stopped_by` `budget`, \
+         and its work is then not capped. Default: no time budget; the work caps (4096 samples, 64 bisection steps, 500 million \
+         triangle tests) stop it the same way.",
+        MAX_BUDGET_S,
+    )
+}
+
 fn step<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
     positive(Value::deserialize(d)?, MAX_STEP)
 }
@@ -167,6 +200,8 @@ pub struct SampleGap {
     pub min_gap_mm: Option<f64>,
     /// The two parts with that gap, or `null`.
     pub pair: Option<[String; 2]>,
+    /// Where those two parts' bodies sit in the assembly, or `null`.
+    pub parts: Option<[PartPlace; 2]>,
 }
 
 /// One sample of the sweep.
@@ -203,10 +238,10 @@ pub struct SweepResult {
     pub unit: &'static str,
     pub from: f64,
     pub to: f64,
-    /// The last value clear of contact, or where a loop or limit stopped it; `null`: it reached
-    /// `to`.
+    /// The last value clear of contact, or where a loop, limit or budget stopped it; `null`: it
+    /// reached `to`.
     pub stopped_at: Option<f64>,
-    /// What stopped it (two parts touching, a loop or a limit), or `null`.
+    /// What stopped it (two parts touching, a loop, a limit or a budget), or `null`.
     pub stopped_by: Option<Stop>,
     /// The values tested, `from` excluded, before the bisection.
     pub samples: Vec<SweepSample>,
@@ -220,6 +255,15 @@ pub struct SweepResult {
     /// Pairs of parts touching at `from`, such as parts joined face to face: they stop it only
     /// once they pass into each other deeper than they start.
     pub touching_at_start: Vec<[String; 2]>,
+    /// Where the bodies of each of `touching_at_start` sit, in the same order.
+    pub touching_parts: Vec<[PartPlace; 2]>,
+    /// The time budget asked for, in seconds, or `null`.
+    pub budget_s: Option<f64>,
+    /// Whether a budget ran out before the sweep was done.
+    pub budget_exceeded: bool,
+    /// Which: `time`, `samples`, `bisections` (the contact is reported but not refined to
+    /// `refine`), `intersections` or `work`; `null`: none.
+    pub budget_ran_out: Option<&'static str>,
     /// Whether the design was left where the sweep stopped (`apply`, and it moved).
     pub applied: bool,
     /// With `report_gaps` only: by part name, the nearest it came to another.

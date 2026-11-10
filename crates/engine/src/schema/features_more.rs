@@ -1,5 +1,5 @@
-//! Contracts for four commands in `cmd/features_more.rs` (#12655): Rib, Web, Remove and Boundary
-//! Fill. Each adds a feature and returns `add_feature`'s reply, a
+//! Contracts for five commands in `cmd/features_more.rs` (#12655, #2829): Rib, Web, Remove,
+//! Boundary Fill and Replace Face. Each adds a feature and returns `add_feature`'s reply, a
 //! [`super::features::FeatureResult`].
 //!
 //! The handlers read their parameters from the raw JSON, so each key here reads as its handler
@@ -13,12 +13,14 @@ use std::borrow::Cow;
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use super::check::whole;
 use super::config::NameList;
 use super::motion::require;
-use super::types::{FeatureCommon, IdOrName, LengthExpr, OperationParam, Point3, RibDirectionParam, TouchingParam, feature_common, present};
+use super::types::{
+    FaceRef, FeatureCommon, IdOrName, LengthExpr, OperationParam, PlaneParam, Point3, RibDirectionParam, TouchingParam, feature_common, present,
+};
 use crate::params::{self, MAX_STRING_LIST};
 
 /// The most curves a rib or web follows, and the most cells Boundary Fill fills, as
@@ -27,6 +29,8 @@ const MAX_CURVES: usize = 1000;
 const MAX_CELLS: usize = 1000;
 /// The most tool bodies Boundary Fill takes.
 const MAX_TOOLS: usize = 64;
+/// The most faces Replace Face moves.
+const MAX_FACES: usize = 1000;
 
 /// A list of names read as `params::string_list` reads it (through [`NameList`], with its
 /// messages), then held to `range` items with the handler's whole `message` for any other count.
@@ -87,6 +91,67 @@ pub struct RibParams {
     /// What the join makes of pieces that share no face. Default: separate.
     #[serde(default)]
     pub touching: Option<TouchingParam>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// Replace Face's `faces`, read as the handler reads them, with its messages.
+#[derive(Debug)]
+pub struct ReplaceFaces(pub Vec<Value>);
+
+impl<'de> Deserialize<'de> for ReplaceFaces {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        let items = v.as_array().ok_or_else(|| D::Error::custom(whole("`faces` must list points [x, y, z] or face names")))?;
+        if items.is_empty() || items.len() > MAX_FACES {
+            return Err(D::Error::custom(whole("`faces` must list 1…1000 points")));
+        }
+        for item in items {
+            crate::cmd::face_ref_form(item).map_err(|why| D::Error::custom(whole(why)))?;
+        }
+        Ok(ReplaceFaces(items.clone()))
+    }
+}
+
+impl JsonSchema for ReplaceFaces {
+    fn schema_name() -> Cow<'static, str> {
+        "ReplaceFaces".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let face = generator.subschema_for::<FaceRef>();
+        json_schema!({
+            "description": "The planar faces to move: 1 to 1000.",
+            "type": "array",
+            "items": face,
+            "minItems": 1,
+            "maxItems": MAX_FACES
+        })
+    }
+}
+
+fn faces_and_target(schema: &mut Schema) {
+    require(schema, "faces");
+    schema.insert("anyOf".into(), json!([{"required": ["target"]}, {"required": ["target_face"]}]));
+}
+
+/// Move planar faces onto a plane, or onto the plane of a parallel planar face. `target_face` is
+/// read before `target`. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = faces_and_target)]
+pub struct ReplaceFaceParams {
+    // Optional in the type, required in the schema: left out, the handler refuses the call with
+    // its own message.
+    #[serde(default)]
+    pub faces: Option<ReplaceFaces>,
+    /// The plane to move the faces onto.
+    #[serde(default)]
+    pub target: Option<PlaneParam>,
+    /// A point on a planar face, whose plane the faces move onto.
+    #[serde(default)]
+    pub target_face: Option<Point3>,
+    /// The body the faces are on. Default: found from the faces.
+    #[serde(default)]
+    pub body: Option<String>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

@@ -66,7 +66,7 @@ pub(crate) fn settings_profile_button(ui: &mut Ui, label: &str, name: &str, edit
         let rect = ui.max_rect();
         let side = t.space_16 + t.space_2 / 2.0;
         let icon = Rect::from_center_size(pos2(rect.left() + side / 2.0, rect.center().y), vec2(side, side));
-        crate::icons::paint_ink(ui.painter(), icon, "settings_profile", t.form_dim);
+        crate::ui_kit::icons::paint_ink(ui.painter(), icon, "settings_profile", t.form_dim);
         let chevron = Rect::from_center_size(pos2(rect.right() - t.space_14 / 2.0, rect.center().y), vec2(t.space_14, t.space_14));
         super::dropdown_indicator(ui.painter(), chevron, t.form_dim);
         let text_left = (icon.right() + t.space_8).min(chevron.left());
@@ -181,9 +181,9 @@ pub(crate) fn settings_chip(ui: &mut Ui, label: &str, chip: SettingsChip<'_>) ->
     if let Some(icon) = chip.icon {
         let at = Rect::from_center_size(pos2(rect.left() + t.space_8 + icon_side / 2.0, rect.center().y), vec2(icon_side, icon_side));
         if icon == "lock" {
-            crate::icons::glyphs::badge(ui.painter(), at, "lock", ink);
+            crate::ui_kit::icons::glyphs::badge(ui.painter(), at, "lock", ink);
         } else {
-            crate::icons::paint_ink(ui.painter(), at, icon, ink);
+            crate::ui_kit::icons::paint_ink(ui.painter(), at, icon, ink);
         }
     }
     let text_left = (rect.left() + t.space_8 + icon_width).min(rect.right());
@@ -293,6 +293,16 @@ pub(crate) fn settings_number<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut 
         let t = Tokens::get();
         ui.spacing_mut().interact_size.x = t.form_label_width - t.space_6;
         super::number_field(ui, value, range, speed, "")
+    })
+    .inner
+}
+
+/// [`settings_number`] for a whole number, with step arrows (`whole_number_field`, #11829).
+pub(crate) fn settings_whole_number<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range: std::ops::RangeInclusive<T>) -> egui::Response {
+    ui.scope(|ui| {
+        let t = Tokens::get();
+        ui.spacing_mut().interact_size.x = t.form_label_width - t.space_6;
+        super::whole_number_field(ui, value, range, "")
     })
     .inner
 }

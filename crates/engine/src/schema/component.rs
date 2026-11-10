@@ -1425,18 +1425,40 @@ fn move_schema(schema: &mut Schema) {
     schema.insert("allOf".into(), Value::Array(pairs));
 }
 
-/// `sketches` as `string_list` reads it (one name or a list, with its messages), where `null`,
-/// `[]` and a missing key all get the handler's `` `sketches` must list sketches ``.
-fn sketch_names<'de, D: Deserializer<'de>>(d: D) -> Result<Option<super::config::NameList>, D::Error> {
-    let v = Value::deserialize(d)?;
-    let names = if v.is_null() { Default::default() } else { super::config::NameList::deserialize(v).map_err(D::Error::custom)? };
-    if names.0.is_empty() { Err(D::Error::custom(whole("`sketches` must list sketches"))) } else { Ok(Some(names)) }
+/// `sketches` as `name_or_id_values` reads it (one name, or a list of names and ids, with its
+/// messages), where `null`, `[]` and a missing key all get the handler's
+/// `` `sketches` must list sketches ``.
+fn sketch_names<'de, D: Deserializer<'de>>(d: D) -> Result<Option<SketchKeys>, D::Error> {
+    // Each message starts with "must", so the check names the key in front, as the reader does.
+    let keys = match Value::deserialize(d)? {
+        Value::Null => Vec::new(),
+        v @ Value::String(_) => vec![v],
+        Value::Array(list) if list.len() > params::MAX_STRING_LIST => {
+            return Err(D::Error::custom(format!("must list at most {} keys", params::MAX_STRING_LIST)));
+        }
+        Value::Array(list) => {
+            if let Some((i, v)) = list.iter().enumerate().find(|(_, v)| !v.is_string() && !v.is_u64()) {
+                return Err(D::Error::custom(format!("must list names or ids; the entry {} is {}", i + 1, params::json_brief(v))));
+            }
+            list
+        }
+        v => return Err(D::Error::custom(format!("must be a list of names or ids; it is {}", params::json_brief(&v)))),
+    };
+    if keys.is_empty() { Err(D::Error::custom(whole("`sketches` must list sketches"))) } else { Ok(Some(SketchKeys(keys))) }
 }
+
+/// The sketches' keys, each a name or an id as given (not serialized, so the schema keeps no
+/// `null` default).
+#[derive(Debug)]
+pub struct SketchKeys(pub Vec<Value>);
 
 fn sketch_names_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({
-        "description": "The sketches, by id or name as text: one, or a list of 1 to 10000.",
-        "anyOf": [{"type": "string"}, {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": params::MAX_STRING_LIST}]
+        "description": "The sketches: one name, or a list of 1 to 10000 names and ids. A number is an id; a string is an exact name, then an id.",
+        "anyOf": [
+            {"type": "string"},
+            {"type": "array", "items": {"anyOf": [{"type": "string"}, {"type": "integer", "minimum": 0}]}, "minItems": 1, "maxItems": params::MAX_STRING_LIST}
+        ]
     })
 }
 
@@ -1987,7 +2009,7 @@ pub struct MoveSketchesParams {
     // out, `null` or empty, the handler refuses the call with its own message.
     #[serde(default, deserialize_with = "sketch_names")]
     #[schemars(schema_with = "sketch_names_schema")]
-    pub sketches: Option<super::config::NameList>,
+    pub sketches: Option<SketchKeys>,
     /// The component they go to, by id or name.
     #[serde(default, deserialize_with = "component", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ComponentRef")]

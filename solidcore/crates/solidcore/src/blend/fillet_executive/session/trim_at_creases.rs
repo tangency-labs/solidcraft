@@ -1098,6 +1098,23 @@ impl FilletSession<'_> {
                     on.push(edge_curve(k, &sheet, e)?);
                 }
             }
+            // an extension's runs from a chain's end to its foot lie on the walls beside it;
+            // with the sheet's section there they fence what the blend takes off that wall
+            // (else the section ends inside the wall and the material taken off reaches
+            // every face)
+            for ext in &extensions {
+                for run in &ext.foot_runs {
+                    if crate::blend::fillet_overflow::curve_on_surface(
+                        k,
+                        run,
+                        self.objects.target,
+                        f,
+                        on_tol,
+                    )? {
+                        on.push(run.copy(k)?);
+                    }
+                }
+            }
             // an open G1 setback corner's spring curves on this face: with the rails they
             // bound the corner's hole on it (the fork's ef57570)
             for (sf, curve) in &open_springs {

@@ -96,8 +96,9 @@ fn every_axis_is_drawn_in_one_set_of_colours() {
         let c = Pos2::new(100.0, 100.0);
         for (name, d, want) in [("x", Vec3::X, t.axis_x), ("y", Vec3::Y, t.axis_y), ("z", Vec3::Z, t.axis_z)] {
             let at = c + vec2(32.0, 0.0);
-            let mut out =
-                ctx.run_ui(egui::RawInput::default(), |ui| crate::icons::navigation::axis_tip(ui.painter(), c, name, d.into(), at, 0.5, false, t));
+            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+                crate::icons::navigation::axis_tip_scaled(ui.painter(), c, name, d.into(), at, 0.5, false, t, 1.0)
+            });
             out.textures_delta.clear();
             let end = out.shapes.iter().find_map(|s| match &s.shape {
                 egui::Shape::Circle(e) if e.center == at => Some(e.fill),
@@ -133,9 +134,10 @@ fn analysis_colours_reach_the_shader_in_its_order() {
 }
 
 // Icons no longer take their colours from the caller or from `IconColors`: the SVG masters name
-// palette roles (`assets/icons/ui/design/palette.toml`, light and dark, plus accents) that
-// `icon_svg` resolves. `icon_svg`'s own tests hold that every master parses and that only the
-// palette's colours exist, including its colour-vision variants.
+// palette roles (`assets/icons/ui/design/palette.toml`, light and dark, plus accents) that the
+// kit's renderer (`ui_kit::icons`) resolves in SolidCraft's set (`icon_svg::SET`). `icon_svg`'s
+// own tests hold that every master parses and that only the palette's colours exist, including
+// its colour-vision variants.
 
 /// The most colour literals each UI file may hold, and why. None of them carries a meaning that a
 /// colour vision mode must change. A file with more fails here: make the new colour a token in
@@ -151,7 +153,6 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
         3,
         "the custom view navigator's raster: the design's appearance and tokens, shaded, as pixels, drawn with the white image tint",
     ),
-    ("context_menu.rs", 1, "the radial menu's shadow"),
     ("dialogs_appearance.rs", 1, "a design appearance: the colour is the fact"),
     ("dialogs_save_mesh.rs", 1, "an installed slicer's own icon, drawn untinted"),
     ("dialogs_library.rs", 1, "a library appearance's swatch: the colour is the fact"),
@@ -162,10 +163,12 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("dialogs_assembly.rs", 1, "the interference fill, shaded from its token"),
     ("dialogs_motion.rs", 1, "a white outline"),
     ("gizmo.rs", 2, "the gizmo's neutral grey ball"),
-    ("icons.rs", 1, "the white tint that carries an icon image's opacity"),
     ("ref_images.rs", 1, "a reference image's opacity tint"),
     ("theme_files.rs", 1, "a colour read from a theme file, which sets tokens"),
     ("titlebar.rs", 2, "the window close button's red hover (the system's convention) and white ink"),
+    ("ui_kit/icons/mod.rs", 1, "the white tint that carries an icon image's opacity"),
+    ("ui_kit/icons/svg.rs", 1, "an icon colour role's value: the installed set's own palette data"),
+    ("ui_kit/menu.rs", 1, "a menu entry's swatch: the colour is document data"),
 ];
 
 const COLOUR_LITERALS: &[&str] = &[
