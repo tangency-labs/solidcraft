@@ -17,7 +17,7 @@ const HOME_ZOOM: f64 = 0.7;
 /// The side of a mesh export's square thumbnail, as slicers write theirs.
 const EXPORT_SIZE: u32 = 512;
 
-/// A mesh export's thumbnail of the exported `bodies` (none named, every shown body), fitted whole
+/// A mesh export's thumbnail of the exported `bodies` (none named, every body), fitted whole
 /// into a square, on a transparent background.
 pub(super) fn exported(s: &Session, bodies: &[String]) -> Option<Vec<u8>> {
     let renderer = crate::capture::installed()?;
@@ -39,8 +39,8 @@ fn transparent(renderer: &crate::capture::Renderer, scene: &mut Scene, camera: &
 }
 
 /// What the thumbnail shows, in the bodies' colours, iso, fitted with the distance scaled by `zoom`.
-/// Saved (`exported` is None): the shown bodies' warm display meshes only. Exported: the exported
-/// bodies (none named, every shown body), meshed here when cold, as a headless export has drawn nothing.
+/// Saved (`exported` is None): the shown bodies' warm display meshes only. Exported: the bodies the
+/// file holds (none named, every body), meshed here when cold, as a headless export has drawn nothing.
 fn scene(s: &Session, zoom: f64, exported: Option<&[String]>) -> Option<(Scene, Camera)> {
     if s.active_sketch.is_some() || !s.pending_moves.is_empty() || s.model.results.iter().any(|r| r.error.is_some()) {
         return None;
@@ -54,8 +54,8 @@ fn scene(s: &Session, zoom: f64, exported: Option<&[String]>) -> Option<(Scene, 
     let mut triangles = 0usize;
     let mut points = 0usize;
     let pictured = |name: &String| match exported {
-        Some(bodies) if !bodies.is_empty() => bodies.contains(name),
-        _ => s.body_visible(name),
+        Some(bodies) => bodies.is_empty() || bodies.contains(name),
+        None => s.body_visible(name),
     };
     for body in world.bodies.iter().filter(|b| pictured(&b.name)) {
         let mesh = if exported.is_some() { body.mesh() } else { body.cached_mesh()? };
@@ -174,8 +174,9 @@ mod tests {
         let mut session = Session::default();
         session.execute("solid.box", &serde_json::json!({"length":10,"width":20,"height":30,"body_name":"Exported"})).unwrap();
         session.execute("solid.box", &serde_json::json!({"length":100,"width":100,"height":100,"body_name":"Omitted"})).unwrap();
+        session.execute("browser.visibility", &serde_json::json!({"items":["Omitted"],"visible":false})).unwrap();
         let exported = ["Exported".to_string()];
         assert_eq!(scene(&session, 1.0, Some(&exported)).unwrap().0.meshes.len(), 1, "the omitted body is not in the picture");
-        assert_eq!(scene(&session, 1.0, Some(&[])).unwrap().0.meshes.len(), 2, "no selection exports every shown body");
+        assert_eq!(scene(&session, 1.0, Some(&[])).unwrap().0.meshes.len(), 2, "no selection exports every body, hidden ones too");
     }
 }
