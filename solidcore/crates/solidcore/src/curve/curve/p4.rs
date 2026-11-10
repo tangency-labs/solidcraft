@@ -28,6 +28,13 @@
 //! | `EvalFunction for` [`FindCurveDistanceExtrema`]   | `SmFindCurveDistanceExtremaEFO::Evaluate` (co-ported in [`crate::curve::curve_cache`]) |
 //!
 //! Deviations:
+//! - **Projected maximum derivative.** Negating the projected stationary
+//!   equation also negates its derivative, so Newton steps use the derivative
+//!   of the function they are solving. Upstream negates only `F` (WR-768). The
+//!   search then reaches the nearest stationary point, so
+//!   [`crate::curve::curve::p5::local_property_analysis`] accepts it only where
+//!   the projected distance has a maximum, and otherwise searches the interval
+//!   for one.
 //! - **Base bodies.** The virtual `IsClosed`, `IsDegenerate` and `ApproximatePolarBox`
 //!   are generic over [`CurveEvaluate`] (`*_base`), so curve kinds whose overrides
 //!   fall back to the base class (the B-spline `IsDegenerate`) can call them on
@@ -1785,6 +1792,7 @@ impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
 
                 if self.property == CurvePropertyType::ProjectedPointMaximize {
                     out.f = -out.f; // [B543]
+                    out.f_prime = -out.f_prime;
                 }
 
                 out.found_answer = (v_dot_v < (EFF_ZERO_SQ * 100.0))
@@ -2268,6 +2276,42 @@ mod tests {
     fn seg(a: [f64; 3], b: [f64; 3]) -> Curve {
         let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
         hermite(a, d, b, d)
+    }
+
+    #[test]
+    fn projected_maximum_equation_has_its_actual_derivative() {
+        use crate::geom::local_solve1d::{EvalFunction, FunctionValue};
+        use crate::math::Vec3;
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+
+        let k = Kernel::default();
+        let curve = Curve::from(BSplineCurve::create_line_segment(3, Vec3::ZERO, Vec3::X).unwrap());
+        // C(t) = (t, 0, 0), P = 0, N = (0, 0, s): the maximum's signed stationary
+        // equation is F(t) = -s^2 t, so F'(t) = -s^2 exactly.
+        for scale in [0.5, 1.0, 2.0] {
+            let vectors = [Vec3::ZERO, Vec3::Z * scale];
+            let mut evaluator = CurvePropertyEfo::new(
+                &k,
+                &curve,
+                CurvePropertyType::ProjectedPointMaximize,
+                None,
+                Some(&vectors),
+                1e-20,
+            );
+            for t in [0.2, 0.25, 0.3] {
+                let mut value = FunctionValue::default();
+                evaluator.evaluate(t, &mut value, false).unwrap();
+                let close = |a: f64, b: f64| (a - b).abs() <= 1e-12 * b.abs().max(1.0);
+                assert!(
+                    close(value.f, -scale * scale * t),
+                    "F at t={t}, scale={scale}"
+                );
+                assert!(
+                    close(value.f_prime, -scale * scale),
+                    "F' at t={t}, scale={scale}"
+                );
+            }
+        }
     }
 
     #[test]

@@ -127,7 +127,7 @@ use crate::geom::geom_utility::p1::{
     CircleCircle,
 };
 use crate::geom::global_solver::SolverOperation;
-use crate::geom::local_solve1d::{LocalSolve1d, SolverAlgorithm};
+use crate::geom::local_solve1d::{EvalFunction, FunctionValue, LocalSolve1d, SolverAlgorithm};
 use crate::geom::matrix::Matrix;
 use crate::geom::solution_array::{Solution, SolutionType};
 use crate::geom::tol::are_same;
@@ -1981,7 +1981,12 @@ impl Curve {
 /// `solution` is a single value at the parameter with the property value (for the
 /// angle properties the signed angle, for the projected point properties the
 /// projected distance). An empty `vectors` stands for `NULL`. The min / max
-/// properties always report the point they stopped at.
+/// properties always report the point they stopped at. Not upstream: a projected
+/// maximum is only found where the projected distance really has a maximum. When the
+/// Newton search from `guess` reaches a minimum instead, or no root at all, the
+/// interval is sampled for a bracketed interior maximum and that one is polished
+/// ([`projected_maximum_from_samples`]); a distance largest at an end of the interval
+/// is no answer (WR-768).
 ///
 /// # Errors
 ///
@@ -2044,19 +2049,34 @@ pub fn local_property_analysis<C: CurveEvaluate + ?Sized, O: Copy>(
         // Something went wrong in 1d solver return error
         Err(_) => return Err(SolidError::sm_err(OP_LPA)),
     };
-    let found_t = outcome.t;
+    let mut found_t = outcome.t;
     let pass_on = k.fixes.query_statuses_pass_on;
 
-    // A search that found nothing has no solution to report, with one exception: the
-    // minimisations and maximisations stop at the extremum they reached, and their `found`
-    // is decided by `|F| < acceptable_accuracy`, a test their objectives are not built for
-    // (a radius of curvature or a derivative length is not near zero at an extremum). For
-    // them the stop point is the solution, but only when `F` there is a value the search
-    // really has: `BIG_DOUBLE` is what the objective answers where it has no finite value
-    // (an uncurved piece), and a failed evaluation leaves no value at all. Upstream reports
-    // the stop point whatever `ls.curr.f` holds, which on a straight trim is the zero a
-    // failed evaluation left behind (#2574).
-    if !outcome.found {
+    // The projected maximum's equation is zero at every stationary point of the
+    // projected distance, minima included. Only where the distance turns down is the
+    // point a maximum: there the equation (the negated distance slope) has a positive
+    // derivative. Not upstream, whose Newton step cannot reach a root (WR-768): with
+    // the derivative corrected it reaches the nearest stationary point, whichever it
+    // is, or runs off where the equation turns back between the guess and its root.
+    // Either way the interval is then searched for the maximum itself.
+    if property == CurvePropertyType::ProjectedPointMaximize {
+        let at_maximum = outcome.found && projected_maximum_at(&mut efo, found_t)?;
+        if !at_maximum {
+            match projected_maximum_from_samples(k, curve, interval, vec(0)?, vec(1)?, &mut efo)? {
+                Some(t) => found_t = t,
+                None => return Ok(false),
+            }
+        }
+    } else if !outcome.found {
+        // A search that found nothing has no solution to report, with one exception: the
+        // minimisations and maximisations stop at the extremum they reached, and their
+        // `found` is decided by `|F| < acceptable_accuracy`, a test their objectives are not
+        // built for (a radius of curvature or a derivative length is not near zero at an
+        // extremum). For them the stop point is the solution, but only when `F` there is a
+        // value the search really has: `BIG_DOUBLE` is what the objective answers where it
+        // has no finite value (an uncurved piece), and a failed evaluation leaves no value
+        // at all. Upstream reports the stop point whatever `ls.curr.f` holds, which on a
+        // straight trim is the zero a failed evaluation left behind (#2574).
         let stops_at_its_extremum = matches!(
             property,
             CurvePropertyType::MinimizeFirstDerivative
@@ -2127,6 +2147,170 @@ pub fn local_property_analysis<C: CurveEvaluate + ?Sized, O: Copy>(
     } // end projected point problem check to set solution ProjectedVector length
 
     Ok(true)
+}
+
+/// Whether the projected distance has a maximum at the root `t` of the
+/// `ProjectedPointMaximize` equation: its derivative there, the negated second
+/// derivative of half the squared distance over the tangent length, is not negative.
+/// A degenerate root (a zero tangent, where the evaluator answers `F' = 0`) passes, as
+/// upstream accepts it.
+///
+/// # Errors
+///
+/// `SM_ERR` when the evaluation fails; [`SolidError::Unported`] from the evaluation.
+fn projected_maximum_at<C: CurveEvaluate + ?Sized>(
+    efo: &mut CurvePropertyEfo<'_, C>,
+    t: f64,
+) -> Result<bool> {
+    let mut at_root = FunctionValue::default();
+    match efo.evaluate(t, &mut at_root, true) {
+        Ok(()) => Ok(at_root.f_prime >= 0.0),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
+        Err(_) => Err(SolidError::sm_err(OP_LPA)),
+    }
+}
+
+/// The number of equal steps `projected_maximum_from_samples` cuts an interval into.
+/// Its Newton polish is confined to one of them, well within the local solver's own
+/// step limit of 8 percent of an interval.
+const PROJECTED_MAXIMUM_STEPS: usize = 16;
+
+/// A place `projected_maximum_from_samples` can take its maximum from: an interior
+/// sample that is a root with a positive derivative, or a step bracketing a root.
+enum Candidate {
+    Sample(usize),
+    Step(usize),
+}
+
+/// Searches `interval` for an interior maximum of the distance from `point`, seen
+/// along `normal`, when a Newton search from the caller's guess did not reach one.
+/// The maximum's equation `F`, the negated slope of the projected distance over the
+/// tangent length, is sampled at [`PROJECTED_MAXIMUM_STEPS`] equal steps. Two kinds
+/// of sample hold a maximum: an interior sample where `F` is zero with a positive
+/// derivative is one already, and a step where `F` goes from negative to positive
+/// brackets one (the distance rises, then falls). Among them the one that reaches
+/// the largest squared distance at its samples wins. A bracketing step is polished
+/// by a Newton search of `F` confined to the step, from its midpoint; when that does
+/// not land on a maximum, the sign change is bisected to adjacent floating point
+/// parameters. A smooth root is then found to machine precision, and a corner of the
+/// distance (a polyline vertex, where `F` jumps from negative to positive without a
+/// root) is placed at its parameter: its slope turns from rising to falling there,
+/// which is a maximum.
+///
+/// `None` when no sample or step holds a maximum: the distance is largest at an end
+/// of the interval, which is no root. The ends themselves are never answers, and a
+/// zero tangent (where the evaluator answers `F = 0`, `F' = 0`) is no sample maximum.
+///
+/// # Errors
+///
+/// `SM_ERR` when the solver fails; [`SolidError::Unported`] from the evaluations.
+/// A sample the evaluator cannot produce takes no part in a bracket, and a failed
+/// evaluation during the bisection ends the search with `None`.
+fn projected_maximum_from_samples<C: CurveEvaluate + ?Sized>(
+    k: &Kernel,
+    curve: &C,
+    interval: &Extent1d,
+    point: Vec3,
+    normal: Vec3,
+    efo: &mut CurvePropertyEfo<'_, C>,
+) -> Result<Option<f64>> {
+    let (a, b) = (interval.min(), interval.max());
+    let length = b - a;
+    if !length.is_finite() || length <= 0.0 {
+        return Ok(None);
+    }
+    let at = |i: usize| a + length * (i as f64 / PROJECTED_MAXIMUM_STEPS as f64);
+
+    // Each sample: the equation and its derivative, and the squared projected distance.
+    let mut samples: [Option<(FunctionValue, f64)>; PROJECTED_MAXIMUM_STEPS + 1] =
+        [const { None }; PROJECTED_MAXIMUM_STEPS + 1];
+    for (i, sample) in samples.iter_mut().enumerate() {
+        let t = at(i);
+        let mut value = FunctionValue::default();
+        let p = match efo.evaluate(t, &mut value, false) {
+            Ok(()) => curve.evaluate_point(k, t),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Err(e) => Err(e),
+        };
+        match p {
+            Ok(p) if value.f.is_finite() && value.f_prime.is_finite() => {
+                let d = normal.cross(p - point).cross(normal).length_squared();
+                *sample = Some((value, d));
+            }
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            _ => {}
+        }
+    }
+
+    // The candidates, each with the squared distance it reaches.
+    let mut best: Option<(Candidate, f64)> = None;
+    for (i, sample) in samples.iter().enumerate() {
+        let interior = i > 0 && i < PROJECTED_MAXIMUM_STEPS;
+        if let Some((value, d)) = sample {
+            if interior
+                && value.f == 0.0
+                && value.f_prime > 0.0
+                && best.as_ref().is_none_or(|(_, reach)| *d > *reach)
+            {
+                best = Some((Candidate::Sample(i), *d));
+            }
+        }
+    }
+    for (i, pair) in samples.windows(2).enumerate() {
+        let [Some((lower, d_lower)), Some((upper, d_upper))] = pair else {
+            continue;
+        };
+        let reach = d_lower.max(*d_upper);
+        if lower.f < 0.0
+            && upper.f > 0.0
+            && best
+                .as_ref()
+                .is_none_or(|(_, best_reach)| reach > *best_reach)
+        {
+            best = Some((Candidate::Step(i), reach));
+        }
+    }
+    let i = match best {
+        None => return Ok(None),
+        Some((Candidate::Sample(i), _)) => return Ok(Some(at(i))),
+        Some((Candidate::Step(i), _)) => i,
+    };
+
+    // Newton inside the bracketing step.
+    let (mut lower, mut upper) = (at(i), at(i + 1));
+    let mut ls = LocalSolve1d::with_interval(Extent1d::from_min_max(lower, upper), false);
+    ls.set_desired_accuracy(EFF_ZERO_SQ);
+    let outcome = match ls.solve_it(efo, 0.5 * (lower + upper), EFF_ZERO_SQRT) {
+        Ok(o) => o,
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(_) => return Err(SolidError::sm_err(OP_LPA)),
+    };
+    if outcome.found && projected_maximum_at(efo, outcome.t)? {
+        return Ok(Some(outcome.t));
+    }
+
+    // Else bisect the sign change down to adjacent parameters: a smooth root to
+    // machine precision, or the parameter of a corner.
+    loop {
+        let mid = 0.5 * (lower + upper);
+        if mid <= lower || mid >= upper {
+            break;
+        }
+        let mut value = FunctionValue::default();
+        match efo.evaluate(mid, &mut value, false) {
+            Ok(()) if value.f.is_finite() => {}
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            _ => return Ok(None),
+        }
+        if value.f < 0.0 {
+            lower = mid;
+        } else if value.f > 0.0 {
+            upper = mid;
+        } else {
+            return Ok((value.f_prime >= 0.0).then_some(mid));
+        }
+    }
+    Ok(Some(upper))
 }
 
 // ---- SmCCIntersectENFO::Evaluate ---------------------------------------------------------
@@ -2642,7 +2826,6 @@ impl<C1: CurveEvaluate + ?Sized, C2: CurveEvaluate + ?Sized> FindCcNormalEnfo<'_
 mod tests {
     use super::*;
     use crate::curve::hermite_curve::HermiteCurve;
-    use crate::geom::local_solve1d::{EvalFunction, FunctionValue};
     use crate::geom::local_solve_nd::EvalNFunctions;
     use crate::nurbs::b_spline_curve::NurbCircleParam;
     use crate::nurbs::nurbs_crv::allocate_nurb_curve;
@@ -2835,6 +3018,92 @@ mod tests {
         let c = arc(1.0, 0.0, 90.0);
         let length = c.length(&k, &c.natural_interval(), 1e-8).unwrap();
         assert!((length - core::f64::consts::FRAC_PI_2).abs() < 1e-8);
+    }
+
+    /// The parabola `(2t, 4t(1 - t))` seen from `P = (1, 0.2)` along `z`: its apex
+    /// `t = 0.5` is a maximum of the projected distance (0.8) and `t = 0.5 +- 0.274` are
+    /// minima. A projected maximum search finds the apex from a guess on its side, and
+    /// still finds it from a guess that Newton takes to a minimum. On a segment, whose
+    /// only stationary point is a minimum, it finds nothing.
+    #[test]
+    fn projected_maximum_is_a_maximum_of_the_projected_distance() {
+        let k = &Kernel::default();
+        let parabola = hermite([0.0; 3], [2.0, 4.0, 0.0], [2.0, 0.0, 0.0], [2.0, -4.0, 0.0]);
+        let vectors = [Vec3::new(1.0, 0.2, 0.0), Vec3::new(0.0, 0.0, 1.0)];
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        for guess in [0.45, 0.75] {
+            let mut sol: Solution<()> = Solution::new();
+            let found = local_property_analysis(
+                k,
+                &parabola,
+                &ivl,
+                CurvePropertyType::ProjectedPointMaximize,
+                guess,
+                None,
+                &vectors,
+                &mut sol,
+            )
+            .unwrap();
+            assert!(found, "from {guess}");
+            assert!(
+                (sol.start.param(0).unwrap() - 0.5).abs() < 1e-7,
+                "from {guess}"
+            );
+            assert!(
+                (sol.start.solution_value - 0.8).abs() < 1e-7,
+                "from {guess}"
+            );
+        }
+
+        let segment = bseg([0.0; 3], [2.0, 0.0, 0.0]);
+        let mut sol: Solution<()> = Solution::new();
+        let found = local_property_analysis(
+            k,
+            &segment,
+            &ivl,
+            CurvePropertyType::ProjectedPointMaximize,
+            0.4,
+            None,
+            &vectors,
+            &mut sol,
+        )
+        .unwrap();
+        assert!(
+            !found,
+            "a segment's stationary point is its nearest point, no maximum"
+        );
+
+        // The polyline (0, 0), (1, 1), (2, 0) seen from (1, -1): the distance has a
+        // corner maximum at its vertex, t = 0.5, where F jumps without a root.
+        let mut cur = allocate_nurb_curve(2, 1, 4).unwrap();
+        for (d, s) in cur
+            .cpts_mut()
+            .iter_mut()
+            .zip([[0.0, 0.0], [1.0, 1.0], [2.0, 0.0]])
+        {
+            d.x = s[0];
+            d.y = s[1];
+            d.z = 0.0;
+            d.w = -f64::MAX;
+        }
+        cur.knots_mut().copy_from_slice(&[0.0, 0.0, 0.5, 1.0, 1.0]);
+        let polyline = Curve::from(BSplineCurve::from_nurb(cur, 3, false));
+        let vectors = [Vec3::new(1.0, -1.0, 0.0), Vec3::new(0.0, 0.0, 1.0)];
+        let mut sol: Solution<()> = Solution::new();
+        let found = local_property_analysis(
+            k,
+            &polyline,
+            &ivl,
+            CurvePropertyType::ProjectedPointMaximize,
+            0.2,
+            None,
+            &vectors,
+            &mut sol,
+        )
+        .unwrap();
+        assert!(found, "a corner maximum is found");
+        assert!((sol.start.param(0).unwrap() - 0.5).abs() <= 1e-15);
+        assert!((sol.start.solution_value - 2.0).abs() < 1e-9);
     }
 
     #[test]
