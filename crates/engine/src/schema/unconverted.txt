@@ -13,7 +13,6 @@ render.scene
 render.start
 sheet.export_dxf
 solid.draft
-solid.emboss
 solid.hole
 solid.loft
 solid.mirror

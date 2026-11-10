@@ -19,8 +19,9 @@ use super::check::whole;
 use super::config::NameList;
 use super::motion::require;
 use super::types::{
-    AngleExpr, AxisDir, CoilSectionParam, CoilSectionPositionParam, FaceRef, FeatureCommon, IdOrName, LengthExpr, NumberExpr, OperationParam,
-    PlaneParam, Point3, PointExpr3, ProfilesParam, RibDirectionParam, SketchRef, StringList, TouchingParam, feature_common, present,
+    AngleExpr, AxisDir, CoilSectionParam, CoilSectionPositionParam, EmbossFacePoint, EmbossModeParam, FaceRef, FeatureCommon, IdOrName, LengthExpr,
+    NumberExpr, OperationParam, PlaneParam, Point3, PointExpr3, ProfilesParam, RibDirectionParam, SketchRef, StringList, TouchingParam,
+    feature_common, present,
 };
 use crate::params::{self, MAX_STRING_LIST};
 
@@ -324,6 +325,34 @@ pub struct CoilParams {
     /// Ignored when `participants` lists bodies.
     #[serde(default)]
     pub targets: Option<StringList>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// Raise a sketch's profiles from a face of the part, or sink them into it. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct EmbossParams {
+    /// The sketch, by id or name. Default: the active sketch, else the last one.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "IdOrName")]
+    pub sketch: Option<IdOrName>,
+    /// Which profiles of the sketch to use. Default: all of them.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ProfilesParam")]
+    pub profiles: Option<ProfilesParam>,
+    /// How far the profiles are raised or sunk.
+    pub depth: LengthExpr,
+    #[serde(default)]
+    pub mode: Option<EmbossModeParam>,
+    /// The bodies to emboss, by name. With `face`, only these are searched for it.
+    #[serde(default)]
+    pub targets: Option<NameList>,
+    /// A world point selecting a planar face or a complete exterior cylindrical wall. Default:
+    /// inferred when exactly one supported tangent cylinder matches the selected profiles.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "EmbossFacePoint")]
+    pub face: Option<EmbossFacePoint>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }
