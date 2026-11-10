@@ -1033,6 +1033,11 @@ fn cut_scope(s: &Session, p: &Value, operation: Operation, sketch: u64, face_bod
     Ok(Some(parts))
 }
 
+/// A solid feature's `profiles`: as given, or, when omitted, what an extrude takes (#14395).
+fn profiles_or_default(s: &Session, p: &Value, sketch: u64, cmd: &str) -> Result<ProfileSel> {
+    if p.get("profiles").is_none() { Ok(default_extrude_profiles(s, sketch)) } else { profiles(p, cmd) }
+}
+
 /// The profiles an extrude takes when `profiles` is omitted: even-odd nesting over what was drawn,
 /// so a loop inside an outline is its hole and a loop inside that hole is material again (#5172).
 /// Without nesting this is `All`, as before. When the pick cannot be stored so that it finds the
@@ -1347,7 +1352,7 @@ fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
     let profiles = match face_profile {
         Some(f) => f,
-        None => profiles(p, cmd)?,
+        None => profiles_or_default(s, p, sketch, cmd)?,
     };
     let angle2 = expr(p, "angle2");
     if let Some(a) = &angle2 {
@@ -3586,7 +3591,7 @@ fn sweep(s: &mut Session, p: &Value) -> Result<Value> {
         p,
         FeatureKind::Sweep {
             sketch: SketchId(sketch),
-            profiles: profiles(p, cmd)?,
+            profiles: profiles_or_default(s, p, sketch, cmd)?,
             path_sketch: SketchId(path_sketch),
             path,
             orientation,
@@ -3729,7 +3734,7 @@ fn loft(s: &mut Session, p: &Value) -> Result<Value> {
             });
             continue;
         }
-        sections.push(solidcraft_doc::LoftSection { sketch: SketchId(sketch), profiles: profiles(sec, cmd)?, point: None });
+        sections.push(solidcraft_doc::LoftSection { sketch: SketchId(sketch), profiles: profiles_or_default(s, sec, sketch, cmd)?, point: None });
     }
     let (rails, rail_fit) = guide_rails(s, p, cmd, "loft", None)?;
     let operation = operation(p, cmd)?;
@@ -3984,6 +3989,9 @@ mod revolve_convention_tests;
 #[path = "single_hole_tests.rs"]
 mod single_hole_tests;
 
+#[cfg(test)]
+#[path = "ring_default_tests.rs"]
+mod ring_default_tests;
 #[cfg(test)]
 #[path = "sweep_options_tests.rs"]
 mod sweep_options_tests;
