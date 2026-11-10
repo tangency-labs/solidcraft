@@ -12,6 +12,7 @@
 //! | [`EndOrder`]       | (none; SolidCraft's `Continuity`) |
 //! | `end_rows` (crate) | (none; the rows of SolidCraft's `bridge::section`) |
 //! | `third_derivative` (crate) | (none; SolidCraft's `bridge::third_derivative`) |
+//! | [`SectionBlendDefinition`], [`section_blend_surface`] | (none; the face's definition kept, #3140) |
 //!
 //! **The surface.** The sections run along u, each sampled at the same stations along v. Section
 //! `i` sits at `u = i / (n - 1)` and the surface passes through every station of it: each
@@ -63,6 +64,11 @@
 //! not SolidCraft's `1e-12` and `1e-9` floors: a chord of `1e-12` is not refused, its speed is
 //! about `1e-12` and the end rows collapse onto the section, a valid but degenerate surface.
 //!
+//! **The definition kept** ([`SectionBlendDefinition`]): the sections, the end orders and crowns,
+//! and the motions the net took since it was made, in order. The net is [`section_blend`] of
+//! them with each motion applied by [`BSplineSurface::transform`], bit for bit, so a re-certified
+//! net is the rebuilt one exactly (bound 0), in any orientation of its parameter square.
+//!
 //! Deviations: no upstream counterpart. SolidCraft's `1e-12` floor on a tangent's length and its
 //! `1e-9` floor on the distance between neighbouring sections are exact tests here (a length that
 //! is not positive): what the floors protect is the division, and an exact test protects it
@@ -73,12 +79,14 @@
 //! recursion.
 
 use crate::error::{Result, SolidError};
+use crate::geom::axis2_placement::Axis2Placement;
 use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_curve::KnotType;
 use crate::nurbs::b_spline_surface::{BSplineSurface, BSplineSurfaceForm, CanonicalSurfaceData};
 use crate::nurbs::crv_fit::p1::{interp_given_params, interp_knot_vector};
 use crate::nurbs::knots::KnotVector;
 use crate::nurbs::math::NOW;
+use crate::surface::surface::{Surface, SurfaceKind};
 
 const OP: &str = "sweep::section_blend";
 
@@ -551,4 +559,162 @@ fn unique(knots: &[f64]) -> (Vec<f64>, Vec<usize>) {
         }
     }
     (values, mults)
+}
+
+const OP_RECERTIFY: &str = "sweep::section_blend::SectionBlendDefinition::recertify";
+
+/// The blend surface through `sections` ([`section_blend`]) as a surface keeping its
+/// definition ([`SectionBlendDefinition`]): what a face of the blend carries, and what
+/// [`Surface::procedural_blend`] reads back and re-certifies.
+///
+/// # Errors
+///
+/// Those of [`section_blend`].
+pub fn section_blend_surface(
+    sections: Vec<Vec<SectionFrame>>,
+    orders: [EndOrder; 2],
+    crown: [f64; 2],
+) -> Result<Surface> {
+    let (definition, net) = SectionBlendDefinition::create(sections, orders, crown)?;
+    let mut surface = Surface::from(net);
+    surface.set_section_blend_definition(definition);
+    Ok(surface)
+}
+
+/// One motion a blend's net took after it was made: the arguments of the
+/// [`BSplineSurface::transform`] it took.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Motion {
+    /// The rotation and move.
+    pub rotate_n_move: Axis2Placement,
+    /// The scale applied first, about the origin.
+    pub scale: Option<Vec3>,
+}
+
+/// A section blend's definition, kept on its face's surface (its net): the sections, the end
+/// orders and crowns, and the motions the net took since it was made, in order. The net is
+/// [`section_blend`] of them with each motion applied by [`BSplineSurface::transform`], bit for
+/// bit (bound 0). A motion is kept, not applied to the sections: moving the sections and
+/// building again rounds differently from moving the net, so only the replay is exact.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SectionBlendDefinition {
+    sections: Vec<Vec<SectionFrame>>,
+    orders: [EndOrder; 2],
+    crown: [f64; 2],
+    motions: Vec<Motion>,
+}
+
+impl SectionBlendDefinition {
+    /// The blend through `sections` ([`section_blend`]) and its definition, no motion yet.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`section_blend`].
+    pub fn create(
+        sections: Vec<Vec<SectionFrame>>,
+        orders: [EndOrder; 2],
+        crown: [f64; 2],
+    ) -> Result<(Self, BSplineSurface)> {
+        let net = section_blend(&sections, orders, crown)?;
+        Ok((
+            Self {
+                sections,
+                orders,
+                crown,
+                motions: Vec::new(),
+            },
+            net,
+        ))
+    }
+
+    /// A definition from its parts, as a record holds them; not checked here: the rebuild
+    /// ([`SectionBlendDefinition::rebuild`]) refuses what [`section_blend`] refuses, and
+    /// [`SectionBlendDefinition::recertify`] a net that is not the rebuilt one.
+    #[must_use]
+    pub const fn from_parts(
+        sections: Vec<Vec<SectionFrame>>,
+        orders: [EndOrder; 2],
+        crown: [f64; 2],
+        motions: Vec<Motion>,
+    ) -> Self {
+        Self {
+            sections,
+            orders,
+            crown,
+            motions,
+        }
+    }
+
+    /// The cross-sections, as the blend was made through them (before any motion).
+    #[must_use]
+    pub fn sections(&self) -> &[Vec<SectionFrame>] {
+        &self.sections
+    }
+
+    /// The continuity held at the first and the last section.
+    #[must_use]
+    pub const fn orders(&self) -> [EndOrder; 2] {
+        self.orders
+    }
+
+    /// The crowns at the first and the last section.
+    #[must_use]
+    pub const fn crown(&self) -> [f64; 2] {
+        self.crown
+    }
+
+    /// The motions the net took since it was made, in order.
+    #[must_use]
+    pub fn motions(&self) -> &[Motion] {
+        &self.motions
+    }
+
+    /// The net's certified distance from the definition: 0, the net is the rebuilt surface.
+    #[must_use]
+    pub const fn bound(&self) -> f64 {
+        0.0
+    }
+
+    /// The net the definition gives: [`section_blend`] of the sections, then each motion.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`section_blend`] and of the transforms.
+    pub fn rebuild(&self) -> Result<BSplineSurface> {
+        let mut net = section_blend(&self.sections, self.orders, self.crown)?;
+        for m in &self.motions {
+            net.transform(&m.rotate_n_move, m.scale)?;
+        }
+        Ok(net)
+    }
+
+    /// Re-certifies `net` against this definition: the net is a B-spline surface, and the
+    /// rebuilt surface ([`SectionBlendDefinition::rebuild`]) is it exactly, the same degrees,
+    /// knots, control points and weights bit for bit in some orientation of the parameter
+    /// square (the swap and reversals a face's net takes). Returns the distance proved, 0.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` naming what fails; those of the rebuild.
+    pub fn recertify(&self, net: &Surface) -> Result<f64> {
+        let refuse = |why| SolidError::invalid_input(OP_RECERTIFY, why);
+        let SurfaceKind::BSpline(form) = net.kind() else {
+            return Err(refuse("a section blend's net is a B-spline surface"));
+        };
+        let rebuilt = self.rebuild()?;
+        match crate::surface::procedural_blend::corner::net_distance(&rebuilt, form) {
+            Some(d) if d <= 0.0 => Ok(0.0),
+            _ => Err(refuse("a section blend's net is not its definition's")),
+        }
+    }
+
+    /// Moves the definition with its net (`Transform`): the motion is kept, to be replayed on
+    /// the rebuilt surface. Any motion the net takes is followed, a scale that is not uniform
+    /// among them: the definition is the blend then its motions, whatever they are.
+    pub fn transform(&mut self, rotate_n_move: &Axis2Placement, scale: Option<Vec3>) {
+        self.motions.push(Motion {
+            rotate_n_move: *rotate_n_move,
+            scale,
+        });
+    }
 }

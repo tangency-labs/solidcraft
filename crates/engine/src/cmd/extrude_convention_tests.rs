@@ -3,6 +3,7 @@
 use crate::Session;
 use serde_json::{Value, json};
 use solidcraft_doc::{Document, ExtrudeConvention, FeatureKind};
+use solidcraft_geom::MeshGeom;
 
 fn run(s: &mut Session, cmd: &str, params: Value) {
     s.execute(cmd, &params).unwrap_or_else(|e| panic!("{cmd}: {e}"));

@@ -128,6 +128,11 @@ with the motion axis along that edge. A revolute joint turns about the picked ed
 moves along it. Round edges use their circle's centre and normal. Existing saved joint origins
 keep their axes.
 
+A joint origin picked on a part inside a sub-assembly that is placed more than once stays on the
+copy it was picked on. A joint at it holds or moves that copy as a whole, since every copy shares
+the part inside. Scripts give the copy with `"path"`: the occurrence ids from the root down to the
+part, as `occurrence.properties` reports them.
+
 A joint origin on a face or a hole keeps the turn it had when it was picked: when the face tilts
 (a bend angle or a rotation changing with a parameter) the part on it tilts with the face but
 doesn't spin about it.

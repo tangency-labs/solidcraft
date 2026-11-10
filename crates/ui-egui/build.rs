@@ -282,7 +282,7 @@ fn builtin_themes() -> Result<(), String> {
         }
     }
     files.sort_by(|a, b| a.file_stem().cmp(&b.file_stem()));
-    let mut out = String::from("/// The theme files shipped with SolidCraft.\nconst BUILTIN: &[(&str, &str)] = &[\n");
+    let mut out = String::from("/// The theme files shipped with SolidCraft.\npub(crate) const BUILTIN: &[(&str, &str)] = &[\n");
     for path in files {
         let id = path.file_stem().and_then(|s| s.to_str()).ok_or("theme file name is not UTF-8")?;
         let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;

@@ -79,6 +79,7 @@ const READ_ON_A_COPY: &[&str] = &[
     "document.inspect",
     "inspect.clearance",
     "inspect.interference",
+    "inspect.parameter_variants",
     // Physical properties of a component or placement: every body of every placement (#8706).
     "component.properties",
     "occurrence.properties",

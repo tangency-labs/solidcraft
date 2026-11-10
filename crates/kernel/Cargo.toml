@@ -10,6 +10,8 @@ workspace = true
 
 [dependencies]
 solidcore-record = { workspace = true }
+solidcore-ops = { workspace = true }
+solidcore-tess = { workspace = true }
 solidcraft-geom = { workspace = true }
 solidcraft-smlib = { workspace = true }
 solidcraft-profile = { workspace = true }

@@ -48,6 +48,17 @@ pub fn with_fit_note(why: &str, size: &str, largest: f64) -> String {
     format!("{head}{}{tail}", largest_fit_note(size, largest))
 }
 
+/// `why` without the largest size that fits it names ([`largest_fit_note`]): the clause
+/// "the largest … that fits is … mm" and the "; " or ": " before it. `why` itself where it
+/// names none.
+pub fn without_fit_note(why: &str) -> String {
+    let Some(start) = why.find("the largest ") else { return why.to_owned() };
+    let Some(len) = why.get(start..).and_then(|rest| rest.find(" mm")) else { return why.to_owned() };
+    let head = why.get(..start).unwrap_or_default();
+    let head = head.strip_suffix("; ").or_else(|| head.strip_suffix(": ")).unwrap_or(head);
+    format!("{head}{}", why.get(start + len + 3..).unwrap_or_default())
+}
+
 /// `v` to the micrometre, without trailing zeros.
 pub(crate) fn trimmed_mm(v: f64) -> String {
     let s = format!("{v:.6}");
@@ -178,7 +189,7 @@ pub(crate) fn curve_derivative(c: &Curve, t: f64) -> Option<Vec3> {
             v3(*points.get(i + 1)?) - v3(*points.get(i)?)
         }
         Curve::Spline { .. } | Curve::RationalSpline { .. } => match CurveEval::new(c).ok()? {
-            CurveEval::Spline(s) => s.eval(t)?.1,
+            CurveEval::Spline(s) => solidcraft_geom::tess::from_kernel(s.eval(t)?.1),
             _ => return None,
         },
         Curve::SurfaceIntersection { surfaces, leader, .. } => {
@@ -536,6 +547,11 @@ fn radius_step(radius: f64) -> f64 {
 /// search's error, since a smaller radius would not be the largest that fits. The rounds turn at
 /// side edges as `turn` says.
 pub fn fillet_max(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<Option<(f64, Body)>> {
+    fillet_max_why(body, edges, radius, turn).map(|search| search.found)
+}
+
+/// [`fillet_max`], with what the search found when nothing builds ([`FitSearch`]).
+pub fn fillet_max_why(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<FitSearch> {
     let _span = solidcraft_profile::span("kernel", "fillet_max");
     largest_that_fits(radius, |r| fillet_turning(body, edges, r, turn))
 }
@@ -543,21 +559,41 @@ pub fn fillet_max(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn) ->
 /// [`fillet_max`] for an equal-distance chamfer of these edges: the largest distance below
 /// `distance` (to three significant digits) at which it works, with its result.
 pub fn chamfer_max(body: &Body, edges: &[Vec3], distance: f64) -> Result<Option<(f64, Body)>> {
+    chamfer_max_why(body, edges, distance).map(|search| search.found)
+}
+
+/// [`chamfer_max`], with what the search found when nothing builds ([`FitSearch`]).
+pub fn chamfer_max_why(body: &Body, edges: &[Vec3], distance: f64) -> Result<FitSearch> {
     let _span = solidcraft_profile::span("kernel", "chamfer_max");
     largest_that_fits(distance, |d| chamfer(body, edges, d))
 }
 
+/// What [`largest_that_fits`] found: the largest size it built, with its result, or (none built)
+/// the smallest size it tried and that candidate's own refusal, so a caller can say why nothing
+/// smaller builds instead of repeating the first refusal's estimate.
+pub struct FitSearch {
+    /// The largest size built, with its result.
+    pub found: Option<(f64, Body)>,
+    /// When nothing built: the smallest size tried and how it failed.
+    pub smallest_refused: Option<(f64, KernelError)>,
+}
+
 /// The largest size n·q below `size` (q: three significant digits of it) at which `blend` works,
-/// by bisection over at most 16 blends; only [`KernelError::TooLarge`] narrows the search.
-fn largest_that_fits(size: f64, blend: impl Fn(f64) -> Result<Body>) -> Result<Option<(f64, Body)>> {
+/// by bisection over a bounded number of blends. A candidate refused as too large or failing as an
+/// operation (its check refusing the result, say) narrows the search: a size that does not build is
+/// not one that fits, so the size found is one that was built. With none built, the smallest size
+/// tried and its failure are kept ([`FitSearch::smallest_refused`]). Bad input and the kernel's own
+/// faults are errors, as before.
+fn largest_that_fits(size: f64, blend: impl Fn(f64) -> Result<Body>) -> Result<FitSearch> {
     if !(size.is_finite() && size > 1e-6) {
-        return Ok(None);
+        return Ok(FitSearch { found: None, smallest_refused: None });
     }
     let q = radius_step(size);
     // Sizes n·q for n in [0, hi): hi is too large (it is the request, or above it), lo works.
     let mut hi = (size / q).ceil() as u64;
     let mut lo = 0u64;
     let mut best: Option<Body> = None;
+    let mut smallest_refused: Option<(f64, KernelError)> = None;
     // log2(10⁴) steps reach the step size; the cap keeps a slow body from stalling.
     for _ in 0..16 {
         if hi - lo <= 1 {
@@ -571,11 +607,17 @@ fn largest_that_fits(size: f64, blend: impl Fn(f64) -> Result<Body>) -> Result<O
                 lo = mid;
                 best = Some(b);
             }
-            Err(KernelError::TooLarge(_)) => hi = mid,
+            Err(e @ (KernelError::TooLarge(_) | KernelError::Failed(_))) => {
+                hi = mid;
+                smallest_refused = Some((mid as f64 * q, e));
+            }
+            // Not a size the blend could not take: bad input, or the kernel's own fault.
             Err(e) => return Err(e),
         }
     }
-    Ok(best.map(|b| (lo as f64 * q, b)))
+    let found = best.map(|b| (lo as f64 * q, b));
+    let smallest_refused = if found.is_some() { None } else { smallest_refused };
+    Ok(FitSearch { found, smallest_refused })
 }
 
 /// [`fillet_max`] for each group of the edges that may limit each other's radius (sharing a
@@ -1159,6 +1201,50 @@ pub(crate) fn with_continuation(e: KernelError, next: Option<Vec3>) -> KernelErr
 mod tests {
     use super::*;
     use solidcore_record::{Loop2, Plane, Region2, Vec2};
+
+    /// A search where every candidate is refused as too large keeps the smallest size it tried
+    /// and that candidate's own refusal, and builds nothing: the caller can say why nothing
+    /// smaller builds instead of repeating the first refusal's estimate.
+    #[test]
+    fn a_search_that_builds_nothing_keeps_its_smallest_refusal() {
+        let search = largest_that_fits(0.3, |d| Err(KernelError::TooLarge(format!("refused at {d}")))).unwrap();
+        assert!(search.found.is_none());
+        let (at, e) = search.smallest_refused.expect("a refusal");
+        assert!(at > 0.0 && at < 0.001, "the bisection goes down to the step: {at}");
+        assert_eq!(e.to_string(), KernelError::TooLarge(format!("refused at {at}")).to_string());
+    }
+
+    /// A search that builds a candidate reports it and no refusal.
+    #[test]
+    fn a_search_that_builds_reports_what_it_built() {
+        let body = crate::build::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
+        let search = largest_that_fits(0.3, |d| if d <= 0.1 { Ok(body.clone()) } else { Err(KernelError::TooLarge("too large".into())) }).unwrap();
+        let (at, _) = search.found.expect("built");
+        assert!((0.099..=0.1).contains(&at), "{at}");
+        assert!(search.smallest_refused.is_none());
+    }
+
+    /// A candidate failing another way (the check) narrows the search like a refusal: the size
+    /// found is the largest that built, not the request's estimate.
+    #[test]
+    fn a_candidate_failing_the_check_narrows_the_search() {
+        let body = crate::build::box_solid(Vec3::ZERO, Vec3::new(1.0, 1.0, 1.0)).unwrap();
+        let search =
+            largest_that_fits(1.0, |r| if r <= 0.95 { Ok(body.clone()) } else { Err(KernelError::Failed("the check refuses it".into())) }).unwrap();
+        let (at, _) = search.found.expect("built");
+        assert!((0.949..=0.95).contains(&at), "{at}");
+    }
+
+    /// The largest-fit clause comes out of a refusal with its separator, and nothing else does.
+    #[test]
+    fn the_fit_note_comes_out_with_its_separator() {
+        assert_eq!(
+            without_fit_note("larger than the faces allow, at the edge at (1, 2, 3); the largest radius that fits is 3.75 mm (tangent chain)"),
+            "larger than the faces allow, at the edge at (1, 2, 3) (tangent chain)"
+        );
+        assert_eq!(without_fit_note("too large: the largest distance that fits is 1.6 mm"), "too large");
+        assert_eq!(without_fit_note("the trim leaks"), "the trim leaks");
+    }
 
     /// A round (`round`) or an equal-distance chamfer of the edges nearest `pts`.
     fn blend(body: &Body, pts: &[Vec3], size: f64, round: bool) -> Result<Body> {

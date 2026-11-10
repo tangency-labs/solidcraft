@@ -2,6 +2,7 @@
 //! design with many bodies must not make every frame or every click slower per body squared.
 
 use serde_json::json;
+use solidcraft_engine::geom::MeshGeom;
 
 use crate::scenario::Harness;
 
@@ -291,7 +292,7 @@ pub(crate) fn view_frame(
         outline: false,
         eye: [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }],
         ao_radius: 0.0,
-        ao_samples: solidcraft_gpu::view::AO_SAMPLES,
+        ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
         sky: [0.0; 4],
         ssaa: 1.0,
         hover_tint: [f32::from(t.hover_face_lift) / 255.0; 3],
@@ -857,4 +858,31 @@ fn orbit_frame_cost() {
         line.push_str(&format!(" [{name}]={:.2}", median(t)));
     }
     println!("{line}");
+}
+
+/// The Render workspace's live product preview on an assembly: extracting the product scene
+/// and building its blocks cold, again with nothing changed, and after a part's colour and
+/// opacity edits, with the preview's cache kept as the live preview keeps it. Run with
+/// `--ignored --nocapture`.
+#[test]
+#[ignore = "manual product preview measurement"]
+fn product_preview_rebuild_cost() {
+    let mut h = assembly(100, 100);
+    let part = crate::open_meshing::session_world(&h.app.session).bodies.iter().find(|b| b.component == 0).map(|b| b.name.clone()).unwrap();
+    let mut cache = crate::render_workspace::ProductCache::default();
+    let extract = |h: &Harness| solidcraft_engine::product_scene::extract(&h.app.session).unwrap();
+    let time = |h: &Harness, cache: &mut crate::render_workspace::ProductCache| {
+        let scene = extract(h);
+        ms(|| drop(crate::render_workspace::gpu_scene_cached(&scene, u64::MAX, cache).unwrap()))
+    };
+    let cold = time(&h, &mut cache);
+    let again = time(&h, &mut cache);
+    h.app.run("appearance.assign", json!({"bodies": [&part], "color": "#336699"})).unwrap();
+    let colour = time(&h, &mut cache);
+    h.app.run("appearance.assign", json!({"bodies": [&part], "color": "#336699", "opacity": 0.5})).unwrap();
+    let opacity = time(&h, &mut cache);
+    let extract_ms = ms(|| drop(extract(&h)));
+    println!(
+        "PRODUCTCACHE bodies=200 cold_ms={cold:.1} unchanged_ms={again:.1} colour_ms={colour:.1} opacity_ms={opacity:.1} extract_ms={extract_ms:.1}"
+    );
 }

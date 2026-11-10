@@ -339,7 +339,8 @@ argument, the same way `"mid:<line>"` and `"on:<curve>:x,y"` work.
 
 With Preferences › Sketch › **Line up with other sketch points while drawing** turned on (it's
 off by default), the pointer also **lines up** while drawing with the sketch's points on screen:
-line ends, centres, standalone points and the origin, and the shape's own earlier points. It
+line ends, centres, standalone points and the origin, and the shape's own earlier points. It also
+lines up with the midpoint of a line you just hovered, whose dotted guide is showing. It
 lines up on both axes at once, level with one point and plumb with another, so a rectangle drawn
 beside another can take its height from one and its width from a point below. A line kept
 horizontal or vertical from its start can still end under or beside another point. A dotted guide
@@ -349,6 +350,13 @@ point it lined up with, in the shape's undo step, unless the sketch already sets
 preference off, drawing lines up only with the previous point, one axis at a time.
 
 Enable **3D Sketch** in the Sketch Palette to draw lines, fit splines and points off the plane.
+
+Enable **Select 3D sketch curve points** in **Preferences > Sketch** to show and select drawn
+3D curve points as construction references after finishing the sketch. This option is off by default.
+For example, choose **Offset Plane**, select its base plane, then select a spline point in
+the **Through point** field. The plane follows that point when the curve is edited. Interior
+points work as well as endpoints, and references use their full 3D positions. Hole placement
+continues to use planar sketch points; drawn 3D curve points are not Hole targets.
 While placing these points, you can snap to points on other visible sketches. For a bridge
 line, start Line and click an endpoint on each source sketch; each endpoint uses its source
 plane, even when that plane differs from the active sketch. These snaps capture positions;
@@ -567,8 +575,9 @@ Choose a circle's centre point to keep a circular pattern centred on that circle
 placed in empty space becomes a sketch point that can be dimensioned or made coincident.
 Double-click the pattern badge (at the circular centre or beside the rectangular seed), or
 right-click a seed or copy and choose **Edit Sketch Pattern**, to change quantity, spacing,
-direction or total angle. Confirmed edits preserve surviving instance ids; Cancel discards
-the preview. Pattern settings survive save/reopen and undo/redo. Deleting a seed, copy or
+direction, total angle or the entities it copies. Confirmed edits preserve surviving instance
+ids, except that changing the entities rebuilds every copy, so dimensions and relations on the
+old copies are lost; Cancel discards the preview. Pattern settings survive save/reopen and undo/redo. Deleting a seed, copy or
 pattern relation breaks that association and leaves the remaining geometry independent.
 Patterns saved by older versions remain independent copies; recreate them to add associations.
 
