@@ -722,6 +722,41 @@ fn polyhedra_shell_and_draft() {
     assert!(rel(measure(&cup).unwrap().volume, PI * (25.0 * 5.0 - 16.0 * 4.0)) < 1e-4, "cup");
 }
 
+/// #14346: a loft through three sections whose corners lie on straight lines has flat sides,
+/// which the skin builds as B-spline patches. Each is a planar face (an extrude can start on it,
+/// a sketch can lie on it), its plane through the face and facing out of the material. A loft
+/// turned between its ends has curved sides, which are not planar.
+#[test]
+fn flat_loft_sides_are_planar_faces() {
+    let rectangle = |x: f64, y: f64| Loop2::polygon(&[Vec2::new(-x, -y), Vec2::new(x, -y), Vec2::new(x, y), Vec2::new(-x, y)]);
+    let flat =
+        loft(&[(Plane::XY, rectangle(10.0, 6.0)), (Plane::XY.offset(10.0), rectangle(8.0, 5.0)), (Plane::XY.offset(20.0), rectangle(6.0, 4.0))])
+            .unwrap();
+    let faces = flat.faces(0.01).unwrap();
+    assert_eq!(faces.len(), 6);
+    let centre = Vec3::new(0.0, 0.0, 10.0);
+    for face in &faces {
+        let plane = flat.planar_face(face.index).unwrap_or_else(|| panic!("face {} is flat", face.index));
+        assert!(plane.height(face.centroid).abs() < 1e-6, "face {}: its plane runs through it", face.index);
+        assert!((face.centroid - centre).dot(plane.normal()) > 0.0, "face {}: its plane faces out", face.index);
+    }
+    // The sides are B-spline patches, so this reaches the control-net test (were the loft to
+    // build planes here, another flat B-spline face would have to stand in).
+    let splines = flat
+        .record()
+        .faces
+        .iter()
+        .filter(|face| {
+            matches!(face.surface, solidcore_record::brep::Surface::Spline { .. } | solidcore_record::brep::Surface::RationalSpline { .. })
+        })
+        .count();
+    assert_eq!(splines, 4);
+    let (sin, cos) = std::f64::consts::FRAC_PI_6.sin_cos();
+    let turned = Loop2::polygon(&[(-6.0, -6.0), (6.0, -6.0), (6.0, 6.0), (-6.0, 6.0)].map(|(x, y)| Vec2::new(cos * x - sin * y, sin * x + cos * y)));
+    let twisted = loft(&[(Plane::XY, rectangle(10.0, 10.0)), (Plane::XY.offset(20.0), turned)]).unwrap();
+    assert_eq!((0..twisted.face_count()).filter(|&i| twisted.planar_face(i).is_some()).count(), 2, "only the ends are flat");
+}
+
 #[test]
 fn loft_and_sweep() {
     let sq = Loop2::polygon(&[Vec2::new(-20.0, -20.0), Vec2::new(20.0, -20.0), Vec2::new(20.0, 20.0), Vec2::new(-20.0, 20.0)]);

@@ -1946,7 +1946,7 @@ pub fn classify_curve_surface_xsect_point_with(
     // a[0] position, a[1] first derivative, a[2] curvature vector
     let geom = match curve_evaluate_geometric(k, curve, current_t, 2, true) {
         Ok(v) => v,
-        Err(SolidError::Upstream { code: SM_ERR, .. }) => {
+        Err(e) if e.upstream_status() == Some(SM_ERR) => {
             // no extra guesses or possible coincidence signalled for degenerate curves
             out.point_type = TsectCurveType::Touching;
             return Ok(out);

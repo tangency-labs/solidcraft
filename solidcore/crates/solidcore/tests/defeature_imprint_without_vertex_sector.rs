@@ -27,7 +27,8 @@
 )] // test helpers
 
 use solidcore::blend::feature_executive::{FeatureExecutive, RebuildBrepType};
-use solidcore::error::SM_ERR;
+use solidcore::error::defeature::DefeatureFailure;
+use solidcore::error::{Reason, SM_ERR};
 use solidcore::geom::attribute::AttributeStore;
 use solidcore::geom::attribute::ObjectKey;
 use solidcore::geom::object::ObjectRef;
@@ -94,17 +95,22 @@ fn defeature_goes_on_past_imprints_without_a_vertex_sector() {
         bp1::edges(ex.base_brep(), None).unwrap().len(),
     );
     let r = ex.do_defeature(&mut k);
-    assert!(
-        matches!(
-            r,
-            Err(SolidError::Upstream {
-                code: SM_ERR,
-                entity: Some(EntityRef::Edge(_)),
-                ..
-            })
-        ),
-        "{r:?}"
-    );
+    // refused at the open loop's edge, naming the limit: the faces along it, extended, do
+    // not enclose it (#3218); the status is still SM_ERR
+    match &r {
+        Err(e @ SolidError::Failed(f)) => {
+            assert!(
+                matches!(
+                    f.reason,
+                    Reason::Defeature(DefeatureFailure::NotEnclosed { .. })
+                ),
+                "{r:?}"
+            );
+            assert!(matches!(f.entity, Some(EntityRef::Edge(_))), "{r:?}");
+            assert_eq!(e.sm_status(), Some(SM_ERR), "{r:?}");
+        }
+        other => panic!("{other:?}"),
+    }
     assert!(ex.features().is_empty());
     let after = (
         bp1::faces(ex.base_brep(), None).unwrap().len(),

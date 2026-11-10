@@ -491,6 +491,28 @@ pub fn surface_partials_sided(
     lk: usize,
     sides: [i32; 2],
 ) -> Result<Partials<f64>> {
+    surface_partials_pinned(k, s, uv, uv, lk, sides)
+}
+
+/// [`surface_partials_sided`] with the pieces a side names chosen at `pin`, not at `uv`
+/// (not the fork's): a sided station solve keeps, for every iterate, the pieces its sides
+/// name at its seed, which its callers place on the knot line. Chosen at each iterate,
+/// an iterate as far from the line as the margin of [`sided_span`] took the other piece,
+/// and Newton cycled between the two (feet 2e-9 off the old boundary of a face's
+/// extension, which is only G1 there: the station failed). A coordinate without a side
+/// takes the span of `uv`, as [`surface_partials_sided`].
+///
+/// # Errors
+///
+/// As [`surface_partials`].
+pub fn surface_partials_pinned(
+    k: &Kernel,
+    s: &Surface,
+    uv: Point2,
+    pin: Point2,
+    lk: usize,
+    sides: [i32; 2],
+) -> Result<Partials<f64>> {
     if lk > MAX_K {
         return Err(SolidError::sm_err(OP));
     }
@@ -498,8 +520,9 @@ pub fn surface_partials_sided(
     let bs = if definition { None } else { as_b_spline(k, s)? };
     if let Some(bs) = bs {
         let n = Nurbs::of(&bs)?;
-        let ku = sided_span(&n.u, n.p, n.nu, uv.x, sides[0]);
-        let kv = sided_span(&n.v, n.q, n.nv, uv.y, sides[1]);
+        let at = |x: f64, p: f64, side: i32| if side == 0 { x } else { p };
+        let ku = sided_span(&n.u, n.p, n.nu, at(uv.x, pin.x, sides[0]), sides[0]);
+        let kv = sided_span(&n.v, n.q, n.nv, at(uv.y, pin.y, sides[1]), sides[1]);
         return Ok(nurbs_partials(&n, ku, kv, uv.x, uv.y, lk));
     }
     // Evaluate(crUV, lK, lK, lSideU >= 0, lSideV >= 0, TRUE, sD, FALSE): a side, the upper
@@ -620,14 +643,17 @@ pub fn gn_evaluate_vn<T: GnScalar>(
         let mut dv = *xv;
         du.set(0, 0, T::of(0.0));
         dv.set(0, 0, T::of(0.0));
+        // du^a and dv^b are 0 below degree a and b (du, dv have no constant term): the
+        // powers and monomials past the degree computed are 0 there and left out
+        let top = lm.min(tr.degree());
         let mut pu = vec![Ser::constant(T::of(1.0))];
         let mut pv = vec![Ser::constant(T::of(1.0))];
-        for _ in 1..=lm {
+        for a in 1..=top {
             let (Some(lu), Some(lv)) = (pu.last().copied(), pv.last().copied()) else {
                 return Err(SolidError::sm_err(OP));
             };
-            pu.push(lu.mul(&du, tr));
-            pv.push(lv.mul(&dv, tr));
+            pu.push(lu.mul_valued(&du, a - 1, 1, tr));
+            pv.push(lv.mul_valued(&dv, a - 1, 1, tr));
         }
         let mut s = VSer::constant(zero);
         let mut su = s;
@@ -638,11 +664,11 @@ pub fn gn_evaluate_vn<T: GnScalar>(
                 fa *= a as f64;
             }
             let mut fb = 1.0_f64;
-            for (b, pvb) in pv.iter().enumerate().take(lm - a + 1) {
+            for (b, pvb) in pv.iter().enumerate().take(top - a + 1) {
                 if b > 0 {
                     fb *= b as f64;
                 }
-                let mono = pua.mul(pvb, tr);
+                let mono = pua.mul_valued(pvb, a, b, tr);
                 // a! b! is exact, 1 / (a! b!) is rounded in T (#2559)
                 let sf = T::of(1.0) / T::of(fa * fb);
                 let cs = [pf.at(a, b), pf.at(a + 1, b), pf.at(a, b + 1)];
@@ -650,7 +676,8 @@ pub fn gn_evaluate_vn<T: GnScalar>(
                 for (c, out) in cs.iter().zip(outs) {
                     let cv = [c.x, c.y, c.z];
                     for (o, &cj) in out.a.iter_mut().zip(&cv) {
-                        *o = o.add(&mono.scale(cj * sf, tr), tr);
+                        // o + mono (cj sf), each coefficient rounded as `add` of `scale`
+                        o.add_scaled_from(&mono, cj * sf, a + b, tr);
                     }
                 }
             }
@@ -1064,10 +1091,25 @@ fn solve_station_body(
     let lk = tr.s() + tr.e() + 1;
     let (l, t) = leader_series_sided(leader, s, tr, opts.before)?;
     let [f0, f1] = faces;
+    // (a side names a piece at the seed, on the knot line: every iterate keeps it)
     let partials_at = |x: &[f64; 4], order: usize| -> Result<[Partials<f64>; 2]> {
         Ok([
-            surface_partials_sided(k, f0, Point2::new(x[0], x[1]), order, [sides[0], sides[1]])?,
-            surface_partials_sided(k, f1, Point2::new(x[2], x[3]), order, [sides[2], sides[3]])?,
+            surface_partials_pinned(
+                k,
+                f0,
+                Point2::new(x[0], x[1]),
+                Point2::new(seed[0], seed[1]),
+                order,
+                [sides[0], sides[1]],
+            )?,
+            surface_partials_pinned(
+                k,
+                f1,
+                Point2::new(x[2], x[3]),
+                Point2::new(seed[2], seed[3]),
+                order,
+                [sides[2], sides[3]],
+            )?,
         ])
     };
 
@@ -1129,9 +1171,20 @@ fn solve_station_body(
     let mut sx = x.map(Ser::constant);
     let jac = gn_jacobian(&sys, &sx)?;
     // (the coefficients of one total degree do not enter each other's: one evaluation
-    // solves them all)
+    // solves them all; G is computed only at that degree and below, and at the powers of
+    // eps solved for, bit for bit the whole truncation's there (`Trunc::computing`), and
+    // not at all at an order with none to solve)
+    let eps_solved = if opts.top >= 1 {
+        tr.e().min(opts.top - 1)
+    } else {
+        tr.e()
+    };
     for tot in 1..=(tr.s() + tr.e()) {
-        let (g, _) = gn_evaluate(&sys, &sx, tr)?;
+        let eps = eps_solved.min(tot);
+        if tot > tr.s() + eps {
+            continue;
+        }
+        let (g, _) = gn_evaluate(&sys, &sx, tr.computing(tot, eps))?;
         for i in 0..=tr.s().min(tot) {
             let kk = tot - i;
             // (to order lTop - 1 in eps with lTop: gn_top_jets)

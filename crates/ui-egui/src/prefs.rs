@@ -24,6 +24,7 @@ pub fn stored(get: impl Fn(&str) -> Option<String>) -> Option<String> {
 }
 
 mod design;
+pub(crate) mod figures;
 mod general;
 mod graphics;
 mod interface;
@@ -947,6 +948,9 @@ preference_settings! {
     /// An orbit drag that reaches the edge of the view moves the cursor to the opposite edge and
     /// keeps turning; false stops the drag at the edge of the screen, as before.
     orbit_cursor_wrap: bool = true, PAGE_NAVIGATION => check_tr("nav.orbit_cursor_wrap.label");
+    /// A right-click in the view with a dialog open confirms its input: on to the next one, then OK.
+    /// Off: it does nothing there, as before (#6159).
+    right_click_confirms: bool = false, PAGE_GENERAL => check("Right-click confirms dialog inputs", "With a dialog open, a right-click in the view goes on to its next empty input, and on the last one runs OK");
     /// View orientation widget: original signed axes (default) or compact cube.
     navigator_style: NavigatorStyle = NavigatorStyle::default(), PAGE_NAVIGATION;
     /// The custom view gizmo's colours: the cube's (themed) or the body's own (modeled).
@@ -1372,6 +1376,11 @@ preference_settings! {
     auto_operation: bool = true, PAGE_TOOLS => check_id("prefs.auto_operation");
     /// Reuse a command's safe values and options after it succeeds, until the app closes. Off by default: each dialog opens with its usual defaults.
     remember_dialog_values: bool = false, PAGE_TOOLS => check_id_help("prefs.remember_dialog_values", "prefs.remember_dialog_values.help");
+    /// A new Solid Fillet opens at the radius the tool ships with, 2 mm, shown in the design's
+    /// unit ("0.07874 in" in an inch design): a radius is bound by the faces beside its edges, and
+    /// the number read in the design's unit ("2 in" = 50.8 mm) never fits the part (#12418). On: it
+    /// opens at the number 2 read in the design's unit, as before.
+    fillet_legacy_radius: bool = false, PAGE_TOOLS => check_id_help("prefs.fillet_legacy_radius", "prefs.fillet_legacy_radius.help");
     /// Placing a Single hole snaps to the middle of the face and the centres of its round edges
     /// (`hole_place`). Off by default: a hole goes where it is clicked.
     hole_snaps: bool = false, PAGE_TOOLS => check("Snap to face and edge centres");
@@ -1591,6 +1600,10 @@ preference_settings! {
     /// The first length dimension of a sketch with nothing sized yet scales the whole drawing to
     /// its value (#1365). Off: it sizes only what it measures (#4109).
     first_dimension_scales: bool = true, PAGE_SKETCH;
+    /// With `first_dimension_scales`: the drawing scales about the sketch origin even when nothing
+    /// ties it there, so a shape drawn away from the origin moves as it grows (the behaviour
+    /// before #11043). Off (the default): such a shape scales about its own middle and stays put.
+    first_dimension_scales_about_origin: bool = false, PAGE_SKETCH;
     /// When true: Shift+click adds without removing; Primary toggles.
     /// When false (default): Shift and Primary both toggle.
     selection_shift_add_only: bool = false, PAGE_SKETCH;
@@ -3530,38 +3543,71 @@ fn theme_option_text(text: &crate::theme_files::OptionText, language: &str, fall
     text.get(language).or_else(|| text.get("en")).map(String::as_str).unwrap_or(fallback).to_owned()
 }
 
+/// SolidCraft's name and help (message ids) for the theme system's standard option `id`.
+fn standard_option_text(id: &str) -> Option<(&'static str, &'static str)> {
+    match id {
+        "blur" => Some(("prefs.theme_option_blur", "prefs.theme_option_blur_help")),
+        "opacity" => Some(("prefs.theme_option_opacity", "prefs.theme_option_opacity_help")),
+        "tab_colours" => Some(("prefs.theme_option_tab_colours", "prefs.theme_option_tab_colours_help")),
+        "tab_fade_ms" => Some(("prefs.theme_option_tab_fade_ms", "prefs.theme_option_tab_fade_ms_help")),
+        _ => None,
+    }
+}
+
+/// Why a theme option is off (a message id), or `None` when it is available.
+pub(crate) fn theme_option_reason(availability: crate::theme_options::Availability) -> Option<&'static str> {
+    match availability {
+        crate::theme_options::Availability::Available => None,
+        crate::theme_options::Availability::Unavailable(reason) => Some(reason),
+        crate::theme_options::Availability::Unsupported => Some("prefs.theme_options_unavailable"),
+    }
+}
+
 fn theme_option_rows<'a>(
     file: &'a crate::theme_files::ThemeFile,
     language: &str,
     providers: &[crate::theme_options::Provider],
+    names: fn(&str) -> Option<(&'static str, &'static str)>,
     blur: crate::theme_options::Availability,
 ) -> Vec<ui_kit::ThemeOptionRow<'a>> {
-    use crate::theme_options::{Availability, offered, provider};
+    use crate::theme_options::{offered, provider};
     let locale = solidcraft_ui_text::Locale::for_language(language);
     offered(file, providers)
         .into_iter()
         .map(|definition| {
-            let provider = provider(&definition.id, providers);
+            let text = provider(&definition.id, providers).and_then(|p| names(p.id));
             ui_kit::ThemeOptionRow {
                 definition,
                 blur: definition.id == "blur",
-                label: provider
-                    .map(|p| locale.text(p.label).to_owned())
+                label: text
+                    .map(|(label, _)| locale.text(label).to_owned())
                     .unwrap_or_else(|| theme_option_text(&definition.label, language, &definition.id)),
-                help: provider.map(|p| locale.text(p.help).to_owned()).unwrap_or_else(|| theme_option_text(&definition.help, language, "")),
+                help: text.map(|(_, help)| locale.text(help).to_owned()).unwrap_or_else(|| theme_option_text(&definition.help, language, "")),
                 choices: match &definition.kind {
                     crate::theme_files::OptionKind::Choice { values, .. } => {
                         values.iter().map(|v| theme_option_text(&v.label, language, &v.id)).collect()
                     }
                     _ => Vec::new(),
                 },
-                reason: match crate::theme_options::availability(file, &definition.id, providers, blur) {
-                    Availability::Available => None,
-                    Availability::Unavailable(reason) => Some(locale.text(reason).to_owned()),
-                },
+                reason: theme_option_reason(crate::theme_options::availability(file, &definition.id, providers, blur))
+                    .map(|reason| locale.text(reason).to_owned()),
             }
         })
         .collect()
+}
+
+/// What the theme options list says, from SolidCraft's catalogs.
+fn theme_options_text() -> ui_kit::ThemeOptionsText<'static> {
+    ui_kit::ThemeOptionsText {
+        count: |count| {
+            let id = if count == 1 { "prefs.appearance.option_count_one" } else { "prefs.appearance.option_count" };
+            solidcraft_ui_text::format(id, &[("count", &count.to_string())])
+        },
+        more: |count| solidcraft_ui_text::format("prefs.theme_options_more", &[("count", &count.to_string())]),
+        reset: solidcraft_ui_text::tr("prefs.theme_options_reset"),
+        blur_off: solidcraft_ui_text::tr("prefs.blur_off"),
+        blur_cost: solidcraft_ui_text::tr("prefs.blur_cost"),
+    }
 }
 
 fn theme_options_row(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -3585,12 +3631,15 @@ fn theme_options_row(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     for (id, identity, text) in problems {
         let key = theme_notice_key(&file.id, &id, &identity);
-        if !app.blur_session.dismissed(key) && ui_kit::theme_option_notice(ui, &id, &text, false).1 {
+        if !app.blur_session.dismissed(key)
+            && ui_kit::theme_option_notice(ui, &id, &text, solidcraft_ui_text::tr("prefs.theme_notice_dismiss"), false).1
+        {
             app.blur_session.dismiss(key);
         }
     }
     if app.blur_session.guard.notice {
-        let (undo, dismiss) = ui_kit::theme_option_notice(ui, "guard", app.tr("prefs.blur_guard"), true);
+        let (undo, dismiss) =
+            ui_kit::theme_option_notice(ui, "guard", app.tr("prefs.blur_guard"), solidcraft_ui_text::tr("prefs.theme_notice_dismiss"), true);
         if undo {
             app.blur_session.guard.undo();
             ui.ctx().request_repaint();
@@ -3599,13 +3648,18 @@ fn theme_options_row(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.blur_session.guard.notice = false;
         }
     }
-    let rows =
-        theme_option_rows(&file, solidcraft_ui_text::effective_language(&app.preferences.language), crate::theme_options::PROVIDERS, availability);
+    let rows = theme_option_rows(
+        &file,
+        solidcraft_ui_text::effective_language(&app.preferences.language),
+        crate::theme_options::PROVIDERS,
+        standard_option_text,
+        availability,
+    );
     if rows.is_empty() {
         return;
     }
     let before = values.clone();
-    let reset = ui_kit::settings_card(ui, |ui| ui_kit::theme_options_list(ui, &file.id, &file.name, &rows, &mut values)).inner;
+    let reset = ui_kit::settings_card(ui, |ui| ui_kit::theme_options_list(ui, &file.id, &file.name, &rows, &mut values, &theme_options_text())).inner;
     let changes: BTreeMap<_, _> = values.into_iter().filter(|(id, value)| before.get(id) != Some(value)).collect();
     if reset || !changes.is_empty() {
         let update = if reset { json!({}) } else { json!(changes) };
@@ -3697,7 +3751,7 @@ fn theme_options_reply(app: &SolveApp) -> solidcraft_engine::schema::ui_prefs::T
             .into_iter()
             .map(|o| {
                 let standard = crate::theme_options::standard(&o.id);
-                let provider = crate::theme_options::provider(&o.id, crate::theme_options::PROVIDERS);
+                let named = crate::theme_options::provider(&o.id, crate::theme_options::PROVIDERS).and_then(|p| standard_option_text(p.id));
                 let availability = crate::theme_options::availability(file, &o.id, crate::theme_options::PROVIDERS, blur);
                 ThemeOptionDef {
                     id: o.id.clone(),
@@ -3711,17 +3765,14 @@ fn theme_options_reply(app: &SolveApp) -> solidcraft_engine::schema::ui_prefs::T
                             ThemeOptionKind::Range { default: *default, min: *min, max: *max, step: *step, unit: unit.clone() }
                         }
                     },
-                    label: provider.map(|p| app.tr(p.label).to_owned()).unwrap_or_else(|| text(&o.label, &o.id)),
-                    help: provider.map(|p| app.tr(p.help).to_owned()).unwrap_or_else(|| text(&o.help, "")),
+                    label: named.map(|(label, _)| app.tr(label).to_owned()).unwrap_or_else(|| text(&o.label, &o.id)),
+                    help: named.map(|(_, help)| app.tr(help).to_owned()).unwrap_or_else(|| text(&o.help, "")),
                     parent: o.parent.clone(),
                     advanced: o.advanced,
                     section: o.section.clone(),
                     standard,
                     available: availability == crate::theme_options::Availability::Available,
-                    reason: match availability {
-                        crate::theme_options::Availability::Unavailable(reason) => Some(app.tr(reason).to_owned()),
-                        crate::theme_options::Availability::Available => None,
-                    },
+                    reason: theme_option_reason(availability).map(|reason| app.tr(reason).to_owned()),
                 }
             })
             .collect(),
@@ -4156,6 +4207,7 @@ mod tests {
 
     #[test]
     fn theme_traits_use_resolved_background_and_maximal_contrast() {
+        crate::test_support::host_data();
         use theme_picker::{Classification, theme_traits};
         let light = Tokens::light();
         let dark = Tokens::dark();
@@ -7534,19 +7586,19 @@ mod tests {
             {"id":"opacity","type":"range","default":100}
         ]}))
         .unwrap();
-        let rows = theme_option_rows(&file, "de", crate::theme_options::PROVIDERS, Availability::Available);
+        let rows = theme_option_rows(&file, "de", crate::theme_options::PROVIDERS, standard_option_text, Availability::Available);
         assert_eq!(rows.iter().map(|r| r.definition.id.as_str()).collect::<Vec<_>>(), ["opacity", "blur", "tab_colours", "tab_fade_ms", "custom"]);
         assert_eq!(rows[0].label, "Deckkraft");
         assert_eq!(rows[4].label, "Eigene");
-        assert_eq!(theme_option_rows(&file, "ja", crate::theme_options::PROVIDERS, Availability::Available)[4].label, "Custom", "English fallback");
-        let providers = [Provider {
-            id: "blur",
-            label: "prefs.theme_option_opacity",
-            help: "prefs.theme_option_opacity_help",
-            availability: || Availability::Unavailable("prefs.theme_options_unavailable"),
-            apply: |_, _| {},
-        }];
-        let rows = theme_option_rows(&file, "en", &providers, Availability::Available);
+        assert_eq!(
+            theme_option_rows(&file, "ja", crate::theme_options::PROVIDERS, standard_option_text, Availability::Available)[4].label,
+            "Custom",
+            "English fallback"
+        );
+        let providers = [Provider { id: "blur", availability: || Availability::Unavailable("prefs.theme_options_unavailable"), apply: |_, _| {} }];
+        // The test provider is named with the opacity text.
+        let opacity_text = |_: &str| Some(("prefs.theme_option_opacity", "prefs.theme_option_opacity_help"));
+        let rows = theme_option_rows(&file, "en", &providers, opacity_text, Availability::Available);
         assert_eq!(rows.iter().map(|r| r.definition.id.as_str()).collect::<Vec<_>>(), ["blur", "custom"]);
         assert_eq!(rows[0].reason.as_deref(), Some("Unavailable on this device"));
         // The internal fixture goes through the real kit. No fake provider is shipped.
@@ -7568,7 +7620,7 @@ mod tests {
                     },
                     |ui| {
                         ui_kit::scope(ui, |ui| {
-                            ui_kit::theme_options_list(ui, &file.id, &file.name, &rows, &mut values);
+                            ui_kit::theme_options_list(ui, &file.id, &file.name, &rows, &mut values, &super::theme_options_text());
                         });
                     },
                 );
@@ -7584,6 +7636,7 @@ mod tests {
 
     #[test]
     fn blur_slider_reserves_readout_meter_and_disabled_reason() {
+        crate::test_support::host_data();
         crate::i18n::install();
         use crate::theme_files::OptionValue;
         use crate::theme_options::Availability;
@@ -7593,7 +7646,7 @@ mod tests {
             crate::theme::set_file_palette(None);
             solidcraft_theme::set_dark(dark);
             for available in [Availability::Available, Availability::Unavailable("prefs.theme_options_unavailable")] {
-                let rows = theme_option_rows(&file, "en", crate::theme_options::PROVIDERS, available);
+                let rows = theme_option_rows(&file, "en", crate::theme_options::PROVIDERS, standard_option_text, available);
                 for radius in [0.0, 1.0, 8.0, 9.0, 18.0, 33.0, 40.0, 18.25] {
                     let ctx = crate::fonts::test_context();
                     let mut values = crate::theme_files::effective_values(&file, &BTreeMap::new()).0;
@@ -7610,7 +7663,7 @@ mod tests {
                             },
                             |ui| {
                                 ui_kit::scope(ui, |ui| {
-                                    ui_kit::theme_options_list(ui, &file.id, &file.name, &rows, &mut values);
+                                    ui_kit::theme_options_list(ui, &file.id, &file.name, &rows, &mut values, &super::theme_options_text());
                                 })
                             },
                         );
@@ -7659,14 +7712,8 @@ mod tests {
         }
         assert_eq!(h.app.preferences.theme_options, saved);
         let providers = [
-            Provider { id: "enabled", label: "", help: "", availability: || Availability::Unavailable("prefs.blur_software"), apply: |_, _| {} },
-            Provider {
-                id: "blur",
-                label: "prefs.theme_option_blur",
-                help: "prefs.theme_option_blur_help",
-                availability: || Availability::Available,
-                apply: |_, _| {},
-            },
+            Provider { id: "enabled", availability: || Availability::Unavailable("prefs.blur_software"), apply: |_, _| {} },
+            Provider { id: "blur", availability: || Availability::Available, apply: |_, _| {} },
         ];
         assert_eq!(
             crate::theme_options::availability(&file, "amount", &providers, Availability::Available),
@@ -7677,7 +7724,7 @@ mod tests {
             Availability::Available,
             "standard blur remains independent of the unavailable custom parent"
         );
-        let rows = theme_option_rows(&file, "en", &providers, Availability::Available);
+        let rows = theme_option_rows(&file, "en", &providers, standard_option_text, Availability::Available);
         let parent = rows.iter().find(|r| r.definition.id == "enabled").unwrap();
         let child = rows.iter().find(|r| r.definition.id == "amount").unwrap();
         let blur = rows.iter().find(|r| r.definition.id == "blur").unwrap();
@@ -7986,8 +8033,9 @@ mod tests {
 
     #[test]
     fn tabs_preferences_validate_atomically_restore_safely_and_preserve_export_defaults() {
+        crate::test_support::host_data();
         for base in ["dark", "light"] {
-            let file = crate::theme_files::tab_fixture(base);
+            let file = crate::test_support::tab_fixture(base);
             let source = serde_json::to_value(&file).unwrap();
             let mut h = crate::scenario::Harness::new();
             for invalid in [json!(false), json!({"sketch":{}}), json!({"SKETCH":{"error":"#ffffff"}}), json!({"SKETCH":{"panel":"bad"}})] {
@@ -8020,7 +8068,7 @@ mod tests {
     #[test]
     fn tabs_followed_reload_updates_surfaces_without_losing_saved_options() {
         let mut h = crate::scenario::Harness::new();
-        let mut source = crate::theme_files::export_file(&crate::theme_files::tab_fixture("dark"));
+        let mut source = crate::theme_files::export_file(&crate::test_support::tab_fixture("dark"));
         let path = h.dir.join("tabs.json");
         std::fs::write(&path, source.to_string()).unwrap();
         control(&mut h.app, &json!({"theme_follow":path,"theme_options":{"file-tabs-dark":{"tab_fade_ms":0}}})).unwrap();
@@ -11433,12 +11481,12 @@ mod graphics_preset_tests {
             let mut h = crate::scenario::Harness::new();
             h.call("ui.prefs", json!({"theme":theme,"language":"en"}));
             h.call("ui.prefs", json!({"open":"Graphics"}));
-            for (index, (_, label)) in crate::navigation_bar::VISUAL_STYLES.into_iter().enumerate() {
+            for (index, (_, label)) in crate::navigation_slots::VISUAL_STYLES.into_iter().enumerate() {
                 click_graphics(&mut h, "Visual style", "prefs:visual_style");
                 h.step(&json!({"click":{"handle":format!("dialog:Visual style:{label}")}})).unwrap();
                 h.frames(3);
                 assert_eq!(h.app.ui.visual_style, index as u8);
-                let icon = crate::navigation_bar::visual_style_icon(index as u8);
+                let icon = crate::navigation_slots::visual_style_icon(index as u8);
                 let painted = crate::scenario::rect_of(&format!("dialog:dropdown_icon:{icon}")).unwrap();
                 assert!(crate::scenario::rect_of("prefs:visual_style").unwrap().contains_rect(painted));
             }

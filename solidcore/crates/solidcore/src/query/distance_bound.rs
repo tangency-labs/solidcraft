@@ -1570,7 +1570,6 @@ mod tests {
         use crate::nurbs::b_spline_curve::BSplineCurve;
         use crate::surface::procedural_blend::{BlendDefinitionInput, ProceduralBlend};
         let mut k = Kernel::default();
-        k.fixes.fillet_gn_section_generator = true;
         k.fixes.fillet_round_as_definition = true;
         let bilinear = |p: [Point3; 4]| {
             BSplineSurface::create_bilinear_surface(p[0], p[1], p[2], p[3]).unwrap()

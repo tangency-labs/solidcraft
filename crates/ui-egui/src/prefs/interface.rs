@@ -150,7 +150,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                     });
                     app.preferences.ui_scale
                 },
-                ui_kit::scale_specimen,
+                super::figures::scale_specimen,
             );
             ui_kit::divider(ui, "scale_font");
             if !cfg!(target_arch = "wasm32") {
@@ -201,10 +201,10 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                     }
                 });
             });
-            ui_kit::status_palette_sample(ui, app.preferences.color_vision);
+            super::figures::status_palette_sample(ui, app.preferences.color_vision);
             // What the modes recolour, in the mode being chosen (#7152): the status chips above keep
             // their colours in every mode.
-            ui_kit::colour_vision_sample(ui, &solidcraft_theme::Tokens::get_in(app.preferences.color_vision));
+            super::figures::colour_vision_sample(ui, &solidcraft_theme::Tokens::get_in(app.preferences.color_vision));
             if app.preferences.color_vision != mode {
                 ui.ctx().request_repaint();
             }
@@ -290,7 +290,7 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                         dialog_left: app.preferences.dialog_place == crate::dialog_column::DialogPlace::LeftColumn,
                     }
                 },
-                ui_kit::layout_preview,
+                |ui, state| ui_kit::layout_preview(ui, state, solidcraft_ui_text::tr("prefs.layout_note")),
             );
             layout_check(
                 ui,

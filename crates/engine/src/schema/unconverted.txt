@@ -12,7 +12,6 @@ render.preflight
 render.scene
 render.start
 sheet.export_dxf
-solid.coil
 solid.draft
 solid.emboss
 solid.hole
@@ -20,12 +19,10 @@ solid.loft
 solid.mirror
 solid.move
 solid.offset_face
-solid.pattern.circular
 solid.pattern.path
 solid.pattern.rectangular
 solid.shell
 solid.thread
-surface.blend
 surface.extrude
 surface.loft
 surface.patch

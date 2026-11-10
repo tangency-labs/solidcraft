@@ -396,7 +396,7 @@ mod kit_translation {
                         content = ui.max_rect().intersect(ui.clip_rect());
                         ui.set_clip_rect(content);
                         scope(ui, |ui| {
-                            clicked = theme_option_notice(ui, "guard", NOTICE, can_undo);
+                            clicked = theme_option_notice(ui, "guard", NOTICE, solidcraft_ui_text::tr("prefs.theme_notice_dismiss"), can_undo);
                         });
                     });
                     for (target, present) in [("prefs:theme_notice_undo:guard", can_undo), ("prefs:theme_notice_dismiss:guard", true)] {

@@ -410,13 +410,13 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                 .collect();
             if items.is_empty() { vec![act("ui.editSketch", app.tr("ui.edit_sketch_empty"), "sketch").on(false)] } else { items }
         }
-        Target::VisualStyle => crate::navigation_bar::VISUAL_STYLES
+        Target::VisualStyle => crate::navigation_slots::VISUAL_STYLES
             .iter()
             .enumerate()
             .map(|(index, (style, label))| {
                 let current = usize::from(app.ui.visual_style) == index;
                 let mut item = cmd(app, "view.visual_style", label).with(json!({"style": style})).key(if current { "current" } else { "" });
-                item.icon = crate::navigation_bar::visual_style_icon(u8::try_from(index).unwrap_or_default()).into();
+                item.icon = crate::navigation_slots::visual_style_icon(u8::try_from(index).unwrap_or_default()).into();
                 item
             })
             .collect(),
@@ -1929,7 +1929,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             if let Some(ss) = id_of(&p, "sketch").and_then(|id| st.sketch(id)) {
                 let to = crate::dialogs::onto_sketch(app.cam.looking_from(ss.plane.normal()), ss);
                 app.animate_to(to);
-            } else if let Some(plane) = p.get("plane").and_then(Value::as_str).and_then(solidcore_record::Plane::named) {
+            } else if let Some(plane) = p.get("plane").and_then(Value::as_str).and_then(|name| crate::dialogs::plane_by_name(&app.session, name)) {
                 let mut to = app.cam.looking_from(crate::dialogs::facing(app, plane.normal(), true));
                 to.target = plane.origin;
                 app.animate_to(to);
@@ -2027,7 +2027,7 @@ pub fn press_shortcut(app: &mut SolveApp, key: &str) -> bool {
 }
 
 /// Show/Hide (the V key): what is selected in the viewport or picked in the browser flips its
-/// visibility (bodies, faces' and edges' bodies, sketches, construction and origin planes and
+/// visibility (bodies, faces' and edges' bodies, sketches and profiles' sketches, construction and origin planes and
 /// axes, components' bodies, canvases, joints' glyphs). When some are shown and some hidden, all are hidden.
 /// A clicked folder takes precedence, and toggles its own visibility without changing its items.
 pub fn toggle_visibility(app: &mut SolveApp) {
@@ -2045,13 +2045,19 @@ pub fn toggle_visibility(app: &mut SolveApp) {
     for c in app.tree.picked_components.clone() {
         bodies.extend(component_bodies(app, c));
     }
-    let sketches: Vec<u64> = app
+    // A picked profile stands for its sketch, as a picked face stands for its body (#13026).
+    let mut sketches: Vec<u64> = app
         .session
         .selection
         .iter()
-        .filter_map(|s| if let Sel::Feature { id } = s { Some(*id) } else { None })
+        .filter_map(|s| match s {
+            Sel::Feature { id } | Sel::Profile { sketch: id, .. } => Some(*id),
+            _ => None,
+        })
         .filter(|id| app.session.doc.feature(*id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. })))
         .collect();
+    sketches.sort_unstable();
+    sketches.dedup();
     let origin: Vec<String> = app
         .session
         .selection
@@ -2638,7 +2644,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
             if target == Target::Workspace {
-                picked = crate::ui_kit::workspace_menu(ui, &list, key_row, (screen.bottom() - list_at.y).max(160.0)).or(picked.take());
+                picked = workspace_menu(ui, &list, key_row, (screen.bottom() - list_at.y).max(160.0)).or(picked.take());
             } else {
                 menu_frame(ui, |ui| seen.push(level_rows(ui, &list, 0, key_row, path.first().copied(), leaving == Some(0), &mut picked)));
             }
@@ -2825,6 +2831,35 @@ pub fn finish_rename(app: &mut SolveApp, text: Option<&str>, commit: bool) -> bo
         let _ = commit_rename(app, &r);
     }
     true
+}
+
+/// How the workspace menu shows each of SolidCraft's workspaces ([`Target::Workspace`]).
+fn workspace_style(item: &Item) -> Option<crate::ui_kit::WorkspaceStyle> {
+    use crate::ui_kit::WorkspaceStyle;
+    use solidcraft_theme::AccentRamp;
+    let planned = |slug, description| WorkspaceStyle { slug, description, tabs: None, ramp: None };
+    Some(match item.label.as_str() {
+        "Design" => {
+            WorkspaceStyle { slug: "design", description: "ui.workspace_design_description", tabs: Some("ui.workspace_design_tabs"), ramp: None }
+        }
+        "Render" => WorkspaceStyle {
+            slug: "render",
+            description: "ui.workspace_render_description",
+            tabs: Some("ui.workspace_render_tabs"),
+            ramp: Some(AccentRamp::Render),
+        },
+        "Animation" => planned("animation", "ui.workspace_animation_description"),
+        "Simulation" => planned("simulation", "ui.workspace_simulation_description"),
+        "Manufacture" => planned("manufacture", "ui.workspace_manufacture_description"),
+        "Drawing" => planned("drawing", "ui.workspace_drawing_description"),
+        _ => return None,
+    })
+}
+
+/// The kit's workspace menu over SolidCraft's workspaces (`items` of [`Target::Workspace`]).
+pub(crate) fn workspace_menu(ui: &mut egui::Ui, items: &[Item], key_row: Option<usize>, height: f32) -> Option<Item> {
+    let menu = crate::ui_kit::WorkspaceMenu { items, style: &workspace_style, footer: solidcraft_ui_text::tr("ui.workspace_footer") };
+    crate::ui_kit::workspace_menu(ui, &menu, key_row, height)
 }
 
 #[cfg(test)]
@@ -3418,7 +3453,7 @@ mod workspace_menu_tests {
         let app = SolveApp::new(Default::default(), Default::default());
         let list = items(&app, &Target::Workspace);
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            crate::ui_kit::workspace_menu(ui, &list, None, 1000.0);
+            workspace_menu(ui, &list, None, 1000.0);
         });
         output.textures_delta.clear();
         let titles: Vec<_> = output

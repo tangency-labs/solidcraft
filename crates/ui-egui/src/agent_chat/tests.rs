@@ -4788,6 +4788,10 @@ fn an_attached_picture_and_the_views_picture_share_the_viewer() {
 fn add_agent_opens_its_dialog_from_home() {
     use solidcraft_ui_registry::handle_at;
     let mut h = crate::scenario::Harness::new();
+    // The search for installed agents counts as done, so it doesn't start when the page opens
+    // (#14384): finishing between the frame that drew Add agent and the click, it replaced the
+    // "Detecting…" line above the button, which moved, and the click missed it.
+    h.app.agent_chat.detection = Some(Default::default());
     h.call("ui.resize", json!({"width": 1600.0, "height": 1000.0}));
     h.call("ui.home", json!({"open": true}));
     h.call("ui.prefs", json!({"open": "AI"}));
