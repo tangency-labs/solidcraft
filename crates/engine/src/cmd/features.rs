@@ -15,8 +15,8 @@ use crate::params::{UNKNOWN_COMMAND, bad, bool_, expr, expr_problem, req_expr, s
 use crate::schema::features::SweepParams;
 use crate::schema::features::{
     AppliedRadius, BoundingSolidParams, BoxParams, ChamferParams, CombineParams, CombineResult, ConeParams, CylinderParams, ExtrudeParams,
-    FeatureNotice, FeatureResult, FilletParams, FilletResult, NoticeAction, OffsetPlaneParams, PipeParams, PlaneAtAngleParams, RevolveParams,
-    ScaleParams, SphereParams, TorusParams,
+    FeatureNotice, FeatureResult, FilletParams, FilletResult, NoticeAction, OffsetPlaneParams, PipeParams, PlaneAtAngleParams, PressPullParams,
+    PressPullResult, RevolveParams, ScaleParams, SphereParams, TorusParams,
 };
 use crate::schema::split::{SplitBodyParams, SplitFaceParams};
 use crate::schema::{TypedContract, output_schema_for};
@@ -40,6 +40,7 @@ const FILLET_CONTRACT: TypedContract<FilletParams> = TypedContract::new();
 const CHAMFER_CONTRACT: TypedContract<ChamferParams> = TypedContract::new();
 const SPLIT_FACE_CONTRACT: TypedContract<SplitFaceParams> = TypedContract::new();
 const SPLIT_BODY_CONTRACT: TypedContract<SplitBodyParams> = TypedContract::new();
+const PRESS_PULL_CONTRACT: TypedContract<PressPullParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.extrude", "Extrude", crate::checked!("solid.extrude", extrude))
@@ -193,7 +194,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SPLIT_BODY_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("body: name; plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended) — or sketch: id, line: curve id (a straight sketch line, along the sketch's normal)"),
-    CommandSpec::new("solid.press_pull", "Press Pull", press_pull)
+    CommandSpec::new("solid.press_pull", "Press Pull", crate::checked!("solid.press_pull", press_pull))
+        .contract(&PRESS_PULL_CONTRACT)
+        .output(output_schema_for::<PressPullResult>)
         .at("SOLID", "MODIFY")
         .icon("presspull")
         .key("Q")

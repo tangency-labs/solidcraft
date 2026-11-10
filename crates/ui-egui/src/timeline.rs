@@ -409,7 +409,7 @@ fn delete_label(count: usize) -> String {
 /// one is among them, labelled with how many, else that feature alone (#5005).
 pub(crate) fn delete_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) {
     let targets = menu_targets(app, id);
-    if crate::context_menu::button(ui, &delete_label(targets.len()), "delete").clicked() {
+    if crate::ui_kit::menu::button(ui, &delete_label(targets.len()), "delete").clicked() {
         delete_features(app, targets);
         ui.close();
     }
@@ -444,7 +444,7 @@ fn after_marker(app: &SolveApp, id: u64, index: usize, marker: usize, shown: Opt
 /// The [`after_marker`] entry as a button.
 pub(crate) fn delete_after_marker_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, index: usize, marker: usize, shown: Option<&[usize]>) {
     let Some((label, ids)) = after_marker(app, id, index, marker, shown) else { return };
-    if crate::context_menu::button(ui, &label, "delete").clicked() {
+    if crate::ui_kit::menu::button(ui, &label, "delete").clicked() {
         delete_features(app, ids);
         ui.close();
     }
@@ -507,12 +507,12 @@ pub(crate) fn anchor_key(id: u64) -> String {
 
 /// Copy and Paste in a feature's timeline menu. Paste puts the copies at the history marker.
 pub(crate) fn clipboard_buttons(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) {
-    if crate::context_menu::button(ui, solidcraft_ui_text::tr_label("Copy"), "copy").clicked() {
+    if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr_label("Copy"), "copy").clicked() {
         let features = menu_targets(app, id);
         let _ = app.run("timeline.copy", json!({ "features": features }));
         ui.close();
     }
-    if crate::context_menu::button_enabled(ui, solidcraft_ui_text::tr_label("Paste"), "paste", !app.session.clipboard.is_empty()).clicked() {
+    if crate::ui_kit::menu::button_enabled(ui, solidcraft_ui_text::tr_label("Paste"), "paste", !app.session.clipboard.is_empty()).clicked() {
         let _ = app.run("timeline.paste", json!({}));
         ui.close();
     }
@@ -692,7 +692,7 @@ pub(crate) fn message_button(app: &SolveApp, ui: &mut egui::Ui, id: u64) {
     let Some(text) = feature_message(app, id) else { return };
     let failed = app.session.model.result(id).is_some_and(|r| r.error.is_some());
     let label = if failed { "Copy Error Message" } else { "Copy Warning Message" };
-    if crate::context_menu::button(ui, solidcraft_ui_text::tr_label(label), "copy").clicked() {
+    if crate::ui_kit::menu::button(ui, solidcraft_ui_text::tr_label(label), "copy").clicked() {
         ui.ctx().copy_text(text);
         ui.close();
     }
@@ -708,7 +708,7 @@ pub(crate) fn sketch_plane_button(app: &mut SolveApp, ui: &mut egui::Ui, id: u64
     else {
         return;
     };
-    let response = crate::context_menu::button_enabled(ui, &item.label, &item.icon, item.enabled);
+    let response = crate::ui_kit::menu::button_enabled(ui, &item.label, &item.icon, item.enabled);
     if response.clicked() {
         crate::context_menu::run_item(app, &item, response.rect.center());
         ui.close();
@@ -936,7 +936,7 @@ pub(crate) fn edit_holes_item(app: &mut SolveApp, ui: &mut egui::Ui, folder: u64
     if crate::hole_folder::holes(app, folder).is_none() {
         return;
     }
-    if crate::context_menu::button(ui, "Edit Holes", "hole").clicked() {
+    if crate::ui_kit::menu::button(ui, "Edit Holes", "hole").clicked() {
         if let Err(why) = crate::hole_folder::open(app, folder) {
             app.set_status(why, true);
         }

@@ -57,6 +57,8 @@ pub mod dialogs_view_dxf;
 pub mod dim_view;
 #[cfg(test)]
 mod dimension_create_ui_tests;
+#[cfg(test)]
+mod dock_dialog_ui_tests;
 pub mod documents;
 pub mod drag_extrude;
 pub mod drag_snap;
@@ -104,6 +106,8 @@ pub mod issue_report;
 pub mod joint_drag;
 pub(crate) mod joint_handles;
 pub mod keymap;
+#[cfg(test)]
+mod kit_gallery_tests;
 mod length_input;
 mod linked_source;
 #[cfg(test)]
@@ -849,6 +853,8 @@ impl SolveApp {
     pub fn new(mut session: Session, services: Services) -> Self {
         // The app's catalogs, once per process; later calls find them installed.
         i18n::install();
+        // The app's icons, likewise, before the first frame.
+        icon_svg::install();
         #[cfg(test)]
         let image_host = Some(solidcraft_engine::render::job::CpuHost::cooperative());
         #[cfg(not(test))]
