@@ -7881,6 +7881,8 @@ fn replay(
     Ok(())
 }
 
+#[path = "eval_lighten.rs"]
+mod lighten;
 #[path = "model_cache.rs"]
 mod model_cache;
 #[path = "eval_more.rs"]
@@ -8283,6 +8285,7 @@ fn eval_feature(
         | FeatureKind::ReplaceFace { .. }
         | FeatureKind::Align { .. }
         | FeatureKind::Remove { .. } => more::eval(doc, vals, f, st, warning),
+        FeatureKind::Lighten { .. } => lighten::eval(doc, vals, f, st, warning),
         FeatureKind::Sketch { plane, sketch } => eval_sketch(doc, vals, f, plane, sketch, st, warning, crate::project::LostNames::Fail),
         FeatureKind::Extrude { operation, targets, .. }
         | FeatureKind::Pipe { operation, targets, .. }

@@ -4,8 +4,8 @@ use serde_json::{Value, json};
 
 use super::{
     BoundingSolidParams, BoxParams, ChamferParams, CombineParams, CombineResult, ConeParams, CylinderParams, ExtrudeParams, FeatureResult,
-    FilletParams, FilletResult, OffsetPlaneParams, PipeParams, PlaneAtAngleParams, PressPullParams, PressPullResult, RevolveParams, ScaleParams,
-    SphereParams, TorusParams,
+    FilletParams, FilletResult, LightenParams, OffsetPlaneParams, PipeParams, PlaneAtAngleParams, PressPullParams, PressPullResult, RevolveParams,
+    ScaleParams, SphereParams, TorusParams,
 };
 use super::{PatternCircularParams, PatternCircularResult};
 use super::{SurfaceSweepParams, SweepParams};
@@ -117,6 +117,24 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<ScaleParams>(), &["bodies", "factor", "factors", "name", "origin", "participants"]);
     assert_keys(input_schema_for::<OffsetPlaneParams>(), &["base", "name", "offset", "participants", "through"]);
     assert_keys(input_schema_for::<PlaneAtAngleParams>(), &["angle", "axis", "base", "direction_only", "name", "participants", "pivot"]);
+    assert_keys(
+        input_schema_for::<LightenParams>(),
+        &[
+            "body_name",
+            "body_names",
+            "depth",
+            "name",
+            "participants",
+            "profiles",
+            "sketch",
+            "targets",
+            "thickness",
+            "through_all",
+            "to",
+            "tool_radius",
+            "trim",
+        ],
+    );
     assert_keys(
         input_schema_for::<FilletParams>(),
         &[

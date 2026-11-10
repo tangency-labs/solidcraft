@@ -2784,3 +2784,93 @@ fn align_by_a_frame_picked_on_another_copy_moves_the_part_in_its_own_coordinates
     assert_bounds(&mut s, "Peg", [4., 4., 10.], [6., 6., 12.]);
     assert_bounds(&mut s, "Peg (Board:2/Header:1)", [104., 4., 10.], [106., 6., 12.]);
 }
+
+fn plate_volume(s: &Session) -> f64 {
+    solidcraft_kernel::measure(&s.model.state().body("Plate").unwrap().body).unwrap().volume
+}
+
+fn holds(body: &solidcraft_kernel::Body, point: solidcore_record::Vec3) -> bool {
+    matches!(body.classify_point(point), Ok(solidcraft_kernel::PointClass::Inside))
+}
+
+fn lighten_plate(s: &mut Session) {
+    run(s, "solid.box", json!({"length": 100, "width": 80, "height": 20, "body_name": "Plate"}));
+    run(s, "sketch.create", json!({"plane": {"face": [50, 40, 20]}, "project_edges": false}));
+}
+
+/// Two rectangles that share an edge inset by half the wall, so the wall between them is the
+/// full thickness. The part outline, inset by the full thickness, is already outside them.
+#[test]
+fn lighten_leaves_the_full_wall_between_touching_profiles() {
+    let mut s = Session::default();
+    lighten_plate(&mut s);
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 20], "p1": [50, 60]}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [50, 20], "p1": [90, 60]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.lighten", json!({"thickness": "4 mm", "depth": "8 mm", "tool_radius": "0 mm"}));
+    // Each pocket insets by 2: 36×36×8, twice. Plate 100×80×20.
+    let removed = 2.0 * 36.0 * 36.0 * 8.0;
+    let volume = plate_volume(&s);
+    assert!((volume - (160_000.0 - removed)).abs() < 1e-2, "{volume}");
+    let state = s.model.state();
+    let body = &state.body("Plate").unwrap().body;
+    assert!(holds(body, solidcore_record::Vec3::new(50.0, 40.0, 16.0)), "the wall between the pockets stays");
+    assert!(!holds(body, solidcore_record::Vec3::new(30.0, 40.0, 16.0)), "the left pocket is open");
+    assert!(holds(body, solidcore_record::Vec3::new(30.0, 40.0, 10.0)), "the floor stays");
+}
+
+/// A profile that covers the whole face is clipped to a full wall inside the part outline.
+#[test]
+fn lighten_trims_a_covering_profile_to_the_part_outline() {
+    let mut s = Session::default();
+    lighten_plate(&mut s);
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 80]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.lighten", json!({"thickness": "4 mm", "depth": "8 mm", "tool_radius": "0 mm", "trim": true}));
+    // Face inset by 4: 92×72×8.
+    let removed = 92.0 * 72.0 * 8.0;
+    let volume = plate_volume(&s);
+    assert!((volume - (160_000.0 - removed)).abs() < 1e-2, "{volume}");
+    let state = s.model.state();
+    let body = &state.body("Plate").unwrap().body;
+    assert!(holds(body, solidcore_record::Vec3::new(2.0, 2.0, 16.0)), "the outline wall stays");
+    assert!(!holds(body, solidcore_record::Vec3::new(6.0, 6.0, 16.0)), "inside the trimmed pocket");
+}
+
+/// A 90° corner loses a square of the tool radius minus a quarter circle.
+#[test]
+fn lighten_rounds_only_the_corners_a_tool_cannot_reach() {
+    let mut s = Session::default();
+    lighten_plate(&mut s);
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 20], "p1": [50, 60]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.lighten", json!({"thickness": "4 mm", "depth": "8 mm", "tool_radius": "2 mm"}));
+    // Half inset leaves a 36×36 pocket. Each corner drops r² − πr²/4.
+    let area = 36.0 * 36.0 - (4.0 - std::f64::consts::PI) * 4.0;
+    // The arcs are measured from a fine mesh, so the volume sits a few hundredths off the
+    // exact quarter-circles. A missed corner would be about 27 mm³ out.
+    let volume = plate_volume(&s);
+    assert!((volume - (160_000.0 - area * 8.0)).abs() < 0.1, "{volume}");
+    let state = s.model.state();
+    let body = &state.body("Plate").unwrap().body;
+    assert!(holds(body, solidcore_record::Vec3::new(12.1, 22.1, 16.0)), "the sharp corner remains");
+    assert!(!holds(body, solidcore_record::Vec3::new(30.0, 40.0, 16.0)), "the pocket centre is open");
+}
+
+/// The shell fillets a concave corner of the tool at half the wall, even with no tool radius.
+/// The point just inside that notch is cut; a point past the fillet stays.
+#[test]
+fn lighten_fillets_the_concave_corner_the_shell_makes() {
+    let mut s = Session::default();
+    lighten_plate(&mut s);
+    // An L. The re-entrant corner is (30, 40); after the half-wall inset it sits at (28, 38).
+    run(&mut s, "sketch.line", json!({"points": [[10, 20], [50, 20], [50, 40], [30, 40], [30, 60], [10, 60]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.lighten", json!({"thickness": "4 mm", "depth": "8 mm", "tool_radius": "0 mm"}));
+    let state = s.model.state();
+    let body = &state.body("Plate").unwrap().body;
+    assert!(!holds(body, solidcore_record::Vec3::new(28.2, 38.2, 16.0)), "the concave fillet cuts the notch");
+    assert!(holds(body, solidcore_record::Vec3::new(29.2, 39.2, 16.0)), "past the fillet the notch stays");
+    assert!(!holds(body, solidcore_record::Vec3::new(20.0, 30.0, 16.0)), "the pocket is open");
+    assert!(holds(body, solidcore_record::Vec3::new(20.0, 30.0, 10.0)), "the floor stays");
+}
