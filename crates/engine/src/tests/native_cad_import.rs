@@ -73,6 +73,26 @@ fn freecad_and_rhino_files_come_in_as_a_component_named_after_the_file() {
     }
 }
 
+/// An `.ipt` whose editable history is refused (here: FreeCAD bytes under the name) opens
+/// through the geometry path instead: one body, a warning that the history was not kept, and an
+/// unsaved design, like every other import — explicit `names: null` / `up: null` included.
+#[test]
+fn inventor_without_editable_history_comes_in_through_the_geometry_path() {
+    let (dir, path) = file("ipt-fc", "part.ipt", BLOCK_FCSTD);
+    let mut s = Session::default();
+    let r = run(&mut s, "doc.open", json!({"path": path, "names": null, "up": null}));
+    let warnings = r["warnings"].as_array().unwrap();
+    assert!(warnings.iter().any(|w| w.as_str().is_some_and(|w| w.contains("imported the available geometry instead"))), "{r}");
+    assert_eq!(r["bodies"].as_array().unwrap().len(), 1, "{r}");
+    assert!(!r.as_object().unwrap().contains_key("editable_history_imported"), "{r}");
+    assert!(s.path.is_none(), "imports create unsaved designs, not owners of the source file");
+    // The explicit options take the geometry path straight, without the history attempt.
+    let mut d = Session::default();
+    let r = run(&mut d, "doc.open", json!({"path": path, "names": "solid"}));
+    assert_eq!(r["bodies"].as_array().unwrap().len(), 1, "{r}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A broken file is refused with a message naming it, and the design is left as it was.
 #[test]
 fn a_broken_freecad_or_rhino_file_is_refused_cleanly() {
