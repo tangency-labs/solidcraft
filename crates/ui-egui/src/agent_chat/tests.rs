@@ -5025,3 +5025,12 @@ fn shared_assistant_header_uses_live_status_and_one_click_starts_one_new_chat() 
     assert_eq!(h.app.agent_chat.input, "Retained responsive composer draft");
     assert!(h.app.agent_chat.items.is_empty());
 }
+
+/// A picker that takes a typed model id says so in its search hint; one that doesn't keeps the
+/// plain hint (#14369).
+#[test]
+fn the_model_search_hint_says_when_an_id_can_be_typed() {
+    crate::i18n::install();
+    assert_eq!(model_search_hint(false), "Search models…");
+    assert_eq!(model_search_hint(true), "Search, or type any model id…");
+}
