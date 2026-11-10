@@ -2178,14 +2178,7 @@ pub(super) fn slot(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w:
 }
 
 /// What [`slot`] adds: the curve and constraint ids, the sketch's solve, and its centre line/middle.
-pub(super) fn slot_parts(
-    s: &mut Session,
-    p: &Value,
-    cmd: &str,
-    c0: Vec2,
-    c1: Vec2,
-    w: f64,
-) -> Result<crate::schema::sketch_shapes::SlotResult> {
+pub(super) fn slot_parts(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w: f64) -> Result<crate::schema::sketch_shapes::SlotResult> {
     let h = w / 2.0;
     let d = (c1 - c0).normalized().ok_or_else(|| bad(cmd, "the slot ends must differ"))?;
     let n = d.perp();
