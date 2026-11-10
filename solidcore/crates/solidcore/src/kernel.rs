@@ -164,6 +164,7 @@ pub struct WorkCounters {
     wall_body_copies: Cell<u64>,
     proto_edge_intersections: Cell<u64>,
     face_extreme_control_points: Cell<u64>,
+    feet_tm_coefficients: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -210,6 +211,15 @@ impl WorkCounters {
         self.face_extreme_control_points.get()
     }
 
+    /// Series coefficients of G the G^n certificate's feet Taylor models compute
+    /// (`blend::fillet_section::feet_tm::gn_enclose_tm`): each position `(sigma^i, eps^k)`
+    /// of the system's series that an evaluation computes, its order-by-order solve's and
+    /// its last. Not the fork's.
+    #[must_use]
+    pub fn feet_tm_coefficients(&self) -> u64 {
+        self.feet_tm_coefficients.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
@@ -217,6 +227,7 @@ impl WorkCounters {
         self.wall_body_copies.set(0);
         self.proto_edge_intersections.set(0);
         self.face_extreme_control_points.set(0);
+        self.feet_tm_coefficients.set(0);
     }
 
     /// Counts one face pair examined for intersection.
@@ -246,6 +257,12 @@ impl WorkCounters {
     pub(crate) fn add_face_extreme_control_points(&self, n: u64) {
         self.face_extreme_control_points
             .set(self.face_extreme_control_points.get().saturating_add(n));
+    }
+
+    /// Counts `n` series coefficients a feet Taylor model computed.
+    pub(crate) fn add_feet_tm_coefficients(&self, n: u64) {
+        self.feet_tm_coefficients
+            .set(self.feet_tm_coefficients.get().saturating_add(n));
     }
 }
 
