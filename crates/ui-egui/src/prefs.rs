@@ -1501,9 +1501,13 @@ preference_settings! {
     /// so the window stays live while they run (#1989, [`crate::control_job`]). Off: they run on
     /// the window thread, and the window waits for each, as before (the default).
     agent_off_thread: bool = false, PAGE_ASSISTANT;
-    /// Let AI agents connect: the localhost control channel (MCP) opens on the default port at
-    /// start-up, unless `--control`/`SOLIDCRAFT_CONTROL_PORT` name one. Read at start-up.
-    agent_control: bool = true, PAGE_ASSISTANT;
+    /// Let AI agents connect: the localhost control channel (MCP) listens on
+    /// `agent_control_port`, unless `--control`/`SOLIDCRAFT_CONTROL_PORT` name one for the run.
+    /// Turning it on or off, or changing the port, takes effect at once ([`crate::control_switch`]).
+    /// Off until the user turns it on, so a new install listens on no port.
+    agent_control: bool = false, PAGE_ASSISTANT;
+    /// The control channel's port. The default one takes the next free port when it is taken.
+    agent_control_port: u16 = 27878, PAGE_ASSISTANT;
     /// Add SolidCraft's MCP server to the AI apps installed on this computer at start-up
     /// ([`crate::ai_connect`]); off takes the entries out again.
     connect_ai_apps: bool = true, PAGE_ASSISTANT;
@@ -9950,17 +9954,37 @@ mod tests {
         assert_eq!(app.preferences.msaa, Prefs::default().msaa);
     }
 
-    /// "Let AI agents connect" is on for a new install and for preferences saved before it existed;
-    /// an explicit off stays off.
+    /// "Let AI agents connect" is off for a new install and for preferences saved before it existed;
+    /// an explicit on stays on.
     #[test]
-    fn agent_control_is_on_unless_saved_off() {
-        assert!(Prefs::default().agent_control);
+    fn agent_control_is_off_unless_saved_on() {
+        assert!(!Prefs::default().agent_control);
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
-        app.preferences.agent_control = false;
+        app.preferences.agent_control = true;
         app.load_prefs(&serde_json::json!({ "preferences": { "msaa": 4 } }).to_string());
-        assert!(app.preferences.agent_control);
-        app.load_prefs(&serde_json::json!({ "preferences": { "agent_control": false } }).to_string());
         assert!(!app.preferences.agent_control);
+        app.load_prefs(&serde_json::json!({ "preferences": { "agent_control": true } }).to_string());
+        assert!(app.preferences.agent_control);
+    }
+
+    /// "Let AI agents connect" and its port sit in Agents through MCP, there with the chat off
+    /// too; the port is 27878 unless saved otherwise, and Restore Defaults puts it back.
+    #[test]
+    fn agent_control_and_its_port_are_in_agents_through_mcp() {
+        use serde_json::json;
+        assert_eq!(Prefs::default().agent_control_port, 27878);
+        let mut h = crate::scenario::Harness::new();
+        h.app.load_prefs(&json!({ "preferences": { "agent_control_port": 7999 } }).to_string());
+        assert_eq!(h.app.preferences.agent_control_port, 7999);
+        h.call("ui.prefs", json!({"ai_features": false, "open": "AI"}));
+        h.frames(3);
+        assert!(crate::scenario::handle_at("prefs:agent_control").is_some(), "the checkbox is on the AI page with the chat off");
+        assert!(crate::scenario::handle_at("prefs:agent_control_port").is_some(), "so is the port");
+        h.call("ui.prefs", json!({"agent_control_port": 8123}));
+        assert_eq!(h.app.preferences.agent_control_port, 8123);
+        h.call("ui.prefs", json!({"button": "defaults"}));
+        assert_eq!(h.app.preferences.agent_control_port, 27878);
+        assert!(!h.app.preferences.agent_control, "Restore Defaults turns it off");
     }
 
     #[test]
