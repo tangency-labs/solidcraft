@@ -98,8 +98,17 @@ const WALL_LABELS: [&str; 4] = ["Center", "Inside", "Outside", "Two Sides"];
 /// What an extrude's first input picks: profiles or planar faces, or curves too when thin.
 const EXTRUDE_ACCEPT: Accept = PROFILES | PLANAR_FACES;
 const THIN_ACCEPT: Accept = PROFILES | CURVES;
-const PROJECT_GEOMETRY: Accept =
-    EDGES | FACES | selection::VERTICES | PLANES | AXES | selection::SKETCH_LINES | selection::EXTERNAL_POINTS | selection::ORIGIN;
+/// What Project picks: model geometry, planes, axes, the origin, the curves and points of other
+/// sketches, and named construction points (#12075).
+const PROJECT_GEOMETRY: Accept = EDGES
+    | FACES
+    | selection::VERTICES
+    | PLANES
+    | AXES
+    | selection::SKETCH_LINES
+    | selection::EXTERNAL_POINTS
+    | selection::ORIGIN
+    | selection::CONSTRUCTION_POINTS;
 /// What Intersect cuts with the sketch plane, picked one by one: faces, model edges and the
 /// curves of other sketches (#10484); an edge or a sketch line gives the points where it crosses.
 const INTERSECT_GEOMETRY: Accept = EDGES | FACES | selection::SKETCH_LINES;
@@ -5233,31 +5242,30 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             if !faces_first {
                 out.extend(profile.clone());
             }
-            // Coplanar faces of one body share one sketch and Boolean. Mixed selections
-            // retain their original order and explicit face-body scope.
+            // Planar faces of one body go in one command: coplanar ones share a sketch and
+            // Boolean, the others extrude each from the body as picked (#11492). Faces of
+            // several bodies or a curved face keep their original order and face-body scope.
             let state = crate::open_meshing::session_world(s);
-            let mut group: Option<(String, solidcore_record::Plane, Vec<Value>)> = None;
-            let mut coplanar = true;
+            let mut one_body: Option<(String, Vec<Value>)> = None;
+            let mut together = true;
             for pick in sels(d, 0) {
                 let Sel::Face { body, index, point } = pick else { continue };
                 let Some(source) = state.body(body) else { return Err("selected body disappeared".into()) };
-                let Some(plane) = source.body.planar_face(*index) else {
-                    coplanar = false;
+                if source.body.planar_face(*index).is_none() {
+                    together = false;
                     break;
-                };
-                let tolerance = (source.body.size() * 1e-9).max(1e-8);
-                if let Some((name, base, points)) = &mut group {
-                    if name != body || base.normal().dot(plane.normal()) <= 1.0 - 1e-9 || base.height(plane.origin).abs() > tolerance {
-                        coplanar = false;
+                }
+                match &mut one_body {
+                    Some((name, points)) if name == body => points.push(pt(*point)),
+                    Some(_) => {
+                        together = false;
                         break;
                     }
-                    points.push(pt(*point));
-                } else {
-                    group = Some((body.clone(), plane, vec![pt(*point)]));
+                    None => one_body = Some((body.clone(), vec![pt(*point)])),
                 }
             }
-            if coplanar
-                && let Some((body, _, points)) = group
+            if together
+                && let Some((body, points)) = one_body
                 && points.len() > 1
             {
                 out.push(("solid.extrude".to_string(), with(json!({"faces": points, "face_body": body}))));
@@ -5662,6 +5670,10 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             for (i, key) in [(1, "from"), (2, "to")] {
                 let snap = d.extra.get(&format!("{key}_snap")).and_then(Value::as_str).unwrap_or("picked");
                 match (sels(d, i).first(), snap) {
+                    // Onto Plane sets the bodies on a plane: a planar face or a plane, nothing else.
+                    (Some(sel), "plane") if key == "to" && !*components && !matches!(sel, Sel::Face { .. } | Sel::Plane { .. }) => {
+                        return Err("Onto Plane takes a planar face or a plane".into());
+                    }
                     // A sketch point or circle is a frame whatever the snap: the bodies follow it
                     // when it moves (#6257).
                     (Some(sel @ (Sel::SketchPoint { .. } | Sel::SketchCurve { .. })), _) if !*components => {
@@ -5676,6 +5688,11 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     (Some(Sel::Face { point, .. }), "center") => p[key] = json!({"snap": "face_center", "at": pt(*point)}),
                     (Some(Sel::Face { point, .. } | Sel::Edge { point, .. }), "circle") => {
                         p[key] = json!({"snap": "circle_center", "at": pt(*point)})
+                    }
+                    // Onto Plane: the To face as the plane it lies in, so the bodies come onto it
+                    // along its normal only.
+                    (Some(sel @ Sel::Face { .. }), "plane") if key == "to" && !*components => {
+                        p["to_plane"] = plane_value(s, Some(sel)).ok_or("Onto Plane takes a planar face or a plane")?
                     }
                     (Some(Sel::Face { point, .. }), _) => p[format!("{key}_face")] = pt(*point),
                     (Some(Sel::Edge { point, .. }), _) => p[key] = json!({"snap": "edge_mid", "at": pt(*point)}),

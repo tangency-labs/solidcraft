@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
 use solidcraft_geom::prelude::*;
+use solidcraft_geom::tess::EvaluateMesh as _;
 
 use crate::Session;
 
@@ -1883,7 +1884,12 @@ fn knife_edge_part() -> Session {
 /// the concave arc). It holds to about 1e-3 of what a blend removes here; the bounds below are
 /// about twice what each test reads.
 fn planned(s: &Session) -> f64 {
-    s.model.state().bodies.iter().map(|b| b.body.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(2e-4)).unwrap().evaluate().measure().volume).sum()
+    s.model
+        .state()
+        .bodies
+        .iter()
+        .map(|b| b.body.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(2e-4)).unwrap().evaluate_mesh().measure().volume)
+        .sum()
 }
 
 /// The middle of the part's arc.
@@ -2703,4 +2709,54 @@ fn an_emboss_that_works_has_no_warning() {
         assert!(reply["warning"].is_null(), "{mode}: {reply}");
         run(&mut s, "edit.undo", json!({}));
     }
+}
+
+/// #9969: a cut whose tool lies clear of the body reported "operation complete" and changed
+/// nothing, with no warning. It now says it removed no material; a cut that works says nothing.
+#[test]
+fn a_cut_that_removes_nothing_says_so() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10}));
+    let before = volume(&mut s);
+    // A square drawn 100 mm beside the box: its prism never meets the body.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [100, 100], "p1": [110, 110]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let reply = run(&mut s, "solid.extrude", json!({"direction": "negative", "distance": 5, "operation": "cut"}));
+    let warning = reply["warning"].as_str().unwrap_or_default();
+    assert!(warning.contains("the cut removes no material"), "{reply}");
+    assert!((volume(&mut s) - before).abs() < 1e-9 * before);
+    // The same cut over the box takes material and says nothing.
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [20, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let reply = run(&mut s, "solid.extrude", json!({"direction": "negative", "distance": 5, "operation": "cut"}));
+    assert!(reply["warning"].is_null(), "{reply}");
+    assert!(volume(&mut s) < before - 400.0);
+}
+
+/// #9969 through sheet metal: a cut the flat pattern takes, drawn clear of the sheet, changes
+/// nothing and says so; the same cut over the sheet takes material and says nothing.
+#[test]
+fn a_sheet_metal_cut_that_removes_nothing_says_so() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+    let before = volume(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Away"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [200, 200], "p1": [210, 210]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let reply = run(&mut s, "solid.extrude", json!({"sketch": "Away", "through_all": true, "direction": "symmetric", "operation": "cut"}));
+    let warning = reply["warning"].as_str().unwrap_or_default();
+    assert!(warning.contains("the cut removes no material"), "{reply}");
+    assert!((volume(&mut s) - before).abs() < 1e-9 * before);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Over"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [20, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let reply = run(&mut s, "solid.extrude", json!({"sketch": "Over", "through_all": true, "direction": "symmetric", "operation": "cut"}));
+    assert!(!reply["warning"].as_str().unwrap_or_default().contains("removes no material"), "{reply}");
+    assert!(volume(&mut s) < before - 50.0);
 }

@@ -15,8 +15,8 @@ use crate::params::{UNKNOWN_COMMAND, bad, bool_, expr, expr_problem, req_expr, s
 use crate::schema::features::SweepParams;
 use crate::schema::features::{
     AppliedRadius, BoundingSolidParams, BoxParams, ChamferParams, CombineParams, CombineResult, ConeParams, CylinderParams, ExtrudeParams,
-    FeatureNotice, FeatureResult, FilletParams, FilletResult, NoticeAction, OffsetPlaneParams, PipeParams, PlaneAtAngleParams, RevolveParams,
-    ScaleParams, SphereParams, TorusParams,
+    FeatureNotice, FeatureResult, FilletParams, FilletResult, NoticeAction, OffsetPlaneParams, PipeParams, PlaneAtAngleParams, PressPullParams,
+    PressPullResult, RevolveParams, ScaleParams, SphereParams, TorusParams,
 };
 use crate::schema::split::{SplitBodyParams, SplitFaceParams};
 use crate::schema::{TypedContract, output_schema_for};
@@ -40,6 +40,7 @@ const FILLET_CONTRACT: TypedContract<FilletParams> = TypedContract::new();
 const CHAMFER_CONTRACT: TypedContract<ChamferParams> = TypedContract::new();
 const SPLIT_FACE_CONTRACT: TypedContract<SplitFaceParams> = TypedContract::new();
 const SPLIT_BODY_CONTRACT: TypedContract<SplitBodyParams> = TypedContract::new();
+const PRESS_PULL_CONTRACT: TypedContract<PressPullParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.extrude", "Extrude", crate::checked!("solid.extrude", extrude))
@@ -193,7 +194,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SPLIT_BODY_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("body: name; plane: XY|XZ|YZ|plane name|{origin, normal} — or tool: {body, point} (a face of a body, its surface extended) — or sketch: id, line: curve id (a straight sketch line, along the sketch's normal)"),
-    CommandSpec::new("solid.press_pull", "Press Pull", press_pull)
+    CommandSpec::new("solid.press_pull", "Press Pull", crate::checked!("solid.press_pull", press_pull))
+        .contract(&PRESS_PULL_CONTRACT)
+        .output(output_schema_for::<PressPullResult>)
         .at("SOLID", "MODIFY")
         .icon("presspull")
         .key("Q")
@@ -906,6 +909,8 @@ fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, world: bool) ->
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
+type FaceProfile = (u64, Option<ProfileSel>, Option<String>);
+
 fn extrude(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.extrude";
     let grouped = if let Some(value) = p.get("faces") {
@@ -917,11 +922,31 @@ fn extrude(s: &mut Session, p: &Value) -> Result<Value> {
             .filter(|faces| !faces.is_empty() && faces.len() <= 1024)
             .ok_or_else(|| bad(cmd, "faces must contain between 1 and 1024 points"))?;
         let points = faces.iter().map(|point| vec3(point).ok_or_else(|| bad(cmd, "faces must be points [x,y,z]"))).collect::<Result<Vec<_>>>()?;
+        let groups = super::face::face_groups(s, &points, cmd, str_(p, "face_body"))?;
+        // Faces in different planes extrude each by itself. Every face's profile is taken from
+        // the body as picked, before the first extrusion grows it (#11492).
+        if groups.len() > 1 {
+            let mut profiles = Vec::new();
+            for group in &groups {
+                let (id, points, body) = super::face::sketch_of_faces(s, group, cmd, str_(p, "face_body"))?;
+                profiles.push((id, Some(ProfileSel::Points { points }), Some(body)));
+            }
+            let mut reply = Value::Null;
+            for profile in profiles {
+                reply = extrude_from(s, p, Some(profile))?;
+            }
+            return Ok(reply);
+        }
         let (id, points, body) = super::face::sketch_of_faces(s, &points, cmd, str_(p, "face_body"))?;
         Some((id, Some(ProfileSel::Points { points }), Some(body)))
     } else {
         None
     };
+    extrude_from(s, p, grouped)
+}
+
+fn extrude_from(s: &mut Session, p: &Value, grouped: Option<FaceProfile>) -> Result<Value> {
+    let cmd = "solid.extrude";
     // A planar body face extrudes like a profile: its boundary is copied into a sketch on it.
     let (sketch, face_profile, face_body) = if let Some(grouped) = grouped {
         grouped

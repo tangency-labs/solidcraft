@@ -372,7 +372,9 @@ fn feature_row(
         // Inside a placement, the feature's component is active while it is edited, and the one
         // active before comes back when the editor ends (#12720).
         app.edit_feature_in(id, Some((component, path)));
-    } else if r.clicked {
+    } else if r.clicked && !crate::timeline::pick_feature_into_dialog(app, id, ui.input(|i| i.modifiers)) {
+        // An open dialog whose active input takes features gets the row, as in the other
+        // History layouts (#13170).
         click_select(app, ui, order_key, Some(Sel::Feature { id }));
     }
     if let Some(at) = r.secondary {

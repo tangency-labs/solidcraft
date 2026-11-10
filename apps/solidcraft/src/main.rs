@@ -261,7 +261,11 @@ impl eframe::App for App {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
     }
+    /// The frame's input before egui reads it: the release of a press handed to a window move
+    /// or resize, the macOS menu and full-screen fixes, the 3D mouse, then the app's own hook.
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        // First: the release of a press the last frame handed to a window move or resize (#13334).
+        solidcraft_ui_egui::window_chrome::release_press_taken_by_os(ctx, raw);
         #[cfg(target_os = "macos")]
         if let Some(menu) = &mut self.native_menu {
             menu.raw_input_hook(&mut self.solve, ctx, raw);
@@ -844,16 +848,10 @@ fn backend_preference() -> Option<String> {
     graphics().and_then(|v| v.get("backend").and_then(serde_json::Value::as_str).map(str::to_string))
 }
 
-/// The viewport scene's sample count: the app's anti-aliasing (the window's pass is 1x), clamped
-/// by the backend's policy (OpenGL renders 1x, see `effective_msaa_samples`). A count the device
-/// cannot render with falls back to the supported default.
+/// The viewport scene's sample count, by the rule the web app shares
+/// (`solidcraft_ui_egui::gpu::scene_samples`).
 fn scene_samples(backend: eframe::wgpu::Backend, samples: u32, supported: &[u32]) -> u32 {
-    let requested = eframe::egui_wgpu::effective_msaa_samples(backend, samples.max(1));
-    if requested <= 1 || supported.is_empty() || supported.contains(&requested) {
-        requested
-    } else {
-        supported.iter().copied().filter(|&n| n <= solidcraft_ui_egui::prefs::Prefs::default().msaa).max().unwrap_or(1)
-    }
+    solidcraft_ui_egui::gpu::scene_samples(backend, samples, supported)
 }
 
 /// Keep the default until the installed renderer's startup check proves a fallback is needed.
@@ -936,6 +934,7 @@ fn main() -> eframe::Result {
     objc2_foundation::NSProcessInfo::processInfo().setProcessName(objc2_foundation::ns_string!("SolidCraft"));
     mark("main");
     solidcraft_ui_egui::i18n::install();
+    solidcraft_ui_egui::icon_svg::install();
     // On OCLP-patched Macs, wgpu picks a Metal Shading Language standard that the system's
     // compiler refuses (`invalid value 'metal3.2'`), because the patched OS reports a newer
     // macOS version than the GPU's Metal compiler supports. Re-launching with

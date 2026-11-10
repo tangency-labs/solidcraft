@@ -241,11 +241,6 @@ pub fn publish_tab(tab: &str, sketch_open: bool, tool_active: bool, ctx: &egui::
     accent.set_current(tab, sketch_open, tool_active, ctx);
 }
 
-/// The common conversion boundary for compiled icon palette data.
-pub(crate) const fn icon_color(rgb: [u8; 3]) -> Color32 {
-    Color32::from_rgb(rgb[0], rgb[1], rgb[2])
-}
-
 /// The 3D view's colours (#4146): the theme's own, or the built-in Light or Dark theme's whatever
 /// the window uses, so a dark window can show the model on a light view and the other way round.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]

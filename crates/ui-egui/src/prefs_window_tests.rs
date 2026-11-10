@@ -1,5 +1,5 @@
 use super::*;
-use crate::test_support::{key, pointer};
+use crate::ui_kit::test_support::{key, pointer};
 use solidcraft_ui_registry as registry;
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -117,7 +117,7 @@ fn frame_as(ctx: &egui::Context, fake: &mut Fake, events: Vec<egui::Event>, pref
     registry::clear_handles();
     fake.drawn.clear();
     let mut pressed = None;
-    crate::test_support::frame(
+    crate::ui_kit::test_support::raw_frame(
         ctx,
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 900.0))),
@@ -137,8 +137,7 @@ fn click(ctx: &egui::Context, fake: &mut Fake, handle: &str) -> Option<Button> {
 }
 
 fn opened() -> (egui::Context, Fake) {
-    crate::i18n::install();
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let mut fake = Fake::default();
     fake.window.open_at(0, PAGES.len());
     for _ in 0..3 {
@@ -249,8 +248,7 @@ fn a_hostile_page_index_shows_the_last_page_and_no_pages_draws_no_body() {
 
 #[test]
 fn every_name_the_window_publishes_starts_with_the_hosts_prefix() {
-    crate::i18n::install();
-    let ctx = crate::fonts::test_context();
+    let ctx = crate::ui_kit::test_support::context();
     let mut fake = Fake::default();
     fake.window.open_at(1, PAGES.len());
     let no_prefs_names = |when: &str| {

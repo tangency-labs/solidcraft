@@ -16,12 +16,12 @@ use solidcraft_geom::Aabb3;
 use super::CommandSpec;
 use crate::params::{bad, bool_, num, str_, vec3};
 use crate::schema::joints::{
-    AsBuiltJointParams, CamLift, CamParams, CamResult, ContactStop, CouplingResult, CreateJointParams, DeleteJointParams, DeleteJointResult,
-    DriveJointParams, DriveJointResult, EditJointResult, FloatingChain, GearParams, HeldValue, InspectJointParams, InspectJointResult,
-    JointAddedResult, JointDeleted, JointFrame, JointLimitsParams, JointProblem, LimitSide, LimitStop, LinkInfo, ListJointsParams, ListJointsResult,
-    ListedJoint, ListedOrigin, LoopStop, MakeJointOriginParams, MakeJointOriginResult, MotionLinkParams, NamedValue, OccurrenceDof, RackPinionParams,
-    ReachLoopStop, ReachParams, ReachResult, ReachedJoint, RigidGroupParams, RigidGroupResult, ScrewParams, SolveJointsParams, SolveReport,
-    SolveResult, ValueUnit,
+    AsBuiltJointParams, BudgetStop, CamLift, CamParams, CamResult, ContactStop, CouplingResult, CreateJointParams, DeleteJointParams,
+    DeleteJointResult, DriveJointParams, DriveJointResult, EditJointResult, FloatingChain, GearParams, HeldValue, InspectJointParams,
+    InspectJointResult, JointAddedResult, JointDeleted, JointFrame, JointLimitsParams, JointProblem, LimitSide, LimitStop, LinkInfo,
+    ListJointsParams, ListJointsResult, ListedJoint, ListedOrigin, LoopStop, MakeJointOriginParams, MakeJointOriginResult, MotionLinkParams,
+    NamedValue, OccurrenceDof, RackPinionParams, ReachLoopStop, ReachParams, ReachResult, ReachedJoint, RigidGroupParams, RigidGroupResult,
+    ScrewParams, SolveJointsParams, SolveReport, SolveResult, ValueUnit,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -101,7 +101,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          held: [{name, requested, value, unit, why}] for each driven value that ended up elsewhere (a motion link sets it, as a screw's \
          travel follows its turn; a limit; contact; a closed loop); moved: whether any occurrence moved; \
          reason: why the joint can move nothing (suppressed: nothing is stored; its origins lost; its chain joined to nothing grounded → unconnected: \
-         the occurrence named; or, when nothing moved, the first held value's why); index?: zero-based coordinate to drive with value (the other coordinates follow); continuous?: bool (drag frame, suppress UI echo)",
+         the occurrence named; or, when nothing moved, the first held value's why); index?: zero-based coordinate to drive with value (the other coordinates follow); continuous?: bool (drag frame, suppress UI echo); stop_at_budget?: bool (default false: a contact check past its sample or work budget fails the drive; true: the drive stops at the last placement checked clear → stopped_by_budget {budget: samples|work|intersections, fraction})",
     ),
     CommandSpec::new("joint.reach", "Reach Point", crate::checked!("joint.reach", reach))
         .icon("reach")
@@ -213,7 +213,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("interference")
         .noundo()
         .params(
-        "bodies?: [names] (default: all, in world placement; a name that is no body is refused); budget_s?: seconds (default 240, at most 86400: pairs not finished by then are listed in unchecked as \"not checked: the time budget … ran out\" and the call returns) → interferences: pairs that overlap with the overlap volume, area, bounding box and centre; unchecked: [{a, b, reason}], the pairs that could not be checked, with the reason, and each mesh body (STL, 3MF or OBJ import: not intersected) as {a: name, b: null, reason: \"mesh body: not checked\"}, so count: 0 is not read as no overlap (checked counts the solid bodies). Bodies are pruned by bounding box first, then by their display meshes (pairs whose meshes stay apart by more than their chord tolerances, neither inside the other, are clear without a boolean), so any number of bodies is fine; the pairs left are intersected exactly, in parallel on desktop, the slowest first; at most 20000 pairs whose boxes overlap are intersected per call (truncated: true and skipped_pairs: n say when more were left out). Also: pairs_candidate (boxes overlap), pairs_cleared (by the meshes), pairs_intersected, pairs_not_checked, budget_exceeded, threads (worker threads; 0: on the calling thread), boolean_ms and tessellate_ms (kernel time summed over the pairs), slowest: [{a, b, ms, boolean_ms, tessellate_ms}] and ms",
+        "bodies?: [names] (default: all, in world placement; a name that is no body is refused); budget_s?: seconds (default 240, at most 86400: pairs not finished by then are listed in unchecked as \"not checked: the time budget … ran out\" and the call returns); exclude_pairs?: [[a, b]] (pairs left out, such as a pin in its hole: each side a body's world name or an occurrence id|name, matching every body under it; pairs_excluded counts them) → interferences: pairs that overlap with the overlap volume, area, bounding box and centre, and a_part, b_part: {component, path: [occurrence names], path_ids} where each body sits (also on unchecked pairs); unchecked: [{a, b, reason}], the pairs that could not be checked, with the reason, and each mesh body (STL, 3MF or OBJ import: not intersected) as {a: name, b: null, reason: \"mesh body: not checked\"}, so count: 0 is not read as no overlap (checked counts the solid bodies). Bodies are pruned by bounding box first, then by their display meshes (pairs whose meshes stay apart by more than their chord tolerances, neither inside the other, are clear without a boolean), so any number of bodies is fine; the pairs left are intersected exactly, in parallel on desktop, the slowest first; at most 20000 pairs whose boxes overlap are intersected per call (truncated: true and skipped_pairs: n say when more were left out). Also: pairs_candidate (boxes overlap), pairs_cleared (by the meshes), pairs_intersected, pairs_not_checked, pairs_excluded, budget_exceeded, threads (worker threads; 0: on the calling thread), boolean_ms and tessellate_ms (kernel time summed over the pairs), slowest: [{a, b, ms, boolean_ms, tessellate_ms}] and ms",
     ),
 ];
 
@@ -1215,7 +1215,12 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
         for &i in &driven {
             j.exprs.set_value(i, None);
         }
-        if let Some(index) = index { super::motion::drive_joint_index(s, id, q, index)? } else { super::motion::drive_joint(s, id, q, given)? }
+        let stop_at_budget = bool_(p, "stop_at_budget").unwrap_or(false);
+        if let Some(index) = index {
+            super::motion::drive_joint_index(s, id, q, index, stop_at_budget)?
+        } else {
+            super::motion::drive_joint(s, id, q, given, stop_at_budget)?
+        }
     };
     let sol = solution(s, &BTreeMap::new(), response_analysis(p));
     // How motion stopped, as `motion::drive_with_contact` says: an object, or null.
@@ -1223,6 +1228,7 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
     let stopped_by_contact =
         stop("stopped_by_contact").map(serde_json::from_value::<ContactStop>).transpose().map_err(|e| bad(cmd, e.to_string()))?;
     let stopped_by_loop = stop("stopped_by_loop").map(serde_json::from_value::<LoopStop>).transpose().map_err(|e| bad(cmd, e.to_string()))?;
+    let stopped_by_budget = stop("stopped_by_budget").map(serde_json::from_value::<BudgetStop>).transpose().map_err(|e| bad(cmd, e.to_string()))?;
     let mut out = DriveJointResult {
         solved: solve_report(&sol, p),
         joint: id,
@@ -1230,6 +1236,7 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
         continuous: (bool_(p, "continuous") == Some(true)).then_some(true),
         stopped_by_contact,
         stopped_by_loop,
+        stopped_by_budget,
         moved: super::motion::moved(&before, &super::motion::positions(s)).next().is_some(),
         requested: None,
         held: None,
@@ -1294,6 +1301,8 @@ fn held_values(s: &Session, j: &Joint, requested: &[f64], driven: &[usize], r: &
             format!("{name} stopped at contact")
         } else if r["stopped_by_loop"].is_object() {
             format!("{name} stopped where a closed loop can no longer close")
+        } else if r.get("stopped_by_budget").is_some_and(Value::is_object) {
+            format!("{name} stopped where the contact check ran out of budget")
         } else {
             continue;
         };

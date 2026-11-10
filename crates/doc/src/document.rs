@@ -1980,7 +1980,8 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         skip: Vec<u64>,
     },
-    /// Rebuild an upstream constant-section mesh with analytic planar/cylindrical faces.
+    /// Rebuild an upstream mesh as a solid: analytic planar/cylindrical faces for a
+    /// constant-section part, planar facets for any other closed mesh.
     MeshConvert {
         body: BodyName,
         #[walk(length = "Tolerance")]
@@ -4476,6 +4477,18 @@ impl Document {
         let name = self.next_d_name();
         self.params.push(Param { name: name.clone(), expr: expr_s.into(), unit: unit.into(), comment: String::new(), model: true });
         name
+    }
+
+    /// Create a model parameter with a name the caller chose (checked: valid and free).
+    pub fn new_named_model_param(&mut self, name: &str, expr_s: &str, unit: &str) -> Result<String> {
+        if let Some(why) = Self::param_name_problem(name) {
+            return Err(DocError::Invalid(why));
+        }
+        if self.name_taken(name) {
+            return Err(DocError::Invalid(format!("there is already a parameter `{name}`")));
+        }
+        self.params.push(Param { name: name.into(), expr: expr_s.into(), unit: unit.into(), comment: String::new(), model: true });
+        Ok(name.into())
     }
 
     /// Evaluate an expression against the document's parameters.

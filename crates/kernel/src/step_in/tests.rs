@@ -1,5 +1,6 @@
 use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
+use solidcraft_geom::tess::EvaluateMesh as _;
 
 use super::*;
 use crate::{BoolOp, boolean, box_solid, cylinder, extrude, fillet, measure, revolve, sphere, step_export, torus};
@@ -2048,7 +2049,7 @@ fn extruded_ellipse_patch_crossing_profile_seam_stays_trimmed() {
             assert_eq!(imported.bodies[0].file_faces, 1);
             let plan = body.mesh_plan(&crate::MeshTolerance::chord(0.01)).unwrap();
             for mesh in [
-                plan.evaluate(),
+                plan.evaluate_mesh(),
                 body.mesh(&crate::MeshTolerance { chord: 0.01, angle: Some(crate::DISPLAY_ANGLE) }).unwrap(),
                 body.mesh(&crate::MeshTolerance { chord: 0.01, angle: Some(crate::DISPLAY_ANGLE) }).unwrap(),
                 body.mesh(&crate::MeshTolerance::chord(0.01)).unwrap(),
@@ -2995,4 +2996,49 @@ fn a_torus_face_round_most_of_its_tube_is_formed_within_one_turn_of_it() {
         assert!(rel(m.volume, volume) < 1e-6, "{tube:?}: volume {} vs {volume}", m.volume);
         assert!(rel(m.area, area) < 1e-6, "{tube:?}: area {} vs {area}", m.area);
     }
+}
+
+/// #12291: a part styled with a surface colour and, beside it, a curve style (its edges) is the
+/// surface colour, whichever style the file lists first or last. The edge's colour once painted
+/// the whole solid, because the first colour found was taken.
+#[test]
+fn a_curve_style_beside_a_surface_style_does_not_colour_the_solid() {
+    let surface = "#71=PRESENTATION_STYLE_ASSIGNMENT((#72));\n#72=SURFACE_STYLE_USAGE(.BOTH.,#73);\n#73=SURFACE_SIDE_STYLE('',(#74));\n#74=SURFACE_STYLE_FILL_AREA(#75);\n#75=FILL_AREA_STYLE('',(#76));\n#76=FILL_AREA_STYLE_COLOUR('',#77);\n#77=COLOUR_RGB('',1.,0.5,0.);\n";
+    let curve = "#81=PRESENTATION_STYLE_ASSIGNMENT((#82));\n#82=CURVE_STYLE('',#83,POSITIVE_LENGTH_MEASURE(0.1),#84);\n#83=DRAUGHTING_PRE_DEFINED_CURVE_FONT('continuous');\n#84=COLOUR_RGB('',0.,0.,1.);\n";
+    for (list, name) in [("(#71,#81)", "surface first"), ("(#81,#71)", "curve first")] {
+        let mut t = String::from(HEAD);
+        t += &cube_entities();
+        t += &context(20, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+        t += "#60=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#101),#20);\n";
+        t += &format!("#70=STYLED_ITEM('',{list},#101);\n");
+        t += surface;
+        t += curve;
+        t += TAIL;
+        let imp = step_import(&t).unwrap();
+        assert_eq!(imp.bodies.len(), 1, "{name}: {:?}", imp.warnings);
+        assert_eq!(imp.bodies[0].color, Some([1.0, 0.5, 0.0]), "{name}");
+    }
+    // A surface style whose boundary lines are drawn in another colour is still its fill's colour.
+    let mut t = String::from(HEAD);
+    t += &cube_entities();
+    t += &context(20, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += "#60=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#101),#20);
+#70=STYLED_ITEM('',(#71),#101);
+";
+    t += &surface.replace("SURFACE_SIDE_STYLE('',(#74))", "SURFACE_SIDE_STYLE('',(#74,#78))");
+    t += "#78=SURFACE_STYLE_BOUNDARY(#79);
+#79=CURVE_STYLE_RENDERING(.CONSTANT_SHADING.,#80);
+#80=SURFACE_RENDERING_PROPERTIES(#84);
+#84=COLOUR_RGB('',0.,0.,1.);
+";
+    t += TAIL;
+    assert_eq!(step_import(&t).unwrap().bodies[0].color, Some([1.0, 0.5, 0.0]), "boundary lines");
+    // A solid styled with a curve style alone has no colour of its own.
+    let mut t = String::from(HEAD);
+    t += &cube_entities();
+    t += &context(20, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += "#60=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#101),#20);\n#70=STYLED_ITEM('',(#81),#101);\n";
+    t += curve;
+    t += TAIL;
+    assert_eq!(step_import(&t).unwrap().bodies[0].color, None);
 }

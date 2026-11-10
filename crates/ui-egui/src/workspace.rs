@@ -1351,7 +1351,14 @@ mod tests {
         s.execute("file.export", &json!({"path": h.dir.join("part2.step")})).unwrap();
         h.step(&json!({"choose_file": "part1.solidcraft"})).unwrap();
         h.step(&json!({"start": "component.insert_design"})).unwrap();
-        h.frames(3);
+        // The file pick and the insert finish on later frames; wait for them like the STEP case below
+        // instead of assuming three frames is enough on a loaded machine.
+        for _ in 0..600 {
+            if h.app.session.world_state().unwrap().bodies.len() == 1 {
+                break;
+            }
+            h.frames(1);
+        }
         let links = h.app.session.execute("component.links", &json!({})).unwrap();
         assert_eq!(links["links"][0]["name"], "part1", "{links}");
         assert_eq!(h.app.session.world_state().unwrap().bodies.len(), 1);
