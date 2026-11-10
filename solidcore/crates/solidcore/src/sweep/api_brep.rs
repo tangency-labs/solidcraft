@@ -78,6 +78,10 @@
 //!   signature and does no extra work; the fork's `bProfileAtPathStart` is
 //!   [`SweepOptions::profile_at_path_start`] (WR-522), off by default.
 //! - Cancellation: a sweep under a fired cancel token (#2136, #2372) returns `Cancelled`, not `Ok`.
+//! - **A pipe past a bend's centre (WR-774, tangency-labs/solidcraft#13766).**
+//!   [`create_pipe_sweep`] refuses, as `InvalidInput`, a radius that reaches the centre of a
+//!   bend in its path. Upstream checks only that the radius is above zero, and builds that
+//!   pipe with its wall folded through itself.
 
 use crate::curve::curve::p2::CurveKind;
 use crate::curve::curve::Curve;
@@ -87,6 +91,7 @@ use crate::geom::tol::ZONE_TOL_3D;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_curve::p1::BSplineCurve;
+use crate::nurbs::knots::Side;
 use crate::primitive::primitive_creation::model::PrimitiveModel;
 use crate::primitive::primitive_creation::p1::PrimitiveCreation;
 use crate::primitive::primitive_creation::p3::RepeatedSweepOptions;
@@ -297,8 +302,10 @@ pub fn create_draft_sweep(
 ///
 /// # Errors
 ///
-/// `InvalidInput` for no path curve or a radius `<= 0` (a NaN radius passes, as
-/// upstream); [`SolidError::Unported`] otherwise
+/// `InvalidInput` for no path curve, a radius `<= 0` (a NaN radius passes, as
+/// upstream), or a radius that reaches the centre of a bend in the path
+/// ([`path_bends_within`]; not upstream, which builds that pipe with its wall folded
+/// through itself, WR-774); [`SolidError::Unported`] otherwise
 /// (`SmBrep::SmBrep`, until the B-rep constructor is ported).
 pub fn create_pipe_sweep(
     k: &mut Kernel,
@@ -315,6 +322,13 @@ pub fn create_pipe_sweep(
     }
 
     let path = bspline_of(path_curve, OP_PIPE)?;
+    if path_bends_within(&path, pipe_radius) {
+        return Err(SolidError::invalid_input(
+            OP_PIPE,
+            "the pipe radius reaches the centre of a bend in the path, so the pipe's wall \
+             would fold through itself",
+        ));
+    }
     let approx_tol = 0.0;
     let translational_sweep = false;
     build(k, |pc, model| {
@@ -331,6 +345,57 @@ pub fn create_pipe_sweep(
             &mut side,
             &mut end,
         )
+    })
+}
+
+/// The samples per knot span, both span ends included, at which [`path_bends_within`]
+/// measures a pipe path's curvature. A span is one polynomial or rational piece, whose
+/// curvature rises and falls only a few times, so 16 samples find a bend well inside the
+/// pipe at a cost that is small beside the sweep itself. A bend tighter than the pipe that
+/// lies between two samples is missed, and that pipe is built as before.
+const PIPE_BEND_SAMPLES_PER_SPAN: u32 = 16;
+
+/// Whether `path` bends somewhere with a radius of at most `radius`, that is, with
+/// curvature at least `1 / radius`. A pipe of that radius folds its wall through itself on
+/// the inside of such a bend: the circles of neighbouring sections cross there, so the
+/// swept surface is singular (Maekawa, Patrikalakis, Sakkalis and Yu, "Analysis and
+/// applications of pipe surfaces", CAGD 15(5), 1998).
+///
+/// Measured at [`PIPE_BEND_SAMPLES_PER_SPAN`] samples per knot span. A `true` is proved by
+/// the sample that found the bend; a `false` only says that no sample found one. A sample
+/// whose curvature cannot be computed (a zero-length tangent) proves nothing and is
+/// skipped. A pipe that crosses itself between distant parts of its path is not found
+/// here.
+fn path_bends_within(path: &BSplineCurve, radius: f64) -> bool {
+    let Some(nurb) = path.nurb.as_ref() else {
+        return false;
+    };
+    // A clamped curve's spans run between knots[degree] and knots[n + 1].
+    let Some(span_knots) = nurb.knots().get(nurb.degree()..=nurb.n() + 1) else {
+        return false;
+    };
+    let reaches = |u: f64, side: Side| {
+        nurb.eval_curvature(u, side, false)
+            .is_ok_and(|c| c.kappa * radius >= 1.0)
+    };
+    span_knots.windows(2).any(|ends| {
+        let &[start, end] = ends else {
+            return false;
+        };
+        // A repeated knot spans nothing.
+        if end <= start {
+            return false;
+        }
+        (0..=PIPE_BEND_SAMPLES_PER_SPAN).any(|i| {
+            let at = f64::from(i) / f64::from(PIPE_BEND_SAMPLES_PER_SPAN);
+            // At its end knot a span is evaluated from its own side, not the next span's.
+            let side = if i == PIPE_BEND_SAMPLES_PER_SPAN {
+                Side::Right
+            } else {
+                Side::Left
+            };
+            reaches(start + at * (end - start), side)
+        })
     })
 }
 
