@@ -736,11 +736,18 @@ impl ScrewOffsetSection {
         Ok((e, cross(axis, e), axis))
     }
 
+    /// At distance exactly zero the section is the source line itself, so its
+    /// normal is never normalised: a line whose normal vanishes somewhere (a
+    /// skew line, one crossing the axis) still has an exact enclosure.
     fn point_box(&self, t: Ivl) -> Box3 {
+        let line = add(self.start_box, scale(self.tangent_box, t));
+        if self.distance == 0.0 {
+            return line;
+        }
         let normal = self.normal_box(t);
         let inverse_length = Ivl::from(1.0) / norm_squared(normal).sqrt();
         add(
-            add(self.start_box, scale(self.tangent_box, t)),
+            line,
             scale(normal, inverse_length * Ivl::from(self.distance)),
         )
     }
@@ -761,22 +768,28 @@ impl ScrewOffsetSection {
     /// Triangle bounds for Rodrigues and its derivative remain valid for the
     /// rounded stored axis. These bounds convert pcurve coordinate certificates
     /// to model units; singular or unbounded source intervals are refused.
+    /// At distance exactly zero the section's tangent is the source tangent and
+    /// the normal is not needed, so a vanishing normal is not refused.
     pub(crate) fn speed_upper_bounds(&self, parameter: Ivl) -> Result<[f64; 2]> {
-        let v = self.normal_box(parameter);
-        let length = norm_squared(v).sqrt();
-        if !length.lo.is_finite() || length.lo <= 0.0 {
-            return Err(bad("pcurve range has no regular normal enclosure"));
-        }
-        let inverse = Ivl::from(1.0) / length;
-        let normal = scale(v, inverse);
-        let dn = scale(
-            sub(
-                self.normal_rate_box,
-                scale(normal, dot(normal, self.normal_rate_box)),
-            ),
-            inverse,
-        );
-        let tangent = add(self.tangent_box, scale(dn, Ivl::from(self.distance)));
+        let tangent = if self.distance == 0.0 {
+            self.tangent_box
+        } else {
+            let v = self.normal_box(parameter);
+            let length = norm_squared(v).sqrt();
+            if !length.lo.is_finite() || length.lo <= 0.0 {
+                return Err(bad("pcurve range has no regular normal enclosure"));
+            }
+            let inverse = Ivl::from(1.0) / length;
+            let normal = scale(v, inverse);
+            let dn = scale(
+                sub(
+                    self.normal_rate_box,
+                    scale(normal, dot(normal, self.normal_rate_box)),
+                ),
+                inverse,
+            );
+            add(self.tangent_box, scale(dn, Ivl::from(self.distance)))
+        };
         let k = boxed(self.axis);
         let q = norm_squared(k);
         let rotation = Ivl::from(1.0) + q.sqrt() + Ivl::from(2.0) * q;
@@ -971,6 +984,34 @@ mod tests {
                 assert!(tangent.dot(normal).abs() < 1e-13);
             }
         }
+    }
+
+    /// A skew line whose screw velocity is parallel to it at its midpoint has a
+    /// vanishing surface normal there. At distance zero the section is the line
+    /// itself: its point and speed enclosures never normalise that normal, so
+    /// they exist and contain the exact line; any nonzero offset still refuses.
+    #[test]
+    fn a_zero_offset_encloses_a_line_whose_normal_vanishes() {
+        let rise = 2.5 / TAU;
+        let slope = rise / 8.0;
+        let start = Vec3::new(8.0, -1.0, -slope);
+        let end = Vec3::new(8.0, 1.0, slope);
+        let section = ScrewOffsetSection::new(start, end, &motion(), 0.0).unwrap();
+        assert!(norm_squared(section.normal_box(Ivl::new(0.0, 1.0))).lo <= 0.0);
+        let whole = Ivl::new(0.0, 1.0);
+        let point = section.point_enclosure(whole).unwrap();
+        for x in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let exact = start + (end - start) * x;
+            for (enclosure, value) in point.iter().zip([exact.x, exact.y, exact.z]) {
+                assert!(enclosure.lo <= value && value <= enclosure.hi);
+            }
+        }
+        let [profile, turn] = section.speed_upper_bounds(whole).unwrap();
+        assert!(profile >= (end - start).length());
+        assert!(turn >= Vec3::new(1.0, 8.0, rise).length());
+        let offset = ScrewOffsetSection::new(start, end, &motion(), 0.1).unwrap();
+        assert!(offset.speed_upper_bounds(whole).is_err());
+        assert!(offset.point_enclosure(whole).is_err());
     }
 
     #[test]

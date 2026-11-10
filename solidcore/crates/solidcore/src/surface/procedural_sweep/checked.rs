@@ -201,7 +201,7 @@ impl ProceduralSweep {
         Ok(result)
     }
 
-    fn checked_source_class(&self) -> Result<bool> {
+    pub(super) fn checked_source_class(&self) -> Result<bool> {
         // canonical() dehomogenizes rational controls with rounded division.
         // Until those quotient intervals are retained, they cannot define the
         // independent exact source used by this runtime certificate.
@@ -227,6 +227,22 @@ impl ProceduralSweep {
         // either identical successful proof is valid. No failed proof is cached.
         let _ = self.runtime_allowance.set(cap);
         Ok(cap)
+    }
+
+    /// The runtime evaluation allowance when this definition's class has one:
+    /// `Ok(None)` for the classes the checked evaluator does not cover (rational
+    /// source controls; no invariant affine screw section, such as a varying
+    /// radial law on a tapered thread or a path sweep), and the allowance's own
+    /// error for a covered class whose proof fails (a nonfinite cap, missing
+    /// stations, an enclosure that cannot be formed).
+    ///
+    /// # Errors
+    /// Those of inspecting the class and of [`Self::runtime_evaluation_allowance`].
+    pub(crate) fn runtime_evaluation_allowance_if_proved(&self) -> Result<Option<f64>> {
+        if !self.checked_source_class()? || self.screw_offset_section()?.is_none() {
+            return Ok(None);
+        }
+        self.runtime_evaluation_allowance().map(Some)
     }
 
     /// Definition-field editors must call this before changing S or its map.
@@ -268,8 +284,6 @@ impl ProceduralSweep {
         let mt = map_size(Ivl::new(first, last), a1, b1)?;
         let mut rate = 0.0_f64;
         for pair in self.stations.windows(2) {
-            #[cfg(test)]
-            ALLOWANCE_SPAN_PROOFS.with(|count| count.set(count.get() + 1));
             let [a, b] = *pair else { continue };
             let w = Ivl::from(b) - Ivl::from(a);
             rate = rate.max((Ivl::from(4.0) * tan_certified(w / Ivl::from(4.0)) / w).hi);
@@ -387,11 +401,6 @@ impl ProceduralSweep {
 }
 
 #[cfg(test)]
-thread_local! {
-    static ALLOWANCE_SPAN_PROOFS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
     #[test]
@@ -408,6 +417,59 @@ mod tests {
         assert!(Rotation::new(3e15).is_err());
     }
 
+    /// A class without a checked evaluator (rational controls, a varying radial
+    /// law) has no allowance, and says so with `None`; a covered class whose
+    /// proof fails is an error, never mistaken for a class refusal.
+    #[test]
+    fn allowance_if_proved_separates_class_refusals_from_failed_proofs() {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::nurbs::crv_basic::Curve as NlCurve;
+        use crate::nurbs::math::CPoint;
+        use crate::surface::procedural_sweep::{RadialLaw, ScrewMotion};
+
+        let (start, end) = (Vec3::new(8.0, 0.0, 0.0), Vec3::new(10.0, 0.0, 1.0));
+        let stations = [0.0, 0.3, 0.6];
+        let line = BSplineCurve::create_line_segment(3, start, end).unwrap();
+        let motion = ScrewMotion::new(Vec3::ZERO, Vec3::Z, 2.5, None).unwrap();
+        let plain = ProceduralSweep::create(&line, motion.clone(), &stations, 0.15).unwrap();
+        assert_eq!(
+            plain.runtime_evaluation_allowance_if_proved().unwrap(),
+            Some(plain.compute_runtime_evaluation_allowance().unwrap())
+        );
+
+        // the same line, both controls homogeneous with weight 2
+        let pw = vec![
+            CPoint::new(16.0, 0.0, 0.0, 2.0),
+            CPoint::new(20.0, 0.0, 2.0, 2.0),
+        ];
+        let rational = BSplineCurve::from_nurb(
+            NlCurve::new(pw, 1, vec![0.0, 0.0, 1.0, 1.0]).unwrap(),
+            3,
+            false,
+        );
+        assert!(rational.is_rational().unwrap());
+        let weighted = ProceduralSweep::create(&rational, motion, &stations, 0.15).unwrap();
+        assert_eq!(
+            weighted.runtime_evaluation_allowance_if_proved().unwrap(),
+            None
+        );
+
+        let law = RadialLaw::new(Vec3::X, vec![0.0, 0.6], vec![0.0, 0.1]).unwrap();
+        let tapered = ScrewMotion::new(Vec3::ZERO, Vec3::Z, 2.5, Some(law)).unwrap();
+        let tapered = ProceduralSweep::create(&line, tapered, &stations, 0.15).unwrap();
+        assert_eq!(
+            tapered.runtime_evaluation_allowance_if_proved().unwrap(),
+            None
+        );
+
+        let mut unstationed = plain.clone();
+        unstationed.invalidate_runtime_allowance();
+        unstationed.stations.clear();
+        assert!(unstationed
+            .runtime_evaluation_allowance_if_proved()
+            .is_err());
+    }
+
     #[test]
     fn point_checks_reuse_the_uniform_station_proof() {
         use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -422,7 +484,12 @@ mod tests {
         let motion = ScrewMotion::new(Vec3::ZERO, Vec3::Z, 2.5, None).unwrap();
         let stations = (0..=560).map(|i| f64::from(i) * 0.1).collect::<Vec<_>>();
         let definition = ProceduralSweep::create(&profile, motion, &stations, 0.05).unwrap();
-        ALLOWANCE_SPAN_PROOFS.with(|count| count.set(0));
+        let proved = definition.compute_runtime_evaluation_allowance().unwrap();
+        let first = Point2::new(0.37, 0.0);
+        let point = definition.evaluate_definition(first, 0, 0).unwrap()[0][0];
+        definition.verify_runtime_point(first, point).unwrap();
+        // The first point check proves the uniform station cap once and keeps it.
+        assert_eq!(definition.runtime_allowance.get().copied(), Some(proved));
         for i in 0..16 {
             let uv = Point2::new(0.37, f64::from(i) * 0.1);
             let point = definition.evaluate_definition(uv, 0, 0).unwrap()[0][0];
@@ -431,13 +498,12 @@ mod tests {
                 .verify_runtime_point(uv, point + Vec3::X)
                 .is_err());
         }
-        let proofs = ALLOWANCE_SPAN_PROOFS.with(std::cell::Cell::get);
-        assert_eq!(proofs, 560, "uniform station proof was repeated per point");
+        assert_eq!(definition.runtime_allowance.get().copied(), Some(proved));
 
         let original = definition.runtime_evaluation_allowance().unwrap();
         let mut changed = definition.clone();
+        assert_eq!(changed.runtime_allowance.get().copied(), Some(original));
         assert_eq!(changed.runtime_evaluation_allowance().unwrap(), original);
-        assert_eq!(ALLOWANCE_SPAN_PROOFS.with(std::cell::Cell::get), 560);
         changed.reparametrize_map(true, 1e8, -2.0);
         assert!(changed.runtime_allowance.get().is_none());
         let mapped = changed.runtime_evaluation_allowance().unwrap();
