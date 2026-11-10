@@ -23,8 +23,9 @@ use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use solidcore_ops::sweep::{
     arcs_on_one_circle, curves_meet, extrude, face_section, join_arcs, loft, loft_to_point,
-    planar_faces, project_curves, revolve, screw_sweep, sweep_placed, sweep_stations, Affine,
-    CornerRefusal, Curve, DraftCorner, Ends, Join, PathCheck, SweepFrame, SweepRoute, Verdict,
+    planar_faces, project_curves, revolve, screw_sweep, screw_sweep_with_faces, sweep_placed,
+    sweep_stations, Affine, CornerRefusal, Curve, DraftCorner, Ends, Join, PathCheck, SweepFrame,
+    SweepRoute, Verdict,
 };
 use solidcore_ops::{make_box, Body, Error};
 
@@ -1029,4 +1030,61 @@ fn a_runout_groove_cut_from_a_cylinder_keeps_its_axial_wall_exact() {
         })
         .count();
     assert_eq!(lost, 0, "a swept wall lost its definition");
+}
+
+/// The square thread of `screw_sweep_square_thread` in both face layouts: two turns cut its
+/// two cylinder walls into four half turns each; joined, each spline wall is one face (2 + 8 +
+/// 2 caps), in half turns it is four (8 + 8 + 2). The solid is the same.
+#[test]
+fn a_screw_sweep_lays_its_spline_walls_out_as_asked() {
+    use solidcore_ops::sweep::ScrewFaces;
+    let profile = polygon(&[
+        [5.0, 0.0, 0.0],
+        [6.0, 0.0, 0.0],
+        [6.0, 0.0, 1.0],
+        [5.0, 0.0, 1.0],
+    ]);
+    let made =
+        |faces| screw_sweep_with_faces(&profile, [0.0; 3], Z, 2.0, 2.0, None, 1e-5, faces).unwrap();
+    let (joined, halves) = (made(ScrewFaces::Joined), made(ScrewFaces::HalfTurns));
+    assert_eq!(joined.counts().unwrap()[0], 12);
+    assert_eq!(halves.counts().unwrap()[0], 18);
+    let default = screw_sweep(&profile, [0.0; 3], Z, 2.0, 2.0, None, 1e-5).unwrap();
+    assert_eq!(default.counts().unwrap(), joined.counts().unwrap());
+    let (a, b) = (joined.volume(1e-8).unwrap(), halves.volume(1e-8).unwrap());
+    assert!((a - b).abs() <= 1e-6 * a, "joined {a}, half turns {b}");
+    assert!((a - TAU * 5.5 * 2.0).abs() <= 1e-4 * a);
+}
+
+/// A radial law splits a joined screw sweep's walls only where it changes slope: a 0.4 square
+/// tooth moved out 1 mm linearly over three turns has its four walls as one face each (none is a
+/// cylinder: the axial lines move off their radius), and a law constant, then sloping, then
+/// constant again over 3.2 turns keeps each flank in three faces and the sloping interval's
+/// axial walls in one each: eight spline walls, each carrying its definition.
+#[test]
+fn a_radial_laws_corners_bound_a_joined_screw_sweeps_walls() {
+    use solidcore_record::brep::Surface;
+    let tooth = polygon(&[
+        [4.0, 0.0, 0.0],
+        [4.4, 0.0, 0.0],
+        [4.4, 0.0, 0.4],
+        [4.0, 0.0, 0.4],
+    ]);
+    let walls = |turns, law: &[(f64, f64)]| {
+        let b = screw_sweep(&tooth, [0.0; 3], Z, 1.0, turns, Some(law), 1e-4).unwrap();
+        let (r, _) = b.to_record().unwrap();
+        let swept = r
+            .faces
+            .iter()
+            .filter(|f| matches!(f.surface, Surface::ProceduralSweep(_)))
+            .count();
+        (swept, r.faces.len(), b.volume(1e-8).unwrap())
+    };
+    // A 2 pi (c turns + the offset's integral over the turns).
+    let (swept, faces, v) = walls(3.0, &[(0.0, 0.0), (3.0, 1.0)]);
+    assert_eq!((swept, faces), (4, 6));
+    let want = 0.16 * TAU * (4.2 * 3.0 + 1.5);
+    assert!((v - want).abs() <= 1e-4 * want, "{v}, want {want}");
+    let (swept, _, _) = walls(3.2, &[(0.0, 0.0), (0.65, 0.0), (1.9, 0.4), (3.2, 0.4)]);
+    assert_eq!(swept, 8);
 }

@@ -31,7 +31,7 @@ use solidcore::surface::procedural_blend::NetScope;
 use solidcore::surface::procedural_sweep::{ProceduralSweep, MAX_HALF_ANGLE};
 use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::sweep::screw::{
-    screw_sweep, screw_sweep_body, screw_sweep_radial, screw_sweep_radial_body,
+    screw_sweep, screw_sweep_body, screw_sweep_radial, screw_sweep_radial_body, ScrewFaces,
 };
 use solidcore::topology::brep::{p1, p2};
 use solidcore::topology::face;
@@ -323,21 +323,33 @@ fn body_variants_stop_before_the_solid_check() {
     let mut k = Kernel::default();
     let c = coil().curves();
     let checked = screw_sweep(&mut k, &c, O, Z, 1.5, 2.0, 1.5e-4).unwrap();
-    let body = screw_sweep_body(&mut k, &c, O, Z, 1.5, 2.0, 1.5e-4).unwrap();
+    let body = screw_sweep_body(&mut k, &c, O, Z, 1.5, 2.0, 1.5e-4, ScrewFaces::Joined).unwrap();
     assert!(p2::is_manifold_solid(&body).unwrap());
     assert_eq!(
         p1::faces(&body, None).unwrap().len(),
         p1::faces(&checked, None).unwrap().len()
     );
     let law = [(0.0, -0.2), (2.0, 0.0)];
-    let body = screw_sweep_radial_body(&mut k, &c, O, Z, 1.5, 2.0, &law, 1.5e-4).unwrap();
+    let body =
+        screw_sweep_radial_body(&mut k, &c, O, Z, 1.5, 2.0, &law, 1.5e-4, ScrewFaces::Joined)
+            .unwrap();
     assert!(p2::is_manifold_solid(&body).unwrap());
     assert!(matches!(
-        screw_sweep_body(&mut k, &c, O, Z, 0.0, 2.0, 1.5e-4),
+        screw_sweep_body(&mut k, &c, O, Z, 0.0, 2.0, 1.5e-4, ScrewFaces::Joined),
         Err(SolidError::InvalidInput { .. })
     ));
     assert!(matches!(
-        screw_sweep_radial_body(&mut k, &c, O, Z, 1.5, 2.0, &[(3.0, 0.0)], 1.5e-4),
+        screw_sweep_radial_body(
+            &mut k,
+            &c,
+            O,
+            Z,
+            1.5,
+            2.0,
+            &[(3.0, 0.0)],
+            1.5e-4,
+            ScrewFaces::Joined
+        ),
         Err(SolidError::InvalidInput { .. })
     ));
 }
@@ -512,6 +524,84 @@ fn continuous_screw_walls_keep_their_definition_on_a_partial_last_turn() {
         let checked = check_wall(&flank, pitch, &[]);
         assert!(checked.bound <= tolerance);
     }
+}
+
+/// The half-turn layout keeps the fork's faces: an M10 groove of 3.271 turns has its two
+/// flanks in the same seven pieces as its two cylinder walls (six half turns, the last up
+/// to an eighth longer), each piece a definition over its own stations, the pieces of a
+/// flank meeting end to end; the joined layout has one face per flank. Both are the same
+/// solid.
+#[test]
+fn half_turn_screw_faces_keep_the_forks_layout_with_their_definitions() {
+    let mut k = Kernel::default();
+    let pitch = 2.5;
+    let turns = 3.271;
+    let tolerance = pitch * 1e-4;
+    let profile = m10_groove(pitch).curves();
+    let mut joined = screw_sweep_body(
+        &mut k,
+        &profile,
+        O,
+        Z,
+        pitch,
+        turns,
+        tolerance,
+        ScrewFaces::Joined,
+    )
+    .unwrap();
+    let mut halves = screw_sweep_body(
+        &mut k,
+        &profile,
+        O,
+        Z,
+        pitch,
+        turns,
+        tolerance,
+        ScrewFaces::HalfTurns,
+    )
+    .unwrap();
+    assert!(p2::is_manifold_solid(&halves).unwrap());
+    let cylinders = |b: &Brep| {
+        p1::faces(b, None)
+            .unwrap()
+            .into_iter()
+            .filter(|&f| {
+                matches!(
+                    face::p2::surface(b, f).unwrap().unwrap().kind(),
+                    SurfaceKind::Cone(c) if c.is_cylinder()
+                )
+            })
+            .count()
+    };
+    assert_eq!(walls(&joined).len(), 2);
+    assert_eq!(cylinders(&joined), 14);
+    let pieces = walls(&halves);
+    assert_eq!(pieces.len(), 14);
+    assert_eq!(cylinders(&halves), 14);
+    // Each flank's pieces cover its turns end to end, each certified on its own stations.
+    let mut spans: Vec<(f64, f64)> = pieces
+        .iter()
+        .map(|w| {
+            let def = w.procedural_sweep().unwrap().definition();
+            assert!(check_wall(w, pitch, &[]).bound <= tolerance);
+            (
+                *def.stations().first().unwrap(),
+                *def.stations().last().unwrap(),
+            )
+        })
+        .collect();
+    spans.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+    for pair in spans.chunks(2) {
+        assert_eq!(pair[0], pair[1], "both flanks are cut at the same stations");
+    }
+    let firsts: Vec<_> = spans.iter().step_by(2).collect();
+    assert_eq!(firsts.first().unwrap().0, 0.0);
+    assert_eq!(firsts.last().unwrap().1, turns * 2.0 * PI);
+    for w in firsts.windows(2) {
+        assert_eq!(w[0].1, w[1].0);
+    }
+    let (a, b) = (volume(&k, &mut joined), volume(&k, &mut halves));
+    assert!((a - b).abs() <= 1e-6 * a, "joined {a}, half turns {b}");
 }
 
 /// A caller reads through the net at a tolerance of at least the bound, and through the

@@ -51,6 +51,10 @@
 //!   definition, the profile curve under the screw motion over the wall's stations, and
 //!   the wall's certified distance from it. The wall itself is built as before; an exact
 //!   cylinder (a profile line along the axis) and the caps keep none.
+//! - **Face layout ([`ScrewFaces`], not the fork's).** The fork cuts every wall into
+//!   faces of half a turn when a cylinder wall needs them; by default each spline wall is
+//!   one face over all its turns instead. [`ScrewFaces::HalfTurns`] keeps the fork's
+//!   layout, for designs whose saved references name those faces.
 
 // The fork's range tests are NaN-safe negations (`!(x > y)`); kept as written.
 #![allow(clippy::neg_cmp_op_on_partial_ord)]
@@ -74,6 +78,20 @@ use crate::topology::brep::p8::{self, FaceBuildEnv};
 use crate::topology::{Brep, FaceId};
 
 const OP: &str = "sweep::screw::screw_sweep";
+
+/// How a screw sweep lays out the faces of its spline walls. A wall of a profile line
+/// along the axis (an exact cylinder) comes in faces of half a turn either way: a
+/// cylinder face cannot turn on itself.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ScrewFaces {
+    /// Each spline wall is one face over all its turns, split only where a radial law
+    /// changes slope.
+    #[default]
+    Joined,
+    /// Each spline wall comes in the same faces of half a turn as the cylinder walls
+    /// (the fork's layout, and this sweep's before its spline walls were joined).
+    HalfTurns,
+}
 
 /// The most turns a screw sweep takes (`SMLIB_SCREW_MAX_TURNS`).
 pub const MAX_TURNS: f64 = 200.0;
@@ -693,17 +711,25 @@ pub fn screw_sweep(
     tolerance: f64,
 ) -> Result<Brep> {
     solid(screw_sweep_body(
-        k, profile, origin, axis, pitch, turns, tolerance,
+        k,
+        profile,
+        origin,
+        axis,
+        pitch,
+        turns,
+        tolerance,
+        ScrewFaces::Joined,
     )?)
 }
 
 /// [`screw_sweep`] up to the fork's `finish`: the stitched and oriented body, its cached
 /// topology refreshed, without the check that it has faces and is a closed manifold
-/// solid.
+/// solid; its spline walls' faces laid out as `faces` says.
 ///
 /// # Errors
 ///
 /// Those of [`screw_sweep`] but the closed-solid check.
+#[allow(clippy::too_many_arguments)]
 pub fn screw_sweep_body(
     k: &mut Kernel,
     profile: &[Curve],
@@ -712,9 +738,10 @@ pub fn screw_sweep_body(
     pitch: f64,
     turns: f64,
     tolerance: f64,
+    faces: ScrewFaces,
 ) -> Result<Brep> {
     let mut m = screw_of(origin, axis, pitch, turns, tolerance)?;
-    sweep(k, profile, &mut m, tolerance)
+    sweep(k, profile, &mut m, tolerance, faces)
 }
 
 /// [`screw_sweep`] with the section moved off the axis as it turns: a thread's groove
@@ -741,15 +768,25 @@ pub fn screw_sweep_radial(
     tolerance: f64,
 ) -> Result<Brep> {
     solid(screw_sweep_radial_body(
-        k, profile, origin, axis, pitch, turns, law, tolerance,
+        k,
+        profile,
+        origin,
+        axis,
+        pitch,
+        turns,
+        law,
+        tolerance,
+        ScrewFaces::Joined,
     )?)
 }
 
-/// [`screw_sweep_radial`] up to the fork's `finish`, as [`screw_sweep_body`].
+/// [`screw_sweep_radial`] up to the fork's `finish`, its faces laid out as `faces`
+/// says, as [`screw_sweep_body`].
 ///
 /// # Errors
 ///
 /// Those of [`screw_sweep_radial`] but the closed-solid check.
+#[allow(clippy::too_many_arguments)]
 pub fn screw_sweep_radial_body(
     k: &mut Kernel,
     profile: &[Curve],
@@ -759,6 +796,7 @@ pub fn screw_sweep_radial_body(
     turns: f64,
     law: &[(f64, f64)],
     tolerance: f64,
+    faces: ScrewFaces,
 ) -> Result<Brep> {
     let mut m = screw_of(origin, axis, pitch, turns, tolerance)?;
     if law.is_empty() || law.len() > MAX_LAW {
@@ -781,12 +819,18 @@ pub fn screw_sweep_radial_body(
         m.angles.push(TAU * turn);
         m.offsets.push(offset);
     }
-    sweep(k, profile, &mut m, tolerance)
+    sweep(k, profile, &mut m, tolerance, faces)
 }
 
 /// `screw_sweep` of the fork: both entry points, the motion `m` set but for its radial
-/// direction.
-fn sweep(k: &mut Kernel, profile: &[Curve], m: &mut Screw, tolerance: f64) -> Result<Brep> {
+/// direction, the spline walls' faces laid out as `faces` says.
+fn sweep(
+    k: &mut Kernel,
+    profile: &[Curve],
+    m: &mut Screw,
+    tolerance: f64,
+    faces: ScrewFaces,
+) -> Result<Brep> {
     if profile.is_empty() {
         return Err(bad("empty profile"));
     }
@@ -912,8 +956,11 @@ fn sweep(k: &mut Kernel, profile: &[Curve], m: &mut Screw, tolerance: f64) -> Re
         crate::geom::tol::USE_DEFAULT,
     )?;
     // A law's knots change the wall tangent. Cylinder seams only split the analytic
-    // cylinders: each spline wall retains its spans in one multi-turn face.
-    for group in pieces.chunk_by(|a, _| !a.t.last().is_some_and(|t| m.angles.contains(t))) {
+    // cylinders: each spline wall retains its spans in one multi-turn face, unless the
+    // half-turn layout is asked for (every piece its own face).
+    let joined = faces == ScrewFaces::Joined;
+    for group in pieces.chunk_by(|a, _| joined && !a.t.last().is_some_and(|t| m.angles.contains(t)))
+    {
         let st = joined_stations(group);
         let (Some(&t0), Some(&t1)) = (st.t.first(), st.t.last()) else {
             return Err(SolidError::sweep_failed(

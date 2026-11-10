@@ -61,6 +61,7 @@ pub use solidcore::geom::certified::Verdict;
 /// Why [`DraftCorner::Curvature`] could not close a corner ([`Error::DraftCornerRefused`]): the
 /// kernel's own reasons.
 pub use solidcore::sweep::api_brep::TaperCornerRefusal as CornerRefusal;
+pub use solidcore::sweep::screw::ScrewFaces;
 
 use crate::body::{finish, Body, Expect};
 use crate::error::status;
@@ -1079,7 +1080,8 @@ pub fn sweep_stations(profile: &[Curve], stations: &[Affine], end: Ends) -> Resu
 /// The screw sweep of `profile` about the axis through `origin` along `axis`: `turns` turns
 /// rising `pitch` each, the walls within `tolerance` of their screw surfaces, capped; with a
 /// `law`, the section moved off the axis by the piecewise linear offset of its (turn, offset)
-/// pairs as it turns (`sweep::screw`).
+/// pairs as it turns (`sweep::screw`). Each spline wall is one face over all its turns
+/// ([`ScrewFaces::Joined`]).
 ///
 /// # Errors
 /// [`Error::Argument`] for a number, law or curve list refused (and the kernel's refusals of
@@ -1092,6 +1094,34 @@ pub fn screw_sweep(
     turns: f64,
     law: Option<&[(f64, f64)]>,
     tolerance: f64,
+) -> Result<Body> {
+    screw_sweep_with_faces(
+        profile,
+        origin,
+        axis,
+        pitch,
+        turns,
+        law,
+        tolerance,
+        ScrewFaces::Joined,
+    )
+}
+
+/// [`screw_sweep`] with its spline walls' faces laid out as `faces` says: one face over all
+/// the turns, or the half-turn faces an older design's references name.
+///
+/// # Errors
+/// Those of [`screw_sweep`].
+#[allow(clippy::too_many_arguments)]
+pub fn screw_sweep_with_faces(
+    profile: &[Curve],
+    origin: [f64; 3],
+    axis: [f64; 3],
+    pitch: f64,
+    turns: f64,
+    law: Option<&[(f64, f64)]>,
+    tolerance: f64,
+    faces: ScrewFaces,
 ) -> Result<Body> {
     let ok = coord_ok(&origin)
         && pitch.is_finite()
@@ -1134,6 +1164,7 @@ pub fn screw_sweep(
                 pitch,
                 turns,
                 tolerance,
+                faces,
             ),
             Some(l) => screw::screw_sweep_radial_body(
                 k,
@@ -1144,6 +1175,7 @@ pub fn screw_sweep(
                 turns,
                 l,
                 tolerance,
+                faces,
             ),
         };
         match built {
