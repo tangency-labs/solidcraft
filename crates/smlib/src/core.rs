@@ -53,7 +53,7 @@ pub(crate) mod trim;
 mod trim_tests;
 
 pub(crate) use convert::{from_arrays, to_arrays};
-pub(crate) use measure::{area, bounds, check, classify_point, edge_face_distance, is_manifold_solid, mass_properties, solid_count};
+pub(crate) use measure::{area, bounds, check, check_with, classify_point, edge_face_distance, is_manifold_solid, mass_properties, solid_count};
 
 /// A solidcore body. Its own lock: solidcore's operations take `&mut Brep`, even to measure.
 pub(crate) struct Body(pub(crate) Mutex<solidcore::topology::Brep>);
@@ -471,7 +471,7 @@ pub(crate) fn run_on<T: dump::Answer>(
 ) -> Result<T> {
     let stop = crate::stop::token();
     if stop.as_ref().is_some_and(CancelToken::is_cancelled) {
-        return Err(Error::Solidcore(format!("{call}: cancelled")));
+        return Err(Error::Cancelled(call));
     }
     call_on(call, inputs, stop, f)
 }
@@ -514,9 +514,14 @@ fn call_on<T: dump::Answer>(
     };
     drop(in_flight);
     // Stopped, it is no failure to look into, and solidcore may have left the kernel part way.
+    // No result either, even one solidcore finished first: the caller never has to ask whether
+    // it came in time (as solidcore-ops' session answers).
     if stop.is_some_and(|s| s.is_cancelled()) {
         put_kernel(None);
-        return r;
+        return match r {
+            Err(Error::Internal(e)) => Err(Error::Internal(e)),
+            _ => Err(Error::Cancelled(call)),
+        };
     }
     let why = match &r {
         Ok(v) => v.refusal(),
@@ -559,6 +564,23 @@ pub(crate) fn with_body<T: dump::Answer>(
     }
     // No token stops it: stopped part way, solidcore may leave the body it borrows half-changed.
     call_on(call, &[("brep", body)], None, |k| f(k, &mut body.0.lock().unwrap_or_else(PoisonError::into_inner)))
+}
+
+/// [`with_body`] on a body only this call reads (one the caller consumes): the token over this
+/// thread's work stops it, since what a stopped call leaves half-changed is never read again.
+pub(crate) fn with_own_body<T: dump::Answer>(
+    call: &'static str,
+    body: &Body,
+    f: impl FnOnce(&mut Kernel, &mut solidcore::topology::Brep) -> std::result::Result<T, solidcore::SolidError>,
+) -> Result<T> {
+    if body.0.is_poisoned() {
+        return Err(Error::Internal(format!("{call}: the body was left unfinished by an earlier panic")));
+    }
+    let stop = crate::stop::token();
+    if stop.as_ref().is_some_and(CancelToken::is_cancelled) {
+        return Err(Error::Cancelled(call));
+    }
+    call_on(call, &[("brep", body)], stop, |k| f(k, &mut body.0.lock().unwrap_or_else(PoisonError::into_inner)))
 }
 
 /// An axis-aligned box from its lower corner (`SmApiCreateBox`, as `smlib_make_box` checks it:
