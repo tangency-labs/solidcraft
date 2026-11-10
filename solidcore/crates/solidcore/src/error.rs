@@ -30,7 +30,7 @@
 //! | [`boolean::BooleanFailure`] | none: the Boolean operation's failures           |
 //! | [`nurbs::NurbsFailure`]     | `NL_*_ERR` numbers, in solidcore's terms         |
 //! | [`defeature::DefeatureFailure`] | none: why a defeature keeps a feature (#3218) |
-//! | [`sweep::SweepFailure`]     | none: why a sweep or loft refuses (#3140)         |
+//! | [`sweep::SweepFailure`]     | none: why a sweep or loft refuses, and the sweep routines' failures |
 //!
 //! NLib routines (`NL_*.cpp`) report failure by returning an error flag and storing an
 //! error number in the process-wide `NL_ERROR` record; solidcore returns
@@ -1114,9 +1114,10 @@ impl SolidError {
     /// [`SolidError::Upstream`] does: its `code`, or the status of a failure that replaced
     /// an `Upstream` site ([`nurbs::BSplineFailure`], [`intersect::IntersectFailure`],
     /// [`primitive::PrimitiveFailure`], [`mass::MassFailure`], [`heal::HealFailure`],
-    /// [`geom::GeomFailure`]). The callers that branch on an upstream status use it so
-    /// that they treat both alike; it goes with `Upstream` in the last PR of the
-    /// typed-errors work.
+    /// [`geom::GeomFailure`], a [`sweep::SweepFailure`] that
+    /// [replaced one](sweep::SweepFailure::replaces_upstream_status)). The callers that branch
+    /// on an upstream status use it so that they treat both alike; it goes with `Upstream` in
+    /// the last PR of the typed-errors work.
     #[must_use]
     pub(crate) fn upstream_status(&self) -> Option<i32> {
         match self {
@@ -1128,6 +1129,7 @@ impl SolidError {
                 | Reason::Mass(_)
                 | Reason::Heal(_)
                 | Reason::Geom(_) => Some(f.status),
+                Reason::Sweep(w) if w.replaces_upstream_status() => Some(f.status),
                 _ => None,
             },
             _ => None,
@@ -1361,7 +1363,8 @@ impl SolidError {
 /// `Upstream`'s code, or the status of a failure that replaced an `Upstream` site
 /// ([`nurbs::BSplineFailure`], [`intersect::IntersectFailure`],
 /// [`primitive::PrimitiveFailure`], [`mass::MassFailure`], [`heal::HealFailure`],
-/// [`geom::GeomFailure`]).
+/// [`geom::GeomFailure`], a [`sweep::SweepFailure`] that
+/// [replaced one](sweep::SweepFailure::replaces_upstream_status)).
 ///
 /// For difftest's comparison only: it is removed with `Upstream` and `sm_status` in the
 /// last PR of the typed-errors work. Callers match [`SolidError::kind`] and the
