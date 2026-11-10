@@ -1138,3 +1138,217 @@ fn point_in_solid_common_and_edge_cases() {
         assert_eq!(d.classify_points(&hollow_pts, &[], &[]).1, vec![false; hollow_pts.len()]);
     }
 }
+
+/// Verifies BVH ray-mesh intersection parity across CPU, Vulkan, and CUDA RT/BVH backends against `Mesh::raycast`, including empty-BVH handling.
+#[test]
+fn multi_backend_raycast_bvh_parity() {
+    use crate::cuda::{CudaBackend, GpuRay};
+    use crate::dispatch::{VulkanAccel, build_gpu_bvh_from_mesh, cpu_raycast_bvh_rayon, cpu_raycast_bvh_scalar, synthetic_closed_sphere_mesh};
+
+    let mesh = synthetic_closed_sphere_mesh(8.0, 10, 10);
+    let (tris, bvh) = build_gpu_bvh_from_mesh(&mesh);
+
+    let mut rays = Vec::new();
+    for ix in -10..=10 {
+        for iy in -10..=10 {
+            let ox = ix as f32 * 1.15 + 0.03;
+            let oy = iy as f32 * 1.15 - 0.04;
+            rays.push(GpuRay { origin: [ox, oy, -20.0, 0.0], dir: [0.0, 0.0, 1.0, 0.0] });
+        }
+    }
+
+    let ref_hits = cpu_raycast_bvh_scalar(&rays, &tris, &bvh);
+    let ray_hits = cpu_raycast_bvh_rayon(&rays, &tris, &bvh);
+    assert_eq!(ref_hits, ray_hits);
+
+    // Check against Mesh::raycast
+    for (i, r) in rays.iter().enumerate() {
+        let orig = Vec3::new(r.origin[0] as f64, r.origin[1] as f64, r.origin[2] as f64);
+        let dir = Vec3::new(r.dir[0] as f64, r.dir[1] as f64, r.dir[2] as f64);
+        let mesh_hit = mesh.raycast(orig, dir);
+        let gpu_hit = ref_hits[i];
+        match mesh_hit {
+            Some((t_cpu, _)) => {
+                assert!(gpu_hit.tri_idx != u32::MAX, "ray {i} missed in GPU BVH but hit in Mesh::raycast at t={t_cpu}");
+                assert!((gpu_hit.t as f64 - t_cpu).abs() < 1e-4, "ray {i} t mismatch: {} vs {t_cpu}", gpu_hit.t);
+            }
+            None => {
+                assert_eq!(gpu_hit.tri_idx, u32::MAX, "ray {i} hit in GPU BVH but missed in Mesh::raycast");
+            }
+        }
+    }
+
+    if let Some(vk) = VulkanAccel::global() {
+        let vk_hits = vk.raycast_bvh(&rays, &tris, &bvh).expect("vk raycast_bvh");
+        for (i, (a, b)) in ref_hits.iter().zip(&vk_hits).enumerate() {
+            assert_eq!(a.tri_idx, b.tri_idx, "Vulkan raycast tri_idx mismatch at {i}");
+            if a.tri_idx != u32::MAX {
+                assert!((a.t - b.t).abs() < 1e-4, "Vulkan raycast t mismatch at {i}");
+            }
+        }
+        assert!(vk.raycast_bvh(&rays, &tris, &[]).is_none());
+        let empty_hits = vk.raycast_bvh(&rays, &[], &[]).expect("vk raycast empty tris");
+        assert!(empty_hits.iter().all(|h| h.tri_idx == u32::MAX));
+    }
+
+    if let Some(cuda) = CudaBackend::global() {
+        let cu_hits = cuda.raycast_rt_bvh(&rays, &tris, &bvh).expect("cuda raycast_rt_bvh");
+        for (i, (a, b)) in ref_hits.iter().zip(&cu_hits).enumerate() {
+            assert_eq!(a.tri_idx, b.tri_idx, "CUDA RT/BVH raycast tri_idx mismatch at {i}");
+            if a.tri_idx != u32::MAX {
+                assert!((a.t - b.t).abs() < 1e-4, "CUDA RT/BVH raycast t mismatch at {i}");
+            }
+        }
+        assert!(cuda.raycast_rt_bvh(&rays, &tris, &[]).is_none());
+        let empty_hits = cuda.raycast_rt_bvh(&rays, &[], &[]).expect("cuda raycast empty tris");
+        assert!(empty_hits.iter().all(|h| h.tri_idx == u32::MAX));
+    }
+}
+
+#[test]
+fn raycast_bvh_common_and_edge_cases() {
+    use crate::cuda::{GpuRay, GpuTri};
+    use crate::dispatch::{BackendTarget, Dispatcher, build_gpu_bvh_from_mesh};
+
+    let disp = Dispatcher::global();
+
+    // 1. Torus multi-surface piercing ray:
+    // A ray from (-20, 0, 0) along +X pierces the torus at x = -13 (entry 1), -7 (exit 1), +7 (entry 2), +13 (exit 2).
+    // Closest hit must be the first entry wall near t = 7.0 (x = -13.0).
+    let torus_solid = ok(solidcraft_kernel::torus(Vec3::ZERO, 10.0, 3.0));
+    let torus_mesh = ok(torus_solid.mesh(&solidcraft_kernel::MeshTolerance::chord(0.1)));
+    let (torus_tris, torus_bvh) = build_gpu_bvh_from_mesh(&torus_mesh);
+
+    // 2. Axis-aligned rays (+X, -X, +Y, -Y, +Z, -Z where two direction components are 0.0 -> inv_d = +/-inf),
+    // diagonal rays, rays starting inside a solid, and rays pointing away from the solid.
+    // Slightly offset the first 3 rays off the exact (y=0, z=0) tessellation vertex seam so each ray hits a unique triangle interior.
+    let rays = vec![
+        // Pierces 4 torus walls along +X; closest is at x ~= -13 -> t ~= 7.0
+        GpuRay { origin: [-20.0, 0.13, 0.07, 0.0], dir: [1.0, 0.0, 0.0, 0.0] },
+        // Pierces 4 torus walls along -X; closest is at x ~= +13 -> t ~= 7.0
+        GpuRay { origin: [20.0, 0.13, 0.07, 0.0], dir: [-1.0, 0.0, 0.0, 0.0] },
+        // Pierces 4 torus walls along +Y; closest is at y ~= -13 -> t ~= 7.0
+        GpuRay { origin: [0.13, -20.0, 0.07, 0.0], dir: [0.0, 1.0, 0.0, 0.0] },
+        // Passes straight through the central hole of the torus along +Z -> MISS
+        GpuRay { origin: [0.0, 0.0, -20.0, 0.0], dir: [0.0, 0.0, 1.0, 0.0] },
+        // Hits top of torus tube at (10, 0, +3) from z = +10 along -Z -> t ~= 7.0
+        GpuRay { origin: [10.0, 0.13, 10.0, 0.0], dir: [0.0, 0.0, -1.0, 0.0] },
+        // Origin inside torus tube (10, 0, 0) shooting +Z -> hits top wall at z = +3 -> t ~= 3.0
+        GpuRay { origin: [10.0, 0.13, 0.0, 0.0], dir: [0.0, 0.0, 1.0, 0.0] },
+        // Origin outside shooting AWAY from torus -> MISS
+        GpuRay { origin: [20.0, 0.0, 0.0, 0.0], dir: [1.0, 0.0, 0.0, 0.0] },
+    ];
+
+    let (_, ref_hits) = disp.with_forced_backend(Some(BackendTarget::CpuScalar)).raycast_mesh(&rays, &torus_tris, &torus_bvh);
+    assert!((ref_hits[0].t - 7.0).abs() < 0.15 && ref_hits[0].tri_idx != u32::MAX);
+    assert!((ref_hits[1].t - 7.0).abs() < 0.15 && ref_hits[1].tri_idx != u32::MAX);
+    assert!((ref_hits[2].t - 7.0).abs() < 0.15 && ref_hits[2].tri_idx != u32::MAX);
+    assert_eq!(ref_hits[3].tri_idx, u32::MAX, "ray through torus hole must miss");
+    assert!((ref_hits[4].t - 7.0).abs() < 0.15 && ref_hits[4].tri_idx != u32::MAX);
+    assert!((ref_hits[5].t - 3.0).abs() < 0.15 && ref_hits[5].tri_idx != u32::MAX);
+    assert_eq!(ref_hits[6].tri_idx, u32::MAX, "ray pointing away from torus must miss");
+
+    for target in BVH_TARGETS {
+        let d = disp.with_forced_backend(Some(target));
+        let (_, hits_bvh) = d.raycast_mesh(&rays, &torus_tris, &torus_bvh);
+        let (_, hits_raw) = d.raycast_mesh(&rays, &torus_tris, &[]);
+        for (i, r) in ref_hits.iter().enumerate() {
+            assert_eq!(hits_bvh[i].tri_idx, r.tri_idx, "torus BVH ray {i} tri_idx mismatch on {target:?}");
+            assert!((hits_bvh[i].t - r.t).abs() < 1e-4, "torus BVH ray {i} t mismatch on {target:?}");
+            assert_eq!(hits_raw[i].tri_idx, r.tri_idx, "torus no-BVH ray {i} tri_idx mismatch on {target:?}");
+            assert!((hits_raw[i].t - r.t).abs() < 1e-4, "torus no-BVH ray {i} t mismatch on {target:?}");
+        }
+    }
+
+    // 3. Single-triangle leaf BVH + near-origin self-intersection guard (t <= 1e-7 ignored):
+    let single_tri = vec![GpuTri { v0: [-1.0, -1.0, 0.0, f32::from_bits(0)], v1: [2.0, -1.0, 0.0, 0.0], v2: [-1.0, 2.0, 0.0, 0.0] }];
+    let single_bvh = vec![crate::cuda::GpuBvhNode {
+        min_x: -1.0,
+        min_y: -1.0,
+        min_z: 0.0,
+        left_or_prim: 0,
+        max_x: 2.0,
+        max_y: 2.0,
+        max_z: 0.0,
+        right_or_count: 0x8000_0000 | 1,
+    }];
+    let single_rays = vec![
+        // Hits at t = 5.0
+        GpuRay { origin: [0.0, 0.0, -5.0, 0.0], dir: [0.0, 0.0, 1.0, 0.0] },
+        // Starts directly on the triangle (t = 0.0 <= 1e-7) -> must be ignored as self-intersection
+        GpuRay { origin: [0.0, 0.0, 0.0, 0.0], dir: [0.0, 0.0, 1.0, 0.0] },
+        // Parallel coplanar ray -> must miss
+        GpuRay { origin: [-5.0, 0.0, 0.0, 0.0], dir: [1.0, 0.0, 0.0, 0.0] },
+    ];
+    for target in BVH_TARGETS {
+        let d = disp.with_forced_backend(Some(target));
+        let (_, sh) = d.raycast_mesh(&single_rays, &single_tri, &single_bvh);
+        assert_eq!(sh[0].tri_idx, 0, "single-tri hit failed on {target:?}");
+        assert!((sh[0].t - 5.0).abs() < 1e-5);
+        assert_eq!(sh[1].tri_idx, u32::MAX, "t=0 self-intersection must be ignored on {target:?}");
+        assert_eq!(sh[2].tri_idx, u32::MAX, "parallel coplanar ray must miss on {target:?}");
+        assert!(d.raycast_mesh(&[], &single_tri, &single_bvh).1.is_empty());
+        let (_, empty_mesh_hits) = d.raycast_mesh(&single_rays, &[], &[]);
+        assert!(empty_mesh_hits.iter().all(|h| h.tri_idx == u32::MAX && h.t < 0.0));
+    }
+
+    // 4. Caller-supplied deep BVH exceeding BVH_STACK_CAP (64) must be rejected by bvh_fits_traversal_stack
+    // and routed through the non-BVH fallback across Vulkan, CUDA, and CPU without missing hits or miscounting crossings:
+    assert!(crate::dispatch::bvh_fits_traversal_stack(&torus_bvh, torus_tris.len()));
+    let mut deep_bvh = Vec::with_capacity(141);
+    for d in 0..70u32 {
+        deep_bvh.push(crate::cuda::GpuBvhNode {
+            min_x: -20.0,
+            min_y: -20.0,
+            min_z: -20.0,
+            left_or_prim: d + 1,
+            max_x: 20.0,
+            max_y: 20.0,
+            max_z: 20.0,
+            right_or_count: 71 + d,
+        });
+    }
+    // Node 70 is the deep leaf referencing all torus_tris; nodes 71..141 are empty right-sibling leaves
+    deep_bvh.push(crate::cuda::GpuBvhNode {
+        min_x: -20.0,
+        min_y: -20.0,
+        min_z: -20.0,
+        left_or_prim: 0,
+        max_x: 20.0,
+        max_y: 20.0,
+        max_z: 20.0,
+        right_or_count: 0x8000_0000 | (torus_tris.len() as u32),
+    });
+    for _ in 0..70 {
+        deep_bvh.push(crate::cuda::GpuBvhNode {
+            min_x: -20.0,
+            min_y: -20.0,
+            min_z: -20.0,
+            left_or_prim: 0,
+            max_x: 20.0,
+            max_y: 20.0,
+            max_z: 20.0,
+            right_or_count: 0x8000_0000,
+        });
+    }
+    assert!(!crate::dispatch::bvh_fits_traversal_stack(&deep_bvh, torus_tris.len()), "70-deep BVH must exceed BVH_STACK_CAP");
+    if let Some(vk) = crate::dispatch::VulkanAccel::global() {
+        let vk_deep_rc = vk.raycast_bvh(&rays, &torus_tris, &deep_bvh).expect("vk deep BVH raycast fallback");
+        for (i, r) in ref_hits.iter().enumerate() {
+            assert_eq!(vk_deep_rc[i].tri_idx, r.tri_idx, "vk deep BVH ray {i} fallback mismatch");
+        }
+        let probe_pts = vec![[0.0f32, 0.0, 0.0, 0.0], [10.0, 0.0, 0.0, 0.0]];
+        let vk_deep_cls = vk.classify_points(&probe_pts, &torus_tris, &deep_bvh, true).expect("vk deep BVH classify fallback");
+        assert_eq!(vk_deep_cls, vec![false, true]);
+    }
+    for target in BVH_TARGETS {
+        let d = disp.with_forced_backend(Some(target));
+        let (_, deep_hits) = d.raycast_mesh(&rays, &torus_tris, &deep_bvh);
+        for (i, r) in ref_hits.iter().enumerate() {
+            assert_eq!(deep_hits[i].tri_idx, r.tri_idx, "deep BVH ray {i} mismatch on {target:?}");
+        }
+        let probe_pts = vec![[0.0f32, 0.0, 0.0, 0.0], [10.0, 0.0, 0.0, 0.0]];
+        let (_, deep_cls) = d.classify_points(&probe_pts, &torus_tris, &deep_bvh);
+        assert_eq!(deep_cls, vec![false, true], "deep BVH classify mismatch on {target:?}");
+    }
+}

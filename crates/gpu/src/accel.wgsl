@@ -326,3 +326,99 @@ fn classify_points_bvh(@builtin(global_invocation_id) gid: vec3<u32>) {
     mq_out_u32[q_idx] = select(0u, 1u, votes >= 2u);
 }
 
+// ── Kernel 4: BVH-Accelerated Raycast (Closest Hit + Triangle Index) ──────
+
+struct GpuRay {
+    origin: vec4<f32>,
+    dir: vec4<f32>,
+}
+
+struct GpuRayHit {
+    t: f32,
+    tri_idx: u32,
+    pad0: u32,
+    pad1: u32,
+}
+
+@group(0) @binding(0) var<uniform> rc_params: MeshQueryParams;
+@group(0) @binding(1) var<storage, read> rc_rays: array<GpuRay>;
+@group(0) @binding(2) var<storage, read> rc_tris: array<GpuTri>;
+@group(0) @binding(3) var<storage, read> rc_bvh: array<BvhNode>;
+@group(0) @binding(4) var<storage, read_write> rc_hits: array<GpuRayHit>;
+
+@compute @workgroup_size(128)
+fn raycast_mesh_bvh(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let r_idx = gid.x;
+    if r_idx >= rc_params.num_queries {
+        return;
+    }
+    let ray = rc_rays[r_idx];
+    let o = ray.origin.xyz;
+    let d = ray.dir.xyz;
+    let inv_d = vec3<f32>(1.0 / d.x, 1.0 / d.y, 1.0 / d.z);
+
+    var best_t: f32 = 1e30;
+    var best_tri: u32 = 0xFFFFFFFFu;
+
+    if rc_params.num_bvh_nodes > 0u {
+        var stack: array<u32, 64>;
+        var sp: u32 = 1u;
+        stack[0] = 0u;
+
+        while sp > 0u {
+            sp -= 1u;
+            let node = rc_bvh[stack[sp]];
+            let t_box = ray_aabb_dist(o, inv_d, node);
+            if t_box < 0.0 || t_box > best_t {
+                continue;
+            }
+            if (node.right_or_count & 0x80000000u) != 0u {
+                let first = node.left_or_prim;
+                let count = node.right_or_count & 0x7FFFFFFFu;
+                for (var i: u32 = 0u; i < count; i = i + 1u) {
+                    let tri = rc_tris[first + i];
+                    let t_hit = ray_hit_tri(tri.v0.xyz, tri.v1.xyz, tri.v2.xyz, o, d);
+                    let orig_idx = bitcast<u32>(tri.v0.w);
+                    if t_hit > 0.0 && (t_hit < best_t || (t_hit == best_t && orig_idx < best_tri)) {
+                        best_t = t_hit;
+                        best_tri = orig_idx;
+                    }
+                }
+            } else if sp + 2u <= 64u {
+                let l = node.left_or_prim;
+                let r = node.right_or_count;
+                let tl = ray_aabb_dist(o, inv_d, rc_bvh[l]);
+                let tr = ray_aabb_dist(o, inv_d, rc_bvh[r]);
+                if tl >= 0.0 && tr >= 0.0 {
+                    if tl <= tr {
+                        stack[sp] = r;
+                        stack[sp + 1u] = l;
+                    } else {
+                        stack[sp] = l;
+                        stack[sp + 1u] = r;
+                    }
+                    sp += 2u;
+                } else if tl >= 0.0 {
+                    stack[sp] = l;
+                    sp += 1u;
+                } else if tr >= 0.0 {
+                    stack[sp] = r;
+                    sp += 1u;
+                }
+            }
+        }
+    } else {
+        for (var i: u32 = 0u; i < rc_params.num_tris; i = i + 1u) {
+            let tri = rc_tris[i];
+            let orig_idx = bitcast<u32>(tri.v0.w);
+            let t_hit = ray_hit_tri(tri.v0.xyz, tri.v1.xyz, tri.v2.xyz, o, d);
+            if t_hit > 0.0 && (t_hit < best_t || (t_hit == best_t && orig_idx < best_tri)) {
+                best_t = t_hit;
+                best_tri = orig_idx;
+            }
+        }
+    }
+
+    rc_hits[r_idx] = GpuRayHit(select(-1.0, best_t, best_tri != 0xFFFFFFFFu), best_tri, 0u, 0u);
+}
+

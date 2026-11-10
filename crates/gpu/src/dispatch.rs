@@ -28,7 +28,7 @@ use wgpu::util::DeviceExt;
 use crate::collision::{CollisionGpu, GpuPod, decode_pod_slice, encode_pod, encode_pod_slice};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::cuda::CudaBackend;
-use crate::cuda::{GpuBvhNode, GpuTri, PatchEvalOutF32, PatchUvQueryF32};
+use crate::cuda::{GpuBvhNode, GpuRay, GpuRayHit, GpuTri, PatchEvalOutF32, PatchUvQueryF32};
 
 const ACCEL_SHADER: &str = include_str!("accel.wgsl");
 
@@ -173,6 +173,7 @@ pub struct VulkanAccel {
     patch_bgl: wgpu::BindGroupLayout,
     classify_tiled_pipeline: wgpu::ComputePipeline,
     classify_bvh_pipeline: wgpu::ComputePipeline,
+    raycast_bvh_pipeline: wgpu::ComputePipeline,
     bvh_query_bgl: wgpu::BindGroupLayout,
 }
 
@@ -230,7 +231,7 @@ impl VulkanAccel {
         });
         let patch_pipeline = make_pipeline(&patch_pl, "eval_bicubic_patches");
 
-        // 2. Classify with BVH (bindings 0..=4)
+        // 2. Classify / Raycast with BVH (bindings 0..=4)
         let bvh_query_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("accel-bvh-query-bgl"),
             entries: &[entry(0, true), entry(1, true), entry(2, true), entry(3, true), entry(4, false)],
@@ -242,6 +243,7 @@ impl VulkanAccel {
         });
         let classify_tiled_pipeline = make_pipeline(&bvh_query_pl, "classify_points_mesh");
         let classify_bvh_pipeline = make_pipeline(&bvh_query_pl, "classify_points_bvh");
+        let raycast_bvh_pipeline = make_pipeline(&bvh_query_pl, "raycast_mesh_bvh");
 
         Some(Self {
             device,
@@ -252,6 +254,7 @@ impl VulkanAccel {
             patch_bgl,
             classify_tiled_pipeline,
             classify_bvh_pipeline,
+            raycast_bvh_pipeline,
             bvh_query_bgl,
         })
     }
@@ -411,6 +414,87 @@ impl VulkanAccel {
 
         let raw: Vec<u32> = self.read_mapped_vec(&read_buf)?;
         Some(raw.into_iter().map(|v| v != 0).collect())
+    }
+
+    /// Executes batched BVH-accelerated ray-mesh intersection on Vulkan/wgpu.
+    /// Returns `None` if `tris` is non-empty and `bvh_nodes` is empty so the dispatcher can fall back.
+    pub fn raycast_bvh(&self, rays: &[GpuRay], tris: &[GpuTri], bvh_nodes: &[GpuBvhNode]) -> Option<Vec<GpuRayHit>> {
+        if rays.is_empty() {
+            return Some(Vec::new());
+        }
+        if tris.is_empty() {
+            return Some(vec![GpuRayHit { t: -1.0, tri_idx: u32::MAX, pad0: 0, pad1: 0 }; rays.len()]);
+        }
+        if bvh_nodes.is_empty() {
+            return None;
+        }
+        let effective_use_bvh = bvh_fits_traversal_stack(bvh_nodes, tris.len());
+        let num_queries = u32::try_from(rays.len()).ok()?;
+        let num_tris = u32::try_from(tris.len()).ok()?;
+        let num_bvh_nodes = if effective_use_bvh { u32::try_from(bvh_nodes.len()).ok()? } else { 0 };
+        let params = MeshQueryParams { num_queries, num_tris, num_bvh_nodes, pad: 0 };
+
+        let dummy_bvh = [GpuBvhNode::default()];
+        let bvh_slice = if effective_use_bvh { bvh_nodes } else { &dummy_bvh[..] };
+
+        let _guard = self.collision.lock_device();
+        let u_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("vk-rc-params"),
+            contents: &encode_pod(&params),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let rays_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("vk-rc-rays"),
+            contents: &encode_pod_slice(rays),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let tris_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("vk-rc-tris"),
+            contents: &encode_pod_slice(tris),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let bvh_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("vk-rc-bvh"),
+            contents: &encode_pod_slice(bvh_slice),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let out_size = (rays.len() * std::mem::size_of::<GpuRayHit>()) as u64;
+        let out_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vk-rc-out"),
+            size: out_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let read_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vk-rc-read"),
+            size: out_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("vk-rc-bg"),
+            layout: &self.bvh_query_bgl,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: u_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: rays_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: tris_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: bvh_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 4, resource: out_buf.as_entire_binding() },
+            ],
+        });
+
+        let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("vk-rc-enc") });
+        {
+            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("vk-rc-pass"), timestamp_writes: None });
+            pass.set_pipeline(&self.raycast_bvh_pipeline);
+            pass.set_bind_group(0, &bg, &[]);
+            pass.dispatch_workgroups(num_queries.div_ceil(128), 1, 1);
+        }
+        enc.copy_buffer_to_buffer(&out_buf, 0, &read_buf, 0, out_size);
+        self.queue.submit(Some(enc.finish()));
+
+        self.read_mapped_vec(&read_buf)
     }
 
     /// Maps a staging readback buffer synchronously and decodes its contents into a `Vec<T>`.
@@ -780,6 +864,121 @@ fn ray_aabb_f32(o: [f32; 3], inv_d: [f32; 3], n: &GpuBvhNode) -> f32 {
     if tmax >= t_enter { t_enter } else { -1.0 }
 }
 
+/// Moller-Trumbore ray-triangle intersection in `f32`, returning hit parameter `t > 1e-7` or `-1.0` on miss.
+fn ray_hit_tri_f32(a: [f32; 3], b: [f32; 3], c: [f32; 3], o: [f32; 3], d: [f32; 3]) -> f32 {
+    let e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    let e2 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    let h = [d[1] * e2[2] - d[2] * e2[1], d[2] * e2[0] - d[0] * e2[2], d[0] * e2[1] - d[1] * e2[0]];
+    let det = e1[0] * h[0] + e1[1] * h[1] + e1[2] * h[2];
+    if det.abs() < 1e-12 {
+        return -1.0;
+    }
+    let inv_det = 1.0 / det;
+    let s = [o[0] - a[0], o[1] - a[1], o[2] - a[2]];
+    let u = inv_det * (s[0] * h[0] + s[1] * h[1] + s[2] * h[2]);
+    if !(0.0..=1.0).contains(&u) {
+        return -1.0;
+    }
+    let q = [s[1] * e1[2] - s[2] * e1[1], s[2] * e1[0] - s[0] * e1[2], s[0] * e1[1] - s[1] * e1[0]];
+    let v = inv_det * (d[0] * q[0] + d[1] * q[1] + d[2] * q[2]);
+    if v < 0.0 || u + v > 1.0 {
+        return -1.0;
+    }
+    let t = inv_det * (e2[0] * q[0] + e2[1] * q[1] + e2[2] * q[2]);
+    if t > 1e-7 { t } else { -1.0 }
+}
+
+/// Traces a single [`GpuRay`] through `bvh` (or brute-force over `tris` when `bvh` is empty).
+fn raycast_one_bvh(ray: &GpuRay, tris: &[GpuTri], bvh: &[GpuBvhNode]) -> GpuRayHit {
+    let o = [ray.origin[0], ray.origin[1], ray.origin[2]];
+    let d = [ray.dir[0], ray.dir[1], ray.dir[2]];
+    let inv_d = [1.0 / d[0], 1.0 / d[1], 1.0 / d[2]];
+    let mut best_t = 1e30f32;
+    let mut best_tri = 0xFFFF_FFFFu32;
+
+    if !bvh.is_empty() {
+        let mut stack = [0u32; 64];
+        let mut sp = 1usize;
+        while sp > 0 {
+            sp -= 1;
+            let Some(node) = bvh.get(stack[sp] as usize) else { continue };
+            let t_box = ray_aabb_f32(o, inv_d, node);
+            if t_box < 0.0 || t_box > best_t {
+                continue;
+            }
+            if (node.right_or_count & 0x8000_0000) != 0 {
+                let first = node.left_or_prim as usize;
+                let count = (node.right_or_count & 0x7FFF_FFFF) as usize;
+                for t in tris.get(first..first + count).unwrap_or(&[]) {
+                    let a = [t.v0[0], t.v0[1], t.v0[2]];
+                    let b = [t.v1[0], t.v1[1], t.v1[2]];
+                    let c = [t.v2[0], t.v2[1], t.v2[2]];
+                    let th = ray_hit_tri_f32(a, b, c, o, d);
+                    let orig_idx = t.v0[3].to_bits();
+                    if th > 0.0 && (th < best_t || (th == best_t && orig_idx < best_tri)) {
+                        best_t = th;
+                        best_tri = orig_idx;
+                    }
+                }
+            } else if sp + 2 <= 64 {
+                let l = node.left_or_prim;
+                let r = node.right_or_count;
+                let tl = bvh.get(l as usize).map_or(-1.0, |n| ray_aabb_f32(o, inv_d, n));
+                let tr = bvh.get(r as usize).map_or(-1.0, |n| ray_aabb_f32(o, inv_d, n));
+                if tl >= 0.0 && tr >= 0.0 {
+                    if tl <= tr {
+                        stack[sp] = r;
+                        stack[sp + 1] = l;
+                    } else {
+                        stack[sp] = l;
+                        stack[sp + 1] = r;
+                    }
+                    sp += 2;
+                } else if tl >= 0.0 {
+                    stack[sp] = l;
+                    sp += 1;
+                } else if tr >= 0.0 {
+                    stack[sp] = r;
+                    sp += 1;
+                }
+            }
+        }
+    } else {
+        for t in tris {
+            let a = [t.v0[0], t.v0[1], t.v0[2]];
+            let b = [t.v1[0], t.v1[1], t.v1[2]];
+            let c = [t.v2[0], t.v2[1], t.v2[2]];
+            let th = ray_hit_tri_f32(a, b, c, o, d);
+            let orig_idx = t.v0[3].to_bits();
+            if th > 0.0 && (th < best_t || (th == best_t && orig_idx < best_tri)) {
+                best_t = th;
+                best_tri = orig_idx;
+            }
+        }
+    }
+
+    GpuRayHit { t: if best_tri != 0xFFFF_FFFF { best_t } else { -1.0 }, tri_idx: best_tri, pad0: 0, pad1: 0 }
+}
+
+/// CPU scalar BVH raycast.
+pub fn cpu_raycast_bvh_scalar(rays: &[GpuRay], tris: &[GpuTri], bvh: &[GpuBvhNode]) -> Vec<GpuRayHit> {
+    let valid_bvh = if bvh_fits_traversal_stack(bvh, tris.len()) { bvh } else { &[] };
+    rays.iter().map(|r| raycast_one_bvh(r, tris, valid_bvh)).collect()
+}
+
+/// CPU `rayon` parallel BVH raycast.
+pub fn cpu_raycast_bvh_rayon(rays: &[GpuRay], tris: &[GpuTri], bvh: &[GpuBvhNode]) -> Vec<GpuRayHit> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let valid_bvh = if bvh_fits_traversal_stack(bvh, tris.len()) { bvh } else { &[] };
+        rays.par_iter().map(|r| raycast_one_bvh(r, tris, valid_bvh)).collect()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        cpu_raycast_bvh_scalar(rays, tris, bvh)
+    }
+}
+
 // ── Calibration Data Structures & Scaling Microbenchmark ──────────────────
 
 /// Number of rotated-order timing samples collected per `(KernelOp, problem_size)` bucket.
@@ -1073,10 +1272,19 @@ pub fn run_scaling_microbenchmark(sizes: &[usize]) -> CalibrationReport {
             [r, r * 0.7, r * -0.4, 0.0]
         })
         .collect();
+    let query_rays: Vec<GpuRay> = (0..max_n)
+        .map(|i| {
+            let f = (i as f32) / (max_n as f32);
+            let ox = (f - 0.5) * 8.0;
+            let oy = ((f * 7.3).fract() - 0.5) * 8.0;
+            GpuRay { origin: [ox, oy, -25.0, 0.0], dir: [0.0, 0.0, 1.0, 0.0] }
+        })
+        .collect();
 
     if let Some(v) = vk {
         let _ = v.eval_bicubic_f32(&patch_f32, &queries_f32[..16]);
         let _ = v.classify_points(&query_pts[..16], &sphere_tris, &sphere_bvh, true);
+        let _ = v.raycast_bvh(&query_rays[..16], &sphere_tris, &sphere_bvh);
     }
     if let Some(c) = cuda {
         let _ = c.eval_bicubic_f32(&patch_f32, &queries_f32[..max_n], false);
@@ -1086,6 +1294,7 @@ pub fn run_scaling_microbenchmark(sizes: &[usize]) -> CalibrationReport {
         }
         let _ = c.classify_points(&query_pts[..16], &sphere_tris, false);
         let _ = c.classify_points_rt_bvh(&query_pts[..16], &sphere_tris, &sphere_bvh);
+        let _ = c.raycast_rt_bvh(&query_rays[..16], &sphere_tris, &sphere_bvh);
     }
 
     let mut kernels = Vec::with_capacity(KernelOp::ALL.len());
@@ -1175,6 +1384,22 @@ pub fn run_scaling_microbenchmark(sizes: &[usize]) -> CalibrationReport {
                                 std::hint::black_box(c.classify_points_rt_bvh(&query_pts[..n], &sphere_tris, &sphere_bvh));
                             } else if let Some(v) = vk {
                                 std::hint::black_box(v.classify_points(&query_pts[..n], &sphere_tris, &sphere_bvh, true));
+                            }
+                        }),
+                        (KernelOp::RaycastMesh, BackendTarget::CpuScalar) => time_ns(|| {
+                            std::hint::black_box(cpu_raycast_bvh_scalar(&query_rays[..n], &sphere_tris, &sphere_bvh));
+                        }),
+                        (KernelOp::RaycastMesh, BackendTarget::CpuRayon) => time_ns(|| {
+                            std::hint::black_box(cpu_raycast_bvh_rayon(&query_rays[..n], &sphere_tris, &sphere_bvh));
+                        }),
+                        (KernelOp::RaycastMesh, BackendTarget::VulkanCompute) => time_ns(|| {
+                            if let Some(v) = vk {
+                                std::hint::black_box(v.raycast_bvh(&query_rays[..n], &sphere_tris, &sphere_bvh));
+                            }
+                        }),
+                        (KernelOp::RaycastMesh, BackendTarget::RtCoreBvh) => time_ns(|| {
+                            if let Some(c) = cuda {
+                                std::hint::black_box(c.raycast_rt_bvh(&query_rays[..n], &sphere_tris, &sphere_bvh));
                             }
                         }),
                         _ => 1,
@@ -1442,6 +1667,40 @@ impl Dispatcher {
             }
         }
         (BackendTarget::CpuScalar, cpu_classify_points_scalar(points, tris, bvh))
+    }
+
+    /// Dispatches batched BVH ray-mesh intersection (`Mesh::raycast` / `MeshIndex::raycast`).
+    pub fn raycast_mesh(&self, rays: &[GpuRay], tris: &[GpuTri], bvh: &[GpuBvhNode]) -> (BackendTarget, Vec<GpuRayHit>) {
+        let target = self.select_backend(KernelOp::RaycastMesh, rays.len());
+        match target {
+            BackendTarget::RtCoreBvh | BackendTarget::AmperePtx | BackendTarget::CudaGeneric | BackendTarget::AmpereTensorCore => {
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(c) = CudaBackend::global()
+                    && let Some(out) = c.raycast_rt_bvh(rays, tris, bvh)
+                {
+                    return (BackendTarget::RtCoreBvh, out);
+                }
+                if let Some(v) = VulkanAccel::global()
+                    && let Some(out) = v.raycast_bvh(rays, tris, bvh)
+                {
+                    return (BackendTarget::VulkanCompute, out);
+                }
+            }
+            BackendTarget::VulkanCompute => {
+                if let Some(v) = VulkanAccel::global()
+                    && let Some(out) = v.raycast_bvh(rays, tris, bvh)
+                {
+                    return (BackendTarget::VulkanCompute, out);
+                }
+            }
+            BackendTarget::CpuRayon => {
+                return (BackendTarget::CpuRayon, cpu_raycast_bvh_rayon(rays, tris, bvh));
+            }
+            BackendTarget::CpuScalar => {
+                return (BackendTarget::CpuScalar, cpu_raycast_bvh_scalar(rays, tris, bvh));
+            }
+        }
+        (BackendTarget::CpuScalar, cpu_raycast_bvh_scalar(rays, tris, bvh))
     }
 
     /// Evaluates a [`TessPlan`] using either CPU scalar or parallel `rayon` across faces.
