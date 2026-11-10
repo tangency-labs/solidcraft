@@ -149,15 +149,25 @@ pub struct Note {
 }
 
 impl Note {
-    /// The occurrence paths of the model references its leaders point at: the anchor's, then each
-    /// branch's.
-    pub fn paths(&self) -> impl Iterator<Item = &[u64]> {
-        self.anchor.path().into_iter().chain(self.branches.iter().map(Branch::path))
+    /// The model references its leaders point at: the anchor's, then each branch's.
+    pub fn references(&self) -> impl Iterator<Item = Reference<'_>> {
+        fn branch(branch: &Branch) -> Reference<'_> {
+            match branch {
+                Branch::Edge(edge) => Reference::Edge(edge),
+                Branch::Corner(point) => Reference::Point(point),
+            }
+        }
+        self.anchor.reference().into_iter().chain(self.branches.iter().map(branch))
     }
 
-    /// Whether one of its leaders points at the model ([`Note::paths`]).
+    /// The occurrence paths of the model references its leaders point at ([`Note::references`]).
+    pub fn paths(&self) -> impl Iterator<Item = &[u64]> {
+        self.references().map(Reference::path)
+    }
+
+    /// Whether one of its leaders points at the model ([`Note::references`]).
     pub fn on_model(&self) -> bool {
-        self.paths().next().is_some()
+        self.references().next().is_some()
     }
 }
 

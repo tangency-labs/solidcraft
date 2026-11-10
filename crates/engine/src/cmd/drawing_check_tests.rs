@@ -707,3 +707,16 @@ fn a_notes_lost_branch_is_listed_by_its_number() {
     assert_eq!(lost.iter().map(|(kind, id, _)| (kind.as_str(), id.as_str())).collect::<Vec<_>>(), [("note", note.as_str().unwrap())], "{reply}");
     assert!(lost[0].2.starts_with("branch 2: "), "{reply}");
 }
+
+/// A note covers what each of its leaders points at: a branch on the chamfer's edge covers the
+/// chamfer, though the note's anchor is the view itself.
+#[test]
+fn a_notes_branch_covers_the_feature_it_points_at() {
+    let (mut s, chamfer) = plate();
+    let (_, view) = drawn(&mut s);
+    let add = json!({"anchor": {"view": ids::encode(view)}, "at": [60, 40], "content": "Break", "branches": [{"edge": [50, 0, 8]}]});
+    let note = run(&mut s, "drawing.note.add", add)["note"].clone();
+    let reply = checked(&mut s, json!({}));
+    let entry = coverage_of(&reply, chamfer.as_u64().unwrap());
+    assert_eq!((&entry["state"], &entry["by"]), (&json!("covered"), &json!([{"kind": "note", "id": note}])), "{reply}");
+}

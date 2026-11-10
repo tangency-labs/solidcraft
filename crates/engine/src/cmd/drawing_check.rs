@@ -237,7 +237,7 @@ fn feature_coverage(s: &Session, d: &Drawing, sheets: &[u64], drawn: &coverage::
     let dimensions = d.dimensions.iter().filter(|dim| on(dim.view) && !held.contains(&dim.id));
     let dimensions = dimensions.map(|dim| (object(CheckedKind::Dimension, dim.id), dim.kind.references()));
     let notes = d.notes.iter().filter(|n| n.anchor.view().is_some_and(on));
-    let notes = notes.map(|n| (object(CheckedKind::Note, n.id), n.anchor.reference().into_iter().collect()));
+    let notes = notes.map(|n| (object(CheckedKind::Note, n.id), n.references().collect()));
     let state = |state: coverage::State| match state {
         coverage::State::Covered => CoverageState::Covered,
         coverage::State::NotCovered => CoverageState::NotCovered,
