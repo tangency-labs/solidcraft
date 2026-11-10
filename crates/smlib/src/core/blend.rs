@@ -79,6 +79,7 @@ pub(super) fn status(e: SolidError) -> Error {
         e if is_b_spline_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
         e if is_intersect_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
         e if is_primitive_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
+        e if is_mass_heal_or_geom_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
         SolidError::InvalidInput { .. } => Error::Status(INVALID_INPUT),
         SolidError::Unsupported { reason, .. } if reason == MIXED_CORNER_RAILS_CROSS => Error::Unported(MIXED_CORNER_UNSUPPORTED),
         e if is_boolean_failure(&e) => boolean_status(e),
@@ -124,6 +125,13 @@ fn is_intersect_failure(e: &SolidError) -> bool {
 /// passes on as that status.
 fn is_primitive_failure(e: &SolidError) -> bool {
     e.primitive_failure().is_some()
+}
+
+/// A mass-property, healing or geometry-utility failure (solidcore's `MassFailure`,
+/// `HealFailure`, `GeomFailure`): it stands for the status the routine returned (`Upstream`
+/// before solidcore described it), and passes on as that status.
+fn is_mass_heal_or_geom_failure(e: &SolidError) -> bool {
+    e.mass_failure().is_some() || e.heal_failure().is_some() || e.geom_failure().is_some()
 }
 
 /// `size_ok`.

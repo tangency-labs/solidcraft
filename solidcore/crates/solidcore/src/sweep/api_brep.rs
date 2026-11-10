@@ -1671,12 +1671,9 @@ mod tests {
                 } else {
                     assert!(
                         matches!(
-                            result,
-                            Err(SolidError::Upstream {
-                                operation: crate::mass::integrator::OP_STEP_CONTROL,
-                                code: crate::error::SM_ERR,
-                                ..
-                            })
+                            &result,
+                            Err(e) if e.operation() == crate::mass::integrator::OP_STEP_CONTROL
+                                && e.upstream_status() == Some(crate::error::SM_ERR)
                         ),
                         "accuracy={accuracy}: {result:?}"
                     );
