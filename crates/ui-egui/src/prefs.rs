@@ -964,6 +964,10 @@ preference_settings! {
     /// A right-click in the view with a dialog open confirms its input: on to the next one, then OK.
     /// Off: it does nothing there, as before (#6159).
     right_click_confirms: bool = false, PAGE_GENERAL => check("Right-click confirms dialog inputs", "With a dialog open, a right-click in the view goes on to its next empty input, and on the last one runs OK");
+    /// With a dialog open, typing the first letter of a button's label presses it: O for OK,
+    /// C for Cancel (#9841). Off by default: typing does nothing to the buttons, as before.
+    /// A letter that fits two buttons does nothing, and a focused text field keeps the keystroke.
+    dialog_first_letter_buttons: bool = false, PAGE_GENERAL => check_id("prefs.dialog_first_letter_buttons");
     /// View orientation widget: original signed axes (default) or compact cube.
     navigator_style: NavigatorStyle = NavigatorStyle::default(), PAGE_NAVIGATION;
     /// The custom view gizmo's colours: the cube's (themed) or the body's own (modeled).
