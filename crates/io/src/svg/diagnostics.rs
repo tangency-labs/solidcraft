@@ -109,8 +109,92 @@ fn rounding_reserve(points: &[Vec2]) -> f64 {
     (256.0 * f64::EPSILON * magnitude).max(f64::MIN_POSITIVE)
 }
 
-/// Each accepted chord has a symmetric Hausdorff bound given by its control hull's distance
-/// to the segment. The curve lies inside that hull; its continuous projection covers the chord.
+fn lerp(a: Vec2, b: Vec2, t: f64) -> Vec2 {
+    a * (1.0 - t) + b * t
+}
+
+/// The control points of the cubic restricted to `[t0, t1]`.
+fn sub_cubic(p: [Vec2; 4], t0: f64, t1: f64) -> [Vec2; 4] {
+    fn split(p: [Vec2; 4], t: f64) -> ([Vec2; 4], [Vec2; 4]) {
+        let [a, b, c, d] = p;
+        let (ab, bc, cd) = (lerp(a, b, t), lerp(b, c, t), lerp(c, d, t));
+        let (abc, bcd) = (lerp(ab, bc, t), lerp(bc, cd, t));
+        let mid = lerp(abc, bcd, t);
+        ([a, ab, abc, mid], [mid, bcd, cd, d])
+    }
+    let head = if t1 >= 1.0 { p } else { split(p, t1).0 };
+    if t0 <= 0.0 || t1 <= 0.0 { head } else { split(head, t0 / t1).1 }
+}
+
+fn point_at(p: [Vec2; 4], t: f64) -> Vec2 {
+    let [a, b, c, d] = p;
+    let (ab, bc, cd) = (lerp(a, b, t), lerp(b, c, t), lerp(c, d, t));
+    lerp(lerp(ab, bc, t), lerp(bc, cd, t), t)
+}
+
+/// A bound on how far a cubic piece strays from the chord between its ends, or `None` when it
+/// cannot be bounded in finite arithmetic. When the control points project inside the chord the
+/// curve's offset from the chord line is a cubic Bernstein polynomial vanishing at both ends, so
+/// it never exceeds 3/4 of its largest inner control offset; otherwise fall back to the distance
+/// of the control hull to the chord.
+fn piece_error([a, b, c, d]: [Vec2; 4]) -> Option<f64> {
+    let chord = d - a;
+    let length2 = chord.len2();
+    let hull = distance_to_segment(b, a, d).max(distance_to_segment(c, a, d));
+    if !hull.is_finite() {
+        return None;
+    }
+    if length2 > 0.0 && length2.is_finite() {
+        let along = |q: Vec2| (q - a).dot(chord) / length2;
+        let (sb, sc) = (along(b), along(c));
+        if (0.0..=1.0).contains(&sb) && (0.0..=1.0).contains(&sc) {
+            let offset = |q: Vec2| {
+                let v = q - a;
+                (v.x * chord.y - v.y * chord.x).abs() / length2.sqrt()
+            };
+            let perpendicular = offset(b).max(offset(c));
+            if perpendicular.is_finite() {
+                return Some((0.75 * perpendicular).min(hull));
+            }
+        }
+    }
+    Some(hull)
+}
+
+/// Replace the cubic by `n` chords between equally spaced parameters, if every piece stays within
+/// `available`. Returns the chords and the largest piece bound.
+fn uniform_chords(p: [Vec2; 4], n: usize, available: f64, work_remaining: &mut usize) -> Option<Option<(Vec<Geom2>, f64)>> {
+    let mut lines = Vec::with_capacity(n);
+    let mut bound = 0.0f64;
+    let mut previous = p[0];
+    for i in 0..n {
+        if *work_remaining == 0 {
+            return None;
+        }
+        *work_remaining -= 1;
+        let (t0, t1) = (i as f64 / n as f64, (i + 1) as f64 / n as f64);
+        let end = if i + 1 == n { p[3] } else { point_at(p, t1) };
+        let mut piece = if n == 1 { p } else { sub_cubic(p, t0, t1) };
+        // The shared vertices are the chord ends; rounding in the split is covered by the reserve.
+        piece[0] = previous;
+        piece[3] = end;
+        let error = piece_error(piece)?;
+        if error > available {
+            return Some(None);
+        }
+        bound = bound.max(error);
+        if previous != end {
+            lines.push(Geom2::Line(previous, end));
+        }
+        previous = end;
+    }
+    Some(Some((lines, bound)))
+}
+
+/// Each accepted chord has a symmetric Hausdorff bound given by its piece's distance to the
+/// segment. The piece lies inside its control hull; its continuous projection covers the chord.
+/// The fewest equally spaced chords that meet the bound are used: fewer, longer segments keep
+/// later extrusion and region detection cheap.
 fn bounded_chords(p: [Vec2; 4], tolerance: f64, work_remaining: &mut usize) -> Option<(Vec<Geom2>, f64)> {
     // A single closed cubic cannot be replaced by an empty chord set. Preserve its topology
     // and leave it unresolved until a closed-curve approximation can be certified separately.
@@ -122,38 +206,32 @@ fn bounded_chords(p: [Vec2; 4], tolerance: f64, work_remaining: &mut usize) -> O
         return None;
     }
     let available = tolerance - reserve;
-    let mut pending = vec![(p, 0u8)];
-    let mut lines = Vec::new();
-    let mut bound = 0.0f64;
-    while let Some(([a, b, c, d], depth)) = pending.pop() {
-        if *work_remaining == 0 {
-            return None;
-        }
-        *work_remaining -= 1;
-        let errors = [distance_to_segment(b, a, d), distance_to_segment(c, a, d)];
-        if errors.iter().any(|e| !e.is_finite()) {
-            return None;
-        }
-        let error = errors[0].max(errors[1]);
-        if error <= available {
-            if a != d {
-                lines.push(Geom2::Line(a, d));
+    const MAX_CHORDS: usize = 4096;
+    // Double until the bound holds, then search the last interval for the smallest count.
+    let mut low = 0usize;
+    let mut n = 1usize;
+    let found = loop {
+        match uniform_chords(p, n, available, work_remaining)? {
+            Some(found) => break found,
+            None if n >= MAX_CHORDS => return None,
+            None => {
+                low = n;
+                n = (n * 2).min(MAX_CHORDS);
             }
-            bound = bound.max(error);
-        } else {
-            if depth >= 24 || lines.len() + pending.len() >= 4096 {
-                return None;
+        }
+    };
+    let (mut best, mut high) = (found, n);
+    while high - low > 1 {
+        let mid = low + (high - low) / 2;
+        match uniform_chords(p, mid, available, work_remaining)? {
+            Some(found) => {
+                best = found;
+                high = mid;
             }
-            let ab = a * 0.5 + b * 0.5;
-            let bc = b * 0.5 + c * 0.5;
-            let cd = c * 0.5 + d * 0.5;
-            let abc = ab * 0.5 + bc * 0.5;
-            let bcd = bc * 0.5 + cd * 0.5;
-            let mid = abc * 0.5 + bcd * 0.5;
-            pending.push(([mid, bcd, cd, d], depth + 1));
-            pending.push(([a, ab, abc, mid], depth + 1));
+            None => low = mid,
         }
     }
+    let (lines, bound) = best;
     let bound = bound + reserve;
     (bound <= tolerance && !lines.is_empty()).then_some((lines, bound))
 }

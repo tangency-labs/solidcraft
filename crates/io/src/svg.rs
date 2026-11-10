@@ -1002,6 +1002,20 @@ mod tests {
     /// so none of these may panic: `catch_unwind` turns one into a failed test, the way
     /// `hostile_files_never_panic` does for STEP (solidcraft#469).
     #[test]
+    fn svg_repair_uses_the_fewest_equal_chords_within_the_bound() {
+        // Midpoint bisection would need 64 chords for each of the two halves at 0.01.
+        let text = r#"<svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="20mm" viewBox="0 0 20 20"><path d="M0 10 C0 -3.333 20 -3.333 20 10 C20 23.333 0 23.333 0 10 Z"/></svg>"#;
+        let repaired = read_svg_diagnosed(text, Some(0.01)).unwrap();
+        assert!(repaired.diagnostics.iter().all(|d| d.repaired && d.max_deviation_mm.is_some_and(|b| b <= 0.01)));
+        assert!(repaired.geometry.iter().all(|g| matches!(g, Geom2::Line(..))));
+        assert!(repaired.geometry.len() <= 80, "{} chords", repaired.geometry.len());
+        let ends = |g: &Geom2| if let Geom2::Line(a, b) = g { (*a, *b) } else { (Vec2::ZERO, Vec2::ZERO) };
+        for pair in repaired.geometry.windows(2) {
+            assert_eq!(ends(&pair[0]).1, ends(&pair[1]).0, "chords stay connected end to end");
+        }
+    }
+
+    #[test]
     fn hostile_svg_never_panics() {
         let good = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="50mm" viewBox="0 0 100 50">
             <g transform="translate(10 5)"><rect x="1" y="2" width="3" height="4"/><path d="M0 0 L5 5 Z"/></g>
