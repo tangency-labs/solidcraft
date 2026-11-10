@@ -23,5 +23,4 @@ solid.pattern.rectangular
 solid.shell
 solid.thread
 surface.extrude
-surface.patch
 surface.revolve

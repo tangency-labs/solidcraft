@@ -8,10 +8,12 @@
 #![forbid(unsafe_code)]
 
 pub mod auth;
+mod cancel;
 mod effect;
 mod request;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod server;
 
+pub use cancel::{Cancel, Ticket};
 pub use effect::Effect;
 pub use request::{ControlRequest, ControlResponse, DOCUMENT_WATCH, DocumentWatch, Subscriber, cancelled_chat_response, chat_turn_cancelled};

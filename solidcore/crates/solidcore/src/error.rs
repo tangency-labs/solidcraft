@@ -30,7 +30,7 @@
 //! | [`boolean::BooleanFailure`] | none: the Boolean operation's failures           |
 //! | [`nurbs::NurbsFailure`]     | `NL_*_ERR` numbers, in solidcore's terms         |
 //! | [`defeature::DefeatureFailure`] | none: why a defeature keeps a feature (#3218) |
-//! | [`sweep::SweepFailure`]     | none: why a sweep or loft refuses (#3140)         |
+//! | [`sweep::SweepFailure`]     | none: why a sweep or loft refuses, and the sweep routines' failures |
 //!
 //! NLib routines (`NL_*.cpp`) report failure by returning an error flag and storing an
 //! error number in the process-wide `NL_ERROR` record; solidcore returns
@@ -79,7 +79,10 @@
 
 pub mod boolean;
 pub mod defeature;
+pub mod geom;
+pub mod heal;
 pub mod intersect;
+pub mod mass;
 pub mod nurbs;
 pub mod offset;
 pub mod primitive;
@@ -736,6 +739,13 @@ pub enum Reason {
     Primitive(primitive::PrimitiveFailure),
     /// A sweep or loft refused (#3140).
     Sweep(sweep::SweepFailure),
+    /// A mass-property integration or enclosure computation failed.
+    Mass(mass::MassFailure),
+    /// A healing or stitching step failed.
+    Heal(heal::HealFailure),
+    /// A geometry utility (linear algebra, transforms, boxes, solvers, tolerances,
+    /// attributes) failed.
+    Geom(geom::GeomFailure),
 }
 
 impl Reason {
@@ -748,7 +758,10 @@ impl Reason {
             | Self::Defeature(_)
             | Self::Intersect(_)
             | Self::Primitive(_)
-            | Self::Sweep(_) => None,
+            | Self::Sweep(_)
+            | Self::Mass(_)
+            | Self::Heal(_)
+            | Self::Geom(_) => None,
             Self::Offset(o) => o.entity(),
             Self::Boolean(b) => b.entity(),
         }
@@ -766,6 +779,9 @@ impl Reason {
             Self::Intersect(i) => i.comparison_status(),
             Self::Primitive(p) => p.comparison_status(),
             Self::Sweep(w) => w.comparison_status(),
+            Self::Mass(m) => m.comparison_status(),
+            Self::Heal(h) => h.comparison_status(),
+            Self::Geom(g) => g.comparison_status(),
         }
     }
 
@@ -781,6 +797,9 @@ impl Reason {
             Self::Intersect(i) => i.kind(),
             Self::Primitive(p) => p.kind(),
             Self::Sweep(w) => w.kind(),
+            Self::Mass(m) => m.kind(),
+            Self::Heal(h) => h.kind(),
+            Self::Geom(g) => g.kind(),
         }
     }
 }
@@ -796,6 +815,9 @@ impl core::fmt::Display for Reason {
             Self::Intersect(i) => i.fmt(f),
             Self::Primitive(p) => p.fmt(f),
             Self::Sweep(w) => w.fmt(f),
+            Self::Mass(m) => m.fmt(f),
+            Self::Heal(h) => h.fmt(f),
+            Self::Geom(g) => g.fmt(f),
         }
     }
 }
@@ -827,6 +849,24 @@ impl From<intersect::IntersectFailure> for Reason {
 impl From<primitive::PrimitiveFailure> for Reason {
     fn from(p: primitive::PrimitiveFailure) -> Self {
         Self::Primitive(p)
+    }
+}
+
+impl From<mass::MassFailure> for Reason {
+    fn from(m: mass::MassFailure) -> Self {
+        Self::Mass(m)
+    }
+}
+
+impl From<heal::HealFailure> for Reason {
+    fn from(h: heal::HealFailure) -> Self {
+        Self::Heal(h)
+    }
+}
+
+impl From<geom::GeomFailure> for Reason {
+    fn from(g: geom::GeomFailure) -> Self {
+        Self::Geom(g)
     }
 }
 
@@ -1073,9 +1113,11 @@ impl SolidError {
     /// The status of an error that answers with an `SmStatus` the way a
     /// [`SolidError::Upstream`] does: its `code`, or the status of a failure that replaced
     /// an `Upstream` site ([`nurbs::BSplineFailure`], [`intersect::IntersectFailure`],
-    /// [`primitive::PrimitiveFailure`]). The callers that branch on an upstream status
-    /// use it so that they treat both alike; it goes with `Upstream` in the last PR of
-    /// the typed-errors work.
+    /// [`primitive::PrimitiveFailure`], [`mass::MassFailure`], [`heal::HealFailure`],
+    /// [`geom::GeomFailure`], a [`sweep::SweepFailure`] that
+    /// [replaced one](sweep::SweepFailure::replaces_upstream_status)). The callers that branch
+    /// on an upstream status use it so that they treat both alike; it goes with `Upstream` in
+    /// the last PR of the typed-errors work.
     #[must_use]
     pub(crate) fn upstream_status(&self) -> Option<i32> {
         match self {
@@ -1083,7 +1125,11 @@ impl SolidError {
             Self::Failed(f) => match &f.reason {
                 Reason::Nurbs(nurbs::NurbsFailure::BSpline(_))
                 | Reason::Intersect(_)
-                | Reason::Primitive(_) => Some(f.status),
+                | Reason::Primitive(_)
+                | Reason::Mass(_)
+                | Reason::Heal(_)
+                | Reason::Geom(_) => Some(f.status),
+                Reason::Sweep(w) if w.replaces_upstream_status() => Some(f.status),
                 _ => None,
             },
             _ => None,
@@ -1316,7 +1362,9 @@ impl SolidError {
 /// The status `error` answers with the way a [`SolidError::Upstream`] does: an
 /// `Upstream`'s code, or the status of a failure that replaced an `Upstream` site
 /// ([`nurbs::BSplineFailure`], [`intersect::IntersectFailure`],
-/// [`primitive::PrimitiveFailure`]).
+/// [`primitive::PrimitiveFailure`], [`mass::MassFailure`], [`heal::HealFailure`],
+/// [`geom::GeomFailure`], a [`sweep::SweepFailure`] that
+/// [replaced one](sweep::SweepFailure::replaces_upstream_status)).
 ///
 /// For difftest's comparison only: it is removed with `Upstream` and `sm_status` in the
 /// last PR of the typed-errors work. Callers match [`SolidError::kind`] and the
@@ -2156,7 +2204,9 @@ mod tests {
     fn the_b_spline_methods_build_no_bare_statuses() {
         let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let library = |rel: &str| {
-            let text = std::fs::read_to_string(src.join(rel)).expect("read");
+            let text = std::fs::read_to_string(src.join(rel))
+                .expect("read")
+                .replace("\r\n", "\n");
             match text.find("#[cfg(test)]\nmod tests") {
                 Some(at) => text[..at].to_owned(),
                 None => text,

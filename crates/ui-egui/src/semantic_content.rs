@@ -241,10 +241,16 @@ pub(crate) fn set_external_body_hover(app: &mut SolveApp, bodies: Vec<String>) {
 /// The timeline's own write of the hovered feature. A Browser row that lit the same feature a
 /// frame earlier no longer owns it, so expiring the Browser's hover leaves the timeline's alone.
 pub(crate) fn set_timeline_feature_hover(app: &mut SolveApp, feature: Option<u64>) {
-    app.tree.content.last_feature = None;
-    app.viewport.hover_feature = feature;
+    if feature.is_some() {
+        app.tree.content.last_feature = None;
+        app.viewport.hover_feature = feature;
+    } else if app.tree.content.last_feature.is_none() {
+        app.viewport.hover_feature = None;
+    }
 }
 
+/// Expire previous hover contributions owned by browser or content trees before applying
+/// new actions for the current frame, returning the previous bodies and construction plane.
 fn expire_hover(app: &mut SolveApp) -> (Vec<String>, Option<String>) {
     let old_bodies = std::mem::take(&mut app.tree.content.last_bodies);
     let old_plane = app.tree.content.last_plane.take();
@@ -432,6 +438,8 @@ fn presented(ui: &Ui) -> bool {
     ui.is_visible() && ui.opacity() > 0.0
 }
 
+/// Finalize content tree hover state, pointer ownership, and drag interactions across panels
+/// for the current frame, requesting a repaint if visible hover highlights changed.
 pub(crate) fn finalize(app: &mut SolveApp, ctx: &egui::Context) {
     ensure_session(app, ctx);
     if app.tree.content.finalized {

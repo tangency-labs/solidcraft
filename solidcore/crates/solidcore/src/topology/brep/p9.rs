@@ -329,6 +329,8 @@ pub fn find_infinite_region(
                     break;
                 }
                 for edge_id in &edges {
+                    // (not upstream) cooperative cancellation once per edge (solidcore#3247)
+                    k.check_cancelled(OP)?;
                     let record = b.edge(*edge_id)?;
                     let curve = required(record.curve.as_ref(), "ray target edge without curve")?;
                     let big_tolerance = record.tolerance > 1.01 * b.tolerance();

@@ -1,7 +1,7 @@
 //! Imports every `.stp`/`.step` file under a directory and prints one line per file:
 //! bodies, skipped bodies with reasons, and topology counts.
 //!
-//! `cargo run -p step-import --example survey -- corpus/steptools`
+//! `cargo run -p goldens --example step_survey -- corpus/steptools`
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -35,7 +35,7 @@ fn main() {
     for p in list {
         let bytes = std::fs::read(&p).unwrap_or_default();
         let name = p.strip_prefix(&dir).unwrap_or(&p).display().to_string();
-        match step_import::import(&bytes, &step_import::Limits::default()) {
+        match step_export::import(&bytes, &step_export::Limits::default()) {
             Err(e) => println!("{name}: PARSE ERROR {e}"),
             Ok(m) => {
                 let (f, e, v): (usize, usize, usize) = m.bodies.iter().fold((0, 0, 0), |a, b| {

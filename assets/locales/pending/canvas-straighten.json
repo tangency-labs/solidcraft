@@ -12,7 +12,7 @@
   },
   "ar": {
     "browser.straighten_angle": "اتجاه الحافة",
-    "browser.straighten_choose": "اختر ما تصبح عليه الحافة، أفقية أو رأسية أو بزاوية، ثم اضغط تقويم.",
+    "browser.straighten_choose": "اختر ما تصبح عليه الحافة، أفقية أو رأسية أو بزاوية، ثم اضغط «تقويم».",
     "browser.straighten_click_a": "انقر الصورة عند أحد طرفي حافة يجب أن تكون مستقيمة، أو اكتب إحداثياتها.",
     "browser.straighten_click_b": "انقر الطرف الآخر للحافة، أو اكتب إحداثياته.",
     "browser.straighten_horizontal": "أفقي",

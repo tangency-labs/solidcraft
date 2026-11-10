@@ -172,7 +172,9 @@ mod tests {
         ];
         files.extend((1..=9).map(|i| format!("curve_class/p{i}.rs")));
         for rel in files {
-            let text = std::fs::read_to_string(src.join(&rel)).expect("read");
+            let text = std::fs::read_to_string(src.join(&rel))
+                .expect("read")
+                .replace("\r\n", "\n");
             let library = text
                 .find("#[cfg(test)]\nmod tests")
                 .map_or(text.as_str(), |at| &text[..at]);

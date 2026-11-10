@@ -142,7 +142,8 @@ fn validate_skin_primitive_inputs(
 fn copy_skin_primitive_curves(k: &Kernel, input_curves: &[Option<&Curve>]) -> Result<Vec<Curve>> {
     let mut curve_copies = Vec::new();
     for curve in input_curves {
-        let curve = curve.ok_or_else(|| SolidError::null_pointer(OP_SKIN_PRIMITIVE))?;
+        let curve =
+            curve.ok_or_else(|| SolidError::sweep_missing(OP_SKIN_PRIMITIVE, "a curve to skin"))?;
         curve_copies.push(curve.copy(k)?);
     }
     Ok(curve_copies)
@@ -193,7 +194,10 @@ pub fn create_skin_primitive(
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 // Ownership is indeterminate for copies without a report entry.
                 _ if transferred.len() != copy_count => {
-                    return Err(SolidError::sm_err(OP_SKIN_PRIMITIVE));
+                    return Err(SolidError::sweep_failed(
+                        OP_SKIN_PRIMITIVE,
+                        "a skinning curve copy has no ownership record",
+                    ));
                 }
                 other => other?,
             }
@@ -330,12 +334,10 @@ pub fn create_surface_revolution(
     })?
     .first()
     .copied()
-    .ok_or_else(|| SolidError::sm_err(OP_REVOLUTION))?;
-    let mut surface = brep
-        .face_mut(face)?
-        .surface
-        .take()
-        .ok_or_else(|| SolidError::sm_err(OP_REVOLUTION))?;
+    .ok_or_else(|| SolidError::sweep_failed(OP_REVOLUTION, "the revolved body has no face"))?;
+    let mut surface = brep.face_mut(face)?.surface.take().ok_or_else(|| {
+        SolidError::sweep_failed(OP_REVOLUTION, "the revolved face has no surface")
+    })?;
     surface.set_owner(None);
     Ok(surface)
 }

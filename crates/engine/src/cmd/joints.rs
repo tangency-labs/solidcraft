@@ -1368,6 +1368,7 @@ fn joint(s: &mut Session, p: &Value) -> Result<Value> {
         angle: angle.unwrap_or(0.0),
         suppressed: false,
         exprs: JointExprs { offset: typed(p.get("offset")), angle: typed(p.get("angle")), values: value_exprs(p) },
+        captured: None,
     };
     // No angle given: B keeps its turn about the joint's axis where a half turn would otherwise
     // come only from how its origin's x was chosen. (An angle relation's angle is its tilt.)
@@ -1413,6 +1414,7 @@ fn as_built(s: &mut Session, p: &Value) -> Result<Value> {
         angle: 0.0,
         suppressed: false,
         exprs: Default::default(),
+        captured: None,
     };
     add_joint(s, j, p)
 }
@@ -2315,6 +2317,45 @@ mod reach_tests;
 #[cfg(test)]
 #[path = "joints_relations_tests.rs"]
 mod relations_tests;
+/// Capture Position: every moving joint keeps its current values (as the solver places them) as
+/// its captured position. Returns how many joints were captured.
+pub(in crate::cmd) fn capture_values(s: &mut Session) -> usize {
+    let current = joints::joint_values(&s.doc.assembly);
+    if s.doc.assembly.joints.iter().all(|j| j.kind == JointKind::Rigid) {
+        return 0;
+    }
+    let mut n = 0;
+    for j in s.doc_mut().assembly.joints.iter_mut().filter(|j| j.kind != JointKind::Rigid) {
+        let mut q = current.get(&j.id).cloned().unwrap_or_else(|| j.values.clone());
+        q.resize(j.kind.dofs().len(), 0.0);
+        j.captured = Some(q);
+        n += 1;
+    }
+    n
+}
+
+/// Revert Position: every joint with a captured position goes back to it, clamped to its limits.
+/// A joint with none (a design from before captured joint values) keeps its values. The values
+/// put back drop their expressions, as `joint.drive` does. Returns how many joints went back.
+pub(in crate::cmd) fn revert_values(s: &mut Session) -> usize {
+    if !s.doc.assembly.joints.iter().any(|j| j.captured.is_some() && j.kind != JointKind::Rigid) {
+        return 0;
+    }
+    let mut n = 0;
+    for j in s.doc_mut().assembly.joints.iter_mut().filter(|j| j.kind != JointKind::Rigid) {
+        let Some(mut q) = j.captured.clone() else { continue };
+        q.resize(j.kind.dofs().len(), 0.0);
+        joints::clamp(j, &mut q);
+        j.values = q;
+        for i in 0..j.kind.dofs().len() {
+            j.exprs.set_value(i, None);
+        }
+        n += 1;
+    }
+    resolve(s);
+    n
+}
+
 #[cfg(test)]
 #[path = "joints_tests.rs"]
 mod tests;

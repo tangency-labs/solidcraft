@@ -562,4 +562,18 @@ fn a_boolean_failure_from_another_operation_keeps_its_status() {
     assert!(matches!(status(primitive(PrimitiveFailure::AxisInsideFace)), Error::Status(1025)));
     let helix = PrimitiveFailure::HelixDeviates { deviation: 0.5, tolerance: 0.25 };
     assert!(matches!(status(primitive(helix)), Error::Status(1021)));
+    // a mass-property, healing or geometry-utility failure passes on as the status it replaced
+    use solidcore::error::geom::GeomFailure;
+    use solidcore::error::heal::HealFailure;
+    use solidcore::error::mass::MassFailure;
+    let mass = |f| Failure::new("mass::integrator", f).into_error();
+    assert!(matches!(status(mass(MassFailure::StepControl)), Error::Status(1001)));
+    assert!(matches!(status(mass(MassFailure::Missing("the edge's curve"))), Error::Status(1006)));
+    let heal = |f| Failure::new("heal::stitch::p1", f).into_error();
+    assert!(matches!(status(heal(HealFailure::Failed("the edges could not be glued"))), Error::Status(1001)));
+    assert!(matches!(status(heal(HealFailure::NotYetHealable)), Error::Status(1040)));
+    let geom = |f| Failure::new("geom::matrix", f).into_error();
+    assert!(matches!(status(geom(GeomFailure::Failed("the matrix is singular"))), Error::Status(1001)));
+    assert!(matches!(status(geom(GeomFailure::CoincidentPoints)), Error::Status(0)));
+    assert!(matches!(status(geom(GeomFailure::ToleranceTooSmall { tolerance: 0.0 })), Error::Status(1007)));
 }
