@@ -1598,3 +1598,82 @@ fn collision_lbvh_morton_and_ssi_edge_cases() {
     }
     let _ = cuda;
 }
+
+#[test]
+fn point_mesh_distance_voronoi_and_edge_cases() {
+    use crate::cuda::GpuTri;
+    use crate::dispatch::{Dispatcher, cpu_point_mesh_distance_scalar};
+
+    let disp = Dispatcher::global();
+
+    // 1. Exact analytical verification of all 7 Voronoi feature regions on a single right triangle:
+    // A = (0, 0, 0), B = (4, 0, 0), C = (0, 3, 0).
+    let tri = GpuTri { v0: [0.0, 0.0, 0.0, 0.0], v1: [4.0, 0.0, 0.0, 0.0], v2: [0.0, 3.0, 0.0, 0.0] };
+    let voronoi_cases: &[([f32; 4], f32, &str)] = &[
+        // Vertex A region: closest is (0, 0, 0), d^2 = (-1)^2 + (-2)^2 + 2^2 = 9.0
+        ([-1.0, -2.0, 2.0, 0.0], 9.0, "Vertex A Voronoi region"),
+        // Vertex B region: closest is (4, 0, 0), d^2 = (6-4)^2 + (-1)^2 + 2^2 = 9.0
+        ([6.0, -1.0, 2.0, 0.0], 9.0, "Vertex B Voronoi region"),
+        // Vertex C region: closest is (0, 3, 0), d^2 = (-2)^2 + (5-3)^2 + 1^2 = 9.0
+        ([-2.0, 5.0, 1.0, 0.0], 9.0, "Vertex C Voronoi region"),
+        // Edge AB region: closest is (2, 0, 0), d^2 = 0^2 + (-3)^2 + 4^2 = 25.0
+        ([2.0, -3.0, 4.0, 0.0], 25.0, "Edge AB Voronoi region"),
+        // Edge AC region: closest is (0, 1.5, 0), d^2 = (-3)^2 + 0^2 + 4^2 = 25.0
+        ([-3.0, 1.5, 4.0, 0.0], 25.0, "Edge AC Voronoi region"),
+        // Edge BC region: (2, 1.5, 0) is midpoint of BC; outward normal in XY is (3, 4)/5.
+        // P = (2, 1.5, 0) + (1.2, 1.6, 2.0) = (3.2, 3.1, 2.0) -> closest is (2, 1.5, 0), d^2 = 1.44 + 2.56 + 4.0 = 8.0
+        ([3.2, 3.1, 2.0, 0.0], 8.0, "Edge BC Voronoi region"),
+        // Face interior region: P = (1, 1, -5) -> closest is (1, 1, 0), d^2 = 25.0
+        ([1.0, 1.0, -5.0, 0.0], 25.0, "Face interior Voronoi region"),
+        // Point directly on triangle interior: P = (1, 1, 0) -> d^2 = 0.0
+        ([1.0, 1.0, 0.0, 0.0], 0.0, "Point on triangle interior"),
+        // Point directly on vertex B: P = (4, 0, 0) -> d^2 = 0.0
+        ([4.0, 0.0, 0.0, 0.0], 0.0, "Point on vertex B"),
+    ];
+    let pts: Vec<[f32; 4]> = voronoi_cases.iter().map(|&(p, _, _)| p).collect();
+
+    for target in COMPUTE_TARGETS {
+        let (_, d2) = disp.with_forced_backend(Some(target)).point_mesh_distance(&pts, &[tri]);
+        for (i, &(_, exp_d2, label)) in voronoi_cases.iter().enumerate() {
+            assert!((d2[i] - exp_d2).abs() < 1e-4, "Voronoi distance mismatch for '{label}' on {target:?}: got {}, expected {exp_d2}", d2[i]);
+        }
+    }
+
+    // 2. Degenerate triangles (coincident vertices A==B==C, A==B!=C, A==C!=B, B==C!=A, and collinear vertices):
+    // Verify no backend ever emits NaN!
+    let degen_tris = vec![
+        GpuTri { v0: [1.0, 2.0, 3.0, 0.0], v1: [1.0, 2.0, 3.0, 0.0], v2: [1.0, 2.0, 3.0, 0.0] },
+        GpuTri { v0: [0.0, 0.0, 0.0, 0.0], v1: [0.0, 0.0, 0.0, 0.0], v2: [2.0, 0.0, 0.0, 0.0] },
+        GpuTri { v0: [0.0, 0.0, 0.0, 0.0], v1: [2.0, 0.0, 0.0, 0.0], v2: [0.0, 0.0, 0.0, 0.0] },
+        GpuTri { v0: [0.0, 0.0, 0.0, 0.0], v1: [2.0, 0.0, 0.0, 0.0], v2: [2.0, 0.0, 0.0, 0.0] },
+        GpuTri { v0: [0.0, 0.0, 0.0, 0.0], v1: [1.0, 0.0, 0.0, 0.0], v2: [2.0, 0.0, 0.0, 0.0] },
+    ];
+    for target in COMPUTE_TARGETS {
+        let (_, d2) = disp.with_forced_backend(Some(target)).point_mesh_distance(&pts, &degen_tris);
+        for (i, &val) in d2.iter().enumerate() {
+            assert!(val.is_finite() && val >= 0.0, "degenerate triangle produced non-finite d2={val} at query {i} on {target:?}");
+        }
+    }
+
+    // 3. Empty inputs and tile-boundary sizes (127, 128, 129 queries x 127, 128, 129 triangles):
+    let mut many_tris = Vec::with_capacity(129);
+    for i in 0..129 {
+        let z = i as f32 * 0.5;
+        many_tris.push(GpuTri { v0: [0.0, 0.0, z, 0.0], v1: [1.0, 0.0, z, 0.0], v2: [0.0, 1.0, z, 0.0] });
+    }
+    let mut many_pts = Vec::with_capacity(129);
+    for i in 0..129 {
+        many_pts.push([0.25, 0.25, i as f32 * 0.5 + 0.1, 0.0]);
+    }
+    let ref_many = cpu_point_mesh_distance_scalar(&many_pts, &many_tris);
+    for target in COMPUTE_TARGETS {
+        let d = disp.with_forced_backend(Some(target));
+        assert!(d.point_mesh_distance(&[], &many_tris).1.is_empty());
+        let (_, empty_tri_d2) = d.point_mesh_distance(&pts, &[]);
+        assert!(empty_tri_d2.iter().all(|&x| x.is_infinite() && x > 0.0));
+        let (_, got_many) = d.point_mesh_distance(&many_pts, &many_tris);
+        for i in 0..129 {
+            assert!((got_many[i] - ref_many[i]).abs() < 1e-5, "tile-boundary 129x129 mismatch at {i} on {target:?}");
+        }
+    }
+}

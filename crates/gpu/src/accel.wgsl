@@ -422,3 +422,112 @@ fn raycast_mesh_bvh(@builtin(global_invocation_id) gid: vec3<u32>) {
     rc_hits[r_idx] = GpuRayHit(select(-1.0, best_t, best_tri != 0xFFFFFFFFu), best_tri, 0u, 0u);
 }
 
+// ── Kernel 5: Point-to-Mesh Minimum Squared Distance ──────────────────────
+
+@group(0) @binding(0) var<uniform> pd_params: MeshQueryParams;
+@group(0) @binding(1) var<storage, read> pd_points: array<vec4<f32>>;
+@group(0) @binding(2) var<storage, read> pd_tris: array<GpuTri>;
+@group(0) @binding(3) var<storage, read_write> pd_dist_sq: array<f32>;
+
+fn closest_point_on_tri_dist_sq(p: vec3<f32>, a: vec3<f32>, b: vec3<f32>, c: vec3<f32>) -> f32 {
+    let ab = b - a;
+    let ac = c - a;
+    let ap = p - a;
+    let d1 = dot(ab, ap);
+    let d2 = dot(ac, ap);
+    if d1 <= 0.0 && d2 <= 0.0 {
+        return dot(ap, ap);
+    }
+    let bp = p - b;
+    let d3 = dot(ab, bp);
+    let d4 = dot(ac, bp);
+    if d3 >= 0.0 && d4 <= d3 {
+        return dot(bp, bp);
+    }
+    let vc = d1 * d4 - d3 * d2;
+    if vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0 {
+        let den = d1 - d3;
+        let v = select(0.0, d1, den > 0.0) / select(1.0, den, den > 0.0);
+        let diff = p - (a + ab * v);
+        return dot(diff, diff);
+    }
+    let cp = p - c;
+    let d5 = dot(ab, cp);
+    let d6 = dot(ac, cp);
+    if d6 >= 0.0 && d5 <= d6 {
+        return dot(cp, cp);
+    }
+    let vb = d5 * d2 - d1 * d6;
+    if vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0 {
+        let den = d2 - d6;
+        let w = select(0.0, d2, den > 0.0) / select(1.0, den, den > 0.0);
+        let diff = p - (a + ac * w);
+        return dot(diff, diff);
+    }
+    let va = d3 * d6 - d5 * d4;
+    if va <= 0.0 && (d4 - d3) >= 0.0 && (d5 - d6) >= 0.0 {
+        let den = (d4 - d3) + (d5 - d6);
+        let w = select(0.0, d4 - d3, den > 0.0) / select(1.0, den, den > 0.0);
+        let diff = p - (b + (c - b) * w);
+        return dot(diff, diff);
+    }
+    let den = va + vb + vc;
+    if abs(den) <= 1e-30 {
+        return dot(ap, ap);
+    }
+    let denom = 1.0 / den;
+    let v = vb * denom;
+    let w = vc * denom;
+    let diff = p - (a + ab * v + ac * w);
+    return dot(diff, diff);
+}
+
+@compute @workgroup_size(128)
+fn point_mesh_distance(
+    @builtin(global_invocation_id) gid: vec3<u32>,
+    @builtin(local_invocation_id) lid: vec3<u32>,
+) {
+    let q_idx = gid.x;
+    let tid = lid.x;
+    let is_active = q_idx < pd_params.num_queries;
+    let p = select(vec3<f32>(0.0), pd_points[min(q_idx, max(pd_params.num_queries, 1u) - 1u)].xyz, is_active);
+
+    var best_d2: f32 = 1e30;
+    let num_tiles = (pd_params.num_tris + 127u) / 128u;
+    for (var tile: u32 = 0u; tile < num_tiles; tile = tile + 1u) {
+        let tri_idx = tile * 128u + tid;
+        if tri_idx < pd_params.num_tris {
+            shared_tris[tid] = pd_tris[tri_idx];
+        }
+        workgroupBarrier();
+
+        if is_active {
+            let count = min(128u, pd_params.num_tris - tile * 128u);
+            for (var k: u32 = 0u; k < count; k = k + 1u) {
+                let tri = shared_tris[k];
+                let d2 = closest_point_on_tri_dist_sq(p, tri.v0.xyz, tri.v1.xyz, tri.v2.xyz);
+                best_d2 = min(best_d2, d2);
+            }
+        }
+        workgroupBarrier();
+    }
+
+    if is_active {
+        pd_dist_sq[q_idx] = best_d2;
+    }
+}
+
+// ── Kernel 6: Divergence Theorem Mass Properties Workgroup Reduction ──────
+
+struct MassReduceOut {
+    v6_area: vec4<f32>, // x = v6 (6 * volume), y = surface area, z = 0, w = 0
+    moment1: vec4<f32>, // xyz = sum((a + b + c) * det), w = 0
+}
+
+@group(0) @binding(0) var<uniform> mp_params: MeshQueryParams;
+@group(0) @binding(1) var<storage, read> mp_tris: array<GpuTri>;
+@group(0) @binding(2) var<storage, read_write> mp_partials: array<MassReduceOut>;
+
+var<workgroup> wg_v6: array<f32, 256>;
+var<workgroup> wg_area: array<f32, 256>;
+var<workgroup> wg_mom: array<vec3<f32>, 256>;

@@ -21,6 +21,7 @@ use std::time::Instant;
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 use solidcore_record::Vec3;
+use solidcraft_geom::compare::closest_on_triangle;
 use solidcraft_geom::tess::TessPlan;
 use solidcraft_geom::{Mesh, Vec3Geom};
 use wgpu::util::DeviceExt;
@@ -178,6 +179,8 @@ pub struct VulkanAccel {
     classify_bvh_pipeline: wgpu::ComputePipeline,
     raycast_bvh_pipeline: wgpu::ComputePipeline,
     bvh_query_bgl: wgpu::BindGroupLayout,
+    dist_pipeline: wgpu::ComputePipeline,
+    dist_bgl: wgpu::BindGroupLayout,
 }
 
 static GLOBAL_VULKAN: OnceLock<Option<VulkanAccel>> = OnceLock::new();
@@ -248,6 +251,18 @@ impl VulkanAccel {
         let classify_bvh_pipeline = make_pipeline(&bvh_query_pl, "classify_points_bvh");
         let raycast_bvh_pipeline = make_pipeline(&bvh_query_pl, "raycast_mesh_bvh");
 
+        // 3. Point-to-Mesh Distance (bindings 0..=3)
+        let dist_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("accel-dist-bgl"),
+            entries: &[entry(0, true), entry(1, true), entry(2, true), entry(3, false)],
+        });
+        let dist_pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("accel-dist-pl"),
+            bind_group_layouts: &[Some(&dist_bgl)],
+            immediate_size: 0,
+        });
+        let dist_pipeline = make_pipeline(&dist_pl, "point_mesh_distance");
+
         Some(Self {
             device,
             queue,
@@ -259,6 +274,8 @@ impl VulkanAccel {
             classify_bvh_pipeline,
             raycast_bvh_pipeline,
             bvh_query_bgl,
+            dist_pipeline,
+            dist_bgl,
         })
     }
 
@@ -491,6 +508,72 @@ impl VulkanAccel {
         {
             let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("vk-rc-pass"), timestamp_writes: None });
             pass.set_pipeline(&self.raycast_bvh_pipeline);
+            pass.set_bind_group(0, &bg, &[]);
+            pass.dispatch_workgroups(num_queries.div_ceil(128), 1, 1);
+        }
+        enc.copy_buffer_to_buffer(&out_buf, 0, &read_buf, 0, out_size);
+        self.queue.submit(Some(enc.finish()));
+
+        self.read_mapped_vec(&read_buf)
+    }
+
+    /// Computes minimum squared distances from `points` to `tris` on Vulkan/wgpu.
+    pub fn point_mesh_distance(&self, points: &[[f32; 4]], tris: &[GpuTri]) -> Option<Vec<f32>> {
+        if points.is_empty() {
+            return Some(Vec::new());
+        }
+        if tris.is_empty() {
+            return Some(vec![f32::INFINITY; points.len()]);
+        }
+        let num_queries = u32::try_from(points.len()).ok()?;
+        let num_tris = u32::try_from(tris.len()).ok()?;
+        let params = MeshQueryParams { num_queries, num_tris, num_bvh_nodes: 0, pad: 0 };
+
+        let _guard = self.collision.lock_device();
+        let u_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("vk-dist-params"),
+            contents: &encode_pod(&params),
+            usage: wgpu::BufferUsages::UNIFORM,
+        });
+        let pts_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("vk-dist-pts"),
+            contents: &encode_pod_slice(points),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let tris_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("vk-dist-tris"),
+            contents: &encode_pod_slice(tris),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let out_size = (points.len() * std::mem::size_of::<f32>()) as u64;
+        let out_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vk-dist-out"),
+            size: out_size,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let read_buf = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("vk-dist-read"),
+            size: out_size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let bg = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("vk-dist-bg"),
+            layout: &self.dist_bgl,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: u_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 1, resource: pts_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 2, resource: tris_buf.as_entire_binding() },
+                wgpu::BindGroupEntry { binding: 3, resource: out_buf.as_entire_binding() },
+            ],
+        });
+
+        let mut enc = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("vk-dist-enc") });
+        {
+            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor { label: Some("vk-dist-pass"), timestamp_writes: None });
+            pass.set_pipeline(&self.dist_pipeline);
             pass.set_bind_group(0, &bg, &[]);
             pass.dispatch_workgroups(num_queries.div_ceil(128), 1, 1);
         }
@@ -1002,6 +1085,40 @@ pub fn cpu_bipartite_overlap_rayon(aabbs_a: &[GpuAabb], aabbs_b: &[GpuAabb], tol
     }
 }
 
+/// Computes the minimum squared distance from a single point `p` to all triangles in `tris`.
+fn point_mesh_dist_sq_one(p: [f32; 4], tris: &[GpuTri]) -> f32 {
+    let pv = Vec3::new(p[0] as f64, p[1] as f64, p[2] as f64);
+    let mut best = f64::INFINITY;
+    for t in tris {
+        let a = Vec3::new(t.v0[0] as f64, t.v0[1] as f64, t.v0[2] as f64);
+        let b = Vec3::new(t.v1[0] as f64, t.v1[1] as f64, t.v1[2] as f64);
+        let c = Vec3::new(t.v2[0] as f64, t.v2[1] as f64, t.v2[2] as f64);
+        let q = closest_on_triangle(pv, a, b, c);
+        let d2 = (q - pv).len2();
+        if d2 < best {
+            best = d2;
+        }
+    }
+    best as f32
+}
+
+/// CPU scalar minimum squared distance from points to mesh triangles.
+pub fn cpu_point_mesh_distance_scalar(points: &[[f32; 4]], tris: &[GpuTri]) -> Vec<f32> {
+    points.iter().map(|&p| point_mesh_dist_sq_one(p, tris)).collect()
+}
+
+/// CPU `rayon` parallel minimum squared distance from points to mesh triangles.
+pub fn cpu_point_mesh_distance_rayon(points: &[[f32; 4]], tris: &[GpuTri]) -> Vec<f32> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        points.par_iter().map(|&p| point_mesh_dist_sq_one(p, tris)).collect()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        cpu_point_mesh_distance_scalar(points, tris)
+    }
+}
+
 // ── Calibration Data Structures & Scaling Microbenchmark ──────────────────
 
 /// Number of rotated-order timing samples collected per `(KernelOp, problem_size)` bucket.
@@ -1308,6 +1425,7 @@ pub fn run_scaling_microbenchmark(sizes: &[usize]) -> CalibrationReport {
         let _ = v.eval_bicubic_f32(&patch_f32, &queries_f32[..16]);
         let _ = v.classify_points(&query_pts[..16], &sphere_tris, &sphere_bvh, true);
         let _ = v.raycast_bvh(&query_rays[..16], &sphere_tris, &sphere_bvh);
+        let _ = v.point_mesh_distance(&query_pts[..16], &sphere_tris);
     }
     if let Some(c) = cuda {
         let _ = c.eval_bicubic_f32(&patch_f32, &queries_f32[..max_n], false);
@@ -1318,6 +1436,7 @@ pub fn run_scaling_microbenchmark(sizes: &[usize]) -> CalibrationReport {
         let _ = c.classify_points(&query_pts[..16], &sphere_tris, false);
         let _ = c.classify_points_rt_bvh(&query_pts[..16], &sphere_tris, &sphere_bvh);
         let _ = c.raycast_rt_bvh(&query_rays[..16], &sphere_tris, &sphere_bvh);
+        let _ = c.point_mesh_distance(&query_pts[..16], &sphere_tris, false);
     }
 
     let mut kernels = Vec::with_capacity(KernelOp::ALL.len());
@@ -1451,6 +1570,27 @@ pub fn run_scaling_microbenchmark(sizes: &[usize]) -> CalibrationReport {
                         (KernelOp::AabbBroadphase, BackendTarget::AmperePtx) => time_ns(|| {
                             if let Some(c) = cuda {
                                 std::hint::black_box(c.bipartite_aabb_overlap(&boxes_a, &boxes_b, 1e-4, true));
+                            }
+                        }),
+                        (KernelOp::PointMeshDistance, BackendTarget::CpuScalar) => time_ns(|| {
+                            std::hint::black_box(cpu_point_mesh_distance_scalar(&query_pts[..n], &sphere_tris));
+                        }),
+                        (KernelOp::PointMeshDistance, BackendTarget::CpuRayon) => time_ns(|| {
+                            std::hint::black_box(cpu_point_mesh_distance_rayon(&query_pts[..n], &sphere_tris));
+                        }),
+                        (KernelOp::PointMeshDistance, BackendTarget::VulkanCompute) => time_ns(|| {
+                            if let Some(v) = vk {
+                                std::hint::black_box(v.point_mesh_distance(&query_pts[..n], &sphere_tris));
+                            }
+                        }),
+                        (KernelOp::PointMeshDistance, BackendTarget::CudaGeneric) => time_ns(|| {
+                            if let Some(c) = cuda {
+                                std::hint::black_box(c.point_mesh_distance(&query_pts[..n], &sphere_tris, false));
+                            }
+                        }),
+                        (KernelOp::PointMeshDistance, BackendTarget::AmperePtx) => time_ns(|| {
+                            if let Some(c) = cuda {
+                                std::hint::black_box(c.point_mesh_distance(&query_pts[..n], &sphere_tris, true));
                             }
                         }),
                         _ => 1,
@@ -1790,6 +1930,43 @@ impl Dispatcher {
             }
         }
         (BackendTarget::CpuScalar, cpu_bipartite_overlap(aabbs_a, aabbs_b, tolerance))
+    }
+
+    /// Dispatches batched point-to-mesh minimum squared distance evaluation.
+    pub fn point_mesh_distance(&self, points: &[[f32; 4]], tris: &[GpuTri]) -> (BackendTarget, Vec<f32>) {
+        let target = self.select_backend(KernelOp::PointMeshDistance, points.len());
+        match target {
+            BackendTarget::AmperePtx | BackendTarget::AmpereTensorCore | BackendTarget::RtCoreBvh => {
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(c) = CudaBackend::global()
+                    && let Some(out) = c.point_mesh_distance(points, tris, true)
+                {
+                    return (BackendTarget::AmperePtx, out);
+                }
+            }
+            BackendTarget::CudaGeneric => {
+                #[cfg(not(target_arch = "wasm32"))]
+                if let Some(c) = CudaBackend::global()
+                    && let Some(out) = c.point_mesh_distance(points, tris, false)
+                {
+                    return (BackendTarget::CudaGeneric, out);
+                }
+            }
+            BackendTarget::VulkanCompute => {
+                if let Some(v) = VulkanAccel::global()
+                    && let Some(out) = v.point_mesh_distance(points, tris)
+                {
+                    return (BackendTarget::VulkanCompute, out);
+                }
+            }
+            BackendTarget::CpuRayon => {
+                return (BackendTarget::CpuRayon, cpu_point_mesh_distance_rayon(points, tris));
+            }
+            BackendTarget::CpuScalar => {
+                return (BackendTarget::CpuScalar, cpu_point_mesh_distance_scalar(points, tris));
+            }
+        }
+        (BackendTarget::CpuScalar, cpu_point_mesh_distance_scalar(points, tris))
     }
 
     /// Evaluates a [`TessPlan`] using either CPU scalar or parallel `rayon` across faces.

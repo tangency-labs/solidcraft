@@ -238,6 +238,7 @@ struct GenericFunctions {
     classify_points_rt_bvh: CudaFunction,
     raycast_rt_bvh: CudaFunction,
     bipartite_aabb: CudaFunction,
+    point_mesh_dist: CudaFunction,
 }
 
 struct AmpereFunctions {
@@ -247,6 +248,7 @@ struct AmpereFunctions {
     classify_points_rt_bvh_sm86: CudaFunction,
     raycast_rt_bvh_sm86: CudaFunction,
     bipartite_aabb_sm86: CudaFunction,
+    point_mesh_dist_sm86: CudaFunction,
 }
 
 /// Multi-tier `cudarc` CUDA backend holding both Generic (`sm_70`) and Handcrafted Ampere (`sm_86`) modules.
@@ -344,6 +346,7 @@ impl CudaBackend {
             classify_points_rt_bvh: mod_generic.load_function("classify_points_rt_bvh").ok()?,
             raycast_rt_bvh: mod_generic.load_function("raycast_rt_bvh").ok()?,
             bipartite_aabb: mod_generic.load_function("bipartite_aabb_overlap_generic").ok()?,
+            point_mesh_dist: mod_generic.load_function("point_mesh_distance_generic").ok()?,
         };
 
         let (mod_ampere, ampere) = if best.supports_ampere_ptx {
@@ -356,6 +359,7 @@ impl CudaBackend {
                         classify_points_rt_bvh_sm86: m86.load_function("classify_points_rt_bvh").ok()?,
                         raycast_rt_bvh_sm86: m86.load_function("raycast_rt_bvh").ok()?,
                         bipartite_aabb_sm86: m86.load_function("bipartite_aabb_overlap_sm86").ok()?,
+                        point_mesh_dist_sm86: m86.load_function("point_mesh_distance_sm86").ok()?,
                     })
                 })();
                 (Some(m86), funcs)
@@ -640,5 +644,34 @@ impl CudaBackend {
         let mut pairs = self.stream.clone_dtoh(&pair_view).ok()?;
         pairs.sort_unstable();
         Some(CollisionResult { pairs, overflowed })
+    }
+
+    /// Computes minimum squared distances from `points` to `tris` on the GPU.
+    pub fn point_mesh_distance(&self, points: &[[f32; 4]], tris: &[GpuTri], use_ampere_sm86: bool) -> Option<Vec<f32>> {
+        if points.is_empty() {
+            return Some(Vec::new());
+        }
+        if tris.is_empty() {
+            return Some(vec![f32::INFINITY; points.len()]);
+        }
+        let func = if use_ampere_sm86 { &self.ampere.as_ref()?.point_mesh_dist_sm86 } else { &self.generic.point_mesh_dist };
+
+        let num_queries = u32::try_from(points.len()).ok()?;
+        let num_tris = u32::try_from(tris.len()).ok()?;
+
+        let _guard = self.lock_and_bind()?;
+        let d_pts = self.stream.clone_htod(points).ok()?;
+        let d_tris = self.stream.clone_htod(tris).ok()?;
+        let mut d_out = self.stream.alloc_zeros::<f32>(points.len()).ok()?;
+
+        let block_x = 128u32;
+        let cfg = LaunchConfig { grid_dim: (num_queries.div_ceil(block_x), 1, 1), block_dim: (block_x, 1, 1), shared_mem_bytes: 0 };
+
+        // SAFETY: Kernel signature takes `(const float4*, const GpuTri*, f32*, u32, u32)`.
+        unsafe {
+            self.stream.launch_builder(func).arg(&d_pts).arg(&d_tris).arg(&mut d_out).arg(&num_queries).arg(&num_tris).launch(cfg).ok()?;
+        }
+
+        self.stream.clone_dtoh(&d_out).ok()
     }
 }
