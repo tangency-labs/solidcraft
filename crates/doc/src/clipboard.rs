@@ -252,6 +252,11 @@ impl crate::Feature {
                     checked_plane(&end.plane, 0)?;
                 }
             }
+            K::FrameGusset { supports, .. } => {
+                for support in supports {
+                    checked_plane(&support.plane, 0)?;
+                }
+            }
             K::ConstructionPlane { plane }
             | K::Split { plane, .. }
             | K::SplitFace { plane, .. }
@@ -325,6 +330,11 @@ impl crate::Feature {
             K::FrameEndCap { ends, .. } => {
                 for end in ends {
                     remap_plane(&mut end.plane, ids, bodies, 0, occurrences, doc)?;
+                }
+            }
+            K::FrameGusset { supports, .. } => {
+                for support in supports {
+                    remap_plane(&mut support.plane, ids, bodies, 0, occurrences, doc)?;
                 }
             }
             K::ConstructionPlane { plane }
