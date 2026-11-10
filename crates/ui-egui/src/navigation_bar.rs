@@ -292,7 +292,3 @@ impl NavigationBar {
         Ok(to)
     }
 }
-
-#[cfg(test)]
-#[path = "navigation_bar_tests.rs"]
-mod tests;

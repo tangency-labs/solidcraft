@@ -1,7 +1,7 @@
 use super::*;
-use crate::gpu::Renderer as ViewRenderer;
 use egui_wgpu::{CallbackResources, CallbackTrait, FrameCompositor, ScreenDescriptor, wgpu};
 use solidcraft_viewport_egui::ViewportCallback;
+use solidcraft_viewport_gpu::view::Renderer as ViewRenderer;
 use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};

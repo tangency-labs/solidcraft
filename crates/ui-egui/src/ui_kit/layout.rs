@@ -67,7 +67,7 @@ fn scope_inner<R>(ui: &mut Ui, grow: Option<egui::Id>, add: impl FnOnce(&mut Ui)
 /// 1.5:1), as in SolidCraft 95 and CGA where they are the same colour; then the theme's ink for
 /// selected elements (#11804). Every other theme keeps its look. Tokens: `form_primary,
 /// selected_bg, selected_ink`.
-fn selection_ink(t: &Tokens) -> egui::Color32 {
+pub(crate) fn selection_ink(t: &Tokens) -> egui::Color32 {
     if solidcraft_theme::contrast_ratio(t.form_primary, t.selected_bg) >= SELECTION_INK_MIN_CONTRAST { t.form_primary } else { t.selected_ink }
 }
 
@@ -972,54 +972,4 @@ pub(crate) fn summary_row(ui: &mut Ui, name: &str, summary: &str, enabled: &mut 
         actions,
     );
     changed
-}
-
-#[cfg(test)]
-mod selection_ink_tests {
-    use super::selection_ink;
-    use solidcraft_theme::{Tokens, contrast_ratio};
-
-    /// Selected text in a form field stands out from the selection in every built-in theme
-    /// (#11804): none draws it in the selection's own colour.
-    #[test]
-    fn selected_form_text_reads_in_every_built_in_theme() {
-        crate::test_support::host_data();
-        let mut themes = vec![("Dark".to_string(), Tokens::dark()), ("Light".to_string(), Tokens::light())];
-        themes.extend(crate::theme_files::builtin().iter().map(|theme| (theme.id.clone(), crate::theme_files::resolve(theme))));
-        let mut failures = Vec::new();
-        for (name, t) in &themes {
-            let ratio = contrast_ratio(selection_ink(t), t.selected_bg);
-            if ratio < 2.0 {
-                failures.push(format!("{name}: {ratio:.2}:1"));
-            }
-        }
-        assert!(failures.is_empty(), "selected form text below 2:1 on selected_bg:\n{}", failures.join("\n"));
-    }
-
-    /// Themes whose primary colour stands out from the selection keep it, Dark and Light
-    /// included; SolidCraft 95 and CGA, where it is the selection colour itself, take the ink for
-    /// selected elements.
-    #[test]
-    fn only_themes_whose_primary_vanishes_switch_to_the_selected_ink() {
-        crate::test_support::host_data();
-        for t in [Tokens::dark(), Tokens::light()] {
-            assert_eq!(selection_ink(&t), t.form_primary);
-        }
-        let mut switched: Vec<&str> = crate::theme_files::builtin()
-            .iter()
-            .filter(|theme| {
-                let t = crate::theme_files::resolve(theme);
-                selection_ink(&t) != t.form_primary
-            })
-            .map(|theme| theme.id.as_str())
-            .collect();
-        switched.sort_unstable();
-        assert_eq!(switched, ["cga", "solidcraft-95"]);
-        for id in ["solidcraft-95", "cga"] {
-            let theme = crate::theme_files::builtin().iter().find(|theme| theme.id == id).unwrap();
-            let t = crate::theme_files::resolve(theme);
-            assert_eq!(t.form_primary, t.selected_bg, "{id}");
-            assert_eq!(selection_ink(&t), t.selected_ink, "{id}");
-        }
-    }
 }

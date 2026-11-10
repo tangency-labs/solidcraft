@@ -68,10 +68,6 @@ pub use actions::{Button, button};
 pub(crate) use assistant::*;
 pub(crate) use assistant_entry::*;
 pub(crate) use attention::*;
-#[cfg(test)]
-pub(crate) use checks::tests::{checkbox_shapes as test_checkbox_shapes, raster as test_raster, textures_update as test_textures_update};
-#[cfg(test)]
-pub(crate) use checks::tests::{raster as raster_ui, textures_update as update_test_textures};
 pub(crate) use checks::*;
 pub(crate) use choice::*;
 pub(crate) use color::*;
@@ -132,6 +128,10 @@ pub(crate) use stages::{Cards, StageAction, StageBar};
 pub(crate) use status::*;
 pub(crate) use table::*;
 #[cfg(test)]
+pub(crate) use test_support::{checkbox_shapes as test_checkbox_shapes, raster as test_raster, textures_update as test_textures_update};
+#[cfg(test)]
+pub(crate) use test_support::{raster as raster_ui, textures_update as update_test_textures};
+#[cfg(test)]
 pub(crate) use text::ellipsize_middle;
 pub(crate) use text::paint_text;
 pub(crate) use text_menu::menu_open as text_menu_open;
@@ -167,7 +167,7 @@ pub(crate) fn fits_steadily(ui: &egui::Ui, key: impl std::hash::Hash + std::fmt:
 
 // Share the existing CPU rasteriser with page-level artwork regressions.
 #[cfg(test)]
-pub(crate) use checks::tests::raster as raster_test_shapes;
+pub(crate) use test_support::raster as raster_test_shapes;
 
 #[cfg(test)]
-pub(crate) use checks::tests::textures_update;
+pub(crate) use test_support::textures_update;

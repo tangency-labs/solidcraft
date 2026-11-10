@@ -79,3 +79,15 @@ pub(crate) fn selected_text(text: &str, at: [i32; 2]) -> (Harness, String, Strin
     h.app.session.selection = vec![Sel::SketchCurve { id: curve.clone(), sketch: None }];
     (h, link, curve)
 }
+
+/// SolidCraft's two-colour built-in themes (1-bit and 1-bit Dark): pure black and white, so a few
+/// looks other themes tell apart by colour are told apart by text or shape instead.
+pub(crate) fn is_two_colour(id: &str) -> bool {
+    matches!(id, "1-bit" | "1-bit-dark")
+}
+
+/// A theme file with per-tab tables for SolidCraft's tabs (`tests/fixtures/theme-tabs.json`).
+pub(crate) fn tab_fixture(base: &str) -> crate::theme_files::ThemeFile {
+    let catalog: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/theme-tabs.json")).unwrap();
+    crate::theme_files::from_value(&catalog[base]).unwrap()
+}

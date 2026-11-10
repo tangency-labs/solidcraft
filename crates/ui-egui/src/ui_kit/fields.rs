@@ -196,11 +196,11 @@ fn step_count(text: &str, delta: i64, limits: &Count<'_>) -> Option<String> {
 
 /// A value a label drag can change: a number with an optional unit ("20 mm", "1,5 in", "45°").
 #[derive(Clone, Debug, PartialEq)]
-struct Literal {
-    number: f64,
+pub(crate) struct Literal {
+    pub(crate) number: f64,
     /// The text after the number, as written (" mm").
-    unit: String,
-    comma: bool,
+    pub(crate) unit: String,
+    pub(crate) comma: bool,
 }
 
 /// The largest value a label drag reads or writes.
@@ -208,7 +208,7 @@ const LITERAL_CAP: f64 = 1e12;
 
 /// `text` as a [`Literal`] of the `expressions` language, or None for anything else: a parameter,
 /// a formula, an empty field. Dragging never rewrites an expression, so a driving parameter stays driving.
-fn literal(expressions: &dyn Expressions, text: &str) -> Option<Literal> {
+pub(crate) fn literal(expressions: &dyn Expressions, text: &str) -> Option<Literal> {
     let text = text.trim();
     if !expressions.is_literal(text) {
         return None;
@@ -227,14 +227,14 @@ fn literal(expressions: &dyn Expressions, text: &str) -> Option<Literal> {
 
 /// How much one point of drag changes a value of this size, before Shift or Ctrl: about a
 /// hundredth of it, as a power of ten, so 20 mm moves by 0.1 mm and 250 mm by 1 mm.
-fn scrub_step(number: f64) -> f64 {
+pub(crate) fn scrub_step(number: f64) -> f64 {
     let decade = number.abs().max(1.0).log10().floor().clamp(0.0, 8.0);
     10f64.powf(decade - 2.0)
 }
 
 /// `anchor` moved by `points` of drag at `step` per point, on the step's grid. A value that
 /// starts at zero or above stays there: a drag never turns a size negative.
-fn scrubbed(anchor: f64, points: f32, step: f64) -> f64 {
+pub(crate) fn scrubbed(anchor: f64, points: f32, step: f64) -> f64 {
     let moved = ((anchor + f64::from(points) * step) / step).round() * step;
     let moved = if anchor >= 0.0 { moved.max(0.0) } else { moved };
     // Literal values are capped where `literal` reads them; a drag never leaves that range.
@@ -242,7 +242,7 @@ fn scrubbed(anchor: f64, points: f32, step: f64) -> f64 {
 }
 
 /// The scrubbed text: as many decimals as the step needs, the unit and decimal mark as typed.
-fn scrub_text(number: f64, step: f64, literal: &Literal) -> String {
+pub(crate) fn scrub_text(number: f64, step: f64, literal: &Literal) -> String {
     let decimals = (-step.log10()).ceil().clamp(0.0, 6.0) as usize;
     let mut text = format!("{number:.decimals$}");
     if text.starts_with('-') && text.trim_start_matches(['-', '0', '.']).is_empty() {

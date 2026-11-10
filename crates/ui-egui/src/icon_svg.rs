@@ -208,7 +208,7 @@ mod tests {
         for file in crate::theme_files::builtin() {
             let palette = crate::theme_files::resolve_icon_palette(file, &Default::default()).expect("shipped icon palette");
             // Two colours can't make a pale/medium/strong ramp three distinct shades (1-bit, 1-bit Dark).
-            for ramp in palette.accents.into_iter().flatten().filter(|_| !crate::theme_files::is_two_colour(&file.id)) {
+            for ramp in palette.accents.into_iter().flatten().filter(|_| !crate::test_support::is_two_colour(&file.id)) {
                 // Ordered faces stay visibly distinct without changing accepted paths.
                 assert_ne!(ramp[0], ramp[1], "{} pale/medium", file.id);
                 assert_ne!(ramp[1], ramp[2], "{} medium/strong", file.id);

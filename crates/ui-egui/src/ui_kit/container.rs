@@ -6,7 +6,7 @@ use egui::{Color32, Context, Frame, Id, Stroke, WidgetText};
 use serde::{Deserialize, Serialize};
 use solidcraft_theme::Tokens;
 
-pub(super) type Background = fn(&egui::Painter, Frame, egui::Rect, egui::Shape) -> egui::Shape;
+pub(crate) type Background = fn(&egui::Painter, Frame, egui::Rect, egui::Shape) -> egui::Shape;
 
 /// A reserved background slot for native hosts whose Frame is painted by egui.
 pub(super) struct BackingSlot {
@@ -322,7 +322,7 @@ pub(crate) struct FeatureWindow<'a> {
 }
 
 impl<'a> FeatureWindow<'a> {
-    pub(super) fn new(window: egui::Window<'a>, id: Id, frame: Frame) -> Self {
+    pub(crate) fn new(window: egui::Window<'a>, id: Id, frame: Frame) -> Self {
         Self { window, id, frame, open: None }
     }
 
@@ -346,7 +346,7 @@ impl<'a> FeatureWindow<'a> {
         self.show_background(ctx, background, body)
     }
 
-    pub(super) fn show_background<R>(
+    pub(crate) fn show_background<R>(
         self,
         ctx: &Context,
         background: Option<Background>,
@@ -1067,7 +1067,7 @@ impl Container {
         shown
     }
 
-    pub(super) fn window<'a>(self, title: impl Into<WidgetText>) -> egui::Window<'a> {
+    pub(crate) fn window<'a>(self, title: impl Into<WidgetText>) -> egui::Window<'a> {
         egui::Window::new(title).enabled(self.input_enabled())
     }
 

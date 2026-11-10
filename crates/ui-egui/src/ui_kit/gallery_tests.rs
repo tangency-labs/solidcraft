@@ -846,7 +846,7 @@ pub(crate) const ELEMENTS: &[Element] = &[
         });
     }),
     element!("preset_card", |ui, _| {
-        let icon = |p: &egui::Painter, r: egui::Rect, ink: egui::Color32| crate::icons::paint_ink(p, r, "settings", ink);
+        let icon = |p: &egui::Painter, r: egui::Rect, ink: egui::Color32| super::icons::paint_ink(p, r, "settings", ink);
         let width = ui.available_width();
         for (name, word, selected, enabled) in
             [("Performance", "Fastest", false, true), ("Quality", "Sharpest", true, true), ("Custom", "Your own mix", false, false)]
@@ -1848,14 +1848,9 @@ pub(crate) const ELEMENTS: &[Element] = &[
             dropdown(ui, "gallery", &mut s.selected, &["One", "Two"]);
         });
     }),
-    element!("dropdown_icons", "dialog:row:Visual style", Some("dialog:Visual style"), |ui, s| {
-        row(ui, "Visual style", |ui| {
-            let options: Vec<_> = crate::navigation_slots::VISUAL_STYLES
-                .iter()
-                .enumerate()
-                .map(|(index, (_, label))| (*label, crate::navigation_slots::visual_style_icon(index as u8)))
-                .collect();
-            dropdown_icons(ui, "gallery_visual_style", &mut s.selected, &options);
+    element!("dropdown_icons", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
+        row(ui, "Gallery", |ui| {
+            dropdown_icons(ui, "gallery_icons", &mut s.selected, &[("One", "one"), ("Two", "two")]);
         });
     }),
     element!("dropdown_previews", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
@@ -2149,19 +2144,20 @@ pub(crate) fn example(ui: &mut Ui, element: &Element) -> (&'static str, Option<&
 
 #[test]
 fn every_element_has_geometry_and_stays_in_its_allocation_in_both_themes() {
-    check_elements(ELEMENTS);
+    check_elements(ELEMENTS, super::test_support::context);
 }
 
 /// Every element of `elements` publishes finite geometry and its handle, keeps its paint inside
-/// its allocation, and keeps the row height of a form row, in both themes.
+/// its allocation, and keeps the row height of a form row, in both themes, each drawn in a fresh
+/// `context()`.
 #[cfg(test)]
-pub(crate) fn check_elements(elements: &[Element]) {
+pub(crate) fn check_elements(elements: &[Element], context: fn() -> egui::Context) {
     let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
         solidcraft_theme::set_dark(dark);
         for element in elements {
             let name = element.name;
-            let ctx = crate::fonts::test_context();
+            let ctx = context();
             ctx.set_visuals(if dark { egui::Visuals::dark() } else { egui::Visuals::light() });
             for pass in 0..3 {
                 let events = if element.name.starts_with("checkbox_hovered") && pass > 0 {
@@ -2222,50 +2218,9 @@ pub(crate) fn check_elements(elements: &[Element]) {
 }
 
 #[test]
-fn visual_style_dropdown_specimen_selects_real_options_and_paints_their_icons() {
-    let previous = solidcraft_theme::is_dark();
-    let element = ELEMENTS.iter().find(|element| element.name == "dropdown_icons").unwrap();
-    for dark in [false, true] {
-        solidcraft_theme::set_dark(dark);
-        let ctx = crate::fonts::test_context();
-        let sample = std::cell::RefCell::new(Sample { value: String::new(), second: String::new(), selected: 0, checked: false });
-        let mut draw = |ui: &mut Ui| {
-            (element.draw)(ui, &mut sample.borrow_mut());
-        };
-        for _ in 0..3 {
-            super::test_support::frame(&ctx, vec![], &mut draw);
-        }
-        for (index, (_, label)) in crate::navigation_slots::VISUAL_STYLES.into_iter().enumerate() {
-            let trigger = solidcraft_ui_registry::handle_at("dialog:Visual style").unwrap();
-            super::test_support::frame(&ctx, super::test_support::pointer(trigger, true), &mut draw);
-            super::test_support::frame(&ctx, super::test_support::pointer(trigger, false), &mut draw);
-            super::test_support::frame(&ctx, vec![], &mut draw);
-            for (option, (_, name)) in crate::navigation_slots::VISUAL_STYLES.into_iter().enumerate() {
-                let rect = solidcraft_ui_registry::rect_of(&format!("dialog:Visual style:{name}")).unwrap();
-                let icon = crate::navigation_slots::visual_style_icon(option as u8);
-                let painted = solidcraft_ui_registry::rect_of(&format!("dialog:dropdown_icon:{icon}")).unwrap();
-                let owner =
-                    if option == sample.borrow().selected { solidcraft_ui_registry::rect_of("dialog:widget:Visual style").unwrap() } else { rect };
-                assert!(owner.contains_rect(painted), "{name}: its real icon is in its option or selected trigger");
-            }
-            let option = solidcraft_ui_registry::handle_at(&format!("dialog:Visual style:{label}")).unwrap();
-            super::test_support::frame(&ctx, super::test_support::pointer(option, true), &mut draw);
-            super::test_support::frame(&ctx, super::test_support::pointer(option, false), &mut draw);
-            super::test_support::frame(&ctx, vec![], &mut draw);
-            assert_eq!(sample.borrow().selected, index, "the specimen edits the real selection index");
-            let icon = crate::navigation_slots::visual_style_icon(index as u8);
-            let trigger = solidcraft_ui_registry::rect_of("dialog:widget:Visual style").unwrap();
-            assert!(trigger.contains_rect(solidcraft_ui_registry::rect_of(&format!("dialog:dropdown_icon:{icon}")).unwrap()));
-            assert!(solidcraft_ui_registry::handle_at("dialog:Visual style:Wireframe").is_none(), "the native popup closes after selection");
-        }
-    }
-    solidcraft_theme::set_dark(previous);
-}
-
-#[test]
 fn apply_does_not_submit_and_obeys_validation() {
     for enabled in [false, true] {
-        let ctx = crate::fonts::test_context();
+        let ctx = super::test_support::context();
         let mut action = Action::None;
         let mut draw = |ui: &mut Ui| {
             action = footer(ui, "OK", "Cancel", enabled, Footer { apply: Some("Apply"), ..Default::default() });
@@ -2280,7 +2235,7 @@ fn apply_does_not_submit_and_obeys_validation() {
 
 #[test]
 fn picked_item_remove_and_paired_values_have_independent_targets() {
-    let ctx = crate::fonts::test_context();
+    let ctx = super::test_support::context();
     let mut removed = false;
     let mut draw = |ui: &mut Ui| {
         removed = list_row(ui, "point-1", "Point 1").clicked();
@@ -2314,7 +2269,7 @@ fn gallery_rows_share_a_label_column_after_measurement_in_both_themes() {
     let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
         solidcraft_theme::set_dark(dark);
-        let ctx = crate::fonts::test_context();
+        let ctx = super::test_support::context();
         let mut value = "3".to_owned();
         for _ in 0..3 {
             super::test_support::frame(&ctx, vec![], |ui| {
@@ -2339,7 +2294,7 @@ fn gallery_rows_share_a_label_column_after_measurement_in_both_themes() {
 
 #[test]
 fn compound_row_actions_preserve_the_original_field_handle() {
-    let ctx = crate::fonts::test_context();
+    let ctx = super::test_support::context();
     let mut value = "3 mm".to_owned();
     let mut expected = None;
     super::test_support::frame(&ctx, vec![], |ui| {
@@ -2365,7 +2320,7 @@ fn compound_row_actions_preserve_the_original_field_handle() {
 #[test]
 fn emphasis_and_compact_modes_keep_independent_actions_in_both_themes() {
     for dark in [false, true] {
-        let ctx = crate::fonts::test_context();
+        let ctx = super::test_support::context();
         ctx.set_visuals(if dark { egui::Visuals::dark() } else { egui::Visuals::light() });
         let mut bold = false;
         let mut italic = false;
@@ -2395,7 +2350,7 @@ fn emphasis_and_compact_modes_keep_independent_actions_in_both_themes() {
 #[test]
 fn table_cells_keep_alignment_fixed_rows_editing_and_action_targets() {
     for dark in [false, true] {
-        let ctx = crate::fonts::test_context();
+        let ctx = super::test_support::context();
         ctx.set_visuals(if dark { egui::Visuals::dark() } else { egui::Visuals::light() });
         let mut first = "10 mm".to_owned();
         let mut second = "20 mm".to_owned();
@@ -2456,7 +2411,7 @@ fn table_cells_keep_alignment_fixed_rows_editing_and_action_targets() {
 #[test]
 fn popup_suggestions_and_selectable_lists_keep_click_selection() {
     for dark in [false, true] {
-        let ctx = crate::fonts::test_context();
+        let ctx = super::test_support::context();
         ctx.set_visuals(if dark { egui::Visuals::dark() } else { egui::Visuals::light() });
         let mut selected = None;
         let mut draw = |ui: &mut Ui| {
@@ -2497,7 +2452,7 @@ fn popup_suggestions_and_selectable_lists_keep_click_selection() {
 
 #[test]
 fn many_draggable_samples_wrap_inside_the_available_width() {
-    let ctx = crate::fonts::test_context();
+    let ctx = super::test_support::context();
     let mut rects = Vec::new();
     let mut bounds = egui::Rect::NOTHING;
     super::test_support::frame(&ctx, vec![], |ui| {
@@ -2551,7 +2506,18 @@ fn gallery_covers_every_inline_element() {
                 // Inherited labels, state keys and accessors, parsers and size measurements do not render elements.
                 if !matches!(
                     name.as_str(),
-                    "dimension" | "eye_drag_id" | "expressions" | "icon_label_width" | "label" | "parse_number" | "placement_field_content_size"
+                    "dimension"
+                        | "eye_drag_id"
+                        | "expressions"
+                        | "icon_label_width"
+                        | "label"
+                        | "literal"
+                        | "parse_number"
+                        | "placement_field_content_size"
+                        | "scrub_step"
+                        | "scrub_text"
+                        | "scrubbed"
+                        | "selection_ink"
                 ) {
                     assert!(names.contains(name.as_str()), "{file}: {name} needs a gallery entry");
                 }
@@ -2576,12 +2542,12 @@ fn history_seam_example(ui: &mut Ui, state: HistoryHandleState) {
 /// CPU-rendered review board using the actual gallery widgets, without a window.
 #[test]
 fn material_widgets_board_in_both_themes() {
-    use super::checks::tests::{raster, textures_update};
+    use super::test_support::{raster, textures_update};
     use std::collections::HashMap;
     let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
         solidcraft_theme::set_dark(dark);
-        let ctx = crate::fonts::test_context();
+        let ctx = super::test_support::context();
         let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(360.0, 240.0));
         let mut textures = HashMap::new();
         let mut image = None;
@@ -2612,7 +2578,7 @@ fn material_widgets_board_in_both_themes() {
 
 #[test]
 fn tree_icon_actions_keep_repeated_light_rows_independent() {
-    let ctx = crate::fonts::test_context();
+    let ctx = super::test_support::context();
     let mut ids = std::collections::HashSet::new();
     super::test_support::frame(&ctx, vec![], |ui| {
         for index in 0..3 {
@@ -2671,7 +2637,7 @@ fn sample_card<'a>(label: &'a str, selected: bool, enabled: bool) -> super::pref
 #[test]
 fn picture_cards_and_tiles_click_only_when_enabled_and_never_panic() {
     use super::preferences_cards::{picture_card, toggle_tile};
-    let ctx = crate::fonts::test_context();
+    let ctx = super::test_support::context();
     for tile in [false, true] {
         for enabled in [true, false] {
             let mut clicked = false;
@@ -2709,8 +2675,8 @@ fn picture_cards_and_tiles_click_only_when_enabled_and_never_panic() {
 #[test]
 fn preset_card_and_help_icon_behave() {
     use super::preferences_cards::{help_icon, preset_card};
-    let ctx = crate::fonts::test_context();
-    let icon = |p: &egui::Painter, r: egui::Rect, ink: egui::Color32| crate::icons::paint_ink(p, r, "settings", ink);
+    let ctx = super::test_support::context();
+    let icon = |p: &egui::Painter, r: egui::Rect, ink: egui::Color32| super::icons::paint_ink(p, r, "settings", ink);
     super::test_support::frame(&ctx, vec![], |ui| {
         for width in [0.0, 10.0, 204.0, f32::NAN] {
             let response = preset_card(ui, "Performance", "Fastest", true, true, &icon, width);
@@ -2725,7 +2691,7 @@ fn preset_card_and_help_icon_behave() {
 /// Set `SOLIDCRAFT_PREFERENCE_WIDGET_EVIDENCE` to a directory to keep the PNGs.
 #[test]
 fn preference_widgets_and_figures_board_in_both_themes() {
-    use super::checks::tests::{raster, textures_update};
+    use super::test_support::{raster, textures_update};
     use std::collections::HashMap;
     let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
@@ -2735,7 +2701,7 @@ fn preference_widgets_and_figures_board_in_both_themes() {
             ("figures", &["preference_figures"][..]),
         ] {
             for scale in [1.0_f32, 2.0] {
-                let ctx = crate::fonts::test_context();
+                let ctx = super::test_support::context();
                 ctx.set_pixels_per_point(scale);
                 let bounds = egui::Rect::from_min_size(
                     egui::Pos2::ZERO,

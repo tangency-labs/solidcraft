@@ -108,6 +108,8 @@ pub(crate) mod joint_handles;
 pub mod keymap;
 #[cfg(test)]
 mod kit_gallery_tests;
+#[cfg(test)]
+mod kit_host_tests;
 mod length_input;
 mod linked_source;
 #[cfg(test)]
@@ -201,6 +203,8 @@ pub mod mouse_gesture;
 mod nav_bar;
 pub(crate) mod navigation;
 pub mod navigation_bar;
+#[cfg(test)]
+mod navigation_bar_tests;
 mod navigation_bar_view;
 pub mod navigation_slots;
 pub use navigation::WebWheelGestures;
@@ -309,6 +313,8 @@ mod sweep_dialog_tests;
 pub(crate) mod test_boat;
 pub mod theme;
 pub mod theme_files;
+#[cfg(test)]
+mod theme_files_tests;
 mod theme_options;
 #[cfg(test)]
 mod thin_extrude_tests;

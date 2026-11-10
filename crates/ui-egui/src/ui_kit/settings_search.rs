@@ -873,6 +873,10 @@ fn now_ms() -> f64 {
 mod tests {
     use super::*;
 
+    /// Two pages of a host's settings window.
+    const PAGE_LAYOUT: usize = 2;
+    const PAGE_GRAPHICS: usize = 3;
+
     /// The search field and its empty result name the window they search (#8318): "Search
     /// settings" under a "Preferences" title read as two names for one window.
     #[test]
@@ -885,7 +889,7 @@ mod tests {
             let mut draw = |filter: &str| {
                 crate::ui_kit::test_support::raw_frame(&ctx, Default::default(), |ui| {
                     let _search = begin(ui, filter, "prefs");
-                    begin_page(ui, crate::prefs::PAGE_LAYOUT, "Layout");
+                    begin_page(ui, PAGE_LAYOUT, "Layout");
                     for label in ["Performance", "Quality"] {
                         let card =
                             Card { label, sub: None, selected: false, enabled: false, options: None, check: false, aspect: 1.0, figure: &|_, _| {} };
@@ -910,13 +914,13 @@ mod tests {
             assert!(target.is_positive());
             let (_, _, hits) = nav(&ctx);
             assert_eq!(hits.len(), 1, "control {kind} owns one real keyboard target");
-            assert_eq!((hits[0].page, hits[0].label.as_str()), (crate::prefs::PAGE_LAYOUT, "Quality"));
-            set_reveal(&ctx, Some(Reveal { page: crate::prefs::PAGE_LAYOUT, label: "Quality".into(), until: f64::MAX, prefix: "prefs".into() }));
+            assert_eq!((hits[0].page, hits[0].label.as_str()), (PAGE_LAYOUT, "Quality"));
+            set_reveal(&ctx, Some(Reveal { page: PAGE_LAYOUT, label: "Quality".into(), until: f64::MAX, prefix: "prefs".into() }));
             solidcraft_ui_registry::clear_handles();
             // The search is cleared before the selected setting is revealed.
             crate::ui_kit::test_support::raw_frame(&ctx, Default::default(), |ui| {
                 let _search = begin(ui, "", "prefs");
-                begin_page(ui, crate::prefs::PAGE_LAYOUT, "Layout");
+                begin_page(ui, PAGE_LAYOUT, "Layout");
                 let card = Card {
                     label: "Quality",
                     sub: None,
@@ -948,7 +952,7 @@ mod tests {
             for _ in 0..4 {
                 crate::ui_kit::test_support::raw_frame(&ctx, Default::default(), |ui| {
                     let _search = begin(ui, query, "prefs");
-                    begin_page(ui, crate::prefs::PAGE_GRAPHICS, "Graphics");
+                    begin_page(ui, PAGE_GRAPHICS, "Graphics");
                     assert_eq!(ui_kit::settings_picture_choices(ui, "shared", "Sampling", &choices, 0, true), None);
                     store_nav(ui);
                 });
@@ -956,11 +960,11 @@ mod tests {
             let (_, _, hits) = nav(&ctx);
             assert_eq!(hits.len(), 1, "{query} has one target");
             assert_eq!(hits[0].label, expected);
-            assert_eq!(hits[0].page, crate::prefs::PAGE_GRAPHICS);
-            set_reveal(&ctx, Some(Reveal { page: crate::prefs::PAGE_GRAPHICS, label: expected.into(), until: f64::MAX, prefix: "prefs".into() }));
+            assert_eq!(hits[0].page, PAGE_GRAPHICS);
+            set_reveal(&ctx, Some(Reveal { page: PAGE_GRAPHICS, label: expected.into(), until: f64::MAX, prefix: "prefs".into() }));
             crate::ui_kit::test_support::raw_frame(&ctx, Default::default(), |ui| {
                 let _search = begin(ui, "", "prefs");
-                begin_page(ui, crate::prefs::PAGE_GRAPHICS, "Graphics");
+                begin_page(ui, PAGE_GRAPHICS, "Graphics");
                 ui_kit::settings_picture_choices(ui, "shared", "Sampling", &choices, 0, true);
                 let rect = solidcraft_ui_registry::rect_of(if expected == "Sampling" { "dialog:row:Sampling" } else { "prefs:shared:on" }).unwrap();
                 assert_eq!(solidcraft_ui_registry::handle_at("prefs:revealed"), Some(rect.center()));

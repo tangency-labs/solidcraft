@@ -98,7 +98,7 @@ fn check_row(ui: &mut Ui, label: &str, icon: &str, value: &mut bool, mixed: bool
     paint_box(ui, square, &response, *value, mixed && !response.changed());
     if !icon.is_empty() {
         let at = Rect::from_center_size(pos2(square.right() + t.space_6 + t.space_16 / 2.0, rect.center().y), vec2(t.space_16, t.space_16));
-        crate::icons::paint_icon(&ui.painter().with_clip_rect(ui.clip_rect().intersect(rect)), at, icon, 1.0);
+        super::icons::paint_icon(&ui.painter().with_clip_rect(ui.clip_rect().intersect(rect)), at, icon, 1.0);
     }
     let text_rect = Rect::from_min_max(pos2((square.right() + icon_width + gap).min(rect.right()), rect.top()), rect.max);
     if wrap {

@@ -384,3 +384,7 @@ fn menu_row(ui: &mut egui::Ui, row: &MenuRow) -> egui::Response {
     }
     response
 }
+
+#[cfg(test)]
+#[path = "nav_bar_tests.rs"]
+mod tests;

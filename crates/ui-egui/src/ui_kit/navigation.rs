@@ -274,25 +274,3 @@ pub(crate) fn navigation_surface(ui: &Ui, rect: Rect, size: NavigationSize, edit
         .corner_radius(NavigationMetrics::for_size(size).radius);
     super::Container::paint_frame(ui.painter(), frame, rect.shrink(NAV_BORDER));
 }
-
-#[cfg(test)]
-mod active_ink_tests {
-    use super::{NavigationFill, navigation_fill, navigation_ink};
-
-    #[test]
-    fn active_navigation_slots_stay_readable_in_every_built_in_theme() {
-        crate::test_support::host_data();
-        let mut themes = vec![("Dark", solidcraft_theme::Tokens::dark()), ("Light", solidcraft_theme::Tokens::light())];
-        themes.extend(crate::theme_files::builtin().iter().map(|theme| (theme.name.as_str(), crate::theme_files::resolve(theme))));
-        let mut failures = Vec::new();
-        for (name, tokens) in themes {
-            let Some(fill) = navigation_fill(&tokens, NavigationFill::Active) else { continue };
-            let ink = navigation_ink(&tokens, NavigationFill::Active);
-            let ratio = solidcraft_theme::contrast_ratio(ink, fill);
-            if ratio < 3.0 {
-                failures.push(format!("{name}: {ratio:.2}:1 ({ink:?} on {fill:?})"));
-            }
-        }
-        assert!(failures.is_empty(), "active navigation slot unreadable:\n{}", failures.join("\n"));
-    }
-}
