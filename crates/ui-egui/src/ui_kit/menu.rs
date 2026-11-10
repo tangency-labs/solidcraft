@@ -468,6 +468,23 @@ impl<'a> MenuItem<'a> {
         }
     }
 
+    /// The row for a menu entry, `lit` when it is chosen with the keys or its flyout is open. A
+    /// `current` shortcut marks the checked entry of a choice.
+    pub(crate) fn from_item(item: &'a Item, lit: bool) -> Self {
+        Self {
+            id: &item.id,
+            label: &item.label,
+            icon: item.icon.as_icon(),
+            shortcut: if item.shortcut == "current" { "" } else { &item.shortcut },
+            enabled: item.enabled,
+            highlighted: lit,
+            danger: item.icon == "delete",
+            checked: (item.shortcut == "current").then_some(true),
+            swatch: item.swatch.map(|c| Color32::from_rgb(c[0], c[1], c[2])),
+            submenu: !item.children.is_empty(),
+        }
+    }
+
     pub(crate) fn show(&self, ui: &mut Ui) -> Response {
         let t = Tokens::get();
         // Areas first measure intrinsic content. Filling their provisional available
@@ -555,6 +572,43 @@ impl<'a> MenuItem<'a> {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
     }
+}
+
+/// A list menu's popup surface, [`LIST_W`] wide, around `add`.
+pub fn menu_frame<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    Menu::show(ui, LIST_W, add)
+}
+
+/// A menu row that acts as a button.
+pub fn button(ui: &mut Ui, label: &str, icon: &str) -> Response {
+    button_enabled(ui, label, icon, true)
+}
+
+/// [`button`], greyed out and inert when `enabled` is false.
+pub fn button_enabled(ui: &mut Ui, label: &str, icon: &str, enabled: bool) -> Response {
+    let mut item = MenuItem::new(label, label, icon);
+    item.enabled = enabled;
+    item.show(ui)
+}
+
+/// One entry of a list menu: a separator, a heading or a row. Returns the entry when its row was
+/// clicked while enabled.
+pub fn list_row(ui: &mut Ui, item: &Item) -> Option<Item> {
+    list_row_lit(ui, item, false)
+}
+
+/// [`list_row`] with the row lit (chosen with the keys, or its flyout open).
+pub fn list_row_lit(ui: &mut Ui, item: &Item, lit: bool) -> Option<Item> {
+    if item.is_sep() {
+        Menu::separator(ui);
+        return None;
+    }
+    if item.is_heading() {
+        Menu::heading(ui, &item.label);
+        return None;
+    }
+    let row = MenuItem::from_item(item, lit);
+    (row.show(ui).clicked() && item.enabled).then(|| item.clone())
 }
 
 pub(crate) fn workspace_menu(ui: &mut egui::Ui, items: &[Item], key_row: Option<usize>, height: f32) -> Option<Item> {
@@ -724,7 +778,7 @@ pub(crate) fn rename_menu(ui: &mut Ui, value: &mut String, focused: &mut bool) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{key, pointer};
+    use crate::ui_kit::test_support::{key, pointer};
 
     #[test]
     fn a_menu_row_draws_a_hosts_texture_and_an_item_still_reads_as_its_kit_name() {
@@ -743,7 +797,7 @@ mod tests {
 
     #[test]
     fn menu_navigation_skips_disabled_rows_and_wraps() {
-        let ctx = crate::fonts::test_context();
+        let ctx = crate::ui_kit::test_support::context();
         let mut selected = None;
         let mut accepted = false;
         let mut frame = |events| {
@@ -786,7 +840,7 @@ mod tests {
     #[test]
     fn disabled_menu_rows_are_inert_and_live_rows_accept_clicks() {
         for enabled in [false, true] {
-            let ctx = crate::fonts::test_context();
+            let ctx = crate::ui_kit::test_support::context();
             let target = std::cell::Cell::new(Rect::NOTHING);
             let clicked = std::cell::Cell::new(false);
             let mut draw = |ui: &mut Ui| {

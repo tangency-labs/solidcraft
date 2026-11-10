@@ -888,7 +888,7 @@ pub(crate) fn scale_specimen(ui: &mut Ui, scale: f32) {
     let feature = Rect::from_min_size(origin + vec2(0.0, line_h + t.space_8 * scale), vec2(r.width() - t.space_10 * 2.0, line_h));
     p.rect_filled(feature, t.control_radius, t.selected_bg);
     let icon = Rect::from_center_size(pos2(feature.left() + t.space_16 * scale, feature.center().y), vec2(t.space_16, t.space_16) * scale);
-    crate::icons::paint_icon(&p, icon, "extrude", 1.0);
+    crate::ui_kit::icons::paint_icon(&p, icon, "extrude", 1.0);
     p.text(
         pos2(icon.right() + t.space_6 * scale, feature.center().y),
         egui::Align2::LEFT_CENTER,
@@ -994,7 +994,7 @@ pub(crate) fn status_palette_sample(ui: &mut Ui, mode: ColorVision) {
             let (r, _) = ui.allocate_exact_size(vec2(galley.size().x + t.space_24 + t.space_16, t.space_24), Sense::hover());
             solidcraft_ui_registry::publish_rect(&format!("prefs:status_sample:{label}"), r);
             ui.painter().rect_filled(r, t.radius_xl, fill);
-            crate::icons::paint_ink(
+            crate::ui_kit::icons::paint_ink(
                 ui.painter(),
                 Rect::from_center_size(pos2(r.left() + t.space_12, r.center().y), vec2(t.space_12, t.space_12)),
                 icon,

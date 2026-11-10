@@ -1132,6 +1132,29 @@ fn chamfer_wider_than_sloped_basin_rim_builds() {
 }
 
 #[test]
+fn mesh_corner_normals_survive_welding_reflection_and_nonuniform_scale() {
+    let positions = [Vec3::ZERO, Vec3::X, Vec3::Y];
+    let normals = [[Vec3::new(1., 0., 1.), Vec3::new(0., 1., 1.), Vec3::Z]];
+    let body = crate::mesh_body_with_normals(&positions, &[[0, 1, 2]], &normals).unwrap();
+    let matrix = [[-2., 0., 0., 0.], [0., 3., 0., 0.], [0., 0., 0.5, 0.], [7., 11., 13., 1.]];
+    let moved = crate::transform_matrix(&body, matrix).unwrap();
+    let mesh = moved.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
+    let expected = [Vec3::new(-0.5, 0., 2.).normalized().unwrap(), Vec3::Z, Vec3::new(0., 1. / 3., 2.).normalized().unwrap()];
+    for (actual, expected) in mesh.normals.iter().zip(expected) {
+        assert!((*actual - expected).len() < 1e-12);
+    }
+    let tiny = crate::transform_matrix(&body, [[1e-6, 0., 0., 0.], [0., 1e-6, 0., 0.], [0., 0., 1e-6, 0.], [0., 0., 0., 1.]]).unwrap();
+    let tiny = tiny.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
+    assert!((tiny.normals[0] - Vec3::new(1., 0., 1.).normalized().unwrap()).len() < 1e-12);
+    assert!((tiny.normals[0].len() - 1.).abs() < 1e-12, "normal magnitude must not depend on a small geometric scale");
+    let [a, b, c] = mesh.triangles[0].map(|i| mesh.positions[i as usize]);
+    assert!((b - a).cross(c - a).z > 0.);
+    assert_eq!(body.triangle_mesh().unwrap().1, &[[0, 1, 2]]);
+    assert!(crate::mesh_body_with_normals(&positions, &[[0, 1, 2]], &[[Vec3::ZERO; 3]]).is_err());
+    assert!(crate::mesh_body_with_normals(&positions, &[[0, 1, 2]], &[[Vec3::Z; 3]; 2]).is_err());
+}
+
+#[test]
 fn mesh_bodies_move_measure_and_refuse_solid_ops() {
     // Unit cube as 12 triangles with repeated corners (welded on construction).
     let c = |i: u32| Vec3::new((i & 1) as f64 * 10.0, ((i >> 1) & 1) as f64 * 10.0, ((i >> 2) & 1) as f64 * 10.0);
@@ -2452,4 +2475,41 @@ fn a_stopped_job_does_not_decide_which_face_a_refusal_names() {
     stop.stop();
     let stopped = stop.within(|| crate::body::Refusal::of(body.record(), &why));
     assert_eq!(stopped.face, plain.face);
+}
+
+/// A boss R 5 standing 10 out of a 40 x 40 x 10 block (sunk 5 into it), its axis turned 0 to 3
+/// degrees off square to the block's top, its root rounded 1. Turned, the supports are a plane
+/// and a cylinder not square to it: a canal round, its spine an ellipse, whose net the
+/// definition's certificate cannot always prove on the offsets to rounding
+/// (tangency-labs/solidcraft#14000). The round is built as with the axis square, keeping a
+/// definition where it is proved and none where it is not. Square, it adds by Pappus
+/// 2 pi (R + x) r^2 (1 - pi / 4), x = r (10 - 3 pi) / (12 - 3 pi). Turned by a, the corner's
+/// angle round the root is 90 degrees + a cos t, so the change in its area is first order in a
+/// and cancels over the turn: the round adds the square amount to within O(a^2), held to 1 %.
+#[test]
+fn a_round_on_a_boss_tilted_a_few_degrees_is_built() {
+    let (big_r, r) = (5.0, 1.0);
+    let x = r * (10.0 - 3.0 * PI) / (12.0 - 3.0 * PI);
+    let square = 2.0 * PI * (big_r + x) * r * r * (1.0 - PI / 4.0);
+    for deg in [0.0_f64, 0.5, 1.0, 2.0, 3.0] {
+        let a = deg.to_radians();
+        let block = box_solid(Vec3::new(-20.0, -20.0, 0.0), Vec3::new(20.0, 20.0, 10.0)).unwrap();
+        let boss = cylinder(Vec3::new(0.0, 0.0, 5.0), Vec3::new(a.sin(), 0.0, a.cos()), big_r, 15.0).unwrap();
+        let body = boolean(&block, &boss, BoolOp::Union).unwrap().unwrap();
+        let before = measure(&body).unwrap().volume;
+        // the root, where the wall meets the top, as a tangent chain from a point on it off the
+        // turn's plane (as the fillet command takes it)
+        let root = crate::blend::tangent_chain(&body, &[Vec3::new(5.0 * a.tan(), big_r, 10.0)]).unwrap();
+        let round = fillet(&body, &root, r).unwrap_or_else(|e| panic!("{deg} degrees: {e}"));
+        assert!(round.validity().is_empty(), "{deg} degrees: {:?}", round.validity());
+        let added = measure(&round).unwrap().volume - before;
+        // and meshed fine, the round's volume the same to the chord's accuracy
+        let fine = |b: &Body| b.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
+        let added_fine = fine(&round) - fine(&body);
+        assert!(rel(added_fine, added) < 1e-3, "{deg} degrees: meshed {added_fine}, exact {added}");
+        // square: the closed form, to the volumes' accuracy (a difference of two of them);
+        // turned: to 1 % of the round's
+        let bound = if deg == 0.0 { 1e-9 * before } else { 1e-2 * square };
+        assert!((added - square).abs() <= bound, "{deg} degrees: adds {added}, square {square}");
+    }
 }

@@ -114,7 +114,7 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
                 Value::String(name) => name.clone(),
                 _ => return Err(bad(cmd, "`component` must be a component id or name")),
             };
-            s.doc.find_component(&key).ok_or_else(|| bad(cmd, format!("no component `{key}`")))?
+            s.doc.resolve_component(&key).map_err(|error| bad(cmd, error.to_string()))?.ok_or_else(|| bad(cmd, format!("no component `{key}`")))?
         }
     };
     let given_path = match p.get("component_path") {
@@ -302,6 +302,32 @@ mod tests {
 
     fn sketch_area(s: &Session, id: u64) -> f64 {
         s.model.state().sketch(id).unwrap().profiles.iter().map(|p| p.area).sum()
+    }
+
+    #[test]
+    fn pasting_features_rejects_an_ambiguous_destination_component() {
+        let mut source = Session::default();
+        run(&mut source, "sketch.create", json!({"plane":"XY","name":"Source"}));
+        run(&mut source, "sketch.finish", json!({}));
+        run(&mut source, "timeline.copy", json!({"features":["Source"]}));
+        let mut target = Session::default();
+        let mut ids = Vec::new();
+        for _ in 0..2 {
+            ids.push(run(&mut target, "component.create", json!({"name":"A","activate":false}))["component"].as_u64().unwrap());
+        }
+        target.clipboard = source.clipboard.clone();
+        target.foreign_copy = source.foreign_copy.clone();
+        let doc = target.doc.clone();
+        let undo = target.undo.len();
+        for foreign in [false, true] {
+            let error = target.execute("timeline.paste", &json!({"component":"A","from_design":foreign})).unwrap_err().to_string();
+            assert!(error.contains("ambiguous component `A`"), "{error}");
+            for id in &ids {
+                assert!(error.contains(&id.to_string()), "{error}");
+            }
+            assert_eq!(target.doc, doc);
+            assert_eq!(target.undo.len(), undo);
+        }
     }
 
     #[test]

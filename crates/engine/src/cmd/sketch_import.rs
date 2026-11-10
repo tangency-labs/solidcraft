@@ -92,8 +92,11 @@ fn drawing_error(p: &Value, svg: bool, msg: String) -> EngineError {
 /// Adds the geometry; end points closer than `q` (mm) become one point, so drawings whose
 /// ends almost meet still make closed profiles.
 pub(super) fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> Vec2, k: f64, q: f64) -> Result<(Vec<usize>, Vec<Geom2>)> {
+    // A dense drawing adds tens of thousands of points and curves: a batch finds each new id
+    // without searching the whole sketch, so the insert takes time in proportion to its size.
+    let sk = &mut sk.batch();
     let mut map: HashMap<(i64, i64), Vec<(Vec2, usize)>> = HashMap::new();
-    let mut pt = |sk: &mut Sketch, p: Vec2| -> Result<usize> {
+    let mut pt = |sk: &mut solidcraft_sketch::SketchBatch, p: Vec2| -> Result<usize> {
         let p = f(p);
         let key = ((p.x / q).floor() as i64, (p.y / q).floor() as i64);
         for dx in -1..=1 {

@@ -1,7 +1,7 @@
 //! Command-search composition: one expanding ribbon editor and a clipped results sheet.
 //! Domain ranking and command dispatch stay with the caller.
-use crate::icons;
 use crate::ui_kit::BackingTooltipExt as _;
+use crate::ui_kit::icons;
 use egui::{FontId, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
 use solidcraft_theme::Tokens;
 
@@ -355,7 +355,7 @@ impl super::MenuItem<'_> {
             let tab = painter.layout_no_wrap(tab.trim().to_owned(), FontId::proportional(t.font_small), t.form_dim);
             let x = (left + tab.size().x + t.space_6).min(path_rect.right());
             painter.with_clip_rect(path_rect).galley(pos2(left, path_rect.center().y - tab.size().y / 2.0), tab, t.form_dim);
-            icons::glyphs::breadcrumb(&painter.with_clip_rect(path_rect), pos2(x, path_rect.center().y), t.form_dim);
+            crate::ui_kit::icons::glyphs::breadcrumb(&painter.with_clip_rect(path_rect), pos2(x, path_rect.center().y), t.form_dim);
             super::text::paint_text(
                 ui,
                 Rect::from_min_max(pos2((x + t.space_6).min(path_rect.right()), path_rect.top()), path_rect.max),
@@ -392,7 +392,7 @@ mod tests {
                 assert_eq!(rect.min + vec2(radius, radius), ring.min + vec2(ring_radius, ring_radius));
                 // Inspect the real paint shapes so a stale fill/ring radius cannot
                 // pass by merely keeping the geometry calculation correct.
-                let ctx = crate::fonts::test_context();
+                let ctx = crate::ui_kit::test_support::context();
                 let mut query = String::new();
                 let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
                     CommandSearch::field(ui, &mut query, false, true, true, SearchFieldGeometry { height: 40.0, radius, progress }, Some("S"), 4096);
@@ -426,7 +426,7 @@ mod tests {
         for floating in [false, true] {
             for progress in [0.0, 0.5, 1.0] {
                 let radius = CommandSearch::field_radius(progress, floating);
-                let ctx = crate::fonts::test_context();
+                let ctx = crate::ui_kit::test_support::context();
                 let mut query = String::new();
                 let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
                     CommandSearch::field(ui, &mut query, false, true, true, SearchFieldGeometry { height: 40.0, radius, progress }, Some("S"), 4096);

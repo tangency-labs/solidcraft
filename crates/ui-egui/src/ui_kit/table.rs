@@ -12,11 +12,24 @@ pub(crate) struct Column<'a> {
     min_content_width: f32,
     icon_only: bool,
     flexible: bool,
+    /// A width the user dragged the column to; it replaces the automatic width and stops sharing.
+    manual: Option<f32>,
 }
 
 impl<'a> Column<'a> {
     pub(crate) fn new(label: &'a str, width: f32) -> Self {
-        Self { label, width, min_content_width: 0.0, icon_only: false, flexible: false }
+        Self { label, width, min_content_width: 0.0, icon_only: false, flexible: false, manual: None }
+    }
+
+    /// Hold the column at a width the user chose by dragging its header divider.
+    pub(crate) fn manual_width(mut self, width: Option<f32>) -> Self {
+        self.manual = width.filter(|w| w.is_finite() && *w > 0.0);
+        self
+    }
+
+    /// Whether this column still takes a share of the remaining width: flexible and not dragged.
+    fn shares(&self) -> bool {
+        self.flexible && self.manual.is_none()
     }
 
     /// Share the remaining visible table width using this column's width as its weight.
@@ -88,21 +101,29 @@ pub(crate) fn table_custom<R>(ui: &mut Ui, id: &str, columns: &[Column<'_>], emp
     output.inner
 }
 
+/// The narrowest a user can drag a column.
+const MANUAL_MIN_WIDTH: f32 = 24.0;
+
+/// Each column's width in points for a table `available` points wide: dragged columns keep their
+/// width, fixed columns measure their heading and controls, and flexible columns share the rest by
+/// weight, each frozen at its minimum before the others divide what remains.
 fn column_widths(ui: &Ui, columns: &[Column<'_>], available: f32) -> Vec<f32> {
     let t = Tokens::get();
     let mut widths: Vec<_> = columns
         .iter()
         .map(|c| {
-            if c.flexible || c.icon_only {
+            if let Some(manual) = c.manual {
+                dimension(manual).max(MANUAL_MIN_WIDTH)
+            } else if c.flexible || c.icon_only {
                 c.min_content_width.max(t.control_height)
             } else {
                 (header_column(ui, c.label) * dimension(c.width)).max(label_width(ui, c.label)).max(c.min_content_width)
             }
         })
         .collect();
-    let fixed: f32 = columns.iter().zip(&widths).filter(|(c, _)| !c.flexible).map(|(_, w)| *w).sum();
+    let fixed: f32 = columns.iter().zip(&widths).filter(|(c, _)| !c.shares()).map(|(_, w)| *w).sum();
     let mut remaining = (available - fixed - t.space_8 * (columns.len().saturating_sub(1) + 2) as f32).max(0.0);
-    let mut sharing: Vec<_> = columns.iter().map(|c| c.flexible && dimension(c.width) > 0.0).collect();
+    let mut sharing: Vec<_> = columns.iter().map(|c| c.shares() && dimension(c.width) > 0.0).collect();
     // Freeze columns at their control minimum before sharing the remaining width. The bounded
     // passes also keep a hostile design with many columns from creating an unbounded loop.
     for _ in 0..columns.len().min(64) {
@@ -148,12 +169,27 @@ impl Table<'_> {
         self.reveal = Some(rect);
     }
 
-    pub(crate) fn headers(&self, ui: &mut Ui, mut header: impl FnMut(&mut Ui, usize) -> bool) {
+    pub(crate) fn headers(&self, ui: &mut Ui, header: impl FnMut(&mut Ui, usize) -> bool) {
+        self.headers_impl(ui, None, header);
+    }
+
+    /// Headers with a draggable divider after each column. A drag stores that column's width
+    /// under `key` (egui persisted memory, shared by every table using the key so sections stay
+    /// lined up); a double-click returns the column to its automatic width.
+    pub(crate) fn headers_resizable(&self, ui: &mut Ui, key: egui::Id, header: impl FnMut(&mut Ui, usize) -> bool) {
+        self.headers_impl(ui, Some(key), header);
+    }
+
+    /// The heading row shared by `headers` and `headers_resizable`: one clipped cell per column,
+    /// `header` drawing a custom heading or the label, and a divider between columns when `resize`
+    /// names the key their dragged widths are stored under.
+    fn headers_impl(&self, ui: &mut Ui, resize: Option<egui::Id>, mut header: impl FnMut(&mut Ui, usize) -> bool) {
         let t = Tokens::get();
         let width = self.width();
         let (rect, _) = ui.allocate_exact_size(vec2(width, row_height()), egui::Sense::hover());
         let ppp = ui.ctx().pixels_per_point().max(0.5);
         let mut left = (rect.left() * ppp).round() / ppp + t.space_8;
+        let mut dividers = Vec::new();
         for (index, (column, width)) in self.columns.iter().zip(&self.widths).enumerate() {
             let cell = egui::Rect::from_min_size(egui::pos2(left, rect.top()), vec2(*width, rect.height()));
             ui.scope_builder(
@@ -166,10 +202,53 @@ impl Table<'_> {
                 },
             );
             solidcraft_ui_registry::publish_rect(&format!("dialog:column:{}:{}", self.id, column.label), cell);
+            if index + 1 < self.columns.len() {
+                dividers.push((index, cell.right() + t.space_8 * 0.5));
+            }
             left = cell.right() + t.space_8;
         }
         ui.painter().hline(rect.x_range(), rect.bottom(), t.tertiary_border(t.dialog_rule));
+        if let Some(key) = resize {
+            for (index, x) in dividers {
+                self.column_divider(ui, key, index, x, rect);
+            }
+        }
         ui.advance_cursor_after_rect(rect);
+    }
+
+    /// One header divider: drag to set the column's width, double-click for its automatic width.
+    fn column_divider(&self, ui: &mut Ui, key: egui::Id, index: usize, x: f32, row: egui::Rect) {
+        let t = Tokens::get();
+        let grip = egui::Rect::from_x_y_ranges(x - t.space_4..=x + t.space_4, row.y_range());
+        let response = ui
+            .interact(grip, ui.make_persistent_id((&self.id, "column_divider", index)), egui::Sense::click_and_drag())
+            .on_hover_cursor(egui::CursorIcon::ResizeColumn);
+        solidcraft_ui_registry::publish_target(&format!("dialog:column_divider:{}:{index}", self.id), grip);
+        if response.hovered() || response.dragged() {
+            let inset = row.height() * 0.25;
+            ui.painter().vline(x, row.top() + inset..=row.bottom() - inset, t.control_border_stroke(t.control_border));
+        }
+        let current = self.widths.get(index).copied().unwrap_or(0.0);
+        let chosen = if response.double_clicked() {
+            Some(None)
+        } else if response.dragged() {
+            let delta = response.drag_delta().x;
+            (delta.is_finite() && delta != 0.0).then(|| Some((current + delta).max(MANUAL_MIN_WIDTH)))
+        } else {
+            None
+        };
+        if let Some(chosen) = chosen {
+            let count = self.columns.len().min(64);
+            ui.ctx().data_mut(|m| {
+                let mut stored: Vec<Option<f32>> = m.get_persisted(key).unwrap_or_default();
+                stored.resize(count, None);
+                if let Some(slot) = stored.get_mut(index) {
+                    *slot = chosen;
+                }
+                m.insert_persisted(key, stored);
+            });
+            ui.ctx().request_repaint();
+        }
     }
 
     fn width(&self) -> f32 {
@@ -207,7 +286,7 @@ impl Table<'_> {
         }
         ui.painter().add(egui::Shape::dashed_line(&outline, stroke, t.space_4, t.space_3));
         let icon = egui::Rect::from_center_size(egui::pos2(rect.left() + t.space_16, rect.center().y), vec2(t.space_14, t.space_14));
-        crate::icons::paint_ink(ui.painter(), icon, "plus", t.form_dim);
+        crate::ui_kit::icons::paint_ink(ui.painter(), icon, "plus", t.form_dim);
         super::text::paint_text(
             ui,
             egui::Rect::from_min_max(egui::pos2(icon.right() + t.space_6, rect.top()), rect.max),
@@ -381,9 +460,9 @@ pub(crate) fn sort_header(ui: &mut Ui, label: &str, sort: &mut Sort) -> Response
     let icon =
         egui::Rect::from_center_size(egui::pos2(text_rect.right() + t.space_4 + t.space_14 * 0.5, rect.center().y), vec2(t.space_14, t.space_14));
     match *sort {
-        Sort::Ascending => crate::icons::paint_ink_flipped(ui.painter(), icon, "chevron", t.form_primary),
-        Sort::Descending => crate::icons::paint_ink(ui.painter(), icon, "chevron", t.form_primary),
-        Sort::Listed if response.hovered() => crate::icons::paint_ink(ui.painter(), icon, "chevron", t.form_dim.gamma_multiply(0.5)),
+        Sort::Ascending => crate::ui_kit::icons::paint_ink_flipped(ui.painter(), icon, "chevron", t.form_primary),
+        Sort::Descending => crate::ui_kit::icons::paint_ink(ui.painter(), icon, "chevron", t.form_primary),
+        Sort::Listed if response.hovered() => crate::ui_kit::icons::paint_ink(ui.painter(), icon, "chevron", t.form_dim.gamma_multiply(0.5)),
         Sort::Listed => {}
     }
     if response.clicked() {
@@ -442,7 +521,7 @@ pub(crate) fn plus_header<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> Opt
     let response = super::actions::icon_button_colored(ui, rect, "plus", "Add Column", Some(t.form_dim));
     if response.hovered() {
         ui.painter().rect_filled(rect, t.control_radius, t.selected_bg);
-        crate::icons::paint_ink(ui.painter(), rect.shrink(t.form_icon_inset), "plus", t.form_primary);
+        crate::ui_kit::icons::paint_ink(ui.painter(), rect.shrink(t.form_icon_inset), "plus", t.form_primary);
         for x in [rect.left() - t.form_gap_y, rect.right() + t.form_gap_y] {
             ui.painter().vline(x, rect.y_range(), egui::Stroke::new(t.space_2, t.form_primary));
         }

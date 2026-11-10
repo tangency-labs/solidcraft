@@ -1,6 +1,7 @@
 use super::*;
-use crate::gpu::{Renderer as ViewRenderer, ViewportCallback};
+use crate::gpu::Renderer as ViewRenderer;
 use egui_wgpu::{CallbackResources, CallbackTrait, FrameCompositor, ScreenDescriptor, wgpu};
+use solidcraft_viewport_egui::ViewportCallback;
 use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex};
@@ -609,7 +610,7 @@ impl Source {
 
     fn key(&self, screen: &ScreenDescriptor, geometry: [Rect; 3]) -> u64 {
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        solidcraft_gpu::view::frame_key(&self.cb.0).hash(&mut h);
+        solidcraft_viewport_gpu::view::frame_key(&self.cb.0).hash(&mut h);
         for r in geometry {
             [r.min.x, r.min.y, r.max.x, r.max.y].map(f32::to_bits).hash(&mut h);
         }

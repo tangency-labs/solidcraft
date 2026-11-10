@@ -3,7 +3,7 @@ use egui::{Rect, pos2, vec2};
 use solidcore_record::Vec3;
 use solidcraft_engine::geom::Aabb3;
 use solidcraft_engine::geom::prelude::*;
-use solidcraft_engine::render::Camera;
+use solidcraft_viewport::Camera;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Layout {

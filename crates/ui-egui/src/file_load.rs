@@ -9,7 +9,8 @@
 //!
 //! Update Links from the toolbar runs the same way (#5329): it reads every linked design again
 //! and rebuilds it, which takes a while in an assembly of many parts, so the overlay names the
-//! linked design being read and its rebuild's progress.
+//! linked design being read and its rebuild's progress. Insert Design reads the saved design it
+//! inserts the same way (#11593): a large one rebuilds for a while.
 
 use crate::i18n::LocaleNames as _;
 use crate::ui_kit::{Container, Surface};
@@ -36,6 +37,9 @@ pub enum Kind {
     Open,
     /// Insert CAD bodies, meshes or sketch drawing geometry into the active design.
     Insert,
+    /// Insert a saved design into the active design as a linked component
+    /// (`component.insert_design`): reading a large design takes a while (#11593).
+    InsertDesign,
     /// Open a design an earlier run autosaved before it closed.
     Recover { id: String, dir: Option<String> },
     /// Export a snapshot of the current design without adopting the worker's session.
@@ -71,6 +75,8 @@ pub struct Request {
     /// The level the caller's own `param_check` named and the warnings it found before the run:
     /// the reply says both (#9184).
     pub(crate) param_check: Option<(solidcraft_engine::schema::ParamCheck, Vec<String>)>,
+    /// The status line once the file is in, in place of the usual one.
+    pub note: Option<String>,
 }
 
 impl Request {
@@ -86,10 +92,12 @@ impl Request {
             chat_turn: None,
             mesh: false,
             param_check: None,
+            note: None,
         }
     }
+    /// It adds what it reads to the active design.
     fn insert(&self) -> bool {
-        self.kind == Kind::Insert
+        matches!(self.kind, Kind::Insert | Kind::InsertDesign)
     }
     /// It reads files the active design already names, and changes that design in place.
     fn reads_again(&self) -> bool {
@@ -107,6 +115,7 @@ impl Request {
             Kind::Insert if self.mesh || solidcraft_engine::io::is_mesh_path(&self.path) => ("file.insert_mesh", self.params()),
             Kind::Insert if solidcraft_engine::io::is_point_cloud_path(&self.path) => ("pointcloud.insert", self.params()),
             Kind::Insert => (insert_command(&self.path), self.params()),
+            Kind::InsertDesign => ("component.insert_design", self.params()),
             Kind::Recover { id, dir } => ("doc.recover", json!({"id": id, "dir": dir})),
             Kind::ExportDxf => ("file.export_view_dxf", Value::Object(self.options.clone())),
             Kind::UpdateLinks => ("component.update_links", Value::Object(self.options.clone())),
@@ -329,6 +338,17 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
                 app.insert_path_with(&request.path, &request.options, request.mesh);
                 Ok(Value::Null)
             }
+            Kind::InsertDesign => {
+                let (command, params) = request.command();
+                let r = solidcraft_engine::io::vfs::allowing_hosts(&request.allow_hosts, || app.run(command, params));
+                if r.is_ok() {
+                    app.fit_view();
+                    if let Some(note) = &request.note {
+                        app.set_status(note.clone(), false);
+                    }
+                }
+                r
+            }
             Kind::Open => {
                 app.open_path_with(&request.path, &request.options);
                 // Opened in place of the blank tab it made, with no switch to it.
@@ -480,6 +500,7 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         chat_turn: req.chat_turn,
         mesh: false,
         param_check,
+        note: None,
     };
     let _ = begin_request(app, request);
     None
@@ -883,10 +904,8 @@ fn step_opening(
 /// load ended meanwhile (`stop`).
 #[cfg(not(target_arch = "wasm32"))]
 fn partial_picture(world: &solidcraft_engine::doc::ModelState, stop: &dyn Fn() -> bool) -> Option<egui::ColorImage> {
-    use solidcraft_engine::{
-        geom::Aabb3,
-        render::{Camera, Rgb, Scene, SceneMesh, StandardView},
-    };
+    use solidcraft_engine::geom::Aabb3;
+    use solidcraft_viewport::{Camera, Rgb, Scene, SceneMesh, StandardView};
     let mut scene = Scene::default();
     let mut bounds = Aabb3::EMPTY;
     let mut triangles = 0usize;
@@ -907,7 +926,7 @@ fn partial_picture(world: &solidcraft_engine::doc::ModelState, stop: &dyn Fn() -
     }
     let mut camera = Camera::default();
     camera.set_view(StandardView::Iso);
-    camera.fit(&bounds);
+    camera.fit(&solidcraft_engine::render::view_bounds(&bounds));
     scene.radius = bounds.diagonal();
     if stop() || !preview_work_fits(&scene, &camera) {
         return None;
@@ -918,10 +937,8 @@ fn partial_picture(world: &solidcraft_engine::doc::ModelState, stop: &dyn Fn() -
 #[cfg(not(target_arch = "wasm32"))]
 fn saved_picture(preview: solidcraft_engine::io::DesignPreview) -> Option<egui::ColorImage> {
     use solidcore_record::Vec3;
-    use solidcraft_engine::{
-        geom::{Aabb3, Mesh},
-        render::{Camera, Rgb, Scene, SceneMesh, StandardView},
-    };
+    use solidcraft_engine::geom::{Aabb3, Mesh};
+    use solidcraft_viewport::{Camera, Rgb, Scene, SceneMesh, StandardView};
     let mut scene = Scene::default();
     let mut bounds = Aabb3::EMPTY;
     for cached in preview.meshes {
@@ -954,7 +971,7 @@ fn saved_picture(preview: solidcraft_engine::io::DesignPreview) -> Option<egui::
     }
     let mut camera = Camera::default();
     camera.set_view(StandardView::Iso);
-    camera.fit(&bounds);
+    camera.fit(&solidcraft_engine::render::view_bounds(&bounds));
     scene.radius = bounds.diagonal();
     if !preview_work_fits(&scene, &camera) {
         return None;
@@ -964,7 +981,7 @@ fn saved_picture(preview: solidcraft_engine::io::DesignPreview) -> Option<egui::
 
 /// The preview picture, drawn on the GPU by the renderer the app installs (none: no picture).
 #[cfg(not(target_arch = "wasm32"))]
-fn preview_image(scene: &solidcraft_engine::render::Scene, camera: &solidcraft_engine::render::Camera) -> Option<egui::ColorImage> {
+fn preview_image(scene: &solidcraft_viewport::Scene, camera: &solidcraft_viewport::Camera) -> Option<egui::ColorImage> {
     match solidcraft_engine::capture::rgba(scene, camera, 320, 200) {
         Ok(picture) => Some(egui::ColorImage::from_rgba_unmultiplied([320, 200], &picture.rgba)),
         Err(e) => {
@@ -978,7 +995,7 @@ fn preview_image(scene: &solidcraft_engine::render::Scene, camera: &solidcraft_e
 /// not monopolize the file worker or a software GPU. Counts each triangle's pixel box at twice the
 /// picture's size.
 #[cfg(not(target_arch = "wasm32"))]
-fn preview_work_fits(scene: &solidcraft_engine::render::Scene, camera: &solidcraft_engine::render::Camera) -> bool {
+fn preview_work_fits(scene: &solidcraft_viewport::Scene, camera: &solidcraft_viewport::Camera) -> bool {
     let mut pixels = 0.0;
     let projection = camera.view_proj(640.0 / 400.0, scene.radius.max(1.0));
     for body in &scene.meshes {
@@ -1226,6 +1243,9 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                     if !request.insert() {
                         app.say_newer_file();
                     }
+                    if let Some(note) = &request.note {
+                        app.set_status(note.clone(), false);
+                    }
                 }
                 request.answer(Ok(made.result));
             }
@@ -1367,7 +1387,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         solidcraft_ui_text::tr("file_load.waiting")
     } else {
         solidcraft_ui_text::tr(match r.request.kind {
-            Kind::Insert => "file_load.inserting",
+            Kind::Insert | Kind::InsertDesign => "file_load.inserting",
             Kind::Open => "file_load.opening",
             Kind::Recover { .. } => "file_load.recovering",
             Kind::ExportDxf => "dxf.exporting",
@@ -1376,7 +1396,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         })
     };
     let icon = match r.request.kind {
-        Kind::Insert => "import",
+        Kind::Insert | Kind::InsertDesign => "import",
         Kind::Open => "open",
         Kind::Recover { .. } => "restore",
         Kind::ExportDxf => "export",
@@ -1400,7 +1420,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
             // An open or an import goes through three steps the card lists; the other operations
             // (and a cancelled one) say what they are doing in a line.
-            let stepped = !cancelled && matches!(r.request.kind, Kind::Open | Kind::Insert | Kind::Recover { .. });
+            let stepped = !cancelled && matches!(r.request.kind, Kind::Open | Kind::Insert | Kind::InsertDesign | Kind::Recover { .. });
             if stepped {
                 let cad = matches!(r.request.kind, Kind::Open | Kind::Insert)
                     && (solidcraft_engine::io::is_step_path(&r.request.path) || solidcraft_engine::io::is_iges_path(&r.request.path));
@@ -1663,7 +1683,7 @@ mod tests {
             let id = h.app.session.active_sketch.unwrap();
             assert_eq!(h.app.session.model.state().sketch(id).unwrap().plane, solidcore_record::Plane::XY);
             assert_eq!(h.app.session.doc.sketch(id).unwrap().curves.len(), 2);
-            h.app.cam.set_view(solidcraft_engine::render::StandardView::Top);
+            h.app.cam.set_view(solidcraft_viewport::StandardView::Top);
             h.app.fit_view();
             h.run(&json!([{ "shot": format!("insert-{file}") }])).unwrap();
             h.app.drop_path(&path);
@@ -1817,6 +1837,7 @@ mod tests {
                 positions: vec![0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0, 0.0].into(),
                 triangles: vec![0, 1, 2].into(),
                 color: Some([0.8, 0.2, 0.1]),
+                corner_normals: Default::default(),
             }],
         };
         let picture = saved_picture(preview).unwrap();
@@ -1833,6 +1854,7 @@ mod tests {
                 positions: vec![0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 10.0, 0.0].into(),
                 triangles: (0..10_000).flat_map(|_| [0, 1, 2]).collect(),
                 color: None,
+                corner_normals: Default::default(),
             }],
         };
         assert!(saved_picture(preview).is_none());

@@ -1,5 +1,5 @@
 //! Navigation chrome and measurements shared by the viewport and Preferences editor.
-use crate::icons;
+use crate::ui_kit::icons;
 use egui::{Rect, Response, Sense, Ui, pos2, vec2};
 use serde::{Deserialize, Serialize};
 use solidcraft_theme::Tokens;

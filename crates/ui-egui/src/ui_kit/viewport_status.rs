@@ -171,9 +171,9 @@ fn icon_action(ui: &mut Ui, item: &StatusItem, part: &str, icon: &str, label: &s
     }
     let glyph = Rect::from_center_size(response.rect.center(), vec2(t.space_24, t.space_24) - vec2(t.space_4, t.space_4) * 2.0);
     if flipped {
-        crate::icons::paint_ink_flipped(ui.painter(), glyph, icon, t.text_dim);
+        crate::ui_kit::icons::paint_ink_flipped(ui.painter(), glyph, icon, t.text_dim);
     } else {
-        crate::icons::paint_icon(ui.painter(), glyph, icon, 1.0);
+        crate::ui_kit::icons::paint_icon(ui.painter(), glyph, icon, 1.0);
     }
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), label));
     solidcraft_ui_registry::publish_target(&target(item, part), response.rect);
@@ -210,7 +210,7 @@ pub(crate) fn viewport_status_item(ui: &mut Ui, item: &StatusItem, state: &mut S
                 let disc_size = t.space_24 - t.space_4;
                 let (disc_rect, _) = ui.allocate_exact_size(vec2(disc_size, disc_size), egui::Sense::hover());
                 ui.painter().circle_filled(disc_rect.center(), disc_rect.width() / 2.0, disc);
-                crate::icons::paint_icon(ui.painter(), disc_rect.shrink(t.space_3), item.kind.icon(), 1.0);
+                crate::ui_kit::icons::paint_icon(ui.painter(), disc_rect.shrink(t.space_3), item.kind.icon(), 1.0);
                 solidcraft_ui_registry::publish_target(&target(item, "icon"), disc_rect);
                 let name = ui.label(RichText::new(&item.name).size(t.font_label).semibold().color(t.text));
                 solidcraft_ui_registry::publish_target(&target(item, "name"), name.rect);
@@ -376,7 +376,7 @@ pub(crate) fn viewport_status_summary(
                         let icon =
                             Rect::from_center_size(egui::pos2(x + t.space_12, rect.center().y), vec2(t.space_24 - t.space_4, t.space_24 - t.space_4));
                         ui.painter().circle_filled(icon.center(), icon.width() / 2.0, disc);
-                        crate::icons::paint_icon(ui.painter(), icon.shrink(t.space_3), latest.kind.icon(), 1.0);
+                        crate::ui_kit::icons::paint_icon(ui.painter(), icon.shrink(t.space_3), latest.kind.icon(), 1.0);
                         x += t.space_24 + t.space_8;
                         ui.painter().galley(egui::pos2(x, rect.center().y - name.size().y / 2.0), name.clone(), t.text);
                         x += name.size().x + t.space_8;
@@ -393,9 +393,9 @@ pub(crate) fn viewport_status_summary(
                         }
                         let chevron = Rect::from_center_size(egui::pos2(x + t.space_12, rect.center().y), vec2(t.space_16, t.space_16));
                         if egui::Popup::is_id_open(ctx, popup_id) {
-                            crate::icons::paint_ink_flipped(ui.painter(), chevron, "chevron", t.text_dim);
+                            crate::ui_kit::icons::paint_ink_flipped(ui.painter(), chevron, "chevron", t.text_dim);
                         } else {
-                            crate::icons::paint_icon(ui.painter(), chevron, "chevron", 1.0);
+                            crate::ui_kit::icons::paint_icon(ui.painter(), chevron, "chevron", 1.0);
                         }
                         let label = solidcraft_ui_text::format(
                             "ui.viewport_status_summary_label",
@@ -418,7 +418,7 @@ pub(crate) fn viewport_status_summary(
                                         StatusKind::Attention => t.warning.gamma_multiply(0.12),
                                     };
                                     ui.painter().circle_filled(icon.center(), (icon.width() - t.space_4) / 2.0, disc);
-                                    crate::icons::paint_icon(ui.painter(), icon.shrink(t.space_4), item.kind.icon(), 1.0);
+                                    crate::ui_kit::icons::paint_icon(ui.painter(), icon.shrink(t.space_4), item.kind.icon(), 1.0);
                                     solidcraft_ui_registry::publish_target(&target(item, "icon"), icon);
                                     let name = ui.label(RichText::new(&item.name).semibold().size(t.font_label));
                                     solidcraft_ui_registry::publish_target(&target(item, "name"), name.rect);

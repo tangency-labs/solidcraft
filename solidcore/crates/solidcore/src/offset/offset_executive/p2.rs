@@ -403,27 +403,21 @@ impl OffsetExecutive {
             let mut shell = run_shell_offset(kernel, original, options, faces, notifications)?;
             // Opt-in (WR-454, #380; tangency-labs/smlib@fbe43bb): an inset of a solid whose
             // offset leaves nothing has no cavity to take away (the difference would hand
-            // the input back unhollowed); an offset that is no closed solid bounds none.
+            // the input back unhollowed). Its non-empty non-manifold case is the shell
+            // guard below.
             if kernel.fixes.shell_empty_cavity_fails
                 && options.offset.distance < 0.0
                 && input_is_manifold
+                && bp1::num_faces(&shell) == 0
             {
-                if bp1::num_faces(&shell) == 0 {
-                    return Err(invalid_input(OP_SHELL));
-                }
-                if !brep_is_manifold_solid(&shell)? {
-                    return Err(SolidError::sm_err(OP_SHELL));
-                }
+                return Err(invalid_input(OP_SHELL));
             }
-            // Opt-in (WR-578): with the loop gaps closed, an offset of a solid that is still no
-            // closed solid is refused rather than handed back as it is (as WR-454's opt-in
-            // does for an inset): the gap closing must never turn upstream's refusal into a
-            // success on a broken body
-            if kernel.fixes.offset_closes_loop_gaps
-                && input_is_manifold
-                && !brep_is_manifold_solid(&shell)?
+            // WR-578: keep the conservative manifold-solid gate. A closed one-region
+            // offset is not yet a labelled solid suitable for the shell's Boolean.
+            if let Some(what) =
+                lost_manifold(brep_is_manifold_solid(&shell)?, || Ok(input_is_manifold))?
             {
-                return Err(SolidError::sm_err(OP_SHELL));
+                return Err(Failure::new(OP_SHELL, OffsetFailure::Unsound { what }).into_error());
             }
             if !brep_is_manifold_solid(&shell)? && !options.create_offset_solid {
                 return Ok(shell);
@@ -560,13 +554,14 @@ impl OffsetExecutive {
                 notifications,
             )?;
             // (not upstream) a shell of a manifold solid is a manifold solid or a refusal (the
-            // ops contract, `finish`): an offset the merge would have refused can reach the
-            // difference, which then hands back no solid (a ruled square-to-circle loft
-            // shelled inward: ten faces, not manifold, volume 0; a box's chamfer left open
-            // by an inset of its two sides' width, which the cavity meets along a line only).
-            // The returns above are ungated by design: a solid's offset that is no solid with
-            // `create_offset_solid` false is the sheet the caller asked for, and a sheet
-            // input's thickening is not a solid's shell.
+            // ops contract, `finish`): the guard above refuses a shell that is no closed
+            // manifold solid where the shell is the result, and this final gate refuses a
+            // result the difference leaves that way (a ruled square-to-circle loft shelled
+            // inward: ten faces, not manifold, volume 0; a box's chamfer left open by an
+            // inset of its two sides' width, which the cavity meets along a line only). The
+            // ungated return above is a sheet input's offset: with `create_offset_solid`
+            // false it is the sheet the caller asked for, and its thickening has its own
+            // path.
             if let Some(what) =
                 lost_manifold(brep_is_closed_manifold(&shell)?, || Ok(input_is_manifold))?
             {
@@ -578,6 +573,13 @@ impl OffsetExecutive {
         // (not upstream) the attributes the notifications left on the result's objects
         let result = result.and_then(|mut shell| {
             attributes::finish_attributes(&mut shell, original_key, notifications)?;
+            // (not upstream) the port's cached topology, true again for the caller, as the
+            // API shell and offset wrappers ensure for theirs: the Boolean difference, the
+            // stitch and the exact-edge pass maintain only the use links, so a field
+            // derived from them (a loop's edges, a shell's faces, an edge's end vertices)
+            // can still say what the body held before they ran. Only those derived fields
+            // are rewritten: no geometry, tolerance or geometry owner changes.
+            shell.refresh_cached_topology();
             Ok(shell)
         });
         ShellOutcome {
@@ -995,16 +997,13 @@ impl OffsetExecutive {
                 }
             }
 
-            // Not upstream (opt-in, fork tangency-labs/smlib 5d428ae and 7ff0a94): close the
+            // (not upstream, the executor's own split flags are the only path since
+            // #2981: fork tangency-labs/smlib 5d428ae, 7ff0a94, 2e1bb8c): close the
             // loop gaps the offset leaves (a local operation's step walls' ends, a solid
             // offset's vertex where two consecutive edges' offsets run parallel), then split
             // the edges that run past a step wall's corner (after WR-531's caps below, in the
             // fork's order)
-            let local = self.operation() == OffsetOperation::LocalOperation;
-            let step_walls = kernel.fixes.local_operation_step_walls && local;
-            if kernel.fixes.offset_closes_loop_gaps || step_walls {
-                self.close_loop_gaps(kernel, original, notifications)?;
-            }
+            self.close_loop_gaps(kernel, original, notifications)?;
 
             // Not upstream (WR-531), opt-in `Kernel::fixes.offset_point_vertex_caps` (the
             // fork's tangency-labs/smlib@d5dadaa): a vertex where one face closes on itself to
@@ -1041,7 +1040,9 @@ impl OffsetExecutive {
                 }
             }
 
-            if step_walls {
+            if kernel.fixes.local_operation_step_walls
+                && self.operation() == OffsetOperation::LocalOperation
+            {
                 self.split_edges_at_step_corners(kernel, notifications)?;
             }
 
@@ -1831,8 +1832,11 @@ pub fn api_shell_brep_full(
         &mut working_notifications,
     );
     let mut result = outcome.result?;
-    // (not upstream: the port's cached topology, true again for the caller)
-    result.refresh_cached_topology();
+    // `shell_brep` already rewrote the port's cached topology at its hand-back, after
+    // the Boolean, the stitch and the exact-edge pass; the only later step is the
+    // tolerance growth below, which never changes the use links those fields derive
+    // from (`offset_brep`, unlike the shell, does not refresh its own result, so its
+    // wrapper keeps its refresh).
     update_result_tolerances(kernel, &mut result)?;
     // (not upstream, #2136 / #2372: a cancel a status-ignoring helper absorbed still
     // ends the shell as `Cancelled`, never `Ok`)
@@ -5450,7 +5454,11 @@ mod tests {
             )?;
             Ok(Some(volume))
         };
-        assert_eq!(shell(false, false).unwrap(), None);
+        // The default path (the splits are the only path since #2981): the shell's
+        // stitch still welds the rims wrongly, the offset of the plate is no closed
+        // solid, and the WR-578 guard refuses it (1001)
+        assert_status(shell(false, false), 1001);
+        // the case's own opt-in (stitch at the body's tolerance) builds the closed form
         // 40 x 40 x 10 less the hole, less the cavity: 8.5 high over the inner box (37 x 37)
         // less the hole's offset disk (r 3.5, centre 3.49 from x = 1.5) cut by x = 1.5
         let expected = 4564.924657;
@@ -5464,8 +5472,10 @@ mod tests {
     }
 
     /// tangency-labs/solidcore#380: a closed inward shell of a box whose wall is as thick
-    /// as (or thicker than) the inradius leaves no cavity. Upstream returns the empty
-    /// offset as a success (the fork: the body unhollowed); with the opt-in it fails, and a thinner wall still shells.
+    /// as (or thicker than) the inradius leaves no cavity. The default path (the split
+    /// flags are the only path since #2981) refuses it as no closed solid (1001); with
+    /// WR-454's own opt-in the typed empty-cavity refusal (1007) takes precedence; a
+    /// thinner wall still shells.
     #[test]
     fn issue_380_shell_with_no_cavity_fails_with_the_fix() {
         let shell = |fix: bool, wall: f64| -> Result<Brep> {
@@ -5494,9 +5504,9 @@ mod tests {
             .result
         };
         for wall in [5.0, 6.0] {
-            // upstream: an empty offset is "not a manifold solid", returned as a success
-            let upstream = shell(false, wall).unwrap();
-            assert_eq!(bp1::num_faces(&upstream), 0);
+            // the default path: an offset that is no closed solid is refused (1001)
+            assert_status(shell(false, wall), 1001);
+            // WR-454's opt-in keeps its own typed refusal (1007)
             assert_status(shell(true, wall), 1007);
         }
         let thin = shell(true, 1.0).unwrap();
