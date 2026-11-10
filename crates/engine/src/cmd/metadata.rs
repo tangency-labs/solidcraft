@@ -18,7 +18,17 @@ const READ_CONTRACT: TypedContract<MetadataParams> = TypedContract::new();
 const SET_CONTRACT: TypedContract<MetadataSetParams> = TypedContract::new();
 const REMOVE_CONTRACT: TypedContract<MetadataRemoveParams> = TypedContract::new();
 
+const REVIEW_CONTRACT: TypedContract<crate::schema::metadata::ReviewParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("document.review", "Context Pointer", crate::checked!("document.review", review))
+        .at("INSPECT", "MEASURE")
+        .icon("list")
+        .noundo()
+        .doc_only()
+        .contract(&REVIEW_CONTRACT)
+        .output(output_schema_for::<crate::schema::metadata::ReviewResult>)
+        .params("no parameters → key, value: the Context Pointer notebook as stored, or null; read-only. UI start opens Context Pointer. Changes use document.metadata.set."),
     CommandSpec::new("document.metadata", "Design Properties", crate::checked!("document.metadata", read))
         .icon("settings")
         .noundo()
@@ -50,6 +60,13 @@ pub static COMMANDS: &[CommandSpec] = &[
 /// A reply built from its schema's type, so the two can't drift apart.
 fn reply(cmd: &str, r: impl serde::Serialize) -> Result<Value> {
     serde_json::to_value(r).map_err(|e| bad(cmd, e.to_string()))
+}
+
+fn review(s: &mut Session, p: &Value) -> Result<Value> {
+    let _: crate::schema::metadata::ReviewParams = serde_json::from_value(p.clone()).map_err(|e| bad("document.review", e.to_string()))?;
+    // Keep the original namespace so existing review notebooks remain accessible.
+    let key = "com.tutorintelligence.review";
+    reply("document.review", crate::schema::metadata::ReviewResult { key: key.into(), value: s.doc.metadata.get(key).cloned() })
 }
 
 fn read(s: &mut Session, _: &Value) -> Result<Value> {

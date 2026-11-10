@@ -181,6 +181,21 @@ They are listed together in the browser's *Construction* folder.
 - **Elsewhere:** construction plane, reference plane, datum plane (and axis, point).
 - **For translators:** not a sketch's construction entity.
 
+### Context Pointer
+
+A text note attached to one or more recorded points on model faces, edges or vertices,
+with a review status and a saved view.
+
+Each target carries the same note number and follows its recorded occurrence through rigid moves.
+A changed or missing anchor is marked stale and its pin is hidden instead of being attached
+to another face, edge or vertex. The complete note and other targets remain saved.
+Notes save with the design through its existing metadata extension point.
+
+- **In SolidCraft:** `document.review` ("Context Pointer"); `com.tutorintelligence.review` in
+  document metadata; changes use `document.metadata.set` and the normal undo history.
+- **For translators:** keep Context Pointer as the tool name. Its notes are feedback about
+  the model, not dimensions or modelling features.
+
 ### curve
 
 A sketch entity that is not a point: a line, an arc, a circle, an ellipse, a spline or a conic.

@@ -192,6 +192,8 @@ pub struct MenuState {
     pub props_measuring: Option<crate::design_properties::Measuring>,
     /// The viewport menu opened over something: it offers Select Other.
     pub over_geometry: bool,
+    /// Exact geometry hit at opening, separate from the preserved modelling selection.
+    review_targets: Vec<Sel>,
     /// The plane under the cursor when the viewport menu opened: it offers a sketch on it.
     pub plane: Option<String>,
     /// Where the viewport menu opened and the keys held at that click (Select Other adds with
@@ -625,6 +627,14 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(cmd(app, "edit.undo", "Undo").on(!app.session.undo.is_empty()));
         v.push(cmd(app, "edit.redo", "Redo").on(!app.session.redo.is_empty()));
         return v;
+    }
+    if !app.menu.review_targets.is_empty() {
+        v.push(
+            act("ui.addReviewNote", app.tr("ui.review.context_add"), "list")
+                .with(json!({"selections": app.menu.review_targets, "document": app.session.uid}))
+                .on(crate::review_notes::can_add(app)),
+        );
+        v.push(Item::sep());
     }
     // A sketch curve or point in the viewport gets the sketch's own menu, the one its browser row
     // opens, with Edit Sketch among it. Solid geometry in the selection keeps the body menu: a
@@ -1506,6 +1516,13 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
     let p = item.params.clone().unwrap_or(Value::Null);
     let bodies = strs(&p, "bodies");
     match item.id.as_str() {
+        "ui.addReviewNote" => {
+            if p.get("document").and_then(Value::as_u64) == Some(app.session.uid)
+                && let Some(selections) = p.get("selections").and_then(|value| serde_json::from_value::<Vec<Sel>>(value.clone()).ok())
+            {
+                crate::review_notes::add_at(app, &selections);
+            }
+        }
         "appearance.library" if crate::render_workspace::active(app) => {
             app.start("appearance.library");
         }
@@ -2316,6 +2333,22 @@ pub fn open(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held) {
 
 /// Open a menu for a target (the radial ring only for the viewport).
 pub fn open_for(app: &mut SolveApp, at: Pos2, target: Target) {
+    let review_target = if target == Target::Viewport && app.session.active_sketch.is_none() {
+        // Use the raw hit even in body/component selection mode. The ordinary
+        // menu selection and its edge-midpoint convention remain unchanged.
+        match app.viewport.rect {
+            Some(rect) if rect.contains(at) => {
+                let proj = crate::viewport::projection(app, rect);
+                crate::viewport::pick_cached(app, &proj, at).iter().find_map(crate::review_notes::picked)
+            }
+            Some(_) => None,
+            None => app.viewport.hover.as_ref().and_then(crate::review_notes::picked),
+        }
+    } else {
+        None
+    };
+    app.menu.review_targets =
+        review_target.as_ref().map(|primary| crate::review_notes::selected_targets(&app.session.selection, primary)).unwrap_or_default();
     app.menu.key_row = None;
     app.menu.submenu.clear();
     app.menu.submenu_key = None;

@@ -52,3 +52,24 @@ fn replies_match_the_output_schema() {
     assert!(warned["param_warnings"].as_array().is_some_and(|w| !w.is_empty()), "{warned}");
     set(&warned);
 }
+
+#[test]
+fn context_pointer_read_is_verbatim_and_does_not_modify_the_design() {
+    use super::{ReviewParams, ReviewResult};
+    assert_keys(input_schema_for::<ReviewParams>(), &[]);
+    let mut s = Session::default();
+    let empty = s.execute("document.review", &json!({})).unwrap();
+    assert_eq!(empty["value"], Value::Null);
+    let key = empty["key"].as_str().unwrap().to_string();
+    let notebook = json!({"version": 2, "notes": [], "future_field": {"keep": true}});
+    s.execute("document.metadata.set", &json!({"key": key, "value": notebook})).unwrap();
+    let before = serde_json::to_value(&*s.doc).unwrap();
+    let undo = s.undo.len();
+    let reply = s.execute("document.review", &json!({})).unwrap();
+    assert_eq!(reply["value"], notebook);
+    let schema = output_schema_for::<ReviewResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply));
+    assert_eq!(s.undo.len(), undo);
+    assert_eq!(serde_json::to_value(&*s.doc).unwrap(), before);
+    assert!(s.execute("document.review", &json!({"unexpected": true})).is_err());
+}

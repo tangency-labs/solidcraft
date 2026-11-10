@@ -54,6 +54,7 @@ pub const DOCUMENTED: &[&str] = &[
     "contact.enable_sets",
     "contact.list",
     "document.inspect",
+    "document.review",
     "document.units",
     "edit.checkpoint",
     "edit.restore_checkpoint",

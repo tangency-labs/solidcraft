@@ -521,6 +521,516 @@ mod tests {
 
     use crate::scenario::Harness;
 
+    /// Original analytic fixture: a box in a movable component, with an exact top-face pick.
+    fn review_fixture() -> Harness {
+        let mut h = Harness::new();
+        h.app.run("component.create", json!({"name":"ReviewPart", "grounded":false})).unwrap();
+        h.app.run("solid.box", json!({"name":"ReviewBox", "body_name":"ReviewBlock", "length":20,"width":10,"height":5})).unwrap();
+        h.app.run("component.activate", json!({"component":"root"})).unwrap();
+        h.app.session.selection = vec![crate::dialogs::face_sel(&h.app.session, solidcore_record::Vec3::new(6.0, 4.0, 5.0)).unwrap()];
+        h
+    }
+
+    fn review_with_note(h: &mut Harness) -> crate::review_notes::Note {
+        let mut draft = crate::review_notes::new_draft(&h.app).unwrap();
+        draft.note.text = "Increase clearance here.".into();
+        crate::review_notes::save(&mut h.app, &draft, false).unwrap();
+        crate::review_notes::Notebook::read(&h.app.session).unwrap().notes.remove(0)
+    }
+
+    #[test]
+    fn review_anchor_follows_only_its_exact_occurrence_through_rigid_moves() {
+        use crate::review_notes::{capture, resolve};
+        use solidcore_record::Vec3;
+        let mut h = review_fixture();
+        let anchor = capture(&h.app.session, &h.app.session.selection[0]).unwrap();
+        assert_eq!(anchor.local_point, Vec3::new(6.0, 4.0, 5.0));
+        assert_eq!(anchor.original_point, anchor.local_point);
+        assert_eq!(anchor.occurrence_path.len(), 1);
+        assert!(matches!(&anchor.locator, crate::review_notes::Locator::Face { name, .. } if !name.is_empty()));
+        assert_eq!(resolve(&h.app.session, &anchor), Some(anchor.original_point));
+        h.app.run("occurrence.copy", json!({"component":"ReviewPart", "translate":[0,40,0]})).unwrap();
+        h.app.run("occurrence.move", json!({"occurrence":"ReviewPart:1", "translate":[30,0,0], "axis":[0,0,1], "angle":"90 deg"})).unwrap();
+        let moved = resolve(&h.app.session, &anchor).unwrap();
+        assert!(moved.dist(Vec3::new(26.0, 6.0, 5.0)) < 1e-8, "{moved:?}");
+        assert_eq!(anchor.original_point, Vec3::new(6.0, 4.0, 5.0), "original evidence stays unchanged");
+        // A saved external revision that removes the original placement still has a copy.
+        let mut missing = (*h.app.session.doc).clone();
+        missing.occurrences.retain(|o| !anchor.occurrence_path.contains(&o.id));
+        let missing = solidcraft_engine::Session::new(missing);
+        assert!(resolve(&missing, &anchor).is_none(), "must not jump to the other occurrence");
+        let mut wrong_face = anchor.clone();
+        if let crate::review_notes::Locator::Face { name, .. } = &mut wrong_face.locator {
+            name.push_str("-different");
+        }
+        assert!(resolve(&h.app.session, &wrong_face).is_none());
+        let mut wrong_feature = anchor.clone();
+        wrong_feature.feature += 1;
+        assert!(resolve(&h.app.session, &wrong_feature).is_none());
+        let mut wrong_offset = anchor.clone();
+        wrong_offset.definition_offset[3][0] += 5.0;
+        assert!(resolve(&h.app.session, &wrong_offset).is_none(), "an internal body transfer is not a rigid occurrence move");
+    }
+
+    #[test]
+    fn review_changed_geometry_is_stale_until_undone() {
+        let mut h = review_fixture();
+        let note = review_with_note(&mut h);
+        h.app.run("timeline.edit", json!({"feature":"ReviewBox","set":{"height":"8"}})).unwrap();
+        assert!(crate::review_notes::resolve(&h.app.session, &note.anchors[0]).is_none());
+        assert_eq!(crate::review_notes::Notebook::read(&h.app.session).unwrap().notes[0], note);
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(crate::review_notes::resolve(&h.app.session, &note.anchors[0]), Some(note.anchors[0].original_point));
+    }
+
+    #[test]
+    fn review_edits_status_delete_undo_and_native_save_roundtrip() {
+        use crate::review_notes::{Draft, KEY, Notebook, Status, save};
+        let mut h = review_fixture();
+        h.app.run("document.metadata.set", json!({"key":"org.example.other", "value":{"keep":true}})).unwrap();
+        let evaluated_model = h.app.session.model.state();
+        let before = h.app.session.undo.len();
+        let note = review_with_note(&mut h);
+        assert_eq!(h.app.session.undo.len(), before + 1);
+        let mut draft = Draft { note: note.clone(), base: Some(note.clone()) };
+        draft.note.text = "Clearance checked.".into();
+        draft.note.status = Status::ReadyForReview;
+        save(&mut h.app, &draft, false).unwrap();
+        let ready = Notebook::read(&h.app.session).unwrap().notes[0].clone();
+        assert_eq!(ready.status, Status::ReadyForReview);
+        // An old editor cannot overwrite the last change.
+        assert!(save(&mut h.app, &draft, false).is_err());
+        draft = Draft { note: ready.clone(), base: Some(ready) };
+        draft.note.status = Status::Resolved;
+        save(&mut h.app, &draft, false).unwrap();
+        let resolved = Notebook::read(&h.app.session).unwrap().notes[0].clone();
+        draft = Draft { note: resolved.clone(), base: Some(resolved.clone()) };
+        save(&mut h.app, &draft, true).unwrap();
+        assert!(Notebook::read(&h.app.session).unwrap().notes.is_empty());
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(Notebook::read(&h.app.session).unwrap().notes, vec![resolved]);
+        assert!(
+            std::sync::Arc::ptr_eq(&evaluated_model, &h.app.session.model.state()),
+            "review changes and undo retain the same evaluated definition model"
+        );
+        assert_eq!(h.app.session.doc.metadata.get("org.example.other"), Some(&json!({"keep":true})));
+        let expected = h.app.session.doc.metadata.get(KEY).unwrap().clone();
+        let path = std::env::temp_dir().join(format!("solidcraft-review-roundtrip-{}.sc", std::process::id()));
+        h.app.run("file.save_as", json!({"path":path,"format":"container"})).unwrap();
+        let mut reopened = solidcraft_engine::Session::default();
+        reopened.execute("doc.open", &json!({"path":path})).unwrap();
+        assert_eq!(reopened.doc.metadata.get(KEY), Some(&expected));
+        let reopened_note = Notebook::read(&reopened).unwrap().notes.remove(0);
+        assert_eq!(crate::review_notes::resolve(&reopened, &reopened_note.anchors[0]), Some(note.anchors[0].original_point));
+        assert_eq!(reopened.execute("document.review", &json!({})).unwrap()["value"], expected);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn review_unknown_fields_survive_and_hostile_metadata_is_never_overwritten() {
+        use crate::review_notes::{Draft, KEY, Notebook, save};
+        let mut h = review_fixture();
+        review_with_note(&mut h);
+        let mut good = h.app.session.doc.metadata.get(KEY).unwrap().clone();
+        good["future"] = json!({"preserve":[1,true,"yes"]});
+        good["notes"][0]["author"] = json!("Reviewer");
+        good["notes"][0]["anchors"][0]["future_anchor"] = json!({"extra":5});
+        good["notes"][0]["anchors"][0]["locator"]["future_locator"] = json!({"extra":7});
+        good["notes"][0]["camera"]["future_camera"] = json!(7);
+        h.app.run("document.metadata.set", json!({"key":KEY,"value":good})).unwrap();
+        let n = Notebook::read(&h.app.session).unwrap().notes.remove(0);
+        let mut draft = Draft { note: n.clone(), base: Some(n) };
+        draft.note.text = "Updated text".into();
+        save(&mut h.app, &draft, false).unwrap();
+        let preserved = h.app.session.doc.metadata.get(KEY).unwrap().clone();
+        assert_eq!(preserved["future"], good["future"]);
+        for key in ["author", "anchors", "camera"] {
+            assert_eq!(preserved["notes"][0][key], good["notes"][0][key]);
+        }
+        let mut cases = vec![json!("broken"), json!({"version":2,"notes":[]}), json!({"version":1,"notes":[]})];
+        for (field, value) in
+            [("status", json!("unknown")), ("text", json!("é".repeat(2049))), ("id", json!(0)), ("camera", json!({})), ("anchors", json!({}))]
+        {
+            let mut bad = preserved.clone();
+            bad["notes"][0][field] = value;
+            cases.push(bad);
+        }
+        let mut duplicate = preserved.clone();
+        duplicate["notes"] = json!([duplicate["notes"][0], duplicate["notes"][0]]);
+        cases.push(duplicate);
+        for anchors in [json!([]), json!(vec![preserved["notes"][0]["anchors"][0].clone(); 33])] {
+            let mut bad = preserved.clone();
+            bad["notes"][0]["anchors"] = anchors;
+            cases.push(bad);
+        }
+        let mut unknown_kind = preserved.clone();
+        unknown_kind["notes"][0]["anchors"][0]["locator"]["kind"] = json!("future_geometry");
+        cases.push(unknown_kind);
+        let mut future_version = preserved.clone();
+        future_version["version"] = json!(3);
+        cases.push(future_version);
+        let mut large = preserved.clone();
+        large["unknown"] = json!("x".repeat(65536));
+        cases.push(large);
+        for value in cases {
+            // Simulates malformed data loaded from a file/another tool, which Metadata preserves.
+            h.app.session.doc_mut().metadata.0.insert(KEY.into(), value.clone());
+            let undo = h.app.session.undo.len();
+            assert!(Notebook::read(&h.app.session).is_err(), "{value}");
+            assert!(save(&mut h.app, &draft, false).is_err());
+            assert!(save(&mut h.app, &draft, true).is_err());
+            assert_eq!(h.app.session.doc.metadata.get(KEY), Some(&value));
+            assert_eq!(h.app.session.undo.len(), undo);
+        }
+        let mut bounded = Notebook::default();
+        let mut n = draft.note;
+        n.id = 1;
+        n.text = "é".repeat(2048);
+        bounded.next_id = 2;
+        bounded.notes.push(n);
+        assert!(bounded.value().is_ok(), "exactly 4096 UTF-8 bytes accepted");
+        bounded.notes[0].text.push('a');
+        assert!(bounded.value().is_err());
+        bounded.notes[0].text = "short".into();
+        let n = bounded.notes[0].clone();
+        for id in 2..=129 {
+            let mut next = n.clone();
+            next.id = id;
+            bounded.notes.push(next);
+        }
+        bounded.next_id = 130;
+        assert!(bounded.value().is_err(), "count bounded before encoding");
+    }
+
+    #[test]
+    fn review_right_click_opens_focused_editor_at_exact_face_point() {
+        use crate::context_menu::{Target, items};
+        use solidcore_record::Vec3;
+        for selected in [false, true] {
+            let mut h = review_fixture();
+            h.app.home.open = false;
+            if !selected {
+                h.app.session.selection.clear();
+            }
+            let selection = h.app.session.selection.clone();
+            h.call("ui.view", json!({"view":"top"}));
+            h.app.cam.target = Vec3::new(10.0, 5.0, 5.0);
+            h.app.cam.distance = 45.0;
+            h.settle();
+            let world = h.app.session.world_state().unwrap();
+            let model = h.app.session.model.state();
+            let undo = h.app.session.undo.len();
+            h.step(&json!({"click":{"world":[14,6,5]},"button":"right"})).unwrap();
+            let menu = items(&h.app, &Target::Viewport);
+            assert!(menu.iter().any(|item| item.id == "ui.addReviewNote" && item.enabled));
+            assert!(menu.iter().any(|item| item.id == "solid.extrude"), "normal face commands remain available");
+            if selected {
+                assert_eq!(h.app.session.selection, selection, "the normal face menu retains its existing selection");
+            }
+            h.step(&json!({"click":{"handle":"menu:ui.addReviewNote"}})).unwrap();
+            assert!(h.app.viewport.context_menu.is_none());
+            let draft = h.app.review_notes.as_ref().unwrap().draft.as_ref().expect("menu opens the editor directly");
+            assert!(draft.note.anchors[0].original_point.dist(Vec3::new(14.0, 6.0, 5.0)) < 1e-5, "{:?}", draft.note.anchors[0]);
+            assert_eq!(draft.note.anchors[0].occurrence_path.len(), 1);
+            assert!(draft.base.is_none());
+            h.step(&json!({"text":"Directly typed review note"})).unwrap();
+            assert_eq!(h.app.review_notes.as_ref().unwrap().draft.as_ref().unwrap().note.text, "Directly typed review note");
+            assert!(std::sync::Arc::ptr_eq(&world, &h.app.session.world_state().unwrap()), "opening a note does not move or rebuild geometry");
+            assert!(std::sync::Arc::ptr_eq(&model, &h.app.session.model.state()));
+            assert_eq!(h.app.session.undo.len(), undo, "a draft makes no document edit");
+        }
+    }
+
+    #[test]
+    fn review_right_click_preserves_occurrence_selection_and_anchors_the_clicked_copy() {
+        use crate::context_menu::{Target, close, items};
+        use solidcore_record::Vec3;
+        let mut h = review_fixture();
+        h.app.home.open = false;
+        h.app.run("occurrence.copy", json!({"component":"ReviewPart", "translate":[0,40,0]})).unwrap();
+        h.app.ui.pick_components = true;
+        h.call("ui.view", json!({"view":"top"}));
+        h.app.cam.target = Vec3::new(10.0, 45.0, 5.0);
+        h.app.cam.distance = 45.0;
+        h.settle();
+        h.step(&json!({"click":{"world":[6,44,5]}})).unwrap();
+        let selection = h.app.session.selection.clone();
+        let [solidcraft_engine::Sel::Occurrence { path }] = selection.as_slice() else { panic!("{selection:?}") };
+        let path = path.clone();
+        let doc = h.app.session.doc.clone();
+        h.step(&json!({"click":{"world":[14,46,5]},"button":"right"})).unwrap();
+        assert_eq!(h.app.session.selection, selection, "right-click retains the selected occurrence");
+        let item = items(&h.app, &Target::Viewport).into_iter().find(|item| item.id == "ui.addReviewNote").unwrap();
+        h.step(&json!({"click":{"handle":"menu:ui.addReviewNote"}})).unwrap();
+        let draft = h.app.review_notes.as_ref().unwrap().draft.as_ref().unwrap();
+        assert_eq!(draft.note.anchors[0].occurrence_path, path);
+        assert!(draft.note.anchors[0].original_point.dist(Vec3::new(14.0, 46.0, 5.0)) < 1e-5);
+        assert!(draft.note.anchors[0].local_point.dist(Vec3::new(14.0, 6.0, 5.0)) < 1e-5);
+        assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc));
+        h.step(&json!({"text":"Keep this draft"})).unwrap();
+        // Replaying a menu action must not replace an unsaved draft.
+        crate::context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
+        assert_eq!(h.app.review_notes.as_ref().unwrap().draft.as_ref().unwrap().note.text, "Keep this draft");
+        h.step(&json!({"click":{"handle":"review:cancel"}})).unwrap();
+        close(&mut h.app);
+        h.app.viewport.hover = None;
+        crate::context_menu::open(&mut h.app, egui::Pos2::ZERO, Default::default());
+        assert!(items(&h.app, &Target::Viewport).iter().all(|item| item.id != "ui.addReviewNote"), "empty space cannot reuse a previous face hit");
+    }
+
+    #[test]
+    fn review_right_click_edge_and_vertex_keep_exact_hit_in_component_mode() {
+        use crate::review_notes::{Locator, Notebook};
+        use solidcore_record::Vec3;
+        use solidcraft_engine::doc;
+        for (kind, local_point, rotated) in [
+            ("edge", Vec3::new(6.0, 0.0, 5.0), false),
+            ("vertex", Vec3::new(20.0, 10.0, 5.0), false),
+            ("edge", Vec3::new(6.0, 0.0, 5.0), true),
+            ("vertex", Vec3::new(20.0, 10.0, 5.0), true),
+        ] {
+            let mut h = review_fixture();
+            h.app.home.open = false;
+            h.app.ui.pick_components = true;
+            let transform = if rotated {
+                h.app.run("occurrence.copy", json!({"component":"ReviewPart", "translate":[0,0,0]})).unwrap();
+                h.app.run("occurrence.move", json!({"occurrence":"ReviewPart:2", "translate":[50,40,0],"axis":[0,0,1],"angle":"90 deg"})).unwrap();
+                doc::rigid(Vec3::new(50.0, 40.0, 0.0), Vec3::ZERO, Vec3::Z, std::f64::consts::FRAC_PI_2)
+            } else {
+                doc::IDENTITY
+            };
+            let point = doc::apply_point(&transform, local_point);
+            let face_point = doc::apply_point(&transform, Vec3::new(6.0, 4.0, 5.0));
+            // An oblique view separates the rotated box's top/bottom outline
+            // edges, which occupy the same pixel in an exact top view.
+            h.call("ui.view", json!({"view":if rotated { "iso" } else { "top" }}));
+            h.app.cam.target = doc::apply_point(&transform, Vec3::new(10.0, 5.0, 5.0));
+            h.app.cam.distance = 45.0;
+            h.settle();
+            h.step(&json!({"click":{"world":[face_point.x,face_point.y,face_point.z]}})).unwrap();
+            let selection = h.app.session.selection.clone();
+            assert!(matches!(selection.as_slice(), [solidcraft_engine::Sel::Occurrence { .. }]));
+            let model = h.app.session.model.state();
+            h.step(&json!({"click":{"world":[point.x,point.y,point.z]},"button":"right"})).unwrap();
+            assert_eq!(h.app.session.selection, selection);
+            h.step(&json!({"click":{"handle":"menu:ui.addReviewNote"}})).unwrap();
+            let draft = h.app.review_notes.as_ref().unwrap().draft.as_ref().unwrap();
+            let anchor = &draft.note.anchors[0];
+            assert!(anchor.original_point.dist(point) < 1e-5, "{kind}: {:?}", anchor.original_point);
+            assert!(anchor.local_point.dist(local_point) < 1e-5);
+            let [solidcraft_engine::Sel::Occurrence { path }] = selection.as_slice() else { panic!("occurrence selection") };
+            assert_eq!(&anchor.occurrence_path, path);
+            assert!(matches!((&anchor.locator, kind), (Locator::Edge { .. }, "edge") | (Locator::Vertex { .. }, "vertex")));
+            if kind == "edge" {
+                assert!(anchor.local_point.dist(Vec3::new(10.0, 0.0, 5.0)) > 3.9, "edge notes must not jump to the midpoint");
+            }
+            h.step(&json!({"text":"Exact geometry target"})).unwrap();
+            h.step(&json!({"click":{"handle":"review:save"}})).unwrap();
+            let note = Notebook::read(&h.app.session).unwrap().notes.remove(0);
+            assert_eq!(note.text, "Exact geometry target");
+            assert!(std::sync::Arc::ptr_eq(&model, &h.app.session.model.state()));
+            h.app.run("edit.undo", json!({})).unwrap();
+            assert!(Notebook::read(&h.app.session).unwrap().notes.is_empty());
+        }
+    }
+
+    #[test]
+    fn review_mixed_multi_selection_roundtrips_with_exact_primary_and_partial_stale_targets() {
+        use crate::review_notes::{Locator, Notebook, new_draft, resolve};
+        use solidcore_record::Vec3;
+        use solidcraft_engine::Sel;
+        let mut h = review_fixture();
+        h.app.home.open = false;
+        let source = h.app.session.model.state();
+        let mesh = source.bodies[0].mesh();
+        let edge_index = mesh
+            .edges
+            .iter()
+            .position(|edge| {
+                edge.first().zip(edge.last()).is_some_and(|(a, b)| {
+                    (a.dist(Vec3::new(0.0, 0.0, 5.0)) < 1e-9 && b.dist(Vec3::new(20.0, 0.0, 5.0)) < 1e-9)
+                        || (b.dist(Vec3::new(0.0, 0.0, 5.0)) < 1e-9 && a.dist(Vec3::new(20.0, 0.0, 5.0)) < 1e-9)
+                })
+            })
+            .unwrap();
+        h.app.run("occurrence.copy", json!({"component":"ReviewPart", "translate":[0,0,0]})).unwrap();
+        h.app.run("occurrence.move", json!({"occurrence":"ReviewPart:2", "translate":[50,40,0],"axis":[0,0,1],"angle":"90 deg"})).unwrap();
+        let face = crate::dialogs::face_sel(&h.app.session, Vec3::new(6.0, 4.0, 5.0)).unwrap();
+        let Sel::Face { body, .. } = &face else { panic!("face fixture") };
+        let edge = Sel::Edge { body: body.clone(), index: edge_index, point: Vec3::new(6.0, 0.0, 5.0) };
+        let copy_body = h.app.session.world_state().unwrap().bodies.iter().find(|b| b.name != *body).unwrap().name.clone();
+        let vertex = Sel::Vertex { body: copy_body, point: Vec3::new(40.0, 60.0, 5.0) };
+        let selection = vec![face, edge, vertex];
+        h.app.session.selection = selection.clone();
+        assert_eq!(new_draft(&h.app).unwrap().note.anchors.len(), 3, "the primary Add button uses the whole geometry selection");
+        h.call("ui.view", json!({"view":"top"}));
+        h.app.cam.target = Vec3::new(25.0, 30.0, 5.0);
+        h.app.cam.distance = 100.0;
+        h.settle();
+        h.step(&json!({"click":{"world":[14,6,5]},"button":"right"})).unwrap();
+        assert_eq!(h.app.session.selection, selection);
+        h.step(&json!({"click":{"handle":"menu:ui.addReviewNote"}})).unwrap();
+        let draft = h.app.review_notes.as_ref().unwrap().draft.as_ref().unwrap();
+        assert_eq!(draft.note.anchors.len(), 3);
+        assert!(matches!(&draft.note.anchors[0].locator, Locator::Face { .. }));
+        assert!(draft.note.anchors[0].original_point.dist(Vec3::new(14.0, 6.0, 5.0)) < 1e-5);
+        assert!(matches!(&draft.note.anchors[1].locator, Locator::Edge { .. }));
+        assert_eq!(draft.note.anchors[1].original_point, Vec3::new(6.0, 0.0, 5.0));
+        assert!(matches!(&draft.note.anchors[2].locator, Locator::Vertex { source_point, .. } if source_point.dist(Vec3::new(20.0,10.0,5.0)) < 1e-9));
+        assert_ne!(draft.note.anchors[0].occurrence_path, draft.note.anchors[2].occurrence_path);
+        h.step(&json!({"text":"One note about all three targets"})).unwrap();
+        h.step(&json!({"click":{"handle":"review:save"}})).unwrap();
+        let note = Notebook::read(&h.app.session).unwrap().notes.remove(0);
+        for index in 0..3 {
+            assert!(crate::scenario::rect_of(&format!("review:pin:1:{index}")).is_some(), "every target has the same numbered note marker");
+        }
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert!(Notebook::read(&h.app.session).unwrap().notes.is_empty());
+        h.app.run("edit.redo", json!({})).unwrap();
+        assert_eq!(Notebook::read(&h.app.session).unwrap().notes, vec![note.clone()]);
+        let path = std::env::temp_dir().join(format!("solidcraft-review-multi-{}.sc", std::process::id()));
+        h.app.run("file.save_as", json!({"path":path,"format":"container"})).unwrap();
+        let mut reopened = solidcraft_engine::Session::default();
+        reopened.execute("doc.open", &json!({"path":path})).unwrap();
+        assert_eq!(Notebook::read(&reopened).unwrap().notes, vec![note.clone()]);
+        for anchor in &note.anchors {
+            assert!(resolve(&reopened, anchor).unwrap().dist(anchor.original_point) < 1e-8);
+        }
+        let _ = std::fs::remove_file(path);
+        h.app.run("occurrence.move", json!({"occurrence":"ReviewPart:2", "translate":[20,0,0]})).unwrap();
+        assert!(resolve(&h.app.session, &note.anchors[2]).unwrap().dist(Vec3::new(60.0, 60.0, 5.0)) < 1e-8);
+        assert!(resolve(&h.app.session, &note.anchors[0]).unwrap().dist(note.anchors[0].original_point) < 1e-8);
+        h.app.run("timeline.edit", json!({"feature":"ReviewBox","set":{"height":"8"}})).unwrap();
+        assert!(note.anchors.iter().all(|a| resolve(&h.app.session, a).is_none()));
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert!(note.anchors.iter().all(|a| resolve(&h.app.session, a).is_some()));
+        let mut missing = (*h.app.session.doc).clone();
+        missing.occurrences.retain(|o| !note.anchors[2].occurrence_path.contains(&o.id));
+        h.app = crate::SolveApp::new(solidcraft_engine::Session::new(missing), Default::default());
+        h.app.home.open = false;
+        h.step(&json!({"start":"document.review"})).unwrap();
+        assert!(resolve(&h.app.session, &note.anchors[0]).is_some());
+        assert!(resolve(&h.app.session, &note.anchors[1]).is_some());
+        assert!(resolve(&h.app.session, &note.anchors[2]).is_none());
+        assert_eq!(Notebook::read(&h.app.session).unwrap().notes, vec![note]);
+        assert!(h.widget("Stale targets: 1 of 3. Their pins are hidden; remaining targets stay attached. The complete note is retained.").is_some());
+    }
+
+    #[test]
+    fn review_vertex_locator_accounts_for_definition_offset_and_rejects_unrelated_points() {
+        use crate::review_notes::{Locator, capture, resolve};
+        use solidcore_record::Vec3;
+        use solidcraft_engine::{Sel, doc};
+        let mut h = review_fixture();
+        let offset = doc::rigid(Vec3::new(3.0, 7.0, 2.0), Vec3::ZERO, Vec3::Z, 0.0);
+        h.app.session.doc_mut().body_offsets.insert("ReviewBlock".into(), offset);
+        let body = h.app.session.world_state().unwrap().bodies[0].name.clone();
+        let point = Vec3::new(23.0, 17.0, 7.0);
+        let anchor = capture(&h.app.session, &Sel::Vertex { body: body.clone(), point }).unwrap();
+        assert!(matches!(&anchor.locator, Locator::Vertex { source_point, .. } if *source_point == Vec3::new(20.0,10.0,5.0)));
+        assert_eq!(anchor.local_point, point);
+        assert_eq!(resolve(&h.app.session, &anchor), Some(point));
+        assert!(capture(&h.app.session, &Sel::Vertex { body, point: point + Vec3::new(0.01, 0.0, 0.0) }).is_err(), "no nearest-vertex reattachment");
+        let mut wrong = anchor.clone();
+        if let Locator::Vertex { source_point, .. } = &mut wrong.locator {
+            source_point.x += 1.0;
+        }
+        assert!(resolve(&h.app.session, &wrong).is_none());
+        let mut wrong = anchor;
+        if let Locator::Vertex { topology, .. } = &mut wrong.locator {
+            *topology = "0".repeat(64);
+        }
+        assert!(resolve(&h.app.session, &wrong).is_none());
+    }
+
+    #[test]
+    fn review_five_legacy_faces_upgrade_only_on_save_and_keep_unknown_fields_and_undo() {
+        use crate::review_notes::{Draft, KEY, Locator, Notebook, resolve, save};
+        let mut h = review_fixture();
+        let seed = review_with_note(&mut h);
+        let mut notes = Vec::new();
+        for id in 1..=5 {
+            let mut note = serde_json::to_value(&seed).unwrap();
+            note["id"] = json!(id);
+            note["text"] = json!(format!("Legacy review note {id}"));
+            note["author"] = json!({"keep":id});
+            let object = note.as_object_mut().unwrap();
+            let mut anchor = object.remove("anchors").unwrap().as_array().unwrap()[0].clone();
+            let fields = anchor.as_object_mut().unwrap();
+            let locator = fields.remove("locator").unwrap();
+            fields.insert("face_index".into(), locator["index"].clone());
+            fields.insert("face_name".into(), locator["name"].clone());
+            fields.insert("future_anchor".into(), json!({"preserve":true}));
+            object.insert("anchor".into(), anchor);
+            notes.push(note);
+        }
+        let legacy = json!({"version":1,"next_id":6,"notes":notes,"future_book":{"preserve":true}});
+        h.app.run("document.metadata.set", json!({"key":KEY,"value":legacy})).unwrap();
+        let migrated = Notebook::read(&h.app.session).unwrap();
+        assert_eq!(h.app.session.doc.metadata.get(KEY), Some(&legacy), "reading never rewrites the saved metadata");
+        assert_eq!((migrated.version, migrated.notes.len()), (2, 5));
+        for (index, note) in migrated.notes.iter().enumerate() {
+            assert_eq!(note.text, format!("Legacy review note {}", index + 1));
+            assert_eq!(note.anchors.len(), 1);
+            assert!(matches!(note.anchors[0].locator, Locator::Face { .. }));
+            assert_eq!(resolve(&h.app.session, &note.anchors[0]), Some(seed.anchors[0].original_point));
+            assert_eq!(note.extra["author"], json!({"keep":index + 1}));
+            assert_eq!(note.anchors[0].extra["future_anchor"], json!({"preserve":true}));
+        }
+        let base = migrated.notes[0].clone();
+        let draft = Draft { note: base.clone(), base: Some(base) };
+        save(&mut h.app, &draft, false).unwrap();
+        assert_eq!(h.app.session.doc.metadata.get(KEY).unwrap()["version"], 2, "the older prototype refuses v2 instead of treating edges as faces");
+        assert_eq!(Notebook::read(&h.app.session).unwrap(), migrated);
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc.metadata.get(KEY), Some(&legacy));
+        h.app.run("edit.redo", json!({})).unwrap();
+        let path = std::env::temp_dir().join(format!("solidcraft-review-legacy-five-{}.sc", std::process::id()));
+        h.app.run("file.save_as", json!({"path":path,"format":"container"})).unwrap();
+        let mut reopened = solidcraft_engine::Session::default();
+        reopened.execute("doc.open", &json!({"path":path})).unwrap();
+        assert_eq!(Notebook::read(&reopened).unwrap(), migrated);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn review_window_picks_faces_and_saves_edits_without_a_browser() {
+        use crate::review_notes::{Notebook, Status};
+        let mut h = review_fixture();
+        // Even component-selection mode yields a precise face while reviewing.
+        h.app.ui.pick_components = true;
+        h.step(&json!({"start":"document.review"})).unwrap();
+        let sel = h.app.session.selection[0].clone();
+        let solidcraft_engine::Sel::Face { body, index, point } = sel else { panic!("face fixture") };
+        let hit = crate::viewport::Hit::Face { body, index, point };
+        assert!(matches!(crate::viewport::candidate(&h.app, &[hit]).unwrap().1, solidcraft_engine::Sel::Face { .. }));
+        h.step(&json!({"click":{"handle":"review:add"}})).unwrap();
+        let d = h.app.review_notes.as_mut().unwrap().draft.as_mut().unwrap();
+        d.note.text = "Check this exact face.".into();
+        let saved_view = d.note.camera.clone();
+        h.frames(2);
+        h.step(&json!({"click":{"handle":"review:save"}})).unwrap();
+        assert_eq!(Notebook::read(&h.app.session).unwrap().notes.len(), 1);
+        h.step(&json!({"click":{"handle":"review:pin:1"}})).unwrap();
+        assert!(h.app.review_notes.as_ref().unwrap().draft.is_some(), "the numbered 3D pin opens its note");
+        h.step(&json!({"click":{"handle":"review:cancel"}})).unwrap();
+        h.app.preferences.look_at_anim = false;
+        h.app.cam.yaw += 0.5;
+        h.step(&json!({"click":{"handle":"review:note:1"}})).unwrap();
+        assert_eq!(serde_json::to_value(h.app.cam).unwrap(), saved_view);
+        let d = h.app.review_notes.as_mut().unwrap().draft.as_mut().unwrap();
+        d.note.text = "Resolved in review.".into();
+        d.note.status = Status::Resolved;
+        h.frames(2);
+        h.step(&json!({"click":{"handle":"review:save"}})).unwrap();
+        assert_eq!(Notebook::read(&h.app.session).unwrap().notes[0].status, Status::Resolved);
+        h.step(&json!({"click":{"handle":"review:note:1"}})).unwrap();
+        h.step(&json!({"click":{"handle":"review:delete"}})).unwrap();
+        assert!(Notebook::read(&h.app.session).unwrap().notes.is_empty());
+        h.step(&json!({"click":{"handle":"review:undo"}})).unwrap();
+        assert_eq!(Notebook::read(&h.app.session).unwrap().notes.len(), 1);
+    }
+
     #[test]
     fn open_surface_properties_show_area_without_volume_rows() {
         let mut h = Harness::new();
