@@ -1171,6 +1171,32 @@ mod tests {
         )));
     }
 
+    /// A pipe whose radius reaches the centre of a bend in its path would fold its wall
+    /// through itself on the inside of that bend, so it is refused (#13766). The ellipse
+    /// with semi-axes 2 and 4 bends tightest at the ends of its long axis, with radius
+    /// 2² / 4 = 1; the circle bends with radius 2 everywhere. Each refused radius is
+    /// beyond the bend's, and each built one within it, by at least 1%.
+    #[test]
+    fn a_pipe_reaching_past_a_bend_centre_is_refused() {
+        let mut k = Kernel::default();
+        let ellipse = Curve::from(
+            api_curves::create_ellipse(&k, Point3::new(0.0, 0.0, 0.0), 2.0, 4.0).expect("ellipse"),
+        );
+        for radius in [1.01, 1.5, 3.0, 5.0] {
+            assert!(
+                invalid(&create_pipe_sweep(&mut k, radius, Some(&ellipse), true)),
+                "radius {radius}"
+            );
+        }
+        let inside = create_pipe_sweep(&mut k, 0.99, Some(&ellipse), true).expect("pipe");
+        assert!(crate::topology::brep::p2::is_manifold_solid(&inside).unwrap());
+
+        let c = circle();
+        assert!(invalid(&create_pipe_sweep(&mut k, 2.02, Some(&c), true)));
+        let inside = create_pipe_sweep(&mut k, 1.98, Some(&c), true).expect("pipe");
+        assert!(crate::topology::brep::p2::is_manifold_solid(&inside).unwrap());
+    }
+
     #[test]
     fn pipe_and_planar_path_validate_then_run_or_defer() {
         let mut k = Kernel::default();
