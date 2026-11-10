@@ -1346,10 +1346,13 @@ const fn cancelled_error(operation: &'static str) -> SolidError {
 ///
 /// Cloning a `CancelToken` shares the underlying `AtomicBool`: calling [`Self::cancel`]
 /// on any clone signals every [`Kernel`] configured with [`Kernel::set_cancel_token`], so
-/// one token can also cancel a group of jobs.
+/// one token can also cancel a group of jobs. [`Self::either`] makes a token that also fires
+/// with another one, for work started under two (a dialog's job of a design that may close).
 #[derive(Clone, Debug, Default)]
 pub struct CancelToken {
     flag: Arc<AtomicBool>,
+    /// Not upstream: the token this one also fires with ([`Self::either`]).
+    also: Option<Arc<CancelToken>>,
 }
 
 impl CancelToken {
@@ -1369,12 +1372,27 @@ impl CancelToken {
         self.flag.store(false, Ordering::Relaxed);
     }
 
+    /// Not upstream: a token that is cancelled when `self` or `other` is. Cancelling it
+    /// cancels `self` and not `other`.
+    #[must_use]
+    pub fn either(&self, other: &CancelToken) -> CancelToken {
+        CancelToken {
+            flag: Arc::clone(&self.flag),
+            also: Some(Arc::new(match &self.also {
+                // keep the chain flat in the token's own flag order: self's others, then other
+                Some(more) => more.either(other),
+                None => other.clone(),
+            })),
+        }
+    }
+
     /// Whether [`Self::cancel`] has been called since construction or the last
-    /// [`Self::reset`].
+    /// [`Self::reset`] (on this token, or on a token it was joined with by [`Self::either`]).
     #[must_use]
     #[inline]
     pub fn is_cancelled(&self) -> bool {
         self.flag.load(Ordering::Relaxed)
+            || self.also.as_deref().is_some_and(CancelToken::is_cancelled)
     }
 
     /// Returns `Err(SolidError::Cancelled { operation })` when [`Self::is_cancelled`] is
@@ -1634,6 +1652,22 @@ mod tests {
         fn assert_send_sync<T: Send + Sync + Clone + core::fmt::Debug + Default>() {}
         assert_send::<Kernel>();
         assert_send_sync::<CancelToken>();
+    }
+
+    #[test]
+    fn either_token_fires_with_each_and_cancels_only_its_own() {
+        let (a, b, c) = (CancelToken::new(), CancelToken::new(), CancelToken::new());
+        let ab = a.either(&b);
+        let abc = ab.either(&c);
+        assert!(!ab.is_cancelled() && !abc.is_cancelled());
+        c.cancel();
+        assert!(abc.is_cancelled() && !ab.is_cancelled());
+        c.reset();
+        b.cancel();
+        assert!(ab.is_cancelled() && abc.is_cancelled() && !a.is_cancelled());
+        b.reset();
+        ab.cancel();
+        assert!(a.is_cancelled() && !b.is_cancelled() && abc.is_cancelled());
     }
 
     #[test]
