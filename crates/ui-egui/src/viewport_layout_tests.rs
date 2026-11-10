@@ -4,8 +4,14 @@ use crate::viewport::NavMode;
 use serde_json::json;
 use solidcraft_viewport::StandardView;
 
+/// SolidCraft's default navigation bar measured on `canvas` with `caps`.
+fn default_bar(canvas: Rect, caps: crate::navigation::NavCaps) -> Rect {
+    crate::navigation_slots::install();
+    crate::navigation_bar_view::measure(canvas, &Default::default(), caps, |_| 0.0).rect
+}
+
 fn bar_rect(canvas: Rect) -> Rect {
-    crate::navigation_bar_view::measure(canvas, &Default::default(), crate::navigation::NavCaps::MODEL, |_| 0.0).rect
+    default_bar(canvas, crate::navigation::NavCaps::MODEL)
 }
 
 fn assert_navigator_shared_zoom(app: &crate::SolveApp, camera: Camera) {
@@ -293,11 +299,7 @@ fn render_compass_avoids_the_navigation_bar_on_either_inspector_side() {
 }
 
 fn layout(viewport: Rect, docks: &[Rect], scale: f32, style: crate::prefs::NavigatorStyle, visible: bool) -> Layout {
-    let navigation = if visible {
-        crate::navigation_bar_view::measure(viewport, &Default::default(), crate::navigation::NavCaps::MODEL, |_| 0.0).rect
-    } else {
-        Rect::NOTHING
-    };
+    let navigation = if visible { default_bar(viewport, crate::navigation::NavCaps::MODEL) } else { Rect::NOTHING };
     Layout::with_content(viewport, viewport, docks, scale, style, egui::Vec2::ZERO, navigation)
 }
 
@@ -305,7 +307,7 @@ fn layout(viewport: Rect, docks: &[Rect], scale: f32, style: crate::prefs::Navig
 fn render_focus_compass_keeps_clear_of_an_exit_chip_on_either_side() {
     let viewport = Rect::from_min_size(pos2(0.0, 0.0), vec2(1400.0, 900.0));
     let content = Rect::from_min_max(pos2(0.0, 104.0), viewport.max);
-    let navigation = crate::navigation_bar_view::measure(content, &Default::default(), crate::navigation::NavCaps::RENDER, |_| 0.0).rect;
+    let navigation = default_bar(content, crate::navigation::NavCaps::RENDER);
     for x in [8.0, 1250.0] {
         let chip = Rect::from_min_size(pos2(x, content.top()), vec2(142.0, 40.0));
         let layout = Layout::product(viewport, content, &[chip], 1.0, crate::prefs::NavigatorStyle::Axes, egui::Vec2::ZERO, navigation);
@@ -808,7 +810,6 @@ fn immediate_standard_view_cancels_fit_before_the_measured_frame() {
 
 #[test]
 fn navigation_anchors_ignore_positioned_resized_and_covering_dialogs() {
-    crate::navigation_slots::install();
     for (width, height, scale) in [(1400.0, 900.0, 1.0), (700.0, 450.0, 2.0), (700.0, 360.0, 2.0)] {
         let vp = Rect::from_min_max(pos2(250.0, crate::toolbar::APP_BAR_HEIGHT + crate::toolbar::RIBBON_HEIGHT), pos2(width, height - 30.0));
         let baseline = layout(vp, &[], scale, crate::prefs::NavigatorStyle::Axes, true);
