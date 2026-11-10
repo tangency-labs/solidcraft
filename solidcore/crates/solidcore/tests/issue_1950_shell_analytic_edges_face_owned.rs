@@ -103,7 +103,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.flat_corners_test_bits = true;
     f.cylinder_rebuild_mean_radius = true;
     f.revolve_analytic_profile_faces = true;
-    f.revolve_arc_centre_near_axis_is_sphere = true;
     f.revolve_nested_shells_as_cavities = true;
     f.join_touching_loops = true;
     f.uv_trim_reversal_on_surface = true;

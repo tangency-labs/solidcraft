@@ -283,8 +283,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.revolution_offset_axis_both_sides = true;
     k.fixes.revolution_round_offset_collapses = true;
     k.fixes.revolve_analytic_profile_faces = true;
-    k.fixes.revolve_arc_centre_near_axis_is_sphere = true;
-    k.fixes.revolve_arc_touching_axis_is_horn_torus = true;
     k.fixes.revolve_holed_profile_void = true;
     k.fixes.revolve_nested_shells_as_cavities = true;
     k.fixes.revolve_splits_curves_on_axis = true;
