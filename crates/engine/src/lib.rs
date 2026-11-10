@@ -1278,8 +1278,12 @@ impl Session {
 
     /// A component by its id or name, or by the name of one of its placements (`K:2`); never the
     /// root.
-    pub(crate) fn component_or_placement(&self, key: &str) -> Option<u64> {
-        self.doc.find_component(key).or_else(|| self.doc.occurrences.iter().find(|o| o.name == key).map(|o| o.component)).filter(|id| *id != 0)
+    pub(crate) fn component_or_placement(&self, key: &str) -> solidcraft_doc::Result<Option<u64>> {
+        Ok(self
+            .doc
+            .resolve_component(key)?
+            .or_else(|| self.doc.occurrences.iter().find(|o| o.name == key).map(|o| o.component))
+            .filter(|id| *id != 0))
     }
 
     /// Number of live-model evaluations after this session's initialization.
@@ -1695,6 +1699,9 @@ impl Session {
         // Picks in the world go into their component's frame (once: commands run by commands
         // already have them there).
         let (_nested, outermost) = frames::Nested::enter(spec.id);
+        if outermost {
+            frames::reset_inner_undoable();
+        }
         let mapped = if outermost {
             frames::forget_picks();
             frames::to_local(self, spec.id, params)?
@@ -1720,7 +1727,10 @@ impl Session {
         };
         // The kernel's internal errors come up without the command's id.
         let r = r.map_err(|e| match e {
-            EngineError::Internal(id, msg) if id.is_empty() => EngineError::Internal(spec.id.to_string(), msg),
+            EngineError::Internal(id, msg) if id.is_empty() => {
+                crash::kernel_caught();
+                EngineError::Internal(spec.id.to_string(), msg)
+            }
             e => e,
         });
         // A value typed as `name = expression` defines the user parameter `name` (#4071), in the
@@ -1772,7 +1782,18 @@ impl Session {
                     let render_only = self.replacements == replacements && self.render_only_change(&before);
                     let display_only = !changed && hidden;
                     let previous_doc = before.doc.clone();
-                    if spec.undoable {
+                    // One undo step per command: the outermost one saves it, for itself or for an
+                    // undoable command it ran (#12393), unless it replaced the session (opening a design starts
+                    // a fresh history). A command run inside another saves none.
+                    let saves = if outermost {
+                        spec.undoable || (frames::inner_undoable() && self.replacements == replacements)
+                    } else {
+                        if spec.undoable {
+                            frames::note_inner_undoable();
+                        }
+                        false
+                    };
+                    if saves {
                         self.undo.push(before);
                         if self.undo.len() > MAX_UNDO {
                             self.undo.remove(0);
@@ -2398,6 +2419,8 @@ mod hole_matrix_tests;
 mod hole_reference_tests;
 #[cfg(test)]
 mod large_assembly_tests;
+#[cfg(test)]
+mod loft_sheet_tests;
 #[cfg(test)]
 mod measure_centre_tests;
 #[cfg(test)]

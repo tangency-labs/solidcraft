@@ -1129,6 +1129,8 @@ preference_settings! {
     insert_lists_open_designs: bool = true, PAGE_DESIGN => check_id("settings.insert_lists_open_designs");
     /// Reopen the saved designs that were open when the app was last closed (#5542).
     reopen_designs: bool = true, PAGE_GENERAL;
+    /// Ask separately when closing several unsaved designs, as before grouped saving.
+    save_prompt_one_at_a_time: bool = false, PAGE_GENERAL => check_id("prefs.save_prompt_one_at_a_time");
     /// Those designs' files, in tab order, as the last quit left them.
     open_designs: Vec<String> = Vec::new(), PAGE_GENERAL;
     /// Web app (#10220): keep each open design's unsaved changes current in the browser's
@@ -1262,6 +1264,10 @@ preference_settings! {
     /// A History folder whose features are all of one kind (Holes, say) shows their icon instead of
     /// the folder icon, in both Histories. Off by default: every folder shows the folder icon.
     history_folder_kind_icon: bool = false, PAGE_LAYOUT;
+    /// The History controls (First, Back, Forward, Last) step through the features the bottom bar
+    /// shows: one component's while it shows one (#11430). Off: they step through every feature of
+    /// the design, as they did before.
+    history_steps_component: bool = true, PAGE_LAYOUT;
     /// On, two or more joints show as one button with their count in the History, and a click
     /// shows each one (#8884). Off, the default, shows each joint as the History always has.
     history_group_joints: bool = false, PAGE_LAYOUT;
@@ -4078,6 +4084,11 @@ fn apply_preferences(app: &mut SolveApp, new: Prefs, p: &serde_json::Value) -> R
 }
 
 #[cfg(test)]
+pub(crate) fn keep_search_reveal_visible(app: &mut SolveApp) -> bool {
+    app.prefs_window.shell.keep_reveal_visible()
+}
+
+#[cfg(test)]
 pub(crate) fn reveal_preference(h: &mut crate::scenario::Harness, handle: &str) {
     // Keep small scroll steps so a target cannot be skipped on a long Preferences page.
     for _ in 0..32 {
@@ -6459,6 +6470,20 @@ mod tests {
     }
 
     #[test]
+    fn save_prompt_preference_defaults_persists_and_resets_on_general() {
+        let mut a = SolveApp::new(Default::default(), Default::default());
+        assert!(!a.preferences.save_prompt_one_at_a_time);
+        control(&mut a, &serde_json::json!({"save_prompt_one_at_a_time":true})).unwrap();
+        let mut b = SolveApp::new(Default::default(), Default::default());
+        b.load_prefs(&a.prefs());
+        assert!(b.preferences.save_prompt_one_at_a_time);
+        defaults(&mut b, PAGE_DESIGN);
+        assert!(b.preferences.save_prompt_one_at_a_time);
+        defaults(&mut b, PAGE_GENERAL);
+        assert!(!b.preferences.save_prompt_one_at_a_time);
+    }
+
+    #[test]
     fn preferences_session_resets_follow_their_new_pages_only() {
         for page in 0..PAGES.len() {
             let mut app = SolveApp::new(Default::default(), Default::default());
@@ -6804,6 +6829,7 @@ mod tests {
             let raw = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0))),
                 system_theme: Some(system),
+                time: Some(h.ctx.input(|input| input.time)),
                 ..Default::default()
             };
             let app = &mut h.app;
@@ -9587,12 +9613,9 @@ mod tests {
 
     /// The texts one frame paints.
     fn painted_texts(h: &mut crate::scenario::Harness) -> Vec<String> {
-        let output = h.ctx.run_ui(egui::RawInput { screen_rect: Some(h.ctx.content_rect()), focused: true, ..Default::default() }, |ui| {
-            h.app.logic(ui.ctx());
-            h.app.ui(ui);
-        });
-        output
-            .shapes
+        // Use the harness clock and consume its texture updates like every other frame.
+        h.frame();
+        h.shapes
             .iter()
             .filter_map(|s| match &s.shape {
                 egui::Shape::Text(t) => Some(t.galley.job.text.clone()),

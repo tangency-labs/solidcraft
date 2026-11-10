@@ -50,8 +50,9 @@ solidcore = { path = "solidcore/crates/solidcore" }
 # Geometry as data (solidcore's layers §1, "Record"): the B-rep record, its structural validation
 # and the native body file. Vendored with solidcore, in the same subtree.
 solidcore-record = { path = "solidcore/crates/solidcore-record" }
-# Geometry made drawable (solidcore's layers §3): the display mesh and its levels of detail, the
-# types SolidCraft's meshes are. Vendored with solidcore, in the same subtree.
+# Geometry made drawable (solidcore's layers §3): the one mesher, SolidCraft's, moved into the
+# subtree (RFC 0003, item 1.1), with the display mesh and its levels of detail, the types
+# SolidCraft's meshes are. Vendored with solidcore, in the same subtree.
 solidcore-tess = { path = "solidcore/crates/solidcore-tess" }
 # test tooling: a dev-dependency only (xtask/src/layers.rs)
 solidcraft-testkit = { path = "crates/testkit" }

@@ -665,7 +665,7 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
             if n > 1 && (!strip.title_bar || moved.x.abs() >= moved.y.abs()) {
                 drag = Some(TabDrag { from: i, grab: origin.x - tr.left() });
             } else if strip.title_bar {
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                crate::window_chrome::hand_press_to_os(ui.ctx(), egui::ViewportCommand::StartDrag);
             }
         } else if resp.double_clicked() {
             if strip.double_click_renames {
@@ -720,7 +720,8 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
         }
         // Named apart from a dialog's Close: egui names an unnamed widget after its tooltip.
         xresp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, show_close, strip.close_name));
-        if xresp.backing_on_hover_text(strip.close_tip).clicked() {
+        // A middle click closes the tab, as in a web browser.
+        if resp.middle_clicked() || xresp.middle_clicked() || xresp.backing_on_hover_text(strip.close_tip).clicked() {
             shut = Some(i);
         } else if (if held.is_some() { resp } else { resp.backing_on_hover_text(tip) }).clicked() {
             pick = Some(i);

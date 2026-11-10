@@ -638,20 +638,26 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
             v.push(cmd(app, "view.normal_to", "Normal to Selection").with(json!({"camera": app.cam})));
             v.push(Item::sep());
         }
-        v.push(cmd(app, "sketch.create", "Create Sketch"));
-        v.push(cmd(app, "solid.extrude", "Extrude"));
-        v.push(cmd(app, "construct.plane.offset", "Offset Plane"));
+        let planar =
+            sel.iter().any(|s| matches!(s, Sel::Face { body, index, .. } if crate::dialogs::planar_face(&app.session, body, *index).is_some()));
+        let one_flat = planar && matches!(sel.as_slice(), [Sel::Face { .. }]);
+        // A curved face, or several faces, have no one plane to sketch on, offset or extrude from;
+        // Press Pull offsets them.
+        if one_flat {
+            v.push(cmd(app, "sketch.create", "Create Sketch"));
+            v.push(cmd(app, "solid.extrude", "Extrude"));
+            v.push(cmd(app, "construct.plane.offset", "Offset Plane"));
+        } else {
+            v.push(cmd(app, "solid.press_pull", "Press Pull"));
+        }
         v.push(cmd(app, "solid.shell", "Shell"));
         if crate::joint_handles::selected_occurrence(app).is_some() {
             v.push(cmd(app, "occurrence.move", "Move"));
         }
         v.push(act("ui.editFeature", "Edit Feature", "edit").with(json!({ "feature": feature })).on(feature.is_some()));
         v.push(act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({ "sketch": sketch })).on(sketch.is_some()));
-        let planar =
-            sel.iter().any(|s| matches!(s, Sel::Face { body, index, .. } if crate::dialogs::planar_face(&app.session, body, *index).is_some()));
         v.push(act("ui.lookAt", "Look At", "lookat").on(planar));
         let marked = matches!(sel.as_slice(), [Sel::Face { body, index, .. }] if crate::print_face_ui::is_print_face(app, body, *index));
-        let one_flat = planar && matches!(sel.as_slice(), [Sel::Face { .. }]);
         v.push(cmd(app, "body.print_face", if marked { "Clear Print Face" } else { "Print Face" }).on(one_flat));
         v.push(Item::sep());
         v.push(act("ui.appearance", "Appearance", "appearance").key("A"));
@@ -664,8 +670,12 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act("ui.findBrowser", "Find in Browser", "list").with(json!({ "body": face })));
         v.push(act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "feature": feature, "body": face })).on(feature.is_some()));
         v.push(Item::sep());
-        v.push(cmd(app, "solid.press_pull", "Press Pull"));
+        if one_flat {
+            v.push(cmd(app, "solid.press_pull", "Press Pull"));
+        }
         v.push(cmd(app, "inspect.measure", "Measure"));
+        // What cannot act on these faces is left out.
+        v.retain(|i| i.enabled || i.is_sep());
     } else if has(|s| matches!(s, Sel::Edge { .. })) {
         let body = sel.iter().find_map(|s| if let Sel::Edge { body, .. } = s { Some(body.clone()) } else { None }).unwrap_or_default();
         let hidden = app.session.visibility.hidden_bodies.contains(&body);
@@ -975,7 +985,11 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
             item.params = Some(json!({"path": path}));
         }
         "ui.export" | "ui.saveMesh" | "ui.sendToSlicer" => item.params = Some(json!({"bodies": bodies})),
-        "browser.expand_all" | "browser.collapse_all" => item.params = Some(json!({"path": path})),
+        // Expand Below and Collapse Below fold this placement's branch; Collapse All keeps the
+        // whole tree.
+        "browser.expand_all" | "browser.collapse_all" if item.params.as_ref().is_some_and(|p| p.get("component").is_some()) => {
+            item.params = Some(json!({"path": path}))
+        }
         _ => {}
     });
     entries
@@ -1148,8 +1162,16 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         );
     }
     organize.push(Item::sep());
-    organize.push(cmd(app, "browser.expand_all", "Expand All").with(json!({ "component": id })));
-    organize.push(cmd(app, "browser.collapse_all", "Collapse All").with(json!({ "component": id })));
+    if id == 0 {
+        organize.push(cmd(app, "browser.expand_all", "Expand All").with(json!({ "component": id })));
+        organize.push(cmd(app, "browser.collapse_all", "Collapse All").with(json!({ "component": id })));
+    } else {
+        // A component folds its own branch; Collapse All still rolls up the whole tree, every
+        // placement at every level, as it does from the design row (#11866).
+        organize.push(cmd(app, "browser.expand_all", "Expand Below").with(json!({ "component": id })));
+        organize.push(cmd(app, "browser.collapse_all", "Collapse Below").with(json!({ "component": id })));
+        organize.push(cmd(app, "browser.collapse_all", "Collapse All").with(json!({})));
+    }
     v.push(group("Organize", "folder", organize));
     v
 }
@@ -3333,7 +3355,7 @@ mod tests {
         h.frames(90);
         assert!(h.app.cam.back().dist(flat.plane_normal.unwrap()) < 2e-6);
         h.app.session.selection = vec![Sel::Face { body: body.name.clone(), index: curved.index, point: curved.centroid }];
-        assert!(items(&h.app, &Target::Viewport).iter().any(|i| i.id == "view.normal_to" && !i.enabled));
+        assert!(!items(&h.app, &Target::Viewport).iter().any(|i| i.id == "view.normal_to"));
     }
 
     #[test]

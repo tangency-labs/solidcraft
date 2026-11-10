@@ -99,6 +99,8 @@ mod outline_tests;
 mod par;
 pub use par::{KERNEL_STACK, for_each_on_threads, kernel_thread, map_on_threads, map_with_local_pools};
 #[cfg(test)]
+mod display_plan_tests;
+#[cfg(test)]
 mod pinch_tests;
 #[cfg(test)]
 mod planar_faces_tests;
@@ -140,7 +142,6 @@ mod sweep_path;
 #[cfg(test)]
 mod sweep_rails_tests;
 mod tangent_edge;
-mod tess;
 #[cfg(test)]
 mod thin_face_tests;
 #[cfg(test)]
@@ -259,6 +260,17 @@ pub enum KernelError {
 
 pub type Result<T> = std::result::Result<T, KernelError>;
 
+/// The mesher's error as the kernel's: the same words.
+impl From<solidcore_tess::TessError> for KernelError {
+    fn from(e: solidcore_tess::TessError) -> KernelError {
+        match e {
+            solidcore_tess::TessError::Invalid(m) => KernelError::Invalid(m),
+            solidcore_tess::TessError::Failed(m) => KernelError::Failed(m),
+            solidcore_tess::TessError::Internal(m) => KernelError::Internal(m),
+        }
+    }
+}
+
 /// Why a kernel step failed: a message, or an error of the solidcore wrapper, which may be a
 /// panic the wrapper caught ([`solidcraft_smlib::Error::Internal`]).
 pub(crate) trait Cause: std::fmt::Display {
@@ -320,6 +332,76 @@ pub fn guarded() -> bool {
 /// ([`KernelError::Internal`]): the crash-report check (`diagnostics.crash_test`'s kernel mode).
 pub fn crash_test() -> Result<()> {
     solidcraft_smlib::crash_test().map_err(|e| KernelError::smlib("crash test", e))
+}
+
+/// Is this thread a Rayon pool thread?
+///
+/// Pool workers do not inherit the calling thread's [`guarded`] flag. Crash reports use this so
+/// a panic there during a command is held with that command, instead of being written at once.
+/// The browser build has no pool.
+pub fn on_pool_thread() -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        rayon::current_thread_index().is_some()
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        false
+    }
+}
+
+/// Panic on a Rayon worker and catch it here, as parallel meshing does: the worker runs the
+/// panic hook, then the panic resumes on this thread inside [`guard`] and becomes
+/// [`KernelError::Internal`].
+///
+/// `diagnostics.crash_test` mode `worker` uses this. Not a modelling operation.
+#[doc(hidden)]
+pub fn crash_test_worker_panic(message: &str) -> Result<()> {
+    let caught = catch_worker_panic(message)?;
+    guard("crash test", || match caught {
+        Ok(()) => Ok(()),
+        Err(payload) => std::panic::resume_unwind(payload),
+    })
+}
+
+/// Panic on a Rayon worker and resume that panic on this thread, outside [`guard`].
+///
+/// `diagnostics.crash_test` mode `worker_raw` uses this. Not a modelling operation.
+#[doc(hidden)]
+pub fn crash_test_worker_panic_raw(message: &str) -> Result<()> {
+    let caught = catch_worker_panic(message)?;
+    match caught {
+        Ok(()) => Ok(()),
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
+}
+
+/// Run `message` as a panic on a private one-thread pool and return what the worker caught.
+/// The panic hook runs on that worker before this returns.
+#[allow(clippy::panic)]
+fn catch_worker_panic(message: &str) -> Result<std::thread::Result<()>> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = message;
+        Err(KernelError::Failed("no worker pool in this build".into()))
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let message = message.to_string();
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(1)
+            .thread_name(|i| format!("solidcraft-kernel-{i}"))
+            .build()
+            .map_err(|e| KernelError::Failed(format!("cannot start worker: {e}")))?;
+        let (tx, rx) = std::sync::mpsc::channel();
+        pool.spawn(move || {
+            let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                std::panic::panic_any(message);
+            }));
+            let _ = tx.send(caught);
+        });
+        rx.recv().map_err(|_| KernelError::Failed("worker ended without a result".into()))
+    }
 }
 
 /// Run vendored kernel code, converting a panic into an error.
