@@ -1065,6 +1065,7 @@ fn projection_fidelity_refreshes_a_split_fit_spline_after_source_edit_and_reload
     verify(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()));
     run(&mut s, "sketch.edit", json!({"sketch":"Source"}));
     run(&mut s, "sketch.spline.remove_point", json!({"curve":"s1", "point":added}));
+    run(&mut s, "sketch.finish", json!({}));
     assert_eq!(s.model.state().sketch(target).unwrap().sketch.curves.len(), 1);
     run(&mut s, "edit.undo", json!({}));
     verify(&s);
