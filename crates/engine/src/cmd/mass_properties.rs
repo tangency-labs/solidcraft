@@ -242,9 +242,20 @@ pub fn assembly(doc: &Document, state: &ModelState) -> Result<AssemblyMassResult
         if !closed {
             return Ok(Shape { closed, volume: 0.0, centroid: Vec3::ZERO, gyration: None });
         }
-        let m = solidcraft_kernel::measure_mass(&body.body)?;
-        let gyration = solidcraft_io::mass_properties(&body.body)?.and_then(|p| p.gyration());
-        Ok(Shape { closed, volume: m.volume, centroid: m.centroid, gyration })
+        let sheet = state.sheets.iter().find(|sheet| sheet.body == body.definition_name() && !sheet.perforations.is_empty());
+        let (volume, centroid) = if sheet.is_some() {
+            let measured = super::inspect::measure_body(body, Some(state))?;
+            (measured.volume, measured.centroid)
+        } else {
+            let measured = solidcraft_kernel::measure_mass(&body.body)?;
+            (measured.volume, measured.centroid)
+        };
+        let mut moments = solidcraft_io::mass_properties(&body.body)?;
+        if let (Some(sheet), Some(moments)) = (sheet, moments.as_mut()) {
+            sheet.correct_perforation_mass_properties(moments, &IDENTITY)?;
+        }
+        let gyration = moments.and_then(|p| p.gyration());
+        Ok(Shape { closed, volume, centroid, gyration })
     });
     let mut shape: BTreeMap<usize, Shape> = BTreeMap::new();
     for (i, s) in measured.into_iter().zip(shapes) {

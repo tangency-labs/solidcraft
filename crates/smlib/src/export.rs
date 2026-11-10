@@ -29,7 +29,7 @@
 //!   on the surface's internal rational B-spline, whose angular parameter is not the angle
 //!   (SmCylinder.h: "the map from one to the other is not linear"), and a circle's or ellipse's
 //!   on its NURBS parameter, not its angle; those pcurves are computed from the edge record on
-//!   the face's surface record (`solidcraft_geom::brep::pcurve`). Every loop is moved by whole
+//!   the face's surface record (`solidcore_ops::pcurve`). Every loop is moved by whole
 //!   periods into the face's domain.
 //! - **Tolerances:** each edge's and vertex's own as SMLib reports it (`EDGE_TOLERANCE`,
 //!   `VERTEX_TOLERANCE`), never below a floor of 10⁻⁶ of the body's size (at least 10⁻⁵ mm),
@@ -549,8 +549,9 @@ fn trims(flat: View, n_edgeuses: usize) -> Res<Vec<Option<b::Curve2>>> {
 /// edgeuse runs against the edge (`same` false) reversed exactly (control points in reverse
 /// order, knots t ↦ a + b − t), then the knots mapped. SMLib keeps a trim on its edge's
 /// interval; where the two ends differ by the rounding of SMLib's own or this remap (within the
-/// schema's 10⁻⁹ of the interval's magnitude, at least 1), the knots at the trim's ends are the
-/// edge record's interval ends, so the pcurve is defined there; farther apart is an error.
+/// schema's 10⁻⁹ of the interval's magnitude, at least 1), every knot within that of an interval
+/// end is that end, and the end spans this leaves without length go with their control points,
+/// so the pcurve is a valid record defined on the edge; farther apart is an error.
 fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f64; 2]) -> Res<b::Curve2> {
     fn along<T: Clone>(knots: &[f64], points: &[T], same: bool) -> (Vec<f64>, Vec<T>) {
         if same {
@@ -559,26 +560,55 @@ fn mapped(trim: &b::Curve2, same: bool, [scale, offset]: [f64; 2], [t0, t1]: [f6
         let (a, b) = (knots.first().copied().unwrap_or(0.0), knots.last().copied().unwrap_or(0.0));
         (knots.iter().rev().map(|t| a + b - t).collect(), points.iter().rev().cloned().collect())
     }
-    let map = |k: Vec<f64>, n: usize| -> Res<Vec<f64>> {
+    // The knots mapped, and the points with them: a knot within the slack of an end of the edge's
+    // interval, inside or past it, is that end, and the end spans that leaves without length are
+    // dropped with their control points (on an edgeuse against its edge the trim is reversed
+    // first, so the issue's dead span sits inside the start as a run a rounding after it). SMLib can hand over a trim whose domain runs a rounding
+    // past the edge's interval with a dead span there (knots `5 x4, 5.00000000003 x5` on an edge
+    // ending at 5: the slot of a sloped bar, solidcraft#12365), or whose last interior knots lie
+    // one ulp past its end knots. Moving the ends alone left a run of 9 knots at 5, or an
+    // unordered vector, which the record refuses, and the body was lost. A basis function whose
+    // support has no length is zero on the domain, so dropping its knot and point leaves the
+    // curve on the edge as it was (exact where the dead span starts at a knot of multiplicity
+    // degree + 1, within the slack otherwise).
+    fn map<T: Clone>(k: Vec<f64>, points: Vec<T>, [scale, offset]: [f64; 2], [t0, t1]: [f64; 2]) -> Res<(Vec<f64>, Vec<T>)> {
         let mut k: Vec<f64> = k.into_iter().map(|t| scale * t + offset).collect();
+        let n = points.len();
         let degree = k.len().checked_sub(n + 1).ok_or_else(|| invalid("UV trim knots"))?;
         let (a, z) = (at(&k, degree, "UV trim knots")?, at(&k, n, "UV trim knots")?);
         let slack = 1e-9 * t0.abs().max(t1.abs()).max(1.0);
         if (a - t0).abs() > slack || (z - t1).abs() > slack {
             return Err(invalid(format!("a UV trim on [{a}, {z}], its edge on [{t0}, {t1}]")));
         }
-        k.iter_mut().filter(|x| **x == a).for_each(|x| *x = t0);
-        k.iter_mut().filter(|x| **x == z).for_each(|x| *x = t1);
-        Ok(k)
-    };
+        for x in &mut k {
+            if (*x - t0).abs() <= slack {
+                *x = t0;
+            } else if (*x - t1).abs() <= slack {
+                *x = t1;
+            }
+        }
+        let mut points = points;
+        let run_at_start = k.iter().take_while(|x| **x == t0).count();
+        let surplus = run_at_start.saturating_sub(degree + 1).min(n.saturating_sub(degree + 1));
+        k.drain(..surplus);
+        points.drain(..surplus);
+        let run_at_end = k.iter().rev().take_while(|x| **x == t1).count();
+        let n = points.len();
+        let surplus = run_at_end.saturating_sub(degree + 1).min(n.saturating_sub(degree + 1));
+        k.truncate(k.len() - surplus);
+        points.truncate(n - surplus);
+        Ok((k, points))
+    }
     Ok(match trim {
         b::Curve2::Spline { knots, points } => {
             let (k, points) = along(knots, points, same);
-            b::Curve2::Spline { knots: map(k, points.len())?, points }
+            let (knots, points) = map(k, points, [scale, offset], [t0, t1])?;
+            b::Curve2::Spline { knots, points }
         }
         b::Curve2::RationalSpline { knots, homogeneous } => {
             let (k, homogeneous) = along(knots, homogeneous, same);
-            b::Curve2::RationalSpline { knots: map(k, homogeneous.len())?, homogeneous }
+            let (knots, homogeneous) = map(k, homogeneous, [scale, offset], [t0, t1])?;
+            b::Curve2::RationalSpline { knots, homogeneous }
         }
     })
 }
@@ -744,7 +774,7 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
         let r = range.get(4 * f..4 * f + 4).ok_or_else(|| invalid("face range"))?;
         // A face with a NURBS form is parameterised on it: its range and trims are that NURBS's.
         let params = nurbs.as_ref().unwrap_or(&surface);
-        let natural = solidcraft_geom::brep::label::surface_natural(params);
+        let natural = solidcore_ops::label::surface_natural(params);
         let domain = [onto([r[0], r[2]], natural[0]), onto([r[1], r[3]], natural[1])];
         // SMLib's own trims are taken where the arrays carry them: B-spline faces, NURBS forms, and
         // planes (mapped onto the plane's own (u, v) by the export).
@@ -1266,7 +1296,7 @@ fn canonical(parts: Parts, n_vertices: usize, flat: View, tolerances: &Tolerance
         })
         .collect::<Res<Vec<_>>>()?;
     let brep = b::Brep { version: b::VERSION, tolerance, regions, shells, faces: face_records, edges: edge_records, vertices };
-    solidcraft_geom::brep::check::validate_built(&brep).map_err(|e| invalid(format!("the mapped B-rep does not validate: {e}")))?;
+    solidcore_ops::record_check::validate_built(&brep).map_err(|e| invalid(format!("the mapped B-rep does not validate: {e}")))?;
     let placed = |new: &[Option<u32>]| {
         new.iter().map(|i| i.map(|i| i as usize).ok_or_else(|| invalid("an entity outside the canonical walk"))).collect::<Res<Vec<_>>>()
     };
@@ -1519,7 +1549,7 @@ fn pcurves<'a>(
         let mut loop_uses = Vec::with_capacity(l.len());
         for (&(e, forward), given) in l.iter().zip(g) {
             let geometry = edge(e).ok_or_else(|| invalid("edge"))?;
-            loop_uses.push(solidcraft_geom::brep::pcurve::EdgeUse {
+            loop_uses.push(solidcore_ops::pcurve::EdgeUse {
                 edge: e,
                 curve: geometry.curve,
                 interval: geometry.interval,
@@ -1530,8 +1560,7 @@ fn pcurves<'a>(
         }
         uses.push(loop_uses);
     }
-    let mut curves =
-        solidcraft_geom::brep::pcurve::pcurves_within(surface, &uses, tolerance, Some(domain)).map_err(|e| invalid(format!("pcurve: {e}")))?;
+    let mut curves = solidcore_ops::pcurve::pcurves_within(surface, &uses, tolerance, Some(domain)).map_err(|e| invalid(format!("pcurve: {e}")))?;
     into_domain(surface, domain, &mut curves);
     Ok(curves)
 }
@@ -1589,7 +1618,7 @@ fn point2(c: &b::Curve2, t: f64) -> Option<[f64; 2]> {
 
 /// Moves each loop's pcurves by whole periods so the loop's middle is nearest the domain's.
 fn into_domain(surface: &b::Surface, domain: [[f64; 2]; 2], curves: &mut [Vec<b::Curve2>]) {
-    for (d, natural) in solidcraft_geom::brep::label::surface_natural(surface).into_iter().enumerate() {
+    for (d, natural) in solidcore_ops::label::surface_natural(surface).into_iter().enumerate() {
         if natural != b::Natural::Periodic {
             continue;
         }

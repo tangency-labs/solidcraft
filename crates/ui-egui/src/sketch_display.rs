@@ -190,6 +190,60 @@ impl Default for SketchBudget {
     }
 }
 
+impl SketchBudget {
+    fn sampling_left(&self) -> bool {
+        self.sampling.remaining_vertices > 0 && self.sampling.remaining_nodes > 0
+    }
+
+    fn room_for_curve(&self) -> bool {
+        self.curves < SKETCH_CURVES && self.sampling_left()
+    }
+
+    fn room_for_profile(&self) -> bool {
+        self.profiles < SKETCH_PROFILES && self.sampling_left()
+    }
+}
+
+/// One sketch sampled past the cache (the open sketch at a dimension's typed value), within the
+/// limits the cache gives one sketch: past them a curve or profile is not drawn, as there.
+pub(crate) struct Uncached(SketchBudget);
+
+#[cfg(test)]
+thread_local! {
+    /// A smaller sampling budget for [`Uncached`] (vertices), so a test can run out of it.
+    pub(crate) static UNCACHED_VERTICES: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
+impl Default for Uncached {
+    fn default() -> Self {
+        #[allow(unused_mut)]
+        let mut budget = SketchBudget::default();
+        #[cfg(test)]
+        if let Some(vertices) = UNCACHED_VERTICES.with(std::cell::Cell::get) {
+            budget.sampling = SamplingBudget::new(vertices, 1_048_576);
+        }
+        Self(budget)
+    }
+}
+
+impl Uncached {
+    pub(crate) fn curve(&mut self, sketch: &Sketch, index: usize, plane: &Plane, proj: &Proj, ppp: f32) -> Vec<Vec<Vec3>> {
+        if !self.0.room_for_curve() {
+            return Vec::new();
+        }
+        self.0.curves += 1;
+        curve_with_budget(sketch, index, plane, proj, ppp, &mut self.0.sampling).parts
+    }
+
+    pub(crate) fn profile(&mut self, region: &Region2, plane: &Plane, proj: &Proj, ppp: f32) -> Option<Region2> {
+        if !self.0.room_for_profile() {
+            return None;
+        }
+        self.0.profiles += 1;
+        display_region_with_budget(region, plane, proj, ppp, &mut self.0.sampling)
+    }
+}
+
 /// The most curves and profiles one sketch caches per model state and view.
 const SKETCH_CURVES: usize = 4096;
 const SKETCH_PROFILES: usize = 1024;
@@ -237,11 +291,7 @@ impl DisplayCache {
             return path.clone();
         }
         let budget = self.budgets.entry(sketch).or_default();
-        if budget.curves >= SKETCH_CURVES
-            || self.curves.len() >= CACHED_CURVES
-            || budget.sampling.remaining_vertices == 0
-            || budget.sampling.remaining_nodes == 0
-        {
+        if !budget.room_for_curve() || self.curves.len() >= CACHED_CURVES {
             return Arc::new(SampledPath { parts: Vec::new(), quality: SamplingQuality::BudgetLimited, vertex_count: 0 });
         }
         let path = Arc::new(state.sketch(sketch).map_or_else(
@@ -262,11 +312,7 @@ impl DisplayCache {
             return region.clone();
         }
         let budget = self.budgets.entry(sketch).or_default();
-        if budget.profiles >= SKETCH_PROFILES
-            || self.profiles.len() >= CACHED_PROFILES
-            || budget.sampling.remaining_vertices == 0
-            || budget.sampling.remaining_nodes == 0
-        {
+        if !budget.room_for_profile() || self.profiles.len() >= CACHED_PROFILES {
             return Arc::new(None);
         }
         let region = Arc::new(

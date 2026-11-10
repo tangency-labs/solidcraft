@@ -172,6 +172,119 @@ pub(super) fn same_support(a: &Plane, b: &Plane, at: Resolution) -> bool {
         && (a.origin - b.origin).dot(nb).abs() <= at.linear
 }
 
+/// A source a face on its plane can take: the plane it names (for a shell's inner role, the
+/// source's plane moved in and turned round), the source, and whether it is that inner role.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Candidate<'a> {
+    plane: Plane,
+    source: &'a FaceSource,
+    inner: bool,
+}
+
+/// What a mapping's inputs say of one plane of its result.
+#[derive(Debug, PartialEq)]
+enum Support<'a> {
+    /// A face without a role, or a competing tool face, lies on the plane.
+    Blocked,
+    /// Every candidate on the plane is one source, plane and role: the pieces of one logical face.
+    Source(Candidate<'a>),
+    /// No candidate lies on the plane, or candidates of distinct identities do.
+    Unnamed,
+}
+
+/// Planes partitioned into supports, in their order: a plane starts a group unless it is one
+/// support (`same_support`) with the first plane of an earlier group, which it then joins. Returns
+/// each plane's group and each group's first plane; `looked` counts the planes looked at.
+fn group_supports(planes: &[Plane], at: Resolution, looked: &mut usize) -> (Vec<usize>, Vec<usize>) {
+    let index = PlaneIndex::new(planes.iter(), at);
+    let mut group: Vec<Option<usize>> = vec![None; planes.len()];
+    let mut first = Vec::new();
+    for (i, plane) in planes.iter().enumerate() {
+        if group.get(i).is_some_and(Option::is_some) {
+            continue;
+        }
+        let g = first.len();
+        first.push(i);
+        let near = index.near(plane);
+        *looked += near.len();
+        for j in near {
+            if let Some(slot @ None) = group.get_mut(j)
+                && (j == i || planes.get(j).is_some_and(|other| same_support(plane, other, at)))
+            {
+                *slot = Some(g);
+            }
+        }
+    }
+    (group.into_iter().map(|g| g.unwrap_or(usize::MAX)).collect(), first)
+}
+
+/// The candidates and blocking planes of a mapping grouped by support once, so each result face
+/// looks up its plane's few groups instead of every candidate on that plane: with many coplanar
+/// faces the work grows with the faces plus the candidates, not with their product.
+struct SupportDecisions<'a> {
+    /// Each candidate group's first plane, and its decision: its first candidate, or none when
+    /// the group holds candidates of distinct identities.
+    groups: Vec<(Plane, Option<Candidate<'a>>)>,
+    group_index: PlaneIndex,
+    /// The first plane of each group of the faces without a role and the competing tool faces.
+    blocking: Vec<Plane>,
+    blocking_index: PlaneIndex,
+    at: Resolution,
+    /// The planes looked at, building the groups and deciding faces.
+    looked: usize,
+}
+
+impl<'a> SupportDecisions<'a> {
+    /// `candidates` in the order that decides between them.
+    fn new(candidates: &[Candidate<'a>], unknown: &[Plane], competing: &[Plane], at: Resolution) -> Self {
+        let mut looked = 0;
+        let planes: Vec<Plane> = candidates.iter().map(|c| c.plane).collect();
+        let (group, first) = group_supports(&planes, at, &mut looked);
+        let mut groups: Vec<(Plane, Option<Candidate<'a>>)> = first.iter().filter_map(|&i| candidates.get(i)).map(|c| (c.plane, Some(*c))).collect();
+        for (candidate, g) in candidates.iter().zip(&group) {
+            if let Some((_, decision)) = groups.get_mut(*g)
+                && decision.is_some_and(|d| d != *candidate)
+            {
+                *decision = None;
+            }
+        }
+        let group_index = PlaneIndex::new(groups.iter().map(|g| &g.0), at);
+        let all_blocking: Vec<Plane> = unknown.iter().chain(competing).copied().collect();
+        let (_, first) = group_supports(&all_blocking, at, &mut looked);
+        let blocking: Vec<Plane> = first.iter().filter_map(|&i| all_blocking.get(i).copied()).collect();
+        let blocking_index = PlaneIndex::new(blocking.iter(), at);
+        SupportDecisions { groups, group_index, blocking, blocking_index, at, looked }
+    }
+
+    /// What the inputs say of a face on `actual`.
+    fn at(&mut self, actual: &Plane) -> Support<'a> {
+        let at = self.at;
+        let near = self.blocking_index.near(actual);
+        self.looked += near.len();
+        if near.into_iter().any(|i| self.blocking.get(i).is_some_and(|plane| same_support(plane, actual, at))) {
+            return Support::Blocked;
+        }
+        let mut near = self.group_index.near(actual);
+        self.looked += near.len();
+        // Groups are numbered in the candidates' order, so the first matching group's first
+        // candidate is the first candidate on the plane.
+        near.sort_unstable();
+        let mut chosen: Option<Candidate<'a>> = None;
+        for (plane, decision) in near.into_iter().filter_map(|g| self.groups.get(g)) {
+            if !same_support(plane, actual, at) {
+                continue;
+            }
+            match (chosen, decision) {
+                (_, None) => return Support::Unnamed,
+                (None, Some(d)) => chosen = Some(*d),
+                (Some(c), Some(d)) if c != *d => return Support::Unnamed,
+                _ => {}
+            }
+        }
+        chosen.map_or(Support::Unnamed, Support::Source)
+    }
+}
+
 fn base_plane(source: &FaceSource, actual: &Plane) -> Option<Plane> {
     match source {
         FaceSource::CertifiedExtrudeSide { plane: Some(p), .. }
@@ -339,98 +452,40 @@ impl Body {
                     unknown_supports.push(actual);
                     continue;
                 }
-                let Some(cost) = descriptor_cost(source) else {
+                if descriptor_cost(source).is_none() {
                     unknown_supports.push(actual);
                     continue;
-                };
-                candidates.push((plane, source, false, cost));
+                }
+                candidates.push(Candidate { plane, source, inner: false });
                 if let Some(t) = shell {
                     let inner = Plane::new(plane.origin - plane.normal() * t, plane.x, -plane.y)
                         .ok_or_else(|| KernelError::Invalid("invalid shell inner source plane".into()))?;
-                    candidates.push((inner, source, true, cost));
+                    candidates.push(Candidate { plane: inner, source, inner: true });
                 }
             }
             // The candidates are taken in the order of their normal's x: where several match one
             // face, the first decides which the rest are compared with.
-            candidates.sort_by(|a, b| a.0.normal().x.total_cmp(&b.0.normal().x));
-            let unknown_index = PlaneIndex::new(unknown_supports.iter(), at);
-            let competing_index = PlaneIndex::new(competing.iter(), at);
-            let candidate_index = PlaneIndex::new(candidates.iter().map(|c| &c.0), at);
-            let mut metadata = 2_000_000usize;
-            let mut identity_bytes = 16_000_000usize;
+            candidates.sort_by(|a, b| a.plane.normal().x.total_cmp(&b.plane.normal().x));
+            let mut decide = SupportDecisions::new(&candidates, &unknown_supports, &competing, at);
             let mut result = Vec::new();
             for (index, actual) in actual_planes(&self)?.into_iter().enumerate() {
-                let mut found = None;
-                if let Some(actual) = actual {
-                    let on = |planes: &[Plane], index: &PlaneIndex| {
-                        index.near(&actual).into_iter().any(|i| planes.get(i).is_some_and(|plane| same_support(plane, &actual, at)))
-                    };
-                    let blocked = on(&unknown_supports, &unknown_index) || on(&competing, &competing_index);
-                    if blocked {
-                        let existing = self
-                            .face_sources()
-                            .and_then(|sources| sources.get(index))
-                            .and_then(|s| s.as_ref())
-                            .filter(|s| (boolean || self.face_was_coalesced(index)) && !boolean_source(s, constructed));
-                        let keep = existing.and_then(|s| {
-                            descriptor_cost(s).and_then(|cost| {
-                                metadata.checked_sub(cost).map(|remaining| {
-                                    metadata = remaining;
-                                    s.clone()
-                                })
-                            })
-                        });
-                        result.push(keep);
-                        continue;
-                    }
-                    let mut chosen: Option<(Plane, &FaceSource, bool, usize)> = None;
-                    let mut near = candidate_index.near(&actual);
-                    near.sort_unstable();
-                    for (plane, source, inner, cost) in near.into_iter().filter_map(|i| candidates.get(i)) {
-                        if same_support(plane, &actual, at) {
-                            if let Some((previous_plane, previous_source, previous_inner, _)) = chosen {
-                                let Some(remaining) = identity_bytes.checked_sub(*cost) else {
-                                    chosen = None;
-                                    break;
-                                };
-                                identity_bytes = remaining;
-                                // Several current pieces of one exact source are one
-                                // logical face; distinct source identities remain ambiguous.
-                                if previous_plane != *plane || previous_source != *source || previous_inner != *inner {
-                                    chosen = None;
-                                    break;
-                                }
-                            } else {
-                                chosen = Some((*plane, *source, *inner, *cost));
-                            }
-                        }
-                    }
-                    if let Some((plane, source, inner, cost)) = chosen
-                        && let Some(remaining) = metadata.checked_sub(cost)
-                    {
-                        metadata = remaining;
-                        found = Some(if shell.is_some() {
-                            FaceSource::ShellPlanar { producer: None, source: Box::new(source.clone()), inner, plane }
-                        } else {
-                            source.clone()
-                        });
-                    }
-                }
-                if found.is_none() && (boolean || self.face_was_coalesced(index)) {
-                    found = self
-                        .face_sources()
+                // A face no candidate names keeps what it had, where an operation could have left
+                // it a source no role describes.
+                let existing = || {
+                    self.face_sources()
                         .and_then(|sources| sources.get(index))
                         .and_then(|s| s.as_ref())
-                        .filter(|s| !boolean_source(s, constructed))
-                        .and_then(|s| {
-                            descriptor_cost(s).and_then(|cost| {
-                                metadata.checked_sub(cost).map(|remaining| {
-                                    metadata = remaining;
-                                    s.clone()
-                                })
-                            })
-                        });
-                }
+                        .filter(|s| (boolean || self.face_was_coalesced(index)) && !boolean_source(s, constructed) && descriptor_cost(s).is_some())
+                        .cloned()
+                };
+                let found = match actual.map(|actual| decide.at(&actual)) {
+                    Some(Support::Source(Candidate { plane, source, inner })) => Some(if shell.is_some() {
+                        FaceSource::ShellPlanar { producer: None, source: Box::new(source.clone()), inner, plane }
+                    } else {
+                        source.clone()
+                    }),
+                    Some(Support::Blocked | Support::Unnamed) | None => existing(),
+                };
                 result.push(found);
             }
             Ok(result)
@@ -572,6 +627,90 @@ mod tests {
             matches += scan.len();
         }
         assert!(matches > 2 * planes.len(), "the planes meet each other, not only themselves: {matches}");
+    }
+
+    /// Many faces on one plane are decided with work that grows with the faces plus the
+    /// candidates: each face looks at its plane's one group, never at every candidate on it.
+    #[test]
+    fn coplanar_faces_are_decided_by_group_in_linear_work() {
+        let body = box_solid(Vec3::ZERO, Vec3::new(1000., 1000., 10.)).unwrap();
+        let at = Resolution::of(&body);
+        let top = Plane::new(Vec3::new(0., 0., 10.), Vec3::X, Vec3::Y).unwrap();
+        let one = FaceSource::Box { producer: Some(1), axis: 2, high: true, plane: top };
+        let other = FaceSource::Box { producer: Some(2), axis: 2, high: true, plane: top };
+        for n in [100usize, 1000] {
+            // `n` pieces of one cap and `n` faces of the result on its plane, each a little moved
+            // along the plane (as a split face's pieces are).
+            let pieces: Vec<Plane> = (0..n).map(|k| Plane::new(Vec3::new(k as f64, 0., 10.), Vec3::X, Vec3::Y).unwrap()).collect();
+            let candidates: Vec<Candidate> = (0..n).map(|_| Candidate { plane: top, source: &one, inner: false }).collect();
+            let mut decide = SupportDecisions::new(&candidates, &[], &[], at);
+            for piece in &pieces {
+                assert_eq!(decide.at(piece), Support::Source(Candidate { plane: top, source: &one, inner: false }));
+            }
+            // One look per candidate to group them, one per face to find its group: a scan of
+            // every candidate per face would look n * n times.
+            assert_eq!(decide.looked, 2 * n);
+            // A second identity among the candidates leaves the plane unnamed; a face without a
+            // role on it blocks it.
+            let mut mixed = candidates.clone();
+            mixed[n / 2] = Candidate { plane: top, source: &other, inner: false };
+            assert_eq!(SupportDecisions::new(&mixed, &[], &[], at).at(&pieces[0]), Support::Unnamed);
+            let unknown = vec![top; n];
+            let mut blocked = SupportDecisions::new(&candidates, &unknown, &[], at);
+            assert!(pieces.iter().all(|piece| blocked.at(piece) == Support::Blocked));
+            assert_eq!(blocked.looked, 3 * n);
+        }
+    }
+
+    /// A plate with 300 holes whose top a comb of grooves cuts into 62 strips: every strip keeps
+    /// the top cap's source, every bottom face the bottom cap's, however many there are.
+    #[test]
+    fn many_coplanar_pieces_of_a_holed_plate_all_keep_their_cap_source() {
+        use solidcore_record::{Loop2, Region2, Vec2};
+        let holes: Vec<Loop2> =
+            (0..60).flat_map(|k| (0..5).map(move |r| Loop2::circle(Vec2::new(10. + 10. * k as f64, 5. + 10. * r as f64), 1.))).collect();
+        let outer = Loop2::polygon(&[Vec2::new(0., 0.), Vec2::new(610., 0.), Vec2::new(610., 50.), Vec2::new(0., 50.)]);
+        let region = Region2 { outer, holes };
+        let raw = crate::extrude(&Plane::XY, std::slice::from_ref(&region), 0., 10.).unwrap().remove(0);
+        let hole_ids: Vec<Vec<String>> = (0..300).map(|k| vec![format!("c{k}")]).collect();
+        let signatures: Vec<_> = raw
+            .face_sources()
+            .unwrap()
+            .iter()
+            .map(|s| matches!(s, Some(FaceSource::ExtrudeCap { .. })).then(|| (vec!["l1".to_string()], hole_ids.clone())))
+            .collect();
+        let plate = raw.with_extrude_cap_certificates(5, 3, &signatures).unwrap();
+        // A comb: 61 teeth 2 wide across the plate between the columns of holes, 2 deep.
+        let mut comb = vec![Vec2::new(-5., 55.), Vec2::new(-5., 60.), Vec2::new(615., 60.), Vec2::new(615., 55.)];
+        for k in (0..=60).rev() {
+            let x = 4. + 10. * k as f64;
+            comb.extend([Vec2::new(x + 2., 55.), Vec2::new(x + 2., -5.), Vec2::new(x, -5.), Vec2::new(x, 55.)]);
+        }
+        let comb = Region2 { outer: Loop2::polygon(&comb), holes: vec![] };
+        let tool = crate::extrude(&Plane::XY, std::slice::from_ref(&comb), 8., 12.).unwrap().remove(0);
+        let cut = crate::boolean(&plate, &tool, crate::BoolOp::Cut).unwrap().unwrap();
+        let sources = cut.face_sources().unwrap();
+        let (mut tops, mut bottoms) = (0, 0);
+        for (i, plane) in actual_planes(&cut).unwrap().into_iter().enumerate() {
+            let Some(plane) = plane else { continue };
+            let high = if plane.normal().dot(Vec3::Z) > 0.999999 && (plane.origin.z - 10.).abs() < 1e-9 {
+                true
+            } else if plane.normal().dot(Vec3::Z) < -0.999999 && plane.origin.z.abs() < 1e-9 {
+                false
+            } else {
+                continue;
+            };
+            let Some(FaceSource::CertifiedExtrudeCap { producer: 5, high: h, holes, .. }) = &sources[i] else {
+                panic!("face {i} on the {} cap lost its source: {:?}", if high { "top" } else { "bottom" }, sources[i]);
+            };
+            assert_eq!((*h, holes.len()), (high, 300));
+            if high {
+                tops += 1;
+            } else {
+                bottoms += 1;
+            }
+        }
+        assert_eq!((tops, bottoms), (62, 1));
     }
 
     #[test]

@@ -152,6 +152,19 @@ impl NumberedLoop {
         out
     }
 
+    /// The same loop started at a segment `joins` does not join to the one before it, so no run of
+    /// joined segments wraps round the loop's end (as it is when every segment joins the next).
+    pub(crate) fn starting_a_run(&self, joins: impl Fn(&Seg2, &Seg2) -> bool) -> NumberedLoop {
+        let segs = &self.lp.segs;
+        let n = segs.len();
+        let joined = |i: usize| matches!((segs.get((i + n - 1) % n), segs.get(i)), (Some(s), Some(t)) if joins(s, t));
+        let mut out = self.clone();
+        if let Some(k) = (0..n).find(|&i| !joined(i)) {
+            out.rotate_left(k);
+        }
+        out
+    }
+
     /// Split segment `k` in half, both halves over what it ran over.
     fn split_half(&mut self, k: usize) {
         if k >= self.lp.segs.len() || k >= self.from.len() {

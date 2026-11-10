@@ -1,0 +1,35 @@
+{
+  "area": "construction",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-plane-perpendicular-refuses-a-line-square-to-the-plane",
+  "expected": {
+    "method": "the Z axis is square to XY: every plane holding it is perpendicular, so none is the answer: refused",
+    "outcome": "refused",
+    "refusal": "the line is square to the plane",
+    "source": "analytic",
+    "sources": [],
+    "what": "a perpendicular plane through the plane's normal"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 1 (construct.plane.perpendicular): the line is square to the plane: every plane through it is perpendicular; pick a line in or along the plane",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 1 (construct.plane.perpendicular): the line is square to the plane: every plane through it is perpendicular; pick a line in or along the plane",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [],
+  "ungraded": [],
+  "what": "a perpendicular plane through the plane's normal",
+  "why_not": [
+    "no kernel operation ran before the failure: step 1 (construct.plane.perpendicular): the line is square to the plane: every plane through it is perpendicular; pick a line in or along the plane"
+  ]
+}

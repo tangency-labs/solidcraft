@@ -27,8 +27,8 @@ mod native_tests {
             let v = b.mass_properties(MEASURE_ACCURACY).unwrap().volume;
             assert!((v - exact).abs() < 1e-6 * exact, "{name}: SMLib volume {v}, closed form {exact}");
             let (native, report) = b.to_native_report().unwrap_or_else(|e| panic!("{name}: {e}"));
-            solidcraft_geom::brep::check::validate(&native).unwrap();
-            solidcraft_geom::brep::geometry::check(&native).unwrap_or_else(|e| panic!("{name}: {e}"));
+            solidcore_ops::record_check::validate(&native).unwrap();
+            solidcore_ops::record_check::agreement(&native).unwrap_or_else(|e| panic!("{name}: {e}"));
             assert_eq!(report, Report { nurbs_edges: report.nurbs_edges, ..Report::default() }, "{name}: every face agrees");
             let [f, e, n] = b.counts().unwrap();
             assert_eq!((native.faces.len(), native.edges.len(), native.vertices.len()), (f, e, n), "{name}");
@@ -63,7 +63,7 @@ mod native_tests {
         let mids: Vec<[f64; 3]> = [(0.0, 0.0), (a, 0.0), (0.0, a), (a, a)].iter().flat_map(|&(p, q)| [[h, p, q], [p, h, q], [p, q, h]]).collect();
         let f = Brep::make_box([0.0; 3], [a; 3]).unwrap().fillet(&mids, 0.1, r).unwrap();
         let record = f.to_native().unwrap();
-        solidcraft_geom::brep::check::validate(&record).unwrap();
+        solidcore_ops::record_check::validate(&record).unwrap();
         let corners: Vec<([f64; 3], f64)> = record
             .faces
             .iter()
@@ -143,7 +143,7 @@ mod native_tests {
                 assert!((p - Vec3::new(q[0], q[1], q[2])).len() < 1e-9, "{:?} at {t}", e.curve);
             }
             if let b::Curve::Circle { radius, .. } = e.curve {
-                let [a, z] = solidcraft_geom::brep::label::edge_curve_interval(e).unwrap();
+                let [a, z] = solidcore_ops::label::edge_curve_interval(e).unwrap();
                 assert!((radius - 5.0).abs() < 1e-12 && (z - a - TAU).abs() < 1e-9);
             }
         }
@@ -160,7 +160,7 @@ mod native_tests {
         let near = Brep::make_cone([0.0; 3], 4.0, 4.0 - 1e-12, 10.0).unwrap().to_native().unwrap();
         assert!(near.faces.iter().any(|f| matches!(f.surface, b::Surface::Cylinder { .. })));
         assert!(!near.faces.iter().any(|f| matches!(f.surface, b::Surface::Cone { .. })));
-        solidcraft_geom::brep::check::validate(&near).unwrap();
+        solidcore_ops::record_check::validate(&near).unwrap();
     }
 
     /// A hole tangent to the block's outline from inside: the material touches itself along the
@@ -179,7 +179,7 @@ mod native_tests {
         assert_eq!((record.faces.len(), record.edges.len(), record.vertices.len()), (f, e + 1, v));
         assert_eq!((record.shells.len(), record.regions.len()), (1, 2));
         assert!(record.edges.iter().all(|e| e.uses.len() == 2));
-        solidcraft_geom::brep::geometry::check(&record).unwrap();
+        solidcore_ops::record_check::agreement(&record).unwrap();
         let on_line = |e: &b::Edge| {
             e.vertices.iter().all(|v| {
                 let p = record.vertices[*v as usize].point;
@@ -227,7 +227,7 @@ mod native_tests {
         let r = block.boolean(&hole, crate::BooleanOp::Subtract).unwrap().unwrap();
         let (record, _) = r.to_native_ordered().unwrap();
         assert!(record.edges.iter().all(|e| e.uses.len() == 2));
-        solidcraft_geom::brep::geometry::check(&record).unwrap();
+        solidcore_ops::record_check::agreement(&record).unwrap();
         let on_line = |e: &b::Edge| {
             e.vertices.iter().all(|v| {
                 let p = record.vertices[*v as usize].point;
@@ -279,7 +279,7 @@ mod native_tests {
         assert_eq!(record.regions.len(), 3);
         assert!(record.regions.iter().all(|g| !g.void));
         assert_eq!(record.regions[0].shells.len(), 2, "the infinite region lists both solids");
-        solidcraft_geom::brep::geometry::check(&record).unwrap();
+        solidcore_ops::record_check::agreement(&record).unwrap();
         // V = 180000 - h/6 (A0 + 4 Am + A1), h = 9, Am = 55 x 35.
         let want = 180000.0 - 9.0 / 6.0 * (100.0 + 4.0 * 55.0 * 35.0 + 6000.0);
         let back = Brep::from_record(&record, true).unwrap();
@@ -327,10 +327,10 @@ mod native_tests {
             a
         };
         let (record, _) = native(&shifted(7e-15)).unwrap();
-        solidcraft_geom::brep::check::validate(&record).unwrap();
+        solidcore_ops::record_check::validate(&record).unwrap();
         assert!(record.edges.iter().any(|x| x.interval[0] == first && x.interval[1] <= last), "an interval on the NURBS's first knot");
         assert!(
-            native(&shifted(1e-3)).map(|(r, _)| solidcraft_geom::brep::check::validate(&r)).map_or(true, |v| v.is_err()),
+            native(&shifted(1e-3)).map(|(r, _)| solidcore_ops::record_check::validate(&r)).map_or(true, |v| v.is_err()),
             "a real overshoot is not moved"
         );
     }
@@ -451,5 +451,97 @@ mod native_tests {
                 let _ = native(&f);
             }
         }
+    }
+}
+
+/// `mapped`: SMLib's UV trim moved onto the edge record's parameter (solidcraft#12365).
+mod mapped_tests {
+    use super::*;
+    use solidcore_ops::pcurve::eval;
+    use solidcore_record::brep::{Budget, check_curve2};
+
+    /// A cubic trim on [3, 5]: clamped, one interior knot.
+    fn base() -> b::Curve2 {
+        b::Curve2::Spline {
+            knots: vec![3.0, 3.0, 3.0, 3.0, 4.0, 5.0, 5.0, 5.0, 5.0],
+            points: vec![[0.0, 0.0], [1.0, 2.0], [2.0, -1.0], [3.5, 1.0], [5.0, 0.5]],
+        }
+    }
+
+    fn same_curve_on(a: &b::Curve2, want: &b::Curve2, [t0, t1]: [f64; 2]) {
+        for i in 0..=8 {
+            let t = t0 + (t1 - t0) * f64::from(i) / 8.0;
+            let (p, q) = (eval(a, t).unwrap(), eval(want, t).unwrap());
+            assert!((p[0] - q[0]).abs() < 1e-9 && (p[1] - q[1]).abs() < 1e-9, "at {t}: {p:?} vs {q:?}");
+        }
+    }
+
+    /// The trim SMLib hands over can end a rounding past the edge record's interval with a dead
+    /// span there (its last span 3e-11 long after the edge's end, knots `5 x4, 5.00000000003 x4`:
+    /// the slot of a sloped bar, solidcraft#12365). Moving its end knots onto the edge's end
+    /// used to leave a run of 8 at 5, which the record refuses as "knot multiplicity", and the
+    /// body was lost. The remap drops the dead span: the record is valid and the curve on the
+    /// edge is unchanged.
+    #[test]
+    fn a_trim_ending_a_dead_span_past_the_edges_end_is_cut_to_the_edge() {
+        let e = 3e-11;
+        let trim = b::Curve2::Spline {
+            knots: vec![3.0, 3.0, 3.0, 3.0, 4.0, 5.0, 5.0, 5.0, 5.0, 5.0 + e, 5.0 + e, 5.0 + e, 5.0 + e],
+            points: vec![[0.0, 0.0], [1.0, 2.0], [2.0, -1.0], [3.5, 1.0], [5.0, 0.5], [5.0, 0.5], [5.0, 0.5], [5.0, 0.5], [5.0, 0.5]],
+        };
+        let out = mapped(&trim, true, [1.0, 0.0], [3.0, 5.0]).unwrap();
+        check_curve2(&out, &mut Budget::input()).unwrap();
+        assert_eq!(out.interval(), Some([3.0, 5.0]));
+        same_curve_on(&out, &base(), [3.0, 5.0]);
+    }
+
+    /// The other form seen in solidcraft#12365: the last interior knot run a rounding past the
+    /// end knots (`3.0000000000000004 x3, 3 x4`), an unordered knot vector by one ulp. Knots past
+    /// an end by rounding are that end, and the dead span they leave is dropped.
+    #[test]
+    fn a_trims_interior_knots_a_rounding_past_its_end_are_the_end() {
+        let u = 3.0 + 4e-16;
+        let trim = b::Curve2::Spline {
+            knots: vec![1.0, 1.0, 1.0, 1.0, 2.0, u, u, u, 3.0, 3.0, 3.0, 3.0],
+            points: vec![[0.0, 0.0], [1.0, 2.0], [2.0, -1.0], [3.5, 1.0], [5.0, 0.5], [5.0, 0.5], [5.0, 0.5], [5.0, 0.5]],
+        };
+        let want = b::Curve2::Spline {
+            knots: vec![1.0, 1.0, 1.0, 1.0, 2.0, 3.0, 3.0, 3.0, 3.0],
+            points: vec![[0.0, 0.0], [1.0, 2.0], [2.0, -1.0], [3.5, 1.0], [5.0, 0.5]],
+        };
+        let out = mapped(&trim, true, [1.0, 0.0], [1.0, 3.0]).unwrap();
+        check_curve2(&out, &mut Budget::input()).unwrap();
+        assert_eq!(out.interval(), Some([1.0, 3.0]));
+        same_curve_on(&out, &want, [1.0, 3.0]);
+    }
+
+    /// The same dead span on an edgeuse that runs against its edge: `mapped` reverses the trim
+    /// about its own ends first, so the dead span is at the start (`3 x4, 3.00000000003 x4`, a
+    /// run that is a rounding inside the edge's start), and the start-side drop runs. The dead
+    /// span's control points are distinct here, so a drop at the wrong end would show.
+    #[test]
+    fn a_reversed_trim_with_a_dead_span_is_cut_at_the_edges_start() {
+        let e = 3e-11;
+        let trim = b::Curve2::Spline {
+            knots: vec![3.0, 3.0, 3.0, 3.0, 4.0, 5.0, 5.0, 5.0, 5.0, 5.0 + e, 5.0 + e, 5.0 + e, 5.0 + e],
+            points: vec![[0.0, 0.0], [1.0, 2.0], [2.0, -1.0], [3.5, 1.0], [5.0, 0.5], [6.0, 1.0], [7.0, 2.0], [8.0, 3.0], [9.0, 4.0]],
+        };
+        let out = mapped(&trim, false, [1.0, 0.0], [3.0, 5.0]).unwrap();
+        check_curve2(&out, &mut Budget::input()).unwrap();
+        assert_eq!(out.interval(), Some([3.0, 5.0]));
+        let want = b::Curve2::Spline {
+            knots: vec![3.0, 3.0, 3.0, 3.0, 4.0, 5.0, 5.0, 5.0, 5.0],
+            points: vec![[5.0, 0.5], [3.5, 1.0], [2.0, -1.0], [1.0, 2.0], [0.0, 0.0]],
+        };
+        let b::Curve2::Spline { points, .. } = &out else { panic!("{out:?}") };
+        assert_eq!(points, &vec![[5.0, 0.5], [3.5, 1.0], [2.0, -1.0], [1.0, 2.0], [0.0, 0.0]]);
+        same_curve_on(&out, &want, [3.0, 5.0]);
+    }
+
+    /// A trim already on its edge is left as it is.
+    #[test]
+    fn a_trim_on_its_edge_is_unchanged() {
+        let out = mapped(&base(), true, [1.0, 0.0], [3.0, 5.0]).unwrap();
+        assert_eq!(out, base());
     }
 }

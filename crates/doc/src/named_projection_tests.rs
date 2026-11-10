@@ -1,5 +1,5 @@
 use crate::{Document, ModelBody, ModelState};
-use solidcore_record::{Plane, Vec3};
+use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{LinkKind, LinkSource, Sketch};
 use std::collections::BTreeMap;
@@ -48,4 +48,414 @@ fn named_manual_projection_keeps_its_body_and_face_at_shared_boundaries() {
     assert_eq!(sketch.points, saved.points);
     assert_eq!(sketch.links[0].id, link);
     assert!(matches!(&sketch.links[0].source,LinkSource::Face{body,..} if body=="Source"));
+}
+
+#[test]
+fn numbered_manual_projection_rebuilds_from_the_whole_planar_face() {
+    let mut doc = Document::default();
+    doc.set_param("size", "5", Some("mm"), None).unwrap();
+    let kind = serde_json::from_value(serde_json::json!({
+        "type": "box", "corner": [0, 0, 0], "length": "size", "width": "size", "height": "10"
+    }))
+    .unwrap();
+    let feature = doc.add_feature(kind, None).unwrap();
+    doc.feature_mut(feature).unwrap().body_names = vec!["Source".into()];
+    let mut model = crate::Model::new();
+    model.evaluate(&doc);
+    let plane = Plane::XY.offset(20.);
+    let source = LinkSource::Face { body: "Source".into(), at: Vec3::new(2., 2., 10.) };
+    let resolved = crate::project::resolve(&doc, &BTreeMap::new(), &model.state(), &plane, LinkKind::Project, &source).unwrap();
+    let mut sketch = Sketch::default();
+    let link = sketch.add_link(LinkKind::Project, source, &resolved.geom).unwrap();
+    let numbered = format!("F{feature}:+z#1");
+    sketch.links[0].face_name = Some(numbered.clone());
+
+    doc.set_param("size", "20", Some("mm"), None).unwrap();
+    model.evaluate(&doc);
+    assert!(crate::project::refresh_links(&doc, &BTreeMap::new(), &model.state(), &plane, &mut sketch).unwrap().is_empty());
+    assert!(!sketch.links[0].lost);
+    assert_eq!(sketch.links[0].face_name.as_deref(), Some(numbered.as_str()));
+    assert_eq!(sketch.link_curves(&link).len(), 4);
+    assert!(sketch.points.iter().any(|point| point.pos.x > 19. && point.pos.y > 19.));
+
+    let saved = model.saved(&doc).unwrap();
+    let reopened = crate::format::read(&doc.to_json()).unwrap();
+    let cached = crate::Model::adopt(&reopened, &saved).unwrap();
+    let state = cached.state();
+    assert!(state.body("Source").unwrap().names.origin.is_none());
+    assert_eq!(state.body("Source").unwrap().names.cached_construction, Some(feature));
+    assert!(crate::project::refresh_links(&reopened, &BTreeMap::new(), &state, &plane, &mut sketch).unwrap().is_empty());
+    assert!(!sketch.links[0].lost);
+}
+
+#[test]
+fn numbered_round_face_projection_recovers_the_whole_face() {
+    let doc = Document {
+        features: serde_json::from_value(serde_json::json!([
+            {
+                "id": 1, "name": "Sketch1", "type": "sketch", "plane": {"name": "XY", "type": "origin"},
+                "sketch": {
+                    "points": [{"fixed": true, "id": "origin", "pos": [0., 0.]}, {"fixed": false, "id": "c1.center", "pos": [0., 0.]}],
+                    "curves": [{"c": 1, "construction": false, "id": "c1", "r": 20., "type": "circle"}],
+                    "constraints": [{"id": "k1", "p": 0, "q": 1, "type": "coincident"}],
+                    "counters": {"k": 1, "l": 0, "p": 1}
+                }
+            },
+            {
+                "id": 2, "name": "Extrude1", "type": "extrude", "body_names": ["Body1"],
+                "extent": {"convention": "total_distance", "direction": "positive", "distance": "10"},
+                "operation": "new_body", "profiles": {"loops": [["c1"]], "type": "curves"}, "sketch": 1
+            },
+            {
+                "id": 3, "name": "Sketch2", "type": "sketch", "plane": {"name": "YZ", "type": "origin"},
+                "sketch": {
+                    "points": [
+                        {"fixed": true, "id": "origin", "pos": [0., 0.]},
+                        {"fixed": false, "id": "p1", "pos": [-20., 0.]},
+                        {"fixed": false, "id": "p2", "pos": [20., 0.]},
+                        {"fixed": false, "id": "p3", "pos": [-20., 10.]},
+                        {"fixed": false, "id": "p4", "pos": [20., 10.]}
+                    ],
+                    "curves": [
+                        {"a": 1, "b": 2, "construction": false, "id": "l1", "link": "j1", "type": "line"},
+                        {"a": 3, "b": 4, "construction": false, "id": "l2", "link": "j1", "type": "line"}
+                    ],
+                    "constraints": [],
+                    "counters": {"k": 0, "l": 2, "p": 4},
+                    "links": [{
+                        "face_name": "F2:side:c1#1", "id": "j1", "kind": "project",
+                        "source": {"at": [-19.87, -2.3, 6.], "body": "Body1", "type": "face"}
+                    }]
+                }
+            }
+        ]))
+        .unwrap(),
+        ..Document::default()
+    };
+    let doc = crate::format::read(&doc.to_json()).unwrap();
+    let mut model = crate::Model::new();
+    model.evaluate(&doc);
+    let state = model.state();
+    let body = state.body("Body1").unwrap();
+    assert!(crate::naming::face_names(body).iter().any(|name| name == "F2:side:c1"));
+    let result = model.result(3).unwrap();
+    assert!(result.error.is_none(), "{result:?}");
+    let projected = &state.sketch(3).expect("the saved projection should rebuild").sketch;
+    assert_eq!(projected.links[0].face_name.as_deref(), Some("F2:side:c1#1"));
+    assert_eq!(projected.link_curves("j1").len(), 2);
+
+    // The edge-on projection of the round wall can retain its saved geometry with a warning.
+    // The numbered reference must evaluate the same way as the whole face's existing name.
+    let mut exact_doc = doc.clone();
+    exact_doc.sketch_mut(3).unwrap().links[0].face_name = Some("F2:side:c1".into());
+    let mut exact_model = crate::Model::new();
+    exact_model.evaluate(&exact_doc);
+    let exact_state = exact_model.state();
+    let exact = &exact_state.sketch(3).unwrap().sketch;
+    assert_eq!(result.warning, exact_model.result(3).unwrap().warning);
+    assert_eq!(projected.links[0].lost, exact.links[0].lost);
+    assert_eq!(projected.curves, exact.curves);
+    assert_eq!(projected.points, exact.points);
+
+    let saved = model.saved(&doc).expect("the healthy projection should save its model cache");
+    let mut reopened = crate::format::read(&doc.to_json()).unwrap();
+    let mut reopened_model = crate::Model::adopt(&reopened, &saved).unwrap();
+    assert!(reopened_model.state().body("Body1").unwrap().names.origin.is_none());
+    assert_eq!(reopened_model.state().body("Body1").unwrap().names.cached_construction, Some(2));
+    let crate::FeatureKind::Sketch { plane, .. } = &mut reopened.feature_mut(3).unwrap().kind else { panic!("projection sketch") };
+    *plane = crate::PlaneRef::Custom { plane: Plane::YZ.offset(0.1) };
+    reopened_model.evaluate(&reopened);
+    assert!(reopened_model.result(3).unwrap().error.is_none(), "{:?}", reopened_model.result(3));
+    let pick = Vec3::new(-19.87, -2.3, 6.);
+    assert!(crate::naming::face_on_body(body, "F2:side:c1#1", pick).is_none(), "ordinary lookup stays strict");
+    let mut split = body.clone();
+    let mut names = crate::naming::face_names(body).as_ref().clone();
+    *names.iter_mut().find(|name| name.as_str() != "F2:side:c1").unwrap() = "F2:side:c1#2#[wall]".into();
+    let origin = split.names.origin.clone();
+    split.names = crate::naming::NameCell::known(Arc::new(names));
+    split.names.origin = origin;
+    assert!(crate::naming::face_on_body(&split, "F2:side:c1#1", pick).is_none());
+    assert!(crate::name_lookup::locate_projected_face(&split, "F2:side:c1#1", pick).is_none(), "another piece still exists");
+
+    let mut outside = doc.sketch(3).unwrap().clone();
+    outside.links[0].source = LinkSource::Face { body: "Body1".into(), at: Vec3::new(-19.87, -2.3, 12.) };
+    let error = crate::project::refresh_links(&doc, &BTreeMap::new(), &state, &Plane::YZ, &mut outside).unwrap_err();
+    assert!(matches!(&error, crate::DocError::Reselect { reference, .. } if reference == "F2:side:c1#1"), "{error}");
+}
+
+#[test]
+fn numbered_projection_refuses_modified_or_moved_cached_sources() {
+    for (kind, pick) in [
+        (serde_json::json!({"type": "shell", "body": "Source", "faces": [[10, 10, 10]], "thickness": "1"}), Vec3::new(0., 5., 5.)),
+        (serde_json::json!({"type": "move", "bodies": ["Source"], "translate": ["1", "0", "0"]}), Vec3::new(1., 5., 5.)),
+    ] {
+        let mut doc = Document::default();
+        let source = doc
+            .add_feature(
+                serde_json::from_value(serde_json::json!({
+                    "type": "box", "corner": [0, 0, 0], "length": "20", "width": "20", "height": "10"
+                }))
+                .unwrap(),
+                None,
+            )
+            .unwrap();
+        doc.feature_mut(source).unwrap().body_names = vec!["Source".into()];
+        doc.add_feature(serde_json::from_value(kind).unwrap(), None).unwrap();
+        let mut model = crate::Model::new();
+        model.evaluate(&doc);
+        assert!(model.results.iter().all(|result| result.error.is_none()));
+        let saved = model.saved(&doc).unwrap();
+        let reopened = crate::format::read(&doc.to_json()).unwrap();
+        let cached = crate::Model::adopt(&reopened, &saved).unwrap();
+        let state = cached.state();
+        let body = state.body("Source").unwrap();
+        let whole = format!("F{source}:-x");
+        let numbered = format!("{whole}#1");
+        assert!(crate::naming::face_on_body(body, &whole, pick).is_some());
+        assert!(crate::naming::face_on_body(body, &numbered, pick).is_none());
+        assert!(body.names.origin.is_none());
+        assert_eq!(body.names.cached_construction, None);
+        assert!(crate::name_lookup::locate_projected_face(body, &numbered, pick).is_none());
+    }
+}
+
+#[test]
+fn numbered_projection_refuses_a_pick_inside_a_hole_in_the_named_face() {
+    let mut doc = Document::default();
+    let mut sketch = Sketch::new();
+    sketch.add_circle(Vec2::ZERO, 10., Some(0), Some("c1")).unwrap();
+    sketch.add_circle(Vec2::ZERO, 2., Some(0), Some("c2")).unwrap();
+    let profile = doc.add_feature(crate::FeatureKind::Sketch { plane: crate::PlaneRef::Origin { name: "XY".into() }, sketch }, None).unwrap();
+    let kind = serde_json::from_value(serde_json::json!({
+        "type": "extrude", "sketch": profile, "profiles": {"type": "curves", "loops": [["c1"]]}, "extent": {"distance": "5"}
+    }))
+    .unwrap();
+    let feature = doc.add_feature(kind, None).unwrap();
+    let mut model = crate::Model::new();
+    model.evaluate(&doc);
+    let state = model.state();
+    let body = state.body("Body1").unwrap();
+    let whole = format!("F{feature}:top");
+    let top = crate::naming::face_names(body).iter().position(|name| name == &whole).unwrap();
+    let numbered = format!("{whole}#1");
+
+    let pick = |x| crate::name_lookup::locate_projected_face(body, &numbered, Vec3::new(x, 0., 5.));
+    assert_eq!(pick(5.).map(|(index, _)| index), Some(top));
+    assert!(pick(0.).is_none(), "the pick is on the plane but inside the hole");
+}
+
+/// A tangent plane on a cylinder saved by 0.30.1, whose kernel split the round side into numbered
+/// pieces, names it `F2:side:c1#2`; the side is one face now (#13252). The plane, and the sketch
+/// on it, are found again when the cylinder is still the body its feature made; a piece that
+/// another face of the surface could be (a split side) or a pick off the face is not.
+#[test]
+fn a_tangent_plane_on_a_numbered_piece_of_a_round_face_is_found_again() {
+    let doc = |name: &str, at: [f64; 3]| Document {
+        features: serde_json::from_value(serde_json::json!([
+            {
+                "id": 1, "name": "Sketch1", "type": "sketch", "plane": {"name": "XY", "type": "origin"},
+                "sketch": {
+                    "points": [{"fixed": true, "id": "origin", "pos": [0., 0.]}, {"fixed": false, "id": "c1.center", "pos": [0., 0.]}],
+                    "curves": [{"c": 1, "construction": false, "id": "c1", "r": 10., "type": "circle"}],
+                    "constraints": [{"id": "k1", "p": 0, "q": 1, "type": "coincident"}],
+                    "counters": {"k": 1, "l": 0, "p": 1}
+                }
+            },
+            {
+                "id": 2, "name": "Extrude1", "type": "extrude", "body_names": ["Body1"],
+                "extent": {"convention": "total_distance", "direction": "positive", "distance": "20"},
+                "operation": "new_body", "profiles": {"loops": [["c1"]], "type": "curves"}, "sketch": 1
+            },
+            {
+                "id": 3, "name": "Plane1", "type": "construction_plane", "suppressed": false,
+                "plane": {"type": "tangent", "at": at, "face": {"type": "face", "at": at, "name": name}}
+            },
+            {
+                "id": 4, "name": "Sketch2", "type": "sketch", "plane": {"feature": 3, "type": "construction"},
+                "sketch": {"points": [{"fixed": true, "id": "origin", "pos": [0., 0.]}], "curves": [], "constraints": [], "counters": {}}
+            }
+        ]))
+        .unwrap(),
+        ..Document::default()
+    };
+    let run = |doc: Document| {
+        let doc = crate::format::read(&doc.to_json()).unwrap();
+        let mut model = crate::Model::new();
+        model.evaluate(&doc);
+        model
+    };
+    let whole = run(doc("F2:side:c1", [10., 0., 10.]));
+    assert!(whole.result(3).unwrap().error.is_none(), "{:?}", whole.result(3));
+    for piece in ["F2:side:c1#1", "F2:side:c1#2"] {
+        let model = run(doc(piece, [10., 0., 10.]));
+        assert!(model.result(3).unwrap().error.is_none(), "{piece}: {:?}", model.result(3));
+        assert!(model.result(4).unwrap().error.is_none(), "{piece}: {:?}", model.result(4));
+    }
+    // A pick that is not on the face is still lost.
+    let off = run(doc("F2:side:c1#2", [10., 0., 30.]));
+    assert!(off.result(3).unwrap().error.is_some());
+}
+
+/// An edge picked when its side face was split in two keeps the piece in its name
+/// (`F2:side:l1#[F2:start]`); once the side is one face again the edge is still found (#11731).
+#[test]
+fn an_edge_named_by_a_piece_of_a_face_that_is_whole_again_is_found() {
+    let doc = Document {
+        features: serde_json::from_value(serde_json::json!([
+            {
+                "id": 1, "name": "Sketch1", "type": "sketch", "plane": {"name": "XY", "type": "origin"},
+                "sketch": {
+                    "points": [
+                        {"fixed": true, "id": "origin", "pos": [0., 0.]},
+                        {"fixed": false, "id": "p1", "pos": [0., 0.]},
+                        {"fixed": false, "id": "p2", "pos": [10., 0.]},
+                        {"fixed": false, "id": "p3", "pos": [10., 16.1]},
+                        {"fixed": false, "id": "p4", "pos": [0., 16.1]}
+                    ],
+                    "curves": [
+                        {"a": 1, "b": 2, "construction": false, "id": "l1", "type": "line"},
+                        {"a": 2, "b": 3, "construction": false, "id": "l2", "type": "line"},
+                        {"a": 3, "b": 4, "construction": false, "id": "l3", "type": "line"},
+                        {"a": 4, "b": 1, "construction": false, "id": "l4", "type": "line"}
+                    ],
+                    "constraints": [],
+                    "counters": {"k": 0, "l": 4, "p": 4}
+                }
+            },
+            {
+                "id": 2, "name": "Extrude1", "type": "extrude", "body_names": ["Body1"],
+                "extent": {"convention": "total_distance", "direction": "positive", "distance": "5"},
+                "operation": "new_body", "profiles": {"loops": [["l1", "l2", "l3", "l4"]], "type": "curves"}, "sketch": 1
+            }
+        ]))
+        .unwrap(),
+        ..Document::default()
+    };
+    let doc = crate::format::read(&doc.to_json()).unwrap();
+    let mut model = crate::Model::new();
+    model.evaluate(&doc);
+    let state = model.state();
+    let body = state.body("Body1").unwrap();
+    // The side along x = 0 meets the start cap in the edge under the pick.
+    let near = Vec3::new(0., 8.05, 0.);
+    let names = crate::naming::edge_names(body);
+    let whole = names.iter().find(|n| n.contains("F2:start") && n.contains("F2:side:l4")).expect("the side's edge on the start cap");
+    let piece = whole.replace("F2:side:l4", "F2:side:l4#[F2:start]");
+    let hit = crate::name_lookup::locate_edge(body, &piece, near).unwrap_or_else(|e| panic!("{piece}: {e}"));
+    assert!(hit.on_point, "the edge under the saved pick");
+    assert_eq!(hit.point, near);
+    assert_eq!(names.get(hit.edge), Some(whole));
+    // A piece told apart by a face the side never touches (the opposite side) is still refused.
+    let gone = whole.replace("F2:side:l4", "F2:side:l4#[F2:side:l2]");
+    assert!(crate::name_lookup::locate_edge(body, &gone, near).is_err(), "{gone}");
+}
+
+/// #13464: a mesh's flat patch outline drops a corner part way along a side, even when single
+/// precision has moved it off the line (as an STL's corners are), and when the loop starts there.
+#[test]
+fn a_mesh_outline_drops_a_rounded_corner_part_way_along_a_side() {
+    let single = |x: f64| f64::from(x as f32);
+    // a, c and d make a triangle; b lies on its side a–c up to single-precision rounding.
+    let a = Vec3::new(0.0, 0.0, 0.0);
+    let b = Vec3::new(single(0.3), single(0.33), 0.0);
+    let c = Vec3::new(1.0, single(1.1), 0.0);
+    let d = Vec3::new(0.0, 2.0, 0.0);
+    let off = (b - a).cross(c - a).len() / (c - a).len();
+    assert!(off > 0.0 && off < 1e-7, "b is off the line only by rounding: {off}");
+    // b first, so the outline's loop starts at it.
+    let mesh =
+        solidcraft_geom::Mesh { positions: vec![b, c, d, a], triangles: vec![[0, 1, 2], [0, 2, 3]], tri_face: vec![0, 0], ..Default::default() };
+    let loops = crate::project3d::flat_outline(&mesh, Vec3::new(0.3, 0.8, 0.0));
+    assert_eq!(loops.len(), 1, "{loops:?}");
+    let corners = loops.first().unwrap();
+    assert_eq!(corners.len(), 4, "three corners and the first again: {corners:?}");
+    assert!(!corners.iter().any(|p| p.dist(b) < 1e-12), "the corner on the side is gone: {corners:?}");
+    for p in [a, c, d] {
+        assert!(corners.iter().any(|q| q.dist(p) < 1e-12), "{p:?} is a corner: {corners:?}");
+    }
+}
+
+/// #13464: far from the origin, a small flat patch keeps its corners. A tolerance that grew with
+/// the distance from the origin alone took every corner of a 1 × 1 square at x = 1 000 000 for one
+/// on a straight side, and the face projected to nothing.
+#[test]
+fn a_small_mesh_patch_far_from_the_origin_keeps_its_corners() {
+    let x = 1_000_000.0;
+    let corners = [Vec3::new(x, 0.0, 0.0), Vec3::new(x + 1.0, 0.0, 0.0), Vec3::new(x + 1.0, 1.0, 0.0), Vec3::new(x, 1.0, 0.0)];
+    let mesh =
+        solidcraft_geom::Mesh { positions: corners.to_vec(), triangles: vec![[0, 1, 2], [0, 2, 3]], tri_face: vec![0, 0], ..Default::default() };
+    let loops = crate::project3d::flat_outline(&mesh, Vec3::new(x + 0.5, 0.5, 0.0));
+    assert_eq!(loops.len(), 1, "{loops:?}");
+    assert_eq!(loops.first().map(Vec::len), Some(5), "four corners and the first again: {loops:?}");
+}
+
+/// A ring turned from a rectangle on YZ about Z: each side of the rectangle makes one round face.
+fn ring() -> Document {
+    let doc = Document {
+        features: serde_json::from_value(serde_json::json!([
+            {
+                "id": 1, "name": "Sketch1", "type": "sketch", "plane": {"name": "YZ", "type": "origin"},
+                "sketch": {
+                    "points": [
+                        {"fixed": true, "id": "origin", "pos": [0., 0.]},
+                        {"fixed": false, "id": "p1", "pos": [10., 0.]},
+                        {"fixed": false, "id": "p2", "pos": [20., 0.]},
+                        {"fixed": false, "id": "p3", "pos": [20., 5.]},
+                        {"fixed": false, "id": "p4", "pos": [10., 5.]}
+                    ],
+                    "curves": [
+                        {"a": 1, "b": 2, "construction": false, "id": "l1", "type": "line"},
+                        {"a": 2, "b": 3, "construction": false, "id": "l2", "type": "line"},
+                        {"a": 3, "b": 4, "construction": false, "id": "l3", "type": "line"},
+                        {"a": 4, "b": 1, "construction": false, "id": "l4", "type": "line"}
+                    ],
+                    "constraints": [],
+                    "counters": {"l": 4, "p": 4}
+                }
+            },
+            {
+                "id": 2, "name": "Revolve1", "type": "revolve", "body_names": ["Ring"], "angle": "360 deg",
+                "axis": {"axis": "Z", "type": "world"}, "convention": "sketch_normal",
+                "operation": "new_body", "profiles": {"type": "all"}, "sketch": 1
+            }
+        ]))
+        .unwrap(),
+        ..Document::default()
+    };
+    crate::format::read(&doc.to_json()).unwrap()
+}
+
+#[test]
+fn numbered_edge_projection_recovers_the_edge_between_whole_faces() {
+    // 0.30.1 split each round face of a revolve into numbered pieces; the edge between two of
+    // them is now the edge between the two whole faces, at the same place.
+    let doc = ring();
+    let mut model = crate::Model::new();
+    model.evaluate(&doc);
+    let state = model.state();
+    let at = Vec3::new(0., -20., 5.);
+    let source = LinkSource::Edge { body: "Ring".into(), at };
+    let resolved = crate::project::resolve(&doc, &BTreeMap::new(), &state, &Plane::XY, LinkKind::Project, &source).unwrap();
+    let mut sketch = Sketch::default();
+    let link = sketch.add_link(LinkKind::Project, source, &resolved.geom).unwrap();
+    let numbered = "F2:side:l2#2|F2:side:l3#2";
+    sketch.links[0].edge_name = Some(numbered.into());
+    let curves = sketch.link_curves(&link).len();
+    let saved = sketch.clone();
+
+    let warnings = crate::project::refresh_links(&doc, &BTreeMap::new(), &state, &Plane::XY, &mut sketch).unwrap();
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert!(!sketch.links[0].lost);
+    assert_eq!(sketch.links[0].edge_name.as_deref(), Some(numbered));
+    assert_eq!(sketch.link_curves(&link).len(), curves);
+
+    // Edges picked by fillets, holes and joints keep the name as picked.
+    let body = state.body("Ring").unwrap();
+    assert!(crate::naming::locate_edge(body, numbered, at).is_err(), "ordinary lookup stays strict");
+
+    // The saved point on another edge (the inner rim): not this edge, so it asks to reselect.
+    let mut elsewhere = saved;
+    elsewhere.links[0].source = LinkSource::Edge { body: "Ring".into(), at: Vec3::new(0., -10., 5.) };
+    let error = crate::project::refresh_links(&doc, &BTreeMap::new(), &state, &Plane::XY, &mut elsewhere).unwrap_err();
+    assert!(matches!(&error, crate::DocError::Reselect { reference, .. } if reference == numbered), "{error}");
 }

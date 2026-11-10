@@ -512,15 +512,127 @@ fn shaft_on_collar() -> Session {
 }
 
 /// Rig 602, ladder 06/004: a thread on a shaft ran a pitch past both ends of its face, into the
-/// collar below as into the air above. At a shoulder it stops with its widest part clear of it:
-/// the collar keeps its whole π 8² 10, and the groove takes (25 - w)/P turns, w its half width
-/// (a square stop inside material takes exactly its length over P, the section being symmetric).
+/// collar below as into the air above. It runs down to the shoulder and is trimmed at its plane
+/// (#11610): the collar keeps its whole π 8² 10, and the groove takes 25/P turns, each slice of
+/// the shaft along the axis losing the same.
 #[test]
-fn a_thread_stops_clear_of_a_shoulder() {
+fn a_thread_runs_down_to_a_shoulder_and_leaves_it_whole() {
     let mut s = shaft_on_collar();
     run(&mut s, "solid.thread", json!({"face": [5, 0, 25], "designation": "M10", "modeled": true}));
+    let want = PI * 64.0 * 10.0 + PI * 25.0 * 25.0 - 25.0 / 1.5 * ext_turn(10.0, 1.5, 5.0);
+    let got = exact_volume(&s, "Part");
+    assert!((got - want).abs() < want * 2e-4, "{got} vs {want}");
+}
+
+/// The volume of a body's part between two heights along Z, within a quadrant of X and Y when
+/// given (their signs).
+fn volume_between(s: &Session, b: &str, (z0, z1): (f64, f64), quadrant: Option<(bool, bool)>) -> f64 {
+    let st = s.model.state();
+    let mut part = st.body(b).unwrap().body.clone();
+    let on = |origin: Vec3, normal: Vec3| solidcore_record::Plane::from_normal(origin, normal.normalized().unwrap()).unwrap();
+    let z = Vec3::new(0.0, 0.0, 1.0);
+    let mut cuts = vec![(on(Vec3::new(0.0, 0.0, z0), z), true), (on(Vec3::new(0.0, 0.0, z1), z), false)];
+    if let Some((x, y)) = quadrant {
+        cuts.push((on(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0)), x));
+        cuts.push((on(Vec3::ZERO, Vec3::new(0.0, 1.0, 0.0)), y));
+    }
+    for (plane, positive) in cuts {
+        part = solidcraft_kernel::half_space(&part, &plane, positive).unwrap().0.unwrap();
+    }
+    solidcraft_kernel::measure(&part).unwrap().volume
+}
+
+/// #11610: a boss standing on a flat plate. The groove reaches the plate at every angle of the
+/// last turn, wherever the helix lands on it (each height a different gap under a pitch): a thin
+/// slice on the plate has lost as much as any slice of the thread, a pitch's slice as much in each
+/// quadrant (the uncut block of the old stop sat in some of them), and the plate is whole. Before,
+/// the last pitch kept up to a whole turn's groove uncut.
+#[test]
+fn a_thread_reaches_a_flat_shoulder_at_every_angle_and_leaves_it_whole() {
+    let (p, t, turn) = (1.5, 6.0, ext_turn(10.0, 1.5, 5.0));
+    let per_mm = PI * 25.0 - turn / p;
+    for (h, extra) in [
+        (16.0, json!({})),
+        (16.45, json!({})),
+        (16.6, json!({})),
+        (16.9, json!({})),
+        (17.4, json!({})),
+        (16.0, json!({"hand": "left"})),
+        (16.6, json!({"tip": "both"})),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"corner": [-20, -20, 0], "length": 40, "width": 40, "height": t, "body_name": "Part"}));
+        run(&mut s, "solid.cylinder", json!({"base": [0, 0, t], "radius": 5, "height": h, "operation": "join", "targets": ["Part"]}));
+        let mut ask = json!({"face": [5, 0, t + h / 2.0], "designation": "M10", "modeled": true});
+        if let (Some(a), Value::Object(e)) = (ask.as_object_mut(), &extra) {
+            a.extend(e.clone());
+        }
+        run(&mut s, "solid.thread", ask);
+        let name = format!("h {h} {extra}");
+        assert!(s.model.state().body("Part").unwrap().body.validity().is_empty(), "{name}");
+        let plate = volume_between(&s, "Part", (-1.0, t), None);
+        assert!((plate - 1600.0 * t).abs() < 1e-6 * 1600.0 * t, "{name}: the plate lost {} mm³", 1600.0 * t - plate);
+        let thin = volume_between(&s, "Part", (t, t + 0.1 * p), None);
+        let want = per_mm * 0.1 * p;
+        assert!((thin - want).abs() < want * 2e-3, "{name}: the slice on the plate is {thin}, not {want}");
+        for quadrant in [(true, true), (true, false), (false, true), (false, false)] {
+            let got = volume_between(&s, "Part", (t, t + p), Some(quadrant));
+            let want = per_mm * p / 4.0;
+            assert!((got - want).abs() < want * 2e-3, "{name}: {quadrant:?} of the last pitch is {got}, not {want}");
+        }
+    }
+}
+
+/// #11610: where a shoulder is not flat. A fillet or a chamfer at the shaft's base stays whole, the
+/// groove trimmed where the face ends above it. A shoulder that rises back along the face (a
+/// slanted plate, a boss on a round body) would be cut by a groove running to the plane of the
+/// face's lowest point, so the groove keeps its square stop there. Nothing here fails.
+#[test]
+fn a_thread_at_a_shoulder_that_is_not_flat_still_builds() {
+    let (p, turn) = (1.5, ext_turn(10.0, 1.5, 5.0));
+    let plate = |s: &mut Session| {
+        run(s, "solid.box", json!({"corner": [-20, -20, 0], "length": 40, "width": 40, "height": 6, "body_name": "Part"}));
+        run(s, "solid.cylinder", json!({"base": [0, 0, 6], "radius": 5, "height": 16, "operation": "join", "targets": ["Part"]}));
+    };
+    for finish in [("solid.fillet", json!({"edges": [[5, 0, 6]], "radius": 1})), ("solid.chamfer", json!({"edges": [[5, 0, 6]], "distance": 1}))] {
+        let mut s = Session::default();
+        plate(&mut s);
+        run(&mut s, finish.0, finish.1);
+        let (base, shaft) = (volume_between(&s, "Part", (-1.0, 7.0), None), exact_volume(&s, "Part"));
+        run(&mut s, "solid.thread", json!({"face": [5, 0, 15], "designation": "M10", "modeled": true}));
+        assert!(s.model.state().body("Part").unwrap().body.validity().is_empty(), "{}", finish.0);
+        let left = volume_between(&s, "Part", (-1.0, 7.0), None);
+        assert!((left - base).abs() < 1e-6 * base, "{}: the base lost {} mm³", finish.0, base - left);
+        let (got, want) = (exact_volume(&s, "Part"), shaft - 15.0 / p * turn);
+        assert!((got - want).abs() < want * 2e-4, "{}: {got} vs {want}", finish.0);
+    }
+    let rising = [
+        vec![("solid.cylinder", json!({"base": [0, 0, 0], "axis": [0.2, 0, 1], "radius": 20, "height": 6, "body_name": "Part"}))],
+        vec![("solid.cylinder", json!({"base": [0, -20, 0], "axis": [0, 1, 0], "radius": 10, "height": 40, "body_name": "Part"}))],
+    ];
+    for cmds in rising {
+        let mut s = Session::default();
+        for (c, ask) in cmds {
+            run(&mut s, c, ask);
+        }
+        run(&mut s, "solid.cylinder", json!({"base": [0, 0, 2], "radius": 5, "height": 26, "operation": "join", "targets": ["Part"]}));
+        let before = exact_volume(&s, "Part");
+        run(&mut s, "solid.thread", json!({"face": [5, 0, 20], "designation": "M10", "modeled": true}));
+        assert!(s.model.state().body("Part").unwrap().body.validity().is_empty());
+        assert!(exact_volume(&s, "Part") < before);
+    }
+}
+
+/// #11610: the trim is for a thread that runs the whole face. A length stopping short of the
+/// shoulder still stops there, however near.
+#[test]
+fn a_thread_of_some_length_stops_where_it_is_told_short_of_a_shoulder() {
     let (p, w) = (1.5, ext_half_width(10.0, 1.5));
-    let want = PI * 64.0 * 10.0 + PI * 25.0 * 25.0 - (25.0 - w) / p * ext_turn(10.0, p, 5.0);
+    let mut s = shaft_on_collar();
+    let before = exact_volume(&s, "Part");
+    run(&mut s, "solid.thread", json!({"face": [5, 0, 25], "designation": "M10", "length": 24.6, "modeled": true}));
+    // Its end is within half a pitch of the shoulder: the stop stays clear of it.
+    let want = before - (24.6f64).min(25.0 - w) / p * ext_turn(10.0, p, 5.0);
     let got = exact_volume(&s, "Part");
     assert!((got - want).abs() < want * 2e-4, "{got} vs {want}");
 }
@@ -528,7 +640,7 @@ fn a_thread_stops_clear_of_a_shoulder() {
 /// A d10 boss (z t..t+16) on a plate t thick, threaded M10: the plate's top is the shoulder.
 /// The groove, with or without its runout, stays on the boss: the plate keeps all of itself
 /// (what lies below z = t after the boss is cut away), and without a runout the boss loses
-/// (16 - w)/P turns, as at a collar. The owner's bug: built as the app builds it (a rounded
+/// 16/P turns, as at a collar. The owner's bug: built as the app builds it (a rounded
 /// plate, a circle sketched on its top face and extruded with Join), a plate thinner than 1.5 P
 /// had no material where the free-end test looked (1 to 1.5 pitches past the face), so its top
 /// was taken for a free end and the overrun cut a pitch into it.
@@ -562,10 +674,10 @@ fn a_thread_on_a_boss_never_cuts_into_the_plate_below() {
         exact_volume(&s, "Body1")
     };
     let plate = |t: f64| (40.0 * 40.0 - (4.0 - PI) * 25.0) * t;
-    let (p, w) = (1.5, ext_half_width(10.0, 1.5));
+    let p = 1.5;
     for t in [6.0, 1.0] {
         let s = boss(t, json!({}));
-        let want = plate(t) + PI * 25.0 * 16.0 - (16.0 - w) / p * ext_turn(10.0, p, 5.0);
+        let want = plate(t) + PI * 25.0 * 16.0 - 16.0 / p * ext_turn(10.0, p, 5.0);
         let got = exact_volume(&s, "Body1");
         assert!((got - want).abs() < want * 2e-4, "plate {t}: {got} vs {want}");
         let left = plate_left(s, t);
@@ -886,7 +998,7 @@ fn m10_stock(z0: f64, z1: f64, rmax: impl Fn(f64) -> f64) -> f64 {
 }
 
 /// ISO 4753's chamfered end on both free ends of an M10 stud: a 45° cone down to the external
-/// minor diameter d3 (ISO 724), cut after the groove; the volume as the stock's chamfered section
+/// minor diameter d3 (ISO 724); the volume as the stock's chamfered section
 /// with the thread's material fraction (as ladder 06/006). d3 lies below the modelled root, so
 /// each end face is the whole disk of d3, with the cone a whole ring around it, not pinched
 /// where the groove reaches the end.
@@ -915,10 +1027,9 @@ fn a_chamfered_tip_tapers_the_last_teeth() {
         "solid.thread",
         json!({"face": [5, 0, 25], "designation": "M10", "tip": "both", "chamfer_angle": "30 deg", "chamfer_depth": 0.5, "modeled": true}),
     );
-    let w = ext_half_width(10.0, 1.5);
     let rf = 4.5;
     let slope = 30f64.to_radians().tan();
-    let want = PI * 64.0 * 10.0 + PI * 25.0 * w + m10_stock(10.0 + w, 35.0, |z| 5f64.min(rf + (35.0 - z) * slope));
+    let want = PI * 64.0 * 10.0 + m10_stock(10.0, 35.0, |z| 5f64.min(rf + (35.0 - z) * slope));
     let got = exact_volume(&s, "Part");
     assert!((got - want).abs() < want * 1e-4, "{got} vs {want}");
     // Internal threads take a countersink instead.
@@ -1004,7 +1115,8 @@ fn a_runout_fades_the_groove_out_before_the_shoulder() {
     let (p, w) = (1.5, ext_half_width(10.0, 1.5));
     let root = 5.0 - 5.0 * p * 3f64.sqrt() / 16.0;
     let h = 5.0 - root + 0.05 * p;
-    let turns = (35.0 - 10.0 - 2.0 * w) / p;
+    // Trimmed at the bottom collar's plane, stopped clear of the top one for its runout.
+    let turns = (35.0 - 10.0 - w) / p;
     for (ease, r_out) in [(json!("short"), 1.25), (json!("standard"), 2.5), (json!("1 mm"), 1.0 / 1.5)] {
         let mut s = shaft_on_collar();
         run(&mut s, "solid.cylinder", json!({"base": [0, 0, 35], "radius": 8, "height": 10, "operation": "join", "targets": ["Part"]}));
@@ -1028,48 +1140,112 @@ fn a_runout_fades_the_groove_out_before_the_shoulder() {
     assert!(e.err().map(|e| e.to_string()).unwrap_or_default().contains("`ease_in` is gone"));
 }
 
-/// A modelled M10 thread's flanks are several B-spline faces per turn (spans of one sweep); where
-/// two of them meet with one tangent plane and one curvature the join is left out of the shaded
-/// view (still pickable and in the wireframe), so the flank reads as one surface. The normal angle across each join is measured
-/// independently (`seam_diagnostics`, projecting stations onto both surfaces).
 #[test]
-fn a_modelled_threads_flank_joins_are_not_drawn() {
+fn a_saved_segmented_thread_flank_pick_does_not_select_a_different_face() {
     use solidcore_record::brep::Surface;
-    let mut s = Session::default();
-    run(&mut s, "solid.cylinder", json!({"radius": 5.0, "height": 12, "body_name": "Shaft"}));
-    run(&mut s, "solid.thread", json!({"face": [5.0, 0, 6.0], "designation": "M10x1.5", "modeled": true}));
-    let st = s.model.state();
-    let body = &st.body("Shaft").unwrap().body;
-    let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
-    let record = body.record();
-    let free_form = |f: u32| {
-        record
-            .faces
-            .get(f as usize)
-            .is_some_and(|f| f.nurbs.is_none() && matches!(f.surface, Surface::Spline { .. } | Surface::RationalSpline { .. }))
-    };
-    let tolerances = solidcraft_kernel::ContinuityTolerances { gap_mm: 1e-3, angle_deg: 0.5, curvature_per_mm: 1.0, ..Default::default() };
-    let report = solidcraft_kernel::seam_diagnostics(body, &[], 33, tolerances).unwrap();
-    let mut flank_joins = 0;
-    let mut worst: f64 = 0.0;
-    for seam in &report.seams {
-        let e = seam.edge;
-        let uses = &record.edges[e].uses;
-        if uses.len() != 2 || !uses.iter().all(|u| free_form(u.face)) {
-            continue;
+
+    // Captured from the segmented build before continuous_flanks existed, including the old
+    // groove-before-chamfer construction. Picks near both chamfered ends exercise its order.
+    let cases = [
+        ("none", vec![("F2:face:12", Vec3::new(4.7828951862188696, -0.0057530612776590315, 1.6606274291037717))]),
+        (
+            "both",
+            vec![
+                ("F2:face:41", Vec3::new(0.09242260275006192, 4.273234209721337, 0.23586874398281996)),
+                ("F2:face:7", Vec3::new(0.9625365002593353, -4.6849682261915895, 6.262443362555148)),
+                ("F2:face:51", Vec3::new(-0.0924226027501412, 4.273234209721336, 11.764131256017183)),
+            ],
+        ),
+    ];
+    for (tip, picks) in cases {
+        let mut thread = json!({
+            "designation": "M10x1.5", "face": [5, 0, 6], "face_names": ["F1:side"],
+            "id": 2, "modeled": true, "name": "Thread1", "suppressed": false, "type": "thread"
+        });
+        if tip != "none" {
+            thread["tip"] = json!(tip);
         }
-        let angle = seam.normal_angle_deg.value;
-        if angle < 0.5 {
-            flank_joins += 1;
-            worst = worst.max(angle);
-            assert!(mesh.smooth_edges[e] && !mesh.shaded_edge_visible(e), "join {e} at {angle} deg is drawn");
-            assert!(mesh.edge_visible(e) && mesh.edge_pickable(e), "join {e} stays in the wireframe and pickable");
-        } else {
-            assert!(mesh.shaded_edge_visible(e), "crease {e} at {angle} deg is hidden");
+        let mut saved: Value = serde_json::from_str(&solidcraft_doc::Document::default().to_json()).unwrap();
+        saved["features"] = json!([
+            {
+                "axis": [0, 0, 1], "base": [0, 0, 0], "body_names": ["Shaft"], "height": "12",
+                "id": 1, "name": "Cylinder1", "operation": "new_body", "param_names": ["d1", "d2"],
+                "radius": "5", "suppressed": false, "type": "cylinder"
+            }, thread
+        ]);
+        saved["next_id"] = json!(3);
+        saved["params"] = json!([]);
+        let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved.to_string()).unwrap());
+        let check_picks = |session: &Session| {
+            let rebuilt = session.model.state();
+            let shaft = rebuilt.body("Shaft").unwrap();
+            for (name, pick) in &picks {
+                let (face, point) = solidcraft_doc::naming::face_on_body(shaft, name, *pick).unwrap();
+                assert!(point.dist(*pick) < 0.01, "{tip}: {name} must stay on its original flank: {point:?}");
+                assert!(
+                    matches!(shaft.body.record().faces[face].surface, Surface::Spline { .. } | Surface::RationalSpline { .. }),
+                    "{tip}: {name} must not select a cylinder"
+                );
+            }
+        };
+        check_picks(&reopened);
+        run(
+            &mut reopened,
+            "timeline.redefine",
+            json!({
+                "feature": 2, "command": "solid.thread",
+                "params": {"face": [5, 0, 6], "designation": "M10x1.5", "modeled": true, "tip": tip}
+            }),
+        );
+        assert!(matches!(reopened.doc.feature(2).unwrap().kind, solidcraft_doc::FeatureKind::Thread { continuous_flanks: false, .. }));
+        check_picks(&reopened);
+        let saved_again = solidcraft_doc::Document::from_json(&reopened.doc.to_json()).unwrap();
+        assert!(matches!(saved_again.feature(2).unwrap().kind, solidcraft_doc::FeatureKind::Thread { continuous_flanks: false, .. }));
+    }
+}
+
+/// A modelled M10 thread keeps each flank as one B-spline face across all turns. Cylinder seams
+/// must not split either flank into separate faces for selection, meshing or STEP export.
+#[test]
+fn a_modelled_thread_keeps_each_flank_as_one_face() {
+    use solidcore_record::brep::Surface;
+    // Include a partial final turn and a chamfered stock: neither may fragment the flanks.
+    for (height, tip) in [(12.0, "none"), (12.345, "none"), (12.345, "both")] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 5.0, "height": height, "body_name": "Shaft"}));
+        run(&mut s, "solid.thread", json!({"face": [5.0, 0, height / 2.0], "designation": "M10x1.5", "modeled": true, "tip": tip}));
+        let st = s.model.state();
+        let shaft = st.body("Shaft").unwrap();
+        let body = &shaft.body;
+        let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
+        let record = body.record();
+        let flanks: Vec<usize> = record
+            .faces
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.nurbs.is_none() && matches!(f.surface, Surface::Spline { .. } | Surface::RationalSpline { .. }))
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(flanks.len(), 2, "one selectable face per flank, independent of the turn count");
+        let names = solidcraft_doc::naming::face_names(shaft);
+        let picks: Vec<_> = flanks
+            .iter()
+            .map(|&flank| {
+                assert!(mesh.tri_face.iter().any(|f| *f as usize == flank), "flank {flank} must tessellate");
+                (names[flank].clone(), solidcraft_doc::naming::face_spot(shaft, flank).unwrap().point)
+            })
+            .collect();
+        // The named picks downstream face commands store must still find the same kind of face
+        // after the history is serialized and rebuilt, including the reordered chamfer cuts.
+        let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+        let rebuilt = reopened.model.state();
+        let shaft = rebuilt.body("Shaft").unwrap();
+        for (name, point) in picks {
+            let (face, found) = solidcraft_doc::naming::face_on_body(shaft, &name, point).unwrap();
+            assert!(found.dist(point) < 1e-6, "the saved flank pick must remain on its named face: {name}");
+            assert!(matches!(shaft.body.record().faces[face].surface, Surface::Spline { .. } | Surface::RationalSpline { .. }));
         }
     }
-    // SMLib's flank pieces meet with normals about 1.5e-6 degrees apart (measured).
-    assert!(flank_joins >= 32 && worst < 1e-4, "{flank_joins} flank joins, the worst {worst} deg apart");
 }
 
 /// A pipe thread's profile for [`pipe_material`]: (flank half angle, thread height h, flat at crest
@@ -1393,4 +1569,83 @@ fn editing_a_saved_automatic_thread_keeps_its_old_size() {
     assert_eq!(designations(&s), ["M14"]);
     run(&mut s, "timeline.redefine", json!({"feature": made["feature"], "command": "solid.thread", "params": {"face": [6, 0, 10], "hand": "left"}}));
     assert_eq!(designations(&s), ["M14"]);
+}
+
+/// #11367: a modelled thread on one hole must not stop the next hole's wall from being found
+/// as a cylinder to thread. The cut the modelled thread makes must not take the body's other
+/// cylinders with it: the second hole still takes a thread, modelled or cosmetic.
+#[test]
+fn a_modelled_thread_leaves_the_next_hole_a_cylinder_to_thread() {
+    for gap in [40.0, 20.0, 12.0, 8.0] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 80, "width": 80, "height": 20, "body_name": "Blk"}));
+        run(&mut s, "solid.hole", json!({"position": [20, 40, 20], "diameter": 5, "direction": [0, 0, -1]}));
+        run(&mut s, "solid.hole", json!({"position": [20.0 + gap, 40.0, 20.0], "diameter": 5, "direction": [0, 0, -1]}));
+        // The first hole takes a modelled M6 thread.
+        let t1 = s.execute("solid.thread", &json!({"face": [22.5, 40.0, 10.0], "designation": "M6", "modeled": true}));
+        assert!(t1.is_ok(), "gap {gap}: the first hole takes its thread: {t1:?}");
+        // The second hole's wall is still a cylinder: it takes a cosmetic thread...
+        let t2 = s.execute("solid.thread", &json!({"face": [22.5 + gap, 40.0, 10.0], "designation": "M6"}));
+        assert!(t2.is_ok(), "gap {gap}: the second hole still has a cylinder to thread: {t2:?}");
+        // ...and a modelled one.
+        let t3 = s.execute("solid.thread", &json!({"face": [22.5 + gap, 40.0, 10.0], "designation": "M6", "modeled": true}));
+        assert!(t3.is_ok(), "gap {gap}: the second hole takes a modelled thread: {t3:?}");
+    }
+}
+
+/// #13505: a tapped hole drilled across two slots has its wall in three pieces (z 30..40, 15..25
+/// and 5..10). The thread runs along every piece the hole reaches, cosmetic or modelled, and a
+/// thread depth runs on through the pieces from the first one's start.
+#[test]
+fn a_tapped_hole_across_slots_is_threaded_along_every_piece_of_its_wall() {
+    let slotted = || {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 30, "width": 30, "height": 40, "body_name": "Part"}));
+        for z in [25, 10] {
+            run(&mut s, "solid.box", json!({"corner": [-1, -1, z], "length": 32, "width": 21, "height": 5, "operation": "cut", "targets": ["Part"]}));
+        }
+        s
+    };
+    let hole = |s: &mut Session, extra: Value| {
+        let mut ask = json!({"position": [15, 10, 40], "direction": [0, 0, -1], "thread": "M4", "depth": 35});
+        ask.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        run(s, "solid.hole", ask);
+    };
+    let spans = |s: &Session| {
+        let mut v: Vec<(f64, f64)> = s
+            .model
+            .state()
+            .threads
+            .iter()
+            .map(|t| {
+                let (a, b) = ((t.axis_point + t.axis * t.start).z, (t.axis_point + t.axis * t.end).z);
+                (a.min(b), a.max(b))
+            })
+            .collect();
+        v.sort_by(|a, b| b.0.total_cmp(&a.0));
+        v
+    };
+    let near = |got: Vec<(f64, f64)>, want: &[(f64, f64)]| {
+        assert_eq!(got.len(), want.len(), "{got:?} vs {want:?}");
+        for (g, w) in got.iter().zip(want) {
+            assert!((g.0 - w.0).abs() < 1e-6 && (g.1 - w.1).abs() < 1e-6, "{got:?} vs {want:?}");
+        }
+    };
+    let mut s = slotted();
+    hole(&mut s, json!({}));
+    near(spans(&s), &[(30.0, 40.0), (15.0, 25.0), (5.0, 10.0)]);
+    // 22 mm from the entry: on through the first slot, stopping in the second piece.
+    let mut s = slotted();
+    hole(&mut s, json!({"thread_depth": 22}));
+    near(spans(&s), &[(30.0, 40.0), (18.0, 25.0)]);
+    // Modelled, every piece of the wall is grooved: each loses material the cosmetic one keeps.
+    let mut s = slotted();
+    hole(&mut s, json!({"modeled": true}));
+    assert!(s.model.state().body("Part").unwrap().body.validity().is_empty());
+    let mut plain = slotted();
+    hole(&mut plain, json!({}));
+    for (z0, z1) in [(30.0, 40.0), (15.0, 25.0), (5.0, 10.0)] {
+        let (cut, drilled) = (volume_between(&s, "Part", (z0, z1), None), volume_between(&plain, "Part", (z0, z1), None));
+        assert!(cut < drilled - 1.0, "z {z0}..{z1}: {cut} vs {drilled}");
+    }
 }

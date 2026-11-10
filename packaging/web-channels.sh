@@ -5,6 +5,10 @@
 #   <site>/app-rc/    release candidate: the web build of the newest published v*-rc.* pre-release
 #   <site>/app-edge/  edge: <edge-build>, built from main in this run
 #
+# It also adds app-transfer.html and app-transfer.js at the top of the site (packaging/web/transfer):
+# how designs saved at /app/ get to https://app.solidcraft.io/, in the browser's storage for this
+# address. It stays while people may still have designs here.
+#
 # Stable and the release candidate are not rebuilt: the release workflow already attaches
 # solidcraft-web-<version>.zip (packaging/web/package.sh, built by that tag's own workflow), and
 # a deploy takes that zip as it is. Rebuilding old tags here would need each tag's own build steps
@@ -19,6 +23,9 @@ set -euo pipefail
 site="${1:?site directory required}"
 edge="${2:?edge build directory required}"
 repo="${GITHUB_REPOSITORY:?}"
+
+# Outside /app/, so the app's service worker has no part in it.
+cp "$(dirname "${BASH_SOURCE[0]}")"/web/transfer/app-transfer.{html,js} "$site"/
 
 # Version order, newest last: 0.31.0-rc.2 sorts after 0.31.0-rc.1 and before 0.31.0.
 version_sort() { sed 's/-/~/' | sort -V | sed 's/~/-/'; }

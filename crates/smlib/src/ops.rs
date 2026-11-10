@@ -58,6 +58,30 @@ impl Blend {
     }
 }
 
+/// How two constant rounds of one radius turn round a sharp, straight, convex side edge square to
+/// both on a plane (the rounds along a boss's base, at its upright edges): the turn of
+/// [`Brep::blend_dropping`]'s rounds ([`Blend::Round`] only).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Turn {
+    /// The rounds run on to where they cross and meet in a mitre, the plane section of the two.
+    #[default]
+    Mitre,
+    /// The rounds end on their sections at the side edge, and the corner's face is that section
+    /// revolved about the side edge, an exact torus tangent to both rounds. A corner where this
+    /// is not built is [`Error::TurnRefused`].
+    Swept,
+}
+
+impl Turn {
+    /// The turn's name in a trace ([`crate::trace`]).
+    pub fn word(self) -> &'static str {
+        match self {
+            Turn::Mitre => "mitre",
+            Turn::Swept => "swept",
+        }
+    }
+}
+
 /// The second side of [`Brep::chamfer_sides`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ChamferSecond {
@@ -172,18 +196,19 @@ impl Brep {
 
     /// [`Brep::blend`], with whether each point picked an edge that a larger round, overflowing
     /// its faces, removed whole: that edge is gone and not rounded (SMLib rounds the edges whose
-    /// blends overflow first, then what is left of the others).
-    pub fn blend_dropping(&self, kind: Blend, edges: &[[f64; 3]], sizes: &[f64], tolerance: f64) -> Result<(Brep, Vec<bool>)> {
+    /// blends overflow first, then what is left of the others). Two rounds turn at a side edge as
+    /// `turn` says; [`Turn::Swept`] is for [`Blend::Round`] only ([`Error::Argument`] otherwise).
+    pub fn blend_dropping(&self, kind: Blend, turn: Turn, edges: &[[f64; 3]], sizes: &[f64], tolerance: f64) -> Result<(Brep, Vec<bool>)> {
         if edges.len() > MAX_POINTS || edges.is_empty() || sizes.len() != edges.len() {
             return Err(Error::Argument);
         }
-        let r = core::blend::blend_dropping(self.core(), kind, edges, sizes, tolerance).map(|(b, d)| (Brep::made_core(b), d));
+        let r = core::blend::blend_dropping(self.core(), kind, turn, edges, sizes, tolerance).map(|(b, d)| (Brep::made_core(b), d));
         trace::call(
             "blend_dropping",
             &[self],
             &r,
             |(b, _)| vec![b.id],
-            || json!({"kind": kind.word(), "edges": trace::picks(self, PickKind::Edge, edges, tolerance), "sizes": sizes}),
+            || json!({"kind": kind.word(), "turn": turn.word(), "edges": trace::picks(self, PickKind::Edge, edges, tolerance), "sizes": sizes}),
         );
         r
     }

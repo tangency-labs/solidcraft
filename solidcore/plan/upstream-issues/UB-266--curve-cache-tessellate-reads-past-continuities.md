@@ -1,0 +1,8 @@
+#### UB-266. `SmCurveCache::Tessellate` reads past `m_pContinuities` for knots closer than `SM_EFF_ZERO`
+- **Severity:** Crash / undefined behaviour
+- **Area:** Curves
+- **Location:** `source/SMLib/src/SmCurveCache.cpp:1659`, `:1660`, `:1793`, `:1800`, `SmCurveCache::Tessellate` (continuities filled at `:1508`).
+- **What happens:** the continuities come from `CalculateContinuities`, one per unique knot from `GetKnots`, which treats knots within `SM_EFF_ZERO` as one. The Bezier spans come from `sm_CreateBezierSegmentBlock`, which splits at every distinct knot value. When two interior knots are distinct but less than `SM_EFF_ZERO` apart, there is one more span than continuities, and `(*m_pContinuities)[i + 1]` for the last span reads past the array's size (`SmTArray::operator[]` checks the index only under `SM_DEBUG_CODE`).
+- **Trigger:** a B-spline curve whose NURB has two interior knots 0 < d < `SM_EFF_ZERO` apart that the copy constructor's `sm_FixupKnotVector` has not merged, e.g. one whose knots were written after construction or computed in place, tessellated through `SmCurveCache` (`SmCurve::Length`, `MakeCurveCache`). Curves built by the constructors are fixed up (merged below `SM_EFF_ZERO * (1 + max |end knot|)`) and are not affected.
+- **How found:** code reading, while adding raw-knot `curve.curve_p5` cases; the Rust port returns `InvalidInput` ("continuity index out of range") for knots `[0 0 0 0 .3 .5 .5+3e-13 .7 1 1 1 1]`, where the C++ completes on the out-of-range read.
+- **Confirmed:** by code reading and the Rust error; the C++ build does not fault (the read stays inside the array's allocation).

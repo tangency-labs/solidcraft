@@ -14,6 +14,13 @@ pub struct Saving {
     done: std::sync::mpsc::Receiver<(Session, Result<Value, String>)>,
 }
 
+impl Saving {
+    /// The command writing: `file.save` or `file.save_as`.
+    pub(crate) fn command(&self) -> &'static str {
+        self.command
+    }
+}
+
 /// Run `file.save` or `file.save_as` with `params`. On the desktop it runs on a worker and is
 /// taken up by [`tick`] (true: it is under way); in the browser, or when no thread can start, it
 /// runs here and is finished on return (false).
@@ -21,7 +28,7 @@ pub fn start(app: &mut SolveApp, command: &'static str, params: Value) -> bool {
     // An assembly reading its links for a part edited in place takes them up when the read is
     // done: a save before then would record a design that is about to change as saved.
     if let Some(name) = crate::edit_in_place::refreshing_assembly(app) {
-        app.set_status(crate::i18n::format("ui.edit_in_place_save_waits", &[("name", &name)]), true);
+        app.set_status(solidcraft_ui_text::format("ui.edit_in_place_save_waits", &[("name", &name)]), true);
         return false;
     }
     #[cfg(not(target_arch = "wasm32"))]
@@ -67,6 +74,11 @@ pub fn tick(app: &mut SolveApp, wait: bool) {
         None => Err(format!("{command}: the save stopped")),
     };
     app.finish_command(command, &r);
+    // Saving a newer SolidCraft's file keeps what this version can't read, unless it was changed
+    // around: then the save says what went.
+    if let Some(first) = r.as_ref().ok().and_then(|v| v["warnings"].as_array()).and_then(|w| w.first()).and_then(serde_json::Value::as_str) {
+        app.set_status(first, true);
+    }
     crate::documents::saved_for_close(app);
 }
 

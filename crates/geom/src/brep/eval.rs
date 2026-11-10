@@ -9,13 +9,13 @@
 //! Call on validated records. Evaluation of a well-formed record never panics: a point that
 //! cannot be had (a vanishing weight, a Newton step that does not converge) is `None`.
 use super::normal_section::normal_section;
-use super::pcurve::Error;
 use super::{Curve, Curve2, Frame, Surface};
 use crate::bspline::MAX_SPLINE_DEGREE;
 use crate::prelude::*;
 use crate::tess::partials::{Partials, tabulate, trig_derivative};
 use crate::tess::uv::{self, Domain};
-use crate::tess::{EvalCurve, EvalSurface, MAX_EVAL_KNOTS, MAX_EVAL_POINTS};
+use crate::tess::{EvalCurve, EvalSurface, MAX_EVAL_KNOTS, MAX_EVAL_POINTS, from_kernel, from_kernel3, to_kernel};
+use solidcore_ops::pcurve::Error;
 use solidcore_record::Vec3;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
@@ -97,10 +97,12 @@ impl SurfaceEval {
             Ok(SurfaceEval::Eval(e, dom))
         };
         match s {
-            Surface::Plane { origin, u_axis, v_axis } => eval(EvalSurface::Plane { origin: v3(*origin), du: v3(*u_axis), dv: v3(*v_axis) }),
+            Surface::Plane { origin, u_axis, v_axis } => {
+                eval(EvalSurface::Plane { origin: to_kernel(v3(*origin)), du: to_kernel(v3(*u_axis)), dv: to_kernel(v3(*v_axis)) })
+            }
             Surface::PlaneThrough { origin, u_point, v_point } => {
                 let o = v3(*origin);
-                eval(EvalSurface::Plane { origin: o, du: v3(*u_point) - o, dv: v3(*v_point) - o })
+                eval(EvalSurface::Plane { origin: to_kernel(o), du: to_kernel(v3(*u_point) - o), dv: to_kernel(v3(*v_point) - o) })
             }
             Surface::Cylinder { frame, radius } => Ok(SurfaceEval::Cylinder { axes: Axes::new(frame), radius: *radius }),
             Surface::Cone { frame, radius_at_origin, half_angle } => {
@@ -130,7 +132,7 @@ impl SurfaceEval {
                 let axis = v3(*axis).normalized().ok_or_else(|| Error::Invalid("revolution axis".into()))?;
                 // Column-major: matrix[column][row].
                 let transform = [0, 1, 2].map(|r| [matrix[0][r], matrix[1][r], matrix[2][r], matrix[3][r]]);
-                eval(EvalSurface::Revolved { profile, origin: v3(*origin), axis, transform, swap: !forward })
+                eval(EvalSurface::Revolved { profile, origin: to_kernel(v3(*origin)), axis: to_kernel(axis), transform, swap: !forward })
             }
         }
     }
@@ -154,7 +156,7 @@ impl SurfaceEval {
             return None;
         }
         Some(match self {
-            SurfaceEval::Eval(e, _) => return e.derivs(u, v),
+            SurfaceEval::Eval(e, _) => return e.derivs(u, v).map(from_kernel3),
             SurfaceEval::Cylinder { axes: a, radius } => {
                 let (r, dr) = a.radial(u);
                 (a.o + a.z * v + r * *radius, dr * *radius, a.z)
@@ -190,7 +192,7 @@ impl SurfaceEval {
             return None;
         }
         Some(match self {
-            SurfaceEval::Eval(e, _) => return e.second(u, v),
+            SurfaceEval::Eval(e, _) => return e.second(u, v).map(from_kernel3),
             SurfaceEval::Cylinder { axes: a, radius } => (a.radial(u).0 * -*radius, Vec3::ZERO, Vec3::ZERO),
             SurfaceEval::Cone { axes: a, radius_at_origin, slope } => {
                 let (r, dr) = a.radial(u);
@@ -224,7 +226,7 @@ impl SurfaceEval {
         let at_v = |k: usize| trig_derivative(v, k);
         let lift = |a: &Axes, i: usize, j: usize, x: Vec3| if i == 0 && j == 0 { a.o + x } else { x };
         match self {
-            SurfaceEval::Eval(e, _) => e.partials(u, v),
+            SurfaceEval::Eval(e, _) => e.partials(u, v).map(crate::tess::partials::from_kernel),
             SurfaceEval::Cylinder { axes: a, radius } => tabulate(|i, j| {
                 let height = match j {
                     0 if i == 0 => a.z * v,
@@ -266,7 +268,7 @@ impl SurfaceEval {
     /// ([`uv::project_with`]), which must serve this surface only.
     pub fn project_with(&self, starts: &uv::Starts, p: Vec3, near: Option<[f64; 2]>, accept: f64) -> Option<[f64; 2]> {
         let q = match self {
-            SurfaceEval::Eval(e, dom) => return uv::project_with(e, dom, starts, p, near, accept),
+            SurfaceEval::Eval(e, dom) => return uv::project_with(e, dom, starts, to_kernel(p), near, accept),
             SurfaceEval::Cylinder { axes, .. } => {
                 let [a, b, h] = axes.local(p);
                 [angle(a, b, near.map(|n| n[0])), h]
@@ -445,7 +447,7 @@ impl CurveEval {
                 (p, d, Vec3::ZERO)
             }
             CurveEval::Spline(c) => match c.derivatives(t, 2)?.as_slice() {
-                [p, d1, d2] => (*p, *d1, *d2),
+                [p, d1, d2] => (from_kernel(*p), from_kernel(*d1), from_kernel(*d2)),
                 _ => return None,
             },
             CurveEval::Intersection(x) => return x.jet(t),
@@ -476,7 +478,7 @@ impl CurveEval {
                 let (a, b) = (*p.get(i)?, *p.get(i + 1)?);
                 Some((a + (b - a) * (t - i as f64), b - a))
             }
-            CurveEval::Spline(c) => c.eval(t),
+            CurveEval::Spline(c) => c.eval(t).map(|(p, d)| (from_kernel(p), from_kernel(d))),
             _ => None,
         }
     }
@@ -614,7 +616,7 @@ pub fn face_flux(s: &SurfaceEval, v0: f64, loops: &[Vec<(&Curve2, bool)>], field
         let at = |k: f64| {
             let f = k / FLUX_PIECES as f64;
             // Exactly the ends at f = 0 and 1, whatever the interval's rounding.
-            super::pcurve::eval(c, if *forward { t0 * (1.0 - f) + t1 * f } else { t1 * (1.0 - f) + t0 * f })
+            solidcore_ops::pcurve::eval(c, if *forward { t0 * (1.0 - f) + t1 * f } else { t1 * (1.0 - f) + t0 * f })
         };
         for k in 0..FLUX_PIECES {
             let (a, m, z) = (at(k as f64)?, at(k as f64 + 0.5)?, at(k as f64 + 1.0)?);

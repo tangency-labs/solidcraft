@@ -1,0 +1,41 @@
+{
+  "area": "history",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-timeline-edit-unknown-field-refused",
+  "expected": {
+    "method": "a field the round does not have would change nothing: refused, naming it",
+    "outcome": "refused",
+    "refusal": "unknown field `radus`",
+    "source": "invariants",
+    "sources": [],
+    "what": "timeline.edit with a misspelt field"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 3 (timeline.edit): invalid parameters for `timeline.edit`: unknown field `radus`; FilletFeature has `body`, `edges`, `radius` (timeline.inspect shows them with their values)",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 3 (timeline.edit): invalid parameters for `timeline.edit`: unknown field `radus`; FilletFeature has `body`, `edges`, `radius` (timeline.inspect shows them with their values)",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [],
+  "what": "timeline.edit with a misspelt field",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 3 (timeline.edit): invalid parameters for `timeline.edit`: unknown field `radus`; FilletFeature has `body`, `edges`, `radius` (timeline.inspect shows them with their values)"
+  ]
+}

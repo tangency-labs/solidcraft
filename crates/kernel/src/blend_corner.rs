@@ -261,7 +261,7 @@ pub fn fillet_radii(body: &Body, edges: &[(Vec3, f64)]) -> Result<Body> {
         return Err(KernelError::Invalid("fillet size must be positive".into()));
     }
     let (points, radii): (Vec<Vec3>, Vec<f64>) = edges.iter().copied().unzip();
-    crate::blend_smlib::fillet_each(body, &points, &radii)
+    crate::blend_smlib::fillet_each(body, &points, &radii, crate::FilletTurn::Mitre)
 }
 
 #[cfg(test)]

@@ -98,8 +98,53 @@ fn a_trays_faces_have_readable_sheet_names_that_follow_its_size() {
     assert_eq!(again, names);
     let right = point(&s, &format!("sheet:Body1:F{sd}.1:top"));
     assert!((right.x - 399.0).abs() < 1e-3, "{right:?}");
-    let far = point(&s, &format!("sheet:Body1:F{fb}.1:rim.far"));
-    assert!((199.0 - 1e-3..=200.0 + 1e-3).contains(&far.y) && (0.0..=400.0).contains(&far.x) && (far.z - 30.0).abs() < 1e-3, "{far:?}");
+    let rim = format!("sheet:Body1:F{fb}.1:rim.far");
+    let far = point(&s, &rim);
+    let st = s.model.state();
+    let hit = solidcraft_doc::naming::locate_one(&st, None, &rim).unwrap();
+    on_planar_face(&st.bodies[hit.body].body, hit.face, far);
+    assert!((far.z - 30.0).abs() < 1e-9 && (199.0..=200.0).contains(&far.y), "the back flange's far rim: {far:?}");
+}
+
+/// `p` lies on face `face` of `body`, on its exact geometry: within rounding at the part's scale
+/// of the plane the face lies on, and inside the boundary its edges trace there (each a line,
+/// counted by crossings).
+fn on_planar_face(body: &solidcraft_kernel::Body, face: usize, p: Vec3) {
+    use solidcore_record::brep::{Curve, Loop};
+    let rounding = 1e-12 * body.size().max(1.0);
+    let surface = solidcraft_kernel::face_surface(body, face).unwrap();
+    let on = surface.nearest(p).unwrap();
+    assert!(on.dist(p) <= rounding, "{p:?} is {} off face {face}'s surface", on.dist(p));
+    let solidcraft_kernel::FaceSurface::Plane { normal, .. } = surface else { panic!("face {face} is not planar: {surface:?}") };
+    // Coordinates in the plane: along `x` and `y`, square to its normal.
+    let x = if normal.cross(Vec3::X).len() > 0.5 { normal.cross(Vec3::X).normalized().unwrap() } else { normal.cross(Vec3::Y).normalized().unwrap() };
+    let y = normal.cross(x);
+    let local = |q: Vec3| ((q - p).dot(x), (q - p).dot(y));
+    let record = body.record();
+    let point = |v: u32| {
+        let q = record.vertices[v as usize].point;
+        Vec3::new(q[0], q[1], q[2])
+    };
+    // Crossings of the ray from `p` along +x with the face's boundary.
+    let mut crossings = 0;
+    for l in &record.faces[face].loops {
+        let Loop::Edges { edges } = l else { continue };
+        for e in edges {
+            let edge = &record.edges[e.edge as usize];
+            assert!(matches!(edge.parameters(), Curve::Line { .. }), "an edge of face {face} is not a line: {:?}", edge.parameters());
+            let [a, b] = edge.vertices.map(|v| local(point(v)));
+            let distance = {
+                let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+                let t = (-(a.0 * dx + a.1 * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+                (a.0 + t * dx).hypot(a.1 + t * dy)
+            };
+            assert!(distance > rounding, "{p:?} is on the boundary of face {face}");
+            if (a.1 > 0.0) != (b.1 > 0.0) && a.0 + (b.0 - a.0) * (0.0 - a.1) / (b.1 - a.1) > 0.0 {
+                crossings += 1;
+            }
+        }
+    }
+    assert_eq!(crossings % 2, 1, "{p:?} is outside face {face}'s boundary");
 }
 
 #[test]

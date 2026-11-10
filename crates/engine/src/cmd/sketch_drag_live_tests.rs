@@ -73,7 +73,7 @@ fn extruded() -> (Session, u64) {
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"distance": 5}));
     let extrude = s.doc.features.last().map(|f| f.id).expect("the extrude");
-    run(&mut s, "sketch.edit", json!({"sketch": "Sketch1"}));
+    run(&mut s, "sketch.edit", json!({"sketch": "Sketch1", "restore_marker": false}));
     (s, extrude)
 }
 
@@ -314,7 +314,7 @@ fn a_live_frame_swaps_only_the_dragged_sketch() {
     run(&mut s, "sketch.create", json!({"plane": "XZ"}));
     run(&mut s, "sketch.circle.center", json!({"center": [50, 50], "radius": 4}));
     run(&mut s, "sketch.finish", json!({}));
-    run(&mut s, "sketch.edit", json!({"sketch": "Sketch1"}));
+    run(&mut s, "sketch.edit", json!({"sketch": "Sketch1", "restore_marker": false}));
     let id = s.active_sketch.expect("sketch mode");
     let other = |s: &Session| s.model.state().sketches.iter().find(|x| x.feature != id).cloned().expect("the other sketch");
     let before = other(&s);
@@ -383,6 +383,30 @@ fn a_drag_with_the_rest_of_a_selection_moves_it_as_one() {
     let mut s = start();
     for with in [json!("l2"), json!([7]), json!(["nope"])] {
         assert!(s.execute("sketch.drag", &json!({"entity": "l1", "with": with, "from": [10, 30], "to": [20, 20]})).is_err(), "{with}");
+    }
+}
+
+/// A selection dragged by an ellipse's axis takes the ellipse and its other axis along, as the
+/// axis dragged alone does: the whole ellipse slides by the cursor's move, keeping its size.
+#[test]
+fn a_selection_dragged_by_an_ellipse_axis_takes_the_ellipse_along() {
+    for live in [false, true] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        let r = run(&mut s, "sketch.ellipse", json!({"center": [0, 0], "major": [20, 0], "minor_radius": 8}));
+        let e = r["curves"][0].as_str().expect("the ellipse").to_string();
+        run(&mut s, "sketch.line", json!({"points": [[40, -10], [40, 10]], "connect": false}));
+        let sk = s.doc.sketch(s.active_sketch.expect("sketch mode")).expect("the sketch");
+        let Some((Some((major, _)), _)) = sk.ellipse_axis_lines(sk.curve_index(&e).expect("the ellipse")) else { panic!("its axes") };
+        let axis = sk.curves[major].id.clone();
+        let line = sk.curves.last().expect("the line").id.clone();
+        run(&mut s, "sketch.drag", json!({"entity": axis, "with": [line], "from": [10, 0], "to": [10, 15], "live": live}));
+        let sk = s.doc.sketch(s.active_sketch.expect("sketch mode")).expect("the sketch");
+        let ei = sk.curve_index(&e).expect("the ellipse");
+        let solidcraft_sketch::CurveKind::Ellipse { c, m, .. } = sk.curves[ei].kind else { panic!("an ellipse") };
+        let v = solidcore_record::Vec2::new;
+        assert!(sk.point(c).expect("its centre").dist(v(0.0, 15.0)) < 1e-6, "live {live}: the centre follows: {:?}", sk.point(c));
+        assert!(sk.point(m).expect("its major end").dist(v(20.0, 15.0)) < 1e-6, "live {live}: the major end follows: {:?}", sk.point(m));
     }
 }
 

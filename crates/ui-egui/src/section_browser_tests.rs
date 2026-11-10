@@ -265,3 +265,92 @@ fn section_ribbon_toggle_and_setting_edit_have_separate_intent_and_compatibility
     assert!(h.app.dialog.is_some());
     assert_eq!(h.app.session.section, cut);
 }
+
+/// Reopened from a section's own geometry (Graphics → Show viewport section status), the dialog
+/// holds the plane as numbers and picks none: the drag arrow still stands on that plane and its
+/// tip reaches the cut (#11423). A plane picked afterwards takes the arrow over.
+#[test]
+fn a_section_reopened_from_its_geometry_keeps_its_drag_arrow() {
+    use solidcraft_engine::doc::expr::Kind as ValueKind;
+    for params in [
+        json!({"plane":"XY","at":-25.4,"flip":true}),
+        json!({"plane":{"origin":[7,-12,4],"normal":[-3,-4,0]},"offset":5}),
+        json!({"plane":{"origin":[7,-12,4],"normal":[0,0,-1]},"offset":-5,"flip":true}),
+    ] {
+        let mut h = harness();
+        h.app.preferences.viewport_section_status = true;
+        h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+        h.app.run("inspect.section", params.clone()).unwrap();
+        h.frames(3);
+        let cut = h.app.session.section.unwrap();
+        menu(&mut h, "Edit Section Analysis");
+        let (offset, _, plane) = section_dialog(&h);
+        assert!(plane.is_empty(), "{params}: no plane picked: {plane:?}");
+        let d = h.app.dialog.as_ref().unwrap();
+        let (base, dir) = crate::canvas::anchor(&h.app, d).unwrap_or_else(|| panic!("{params}: no arrow"));
+        let dir = dir.unwrap_or_else(|| panic!("{params}: an arrow with no direction"));
+        let distance = crate::length_input::eval(&h.app.session.doc, &offset, ValueKind::Length).unwrap();
+        let tip = base + dir * distance;
+        assert!((tip - cut.0).len() < 1e-9, "{params}: the arrow ends at {tip:?}, the cut is at {:?}", cut.0);
+        assert!(dir.cross(cut.1).len() < 1e-9, "{params}: the arrow runs along the cut's normal: {dir:?} vs {:?}", cut.1);
+
+        let mut d = h.app.dialog.take().unwrap();
+        d.pick(&h.app.session, solidcraft_engine::Sel::Plane { name: "XZ".into() });
+        let (_, dir) = crate::canvas::anchor(&h.app, &d).unwrap_or_else(|| panic!("{params}: no arrow on the picked plane"));
+        assert!(dir.is_some_and(|n| (n.y.abs() - 1.0).abs() < 1e-9), "{params}: the picked plane's arrow: {dir:?}");
+    }
+}
+
+/// The Distance slider spans the model along the plane and moves the cut while it is held. A
+/// distance typed outside the model stays as typed, and with no plane there is no slider.
+#[test]
+fn the_distance_slider_moves_the_cut_live() {
+    fn slider(h: &Harness) -> Option<egui::accesskit::Rect> {
+        h.output.accesskit_update.as_ref()?.nodes.iter().find_map(|(_, n)| (n.role() == egui::accesskit::Role::Slider).then(|| n.bounds()).flatten())
+    }
+    fn offset(h: &Harness) -> String {
+        match h.app.dialog.as_ref().map(|d| &d.kind) {
+            Some(crate::dialogs::Kind::Section { offset, .. }) => offset.clone(),
+            other => panic!("not the section dialog: {other:?}"),
+        }
+    }
+    let mut h = harness();
+    h.app.preferences.viewport_section_status = false;
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    h.app.session.selection.clear();
+    h.app.start("inspect.section");
+    h.frames(4);
+    assert!(slider(&h).is_none(), "no plane, no slider");
+    h.app.dialog.as_mut().unwrap().inputs[0].items.push(solidcraft_engine::Sel::Plane { name: "XY".into() });
+    h.frames(4);
+    let typed = offset(&h);
+    let bounds = slider(&h).expect("the Distance slider");
+    assert_eq!(offset(&h), typed, "showing the slider leaves the field alone");
+    let at = |fraction: f64| pos2((bounds.x0 + fraction * (bounds.x1 - bounds.x0)) as f32, ((bounds.y0 + bounds.y1) / 2.0) as f32);
+    let start = at(0.25);
+    h.app.synthetic.extend([
+        egui::Event::PointerMoved(start),
+        egui::Event::PointerButton { pos: start, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() },
+    ]);
+    h.frames(3);
+    let first = crate::viewport::section_plane(&h.app).expect("a cut while held").0.z;
+    h.app.synthetic.push(egui::Event::PointerMoved(at(0.75)));
+    h.frames(3);
+    let second = crate::viewport::section_plane(&h.app).expect("a cut while held").0.z;
+    assert!(h.ctx.input(|i| i.pointer.primary_down()));
+    let model = crate::viewport::model_bounds(&h.app);
+    assert!(second > first && first >= model.min.z && second <= model.max.z, "{first} {second} {model:?}");
+    assert!(offset(&h) != typed, "the field follows the slider");
+    h.app.synthetic.push(egui::Event::PointerButton {
+        pos: at(0.75),
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: Default::default(),
+    });
+    h.frames(3);
+    if let Some(crate::dialogs::Kind::Section { offset, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *offset = "500 mm".into();
+    }
+    h.frames(4);
+    assert_eq!(offset(&h), "500 mm");
+}
