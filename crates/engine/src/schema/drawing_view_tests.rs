@@ -64,6 +64,8 @@ fn the_edit_contract_lists_a_saved_views_settings() {
         hide: Some(Vec::new().into()),
         line_group: Some(Default::default()),
         exploded: Some(Default::default()),
+        // Not yet in the edit: `drawing.view.edit` takes a position in the next commit.
+        pose: None,
     };
     let own = serde_json::to_value(all).unwrap_or_default();
     let named = |key: &String| if key == "occurrences" { "source".to_string() } else { key.clone() };

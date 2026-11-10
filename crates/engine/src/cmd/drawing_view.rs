@@ -36,7 +36,7 @@ use solidcraft_doc::drawing::balloon::Balloon;
 use solidcraft_doc::drawing::dimension::{Dimension, LabelKind, MAX_DECIMALS, reading_label};
 use solidcraft_doc::drawing::note::Note;
 use solidcraft_doc::drawing::view::{ResolvedView, SetBy, Setting, View, ViewKind, ViewPlace, check_occurrence_paths};
-use solidcraft_doc::drawing_view::{Exploded, Looking, OccurrencePaths, TangentEdges, ViewDirection, ViewOverrides};
+use solidcraft_doc::drawing_view::{Exploded, Looking, OccurrencePaths, Pose, TangentEdges, ViewDirection, ViewOverrides};
 use solidcraft_doc::ids;
 use solidcraft_geom::Aabb2;
 use solidcraft_geom::drawing_measure::{self, AngleFrom, LinearDirection, Measured, Reading};
@@ -816,6 +816,7 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
                         hide: resolved.hide.value.clone(),
                         line_group: matches!(resolved.line_group.set_by, SetBy::This | SetBy::Parent(_)).then_some(resolved.line_group.value),
                         exploded: Some(resolved.exploded.value).filter(|exploded| *exploded != Exploded::Assembled),
+                        pose: Some(resolved.pose.value.clone()).filter(|pose| *pose != Pose::Designed),
                     };
                     view.place = ViewPlace::At([to.x, to.y]);
                 }
@@ -880,6 +881,7 @@ fn base(s: &mut Session, p: &Value) -> Result<Value> {
         hide: request.hide.as_deref().map(occurrence_paths),
         line_group: None,
         exploded: request.exploded.as_ref().map(|chosen| exploded_of(s, chosen, BASE)).transpose()?,
+        pose: None,
     };
     let place = ViewPlace::At([position.x, position.y]);
     let kind = ViewKind::Base { source, view: direction };

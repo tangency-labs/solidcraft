@@ -89,6 +89,34 @@ pub enum Exploded {
     View(u64),
 }
 
+/// Most joints a view's position sets.
+pub const MAX_POSE_JOINTS: usize = 64;
+/// Most values one joint has in a position: at least as many as any joint kind has
+/// ([`crate::joints::JointKind::dofs`]).
+pub const MAX_JOINT_VALUES: usize = 6;
+/// The largest value a position saves, either way, in radians or millimetres.
+pub const MAX_POSE_VALUE: f64 = 1e9;
+
+/// One joint's values in a view's position, by the joint's id, in the units and order joints save them
+/// ([`crate::joints::JointKind::dofs`]: angles in radians, distances in mm).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct JointPose {
+    pub joint: u64,
+    pub values: Vec<f64>,
+}
+
+/// The position of its assembly a view draws (#13048): as the design places its parts (the
+/// default), or with some of its joints at values of its own. The design is never changed: the view
+/// draws a copy. A joint the design no longer has is skipped, never refuses the file.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Pose {
+    #[default]
+    Designed,
+    Joints(Arc<[JointPose]>),
+}
+
 /// What a view shows and how. Every field has a default: the front view at the scale that fits
 /// its page, visible lines only, tangent edges hidden.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -139,6 +167,9 @@ pub struct ViewOverrides {
     /// The state of its assembly it draws: assembled when no view of its chain sets one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exploded: Option<Exploded>,
+    /// The position of its assembly it draws: the design's when no view of its chain sets one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pose: Option<Pose>,
 }
 
 impl ViewOverrides {
