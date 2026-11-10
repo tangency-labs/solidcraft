@@ -162,7 +162,9 @@ mod tests {
     fn the_mass_routines_build_no_bare_statuses() {
         let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/mass");
         for rel in ["integrator.rs", "integrator/properties.rs", "enclosure.rs"] {
-            let text = std::fs::read_to_string(src.join(rel)).expect("read");
+            let text = std::fs::read_to_string(src.join(rel))
+                .expect("read")
+                .replace("\r\n", "\n");
             let library = text
                 .find("#[cfg(test)]\nmod tests")
                 .map_or(text.as_str(), |at| &text[..at]);

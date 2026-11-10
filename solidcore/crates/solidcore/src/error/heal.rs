@@ -168,7 +168,9 @@ mod tests {
             "stitch/p1.rs",
             "stitch/p2.rs",
         ] {
-            let text = std::fs::read_to_string(src.join(rel)).expect("read");
+            let text = std::fs::read_to_string(src.join(rel))
+                .expect("read")
+                .replace("\r\n", "\n");
             let library = text
                 .find("#[cfg(test)]\nmod tests")
                 .map_or(text.as_str(), |at| &text[..at]);

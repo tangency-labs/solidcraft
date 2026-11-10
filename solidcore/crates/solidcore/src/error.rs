@@ -2201,7 +2201,9 @@ mod tests {
     fn the_b_spline_methods_build_no_bare_statuses() {
         let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let library = |rel: &str| {
-            let text = std::fs::read_to_string(src.join(rel)).expect("read");
+            let text = std::fs::read_to_string(src.join(rel))
+                .expect("read")
+                .replace("\r\n", "\n");
             match text.find("#[cfg(test)]\nmod tests") {
                 Some(at) => text[..at].to_owned(),
                 None => text,
