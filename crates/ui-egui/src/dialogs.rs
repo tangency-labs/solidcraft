@@ -3272,7 +3272,10 @@ pub(crate) fn input_rows_range(
                 }
             });
         });
-        if let Some((ctype, rows)) = corner_rows.as_ref().filter(|_| i == 0) {
+        // The corner rows are this input's picked items, so the arrow beside the field folds
+        // them away as it folds any input's list: a row shows only while the list is open, and
+        // the input never falls back to a bare list of the picked lines.
+        if let Some((ctype, rows)) = corner_rows.as_ref().filter(|_| i == 0 && d.listed == Some(i)) {
             for (index, row) in rows.iter().enumerate() {
                 // The Flip and the X/V sit in columns measured from the row's right edge,
                 // so they line up down the list whatever each row is called.
@@ -3299,7 +3302,7 @@ pub(crate) fn input_rows_range(
                     corner_changes.push((row.key.clone(), crate::sketch_corner_rows::Change::Off(row.enabled)));
                 }
             }
-        } else if inp.multi && d.listed == Some(i) && !inp.items.is_empty() {
+        } else if corner_rows.is_none() && inp.multi && d.listed == Some(i) && !inp.items.is_empty() {
             let rows = d.listed_items(s, i);
             egui::ScrollArea::vertical().id_salt(("picked_items", i)).max_height(t.control_height * 6.5).show(ui, |ui| {
                 for (index, item) in rows.into_iter().enumerate() {

@@ -532,6 +532,7 @@ fn two_distance_chamfer_takes_both_distances_and_flip_swaps_the_legs() {
         retype(&mut h, "dialog:Distance 2", "4");
         if flip {
             // Each corner row has its own Flip, so turning one leg round leaves the others as they are.
+            open_corner_rows(&mut h);
             h.step(&json!({"click":{"handle":"dialog:Corner 0:Flip"}})).unwrap();
             h.frames(2);
         }
@@ -1176,6 +1177,13 @@ fn labels(h: &crate::scenario::Harness, ids: &[&str]) -> Vec<String> {
     corner_rows(h, ids).into_iter().map(|(label, _)| label).collect()
 }
 
+/// The corner rows are the input's picked items: the arrow beside the field lists them, and they
+/// start folded the way every input's picked items do in this window.
+fn open_corner_rows(h: &mut crate::scenario::Harness) {
+    h.step(&json!({"click":{"handle":"dialog:list_toggle:Corners"}})).unwrap();
+    h.frames(2);
+}
+
 /// A picked line looks for an earlier line with a free end at one of its own. The shared end
 /// becomes that corner, the row stays if its line is unpicked, and a line at 180 degrees to
 /// another keeps a row of its own.
@@ -1323,6 +1331,7 @@ fn a_corner_cut_between_two_profiles_repaints_only_its_own_lines() {
     // The two trimmed lines and the arc, not the six lines the cut leaves alone.
     assert_eq!(crate::scenario::count_of("sketch_preview_curves"), Some(3.0), "only the cut curves are drawn as changed");
     // The row's X takes the arc away and leaves the two lines picked: the selection stays.
+    open_corner_rows(&mut h);
     h.step(&json!({"click":{"handle":"dialog:list:corner:0:remove"}})).unwrap();
     h.step(&json!({"until":{"count":{"name":"sketch_preview_curves","value":2}}})).unwrap();
     let rows = crate::sketch_modify_ui::dialog_rows(&h.app.session, h.app.dialog.as_ref().unwrap());
@@ -1354,6 +1363,7 @@ fn a_corner_rows_x_turns_its_own_cut_off_and_the_buttons_line_up() {
     h.frames(2);
     let rows = crate::sketch_modify_ui::dialog_rows(&h.app.session, h.app.dialog.as_ref().unwrap());
     assert_eq!(rows.len(), 4, "{:?}", rows.iter().map(|r| r.label()).collect::<Vec<_>>());
+    open_corner_rows(&mut h);
     let at = |name: &str| crate::scenario::handle_at(name).unwrap_or_else(|| panic!("missing {name}"));
     let first = at("dialog:list:corner:0:remove");
     let flip = at("dialog:Corner 0:Flip");
@@ -1435,6 +1445,7 @@ fn a_hidden_corner_stays_hidden_when_its_lines_leave_the_list_and_come_back() {
     let picks = line_picks(&h, &["l1", "l2"]);
     set(&mut h, picks.clone());
     assert_eq!(rows(&h).len(), 1);
+    open_corner_rows(&mut h);
     h.step(&json!({"click":{"handle":"dialog:list:corner:0:remove"}})).unwrap();
     h.frames(2);
     assert!(!rows(&h)[0].enabled, "the X takes the cut away");
@@ -1446,6 +1457,33 @@ fn a_hidden_corner_stays_hidden_when_its_lines_leave_the_list_and_come_back() {
     let back = rows(&h);
     assert_eq!(back.len(), 1);
     assert!(!back[0].enabled, "a corner the user hid stays hidden");
+}
+
+/// The corner rows are the input's picked items, so they start folded and the arrow beside the
+/// field lists them, as it lists any input's picked items: a row per corner shows only while the
+/// list is open, and the input never falls back to a bare list of the picked lines.
+#[test]
+fn the_corner_rows_start_folded_and_their_arrow_lists_them() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"sketch.fillet"})).unwrap();
+    h.frames(2);
+    let picks = line_picks(&h, &["l1", "l2"]);
+    if let Some(input) = h.app.dialog.as_mut().and_then(|d| d.inputs.first_mut()) {
+        input.items = picks;
+    }
+    h.frames(2);
+    let rows = |h: &crate::scenario::Harness| crate::sketch_modify_ui::dialog_rows(&h.app.session, h.app.dialog.as_ref().unwrap());
+    assert_eq!(rows(&h).len(), 1, "the two lines make one corner");
+    assert!(crate::scenario::handle_at("dialog:list:corner:0:remove").is_none(), "the corner rows start folded, as every input's picked items do");
+    open_corner_rows(&mut h);
+    assert!(crate::scenario::handle_at("dialog:list:corner:0:remove").is_some(), "the arrow lists the corner rows");
+    h.step(&json!({"click":{"handle":"dialog:list_toggle:Corners"}})).unwrap();
+    h.frames(2);
+    assert!(crate::scenario::handle_at("dialog:list:corner:0:remove").is_none(), "and folds them away again");
+    assert_eq!(rows(&h).len(), 1, "folding the rows leaves the picks, and their corner, alone");
 }
 
 #[test]
