@@ -184,8 +184,9 @@ pub(crate) fn dropped(s: &Session, extra: &mut Map<String, Value>, p: Vec3, n: V
     Some(json!(coords))
 }
 
-/// The typed placement into the command's parameters: a bare number typed into a field is in the
-/// design's units (as in the size fields), an empty field is 0, and a stored number is kept.
+/// The typed placement into the command's parameters, read as the size fields read it
+/// (`length_input::expression`): a bare number, a decimal comma or a unitless expression typed
+/// into a field is in the design's units, an empty field is 0, and a stored number is kept.
 pub(crate) fn params(s: &Session, cmd: &str, extra: &Map<String, Value>, p: &mut Map<String, Value>) {
     for key in keys(cmd) {
         let Some(Value::Array(point)) = extra.get(*key) else { continue };
@@ -193,7 +194,7 @@ pub(crate) fn params(s: &Session, cmd: &str, extra: &Map<String, Value>, p: &mut
             .iter()
             .map(|c| match c {
                 Value::String(t) if t.trim().is_empty() => json!(0),
-                Value::String(t) => json!(s.doc.with_design_unit(t, ValueKind::Length)),
+                Value::String(t) => json!(crate::length_input::expression(&s.doc, t, ValueKind::Length)),
                 other => other.clone(),
             })
             .collect();
