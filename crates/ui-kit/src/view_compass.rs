@@ -136,10 +136,9 @@ pub fn show(ui: &mut egui::Ui, compass: &Compass) -> Option<ViewAction> {
     {
         solidcraft_ui_registry::publish_handle(&format!("axis_view_hover:{name}"), hover.unwrap_or(c));
         ui.interact(Rect::from_center_size(hover.unwrap_or(c), vec2(2.0, 2.0)), ui.scope_id().with("axis_view_tip"), Sense::hover())
-            .backing_on_hover_text(format!(
-                "View from {}. Click again to reverse. Drag to orbit{}.",
-                name.to_uppercase(),
-                if compass.snap_hint { "; hold Shift to snap" } else { "" }
+            .backing_on_hover_text(solidcraft_ui_text::format(
+                if compass.snap_hint { "ui.view_compass_tip_snap" } else { "ui.view_compass_tip" },
+                &[("axis", &name.to_uppercase())],
             ));
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         if ui.input(|i| i.pointer.primary_clicked()) {

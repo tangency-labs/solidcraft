@@ -970,3 +970,55 @@ mod panel {
         }
     }
 }
+
+/// The view compass with SolidCraft's catalogs.
+mod view_compass {
+    use crate::ui_kit::view_compass::{Compass, ViewAxes, show, tips};
+    use egui::{Event, Pos2, RawInput, Rect, pos2, vec2};
+
+    /// The tooltip text a hovered tip shows, after a few frames with the pointer at rest on it.
+    fn hover_text(snap_hint: bool) -> Vec<String> {
+        let front = ViewAxes { right: [1.0, 0.0, 0.0], up: [0.0, 0.0, 1.0], back: [0.0, -1.0, 0.0] };
+        let centre = pos2(200.0, 200.0);
+        let at = tips(&front, centre).iter().find(|tip| tip.0 == "x").map(|tip| tip.2).unwrap();
+        let ctx = crate::ui_kit::test_support::context();
+        ctx.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
+        let mut texts = Vec::new();
+        for frame in 0..4 {
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 400.0))),
+                events: if frame == 0 { vec![Event::PointerMoved(at)] } else { Vec::new() },
+                time: Some(f64::from(frame)),
+                ..Default::default()
+            };
+            let output = crate::ui_kit::test_support::raw_frame(&ctx, input, |ui| {
+                let compass =
+                    Compass { clip: ui.max_rect(), centre, axes: front, hover: Some(at), orbiting: false, snap_hint, home_label: "Home".into() };
+                show(ui, &compass);
+            });
+            texts = Vec::new();
+            for shape in &output.shapes {
+                crate::ui_kit::test_support::each_shape(&shape.shape, &mut |shape| {
+                    if let egui::Shape::Text(text) = shape {
+                        texts.push(text.galley.job.text.clone());
+                    }
+                });
+            }
+        }
+        texts
+    }
+
+    /// A tip's hover text is the catalog's whole sentence in the user's language, with the axis
+    /// as its argument, with and without the Shift hint.
+    #[test]
+    fn a_tips_hover_text_is_translated() {
+        crate::test_support::host_data();
+        let _japanese = solidcraft_ui_text::scope("ja");
+        for (snap_hint, id) in [(false, "ui.view_compass_tip"), (true, "ui.view_compass_tip_snap")] {
+            let expected = solidcraft_ui_text::format(id, &[("axis", "X")]);
+            assert!(expected.starts_with('X') && !expected.contains("View from"), "{id} is in the Japanese catalog: {expected}");
+            let texts = hover_text(snap_hint);
+            assert!(texts.contains(&expected), "{id}: the tip shows {expected:?}; drawn: {texts:?}");
+        }
+    }
+}
