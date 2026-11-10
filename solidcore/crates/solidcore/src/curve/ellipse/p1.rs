@@ -299,7 +299,10 @@ impl PolarConversion {
             | ExtentPointType::Inside => {
                 // use a conversion based arcTan2 (EvaluatePoint status ignored)
                 let point = ignored(curve.base.evaluate_point(nurbs_param))?.unwrap_or(Vec3::UNDEF);
-                curve.parameter_angle(k, point)
+                match curve.near_end_parameter_angle(point, nurbs_param) {
+                    Some(angle) => angle,
+                    None => curve.parameter_angle(k, point),
+                }
             }
         };
 
@@ -3437,6 +3440,44 @@ mod tests {
         );
         let near_end = e.base.evaluate_point(domain.evaluate(1.0 - 1e-10)).unwrap();
         assert_eq!(e.step_inversion(&k, near_end, false, 0.0).0, 0.0);
+    }
+
+    #[test]
+    fn parameter_conversion_next_to_an_end_snaps_only_within_rounding() {
+        let k = kernel();
+        // far from the origin, a small circle's NURB points carry rounding far larger
+        // than a 1e-12 parameter offset: the end angle is returned exactly
+        let far = Ellipse::new_circle(
+            &k,
+            Point3::new(100_000.0, -100_000.0, 30_000.0),
+            Vec3::new(0.6, 0.8, 0.0),
+            Vec3::new(-0.8, 0.6, 0.0),
+            Extent1d::from_min_max(0.0, 360.0),
+            1e-4,
+            &EllipseOptions::default(),
+        )
+        .unwrap();
+        let domain = far.base.natural_interval();
+        assert_eq!(
+            far.convert_t_from_nurbs_to_step(&k, domain.evaluate(1e-12))
+                .unwrap(),
+            0.0
+        );
+        assert_eq!(
+            far.convert_t_from_nurbs_to_step(&k, domain.evaluate(1.0 - 1e-12))
+                .unwrap(),
+            360.0
+        );
+        // near the origin the same offset is far above rounding and keeps its own angle
+        let e = circle(&k, 0.0, 360.0, 1.0);
+        let domain = e.base.natural_interval();
+        for fraction in [1e-12, 1.0 - 1e-12] {
+            let parameter = domain.evaluate(fraction);
+            let angle = e.convert_t_from_nurbs_to_step(&k, parameter).unwrap();
+            assert!(angle > 0.0 && angle < 360.0, "{fraction}: {angle}");
+            let point = e.base.evaluate_point(parameter).unwrap();
+            assert!((e.evaluate_step_point(angle).unwrap() - point).length() < 1e-15);
+        }
     }
 
     /// The trimmed arc of the fork's capi test `scenario_ellipse_trimmed_just_short_of_its_seam`

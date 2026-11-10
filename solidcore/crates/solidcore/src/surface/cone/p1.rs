@@ -2999,6 +2999,42 @@ mod tests {
         }
     }
 
+    /// goldens `surface.cone_p1` `r3_36705`: a 1e-4 cone 1e5 from the origin, 1e-12 of
+    /// its polar parameter from the seam. The NURB point's rounding (about 1.5e-11 on
+    /// 1.4e5 coordinates) is 1e-7 rad on the 1e-4 polar circle, far above the 5.7e-12 rad
+    /// offset, so the angle must not follow it (atan2 of that point gave -1.5e-5 deg,
+    /// moving the point at v = 1, radius 1/3, by 8.7e-8). The same cone at the origin
+    /// resolves the offset and gives the exact angle.
+    #[test]
+    fn far_tiny_cone_angle_next_to_the_seam_stays_within_rounding() {
+        let k = k();
+        let cone_at = |placement: &Axis2Placement| {
+            let mut cone =
+                Cone::create_canonical(&k, placement, 1e-4, 2e-4, 3e-4, false, false).unwrap();
+            cone.set_out_of_bounds_enabled(true);
+            cone
+        };
+        let far = cone_at(&Axis2Placement::new(
+            Vec3::new(100_000.0, -100_000.0, 30_000.0),
+            Vec3::new(0.6, 0.8, 0.0),
+            Vec3::new(-0.8, 0.6, 0.0),
+        ));
+        let near = cone_at(&std_placement());
+        let uv = Point2::new(1e-12, 0.999_999_999_999);
+        let exact = near.convert_uv_from_nurbs_to_step(&k, uv).unwrap();
+        assert!(exact.x > 3.24e-10 && exact.x < 3.25e-10, "{}", exact.x);
+        let step = far.convert_uv_from_nurbs_to_step(&k, uv).unwrap();
+        // the angle error as a displacement of the point, against the coordinates' ulp
+        let ulp = f64::EPSILON * 131_072.0;
+        let shift = (step.x - exact.x).abs() * PI / 180.0 * far.radius(step.y).abs();
+        assert!(shift <= 4.0 * ulp, "{} deg moves the point {shift}", step.x);
+        let point = far.evaluate_point(&k, uv).unwrap();
+        let reference = far
+            .evaluate_step_point(Point2::new(exact.x, step.y))
+            .unwrap();
+        assert!((point - reference).length() <= 4.0 * ulp);
+    }
+
     #[test]
     fn checked_cylinder_keeps_near_seam_point_and_rejects_snapped_candidate() {
         let k = Kernel::default();

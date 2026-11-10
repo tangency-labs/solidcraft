@@ -1309,6 +1309,81 @@ impl Ellipse {
             .0
     }
 
+    /// The STEP angle of `point`, the NURB point at `nurbs_param`, when the parameter
+    /// lies next to an end of the NURB interval, computed from that end's exact angle
+    /// with `+ - * /` only, so that every IEEE platform returns the same value (no
+    /// libm `atan2`). An offset within the evaluation's rounding of the end control
+    /// point returns the end angle exactly. `None` away from the ends (or when the end
+    /// does not evaluate): the caller
+    /// inverts the point as before.
+    ///
+    /// The offset `d` from the end is `atan(q)` with `q = cross / dot` of the end and
+    /// point radii in the circle-scaled frame; for `|q| <= 2^-20`, `q - q^3/3` is
+    /// within `|q|^5 / 5 < 2^-100 |q|` of it. The rounding bound is
+    /// `16 eps s / |end radius|`, `s` the frame axes' projection of the coordinate
+    /// sizes `|centre_i| + 2 max radius`: the rational quadratic evaluation and the
+    /// frame projection each err by a few `eps` of each coordinate, with weights of
+    /// at least `cos 45 deg`.
+    pub(crate) fn near_end_parameter_angle(&self, point: Point3, nurbs_param: f64) -> Option<f64> {
+        const MAX_TAN: f64 = 1.0 / 1_048_576.0;
+        const MAX_PARAM_FRACTION: f64 = 1e-6;
+        let nat = self.base.natural_interval();
+        let to_start = (nurbs_param - nat.min()).abs();
+        let to_end = (nat.max() - nurbs_param).abs();
+        let at_start = to_start <= to_end;
+        if to_start.min(to_end) > MAX_PARAM_FRACTION * nat.length() || self.radius_y == 0.0 {
+            return None;
+        }
+        let end_param = if at_start { nat.min() } else { nat.max() };
+        let end_deg = if at_start == self.inside_out {
+            self.anal_domain.max()
+        } else {
+            self.anal_domain.min()
+        };
+        // the interval ends evaluate to the end control points exactly
+        let end_point = self.base.evaluate_point(end_param).ok()?;
+        let center = self.position.origin();
+        let x_axis = self.position.x_axis();
+        let y_axis = self.position.y_axis();
+        let local = |p: Point3| {
+            let v = p - center;
+            (v.dot(x_axis), self.radius_x / self.radius_y * v.dot(y_axis))
+        };
+        let (ex, ey) = local(end_point);
+        let (px, py) = local(point);
+        let cross = ex * py - ey * px;
+        let dot = ex * px + ey * py;
+        let end_radius = (ex * ex + ey * ey).sqrt();
+        if dot.is_nan()
+            || dot <= 0.0
+            || !cross.is_finite()
+            || end_radius.is_nan()
+            || end_radius <= 0.0
+        {
+            return None;
+        }
+        let q = cross / dot;
+        if q.is_nan() || q.abs() > MAX_TAN {
+            return None;
+        }
+        // A world coordinate rounds in proportion to its own size, and only the
+        // in-plane projections reach the angle (a far axial offset does not).
+        let span = 2.0 * self.radius_x.abs().max(self.radius_y.abs());
+        let projected = |axis: Vec3| {
+            (center.x.abs() + span) * axis.x.abs()
+                + (center.y.abs() + span) * axis.y.abs()
+                + (center.z.abs() + span) * axis.z.abs()
+        };
+        let scale =
+            projected(x_axis).max((self.radius_x / self.radius_y).abs() * projected(y_axis));
+        let noise = 16.0 * f64::EPSILON * scale / end_radius;
+        if q.abs() <= noise {
+            return Some(end_deg);
+        }
+        let offset = q - q * q * q / 3.0;
+        Some(end_deg + offset * (180.0 / PI))
+    }
+
     fn step_inversion_with_seam_policy(
         &self,
         k: &Kernel,
