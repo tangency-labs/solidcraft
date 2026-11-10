@@ -222,7 +222,8 @@ struct Mapper<'a> {
 
 impl Mapper<'_> {
     fn pick(&mut self, v: &Value, body: Option<&str>) -> Option<Value> {
-        let p = vec3(v)?;
+        // `[x, y, z]` or `{x, y, z}`: a direction given with it then turns with the picked body.
+        let p = crate::params::vec3(v)?;
         let under = if self.here { None } else { frame_at(self.s, self.world, &self.f, p, body) };
         let m = if self.here { self.f.sketch } else { under.as_ref().map(|(m, _)| *m).unwrap_or(self.f.active) };
         self.first.get_or_insert(m);
@@ -247,6 +248,9 @@ impl Mapper<'_> {
 
     fn make(&mut self, v: &Value) -> Option<Value> {
         let m = self.f.active;
+        // A point written `{x, y, z}` (as `point_param` reads it) maps like `[x, y, z]`.
+        let xyz = v.as_object().and_then(|o| Some(Value::Array(vec![o.get("x")?.clone(), o.get("y")?.clone(), o.get("z")?.clone()])));
+        let v = xyz.as_ref().unwrap_or(v);
         let Some(p) = vec3(v) else { return self.map_expr(&m, v, map_point_expr) };
         self.local_point(&m, p)
     }
@@ -270,7 +274,8 @@ impl Mapper<'_> {
     }
 
     fn dir(&mut self, v: &Value) -> Option<Value> {
-        let d = vec3(v)?;
+        // `[x, y, z]` or `{x, y, z}`, as commands read a direction.
+        let d = crate::params::vec3(v)?;
         let m = self.first.unwrap_or(self.f.active);
         if is_identity(&m) {
             return None;
@@ -288,6 +293,8 @@ impl Mapper<'_> {
                 let out: Vec<Value> = a.iter().map(|x| self.picks(x, body).unwrap_or_else(|| x.clone())).collect();
                 Some(Value::Array(out))
             }
+            // A point written `{x, y, z}` among the picks, as one written `[x, y, z]`.
+            Value::Object(o) if ["x", "y", "z"].iter().all(|k| o.contains_key(*k)) => self.pick(v, body),
             Value::Object(o) => {
                 let b = o.get("body").and_then(Value::as_str).map(str::to_string);
                 let mut m = o.clone();
@@ -428,6 +435,26 @@ impl Drop for LocalGeometry {
     fn drop(&mut self) {
         MAPPED.with(|m| m.set(self.0));
     }
+}
+
+thread_local! {
+    /// Whether an undoable command run inside the current outermost one changed the design.
+    static INNER_UNDOABLE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// A new outermost command starts with no undoable inner change.
+pub fn reset_inner_undoable() {
+    INNER_UNDOABLE.with(|c| c.set(false));
+}
+
+/// An undoable command run inside another changed the design: the outer one saves the step.
+pub fn note_inner_undoable() {
+    INNER_UNDOABLE.with(|c| c.set(true));
+}
+
+/// Whether [`note_inner_undoable`] was called since the outermost command began.
+pub fn inner_undoable() -> bool {
+    INNER_UNDOABLE.with(std::cell::Cell::get)
 }
 
 /// A command running inside another (its parameters are already in component frames).
@@ -702,7 +729,7 @@ fn map_local(s: &Session, world: &solidcraft_doc::ModelState, id: &str, params: 
                         if let Some(origin) = origin.and_then(|o| m.make(&o)) {
                             axis.insert("origin".into(), origin);
                         }
-                        if let Some(dir) = axis.get("dir").and_then(vec3)
+                        if let Some(dir) = axis.get("dir").and_then(crate::params::vec3)
                             && !is_identity(&m.f.active)
                             && let Some(inv) = mat_inverse(&m.f.active)
                         {

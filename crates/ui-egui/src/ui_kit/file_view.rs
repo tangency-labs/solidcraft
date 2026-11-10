@@ -43,7 +43,7 @@ impl<'a> From<&'a str> for Icon<'a> {
 impl Icon<'_> {
     pub(crate) fn paint(&self, painter: &egui::Painter, rect: Rect, opacity: f32) {
         match self {
-            Icon::Kit(name) => crate::icons::paint_accented(painter, rect, name, None, opacity),
+            Icon::Kit(name) => crate::ui_kit::icons::paint_accented(painter, rect, name, None, opacity),
             Icon::Texture(texture) => {
                 painter.image(
                     *texture,
@@ -231,7 +231,7 @@ impl FileView {
         }
         let inner = rect.shrink2(vec2(t.space_12, 0.0));
         let icon = Rect::from_center_size(pos2(inner.left() + t.form_icon_size / 2.0, inner.center().y), Vec2::splat(t.form_icon_size));
-        crate::icons::paint_ink_mirrored(ui.painter(), icon, "chevron_right", t.file_rail_ink);
+        crate::ui_kit::icons::paint_ink_mirrored(ui.painter(), icon, "chevron_right", t.file_rail_ink);
         let key = ui.painter().layout_no_wrap(shortcut.to_owned(), FontId::monospace(t.font_small), t.file_rail_ink);
         let key_rect = Rect::from_center_size(
             pos2(inner.right() - (key.size().x + t.space_10) / 2.0, inner.center().y),
@@ -333,7 +333,7 @@ impl FileView {
             // A design whose picture could not be made shows a fainter box, so it reads as "no
             // preview" rather than as one still being drawn.
             let opacity = if row.thumbnail_failed { 0.4 } else { 1.0 };
-            crate::icons::paint_accented(
+            crate::ui_kit::icons::paint_accented(
                 ui.painter(),
                 Rect::from_center_size(preview.center(), Vec2::splat(t.space_24.min(preview.height()))),
                 "box",
@@ -544,7 +544,7 @@ fn recovery_panel(
                 let well =
                     Rect::from_min_size(pos2(rect.left(), rect.top() + (top_height - t.file_recovery_icon) / 2.0), Vec2::splat(t.file_recovery_icon));
                 ui.painter().rect_filled(well, t.radius_lg, t.file_recovery_well);
-                crate::icons::paint_accented(ui.painter(), well.shrink(t.space_6), "status_recovery", Some("construction"), 1.0);
+                crate::ui_kit::icons::paint_accented(ui.painter(), well.shrink(t.space_6), "status_recovery", Some("construction"), 1.0);
             }
             let text_at = pos2(rect.left() + icon_width, rect.top() + (top_height - galley.size().y) / 2.0);
             ui.painter().with_clip_rect(ui.clip_rect().intersect(rect)).galley(text_at, galley, t.form_ink);

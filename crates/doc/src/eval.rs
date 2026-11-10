@@ -1761,6 +1761,14 @@ impl PlacementReads {
                 self.link(doc, st, b);
             }
             // In the sketch's own frame: the component's origin, axes and planes, its own axes, text.
+            // A construction point is kept in its own component's frame: the sketch reads where
+            // that component is placed (#12075).
+            L::ConstructionPoint { name } => match doc.find_feature(name) {
+                Some(point) => {
+                    self.components.insert(point.component);
+                }
+                None => self.all = true,
+            },
             L::Origin | L::Axis { .. } | L::SketchAxis { .. } | L::Plane { .. } | L::Text { .. } => {}
         }
     }
@@ -4703,6 +4711,33 @@ fn line_in_sketch_plane(ss: &SolvedSketch, origin: Vec3, dir: Vec3) -> Result<(V
     Ok((pl.to_local(origin), Vec2::new(d.dot(pl.x), d.dot(pl.y))))
 }
 
+/// A construction point `name` of the timeline so far, as evaluated, in the frame `frame` places
+/// in the world: the frame a sketch is evaluated in, its component's placement or the placement
+/// of the face it is attached to (#12075). The point is kept in its own component's frame.
+pub(crate) fn construction_point_in(doc: &Document, st: &ModelState, name: &str, author: u64, frame: &Mat) -> Result<Vec3> {
+    let c = st
+        .construct
+        .iter()
+        .find(|c| c.name == name)
+        .ok_or_else(|| DocError::Unknown(format!("construction point `{name}` (it must come earlier in the timeline)")))?;
+    let crate::construct::ConstructGeom::Point(p) = &c.geom else {
+        return Err(DocError::Invalid(format!("`{name}` is not a construction point")));
+    };
+    if doc.occurrences.is_empty() {
+        return Ok(*p);
+    }
+    let owner = doc.feature(c.feature).map_or(0, |f| f.component);
+    // The same definition is authored in this occurrence, even when it is not the first.
+    // Its point is already in the author coordinates; using the first occurrence here
+    // would introduce the difference between the two placements.
+    if owner == author {
+        return Ok(*p);
+    }
+    let inverse = crate::mat_inverse(frame).ok_or_else(|| DocError::Invalid("the sketch's frame cannot be inverted".into()))?;
+    let relative = crate::mat_mul(&inverse, &doc.component_transform(owner));
+    Ok(crate::apply_point(&relative, *p))
+}
+
 /// A construction axis `name` of the timeline so far, as evaluated, in the frame of component
 /// `comp`: a point on it and its direction. Without a document (`doc` None) it is taken in its
 /// own component's frame.
@@ -7127,6 +7162,21 @@ fn replay(
             }
             continue;
         }
+        // An Offset Face repeats at the copied faces of the body they lie on.
+        if let FeatureKind::OffsetFace { faces, distance, body } = &src.kind {
+            let d = val(vals, distance, Kind::Length)?;
+            let picked = crate::plain(faces);
+            for m in mats {
+                let moved: Vec<Vec3> = picked.iter().map(|p| crate::apply_point(m, *p)).collect();
+                let i = body_at(st, body, &moved)?;
+                let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
+                let nb = mb.traced().then(kernel::offset_faces(&mb.body, &moved, d)?);
+                if let Some(slot) = st.bodies.get_mut(i) {
+                    *slot = ModelBody::traced_new(mb.name, nb, mb.feature);
+                }
+            }
+            continue;
+        }
         // A moved copy is copied again as a body: each instance is the copy the Move made,
         // placed by the pattern (#5931).
         if let FeatureKind::Move { copy: true, .. } = &src.kind {
@@ -8630,11 +8680,13 @@ fn eval_sketch(
     // A text's outlines are rebuilt from its numbers when the links are refreshed: the
     // ones its expressions give come first.
     doc.apply_text_values(vals, &mut sk)?;
-    let mut warns = match (anchor, lost_names) {
-        (Some(anchor), crate::project::LostNames::Fail) => crate::project::refresh_face_anchor_links(doc, vals, &fst, &plane, &mut sk, anchor)?,
-        (None, crate::project::LostNames::Fail) => crate::project::refresh_links(doc, vals, &fst, &plane, &mut sk)?,
-        (anchor, crate::project::LostNames::Mark) => crate::project::refresh_links_marking_lost(doc, vals, &fst, &plane, &mut sk, anchor)?,
+    // The frame the sketch is evaluated in, where a construction point it projects is
+    // brought from its own component's (#12075).
+    let link_frame = match anchor.map(|anchor| anchor.author_frame(doc, f.component)) {
+        Some(Ok(frame)) => frame,
+        _ => doc.component_transform(f.component),
     };
+    let mut warns = crate::project::refresh_links_with(doc, vals, &fst, &plane, &mut sk, anchor, lost_names, Some(&(f.component, link_frame)))?;
     drop(fst);
     sk.refresh_offsets()?;
     if let Some(w) = face_warning {

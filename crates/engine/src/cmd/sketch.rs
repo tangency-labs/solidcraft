@@ -151,7 +151,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&RECT_ROUNDED_CONTRACT)
         .output(output_schema_for::<RoundedRectResult>)
-        .params(concat!("p0, p1: opposite corners [x,y] (a coordinate may be an expression over the design's parameters: the corner follows them, as in `sketch.rectangle.two_point`); radius: expr (the corner radius, less than half the shorter side); construction?. A 2-point rectangle whose four corners are filleted alike: one radius dimension (`param`), the other arcs equal to it. Returns sides {bottom, right, top, left} (line ids) and arcs (the corner arcs: bottom-left, bottom-right, top-right, top-left)", connect_doc!(), created_doc!())),
+        .params(concat!("p0, p1: opposite corners [x,y] (a coordinate may be an expression over the design's parameters: the corner follows them, as in `sketch.rectangle.two_point`); radius: expr (the corner radius, less than half the shorter side); construction?. A 2-point rectangle whose four corners are filleted alike: one radius dimension (`param`), the other arcs equal to it. Returns sides {bottom, right, top, left} (line ids) and arcs (the corner arcs: bottom-left, bottom-right, top-right, top-left), diagonal (construction, between the bottom-left and top-right arc centres) and centre (the point held at its midpoint)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.rectangle.center", "Center Rectangle", crate::checked!("sketch.rectangle.center", rect_center))
         .at("SKETCH", "CREATE")
         .icon("rect_center")
@@ -219,15 +219,15 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("slot")
         .enabled(in_sketch)
         .contract(&SLOT_CENTER_TO_CENTER_CONTRACT)
-        .output(output_schema_for::<DrawResult>)
-        .params(concat!("p0, p1: arc centres, width", connect_doc!(), created_doc!())),
+        .output(output_schema_for::<crate::schema::sketch_shapes::SlotResult>)
+        .params(concat!("p0, p1: arc centres, width; returns centre_line (construction, between the arc centres) and middle (the point held at its midpoint)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.slot.overall", "Overall Slot", crate::checked!("sketch.slot.overall", slot_overall))
         .at("SKETCH", "CREATE")
         .icon("slot_overall")
         .enabled(in_sketch)
         .contract(&SLOT_OVERALL_CONTRACT)
-        .output(output_schema_for::<DrawResult>)
-        .params(concat!("p0, p1: overall ends, width", connect_doc!(), created_doc!())),
+        .output(output_schema_for::<crate::schema::sketch_shapes::SlotResult>)
+        .params(concat!("p0, p1: overall ends, width; returns centre_line (construction, between the arc centres) and middle (the point held at its midpoint)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.point", "Point", crate::checked!("sketch.point", draw_point)).at("SKETCH", "CREATE").icon("point").enabled(in_sketch).contract(&POINT_CONTRACT).output(output_schema_for::<PointResult>).params(concat!("point: [x,y] (each a number or an expression over the design's parameters: the point is then fixed where it comes to and follows them) or a snap: \"mid:<line>\" (held at the line's midpoint), \"on:<curve>:x,y\" (on the curve near x,y), {vertex: [x,y,z]} or {on_edge: [x,y,z]} of the model; id?", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.dimension", "Sketch Dimension", crate::checked!("sketch.dimension", dimension))
         .at("SKETCH", "CREATE")
@@ -1682,6 +1682,25 @@ fn rect_rounded(s: &mut Session, p: &Value) -> Result<Value> {
         fillet["sketch"] = sketch.clone();
     }
     let rounded = scratch.execute("sketch.fillet", &fillet)?;
+    let arcs = rounded.get("curves").cloned().unwrap_or_else(|| json!([]));
+    // Its centre (#7908): a point held at the midpoint of a construction diagonal between the
+    // bottom-left and top-right arc centres, so it stays in the middle however the rectangle is
+    // edited or dragged. Two coordinates, two equations: the centre adds no freedom.
+    let corner = |k: usize| arcs.get(k).and_then(Value::as_str).map(str::to_string);
+    let (bl, tr) = corner(0).zip(corner(2)).ok_or_else(|| bad(cmd, "the corner arcs are missing"))?;
+    let ((diagonal, centre, centre_con), info) = edit(&mut scratch, p, cmd, false, |sk, _| {
+        let k0 = sk.curve_index(&bl).and_then(|a| arc_centre(sk, a));
+        let k1 = sk.curve_index(&tr).and_then(|a| arc_centre(sk, a));
+        let (k0, k1) = k0.zip(k1).ok_or_else(|| bad(cmd, "the corner arcs lost their centres"))?;
+        let at = sk.point(k0).zip(sk.point(k1)).map(|(a, b)| (a + b) * 0.5).ok_or_else(|| bad(cmd, "the corner arcs lost their centres"))?;
+        let diagonal = sk.add_line_pts(k0, k1, None)?;
+        if let Some(c) = sk.curves.get_mut(diagonal) {
+            c.construction = true;
+        }
+        let centre = sk.add_point(at, None)?;
+        let con = add_c(sk, ConstraintKind::Midpoint { p: centre, l: diagonal })?;
+        Ok((sk.curves.get(diagonal).map(|c| c.id.clone()), sk.points.get(centre).map(|q| q.id.clone()), con))
+    })?;
     // Session::execute records the wrapper's before snapshot. Nested history must not leak.
     scratch.undo.clear();
     s.accept_computed(scratch);
@@ -1693,10 +1712,12 @@ fn rect_rounded(s: &mut Session, p: &Value) -> Result<Value> {
     // The sharp corners are gone (the lines end at the arcs now): the reply names no corners.
     let reply = RoundedRectResult {
         curves: ids(&out, "curves").into_iter().chain(arcs.iter().cloned()).collect(),
-        constraints: ids(&out, "constraints").into_iter().chain(ids(&rounded, "constraints")).collect(),
-        sketch: rounded.get("sketch").or_else(|| out.get("sketch")).cloned().unwrap_or(Value::Null),
+        constraints: ids(&out, "constraints").into_iter().chain(ids(&rounded, "constraints")).chain([centre_con]).collect(),
+        sketch: if info.is_null() { rounded.get("sketch").or_else(|| out.get("sketch")).cloned().unwrap_or(Value::Null) } else { info },
         sides: RectSides { bottom: side("bottom"), right: side("right"), top: side("top"), left: side("left") },
         arcs,
+        diagonal,
+        centre,
         param: rounded.get("param").and_then(Value::as_str).unwrap_or_default().to_string(),
         created: None,
         param_warnings: Vec::new(),
@@ -2071,16 +2092,28 @@ fn polygon_edge(s: &mut Session, p: &Value) -> Result<Value> {
     polygon(s, p, cmd, center, rv, start, n, true)
 }
 
+/// The centre point of arc `a` (`None`: not an arc).
+fn arc_centre(sk: &Sketch, a: usize) -> Option<usize> {
+    match sk.curves.get(a).map(|c| &c.kind) {
+        Some(CurveKind::Arc { c, .. }) => Some(*c),
+        _ => None,
+    }
+}
+
+/// A straight slot: two lines and two equal arc caps, tangent where they meet, plus its middle
+/// (#7908): a point held at the midpoint of a construction line between the arc centres, so it
+/// stays in the middle however the slot is edited or dragged. The middle adds no freedom.
 pub(super) fn slot(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w: f64) -> Result<Value> {
-    let (out, info) = slot_parts(s, p, cmd, c0, c1, w)?;
-    draw_reply(out, info)
+    let reply = slot_parts(s, p, cmd, c0, c1, w)?;
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 /// What [`slot`] adds: the curve and constraint ids, and the sketch's solve.
-pub(super) fn slot_parts(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w: f64) -> Result<((Vec<String>, Vec<String>), Value)> {
+pub(super) fn slot_parts(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Vec2, w: f64) -> Result<crate::schema::sketch_shapes::SlotResult> {
     let h = w / 2.0;
     let d = (c1 - c0).normalized().ok_or_else(|| bad(cmd, "the slot ends must differ"))?;
     let n = d.perp();
+    let mut extra = (None, None);
     let (out, info) = draw(s, p, cmd, |sk, _| {
         let pts: Vec<usize> =
             [c0 - n * h, c1 - n * h, c1 + n * h, c0 + n * h].iter().map(|q| sk.add_point(*q, None)).collect::<std::result::Result<_, _>>()?;
@@ -2094,9 +2127,21 @@ pub(super) fn slot_parts(s: &mut Session, p: &Value, cmd: &str, c0: Vec2, c1: Ve
             cons.push(add_c(sk, ConstraintKind::Tangent { a: l, b: a })?);
         }
         cons.push(add_c(sk, ConstraintKind::Equal { a: a0, b: a1 })?);
+        let (k0, k1) = arc_centre(sk, a0).zip(arc_centre(sk, a1)).ok_or_else(|| bad(cmd, "the slot caps lost their centres"))?;
+        let axis = sk.add_line_pts(k0, k1, None)?;
+        if let Some(c) = sk.curves.get_mut(axis) {
+            c.construction = true;
+        }
+        let mid = sk.add_point((c0 + c1) * 0.5, None)?;
+        cons.push(add_c(sk, ConstraintKind::Midpoint { p: mid, l: axis })?);
+        extra = (sk.curves.get(axis).map(|c| c.id.clone()), sk.points.get(mid).map(|q| q.id.clone()));
         Ok((ids_of(sk, &[l1, a1, l2, a0]), cons))
     })?;
-    Ok((out, info))
+    Ok(crate::schema::sketch_shapes::SlotResult {
+        drawn: DrawResult { curves: out.0, constraints: out.1, sketch: info, created: None, param_warnings: Vec::new() },
+        centre_line: extra.0,
+        middle: extra.1,
+    })
 }
 
 fn slot_c2c(s: &mut Session, p: &Value) -> Result<Value> {
@@ -3354,6 +3399,8 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
         let is_round = |c: usize| matches!(sk.curves.get(c).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Arc { .. }));
         // The other reading of an angle between two lines (see below).
         let mut alt: Option<(ConstraintKind, f64)> = None;
+        // A free line measured to a linked one (an origin axis, a projected edge): (line, link).
+        let mut keep_parallel: Option<(usize, usize)> = None;
         let (mut k, mut cur): (ConstraintKind, f64) = match (e0, e1) {
             ((None, Some(c)), None) if ty == "sweep" => {
                 let angle = arc_len(sk, c).zip(sk.radius(c)).map(|(len, r)| len / r).ok_or_else(|| bad(cmd, "sweep needs an arc"))?;
@@ -3461,13 +3508,28 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
                 let (da, db) = (a1 - a0, b1 - b0);
                 if da.cross(db).abs() < 1e-9 * da.len() * db.len() && ty != "angle" {
                     // Parallel lines: distance between them (a diameter about a centerline).
-                    let (a, b, b0) = if sk.curves.get(a).is_some_and(|c| c.centerline) { (a, b, b0) } else { (b, a, a0) };
+                    // The reference is a centerline, else an origin or sketch axis in either pick
+                    // order, so the free line is the one kept parallel to it. Other linked lines
+                    // (a projected edge) keep the pick order and get no Parallel.
+                    let linked = |c: usize| sk.curves.get(c).is_some_and(|c| c.link.is_some());
+                    let axis = |c: usize| {
+                        sk.curves.get(c).and_then(|c| c.link.as_deref()).and_then(|l| sk.link(l)).is_some_and(|l| {
+                            matches!(l.source, solidcraft_sketch::LinkSource::Axis { .. } | solidcraft_sketch::LinkSource::SketchAxis { .. })
+                        })
+                    };
+                    // A centerline comes first, then an axis, whichever was picked first.
+                    let centerline = |c: usize| sk.curves.get(c).is_some_and(|c| c.centerline);
+                    let a_ref = centerline(a) || (!centerline(b) && axis(a) && !linked(b));
+                    let (a, b, b0) = if a_ref { (a, b, b0) } else { (b, a, a0) };
                     let (bq, _) = line_ends(sk, b);
                     let (a0, a1) = line_pts(sk, a).unwrap_or_default();
                     let d = (a1 - a0).normalized().map(|d| d.cross(b0 - a0).abs()).unwrap_or(0.0);
                     if diameter_about(sk, a, &ty) {
                         (ConstraintKind::LinearDiameter { p: bq, l: a, value: 2.0 * d }, 2.0 * d)
                     } else {
+                        if axis(a) && !linked(b) {
+                            keep_parallel = Some((b, a));
+                        }
                         (ConstraintKind::PointLineDistance { p: bq, l: a, value: d }, d)
                     }
                 } else {
@@ -3553,6 +3615,7 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
             // A reference dimension: measures, no parameter.
             let name = k.name();
             let id = sk.add_constraint(k, None)?;
+            new_id = id.clone();
             place_text(sk, &id, text_at);
             if let Some(c) = sk.constraints.iter_mut().find(|c| c.id == id) {
                 c.driven = true;
@@ -3611,11 +3674,18 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
         let name = k.name();
         let id = sk.add_constraint(k, Some(pname.clone()))?;
         new_id = id.clone();
+        // The distance holds one end of the line; it stays parallel to the linked line so the
+        // whole line keeps that distance, unless something already sets its direction.
+        if let Some((l, r)) = keep_parallel
+            && !direction_fixed(sk, l)
+        {
+            sk.add_constraint(ConstraintKind::Parallel { a: l, b: r }, None)?;
+        }
         place_text(sk, &id, text_at);
         Ok((pname, name, measured(is_angle, cur)))
     })?;
     // Report what the dimension measures once the sketch is solved, not the geometry before.
-    let current = solved_measure(s, p, cmd).unwrap_or(current);
+    let current = solved_measure(s, p, cmd, &new_id).unwrap_or(current);
     if driven {
         return Ok(DimensionResult {
             param: None,
@@ -3681,10 +3751,63 @@ fn measured(is_angle: bool, v: f64) -> (f64, &'static str) {
     if is_angle { (round6(v.to_degrees()), "deg") } else { (round6(v), "mm") }
 }
 
+/// Whether the sketch's constraints already fix line `l`'s direction: a Horizontal, Vertical or
+/// angle on it (or Horizontal/Vertical on its two ends), or a Parallel, Collinear, Perpendicular
+/// or Angle to a line whose direction is fixed or which is linked (an axis, a projected edge).
+/// A relation to free lines only makes them turn together, so it does not count.
+fn direction_fixed(sk: &Sketch, l: usize) -> bool {
+    let absolute = |x: usize| {
+        let ends = match sk.curves.get(x).map(|c| &c.kind) {
+            Some(CurveKind::Line { a, b }) => Some((*a, *b)),
+            _ => None,
+        };
+        sk.constraints.iter().filter(|c| !c.driven).any(|c| match c.kind {
+            ConstraintKind::HorizontalPoints { p, q } | ConstraintKind::VerticalPoints { p, q } => {
+                ends.is_some_and(|(a, b)| (p == a && q == b) || (p == b && q == a))
+            }
+            ConstraintKind::Horizontal { l: y } | ConstraintKind::Vertical { l: y } | ConstraintKind::LineAngle { l: y, .. } => y == x,
+            _ => false,
+        })
+    };
+    let linked = |x: usize| sk.curves.get(x).is_some_and(|c| c.link.is_some());
+    let mut seen = vec![l];
+    let mut next = vec![l];
+    while let Some(x) = next.pop() {
+        if absolute(x) || (x != l && linked(x)) {
+            return true;
+        }
+        for c in sk.constraints.iter().filter(|c| !c.driven) {
+            let other = match c.kind {
+                ConstraintKind::Parallel { a, b }
+                | ConstraintKind::Collinear { a, b }
+                | ConstraintKind::Perpendicular { a, b }
+                | ConstraintKind::Angle { a, b, .. } => {
+                    if a == x {
+                        Some(b)
+                    } else if b == x {
+                        Some(a)
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
+            if let Some(o) = other
+                && !seen.contains(&o)
+            {
+                seen.push(o);
+                next.push(o);
+            }
+        }
+    }
+    false
+}
+
 /// What the dimension just added (the sketch's last constraint) measures on the solved sketch.
-fn solved_measure(s: &Session, p: &Value, cmd: &str) -> Option<(f64, &'static str)> {
+/// The dimension is found by its id: a Parallel added after it is not it.
+fn solved_measure(s: &Session, p: &Value, cmd: &str, id: &str) -> Option<(f64, &'static str)> {
     let sk = sketch_store::read(&s.doc, sketch_store::target(s, p, cmd).ok()?).ok()?;
-    let k = &sk.constraints.last()?.kind;
+    let k = &sk.constraints.iter().find(|c| c.id == id)?.kind;
     Some(measured(k.is_angle(), solidcraft_sketch::measure_dimension(sk, k)?))
 }
 

@@ -20,7 +20,7 @@ fn schemas_and_the_key_check_agree() {
         &["a", "angle", "b", "flip", "limits", "name", "offset", "quiet", "type", "value", "values"],
     );
     assert_keys(input_schema_for::<AsBuiltJointParams>(), &["a", "at", "b", "limits", "name", "quiet", "type", "value", "values"]);
-    assert_keys(input_schema_for::<DriveJointParams>(), &["continuous", "index", "joint", "quiet", "value", "values"]);
+    assert_keys(input_schema_for::<DriveJointParams>(), &["continuous", "index", "joint", "quiet", "stop_at_budget", "value", "values"]);
     assert_keys(input_schema_for::<JointLimitsParams>(), &["index", "joint", "max", "min", "quiet"]);
     assert_keys(input_schema_for::<DeleteJointParams>(), &["joint", "link", "origin", "quiet"]);
     assert_keys(input_schema_for::<ListJointsParams>(), &["quiet"]);

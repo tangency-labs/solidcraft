@@ -4,7 +4,7 @@
 
 use crate::vec::VecExt as _;
 use solidcore::eval::plan::EvalSurface;
-pub(crate) use solidcore::eval::plan::uv::{Domain, degenerate_within, domain, unwrap};
+pub(crate) use solidcore::eval::plan::uv::{Domain, domain, unwrap};
 
 use super::edges::{QUARTER_TURN, turn};
 use super::size::Rules;
@@ -36,7 +36,7 @@ pub(crate) fn refine(s: &EvalSurface, d: usize, lines: &[f64], across: (f64, f64
 fn split(starts: &[f64], flat: &dyn Fn(f64, f64) -> bool, max_lines: usize) -> Vec<f64> {
     let Some(&first) = starts.first() else { return Vec::new() };
     let mut out = vec![first];
-    let mut stack: Vec<(f64, f64, u32)> = starts.windows(2).rev().map(|w| (w[0], w[1], 0)).collect();
+    let mut stack: Vec<(f64, f64, u32)> = starts.windows(2).rev().filter_map(|w| if let [a, b] = *w { Some((a, b, 0)) } else { None }).collect();
     while let Some((a, b, depth)) = stack.pop() {
         if depth >= 20 || out.len() + stack.len() >= max_lines.max(2) || flat(a, b) {
             out.push(b);

@@ -2255,6 +2255,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             )
             .collect();
         let domain = common_trim_interval(k, &joined, ci1.interval, OP_CREATE_PE)?;
+        // Not upstream: a joined curve the common interval cannot hold refuses the edge. Its own
+        // trim snaps an end further than 100 scaled zeros from `domain`, or it would have to be
+        // reparametrised onto `domain` and is no B-spline (`trim_unsnapped`'s port invariant,
+        // which `ignore_soft` passes on for a uv curve too). The curves then end at no one
+        // parameter, where upstream builds an edge that runs past its 3D curve: the refusal
+        // replaces an invalid result, as in the offset's `mate_edges`.
         trim_unsnapped(k, &mut copy, domain, OP_CREATE_PE)?;
         for (u, join) in [&mut uv1, &mut uv2].into_iter().zip(joins) {
             if let Some(u) = u.as_mut() {

@@ -378,7 +378,7 @@ pub(crate) fn theme_card(ui: &mut Ui, card: &ThemeCard<'_>, width: f32) -> Respo
     if let Some(help) = card.options {
         let centre = pos2(r.right() - t.space_8 - size / 2.0, r.top() + t.space_4 + (width - t.space_8) * 76.0 / 124.0 - size / 2.0);
         ui.painter().circle_filled(centre, size / 2.0, t.form_primary);
-        crate::icons::paint_ink(ui.painter(), Rect::from_center_size(centre, vec2(t.space_12, t.space_12)), "settings", t.on_accent);
+        crate::ui_kit::icons::paint_ink(ui.painter(), Rect::from_center_size(centre, vec2(t.space_12, t.space_12)), "settings", t.on_accent);
         return response.backing_on_hover_text(help);
     }
     response

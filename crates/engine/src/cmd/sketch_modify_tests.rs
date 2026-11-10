@@ -4226,7 +4226,10 @@ fn trim_hover_made_once_and_extend_previews_per_end_answer_as_afresh() {
             let Some(piece) = piece else { continue };
             if k % 4 == 1 {
                 let mut after = sk.clone();
-                super::remove_piece(&mut after, ci, at, "sketch.trim").unwrap();
+                let (_, removed) = super::remove_piece(&mut after, ci, at, "sketch.trim").unwrap();
+                if c.kind.is_freeform() {
+                    assert_eq!(piece, removed, "{} at {at:?}", c.id);
+                }
                 let mid = if piece.len() > 2 { piece[piece.len() / 2] } else { (piece[0] + piece[1]) * 0.5 };
                 assert!(!(0..after.curves.len()).filter_map(|i| after.shape(i)).any(|sh| sh.dist(mid) < 1e-6), "{} at {at:?}", c.id);
                 trimmed += 1;

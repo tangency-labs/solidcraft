@@ -2108,7 +2108,7 @@ impl FilletBrep {
 
         // 4. set topology pointers
         let base_eu = base_eu.ok_or_else(|| SolidError::null_pointer(OP_RAIL_EU))?;
-        let base_face = eu1::face(target, base_eu)?;
+        let base_face = rolled_face(solver, rail_index)?.or(eu1::face(target, base_eu)?);
         self.fillet_edge_mut(rail_e)?.set_original_face(base_face);
 
         // Set srf ptrs in FilletVertexuse's TsectPnt.
@@ -2123,8 +2123,9 @@ impl FilletBrep {
             *slot = user_surface(target, face)?;
         }
         let base_eu1 = base_eu1.ok_or_else(|| SolidError::null_pointer(OP_RAIL_EU))?;
-        let face1 =
-            eu1::face(target, base_eu1)?.ok_or_else(|| SolidError::null_pointer(OP_RAIL_EU))?;
+        let face1 = rolled_face(solver, 1 - rail_index)?
+            .or(eu1::face(target, base_eu1)?)
+            .ok_or_else(|| SolidError::null_pointer(OP_RAIL_EU))?;
         target.face(face1)?;
         if let Some(slot) = self
             .fillet_vertexuse_mut(new_vu)?
@@ -3208,6 +3209,26 @@ pub(super) fn held_curve_zone_tol_3d(k: &Kernel, b: &Brep, holder: Option<EdgeId
         Some(e) => edge::tolerance(b, e)?,
         None => crate::geom::tol::zone_tol_3d(k, crate::geom::tol::SmallTopoType::NormalSize),
     })
+}
+
+/// Not upstream (solidcore-native, [`crate::blend::fillet_tangent_rollover`]): the face a solver's rail `rail` rolls on when
+/// its offset surface is owned by another face than its edge use's (a whole rail rolled over a
+/// smooth far edge before the trace, [`crate::blend::fillet_tangent_rollover`]), else `None`.
+/// Only that construction gives an offset surface another face before the rails are made: the
+/// rollover recovery re-homes a rail itself, and a rim support keeps its face.
+fn rolled_face(solver: &FilletSolver, rail: usize) -> Result<Option<FaceId>> {
+    let Some(slot) = solver.surface(rail)? else {
+        return Ok(None);
+    };
+    let crate::blend::fillet_custom_solver::SurfaceId::Face(face) = slot.surface.base_id else {
+        return Ok(None);
+    };
+    Ok(solver
+        .rolled_faces
+        .get(rail)
+        .copied()
+        .flatten()
+        .filter(|f| *f == face))
 }
 
 #[cfg(test)]

@@ -51,7 +51,7 @@
 //! - **Context.** `SmApiGetOrCreateContext()` is the caller's [`Kernel`], taken by
 //!   every entry point (the merge engine reads its tolerances).
 //! - **Statuses.** `SM_ERR_INVALID_INPUT` is [`SolidError::InvalidInput`]; `SM_ERR`
-//!   is [`SolidError::Upstream`] with [`crate::error::SM_ERR`].
+//!   is a [`SolidError::Failed`] whose comparison status is [`crate::error::SM_ERR`].
 //! - **2D booleans.** [`boolean_2d`] runs `SmPrimitiveCreation::Boolean2D` (static
 //!   upstream) on a [`PrimitiveCreation`] without primitive B-rep, as `merge::p3` does
 //!   for planar list operands, with the operands' marks and an arena-only notification
@@ -267,7 +267,9 @@ fn merge_boolean_by(
             operation,
         )?
     };
-    let mut result = result.ok_or_else(|| SolidError::null_pointer(OP_BOOLEAN))?;
+    let mut result = result.ok_or_else(|| {
+        SolidError::entity_missing(OP_BOOLEAN, "the Boolean made no result B-rep")
+    })?;
     // (not upstream: the port's cached topology fields, true again for the caller)
     result.refresh_cached_topology();
     if let Some(o) = other.as_mut() {
@@ -476,7 +478,10 @@ pub fn piecewise_merge(
     let result_id = merged?;
     if result_id != PrimitiveModel::MAIN {
         // PiecewiseMerge's result is its first operand
-        return Err(SolidError::sm_err(OP_PIECEWISE));
+        return Err(SolidError::stage_failed(
+            OP_PIECEWISE,
+            "the piecewise merge did not return its first operand",
+        ));
     }
     let mut other = model.take_brep(other_id)?;
     let mut result = model.into_brep()?;

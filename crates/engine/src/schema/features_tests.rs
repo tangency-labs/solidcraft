@@ -4,7 +4,8 @@ use serde_json::{Value, json};
 
 use super::{
     BoundingSolidParams, BoxParams, ChamferParams, CombineParams, CombineResult, ConeParams, CylinderParams, ExtrudeParams, FeatureResult,
-    FilletParams, FilletResult, OffsetPlaneParams, PipeParams, PlaneAtAngleParams, RevolveParams, ScaleParams, SphereParams, TorusParams,
+    FilletParams, FilletResult, OffsetPlaneParams, PipeParams, PlaneAtAngleParams, PressPullParams, PressPullResult, RevolveParams, ScaleParams,
+    SphereParams, TorusParams,
 };
 use super::{PatternCircularParams, PatternCircularResult};
 use super::{SurfaceSweepParams, SweepParams};
@@ -1117,4 +1118,48 @@ fn circular_pattern_replies_match_the_output_schema() {
     let warned = json!({"components": ["Part"], "axis": "Z", "count": 3, "colour": "red"});
     let r = ring_rig(ParamCheck::Warn).execute("solid.pattern.circular", &warned).unwrap_or_else(|e| panic!("{e}"));
     assert!(r["param_warnings"].as_array().is_some_and(|w| !w.is_empty()) && conforms(schema, schema, &r), "{r}");
+
+/// A 40 x 30 x 20 block from the origin, `Block`, with its top front edge rounded (radius 2) when
+/// `rounded` is true.
+fn press_pull_block(level: ParamCheck, rounded: bool) -> Session {
+    let mut s = Session { param_check: level, ..Session::default() };
+    s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20, "corner": [0, 0, 0], "body_name": "Block"})).unwrap();
+    if rounded {
+        s.execute("solid.fillet", &json!({"edges": [[20, 0, 20]], "radius": 2})).unwrap();
+    }
+    s
+}
+
+/// Press Pull describes its keys, keeps today's errors, and each kind of reply it gives fits its
+/// output schema: a new feature from a flat face and from edges, and a fillet's size edited.
+#[test]
+fn press_pull_contract_and_replies() {
+    assert_keys(input_schema_for::<PressPullParams>(), &["body", "distance", "edges", "face"]);
+    assert_strict_keeps_todays_errors(&[
+        ("solid.press_pull", json!({"face": [0, 0, 0]})),
+        ("solid.press_pull", json!({"distance": 1})),
+        ("solid.press_pull", json!({"face": [0, 0, 0], "distance": true})),
+    ]);
+    let schema = output_schema_for::<PressPullResult>();
+    let schema = schema.as_value();
+    let root2 = 2f64.sqrt();
+    let replies = [
+        (false, json!({"face": [20, 15, 20], "distance": 5}), false),
+        (false, json!({"edges": [[20, 0, 20]], "distance": 1, "body": "Block"}), false),
+        // Half way round the 2 mm fillet on the top front edge.
+        (true, json!({"face": [20, 2.0 - root2, 18.0 + root2], "distance": 1}), true),
+    ];
+    for (rounded, p, edited) in replies {
+        let r = press_pull_block(ParamCheck::Strict, rounded).execute("solid.press_pull", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert_eq!(r.get("edited").is_some(), edited, "{r}");
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+    }
+}
+
+/// With its contract, Press Pull refuses an unknown key in strict.
+#[test]
+fn press_pull_checks_its_keys() {
+    let p = json!({"face": [20, 15, 20], "distance": 5, "flp": true});
+    let error = press_pull_block(ParamCheck::Strict, false).execute("solid.press_pull", &p).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(error.contains("`flp`"), "{error}");
 }
