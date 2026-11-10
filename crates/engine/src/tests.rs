@@ -4116,6 +4116,62 @@ fn hole_to_object_and_at_sketch_points() {
     assert!(rel(w0 - volume(&mut t), 3.0 * PI * 2.25 * 10.0) < 1e-3, "{r} {}", w0 - volume(&mut t));
 }
 
+/// #8087: deleting one sketch point of a Hole drilled at several points drops only that point's
+/// hole, and the Hole's warning names it; the feature keeps the point's id, so undo brings the hole
+/// back. With every point gone the Hole fails, naming them.
+#[test]
+fn a_deleted_sketch_point_drops_only_its_own_hole() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 60, "width": 20, "height": 10}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Pts"}));
+    run(&mut s, "sketch.point", json!({"point": [15, 10], "id": "a"}));
+    run(&mut s, "sketch.point", json!({"point": [45, 10], "id": "b"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "Pts", "points": ["a", "b"], "diameter": 8, "name": "Holes"}));
+    let bore = PI * 16.0 * 10.0;
+    assert!(rel(volume(&mut s), 12000.0 - 2.0 * bore) < 1e-4, "{}", volume(&mut s));
+    let delete = |s: &mut Session, points: Value| {
+        run(s, "sketch.edit", json!({"sketch": "Pts"}));
+        run(s, "sketch.delete", json!({ "entities": points }));
+        run(s, "sketch.finish", json!({}));
+    };
+    let holes = |s: &Session| s.model.results.iter().find(|r| r.name == "Holes").cloned().unwrap();
+
+    delete(&mut s, json!(["b"]));
+    assert!(rel(volume(&mut s), 12000.0 - bore) < 1e-4, "one Ø8 hole is left: {}", volume(&mut s));
+    let h = holes(&s);
+    assert_eq!(h.error, None);
+    assert_eq!(h.warning.as_deref(), Some("sketch point(s) `b` no longer in the sketch: not drilled there (edit the Hole to drop them)"));
+    assert!(
+        s.model.state().bodies.iter().all(|b| b
+            .body
+            .classify_point(solidcore_record::Vec3::new(15.0, 10.0, 5.0))
+            .expect("classify the point at `a`")
+            == solidcraft_kernel::PointClass::Outside),
+        "the hole at `a` is drilled"
+    );
+    assert!(
+        s.model.state().bodies.iter().any(|b| b
+            .body
+            .classify_point(solidcore_record::Vec3::new(45.0, 10.0, 5.0))
+            .expect("classify the point at `b`")
+            == solidcraft_kernel::PointClass::Inside),
+        "`b`'s spot is solid"
+    );
+    let f = s.doc.find_feature("Holes").unwrap();
+    assert!(matches!(&f.kind, solidcraft_doc::FeatureKind::Hole { points: Some(sp), .. } if sp.ids == ["a", "b"]), "{:?}", f.kind);
+
+    // Undo puts `b` back, and its hole with it.
+    run(&mut s, "edit.undo", json!({}));
+    assert!(rel(volume(&mut s), 12000.0 - 2.0 * bore) < 1e-4, "{}", volume(&mut s));
+    assert_eq!(holes(&s).warning, None);
+
+    delete(&mut s, json!(["a", "b"]));
+    let h = holes(&s);
+    assert_eq!(h.error.as_deref(), Some("unknown sketch point(s) `a`, `b` (none of the hole's points is left in its sketch)"));
+    assert!(rel(volume(&mut s), 12000.0) < 1e-9, "{}", volume(&mut s));
+}
+
 /// Combine keeps its tools on request and can put its result in a new component.
 #[test]
 fn combine_keep_tools_and_new_component() {
@@ -5384,6 +5440,49 @@ fn renaming_a_body_later_features_change_evaluates_nothing() {
     assert_eq!(s.evaluations, 0, "a rename evaluates nothing");
     let after = looks(&s.model.state());
     assert_eq!(after.first().map(|b| b.0.as_str()), Some("Plate"));
+    let mut fresh = Session::new((*s.doc).clone());
+    fresh.refresh();
+    assert_eq!(looks(&fresh.model.state()), after, "the bodies and face names evaluating the renamed design gives");
+    assert!(rel(body_volume(&fresh.model.state()), v) < 1e-9);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(looks(&s.model.state()), before);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(looks(&s.model.state()), after);
+    assert_eq!(s.evaluations, 0, "nor do its undo and redo");
+}
+
+/// #12657: renaming a body that a split cut in two, after many features changed it, evaluates
+/// nothing: the split's other piece (`Caisson (1)`) keeps its name, which the split stores, so
+/// the model is the one evaluating the renamed design gives. Undo and redo do the same.
+#[test]
+fn renaming_a_split_body_evaluates_nothing() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 300, "width": 200, "height": 160, "center": [0, 0, 80], "body_name": "Caisson"}));
+    run(&mut s, "solid.shell", json!({"faces": [[0, 0, 160]], "thickness": 4, "body": "Caisson"}));
+    for i in 0..3 {
+        let base = [-140 + i * 14, -103, 20];
+        run(
+            &mut s,
+            "solid.cylinder",
+            json!({"diameter": 4.5, "height": 10, "base": base, "axis": [0, 1, 0], "operation": "cut", "targets": ["Caisson"]}),
+        );
+    }
+    run(&mut s, "solid.split_body", json!({"body": "Caisson", "plane": {"origin": [0, 0, 80], "normal": [0, 0, 1]}}));
+    let looks = |st: &solidcraft_doc::ModelState| {
+        st.bodies.iter().map(|b| (b.name.clone(), (*solidcraft_doc::naming::face_names(b)).clone())).collect::<Vec<_>>()
+    };
+    let before = looks(&s.model.state());
+    assert!(before.iter().any(|b| b.0 == "Caisson (1)"), "{:?}", before.iter().map(|b| &b.0).collect::<Vec<_>>());
+    let v = body_volume(&s.model.state());
+    s.evaluations = 0;
+    run(&mut s, "body.rename", json!({"body": "Caisson", "name": "Haut"}));
+    assert_eq!(s.evaluations, 0, "a rename evaluates nothing");
+    let after = looks(&s.model.state());
+    assert!(
+        after.iter().any(|b| b.0 == "Haut") && after.iter().any(|b| b.0 == "Caisson (1)"),
+        "{:?}",
+        after.iter().map(|b| &b.0).collect::<Vec<_>>()
+    );
     let mut fresh = Session::new((*s.doc).clone());
     fresh.refresh();
     assert_eq!(looks(&fresh.model.state()), after, "the bodies and face names evaluating the renamed design gives");

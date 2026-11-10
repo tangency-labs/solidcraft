@@ -1706,7 +1706,7 @@ fn quick_access_bar(app: &mut SolveApp, ui: &mut egui::Ui, bar: Rect, mut x: f32
             _ => label.clone(),
         };
         let tip = if shown { tip } else { solidcraft_ui_text::format("ui.needs_design", &[("command", &label)]) };
-        if resp.on_hover_text(tip).clicked() && enabled {
+        if resp.backing_on_hover_text(tip).clicked() && enabled {
             start = Some((c.id, br));
         }
         buttons.push((c.id, br));
@@ -1750,7 +1750,7 @@ fn assistant_button(app: &mut SolveApp, ui: &mut egui::Ui, at: Rect) {
         AssistantMark::Quiet => crate::ui_kit::AssistantEntryState::Quiet,
         AssistantMark::Ready => crate::ui_kit::AssistantEntryState::Ready,
         AssistantMark::Busy => crate::ui_kit::AssistantEntryState::Busy,
-        AssistantMark::NeedsAuth => crate::ui_kit::AssistantEntryState::NeedsAuth,
+        AssistantMark::NeedsAuth | AssistantMark::NoDesign => crate::ui_kit::AssistantEntryState::NeedsAuth,
         AssistantMark::Stopped => crate::ui_kit::AssistantEntryState::Stopped,
         AssistantMark::Waiting(count) => crate::ui_kit::AssistantEntryState::Waiting(count),
     };
@@ -2426,12 +2426,6 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 }
                 // A single Esc with nothing left to cancel keeps the sketch open (#1804); a quick
                 // second press finishes it (above).
-            }
-            // With a menu open, V runs that menu's Show/Hide on what the menu is for.
-            Key::V => {
-                if !crate::context_menu::press_shortcut(app, "V") {
-                    crate::context_menu::toggle_visibility(app);
-                }
             }
             Key::F2 => {
                 if !crate::context_menu::press_shortcut(app, "F2") {

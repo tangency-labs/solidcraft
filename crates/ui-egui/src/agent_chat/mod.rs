@@ -521,6 +521,9 @@ pub struct AgentChat {
     /// in. The next message tells it when the design is no longer that one (#10854).
     seen: Option<Revision>,
     tools_available: Option<bool>,
+    /// The agent was started with SolidCraft's tools (solidcraft-cli and the control port were
+    /// both there): if they are still unavailable, they failed to start, not to be found.
+    tools_bridged: bool,
     /// The latest completed turn's notice; older notices remain in the transcript.
     turn_warning: Option<String>,
     held: Vec<Held>,
@@ -721,6 +724,23 @@ impl AgentChat {
 
     pub fn state(&self) -> State {
         self.state.unwrap_or(State::Off)
+    }
+    /// The agent is ready but was started without SolidCraft's tools (no `solidcraft-cli` was
+    /// found, or no control port), so no reply can read or change the design (#12283).
+    pub(crate) fn without_design(&self) -> bool {
+        self.state() == State::Ready && self.tools_available == Some(false)
+    }
+    /// Why [`Self::without_design`], and what to do about it: the chat's endpoint did not start,
+    /// `solidcraft-cli` was not found (as the notice `connect` posts says), or it was found but
+    /// its tools did not start (an endpoint agent whose MCP start failed; the error is in the chat).
+    pub(crate) fn no_design_hint(&self) -> &'static str {
+        if self.tools_port.is_none() {
+            tr("ui.agent_chat_no_control")
+        } else if self.tools_bridged {
+            tr("ui.agent_chat_tools_not_started")
+        } else {
+            tr("ui.agent_chat_no_design_hint")
+        }
     }
     #[cfg(test)]
     pub(crate) fn set_state(&mut self, state: State) {
@@ -1034,6 +1054,8 @@ pub(crate) enum AssistantMark {
     NeedsAuth,
     Stopped,
     Waiting(usize),
+    /// The agent runs, but without SolidCraft's tools: it can't read or change the design (#12283).
+    NoDesign,
 }
 
 fn assistant_mark_for(state: State, login: &str, configured: bool, waiting: usize, stopped: bool, failed: bool) -> AssistantMark {
@@ -1059,14 +1081,15 @@ fn assistant_mark_for(state: State, login: &str, configured: bool, waiting: usiz
 pub(crate) fn assistant_mark(app: &SolveApp) -> AssistantMark {
     let chat = &app.agent_chat;
     let current = agents::current(app);
-    assistant_mark_for(
+    let mark = assistant_mark_for(
         chat.state(),
         current.as_ref().map_or("", |e| e.login),
         current.is_some(),
         chat.waiting(),
         chat.stopped,
         chat.ended.as_deref() == Some("error"),
-    )
+    );
+    if mark == AssistantMark::Ready && chat.without_design() { AssistantMark::NoDesign } else { mark }
 }
 
 pub(crate) fn assistant_tip(app: &SolveApp, mark: AssistantMark) -> String {
@@ -1077,12 +1100,16 @@ pub(crate) fn assistant_tip(app: &SolveApp, mark: AssistantMark) -> String {
         AssistantMark::NeedsAuth => tr("ui.agent_chat_state_auth").to_string(),
         AssistantMark::Stopped => tr("ui.agent_chat_state_exited").to_string(),
         AssistantMark::Waiting(count) => trf("ui.assistant_waiting", &[("count", &count.to_string())]),
+        AssistantMark::NoDesign => tr("ui.agent_chat_state_no_design").to_string(),
     };
     let name = match crate::keymap::display_for(app, "ui.assistant") {
         Some(key) => format!("{} ({key})", tr("ui.assistant")),
         None => tr("ui.assistant").to_string(),
     };
-    format!("{name} — {state}")
+    match mark {
+        AssistantMark::NoDesign => format!("{name} — {state}\n{}", app.agent_chat.no_design_hint()),
+        _ => format!("{name} — {state}"),
+    }
 }
 
 /// `solidcraft-cli` next to this program, else on the search path.
@@ -1161,6 +1188,7 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
     }
     let bridge = cli.zip(chat.tools_port).map(|(cli, port)| acp::McpBridge { cli, port });
     chat.tools_available = Some(bridge.is_some());
+    chat.tools_bridged = bridge.is_some();
     let wake = ctx.clone();
     let start = backend::StartContext { cwd: working_dir(), bridge, tools: chat.tools_tx.clone(), wake: Box::new(move || wake.request_repaint()) };
     let started: Result<Box<dyn ChatBackend>, String> = match entry.kind {

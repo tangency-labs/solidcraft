@@ -39,6 +39,7 @@ pub mod dialogs;
 pub mod dialogs_appearance;
 pub mod dialogs_assembly;
 pub mod dialogs_coupling;
+pub mod dialogs_end_cap;
 pub mod dialogs_frame;
 mod dialogs_hole;
 pub mod dialogs_insert_drawing;
@@ -270,6 +271,7 @@ pub(crate) mod sketch_attachment_ui;
 #[cfg(test)]
 mod sketch_attachment_ui_tests;
 mod sketch_construction;
+mod sketch_cursor_readout;
 pub mod sketch_dims;
 pub(crate) mod sketch_display;
 #[cfg(test)]
@@ -1295,6 +1297,8 @@ impl SolveApp {
         // Before a file given at start opens: the largest file it may be (#4086).
         prefs::apply_file_limits(&self.preferences);
         render_workspace::apply_memory_policy(self);
+        // Before a design given at start opens: the largest sketch it may build (#10874).
+        prefs::apply_sketch_limit(&self.preferences);
         // Saved before the theme was a preference: the Dark/Light flag says which.
         if v.get("preferences").and_then(|p| p.get("theme")).is_none() {
             self.preferences.theme = if self.ui.dark { "dark" } else { "light" }.into();
@@ -1805,6 +1809,14 @@ impl SolveApp {
         if solidcraft_engine::panels::commands::is_command(id) {
             if let Err(why) = self.run(id, json!({})) {
                 self.set_status(why, true);
+            }
+            return;
+        }
+        // Before the folder pick is cleared: a clicked Browser folder is what Show/Hide acts on.
+        // With a menu open, this runs that menu's Show/Hide on what the menu is for.
+        if id == "ui.toggle_visibility" {
+            if !context_menu::press_shortcut(self, "V") {
+                context_menu::toggle_visibility(self);
             }
             return;
         }

@@ -950,6 +950,9 @@ fn canvas_menu_hides_renames_calibrates_and_deletes() {
     act(&mut app, &t, "Calibrate");
     let p = app.tree.canvas_panel.clone().unwrap();
     assert!(p.calibrate && (p.distance - 80.0).abs() < 1e-9, "starts from the image's width");
+    act(&mut app, &t, "Straighten");
+    let p = app.tree.canvas_panel.clone().unwrap();
+    assert!(p.straighten && !p.calibrate && p.picks_points() && p.target_angle() == 0.0, "{p:?}");
     act(&mut app, &t, "Delete");
     assert!(app.session.doc.canvases.is_empty());
     app.run("edit.undo", json!({})).unwrap();
@@ -958,7 +961,7 @@ fn canvas_menu_hides_renames_calibrates_and_deletes() {
     act(&mut app, &t, "Lock");
     assert!(app.session.doc.canvases[0].locked);
     let items = context_menu::items(&app, &t);
-    for label in ["Edit Canvas", "Calibrate", "Delete"] {
+    for label in ["Edit Canvas", "Calibrate", "Straighten", "Delete"] {
         let item = find(&items, label);
         assert!(!item.enabled && item.tip.as_deref() == Some(solidcraft_ui_text::tr("browser.canvas_locked")), "{label}: {item:?}");
     }
@@ -1804,6 +1807,19 @@ fn appearance_submenu_swatches_apply_to_the_clicked_body_and_keep_library_action
     let swatch = appearance.children.iter().find(|row| row.swatch.is_some()).unwrap();
     context_menu::run_item(&mut app, swatch, pos2(0.0, 0.0));
     assert_eq!(app.session.doc.appearances.bodies[&name].color, swatch.swatch.unwrap());
+}
+
+/// The A key opens the Appearance editor, so the quick looks and Remove override show no key.
+#[test]
+fn appearance_quick_choices_show_no_shortcut() {
+    let app = sample_app();
+    let appearance = find(&context_menu::items(&app, &Target::Body { name: body(&app) }), "Appearance");
+    assert_eq!(appearance.children[0].shortcut, "A");
+    let quick: Vec<_> = appearance.children.iter().filter(|row| row.id == "appearance.assign").collect();
+    assert!(quick.len() > 1, "quick looks and Remove override expected");
+    for row in quick {
+        assert_eq!(row.shortcut, "", "{}", row.label);
+    }
 }
 
 fn appearance_selection_app() -> SolveApp {

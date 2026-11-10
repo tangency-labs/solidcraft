@@ -3221,6 +3221,33 @@ fn the_agent_list_keeps_the_panels_side_margin() {
     }
 }
 
+/// #14385: Add agent and Refresh, side by side on the Agent row, are buttons of one size.
+#[test]
+fn add_agent_and_refresh_are_the_same_size() {
+    let mut h = narrow_chat();
+    h.frames(3);
+    h.frame();
+    let panel = solidcraft_ui_registry::rect_of("agent_chat:panel").expect("the panel");
+    let (mut texts, mut boxes) = (Vec::new(), Vec::new());
+    for clipped in &h.shapes {
+        crate::test_support::each_shape(&clipped.shape, &mut |s| match s {
+            egui::Shape::Text(t) => texts.push((t.galley.text().to_string(), egui::Rect::from_min_size(t.pos, t.galley.rect.size()))),
+            egui::Shape::Rect(r) => boxes.push(r.rect),
+            _ => {}
+        });
+    }
+    // A button is the smallest box around its label.
+    let button = |label: &str| {
+        let text = texts.iter().find(|(t, r)| t == label && panel.contains(r.center())).map(|(_, r)| *r).expect(label);
+        let frame = boxes.iter().filter(|b| b.contains_rect(text)).min_by(|a, b| a.area().total_cmp(&b.area())).copied();
+        (text, frame.expect(label))
+    };
+    let (add_text, add) = button(tr("ui.ai_add_agent"));
+    let (refresh_text, refresh) = button(tr("ui.agent_chat_refresh"));
+    assert!((add.height() - refresh.height()).abs() < 0.5, "Add agent {add:?}, Refresh {refresh:?}");
+    assert!((add_text.height() - refresh_text.height()).abs() < 0.5, "labels: Add agent {add_text:?}, Refresh {refresh_text:?}");
+}
+
 /// Every chip and the text box sit inside the panel.
 fn assert_inside_the_panel(chips: usize) {
     use solidcraft_ui_registry::rect_of;
@@ -3673,6 +3700,49 @@ fn assistant_marks_follow_chat_login_turns_and_approvals() {
     }
     assert_eq!(assistant_mark_for(State::Ready, "signed_in", true, 0, true, false), Stopped);
     assert_eq!(assistant_mark_for(State::Ready, "signed_in", true, 0, false, true), Stopped);
+}
+
+/// #12283: an agent started without SolidCraft's tools (no solidcraft-cli beside the app) can't
+/// reach the design. The panel's badge and the application bar's mark say so, not Ready; the
+/// badge's hover text says how to get the tools.
+#[test]
+fn an_agent_without_the_design_tools_is_not_shown_as_ready() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    h.app.agent_chat.set_state(State::Ready);
+    h.app.agent_chat.tools_available = Some(true);
+    h.frames(3);
+    assert_eq!(assistant_mark(&h.app), AssistantMark::Ready);
+    assert!(h.widget(tr("ui.agent_chat_state_ready")).is_some(), "with the tools, the badge says Ready");
+
+    h.app.agent_chat.tools_available = Some(false);
+    h.frames(3);
+    assert_eq!(assistant_mark(&h.app), AssistantMark::NoDesign);
+    assert!(h.widget(tr("ui.agent_chat_state_no_design")).is_some(), "the badge says the design can't be reached");
+    assert!(h.widget(tr("ui.agent_chat_state_ready")).is_none(), "and not Ready");
+    let tip = assistant_tip(&h.app, AssistantMark::NoDesign);
+    assert!(tip.contains(tr("ui.agent_chat_state_no_design")), "{tip}");
+    assert!(tr("ui.agent_chat_no_design_hint").contains("SOLIDCRAFT_CLI"));
+    // The hint names the cause: the chat's endpoint that did not start, or the missing CLI;
+    // the application bar's tooltip carries it too.
+    h.app.agent_chat.tools_port = None;
+    assert_eq!(h.app.agent_chat.no_design_hint(), tr("ui.agent_chat_no_control"));
+    assert!(assistant_tip(&h.app, AssistantMark::NoDesign).contains(tr("ui.agent_chat_no_control")));
+    h.app.agent_chat.tools_port = Some(12345);
+    assert_eq!(h.app.agent_chat.no_design_hint(), tr("ui.agent_chat_no_design_hint"));
+    assert!(assistant_tip(&h.app, AssistantMark::NoDesign).contains(tr("ui.agent_chat_no_design_hint")));
+    // solidcraft-cli was found and handed to the agent, but its tools did not start (an endpoint
+    // agent whose MCP start failed): the hint does not say the CLI is missing.
+    h.app.agent_chat.tools_bridged = true;
+    assert_eq!(h.app.agent_chat.no_design_hint(), tr("ui.agent_chat_tools_not_started"));
+    assert!(!tr("ui.agent_chat_tools_not_started").contains("not found"));
+    assert!(assistant_tip(&h.app, AssistantMark::NoDesign).contains(tr("ui.agent_chat_tools_not_started")));
+    h.app.agent_chat.tools_bridged = false;
+    assert!(!assistant_tip(&h.app, AssistantMark::Ready).contains(tr("ui.agent_chat_no_design_hint")));
+
+    // A turn in progress, or one waiting for approval, still shows what it is doing.
+    h.app.agent_chat.set_state(State::Busy);
+    assert_eq!(assistant_mark(&h.app), AssistantMark::Busy);
 }
 
 /// An app whose endpoint agents answer at once (offline), with `api-1` and `api-2` added.

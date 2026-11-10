@@ -416,6 +416,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             Plastic(crate::dialogs_plastic::Pl),
             /// Frame members (`dialogs_frame`).
             Frame(crate::dialogs_frame::Member),
+            /// End caps on frame members (`dialogs_end_cap`).
+            EndCap(crate::dialogs_end_cap::EndCap),
             /// Appearance (`dialogs_appearance`).
             Appearance(crate::dialogs_appearance::Ap),
             /// Contact sets, motion studies, exploded views, configurations (`dialogs_motion`).
@@ -801,7 +803,7 @@ impl Dialog {
     }
 
     /// Show why OK (or starting the sketch) was refused, for as long as the inputs stay as they are.
-    fn refuse(&mut self, app: &SolveApp, error: String) {
+    pub(crate) fn refuse(&mut self, app: &SolveApp, error: String) {
         self.refused = Some(Refused::now(app, self));
         self.error = Some(error);
     }
@@ -1131,6 +1133,7 @@ impl Dialog {
                     .or_else(|| crate::view_gizmo::start(app, id))
                     .or_else(|| crate::dialogs_plastic::start(app, id))
                     .or_else(|| crate::dialogs_frame::start(app, id))
+                    .or_else(|| crate::dialogs_end_cap::start(app, id))
                     .or_else(|| crate::dialogs_appearance::start(app, id))
                     .or_else(|| crate::dialogs_motion::start(app, id))
                     .or_else(|| crate::dialogs_parts::start(app, id))
@@ -1155,6 +1158,9 @@ impl Dialog {
         // text it edits, not its path.)
         let preselection: &[Sel] = if matches!(d.kind, Kind::Text(_)) { &[] } else { &s.selection };
         for sel in preselection {
+            if !matches!(d.kind, Kind::OffsetPlane { .. } | Kind::Construct { .. }) && is_wire_point(s, sel) {
+                continue;
+            }
             // A sketch line drawn over a body edge is what a click there picks; a command that
             // takes edges and no sketch curves takes it as that edge (#8927).
             let as_edge = (!d.inputs.iter().any(|i| fits(i.accept, sel)) && d.inputs.iter().any(|i| i.accept & EDGES != 0))
@@ -1377,7 +1383,7 @@ impl Dialog {
             Kind::Surface(_) => return true,
             Kind::SketchModify(k) => return k.previews(),
             Kind::Plastic(k) => return k.previews(),
-            Kind::Frame(_) => return true,
+            Kind::Frame(_) | Kind::EndCap(_) => return true,
             Kind::Part(_) | Kind::PartSize(_) | Kind::InsertDrawing(_) => return true,
             // Web previews run synchronously; a modelled thread can take seconds.
             Kind::Thread { .. } => return !cfg!(target_arch = "wasm32") && self.extra.get("modeled").and_then(Value::as_bool).unwrap_or(false),
@@ -1621,6 +1627,11 @@ impl Dialog {
                 Hit::Face { body, .. } => occurrence_path_of_body(s, body).map(|path| Sel::Occurrence { path }),
                 _ => None,
             };
+        }
+        // Only construction tools resolve wire-node references. In particular, Hole must
+        // not silently freeze a wire node into a face position or accept an unresolved ID.
+        if matches!(h, Hit::SketchPoint3d { .. }) && !matches!(self.kind, Kind::OffsetPlane { .. } | Kind::Construct { .. }) {
+            return None;
         }
         // Features are also picked on the canvas: a face stands for the feature that made it.
         if inp.accept == selection::FEATURES {
@@ -2185,6 +2196,15 @@ fn single_hole_point(app: &SolveApp, d: &Dialog, x: &Sel) -> Option<(u64, String
     })
 }
 
+/// A selected drawn wire node, distinguished from an ordinary planar sketch point.
+fn is_wire_point(s: &Session, sel: &Sel) -> bool {
+    let Sel::SketchPoint { id } = sel else { return false };
+    let Some((sketch, point)) = id.split_once(':') else { return false };
+    let Ok(sketch) = sketch.parse::<u64>() else { return false };
+    let Some((wire, index)) = point.rsplit_once(':') else { return false };
+    index.parse::<usize>().is_ok() && s.model.state().sketch(sketch).is_some_and(|ss| ss.sketch.wire_index(wire).is_some())
+}
+
 /// Does an input take face places that snap to sketch points on the face (the Single hole's)?
 pub(crate) fn snaps_to_points(accept: Accept) -> bool {
     accept & selection::POINTS != 0 && accept & PLANAR_FACES != 0
@@ -2639,6 +2659,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::InsertDrawing(p) => crate::dialogs_insert_drawing::title(p),
         Kind::Plastic(k) => k.title(),
         Kind::Frame(_) => "FRAME MEMBER",
+        Kind::EndCap(_) => "ui.end_cap_title",
         Kind::Appearance(_) => "APPEARANCE",
         Kind::Motion(k) => k.title(),
         Kind::Part(_) => "INSERT PART",
@@ -2701,7 +2722,7 @@ thread_local! {
 
 /// The feature that made a face: the latest feature before which the face's point lay on no
 /// face of the model.
-fn feature_of_face(s: &Session, body: &str, index: usize, p: Vec3) -> Option<u64> {
+pub(crate) fn feature_of_face(s: &Session, body: &str, index: usize, p: Vec3) -> Option<u64> {
     let key = (body.to_string(), index);
     if let Some(hit) = FACE_FEATURE.with(|c| {
         let c = c.borrow();
@@ -3329,8 +3350,12 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
         // A command that is not available in this context ("`sketch.project` is not available
         // right now: no sketch is being edited") is guidance too: the context went away, not the
         // design, so there is nothing to report (#10181).
+        // A pick or drag that a hole's reference edge cannot follow is refused with what to do
+        // instead: guidance as well.
         let rect = if missing_pick(&error) {
             crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Hint("missing_pick")).rect
+        } else if error == crate::hole_place::HELD_OFF_ITS_LINE {
+            crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Hint("held_off_its_line")).rect
         } else if context_refusal(app, d, &error) {
             crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Hint("context")).rect
         } else {
@@ -4324,6 +4349,7 @@ fn rememberable(kind: &Kind) -> bool {
                     | crate::dialogs_plastic::Pl::SnapFit { .. },
             )
             | Kind::Frame(_)
+            | Kind::EndCap(_)
     )
 }
 
@@ -4377,6 +4403,8 @@ fn recall(app: &SolveApp, dialog: &mut Dialog) {
         }
         (Kind::Revolve { axis, .. }, Kind::Revolve { axis: fresh, .. }) => *axis = fresh.clone(),
         (Kind::PathPlane { sketch, .. }, Kind::PathPlane { sketch: fresh, .. }) => *sketch = *fresh,
+        // The sizes come back; which ends an edit could not find belonged to that edit.
+        (Kind::EndCap(c), Kind::EndCap(_)) => c.unresolved.clear(),
         (Kind::Thread { designation, suggested, of, .. }, Kind::Thread { suggested: fresh_suggested, of: fresh_of, .. }) => {
             // A remembered auto-suggestion belonged to the old face: the new face gets its own.
             // An authored designation stays.
@@ -6190,6 +6218,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::InsertDrawing(p) => return crate::dialogs_insert_drawing::commands(p),
         Kind::Plastic(k) => return crate::dialogs_plastic::commands(app, k, &d.inputs, &d.extra),
         Kind::Frame(k) => return crate::dialogs_frame::commands(app, k, &d.inputs, &d.extra),
+        Kind::EndCap(k) => return crate::dialogs_end_cap::commands(app, k, &d.inputs, &d.extra),
         Kind::Appearance(k) => return Ok(crate::dialogs_appearance::commands(k, &d.inputs)),
         Kind::Motion(k) => return crate::dialogs_motion::commands(app, k, &d.inputs),
         Kind::Part(k) => return crate::dialogs_parts::commands(app, k, &d.inputs),
@@ -7208,8 +7237,11 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 }
                 Some(sp) => {
                     d.inputs = vec![SelInput::new("Points", selection::POINTS, true)];
+                    // Points gone from the sketch are left out (#8087), so OK drops them.
+                    let st = crate::open_meshing::session_world(s);
+                    let kept = |id: &&String| st.sketch(sp.sketch.0).is_none_or(|ss| ss.sketch.points.iter().any(|p| &p.id == *id));
                     if let Some(inp) = d.inputs.first_mut() {
-                        inp.items = sp.ids.iter().map(|id| Sel::SketchPoint { id: format!("{}:{id}", sp.sketch) }).collect();
+                        inp.items = sp.ids.iter().filter(kept).map(|id| Sel::SketchPoint { id: format!("{}:{id}", sp.sketch) }).collect();
                     }
                     if sp.flip {
                         d.extra.insert("flip".into(), json!(true));
@@ -7869,6 +7901,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             let (kind, inputs, extra) = crate::dialogs_sheet::for_feature(app, other)
                 .or_else(|| crate::dialogs_plastic::for_feature(app, other))
                 .or_else(|| crate::dialogs_frame::for_feature(app, other))
+                .or_else(|| crate::dialogs_end_cap::for_feature(app, other))
                 .or_else(|| crate::dialogs_surface::for_feature(app, other, &feature_frame(s, f.component)))?;
             let mut d = Dialog::new(kind, inputs);
             d.extra = extra;
@@ -8074,6 +8107,35 @@ mod refused_ok_tests {
             steps(&mut h, &[json!({"key": "Escape"}), json!({"frames": 2})]);
             assert!(h.app.dialog.as_ref().is_none_or(|d| d.editing.is_none()), "{name}: one Escape closes the dialog");
         }
+    }
+
+    /// #8087: a Hole whose sketch lost one of its points opens for editing without that point,
+    /// and OK saves the Hole with the points that are left, clearing its warning.
+    #[test]
+    fn editing_a_hole_drops_points_gone_from_its_sketch() {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"corner": [0, 0, 0], "length": 60, "width": 20, "height": 10})).unwrap();
+        h.app.run("sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Pts"})).unwrap();
+        h.app.run("sketch.point", json!({"point": [15, 10], "id": "a"})).unwrap();
+        h.app.run("sketch.point", json!({"point": [45, 10], "id": "b"})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("solid.hole", json!({"sketch": "Pts", "points": ["a", "b"], "diameter": 8, "name": "Holes"})).unwrap();
+        h.app.run("sketch.edit", json!({"sketch": "Pts"})).unwrap();
+        h.app.run("sketch.delete", json!({"entities": ["b"]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let warning = |h: &Harness| h.app.session.model.results.iter().find(|r| r.name == "Holes").and_then(|r| r.warning.clone());
+        assert!(warning(&h).is_some_and(|w| w.contains("`b`")), "{:?}", warning(&h));
+
+        let feature = h.app.session.doc.find_feature("Holes").unwrap().id;
+        h.app.edit_feature(feature);
+        h.frames(1);
+        let items = h.app.dialog.as_ref().and_then(|d| d.inputs.first()).map(|i| i.items.clone()).unwrap_or_default();
+        assert!(matches!(items.as_slice(), [Sel::SketchPoint { id }] if id.ends_with(":a")), "{items:?}");
+        steps(&mut h, &[json!({"key": "Enter"})]);
+        h.frames(1);
+        let f = h.app.session.doc.find_feature("Holes").unwrap();
+        assert!(matches!(&f.kind, FeatureKind::Hole { points: Some(sp), .. } if sp.ids == ["a"]), "{:?}", f.kind);
+        assert_eq!(warning(&h), None);
     }
 
     fn set_depth(h: &mut Harness, depth: &str) {

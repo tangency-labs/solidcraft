@@ -266,7 +266,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.iso_curve_uv_line_both_params = true;
     f.extrusion_step_uses_clamped_uv = true;
     f.analytic_corner_failure_is_false = true;
-    f.fillet_refuse_crossing_rails = true;
     f.proto_edge_split_upper_keeps_the_old_max = true;
     f.point_on_start_point_squared_tolerance = true;
     f.bspline_trim_keeps_rational_end_spans = true;
@@ -336,7 +335,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_overflow_crease_along_edge = true;
     f.plane_first_torus_section_exact = true;
     f.keep_exact_pcurves = true;
-    f.shell_one_construction = true;
     f.approximate_surface_checks_every_row = true;
     f.topological_vertex_has_only_edge_uses = true;
     f.planar_section_face_tolerance = true;

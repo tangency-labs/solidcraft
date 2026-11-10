@@ -1705,3 +1705,60 @@ fn the_grouped_joints_arrow_lights_up_under_the_pointer() {
     assert_eq!(h.call("ui.click", json!({"x": arrow.center().x, "y": arrow.center().y}))["ok"], true);
     assert!(!joints_open(&h.app, 1201, JointRun::Loose), "and groups them again");
 }
+
+/// A pick on a part in a sub-assembly placed twice sends the placement it was made on: on the
+/// second copy the origin is on that copy, inside the part; on the first it is stored as before
+/// (#11426).
+#[test]
+fn joint_origin_picked_on_a_repeated_sub_assembly_is_on_that_copy() {
+    let mut s = Session::default();
+    for (id, p) in [
+        ("component.create", json!({"name": "Board", "parent": "root"})),
+        ("component.create", json!({"name": "Header", "parent": "Board"})),
+        ("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Pin"})),
+        ("component.activate", json!({"component": "root"})),
+        // Header turned and moved in Board: its top's centre at (-5, 25, 10).
+        ("occurrence.move", json!({"occurrence": "Header:1", "axis": [0, 0, 1], "angle": "90 deg", "origin": [0, 0, 0]})),
+        ("occurrence.move", json!({"occurrence": "Header:1", "translate": [0, 20, 0]})),
+        ("occurrence.copy", json!({"component": "Board", "translate": [100, 0, 0]})),
+    ] {
+        s.execute(id, &p).unwrap();
+    }
+    let mut app = SolveApp::new(s, Services::default());
+    let board = app.session.doc.find_component("Board").unwrap();
+    let boards: Vec<u64> = app.session.doc.occurrences.iter().filter(|o| o.component == board).map(|o| o.id).collect();
+    let header = occ(&app, "Header");
+    for (x, board, body, stored) in
+        [(95.0, boards[1], "Pin (Board:2/Header:1)", (boards[1], vec![header])), (-5.0, boards[0], "Pin", (header, vec![]))]
+    {
+        app.start("joint.origin");
+        let mut d = app.dialog.clone().unwrap();
+        let top = face_sel(&app.session, Vec3::new(x, 25.0, 10.0)).unwrap();
+        assert!(matches!(&top, Sel::Face { body: b, .. } if b == body), "{top:?}");
+        d.pick(&app.session, top);
+        let commands = apply_commands(&app, &d).unwrap();
+        assert_eq!(commands[0].1["path"], json!([board, header]), "{commands:?}");
+        for (id, p) in commands {
+            app.run(&id, p).unwrap();
+        }
+        let o = &app.session.doc.assembly.origins.last().unwrap().origin;
+        assert_eq!((o.occurrence, o.inside.clone()), stored, "{body}: {o:?}");
+    }
+    // The same part in two copies is two sides of a joint, not "one component".
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    for x in [-5.0, 95.0] {
+        d.pick(&app.session, face_sel(&app.session, Vec3::new(x, 25.0, 10.0)).unwrap());
+    }
+    let Kind::Assembly(k) = &d.kind else { panic!("{:?}", d.kind) };
+    assert_eq!(joint_problem(&app, k, &d.inputs), None);
+    // Edit Joint shows a side on the second copy on that copy's part.
+    app.run("component.create", json!({"name": "Probe", "parent": "root", "grounded": false})).unwrap();
+    app.run("solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [50, -30, 0]})).unwrap();
+    app.run("component.activate", json!({"component": "root"})).unwrap();
+    let on_copy = app.session.doc.assembly.origins[0].name.clone();
+    app.run("joint.create", json!({"type": "rigid", "a": on_copy, "b": {"occurrence": "Probe", "face": [51, -29, 0]}})).unwrap();
+    let d = edit_joint(&app, app.session.doc.assembly.joints[0].id).unwrap();
+    let Some(Sel::Face { body, .. }) = d.inputs[0].items.first() else { panic!("no side pick: {:?}", d.inputs[0].items) };
+    assert_eq!(body, "Pin (Board:2/Header:1)");
+}

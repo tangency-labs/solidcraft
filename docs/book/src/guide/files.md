@@ -2,7 +2,8 @@
 
 Everything here starts from the **File** menu at the top left.
 
-![The File menu, numbered 1 to 5](../media/files/menu.png)
+<img class="dark-ui" src="../media/files/menu.png" alt="The File menu, numbered 1 to 5">
+<img class="light-ui" src="../media/files/menu.light.png" alt="The File menu, numbered 1 to 5">
 
 **1** Open a design (or a STEP, IGES or mesh file as a new one) · **2** Insert a file into the open
 design · **3** Save · **4** Export: meshes, STEP, a DXF of the view, URDF, JSON ·

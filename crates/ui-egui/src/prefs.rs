@@ -792,6 +792,19 @@ pub fn apply_file_limits(p: &Prefs) {
     }
 }
 
+/// The most points or curves one sketch holds, as the preferences ask (Preferences › Sketch ›
+/// Largest sketch, #10874); a value outside the accepted range (a hand edit) reads as the default.
+pub fn sketch_limit(p: &Prefs) -> usize {
+    if accepted::max_sketch_points(p) { p.max_sketch_points } else { solidcraft_engine::sketch::limits::DEFAULT_POINTS }
+}
+
+/// Every sketch built from now on holds up to [`sketch_limit`] points.
+pub fn apply_sketch_limit(p: &Prefs) {
+    if let Err(e) = solidcraft_engine::sketch::limits::set_max_points(sketch_limit(p)) {
+        log::warn!("preferences: largest sketch: {e}");
+    }
+}
+
 /// Perspective view's default field of view (about 34°), in radians.
 const PERSPECTIVE_FOV: f64 = 0.6;
 
@@ -905,7 +918,7 @@ macro_rules! preference_settings {
         ui_kit::checkbox($ui, $app.tr($label), &mut $app.preferences.$field)
     };
     (@control $app:ident, $ui:ident, $field:ident, check_id_help($label:literal, $help:literal)) => {
-        ui_kit::checkbox($ui, $app.tr($label), &mut $app.preferences.$field).on_hover_text($app.tr($help))
+        ui_kit::checkbox($ui, $app.tr($label), &mut $app.preferences.$field).backing_on_hover_text($app.tr($help))
     };
     (@control $app:ident, $ui:ident, $field:ident, number($label:literal, $range:expr)) => {
         ui_kit::row($ui, $app.tr($label), |ui| {
@@ -1397,9 +1410,11 @@ preference_settings! {
     hole_group: bool = false, PAGE_TOOLS => check_id("prefs.design_tools.hole_group");
     /// The browser's Origin folder starts hidden in designs that don't keep its eye themselves.
     hide_origin: bool = false, PAGE_DESIGN => check_tr("ui.hide_origin_by_default");
-    /// Handles on the preview of a feature placed on a face (Rest, Boss, Snap Fit): a marker that
-    /// drags it across the model and a ring that turns it. Off by default: the feature is then placed
-    /// by its click only, as before, and its Position input takes faces only.
+    /// Handles on the preview of a feature placed on a face (Rest, Boss, Snap Fit, and the Box,
+    /// Cylinder, Cone, Sphere, Torus and Coil): a marker that drags it across the model and, where
+    /// it can turn in the face, a ring that turns it. Off by default: a Rest, Boss or Snap Fit is
+    /// then placed by its click only, as before, and its Position input takes faces only; a
+    /// primitive by its fields, its inputs or the selection it opened with.
     placement_handles: bool = false, PAGE_TOOLS => check_tr("ui.placement_handles");
     /// The files a design names (linked designs, font files) may be on any network location, for
     /// organisations that keep their designs on file servers. Off (the default): only on the
@@ -1452,6 +1467,9 @@ preference_settings! {
     send_slicer: String = String::new();
     /// Slicers that can load a file into the window that is already open do so (default on).
     slicer_single_instance: bool = true, 0;
+    /// Export STL, Export 3MF and Send to Slicer start with the design's body in Bodies when it
+    /// has just one (#13098). Off: the list starts empty, as before.
+    export_selects_only_body: bool = true, 0;
     /// How strongly a print face stands out in the viewport (#8429): the share of the section
     /// colour in its tint, 0 to 1; its outline follows. 0 draws no highlight.
     print_face_highlight: f32 = 0.2, PAGE_GENERAL, accept(0.0..=1.0);
@@ -1532,8 +1550,15 @@ preference_settings! {
     /// horizontal or vertical snap to the previous point, and the click adds the alignments
     /// (#7828). Off by default: only with the previous point, one axis at a time, as before.
     sketch_align_points: bool = false, PAGE_SKETCH;
+    /// A point snaps to the crossings of the lines the grid draws, and to the finer lattice
+    /// between them. Off: the point snaps to the finer lattice only.
+    sketch_snap_to_visible_grid: bool = true, PAGE_SKETCH;
     /// Open Project's options before picking; off restores its previous direct-pick workflow.
     project_options_dialog: bool = true, PAGE_SKETCH;
+    /// The most points or curves one sketch holds (#10874): from the default (20000), which
+    /// sketches have always had, up to 200000, so a dense SVG or DXF drawing fits in one sketch.
+    max_sketch_points: usize = solidcraft_engine::sketch::limits::DEFAULT_POINTS, PAGE_SKETCH,
+        accept(solidcraft_engine::sketch::limits::DEFAULT_POINTS..=solidcraft_engine::sketch::limits::CEILING_POINTS);
     /// Whether Alt/Option also frees gizmo / canvas manipulator arrows (Primary always does).
     manipulator_free_alt: bool = true, PAGE_SKETCH;
     /// A sketch's icon in History and the browser takes the colour of its solve state, and its
@@ -1609,6 +1634,8 @@ preference_settings! {
     selection_shift_add_only: bool = false, PAGE_SKETCH;
     /// Prefer movable sketch points on exact selection ties; off keeps point insertion order.
     prefer_free_sketch_points: bool = true, PAGE_SKETCH;
+    /// Opt in to displaying and selecting drawn 3D curve nodes as construction references.
+    select_3d_curve_points: bool = false, PAGE_SKETCH;
     /// While the open sketch's constraints conflict, the curves and points a failing constraint
     /// holds, and its glyph or dimension, are drawn in `sketch_conflict` (#7244). Off: only the
     /// glyphs and dimensions are red, in `error`, as before.
@@ -1622,6 +1649,9 @@ preference_settings! {
     /// its half-axes and axes can be dimensioned. Off: the ellipse alone, and D on it gives its
     /// minor radius, labelled R, as before.
     ellipse_axes: bool = true, PAGE_SKETCH;
+    /// In an open sketch with no tool running, the pointer's sketch coordinates beside it (#11070).
+    /// Off: only a sketch tool shows them, while it places a point, as before.
+    sketch_cursor_coordinates: bool = true, PAGE_SKETCH;
     /// Drive Joints shows the moved parts' old place as a ghost (its Show ghost box, #5905).
     drive_joints_ghost: bool = true, PAGE_TOOLS => check_tr("prefs.design_tools.ghost");
     /// While Move's triad drags a component drawn as a layer of its own, what is under the pointer
@@ -2231,6 +2261,7 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
         app.prefs_window.applied_profile = Some(profile);
     }
     apply_file_limits(&app.preferences);
+    apply_sketch_limit(&app.preferences);
     // The viewport's display quality (an unknown saved value draws at Normal).
     solidcraft_engine::doc::display_quality::set_current(
         solidcraft_engine::doc::display_quality::DisplayQuality::parse(&app.preferences.display_quality).unwrap_or_default(),
@@ -3875,6 +3906,10 @@ fn limit_disabled_plugins(mut p: Prefs) -> Prefs {
     let mb = solidcraft_engine::io::limits::MB;
     (p.max_step_file_mb, p.max_design_file_mb) =
         if solidcraft_engine::io::limits::ADJUSTABLE { (limits.step / mb, limits.design / mb) } else { (DEFAULT_STEP_MB, DEFAULT_DESIGN_MB) };
+    // A hand-edited largest sketch out of range reads as the default (#10874).
+    if !accepted::max_sketch_points(&p) {
+        p.max_sketch_points = Prefs::default().max_sketch_points;
+    }
     p.disabled_plugins.retain(|id| crate::plugins::valid_id(id));
     if p.disabled_plugins.len() > crate::plugins::MAX_DISABLED {
         p.disabled_plugins = p.disabled_plugins.into_iter().take(crate::plugins::MAX_DISABLED).collect();
@@ -4082,6 +4117,10 @@ fn prepare_preferences(
     if !accepted::dimension_step_mm(&new) || !accepted::dimension_step_deg(&new) {
         return Err("`dimension_step_mm` must be 0.001…1000 and `dimension_step_deg` 0.001…180".into());
     }
+    if !accepted::max_sketch_points(&new) {
+        use solidcraft_engine::sketch::limits::{CEILING_POINTS, DEFAULT_POINTS};
+        return Err(format!("`max_sketch_points` must be {DEFAULT_POINTS}…{CEILING_POINTS}"));
+    }
     if solidcraft_engine::doc::display_quality::DisplayQuality::parse(&new.display_quality).is_none() {
         return Err("`display_quality` must be coarse, normal, fine or ultra".into());
     }
@@ -4121,6 +4160,7 @@ fn apply_preferences(app: &mut SolveApp, new: Prefs, p: &serde_json::Value) -> R
     sync_surface_analysis(app);
     crate::render_workspace::apply_memory_policy(app);
     apply_file_limits(&app.preferences);
+    apply_sketch_limit(&app.preferences);
     if units_changed {
         default_units_changed(app);
     }
@@ -6372,8 +6412,10 @@ mod tests {
             ("sketch_tracking_points", json!(false), PAGE_SKETCH),
             ("sketch_align_points", json!(true), PAGE_SKETCH),
             ("sketch_recent_snap", json!(true), PAGE_SKETCH),
+            ("sketch_snap_to_visible_grid", json!(false), PAGE_SKETCH),
             ("line_hover_tangent_arc", json!(true), PAGE_SKETCH),
             ("ribbon_click_ends_tool", json!(false), PAGE_SKETCH),
+            ("sketch_cursor_coordinates", json!(false), PAGE_SKETCH),
             ("msaa", json!(8), PAGE_GRAPHICS),
             ("single_surface_analysis", json!(false), PAGE_GRAPHICS),
         ];
@@ -7831,6 +7873,7 @@ mod tests {
                 ("sketch_tracking_guides", "prefs.sketch.tracking_guides"),
                 ("sketch_recent_snap", "prefs.sketch.recent_snap"),
                 ("sketch_align_points", "prefs.sketch.align_points"),
+                ("sketch_snap_to_visible_grid", "prefs.sketch.snap_to_visible_grid"),
                 ("line_drag_draws_one", "prefs.line_drag_draws_one"),
                 ("line_hover_tangent_arc", "prefs.line_hover_tangent_arc"),
                 ("center_arc_follows_cursor", "prefs.sketch.center_arc"),
@@ -7840,11 +7883,13 @@ mod tests {
                 ("shortcut_cycles_modes", "prefs.sketch.shortcut_cycles_modes"),
                 ("ribbon_click_ends_tool", "prefs.ribbon_click_ends_tool"),
                 ("project_options_dialog", "prefs.sketch.project_options"),
+                ("sketch_cursor_coordinates", "prefs.sketch.cursor_coordinates"),
                 ("sketch_face_activates_part", "prefs.sketch_face_activates_part"),
                 ("sketch_open_look_at", "prefs.sketch_open_look_at"),
                 ("escape_twice_finishes_sketch", "prefs.sketch.escape_twice_finishes"),
                 ("selection_shift_add_only", "prefs.shift_add_ctrl_toggle"),
                 ("prefer_free_sketch_points", "prefs.sketch.prefer_free_points"),
+                ("select_3d_curve_points", "prefs.sketch.select_3d_curve_points"),
                 ("select_other_hidden", "prefs.sketch.select_other_hidden"),
                 ("manipulator_free_alt", "prefs.alt_frees_manipulators"),
             ] {
@@ -8884,6 +8929,34 @@ mod tests {
         assert!(crate::scenario::rect_of("prefs:max_design_file_mb").is_some());
         h.call("ui.prefs", json!({"button": "defaults"}));
         assert_eq!(super::file_limits(&h.app.preferences), FileLimits::DEFAULT);
+        h.call("ui.prefs", json!({"button": "cancel"}));
+    }
+
+    /// #10874: Preferences › Sketch › Largest sketch starts at the limit sketches have always had,
+    /// raises the limit every sketch is built to, refuses a value out of range, reads a hand-edited
+    /// one back as the default, and Sketch's Restore Defaults puts it back.
+    #[test]
+    fn the_largest_sketch_defaults_raises_and_refuses_out_of_range() {
+        use serde_json::json;
+        use solidcraft_engine::sketch::limits::{CEILING_POINTS, DEFAULT_POINTS};
+        let mut h = crate::scenario::Harness::new();
+        assert_eq!(h.app.preferences.max_sketch_points, DEFAULT_POINTS);
+        let out = h.call("ui.prefs", json!({"max_sketch_points": 50_000}));
+        assert_eq!(out["result"]["max_sketch_points"].as_u64(), Some(50_000), "{out}");
+        assert_eq!(super::sketch_limit(&h.app.preferences), 50_000);
+        for bad in
+            [json!({"max_sketch_points": DEFAULT_POINTS - 1}), json!({"max_sketch_points": CEILING_POINTS + 1}), json!({"max_sketch_points": "lots"})]
+        {
+            assert!(h.call("ui.prefs", bad.clone())["error"].is_string(), "{bad}");
+        }
+        assert_eq!(super::sketch_limit(&h.app.preferences), 50_000, "a refused value changes nothing");
+        assert_eq!(super::lenient(&json!({"max_sketch_points": 5})).max_sketch_points, DEFAULT_POINTS);
+
+        h.call("ui.prefs", json!({"open": "Sketch"}));
+        h.frames(2);
+        super::reveal_preference(&mut h, "prefs:max_sketch_points");
+        h.call("ui.prefs", json!({"button": "defaults"}));
+        assert_eq!(h.app.preferences.max_sketch_points, DEFAULT_POINTS);
         h.call("ui.prefs", json!({"button": "cancel"}));
     }
 
@@ -12650,16 +12723,40 @@ mod settings_search_tests {
             let command = solidcraft_engine::command_specs().last().unwrap().id;
             let original = crate::toolbar_custom::export(&h.app);
             h.app.prefs_window.shell.filter = command.into();
-            h.frames(4);
-            let (_, _, hits) = nav(&h.ctx);
-            let matches: Vec<_> =
-                hits.iter().enumerate().filter(|(_, hit)| hit.page == crate::prefs::PAGE_SHORTCUTS && hit.label.contains(command)).collect();
+            let find = |h: &crate::scenario::Harness| {
+                let (_, _, hits) = nav(&h.ctx);
+                hits.iter()
+                    .enumerate()
+                    .filter(|(_, hit)| hit.page == crate::prefs::PAGE_SHORTCUTS && hit.label.contains(command))
+                    .map(|(i, _)| i)
+                    .collect::<Vec<_>>()
+            };
+            // Wait for the results to appear rather than assuming four frames on a loaded machine.
+            for _ in 0..600 {
+                h.frames(1);
+                if !find(&h).is_empty() {
+                    break;
+                }
+            }
+            let matches: Vec<_> = find(&h).into_iter().map(|i| (i, ())).collect();
             assert_eq!(matches.len(), 1, "a collapsed result owns one real keyboard target");
             set_cursor(&h.ctx, matches[0].0);
             h.frames(2);
             h.step(&json!({"key":"Enter"})).unwrap();
             keep_reveal_visible(&mut h);
             h.frames(30);
+            // The reveal scrolls over later frames; wait until the target is in view.
+            for _ in 0..600 {
+                let in_view = match (crate::scenario::rect_of(&format!("keymap:capture:{command}")), crate::scenario::rect_of("dialog:page_body")) {
+                    (Some(target), Some(body)) => body.contains_rect(target),
+                    _ => false,
+                };
+                if h.app.prefs_window.shell.filter.is_empty() && in_view {
+                    break;
+                }
+                keep_reveal_visible(&mut h);
+                h.frames(1);
+            }
             assert!(h.app.prefs_window.shell.filter.is_empty());
             assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_SHORTCUTS);
             let target = crate::scenario::rect_of(&format!("keymap:capture:{command}")).unwrap();

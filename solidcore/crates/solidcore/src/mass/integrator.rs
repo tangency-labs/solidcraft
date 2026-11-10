@@ -1110,7 +1110,8 @@ mod tests {
         let mut k_fix = Kernel::default();
         k_fix.fixes.integrator_propagates_failure = true;
 
-        // Curved B-spline-derived Curve::length (radius-2 circle, circumference 4 * PI).
+        // Curved B-spline Curve::length (the B-spline of a radius-2 circle, circumference
+        // 4 * PI; the circle itself measures in closed form, without the integrator).
         let circle = Curve::from(
             Ellipse::create_canonical_circle(
                 &k_default,
@@ -1119,7 +1120,9 @@ mod tests {
                 None,
                 None,
             )
-            .unwrap(),
+            .unwrap()
+            .base()
+            .clone(),
         );
         let ivl = circle.natural_interval();
         assert_eq!(circle.length(&k_default, &ivl, 0.0).unwrap(), 0.0);

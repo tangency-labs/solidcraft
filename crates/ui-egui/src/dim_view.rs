@@ -483,6 +483,13 @@ thread_local! {
     /// Value texts of finished sketches' shown dimensions (Show Dimensions), as the model view
     /// drew them last frame: sketch, constraint id, parameter (None: driven), text box.
     static MODEL: RefCell<Vec<ModelDim>> = const { RefCell::new(Vec::new()) };
+    /// The value box of the dimension being placed or typed, as drawn this frame.
+    static DRAFT_TEXT: std::cell::Cell<Option<Rect>> = const { std::cell::Cell::new(None) };
+}
+
+/// Where the value of the dimension being placed or typed was drawn this frame.
+pub(crate) fn draft_text() -> Option<Rect> {
+    DRAFT_TEXT.with(std::cell::Cell::get)
 }
 
 /// A shown dimension of a finished sketch, as drawn in the model view (screen space).
@@ -770,6 +777,7 @@ fn label_marked(k: &ConstraintKind, radius_mark: bool, expr: Option<&str>, drive
 
 /// Draw the active sketch's dimensions and remember where they are for picking.
 pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &Proj) {
+    DRAFT_TEXT.with(|d| d.set(None));
     let mut drawn = Vec::new();
     let editor_draft = EDIT.with(|edit| {
         let mut edit = edit.borrow_mut();
@@ -938,6 +946,9 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         }
         let Some(tc) = to(lay.text) else { continue };
         let r = Rect::from_center_size(tc, size);
+        if is_draft {
+            DRAFT_TEXT.with(|d| d.set(Some(r)));
+        }
         placed.push(r);
         painter.rect_filled(r, tk.radius_sm / 2, tk.viewport_top.gamma_multiply(0.85));
         painter.galley(r.min + vec2(3.0, 1.0), galley, col);

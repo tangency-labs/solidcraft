@@ -740,8 +740,8 @@ fn flat_loft_sides_are_planar_faces() {
         assert!(plane.height(face.centroid).abs() < 1e-6, "face {}: its plane runs through it", face.index);
         assert!((face.centroid - centre).dot(plane.normal()) > 0.0, "face {}: its plane faces out", face.index);
     }
-    // The sides are B-spline patches, so this reaches the control-net test (were the loft to
-    // build planes here, another flat B-spline face would have to stand in).
+    // The sides are B-spline patches, so this reaches the kernel's flatness test (were the loft
+    // to build planes here, another flat B-spline face would have to stand in).
     let splines = flat
         .record()
         .faces

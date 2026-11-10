@@ -11,7 +11,8 @@ The UI is thin: it reads engine state and acts through `app.run(id, params)` or 
 - All panels, floating sheets, menus, overlays and platform UI windows use `ui_kit::Container`, directly or through `Panel`, `Window`, `Confirm` and `Menu`. Declare the semantic `Surface`; workspace panels use its shared layout policy and chrome.
 - System and report windows use `ui_kit::Window`; its low-level host builder is kit-private.
 - Do not construct raw egui hosts, outer popup or window frames, or shadows in feature modules.
-- `cargo xtask ui-containers` checks source and examples in all current and future crates and apps, recursively. It runs in the fast repository CI job and in `cargo xtask ci`, with no caller allowances. The inventory and the legitimate content and native exceptions are in `docs/ui-container-audit.md`.
+- Tooltips go through `ui_kit::BackingTooltipExt` (`backing_on_hover_text` and friends), which gives them the themed backing and blur; egui's own `on_hover_*` and `show_tooltip_*` methods are not called outside the kit. A tooltip egui draws inside its own widget (an elided label) is outside this rule.
+- `cargo xtask ui-containers` checks source and examples in all current and future crates and apps, recursively, for raw hosts and raw tooltip calls. It runs in the fast repository CI job and in `cargo xtask ci`, with no caller allowances. The inventory and the legitimate content and native exceptions are in `docs/ui-container-audit.md`.
 
 ## Controls and colour
 - Colours, typography, dimensions and spacing come from `theme::Tokens` (`crates/ui-egui/src/theme.rs`). No literal colours in feature code.

@@ -12,7 +12,7 @@
 {"case":"cci_projection_circle_line_along_view","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[1.0,1.0,2.0,2.0,0.0,1.0,3.061616997868383e-17,0.25,0.0]}}
 {"case":"cci_projection_nurb_self","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.0]}}
 {"case":"circle_pivot_min","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[1.0,1.0,2.0,2.0,0.0,1.0,-2.202981575475641,0.2213264412542878,0.22132644125428833]}}
-{"case":"circle_projected_max","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":{"blocks":[[24.999999999999993,24.999999999999993,221.9999999999999]],"n":17}}}
+{"case":"circle_projected_max","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":{"blocks":[[25.0,25.0,222.0]],"n":17}}}
 {"case":"circle_projected_min_max","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":{"blocks":[[18.99999999999998,18.99999999999998,155.99999999999977]],"n":17}}}
 {"case":"circle_projected_tangency","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":{"blocks":[[43.812762400725674,43.812762400725674,697.6834569134568]],"n":33}}}
 {"case":"circle_rotated_projected_intersect","deferred":null,"error":null,"ints":{"status":[0]},"topology":null,"values":{"out":[0.0]}}

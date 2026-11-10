@@ -178,7 +178,7 @@ fn sm_bool(b: bool) -> i32 {
 fn start_uv<O: SolutionObject>(sols: &SolutionArray<O>, i: usize) -> Result<Point2> {
     sols.get(i)
         .map(|s| Point2::new(s.start.parameters[0], s.start.parameters[1]))
-        .ok_or_else(|| SolidError::sm_err(OP))
+        .ok_or_else(|| SolidError::intersect_failed(OP, "the drop has no such solution"))
 }
 
 /// Sets parameter `p` of solution `i`'s start.
@@ -188,12 +188,12 @@ fn set_start_param<O: SolutionObject>(
     p: usize,
     value: f64,
 ) -> Result<()> {
-    let s = sols.get_mut(i).ok_or_else(|| SolidError::sm_err(OP))?;
-    let slot = s
-        .start
-        .parameters
-        .get_mut(p)
-        .ok_or_else(|| SolidError::sm_err(OP))?;
+    let s = sols
+        .get_mut(i)
+        .ok_or_else(|| SolidError::intersect_failed(OP, "the drop has no such solution"))?;
+    let slot = s.start.parameters.get_mut(p).ok_or_else(|| {
+        SolidError::intersect_failed(OP, "the drop solution has no such parameter")
+    })?;
     *slot = value;
     Ok(())
 }
@@ -690,7 +690,10 @@ impl Surface {
                 CreateUvTrimCurvePathType::DegenSurfaceFail,
                 &early,
             );
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::intersect_failed(
+                OP,
+                "the surface's uv domain is degenerate",
+            ));
         }
 
         // check state - given UVDomain must fit within the Surface's Natural UVDomain
@@ -702,7 +705,10 @@ impl Surface {
                 CreateUvTrimCurvePathType::DropDomainUncontainedFail,
                 &early,
             );
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::intersect_failed(
+                OP,
+                "the uv domain does not fit within the surface's natural domain",
+            ));
         }
 
         // UV Tolerances - proportional to surface 3d/UV mapping size
@@ -846,7 +852,10 @@ impl Surface {
 
         // there should always be at least one solution
         if solutions.is_empty() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::intersect_failed(
+                OP,
+                "dropping the curve's start onto the surface found no solution",
+            ));
         }
 
         // Classify the 1st start DropSolution point (status ignored upstream)
@@ -1144,11 +1153,11 @@ impl Surface {
                 curve_cache = Some(match make_curve_cache::<()>(k, curve, None) {
                     Ok(c) => c,
                     Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                    Err(_) => return Err(SolidError::null_pointer(OP)),
+                    Err(_) => return Err(SolidError::intersect_missing(OP, "the curve cache")),
                 });
             }
             let Some(cache) = curve_cache.as_ref() else {
-                return Err(SolidError::null_pointer(OP));
+                return Err(SolidError::intersect_missing(OP, "the curve cache"));
             };
             let span_count = cache.span_count();
 
@@ -1597,7 +1606,9 @@ mod tests {
                 curve: None,
             }),
         );
-        assert!(matches!(r, Err(SolidError::Upstream { code: SM_ERR, .. })));
+        assert!(
+            matches!(&r, Err(e) if e.intersect_failure().is_some() && e.sm_status() == Some(SM_ERR))
+        );
         assert_eq!(fail.fail_status, SM_ERR_OUTSIDE_OF_DOMAIN);
         assert_eq!(
             fail.create_path_type,
@@ -1739,7 +1750,9 @@ mod tests {
         assert!(nat.y_length() < EFF_ZERO);
 
         let (r, fail) = wr100_drop(&k, &srf, [0.0, 1.0, 1.0, 1.0]);
-        assert!(matches!(r, Err(SolidError::Upstream { code: SM_ERR, .. })));
+        assert!(
+            matches!(&r, Err(e) if e.intersect_failure().is_some() && e.sm_status() == Some(SM_ERR))
+        );
         assert_eq!(fail.fail_status, SM_ERR_DEGENERATE_SURFACE);
         assert_eq!(
             fail.create_path_type,
@@ -1762,7 +1775,9 @@ mod tests {
         assert!(nat.y_length() >= EFF_ZERO);
 
         let (r, fail) = wr100_drop(&k, &srf, [1.0, 0.0, 1.0, 1.0]);
-        assert!(matches!(r, Err(SolidError::Upstream { code: SM_ERR, .. })));
+        assert!(
+            matches!(&r, Err(e) if e.intersect_failure().is_some() && e.sm_status() == Some(SM_ERR))
+        );
         assert_eq!(fail.fail_status, SM_ERR_DEGENERATE_SURFACE);
         assert_eq!(
             fail.create_path_type,

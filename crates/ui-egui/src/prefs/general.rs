@@ -46,10 +46,12 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             // Only the web app keeps designs in the browser (#10220).
             if app.services.browser_files.is_some() {
                 let tip = app.tr("prefs.keep_unsaved_in_browser_tip").to_string();
-                ui_kit::checkbox(ui, app.tr("prefs.keep_unsaved_in_browser"), &mut app.preferences.keep_unsaved_in_browser).on_hover_text(tip);
+                ui_kit::checkbox(ui, app.tr("prefs.keep_unsaved_in_browser"), &mut app.preferences.keep_unsaved_in_browser)
+                    .backing_on_hover_text(tip);
                 if app.preferences.keep_unsaved_in_browser {
                     let tip = app.tr("prefs.keep_unsaved_also_asks_tip").to_string();
-                    ui_kit::checkbox(ui, app.tr("prefs.keep_unsaved_also_asks"), &mut app.preferences.keep_unsaved_also_asks).on_hover_text(tip);
+                    ui_kit::checkbox(ui, app.tr("prefs.keep_unsaved_also_asks"), &mut app.preferences.keep_unsaved_also_asks)
+                        .backing_on_hover_text(tip);
                 }
             }
             setting::save_prompt_one_at_a_time(app, ui).on_hover_text(app.tr("prefs.save_prompt_one_at_a_time_help"));
@@ -115,6 +117,14 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let width = (ui.available_width() - t.space_16 - ui.spacing().item_spacing.x).max(0.0);
                 ui.allocate_ui_with_layout(egui::vec2(width, t.control_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     ui_kit::checkbox(ui, &single, &mut app.preferences.slicer_single_instance).backing_on_hover_text(&tip);
+                });
+                ui_kit::help_icon(ui, &tip);
+            });
+            ui.horizontal(|ui| {
+                let (only, tip) = (app.tr("ui.export_selects_only_body").to_string(), app.tr("ui.export_selects_only_body_tip").to_string());
+                let width = (ui.available_width() - t.space_16 - ui.spacing().item_spacing.x).max(0.0);
+                ui.allocate_ui_with_layout(egui::vec2(width, t.control_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui_kit::checkbox(ui, &only, &mut app.preferences.export_selects_only_body).backing_on_hover_text(&tip);
                 });
                 ui_kit::help_icon(ui, &tip);
             });

@@ -187,10 +187,51 @@ pub fn check_kept(body: &Body) -> Result<()> {
         Some((u, r)) => (u.what.as_str(), check_result(r, u.how)),
         None => ("SMLib", body.smlib()?.check(solidcraft_smlib::CheckLevel::All).map_err(|e| format!("check: {e}"))),
     };
+    verdict(what, check)
+}
+
+/// What [`check_kept`] makes of SMLib's check of what it read (`what` names the step).
+fn verdict(what: &str, check: std::result::Result<solidcraft_smlib::CheckReport, String>) -> Result<()> {
     match check {
         Ok(c) if c.is_valid() => Ok(()),
         Ok(c) => Err(KernelError::Failed(format!("{what}: SMLib's check refuses the result: {c}"))),
         Err(e) => Err(KernelError::Failed(format!("{what}: {e}"))),
+    }
+}
+
+/// [`check_kept`] of a body, ready to run on another thread ([`detach_kept`]).
+pub struct KeptCheck(Kept);
+
+enum Kept {
+    /// A mesh body: nothing to check.
+    Nothing,
+    /// The step's own result, taken from the body.
+    Step { what: String, how: Checked, result: solidcraft_smlib::Brep },
+    /// A copy of the body's SMLib form, made when the check was detached.
+    Copy(Result<solidcraft_smlib::Brep>),
+}
+
+/// [`check_kept`] of `body`, detached from it: the step's result is taken now, or the body's SMLib
+/// form is copied now, so the check reads nothing the operations after it use and can run on
+/// another thread beside them ([`KeptCheck::run`]).
+pub fn detach_kept(body: &Body) -> KeptCheck {
+    if body.is_mesh() {
+        return KeptCheck(Kept::Nothing);
+    }
+    if let Some((u, result)) = body.unchecked.as_deref().and_then(|u| u.take(&body.record).map(|r| (u, r))) {
+        return KeptCheck(Kept::Step { what: u.what.clone(), how: u.how, result });
+    }
+    KeptCheck(Kept::Copy(body.smlib().and_then(|b| b.try_clone().map_err(|e| KernelError::smlib("SMLib copy", e)))))
+}
+
+impl KeptCheck {
+    /// The check: [`check_kept`]'s result for the body it was detached from.
+    pub fn run(self) -> Result<()> {
+        match self.0 {
+            Kept::Nothing => Ok(()),
+            Kept::Step { what, how, result } => verdict(&what, check_result(&result, how)),
+            Kept::Copy(copy) => verdict("SMLib", copy?.check(solidcraft_smlib::CheckLevel::All).map_err(|e| format!("check: {e}"))),
+        }
     }
 }
 
