@@ -67,7 +67,7 @@ fn on_both_surfaces(c: &C3, surfaces: &[Box<solidcore_record::brep::Surface>; 2]
 impl C3 {
     /// The bounded curve of an edge. A line, circle or ellipse with a NURBS form has its bounds
     /// on the form ([`Edge::parameters`]): a line's ends are evaluated there, a conic's angles come
-    /// from [`crate::brep::label::edge_curve_interval`].
+    /// from [`solidcore_ops::label::edge_curve_interval`].
     pub fn of_edge(e: &Edge) -> Result<(C3, CurveAccuracy), HlrError> {
         let exact = |c: C3| (c, CurveAccuracy::Analytic);
         match (&e.curve, &e.nurbs) {
@@ -93,7 +93,7 @@ impl C3 {
                 Ok(exact(C3::Line { a: end(e.interval[0])?, b: end(e.interval[1])? }))
             }
             (Curve::Circle { .. } | Curve::Ellipse { .. }, _) => {
-                let angles = crate::brep::label::edge_curve_interval(e).ok_or(HlrError::Invalid("edge form"))?;
+                let angles = solidcore_ops::label::edge_curve_interval(e).ok_or(HlrError::Invalid("edge form"))?;
                 Ok(exact(C3::bounded(&e.curve, angles)?))
             }
             (curve, _) => Ok(exact(C3::bounded(curve, e.interval)?)),

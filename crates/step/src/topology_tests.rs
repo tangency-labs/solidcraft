@@ -211,8 +211,8 @@ fn one_solid(ex: &p21::Exchange) -> Solid {
     assert!(r.failures.is_empty(), "{:?}", r.failures);
     assert_eq!(r.solids.len(), 1);
     let s = r.solids.into_iter().next().unwrap();
-    solidcraft_geom::brep::check::validate(&s.brep).unwrap();
-    solidcraft_geom::brep::geometry::check(&s.brep).unwrap();
+    solidcore_ops::record_check::validate(&s.brep).unwrap();
+    solidcore_ops::record_check::agreement(&s.brep).unwrap();
     s
 }
 
@@ -233,10 +233,7 @@ fn sides(b: &Brep) -> Vec<(usize, V, V)> {
             let u = &edges[0];
             let [t0, t1] = u.pcurve.interval().unwrap();
             let m = 0.5 * (t0 + t1);
-            let (a, c) = (
-                solidcraft_geom::brep::pcurve::eval(&u.pcurve, m).unwrap(),
-                solidcraft_geom::brep::pcurve::eval(&u.pcurve, m + 1e-4 * (t1 - t0)).unwrap(),
-            );
+            let (a, c) = (solidcore_ops::pcurve::eval(&u.pcurve, m).unwrap(), solidcore_ops::pcurve::eval(&u.pcurve, m + 1e-4 * (t1 - t0)).unwrap());
             let along = if u.forward { [c[0] - a[0], c[1] - a[1]] } else { [a[0] - c[0], a[1] - c[1]] };
             let n = (along[0].hypot(along[1])).max(1e-300);
             let left = [-along[1] / n, along[0] / n];
@@ -377,7 +374,7 @@ fn a_cylinder_has_a_seam_used_twice_by_its_side() {
     for e in &s.brep.edges {
         if matches!(e.curve, BCurve::Circle { .. }) {
             // On its NURBS form: a whole turn in angle, its interval in the form's parameter.
-            let [a0, a1] = solidcraft_geom::brep::label::edge_curve_interval(e).unwrap();
+            let [a0, a1] = solidcore_ops::label::edge_curve_interval(e).unwrap();
             assert!(e.nurbs.is_some() && (a1 - a0 - TAU).abs() < 1e-12);
             assert_eq!(e.vertices[0], e.vertices[1]);
         }
@@ -411,7 +408,7 @@ fn a_ball_bounded_by_its_seam_alone() {
         let s = one_solid(&w.file(&[solid]));
         assert_eq!(counts(&s.brep), [2, 1, 1, 1, 2]);
         let e = &s.brep.edges[0];
-        let [a0, a1] = solidcraft_geom::brep::label::edge_curve_interval(e).unwrap();
+        let [a0, a1] = solidcore_ops::label::edge_curve_interval(e).unwrap();
         assert!((a1 - a0 - PI).abs() < 1e-12, "{:?}", e.interval);
         faces_away(&s.brep, 0, |_| [0.0; 3]);
     }
@@ -805,7 +802,7 @@ fn an_edge_on_a_curve_replica_is_the_moved_curve() {
     assert!(moved.failures.is_empty(), "{:?}", moved.failures);
     assert_eq!(moved.solids.len(), 1);
     let (a, b) = (&plain.solids[0].brep, &moved.solids[0].brep);
-    solidcraft_geom::brep::check::validate(b).unwrap();
+    solidcore_ops::record_check::validate(b).unwrap();
     assert_eq!(counts(a), counts(b));
     // The replica's edge is the plain cube's edge: same curve, same interval.
     assert_eq!(a.edges[0].curve, b.edges[0].curve);
@@ -913,8 +910,8 @@ fn step_conformance_parts() {
         let r = read_solids(&p21::parse(&std::fs::read_to_string(&path).unwrap()).unwrap());
         assert!(r.failures.is_empty() && r.solids.len() == 1, "{name}: {:?}", r.failures);
         let b = &r.solids[0].brep;
-        solidcraft_geom::brep::check::validate(b).unwrap();
-        solidcraft_geom::brep::geometry::check(b).unwrap();
+        solidcore_ops::record_check::validate(b).unwrap();
+        solidcore_ops::record_check::agreement(b).unwrap();
         assert_eq!(b.regions.len(), 2, "{name}");
     }
 }
@@ -983,7 +980,7 @@ fn same_surface(data: &str, us: (f64, f64), vs: (f64, f64)) -> BSurface {
         .collect();
     let ext = swept::Extent { points: grid.iter().map(|&(u, v)| v3(s.point(u, v).unwrap())).collect(), seam: Vec::new() };
     let (record, reversed) = swept::map_surface(&s, &ext, DEFAULT_TOLERANCE).unwrap();
-    solidcraft_geom::brep::label::surface_natural(&record);
+    let _ = solidcore_ops::label::surface_natural(&record);
     let eval = SurfaceEval::new(&record).unwrap();
     for &(u, v) in &grid {
         let p = v3(s.point(u, v).unwrap());

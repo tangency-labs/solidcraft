@@ -181,7 +181,7 @@ fn solidcore_case(name: &'static str) -> Option<Measured> {
         let solids = solid_count(body).unwrap_or_else(|e| panic!("{name}: solid count: {e}"));
         assert_eq!(solids, c.solids, "{name}: solids");
         let (rec, _) = native(&to_arrays(body).unwrap()).unwrap_or_else(|e| panic!("{name}: record: {e:?}"));
-        solidcraft_geom::brep::check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
+        solidcore_ops::record_check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
         Some(Measured { volume: v, counts: n, kinds: kinds(&rec), solids })
     })
 }

@@ -909,7 +909,8 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             let (pick, stored) = match axis {
                 AxisRef::World { axis } => (Some(Sel::Axis { name: axis.to_ascii_uppercase() }), None),
                 AxisRef::SketchAxis { axis } => (Some(Sel::Axis { name: axis.to_ascii_lowercase() }), None),
-                AxisRef::SketchLine { curve } => (Some(crate::selection::curve_pick(curve, sketch.0, s.active_sketch)), None),
+                AxisRef::SketchLine { curve, sketch: Some(owner) } => (Some(crate::selection::curve_pick(curve, *owner, s.active_sketch)), None),
+                AxisRef::SketchLine { curve, sketch: None } => (Some(crate::selection::curve_pick(curve, sketch.0, s.active_sketch)), None),
                 AxisRef::Construction { name } => (Some(Sel::Axis { name: name.to_string() }), None),
                 AxisRef::Line { origin, dir } => (None, Some(crate::dialogs::line_axis_value(s, frame, origin, dir.0))),
                 // An edge or face that is gone stays the reference until another is picked.
