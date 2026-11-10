@@ -90,6 +90,10 @@ pub struct RibParams {
     pub flip: Option<bool>,
     #[serde(default)]
     pub direction: Option<RibDirectionParam>,
+    /// True: the curves' open ends run on in their own direction until they meet the part, so
+    /// the wall reaches the face beyond them. Default: true.
+    #[serde(default)]
+    pub extend: Option<bool>,
     /// What the join makes of pieces that share no face. Default: separate.
     #[serde(default)]
     pub touching: Option<TouchingParam>,

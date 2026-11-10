@@ -447,6 +447,34 @@ fn rib_to_the_next_face_fills_the_corner() {
     assert!(rel(volume(&mut s), 7500.0 + 400.0) < 1e-6);
 }
 
+/// A rib whose curve stops short of a curved wall runs its end on to the wall (#13019): a base,
+/// a wall at x = 0..5 and above them a cylinder along X (bottom at z = 29 in the sketch plane);
+/// the rib's line runs up from the base at x = 20 and stops at z = 25. Without `extend` (a
+/// design saved before the option) the rib ends at the line's end as it did.
+#[test]
+fn rib_runs_its_ends_on_to_a_curved_wall() {
+    let added = |extend: bool| {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 60, "width": 20, "height": 5, "corner": [0, 0, 0], "body_name": "P"}));
+        run(&mut s, "solid.box", json!({"length": 5, "width": 20, "height": 40, "corner": [0, 0, 0], "operation": "join"}));
+        run(&mut s, "solid.cylinder", json!({"radius": 6, "height": 40, "base": [0, 10, 35], "axis": "X", "operation": "join"}));
+        run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 10, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}, "name": "RibSketch"}));
+        run(&mut s, "sketch.line", json!({"points": [[20, 5], [20, 25]], "ids": ["l1"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let before = volume(&mut s);
+        run(&mut s, "solid.rib", json!({"sketch": "RibSketch", "curves": ["l1"], "thickness": 4, "extend": extend}));
+        assert_eq!(measure(&mut s)["body_count"], 1);
+        volume(&mut s) - before
+    };
+    // Up to the line's end: 15 from the line to the wall, 20 high, 4 thick.
+    let short = added(false);
+    assert!(rel(short, 1200.0) < 1e-6, "{short}");
+    // On to the cylinder, which is 29 above the base at the sketch plane and 29.34 at the rib's
+    // faces: at least 4 higher, and below the cylinder's axis.
+    let long = added(true);
+    assert!(long > 1200.0 + 15.0 * 4.0 * 4.0 * 0.98 && long < 1200.0 + 15.0 * 4.0 * 10.0, "{long}");
+}
+
 #[test]
 fn rib_with_a_depth_and_web() {
     let mut s = bracket();

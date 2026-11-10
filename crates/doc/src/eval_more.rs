@@ -210,7 +210,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
 /// moves the rib's sketch first: a pattern's or mirror's copy of the rib is built again where
 /// the copy is, against the bodies there (#4593), as a hole is drilled again at each copy.
 pub(super) fn rib_tools(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature, at: Option<&crate::Mat>) -> Result<Vec<Body>> {
-    let FeatureKind::Rib { sketch, curves, thickness, depth, flip, web, normal } = &f.kind else {
+    let FeatureKind::Rib { sketch, curves, thickness, depth, flip, web, normal, extend } = &f.kind else {
         return Err(DocError::Invalid(format!("{} is not a rib", f.name)));
     };
     let mut ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?.clone();
@@ -236,7 +236,7 @@ pub(super) fn rib_tools(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Fea
     }
     let mut tools = Vec::new();
     for g in &groups {
-        tools.push(if *normal { rib_tool_normal(st, &ss, g, t, depth, *flip)? } else { rib_tool(st, &ss, g, t, depth, *flip)? });
+        tools.push(if *normal { rib_tool_normal(st, &ss, g, t, depth, *flip)? } else { rib_tool(st, &ss, g, t, depth, *flip, *extend)? });
     }
     Ok(tools)
 }
@@ -297,14 +297,17 @@ fn chain_points(ss: &SolvedSketch, ids: &[String]) -> Result<Vec<Vec2>> {
 
 /// A rib wall: the band swept from the curves across the plane by `depth` (or to the body),
 /// `t` thick about the sketch plane.
-fn rib_tool(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: Option<f64>, flip: bool) -> Result<Body> {
-    let pts = chain_points(ss, ids)?;
+fn rib_tool(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: Option<f64>, flip: bool, extend: bool) -> Result<Body> {
+    let mut pts = chain_points(ss, ids)?;
+    let reach = st.bodies.iter().map(|b| b.mesh().bounds()).fold(0.0f64, |acc, bb| acc.max((bb.max - bb.min).len()));
+    if extend {
+        extend_rib_ends(st, ss, &mut pts, t, reach);
+    }
     let (Some(a), Some(b)) = (pts.first().copied(), pts.last().copied()) else { return Err(DocError::Invalid("empty rib curve".into())) };
     let chord = (b - a).normalized().ok_or_else(|| DocError::Invalid("a closed or zero-length rib curve".into()))?;
     let mid = pts.get(pts.len() / 2).copied().unwrap_or(a);
     // Toward the material: the side of the curve where the bodies are (unless flipped).
     let mut n = chord.perp();
-    let reach = st.bodies.iter().map(|b| b.mesh().bounds()).fold(0.0f64, |acc, bb| acc.max((bb.max - bb.min).len()));
     let probe = |side: Vec2| {
         let mut hits = 0;
         for k in 1..=20 {
@@ -367,6 +370,55 @@ fn rib_tool(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: O
     let region = Region2 { outer: lp, holes: Vec::new() };
     let tools = kernel::extrude(&ss.plane, &[region], -t / 2.0, t / 2.0)?;
     tools.into_iter().next().ok_or_else(|| DocError::Invalid("the rib made no solid".into()))
+}
+
+/// Run a rib curve's open ends (`pts`, in sketch coordinates) on in their own direction until they
+/// meet the bodies, and on until the wall's two faces, `t` apart about the sketch plane, are in
+/// the material too, so a curved face is reached across the whole thickness (#13019). Decided on
+/// the bodies' exact faces. An end already on or in the material, or facing none within `reach`,
+/// stays where it is.
+fn extend_rib_ends(st: &ModelState, ss: &SolvedSketch, pts: &mut Vec<Vec2>, t: f64, reach: f64) {
+    let normal = ss.plane.normal();
+    // A point the kernel cannot place counts as outside: the end then stays or runs on no further.
+    let solid = |q: Vec2, off: f64| {
+        let w = ss.plane.to_world(q) + normal * off;
+        st.bodies.iter().any(|b| matches!(b.body.classify_point(w), Ok(c) if c != kernel::PointClass::Outside))
+    };
+    let step = (reach / 200.0).max(1e-3);
+    for at_start in [true, false] {
+        let n = pts.len();
+        let (end, inner) = if at_start { (0, 1) } else { (n.saturating_sub(1), n.saturating_sub(2)) };
+        let (Some(p), Some(q)) = (pts.get(end).copied(), pts.get(inner).copied()) else { continue };
+        let Some(dir) = (p - q).normalized() else { continue };
+        if solid(p, 0.0) {
+            continue;
+        }
+        let Some(k) = (1..=200).map(f64::from).find(|k| solid(p + dir * (k * step), 0.0)) else { continue };
+        // Refine between the last outside and the first inside step.
+        let (mut lo, mut hi) = ((k - 1.0) * step, k * step);
+        for _ in 0..30 {
+            let m = 0.5 * (lo + hi);
+            if solid(p + dir * m, 0.0) { hi = m } else { lo = m }
+        }
+        // On until both faces of the wall are in the material (a face curving away across the
+        // thickness), at most the thickness further.
+        let mut h = hi + t * 0.05;
+        for i in 0..=20 {
+            let d = hi + t * f64::from(i) / 20.0;
+            let c = p + dir * d;
+            if solid(c, t * 0.5) && solid(c, -t * 0.5) {
+                h = d + t * 0.05;
+                break;
+            }
+            h = d;
+        }
+        let tip = p + dir * h;
+        if at_start {
+            pts.insert(0, tip);
+        } else {
+            pts.push(tip);
+        }
+    }
 }
 
 /// A rib wall along the sketch normal: the curves widened to `t` in the sketch plane, run from

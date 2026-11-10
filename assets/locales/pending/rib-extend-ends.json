@@ -1,0 +1,26 @@
+{
+  "en": {
+    "ui.rib_extend_ends": "Extend to the body"
+  },
+  "ar": {
+    "ui.rib_extend_ends": "التمديد حتى الجسم"
+  },
+  "de": {
+    "ui.rib_extend_ends": "Bis zum Körper verlängern"
+  },
+  "he": {
+    "ui.rib_extend_ends": "הארכה עד הגוף"
+  },
+  "ja": {
+    "ui.rib_extend_ends": "ボディまで延長"
+  },
+  "ko": {
+    "ui.rib_extend_ends": "바디까지 연장"
+  },
+  "vi": {
+    "ui.rib_extend_ends": "Kéo dài đến thân khối"
+  },
+  "zh": {
+    "ui.rib_extend_ends": "延伸至实体"
+  }
+}

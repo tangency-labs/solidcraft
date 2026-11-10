@@ -1317,6 +1317,11 @@ pub enum FeatureKind {
         /// plane) instead of across the plane from the curves.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         normal: bool,
+        /// Run the curves' open ends on in their own direction until they meet the body, so the
+        /// wall reaches the face beyond them. Ribs saved before this option have none and end
+        /// where their curves end (#13019).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        extend: bool,
     },
     /// Move planar faces (at the given points) onto a target plane parallel to them.
     ReplaceFace {

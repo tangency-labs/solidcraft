@@ -290,6 +290,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 flip: bool,
                 /// Grow along the sketch normal rather than across the plane.
                 normal: bool,
+                /// Run the curves' open ends on to the body.
+                extend: bool,
             },
             /// Move planar faces onto a target plane or face.
             DeleteFaces,
@@ -945,7 +947,14 @@ impl Dialog {
                 Dialog::new(Kind::Mirror, vec![SelInput::new("Objects", BODIES, true), SelInput::new("Mirror Plane", PLANES | PLANAR_FACES, false)])
             }
             "solid.rib" | "solid.web" => Dialog::new(
-                Kind::Rib { web: id == "solid.web", thickness: length_default(s, "2"), depth: String::new(), flip: false, normal: false },
+                Kind::Rib {
+                    web: id == "solid.web",
+                    thickness: length_default(s, "2"),
+                    depth: String::new(),
+                    flip: false,
+                    normal: false,
+                    extend: true,
+                },
                 vec![SelInput::new("Curves", CURVES, true)],
             ),
             "solid.replace_face" => Dialog::new(
@@ -5845,11 +5854,11 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
             ("construct.plane.at_angle", p)
         }
-        Kind::Rib { web, thickness, depth, flip, normal } => {
+        Kind::Rib { web, thickness, depth, flip, normal, extend } => {
             need(0, "open sketch curves")?;
             let curves = sels(d, 0).curve_ids();
             let sketch = picks_sketch(app, sels(d, 0), None).ok_or("the curves must be in one sketch")?;
-            let mut p = json!({"sketch": sketch, "curves": curves, "thickness": thickness, "flip": flip});
+            let mut p = json!({"sketch": sketch, "curves": curves, "thickness": thickness, "flip": flip, "extend": extend});
             if *normal {
                 p["direction"] = json!("normal");
             }
@@ -7895,7 +7904,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Rib { sketch, curves, thickness, depth, flip, web, normal, .. } => {
+        FeatureKind::Rib { sketch, curves, thickness, depth, flip, web, normal, extend } => {
             let mut d = start(if *web { "solid.web" } else { "solid.rib" })?;
             d.kind = Kind::Rib {
                 web: *web,
@@ -7903,6 +7912,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 depth: depth.as_deref().map(|e| shown_expr(e, ValueKind::Length)).unwrap_or_default(),
                 flip: *flip,
                 normal: *normal,
+                extend: *extend,
             };
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = curves.iter().map(|id| crate::selection::curve_pick(id, sketch.0, s.active_sketch)).collect();

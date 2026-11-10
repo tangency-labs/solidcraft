@@ -1001,7 +1001,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             form_row(ui, "Position (0 to 1)", |ui| enter |= field(ui, t));
         }
         Kind::Split | Kind::ReplaceFace | Kind::Remove | Kind::Midplane | Kind::ChatContext | Kind::Construct { t: None, .. } => {}
-        Kind::Rib { thickness, depth, flip, normal, .. } => {
+        Kind::Rib { thickness, depth, flip, normal, extend, .. } => {
             form_row(ui, "Direction", |ui| {
                 let mut i = usize::from(*normal);
                 ui_kit::segmented(ui, &mut i, &["In plane", "Normal"], Default::default());
@@ -1009,7 +1009,8 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             });
             enter |= expr_row(ui, "Thickness", thickness);
             enter |= hint_row(ui, "Depth", depth, tr("to the next face"));
-            ui_kit::options(ui, "feature_options", &mut [("Flip", flip)]);
+            let extend_label = solidcraft_ui_text::tr("ui.rib_extend_ends");
+            ui_kit::options(ui, "feature_options", &mut [("Flip", flip), (extend_label, extend)]);
         }
         Kind::Emboss { depth, deboss } => {
             enter |= expr_row(ui, "Depth", depth);
