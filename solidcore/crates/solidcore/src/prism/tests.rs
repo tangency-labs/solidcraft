@@ -976,6 +976,37 @@ fn sheet_figures_a_label_box_fits_a_triangle_in_closed_form() {
 }
 
 #[test]
+fn sheet_figures_a_label_box_on_a_pointed_bottom_sits_on_the_higher_of_its_bounds() {
+    // Two edges below the box at 45°, meeting at a point that is not under the centre line: each
+    // bounds the bottom through its own lower corner, and the box sits on the higher bound. With a
+    // box as wide as tall, centred on x = cx: the left edge (x + y = k) needs y0 ≥ k - cx + h / 2,
+    // the right one (y = x - j) needs y0 ≥ cx - j + h / 2, and the top y = t needs y0 ≤ t - h.
+    let fit = |poly: &[Point2], cx| box_fit_in_convex_polygon(poly, cx, 1.0, 0.0, 100.0).unwrap();
+    // The point at (1, 0), sides x = 0 and x = 4, top y = 10, centre x = 2: the sides give h = 4,
+    // the right edge y0 ≥ 1 + h / 2 = 3, above the left edge's y0 ≥ h / 2 - 1 = 1.
+    let narrow = [
+        p(1.0, 0.0),
+        p(4.0, 3.0),
+        p(4.0, 10.0),
+        p(0.0, 10.0),
+        p(0.0, 1.0),
+    ];
+    fits(fit(&narrow, 2.0), 4.0, p(0.0, 3.0));
+    // The point at (5, 0), sides x = 0 and x = 20, top y = 20, centre x = 8: the sides allow 16,
+    // and the right edge and the top meet first, at 3 + h / 2 = 20 - h, so h = 34 / 3 with its
+    // bottom at 26 / 3; the left edge's bound, h / 2 - 3, is 6 lower.
+    let wide = [
+        p(5.0, 0.0),
+        p(20.0, 15.0),
+        p(20.0, 20.0),
+        p(0.0, 20.0),
+        p(0.0, 5.0),
+    ];
+    let h = 34.0 / 3.0;
+    fits(fit(&wide, 8.0), h, p(8.0 - h / 2.0, 26.0 / 3.0));
+}
+
+#[test]
 fn sheet_figures_refuse_an_outline_that_is_not_convex_and_counter_clockwise() {
     let ok = |poly: &[Point2]| box_fit_in_convex_polygon(poly, 5.0, 2.0, 1.0, 100.0);
     let mut clockwise = square10();
