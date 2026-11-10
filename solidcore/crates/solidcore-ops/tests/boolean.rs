@@ -1,10 +1,12 @@
 //! The boolean family on bodies whose answers are known.
 #![allow(clippy::unwrap_used, clippy::indexing_slicing)] // test
 
+use std::f64::consts::{PI, TAU};
 use std::io::Read as _;
 
 use serde_json::Value;
 use solidcore_ops::boolean::{boolean, imprint, union_all};
+use solidcore_ops::sweep::{extrude, revolve, Curve, DraftCorner};
 use solidcore_ops::{make_box, session, Body, BooleanOp, CheckLevel, Error};
 use solidcore_record::brep::Brep as Record;
 
@@ -162,6 +164,93 @@ fn a_rod_cut_by_the_union_of_two_counter_wound_channel_sweeps_is_valid() {
         .unwrap()
         .unwrap();
     graded("by the union", &r);
+}
+
+/// A dome turned about y from a quarter disc whose arc SolidCraft drew through a point written to
+/// eight decimals (#13713): the arc's circle has radius 10 + 1.01e-8, and the arc starts 1.01e-9
+/// rad above the x axis, so the dome's base circle lies 1.01e-8 above y = 0. Its seam lies in
+/// z = 0 on +x.
+fn rounded_dome() -> Body {
+    let r = 10.000_000_010_132_878;
+    let profile = [
+        Curve::Arc {
+            center: [0.0; 3],
+            axis: [0.0, 0.0, 1.0],
+            reference: [1.0, 0.0, 0.0],
+            radius: r,
+            start: 1.013_287_798_059_198_8e-9,
+            end: 1.570_796_325_781_608_9,
+        },
+        Curve::Line {
+            start: [0.0, r, 0.0],
+            end: [0.0; 3],
+        },
+        Curve::Line {
+            start: [0.0; 3],
+            end: [r, 1.013_287_799_085_951e-8, 0.0],
+        },
+    ];
+    revolve(&profile, [0.0; 3], [0.0, -1.0, 0.0], TAU, true).unwrap()
+}
+
+/// One valid solid of `counts` faces, edges and vertices and `want` mm³ (the dome's 1e-8 off
+/// its circle moves the volume by about 1e-9 relative).
+fn one_valid_solid(r: &Body, counts: [usize; 3], want: f64) {
+    let report = r.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    assert_eq!(r.solid_count().unwrap(), 1);
+    assert_eq!(r.counts().unwrap(), counts);
+    assert!(near(volume(r), want), "{}, closed form {want}", volume(r));
+}
+
+/// The rounded dome joined flat to a cylinder of radius 10 below it, its seam on the dome's. The
+/// two seams end 1.43e-8 apart at the vertex they share, 1.01e-8 radially and 1.01e-8 along the
+/// seam, and not at all across it: the result is valid (no face test 36, "Face Near missing
+/// Seam"), V = 2/3·π·10³ + π·10²·15.
+#[test]
+fn a_dome_1e_8_off_its_circle_joins_flat_to_a_cylinder() {
+    all_fixes();
+    let circle = [Curve::Arc {
+        center: [0.0, -15.0, 0.0],
+        axis: [0.0, 1.0, 0.0],
+        reference: [1.0, 0.0, 0.0],
+        radius: 10.0,
+        start: 0.0,
+        end: TAU,
+    }];
+    let cylinder = extrude(
+        &circle,
+        [0.0, 1.0, 0.0],
+        15.0,
+        0.0,
+        DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    let r = boolean(cylinder, rounded_dome(), BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    one_valid_solid(&r, [3, 4, 3], 2.0 / 3.0 * PI * 1e3 + PI * 1e2 * 15.0);
+}
+
+/// The rounded dome joined to its mirror image about y = 0: the two seams end 2.03e-8 apart, along
+/// the seam only. The result is a valid sphere, V = 4/3·π·10³.
+#[test]
+fn a_dome_1e_8_off_its_circle_joins_to_its_mirror() {
+    all_fixes();
+    let mirror = rounded_dome();
+    mirror
+        .transform(&[
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, -1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ])
+        .unwrap();
+    let r = boolean(rounded_dome(), mirror, BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    one_valid_solid(&r, [2, 3, 3], 4.0 / 3.0 * PI * 1e3);
 }
 
 /// Cancel stops the full check of a long coil cut (solidcore#3247): a 20-turn square coil cut
