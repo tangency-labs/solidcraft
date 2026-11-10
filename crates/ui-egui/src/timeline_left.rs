@@ -234,7 +234,7 @@ pub fn left_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     let held = crate::dialog_column::holds(app);
     if held {
         // No row is under the pointer: the view lights no feature for the History.
-        app.viewport.hover_feature = None;
+        crate::semantic_content::set_timeline_feature_hover(app, None);
     }
     if Container::for_layout(app.ui.layout, Surface::Panel).floating() || stacked(app) {
         let bounds = floating_rect(app, available);
@@ -1450,7 +1450,7 @@ fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
         }
         None => data.remove::<Drag>(drag_id),
     });
-    app.viewport.hover_feature = rows.hovered;
+    crate::semantic_content::set_timeline_feature_hover(app, rows.hovered);
     if let Some(feature) = rows.edit {
         app.edit_feature(feature);
     }
