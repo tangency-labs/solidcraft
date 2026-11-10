@@ -834,16 +834,25 @@ fn origin_boundary(o: vec3<f32>, d: vec3<f32>) -> OriginBoundary {
             // Keep the ray projection homogeneous: a rounded d[kx]/d[kz]
             // must not turn an exact uploaded-f32 edge tangent into a crossing.
             // All projected coordinates share d[kz], so barycentrics are invariant.
-            // Coordinate k is vertex k/2 on axis kx (even k) or ky (odd k), all
-            // six from one inlined difference_products.
+            // Steps 0-5 project vertex k/2 on axis kx (even k) or ky (odd k);
+            // steps 6-8 then form the edge weights as edge_weights does. All
+            // nine share one inlined difference_products.
             var a=vec2<f32>(0.0);var b=vec2<f32>(0.0);var c=vec2<f32>(0.0);
-            for (var k=0u; k<6u; k+=1u) {
-                let point=select(select(pc,pb,k<4u),pa,k<2u);
-                let axis=select(kx,ky,(k&1u)!=0u);
-                let value=difference_products(point[axis],d[kz],d[axis],point[kz]);
-                if k<2u { a[k]=value; } else if k<4u { b[k-2u]=value; } else { c[k-4u]=value; }
+            var weights=vec3<f32>(0.0);
+            for (var k=0u; k<9u; k+=1u) {
+                var products=vec4<f32>(0.0);
+                if k<6u {
+                    let point=select(select(pc,pb,k<4u),pa,k<2u);
+                    let axis=select(kx,ky,(k&1u)!=0u);
+                    products=vec4<f32>(point[axis],d[kz],d[axis],point[kz]);
+                } else {
+                    let e=select(select(a,c,k==7u),b,k==6u);
+                    let f=select(select(b,a,k==7u),c,k==6u);
+                    products=vec4<f32>(e.x,f.y,e.y,f.x);
+                }
+                let value=difference_products(products.x,products.y,products.z,products.w);
+                if k<2u { a[k]=value; } else if k<4u { b[k-2u]=value; } else if k<6u { c[k-4u]=value; } else { weights[k-6u]=value; }
             }
-            let weights=edge_weights(a,b,c);
             if any(weights<vec3<f32>(0.0)) && any(weights>vec3<f32>(0.0)) { continue; }
             let det=weights.x+weights.y+weights.z;
             if det==0.0 { continue; }
@@ -1140,8 +1149,9 @@ fn direct_light(t: Triangle, position: vec3<f32>, physical: PrecisePoint, o: vec
         if !studio || emitter_hit_precise(shadow_origin,shadow_origin_low,shadow_direction,shadow_minimum).distance>=emitter_limit {
             visibility = shadow_transmittance(shadow_origin,shadow_origin_low,shadow_direction,shadow_distance,shadow_minimum);
             if !OPAQUE_SCENE && studio && u.volume_min.w>0.0 {
-                var attenuation=volume_transmittance_precise(shadow_origin,shadow_origin_low,shadow_direction,shadow_distance);
-                if punctual { attenuation=volume_transmittance_precise(physical.hi,physical.lo,sample.direction,physical_distance); }
+                // A punctual connection is attenuated along its physical segment.
+                let attenuation=volume_transmittance_precise(select(shadow_origin,physical.hi,punctual),select(shadow_origin_low,physical.lo,punctual),
+                    select(shadow_direction,sample.direction,punctual),select(shadow_distance,physical_distance,punctual));
                 visibility.transmittance*=attenuation;
                 visibility.branch_pdf*=attenuation;
             }
@@ -1364,11 +1374,18 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
         if u.environment.w > 0.0 {
             if emitter.distance < hit.distance {
                 let light = u.area_lights[emitter.index];
-                let segment = ray_segment_precise(o,o_low,previous_position,previous_position_low,d,emitter.distance);
+                // The physical and scatter segments to the emitter share one inlined
+                // precise subtraction.
+                var segment=vec3<f32>(0.0);
+                var scatter_segment=vec3<f32>(0.0);
+                for (var k=0u; k<2u; k+=1u) {
+                    let delta=ray_segment_precise(o,o_low,select(previous_position,previous_scatter_position,k==1u),
+                        select(previous_position_low,previous_scatter_position_low,k==1u),d,emitter.distance);
+                    if k==0u { segment=delta; } else { scatter_segment=delta; }
+                }
                 if medium_count>0u {
                     throughput *= exp(-media[medium_count-1u].sigma*length(segment));
                 }
-                let scatter_segment = ray_segment_precise(o,o_low,previous_scatter_position,previous_scatter_position_low,d,emitter.distance);
                 let pdf = area_pdf(light,scatter_segment);
                 if pdf>0.0 && !suppress_direct && !photon_owns_smooth_tail(smooth_tail,false) {
                     let weight = select(power_weight(previous_pdf,pdf),1.0,previous_delta);
@@ -1409,10 +1426,17 @@ fn sample_path_lane(pixel: u32, lane: u32) -> vec4<f32> {
             position=point.hi;position_low=point.lo;
         }
         let shading_position=position+position_low;
-        texture_path_length+=length(precise_point_delta(position,position_low,o,o_low));
+        // The travelled ray segment and, inside a medium, its absorbing segment
+        // share one inlined precise subtraction.
+        var travelled=vec3<f32>(0.0);
+        var absorbing=vec3<f32>(0.0);
+        for (var k=0u; k<select(1u,2u,medium_count>0u); k+=1u) {
+            let delta=precise_point_delta(position,position_low,select(o,previous_position,k==1u),select(o_low,previous_position_low,k==1u));
+            if k==0u { travelled=delta; } else { absorbing=delta; }
+        }
+        texture_path_length+=length(travelled);
         if medium_count > 0u {
-            let segment=precise_point_delta(position,position_low,previous_position,previous_position_low);
-            throughput *= exp(-media[medium_count-1u].sigma*length(segment));
+            throughput *= exp(-media[medium_count-1u].sigma*length(absorbing));
         }
         previous_position = position; previous_position_low=position_low;
         o = position + geometric*(u.lighting.x*2.0); o_low=vec3<f32>(0.0);
