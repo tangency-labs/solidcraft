@@ -1,6 +1,8 @@
 use serde_json::{Value, json};
 
-use super::{Curves3dResult, Line3dParams, Move3dParams, Move3dResult, Point3dParams, Point3dResult, Spline3dParams};
+use super::{
+    AlongAxisParams, AlongAxisResult, Curves3dResult, Line3dParams, Move3dParams, Move3dResult, Point3dParams, Point3dResult, Spline3dParams,
+};
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
@@ -39,6 +41,9 @@ fn strict_keeps_todays_errors() {
         ("sketch.point3d", json!({"point": [1, 2]})),
         ("sketch.point3d", json!({"point": "1,2,3"})),
         ("sketch.point3d", json!({"point": [1, 2, 3], "sketch": {}})),
+        // A coordinate may be an expression (#10608), but neither a flag nor blank text.
+        ("sketch.line3d", json!({"points": [[0, 0, 0], [true, 0, 1]]})),
+        ("sketch.point3d", json!({"point": [1, " ", 3]})),
         ("sketch.move3d", json!({})),
         ("sketch.move3d", json!({"wire": 3, "to": [0, 0, 0]})),
         ("sketch.move3d", json!({"wire": null, "to": [0, 0, 0]})),
@@ -142,6 +147,9 @@ fn the_schemas_take_what_the_handlers_read() {
                 (json!({"points": [[0, 0, 0]]}), false),
                 (json!({"points": [[0, 0, 0], [1, 1]]}), false),
                 (json!({"points": two, "sketch": true}), false),
+                // Coordinates may be expressions over the design's parameters (#10608).
+                (json!({"points": [["len / 2", 0, "shs"], {"x": 1, "y": "w", "z": 1}]}), true),
+                (json!({"points": [[true, 0, 0], [1, 1, 1]]}), false),
             ],
         );
     }
@@ -152,6 +160,8 @@ fn the_schemas_take_what_the_handlers_read() {
             (json!({"point": {"x": 1, "y": 2, "z": 3}}), true),
             (json!({}), false),
             (json!({"point": [1, 2]}), false),
+            (json!({"point": ["h", 2, 3]}), true),
+            (json!({"point": [1, null, 3]}), false),
         ],
     );
     takes(
@@ -238,4 +248,32 @@ fn the_check_names_what_is_wrong_with_a_key() {
     assert_eq!(issues("sketch.move3d", json!({"wire": "w", "index": 500})), ["`index` must be a fit point index below 500"]);
     assert_eq!(issues("sketch.move3d", json!({"wire": "w", "by": 1})), ["`by` must be [x,y,z]"]);
     assert_eq!(issues("sketch.line3d", json!({"points": [[0, 0, 0], [1, 1, 1]], "sketch": true})), ["`sketch` must be an id or a name"]);
+}
+
+#[test]
+fn along_axis_schema_and_the_key_check_agree() {
+    assert_keys(input_schema_for::<AlongAxisParams>(), &["axis", "line", "lines", "sketch"]);
+}
+
+#[test]
+fn along_axis_strict_keeps_todays_errors() {
+    assert_strict_keeps_todays_errors(&[
+        ("sketch.constraint.along_axis", json!({"line": "w1"})),
+        ("sketch.constraint.along_axis", json!({"line": "w1", "axis": "w"})),
+        ("sketch.constraint.along_axis", json!({"line": 5, "axis": "x"})),
+        ("sketch.constraint.along_axis", json!({"axis": "x"})),
+    ]);
+}
+
+#[test]
+fn along_axis_reply_matches_its_schema() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let run = |s: &mut Session, id: &str, p: serde_json::Value| s.execute(id, &p).unwrap_or_else(|e| panic!("{id}: {e}"));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    let l = run(&mut s, "sketch.line3d", json!({"points": [[0, 0, 0], [10, 1, 2]]}));
+    let line = l["curves"][0].as_str().unwrap_or_else(|| panic!("{l}")).to_string();
+    let r = run(&mut s, "sketch.constraint.along_axis", json!({"line": line, "axis": "x"}));
+    let schema = output_schema_for::<AlongAxisResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &r), "{r}");
 }

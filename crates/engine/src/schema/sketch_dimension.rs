@@ -246,6 +246,9 @@ impl<'de> Deserialize<'de> for SketchDimensionParams {
 /// What `sketch.dimension` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct DimensionResult {
+    /// For a 3D sketch's dimension (#10608): its constraint id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constraint: Option<String>,
     /// The parameter that holds the dimension's value (`d1`, or the name a `name = expression`
     /// value defined); null for a driven dimension, which has none.
     pub param: Option<String>,
@@ -254,7 +257,9 @@ pub struct DimensionResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub driven: Option<bool>,
     /// What the dimension is: `LinearDimension`, `RadialDimension`, `DiameterDimension`,
-    /// `AngularDimension`, `ArcLengthDimension` or `LinearDiameterDimension`.
+    /// `AngularDimension`, `ArcLengthDimension` or `LinearDiameterDimension`; for a 3D sketch's
+    /// dimension (#10608), `length`, `distance`, `distance_x`, `distance_y`, `distance_z`,
+    /// `angle` or `radius`.
     #[serde(rename = "type")]
     pub kind: String,
     /// The parameter's expression, as the design stores it, in the design's units (a driving
