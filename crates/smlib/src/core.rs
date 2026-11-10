@@ -330,10 +330,8 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.bend_volume_trim_param_box_across_period = true;
     f.point_set_tight_pbox_projects_points = true;
     f.degen_param_tiebreak_uses_actual_param = true;
-    f.conic_evaluate_uses_computed_second_deriv = true;
     f.cylinder_plane_section_trims_exact = true;
     f.local_surface_intersect_guards_max_boundary_retry = true;
-    f.curve_max_distance_single_sample_midpoint = true;
     f.curve_sweep_closed_path_joins_ends = true;
     f.validate_tolerances_fixes_reported_gaps = true;
     f.edgeuse_convexity_propagates_step_off_failure = true;
