@@ -4987,6 +4987,7 @@
   "ui.agent_chat_setup_title": "Configurar um assistente",
   "ui.agent_chat_side": "Lado do chat com agente",
   "ui.agent_chat_signed_in": "conectado",
+  "ui.agent_chat_snap_none_found": "Nenhum agente de programação encontrado. O pacote Snap é confinado, então não consegue ver nem iniciar os agentes de programação instalados neste computador. Para usá-los, instale o SolidCraft pelo pacote AppImage, .deb ou .rpm. Um agente que usa uma API compatível com OpenAI também funciona no pacote Snap: configure-o em Adicionar agente.",
   "ui.agent_chat_state_auth": "É preciso entrar",
   "ui.agent_chat_state_busy": "Trabalhando…",
   "ui.agent_chat_state_exited": "Agente parado",
