@@ -25,6 +25,7 @@ use std::sync::PoisonError;
 use solidcore::EntityRef;
 use solidcore::SolidError;
 use solidcore::blend::blend_corner::BlendCornerEvent;
+use solidcore::blend::blend_refusal::{BlendRefusal, SetbackTooShortWhy};
 use solidcore::blend::chamfer_side::faces_along;
 use solidcore::blend::fillet_corner::p3::MIXED_CORNER_RAILS_CROSS;
 use solidcore::blend::fillet_executive::p1::{FilletLaw, FilletLawKind};
@@ -311,14 +312,29 @@ fn face_set(b: &Brep) -> solidcore::Result<HashSet<FaceId>> {
 /// the cliff overflow on, solidcore makes the fork's choice, and its refusals (each with its own
 /// reason) are [`Error::NoRoom`] like the fork's.
 ///
+/// A setback too short for its corner's fill, which solidcore refuses as data naming the least
+/// setback its fill takes (`BlendRefusal::SetbackTooShort`, from the fill's convex or concave
+/// test), is [`Error::SetbackTooShort`] with that setback and the corner's point; `replaced`
+/// (the session marks the corners' patches for another patch to replace) says the setback is
+/// only what solidcore's corner needs, not one shown to build. Its other reason, a setback
+/// short of where the rails cross, names a setback that passes that test only, so it stays
+/// unsized.
+///
 /// A blend too large that solidcore sizes (the session's fit, as the fork's capi reads it with
 /// `smlib_blend_fit_size`, or [`SolidError::FilletRefused`] carrying it) is
 /// [`Error::TooLarge`] with that size, its edge's point
 /// filled in by the caller from the edge returned with it ([`sized_on`]); a corner solidcore
 /// refuses as not supported (the mixed corner whose rails cross, solidcore#2256) is
 /// [`Error::Unported`] naming it.
-fn blend_failure(s: &FilletSession<'_>, e: SolidError, corner: bool) -> (Error, Option<EdgeId>) {
+fn blend_failure(s: &FilletSession<'_>, e: SolidError, corner: bool, replaced: bool) -> (Error, Option<EdgeId>) {
     let info = s.error_info();
+    if let SolidError::BlendRefused {
+        refusal: BlendRefusal::SetbackTooShort { least, why: SetbackTooShortWhy::ConvexFill | SetbackTooShortWhy::ConcaveFill, .. },
+        ..
+    } = e
+    {
+        return (Error::SetbackTooShort { least, at: info.location.map(|p| [p.x, p.y, p.z]), builds: !replaced }, None);
+    }
     let (fit, reason) = match &e {
         SolidError::FilletRefused { fit, reason, .. } => (Some(*fit), reason.or(info.no_room_reason())),
         _ if info.code == FilletErrorType::NoRoom as i32 => (s.fit_size(), info.no_room_reason()),
@@ -544,6 +560,9 @@ fn blend_edges_stopping(
             step = corners(&mut s, section, setbacks);
         }
         s.set_mark_corner_patches(patches.is_some());
+        // the corners' patches marked for another patch to replace: solidcore's fill is then
+        // not the corner ([`blend_failure`])
+        let replaced = patches.is_some();
         match step {
             // The marks go with the session: read them before it drops.
             Ok(Ok(set_back)) => match s.do_filleting(k, None) {
@@ -557,7 +576,7 @@ fn blend_edges_stopping(
                             *m = s.mitred_edges();
                         }
                     }
-                    let (why, edge) = blend_failure(&s, e, corner);
+                    let (why, edge) = blend_failure(&s, e, corner, replaced);
                     fit_edge = edge;
                     Ok(Err(Err(why)))
                 }
@@ -566,7 +585,7 @@ fn blend_edges_stopping(
             Err(e) => match refused_turn {
                 Some(why) => Ok(Err(Err(why))),
                 None => {
-                    let (why, edge) = blend_failure(&s, e, corner);
+                    let (why, edge) = blend_failure(&s, e, corner, replaced);
                     fit_edge = edge;
                     Ok(Err(Err(why)))
                 }
