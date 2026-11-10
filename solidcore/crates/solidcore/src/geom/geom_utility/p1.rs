@@ -57,10 +57,10 @@
 //! Deviations:
 //! - Out-params and `SmStatus` become return values. `SM_ERR_INVALID_INPUT` (also from
 //!   `ZERO_VEC_ER` and a failed `Unitize`) is [`SolidError::InvalidInput`]; `SM_ERR` is
-//!   [`SolidError::Upstream`] with code 1001, `SM_ERR_WARNING` code 1023. Where upstream
+//!   [`GeomFailure`](crate::error::geom::GeomFailure) with code 1001, `SM_ERR_WARNING` code 1023. Where upstream
 //!   returns `FALSE` as a status (`smgu_CircleCenterFrom3Points` for coincident
 //!   points; `FALSE` is not a valid `SmStatus` and is not `SM_SUCCESS`) the port returns
-//!   [`SolidError::Upstream`] with code 0.
+//!   [`GeomFailure`](crate::error::geom::GeomFailure) with code 0.
 //! - Upstream fixed-size output arrays plus counts (`ULONG&` + `double[2]`, ...) become
 //!   `Vec`s, `Option`s or enums holding exactly the values upstream sets.
 //! - Statuses upstream ignores (`SE(...)` is a no-op in the release build, or the call
@@ -93,7 +93,8 @@
 //! - `SM_ASSERT*` and `SM_DEBUG_CODE` blocks are not compiled upstream (release build)
 //!   and are not ported.
 
-use crate::error::{Result, SolidError, SM_ERR_WARNING};
+use crate::error::geom::GeomFailure;
+use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::matrix::Matrix;
@@ -136,7 +137,10 @@ pub fn add_point(points: &mut Vec<Point3>, tol: f64, pnt: Point3) -> Result<()> 
         }
     }
     if points.len() > 1 {
-        return Err(SolidError::sm_err("geom::geom_utility::p1::add_point"));
+        return Err(SolidError::geom_failed(
+            "geom::geom_utility::p1::add_point",
+            "the point set is not empty",
+        ));
     }
     points.push(pnt);
     Ok(())
@@ -353,13 +357,13 @@ pub fn line_line_closest_point(
     const OP: &str = "geom::geom_utility::p1::line_line_closest_point";
     // err - zero length vectors
     if line_vec1.length_squared() < EFF_ZERO_SQ || line_vec2.length_squared() < EFF_ZERO_SQ {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::geom_failed(OP, "a line has no direction"));
     }
 
     // error - parallel or coincident lines
     let cross = line_vec1.cross(line_vec2);
     if cross.length_squared() < EFF_ZERO_SQ {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::geom_failed(OP, "the lines are parallel"));
     }
 
     // get minimum distance vector direction
@@ -370,9 +374,9 @@ pub fn line_line_closest_point(
     let plane_v2 = cross.cross(line_vec2).unitize()?;
 
     let t1 = line_plane_intersect(line_pnt1, line_vec1, line_pnt2, plane_v2)
-        .map_err(|_| SolidError::sm_err(OP))?;
+        .map_err(|_| SolidError::geom_failed(OP, "the lines are parallel"))?;
     let t2 = line_plane_intersect(line_pnt2, line_vec2, line_pnt1, plane_v1)
-        .map_err(|_| SolidError::sm_err(OP))?;
+        .map_err(|_| SolidError::geom_failed(OP, "the lines are parallel"))?;
     Ok((t1, t2))
 }
 
@@ -396,7 +400,10 @@ pub fn line_plane_intersect(
     let denom = line_vec.dot(plane_norm);
 
     if denom.abs() < tol {
-        return Err(SolidError::sm_err(OP)); // Parallel case
+        return Err(SolidError::geom_failed(
+            OP,
+            "the line is parallel to the plane",
+        )); // Parallel case
     }
 
     Ok(-(plane_eq_d + line_pnt.dot(plane_norm)) / denom)
@@ -430,7 +437,10 @@ pub fn line_plane_intersect_uv(
     let denom = line_vec.dot(norm);
 
     if denom.abs() < tol {
-        return Err(SolidError::sm_err(OP)); // Parallel case
+        return Err(SolidError::geom_failed(
+            OP,
+            "the line is parallel to the plane",
+        )); // Parallel case
     }
 
     // Cramer's rule:
@@ -517,18 +527,14 @@ pub fn segment_point_angle_deg_to_perp(
 
 /// Center of the 2D circle through three points (`smgu_CircleCenterFrom3Points`).
 ///
-/// Errors: [`SolidError::Upstream`] with code 0 (upstream returns `FALSE`) when two
+/// Errors: [`GeomFailure`](crate::error::geom::GeomFailure) with code 0 (upstream returns `FALSE`) when two
 /// points are within `SM_EFF_ZERO_SQRT * (1 + |A| + |C|)` of each other; `SM_ERR`
 /// (1001) when the points are (nearly) collinear.
 pub fn circle_center_from_3_points(a: Point2, b: Point2, c: Point2) -> Result<Point2> {
     const OP: &str = "geom::geom_utility::p1::circle_center_from_3_points";
     let tol = EFF_ZERO_SQRT * (1.0 + a.max_dimension() + c.max_dimension());
     let tol2 = tol * tol;
-    let not_ok = || SolidError::Upstream {
-        operation: OP,
-        code: 0,
-        entity: None,
-    };
+    let not_ok = || SolidError::geom(OP, GeomFailure::CoincidentPoints);
     // Do some checks for coincident points and colinear points
     if a.distance_squared(b) < tol2 || b.distance_squared(c) < tol2 || a.distance_squared(c) < tol2
     {
@@ -539,7 +545,7 @@ pub fn circle_center_from_3_points(a: Point2, b: Point2, c: Point2) -> Result<Po
     // Upstream calls the 3d smgu_LinePointDistance (points converted with z = 0).
     let (dist_to_line, _) = line_point_distance(Vec3::from(a), vec, Vec3::from(b));
     if dist_to_line < 2.0 * EFF_ZERO * a.distance_squared(c) {
-        return Err(SolidError::sm_err(OP)); // Radius would be bigger than 1 / SM_EFF_ZERO.
+        return Err(SolidError::geom_failed(OP, "the points are collinear")); // Radius would be bigger than 1 / SM_EFF_ZERO.
     }
 
     // Set up the 2x2 as described.
@@ -556,7 +562,7 @@ pub fn circle_center_from_3_points(a: Point2, b: Point2, c: Point2) -> Result<Po
     let numer1 = a00 * b1 - a10 * b0;
 
     if determ.abs() < numer0.abs() * EFF_ZERO || determ.abs() < numer1.abs() * EFF_ZERO {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::geom_failed(OP, "the points are collinear"));
     }
 
     Ok(Point2::new(numer0 / determ, numer1 / determ))
@@ -593,7 +599,10 @@ pub fn circle_from_3_points(
 ) -> Result<Circle3Points> {
     const OP: &str = "geom::geom_utility::p1::circle_from_3_points";
     if !(2..=3).contains(&dimension) {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::geom_failed(
+            OP,
+            "the dimension is neither 2 nor 3",
+        ));
     }
 
     let mut sp = start;
@@ -625,11 +634,7 @@ pub fn circle_from_3_points(
     // solve for Center Point
     let sol = a.solve_linear_system(&b)?;
     if sol.near_singular {
-        return Err(SolidError::Upstream {
-            operation: OP,
-            code: SM_ERR_WARNING,
-            entity: None,
-        });
+        return Err(SolidError::geom(OP, GeomFailure::NearlySingular));
     }
     let [x0, x1, x2] =
         <[f64; 3]>::try_from(sol.x.as_slice()).map_err(|_| invalid(OP, "linear solution size"))?;
@@ -831,8 +836,9 @@ pub fn line_coplanar_circle_intersect(
     // Unitize the line vector.
     let scale = line_vec.length();
     if scale < EFF_ZERO * circle_radius {
-        return Err(SolidError::sm_err(
+        return Err(SolidError::geom_failed(
             "geom::geom_utility::p1::line_coplanar_circle_intersect",
+            "the line has no direction",
         ));
     }
     line_vec /= scale;
@@ -1051,7 +1057,7 @@ pub fn line_intersect_sphere(
     // compute 1/2 distance between the point solutions
     let disc = sphere_radius * sphere_radius - b * b;
     if disc < EFF_ZERO {
-        return Err(SolidError::sm_err(OP)); // can't really happen
+        return Err(SolidError::geom_failed(OP, "the line misses the sphere")); // can't really happen
     }
     let d = sm_sqrt(disc);
 
@@ -1129,8 +1135,9 @@ pub fn plane_point_distance(
     test_point: Point3,
 ) -> Result<f64> {
     if plane_norm.length_squared() - 1.0 > EFF_ZERO {
-        return Err(SolidError::sm_err(
+        return Err(SolidError::geom_failed(
             "geom::geom_utility::p1::plane_point_distance",
+            "the plane normal is not a unit vector",
         ));
     }
 
@@ -1295,7 +1302,7 @@ pub fn vec_lin_comb_two_vectors(basis1: Vec3, basis2: Vec3, vector: Vec3) -> Res
 
     // `det == 0.0` in case dNumer0 or dNumer1 is 0 exactly.
     if det == 0.0 || det.abs() < numer0.abs() * EFF_ZERO || det.abs() < numer1.abs() * EFF_ZERO {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::geom_failed(OP, "the system is singular"));
     }
 
     Ok(Point2::new(numer0 / det, numer1 / det))
@@ -1528,7 +1535,10 @@ pub fn inverse_3x3(a0: &[f64; 3], a1: &[f64; 3], a2: &[f64; 3]) -> Result<[[f64;
     let det = vec_triple_product(a0, a1, a2);
 
     if is_zero(det) {
-        return Err(SolidError::sm_err("geom::geom_utility::p1::inverse_3x3"));
+        return Err(SolidError::geom_failed(
+            "geom::geom_utility::p1::inverse_3x3",
+            "the matrix is singular",
+        ));
     }
 
     let [a00, a01, a02] = *a0;
@@ -1846,7 +1856,7 @@ mod tests {
         ));
         assert!(matches!(
             line_plane_intersect(Vec3::ZERO, Vec3::X, Vec3::ZERO, Vec3::Z),
-            Err(SolidError::Upstream { code: 1001, .. })
+            Err(e) if e.upstream_status() == Some(1001)
         ));
         let (t, u, w) =
             line_plane_intersect_uv(v(1., 2., 5.), -Vec3::Z, Vec3::ZERO, Vec3::X, Vec3::Y).unwrap();
@@ -1876,7 +1886,7 @@ mod tests {
                 Point2::new(1., 0.),
                 Point2::new(2., 0.)
             ),
-            Err(SolidError::Upstream { code: 0, .. })
+            Err(e) if e.upstream_status() == Some(0)
         ));
         let c =
             circle_from_3_points(v(1., 0., 0.), v(0., 1., 0.), v(-1., 0., 0.), 3, false).unwrap();
