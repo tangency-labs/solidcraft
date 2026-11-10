@@ -1989,6 +1989,25 @@ fn clamped(degree: usize, knots: Vec<f64>, homogeneous: Vec<[f64; 4]>) -> Result
     }
 }
 
+/// Each of `lines`, a spline of `degree` on `knots`, clamped ([`clamped`]), and the knots they
+/// share after it.
+fn clamped_lines(degree: usize, knots: Vec<f64>, lines: Vec<Vec<[f64; 4]>>) -> R<(Vec<f64>, Vec<Vec<[f64; 4]>>)> {
+    let mut out = Vec::with_capacity(lines.len());
+    let mut shared = None;
+    for line in lines {
+        let (k, c) = clamped(degree, knots.clone(), line).map_err(|e| format!("an unclamped B-spline surface: {e}"))?;
+        shared = Some(k);
+        out.push(c);
+    }
+    Ok((shared.unwrap_or(knots), out))
+}
+
+/// `grid`'s columns as rows.
+fn transposed(grid: &[Vec<[f64; 4]>]) -> Vec<Vec<[f64; 4]>> {
+    let width = grid.first().map_or(0, Vec::len);
+    (0..width).map(|j| grid.iter().filter_map(|r| r.get(j).copied()).collect()).collect()
+}
+
 fn map_bspline_surface(b: &BSplineSurface) -> R<BSurface> {
     let nu = b.points.len();
     let nv = b.points.first().map_or(0, Vec::len);
@@ -2013,34 +2032,9 @@ fn map_bspline_surface(b: &BSplineSurface) -> R<BSurface> {
     // Unclamped knots in either direction are clamped exactly, line by line: every row is a
     // spline in v on the v knots, every column one in u on the u knots, and inserting the same
     // knots into each gives the surface's.
-    let (mut v_knots, mut rows) = (v_knots, rows);
-    if let Some(first) = rows.first() {
-        let (knots, _) = clamped(b.v_degree, v_knots.clone(), first.clone()).map_err(|e| format!("an unclamped B-spline surface: {e}"))?;
-        if knots != v_knots {
-            rows = rows
-                .into_iter()
-                .map(|r| clamped(b.v_degree, v_knots.clone(), r).map(|(_, c)| c))
-                .collect::<Result<_, _>>()
-                .map_err(|e| format!("an unclamped B-spline surface: {e}"))?;
-            v_knots = knots;
-        }
-    }
-    let mut u_knots = u_knots;
-    let width = rows.first().map_or(0, Vec::len);
-    let columns: Vec<Vec<[f64; 4]>> = (0..width).map(|j| rows.iter().filter_map(|r| r.get(j).copied()).collect()).collect();
-    if let Some(first) = columns.first() {
-        let (knots, _) = clamped(b.u_degree, u_knots.clone(), first.clone()).map_err(|e| format!("an unclamped B-spline surface: {e}"))?;
-        if knots != u_knots {
-            let columns: Vec<Vec<[f64; 4]>> = columns
-                .into_iter()
-                .map(|c| clamped(b.u_degree, u_knots.clone(), c).map(|(_, c)| c))
-                .collect::<Result<_, _>>()
-                .map_err(|e| format!("an unclamped B-spline surface: {e}"))?;
-            let height = columns.first().map_or(0, Vec::len);
-            rows = (0..height).map(|i| columns.iter().filter_map(|c| c.get(i).copied()).collect()).collect();
-            u_knots = knots;
-        }
-    }
+    let (v_knots, rows) = clamped_lines(b.v_degree, v_knots, rows)?;
+    let (u_knots, columns) = clamped_lines(b.u_degree, u_knots, transposed(&rows))?;
+    let rows = transposed(&columns);
     Ok(match &b.weights {
         None => BSurface::Spline { u_knots, v_knots, points: rows.iter().map(|r| r.iter().map(|h| [h[0], h[1], h[2]]).collect()).collect() },
         Some(_) => BSurface::RationalSpline { u_knots, v_knots, homogeneous: rows },

@@ -1013,10 +1013,10 @@ impl Builder<'_, '_> {
             };
             Ok(wrap(ua - ub).abs() * r <= s.tol)
         };
-        if let Kind::Iso { start: u0, .. } = ax.kind {
+        if let Kind::Iso { start, .. } = ax.kind {
             // Both loops start on the spline's boundary column, split there where they don't.
-            let i = self.seam_start(fi, la, u0, ax, eval)?;
-            let j = self.seam_start(fi, lb, u0, ax, eval)?;
+            let i = self.seam_start(fi, la, start, ax, eval)?;
+            let j = self.seam_start(fi, lb, start, ax, eval)?;
             *splits += 2;
             if *splits > MAX_SPLITS {
                 return Err(format!("more than {MAX_SPLITS} edges split for seams"));
@@ -1128,16 +1128,16 @@ impl Builder<'_, '_> {
     }
 
     /// The use of loop `li` of face `fi` that starts on the closed spline's boundary line at
-    /// `u0` (the column at u = `u0`, or the row at v = `u0` for one closed in v): a vertex there
+    /// `start` (the column at u = `start`, or the row at v = `start` for one closed in v): a vertex there
     /// within the tolerance, else one made by splitting the loop's edge that crosses it.
-    fn seam_start(&mut self, fi: usize, li: usize, u0: f64, ax: &Axis, eval: &SurfaceEval) -> R<usize> {
+    fn seam_start(&mut self, fi: usize, li: usize, start: f64, ax: &Axis, eval: &SurfaceEval) -> R<usize> {
         let Some(LoopB::Edges(es)) = self.faces.get(fi).and_then(|f| f.loops.get(li)) else { return Err("loop reference".into()) };
         let es = es.clone();
         let d = ax.kind.winds_in();
         let on_seam = |s: &Self, v: u32| -> R<bool> {
             let p = s.vpoint(v)?;
             let Some(q) = eval.project(p, None, f64::INFINITY) else { return Ok(false) };
-            let on = if d == 0 { [u0, q[1]] } else { [q[0], u0] };
+            let on = if d == 0 { [start, q[1]] } else { [q[0], start] };
             Ok(eval.point(on).is_some_and(|c| c.dist(p) <= s.tol))
         };
         for (k, u) in es.iter().enumerate() {
@@ -1146,7 +1146,7 @@ impl Builder<'_, '_> {
             }
         }
         for &(e, _) in &es {
-            if let Some(t) = self.crossing(e, d, u0, ax.period, eval)? {
+            if let Some(t) = self.crossing(e, d, start, ax.period, eval)? {
                 let v = self.split_edge(e, t)?;
                 let Some(LoopB::Edges(now)) = self.faces.get(fi).and_then(|f| f.loops.get(li)) else { return Err("loop reference".into()) };
                 for (k, u) in now.iter().enumerate() {
@@ -1157,7 +1157,7 @@ impl Builder<'_, '_> {
                 return Err("the split vertex is not on its loop".into());
             }
         }
-        Err(unsupported("a loop around a closed spline that never reaches its boundary column"))
+        Err(unsupported("a loop around a closed spline that never reaches its boundary line"))
     }
 
     /// Split edge `e` at `t` inside its interval: it keeps [min, t], a new edge takes
