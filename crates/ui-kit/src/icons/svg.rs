@@ -171,9 +171,29 @@ impl IconData {
     };
 }
 
-/// A host's icons: its [`IconData`] and the masters parsed from it on first use. Keep it in a `static`.
+/// A host's own masters over another host's [`IconData`] ([`IconSet::extended`]): drawn in that
+/// data's colour roles and accents. For a name both have, the extension's master, alias or
+/// default accent is the one drawn.
+#[derive(Clone, Copy)]
+pub struct IconExtension {
+    /// The host's masters, as [`IconData::masters`].
+    pub masters: &'static [(&'static str, &'static str, &'static str)],
+    /// The host's aliases, as [`IconData::aliases`]; they may name the data's masters too.
+    pub aliases: &'static [(&'static str, &'static str, &'static str)],
+    /// The host's default accents, as [`IconData::icon_accents`], by the data's accent names.
+    pub icon_accents: &'static [(&'static str, &'static str)],
+}
+
+impl IconExtension {
+    /// No masters of the host's own.
+    pub const NONE: IconExtension = IconExtension { masters: &[], aliases: &[], icon_accents: &[] };
+}
+
+/// A host's icons: its [`IconData`], any [`IconExtension`] over it, and the masters parsed from
+/// them on first use. Keep it in a `static`.
 pub struct IconSet {
     data: IconData,
+    extension: IconExtension,
     table: OnceLock<Table>,
 }
 
@@ -194,12 +214,23 @@ pub struct Resolved {
 impl IconSet {
     /// The set over `data`. Its masters are parsed the first time one is drawn.
     pub const fn new(data: IconData) -> Self {
-        Self { data, table: OnceLock::new() }
+        Self::extended(data, IconExtension::NONE)
     }
 
-    /// The set's data.
+    /// The set over `data` with a host's own masters, aliases and default accents, which take
+    /// precedence for a name both have. `data` is not copied: it is the same static tables.
+    pub const fn extended(data: IconData, extension: IconExtension) -> Self {
+        Self { data, extension, table: OnceLock::new() }
+    }
+
+    /// The set's data (without its extension).
     pub fn data(&self) -> &IconData {
         &self.data
+    }
+
+    /// The host's masters over [`IconSet::data`]; [`IconExtension::NONE`] for a plain set.
+    pub fn extension(&self) -> &IconExtension {
+        &self.extension
     }
 
     fn role(&self, name: &str) -> Option<usize> {
@@ -209,7 +240,8 @@ impl IconSet {
     fn table(&'static self) -> &'static Table {
         self.table.get_or_init(|| {
             let (mut big, mut small) = (HashMap::new(), HashMap::new());
-            for (id, fam, src) in self.data.masters {
+            // The extension's masters come first, so they win a name both have.
+            for (id, fam, src) in self.extension.masters.iter().chain(self.data.masters) {
                 match self.parse(src) {
                     Ok(doc) => {
                         let map = if *fam == "small" { &mut small } else { &mut big };
@@ -342,7 +374,8 @@ impl IconSet {
 
     /// A semantic default belongs to the requested id, never to the caller's current workspace.
     fn default_accent(&self, name: &str) -> Option<usize> {
-        self.data.icon_accents.iter().find(|(id, _)| *id == name).and_then(|(_, accent)| self.accent_index(accent))
+        let find = |accents: &'static [(&'static str, &'static str)]| accents.iter().find(|(id, _)| *id == name);
+        find(self.extension.icon_accents).or_else(|| find(self.data.icon_accents)).and_then(|(_, accent)| self.accent_index(accent))
     }
 
     /// The master and accent for an icon id: an alias (with its accent), a master of that name,
@@ -356,7 +389,11 @@ impl IconSet {
     fn resolve_master(&'static self, name: &str) -> Resolved {
         let big = &self.table().big;
         let placeholder = Resolved { master: PLACEHOLDER, accent: None, placeholder: true };
-        if let Some((_, master, accent)) = self.data.aliases.iter().find(|(a, _, _)| *a == name) {
+        let find = |aliases: &'static [(&'static str, &'static str, &'static str)]| aliases.iter().find(|(a, _, _)| *a == name);
+        // The extension's names first: its alias, then its master, then the data's alias.
+        let extends = self.extension.masters.iter().any(|(id, fam, _)| *id == name && *fam != "small");
+        let alias = find(self.extension.aliases).or_else(|| if extends { None } else { find(self.data.aliases) });
+        if let Some((_, master, accent)) = alias {
             return match big.get_key_value(master) {
                 Some((k, _)) => Resolved { master: k, accent: self.accent_index(accent).or_else(|| self.default_accent(name)), placeholder: false },
                 None => placeholder,

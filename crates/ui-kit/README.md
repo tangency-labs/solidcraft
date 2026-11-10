@@ -7,7 +7,7 @@ host's prefix for its names), draws with `solidcraft_theme::Tokens`, reads its t
 chose for the host to run. Nothing here reads an app's state.
 
 What a host draws with is host data, installed once per process before the first frame or passed
-in: its icon set (`icons::install`), its glyphs, its tab table (`solidcraft_theme::install_tabs`),
+in: its icon set (`icons::install`; `icons::IconSet::extended` draws another host's set with a few masters of its own), its glyphs, its tab table (`solidcraft_theme::install_tabs`),
 its navigation catalogue (`navigation_bar::install_catalogue`), its message catalogs
 (`solidcraft_ui_text::install`), its built-in themes (`theme_files::install_builtin`) and its
 fonts. With none installed the kit still draws: icons draw nothing, text shows its message ids and
