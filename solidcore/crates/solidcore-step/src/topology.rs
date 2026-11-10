@@ -198,7 +198,9 @@ pub fn is_body_item(name: &str) -> bool {
 /// The topology a file holds outside any representation, as bodies to read (a file of bare
 /// geometry, or one whose topology no shape representation lists): every solid or surface model
 /// no other entity refers to, then every shell no solid, model or other shell lists, then every
-/// face no shell lists (each a one-face sheet), in id order within each. As solidcore's
+/// face no shell lists (each a one-face sheet), in id order within each. A presentation's reference
+/// (a style, a layer, an invisibility) does not count: a styled loose shell is still unlisted. As
+/// solidcore's
 /// step-import read such files (#2583, topology first): what the file's topology holds is read
 /// whether or not a product structure names it.
 pub fn roots(ex: &Exchange) -> Vec<u64> {
@@ -215,9 +217,10 @@ pub fn roots(ex: &Exchange) -> Vec<u64> {
             _ => {}
         }
     }
+    let presentation = |name: &str| name.ends_with("STYLED_ITEM") || matches!(name, "PRESENTATION_LAYER_ASSIGNMENT" | "INVISIBILITY");
     let mut referenced = HashSet::new();
     for e in ex.entities.values() {
-        for r in &e.records {
+        for r in e.records.iter().filter(|r| !presentation(&r.name)) {
             for p in &r.params {
                 refer(p, &mut referenced, 0);
             }

@@ -2502,6 +2502,18 @@ fn a_face_no_shell_lists_is_a_one_face_sheet() {
     let b = &imp.bodies[0];
     assert!(!b.closed && b.body.face_count() == 1, "{:?}", imp.warnings);
     assert!(rel(measure(&b.body).unwrap().area, 31.5) < 1e-9, "{}", measure(&b.body).unwrap().area);
+    // Styled and on a layer, it is still a face no shell lists: a presentation's reference is not
+    // the topology's.
+    let styled = text.replace(
+        "#12=FACE_SURFACE('',(#7),#11,.T.);",
+        "#12=FACE_SURFACE('',(#7),#11,.T.);
+#13=PRESENTATION_STYLE_ASSIGNMENT(());
+#14=STYLED_ITEM('',(#13),#12);
+#15=PRESENTATION_LAYER_ASSIGNMENT('1','',(#12));",
+    );
+    let imp = step_import(&styled).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert_eq!(imp.bodies[0].body.face_count(), 1, "{:?}", imp.warnings);
 }
 
 /// SMLib's refusal of a face by its index in the record (NIST CTC 02's face whose NURBS form is
