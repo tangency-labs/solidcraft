@@ -3562,17 +3562,19 @@ fn convert_mesh_asks_for_the_body_and_converts_the_selected_one() {
     assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::MeshConvert { .. })));
     crate::dialogs::cancel(&mut h.app);
 
+    h.app.apply_off_thread = Some(std::time::Duration::ZERO);
     h.app.session.selection = vec![Sel::Body { name: "Mesh".into() }];
     h.app.start("mesh.convert");
     h.frames(1);
     assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![Sel::Body { name: "Mesh".into() }]);
     h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.applying.is_none(), "new mesh conversions apply synchronously");
     assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
     let state = h.app.session.model.state();
     assert!(!state.body("Mesh").unwrap().body.is_mesh(), "rebuilt as faces");
 }
 
-/// Repeated OK on an unsupported closed mesh keeps the dialog and the imported design.
+/// Repeated OK on an unsupported open mesh keeps the dialog and the imported design.
 #[test]
 fn failed_convert_mesh_submissions_keep_the_dialog_and_original_mesh() {
     use solidcraft_engine::doc::{Document, FeatureKind, MeshData};
@@ -3600,18 +3602,8 @@ fn failed_convert_mesh_submissions_keep_the_dialog_and_original_mesh() {
     h.app.start("mesh.convert");
     h.frames(1);
     for _ in 0..3 {
-        let (finish, gate) = std::sync::mpsc::channel();
-        h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
         h.step(&json!({"key":"Enter"})).unwrap();
-        assert!(h.app.applying.is_some(), "each retry dispatches to the worker");
-        assert_eq!(h.app.session.doc.to_json(), before, "the pending worker leaves the imported design alone");
-        finish.send(()).unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-        while h.app.applying.is_some() && std::time::Instant::now() < deadline {
-            h.frames(1);
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        assert!(h.app.applying.is_none(), "the failed worker finishes before checking its dialog error");
+        assert!(h.app.applying.is_none(), "each retry applies synchronously");
         let dialog = h.app.dialog.as_ref().expect("failed conversion stays open");
         assert!(dialog.error.as_ref().is_some_and(|e| e.contains("mesh conversion")), "{:?}", dialog.error);
         assert_eq!(h.app.session.doc.to_json(), before);
