@@ -7238,8 +7238,23 @@ fn replay(
             // a blind hole's depth counts from the face at the copy, not from the bottom of the
             // original hole under the original spot.
             let (spots, dir) = hole_spots_raw(vals, st, src)?;
+            // A hole at sketch points drills into the material, judged at each copy's spots as
+            // the source's side was judged at its own (#14050): judged at the source spots, where
+            // the source has already left an empty bore, a through hole's copies turned away.
+            let sketch_side = match &src.kind {
+                FeatureKind::Hole { points: Some(sp), .. } if !sp.single => st.sketch(sp.sketch.0).map(|ss| (ss.plane.normal(), sp.flip)),
+                _ => None,
+            };
             for (k, m) in mats.iter().enumerate() {
-                let d = crate::apply_vector(m, dir).normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?;
+                let d = match sketch_side {
+                    Some((n, flip)) => {
+                        let moved: Vec<Vec3> = spots.iter().map(|p| crate::apply_point(m, *p)).collect();
+                        let n = crate::apply_vector(m, n).normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?;
+                        let side = sketch_hole_dir(st, &moved, n, hole_scope(src));
+                        if flip { -side } else { side }
+                    }
+                    None => crate::apply_vector(m, dir).normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?,
+                };
                 let start = copies.len();
                 let mut on = Vec::with_capacity(spots.len());
                 for p in &spots {

@@ -528,6 +528,29 @@ fn patterns_of_a_blind_hole_drill_every_copy() {
     assert!((c - 2.0 * one).abs() < 1e-3 * one, "{c} vs 2 × {one}");
 }
 
+/// #14050: a through hole at a sketch point on a plane below the box drills up into it, and so
+/// does every copy of it. Judged where the source hole already left an empty bore, the copies
+/// drilled away from the box and cut almost nothing (test and analysis by Ehuntabi).
+#[test]
+fn patterns_of_a_sketch_point_hole_below_the_box_drill_every_copy() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 90, "width": 60, "height": 10, "center": [0, 0, 5]}));
+    let v0 = volume(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "VP", "offset": -1}));
+    run(&mut s, "sketch.point", json!({"point": [-20, -10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "VP", "points": ["p1"], "diameter": 6, "depth": 12, "name": "H1"}));
+    let one = v0 - volume(&mut s);
+    assert!((one - PI * 9.0 * 10.0).abs() < 1e-3 * one, "{one}");
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"features": ["H1"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 20, "dir2": [0, 1, 0], "count2": 2, "spacing2": 20}),
+    );
+    let six = v0 - volume(&mut s);
+    assert!((six - 6.0 * one).abs() < 1e-3 * one, "{six} vs 6 × {one}");
+}
+
 /// Feature patterns and mirrors reference features by id (#1134): a rename leaves the
 /// references alone, and they keep pointing at the same feature (#401).
 #[test]
