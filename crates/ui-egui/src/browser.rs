@@ -3999,10 +3999,10 @@ pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
             };
             let Some(px) = crate::dim_view::mm_per_pixel(to, anchor) else { continue };
             let expr = c.param.as_ref().and_then(|p| app.session.doc.param(p)).map(|p| p.expr.as_str());
-            let col = if c.driven { tk.dimension_driven } else { tk.dimension };
+            let col = crate::prefs::dimension_colour(&app.preferences, c.driven);
             let galley = painter.layout_no_wrap(
                 crate::dim_view::frame_label(&frame, &c.kind, expr, c.driven, &app.session.doc.units, app.preferences.length_decimals),
-                FontId::proportional(tk.font_caption),
+                FontId::proportional(tk.font_caption * crate::prefs::dimension_text_scale(&app.preferences)),
                 col,
             );
             let size = galley.size() + vec2(6.0, 2.0);

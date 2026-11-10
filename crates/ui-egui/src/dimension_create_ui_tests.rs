@@ -1848,6 +1848,28 @@ fn shown_dimensions() -> (Harness, u64) {
     (h, sketch)
 }
 
+/// The painted model-view text of the dimension driven by `param`.
+fn model_text_shape(h: &Harness, param: &str) -> egui::epaint::TextShape {
+    let sk = h
+        .app
+        .session
+        .world_state()
+        .unwrap()
+        .sketch(h.app.session.doc.features.iter().find(|f| f.name.starts_with("Sketch")).unwrap().id)
+        .unwrap()
+        .sketch
+        .clone();
+    let id = sk.constraints.iter().find(|c| c.param.as_deref() == Some(param)).unwrap().id.clone();
+    let (_, _, centre) = crate::dim_view::model_drawn().into_iter().find(|(_, d, _)| *d == id).expect("the dimension is shown in the model view");
+    h.shapes
+        .iter()
+        .find_map(|s| match &s.shape {
+            egui::Shape::Text(t) if (t.visual_bounding_rect().center() - centre).length() < 2.0 => Some(t.clone()),
+            _ => None,
+        })
+        .expect("the dimension's value is painted")
+}
+
 /// The model view's text of the dimension driven by `param` (screen).
 fn model_text(h: &Harness, param: &str) -> [f32; 2] {
     let sk = h
@@ -1946,6 +1968,24 @@ fn a_dimension_is_sized_from_whichever_direction_reaches_the_screen() {
     let neither = |p: Vec2| (p.x == at.x && p.y == at.y).then(|| screen(p));
     assert_eq!(mm_per_pixel(neither, at), None, "no direction projects: no size");
     assert_eq!(mm_per_pixel(|_| None, at), None, "the point itself does not project");
+}
+
+/// #14121: Show Dimensions follows the same text size and colour preferences as the open sketch.
+#[test]
+fn shown_dimensions_follow_the_dimension_text_size_and_colour() {
+    let (mut h, _) = shown_dimensions();
+    let before = model_text_shape(&h, "d1");
+    let custom = egui::Color32::from_rgb(0x12, 0x34, 0x56);
+    h.call("ui.prefs", json!({"dimension_text_scale":2.0,"dimension_colour":[0x12,0x34,0x56]}));
+    h.frames(2);
+    let after = model_text_shape(&h, "d1");
+    assert!(
+        (after.galley.size().y - before.galley.size().y * 2.0).abs() <= 2.0,
+        "the shown dimension's text height {} doubles to {}",
+        before.galley.size().y,
+        after.galley.size().y
+    );
+    assert_eq!(after.fallback_color, custom, "the shown dimension's value takes the custom colour");
 }
 
 #[test]
