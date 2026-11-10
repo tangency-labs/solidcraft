@@ -2350,9 +2350,10 @@ fn a_pose_past_a_limit_is_clamped_and_said() {
     assert!((drawn - 60.0).abs() < 1e-9, "{pose}");
 }
 
-/// A joint the design no longer has is skipped: the view draws with the rest (here none, so its copy
-/// solves no joint), and inspect names it.
-/// Undoing the delete draws the position again.
+/// A joint the design no longer has is skipped: the view draws with the rest (here none, so the design's
+/// own placement, and its copy solves no joint), inspect names it, and the sheet's entry for the view
+/// says how many are gone, as a drawn note says why beside its lines. Undoing the delete draws the
+/// position again.
 #[test]
 fn a_pose_naming_a_gone_joint_skips_it() {
     let (mut s, view, hinge) = hinge_pair();
@@ -2372,11 +2373,15 @@ fn a_pose_naming_a_gone_joint_skips_it() {
     let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
     let scene = run(&mut s, "drawing.scene", json!({"sheet": sheet}));
     let drawn = scene["views"].as_array().and_then(|views| views.iter().find(|v| v["view"] == json!(ids::encode(view)))).cloned();
-    assert_eq!(drawn.map(|v| v["status"].clone()), Some(json!("drawn")), "{scene}");
+    let entry = drawn.map(|v| (v["status"].clone(), v["reason"].clone()));
+    assert_eq!(entry, Some((json!("drawn"), json!("its position names 1 joint the design no longer has"))), "{scene}");
     run(&mut s, "drawing.close", json!({}));
     run(&mut s, "edit.undo", json!({}));
     run(&mut s, "drawing.open", json!({"drawing": drawing}));
     assert!((height(&mut s, view) - 20.0).abs() < 1e-6, "the joint back, the position drawn");
+    let scene = run(&mut s, "drawing.scene", json!({"sheet": sheet}));
+    let drawn = scene["views"].as_array().and_then(|views| views.iter().find(|v| v["view"] == json!(ids::encode(view)))).cloned();
+    assert_eq!(drawn.map(|v| v.get("reason").cloned()), Some(None), "nothing gone, nothing said: {scene}");
 }
 
 /// Dimensions on a posed view would measure the design's placement: they are refused there, by the

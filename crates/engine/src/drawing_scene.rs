@@ -135,6 +135,9 @@ pub struct ViewState {
     pub status: Status,
     /// What working out its lines cost, when they were.
     pub stats: Option<Stats>,
+    /// What it says beside its lines, when its status doesn't say why, as a note does: the joints its
+    /// position names that are gone ([`crate::drawing_view::gone_joints_reason`]).
+    pub why: Option<String>,
 }
 
 /// One dimension of a sheet scene.
@@ -437,6 +440,8 @@ struct Drawn {
     frame: Option<ViewFrame>,
     /// What drew each item of `group`, for [`line_at`].
     owners: Option<Arc<Owners>>,
+    /// What it says beside its lines ([`ViewState::why`]).
+    why: Option<String>,
 }
 
 /// What drew each item of a view's group: for a stroke, the body (its index among `bodies`) and what
@@ -533,7 +538,8 @@ fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64,
     });
     let placing = measured.as_ref().map(|(_, extents, around)| (*extents, *around)).map_err(|why| *why);
     let boundary = crate::drawing_view::placed(view, placing, Vec2::ZERO, CMD).ok().map(|placed| placed.boundary);
-    let none = |status| Drawn { group: None, status, stats: None, boundary, frame: None, owners: None };
+    let why = crate::drawing_view::gone_joints_reason(crate::drawing_view::gone_joints(s, view).len());
+    let none = |status| Drawn { group: None, status, stats: None, boundary, frame: None, owners: None, why: why.clone() };
     let styles = Styles::from(view);
     let not_drawable = crate::drawing_view::not_drawable(view.visual_style.value, view.reference_style.value);
     if let Some(why) = not_drawable.or_else(|| crate::drawing_view::not_drawable_apart(view)) {
@@ -571,7 +577,7 @@ fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64,
                 return none(Status::Failed(format!("its lines are more than a paper scene's {MAX_RECORDS} records: choose a smaller scale")));
             }
             let owners = Some(Arc::new(Owners { bodies: set.into_owned().bodies, items }));
-            Drawn { group: Some(group), status: Status::Drawn, stats: Some(lines.stats), boundary, frame: Some(frame), owners }
+            Drawn { group: Some(group), status: Status::Drawn, stats: Some(lines.stats), boundary, frame: Some(frame), owners, why }
         }
         Err(e) => none(Status::Failed(reason(e))),
     }
@@ -925,7 +931,7 @@ fn assemble<D: Borrow<Drawn>>(
         if let Some(bounds_mm) = lines.filter(|b| !b.is_empty()).or(boundary_mm) {
             assembly.objects.push(SheetObject { object: view, kind: ObjectKind::View, bounds_mm, boundary_mm });
         }
-        assembly.states.push(ViewState { view, status, stats: drawn.stats });
+        assembly.states.push(ViewState { view, status, stats: drawn.stats, why: drawn.why.clone() });
     }
     Ok(assembly)
 }
@@ -1628,13 +1634,16 @@ fn set_waiting_dimensions(s: &mut Session, d: &Drawing, on: &[(u64, ResolvedView
 /// kept for [`step`] to draw from, or its exploded view's (#13048), one for each exploded view behind.
 /// Each is worked out only when a view drawing it is behind.
 fn keep_what_shows_the_same(s: &mut Session, on: impl Iterator<Item = u64> + Clone, state: &Arc<ModelState>) {
-    let behind: Vec<(u64, Choice)> = on
+    // Each with what it says now: a joint deleted may leave its picture as it was.
+    let says = |view: &ResolvedView| crate::drawing_view::gone_joints_reason(crate::drawing_view::gone_joints(s, view).len());
+    let behind: Vec<(u64, Choice, Option<String>)> = on
         .filter_map(|id| {
-            s.drawing_scenes.views.get(&id).filter(|e| e.shows.is_some() && !Arc::ptr_eq(&e.state, state)).map(|e| (id, Choice::of(&e.view)))
+            let entry = s.drawing_scenes.views.get(&id).filter(|e| e.shows.is_some() && !Arc::ptr_eq(&e.state, state))?;
+            Some((id, Choice::of(&entry.view), says(&entry.view)))
         })
         .collect();
     let mut now: BTreeMap<Choice, Option<Arc<SourceKey>>> = BTreeMap::new();
-    if behind.iter().any(|(_, choice)| choice.is_placed()) {
+    if behind.iter().any(|(_, choice, _)| choice.is_placed()) {
         let shown = match s.drawing_scenes.shown.take() {
             Some((was, shown)) if Arc::ptr_eq(&was, state) => shown,
             _ => crate::drawing_view::shown(s),
@@ -1644,7 +1653,7 @@ fn keep_what_shows_the_same(s: &mut Session, on: impl Iterator<Item = u64> + Clo
     }
     {
         let mut sessions = ViewSessions::new(s);
-        for (_, choice) in &behind {
+        for (_, choice, _) in &behind {
             if !now.contains_key(choice) {
                 let shown = sessions.drawing(choice).and_then(crate::drawing_view::shown);
                 now.insert(choice.clone(), SourceKey::of(&shown));
@@ -1652,10 +1661,15 @@ fn keep_what_shows_the_same(s: &mut Session, on: impl Iterator<Item = u64> + Clo
         }
     }
     let cache = &mut s.drawing_scenes;
-    for (id, choice) in behind {
+    for (id, choice, why) in behind {
         let Some(Some(now)) = now.get(&choice) else { continue };
         if let Some(entry) = cache.views.get_mut(&id).filter(|e| e.shows_the_same(state, now)) {
             entry.state = state.clone();
+            // A new reason is a new drawing of the view, so the sheet is assembled again.
+            if entry.drawn.why != why {
+                cache.serial += 1;
+                (entry.serial, entry.drawn.why) = (cache.serial, why);
+            }
         }
     }
 }

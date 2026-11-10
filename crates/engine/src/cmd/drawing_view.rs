@@ -738,8 +738,7 @@ fn pose_value(pose: Pose) -> Value {
 fn pose_result(s: &Session, sessions: &mut ViewSessions, view: &ResolvedView, own: Option<Pose>) -> PoseResult {
     let setting = setting(view.pose.clone(), own, pose_value);
     let Pose::Joints(joints) = &view.pose.value else { return PoseResult { setting, drawn: None, skipped: None } };
-    let has = |id: u64| s.doc.assembly.joints.iter().any(|j| j.id == id);
-    let skipped = joints.iter().map(|j| j.joint).filter(|id| !has(*id)).collect();
+    let skipped = crate::drawing_view::gone_joints(s, view);
     let drawn = match sessions.of(view) {
         Ok(posed) => joints
             .iter()

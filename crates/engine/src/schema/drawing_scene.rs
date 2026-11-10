@@ -44,7 +44,7 @@ impl JsonSchema for SheetPaperScene {
 }
 
 /// One view on the sheet: `drawn`, `placeholder` (nothing to measure, so no lines) or `failed`,
-/// with why.
+/// with why. A drawn view can say why too, as a note does: its position names joints that are gone.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct SheetSceneView {
     pub view: String,
@@ -58,7 +58,7 @@ pub struct SheetSceneView {
 
 impl From<ViewState> for SheetSceneView {
     fn from(v: ViewState) -> Self {
-        SheetSceneView { view: ids::encode(v.view), status: v.status.name(), reason: v.status.reason(), stats: v.stats.map(Into::into) }
+        SheetSceneView { view: ids::encode(v.view), status: v.status.name(), reason: v.status.reason().or(v.why), stats: v.stats.map(Into::into) }
     }
 }
 

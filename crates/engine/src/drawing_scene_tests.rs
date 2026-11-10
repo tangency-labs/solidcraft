@@ -899,6 +899,25 @@ fn a_driven_joint_redraws_a_designed_view_but_not_a_posed_one() {
     assert_eq!(extract(&mut s, sheet).unwrap().stale, vec![posed]);
 }
 
+/// A deleted joint that leaves a posed view's picture as it was keeps the view's lines, and says why on
+/// the sheet: the view takes the new model without drawing again, and the reason with it.
+#[test]
+fn a_gone_joint_keeps_a_posed_views_lines_and_says_why() {
+    let (mut s, view, _) = hinge_pair();
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    // At the value the design has, so the leaf lies where it would without the joint.
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(view), "set": {"pose": [{"joint": "Hinge", "values": [0]}]}}));
+    let why = |answer: &SheetView| answer.views.iter().find(|v| v.view == view).map(|v| v.why.clone());
+    assert_eq!(why(&settled(&mut s, sheet)), Some(None));
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "joint.delete", json!({"joint": "Hinge"}));
+    run(&mut s, "drawing.open", drawing);
+    let answer = extract(&mut s, sheet).unwrap();
+    assert!(answer.stale.is_empty(), "the picture is the same, so nothing draws again: {:?}", answer.stale);
+    assert_eq!(why(&answer), Some(Some("its position names 1 joint the design no longer has".into())));
+}
+
 /// A file can hold a dimension on a view that draws an exploded view, though no command makes one
 /// (#13048). Its view holds it back, unread and undrawn, so every command that reads the sheet
 /// lists it out of date: the scene, the export and `drawing.status`. No update would read it, so the
@@ -1249,6 +1268,7 @@ fn a_view_past_the_sheets_records_leaves_out_only_itself() {
             boundary: None,
             frame: None,
             owners: None,
+            why: None,
         }
     };
     for title_block in [None, Some(solidcraft_geom::title_block::default_block())] {
@@ -1606,6 +1626,7 @@ fn a_views_box_is_what_it_draws() {
             boundary: Some(boundary),
             frame: None,
             owners: None,
+            why: None,
         };
         let (_, _, objects, _, _) =
             assemble(&record, Projection::Third, &labels(&record), &[], &[], [(7, centre, &drawn)].into_iter()).unwrap().finish().unwrap();
@@ -1794,7 +1815,10 @@ fn overfill(s: &mut Session, view: u64) -> Drawn {
     let items = vec![Item::Stroke { path, closed: false, width_mm: 0.5, pattern: None }];
     let group = Group { object: view, kind: ObjectKind::View, items };
     entry.serial = serial;
-    std::mem::replace(&mut entry.drawn, Drawn { group: Some(group), status: Status::Drawn, stats: None, boundary: None, frame: None, owners: None })
+    std::mem::replace(
+        &mut entry.drawn,
+        Drawn { group: Some(group), status: Status::Drawn, stats: None, boundary: None, frame: None, owners: None, why: None },
+    )
 }
 
 /// Each dimension's word is the one inspect uses: read, then lost when its body goes, with why. Its
@@ -2052,6 +2076,7 @@ fn a_dimension_past_the_scenes_limits_is_left_out_and_says_why() {
         boundary: None,
         frame: Some(ViewFrame::new(solidcore_record::Plane::XY, "1:1".parse().unwrap(), Vec2::ZERO, Vec2::ZERO).unwrap()),
         owners: None,
+        why: None,
     };
     let mut assembly =
         assemble(record, Projection::Third, &labels(record), &[], &[], std::iter::once((front, Vec2::new(100.0, 100.0), view))).unwrap();
@@ -2094,6 +2119,7 @@ fn dimensions_share_one_font_table_and_one_left_out_adds_nothing() {
         boundary: None,
         frame: Some(frame),
         owners: None,
+        why: None,
     };
     let text = |id, text: &str, more: usize| {
         let style = solidcraft_sketch::TextStyle::default();

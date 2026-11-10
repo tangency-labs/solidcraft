@@ -243,10 +243,10 @@ fn each_status_gives_its_kind() {
         assert_eq!(finding.as_ref().map(|f| f.kind), kind, "{status:?}");
         assert!(finding.is_none_or(|f| !f.why.is_empty() && f.sheet == ids::encode(7) && f.object == dimension), "{status:?}");
     }
-    let failed = ViewState { view: 9, status: ViewStatus::Failed("too many lines".into()), stats: None };
+    let failed = ViewState { view: 9, status: ViewStatus::Failed("too many lines".into()), stats: None, why: None };
     let finding = view_finding(7, &failed).unwrap();
     assert_eq!((finding.kind, finding.why.as_str(), finding.object), (FindingKind::Failed, "too many lines", object_of(CheckedKind::View, 9)));
-    assert!(view_finding(7, &ViewState { view: 9, status: ViewStatus::Drawn, stats: None }).is_none());
+    assert!(view_finding(7, &ViewState { view: 9, status: ViewStatus::Drawn, stats: None, why: None }).is_none());
 }
 
 /// A note on the chamfer's edge is lost with it; a note on the sheet reads no model.

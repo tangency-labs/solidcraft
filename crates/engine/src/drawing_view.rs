@@ -285,6 +285,19 @@ pub fn copy_for(placed: &Session, choice: &Choice) -> std::result::Result<Sessio
     Ok(copy)
 }
 
+/// The joints saved view `view`'s position names that `s`'s design no longer has, in its order. The
+/// view draws with the rest ([`copy_for`]).
+pub fn gone_joints(s: &Session, view: &ResolvedView) -> Vec<u64> {
+    let Pose::Joints(joints) = &view.pose.value else { return Vec::new() };
+    joints.iter().map(|j| j.joint).filter(|id| !s.doc.assembly.joints.iter().any(|joint| joint.id == *id)).collect()
+}
+
+/// What the sheet says beside a view whose position names `gone` joints the design no longer has
+/// (#13048), as a drawn note says why. With none of its joints left it draws the design's placement.
+pub fn gone_joints_reason(gone: usize) -> Option<String> {
+    (gone > 0).then(|| format!("its position names {gone} joint{} the design no longer has", if gone == 1 { "" } else { "s" }))
+}
+
 /// What saved view `view` draws from `sessions`: every body its session places ([`shown`]), or why
 /// there's nothing to show.
 pub fn shown_by(sessions: &mut ViewSessions, view: &ResolvedView) -> std::result::Result<ShownSet, Unmeasured> {
