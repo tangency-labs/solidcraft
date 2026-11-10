@@ -3,7 +3,8 @@
 //! of its surface dialogs) and the boards that need a running app. The kit's own gallery,
 //! drawn from plain data, is `ui_kit::gallery`; these are checked with its `check_elements`.
 use crate::dialogs_surface::{continuity_row, continuity_row_explained, continuity_tip};
-use crate::ui_kit::gallery::{ELEMENTS, Element, Sample, check_elements, element, example};
+use crate::ui_kit::element;
+use crate::ui_kit::gallery::{ELEMENTS, Element, Sample, check_elements, example};
 use crate::ui_kit::*;
 use egui::{Ui, vec2};
 use solidcraft_engine::kernel::Continuity;

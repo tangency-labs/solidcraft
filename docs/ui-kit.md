@@ -161,7 +161,7 @@ diagnostics without preparing or evaluating geometry. `details_findings` and
 | `method_section` | Section with a GPU/CPU tag; unsupported contents stay faded with a readable reason. |
 | `read_only_text` | Bounded, selectable code box for read-only diagnostic JSON. |
 
-`crates/ui-egui/src/ui_kit/` contains the tokenised controls used by feature dialogs,
+`crates/ui-kit/src/` (the shared crate `solidcraft-ui-kit`, which `ui-egui` uses as `ui_kit`) contains the tokenised controls used by feature dialogs,
 preferences, manager cards, prompts, context menus and the sketch palette. Import through
 `crate::ui_kit::{...}`. Most controls are crate-visible; the container API is public so platform apps use the same hosts.
 
@@ -1063,9 +1063,9 @@ search and reveal their own bounds. Labelled rows retain ownership of their sear
 
 ### Figures
 
-`ui_kit/preferences_figures.rs` paints the illustrations of the Preferences boards. The geometry of
+`crates/ui-kit/src/preferences_figures.rs` paints the illustrations of the Preferences boards. The geometry of
 each comes from its SVG in `docs/design/preferences/figures/`: `tools/preferences-figures/generate.py`
-compiles those files into `ui_kit/preferences_figure_data.rs`, one constant and one painter per
+compiles those files into `crates/ui-kit/src/preferences_figure_data.rs`, one constant and one painter per
 figure (`paint_tess_normal`, `paint_orbit_origin`, ...; `FIGURES` lists them all), and
 `preferences_figure_ops.rs` paints the operations with egui shapes. A figure is a list of rectangles,
 circles, polygons, soft shadows and tiny captions in the figure's own coordinates. Nothing is
