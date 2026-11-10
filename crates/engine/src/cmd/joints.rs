@@ -1762,7 +1762,7 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     let doc = s.doc_mut();
     let Some(j) = doc.assembly.joints.iter_mut().find(|j| j.id == id) else { return Err(bad(cmd, "joint")) };
     // As they were: Edit Joint sends the type, offset and flip with every edit, changed or not.
-    let (was_kind, was_offset, was_flip) = (j.kind, j.offset, j.flip);
+    let (was_kind, was_offset, was_flip, was_suppressed) = (j.kind, j.offset, j.flip, j.suppressed);
     if let Some(a) = a {
         j.a = a;
     }
@@ -1814,9 +1814,11 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     // An Angle relation whose tilt alone changes turns on from the values it has, so its part
     // keeps to its side and a tilt past 180 degrees carries on round. Starting again from where
     // the parts are would take the nearer of the two sides each time: the way back past 180, and
-    // either side from straight up (#12426).
+    // either side from straight up (#12426). Not a suppressed one: its part may have moved while
+    // it was off, so it starts again from where its parts are, as before.
     let tilt_only = angle.is_some()
         && was_kind == JointKind::Angle
+        && !was_suppressed
         && !sides
         && kind.is_none_or(|k| k == was_kind)
         && offset.is_none_or(|o| (o - was_offset).abs() <= 1e-9)

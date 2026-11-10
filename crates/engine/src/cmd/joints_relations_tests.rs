@@ -349,3 +349,26 @@ fn an_angle_relation_on_a_hinge_keeps_its_side_and_carries_on_past_180() {
     }
     assert!(sides.iter().all(|d| d.signum() == sides[0].signum()), "one side from straight up: {sides:?}");
 }
+
+/// A suppressed Angle relation whose part was moved meanwhile starts again from where the part is
+/// when its angle is edited, so turning it back on doesn't carry the part back to where it was:
+/// with the angle edited first and the joint unsuppressed after, or both in one edit.
+#[test]
+fn an_angle_edit_while_the_joint_is_suppressed_starts_from_where_the_part_is() {
+    let side = |s: &Session| place(s, "Leaf", Vec3::new(50.0, 55.0, 40.0));
+    for together in [false, true] {
+        let mut s = hinged_leaf();
+        run(&mut s, "joint.delete", json!({"joint": "Hinge"}));
+        run(&mut s, "joint.edit", json!({"joint": "angle Top-Side", "suppressed": true}));
+        let leaf = occ(&s, "Leaf");
+        run(&mut s, "occurrence.move", json!({"occurrence": leaf, "translate": [0, 0, 50]}));
+        let moved = side(&s);
+        if together {
+            run(&mut s, "joint.edit", json!({"joint": "angle Top-Side", "angle": "130 deg", "suppressed": false}));
+        } else {
+            run(&mut s, "joint.edit", json!({"joint": "angle Top-Side", "angle": "130 deg"}));
+            run(&mut s, "joint.edit", json!({"joint": "angle Top-Side", "suppressed": false}));
+        }
+        assert!(near(side(&s), moved, 1e-6), "together {together}: {:?}, moved to {moved:?}", side(&s));
+    }
+}
