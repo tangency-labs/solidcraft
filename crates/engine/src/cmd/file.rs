@@ -770,9 +770,25 @@ fn rename_design(s: &mut Session, from: &str, to: &str) {
     let model = s.model.state();
     let keep_world = s.world_cache.lock().ok().is_some_and(|cache| cache.as_ref().is_some_and(|cache| cache.matches(s, &model)));
     s.doc_mut().name = to.to_string();
+    // An open sketch's entry finds its place in the history by these states' addresses
+    // (Finish folds the edit, Cancel checks the history): it follows the renamed copies.
+    let mut renamed: Vec<(*const solidcraft_doc::Document, std::sync::Arc<solidcraft_doc::Document>)> = Vec::new();
     for snap in s.undo.iter_mut().chain(s.redo.iter_mut()) {
         if snap.doc.name == from {
+            let old = std::sync::Arc::as_ptr(&snap.doc);
             std::sync::Arc::make_mut(&mut snap.doc).name = to.to_string();
+            renamed.push((old, snap.doc.clone()));
+        }
+    }
+    if let Some(entry) = s.sketch_entry.as_mut() {
+        let follow = |doc: &mut std::sync::Arc<solidcraft_doc::Document>| match renamed.iter().find(|(old, _)| *old == std::sync::Arc::as_ptr(doc)) {
+            Some((_, new)) => *doc = new.clone(),
+            None if doc.name == from => std::sync::Arc::make_mut(doc).name = to.to_string(),
+            None => {}
+        };
+        follow(&mut entry.doc);
+        if let Some(top) = entry.undo_top.as_mut() {
+            follow(top);
         }
     }
     if keep_world
@@ -947,6 +963,14 @@ impl Session {
         }
         if !self.visibility.is_empty() {
             design.to_mut().visibility = self.visibility.clone();
+        }
+        // A sketch edited with the timeline rolled to it: the file holds the position the edit
+        // returns to, not the temporary rollback (#14010).
+        if let Some(marker) = self.sketch_restore_marker() {
+            let marker = marker.filter(|m| *m < design.features.len());
+            if design.marker != marker {
+                design.to_mut().marker = marker;
+            }
         }
         design
     }

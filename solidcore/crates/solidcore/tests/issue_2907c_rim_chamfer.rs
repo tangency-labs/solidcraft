@@ -78,14 +78,16 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 
 /// One offset on the chain builds: a clean closed solid with the seven chamfers' faces. Its faces
 /// curve, so its gain has no closed form. The gain is the flux over the faces that differ, taken
-/// about a point of the chain (`direct_gain`): 80.12092 at accuracy 1e-11, 80.12081 at 1e-9.
+/// about a point of the chain (`direct_gain`): 80.12239 at accuracy 1e-11, 80.12228 at 1e-9.
 /// The body is about 5.1e6 and some 500 from the world origin, and a whole-body volume about the
 /// box's middle misses its asked 1e-11 by 1.5e-9 relative there (tangency-labs/solidcraft#14170),
 /// so the gain is not a difference of two volumes. It is checked against an independent estimate,
 /// not a closed form: the chamfer's sections integrated along the chain from the faces and the
 /// rails alone, the chain's ends sectioned with their end faces (`integrated_gain`, 79.82 +-
 /// 0.53 here, the stations near the ends with no section the main term of that error). The
-/// groove below has a closed form.
+/// groove below has a closed form. Two of the chamfers, run on past their faces on the faces'
+/// extensions, are their definitions (#13774; before, the trace's skinned B-splines, and the
+/// gain 80.12092 and 80.12081).
 #[test]
 fn a_chamfered_rim_on_a_curved_face_builds() {
     let mut k = kernel();

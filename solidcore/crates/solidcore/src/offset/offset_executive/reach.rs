@@ -877,7 +877,7 @@ fn edge_pieces(b: &Brep, e: crate::topology::EdgeId) -> Result<Option<Vec<Piece>
     let interval = edge::interval(b, e)?;
     let (lo, hi) = (interval.min(), interval.max());
     let mut pieces = Vec::new();
-    for seg in create_bez_segments(nurb).map_err(SolidError::nl_ser(LOCAL_OP))? {
+    for seg in create_bez_segments(nurb).map_err(SolidError::nurbs_routine(LOCAL_OP))? {
         let (Some(&k0), Some(&k1)) = (seg.knots().first(), seg.knots().last()) else {
             continue;
         };

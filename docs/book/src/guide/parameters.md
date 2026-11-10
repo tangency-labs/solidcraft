@@ -133,3 +133,21 @@ time and what changed from the design as it is now: features that fail (`failed`
 (`joints_flipped`, more than 90°), sketch planes that turned over (`sketches_flipped`) and sketch
 solves that fail or only hold by flipping a triangle's turn or an offset's side (`sketches_failed`).
 `summary` counts the values that show each.
+
+Use **Compare Parameter Variants** when several parameters must change together. Each
+named variant starts from the same open design, so values from one variant never carry
+over to the next. For example, compare a pair of bracket sizes:
+
+```json
+{"command": "inspect.parameter_variants", "params": {"variants": [
+  {"name": "Compact", "set": {"Width": "40 mm", "Thickness": "4 mm"}},
+  {"name": "Wide", "set": {"Width": "60 mm", "Thickness": "6 mm"}}
+]}}
+```
+
+The command accepts up to 12 variants with up to 16 existing parameters each. It returns
+the baseline's volume, mass and body counts, then one result per variant in input order.
+The result reports new feature, joint or sketch regressions using the same checks as
+Parameter Sweep. A refused expression is an error for that variant; later variants still
+run. A variant with a rebuild regression has no metrics. Open bodies do not count toward
+volume or mass. The design and its undo history are unchanged.

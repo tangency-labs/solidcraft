@@ -106,7 +106,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.edit", "Edit Sketch", crate::checked!("sketch.edit", edit_sketch))
         .noundo().icon("sketch")
         .contract(&EDIT_CONTRACT).output(output_schema_for::<EditResult>)
-        .params("sketch: id or name; restore_marker?: nonnegative timeline position or null (end). When provided, temporarily roll to this sketch and restore that position on Finish or Cancel; Finish groups the edit into one Undo step. Omit to leave the timeline in place"),
+        .params("sketch: id or name; restore_marker?: nonnegative timeline position, null (end) or false. A position or null: temporarily roll to this sketch and restore that position on Finish or Cancel; Finish groups the edit into one Undo step. Omitted: the same with the current position when features come after the sketch, so they rebuild once at Finish rather than after every sketch command. false: leave the timeline in place (later features rebuild after every sketch command)"),
     CommandSpec::new("sketch.finish", "Finish Sketch", crate::checked!("sketch.finish", finish_sketch))
         .at("SKETCH", "FINISH SKETCH").icon("finish").enabled(in_sketch).noundo()
         .contract(&EXIT_CONTRACT).output(output_schema_for::<FinishResult>)
@@ -124,7 +124,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&LINE_CONTRACT)
         .output(output_schema_for::<DrawResult>)
-        .params(concat!("points: [[x,y] | \"l1.end\" | {at, ref}…] (x and y each a number or an expression over the design's parameters, \"W / 2\": such a point is fixed where it comes to and follows the parameters; likewise wherever a point argument also takes a point id), closed?: bool, construction?: bool, ids?: [..], infer?: bool (add horizontal/vertical)", connect_doc!(), created_doc!())),
+        .params(concat!("points: [[x,y] | \"l1.end\" | {at, ref}…] (x and y each a number or an expression over the design's parameters, \"W / 2\": such a point is fixed where it comes to and follows the parameters, while text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point; likewise wherever a point argument also takes a point id), closed?: bool, construction?: bool, ids?: [..], infer?: bool (add horizontal/vertical)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.draw.dimensioned", "Draw Dimensioned Sketch Geometry", crate::checked!("sketch.draw.dimensioned", draw_dimensioned)).icon("dimension")
         .enabled(in_sketch)
         .contract(&DRAW_DIMENSIONED_CONTRACT)
@@ -137,7 +137,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&RECT_TWO_POINT_CONTRACT)
         .output(output_schema_for::<RectResult>)
-        .params(concat!("p0, p1: opposite corners [x,y] (a coordinate may be an expression over the design's parameters: the corner follows them); construction?. Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)", connect_doc!(), created_doc!())),
+        .params(concat!("p0, p1: opposite corners [x,y] (a coordinate may be an expression over the design's parameters: the corner is fixed and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the corner); construction?. Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.rectangle.three_point", "3-Point Rectangle", crate::checked!("sketch.rectangle.three_point", rect_three_point))
         .at("SKETCH", "CREATE")
         .icon("rect3")
@@ -151,14 +151,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&RECT_ROUNDED_CONTRACT)
         .output(output_schema_for::<RoundedRectResult>)
-        .params(concat!("p0, p1: opposite corners [x,y] (a coordinate may be an expression over the design's parameters: the corner follows them, as in `sketch.rectangle.two_point`); radius: expr (the corner radius, less than half the shorter side); construction?. A 2-point rectangle whose four corners are filleted alike: one radius dimension (`param`), the other arcs equal to it. Returns sides {bottom, right, top, left} (line ids) and arcs (the corner arcs: bottom-left, bottom-right, top-right, top-left), diagonal (construction, between the bottom-left and top-right arc centres) and centre (the point held at its midpoint)", connect_doc!(), created_doc!())),
+        .params(concat!("p0, p1: opposite corners [x,y] (a coordinate may be an expression over the design's parameters: the corner is fixed and follows them, as in `sketch.rectangle.two_point`; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the corner); radius: expr (the corner radius, less than half the shorter side); construction?. A 2-point rectangle whose four corners are filleted alike: one radius dimension (`param`), the other arcs equal to it. Returns sides {bottom, right, top, left} (line ids) and arcs (the corner arcs: bottom-left, bottom-right, top-right, top-left), diagonal (construction, between the bottom-left and top-right arc centres) and centre (the point held at its midpoint)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.rectangle.center", "Center Rectangle", crate::checked!("sketch.rectangle.center", rect_center))
         .at("SKETCH", "CREATE")
         .icon("rect_center")
         .enabled(in_sketch)
         .contract(&RECT_CENTER_CONTRACT)
         .output(output_schema_for::<RectResult>)
-        .params(concat!("center, corner: [x,y] (a coordinate may be an expression over the design's parameters: the point follows them); construction?: bool. Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)", connect_doc!(), created_doc!())),
+        .params(concat!("center, corner: [x,y] (a coordinate may be an expression over the design's parameters: the point is fixed and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point); construction?: bool. Returns sides {bottom, right, top, left} (line ids) and corners {bottom_left, bottom_right, top_right, top_left} (point ids)", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.circle.center", "Center Diameter Circle", crate::checked!("sketch.circle.center", circle_center))
         .at("SKETCH", "CREATE")
         .icon("circle")
@@ -167,7 +167,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&CIRCLE_CENTER_CONTRACT)
         .output(output_schema_for::<DrawResult>)
         .params(concat!(
-            "center: [x,y] or point ref (a coordinate may be an expression over the design's parameters: the centre follows them), radius | diameter: number or expression (an expression naming a parameter is a dimension driven by it; with `through` a point ref, that and the point both fix the radius); through?: point ref (a point the circle passes through, kept on it: where the tool's second click snapped); construction?: bool",
+            "center: [x,y] or point ref (a coordinate may be an expression over the design's parameters: the centre is fixed and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the centre), radius | diameter: number or expression (an expression naming a parameter is a dimension driven by it; with `through` a point ref, that and the point both fix the radius); through?: point ref (a point the circle passes through, kept on it: where the tool's second click snapped); construction?: bool",
             connect_doc!(),
             created_doc!()
         )),
@@ -228,7 +228,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SLOT_OVERALL_CONTRACT)
         .output(output_schema_for::<crate::schema::sketch_shapes::SlotResult>)
         .params(concat!("p0, p1: overall ends, width; returns centre_line (construction, between the arc centres) and middle (the point held at its midpoint)", connect_doc!(), created_doc!())),
-    CommandSpec::new("sketch.point", "Point", crate::checked!("sketch.point", draw_point)).at("SKETCH", "CREATE").icon("point").enabled(in_sketch).contract(&POINT_CONTRACT).output(output_schema_for::<PointResult>).params(concat!("point: [x,y] (each a number or an expression over the design's parameters: the point is then fixed where it comes to and follows them) or a snap: \"mid:<line>\" (held at the line's midpoint), \"on:<curve>:x,y\" (on the curve near x,y), {vertex: [x,y,z]} or {on_edge: [x,y,z]} of the model; id?", connect_doc!(), created_doc!())),
+    CommandSpec::new("sketch.point", "Point", crate::checked!("sketch.point", draw_point)).at("SKETCH", "CREATE").icon("point").enabled(in_sketch).contract(&POINT_CONTRACT).output(output_schema_for::<PointResult>).params(concat!("point: [x,y] (each a number or an expression over the design's parameters: the point is then fixed where it comes to and follows them; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point) or a snap: \"mid:<line>\" (held at the line's midpoint), \"on:<curve>:x,y\" (on the curve near x,y), {vertex: [x,y,z]} or {on_edge: [x,y,z]} of the model; id?", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.dimension", "Sketch Dimension", crate::checked!("sketch.dimension", dimension))
         .at("SKETCH", "CREATE")
         .icon("dimension")
@@ -1190,14 +1190,16 @@ fn sketch_on_plane(s: &mut Session, p: &Value, plane: PlaneRef, internal_body: O
 }
 
 fn edit_sketch(s: &mut Session, p: &Value) -> Result<Value> {
-    let restore_marker = p
+    let requested = p
         .get("restore_marker")
         .map(|v| {
-            serde_json::from_value::<Option<usize>>(v.clone())
-                .map_err(|_| bad("sketch.edit", "`restore_marker` must be a nonnegative timeline position or null"))
+            crate::schema::sketch::EditMarker::read(v)
+                .ok_or_else(|| bad("sketch.edit", "`restore_marker` must be a nonnegative timeline position, null or false"))
         })
         .transpose()?;
-    if restore_marker.flatten().is_some_and(|m| m > s.doc.features.len()) {
+    if let Some(crate::schema::sketch::EditMarker::Restore(Some(m))) = requested
+        && m > s.doc.features.len()
+    {
         return Err(bad("sketch.edit", "`restore_marker` is past the end of the timeline"));
     }
     let key = match p.get("sketch") {
@@ -1221,6 +1223,18 @@ fn edit_sketch(s: &mut Session, p: &Value) -> Result<Value> {
         s.active_occurrence_path = (!path.is_empty()).then_some(path);
     }
     if s.active_sketch != Some(id) || s.sketch_entry.as_ref().is_none_or(|entry| entry.sketch != id) {
+        let restore_marker = match requested {
+            Some(crate::schema::sketch::EditMarker::Restore(marker)) => Some(marker),
+            Some(crate::schema::sketch::EditMarker::InPlace) => None,
+            // Left out: features the timeline evaluates after the sketch would be rebuilt by
+            // every sketch command (their fingerprints chain through it, #14010). Roll to the
+            // sketch for the edit and come back on Finish or Cancel, as the app's Edit Sketch
+            // does, so they are rebuilt once.
+            None => {
+                let end = s.doc.marker.unwrap_or(s.doc.features.len()).min(s.doc.features.len());
+                s.doc.feature_index(id).filter(|&index| index + 1 < end).map(|_| s.doc.marker)
+            }
+        };
         s.sketch_entry = Some(SketchEntry { sketch: id, restore_marker, ..entry_point(s) });
         if restore_marker.is_some()
             && let Some(index) = s.doc.feature_index(id)

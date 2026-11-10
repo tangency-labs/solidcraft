@@ -290,8 +290,10 @@ impl FilletLaw {
 
 /// The `SmStatus` upstream's `SER` returns for a failed callee.
 fn status_of(e: &SolidError) -> i32 {
+    if let Some(code) = e.upstream_status() {
+        return code;
+    }
     match e {
-        SolidError::Upstream { code, .. } => *code,
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => {
             crate::error::SM_ERR_INVALID_INPUT
         }
