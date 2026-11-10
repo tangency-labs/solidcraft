@@ -967,3 +967,34 @@ fn construction_on_a_moved_body_moves_with_it() {
     let (o, d) = axis(&s, "Tether");
     assert!(on_line(o, d, Vec3::new(0.0, 0.0, 20.0)) && on_line(o, d, Vec3::new(0.0, 50.0, 20.0)), "{o:?} {d:?}");
 }
+
+/// A feature named exactly like a component origin item stays reachable: at every resolver that
+/// takes a name the feature wins over the datum key (the #9128 mistake the plan calls out).
+/// Without the feature the same pick is the component origin's, saved as its datum.
+#[test]
+fn feature_named_like_a_datum_key_stays_reachable() {
+    let mut s = Session::default();
+    let made = run(&mut s, "component.create", json!({"name": "Child", "grounded": false}));
+    let child = made["occurrence"].as_u64().unwrap();
+    run(&mut s, "occurrence.move", json!({"occurrence": child, "translate": [100, 0, 0]}));
+    let key = crate::origins::key(&[child], "X");
+    run(&mut s, "construct.axis.two_planes", json!({"a": "XY", "b": "XZ", "name": key}));
+    // The name resolves the feature, not a frozen line of the origin axis it is spelled like.
+    run(&mut s, "construct.plane.perpendicular", json!({"plane": "XY", "line": {"axis": key}, "name": "P"}));
+    let f = s.doc.features.iter().find(|f| f.name == "P").unwrap();
+    let solidcraft_doc::FeatureKind::ConstructionPlane { plane: solidcraft_doc::PlaneRef::Perpendicular { line, .. } } = &f.kind else {
+        panic!("{:?}", f.kind)
+    };
+    let solidcraft_doc::construct::GeoRef::Axis { name } = line.as_ref() else { panic!("{:?}", line) };
+    assert_eq!(name.to_string(), key);
+    // Without the feature the same pick is the component origin axis, saved as its datum: it
+    // follows the placement instead of staying where it was picked.
+    run(&mut s, "construct.plane.perpendicular", json!({"plane": "XY", "line": {"axis": crate::origins::key(&[child], "Y")}, "name": "Q"}));
+    let f = s.doc.features.iter().find(|f| f.name == "Q").unwrap();
+    let solidcraft_doc::FeatureKind::ConstructionPlane { plane: solidcraft_doc::PlaneRef::Perpendicular { line, .. } } = &f.kind else {
+        panic!("{:?}", f.kind)
+    };
+    let solidcraft_doc::construct::GeoRef::Datum { datum } = line.as_ref() else { panic!("{:?}", line) };
+    assert_eq!(datum.item, solidcraft_doc::construct::DatumItem::Y);
+    assert_eq!(datum.path, vec![child]);
+}
