@@ -9120,7 +9120,9 @@ fn eval_feature(
             let o = match about {
                 None => origin.0,
                 Some(ScaleAbout::Centre) => bodies_centre(st, bodies)?,
-                Some(ScaleAbout::Pick { at }) => crate::construct::scale_point(&crate::construct::Ctx { doc, vals, st, depth: 0 }, at)?,
+                Some(ScaleAbout::Pick { at }) => {
+                    crate::construct::scale_point(&crate::construct::Ctx { doc, vals, st, depth: 0, component: f.component }, at)?
+                }
             };
             if !o.is_finite() {
                 return Err(DocError::Invalid("the point to scale about is not finite".into()));
