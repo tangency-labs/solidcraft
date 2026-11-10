@@ -48,3 +48,56 @@ plane (the perturbation band of `issue_2538_tilted_notch_on_a_slant_edge` on tha
 rows report exactly what they report without it, the four rows still carrying face test 36
 included: those are not near misses this change drops. `wr579_near_coincident_tube_ends_join`, which
 pins face test 36 at tube ends 1e-5 to 1e-7 apart, passes unchanged.
+
+**Goldens moved.** Only near-miss findings at vertex ends drop; every other output of both units
+is unchanged, and the heal units that act on face properties do not move.
+
+`topology.assert_valid`: mutation 6 moves a vertex in +x, off the surface at a cylinder's seam
+vertex and along the seam at a sphere's pole. Only the face test 36 report goes; a vertex 1e-6 off
+with tolerance 1e-5 becomes valid, the 0.1 and 1e-4 moves stay invalid on their vertex gap reports.
+
+| Case | Face test 36 | Other reports | Check |
+|---|---|---|---|
+| `cylinder_mutation6_v0.1_i0` | 1 -> 0 | unchanged | invalid -> invalid |
+| `cylinder_mutation6_v0.1_i3` | 1 -> 0 | unchanged | invalid -> invalid |
+| `gen0002` | 1 -> 0 | unchanged | invalid -> invalid |
+| `sphere_mutation6_v0.1_i0` | 1 -> 0 | unchanged | invalid -> invalid |
+| `sphere_mutation6_v0.1_i3` | 1 -> 0 | unchanged | invalid -> invalid |
+| `update_cylinder_m6_i0_v0.0001_l2` | 1 -> 0 | unchanged | invalid -> invalid |
+| `update_cylinder_m6_i1_v1e-06_l2` | 1 -> 0 | unchanged | invalid -> valid |
+
+`heal.face_props`: per face, `bad_near_miss_seam` and its direction (old -> new); nothing else.
+
+| Case | Faces that change |
+|---|---|
+| `gen0055` | 0: True U -> False Neither; 1: True U -> False Neither; 2: True U -> False Neither; 3: True U -> False Neither; 4: True U -> False Neither; 5: True U -> False Neither; 6: True U -> False Neither; 7: True U -> False Neither; 8: True U -> False Neither |
+| `gen0329` | 0: True Both -> True V; 1: True Both -> True V; 2: True Both -> True V |
+| `gen0374` | 0: True Both -> True V; 1: True Both -> True V; 2: True Both -> True V; 3: True Both -> True V; 4: True Both -> True V |
+| `gen0384` | 4: True U -> False Neither; 5: True U -> False Neither; 6: True U -> False Neither |
+| `gen0435` | 0: True Both -> False Neither; 1: True Both -> False Neither; 2: True Both -> False Neither; 3: True Both -> False Neither; 4: True Both -> False Neither; 5: True Both -> False Neither; 6: True Both -> False Neither; 7: True Both -> False Neither; 8: True Both -> False Neither |
+| `gen0476` | 0: True Both -> True U; 1: True Both -> True U |
+| `gen0510` | 0: True U -> False Neither |
+| `gen0617` | 4: True Both -> True V; 6: True Both -> True V |
+| `gen0638` | 0: True Both -> False Neither; 2: True Both -> False Neither; 4: True Both -> False Neither; 5: True Both -> False Neither |
+| `gen0769` | 0: True V -> False Neither; 1: True V -> False Neither; 3: True V -> False Neither; 4: True V -> False Neither; 5: True V -> False Neither; 6: True V -> False Neither; 7: True V -> False Neither |
+| `gen0807` | 0: True Both -> True V; 1: True Both -> True V; 2: True Both -> True V; 3: True Both -> True V; 4: True Both -> True V; 6: True Both -> True V; 7: True Both -> True V; 8: True Both -> True V |
+| `gen1014` | 0: True Both -> False Neither; 2: True Both -> False Neither |
+| `gen1047` | 0: True Both -> True U; 2: True Both -> True U; 3: True Both -> True U |
+| `gen1097` | 0: True Both -> True V; 1: True Both -> True V; 2: True Both -> True V |
+| `gen1109` | 0: True Both -> False Neither; 2: True Both -> False Neither; 3: True Both -> False Neither; 4: True Both -> False Neither; 5: True Both -> False Neither; 6: True Both -> False Neither; 7: True Both -> False Neither; 8: True Both -> False Neither; 9: True Both -> False Neither; 10: True Both -> False Neither |
+| `gen1143` | 0: True Both -> True V; 1: True Both -> True V; 2: True Both -> True V; 3: True Both -> True V; 4: True Both -> True V; 6: True Both -> True V |
+| `gen1183` | 0: True Both -> True V; 1: True Both -> True V |
+| `gen1354` | 0: True Both -> False Neither; 2: True Both -> False Neither; 3: True Both -> False Neither |
+| `gen1365` | 0: True V -> False Neither; 4: True V -> False Neither; 5: True V -> False Neither |
+| `gen1377` | 0: True Both -> True U; 2: True Both -> True U; 3: True Both -> True U; 4: True Both -> True U |
+| `gen1428` | 0: True Both -> False Neither; 2: True Both -> False Neither; 3: True Both -> False Neither; 4: True Both -> False Neither |
+| `gen1464` | 0: True Both -> True U; 1: True Both -> True U; 2: True Both -> True U; 3: True Both -> True U |
+| `gen1482` | 0: True Both -> True V; 1: True Both -> True V; 2: True Both -> True V; 3: True Both -> True V |
+| `s3gen0033` | 0: True U -> False Neither; 1: True U -> False Neither; 3: True U -> False Neither |
+| `s3gen0063` | 0: True U -> False Neither; 2: True U -> False Neither |
+| `s3gen0089` | 0: True U -> False Neither |
+| `s3gen0099` | 0: True V -> False Neither; 1: True V -> False Neither |
+| `s3gen0294` | 0: True V -> False Neither; 1: True V -> False Neither |
+| `stage3_sph_one_tol1` | 0: True U -> False Neither |
+| `stage3_sph_swap_one_tol1` | 0: True V -> False Neither |
+| `stage3_sph_two_tol1` | 0: True U -> False Neither |
