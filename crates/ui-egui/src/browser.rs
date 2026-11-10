@@ -1535,7 +1535,7 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
         crate::ui_kit::disclosure(ui.painter(), pos2(right - t.form_section_icon_size / 2.0, rect.center().y), !collapsed, t.text_dim);
         right -= 18.0;
     }
-    let bodies = app.session.model.state().bodies.len();
+    let bodies = listed_bodies(&app.session);
     let key = if bodies == 1 { "ui.browser_bodies_one" } else { "ui.browser_bodies_other" };
     let count = solidcraft_ui_text::format(key, &[("count", &bodies.to_string())]);
     let galley = ui.painter().layout_no_wrap(count, FontId::proportional(t.font_body), t.text_dim);
@@ -1552,6 +1552,13 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
             }
         }
     }
+}
+
+/// How many bodies the Browser lists for its header: one row per placement of each body, so a
+/// component's body placed twice counts twice, as the world shows it. The model's own count when
+/// the design cannot be placed (the rows then still list the model's bodies).
+fn listed_bodies(session: &solidcraft_engine::Session) -> usize {
+    session.world_state().map_or_else(|_| session.model.state().bodies.len(), |world| world.bodies.len())
 }
 
 fn prepare_model(app: &mut SolveApp) {
