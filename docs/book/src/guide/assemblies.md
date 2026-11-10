@@ -46,8 +46,10 @@ angle. A ghost shows where the part started. **OK** keeps the new angle.
 
 A component is placed by its **occurrences**. Paste creates another instance of the same
 component, and **Paste New** creates an independent copy. Move an occurrence with the move
-triad, then **Capture Position** to keep it or **Revert** to put it back. SolidCraft asks before
-the next command if a move wasn't captured. **Ground** fixes an occurrence in place, and
+triad, then **Capture Position** to keep it or **Revert** to put it back. **Capture Position**
+also saves every joint's current values, and **Revert Position** puts the joints back to them,
+clamped to their limits, together with the parts, as one undo step. SolidCraft asks before the
+next command if a move wasn't captured. **Ground** fixes an occurrence in place, and
 **Unground** (the same row of **Placement** in the browser's context menu) frees it again.
 
 The design's first part is grounded when it is made: the first occurrence placed directly in the

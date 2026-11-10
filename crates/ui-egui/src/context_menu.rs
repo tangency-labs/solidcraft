@@ -1090,11 +1090,16 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         let oid = occ.map(|o| o.id).unwrap_or(0);
         let movable = !grounded && occ.is_some() && app.session.held_by_rigid_group(oid).is_none();
         v.push(act("ui.moveOccurrence", "Move/Copy", "move").key("M").with(json!({ "occurrence": oid })).on(movable));
+        let moved = !app.session.pending_moves.is_empty();
+        let joints = &app.session.doc.assembly.joints;
         let mut placement = vec![
             cmd(app, "occurrence.ground", if grounded { "Unground" } else { "Ground" }).with(json!({ "occurrence": oid, "grounded": !grounded })),
             turn_up_axis(oid, movable),
-            cmd(app, "component.capture_position", "Capture Position").on(!app.session.pending_moves.is_empty()),
-            cmd(app, "component.revert_position", "Revert Position").on(!app.session.pending_moves.is_empty()),
+            // Capture Position also saves the joints' values, and Revert Position puts them back.
+            cmd(app, "component.capture_position", "Capture Position")
+                .on(moved || joints.iter().any(|j| j.kind != solidcraft_engine::doc::joints::JointKind::Rigid)),
+            cmd(app, "component.revert_position", "Revert Position")
+                .on(moved || joints.iter().any(|j| j.captured.is_some() && j.kind != solidcraft_engine::doc::joints::JointKind::Rigid)),
         ];
         // An imported assembly moves as one until its rigid group is released.
         if !app.session.contents_joints(id).is_empty() {

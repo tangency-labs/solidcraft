@@ -458,6 +458,10 @@ pub struct Joint {
     /// again whenever the design changes, so a joint follows the parameters it is defined by.
     #[serde(default, skip_serializing_if = "JointExprs::is_empty")]
     pub exprs: JointExprs,
+    /// The values Capture Position saved, which Revert Position puts the joint back to. None in
+    /// files from before captured joint values: such a joint keeps its values on Revert Position.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub captured: Option<Vec<f64>>,
 }
 
 /// Expressions a joint's numbers follow (over the design's parameters): the offset (a length),
@@ -2751,6 +2755,7 @@ mod tests {
                 angle: 0.0,
                 suppressed: false,
                 exprs: Default::default(),
+                captured: None,
             })
             .collect();
         let links =

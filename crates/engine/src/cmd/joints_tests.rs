@@ -192,6 +192,50 @@ fn slider_limits_clamp() {
 }
 
 #[test]
+fn capture_position_saves_joint_values_and_revert_position_puts_them_back() {
+    // #14275: Capture Position also saves every joint's values; Revert Position puts them back.
+    let mut s = two_cubes();
+    run(&mut s, "joint.create", json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "name": "Rail"}));
+    let b = Vec3::new(25.0, 5.0, 0.0);
+    // Nothing captured yet: Revert Position leaves the joint where it is.
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 3}));
+    let r = run(&mut s, "component.revert_position", json!({}));
+    assert_eq!(r["joints"], json!(0), "{r}");
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 13.0)));
+    // Capture at 3 mm, drive away, and revert.
+    let r = run(&mut s, "component.capture_position", json!({}));
+    assert_eq!(r["joints"], json!(1), "{r}");
+    assert_eq!(s.doc.assembly.joints[0].captured, Some(vec![3.0]));
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 9}));
+    let r = run(&mut s, "component.revert_position", json!({}));
+    assert_eq!(r["joints"], json!(1), "{r}");
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 13.0)));
+    // One undo step puts it back where it was driven.
+    run(&mut s, "edit.undo", json!({}));
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 19.0)));
+    // The captured values are saved with the design.
+    let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    *s.doc_mut() = doc;
+    run(&mut s, "joint.solve", json!({}));
+    run(&mut s, "component.revert_position", json!({}));
+    assert!(near(place(&s, "B", b), Vec3::new(5.0, 5.0, 13.0)));
+}
+
+#[test]
+fn a_design_without_captured_joint_values_loads_unchanged() {
+    // A file saved before captured joint values has no `captured`: it loads with the same values,
+    // and a joint with none saves without the key.
+    let mut s = two_cubes();
+    run(&mut s, "joint.create", json!({"type": "slider", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "name": "Rail"}));
+    run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 4}));
+    let json = s.doc.to_json();
+    assert!(!json.contains("\"captured\""), "no captured key before Capture Position");
+    let doc = solidcraft_doc::Document::from_json(&json).unwrap();
+    assert_eq!(doc.assembly.joints[0].captured, None);
+    assert_eq!(doc.assembly.joints[0].values, s.doc.assembly.joints[0].values);
+}
+
+#[test]
 fn rigid_cycles_solve_and_conflicts_report() {
     let mut s = two_cubes();
     run(&mut s, "component.activate", json!({"component": "root"}));
