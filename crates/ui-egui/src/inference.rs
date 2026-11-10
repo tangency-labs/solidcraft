@@ -331,6 +331,21 @@ impl Tracking {
         }
     }
 
+    /// The straight edges whose midpoint guides are live, with those midpoints, so a point placed
+    /// on such a guide can stay lined up with it (#13413).
+    pub(crate) fn line_midpoints(&self, sk: &Sketch) -> Vec<(String, Vec2)> {
+        [&self.anchor, &self.previous]
+            .into_iter()
+            .flatten()
+            .filter_map(|reference| {
+                let TrackRef::Curve(id) = reference else { return None };
+                let index = sk.curve_index(id)?;
+                matches!(sk.curves.get(index)?.kind, CurveKind::Line { .. }).then_some(())?;
+                Some((id.clone(), Self::reference(sk, index)?))
+            })
+            .collect()
+    }
+
     /// Keep `reference` as one of the two remembered references. Hovering the older one swaps
     /// them, so going back does not drop it. A third, different reference drops the oldest.
     fn remember(&mut self, reference: TrackRef) {
