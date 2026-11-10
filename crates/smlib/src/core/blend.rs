@@ -33,6 +33,7 @@ use solidcore::blend::fillet_executive::session::{FilletObject, FilletSession};
 use solidcore::blend::fillet_geom::p1::{FilletCornerType, FilletErrorType};
 use solidcore::blend::fillet_section::section::GN_THUMBWEIGHT_EQUAL_AREA;
 use solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
+use solidcore::error::nurbs::NurbsFailure;
 use solidcore::geom::attribute::{Attribute, AttributeHandlers, Behavior, ids as attribute_ids};
 use solidcore::geom::vector3d::{Point3, Vec3};
 use solidcore::kernel::Kernel;
@@ -75,11 +76,77 @@ const INVALID_INPUT: i32 = 1007;
 pub(super) fn status(e: SolidError) -> Error {
     match e {
         SolidError::Upstream { code, .. } => Error::Status(code),
+        e if is_b_spline_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
+        e if is_intersect_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
+        e if is_primitive_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
+        e if is_mass_heal_or_geom_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
+        e if is_sweep_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
+        e if is_query_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
         SolidError::InvalidInput { .. } => Error::Status(INVALID_INPUT),
         SolidError::Unsupported { reason, .. } if reason == MIXED_CORNER_RAILS_CROSS => Error::Unported(MIXED_CORNER_UNSUPPORTED),
+        e if is_boolean_failure(&e) => boolean_status(e),
         e if e.is_unported() => Error::Unsupported,
         e => Error::Solidcore(e.to_string()),
     }
+}
+
+/// A failure of the Boolean engine (which slice, sweep and the other users of the merge engine
+/// run), which solidcore names in its own terms as a [`SolidError::Failed`] from a
+/// `boolean::` stage where it once returned [`SolidError::Upstream`].
+fn is_boolean_failure(e: &SolidError) -> bool {
+    matches!(e, SolidError::Failed(f) if f.operation.starts_with("boolean::"))
+}
+
+/// The status of a Boolean failure as the capi passes it on: the status the failure stands for
+/// ([`Error::Status`]), as the `Upstream` it replaced gave. A stage that failed because a call is
+/// not ported is not that status ([`SolidError::is_status_answer`]): it is as unported code is,
+/// not supported.
+fn boolean_status(e: SolidError) -> Error {
+    match e.sm_status() {
+        Some(code) if e.is_status_answer() => Error::Status(code),
+        _ if e.root_cause().is_unported() => Error::Unsupported,
+        _ => Error::Solidcore(e.to_string()),
+    }
+}
+
+/// A B-spline method's failure (solidcore's `BSplineFailure`): it stands for the status the
+/// method returned (`Upstream` before solidcore described it), and passes on as that status.
+fn is_b_spline_failure(e: &SolidError) -> bool {
+    matches!(e.nurbs_failure(), Some(NurbsFailure::BSpline(_)))
+}
+
+/// An intersection or classification failure (solidcore's `IntersectFailure`): it stands for the
+/// status the routine returned (`Upstream` before solidcore described it), and passes on as that
+/// status.
+fn is_intersect_failure(e: &SolidError) -> bool {
+    e.intersect_failure().is_some()
+}
+
+/// A primitive, extrusion, revolution, skin or taper failure (solidcore's `PrimitiveFailure`): it
+/// stands for the status the routine returned (`Upstream` before solidcore described it), and
+/// passes on as that status.
+fn is_primitive_failure(e: &SolidError) -> bool {
+    e.primitive_failure().is_some()
+}
+
+/// A mass-property, healing or geometry-utility failure (solidcore's `MassFailure`,
+/// `HealFailure`, `GeomFailure`): it stands for the status the routine returned (`Upstream`
+/// before solidcore described it), and passes on as that status.
+fn is_mass_heal_or_geom_failure(e: &SolidError) -> bool {
+    e.mass_failure().is_some() || e.heal_failure().is_some() || e.geom_failure().is_some()
+}
+
+/// A sweep routine's failure (solidcore's `SweepFailure`) that replaced a status the routine
+/// returned (`Upstream` before solidcore described it): it passes on as that status. A railed
+/// loft's refusal replaced none and passes on as solidcore's text, as before.
+fn is_sweep_failure(e: &SolidError) -> bool {
+    e.sweep_failure().is_some_and(|w| w.replaces_upstream_status())
+}
+
+/// A query's failure (solidcore's `QueryFailure`): it stands for the status the query returned
+/// (`Upstream` before solidcore described it), and passes on as that status.
+fn is_query_failure(e: &SolidError) -> bool {
+    e.query_failure().is_some()
 }
 
 /// `size_ok`.
@@ -231,8 +298,8 @@ enum Section<'a> {
     /// such rounds at a side edge as the [`Turn`] says (`SetSweptTurns`).
     Round(Turn),
     /// The curvature-continuous section (`SM_FSG_BLEND_CURVE`): the Gⁿ generator's order 2 at the
-    /// equal-area thumbweight (`SMLIB_BLEND_THUMBWEIGHT`, fork 6148773; solidcore#2261 under
-    /// `fillet_gn_section_generator`), which takes off what the ball's circle does.
+    /// equal-area thumbweight (`SMLIB_BLEND_THUMBWEIGHT`, fork 6148773; solidcore#2261, the
+    /// kernel's default since WR-685), which takes off what the ball's circle does.
     Curvature,
     Chord,
     /// A chamfer of the sizes asked: one for all the edges or one per edge, and for each edge
@@ -268,8 +335,8 @@ fn face_set(b: &Brep) -> solidcore::Result<HashSet<FaceId>> {
 /// reason) are [`Error::NoRoom`] like the fork's.
 ///
 /// A blend too large that solidcore sizes (the session's fit, as the fork's capi reads it with
-/// `smlib_blend_fit_size`, or [`SolidError::FilletRefused`] carrying it; under
-/// `fixes.fillet_gn_section_generator`) is [`Error::TooLarge`] with that size, its edge's point
+/// `smlib_blend_fit_size`, or [`SolidError::FilletRefused`] carrying it) is
+/// [`Error::TooLarge`] with that size, its edge's point
 /// filled in by the caller from the edge returned with it ([`sized_on`]); a corner solidcore
 /// refuses as not supported (the mixed corner whose rails cross, solidcore#2256) is
 /// [`Error::Unported`] naming it.
@@ -1366,8 +1433,8 @@ pub(crate) fn fillet_variable(
         if law_has_corner(degree, knots, radii) {
             return Ok(Err(Error::Unsupported));
         }
-        // The round is the union of its balls (smlib#78, solidcore#2262 with
-        // `fillet_gn_section_generator`): each ball touches it along the circle shifted
+        // The round is the union of its balls (smlib#78, solidcore#2262):
+        // each ball touches it along the circle shifted
         // -r r'/|c'| from its great circle. A law whose balls fold over one another is refused
         // (`NoRoomReason::BallsFold`), [`Error::NoRoom`].
         let solid_in = brep_p2::is_manifold_solid(&w)?;
@@ -1383,6 +1450,35 @@ pub(crate) fn fillet_variable(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A B-spline method's failure passes on as the status it stands for, as the `Upstream` it
+    /// replaced did; a cancellation or unported call a B-spline method passes through is not one.
+    #[test]
+    fn b_spline_failures_pass_on_as_their_status() {
+        use solidcore::error::Failure;
+        use solidcore::error::nurbs::BSplineFailure;
+        let op = "nurbs::b_spline_surface::p2::BSplineSurface::split_at";
+        let failed = |b| Failure::new(op, NurbsFailure::BSpline(b)).into_error();
+        assert!(matches!(status(failed(BSplineFailure::NoNurbsForm)), Error::Status(1001)));
+        assert!(matches!(status(failed(BSplineFailure::RoutineFailed)), Error::Status(1001)));
+        assert!(matches!(status(failed(BSplineFailure::Missing("the NURBS form"))), Error::Status(1006)));
+        assert!(matches!(status(failed(BSplineFailure::ZeroAxis)), Error::Status(1007)));
+        assert!(matches!(status(SolidError::unported("SmX", "x")), Error::Unsupported));
+    }
+
+    /// A sweep routine's failure passes on as the status it replaced, as the `Upstream` it replaced
+    /// did; a railed loft's refusal, which replaced no status, keeps passing on as solidcore's text.
+    #[test]
+    fn sweep_failures_pass_on_as_their_status() {
+        use solidcore::error::Failure;
+        use solidcore::error::sweep::SweepFailure;
+        let sweep = |w| Failure::new("sweep::topology_sweep", w).into_error();
+        assert!(matches!(status(sweep(SweepFailure::Failed("the face was already swept"))), Error::Status(1001)));
+        assert!(matches!(status(sweep(SweepFailure::Missing("the edge's curve"))), Error::Status(1006)));
+        assert!(matches!(status(SolidError::sm_err("CopyFaces")), Error::Status(1001)));
+        let cap = SweepFailure::RailPastStationCap { asked: 1e-6, reached: 1e-3, wires: 64 };
+        assert!(matches!(status(sweep(cap)), Error::Solidcore(_)));
+    }
 
     #[test]
     fn laws_are_checked_as_the_capi_checks_them() {
@@ -1409,5 +1505,16 @@ mod tests {
         assert_eq!(pick(&all, &[[1.0, 0.0, 0.0], [0.5, 0.0, 0.0]], 1.0, 1e-6, d).unwrap(), Err(Miss::Ambiguous(1)));
         // The same entity twice is picked once, by its first point.
         assert_eq!(pick(&all, &[[3.1, 0.0, 0.0], [2.9, 0.0, 0.0]], 0.5, 1e-6, d).unwrap(), Ok((vec![3.0], vec![0])));
+    }
+
+    /// A query's failure passes on as the status it replaced, as the `Upstream` it replaced did.
+    #[test]
+    fn query_failures_pass_on_as_their_status() {
+        use solidcore::error::Failure;
+        use solidcore::error::query::QueryFailure;
+        let query = |q| Failure::new("query::edge", q).into_error();
+        assert!(matches!(status(query(QueryFailure::Failed("the region has no shells"))), Error::Status(1001)));
+        assert!(matches!(status(query(QueryFailure::Missing("the face's surface"))), Error::Status(1006)));
+        assert!(matches!(status(query(QueryFailure::InvalidValue("a vector of zero length has no direction"))), Error::Status(1007)));
     }
 }

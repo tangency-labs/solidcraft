@@ -51,9 +51,9 @@
 //! | `p3::FilletCorner::adjust_topology` (`_` arm), the executive's tangent step | `SmFilletCorner::AdjustTopology`, `SmFillet4x3Corner::AdjustTopology`, `SmFilletNxNCorner::AdjustTopology`, `SmFilletCorner::AdjustTangentCorner` (all `return SM_SUCCESS`) |
 //!
 //! Deviations:
-//! - **Exact arcs.** With `Kernel::fixes.fillet_exact_arc_sections` (WR-708, the fork's
-//!   tangency-labs/smlib@523bc25) `MakeConstantRadiusFillet`'s circular generator takes
-//!   the exact circle (`bApproximateArcs` FALSE).
+//! - **Exact arcs.** `MakeConstantRadiusFillet`'s circular generator takes the exact
+//!   circle (`bApproximateArcs` FALSE), as the fork's tangency-labs/smlib@523bc25 does;
+//!   upstream takes approximated arcs (WR-708).
 //! - **Shared helpers.** `sm_CheckSeamOut` and `sm_SetSurfaceClosure` are textually the
 //!   same in `SmFilletCorner.cpp` and `SmFilletGeom.cpp` (each file has its own static
 //!   copy): both are the ports in [`crate::blend::fillet_geom::p1`], re-exported here.
@@ -2443,9 +2443,10 @@ impl FilletCorner {
 
         // arrive here when building an N-sided patch
 
-        // Not upstream (WR-659, opt-in `fillet_corner_face_curve_halves`; the fork's
-        // tangency-labs/smlib 4702889): at a corner whose rounds ease
-        let face_curve_halves = env.k.fixes.fillet_corner_face_curve_halves && self.ease_dist > 0.0;
+        // Not upstream (WR-659; the fork's tangency-labs/smlib 4702889): at a corner whose
+        // rounds ease (m_dEaseDist > 0), the patch's sides on the corner's face curves are
+        // those curves' own halves (below)
+        let face_curve_halves = self.ease_dist > 0.0;
 
         // for every m_Surfaces->Surface - build 1 face with natural edge boundaries
         for surface in self.surfaces.clone() {
@@ -2467,7 +2468,7 @@ impl FilletCorner {
                 curve_orients.push(orient);
             }
 
-            // Not upstream (WR-659, opt-in; the fork's 4702889): at a corner whose rounds
+            // Not upstream (WR-659; the fork's 4702889): at a corner whose rounds
             // ease into their curvature-continuous sections (m_dEaseDist), a side of this
             // face on one of the corner's face curves is that curve's own half
             // (sm_FaceCurveHalfAlong), not the patch's iso-curve, which N_FillNSidedHole fits
@@ -2755,17 +2756,15 @@ impl FilletCorner {
         let fsg0 = fsg_of(env, fg0)?;
         let fsg1 = fsg_of(env, fg1)?;
         let fsg_type = fsg0.fillet_surface_generator_type();
-        let mut blend_scale = 1.5; // For use in SmBlendCurveCrossSectionFSG cases only
         let mut max_continuity = 0u32;
-        // the fork's SmGnSectionFSG (WR-685, fixes.fillet_gn_section_generator): its
+        // a blend-curve generator is the fork's SmGnSectionFSG (WR-685): its
         // thumbweight, and its order as the continuity
-        let gn = matches!(fsg0, FilletSurfaceGenerator::GnSection(_));
         let mut thumbweight = GN_DEFAULT_THUMBWEIGHT;
         if fsg_type != fsg1.fillet_surface_generator_type() {
             return Err(sm_err());
         }
 
-        if fsg_type == FilletSurfaceGeneratorType::BlendCurve && gn {
+        if fsg_type == FilletSurfaceGeneratorType::BlendCurve {
             thumbweight = fsg0.thumbweight().unwrap_or(thumbweight);
             let first_order = fsg0.continuity();
             if (thumbweight - fsg1.thumbweight().unwrap_or(f64::NAN)).abs() > EFF_ZERO
@@ -2777,25 +2776,15 @@ impl FilletCorner {
             if continuity > max_continuity {
                 max_continuity = continuity;
             }
-        } else if fsg_type == FilletSurfaceGeneratorType::BlendCurve {
-            blend_scale = fsg0.blend_scale().unwrap_or(blend_scale);
-            if (blend_scale - fsg1.blend_scale().unwrap_or(blend_scale)).abs() > EFF_ZERO {
-                return Err(sm_err()); // Unable to convert
-            }
-            let continuity = fsg1.continuity().unwrap_or(0);
-            if continuity > max_continuity {
-                max_continuity = continuity;
-            }
         }
 
         // Make a constant radius fillet solver
         let fsg = match fsg_type {
             FilletSurfaceGeneratorType::Circular => {
-                // the fork's exact circle (WR-708, tangency-labs/smlib@523bc25)
-                let approx = !env.k.fixes.fillet_exact_arc_sections;
-                FilletSurfaceGenerator::circular(approx, 1.0e-3, false, false)
+                // the exact circle, not upstream's approximated arcs (WR-708)
+                FilletSurfaceGenerator::circular(false, 1.0e-3, false, false)
             }
-            FilletSurfaceGeneratorType::BlendCurve if gn => {
+            FilletSurfaceGeneratorType::BlendCurve => {
                 FilletSurfaceGenerator::GnSection(GnSectionFsg::new(
                     if max_continuity > 1 {
                         max_continuity as usize
@@ -2804,9 +2793,6 @@ impl FilletCorner {
                     },
                     thumbweight,
                 ))
-            }
-            FilletSurfaceGeneratorType::BlendCurve => {
-                FilletSurfaceGenerator::blend_curve(blend_scale, max_continuity)
             }
             FilletSurfaceGeneratorType::Linear => return Err(sm_err()),
             // no solver is made: pNewFS->SetFilletExecutive on NULL

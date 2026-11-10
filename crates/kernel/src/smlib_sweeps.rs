@@ -97,7 +97,6 @@ mod imp {
 
     use super::*;
     use crate::history::FaceProv;
-    use crate::provenance::{closest_on_tri, face_tris};
     use crate::record;
 
     fn failed(what: &str, e: impl crate::Cause) -> KernelError {
@@ -342,88 +341,144 @@ mod imp {
         Unknown,
     }
 
-    /// The role of each face of `body` swept from the profile in `start` (see the module notes):
-    /// `edges` lie on the walls' edges in the start plane, `inside` inside the walls; the face in
-    /// `end` (or, with `end` unset and `rest_is_end`, a planar face nothing else claims) is the
-    /// end cap.
+    /// The role of each face of `body` swept from the profile in `start` (see the module notes),
+    /// from the body's exact geometry: a face on the start plane is the start cap where a point
+    /// of `edges` lies on it, one on `end` the end cap (with `end` unset and `rest_is_end`, a
+    /// planar face nothing else claims); a wall comes from each piece whose point in `edges` lies
+    /// on its edge in the start plane, or whose point in `inside` lies on it. Each point names
+    /// the nearest edges or faces: one where SMLib split a curve or a wall lies on both.
     fn roles(body: &Body, start: &Plane, end: Option<&Plane>, edges: &[Seed], inside: &[Seed], rest_is_end: bool) -> Result<Vec<Role>> {
+        use solidcore_record::brep::{Curve as RecordCurve, Surface};
+        use solidcraft_geom::brep::eval::CurveEval;
+        let r = body.record();
         let size = body.size().max(1e-9);
-        let mesh_tol = (size * 2e-4).max(1e-6);
-        let m = body.mesh(&crate::MeshTolerance::chord(mesh_tol))?;
-        let faces = face_tris(&m);
-        let n = body.face_count();
-        // A cap's points lie on its plane to the evaluation's precision. Sized to the body, the
-        // flatness tolerance can exceed the gap between parallel start and end planes (a box
-        // 0.1 µm thick in a 14 mm body), which would put each cap in both: it stays under a
-        // quarter of that gap. Planes that coincide (the ends of a half turn) are told apart by
-        // the profile's edges instead.
+        // A cap lies on its plane to the evaluation's precision. Sized to the body, that can exceed
+        // the gap between parallel start and end planes (a box 0.1 µm thick in a 14 mm body), which
+        // would put each cap on both: it stays under a quarter of that gap.
         let gap = end
-            .filter(|e| e.normal().cross(start.normal()).len() < 1e-9)
             .map(|e| start.height(e.origin).abs())
-            .filter(|g| *g > size * 1e-9)
+            .filter(|g| end.is_some_and(|e| e.normal().cross(start.normal()).len() < 1e-9) && *g > size * 1e-9)
             .unwrap_or(f64::INFINITY);
-        let flat_tol = (size * 1e-5 + 1e-9).min(0.25 * gap);
-        let near = 3.0 * mesh_tol + flat_tol;
-        let flat = |f: usize, pl: &Plane| {
-            faces.get(f).is_some_and(|ft| !ft.tris.is_empty() && ft.tris.iter().all(|(t, _)| t.iter().all(|q| pl.height(*q).abs() <= flat_tol)))
+        let tol = (size * 1e-5 + 1e-9).min(0.25 * gap);
+        let vertex = |v: u32| r.vertices.get(v as usize).map(|v| crate::body::v3(v.point));
+        // A planar face's point and unit normal.
+        let flat = |f: &solidcore_record::brep::Face| {
+            let (o, u, v) = match &f.surface {
+                Surface::Plane { origin, u_axis, v_axis } => (crate::body::v3(*origin), crate::body::v3(*u_axis), crate::body::v3(*v_axis)),
+                Surface::PlaneThrough { origin, u_point, v_point } => {
+                    let o = crate::body::v3(*origin);
+                    (o, crate::body::v3(*u_point) - o, crate::body::v3(*v_point) - o)
+                }
+                _ => return None,
+            };
+            u.cross(v).normalized().map(|n| (o, n))
         };
-        let planar =
-            |f: usize| faces.get(f).is_some_and(|ft| ft.tris.first().is_some_and(|(_, n0)| ft.tris.iter().all(|(_, nn)| nn.dot(*n0) > 1.0 - 1e-6)));
-        // A face in the start plane is the start cap where the profile bounds it (a screw's far
-        // end after whole turns lies in the same plane, elsewhere).
-        let touches = |f: usize| {
-            edges.is_empty()
-                || faces.get(f).is_some_and(|ft| edges.iter().any(|s| ft.tris.iter().any(|(t, _)| closest_on_tri(s.at, *t).dist(s.at) <= near)))
+        let on = |f: &solidcore_record::brep::Face, pl: &Plane| {
+            flat(f).is_some_and(|(o, n)| n.dot(pl.normal()).abs() >= 1.0 - 1e-9 && pl.height(o).abs() <= tol)
         };
-        let start_cap: Vec<bool> = (0..n).map(|f| flat(f, start) && touches(f)).collect();
-        let end_cap: Vec<bool> = (0..n).map(|f| end.is_some_and(|e| flat(f, e))).collect();
-        let cap = |f: usize| start_cap.get(f).copied().unwrap_or(false) || end_cap.get(f).copied().unwrap_or(false);
-        let mut swept: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); n];
-        // Each seed lies on its own piece's edge (within the mesh's sag on a curve); `near` is
-        // sized to the body, so on a side shorter than it (a 0.3 mm wall of a 1 m label) the
-        // neighbours' edges are near too. The seed marks only the edges nearest it: the one it
-        // lies on, or both pieces of an edge split at its middle.
-        let start_edges: Vec<(&Vec<Vec3>, &Vec<u32>)> = m
-            .edges
-            .iter()
-            .zip(&m.edge_faces)
-            .filter(|(poly, _)| poly.len() >= 2 && poly.iter().all(|q| start.height(*q).abs() <= flat_tol))
-            .collect();
+        // The edges in the start plane: their ends and middle on it.
+        let mut base = Vec::new();
+        for (i, e) in r.edges.iter().enumerate() {
+            let (Some(a), Some(b)) = (vertex(e.vertices[0]), vertex(e.vertices[1])) else { continue };
+            // An edge SMLib made within its own tolerance of the curve it stands for (a screw's
+            // start) is taken to that tolerance.
+            let reach = tol.max(e.tolerance);
+            if start.height(a).abs() > reach || start.height(b).abs() > reach {
+                continue;
+            }
+            let curve = CurveEval::new(e.parameters()).map_err(|err| KernelError::Failed(format!("extrude history: edge {i}: {err}")))?;
+            let [t0, t1] = e.interval;
+            let mid = curve.point(0.5 * (t0 + t1)).ok_or_else(|| KernelError::Failed(format!("extrude history: edge {i} has no middle")))?;
+            if start.height(mid).abs() > reach {
+                continue;
+            }
+            // The curve's control points bound it.
+            let mut bounds = solidcraft_geom::Aabb3::EMPTY;
+            match e.parameters() {
+                RecordCurve::Line { .. } => [a, b].into_iter().for_each(|q| bounds.add(q)),
+                RecordCurve::Spline { points, .. } => points.iter().for_each(|q| bounds.add(crate::body::v3(*q))),
+                RecordCurve::RationalSpline { homogeneous, .. } if homogeneous.iter().all(|h| h[3] > 0.0) => {
+                    homogeneous.iter().for_each(|h| bounds.add(Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3])))
+                }
+                _ => {
+                    bounds = solidcraft_geom::Aabb3 { min: Vec3::new(-f64::MAX, -f64::MAX, -f64::MAX), max: Vec3::new(f64::MAX, f64::MAX, f64::MAX) }
+                }
+            }
+            // A line by its ends; a curve searched from eight samples a knot span.
+            let samples = match e.parameters() {
+                RecordCurve::Line { .. } => None,
+                RecordCurve::Spline { knots, .. } | RecordCurve::RationalSpline { knots, .. } => {
+                    Some(8 * knots.windows(2).filter(|w| w[1] > w[0]).count().max(8))
+                }
+                _ => Some(64),
+            };
+            base.push((i, curve, e.interval, [a, b], samples, reach, bounds.inflated(reach)));
+        }
+        // Each seed's nearest edges, and the faces on them.
+        let mut matched: Vec<(usize, usize)> = Vec::new();
         for s in edges {
-            let dist = |poly: &[Vec3]| poly.windows(2).map(|w| s.at.dist_to_segment(w[0], w[1])).fold(f64::INFINITY, f64::min);
-            let ds: Vec<f64> = start_edges.iter().map(|(poly, _)| dist(poly)).collect();
-            let nearest = ds.iter().copied().fold(f64::INFINITY, f64::min);
-            for ((_, fs), d) in start_edges.iter().zip(&ds) {
-                if *d <= near && *d <= nearest + flat_tol {
-                    for f in fs.iter().map(|f| *f as usize).filter(|f| !cap(*f)) {
-                        if let Some(set) = swept.get_mut(f) {
-                            set.insert(s.piece);
-                        }
-                    }
+            let ds: Vec<(usize, f64, f64)> = base
+                .iter()
+                .filter(|(.., bounds)| bounds.contains(s.at))
+                .map(|(i, curve, interval, [a, b], samples, reach, _)| {
+                    let Some(samples) = samples else { return (*i, s.at.dist_to_segment(*a, *b), *reach) };
+                    let along = crate::surfaces::nearest_parameter_in(curve, *interval, s.at, *samples).map_or(f64::INFINITY, |(_, d)| d);
+                    (*i, along.min(s.at.dist(*a)).min(s.at.dist(*b)), *reach)
+                })
+                .collect();
+            let nearest = ds.iter().map(|(_, d, _)| *d).fold(f64::INFINITY, f64::min);
+            matched.extend(ds.iter().filter(|(_, d, reach)| *d <= *reach && *d <= nearest + tol).map(|(i, ..)| (*i, s.piece)));
+        }
+        let faces_on = |e: usize| r.edges.get(e).into_iter().flat_map(|e| e.uses.iter().map(|u| u.face as usize));
+        let touched: BTreeSet<usize> = matched.iter().flat_map(|(e, _)| faces_on(*e)).collect();
+        let n = r.faces.len();
+        // How far a point may lie off a face SMLib made to its own tolerance.
+        let reach = r.edges.iter().map(|e| e.tolerance).fold(tol, f64::max);
+        let ops = || body.ops_body().ok_or_else(|| KernelError::Failed("sweep history: the body is no SMLib body".into()));
+        let points = |seeds: &[Seed]| seeds.iter().map(|s| p(s.at)).collect::<Vec<_>>();
+        // A face in the start plane is the start cap where a profile point lies on it: on its edges
+        // (an extrusion's), or inside it (a screw's start section, SMLib's approximation of the profile).
+        let mut start_cap = Vec::with_capacity(r.faces.len());
+        for (f, face) in r.faces.iter().enumerate() {
+            let on_it = on(face, start)
+                && (edges.is_empty() || touched.contains(&f) || {
+                    let (ops, order) = ops()?;
+                    let ds =
+                        ops.face_distances(order, f, &points(edges)).map_err(|e| KernelError::Failed(format!("sweep history: face {f}: {e}")))?;
+                    ds.iter().any(|d| d.is_some_and(|d| d <= reach))
+                });
+            start_cap.push(on_it);
+        }
+        let end_cap: Vec<bool> = r.faces.iter().map(|face| end.is_some_and(|e| on(face, e))).collect();
+        let mut swept: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); n];
+        for (e, piece) in &matched {
+            for f in faces_on(*e) {
+                if !start_cap.get(f).copied().unwrap_or(false)
+                    && !end_cap.get(f).copied().unwrap_or(false)
+                    && let Some(set) = swept.get_mut(f)
+                {
+                    set.insert(*piece);
                 }
             }
         }
-        // Inside the walls: the face nearest each point (bounded work).
-        let tris: usize = faces.iter().map(|f| f.tris.len()).sum();
-        if tris.saturating_mul(inside.len()) <= 50_000_000 {
-            for s in inside {
-                let mut best = (f64::INFINITY, usize::MAX);
-                for (fi, ft) in faces.iter().enumerate() {
-                    if !ft.bounds.inflated(best.0.min(size)).contains(s.at) {
-                        continue;
+        // Inside the walls: the faces nearest each point, as trimmed (a point on the edge between
+        // two faces of one wall lies on both).
+        if !inside.is_empty() {
+            let (ops, order) = ops()?;
+            let points = points(inside);
+            let ds = (0..n)
+                .map(|f| ops.face_distances(order, f, &points).map_err(|e| KernelError::Failed(format!("sweep history: face {f}: {e}"))))
+                .collect::<Result<Vec<_>>>()?;
+            for (j, s) in inside.iter().enumerate() {
+                let d = |f: usize| ds.get(f).and_then(|d| d.get(j).copied().flatten()).unwrap_or(f64::INFINITY);
+                let nearest = (0..n).map(d).fold(f64::INFINITY, f64::min);
+                for f in (0..n).filter(|f| d(*f) <= reach && d(*f) <= nearest + tol) {
+                    if !start_cap.get(f).copied().unwrap_or(false)
+                        && !end_cap.get(f).copied().unwrap_or(false)
+                        && let Some(set) = swept.get_mut(f)
+                    {
+                        set.insert(s.piece);
                     }
-                    for (t, _) in &ft.tris {
-                        let d = closest_on_tri(s.at, *t).dist(s.at);
-                        if d < best.0 {
-                            best = (d, fi);
-                        }
-                    }
-                }
-                if best.0 <= 5.0 * near
-                    && !cap(best.1)
-                    && let Some(set) = swept.get_mut(best.1)
-                {
-                    set.insert(s.piece);
                 }
             }
         }
@@ -437,7 +492,7 @@ mod imp {
                     Role::End
                 } else if !set.is_empty() {
                     Role::Wall(set)
-                } else if end.is_none() && rest_is_end && planar(f) {
+                } else if end.is_none() && rest_is_end && r.faces.get(f).is_some_and(|face| flat(face).is_some()) {
                     Role::End
                 } else {
                     log::debug!(target: "smlib", "sweep history: face {f} comes from no profile segment");
@@ -519,9 +574,7 @@ mod imp {
         let rule = draft.map_or(DraftCorner::default(), |d| corner(d.corner));
         let brep = Brep::extrude(&c, p(dir), distance, lean, rule, true).map_err(|e| failed("extrude", e))?;
         let body = body_of(brep, "extrude")?;
-        // Half-way along a straight wall lies over its segment; a drafted one has moved.
-        let inside = if draft.is_none() { seeds(&base, pieces, |q| q + dir * (distance * 0.5)) } else { Vec::new() };
-        let roles = roles(&body, &base, Some(&top), &edges, &inside, false)?;
+        let roles = roles(&body, &base, Some(&top), &edges, &[], false)?;
         let sources = (draft.is_none() && sign > 0.0).then(|| extrude_sources(&roles, pieces, region, plane, &base, &top));
         let body = body.with_face_sources(sources.map(std::sync::Arc::new));
         with_history(body, &roles, pieces)
@@ -1628,11 +1681,9 @@ mod imp {
         let st = crate::sweep_path::controlled_stations(plane, &[start, a0], &[first_t, t0], &[], &law)?;
         let want = st.last().map(|s| s.apply(plane.x)).ok_or_else(|| KernelError::Invalid("sweep path".into()))?;
         let have = affine_turn(at_start, plane.x);
-        // About the section's normal, pointing the way the run leaves it (the twist's axis).
-        let n = affine_turn(at_start, plane.normal());
-        let axis = (if n.dot(t0) < 0.0 { n * -1.0 } else { n })
-            .normalized()
-            .ok_or_else(|| KernelError::Invalid("the sweep's section is degenerate".into()))?;
+        // About the run's direction (the twist's axis, as `controlled_stations` turns about the
+        // path where it leaves the profile).
+        let axis = t0.normalized().ok_or_else(|| KernelError::Invalid("the sweep's section is degenerate".into()))?;
         let flat = |v: Vec3| (v - axis * v.dot(axis)).normalized();
         let (Some(w), Some(h)) = (flat(want), flat(have)) else {
             return Err(KernelError::Invalid("the profile lies along the sweep path at a corner".into()));
@@ -1839,11 +1890,14 @@ mod imp {
         pitch: f64,
         turns: f64,
         law: &[(f64, f64)],
+        continuous_flanks: bool,
     ) -> Result<Body> {
         let c = curves(plane, pieces)?;
         let tolerance = (pitch.abs() * 1e-4).clamp(1e-6, 1e-2);
+        let options =
+            solidcraft_smlib::sweeps::ScrewSweepOptions { law: (!law.is_empty()).then_some(law), join_spline_walls: continuous_flanks, tolerance };
         let brep =
-            Brep::screw_sweep_radial(&c, p(origin), p(axis), pitch, turns, law, tolerance).map_err(|e| failed("screw sweep with a radial law", e))?;
+            Brep::screw_sweep_with_options(&c, p(origin), p(axis), pitch, turns, options).map_err(|e| failed("screw sweep with a radial law", e))?;
         let body = body_of(brep, "screw sweep")?;
         let roles = roles(&body, plane, None, &seeds(plane, pieces, |q| q), &[], true)?;
         with_history(body, &roles, pieces)

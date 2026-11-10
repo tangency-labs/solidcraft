@@ -634,13 +634,37 @@ impl OffsetCurve {
     }
 
     /// The base curve's unique knots and multiplicities, optionally limited to
-    /// `interval` (`GetKnots`).
+    /// `interval` (`GetKnots`). When the offset curve is reversed, the interval is
+    /// mapped to the base curve and the resulting knots and multiplicities are
+    /// mirrored and returned in increasing order.
     ///
     /// # Errors
     ///
     /// Those of the base curve's `GetKnots`.
     pub fn knots(&self, k: &Kernel, interval: Option<&Extent1d>) -> Result<(Vec<f64>, Vec<usize>)> {
-        self.base()?.knots(k, interval)
+        let base = self.base()?;
+        if self.reversed == 0 {
+            return base.knots(k, interval);
+        }
+        let base_ivl = interval.map(|ivl| {
+            let u0 = self.base_parameter(ivl.min());
+            let u1 = self.base_parameter(ivl.max());
+            let (min_u, max_u) = if u0 > u1 { (u1, u0) } else { (u0, u1) };
+            Extent1d::from_min_max(min_u - EFF_ZERO, max_u + EFF_ZERO)
+        });
+        let (base_knots, base_mults) = base.knots(k, base_ivl.as_ref())?;
+        let (knots, mults) = base_knots
+            .into_iter()
+            .rev()
+            .zip(base_mults.into_iter().rev())
+            .filter_map(|(u, m)| {
+                let t = self.base_parameter(u);
+                interval
+                    .is_none_or(|ivl| ivl.contains_value(t, 0.0))
+                    .then_some((t, m))
+            })
+            .unzip();
+        Ok((knots, mults))
     }
 
     /// The base curve's natural knot count (`GetNumberNaturalKnots`).
@@ -1007,5 +1031,70 @@ mod tests {
         .unwrap();
         assert!(c.evaluate_point(k, 0.5).is_err());
         assert!(c.evaluate(k, 0.5, 2, true, true).is_err());
+    }
+
+    #[test]
+    fn reversed_offset_curve_reports_knots_in_order_and_respects_interval() {
+        let k = &Kernel::default();
+        // A quadratic B-spline on [0, 2] with knots 0 (x3), 0.5 (x2), 1 (x1), 2 (x3).
+        let mut cur = crate::nurbs::nurbs_crv::allocate_nurb_curve(5, 2, 8).unwrap();
+        cur.knots_mut()
+            .copy_from_slice(&[0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 2.0, 2.0, 2.0]);
+        let base = Curve::from(crate::nurbs::b_spline_curve::BSplineCurve::from_nurb(
+            cur, 3, false,
+        ));
+        let mut c = OffsetCurve::new(
+            3,
+            base,
+            Extent1d::from_min_max(0.0, 2.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            0.0,
+            false,
+        )
+        .unwrap();
+
+        // Before reversal: knots are [0.0, 0.5, 1.0, 2.0] with mults [3, 2, 1, 3].
+        let (knots, mults) = c.knots(k, None).unwrap();
+        assert_eq!(knots, vec![0.0, 0.5, 1.0, 2.0]);
+        assert_eq!(mults, vec![3, 2, 1, 3]);
+
+        // Reverse the offset curve parameterisation.
+        let _ = c.reverse_parameterization(&Extent1d::from_min_max(0.0, 2.0));
+
+        // When reversed, knots are 0, 1, 1.5, 2 with multiplicities 3, 1, 2, 3.
+        let (rev_knots, rev_mults) = c.knots(k, None).unwrap();
+        assert_eq!(rev_knots, vec![0.0, 1.0, 1.5, 2.0]);
+        assert_eq!(rev_mults, vec![3, 1, 2, 3]);
+
+        // Querying interval [1.25, 1.75] should find the knot at 1.5 with multiplicity 2.
+        let (sub_knots, sub_mults) = c
+            .knots(k, Some(&Extent1d::from_min_max(1.25, 1.75)))
+            .unwrap();
+        assert_eq!(sub_knots, vec![1.5]);
+        assert_eq!(sub_mults, vec![2]);
+
+        // A knot at 0.3 on [0.0, 1.0] reverses to 0.7. Querying [0.7, 0.7] must include it despite roundoff.
+        let mut cur_unit = crate::nurbs::nurbs_crv::allocate_nurb_curve(2, 1, 4).unwrap();
+        cur_unit
+            .knots_mut()
+            .copy_from_slice(&[0.0, 0.0, 0.3, 1.0, 1.0]);
+        let base_unit = Curve::from(crate::nurbs::b_spline_curve::BSplineCurve::from_nurb(
+            cur_unit, 3, false,
+        ));
+        let mut c_unit = OffsetCurve::new(
+            3,
+            base_unit,
+            Extent1d::from_min_max(0.0, 1.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            0.0,
+            false,
+        )
+        .unwrap();
+        let _ = c_unit.reverse_parameterization(&Extent1d::from_min_max(0.0, 1.0));
+        let (pt_knots, pt_mults) = c_unit
+            .knots(k, Some(&Extent1d::from_min_max(0.7, 0.7)))
+            .unwrap();
+        assert_eq!(pt_knots, vec![0.7]);
+        assert_eq!(pt_mults, vec![1]);
     }
 }

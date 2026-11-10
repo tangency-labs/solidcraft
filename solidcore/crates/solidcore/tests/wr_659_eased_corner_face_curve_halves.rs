@@ -9,8 +9,9 @@
 //! r 5, set back and eased (`smlib_blend_setback_open_eased`; capi test
 //! `corner_setback_eased_face_curves_are_quintics`). Since solidcore#2933 this marked corner
 //! between planes is the blend corner's Setback, its G2 fill bounded by the same halves, and
-//! the checks hold for it; `fillet_corner_face_curve_halves`' N x N branch is reached only by
-//! an N x N corner (beside a curved face), which this test does not build.
+//! the checks hold for it; the N x N corner's face-curve halves (the default since their flag
+//! was retired: WR-659 update in the WR-685 addendum 2026-11-06) are reached only by an N x N
+//! corner (beside a curved face), which this test does not build.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -19,6 +20,7 @@
 )] // test helpers
 
 use solidcore::blend::fillet_executive::session::FilletSession;
+use solidcore::blend::fillet_section::section::GN_DEFAULT_THUMBWEIGHT;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::surface::surface::SurfaceKind;
@@ -35,12 +37,11 @@ fn at_point(b: &Brep, v: VertexId, p: [f64; 3]) -> bool {
     (q.x - p[0]).abs() + (q.y - p[1]).abs() + (q.z - p[2]).abs() < 1e-6
 }
 
-/// The box with its three edges at `CORNER` rounded r 5 by the curvature-continuous blend,
-/// the corner set back `setback` and eased `ease`, under `halves`
-/// (`fillet_corner_face_curve_halves`); and the corner patch's faces.
-fn build(setback: f64, ease: f64, halves: bool) -> (Kernel, Brep, Vec<solidcore::FaceId>) {
+/// The box with its three edges at `CORNER` rounded r 5 by the curvature-continuous blend
+/// (the order-2 G^n section at its default, equal area thumbweight),
+/// the corner set back `setback` and eased `ease`; and the corner patch's faces.
+fn build(setback: f64, ease: f64) -> (Kernel, Brep, Vec<solidcore::FaceId>) {
     let mut k = Kernel::default();
-    k.fixes.fillet_corner_face_curve_halves = halves;
     let mut b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 20.0).unwrap();
     let edges: Vec<EdgeId> = b
         .edges()
@@ -58,8 +59,7 @@ fn build(setback: f64, ease: f64, halves: bool) -> (Kernel, Brep, Vec<solidcore:
     {
         let mut s = FilletSession::new(&mut k, &mut b).unwrap();
         s.set_mark_corner_patches(true);
-        s.set_blend_curve_at_thirds(true);
-        s.prepare_constant_radius_edges(&mut k, &edges, 5.0, 2, 2, 1.0)
+        s.prepare_constant_radius_edges(&mut k, &edges, 5.0, 2, 2, GN_DEFAULT_THUMBWEIGHT)
             .unwrap();
         // the corner set back (`AddSetBackVertex`): no Ball is built there
         let set_back: Vec<_> = s
@@ -142,11 +142,11 @@ fn end_curvature(k: &Kernel, b: &Brep, e: EdgeId, v: VertexId) -> f64 {
     d[1].cross(d[2]).length() / (speed * speed * speed)
 }
 
-/// Flag on: every face curve half is one span of degree at most 5; where two halves meet
+/// Every face curve half is one span of degree at most 5; where two halves meet
 /// their curvatures agree, at its other end (on its straight contact line) it is flat; the
 /// result is a manifold solid.
 fn assert_quintic_halves(setback: f64, ease: f64) {
-    let (k, b, patch) = build(setback, ease, true);
+    let (k, b, patch) = build(setback, ease);
     assert!(
         is_manifold_solid(&b).unwrap(),
         "setback {setback}, ease {ease}"
