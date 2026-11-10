@@ -1976,23 +1976,47 @@ fn map_bspline_curve(b: &BSplineCurve) -> R<BCurve> {
             b.points.iter().zip(w).map(|(p, w)| [p[0] * w, p[1] * w, p[2] * w, *w]).collect()
         }
     };
-    // An unclamped knot vector (a periodic curve written with uniform knots, its first points
-    // repeated at its end) is the same curve over [knots[p], knots[n]] clamped there, exactly
-    // (knot insertion): its parameters unchanged, its ends its own points, as every evaluator
-    // and pcurve takes a spline.
-    let (p, n) = (b.degree, homogeneous.len());
-    let (lo, hi) = (knots.get(p).copied(), knots.get(n).copied());
-    let clamped = |at: &[f64], x: Option<f64>| x.is_some_and(|x| at.iter().all(|k| *k == x));
-    let (knots, homogeneous) = match (knots.get(..=p), knots.get(n..), lo, hi) {
-        (Some(head), Some(tail), Some(a), Some(z)) if !(clamped(head, lo) && clamped(tail, hi)) => {
-            solidcore::eval::pcurve::segment(p, &knots, &homogeneous, a, z).map_err(|e| format!("an unclamped B-spline curve: {e}"))?
-        }
-        _ => (knots, homogeneous),
-    };
+    let (knots, homogeneous) = clamped(b.degree, knots, homogeneous).map_err(|e| format!("an unclamped B-spline curve: {e}"))?;
     Ok(match &b.weights {
         None => BCurve::Spline { knots, points: homogeneous.iter().map(|h| [h[0], h[1], h[2]]).collect() },
         Some(_) => BCurve::RationalSpline { knots, homogeneous },
     })
+}
+
+/// A spline of `degree` on `knots` over `homogeneous` control points with an unclamped knot
+/// vector (a periodic spline written with uniform knots, its first points repeated at its end) as
+/// the same spline over [knots[degree], knots[n]] clamped there, exactly (knot insertion): its
+/// parameters unchanged, its ends its own points, as every evaluator and pcurve takes a spline,
+/// and a closed one's first and last points one. A clamped one comes back as it is.
+fn clamped(degree: usize, knots: Vec<f64>, homogeneous: Vec<[f64; 4]>) -> Result<(Vec<f64>, Vec<[f64; 4]>), String> {
+    let (p, n) = (degree, homogeneous.len());
+    let (lo, hi) = (knots.get(p).copied(), knots.get(n).copied());
+    let repeats = |at: &[f64], x: Option<f64>| x.is_some_and(|x| at.iter().all(|k| *k == x));
+    match (knots.get(..=p), knots.get(n..), lo, hi) {
+        (Some(head), Some(tail), Some(a), Some(z)) if !(repeats(head, lo) && repeats(tail, hi)) => {
+            solidcore::eval::pcurve::segment(p, &knots, &homogeneous, a, z).map_err(|e| e.to_string())
+        }
+        _ => Ok((knots, homogeneous)),
+    }
+}
+
+/// Each of `lines`, a spline of `degree` on `knots`, clamped ([`clamped`]), and the knots they
+/// share after it.
+fn clamped_lines(degree: usize, knots: Vec<f64>, lines: Vec<Vec<[f64; 4]>>) -> R<(Vec<f64>, Vec<Vec<[f64; 4]>>)> {
+    let mut out = Vec::new();
+    let mut shared = None;
+    for line in lines {
+        let (k, c) = clamped(degree, knots.clone(), line).map_err(|e| format!("an unclamped B-spline surface: {e}"))?;
+        shared = Some(k);
+        out.push(c);
+    }
+    Ok((shared.unwrap_or(knots), out))
+}
+
+/// `grid`'s columns as rows.
+fn transposed(grid: &[Vec<[f64; 4]>]) -> Vec<Vec<[f64; 4]>> {
+    let width = grid.first().map_or(0, Vec::len);
+    (0..width).map(|j| grid.iter().filter_map(|r| r.get(j).copied()).collect()).collect()
 }
 
 fn map_bspline_surface(b: &BSplineSurface) -> R<BSurface> {
@@ -2003,16 +2027,28 @@ fn map_bspline_surface(b: &BSplineSurface) -> R<BSurface> {
     if b.points.iter().any(|r| r.len() != nv) {
         return Err("ragged B-spline surface".into());
     }
+    if let Some(w) = &b.weights
+        && (w.len() != nu || w.iter().any(|r| r.len() != nv))
+    {
+        return Err("B-spline surface weights and points differ in number".into());
+    }
+    // Control point (i, j) is row i (along u), entry j (along v), homogeneous.
+    let weight = |i: usize, j: usize| b.weights.as_ref().and_then(|w| w.get(i)?.get(j).copied()).unwrap_or(1.0);
+    let homogeneous = |i: usize, j: usize, p: &[f64; 3]| {
+        let w = weight(i, j);
+        [p[0] * w, p[1] * w, p[2] * w, w]
+    };
+    let rows: Vec<Vec<[f64; 4]>> =
+        b.points.iter().enumerate().map(|(i, r)| r.iter().enumerate().map(|(j, p)| homogeneous(i, j, p)).collect()).collect();
+    // Unclamped knots in either direction are clamped exactly, line by line: every row is a
+    // spline in v on the v knots, every column one in u on the u knots, and inserting the same
+    // knots into each gives the surface's.
+    let (v_knots, rows) = clamped_lines(b.v_degree, v_knots, rows)?;
+    let (u_knots, columns) = clamped_lines(b.u_degree, u_knots, transposed(&rows))?;
+    let rows = transposed(&columns);
     Ok(match &b.weights {
-        None => BSurface::Spline { u_knots, v_knots, points: b.points.clone() },
-        Some(w) => {
-            if w.len() != nu || w.iter().any(|r| r.len() != nv) {
-                return Err("B-spline surface weights and points differ in number".into());
-            }
-            let homogeneous =
-                b.points.iter().zip(w).map(|(row, wr)| row.iter().zip(wr).map(|(p, w)| [p[0] * w, p[1] * w, p[2] * w, *w]).collect()).collect();
-            BSurface::RationalSpline { u_knots, v_knots, homogeneous }
-        }
+        None => BSurface::Spline { u_knots, v_knots, points: rows.iter().map(|r| r.iter().map(|h| [h[0], h[1], h[2]]).collect()).collect() },
+        Some(_) => BSurface::RationalSpline { u_knots, v_knots, homogeneous: rows },
     })
 }
 
