@@ -1632,19 +1632,19 @@ impl Body {
             return vec![None; indices.len()];
         }
         let tol = self.planar_edges_tolerance();
-        let mut faces = None;
-        indices
-            .iter()
-            .map(|i| {
-                let mut work = 262_144usize;
-                let run = crate::prism_curve::Run::of(&self.record, *i, true)?;
-                crate::prism_curve::projected_curves(&run, plane, tol, &mut work).or_else(|| {
-                    let faces = faces.get_or_insert_with(|| crate::history::edge_faces(&self.record));
-                    let segs = self.projected_on_cylinder(plane, *i, faces.get(*i)?, tol)?;
-                    Some(segs.into_iter().map(crate::PlanarPiece::Seg).collect())
-                })
-            })
-            .collect()
+        let exact = solidcore_ops::spline_projection::project_edges(&self.record, plane, indices, tol);
+        indices.iter().zip(exact).map(|(i, projected)| self.cylinder_edge_projection(plane, *i).or(projected)).collect()
+    }
+
+    /// The circle or arc of a cylinder bounded by this edge, viewed along its axis.
+    /// Uses the body's existing tolerance and the kernel's monotone-turn certificate.
+    pub fn cylinder_edge_projection(&self, plane: &solidcore_record::Plane, edge: usize) -> Option<Vec<crate::PlanarPiece>> {
+        if self.is_mesh() {
+            return None;
+        }
+        let faces = crate::history::edge_faces(&self.record);
+        self.projected_on_cylinder(plane, edge, faces.get(edge)?, self.planar_edges_tolerance())
+            .map(|segs| segs.into_iter().map(crate::PlanarPiece::Seg).collect())
     }
 
     /// Edge `edge` projected on `plane` as the arc it covers of the circle of a cylinder it

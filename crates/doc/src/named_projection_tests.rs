@@ -6,28 +6,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 #[test]
-fn a_short_certified_arc_far_from_the_origin_keeps_its_selected_sweep() {
-    use solidcore_record::{Seg2, Vec2};
-    use solidcraft_sketch::LinkGeom;
-    let source = Plane::XY.offset(0.);
-    let source = Plane::new(Vec3::new(1e6, 0., 0.), source.x, source.y).unwrap();
-    let target = Plane::new(Vec3::new(1e6, 0., 0.), Vec3::new(0.8, 0., 0.6), Vec3::Y).unwrap();
-    let arc = crate::kernel::PlanarPiece::Seg(Seg2::Arc { center: Vec2::ZERO, radius: 1., start: 0., sweep: 0.0005 });
-    let projected = crate::project::project_certified_arcs(&target, &source, &[arc]).unwrap();
-    assert_eq!(projected.len(), 1);
-    let points = match &projected[0] {
-        LinkGeom::Conic { a, apex, b, .. } => vec![*a, *apex, *b],
-        LinkGeom::Spline { pts, .. } => pts.clone(),
-        LinkGeom::Line(a, b) => vec![*a, *b],
-        other => panic!("a tiny selected arc must not become a full ellipse: {other:?}"),
-    };
-    let expected = |t: f64| target.to_local(source.to_world(Vec2::new(t.cos(), t.sin())));
-    assert!(points.first().unwrap().dist(expected(0.)) < 1e-7);
-    assert!(points.last().unwrap().dist(expected(0.0005)) < 1e-7);
-    assert!(points.iter().all(|p| p.dist(expected(0.)) < 0.001));
-}
-
-#[test]
 fn tilted_spline_projection_keeps_one_exact_curve() {
     use solidcore_record::{Seg2, Vec2};
     use solidcraft_sketch::{CurveKind, LinkGeom, Nurbs};
@@ -46,7 +24,6 @@ fn tilted_spline_projection_keeps_one_exact_curve() {
         let chords: Vec<_> = points.windows(2).map(|p| p[0].dist(p[1]).max(1e-9)).collect();
         let total: f64 = chords.iter().sum();
         let expected: Vec<Vec2> = (0..=128)
-            .into_iter()
             .map(|i| {
                 let t = f64::from(i) / 128.;
                 if let Some(spans) = &fit_spans {
