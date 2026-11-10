@@ -519,7 +519,7 @@ pub struct RefusedExpect {
     /// Text the step's error contains. Empty or whitespace-only text is invalid.
     pub error: String,
     /// The largest size that builds, which the refusal must report
-    /// (`SolidError::FilletRefused`'s `fit`; needs `fillet_gn_section_generator`).
+    /// (`SolidError::FilletRefused`'s `fit`).
     #[serde(default)]
     pub fit_size: Option<FitSizeExpect>,
 }
@@ -987,7 +987,7 @@ pub enum Run {
     /// A step returned an error other than `Unported`.
     Error(String),
     /// A fillet or chamfer step was refused as too large, with the largest size that
-    /// builds it (`SolidError::FilletRefused`, opt-in `fillet_gn_section_generator`).
+    /// builds it (`SolidError::FilletRefused`, WR-696).
     /// Scored as an `ERROR`, except by a case that expects the refusal.
     Refused {
         /// The error, prefixed with the step as for [`Run::Error`].
@@ -1753,7 +1753,6 @@ fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
         "cover_wraps_across_closed_seam" => &mut k.fixes.cover_wraps_across_closed_seam,
         "fillet_refuse_non_manifold_result" => &mut k.fixes.fillet_refuse_non_manifold_result,
         "fillet_refuse_crossing_rails" => &mut k.fixes.fillet_refuse_crossing_rails,
-        "fillet_refuse_ball_not_fitting" => &mut k.fixes.fillet_refuse_ball_not_fitting,
         "fillet_torus_rail_on_axis" => &mut k.fixes.fillet_torus_rail_on_axis,
         "cone_parallel_line_midpoint" => &mut k.fixes.cone_parallel_line_midpoint,
         "fillet_trace_from_tangent_point_toward_next" => {
@@ -2508,11 +2507,9 @@ mod tests {
         enable_fix(&mut k, "sweep_frame_on_planar_path_normal").unwrap();
         enable_fix(&mut k, "cover_refuses_folded_continuation").unwrap();
         enable_fix(&mut k, "fillet_refuse_non_manifold_result").unwrap();
-        enable_fix(&mut k, "fillet_refuse_ball_not_fitting").unwrap();
         assert!(k.fixes.sweep_frame_on_planar_path_normal);
         assert!(k.fixes.cover_refuses_folded_continuation);
         assert!(k.fixes.fillet_refuse_non_manifold_result);
-        assert!(k.fixes.fillet_refuse_ball_not_fitting);
         assert!(enable_fix(&mut k, "no_such_fix").is_err());
     }
 
@@ -2727,7 +2724,7 @@ mod tests {
         // blend's checks the refusal reports the largest radius that builds, 3.
         let case: Case = serde_json::from_value(json!({
             "name": "bar-round-too-large",
-            "fixes": ["fillet_refuse_overlapping_bands", "fillet_gn_section_generator"],
+            "fixes": ["fillet_refuse_overlapping_bands"],
             "steps": [
                 {"op": "box", "id": "bar", "origin": [14.0, 0.0, 0.0], "size": [14.0, 6.0, 10.0]},
                 {"op": "fillet", "id": "result", "body": "bar",

@@ -2702,7 +2702,6 @@ mod tests {
         use crate::surface::procedural_blend::{BlendDefinitionInput, ProceduralBlend};
 
         let mut k = Kernel::default();
-        k.fixes.fillet_gn_section_generator = true;
         k.fixes.fillet_round_as_definition = true;
 
         let (l, r) = (10.0, 2.0);

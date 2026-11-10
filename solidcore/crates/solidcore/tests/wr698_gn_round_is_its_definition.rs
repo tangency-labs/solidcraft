@@ -1,5 +1,5 @@
-//! WR-698 (#2273, the fork's 4a10ed8): with `fillet_round_as_definition` (and
-//! `fillet_gn_section_generator`) the G^n section generator's round is its definition,
+//! WR-698 (#2273, the fork's 4a10ed8): with `fillet_round_as_definition` the G^n section
+//! generator's round is its definition,
 //! a procedural blend (`SmProceduralBlend`) on the certified net it built: its faces,
 //! the ball's offsets and sides, the section, the centre line as the leader, the feet's
 //! uv curves as the seeds and the certified bound. A face that is itself a blend by its
@@ -40,8 +40,6 @@ use solidcore::{Brep, Kernel};
 
 fn kernel(definition: bool) -> Kernel {
     let mut fixes = UpstreamFixes::default();
-    fixes.fillet_gn_section_generator = true;
-    fixes.fillet_surface_plane_curve_on_plane_equation = true;
     fixes.fillet_round_as_definition = definition;
     let mut k = Kernel::new(&KernelOptions::default());
     k.fixes = fixes;

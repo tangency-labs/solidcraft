@@ -1,6 +1,7 @@
 //! WR-685 addendum (#2250; the fork's tangency-labs/smlib d2a6125, f2ec002, e9560e3 and
-//! 2714d37 in d01d7b0, rebased from 6b346f6, 5db8feb, fb5c060 and d622107): with
-//! `fixes.fillet_gn_section_generator` a variable round is the union of its balls. Its
+//! 2714d37 in d01d7b0, rebased from 6b346f6, 5db8feb, fb5c060 and d622107): a variable
+//! round is the union of its balls (on every kernel since the G^n section's flag,
+//! `fillet_gn_section_generator`, was retired: WR-685 addendum 2026-11-06). Its
 //! circle section is the circle along which the balls' envelope touches the ball, square
 //! to the centre line and moved along it by `-r r'/|c'|`, not the great circle through the
 //! rails; and a round whose balls fold over one another is refused (`NoRoom`, naming the
@@ -64,30 +65,22 @@ fn edge_between(k: &Kernel, b: &Brep, p: Point3, q: Point3) -> (EdgeId, bool) {
         .expect("edge")
 }
 
-/// The kernel: every fix on (the fork's own behaviour) when `fork`, else upstream's; the
-/// G^n section generator as `gn`. Without it the kernel is the fork before d01d7b0, whose
-/// rounds' sections are still upstream's approximated arcs: the exact circle
-/// (`fillet_exact_arc_sections`, WR-708, the fork's 523bc25) comes after the G^n section
-/// and is off with it.
-fn kernel(fork: bool, gn: bool) -> Kernel {
-    let mut k = Kernel::default();
-    let mut fixes = if fork {
-        UpstreamFixes::all()
-    } else {
-        UpstreamFixes::default()
-    };
-    fixes.fillet_gn_section_generator = gn;
-    if !gn {
-        fixes.fillet_exact_arc_sections = false;
+/// The kernel: every fix on (the fork's own behaviour) when `fork`, else the default.
+fn kernel(fork: bool) -> Kernel {
+    Kernel {
+        fixes: if fork {
+            UpstreamFixes::all()
+        } else {
+            UpstreamFixes::default()
+        },
+        ..Kernel::default()
     }
-    k.fixes = fixes;
-    k
 }
 
 /// The fork at d01d7b0 (and 58d03ef): every fix but the exact circle of 523bc25
 /// (`fillet_exact_arc_sections`, WR-708).
 fn kernel_d01d7b0() -> Kernel {
-    let mut k = kernel(true, true);
+    let mut k = kernel(true);
     k.fixes.fillet_exact_arc_sections = false;
     k
 }
@@ -95,7 +88,7 @@ fn kernel_d01d7b0() -> Kernel {
 /// The fork at 5e8c9c1 (and 523bc25): every fix but WR-711's one arc count of the exact
 /// circles (`fillet_exact_arc_spans`), which comes after them.
 fn kernel_5e8c9c1() -> Kernel {
-    let mut k = kernel(true, true);
+    let mut k = kernel(true);
     k.fixes.fillet_exact_arc_spans = false;
     k
 }
@@ -185,7 +178,7 @@ fn rel(a: f64, b: f64) -> f64 {
 #[test]
 fn a_linear_round_is_the_balls_cone() {
     for fork in [false, true] {
-        let v = cone_round(kernel(fork, true));
+        let v = cone_round(kernel(fork));
         let removed = 12000.0 - v;
         eprintln!(
             "fork fixes {fork}: {v} removed {removed}, cone {}",
@@ -206,22 +199,8 @@ fn a_linear_round_is_the_balls_cone() {
 }
 
 #[test]
-fn a_linear_round_keeps_the_great_circles_without_the_fix() {
-    for fork in [false, true] {
-        let v = cone_round(kernel(fork, false));
-        // the great circles leave the cone: 44.353 removed, 1.3% over the cone's 43.778
-        // (SolidCraft's measurement of solidcore before the fix)
-        let removed = 12000.0 - v;
-        eprintln!("fork fixes {fork}, no G^n section: {v} removed {removed}");
-        assert!((removed - 44.353).abs() < 1e-3, "{removed}");
-        assert!(rel(v, CONE_VOLUME) > 1e-5, "{v}");
-    }
-}
-
-#[test]
 fn folding_balls_are_refused_naming_the_radius() {
-    let (err, reason) =
-        spline_round(kernel(true, true), FOLDS).expect_err("a folded round is refused");
+    let (err, reason) = spline_round(kernel(true), FOLDS).expect_err("a folded round is refused");
     eprintln!("{err}");
     assert_eq!(reason, Some(NoRoomReason::BallsFold));
     // since the fork's tangency-labs/smlib#79 (410dfe1, WR-696) the fold is found by
@@ -232,22 +211,13 @@ fn folding_balls_are_refused_naming_the_radius() {
         err.contains("fold over one another where its radius is 19.63563:"),
         "{err}"
     );
-    let (err, reason) = spline_round(kernel(true, true), [2.0, 2.0, 13.2, 3.0, 2.0])
+    let (err, reason) = spline_round(kernel(true), [2.0, 2.0, 13.2, 3.0, 2.0])
         .expect_err("a folded round is refused");
     assert_eq!(reason, Some(NoRoomReason::BallsFold));
     assert!(
         err.contains("fold over one another where its radius is 7.838673:"),
         "{err}"
     );
-}
-
-#[test]
-fn folding_balls_build_folded_without_the_fix() {
-    // the great circles never fold: the round builds, 726.56 removed against the union of
-    // the balls' 332.2 (the fork's capi test, before d622107: 726.53)
-    let v = spline_round(kernel(true, false), FOLDS).expect("builds");
-    eprintln!("no G^n section: {v} removed {}", 6000.0 - v);
-    assert!((6000.0 - v - 726.5).abs() < 0.5, "{v}");
 }
 
 #[test]
@@ -336,7 +306,7 @@ fn a_cliff_overflows_variable_round_holds_its_law_on_its_touch_circles() {
 /// its G^n section is built for constant radii only).
 #[test]
 fn a_variable_blend_curve_round_takes_the_gn_default_thumbweight() {
-    let mut k = kernel(true, true);
+    let mut k = kernel(true);
     let mut b = create_box(&mut k, Vec3::ZERO, 20.0, 30.0, 20.0).unwrap();
     let (e, reversed) = edge_between(
         &k,
@@ -366,7 +336,7 @@ const CLIFF_2_11_VOLUME: f64 = 5_802.443_142;
 /// the cliff overflow of 2 -> 11 on its closed form.
 #[test]
 fn wr711_linear_rounds_keep_their_closed_forms() {
-    let v = cone_round(kernel(true, true));
+    let v = cone_round(kernel(true));
     eprintln!("cone {v} vs {CONE_VOLUME}, rel {}", rel(v, CONE_VOLUME));
     assert!(rel(v, CONE_VOLUME) < 1e-9, "{v}");
     for (r0, r1) in [
@@ -376,7 +346,7 @@ fn wr711_linear_rounds_keep_their_closed_forms() {
         (2.0, 30.0),
         (2.0, 50.0),
     ] {
-        let v = cliff_round(kernel(true, true), r0, r1).expect("builds");
+        let v = cliff_round(kernel(true), r0, r1).expect("builds");
         eprintln!(
             "cliff {r0} -> {r1}: {v:.10}, rel to 2 -> 11's {}",
             rel(v, CLIFF_2_11_VOLUME)
