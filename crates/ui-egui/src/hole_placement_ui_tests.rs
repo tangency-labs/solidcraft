@@ -549,50 +549,71 @@ fn a_single_hole_picked_near_a_sketch_point_off_the_face_under_it_stays_where_it
 
 #[test]
 fn select_other_offers_the_centre_and_the_face_as_picked() {
-    let (mut h, centre) = block_with_circle();
-    let click = near(&mut h, centre);
-    h.step(&json!({"start": "solid.hole"})).unwrap();
-    // Where the click's ray meets the top face.
-    let ray = hits_at(&h, click);
-    let Some(Hit::Face { point: raw, .. }) = ray.iter().find(|x| matches!(x, Hit::Face { .. })) else { panic!("{ray:?}") };
-    let raw = *raw;
-    assert!(raw.dist(centre) > 0.1);
-    for (row, want) in [(0, centre), (1, raw)] {
-        let list = h.call("ui.selectOther", json!({"x": click[0], "y": click[1]}))["result"].clone();
-        let labels: Vec<&str> = list["rows"].as_array().into_iter().flatten().filter_map(|r| r["label"].as_str()).collect();
-        assert!(labels.len() == 2 && labels[0].contains("centre") && labels[1].starts_with("Face"), "the snapped centre, then the face: {labels:?}");
-        h.call("ui.selectOther", json!({ "pick": row }));
-        let places = face_places(&h);
-        assert!(matches!(places.as_slice(), [(_, p)] if p.dist(want) < 1e-9), "row {row} places at {want:?}: {places:?}");
-        // Start over for the other row (a second pick on the same face would take it out).
-        h.step(&json!({"key": "Escape"})).unwrap();
+    for enabled in [false, true] {
+        let face_count = if enabled { 2 } else { 1 };
+        let (mut h, centre) = block_with_circle();
+        h.app.preferences.select_other_hidden = enabled;
+        let click = near(&mut h, centre);
         h.step(&json!({"start": "solid.hole"})).unwrap();
+        // Where the click's ray meets the top face.
+        let ray = hits_at(&h, click);
+        let Some(Hit::Face { body, point: raw, .. }) = ray.iter().find(|x| matches!(x, Hit::Face { .. })) else { panic!("{ray:?}") };
+        let body = body.clone();
+        let raw = *raw;
+        assert!(raw.dist(centre) > 0.1);
+        for (row, want) in [(0, centre), (1, raw)] {
+            let list = h.call("ui.selectOther", json!({"x": click[0], "y": click[1]}))["result"].clone();
+            let labels: Vec<&str> = list["rows"].as_array().into_iter().flatten().filter_map(|r| r["label"].as_str()).collect();
+            assert!(
+                labels.len() == face_count + 1 && labels[0].contains("centre") && labels[1..].iter().all(|label| label.starts_with("Face")),
+                "the snapped centre, then the faces (hidden={enabled}): {labels:?}"
+            );
+            h.call("ui.selectOther", json!({ "pick": row }));
+            let places = face_places(&h);
+            assert!(matches!(places.as_slice(), [(_, p)] if p.dist(want) < 1e-9), "row {row} places at {want:?}: {places:?}");
+            // Start over for the other row (a second pick on the same face would take it out).
+            h.step(&json!({"key": "Escape"})).unwrap();
+            h.step(&json!({"start": "solid.hole"})).unwrap();
+        }
+        if enabled {
+            h.call("ui.selectOther", json!({"x": click[0], "y": click[1]}));
+            h.call("ui.selectOther", json!({"pick": 2}));
+            let places = face_places(&h);
+            assert!(
+                matches!(places.as_slice(), [(name, point)] if name == &body && point.z.abs() < 1e-9),
+                "the opposite face places on the box bottom: {places:?}"
+            );
+        }
     }
 }
 
 #[test]
 fn select_other_keeps_the_face_as_picked_beside_many_snapped_points() {
-    // More points under the cursor than Select Other lists of one kind: the snapped places are
-    // capped as points, and the face as picked keeps its row.
-    let mut h = Harness::new();
-    h.app.set_origin_shown(false);
-    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
-    h.app.run("sketch.create", json!({"plane": {"face": [20, 15, 20]}})).unwrap();
-    let many = crate::select_other::MAX_PER_KIND + 4;
-    for i in 0..many {
-        let a = i as f64 * 0.3;
-        h.app.run("sketch.point", json!({"point": [12.0 + 0.1 * a.cos(), 9.0 + 0.1 * a.sin()]})).unwrap();
+    for enabled in [false, true] {
+        let face_count = if enabled { 2 } else { 1 };
+        // More points under the cursor than Select Other lists of one kind: the snapped places are
+        // capped as points, and the face as picked keeps its row.
+        let mut h = Harness::new();
+        h.app.preferences.select_other_hidden = enabled;
+        h.app.set_origin_shown(false);
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        h.app.run("sketch.create", json!({"plane": {"face": [20, 15, 20]}})).unwrap();
+        let many = crate::select_other::MAX_PER_KIND + 4;
+        for i in 0..many {
+            let a = i as f64 * 0.3;
+            h.app.run("sketch.point", json!({"point": [12.0 + 0.1 * a.cos(), 9.0 + 0.1 * a.sin()]})).unwrap();
+        }
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.step(&json!({"call": "ui.view", "params": {"view": "top"}})).unwrap();
+        h.settle();
+        let click = near(&mut h, Vec3::new(12.0, 9.0, 20.0));
+        h.step(&json!({"start": "solid.hole"})).unwrap();
+        let list = h.call("ui.selectOther", json!({"x": click[0], "y": click[1]}))["result"].clone();
+        let rows = list["rows"].as_array().cloned().unwrap_or_default();
+        let count = |prefix: &str| rows.iter().filter(|r| r["label"].as_str().is_some_and(|l| l.starts_with(prefix))).count();
+        assert_eq!((count("Point"), count("Face")), (crate::select_other::MAX_PER_KIND, face_count), "{list}");
+        assert_eq!(list["total"], json!(many + face_count), "{list}");
     }
-    h.app.run("sketch.finish", json!({})).unwrap();
-    h.step(&json!({"call": "ui.view", "params": {"view": "top"}})).unwrap();
-    h.settle();
-    let click = near(&mut h, Vec3::new(12.0, 9.0, 20.0));
-    h.step(&json!({"start": "solid.hole"})).unwrap();
-    let list = h.call("ui.selectOther", json!({"x": click[0], "y": click[1]}))["result"].clone();
-    let rows = list["rows"].as_array().cloned().unwrap_or_default();
-    let count = |prefix: &str| rows.iter().filter(|r| r["label"].as_str().is_some_and(|l| l.starts_with(prefix))).count();
-    assert_eq!((count("Point"), count("Face")), (crate::select_other::MAX_PER_KIND, 1), "{list}");
-    assert_eq!(list["total"], json!(many + 1), "{list}");
 }
 
 /// The block, seen from the top, with an "L" 10 mm high written on its top face from (5, 5), and
@@ -792,35 +813,43 @@ fn cylinder_with_cluster(sketch: Value, at: [f64; 2], view: &str) -> Cluster {
 
 #[test]
 fn select_other_over_a_dense_cluster_looks_the_face_up_once() {
-    // The points on the cylinder's top face, a disc of a small part of the body's triangles. Select
-    // Other looks the face under the cursor up once for all of them, not once per point (#718
-    // review): one planarity lookup, which tessellates the body, and one pass over the body's
-    // triangles. Each point is then tested against the face's triangles near the points only,
-    // not the face's or the body's; every point on the face is still counted.
-    let mut c = cylinder_with_cluster(json!({"plane": {"face": [0, 0, 20]}}), [5.0, 4.0], "top");
-    let (many, body, face, near) = (c.many, c.body_tris, c.face_tris, c.near_tris);
-    // The top cap is one of the cylinder's three faces (the planner meshes both caps alike), under
-    // a third of its triangles; the points lie on a small part of it.
-    assert!(body >= 3 * face && 4 * near <= face, "{body} triangles in the body, {face} in the face, {near} of them near the points");
-    let (list, (lookups, tested)) = c.select_other();
-    assert_eq!((rows_named(&list, "Point"), rows_named(&list, "Face")), (crate::select_other::MAX_PER_KIND, 1), "{list}");
-    assert_eq!(list["total"], json!(many + 1), "every point on the face is counted: {list}");
-    assert_eq!(lookups, 1, "the face is looked up once for {many} points");
-    assert!(tested <= body + many * near, "{tested} triangles looked at for {many} points ({body} in the body, {near} near the points)");
+    for enabled in [false, true] {
+        let face_count = if enabled { 2 } else { 1 };
+        // The points on the cylinder's top face, a disc of a small part of the body's triangles. Select
+        // Other looks each candidate face up once, not once per point (#718 review). Only the
+        // nearest face supplies the snap: one pass over the body's triangles. Each point is then
+        // tested against that face's triangles near the points only, not the face's or the body's;
+        // every point on the nearest face is still counted.
+        let mut c = cylinder_with_cluster(json!({"plane": {"face": [0, 0, 20]}}), [5.0, 4.0], "top");
+        c.h.app.preferences.select_other_hidden = enabled;
+        let (many, body, face, near) = (c.many, c.body_tris, c.face_tris, c.near_tris);
+        // The top cap is one of the cylinder's three faces (the planner meshes both caps alike), under
+        // a third of its triangles; the points lie on a small part of it.
+        assert!(body >= 3 * face && 4 * near <= face, "{body} triangles in the body, {face} in the face, {near} of them near the points");
+        let (list, (lookups, tested)) = c.select_other();
+        assert_eq!((rows_named(&list, "Point"), rows_named(&list, "Face")), (crate::select_other::MAX_PER_KIND, face_count), "{list}");
+        assert_eq!(list["total"], json!(many + face_count), "every point on the face is counted: {list}");
+        assert_eq!(lookups, face_count, "each face is looked up once for {many} points (hidden={enabled})");
+        assert!(tested <= body + many * near, "{tested} triangles looked at for {many} points ({body} in the body, {near} near the points)");
+    }
 }
 
 #[test]
 fn select_other_over_a_dense_cluster_off_the_face_tests_no_triangles() {
-    // The points 10 mm above the cylinder's top face, seen from the top: under the cursor, but
-    // off the face's plane. Each is turned down without a triangle test, and the face as picked
-    // is all that is offered.
-    let mut c = cylinder_with_cluster(json!({"plane": "XY", "offset": 30}), [5.0, 4.0], "top");
-    let (many, body) = (c.many, c.body_tris);
-    let (list, (lookups, tested)) = c.select_other();
-    assert_eq!((rows_named(&list, "Point"), rows_named(&list, "Face")), (0, 1), "{list}");
-    assert_eq!(list["total"], json!(1), "{list}");
-    assert_eq!(lookups, 1, "the face is looked up once for {many} points");
-    assert_eq!(tested, body, "one pass over the body's {body} triangles, and no test for the {many} points off the face");
+    for enabled in [false, true] {
+        let face_count = if enabled { 2 } else { 1 };
+        // The points 10 mm above the cylinder's top face, seen from the top: under the cursor, but
+        // off the face's plane. Each is turned down without a triangle test, so only faces are
+        // offered: the nearest face, and the opposite face when hidden geometry is included.
+        let mut c = cylinder_with_cluster(json!({"plane": "XY", "offset": 30}), [5.0, 4.0], "top");
+        c.h.app.preferences.select_other_hidden = enabled;
+        let (many, body) = (c.many, c.body_tris);
+        let (list, (lookups, tested)) = c.select_other();
+        assert_eq!((rows_named(&list, "Point"), rows_named(&list, "Face")), (0, face_count), "{list}");
+        assert_eq!(list["total"], json!(face_count), "{list}");
+        assert_eq!(lookups, face_count, "each face is looked up once for {many} points (hidden={enabled})");
+        assert_eq!(tested, body, "one pass over the body's {body} triangles, and no test for the {many} points off the face");
+    }
 }
 
 #[test]
@@ -838,18 +867,22 @@ fn select_other_over_a_dense_cluster_by_a_curved_face_looks_it_up_once() {
 
 #[test]
 fn select_other_snaps_no_more_points_than_the_budget_allows() {
-    // With the snap's budget cut to 30 point-in-triangle tests, at most 30 of the points on the
-    // face are offered (each takes one test at least), and the face as picked keeps its row.
-    let mut c = cylinder_with_cluster(json!({"plane": {"face": [0, 0, 20]}}), [5.0, 4.0], "top");
-    let (many, body) = (c.many, c.body_tris);
-    crate::dialogs::set_snap_budget(Some(30));
-    let (list, (_, tested)) = c.select_other();
-    crate::dialogs::set_snap_budget(None);
-    assert!(many > 30, "more points than the budget");
-    assert_eq!(rows_named(&list, "Face"), 1, "{list}");
-    let (points, total) = (rows_named(&list, "Point"), list["total"].as_u64().unwrap() as usize);
-    assert!(points >= 1 && total > points && total <= 30 + 1, "some points within the budget, and the face: {list}");
-    assert!(tested <= body + 30, "{tested} triangles looked at");
+    for enabled in [false, true] {
+        let face_count = if enabled { 2 } else { 1 };
+        // With the snap's budget cut to 30 point-in-triangle tests, at most 30 of the points on the
+        // face are offered (each takes one test at least), and the face as picked keeps its row.
+        let mut c = cylinder_with_cluster(json!({"plane": {"face": [0, 0, 20]}}), [5.0, 4.0], "top");
+        c.h.app.preferences.select_other_hidden = enabled;
+        let (many, body) = (c.many, c.body_tris);
+        crate::dialogs::set_snap_budget(Some(30));
+        let (list, (_, tested)) = c.select_other();
+        crate::dialogs::set_snap_budget(None);
+        assert!(many > 30, "more points than the budget");
+        assert_eq!(rows_named(&list, "Face"), face_count, "{list}");
+        let (points, total) = (rows_named(&list, "Point"), list["total"].as_u64().unwrap() as usize);
+        assert!(points >= 1 && total > points && total <= 30 + face_count, "some points within the budget, and the face: {list}");
+        assert!(tested <= body + 30, "{tested} triangles looked at");
+    }
 }
 
 #[test]
