@@ -1405,7 +1405,7 @@ fn kept_view_middle(app: &SolveApp, rect: Rect, kept: Option<Vec3>) -> Option<Ve
 /// target, when the middle is within half a point of the window's centre, before the view is
 /// first laid out, in the Render workspace (which frames its own picture), and when the camera
 /// gives no finite point.
-fn view_middle(app: &SolveApp, rect: Rect) -> Option<Vec3> {
+pub(crate) fn view_middle(app: &SolveApp, rect: Rect) -> Option<Vec3> {
     if crate::render_workspace::active(app) {
         return None;
     }
