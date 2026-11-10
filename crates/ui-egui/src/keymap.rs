@@ -1975,6 +1975,8 @@ mod tests {
         context_menu::show_current_keys(&h.app, &mut rows);
         assert_eq!(rows[0].shortcut, "V", "another command's V stays on its row");
         assert_eq!(rows[1].shortcut, "Shift+J");
+        // A command above Show/Hide in the menu now has V: Show/Hide's key still runs Show/Hide.
+        bind(&mut h.app, "component.from_bodies", "V", true).unwrap();
         context_menu::open_for(&mut h.app, egui::pos2(300.0, 200.0), Target::Body { name: body.clone() });
         h.frames(2);
         let report = context_menu::describe(&h.app);
@@ -1984,6 +1986,7 @@ mod tests {
         h.frames(2);
         assert!(hidden(&h), "the menu's Show/Hide ran");
         assert!(h.app.viewport.context_menu.is_none(), "the menu closes as after a click");
+        bind(&mut h.app, "component.from_bodies", "", false).unwrap();
         h.app.run("browser.visibility", json!({"items": [body], "visible": true})).unwrap();
 
         bind(&mut h.app, ID, "", false).unwrap();
