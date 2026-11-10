@@ -70,6 +70,7 @@ enum Finish {
     Artwork,
     Ink(Color32),
     Danger,
+    Greyscale,
 }
 
 /// Textures already rasterised: one per (master, look, pixel size, finish).
@@ -148,6 +149,17 @@ pub fn paint_accented(p: &Painter, r: Rect, name: &str, accent: Option<&str>, op
     paint_resolved(p, r, resolved, look, opacity, Finish::Artwork, Mirror::None);
 }
 
+/// Draw palette-owned icon artwork converted to greyscale, preserving facet shading, highlights and outlines.
+pub fn paint_greyscale(p: &Painter, r: Rect, name: &str, accent: Option<&str>, opacity: f32) {
+    let resolved = resolve(name);
+    let accent = match accent {
+        Some(name) => accent_index(name).or(resolved.accent),
+        None => None,
+    };
+    let look = Look::themed(p.ctx().global_style().visuals.dark_mode, accent, solidcraft_theme::vision());
+    paint_resolved(p, r, resolved, look, opacity, Finish::Greyscale, Mirror::None);
+}
+
 /// Shared destructive-action artwork: shaded faces in the set's danger ramp, normal outlines and cutouts.
 /// Unlike a single-colour mask, this also tints a master's passive faces through
 /// that ramp without flattening the lid, handle or other details.
@@ -180,6 +192,12 @@ fn paint_resolved(p: &Painter, r: Rect, resolved: Resolved, look: Look, opacity:
         if let Finish::Ink(ink) = finish {
             for pixel in &mut image.pixels {
                 *pixel = ink.gamma_multiply(f32::from(pixel.a()) / 255.0);
+            }
+        } else if finish == Finish::Greyscale {
+            for pixel in &mut image.pixels {
+                let [r, g, b, a] = pixel.to_array();
+                let y = ((r as u32 * 54 + g as u32 * 183 + b as u32 * 19) >> 8) as u8;
+                *pixel = Color32::from_rgba_premultiplied(y, y, y, a);
             }
         }
         slot.insert(ctx.load_texture(format!("icon:{}:{px}", resolved.master), image, TextureOptions::LINEAR));
