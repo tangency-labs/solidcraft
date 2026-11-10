@@ -5,8 +5,18 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-[lints]
-workspace = true
+# Overridden (not `workspace = true`) so the lib can `deny(unsafe_code)` at its root and allow it
+# ONLY in `cuda.rs` for `cudarc` kernel launches and `DeviceRepr` traits (`forbid` cannot be overridden on a module).
+# Keep the clippy entries in step with `[workspace.lints.clippy]` in the root Cargo.toml.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+too_many_arguments = "allow"
+type_complexity = "allow"
+neg_cmp_op_on_partial_ord = "allow"
 
 [dependencies]
 solidcraft-viewport-gpu = { workspace = true }
@@ -23,6 +33,8 @@ thiserror = { workspace = true }
 serde = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+cudarc = { workspace = true }
+rayon = { workspace = true }
 robust = { workspace = true }
 pollster = { workspace = true }
 # Native backends, so tests and the CLI can open a device without a window.

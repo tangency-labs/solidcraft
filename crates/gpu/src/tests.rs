@@ -182,6 +182,7 @@ fn mixed_bitwise(line: &str) -> Option<String> {
     groups.iter().find_map(mixed)
 }
 
+/// Unwraps a `Result` in test code, panicking with its `Debug` representation on `Err`.
 fn ok<T, E: std::fmt::Debug>(r: std::result::Result<T, E>) -> T {
     match r {
         Ok(v) => v,
@@ -189,6 +190,7 @@ fn ok<T, E: std::fmt::Debug>(r: std::result::Result<T, E>) -> T {
     }
 }
 
+/// Builds a representative suite of B-rep test solids (booleans, torus, fillets, mirror transform).
 fn bodies() -> Vec<(&'static str, Body)> {
     let bx = ok(solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 4.0)));
     let pin = ok(solidcraft_kernel::cylinder(Vec3::new(5.0, 5.0, -1.0), Vec3::Z, 2.0, 6.0));
@@ -207,6 +209,7 @@ fn bodies() -> Vec<(&'static str, Body)> {
     ]
 }
 
+/// Verifies that GPU tessellation evaluation matches the CPU reference evaluator across all test bodies.
 #[test]
 fn gpu_evaluation_matches_the_cpu() {
     let Some(gpu) = gpu() else { return };
@@ -482,4 +485,196 @@ fn a_plan_with_pole_nodes_is_refused_by_name() {
     let Some(gpu) = gpu() else { return };
     assert!(matches!(gpu.prepare(&plan), Err(GpuError::PoleNodes { face: 1 })));
     assert!(matches!(gpu.evaluate(&plan), Err(GpuError::PoleNodes { face: 1 })));
+}
+
+/// Verifies that CUDA device info enables hardware F32 tensor cores (`mma.sync.aligned.m16n8k8.row.col.f32.tf32.tf32.f32`)
+/// across all consumer and datacenter Ampere (`sm_80+`) and newer architectures.
+#[test]
+fn cuda_f32_tensor_core_detection_rules() {
+    use crate::cuda::{CudaBackend, CudaDeviceInfo};
+    if let Some(cuda) = CudaBackend::global() {
+        let dev = cuda.device_info();
+        let (major, minor) = dev.compute_capability;
+        let expected_hw_f32 = major >= 8;
+        assert_eq!(
+            dev.supports_f32_tensor_core, expected_hw_f32,
+            "device {} (SM {}.{}) F32 tensor core flag must be {} (hardware F32 MMA is supported on sm_80+)",
+            dev.name, major, minor, expected_hw_f32
+        );
+        assert_eq!(cuda.has_f32_tensor_core(), expected_hw_f32 && cuda.has_ampere_ptx());
+    }
+
+    // Verify `select_best_device` filters out pre-sm_70 devices even when they have more SMs,
+    // and breaks ties among eligible sm_70+ devices by `(sm_count, compute_capability, total_vram_bytes)`.
+    let mk_dev = |ordinal: i32, cc: (i32, i32), sm_count: i32, vram: usize| CudaDeviceInfo {
+        ordinal,
+        name: format!("GPU-{ordinal}"),
+        compute_capability: cc,
+        sm_count,
+        clock_khz: 1_500_000,
+        memory_bus_bits: 256,
+        l2_cache_bytes: 4 * 1024 * 1024,
+        total_vram_bytes: vram,
+        supports_ampere_ptx: cc.0 >= 8,
+        supports_f32_tensor_core: cc.0 >= 8,
+        supports_rt_core: cc >= (7, 5),
+    };
+    let pascal_only = [mk_dev(0, (6, 1), 28, 11 << 30), mk_dev(1, (0, 0), 64, 16 << 30)];
+    assert!(CudaBackend::select_best_device(&pascal_only).is_none());
+
+    let mixed = [mk_dev(0, (6, 1), 28, 11 << 30), mk_dev(1, (8, 6), 20, 8 << 30), mk_dev(2, (7, 5), 20, 16 << 30)];
+    assert_eq!(CudaBackend::select_best_device(&mixed).expect("eligible gpu").ordinal, 1);
+}
+
+/// Verifies [`Dispatcher`] multi-sample rotated calibration, markdown reporting, `GpuPod` codec, and `evaluate_tess_plan`.
+#[test]
+fn dispatcher_auto_tuning_calibration_and_routing() {
+    use crate::collision::{
+        GpuAabb, GpuPod, OverlapPair, aabbs_from_bounds, decode_pod_slice, encode_pod, encode_pod_slice, face_aabbs_from_mesh, face_aabbs_from_plan,
+        synthetic_aabb_grid, triangle_aabbs_from_mesh,
+    };
+    use crate::dispatch::{
+        BENCH_SIZES, BackendTarget, CALIBRATION_SAMPLES, Dispatcher, KernelCalibration, KernelOp, SizeBucketCalibration, synthetic_bicubic_patch_f32,
+        synthetic_closed_sphere_mesh,
+    };
+
+    let disp = Dispatcher::global();
+    let report = disp.report();
+    assert_eq!(report.kernels.len(), KernelOp::ALL.len());
+    for k in &report.kernels {
+        assert_eq!(k.buckets.len(), BENCH_SIZES.len());
+        for b in &k.buckets {
+            assert_eq!(b.sample_orders.len(), CALIBRATION_SAMPLES);
+            assert_eq!(b.sample_timings_ns.len(), CALIBRATION_SAMPLES);
+            if b.sample_orders[0].len() > 1 {
+                assert_ne!(b.sample_orders[0], b.sample_orders[1], "backend execution order must rotate across calibration samples");
+            }
+        }
+    }
+
+    let md = report.to_markdown();
+    assert!(md.contains("SolidCraft Multi-Backend GPU & Auto-Tuning Dispatcher Report"));
+    assert!(md.contains("Bicubic Tensor Patch Eval (f32 MMA)"));
+
+    let _ = synthetic_bicubic_patch_f32();
+    let _ = synthetic_closed_sphere_mesh(5.0, 6, 6);
+    let _ = synthetic_aabb_grid(16, 2.0, 0.8);
+
+    assert!(decode_pod_slice::<GpuAabb>(&[1, 2, 3]).is_empty(), "truncated byte slice (< 1 word) must decode to empty");
+    assert!(decode_pod_slice::<GpuAabb>(&[0u8; 28]).is_empty(), "partial 7-word slice for 8-word GpuAabb must decode to empty");
+    let empty_encoded = encode_pod_slice::<OverlapPair>(&[]);
+    assert_eq!(empty_encoded.len(), OverlapPair::WORDS * 4, "encoding empty slice pads to 1 default element");
+    assert_eq!(decode_pod_slice::<OverlapPair>(&empty_encoded), vec![OverlapPair::default()]);
+    assert_eq!(encode_pod(&42u32), 42u32.to_le_bytes());
+
+    let bounds = [(Vec3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 2.0, 3.0)), (Vec3::new(-1.0, -2.0, -3.0), Vec3::new(0.5, 0.5, 0.5))];
+    let from_bounds = aabbs_from_bounds(&bounds);
+    assert_eq!(from_bounds.len(), 2);
+    assert!(from_bounds[0].overlaps(&from_bounds[1], 0.0));
+
+    let box_body = ok(solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(4.0, 5.0, 6.0)));
+    let box_mesh = ok(box_body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.1)));
+    let face_boxes = face_aabbs_from_mesh(&box_mesh);
+    let tri_boxes = triangle_aabbs_from_mesh(&box_mesh);
+    assert_eq!(face_boxes.len(), 6, "box mesh must have 6 face AABBs");
+    assert_eq!(tri_boxes.len(), box_mesh.triangles.len());
+
+    let small_plan = ok(box_body.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(0.1)));
+    assert_eq!(face_aabbs_from_plan(&small_plan).len(), 6);
+    assert!(small_plan.vertex_count() < 512);
+    let small_eval = disp.evaluate_tess_plan(&small_plan);
+    let small_ref = small_plan.evaluate_mesh();
+    assert_eq!(small_eval.positions, small_ref.positions);
+    assert_eq!(small_eval.triangles, small_ref.triangles);
+
+    let fine_torus = ok(solidcraft_kernel::torus(Vec3::ZERO, 10.0, 3.0));
+    let large_plan = ok(fine_torus.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(0.02)));
+    assert!(large_plan.vertex_count() >= 512);
+    let large_eval = disp.evaluate_tess_plan(&large_plan);
+    let large_ref = large_plan.evaluate_mesh();
+    assert_eq!(large_eval.positions, large_ref.positions);
+    assert_eq!(large_eval.normals, large_ref.normals);
+    assert_eq!(large_eval.triangles, large_ref.triangles);
+
+    let empty_cal = KernelCalibration {
+        op: KernelOp::SurfaceEvalF32,
+        buckets: Vec::new(),
+        rayon_crossover_size: None,
+        gpu_crossover_size: None,
+        preferred_gpu_backend: None,
+    };
+    assert_eq!(empty_cal.select_backend(100), BackendTarget::CpuScalar);
+
+    let mk_bucket = |size: usize, winner: BackendTarget| SizeBucketCalibration {
+        problem_size: size,
+        timings: Vec::new(),
+        sample_orders: Vec::new(),
+        sample_timings_ns: Vec::new(),
+        fastest_backend: winner,
+        fastest_latency_ns: 1,
+        speedup_vs_scalar: 1.0,
+    };
+    let custom_cal = KernelCalibration {
+        op: KernelOp::SurfaceEvalF32,
+        buckets: vec![
+            mk_bucket(64, BackendTarget::CpuScalar),
+            mk_bucket(1024, BackendTarget::CpuRayon),
+            mk_bucket(16384, BackendTarget::VulkanCompute),
+        ],
+        rayon_crossover_size: Some(1024),
+        gpu_crossover_size: Some(16384),
+        preferred_gpu_backend: Some(BackendTarget::VulkanCompute),
+    };
+    assert_eq!(custom_cal.select_backend(0), BackendTarget::CpuScalar);
+    assert_eq!(custom_cal.select_backend(64), BackendTarget::CpuScalar);
+    assert_eq!(custom_cal.select_backend(65), BackendTarget::CpuRayon);
+    assert_eq!(custom_cal.select_backend(1024), BackendTarget::CpuRayon);
+    assert_eq!(custom_cal.select_backend(1025), BackendTarget::VulkanCompute);
+    assert_eq!(custom_cal.select_backend(1_000_000), BackendTarget::VulkanCompute);
+    assert_eq!(
+        disp.with_forced_backend(Some(BackendTarget::VulkanCompute)).select_backend(KernelOp::SurfaceEvalF32, 16),
+        BackendTarget::VulkanCompute
+    );
+}
+/// Extracts sorted `(key, value)` pairs from a `[section]` header in a TOML manifest.
+fn parse_toml_section_entries(toml_text: &str, section_header: &str) -> Vec<(String, String)> {
+    let mut in_section = false;
+    let mut entries = Vec::new();
+    for raw_line in toml_text.lines() {
+        let line = raw_line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            in_section = line == section_header;
+            continue;
+        }
+        if in_section && let Some((k, v)) = line.split_once('=') {
+            entries.push((k.trim().to_string(), v.trim().to_string()));
+        }
+    }
+    entries.sort();
+    entries
+}
+
+/// Ensures `[lints.clippy]` and `[lints.rust]` in `crates/gpu/Cargo.toml` stay synchronized with `[workspace.lints.*]` in the root `Cargo.toml`.
+#[test]
+fn gpu_cargo_toml_lints_match_workspace() {
+    let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let gpu_toml = ok(std::fs::read_to_string(manifest_dir.join("Cargo.toml")));
+    let root_toml = ok(std::fs::read_to_string(manifest_dir.join("../../Cargo.toml")));
+
+    let ws_clippy = parse_toml_section_entries(&root_toml, "[workspace.lints.clippy]");
+    let gpu_clippy = parse_toml_section_entries(&gpu_toml, "[lints.clippy]");
+    assert!(!ws_clippy.is_empty(), "root Cargo.toml must have [workspace.lints.clippy]");
+    assert_eq!(gpu_clippy, ws_clippy, "crates/gpu/Cargo.toml [lints.clippy] must stay in sync with root Cargo.toml [workspace.lints.clippy]");
+
+    let ws_rust = parse_toml_section_entries(&root_toml, "[workspace.lints.rust]");
+    let gpu_rust = parse_toml_section_entries(&gpu_toml, "[lints.rust]");
+    assert_eq!(ws_rust, vec![("unsafe_code".to_string(), "\"forbid\"".to_string())]);
+    assert_eq!(
+        gpu_rust,
+        vec![("unsafe_code".to_string(), "\"deny\"".to_string())],
+        "crates/gpu/Cargo.toml [lints.rust] must match [workspace.lints.rust] except for unsafe_code = \"deny\""
+    );
 }
