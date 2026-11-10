@@ -2003,7 +2003,7 @@ fn clamped(degree: usize, knots: Vec<f64>, homogeneous: Vec<[f64; 4]>) -> Result
 /// Each of `lines`, a spline of `degree` on `knots`, clamped ([`clamped`]), and the knots they
 /// share after it.
 fn clamped_lines(degree: usize, knots: Vec<f64>, lines: Vec<Vec<[f64; 4]>>) -> R<(Vec<f64>, Vec<Vec<[f64; 4]>>)> {
-    let mut out = Vec::with_capacity(lines.len());
+    let mut out = Vec::new();
     let mut shared = None;
     for line in lines {
         let (k, c) = clamped(degree, knots.clone(), line).map_err(|e| format!("an unclamped B-spline surface: {e}"))?;
