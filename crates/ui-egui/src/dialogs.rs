@@ -996,7 +996,11 @@ impl Dialog {
                     Kind::Thread { designation: String::new(), length: String::new(), suggested: None, of: Vec::new(), options: Default::default() },
                     crate::dialogs_thread::inputs(),
                 );
-                d.extra.insert("continuous_flanks".into(), json!(app.preferences.thread_continuous_flanks));
+                // Continuous flanks are the command's default and stay out of the command; only
+                // the historical layout the preference asks for goes in.
+                if !app.preferences.thread_continuous_flanks {
+                    d.extra.insert("continuous_flanks".into(), json!(false));
+                }
                 d
             }
             "material.assign" => {

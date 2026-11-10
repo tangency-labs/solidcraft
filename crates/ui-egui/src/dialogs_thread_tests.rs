@@ -27,7 +27,9 @@ fn a_new_thread_uses_the_preference_and_an_edit_keeps_its_saved_layout() {
         h.app.preferences.thread_continuous_flanks = continuous;
         h.app.session.selection = vec![thread_face(&h.app, "Body1")];
         h.app.dialog = crate::dialogs::Dialog::for_command(&h.app, "solid.thread");
-        assert_eq!(params(&h)["continuous_flanks"], json!(continuous));
+        // The command's default (continuous) stays out of the command; the historical layout is sent.
+        let sent = params(&h).get("continuous_flanks").cloned();
+        assert_eq!(sent, (!continuous).then_some(json!(false)));
         h.app.run("solid.thread", json!({"face": [4,0,5], "designation": "M8", "continuous_flanks": continuous})).unwrap();
         let saved = h.app.session.doc.features.last().unwrap().kind.clone();
         h.app.preferences.thread_continuous_flanks = !continuous;
