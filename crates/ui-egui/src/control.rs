@@ -703,10 +703,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                 ctx.request_repaint();
             }
             let availability = crate::prefs::blur_availability(app);
-            let reason = match availability {
-                crate::theme_options::Availability::Unavailable(reason) => Some(app.tr(reason)),
-                crate::theme_options::Availability::Available => None,
-            };
+            let reason = crate::prefs::theme_option_reason(availability).map(|reason| app.tr(reason));
             ok(
                 json!({"radius_px":app.blur.radius(), "max_radius_px":60, "capability":app.blur.capability_for(ctx.viewport_id()), "counters":app.blur.counters(),
                     "available": availability == crate::theme_options::Availability::Available, "reason": reason,

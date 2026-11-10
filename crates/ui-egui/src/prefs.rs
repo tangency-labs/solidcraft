@@ -3531,35 +3531,54 @@ fn theme_option_text(text: &crate::theme_files::OptionText, language: &str, fall
     text.get(language).or_else(|| text.get("en")).map(String::as_str).unwrap_or(fallback).to_owned()
 }
 
+/// SolidCraft's name and help (message ids) for the theme system's standard option `id`.
+fn standard_option_text(id: &str) -> Option<(&'static str, &'static str)> {
+    match id {
+        "blur" => Some(("prefs.theme_option_blur", "prefs.theme_option_blur_help")),
+        "opacity" => Some(("prefs.theme_option_opacity", "prefs.theme_option_opacity_help")),
+        "tab_colours" => Some(("prefs.theme_option_tab_colours", "prefs.theme_option_tab_colours_help")),
+        "tab_fade_ms" => Some(("prefs.theme_option_tab_fade_ms", "prefs.theme_option_tab_fade_ms_help")),
+        _ => None,
+    }
+}
+
+/// Why a theme option is off (a message id), or `None` when it is available.
+pub(crate) fn theme_option_reason(availability: crate::theme_options::Availability) -> Option<&'static str> {
+    match availability {
+        crate::theme_options::Availability::Available => None,
+        crate::theme_options::Availability::Unavailable(reason) => Some(reason),
+        crate::theme_options::Availability::Unsupported => Some("prefs.theme_options_unavailable"),
+    }
+}
+
 fn theme_option_rows<'a>(
     file: &'a crate::theme_files::ThemeFile,
     language: &str,
     providers: &[crate::theme_options::Provider],
+    names: fn(&str) -> Option<(&'static str, &'static str)>,
     blur: crate::theme_options::Availability,
 ) -> Vec<ui_kit::ThemeOptionRow<'a>> {
-    use crate::theme_options::{Availability, offered, provider};
+    use crate::theme_options::{offered, provider};
     let locale = solidcraft_ui_text::Locale::for_language(language);
     offered(file, providers)
         .into_iter()
         .map(|definition| {
-            let provider = provider(&definition.id, providers);
+            let text = provider(&definition.id, providers).and_then(|p| names(p.id));
             ui_kit::ThemeOptionRow {
                 definition,
                 blur: definition.id == "blur",
-                label: provider
-                    .map(|p| locale.text(p.label).to_owned())
+                label: text
+                    .map(|(label, _)| locale.text(label).to_owned())
                     .unwrap_or_else(|| theme_option_text(&definition.label, language, &definition.id)),
-                help: provider.map(|p| locale.text(p.help).to_owned()).unwrap_or_else(|| theme_option_text(&definition.help, language, "")),
+                help: text.map(|(_, help)| locale.text(help).to_owned()).unwrap_or_else(|| theme_option_text(&definition.help, language, "")),
                 choices: match &definition.kind {
                     crate::theme_files::OptionKind::Choice { values, .. } => {
                         values.iter().map(|v| theme_option_text(&v.label, language, &v.id)).collect()
                     }
                     _ => Vec::new(),
                 },
-                reason: match crate::theme_options::availability(file, &definition.id, providers, blur) {
-                    Availability::Available => None,
-                    Availability::Unavailable(reason) => Some(locale.text(reason).to_owned()),
-                },
+                reason: theme_option_reason(crate::theme_options::availability(file, &definition.id, providers, blur))
+                    .map(|reason| locale.text(reason).to_owned()),
             }
         })
         .collect()
@@ -3617,8 +3636,13 @@ fn theme_options_row(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.blur_session.guard.notice = false;
         }
     }
-    let rows =
-        theme_option_rows(&file, solidcraft_ui_text::effective_language(&app.preferences.language), crate::theme_options::PROVIDERS, availability);
+    let rows = theme_option_rows(
+        &file,
+        solidcraft_ui_text::effective_language(&app.preferences.language),
+        crate::theme_options::PROVIDERS,
+        standard_option_text,
+        availability,
+    );
     if rows.is_empty() {
         return;
     }
@@ -3715,7 +3739,7 @@ fn theme_options_reply(app: &SolveApp) -> solidcraft_engine::schema::ui_prefs::T
             .into_iter()
             .map(|o| {
                 let standard = crate::theme_options::standard(&o.id);
-                let provider = crate::theme_options::provider(&o.id, crate::theme_options::PROVIDERS);
+                let named = crate::theme_options::provider(&o.id, crate::theme_options::PROVIDERS).and_then(|p| standard_option_text(p.id));
                 let availability = crate::theme_options::availability(file, &o.id, crate::theme_options::PROVIDERS, blur);
                 ThemeOptionDef {
                     id: o.id.clone(),
@@ -3729,17 +3753,14 @@ fn theme_options_reply(app: &SolveApp) -> solidcraft_engine::schema::ui_prefs::T
                             ThemeOptionKind::Range { default: *default, min: *min, max: *max, step: *step, unit: unit.clone() }
                         }
                     },
-                    label: provider.map(|p| app.tr(p.label).to_owned()).unwrap_or_else(|| text(&o.label, &o.id)),
-                    help: provider.map(|p| app.tr(p.help).to_owned()).unwrap_or_else(|| text(&o.help, "")),
+                    label: named.map(|(label, _)| app.tr(label).to_owned()).unwrap_or_else(|| text(&o.label, &o.id)),
+                    help: named.map(|(_, help)| app.tr(help).to_owned()).unwrap_or_else(|| text(&o.help, "")),
                     parent: o.parent.clone(),
                     advanced: o.advanced,
                     section: o.section.clone(),
                     standard,
                     available: availability == crate::theme_options::Availability::Available,
-                    reason: match availability {
-                        crate::theme_options::Availability::Unavailable(reason) => Some(app.tr(reason).to_owned()),
-                        crate::theme_options::Availability::Available => None,
-                    },
+                    reason: theme_option_reason(availability).map(|reason| app.tr(reason).to_owned()),
                 }
             })
             .collect(),
@@ -7553,19 +7574,19 @@ mod tests {
             {"id":"opacity","type":"range","default":100}
         ]}))
         .unwrap();
-        let rows = theme_option_rows(&file, "de", crate::theme_options::PROVIDERS, Availability::Available);
+        let rows = theme_option_rows(&file, "de", crate::theme_options::PROVIDERS, standard_option_text, Availability::Available);
         assert_eq!(rows.iter().map(|r| r.definition.id.as_str()).collect::<Vec<_>>(), ["opacity", "blur", "tab_colours", "tab_fade_ms", "custom"]);
         assert_eq!(rows[0].label, "Deckkraft");
         assert_eq!(rows[4].label, "Eigene");
-        assert_eq!(theme_option_rows(&file, "ja", crate::theme_options::PROVIDERS, Availability::Available)[4].label, "Custom", "English fallback");
-        let providers = [Provider {
-            id: "blur",
-            label: "prefs.theme_option_opacity",
-            help: "prefs.theme_option_opacity_help",
-            availability: || Availability::Unavailable("prefs.theme_options_unavailable"),
-            apply: |_, _| {},
-        }];
-        let rows = theme_option_rows(&file, "en", &providers, Availability::Available);
+        assert_eq!(
+            theme_option_rows(&file, "ja", crate::theme_options::PROVIDERS, standard_option_text, Availability::Available)[4].label,
+            "Custom",
+            "English fallback"
+        );
+        let providers = [Provider { id: "blur", availability: || Availability::Unavailable("prefs.theme_options_unavailable"), apply: |_, _| {} }];
+        // The test provider is named with the opacity text.
+        let opacity_text = |_: &str| Some(("prefs.theme_option_opacity", "prefs.theme_option_opacity_help"));
+        let rows = theme_option_rows(&file, "en", &providers, opacity_text, Availability::Available);
         assert_eq!(rows.iter().map(|r| r.definition.id.as_str()).collect::<Vec<_>>(), ["blur", "custom"]);
         assert_eq!(rows[0].reason.as_deref(), Some("Unavailable on this device"));
         // The internal fixture goes through the real kit. No fake provider is shipped.
@@ -7613,7 +7634,7 @@ mod tests {
             crate::theme::set_file_palette(None);
             solidcraft_theme::set_dark(dark);
             for available in [Availability::Available, Availability::Unavailable("prefs.theme_options_unavailable")] {
-                let rows = theme_option_rows(&file, "en", crate::theme_options::PROVIDERS, available);
+                let rows = theme_option_rows(&file, "en", crate::theme_options::PROVIDERS, standard_option_text, available);
                 for radius in [0.0, 1.0, 8.0, 9.0, 18.0, 33.0, 40.0, 18.25] {
                     let ctx = crate::fonts::test_context();
                     let mut values = crate::theme_files::effective_values(&file, &BTreeMap::new()).0;
@@ -7679,14 +7700,8 @@ mod tests {
         }
         assert_eq!(h.app.preferences.theme_options, saved);
         let providers = [
-            Provider { id: "enabled", label: "", help: "", availability: || Availability::Unavailable("prefs.blur_software"), apply: |_, _| {} },
-            Provider {
-                id: "blur",
-                label: "prefs.theme_option_blur",
-                help: "prefs.theme_option_blur_help",
-                availability: || Availability::Available,
-                apply: |_, _| {},
-            },
+            Provider { id: "enabled", availability: || Availability::Unavailable("prefs.blur_software"), apply: |_, _| {} },
+            Provider { id: "blur", availability: || Availability::Available, apply: |_, _| {} },
         ];
         assert_eq!(
             crate::theme_options::availability(&file, "amount", &providers, Availability::Available),
@@ -7697,7 +7712,7 @@ mod tests {
             Availability::Available,
             "standard blur remains independent of the unavailable custom parent"
         );
-        let rows = theme_option_rows(&file, "en", &providers, Availability::Available);
+        let rows = theme_option_rows(&file, "en", &providers, standard_option_text, Availability::Available);
         let parent = rows.iter().find(|r| r.definition.id == "enabled").unwrap();
         let child = rows.iter().find(|r| r.definition.id == "amount").unwrap();
         let blur = rows.iter().find(|r| r.definition.id == "blur").unwrap();

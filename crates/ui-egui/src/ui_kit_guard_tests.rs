@@ -1486,7 +1486,12 @@ fn kit_code_names_no_host_message_ids() {
             failures.push(format!("{relative}: {found:?}"));
         }
     }
-    scan(&Path::new(env!("CARGO_MANIFEST_DIR")).join("src/ui_kit"), "ui_kit", &names, &mut failures);
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    scan(&src.join("ui_kit"), "ui_kit", &names, &mut failures);
+    // The theme option components that move with the kit.
+    for component in ["theme_files.rs", "theme_options.rs"] {
+        scan(&src.join(component), component, &names, &mut failures);
+    }
     failures.sort();
     assert!(failures.is_empty(), "kit code names the host's messages; take the text from the host as data:\n{}", failures.join("\n"));
 }
