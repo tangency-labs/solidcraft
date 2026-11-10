@@ -431,7 +431,8 @@ fn check_wall(wall: &Surface, pitch: f64, law: &[(f64, f64)]) -> WallCheck {
     for span in d.stations().windows(2) {
         for s in [-0.93, -r, -0.31, 0.0, 0.17, r, 0.88] {
             let t = span[0] + 0.5 * (s + 1.0) * (span[1] - span[0]);
-            let theta = arc_angle(span[0], span[1], d.half_angle(), t);
+            // Each span keeps its own arc width; the half angle bounds them all.
+            let theta = arc_angle(span[0], span[1], 0.5 * (span[1] - span[0]), t);
             assert_eq!(d.turn_at(t).0, theta);
             for a in [0.13, 0.5, 0.87] {
                 let w = profile.min() + a * (profile.max() - profile.min());
