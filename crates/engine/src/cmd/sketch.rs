@@ -106,7 +106,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.edit", "Edit Sketch", crate::checked!("sketch.edit", edit_sketch))
         .noundo().icon("sketch")
         .contract(&EDIT_CONTRACT).output(output_schema_for::<EditResult>)
-        .params("sketch: id or name; restore_marker?: nonnegative timeline position or null (end). When provided, temporarily roll to this sketch and restore that position on Finish or Cancel; Finish groups the edit into one Undo step. Omit to leave the timeline in place"),
+        .params("sketch: id or name; restore_marker?: nonnegative timeline position, null (end) or false. A position or null: temporarily roll to this sketch and restore that position on Finish or Cancel; Finish groups the edit into one Undo step. Omitted: the same with the current position when features come after the sketch, so they rebuild once at Finish rather than after every sketch command. false: leave the timeline in place (later features rebuild after every sketch command)"),
     CommandSpec::new("sketch.finish", "Finish Sketch", crate::checked!("sketch.finish", finish_sketch))
         .at("SKETCH", "FINISH SKETCH").icon("finish").enabled(in_sketch).noundo()
         .contract(&EXIT_CONTRACT).output(output_schema_for::<FinishResult>)
@@ -1190,14 +1190,16 @@ fn sketch_on_plane(s: &mut Session, p: &Value, plane: PlaneRef, internal_body: O
 }
 
 fn edit_sketch(s: &mut Session, p: &Value) -> Result<Value> {
-    let restore_marker = p
+    let requested = p
         .get("restore_marker")
         .map(|v| {
-            serde_json::from_value::<Option<usize>>(v.clone())
-                .map_err(|_| bad("sketch.edit", "`restore_marker` must be a nonnegative timeline position or null"))
+            crate::schema::sketch::EditMarker::read(v)
+                .ok_or_else(|| bad("sketch.edit", "`restore_marker` must be a nonnegative timeline position, null or false"))
         })
         .transpose()?;
-    if restore_marker.flatten().is_some_and(|m| m > s.doc.features.len()) {
+    if let Some(crate::schema::sketch::EditMarker::Restore(Some(m))) = requested
+        && m > s.doc.features.len()
+    {
         return Err(bad("sketch.edit", "`restore_marker` is past the end of the timeline"));
     }
     let key = match p.get("sketch") {
@@ -1221,6 +1223,18 @@ fn edit_sketch(s: &mut Session, p: &Value) -> Result<Value> {
         s.active_occurrence_path = (!path.is_empty()).then_some(path);
     }
     if s.active_sketch != Some(id) || s.sketch_entry.as_ref().is_none_or(|entry| entry.sketch != id) {
+        let restore_marker = match requested {
+            Some(crate::schema::sketch::EditMarker::Restore(marker)) => Some(marker),
+            Some(crate::schema::sketch::EditMarker::InPlace) => None,
+            // Left out: features the timeline evaluates after the sketch would be rebuilt by
+            // every sketch command (their fingerprints chain through it, #14010). Roll to the
+            // sketch for the edit and come back on Finish or Cancel, as the app's Edit Sketch
+            // does, so they are rebuilt once.
+            None => {
+                let end = s.doc.marker.unwrap_or(s.doc.features.len()).min(s.doc.features.len());
+                s.doc.feature_index(id).filter(|&index| index + 1 < end).map(|_| s.doc.marker)
+            }
+        };
         s.sketch_entry = Some(SketchEntry { sketch: id, restore_marker, ..entry_point(s) });
         if restore_marker.is_some()
             && let Some(index) = s.doc.feature_index(id)
