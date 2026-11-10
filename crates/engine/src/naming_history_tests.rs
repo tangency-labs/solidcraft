@@ -900,7 +900,7 @@ fn a_reference_told_apart_by_a_face_a_blend_replaced_still_finds_its_face() {
     // Round the block's top front edge: the front side meets the top only through the blend.
     run(&mut s, "solid.fillet", json!({"edges": [[20, 0, 10]], "radius": 2, "name": "Round"}));
     let round = id(&s, "Round");
-    let blend = format!("F{round}:blend:F{block}:side:l1|F{block}:top");
+    let blend = format!("F{round}:blend(F{block}:side:l1|F{block}:top)");
     assert!(names(&s, "Body1").iter().any(|(n, exact)| n == &blend && *exact), "{:?}", names(&s, "Body1"));
     // The front side, pushed out 2 mm while its name still says the top told it apart.
     run(&mut s, "solid.offset_face", json!({"faces": [[20, 0, 5]], "distance": 2, "name": "Push"}));
@@ -915,7 +915,7 @@ fn a_reference_told_apart_by_a_face_a_blend_replaced_still_finds_its_face() {
     assert!(solid_at(&s, [20.0, -1.0, 5.0]), "the front side moved out");
     let bounds = s.model.state().body("Body1").unwrap().mesh().bounds();
     assert!((bounds.min.y + 2.0).abs() < 1e-6, "{}", bounds.min.y);
-    assert!(names(&s, "Body1").iter().any(|(n, _)| n.contains(":blend:")), "{:?}", names(&s, "Body1"));
+    assert!(names(&s, "Body1").iter().any(|(n, _)| n.contains(":blend(")), "{:?}", names(&s, "Body1"));
     // A qualifier the blend does not separate from the wall still asks for the face again.
     let other = format!("F{block}:side:l1#[F{block}:side:l3]");
     s.doc_mut().feature_mut(push).unwrap().face_names = vec![other.clone()];
