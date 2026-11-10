@@ -14,14 +14,14 @@ pub mod p4;
 pub mod p5;
 pub mod p6;
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 
 /// `len` copies of `x` (an upstream `N_Alloc*` array, filled), or `NL_MEM_ERR` where
 /// the storage cannot be allocated (as upstream's failed `N_Malloc`).
 fn filled<T: Clone>(len: usize, x: T, op: &'static str) -> Result<Vec<T>> {
     let mut v = Vec::new();
     v.try_reserve_exact(len)
-        .map_err(|_| SolidError::nlib(op, NlibCode::Memory))?;
+        .map_err(|_| SolidError::nurbs(op, NurbsFailure::Memory))?;
     v.resize(len, x);
     Ok(v)
 }
@@ -31,7 +31,7 @@ fn filled<T: Clone>(len: usize, x: T, op: &'static str) -> Result<Vec<T>> {
 fn grid<T: Clone>(rows: usize, cols: usize, x: T, op: &'static str) -> Result<Vec<Vec<T>>> {
     let mut w = Vec::new();
     w.try_reserve_exact(rows)
-        .map_err(|_| SolidError::nlib(op, NlibCode::Memory))?;
+        .map_err(|_| SolidError::nurbs(op, NurbsFailure::Memory))?;
     for _ in 0..rows {
         w.push(filled(cols, x.clone(), op)?);
     }

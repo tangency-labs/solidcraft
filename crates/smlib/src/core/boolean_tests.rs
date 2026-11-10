@@ -181,7 +181,7 @@ fn solidcore_case(name: &'static str) -> Option<Measured> {
         let solids = solid_count(body).unwrap_or_else(|e| panic!("{name}: solid count: {e}"));
         assert_eq!(solids, c.solids, "{name}: solids");
         let (rec, _) = native(&to_arrays(body).unwrap()).unwrap_or_else(|e| panic!("{name}: record: {e:?}"));
-        solidcraft_geom::brep::check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
+        solidcore_ops::record_check::validate(&rec).unwrap_or_else(|e| panic!("{name}: record: {e}"));
         Some(Measured { volume: v, counts: n, kinds: kinds(&rec), solids })
     })
 }
@@ -493,4 +493,60 @@ mod history {
         let h = u(&u(&boxes[0], &boxes[1]), &u(&boxes[2], &boxes[3])).history().unwrap();
         assert!(h.faces.iter().any(|f| f.origins.len() == 4), "{h:?}");
     }
+}
+
+/// A boolean stage fails with a status error whose cause chain holds the stage that failed. The
+/// call is no answer only when that stage is a kernel status: a port failure or a cancellation
+/// in the chain fails the call, as `solidcore-ops`' `session::answer` does. (Each assertion on a
+/// chain fails when `answer` reads only the error on top.)
+#[test]
+fn a_status_error_with_a_port_failure_or_cancellation_as_cause_fails_the_call() {
+    use solidcore::SolidError;
+    use solidcore::error::{Failure, Reason};
+
+    use super::answer;
+
+    let wrap = |cause: SolidError| Failure::new("test::stage", Reason::Failed("a stage failed")).caused_by(cause).into_error();
+
+    let status = wrap(SolidError::sm_err("test::inner"));
+    assert!(status.sm_status().is_some());
+    assert!(matches!(answer::<()>(Err(status)), Ok(None)));
+
+    let unported = wrap(SolidError::unported("test::callee", "test.unit"));
+    assert!(unported.sm_status().is_some());
+    assert!(matches!(answer::<()>(Err(unported)), Err(e) if e.is_port_failure()));
+    let deep = wrap(wrap(SolidError::unported("test::callee", "test.unit")));
+    assert!(answer::<()>(Err(deep)).is_err());
+
+    let cancelled = wrap(SolidError::cancelled("test::cancelled"));
+    assert!(cancelled.sm_status().is_some() && !cancelled.is_port_failure());
+    assert!(answer::<()>(Err(cancelled)).is_err());
+
+    assert!(answer::<()>(Err(SolidError::invalid_input("test::input", "bad"))).is_err());
+}
+
+/// A Boolean failure that slice, sweep and the other users of the merge engine pass up reaches the
+/// caller as the SMLib status it stands for, as the `Upstream` it replaced did, not as a message;
+/// one whose cause chain holds unported code is not supported; another subsystem's failure keeps
+/// its message.
+#[test]
+fn a_boolean_failure_from_another_operation_keeps_its_status() {
+    use solidcore::SolidError;
+    use solidcore::error::{Failure, Reason};
+
+    use super::blend::status;
+
+    let boolean = |cause: Option<SolidError>| {
+        let f = Failure::new("boolean::merge::p3", Reason::Failed("a Boolean of the tree failed"));
+        match cause {
+            Some(c) => f.caused_by(c),
+            None => f,
+        }
+        .into_error()
+    };
+    assert!(matches!(status(boolean(None)), Error::Status(1001)));
+    assert!(matches!(status(boolean(Some(SolidError::sm_err("test::inner")))), Error::Status(1001)));
+    assert!(matches!(status(boolean(Some(SolidError::unported("test::callee", "test.unit")))), Error::Unsupported));
+    let offset = Failure::new("offset::offset_executive::p2", Reason::Failed("the offset could not be built")).into_error();
+    assert!(matches!(status(offset), Error::Solidcore(_)));
 }

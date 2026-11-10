@@ -38,7 +38,21 @@ fn swept(mut p: Value) -> Value {
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<SweepParams>(),
-        &["against", "apply", "contact_sets", "from", "index", "joint", "occurrences", "refine", "report_gaps", "step", "to"],
+        &[
+            "against",
+            "apply",
+            "budget_s",
+            "contact_sets",
+            "exclude_pairs",
+            "from",
+            "index",
+            "joint",
+            "occurrences",
+            "refine",
+            "report_gaps",
+            "step",
+            "to",
+        ],
     );
     let schema = input_schema_for::<SweepParams>();
     let required: Vec<&str> = schema.as_value()["required"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
@@ -68,7 +82,6 @@ fn strict_keeps_todays_errors() {
         swept(json!({"refine": 2000})),
         swept(json!({"step": -1})),
         swept(json!({"step": 1e10})),
-        swept(json!({"step": 1e-6})),
         swept(json!({"occurrences": ["Door"]})),
         swept(json!({"occurrences": ["Door", "Block"], "contact_sets": true})),
         swept(json!({"against": ["Block"]})),
@@ -147,7 +160,7 @@ fn sweep_joint_replies_with_its_schema() {
         keys.sort();
         keys
     };
-    assert!(gaps["samples"].as_array().is_some_and(|all| all.iter().all(|x| keys(x) == ["min_gap_mm", "pair", "value"])), "{gaps}");
+    assert!(gaps["samples"].as_array().is_some_and(|all| all.iter().all(|x| keys(x) == ["min_gap_mm", "pair", "parts", "value"])), "{gaps}");
 
     let reached = sweep(&mut s, json!({"joint": "Hinge", "from": 0, "to": "10 deg", "step": 5}));
     assert_eq!((&reached["stopped_at"], &reached["stopped_by"]), (&Value::Null, &Value::Null), "{reached}");
@@ -157,4 +170,14 @@ fn sweep_joint_replies_with_its_schema() {
     let applied = sweep(&mut s, json!({"joint": "Hinge", "from": 0, "to": 10, "step": 5, "apply": true}));
     assert_eq!(applied["applied"], true, "{applied}");
     assert_ne!(*s.doc, *before, "the hinge was left at 10 degrees");
+
+    // #5963: a time budget given, one run out at once, and a sweep past its
+    // sample cap all reply as the schema says.
+    for p in [
+        json!({"joint": "Hinge", "from": 0, "to": 90, "budget_s": 60}),
+        json!({"joint": "Hinge", "from": 0, "to": "90", "budget_s": 1e-9}),
+        json!({"joint": "Hinge", "from": 0, "to": 1e8, "step": 1e-3}),
+    ] {
+        sweep(&mut s, p);
+    }
 }

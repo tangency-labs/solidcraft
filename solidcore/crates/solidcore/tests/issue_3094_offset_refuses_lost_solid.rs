@@ -25,7 +25,7 @@ use offset_fixture::{api_shell, offset_full, planar_faces_at, shell, volume};
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::boolean::api_brep::boolean_union;
 use solidcore::error::offset::{OffsetFailure, Unsoundness};
-use solidcore::error::Reason;
+use solidcore::error::{Reason, SM_ERR};
 use solidcore::geom::attribute::AttributeStore;
 use solidcore::math::Point3;
 use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions};
@@ -149,15 +149,20 @@ fn an_offset_that_is_no_solid_is_refused() {
     );
     match offset_full(&mut k, &mut part, -4.0) {
         Err(error) => {
-            let SolidError::Failed(failure) = &error else {
-                panic!("not a refusal: {error}");
+            assert_eq!(error.sm_status(), Some(SM_ERR));
+            let cause = error.cause().expect("the offset retains its stage failure");
+            let Some(failure) = cause.failure() else {
+                panic!("not a typed refusal: {cause:?}");
             };
-            assert_eq!(
-                failure.reason,
-                Reason::Offset(OffsetFailure::Unsound {
-                    what: Unsoundness::NotManifoldSolid
-                })
-            );
+            let Reason::Offset(OffsetFailure::EdgeVanishes {
+                edge: Some(edge),
+                face: None,
+            }) = &failure.reason
+            else {
+                panic!("not an edge-vanishing refusal: {cause:?}");
+            };
+            assert!(part.edge(*edge).is_ok(), "the refusal names an input edge");
+            assert_eq!(failure.entity, Some(solidcore::EntityRef::Edge(*edge)));
         }
         Ok(body) => assert!(
             brep_is_manifold_solid(&body).unwrap(),

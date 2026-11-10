@@ -858,7 +858,7 @@ pub fn extend(body: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
         .iter()
         .enumerate()
         .map(|(i, e)| {
-            Ok(solidcraft_geom::brep::pcurve::EdgeUse {
+            Ok(solidcore_ops::pcurve::EdgeUse {
                 edge: index(i)?,
                 curve: e.parameters(),
                 interval: e.interval,
@@ -869,7 +869,7 @@ pub fn extend(body: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
         })
         .collect::<Result<Vec<_>>>()?;
     let surface = b::Surface::Plane { origin: a3(origin), u_axis: a3(du), v_axis: a3(dv) };
-    let pcurves = solidcraft_geom::brep::pcurve::pcurves(&surface, &[uses], r.tolerance).map_err(|e| failed(format!("extend: {e}")))?;
+    let pcurves = solidcore_ops::pcurve::pcurves(&surface, &[uses], r.tolerance).map_err(|e| failed(format!("extend: {e}")))?;
     let edges = pcurves
         .into_iter()
         .flatten()

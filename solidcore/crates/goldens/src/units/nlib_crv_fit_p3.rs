@@ -30,12 +30,13 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use solidcore::error::nurbs::nlib_number;
 use solidcore::math::Vec3;
 use solidcore::nurbs::crv_basic::Curve;
 use solidcore::nurbs::crv_fit::p1::{param_values, ParamMethod};
 use solidcore::nurbs::crv_fit::p3::{self as fit, EndTangents, ParamSource, VectorKind};
 use solidcore::nurbs::math::CPoint;
-use solidcore::{Result as SolidResult, SolidError};
+use solidcore::{Result as SolidResult};
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;
@@ -190,7 +191,7 @@ fn to_output(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
 fn status<T>(r: &SolidResult<T>) -> f64 {
     match r {
         Ok(_) => 0.0,
-        Err(SolidError::Nlib { code, .. }) => f64::from(code.code()),
+        Err(e) if nlib_number(e).is_some() => f64::from(nlib_number(e).unwrap_or_default()),
         Err(_) => -1.0,
     }
 }
