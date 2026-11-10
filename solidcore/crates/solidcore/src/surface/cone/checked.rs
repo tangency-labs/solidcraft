@@ -66,6 +66,7 @@ pub(crate) struct HeightMap {
     origin: Ivl,
     scale: Ivl,
     intermediates: [(Ivl, Ivl); 4],
+    exact: [Ivl; 2],
 }
 
 impl HeightMap {
@@ -91,6 +92,7 @@ impl HeightMap {
                 origin: Ivl::from(0.0),
                 scale: Ivl::from(if inside { -1.0 } else { 1.0 }),
                 intermediates: [(Ivl::from(0.0), Ivl::from(if inside { -1.0 } else { 1.0 })); 4],
+                exact: [Ivl::from(0.0), Ivl::from(if inside { -1.0 } else { 1.0 })],
             });
         }
         let width = Ivl::from(native.max()) - Ivl::from(native.min());
@@ -124,6 +126,10 @@ impl HeightMap {
             origin: add.0,
             scale: add.1,
             intermediates: [subtract, divide, multiply, add],
+            exact: [
+                Ivl::from(step.min()) - Ivl::from(start) * step_width / denominator,
+                step_width / denominator,
+            ],
         };
         if ![map.origin.lo, map.origin.hi, map.scale.lo, map.scale.hi]
             .iter()
@@ -135,6 +141,11 @@ impl HeightMap {
             ));
         }
         Ok(map)
+    }
+
+    /// The mathematical affine map, before native floating-point evaluation.
+    pub(crate) const fn exact_coefficients(self) -> [Ivl; 2] {
+        self.exact
     }
 
     pub(crate) fn range(self, parameter: Ivl) -> Result<Ivl> {
@@ -483,6 +494,132 @@ impl Cone {
         });
         slots.data = Some(Arc::clone(&data));
         Some(data)
+    }
+
+    /// Literal coaxial circle radius. For Y=+/-axis cross X with a Cartesian
+    /// unit axis, X and Y are exactly perpendicular and have identical length.
+    /// Thus r*(X*cos+Y*sin) has radius r*|X|, including stored frame rounding.
+    /// No axis renormalization changes the mathematical surface.
+    pub(crate) fn coaxial_radius_enclosure(&self, origin: Vec3, axis: Vec3) -> Result<Option<Ivl>> {
+        let frame = self.canonical();
+        if frame.semi_angle_deg != 0.0
+            || ![Vec3::X, -Vec3::X, Vec3::Y, -Vec3::Y, Vec3::Z, -Vec3::Z].contains(&axis)
+            || (frame.origin.z_axis() != axis && frame.origin.z_axis() != -axis)
+        {
+            return Ok(None);
+        }
+        let x = frame.origin.x_axis();
+        let y = frame.origin.y_axis();
+        let center = frame.origin.origin();
+        if [x.x, x.y, x.z]
+            .into_iter()
+            .zip([y.x, y.y, y.z])
+            .zip([axis.x, axis.y, axis.z])
+            .any(|((x, y), k)| k != 0.0 && (x != 0.0 || y != 0.0))
+            || [center.x, center.y, center.z]
+                .into_iter()
+                .zip([origin.x, origin.y, origin.z])
+                .zip([axis.x, axis.y, axis.z])
+                .any(|((c, o), k)| k == 0.0 && c != o)
+            || (y != axis.cross(x) && y != -axis.cross(x))
+        {
+            return Ok(None);
+        }
+        let radius = Ivl::from(frame.radius) * norm(boxed(x));
+        if radius.lo <= 0.0 || !radius.hi.is_finite() {
+            return Err(bad("coaxial circle radius is not finite and positive"));
+        }
+        Ok(Some(radius))
+    }
+
+    /// Enclose every point of a native UV rectangle in the checked full-circle
+    /// class. Every intersected stored polar span is evaluated over an interval;
+    /// this is not an endpoint approximation of a curved cylinder trace.
+    pub(crate) fn cylinder_patch_enclosure(
+        &self,
+        k: &Kernel,
+        uv: [Ivl; 2],
+    ) -> Result<Option<Box3>> {
+        if self.cylinder_runtime_allowance(k)?.is_none() {
+            return Ok(None);
+        }
+        if uv
+            .iter()
+            .any(|x| !x.lo.is_finite() || !x.hi.is_finite() || x.lo > x.hi)
+        {
+            return Err(bad(
+                "cylinder parameter rectangle must be finite and ordered",
+            ));
+        }
+        let [x, y] = uv;
+        let [mut u, v] = if self.canonical().swap_uv {
+            [y, x]
+        } else {
+            [x, y]
+        };
+        let polar = self
+            .rev()
+            .polar_curve()
+            .ok_or_else(|| bad("missing cylinder polar curve"))?;
+        // Derived once per surface; `None` derives afresh, with the same results.
+        let memo = self.checked_memo(k, polar);
+        let canonical = polar.base().canonical()?;
+        let controls = polar.base().control_points()?;
+        let (Some(&lo), Some(&hi)) = (canonical.knots.first(), canonical.knots.last()) else {
+            return Err(bad("missing polar interval"));
+        };
+        if !lo.is_finite() || !hi.is_finite() || lo >= hi {
+            return Err(bad("invalid polar interval"));
+        }
+        let extrapolate = polar.base().is_out_of_bounds_enabled();
+        if !extrapolate {
+            u = Ivl::new(
+                crate::math::clamp_between(u.lo, lo, hi),
+                crate::math::clamp_between(u.hi, lo, hi),
+            );
+        }
+        let mut result: Option<Box3> = None;
+        // The shared class gate bounds this loop by 24,000 quadratic spans.
+        for (index, knots) in canonical.knots.windows(2).enumerate() {
+            let [a, b] = *knots else {
+                return Err(bad("missing polar span"));
+            };
+            if !a.is_finite() || !b.is_finite() || a >= b {
+                return Err(bad("invalid polar span"));
+            }
+            let left = if extrapolate && a == lo {
+                u.lo
+            } else {
+                u.lo.max(a)
+            };
+            let right = if extrapolate && b == hi {
+                u.hi
+            } else {
+                u.hi.min(b)
+            };
+            if left > right {
+                continue;
+            }
+            let raw = controls
+                .get(2 * index..2 * index + 3)
+                .ok_or_else(|| bad("missing polar controls"))?;
+            let width = Ivl::from(b) - Ivl::from(a);
+            let span = PolarSpan {
+                coefficients: polar_coefficients(polar, raw)?,
+                parameter: (Ivl::new(left, right) - Ivl::from(a)) / width,
+            };
+            let point = self.cylinder_span_enclosure(k, span, v, memo.as_deref())?;
+            result = Some(match result {
+                None => point,
+                Some([x, y, z]) => {
+                    let [a, b, c] = point;
+                    [x.hull(a), y.hull(b), z.hull(c)]
+                }
+            });
+        }
+        result
+            .map(Some)
+            .ok_or_else(|| bad("cylinder parameter range has no polar span"))
     }
 
     /// A uniform accuracy requirement for a successful native cylinder point.

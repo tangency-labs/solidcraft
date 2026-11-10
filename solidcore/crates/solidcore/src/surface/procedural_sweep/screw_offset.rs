@@ -560,6 +560,67 @@ impl ScrewOffsetSection {
         Ok(Some(result))
     }
 
+    /// Encloses `tan(-phase/2)` and its Taylor coefficients on an entire
+    /// source interval. The positive radial half-plane selects one meridian;
+    /// `-y/(sqrt(x*x+y*y)+x)` avoids an angular inversion and its branch cut.
+    /// The coefficients enclose derivatives divided by their factorials.
+    pub(crate) fn meridian_half_angle_jet(
+        &self,
+        parameter: Ivl,
+        radial: Vec3,
+    ) -> Result<crate::blend::fillet_section::tay::Tay<Ivl>> {
+        use crate::blend::fillet_section::tay::{tay_sqrt, Tay};
+        if !parameter.lo.is_finite() || !parameter.hi.is_finite() || parameter.lo > parameter.hi {
+            return Err(bad("invalid meridian Taylor interval"));
+        }
+        let constant = |v| Tay::of_terms(v, Ivl::from(0.0));
+        let variable = Tay::of_terms(parameter, Ivl::from(1.0));
+        let (e, f, _) = self.meridian_frame(radial)?;
+        let v = self
+            .normal_start_box
+            .into_iter()
+            .zip(self.normal_rate_box)
+            .map(|(a, b)| constant(a) + constant(b) * variable)
+            .collect::<Vec<_>>();
+        let squared = v
+            .iter()
+            .fold(constant(Ivl::from(0.0)), |sum, &x| sum + x * x);
+        if squared.at(0).lo <= 0.0 {
+            return Err(bad("meridian Taylor normal is not proved regular"));
+        }
+        let length = tay_sqrt(&squared);
+        let mut x = constant(Ivl::from(0.0));
+        let mut y = constant(Ivl::from(0.0));
+        for (((((start, rate), normal), origin), ex), fy) in self
+            .start_box
+            .into_iter()
+            .zip(self.tangent_box)
+            .zip(v)
+            .zip(boxed(self.origin))
+            .zip(e)
+            .zip(f)
+        {
+            let component = constant(start - origin)
+                + constant(rate) * variable
+                + constant(Ivl::from(self.distance)) * normal / length;
+            x = x + constant(ex) * component;
+            y = y + constant(fy) * component;
+        }
+        if x.at(0).lo <= 0.0 {
+            return Err(bad("meridian Taylor interval leaves its radial half-plane"));
+        }
+        let radius = tay_sqrt(&(x * x + y * y));
+        let denominator = radius + x;
+        if denominator.at(0).lo <= 0.0 {
+            return Err(bad("meridian half-angle has no positive denominator"));
+        }
+        let q = (constant(Ivl::from(0.0)) - y) / denominator;
+        if q.c.iter().any(|v| !v.lo.is_finite() || !v.hi.is_finite()) {
+            return Err(bad("meridian Taylor coefficients overflowed"));
+        }
+        Ok(q)
+    }
+
     /// Isolates an intersection with `other` in two source parameter intervals using
     /// the interval Krawczyk operator, for at most 48 contractions. This operates on
     /// screw-invariant sections; both callers must use the same axis, pitch and axial
@@ -764,6 +825,110 @@ impl ScrewOffsetSection {
         Ok(point)
     }
 
+    /// Exact constant-radius meridian used only by section root isolation.
+    /// Its interval coefficients retain the specified radius and axial bounds;
+    /// constructing rounded world-space endpoints would solve a different radius.
+    pub(crate) fn cylinder_reference(
+        radius: Ivl,
+        height: [f64; 2],
+        motion: &ScrewMotion,
+        radial: Vec3,
+    ) -> Result<Self> {
+        let coordinate_axis =
+            |v: Vec3| [Vec3::X, -Vec3::X, Vec3::Y, -Vec3::Y, Vec3::Z, -Vec3::Z].contains(&v);
+        let axis = motion.axis();
+        let [lo, hi] = height;
+        if !radius.lo.is_finite()
+            || !radius.hi.is_finite()
+            || radius.lo <= 0.0
+            || radius.lo > radius.hi
+            || !lo.is_finite()
+            || !hi.is_finite()
+            || lo >= hi
+            || !coordinate_axis(axis)
+            || !coordinate_axis(radial)
+            || axis.dot(radial) != 0.0
+            || motion.law().is_some()
+        {
+            return Err(bad(
+                "cylinder root reference needs an exact Cartesian screw frame",
+            ));
+        }
+        let origin = motion.origin();
+        let mut section = Self::new(
+            origin + radial * radius.mid() + axis * lo,
+            origin + radial * radius.mid() + axis * hi,
+            motion,
+            0.0,
+        )?;
+        section.start_box = add(
+            boxed(origin),
+            add(
+                scale(boxed(radial), radius),
+                scale(boxed(axis), Ivl::from(lo)),
+            ),
+        );
+        section.tangent_box = scale(boxed(axis), Ivl::from(hi) - Ivl::from(lo));
+        let velocity = add(
+            cross(boxed(axis), sub(section.start_box, boxed(origin))),
+            scale(
+                boxed(axis),
+                Ivl::from(motion.pitch()) / Ivl::checked(TAU, TAU),
+            ),
+        );
+        section.normal_start_box = cross(section.tangent_box, velocity);
+        section.normal_rate_box =
+            cross(section.tangent_box, cross(boxed(axis), section.tangent_box));
+        Ok(section)
+    }
+
+    /// Global lower bound of profile speed, including the stored axis's rounding.
+    /// Since b.n'=0, |C'| >= |b|. Rodrigues rotation with q=|k|² has
+    /// perpendicular singular value sqrt(cos²(theta)+q sin²(theta)) and axial
+    /// value q+(1-q)cos(theta). Their positive lower bounds account for an axis
+    /// which was normalised in floating point rather than being exactly unit.
+    pub(crate) fn profile_speed_lower_bound(&self) -> f64 {
+        let q = norm_squared(boxed(self.axis));
+        let perpendicular = Ivl::from(q.lo.min(1.0)).sqrt().lo;
+        let axial = (Ivl::from(2.0) * q - Ivl::from(1.0)).lo.min(1.0);
+        let rotation = perpendicular.min(axial).max(0.0);
+        (norm_squared(self.tangent_box).sqrt() * Ivl::from(rotation)).lo
+    }
+
+    /// Lower bound of angular speed for every turn of the supplied profile range.
+    /// Write r=C-o, q=|k|² and r_perp=r-k(k.r)/q. The squared perpendicular
+    /// speed is `|r_perp|²(q cos²(theta)+sin²(theta))`; the axial coefficient is
+    /// h+(q-1)(k.r)sin(theta)/q. These orthogonal terms give a global bound,
+    /// with no assumption that the stored axis has exactly unit length.
+    pub(crate) fn turn_speed_lower_bound(&self, parameter: Ivl) -> Result<f64> {
+        if !parameter.lo.is_finite() || !parameter.hi.is_finite() || parameter.lo >= parameter.hi {
+            return Err(bad(
+                "angular reach needs a finite ascending source interval",
+            ));
+        }
+        let k = boxed(self.axis);
+        let q = norm_squared(k);
+        if !q.lo.is_finite() || q.lo <= 0.0 || !q.hi.is_finite() {
+            return Err(bad("angular reach needs a nonzero finite screw axis"));
+        }
+        let r = sub(self.point_box(parameter), boxed(self.origin));
+        let axial_coordinate = dot(k, r) / q;
+        let radial = sub(r, scale(k, axial_coordinate));
+        let defect = (q - Ivl::from(1.0)) * axial_coordinate;
+        // Enclose the division that produced rise, including subnormal rounding.
+        let rise = self.rise_box;
+        let axial = (Ivl::from(rise.mig()) - Ivl::from(defect.mag()))
+            .lo
+            .max(0.0);
+        let speed_squared =
+            norm_squared(radial) * Ivl::from(q.lo.min(1.0)) + q * square(Ivl::from(axial));
+        let speed = speed_squared.sqrt().lo;
+        if !speed.is_finite() || speed <= 0.0 {
+            return Err(bad("angular reach has no proved positive speed"));
+        }
+        Ok(speed)
+    }
+
     /// Upper speeds in source parameter and physical angle, over all turns.
     /// Triangle bounds for Rodrigues and its derivative remain valid for the
     /// rounded stored axis. These bounds convert pcurve coordinate certificates
@@ -803,6 +968,26 @@ impl ScrewOffsetSection {
             return Err(bad("pcurve derivative enclosure is not finite"));
         }
         Ok([profile, turn])
+    }
+
+    /// Distance from the stored-axis Rodrigues orbit to its unit-axis screw
+    /// orbit, for every supplied source parameter and physical angle. With
+    /// k=s*u, |u|=1, their rotation difference is
+    /// (s-1)(u cross r)sin(theta)+(s²-1)u(u.r)(1-cos(theta)); their axial
+    /// translation differs by h(s-1)u*theta. This explicit term makes unit-frame
+    /// meridian certificates valid even when axis normalization rounded.
+    pub(crate) fn unit_axis_orbit_deviation(&self, parameter: Ivl, angle: Ivl) -> Result<f64> {
+        let q = norm_squared(boxed(self.axis));
+        let s_error = (q.sqrt() - Ivl::from(1.0)).mag();
+        let q_error = (q - Ivl::from(1.0)).mag();
+        let radius = norm_squared(sub(self.point_box(parameter), boxed(self.origin))).sqrt();
+        let bound = ((Ivl::from(s_error) + Ivl::from(2.0) * Ivl::from(q_error)) * radius
+            + Ivl::from(self.rise_box.mag()) * Ivl::from(s_error) * Ivl::from(angle.mag()))
+        .hi;
+        if !bound.is_finite() {
+            return Err(bad("unit-axis orbit discrepancy is not finite"));
+        }
+        Ok(bound)
     }
 
     /// Proves that the offset has not passed a focal singularity on this support.
@@ -1164,6 +1349,44 @@ mod tests {
     }
 
     #[test]
+    fn meridian_half_angle_jet_encloses_the_segmented_m20_separator() {
+        let motion = ScrewMotion::new(Vec3::new(-1.0, -64.0, 0.0), Vec3::Z, 2.5, None).unwrap();
+        for distance in [-0.1, 0.1] {
+            let section = ScrewOffsetSection::new(
+                Vec3::new(9.125, -64.0, -1.334_081_216_351_296_3),
+                Vec3::new(7.646_835_306_586_814, -64.0, -2.1875),
+                &motion,
+                distance,
+            )
+            .unwrap();
+            // This is the literal root-corner source parameter in the native
+            // negative-offset witness. Constant theta leaves the authored plane
+            // by 0.003959 mm; the half-angle correction cancels that phase.
+            let corner = section.evaluate(0.966_201_402_772_523_4).unwrap().0;
+            assert!((corner.y + 64.0).abs() > 0.0039);
+            for interval in [
+                Ivl::new(-0.12, 0.2),
+                Ivl::new(0.2, 0.8),
+                Ivl::new(0.8, 1.12),
+            ] {
+                let q = section.meridian_half_angle_jet(interval, Vec3::X).unwrap();
+                for fraction in [0.113, 0.379, 0.713, 0.937] {
+                    let t = interval.lo + fraction * (interval.hi - interval.lo);
+                    let meridian = section.meridian(t, Vec3::X).unwrap();
+                    let value = (-0.5 * meridian.phase).tan();
+                    let rate = -0.5 * (1.0 + value * value) * meridian.phase_rate;
+                    assert!(q.at(0).lo <= value && value <= q.at(0).hi);
+                    assert!(q.at(1).lo <= rate && rate <= q.at(1).hi);
+                    let point = section.evaluate(t).unwrap().0 - motion.origin();
+                    let cosine = (1.0 - value * value) / (1.0 + value * value);
+                    let sine = 2.0 * value / (1.0 + value * value);
+                    assert!((point.x * sine + point.y * cosine).abs() < 1e-12);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn meridian_phase_encloses_oblique_reference_normalization() {
         let motion = ScrewMotion::new(Vec3::ZERO, Vec3::new(1.0, 2.0, 3.0), 2.5, None).unwrap();
         let section = ScrewOffsetSection::new(
@@ -1207,6 +1430,37 @@ mod tests {
                 for product in [dot(e, f), dot(e, k), dot(f, k)] {
                     assert!(product.lo <= 0.0 && product.hi >= 0.0, "{product:?}");
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn stored_axis_rounding_is_included_in_the_orbit_certificate() {
+        // A controlled unit-axis rounding error; construction ordinarily introduces
+        // such a defect on oblique axes. The ideal unit axis here is exactly Z.
+        let mut motion = motion();
+        motion.axis = Vec3::Z * (1.0 + f64::EPSILON);
+        let section = ScrewOffsetSection::new(
+            Vec3::new(8.0, 0.0, 0.0),
+            Vec3::new(10.0, 0.0, 2.0),
+            &motion,
+            0.0,
+        )
+        .unwrap();
+        let bound = section
+            .unit_axis_orbit_deviation(Ivl::new(0.0, 1.0), Ivl::new(-2.0, 3.0))
+            .unwrap();
+        assert!(bound.is_finite() && bound > 0.0 && bound < 1e-10);
+        for t in [0.113, 0.371, 0.829] {
+            let p = section.evaluate(t).unwrap().0;
+            for angle in [-1.73_f64, 0.417, 2.81] {
+                let stored = motion.turn(p, angle) + motion.axis() * motion.lift(angle);
+                let ideal = Vec3::new(
+                    p.x * angle.cos() - p.y * angle.sin(),
+                    p.x * angle.sin() + p.y * angle.cos(),
+                    p.z + motion.lift(angle),
+                );
+                assert!((stored - ideal).length() <= bound);
             }
         }
     }
