@@ -1442,3 +1442,65 @@ fn host_name_guard_finds_tab_names_and_command_ids_but_skips_tests() {
     "#;
     assert_eq!(host_names_in(source, &names), ["SKETCH", "solid.extrude"]);
 }
+
+/// Message-id prefixes of the kit's own vocabulary: the generic words its widgets say
+/// themselves (OK, Undo, the History controls), the colour picker's, the search field's and the
+/// navigation bar customiser's. Every other id in the host's catalogs names the host's screens.
+const KIT_MESSAGE_PREFIXES: &[&str] = &["color.", "navbar.custom.", "search.", "ui."];
+
+/// The message ids (`area.thing`) of SolidCraft's English catalog outside the kit's vocabulary:
+/// labels the kit must take from the host as data.
+fn host_message_ids() -> std::collections::BTreeSet<String> {
+    let english = crate::i18n::LOCALES.first().expect("the English catalog");
+    english
+        .messages()
+        .keys()
+        .filter(|key| {
+            let mut parts = key.split('.');
+            let dotted = key.contains('.')
+                && parts.all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_'));
+            dotted && !KIT_MESSAGE_PREFIXES.iter().any(|prefix| key.starts_with(prefix))
+        })
+        .map(|key| key.to_string())
+        .collect()
+}
+
+#[test]
+fn kit_code_names_no_host_message_ids() {
+    let names = host_message_ids();
+    let mut failures = Vec::new();
+    fn scan(path: &Path, relative: &str, names: &std::collections::BTreeSet<String>, failures: &mut Vec<String>) {
+        if path.is_dir() {
+            for entry in std::fs::read_dir(path).unwrap() {
+                let path = entry.unwrap().path();
+                let name = path.file_name().unwrap().to_str().unwrap().to_owned();
+                scan(&path, &format!("{relative}/{name}"), names, failures);
+            }
+            return;
+        }
+        if path.extension().is_none_or(|e| e != "rs") || relative.ends_with("_tests.rs") {
+            return;
+        }
+        let found = host_names_in(&std::fs::read_to_string(path).unwrap(), names);
+        if !found.is_empty() {
+            failures.push(format!("{relative}: {found:?}"));
+        }
+    }
+    scan(&Path::new(env!("CARGO_MANIFEST_DIR")).join("src/ui_kit"), "ui_kit", &names, &mut failures);
+    failures.sort();
+    assert!(failures.is_empty(), "kit code names the host's messages; take the text from the host as data:\n{}", failures.join("\n"));
+}
+
+#[test]
+fn message_id_guard_finds_host_ids_but_skips_kit_vocabulary_and_tests() {
+    let names = host_message_ids();
+    assert!(names.contains("prefs.blur_off") && !names.contains("ui.undo") && !names.contains("Invert"));
+    let source = r#"
+        fn host() -> &'static str { solidcraft_ui_text::tr("prefs.blur_off") }
+        fn kit() -> &'static str { solidcraft_ui_text::tr("ui.undo") }
+        fn handle() -> String { format!("prefs:blur_cost:{}", "ai.prefs.pointer_preview_hidden") }
+        #[cfg(test)]
+        mod tests { fn sample() -> &'static str { "sketch_text.bold" } }
+    "#;
+    assert_eq!(host_names_in(source, &names), ["prefs.blur_off", "ai.prefs.pointer_preview_hidden"]);
+}
