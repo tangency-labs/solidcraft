@@ -128,7 +128,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "MODIFY")
         .icon("sketch_scale")
         .enabled(in_sketch)
-        .params("entities: [curve/point ids], base: [x,y] or point ref, factor: number"),
+        .params("entities: [curve/point ids], base: [x,y] or point ref, factor: number; the driving length and radius dimensions wholly inside the selection scale too (a formula becomes `(formula) * factor`)"),
     CommandSpec::new("sketch.transform", "Transform", transform)
         .at("SKETCH", "MODIFY")
         .icon("sketch_move")
@@ -3922,14 +3922,18 @@ fn scale_dimensions(sk: &mut Sketch, doc: &mut solidcraft_doc::Document, curves:
 fn scale(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.scale";
     let k = num(p, "factor").filter(|k| *k > 1e-9 && *k < 1e6).ok_or_else(|| bad(cmd, "`factor` must be a positive number"))?;
-    let (out, info) = edit(s, p, cmd, false, |sk, _| {
+    let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let (mut cs, ps) = entities(sk, p, cmd)?;
         with_ellipse_axes(sk, &mut cs);
         let b = if p.get("base").is_some() { point_or_ref(sk, p, "base", cmd)? } else { Vec2::ZERO };
         let f = move |q: Vec2| b + (q - b) * k;
         transform_in_place(sk, &cs, &ps, &f, k, cmd)?;
+        // The dimensions go with the geometry, else the solve pulls it back to the old sizes (#14411).
+        let moved = involved_points(sk, &cs, &ps);
+        scale_dimensions(sk, doc, &cs, &moved, k)?;
         Ok(ids_of(sk, &cs))
     })?;
+    s.doc_mut().prune_model_params();
     reply(cmd, ScaleResult { curves: out, sketch: info, param_warnings: Vec::new() })
 }
 
