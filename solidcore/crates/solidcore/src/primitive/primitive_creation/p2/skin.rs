@@ -94,13 +94,16 @@ fn skin_primitive_internal(
 
     // check input, at least two profiles
     if curves_in_each_profile.len() < 2 {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::primitive_failed(
+            OP,
+            "a skin needs at least two profiles",
+        ));
     }
 
     // local region, brep and tolerance
     let region = primitive
         .region()
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::primitive_missing(OP, "the target region"))?;
     let tol = a.brep(brep)?.tolerance();
 
     // tell brep it's going to be modified, and that we'll be doing a Boolean
@@ -170,7 +173,9 @@ fn skin_with_scratch(
             // see if this profile is a set of co-planar loops
             let mut profile: Vec<Option<Curve>> = curves
                 .get_mut(range.clone())
-                .ok_or_else(|| SolidError::sm_err(OP))?
+                .ok_or_else(|| {
+                    SolidError::primitive_failed(OP, "a profile's curves are out of range")
+                })?
                 .iter_mut()
                 .map(Option::take)
                 .collect();
@@ -190,9 +195,9 @@ fn skin_with_scratch(
                 }
             }
             // Unconsumed curves stay with the caller.
-            let slots = curves
-                .get_mut(range.clone())
-                .ok_or_else(|| SolidError::sm_err(OP))?;
+            let slots = curves.get_mut(range.clone()).ok_or_else(|| {
+                SolidError::primitive_failed(OP, "a profile's curves are out of range")
+            })?;
             for (target, slot) in slots.iter_mut().zip(profile) {
                 if slot.is_some() {
                     *target = slot;
@@ -211,7 +216,10 @@ fn skin_with_scratch(
                         open_profiles = true;
                     } else {
                         // input profiles don't all match
-                        return Err(SolidError::sm_err(OP));
+                        return Err(SolidError::primitive_failed(
+                            OP,
+                            "the profiles do not all match",
+                        ));
                     }
                 }
                 Ok(()) => {
@@ -224,7 +232,10 @@ fn skin_with_scratch(
 
             // error - more than one face per profile
             if profile_faces.len() > 1 {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::primitive_failed(
+                    OP,
+                    "a profile makes more than one face",
+                ));
             }
             faces.extend(profile_faces.iter().map(|&face| (scratch, face)));
         }
@@ -234,11 +245,13 @@ fn skin_with_scratch(
             // build a composite curve from these profile curves
             let brep_tol = a.brep(brep)?.tolerance();
             let mut profile = Vec::new();
-            for slot in curves
-                .get_mut(range.clone())
-                .ok_or_else(|| SolidError::sm_err(OP))?
-            {
-                profile.push(slot.take().ok_or_else(|| SolidError::null_pointer(OP))?);
+            for slot in curves.get_mut(range.clone()).ok_or_else(|| {
+                SolidError::primitive_failed(OP, "a profile's curves are out of range")
+            })? {
+                profile.push(
+                    slot.take()
+                        .ok_or_else(|| SolidError::primitive_missing(OP, "a profile curve"))?,
+                );
             }
             for flag in transferred.get_mut(range.clone()).unwrap_or_default() {
                 *flag = true;
@@ -250,14 +263,15 @@ fn skin_with_scratch(
                 0.0,
             )?;
             if built.composites.len() != 1 {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::primitive_failed(
+                    OP,
+                    "an open profile does not make one composite curve",
+                ));
             }
             // build a B-spline curve for the composite curve
-            let mut composite = built
-                .composites
-                .into_iter()
-                .next()
-                .ok_or_else(|| SolidError::sm_err(OP))?;
+            let mut composite = built.composites.into_iter().next().ok_or_else(|| {
+                SolidError::primitive_failed(OP, "an open profile makes no composite curve")
+            })?;
             nurbs.push(composite.make_composite_nurb()?);
         }
     }
@@ -279,7 +293,9 @@ fn skin_with_scratch(
     if cap_ends {
         // A planar loft (all profiles coplanar) has no depth to cap.
         let k = a.kernel(brep)?;
-        let &(first_brep, first) = faces.first().ok_or_else(|| SolidError::null_pointer(OP))?;
+        let &(first_brep, first) = faces
+            .first()
+            .ok_or_else(|| SolidError::primitive_missing(OP, "the skin's first face"))?;
         let (mut coplanar, point0, normal0) =
             match crate::topology::face::p2::surface(a.brep(first_brep)?, first)? {
                 Some(surface) => {
@@ -312,13 +328,16 @@ fn skin_with_scratch(
 
         // Only side faces touching the full skin's U endpoints bound the caps.
         if side_faces.is_empty() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::primitive_failed(
+                OP,
+                "the skin made no side faces",
+            ));
         }
         let mut skin_u_min = BIG_DOUBLE;
         let mut skin_u_max = -BIG_DOUBLE;
         for &face in side_faces.iter() {
             let surface = crate::topology::face::p2::surface(a.brep(brep)?, face)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::primitive_missing(OP, "the side face's surface"))?;
             let domain = surface.natural_uv_domain_with_nurb(k)?;
             skin_u_min = min2(skin_u_min, domain.min().x);
             skin_u_max = max2(skin_u_max, domain.max().x);
@@ -328,7 +347,7 @@ fn skin_with_scratch(
         let mut end_curves = Vec::new();
         for &face in side_faces.iter() {
             let surface = crate::topology::face::p2::surface(a.brep(brep)?, face)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::primitive_missing(OP, "the side face's surface"))?;
             let domain = surface.natural_uv_domain_with_nurb(k)?;
             if (domain.min().x - skin_u_min).abs() <= EFF_ZERO_SQRT {
                 let curve = surface
@@ -358,7 +377,10 @@ fn skin_with_scratch(
             }
         }
         if start_curves.is_empty() || end_curves.is_empty() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::primitive_failed(
+                OP,
+                "the skin has no end curves to cap",
+            ));
         }
 
         // from list of all top and bottom curves - create needed planar cap faces

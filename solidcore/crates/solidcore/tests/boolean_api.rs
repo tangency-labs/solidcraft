@@ -2,7 +2,9 @@
 //! union, sphere/box intersection, T-pipe, coplanar union, tangent union, torus minus box)
 //! each succeed, give a closed manifold solid, and integrate to the analytic volume
 //! (which the C++ SMLib reference also reproduces), with SMLib's face count. Unions of
-//! two solids touching at one point, on a seam or off it, also check clean at Level2.
+//! two solids touching at one point, on a seam or off it, also check clean at Level2. A body
+//! cut by an exact copy of itself leaves nothing, with STEP-sized tolerances too.
+#![allow(clippy::unwrap_used)] // test helpers
 
 use solidcore::boolean::api_brep::{boolean_difference, boolean_intersection, boolean_union};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
@@ -383,4 +385,144 @@ fn public_booleans_give_closed_solids_with_analytic_volume() {
         .filter_map(|c| run(c).err().map(|e| format!("{}: {e}", c.name)))
         .collect();
     assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// A slice by a solid fails with a typed reason in solidcore's terms: the stage's path, a phrase,
+/// the stable kind, and the comparison status (`SM_ERR`) the C++ reports for it.
+#[test]
+fn a_slice_by_a_solid_fails_with_a_typed_reason() {
+    use solidcore::boolean::api_brep::boolean;
+    use solidcore::error::{ErrorKind, SolidError};
+    use solidcore::geom::a_object::BooleanOperation;
+
+    let mut k = Kernel::default();
+    let (a, b, _) = operands(&mut k, "box-box-union").unwrap();
+    let error = boolean(&mut k, a, b, BooleanOperation::Slice).unwrap_err();
+    assert!(matches!(error, SolidError::Failed(_)), "{error:?}");
+    assert_eq!(error.kind(), ErrorKind::Failed);
+    assert_eq!(error.sm_status(), Some(solidcore::error::SM_ERR));
+    assert_eq!(error.operation(), "boolean::merge::p4::manifold_boolean");
+    assert_eq!(
+        error.to_string(),
+        "boolean::merge::p4::manifold_boolean: a slice needs a sheet, and the B-rep is not one"
+    );
+    assert!(!error.is_port_failure());
+}
+
+/// The Boolean subsystem names no SMLib symbol in an error, a message or an operation path.
+#[test]
+fn boolean_sources_name_no_smlib_symbol_in_a_string() {
+    fn visit(dir: &std::path::Path, found: &mut Vec<String>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                visit(&path, found);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                for (n, line) in std::fs::read_to_string(&path).unwrap().lines().enumerate() {
+                    let code = line.trim_start();
+                    if code.starts_with("//") {
+                        continue;
+                    }
+                    let mut rest = code;
+                    while let Some(i) = rest.find("\"Sm") {
+                        if rest[i + 3..].starts_with(|c: char| c.is_ascii_uppercase()) {
+                            found.push(format!("{}:{}: {line}", path.display(), n + 1));
+                        }
+                        rest = &rest[i + 3..];
+                    }
+                }
+            }
+        }
+    }
+    let mut found = Vec::new();
+    visit(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/boolean"),
+        &mut found,
+    );
+    assert!(found.is_empty(), "{found:#?}");
+}
+
+// ---- a body minus an exact copy of itself ----------------------------------------------
+
+/// SolidCraft's fix list (`kernel_cases/fixes.json`).
+fn rig_kernel() -> Kernel {
+    let names: Vec<String> = serde_json::from_str(include_str!("kernel_cases/fixes.json")).unwrap();
+    let mut fixes = solidcore::kernel::UpstreamFixes::default();
+    for name in &names {
+        if let Some(f) = fixes.flag_mut(name) {
+            *f = true;
+        }
+    }
+    Kernel {
+        fixes,
+        ..Kernel::default()
+    }
+}
+
+/// `b` with the tolerances a STEP file carries (0.01 on the body and every face, edge and
+/// vertex), as SolidCraft imports one.
+fn with_step_tolerances(k: &Kernel, mut b: Brep) -> Brep {
+    use solidcore::topology::brep::{p1, p2};
+    p2::set_tolerance(k, &mut b, 0.01, true, true).unwrap();
+    for f in p1::faces(&b, None).unwrap() {
+        solidcore::topology::face::p3::set_tolerance(&mut b, f, 0.01, true, true).unwrap();
+    }
+    b
+}
+
+/// The faces left by cutting `b` with an exact copy of itself: none, for a closed result
+/// of nothing.
+fn faces_left_by_own_copy(k: &mut Kernel, b: Brep) -> usize {
+    let copy = solidcore::topology::brep::p3::brep_copy(k, &b).unwrap();
+    let r = boolean_difference(k, b, copy).unwrap();
+    solidcore::topology::brep::p1::faces(&r, None)
+        .unwrap()
+        .len()
+}
+
+/// A disc with a hub, a bore and four pockets, every tolerance 0.01: the intersection
+/// tolerance is half that and upstream's capture distance 2000 times it, 10 mm, which
+/// captured vertices of the 30 mm part up to 10 mm apart into one proto vertex, and the cut
+/// by its own copy kept faces. The capture stays below half the nearest two vertices'
+/// distance, and nothing is left: with SolidCraft's fix list and with the default kernel
+/// (every `UpstreamFixes` flag off), since the rule is no longer a flag.
+#[test]
+fn a_part_with_step_tolerances_minus_itself_is_empty() {
+    for (kernel, mut k) in [
+        ("SolidCraft's fixes", rig_kernel()),
+        ("the default kernel", Kernel::default()),
+    ] {
+        let p = Point3::new;
+        let disc = api::create_cylinder(&mut k, p(0.0, 0.0, 0.0), 15.0, 3.0).unwrap();
+        let hub = api::create_cylinder(&mut k, p(0.0, 0.0, 0.0), 4.0, 8.0).unwrap();
+        let mut b = boolean_union(&mut k, disc, hub).unwrap();
+        let bore = api::create_cylinder(&mut k, p(0.0, 0.0, -1.0), 1.5, 10.0).unwrap();
+        b = boolean_difference(&mut k, b, bore).unwrap();
+        for (x, y) in [(7.0, -2.0), (-11.0, -2.0), (-2.0, 7.0), (-2.0, -11.0)] {
+            let pocket = api::create_box(&mut k, p(x, y, 1.0), 4.0, 4.0, 3.0).unwrap();
+            b = boolean_difference(&mut k, b, pocket).unwrap();
+        }
+        let b = with_step_tolerances(&k, b);
+        assert_eq!(faces_left_by_own_copy(&mut k, b), 0, "{kernel}");
+    }
+}
+
+/// A block with a boss and a bore through it, every tolerance 0.01: at the bore's rim the
+/// radial sector test steps off the edge until it leaves a face. Upstream read the
+/// coincident bore face's side against the edge's other face (the boss top) instead of the
+/// face the bore face lies on, took the bore and its copy for opposite sides and kept the
+/// bore face. The side is read against the face the bore face lies on, and nothing is left.
+#[test]
+fn a_bore_minus_its_copy_is_empty_when_the_sector_steps_off() {
+    for (r, h) in [(0.3, 0.2), (0.1, 0.05), (0.05, 0.02)] {
+        let mut k = rig_kernel();
+        let p = Point3::new;
+        let block = api::create_box(&mut k, p(-2.0, -2.0, 0.0), 4.0, 4.0, 1.0).unwrap();
+        let boss = api::create_cylinder(&mut k, p(0.0, 0.0, 1.0), 3.0 * r, h).unwrap();
+        let mut b = boolean_union(&mut k, block, boss).unwrap();
+        let bore = api::create_cylinder(&mut k, p(0.0, 0.0, 0.5), r, 2.0).unwrap();
+        b = boolean_difference(&mut k, b, bore).unwrap();
+        let b = with_step_tolerances(&k, b);
+        assert_eq!(faces_left_by_own_copy(&mut k, b), 0, "r {r}");
+    }
 }

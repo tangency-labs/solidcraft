@@ -529,7 +529,7 @@ mod tests {
         doc.set_param("width", "10 mm", None, None).unwrap();
         doc.set_param("depth", "5 mm", None, None).unwrap();
         doc.configs.columns = vec![Column::Param("width".into()), Column::Param("depth".into())];
-        doc.configs.rows.push(ConfigRow { name: "Default".into(), cells: vec!["10 mm".into(), "5 mm".into()] });
+        doc.configs.rows.push(ConfigRow { id: 1, name: "Default".into(), cells: vec!["10 mm".into(), "5 mm".into()] });
         doc
     }
     fn rule(id: &str, condition: RuleCondition, effect: RuleEffect) -> ConfigRule {
@@ -730,7 +730,7 @@ mod tests {
         doc.rename_param(&width, "width").unwrap();
         doc.rename_param(&depth, "depth").unwrap();
         doc.configs.columns = vec![Column::Param("width".into()), Column::Param("depth".into())];
-        doc.configs.rows.push(ConfigRow { name: "Default".into(), cells: vec!["10 mm".into(), "5 mm".into()] });
+        doc.configs.rows.push(ConfigRow { id: 2, name: "Default".into(), cells: vec!["10 mm".into(), "5 mm".into()] });
         doc.units = "in".into();
         let mut first =
             rule("first", RuleCondition::Always, RuleEffect::DriveParameter { parameter: "width".into(), expression: "depth + 1".into() });

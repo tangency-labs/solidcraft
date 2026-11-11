@@ -149,8 +149,7 @@
 //!   the earlier [`SolidError::Unported`] deferral, and an `IsConnectedTo` target in another
 //!   B-rep is connected to nothing. `SmFace::IsConnectedTo` (`topology.face_p4`) and the
 //!   B-rep of `GetBrep` (a [`BrepId`] the handle hooks cannot name) are still unported.
-//! - **Opt-in (WR-537).** With `Kernel::fixes.seam_point_solutions_are_one`,
-//!   `ComputePointParameters` keeps the nearest of a face or surface solve's solutions
+//! - **WR-537.** `ComputePointParameters` keeps the nearest of a face or surface solve's solutions
 //!   when they all evaluate to one point within the source zone tolerance (a point on a
 //!   closed face's seam; the fork's tangency-labs/smlib@577f7be).
 //! - **Not in this unit.** `GetLoop`, `GetSurfaceObject`, `GetVolumeObject`,
@@ -837,7 +836,7 @@ impl<O: ClassObject> PointClassification<O> {
             // still no solutions - return an error
             if solutions.len() != 1 {
                 if propagate {
-                    return Err(SolidError::sm_err(OP_GAP));
+                    return Err(SolidError::intersect_failed(OP_GAP, "no single nearest point on the face's surface was found within 100 times its tolerance"));
                 }
                 return Ok(f64::from(SM_ERR));
             }
@@ -1355,7 +1354,10 @@ impl<O: ClassObject> PointClassification<O> {
 
             // If we fail then for now we'll error out
             if !dropped.success {
-                return Err(SolidError::sm_err(OP_COMPUTE));
+                return Err(SolidError::intersect_failed(
+                    OP_COMPUTE,
+                    "the point could not be dropped onto the edge's curve",
+                ));
             }
 
             // save param and deviation
@@ -1368,16 +1370,14 @@ impl<O: ClassObject> PointClassification<O> {
             // find point/face->surface intersection point to face->Tolerance
             let mut solutions =
                 access.global_point_solve(k, target, &uv_domain, point, self.src_zone_tol_3d)?;
-            // not upstream (WR-537, opt-in): solutions that are one point are one
-            if k.fixes.seam_point_solutions_are_one {
-                one_point(
-                    k,
-                    access.geometry(),
-                    target,
-                    &mut solutions,
-                    self.src_zone_tol_3d,
-                )?;
-            }
+            // not upstream (WR-537): solutions that are one point are one
+            one_point(
+                k,
+                access.geometry(),
+                target,
+                &mut solutions,
+                self.src_zone_tol_3d,
+            )?;
 
             // when a distinct solution was not found
             if solutions.len() != 1 {
@@ -1389,19 +1389,20 @@ impl<O: ClassObject> PointClassification<O> {
                     point,
                     zone_tol3d(k, self.src_zone_tol_3d * 100.0),
                 )?;
-                if k.fixes.seam_point_solutions_are_one {
-                    one_point(
-                        k,
-                        access.geometry(),
-                        target,
-                        &mut solutions,
-                        self.src_zone_tol_3d,
-                    )?;
-                }
+                one_point(
+                    k,
+                    access.geometry(),
+                    target,
+                    &mut solutions,
+                    self.src_zone_tol_3d,
+                )?;
 
                 // still no solutions - return an error
                 if solutions.len() != 1 {
-                    return Err(SolidError::sm_err(OP_COMPUTE));
+                    return Err(SolidError::intersect_failed(
+                        OP_COMPUTE,
+                        "no single nearest point on the face's surface was found",
+                    ));
                 }
             }
 
@@ -1415,7 +1416,10 @@ impl<O: ClassObject> PointClassification<O> {
         else if let Some(volume) = obj_volume {
             let param_domain = volume.natural_param_domain()?;
             let Some(solution) = volume_global_point_solve(k, volume, point, &param_domain)? else {
-                return Err(SolidError::sm_err(OP_COMPUTE));
+                return Err(SolidError::intersect_failed(
+                    OP_COMPUTE,
+                    "the point could not be dropped into the volume",
+                ));
             };
 
             // save param and deviation
@@ -1442,7 +1446,10 @@ impl<O: ClassObject> PointClassification<O> {
         geometry: &impl ClassGeometry<O>,
     ) -> Result<Point3> {
         if !self.are_parameters_set() {
-            return Err(SolidError::sm_err(OP_FIND));
+            return Err(SolidError::intersect_failed(
+                OP_FIND,
+                "the point's classification parameters are not set",
+            ));
         }
 
         // switch on classification type (`SM_CAST_PTR` is NULL for an object of
@@ -1494,7 +1501,10 @@ impl<O: ClassObject> PointClassification<O> {
                 surface.evaluate_point(k, self.uv_param)
             }
             PointClassType::Unknown | PointClassType::Nothing | PointClassType::Region => {
-                Err(SolidError::sm_err(OP_FIND))
+                Err(SolidError::intersect_failed(
+                    OP_FIND,
+                    "the point is not classified to a vertex, edge or face",
+                ))
             }
         }
     }
@@ -1553,7 +1563,12 @@ impl<O: ClassObject> PointClassification<O> {
             | ClassObjectKind::Edgeuse
             | ClassObjectKind::Faceuse
             | ClassObjectKind::Loopuse
-            | ClassObjectKind::Other => return Err(SolidError::sm_err(OP_MERGE)),
+            | ClassObjectKind::Other => {
+                return Err(SolidError::intersect_failed(
+                    OP_MERGE,
+                    "the point is not classified to a vertex, edge, face or region",
+                ))
+            }
         };
 
         // arrive here when new_v = new or found Vertex that classifies to SrcPoint
@@ -1634,7 +1649,12 @@ impl<O: ClassObject> PointClassification<O> {
             EntityRef::Face(_) => ClassObjectKind::Face,
             EntityRef::Edge(_) => ClassObjectKind::Edge,
             EntityRef::Vertex(_) => ClassObjectKind::Vertex,
-            _ => return Err(SolidError::sm_err(OP_MERGE)),
+            _ => {
+                return Err(SolidError::intersect_failed(
+                    OP_MERGE,
+                    "the target is not a vertex, edge, face or region",
+                ))
+            }
         };
         if object.class_kind() != kind || handle(target) != object {
             return Err(SolidError::invalid_input(
@@ -1674,7 +1694,12 @@ impl<O: ClassObject> PointClassification<O> {
                     env,
                     curve_identity,
                 )?;
-                let v = split.vertex.ok_or_else(|| SolidError::sm_err(OP_MERGE))?;
+                let v = split.vertex.ok_or_else(|| {
+                    SolidError::intersect_failed(
+                        OP_MERGE,
+                        "splitting the edge at the point made no vertex",
+                    )
+                })?;
                 if !split.split {
                     // Native assigns these two fields directly; in particular an
                     // unset parameter flag remains unset on this early return.
@@ -1692,7 +1717,12 @@ impl<O: ClassObject> PointClassification<O> {
                 v
             }
             EntityRef::Vertex(v) => v,
-            _ => return Err(SolidError::sm_err(OP_MERGE)),
+            _ => {
+                return Err(SolidError::intersect_failed(
+                    OP_MERGE,
+                    "the target is not a vertex or an edge",
+                ))
+            }
         };
         let _initial_point = b.vertex(vertex_id)?.point;
         self.set_class_object(
@@ -1798,7 +1828,12 @@ impl<O: ClassObject> PointClassification<O> {
             | ClassObjectKind::Edgeuse
             | ClassObjectKind::Faceuse
             | ClassObjectKind::Loopuse
-            | ClassObjectKind::Other => return Err(SolidError::sm_err(OP_LOAD)),
+            | ClassObjectKind::Other => {
+                return Err(SolidError::intersect_failed(
+                    OP_LOAD,
+                    "the solution is not on a curve, surface, volume, vertex, edge or face",
+                ))
+            }
         }
 
         // save the preSnapParam value when Point solution comes from a curve/object
@@ -2268,8 +2303,7 @@ enum DropTarget<O> {
     Face(O),
 }
 
-/// Not upstream (WR-537, opt-in `Kernel::fixes.seam_point_solutions_are_one`; the fork's
-/// tangency-labs/smlib@577f7be): a point on the seam of a face that closes on itself (a
+/// Not upstream (WR-537; the fork's tangency-labs/smlib@577f7be): a point on the seam of a face that closes on itself (a
 /// whole cylinder's wall) has its parameters at both ends of the period, several
 /// solutions that are one point. When every solution evaluates within `tol` of the
 /// first's point, only the nearest (the first of the smallest solution values) is
@@ -2483,10 +2517,9 @@ fn volume_global_point_solve(
     if !found {
         return Ok(None);
     }
-    solutions
-        .get(0)
-        .map(|s| Some(s.start))
-        .ok_or(SolidError::sm_err(OP_COMPUTE))
+    solutions.get(0).map(|s| Some(s.start)).ok_or_else(|| {
+        SolidError::intersect_failed(OP_COMPUTE, "the volume's point solve returned no solution")
+    })
 }
 
 /// `SmVolume::EvaluatePoint(uvw, point)` (compounding, the default).
@@ -2647,7 +2680,7 @@ fn unresolved(op: &'static str) -> SolidError {
 }
 
 fn null_object(op: &'static str) -> SolidError {
-    SolidError::null_pointer(op)
+    SolidError::intersect_missing(op, "an object the classification refers to")
 }
 
 fn param_index(offset: usize, i: usize) -> Result<usize> {
@@ -2807,7 +2840,9 @@ mod tests {
             .is_err());
         p.set_class_object(PointClassType::Curve, Some(H(ClassObjectKind::Curve, 4)));
         let e = p.merge_into_object(&Kernel::default(), Point3::new(0.0, 0.0, 0.0));
-        assert!(matches!(e, Err(SolidError::Upstream { code: SM_ERR, .. })));
+        assert!(
+            matches!(&e, Err(e) if e.intersect_failure().is_some() && e.sm_status() == Some(SM_ERR))
+        );
     }
 
     #[test]
@@ -2935,11 +2970,10 @@ mod tests {
                     .expect_err("opt-in WR-58 should return Err(SM_ERR) instead of 1001.0");
                 assert_eq!(
                     err,
-                    SolidError::Upstream {
-                        operation: OP_GAP,
-                        code: SM_ERR,
-                        entity: None,
-                    }
+                    SolidError::intersect_failed(
+                        OP_GAP,
+                        "no single nearest point on the face's surface was found within 100 times its tolerance",
+                    )
                 );
             }
         }
@@ -2975,11 +3009,10 @@ mod tests {
             .expect_err("opt-in WR-58 should propagate find_obj_point_3d failure");
         assert_eq!(
             obj_err,
-            SolidError::Upstream {
-                operation: OP_FIND,
-                code: SM_ERR,
-                entity: None,
-            }
+            SolidError::intersect_failed(
+                OP_FIND,
+                "the point's classification parameters are not set",
+            )
         );
     }
 

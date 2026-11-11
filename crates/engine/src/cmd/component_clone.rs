@@ -486,7 +486,7 @@ pub(super) fn build(
         } else if f.body_names.is_empty() {
             f.body_names = outputs.get(&old.id).cloned().unwrap_or_default();
         }
-        f.remap_clone(&features, &names, &bodies, &parameters)?;
+        f.remap_clone(&features, &names, &bodies, &parameters, &occurrences, &scratch.doc)?;
         transfer_into_copy(&mut f.kind, &components)?;
         if let FeatureKind::Emboss { face: Some(face), .. } = &mut f.kind
             && !face.path.is_empty()
@@ -509,6 +509,20 @@ pub(super) fn build(
                 anchor.path = cloned_path(source, &original.path, component, &clone_path, &occurrences)?;
             }
             anchor.author_path = cloned_path(source, &original.author_path, component, &clone_path, &occurrences)?;
+        }
+        if let (FeatureKind::FrameEndCap { ends, .. }, FeatureKind::FrameEndCap { ends: originals, .. }) = (&mut f.kind, &old.kind) {
+            for (end, original) in ends.iter_mut().zip(originals) {
+                if let (Some(anchor), Some(original)) =
+                    (super::sketch::face::anchor_mut(&mut end.plane), super::sketch::face::anchor(&original.plane))
+                {
+                    if bodies.contains_key(&original.target.body) {
+                        anchor.component =
+                            *components.get(&original.component).ok_or_else(|| bad(CMD, "end cap's member is outside the copied graph"))?;
+                        anchor.path = cloned_path(source, &original.path, component, &clone_path, &occurrences)?;
+                    }
+                    anchor.author_path = cloned_path(source, &original.author_path, component, &clone_path, &occurrences)?;
+                }
+            }
         }
         if let Some(slot) = scratch.doc_mut().feature_mut(f.id) {
             *slot = f;
@@ -650,6 +664,23 @@ pub(super) fn build(
                 "{} retains external exact face attachment to {} (producer {})",
                 feature.name, anchor.target.body, anchor.target.origin_feature
             ));
+        }
+        // A cap closes the end of a member it does not copy: that member, and the face it was
+        // picked on, stay outside.
+        if let FeatureKind::FrameEndCap { ends, .. } = &feature.kind {
+            for end in ends {
+                if !features.contains_key(&end.member.feature.0) {
+                    notices.push(format!("{} retains external feature reference {}", feature.name, end.member.feature));
+                }
+                if let Some(anchor) = super::sketch::face::anchor(&end.plane)
+                    && !bodies.contains_key(&anchor.target.body)
+                {
+                    notices.push(format!(
+                        "{} retains external exact face attachment to {} (producer {})",
+                        feature.name, anchor.target.body, anchor.target.origin_feature
+                    ));
+                }
+            }
         }
         for id in feature.kind.input_sketches() {
             if !features.contains_key(&id) {

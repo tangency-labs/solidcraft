@@ -46,12 +46,15 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             // Only the web app keeps designs in the browser (#10220).
             if app.services.browser_files.is_some() {
                 let tip = app.tr("prefs.keep_unsaved_in_browser_tip").to_string();
-                ui_kit::checkbox(ui, app.tr("prefs.keep_unsaved_in_browser"), &mut app.preferences.keep_unsaved_in_browser).on_hover_text(tip);
+                ui_kit::checkbox(ui, app.tr("prefs.keep_unsaved_in_browser"), &mut app.preferences.keep_unsaved_in_browser)
+                    .backing_on_hover_text(tip);
                 if app.preferences.keep_unsaved_in_browser {
                     let tip = app.tr("prefs.keep_unsaved_also_asks_tip").to_string();
-                    ui_kit::checkbox(ui, app.tr("prefs.keep_unsaved_also_asks"), &mut app.preferences.keep_unsaved_also_asks).on_hover_text(tip);
+                    ui_kit::checkbox(ui, app.tr("prefs.keep_unsaved_also_asks"), &mut app.preferences.keep_unsaved_also_asks)
+                        .backing_on_hover_text(tip);
                 }
             }
+            setting::save_prompt_one_at_a_time(app, ui).on_hover_text(app.tr("prefs.save_prompt_one_at_a_time_help"));
             ui_kit::settings_form(ui, labels, |ui| {
                 let shown = ui_kit::settings_row_help(ui, app.tr("ui.autosave_every"), solidcraft_ui_text::tr_label("0 turns it off"), |ui| {
                     let number = ui_kit::settings_number(ui, &mut app.autosave_minutes, 0.0..=120.0, 0.5);
@@ -69,7 +72,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
                 if shown {
                     ui_kit::below_row_control(ui, app.tr("ui.autosave_every"), t.space_24 * 10.0 + t.space_16 + t.space_4, |ui| {
-                        ui_kit::settings_autosave_timeline(ui, app.autosave_minutes)
+                        super::figures::autosave_timeline(ui, app.autosave_minutes)
                     });
                 }
             });
@@ -117,6 +120,14 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
                 ui_kit::help_icon(ui, &tip);
             });
+            ui.horizontal(|ui| {
+                let (only, tip) = (app.tr("ui.export_selects_only_body").to_string(), app.tr("ui.export_selects_only_body_tip").to_string());
+                let width = (ui.available_width() - t.space_16 - ui.spacing().item_spacing.x).max(0.0);
+                ui.allocate_ui_with_layout(egui::vec2(width, t.control_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui_kit::checkbox(ui, &only, &mut app.preferences.export_selects_only_body).backing_on_hover_text(&tip);
+                });
+                ui_kit::help_icon(ui, &tip);
+            });
             ui_kit::settings_form(ui, labels, |ui| {
                 ui_kit::settings_row_help(ui, app.tr("prefs.print_face_highlight"), app.tr("prefs.print_face_highlight_tip"), |ui| {
                     ui_kit::settings_control_width(ui, t.space_24 * 10.0, |ui| {
@@ -132,6 +143,12 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     });
                 });
             });
+        });
+        ui_kit::settings_section(ui, "dialogs", app.tr("prefs.dialogs"), |ui| {
+            let right_click = setting::right_click_confirms(app, ui);
+            crate::scenario::publish_target("prefs:right_click_confirms", right_click.rect);
+            let first_letter = setting::dialog_first_letter_buttons(app, ui).backing_on_hover_text(app.tr("prefs.dialog_first_letter_buttons_help"));
+            crate::scenario::publish_target("prefs:dialog_first_letter_buttons", first_letter.rect);
         });
         ui_kit::settings_section(ui, "updates", app.tr("prefs.updates"), |ui| {
             crate::update::prefs_rows(app, ui);

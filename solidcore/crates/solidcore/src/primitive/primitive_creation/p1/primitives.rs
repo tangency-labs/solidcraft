@@ -31,9 +31,8 @@
 //! 12918e9): [`PrimitiveCreation::create_linear_sweep`] makes a circular arc short of a
 //! whole turn that is swept square to its plane a cylinder (`arc_sweep_cylinder`), where
 //! upstream makes it an `SmSurfOfExtrusion`.
-//! Not upstream (WR-576, tangency-labs/solidcore#1507, opt-in
-//! `Kernel::fixes.linear_sweep_arc_to_cylinder_zero`; SolidCraft change, tangency-labs/smlib
-//! fd59111): [`PrimitiveCreation::create_linear_sweep`] tests a profile curve for an arc
+//! Not upstream (WR-576, tangency-labs/solidcore#1507; SolidCraft change,
+//! tangency-labs/smlib fd59111): [`PrimitiveCreation::create_linear_sweep`] tests a profile curve for an arc
 //! to the zero an `SmCylinder`'s own check holds its generating curve to (`arc_zero`),
 //! not to the B-rep's tolerance.
 //! Not upstream (WR-596, opt-in `Kernel::fixes.box_face_failures_propagate`; the fork's
@@ -120,7 +119,11 @@ fn with_face_env<T>(
         &mut crate::topology::brep::p8::FaceBuildEnv<'_, '_>,
     ) -> Result<T>,
 ) -> Result<T> {
-    let mut state = crate::topology::brep::p2::ArenaNotifyState::new(b);
+    // (not upstream) the kernel's reused record map, as the stitch's glues reuse it, so a
+    // sweep's many faces do not each make one of every object of the B-rep
+    let (tag, records) = crate::heal::stitch::p1::take_arena_records(k, b);
+    let serial = k.context.issued_brep_serial(b.notify_identity());
+    let mut state = crate::topology::brep::p2::ArenaNotifyState::reusing(records, b, serial);
     let mut env = state.env(None);
     let mut marks = crate::topology::topology_traverser::Marks::default();
     let this_face =
@@ -130,7 +133,9 @@ fn with_face_env<T>(
         marks: &mut marks,
         this_face: &this_face,
     };
-    body(k, b, &mut fenv)
+    let r = body(k, b, &mut fenv);
+    k.arena_notify_records = (tag, state.into_records());
+    r
 }
 
 fn create_face(k: &mut Kernel, b: &mut Brep, surface: Surface, domain: Extent2d) -> Result<()> {
@@ -306,7 +311,12 @@ pub(super) fn detailed_face(
         notifications,
     )?
     .face
-    .ok_or_else(|| SolidError::null_pointer("primitive::primitive_creation::p1::detailed_face"))
+    .ok_or_else(|| {
+        SolidError::primitive_missing(
+            "primitive::primitive_creation::p1::detailed_face",
+            "the built face",
+        )
+    })
 }
 
 /// `pSurface->DropCurve(ctx, pSurface->GetNaturalUVDomain(), *pCurve,
@@ -392,7 +402,10 @@ fn circle_error(error: SolidError) -> SolidError {
     if error.is_unported_or_cancelled() {
         error
     } else {
-        SolidError::sm_err("primitive::primitive_creation::p1::create_circle")
+        SolidError::primitive_failed(
+            "primitive::primitive_creation::p1::create_circle",
+            "the circle could not be built",
+        )
     }
 }
 fn circle_curve(radius: f64, frame: &Axis2Placement) -> Result<BSplineCurve> {
@@ -661,7 +674,10 @@ impl PrimitiveCreation {
         self.init_entity_maps();
 
         if height < EFF_ZERO {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::primitive_failed(
+                OP,
+                "the height is below zero tolerance",
+            ));
         }
 
         brep.set_editing_enabled(true);
@@ -672,7 +688,12 @@ impl PrimitiveCreation {
         match cylinder.adjust_step_uv_domain(k, &domain) {
             Ok(()) => {}
             Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
-            Err(_) => return Err(SolidError::sm_err(OP)),
+            Err(_) => {
+                return Err(SolidError::primitive_failed(
+                    OP,
+                    "the cylinder's domain could not be set",
+                ))
+            }
         }
 
         self.conic_solid(k, brep, &cylinder, radius, radius)?;
@@ -817,12 +838,14 @@ impl PrimitiveCreation {
             }
             let op = "primitive::primitive_creation::p1::boolean_2d";
             let tolerance = crate::math::max2(a.tolerance(), b.tolerance());
-            let first = *faces_a.first().ok_or_else(|| SolidError::sm_err(op))?;
+            let first = *faces_a
+                .first()
+                .ok_or_else(|| SolidError::primitive_failed(op, "the first B-rep has no face"))?;
             let first_plane = a
                 .face(first)?
                 .surface
                 .as_ref()
-                .ok_or_else(|| SolidError::null_pointer(op))?
+                .ok_or_else(|| SolidError::primitive_missing(op, "the face's surface"))?
                 .is_planar(k, tolerance)?;
             if !first_plane.is_planar {
                 return Err(SolidError::invalid_input(op, "non-planar first surface"));
@@ -836,7 +859,7 @@ impl PrimitiveCreation {
                         .face(*face)?
                         .surface
                         .as_ref()
-                        .ok_or_else(|| SolidError::null_pointer(op))?
+                        .ok_or_else(|| SolidError::primitive_missing(op, "the face's surface"))?
                         .is_planar(k, tolerance)?;
                     if !other.is_planar {
                         return Err(SolidError::invalid_input(op, "non-planar surface"));
@@ -883,7 +906,7 @@ impl PrimitiveCreation {
                     let other = record
                         .surface
                         .as_ref()
-                        .ok_or_else(|| SolidError::null_pointer(op))?
+                        .ok_or_else(|| SolidError::primitive_missing(op, "the face's surface"))?
                         .clone_for_evaluation()?;
                     let covered = cover_face_surface(
                         k,
@@ -897,11 +920,10 @@ impl PrimitiveCreation {
                     // the first surface below: one it does not cover would carry edges
                     // far off its surface
                     if k.fixes.boolean2d_plane_covers_far_faces && !covered {
-                        return Err(SolidError::Upstream {
-                            operation: op,
-                            code: crate::error::SM_ERR_INVALID_INPUT,
-                            entity: None,
-                        });
+                        return Err(SolidError::primitive(
+                            op,
+                            crate::error::primitive::PrimitiveFailure::PlaneCannotCover,
+                        ));
                     }
                 }
             }
@@ -910,7 +932,7 @@ impl PrimitiveCreation {
                 .face(first)?
                 .surface
                 .as_ref()
-                .ok_or_else(|| SolidError::null_pointer(op))?
+                .ok_or_else(|| SolidError::primitive_missing(op, "the face's surface"))?
                 .clone_for_evaluation()?;
             for (brep, faces) in [
                 (&mut *a, faces_a.get(1..).unwrap_or_default()),
@@ -921,11 +943,10 @@ impl PrimitiveCreation {
                         cover_face_surface(k, brep, *face, &first_surface, tolerance * 2.0, None)?;
                     // (WR-536, opt-in) a plane that cannot be grown to cover the first face
                     if k.fixes.boolean2d_plane_covers_far_faces && !covered {
-                        return Err(SolidError::Upstream {
-                            operation: op,
-                            code: crate::error::SM_ERR_INVALID_INPUT,
-                            entity: None,
-                        });
+                        return Err(SolidError::primitive(
+                            op,
+                            crate::error::primitive::PrimitiveFailure::PlaneCannotCover,
+                        ));
                     }
                 }
             }
@@ -983,13 +1004,13 @@ fn cover_face_surface(
         .face(face)?
         .surface
         .as_ref()
-        .ok_or_else(|| SolidError::null_pointer(op))?
+        .ok_or_else(|| SolidError::primitive_missing(op, "the face's surface"))?
         .clone_for_evaluation()?;
     let mut surface = brep
         .face_mut(face)?
         .surface
         .replace(stand_in)
-        .ok_or_else(|| SolidError::null_pointer(op))?;
+        .ok_or_else(|| SolidError::primitive_missing(op, "the face's surface"))?;
     let r = surface.cover_coincident_surface_deferring_trims_with_context(
         k,
         other,
@@ -1056,7 +1077,7 @@ fn arc_sweep_cylinder(
     Ok(Some(cylinder))
 }
 
-/// Not upstream (WR-576, #1507, `fixes.linear_sweep_arc_to_cylinder_zero`): the zero a
+/// Not upstream (WR-576, #1507): the zero a
 /// linear sweep tests a profile curve's arc to, the one an `SmCylinder`'s own check holds
 /// its generating curve to: `SM_EFF_ZERO * 1000 * (1 + the largest coordinate of the
 /// curve's ends)` (the fork's `ArcZero`). The ends' status is ignored, as `GetEnds`'
@@ -1075,8 +1096,8 @@ impl PrimitiveCreation {
     /// swept along its axis, and an extrusion otherwise. Topology edits defer.
     /// With `k.fixes.linear_sweep_arc_is_cylinder` (not upstream, WR-565) an arc
     /// short of a full circle swept along its axis is a cylinder too.
-    /// With `k.fixes.linear_sweep_arc_to_cylinder_zero` (not upstream, WR-576) the arc
-    /// test is to the cylinder check's zero (`arc_zero`), not the B-rep's tolerance.
+    /// The arc test is to the cylinder check's zero (`arc_zero`, not upstream, WR-576),
+    /// not the B-rep's tolerance.
     pub fn create_linear_sweep(
         &mut self,
         k: &mut Kernel,
@@ -1128,13 +1149,9 @@ impl PrimitiveCreation {
                 } else if let Some((mut frame, radius, start, end)) = curve.is_arc(
                     k,
                     8,
-                    // Not upstream (WR-576, #1507): with the fix, an arc only to the
-                    // zero the cylinder's own check holds it to.
-                    if k.fixes.linear_sweep_arc_to_cylinder_zero {
-                        arc_zero(k, curve)?
-                    } else {
-                        brep.tolerance()
-                    },
+                    // Not upstream (WR-576, #1507): an arc only to the zero the
+                    // cylinder's own check holds it to.
+                    arc_zero(k, curve)?,
                 )? {
                     let angle = end - start;
                     // A right cylinder only fits if the cap, translated along the
@@ -1292,7 +1309,7 @@ impl PrimitiveCreation {
                     .edge(edge)?
                     .curve
                     .as_ref()
-                    .ok_or_else(|| SolidError::null_pointer(op))?;
+                    .ok_or_else(|| SolidError::primitive_missing(op, "the edge's curve"))?;
                 let copy = original.copy(k)?;
                 ignore_or_pass_on(
                     drop_uv_curves(k, &surface, &copy, tolerance, &mut dropped),
@@ -1300,11 +1317,13 @@ impl PrimitiveCreation {
                 )?;
                 let uv = dropped
                     .first()
-                    .ok_or_else(|| SolidError::null_pointer(op))?
+                    .ok_or_else(|| SolidError::primitive_missing(op, "the dropped UV curve"))?
                     .copy(k)?;
                 let edgeuse =
                     crate::topology::edge::upward_edgeuse_of_face(brep, edge, Some(face))?
-                        .ok_or_else(|| SolidError::null_pointer(op))?;
+                        .ok_or_else(|| {
+                            SolidError::primitive_missing(op, "the edge's use on the face")
+                        })?;
                 let orient = crate::topology::edgeuse::p1::orientation(brep, edgeuse)?;
                 boundary.curve_orients.push(if orient == OrientType::Same {
                     OrientType::Opposite
@@ -1375,7 +1394,10 @@ impl PrimitiveCreation {
     ) -> Result<()> {
         use crate::nurbs::b_spline_surface::p2::IsoCurveOptions;
         let nurb = crate::nurbs::srf_nurb::cone_elliptic_ends(inputs).map_err(|_| {
-            SolidError::sm_err("primitive::primitive_creation::p1::create_cone_elliptic_ends")
+            SolidError::primitive_failed(
+                "primitive::primitive_creation::p1::create_cone_elliptic_ends",
+                "the cone surface could not be built",
+            )
         })?;
         let surface = BSplineSurface::from_gw_nurb(&nurb);
         create_face(
@@ -1446,7 +1468,10 @@ pub fn analytic_rotational_sweep(
         let angle = tol / scale * (180.0 / core::f64::consts::PI);
         if line.is_parallel_to(axis, angle) {
             if start_distance <= tol {
-                return Err(SolidError::sm_err(op));
+                return Err(SolidError::primitive_failed(
+                    op,
+                    "the line lies on the axis",
+                ));
             }
             let y = line.cross(ends.start - axis_base).unitize()?;
             let x = y.cross(line);
@@ -1483,7 +1508,10 @@ pub fn analytic_rotational_sweep(
             return match planar_face(k, brep, brep.infinite_region(), &circles, tol) {
                 Ok(_) => Ok(()),
                 Err(e) if e.is_unported_or_cancelled() => Err(e),
-                Err(_) => Err(SolidError::sm_err(op)),
+                Err(_) => Err(SolidError::primitive_failed(
+                    op,
+                    "the planar face could not be built",
+                )),
             };
         } else {
             let (bottom_radius, bottom_parameter) =
@@ -1511,10 +1539,16 @@ pub fn analytic_rotational_sweep(
                         if !((interval.min() - t).abs() < param_tol
                             || (interval.max() - t).abs() < param_tol)
                         {
-                            return Err(SolidError::sm_err(op));
+                            return Err(SolidError::primitive_failed(
+                                op,
+                                "the curve crosses the axis inside its ends",
+                            ));
                         }
                     } else if first.solution_type == SolutionType::RangeOfValues {
-                        return Err(SolidError::sm_err(op));
+                        return Err(SolidError::primitive_failed(
+                            op,
+                            "the curve runs along the axis",
+                        ));
                     }
                 }
             }
@@ -1546,7 +1580,10 @@ pub fn analytic_rotational_sweep(
             if line_point_distance(axis_base, axis, ends.start).0 > tol
                 || line_point_distance(axis_base, axis, ends.end).0 > tol
             {
-                return Err(SolidError::sm_err(op));
+                return Err(SolidError::primitive_failed(
+                    op,
+                    "the half circle's ends are off the axis",
+                ));
             }
             if let Some(sphere) = ignored(sphere_surface(k, &frame, radius))? {
                 analytic = Some(AnalyticSurface::Sphere(sphere));
@@ -1565,7 +1602,10 @@ pub fn analytic_rotational_sweep(
                 p,
             )? {
                 if !solutions.is_empty() {
-                    return Err(SolidError::sm_err(op));
+                    return Err(SolidError::primitive_failed(
+                        op,
+                        "the full circle meets the axis",
+                    ));
                 }
             }
             let (major, param) = line_point_distance(axis_base, axis, frame.origin());
@@ -1587,18 +1627,30 @@ pub fn analytic_rotational_sweep(
                 analytic = Some(AnalyticSurface::Torus(torus));
             }
         } else {
-            return Err(SolidError::sm_err(op));
+            return Err(SolidError::primitive_failed(
+                op,
+                "the arc is neither a half nor a full circle",
+            ));
         }
     } else {
-        return Err(SolidError::sm_err(op));
+        return Err(SolidError::primitive_failed(
+            op,
+            "the curve is neither a line nor an arc",
+        ));
     }
     let Some(surface) = analytic else {
-        return Err(SolidError::sm_err(op));
+        return Err(SolidError::primitive_failed(
+            op,
+            "no analytic surface could be built",
+        ));
     };
     match analytic_face(k, brep, surface) {
         Ok(_) => Ok(()),
         Err(e) if e.is_unported_or_cancelled() => Err(e),
-        Err(_) => Err(SolidError::sm_err(op)),
+        Err(_) => Err(SolidError::primitive_failed(
+            op,
+            "the analytic face could not be built",
+        )),
     }
 }
 
@@ -1625,19 +1677,46 @@ mod tests {
         b
     }
 
+    /// A cylinder too short to build fails with the `SM_ERR` it replaced, before any
+    /// B-rep edit, with a typed reason.
+    #[test]
+    fn a_flat_cylinder_is_a_primitive_failure() {
+        let mut k = Kernel::default();
+        let mut brep = new_brep(&mut k).unwrap();
+        let faces = crate::topology::brep::p1::num_faces(&brep);
+        let error = PrimitiveCreation::new(None, 17, true)
+            .create_cylinder(&mut k, &mut brep, 0.0, 1.0, &Axis2Placement::default())
+            .unwrap_err();
+        assert_eq!(
+            error.operation(),
+            "primitive::primitive_creation::p1::create_cylinder"
+        );
+        assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(
+            error.primitive_failure(),
+            Some(&crate::error::primitive::PrimitiveFailure::Failed(
+                "the height is below zero tolerance"
+            ))
+        );
+        assert_eq!(crate::topology::brep::p1::num_faces(&brep), faces);
+    }
+
     #[test]
     fn failed_static_circle_geometry_reports_native_sm_err() {
         let frame = Axis2Placement::default();
         for radius in [-1.0, 0.0, EFF_ZERO * 0.5] {
             let error = circle_curve(radius, &frame).unwrap_err();
-            assert!(matches!(
-                error,
-                SolidError::Upstream {
-                    operation: "primitive::primitive_creation::p1::create_circle",
-                    code: crate::error::SM_ERR,
-                    ..
-                }
-            ));
+            assert_eq!(
+                error.operation(),
+                "primitive::primitive_creation::p1::create_circle"
+            );
+            assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
+            assert_eq!(
+                error.primitive_failure(),
+                Some(&crate::error::primitive::PrimitiveFailure::Failed(
+                    "the circle could not be built"
+                ))
+            );
         }
         let circle = circle_curve(0.5, &frame).unwrap();
         let point = circle
