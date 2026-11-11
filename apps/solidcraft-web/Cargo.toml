@@ -22,7 +22,11 @@ profile = ["solidcraft-engine/profile"]
 
 [dependencies]
 solidcraft-engine = { workspace = true }
+solidcraft-control = { workspace = true }
 solidcraft-ui-egui = { workspace = true }
+# SolidCraft's look (icons, glyphs, built-in themes), installed at startup.
+solidcraft-look = { workspace = true }
+solidcraft-ui-text = { workspace = true }
 egui = { workspace = true }
 log = { workspace = true }
 serde_json = { workspace = true }

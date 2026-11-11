@@ -1,0 +1,263 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b122": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b122"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b123"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b123"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b124"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b124"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b125"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b125"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b126"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  8.364148540740462,
+                  10.0,
+                  18.471155720816718
+                ],
+                [
+                  8.364148540740462,
+                  10.0,
+                  18.471155720816718
+                ]
+              ],
+              "index": 18
+            }
+          ],
+          "points": [
+            [
+              11.635851459259516,
+              10.0,
+              16.169860430560842
+            ]
+          ],
+          "tolerance": 4.2730018726587655
+        },
+        "kind": "chamfer",
+        "sizes": [
+          1.0
+        ]
+      }
+    }
+  ],
+  "case": "3753-circular-pattern-of-hole-and-its-rim-chamfer",
+  "expected": {
+    "bbox": {
+      "max": [
+        30,
+        10,
+        30
+      ],
+      "min": [
+        -30,
+        0,
+        -30
+      ]
+    },
+    "body_count": 1,
+    "continuity": {
+      "order": "g0"
+    },
+    "faces": 15,
+    "method": "Disc R=30, h=10 (axis Y): V0 = pi 900 10 = 28274.3339. Each hole: diameter 4 through (pi 4 10 = 125.6637) plus the 1 mm chamfer on the top rim, a frustum from r=2 (depth 1) to r=3 (top) minus the cylinder it overlaps: pi/3 (4 + 6 + 9) - 4 pi = 7 pi/3 = 7.3304. The holes sit on a circle of radius 20, 60 degrees apart (chord 20, holes 4 mm wide plus the chamfer's 6 mm: no overlap, and 20 - 3 > 0 leaves the rim inside the disc). V = V0 - 6 (125.6637 + 7.3304) = 27476.3693 mm3. Faces: side, top, bottom, plus a wall and a cone per hole = 15.",
+    "outcome": "solid",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#3753"
+    ],
+    "volume_mm3": 27476.3693,
+    "what": "a circular pattern (6 copies about Y) of a through hole and the 1 mm chamfer on its rim (the report: the pattern is refused because the copied chamfer 'would grow the part'); rebuilt as a hole in a disc, the original design is not in the report"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 33,
+      "faces": 15,
+      "vertices": 20
+    }
+  },
+  "records": "3753-circular-pattern-of-hole-and-its-rim-chamfer.bodies.json.gz",
+  "result": [
+    {
+      "body": "Disc",
+      "made": "b126"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 8106.648642809372,
+      "body_count": 1,
+      "edges": 33,
+      "faces": 15,
+      "vertices": 20,
+      "volume_mm3": 27476.369347380663
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3753"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "a circular pattern (6 copies about Y) of a through hole and the 1 mm chamfer on its rim (the report: the pattern is refused because the copied chamfer 'would grow the part'); rebuilt as a hole in a disc, the original design is not in the report",
+  "why_not": []
+}

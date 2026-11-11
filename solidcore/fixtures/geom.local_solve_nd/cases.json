@@ -1,0 +1,1596 @@
+{
+ "cases": [
+  {
+   "name": "edgeuse_step_off_total3_periodic",
+   "upstream_ref": "source/SMLib/src/SmEdgeuse.cpp:3482",
+   "inputs": {
+    "op": "solve",
+    "n": 2,
+    "a": [
+     4.0,
+     1.0,
+     1.0,
+     3.0
+    ],
+    "b": [
+     1.9344999999999999,
+     2.4437499999999996
+    ],
+    "c": [
+     0.5,
+     0.25
+    ],
+    "d": [
+     0.1,
+     -0.2
+    ],
+    "guess": [
+     0.0,
+     0.0
+    ],
+    "handler": "total",
+    "max_hits": 3,
+    "acceptable": 9.999999999999999e-05,
+    "ivl": [
+     {
+      "lo": -1.0,
+      "hi": 1.0
+     },
+     {
+      "lo": 0.0,
+      "hi": 1.0,
+      "periodic": true
+     }
+    ],
+    "use_intervals": true,
+    "use_periodic": true
+   }
+  },
+  {
+   "name": "edgeuse_step_off_solution_outside",
+   "upstream_ref": "source/SMLib/src/SmEdgeuse.cpp:3482",
+   "inputs": {
+    "op": "solve",
+    "n": 2,
+    "a": [
+     4.0,
+     1.0,
+     1.0,
+     3.0
+    ],
+    "b": [
+     1.9344999999999999,
+     2.4437499999999996
+    ],
+    "c": [
+     0.5,
+     0.25
+    ],
+    "d": [
+     0.1,
+     -0.2
+    ],
+    "guess": [
+     0.0,
+     0.0
+    ],
+    "handler": "total",
+    "max_hits": 3,
+    "acceptable": 9.999999999999999e-05,
+    "ivl": [
+     {
+      "lo": -1.0,
+      "hi": 0.1
+     },
+     {
+      "lo": 0.0,
+      "hi": 0.2
+     }
+    ],
+    "use_intervals": true
+   }
+  },
+  {
+   "name": "surface_cs_intersect_step_cutting",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:24825",
+   "inputs": {
+    "op": "solve",
+    "n": 3,
+    "a": [
+     5.0,
+     1.0,
+     -1.0,
+     0.5,
+     4.0,
+     1.0,
+     1.0,
+     -1.0,
+     6.0
+    ],
+    "b": [
+     1.275,
+     0.15,
+     6.5
+    ],
+    "c": [
+     0.2,
+     0.0,
+     -0.3
+    ],
+    "d": [
+     0.0,
+     0.4,
+     0.1
+    ],
+    "guess": [
+     0.0,
+     0.0,
+     0.0
+    ],
+    "desired": 1e-13,
+    "step_cutting": true,
+    "handler": "total",
+    "max_hits": 6,
+    "max_iter": 20,
+    "acceptable": 4e-06,
+    "ivl": [
+     {
+      "lo": -2,
+      "hi": 2
+     },
+     {
+      "lo": -2,
+      "hi": 2
+     },
+     {
+      "lo": 0,
+      "hi": 6.283185307179586,
+      "periodic": true
+     }
+    ],
+    "use_intervals": true,
+    "use_periodic": true
+   }
+  },
+  {
+   "name": "surface_cs_intersect_far_guess",
+   "upstream_ref": "source/SMLib/src/SmSurface.cpp:24825",
+   "inputs": {
+    "op": "solve",
+    "n": 3,
+    "a": [
+     5.0,
+     1.0,
+     -1.0,
+     0.5,
+     4.0,
+     1.0,
+     1.0,
+     -1.0,
+     6.0
+    ],
+    "b": [
+     1.275,
+     0.15,
+     6.5
+    ],
+    "c": [
+     0.2,
+     0.0,
+     -0.3
+    ],
+    "d": [
+     0.0,
+     0.4,
+     0.1
+    ],
+    "guess": [
+     10.0,
+     -8.0,
+     5.0
+    ],
+    "desired": 1e-13,
+    "step_cutting": true,
+    "handler": "total",
+    "max_hits": 6,
+    "max_iter": 20,
+    "acceptable": 4e-06,
+    "ivl": [
+     {
+      "lo": -20,
+      "hi": 20
+     },
+     {
+      "lo": -20,
+      "hi": 20
+     },
+     {
+      "lo": -20,
+      "hi": 20
+     }
+    ],
+    "use_intervals": true
+   }
+  },
+  {
+   "name": "fillet_sphere_solve_fd_jacobian",
+   "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:3024",
+   "inputs": {
+    "op": "solve",
+    "n": 4,
+    "a": [
+     6,
+     1,
+     0,
+     1,
+     1,
+     5,
+     1,
+     0,
+     0,
+     1,
+     7,
+     1,
+     1,
+     0,
+     1,
+     8
+    ],
+    "b": [
+     1.2061000000000002,
+     1.4016000000000002,
+     2.724,
+     3.5936
+    ],
+    "c": [
+     0.1,
+     0.2,
+     0.0,
+     -0.1
+    ],
+    "d": [
+     0.3,
+     0,
+     0.2,
+     0
+    ],
+    "guess": [
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "desired": 1e-24,
+    "handler": "total",
+    "max_hits": 8,
+    "max_iter": 30,
+    "acceptable": 1e-05,
+    "jac_mode": 1
+   }
+  },
+  {
+   "name": "fillet_sphere_solve_fd_jacobian_bounded",
+   "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp:3393",
+   "inputs": {
+    "op": "solve",
+    "n": 4,
+    "a": [
+     6,
+     1,
+     0,
+     1,
+     1,
+     5,
+     1,
+     0,
+     0,
+     1,
+     7,
+     1,
+     1,
+     0,
+     1,
+     8
+    ],
+    "b": [
+     1.2061000000000002,
+     1.4016000000000002,
+     2.724,
+     3.5936
+    ],
+    "c": [
+     0.1,
+     0.2,
+     0.0,
+     -0.1
+    ],
+    "d": [
+     0.3,
+     0,
+     0.2,
+     0
+    ],
+    "guess": [
+     0.5,
+     0.5,
+     0.5,
+     0.5
+    ],
+    "desired": 1e-24,
+    "handler": "total",
+    "max_hits": 8,
+    "max_iter": 30,
+    "acceptable": 1e-05,
+    "jac_mode": 2,
+    "ivl": [
+     {
+      "lo": 0,
+      "hi": 1
+     },
+     {
+      "lo": 0,
+      "hi": 1
+     },
+     {
+      "lo": 0,
+      "hi": 0.25
+     },
+     {
+      "lo": 0,
+      "hi": 1,
+      "unbounded": true
+     }
+    ],
+    "use_intervals": true
+   }
+  },
+  {
+   "name": "volume_drop_total3",
+   "upstream_ref": "source/SMLib/src/SmVolume.cpp:6920",
+   "inputs": {
+    "op": "solve",
+    "n": 3,
+    "a": [
+     5.0,
+     1.0,
+     -1.0,
+     0.5,
+     4.0,
+     1.0,
+     1.0,
+     -1.0,
+     6.0
+    ],
+    "b": [
+     1.275,
+     0.15,
+     6.5
+    ],
+    "c": [
+     0.2,
+     0.0,
+     -0.3
+    ],
+    "d": [
+     0.0,
+     0.4,
+     0.1
+    ],
+    "guess": [
+     1.0,
+     1.0,
+     1.0
+    ],
+    "handler": "total",
+    "max_hits": 3,
+    "acceptable": 9.999999999999999e-05,
+    "ivl": [
+     {
+      "lo": 0,
+      "hi": 1
+     },
+     {
+      "lo": -1,
+      "hi": 0
+     },
+     {
+      "lo": 0,
+      "hi": 2
+     }
+    ],
+    "use_intervals": true
+   }
+  },
+  {
+   "name": "header_example_sss_6dof",
+   "upstream_ref": "source/SMLib/inc/SmLocalSolveNd.h:84",
+   "inputs": {
+    "op": "solve",
+    "n": 6,
+    "a": [
+     10.0,
+     -0.25,
+     -0.25,
+     0.5,
+     -0.25,
+     -0.25,
+     -0.25,
+     10.0,
+     0.5,
+     -0.25,
+     -0.25,
+     0.5,
+     -0.25,
+     0.5,
+     10.0,
+     -0.25,
+     0.5,
+     -0.25,
+     0.5,
+     -0.25,
+     -0.25,
+     10.0,
+     -0.25,
+     -0.25,
+     -0.25,
+     -0.25,
+     0.5,
+     -0.25,
+     10.0,
+     0.5,
+     -0.25,
+     0.5,
+     -0.25,
+     -0.25,
+     0.5,
+     10.0
+    ],
+    "b": [
+     0.8750999999999999,
+     -1.1019999999999999,
+     2.2016,
+     -1.9810000000000003,
+     3.00135,
+     -2.928
+    ],
+    "c": [
+     0.1,
+     0,
+     0.2,
+     0,
+     0.05,
+     0
+    ],
+    "d": [
+     0,
+     0.1,
+     0,
+     0.1,
+     0,
+     0.1
+    ],
+    "guess": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "handler": "total",
+    "max_hits": 8,
+    "acceptable": 1e-06,
+    "ivl": [
+     {
+      "lo": -1,
+      "hi": 1
+     },
+     {
+      "lo": -1,
+      "hi": 1
+     },
+     {
+      "lo": -1,
+      "hi": 1
+     },
+     {
+      "lo": -1,
+      "hi": 1
+     },
+     {
+      "lo": -1,
+      "hi": 1
+     },
+     {
+      "lo": -1,
+      "hi": 1
+     }
+    ],
+    "use_intervals": true,
+    "use_periodic": true
+   }
+  },
+  {
+   "name": "guess_is_solution",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:227",
+   "inputs": {
+    "op": "solve",
+    "n": 2,
+    "a": [
+     4.0,
+     1.0,
+     1.0,
+     3.0
+    ],
+    "b": [
+     0,
+     0
+    ],
+    "guess": [
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "guess_good_but_not_is_converged",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:229",
+   "inputs": {
+    "op": "solve",
+    "n": 2,
+    "a": [
+     4.0,
+     1.0,
+     1.0,
+     3.0
+    ],
+    "b": [
+     1.9344999999999999,
+     2.4437499999999996
+    ],
+    "c": [
+     0.5,
+     0.25
+    ],
+    "d": [
+     0.1,
+     -0.2
+    ],
+    "guess": [
+     0.3,
+     0.7
+    ],
+    "size_scale": 1.0,
+    "scaled_zero": 0.0
+   }
+  },
+  {
+   "name": "first_evaluate_fails",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:177",
+   "inputs": {
+    "op": "solve",
+    "n": 2,
+    "a": [
+     4.0,
+     1.0,
+     1.0,
+     3.0
+    ],
+    "b": [
+     1.9344999999999999,
+     2.4437499999999996
+    ],
+    "guess": [
+     0,
+     0
+    ],
+    "fail_calls": [
+     0
+    ]
+   }
+  },
+  {
+   "name": "evaluator_found_answer_first",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:189",
+   "inputs": {
+    "op": "solve",
+    "n": 2,
+    "a": [
+     4.0,
+     1.0,
+     1.0,
+     3.0
+    ],
+    "b": [
+     1.9344999999999999,
+     2.4437499999999996
+    ],
+    "guess": [
+     0,
+     0
+    ],
+    "found_tol": 1000000000.0
+   }
+  },
+  {
+   "name": "evaluator_found_answer_later",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:599",
+   "inputs": {
+    "op": "solve",
+    "n": 2,
+    "a": [
+     4.0,
+     1.0,
+     1.0,
+     3.0
+    ],
+    "b": [
+     1.9344999999999999,
+     2.4437499999999996
+    ],
+    "c": [
+     0.5,
+     0.25
+    ],
+    "guess": [
+     0,
+     0
+    ],
+    "found_tol": 0.001
+   }
+  },
+  {
+   "name": "zero_row_bad_jacobian",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:280",
+   "inputs": {
+    "op": "solve",
+    "n": 3,
+    "a": [
+     1,
+     2,
+     3,
+     0,
+     0,
+     0,
+     1,
+     0,
+     1
+    ],
+    "b": [
+     1,
+     2,
+     3
+    ],
+    "guess": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "near_singular_pivot",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:280",
+   "inputs": {
+    "op": "solve",
+    "n": 2,
+    "a": [
+     1,
+     1,
+     1,
+     1
+    ],
+    "b": [
+     1,
+     2
+    ],
+    "guess": [
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "max_iterations_zero",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:253",
+   "inputs": {
+    "op": "solve",
+    "n": 2,
+    "a": [
+     4.0,
+     1.0,
+     1.0,
+     3.0
+    ],
+    "b": [
+     1.9344999999999999,
+     2.4437499999999996
+    ],
+    "c": [
+     0.5,
+     0.25
+    ],
+    "guess": [
+     0,
+     0
+    ],
+    "max_iter": 0
+   }
+  },
+  {
+   "name": "max_iterations_one",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:253",
+   "inputs": {
+    "op": "solve",
+    "n": 2,
+    "a": [
+     4.0,
+     1.0,
+     1.0,
+     3.0
+    ],
+    "b": [
+     1.9344999999999999,
+     2.4437499999999996
+    ],
+    "c": [
+     0.5,
+     0.25
+    ],
+    "d": [
+     0.1,
+     -0.2
+    ],
+    "guess": [
+     1,
+     1
+    ],
+    "max_iter": 1
+   }
+  },
+  {
+   "name": "hits_all_boundaries_exit",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:743",
+   "inputs": {
+    "op": "solve",
+    "n": 2,
+    "a": [
+     4.0,
+     1.0,
+     1.0,
+     3.0
+    ],
+    "b": [
+     1.9344999999999999,
+     2.4437499999999996
+    ],
+    "guess": [
+     0,
+     0
+    ],
+    "handler": "all",
+    "ivl": [
+     {
+      "lo": -0.5,
+      "hi": -0.1
+     },
+     {
+      "lo": -0.5,
+      "hi": -0.1
+     }
+    ],
+    "use_intervals": true
+   }
+  },
+  {
+   "name": "ignore_boundary_hits",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:742",
+   "inputs": {
+    "op": "solve",
+    "n": 2,
+    "a": [
+     4.0,
+     1.0,
+     1.0,
+     3.0
+    ],
+    "b": [
+     1.9344999999999999,
+     2.4437499999999996
+    ],
+    "guess": [
+     0,
+     0
+    ],
+    "handler": "ignore",
+    "ivl": [
+     {
+      "lo": -0.5,
+      "hi": -0.1
+     },
+     {
+      "lo": -0.5,
+      "hi": -0.1
+     }
+    ],
+    "use_intervals": true
+   }
+  },
+  {
+   "name": "clamped_first_evaluate_fails_scaled_ok",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:449",
+   "inputs": {
+    "op": "solve",
+    "n": 2,
+    "a": [
+     4.0,
+     1.0,
+     1.0,
+     3.0
+    ],
+    "b": [
+     1.9344999999999999,
+     2.4437499999999996
+    ],
+    "guess": [
+     0,
+     0
+    ],
+    "fail_calls": [
+     1
+    ],
+    "ivl": [
+     {
+      "lo": -0.05,
+      "hi": 0.05
+     },
+     {
+      "lo": -1,
+      "hi": 1
+     }
+    ],
+    "use_intervals": true,
+    "handler": "total",
+    "max_hits": 8
+   }
+  },
+  {
+   "name": "clamped_both_evaluates_fail",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:548",
+   "inputs": {
+    "op": "solve",
+    "n": 2,
+    "a": [
+     4.0,
+     1.0,
+     1.0,
+     3.0
+    ],
+    "b": [
+     1.9344999999999999,
+     2.4437499999999996
+    ],
+    "guess": [
+     0,
+     0
+    ],
+    "fail_calls": [
+     1,
+     2
+    ],
+    "ivl": [
+     {
+      "lo": -0.05,
+      "hi": 0.05
+     },
+     {
+      "lo": -1,
+      "hi": 1
+     }
+    ],
+    "use_intervals": true
+   }
+  },
+  {
+   "name": "unclamped_evaluate_fails",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:449",
+   "inputs": {
+    "op": "solve",
+    "n": 2,
+    "a": [
+     4.0,
+     1.0,
+     1.0,
+     3.0
+    ],
+    "b": [
+     1.9344999999999999,
+     2.4437499999999996
+    ],
+    "c": [
+     0.5,
+     0.25
+    ],
+    "guess": [
+     0,
+     0
+    ],
+    "fail_calls": [
+     2
+    ]
+   }
+  },
+  {
+   "name": "wrong_sign_jacobian_step_cutting",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:644",
+   "inputs": {
+    "op": "solve",
+    "n": 2,
+    "a": [
+     4.0,
+     1.0,
+     1.0,
+     3.0
+    ],
+    "b": [
+     1.9344999999999999,
+     2.4437499999999996
+    ],
+    "c": [
+     0.5,
+     0.25
+    ],
+    "guess": [
+     0,
+     0
+    ],
+    "jac_scale": -1.0,
+    "step_cutting": true,
+    "max_iter": 10
+   }
+  },
+  {
+   "name": "half_jacobian_slow",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:253",
+   "inputs": {
+    "op": "solve",
+    "n": 2,
+    "a": [
+     4.0,
+     1.0,
+     1.0,
+     3.0
+    ],
+    "b": [
+     1.9344999999999999,
+     2.4437499999999996
+    ],
+    "c": [
+     0.5,
+     0.25
+    ],
+    "guess": [
+     0,
+     0
+    ],
+    "jac_scale": 2.0
+   }
+  },
+  {
+   "name": "abs_kink_oscillation",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:689",
+   "inputs": {
+    "op": "solve",
+    "n": 1,
+    "a": [
+     0.0
+    ],
+    "b": [
+     -1.0
+    ],
+    "e": [
+     1.0
+    ],
+    "c": [
+     0.0
+    ],
+    "guess": [
+     0.5
+    ],
+    "step_cutting": true
+   }
+  },
+  {
+   "name": "abs_kink_no_cutting",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:689",
+   "inputs": {
+    "op": "solve",
+    "n": 1,
+    "a": [
+     0.1
+    ],
+    "b": [
+     1.0
+    ],
+    "e": [
+     1.0
+    ],
+    "guess": [
+     -0.3
+    ]
+   }
+  },
+  {
+   "name": "no_root_cubic_step_cutting",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:644",
+   "inputs": {
+    "op": "solve",
+    "n": 1,
+    "a": [
+     0.0
+    ],
+    "b": [
+     -1.0
+    ],
+    "c": [
+     0.0
+    ],
+    "d": [
+     1.0
+    ],
+    "guess": [
+     0.5
+    ],
+    "step_cutting": true,
+    "acceptable": 0.001
+   }
+  },
+  {
+   "name": "nan_guess",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:177",
+   "inputs": {
+    "op": "solve",
+    "n": 2,
+    "a": [
+     4.0,
+     1.0,
+     1.0,
+     3.0
+    ],
+    "b": [
+     1.9344999999999999,
+     2.4437499999999996
+    ],
+    "guess": [
+     "NaN",
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "has_intervals_set_ok",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:127",
+   "inputs": {
+    "op": "solve",
+    "n": 2,
+    "a": [
+     4.0,
+     1.0,
+     1.0,
+     3.0
+    ],
+    "b": [
+     1.9344999999999999,
+     2.4437499999999996
+    ],
+    "guess": [
+     0,
+     0
+    ],
+    "has_intervals": true,
+    "set_intervals_ok": true,
+    "ivl": [
+     {
+      "lo": -1,
+      "hi": 1
+     },
+     {
+      "lo": -1,
+      "hi": 1
+     }
+    ],
+    "use_intervals": true
+   }
+  },
+  {
+   "name": "has_intervals_base_set_fails",
+   "upstream_ref": "source/SMLib/inc/SmLocalSolveNd.h:130",
+   "inputs": {
+    "op": "solve",
+    "n": 2,
+    "a": [
+     4.0,
+     1.0,
+     1.0,
+     3.0
+    ],
+    "b": [
+     1.9344999999999999,
+     2.4437499999999996
+    ],
+    "guess": [
+     0,
+     0
+    ],
+    "has_intervals": true
+   }
+  },
+  {
+   "name": "desired_accuracy_eff_zero_sq",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:253",
+   "inputs": {
+    "op": "solve",
+    "n": 3,
+    "a": [
+     5.0,
+     1.0,
+     -1.0,
+     0.5,
+     4.0,
+     1.0,
+     1.0,
+     -1.0,
+     6.0
+    ],
+    "b": [
+     1.275,
+     0.15,
+     6.5
+    ],
+    "c": [
+     0.2,
+     0.0,
+     -0.3
+    ],
+    "d": [
+     0.0,
+     0.4,
+     0.1
+    ],
+    "guess": [
+     0,
+     0,
+     0
+    ],
+    "desired": 1e-24,
+    "max_iter": 30
+   }
+  },
+  {
+   "name": "fail_radius_divergence",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:449",
+   "inputs": {
+    "op": "solve",
+    "n": 2,
+    "a": [
+     0.01,
+     1,
+     1,
+     0.01
+    ],
+    "b": [
+     5,
+     5
+    ],
+    "c": [
+     1,
+     1
+    ],
+    "guess": [
+     0.1,
+     0.1
+    ],
+    "fail_radius": 3.0
+   }
+  },
+  {
+   "name": "periodic_wrap_solution",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:387",
+   "inputs": {
+    "op": "solve",
+    "n": 1,
+    "a": [
+     1.0
+    ],
+    "b": [
+     7.0
+    ],
+    "guess": [
+     0.5
+    ],
+    "ivl": [
+     {
+      "lo": 0.0,
+      "hi": 6.0,
+      "periodic": true
+     }
+    ],
+    "use_intervals": true,
+    "use_periodic": true
+   }
+  },
+  {
+   "name": "max_size_8",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:253",
+   "inputs": {
+    "op": "solve",
+    "n": 8,
+    "a": [
+     12.0,
+     -0.2,
+     -0.2,
+     -0.2,
+     -0.2,
+     -0.2,
+     -0.2,
+     -0.2,
+     -0.2,
+     12.0,
+     -0.2,
+     0.3,
+     -0.2,
+     0.3,
+     -0.2,
+     0.3,
+     -0.2,
+     -0.2,
+     12.0,
+     -0.2,
+     -0.2,
+     -0.2,
+     -0.2,
+     -0.2,
+     -0.2,
+     0.3,
+     -0.2,
+     12.0,
+     -0.2,
+     0.3,
+     -0.2,
+     0.3,
+     -0.2,
+     -0.2,
+     -0.2,
+     -0.2,
+     12.0,
+     -0.2,
+     -0.2,
+     -0.2,
+     -0.2,
+     0.3,
+     -0.2,
+     0.3,
+     -0.2,
+     12.0,
+     -0.2,
+     0.3,
+     -0.2,
+     -0.2,
+     -0.2,
+     -0.2,
+     -0.2,
+     -0.2,
+     12.0,
+     -0.2,
+     -0.2,
+     0.3,
+     -0.2,
+     0.3,
+     -0.2,
+     0.3,
+     -0.2,
+     12.0
+    ],
+    "b": [
+     -0.56,
+     1.41045,
+     1.8816,
+     3.7537500000000006,
+     4.3272,
+     6.10225,
+     6.779200000000001,
+     8.44715
+    ],
+    "c": [
+     0.05,
+     0.05,
+     0.05,
+     0.05,
+     0.05,
+     0.05,
+     0.05,
+     0.05
+    ],
+    "d": [
+     0.02,
+     0.02,
+     0.02,
+     0.02,
+     0.02,
+     0.02,
+     0.02,
+     0.02
+    ],
+    "guess": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "zero_step_not_acceptable",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:358",
+   "inputs": {
+    "op": "solve",
+    "n": 1,
+    "a": [
+     1.0
+    ],
+    "b": [
+     1.0
+    ],
+    "guess": [
+     0.0
+    ],
+    "jac_scale": 1000000000.0,
+    "desired": 0.001
+   }
+  },
+  {
+   "name": "zero_step_acceptable",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:358",
+   "inputs": {
+    "op": "solve",
+    "n": 1,
+    "a": [
+     1.0
+    ],
+    "b": [
+     1e-07
+    ],
+    "guess": [
+     0.0
+    ],
+    "jac_scale": 1000000000.0,
+    "desired": 0.001,
+    "acceptable": 1e-06
+   }
+  },
+  {
+   "name": "zero_step_after_clamp_out_of_bounds",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:373",
+   "inputs": {
+    "op": "solve",
+    "n": 1,
+    "a": [
+     1.0
+    ],
+    "b": [
+     5.0
+    ],
+    "c": [
+     1.0
+    ],
+    "guess": [
+     0.0
+    ],
+    "desired": 0.01,
+    "handler": "ignore",
+    "ivl": [
+     {
+      "lo": -1.0,
+      "hi": 1.0
+     }
+    ],
+    "use_intervals": true
+   }
+  },
+  {
+   "name": "jacobian_central",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:851",
+   "inputs": {
+    "op": "jacobian",
+    "n": 2,
+    "a": [
+     4.0,
+     1.0,
+     1.0,
+     3.0
+    ],
+    "b": [
+     1.9344999999999999,
+     2.4437499999999996
+    ],
+    "c": [
+     0.5,
+     0.25
+    ],
+    "d": [
+     0.1,
+     -0.2
+    ],
+    "guess": [
+     0.3,
+     -0.7
+    ]
+   }
+  },
+  {
+   "name": "jacobian_large_params",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:873",
+   "inputs": {
+    "op": "jacobian",
+    "n": 3,
+    "a": [
+     5.0,
+     1.0,
+     -1.0,
+     0.5,
+     4.0,
+     1.0,
+     1.0,
+     -1.0,
+     6.0
+    ],
+    "b": [
+     1.275,
+     0.15,
+     6.5
+    ],
+    "c": [
+     0.2,
+     0.0,
+     -0.3
+    ],
+    "d": [
+     0.0,
+     0.4,
+     0.1
+    ],
+    "guess": [
+     1000000.0,
+     -2000.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "jacobian_clamped_forward",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:883",
+   "inputs": {
+    "op": "jacobian",
+    "n": 2,
+    "a": [
+     4.0,
+     1.0,
+     1.0,
+     3.0
+    ],
+    "b": [
+     1.9344999999999999,
+     2.4437499999999996
+    ],
+    "c": [
+     0.5,
+     0.25
+    ],
+    "guess": [
+     0.0,
+     1.0
+    ],
+    "ivl": [
+     {
+      "lo": 0.0,
+      "hi": 1.0
+     },
+     {
+      "lo": 0.0,
+      "hi": 1.0
+     }
+    ],
+    "use_intervals": true
+   }
+  },
+  {
+   "name": "jacobian_degenerate_interval",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:896",
+   "inputs": {
+    "op": "jacobian",
+    "n": 2,
+    "a": [
+     4.0,
+     1.0,
+     1.0,
+     3.0
+    ],
+    "b": [
+     1.9344999999999999,
+     2.4437499999999996
+    ],
+    "guess": [
+     0.5,
+     0.5
+    ],
+    "ivl": [
+     {
+      "lo": 0.0,
+      "hi": 1.0
+     },
+     {
+      "lo": 0.5,
+      "hi": 0.5
+     }
+    ],
+    "use_intervals": true
+   }
+  },
+  {
+   "name": "jacobian_evaluate_fails",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:889",
+   "inputs": {
+    "op": "jacobian",
+    "n": 3,
+    "a": [
+     5.0,
+     1.0,
+     -1.0,
+     0.5,
+     4.0,
+     1.0,
+     1.0,
+     -1.0,
+     6.0
+    ],
+    "b": [
+     1.275,
+     0.15,
+     6.5
+    ],
+    "guess": [
+     0.1,
+     0.2,
+     0.3
+    ],
+    "fail_calls": [
+     4
+    ]
+   }
+  },
+  {
+   "name": "jacobian_kink",
+   "upstream_ref": "source/SMLib/src/SmLocalSolveNd.cpp:851",
+   "inputs": {
+    "op": "jacobian",
+    "n": 1,
+    "a": [
+     0.0
+    ],
+    "b": [
+     0.0
+    ],
+    "e": [
+     2.0
+    ],
+    "guess": [
+     0.0
+    ]
+   }
+  }
+ ]
+}

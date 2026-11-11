@@ -222,7 +222,7 @@ const MARK: Palette = Palette {
     cap: Rgb(55, 56, 57),
     hatch: [Rgb(61, 62, 63), Rgb(64, 65, 66)],
     isocurve: Rgb(58, 59, 60),
-    analysis: solidcraft_render::AnalysisColors {
+    analysis: solidcraft_color::AnalysisColors {
         draft: [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9]],
         access: [[0.11, 0.12, 0.13], [0.14, 0.15, 0.16]],
         curvature: [[0.17, 0.18, 0.19], [0.21, 0.22, 0.23], [0.24, 0.25, 0.26]],
@@ -253,7 +253,7 @@ fn the_default_palette_is_the_colour_table() {
         (colors::SKETCH_PROJECTED, colors::SKETCH_LOST, colors::SKETCH_CONSTRUCTION, colors::SKETCH_CENTERLINE)
     );
     assert_eq!((p.axes, p.cap, p.isocurve), ([colors::AXIS_X, colors::AXIS_Y, colors::AXIS_Z], colors::SECTION_CAP, colors::ISOCURVE));
-    assert_eq!(p.analysis, solidcraft_render::AnalysisColors::DEFAULT);
+    assert_eq!(p.analysis, solidcraft_color::AnalysisColors::DEFAULT);
 }
 
 #[test]

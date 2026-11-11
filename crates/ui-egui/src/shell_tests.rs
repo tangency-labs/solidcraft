@@ -1,5 +1,6 @@
 use super::*;
 use crate::scenario::{Harness, rect_of};
+use crate::toolbar;
 use serde_json::json;
 use solidcraft_engine::panels::ActionSink as _;
 
@@ -534,14 +535,11 @@ fn actual_tabs_preset_raw_widget_drag_retains_the_inactive_editor_identity_and_d
             let target = HostControlTarget::Pointer(HostPointerTarget::Tab { instance: editor.clone() });
             let control = h.app.universal_panel_frame().unwrap().controls.iter().find(|control| control.target == target).unwrap();
             assert!(
-                h.output
-                    .accesskit_update
-                    .as_ref()
-                    .unwrap()
-                    .nodes
-                    .iter()
-                    .any(|(_, node)| node.role() == egui::accesskit::Role::Button && node.label() == Some(control.accessible_name.as_str())),
-                "use an actual accessible Tab widget, not a reducer-only target"
+                h.output.accesskit_update.as_ref().unwrap().nodes.iter().any(|(id, node)| *id == control.id.accesskit_id()
+                    && node.role() == egui::accesskit::Role::Tab
+                    && node.label() == Some(control.accessible_name.as_str())
+                    && node.is_selected() == Some(false)),
+                "use the actual inactive accessible Tab widget, not a reducer-only target"
             );
             let bounds = control.bounds;
             let card = h.app.universal_panel_frame().unwrap().layout.sections.iter().find(|card| card.section == source_id).unwrap();
@@ -836,7 +834,7 @@ fn host_full_canvas_and_same_pass_controls_follow_actual_sizing_footprints_witho
                             assert!(frame.layout.usable.contains_rect(logical_rect(bounds)));
                             assert!(frame.layout.usable.obstacles.iter().all(|obstacle| {
                                 !bounds
-                                    .expand(crate::theme::Tokens::get().space_4)
+                                    .expand(solidcraft_theme::Tokens::get().space_4)
                                     .intersect(crate::panel_runtime::egui_rect(*obstacle))
                                     .is_positive()
                             }));
@@ -948,7 +946,7 @@ fn actual_host_fit_and_centring_respect_the_measured_sketch_palette_at_both_scal
         for (name, control) in [("nav:outer", layout.navigation), ("axis_view:outer", layout.axis_view)] {
             if control.is_positive() {
                 assert_eq!(rect_of(name), Some(control), "published controls must match the actual same-pass footprint");
-                assert!(!control.expand(crate::theme::Tokens::get().space_4).intersect(palette).is_positive());
+                assert!(!control.expand(solidcraft_theme::Tokens::get().space_4).intersect(palette).is_positive());
                 assert!(effective.contains_rect(logical_rect(control)));
                 assert!(frame.layout.usable.obstacles.iter().all(|obstacle| !control.intersect(egui_rect(*obstacle)).is_positive()));
             } else {
@@ -987,7 +985,7 @@ fn actual_host_fit_and_centring_respect_the_measured_sketch_palette_at_both_scal
             h.settle();
             assert_eq!(h.app.viewport.rect, Some(domain), "explicit fitting preserves the full render domain");
             let footprint = projected_extent(&h, bounds);
-            let padded = footprint.expand(crate::theme::Tokens::get().space_8 - 0.01);
+            let padded = footprint.expand(solidcraft_theme::Tokens::get().space_8 - 0.01);
             assert!(
                 h.app.viewport.layout.as_ref().unwrap().usable.as_ref().unwrap().contains_rect(logical_rect(padded)),
                 "{scale}x {mode:?}: the full 100 mm line and its clearance must avoid the palette, host and controls: {padded:?}"
@@ -1859,7 +1857,7 @@ fn tool_sheet_dropdowns_and_preferences_still_open_above_the_sheet() {
         let cancel = rect_of("prefs:cancel").expect("Preferences Cancel");
         assert_eq!(h.ctx.layer_id_at(cancel.center()).unwrap().id, egui::Id::unique("sc_prefs"), "Preferences owns its Cancel target");
         h.step(&json!({"click":{"handle":"prefs:cancel"}})).unwrap();
-        assert!(!h.app.prefs_window.open && h.app.dialog.is_some(), "Cancel closes Preferences, leaving the feature dialog open");
+        assert!(!h.app.prefs_window.shell.open && h.app.dialog.is_some(), "Cancel closes Preferences, leaving the feature dialog open");
         h.step(&json!({"widget":"Cancel"})).unwrap();
         assert!(h.app.dialog.is_none());
     }
@@ -1931,7 +1929,7 @@ fn compact_chrome_is_flush_and_browser_hugs_content_in_both_themes() {
         assert!(browser.height() < h.app.viewport.rect.unwrap().height() / 2.0, "Browser hugs its contents");
         let compact = crate::ui_kit::Container::new(&h.ctx, crate::ui_kit::Surface::Panel);
         assert_eq!(compact.gap(), 0.0);
-        let frame = compact.frame(&h.ctx, crate::theme::Tokens::get().panel, crate::frame::Side::Left);
+        let frame = compact.frame(&h.ctx, solidcraft_theme::Tokens::get().panel, crate::frame::Side::Left);
         assert_eq!(frame.shadow, egui::Shadow::NONE);
         assert_eq!(frame.corner_radius, egui::CornerRadius::ZERO);
         h.app.start("solid.extrude");
@@ -1944,7 +1942,7 @@ fn compact_chrome_is_flush_and_browser_hugs_content_in_both_themes() {
         let moved = h.app.viewport.dialog_rect.unwrap();
         assert!(moved.right() < before.right() - 100.0, "compact tool sheets detach from the right edge");
         let feature = crate::ui_kit::Container::new(&h.ctx, crate::ui_kit::Surface::Feature);
-        assert_eq!(feature.frame(&h.ctx, crate::theme::Tokens::get().dialog_body, crate::frame::Side::Right).shadow, egui::Shadow::NONE);
+        assert_eq!(feature.frame(&h.ctx, solidcraft_theme::Tokens::get().dialog_body, crate::frame::Side::Right).shadow, egui::Shadow::NONE);
         h.app.run("view.layout", json!({"mode":"floating"})).unwrap();
         h.settle();
         assert_eq!(rect_of("browser:card").unwrap().left(), SHELL_GAP);
@@ -2047,7 +2045,7 @@ fn embed_editor_keeps_the_ribbon_and_leaves_files_to_the_host() {
     }
     h.settle();
     assert_eq!((h.app.docs.count(), h.app.session.revision), (docs, revision));
-    assert!(!h.app.file_picker_busy() && !h.app.prefs_window.open, "{}", h.call("ui.inspect", json!({})));
+    assert!(!h.app.file_picker_busy() && !h.app.prefs_window.shell.open, "{}", h.call("ui.inspect", json!({})));
     // Undo stays the design's own.
     h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
     h.settle();
@@ -2113,7 +2111,7 @@ fn a_host_keeps_the_design_and_gives_it_back_with_its_timeline() {
 /// beside it, and OK, Cancel or Esc bring the column back exactly as it was.
 #[test]
 fn a_dialog_in_the_left_column_takes_the_place_of_browser_and_history() {
-    let card = crate::theme::Tokens::get().form_card_width;
+    let card = solidcraft_theme::Tokens::get().form_card_width;
     for mode in [LayoutMode::Floating, LayoutMode::Docked] {
         for (dock, close) in [("bottom", "Cancel"), ("left", "Escape"), ("under_browser", "OK")] {
             let what = format!("{mode:?}, History {dock}, {close}");
@@ -2170,7 +2168,7 @@ fn a_dialog_in_the_left_column_takes_the_place_of_browser_and_history() {
 /// the left column docks at the left edge at its own width, above the bottom History strip.
 #[test]
 fn without_a_left_column_a_dialog_docks_at_the_left_edge_at_its_own_width() {
-    let card = crate::theme::Tokens::get().form_card_width;
+    let card = solidcraft_theme::Tokens::get().form_card_width;
     for (mode, browser) in [(LayoutMode::Floating, "hidden"), (LayoutMode::Docked, "hidden"), (LayoutMode::Floating, "translucent")] {
         let what = format!("{mode:?}, browser {browser}");
         let mut h = Harness::new();
@@ -2327,6 +2325,133 @@ fn dialog_place_is_saved_and_survives_cancel_defaults_and_bad_input() {
     assert_eq!(restored.preferences.default_units, "in");
 }
 
+/// A design with Extrude1 (Body1) built from Sketch1, for the design tree over the view.
+fn extruded(h: &mut Harness) {
+    sketched(h);
+    h.app.run("solid.extrude", json!({"distance":10})).unwrap();
+}
+
+/// Dialogs in the left column, the design tree over the view (#6710): the view's top-left corner
+/// shows the design's name, folded; a click opens the browser's Origin and Bodies rows and the
+/// History's features over the view, covered for navigation and picking only inside its card; a
+/// plane picked there starts the sketch; another click folds it, and it goes with the dialog.
+#[test]
+fn the_design_tree_over_the_view_folds_picks_and_goes_with_the_dialog() {
+    for mode in [LayoutMode::Floating, LayoutMode::Docked] {
+        let what = format!("{mode:?}");
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1400,"height":900}));
+        h.call("ui.set", json!({"layout":mode}));
+        h.app.run("view.history_layout", json!({"dock":"under_browser"})).unwrap();
+        extruded(&mut h);
+        h.settle();
+        h.step(&json!({"start":"sketch.create"})).unwrap();
+        h.settle();
+        assert!(rect_of("dialog_tree:outer").is_none(), "{what}: at the view's edge the browser is there");
+        h.step(&json!({"widget":"Cancel"})).unwrap();
+        h.call("ui.prefs", json!({"dialog_place":"left_column"}));
+        h.step(&json!({"start":"sketch.create"})).unwrap();
+        h.settle();
+        let folded = rect_of("dialog_tree:outer").expect("the folded tree");
+        let viewport = h.app.viewport.rect.unwrap();
+        let content = content_rect(&h.app, viewport);
+        let dialog = h.app.viewport.dialog_rect.unwrap();
+        assert!(folded.left() >= dialog.right() && (folded.left() - content.left()).abs() <= SHELL_GAP + 1.0, "{what}: {folded:?} {content:?}");
+        assert!((folded.top() - content.top()).abs() <= SHELL_GAP + 1.0, "{what}: {folded:?} {content:?}");
+        assert!(folded.height() < 2.0 * crate::ui_kit::TREE_ROW_HEIGHT + 12.0, "{what}: folded is one row: {folded:?}");
+        assert!(crate::scenario::handle_at("timeline:Extrude1").is_none(), "{what}: folded");
+        assert!(covered(&h.app, folded.center()), "{what}");
+        assert!(!covered(&h.app, folded.right_bottom() + egui::vec2(6.0, 6.0)), "{what}: the view goes on right beside it");
+        h.step(&json!({"click":{"handle":"dialog_tree:header"}})).unwrap();
+        h.settle();
+        let open = rect_of("dialog_tree:outer").expect("the open tree");
+        assert!(open.height() > folded.height() * 3.0 && open.left() == folded.left(), "{what}: {open:?}");
+        let rows: Vec<String> = crate::browser::drawn_rows().into_iter().map(|(label, ..)| label).collect();
+        for row in ["Origin", "Bodies", "Body1"] {
+            assert!(rows.iter().any(|r| r == row), "{what}: {row} in {rows:?}");
+        }
+        assert!(crate::scenario::handle_at("timeline:Extrude1").is_some_and(|p| open.contains(p)), "{what}: the History's rows");
+        assert!(covered(&h.app, open.center()) && !covered(&h.app, open.right_center() + egui::vec2(6.0, 0.0)), "{what}");
+        h.step(&json!({"click":{"chevron":"Origin"}})).unwrap();
+        h.settle();
+        h.step(&json!({"click":{"browser":"XY"}})).unwrap();
+        h.settle();
+        assert!(h.app.session.active_sketch.is_some(), "{what}: the plane picked in the tree starts the sketch");
+        assert!(
+            h.app.dialog.is_none() && rect_of("dialog_tree:outer").is_none() && h.app.shell.dialog_tree.is_none(),
+            "{what}: it goes with the dialog"
+        );
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.step(&json!({"start":"solid.shell"})).unwrap();
+        h.settle();
+        let again = rect_of("dialog_tree:outer").expect("a new dialog's tree");
+        assert!(again.height() < 2.0 * crate::ui_kit::TREE_ROW_HEIGHT + 12.0, "{what}: each dialog starts with the tree folded");
+        h.step(&json!({"click":{"handle":"dialog_tree:header"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog_tree:header"}})).unwrap();
+        h.settle();
+        assert!(
+            rect_of("dialog_tree:outer").is_some_and(|r| r.height() < 2.0 * crate::ui_kit::TREE_ROW_HEIGHT + 12.0),
+            "{what}: a second click folds it"
+        );
+    }
+}
+
+/// With OK and Cancel in the view's corner (#6709), the open tree keeps clear of the pair, also on
+/// a view too narrow for both side by side at the tree's full width.
+#[test]
+fn the_design_tree_over_the_view_keeps_clear_of_the_corner_pair() {
+    for width in [1400.0, 600.0] {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":width,"height":900}));
+        h.call("ui.prefs", json!({"dialog_place":"left_column","view_confirm_corner":true}));
+        extruded(&mut h);
+        h.settle();
+        h.step(&json!({"start":"solid.shell"})).unwrap();
+        h.settle();
+        h.step(&json!({"click":{"handle":"dialog_tree:header"}})).unwrap();
+        h.settle();
+        let tree = rect_of("dialog_tree:outer").expect("the open tree");
+        let pair = rect_of("view:confirm").expect("the pair");
+        assert!(!tree.intersects(pair), "width {width}: {tree:?} {pair:?}");
+        assert!(!tree.intersects(h.app.viewport.dialog_rect.unwrap()), "width {width}: the tree is beside the dialog");
+    }
+}
+
+/// A click on a feature in the design tree over the view gives it to a dialog input that takes
+/// features, through the History's own click (`timeline::pick_feature_into_dialog`, #6532); a body
+/// goes to an input that takes bodies, as in the browser.
+#[test]
+fn the_design_tree_over_the_view_gives_features_and_bodies_to_the_dialog() {
+    let mut h = Harness::new();
+    h.call("ui.resize", json!({"width":1400,"height":900}));
+    h.call("ui.prefs", json!({"dialog_place":"left_column"}));
+    h.app.run("view.history_layout", json!({"dock":"left"})).unwrap();
+    extruded(&mut h);
+    h.settle();
+    let extrude = h.app.session.doc.features.iter().find(|f| f.name == "Extrude1").unwrap().id;
+    h.step(&json!({"start":"solid.mirror"})).unwrap();
+    h.settle();
+    h.step(&json!({"click":{"handle":"dialog:Object Type"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Object Type:Features"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Features"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog_tree:header"}})).unwrap();
+    h.settle();
+    let tree = rect_of("dialog_tree:outer").expect("the open tree");
+    assert!(crate::scenario::handle_at("timeline:Extrude1").is_some_and(|p| tree.contains(p)), "the History's row is in the tree");
+    h.step(&json!({"click":{"handle":"timeline:Extrude1"}})).unwrap();
+    let d = h.app.dialog.as_ref().expect("Mirror stays open");
+    assert_eq!(d.inputs[0].items, vec![solidcraft_engine::Sel::Feature { id: extrude }], "the feature fills Features");
+    h.step(&json!({"widget":"Cancel"})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"solid.combine"})).unwrap();
+    h.settle();
+    h.step(&json!({"click":{"handle":"dialog_tree:header"}})).unwrap();
+    h.settle();
+    h.step(&json!({"click":{"browser":"Body1"}})).unwrap();
+    let d = h.app.dialog.as_ref().expect("Combine stays open");
+    assert!(d.inputs.iter().any(|i| i.items.contains(&solidcraft_engine::Sel::Body { name: "Body1".into() })), "a body picked in the tree");
+}
+
 /// Every text the last frame painted.
 fn painted_texts(h: &Harness) -> Vec<String> {
     fn walk(shape: &egui::Shape, out: &mut Vec<String>) {
@@ -2442,7 +2567,7 @@ fn status_bar_names_what_is_edited_and_the_sketch_state_and_replaces_the_views_c
     assert!(h.app.dialog.as_ref().is_some_and(|d| d.editing.is_some()));
     assert_eq!(crate::status_bar::contents(&h.app).editing.as_deref(), Some("Editing Extrude1"));
     // In another language the text is translated, and so is a default feature name.
-    let _ja = crate::i18n::scope("ja");
+    let _ja = solidcraft_ui_text::scope("ja");
     assert_eq!(crate::status_bar::contents(&h.app).editing, Some(format!("編集中: {}", crate::i18n::tr_name("Extrude1"))));
     assert_eq!(crate::i18n::tr_name("Sketch1"), "スケッチ1");
 }
@@ -2530,7 +2655,7 @@ fn status_bar_mouse_mapping_opens_the_mappings_and_picks_one_as_the_preferences_
     assert_eq!(h.app.session.undo.len(), undo);
     // An unknown mapping changes nothing.
     let before = serde_json::to_value(&h.app.preferences).unwrap();
-    let hostile = crate::context_menu::Item::action("ui.navPreset", "Nope", "").with(json!({"preset": "nope"}));
+    let hostile = crate::ui_kit::Item::action("ui.navPreset", "Nope", "").with(json!({"preset": "nope"}));
     crate::context_menu::run_item(&mut h.app, &hostile, egui::pos2(0.0, 0.0));
     assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), before);
     // A second click on the button closes the menu it opened.

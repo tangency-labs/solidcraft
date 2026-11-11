@@ -111,7 +111,7 @@ impl CameraFilm {
             }
         }
     }
-    pub(super) fn pixel(&self, index: usize) -> Result<([f64; 3], u16, u16)> {
+    pub(super) fn pixel(&self, index: usize) -> Result<([f64; 3], u32, u32)> {
         match self {
             Self::Uniform(film) => film.pixel(index),
             Self::Adaptive(_) => {
@@ -131,7 +131,9 @@ impl CameraFilm {
     pub(super) fn identity(&self, index: usize, seed: u32) -> Result<Option<SamplingIdentity>> {
         match self {
             Self::Uniform(film) => Ok(Some(SamplingIdentity { seed, ordinal: film.samples(), stage: PreviewStage::Production })),
-            Self::Adaptive(_) => self.state()?.sampling_identity(index),
+            // A native tile reads future pixels while the owner freezes this
+            // sweep. Film add/skip retain their separate strict cursor checks.
+            Self::Adaptive(_) => self.state()?.sampling_identity_in_pass(index),
         }
     }
     pub(super) fn skip(&mut self, index: usize, cancel: &CancelToken, charge: &mut impl FnMut() -> Result<()>) -> Result<()> {

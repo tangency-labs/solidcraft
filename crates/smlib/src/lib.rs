@@ -54,6 +54,13 @@ pub enum Error {
     /// (solidcore's fit, `SolidError::FilletRefused`): the size, what it sizes, a point at the
     /// middle of the edge it was found for, and why there is no room, when the refusal names them.
     TooLarge { size: f64, kind: FitKind, at: Option<[f64; 3]>, why: Option<RoomReason> },
+    /// A corner's setback too short for its fill: solidcore's `BlendRefusal::SetbackTooShort`
+    /// from the fill's test, the corner's fill not certified at the setback asked. `least` is
+    /// the least setback solidcore's fill takes, `at` the corner's point when solidcore gives
+    /// it. `builds`: solidcore's fill is the corner, so a setback of `least` builds it; where
+    /// another patch replaces it (a G2 corner), `least` is only what solidcore's corner needs,
+    /// not a setback shown to build.
+    SetbackTooShort { least: f64, at: Option<[f64; 3]>, builds: bool },
     /// A shell, offset or thicken whose wall is thicker than a face curves: the face's offset
     /// folds (solidcore's `OffsetFailure::Folds`). The largest wall that works,
     /// when solidcore names one.
@@ -90,6 +97,9 @@ pub enum Error {
     /// A step of SMLib solidcore has not ported yet, refused rather than built another way: what
     /// is missing, and the solidcore issue that ports it.
     Unported(&'static str),
+    /// The work's token was stopped ([`stop::Stop::stop`]) before or during the call: no result,
+    /// even one solidcore finished first. Never a failure of the operation on its input.
+    Cancelled(&'static str),
 }
 
 /// Why a blend has no room, as solidcore names its refusal (`NoRoomReason`): the reasons a
@@ -189,6 +199,17 @@ impl std::fmt::Display for Error {
                 }
                 write!(f, "; the largest {} that fits is {size}", kind.word())
             }
+            Error::SetbackTooShort { least, at, builds } => {
+                write!(f, "the setback is too short for the corner's fill")?;
+                if let Some([x, y, z]) = at {
+                    write!(f, " at ({x:.3}, {y:.3}, {z:.3})")?;
+                }
+                if *builds {
+                    write!(f, "; the smallest setback that builds is {least}")
+                } else {
+                    write!(f, ": solidcore's corner needs a setback of at least {least}")
+                }
+            }
             Error::WallFolds { largest } => {
                 write!(f, "the wall is thicker than a face curves, so the face's offset folds")?;
                 match largest {
@@ -227,6 +248,7 @@ impl std::fmt::Display for Error {
             Error::Solidcore(e) => write!(f, "solidcore: {e}"),
             Error::Internal(e) => write!(f, "solidcore failed internally in {e}"),
             Error::Unported(what) => write!(f, "not supported yet: {what}"),
+            Error::Cancelled(call) => write!(f, "{call}: cancelled"),
         }
     }
 }
