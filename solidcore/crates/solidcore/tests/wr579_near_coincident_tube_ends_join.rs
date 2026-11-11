@@ -14,10 +14,11 @@
 //! `issue_1517_tube_ends.json` does on both sides.
 //!
 //! Expected with `proto_edge_splits_at_captured_vertices`: one manifold solid, its volume
-//! between the larger tube's and both together. Its check still fails on a separate
-//! defect, as the fork's does: an ellipse piece 8.6e-5 long (the top tube's wall cut by the
-//! seat's end plane) whose NURB lies 2.1e-5 off its ellipse (`SmEllipse` test 2;
-//! `SmExtent1d::ContainsPeriodicValue`, #1518). That is the only failure allowed.
+//! between the larger tube's and both together, and its check is clean. The fork's still
+//! fails on a separate defect: an ellipse piece 8.6e-5 long (the top tube's wall cut by the
+//! seat's end plane) whose STEP inversion set points near the arc's start to the start, so
+//! its NURB read 2.1e-5 off its ellipse (`SmEllipse` test 2). That was
+//! `SmExtent1d::ContainsPeriodicValue`, fixed for #1518 (WR-509).
 //!
 //! WR-741: a plane that nearly holds a cylinder's axis meets it in an ellipse of radii 1.8e7
 //! and 8, a line to 6e-11 over its 2.3e-4 degrees, whose analytic form carries rounding of
@@ -93,19 +94,8 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
     brep_volume(k, b, 1e-6, &attrs).unwrap()
 }
 
-/// #1518's report, the one check failure the joined body still has: the ellipse piece
-/// 8.6e-5 long (the top tube's wall cut by the seat's end plane) whose NURB lies 2.1e-5
-/// off its ellipse (`SmExtent1d::ContainsPeriodicValue`, a separate defect the fork's
-/// commit also leaves). The numbers are deterministic.
-/// Its tolerance is upstream's point term plus the rounding the ellipse's evaluation carries
-/// (WR-741).
-const ELLIPSE_1518: &str = "SmEllipse::Test #2 Bad Nurb to STEP Approx: \
-Dist(NurbPt, EvalSTEP(STEPInversion(NurbPt)) greater than tol \
-(offset=2.1419823e-05, tolerance=8.2100185e-08) [owner SmEllipse]";
-
 /// The union with the fix set to `fixed`: the result's volume when it is one manifold
-/// solid whose check reports exactly #1518's ellipse ([`ELLIPSE_1518`]), else what went
-/// wrong.
+/// solid whose check is clean, else what went wrong.
 fn join(fixed: bool) -> Result<f64, String> {
     let mut k = Kernel::default();
     k.fixes.proto_edge_splits_at_captured_vertices = fixed;
@@ -118,8 +108,9 @@ fn join(fixed: bool) -> Result<f64, String> {
         .unwrap()
         .lines();
     println!("check (fix {fixed}): {lines:?}");
-    // exactly #1518's line, once; any other report fails
-    if lines != [ELLIPSE_1518] {
+    // any report fails: #1518's ellipse line, the one the fork still has, is gone with
+    // WR-509's fix
+    if !lines.is_empty() {
         return Err(format!("check: {lines:?}"));
     }
     Ok(volume(&k, &mut r))

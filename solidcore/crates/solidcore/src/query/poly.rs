@@ -188,7 +188,6 @@ pub mod copy;
 pub const UNDEF_ULONG: u64 = u64::MAX - 1;
 
 // `SM_ERR_INVALID_INPUT`.
-use crate::error::SM_ERR_INVALID_INPUT;
 
 macro_rules! poly_id {
     ($(#[$doc:meta])* $name:ident) => {
@@ -1070,7 +1069,10 @@ impl PolyBrep {
         } else {
             let l = slot(&self.loop_slots, lp.0, OP)?;
             if l.last_end_point.distance(start) > zt * 100.0 {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::query_failed(
+                    OP,
+                    "the poly edge does not start where the loop's last edge ends",
+                ));
             }
             let v = l.last_end_vertex.unwrap_or(start_vertex);
             if !slot(&self.vertex_slots, v.0, OP)?.listed {
@@ -1113,12 +1115,17 @@ impl PolyBrep {
     pub fn finish_poly_edge_loop(&mut self, lp: PolyLoopId) -> Result<()> {
         const OP: &str = "query::poly::PolyBrep::finish_poly_edge_loop";
         let l = slot(&self.loop_slots, lp.0, OP)?;
-        let first = l.head.ok_or(SolidError::sm_err(OP))?;
+        let first = l
+            .head
+            .ok_or_else(|| SolidError::query_failed(OP, "the loop has no first edge"))?;
         let last_end = l.last_end_point;
         let v = self.edge_vertex(first, OP)?;
         let vx = slot(&self.vertex_slots, v.0, OP)?;
         if vx.point.distance(last_end) > vx.tolerance {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::query_failed(
+                OP,
+                "the loop's last edge does not end at its first vertex",
+            ));
         }
         let l = slot_mut(&mut self.loop_slots, lp.0, OP)?;
         l.closed = true;
@@ -1342,7 +1349,7 @@ impl PolyBrep {
     fn edge_vertex(&self, e: PolyEdgeId, op: &'static str) -> Result<PolyVertexId> {
         self.edge(e)?
             .vertex
-            .ok_or_else(|| SolidError::null_pointer(op))
+            .ok_or_else(|| SolidError::query_missing(op, "the poly edge's vertex"))
     }
 
     /// The poly vertex record `v`.
@@ -1643,7 +1650,10 @@ impl PolyBrep {
         };
         // error - bad back pointers
         if start != v {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::query_failed(
+                OP,
+                "the poly edge does not start at the vertex",
+            ));
         }
         let (prev, next) = (e.prev_at_v, e.next_at_v);
         {
@@ -1658,7 +1668,10 @@ impl PolyBrep {
         }
         if prev == Some(edge) {
             if next != prev {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::query_failed(
+                    OP,
+                    "the vertex's edge ring is broken",
+                ));
             }
             // Only one element in the list - just remove it.
             x.edge_list = None;
@@ -1684,7 +1697,10 @@ impl PolyBrep {
         loop {
             out.push(e);
             if out.len() > self.edge_slots.len() {
-                return Err(SolidError::sm_err(op));
+                return Err(SolidError::query_failed(
+                    op,
+                    "the vertex's edge ring does not close",
+                ));
             }
             e = self.edge(e)?.next_at_v.ok_or_else(|| dead(op))?;
             if e == h {
@@ -1830,7 +1846,10 @@ impl PolyBrep {
         loop {
             out.push(cur);
             if out.len() > self.edge_slots.len() {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::query_failed(
+                    OP,
+                    "the radial ring does not close",
+                ));
             }
             match self.edge_radial(cur)? {
                 None => break,
@@ -1891,7 +1910,9 @@ impl PolyBrep {
     pub fn edge_end_poly_vertex(&self, e: PolyEdgeId) -> Result<Option<PolyVertexId>> {
         const OP: &str = "query::poly::PolyBrep::edge_end_poly_vertex";
         let x = self.edge(e)?;
-        let next = x.next.ok_or(SolidError::null_pointer(OP))?;
+        let next = x
+            .next
+            .ok_or_else(|| SolidError::query_missing(OP, "the poly edge's next edge"))?;
         let last_edge = match x.owner {
             Some(l) => self.lp(l)?.head == Some(next),
             None => false,
@@ -1916,11 +1937,12 @@ impl PolyBrep {
     /// `SM_ERR_NULL_POINTER` without an end vertex; those of
     /// [`PolyBrep::edge_end_poly_vertex`].
     pub fn edge_end_point(&self, e: PolyEdgeId) -> Result<Point3> {
-        let v = self
-            .edge_end_poly_vertex(e)?
-            .ok_or(SolidError::null_pointer(
+        let v = self.edge_end_poly_vertex(e)?.ok_or_else(|| {
+            SolidError::query_missing(
                 "query::poly::PolyBrep::edge_end_point",
-            ))?;
+                "the poly edge's end vertex",
+            )
+        })?;
         Ok(self.vertex(v)?.point)
     }
 
@@ -1975,7 +1997,7 @@ impl PolyBrep {
         let s = self.edge_vertex(e, OP)?;
         let end = self
             .edge_end_poly_vertex(e)?
-            .ok_or(SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::query_missing(OP, "the poly edge's end vertex"))?;
         let b = self.vertex_bounding_box(s)?;
         let bv = self.vertex_bounding_box(end)?;
         Ok(b.union(&bv))
@@ -2191,7 +2213,10 @@ impl PolyBrep {
         loop {
             out.push(e);
             if out.len() > x.size {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::query_failed(
+                    OP,
+                    "the loop's edge ring is longer than its size",
+                ));
             }
             match self.edge(e)?.next {
                 Some(n) if n != h => e = n,
@@ -3318,11 +3343,10 @@ impl PolyBrep {
         }
 
         if scale.is_some_and(Vec3::is_undef) {
-            return Err(SolidError::Upstream {
-                operation: OP,
-                code: SM_ERR_INVALID_INPUT,
-                entity: None,
-            });
+            return Err(SolidError::query_invalid_value(
+                OP,
+                "the scale is undefined",
+            ));
         }
 
         // we're starting - inform the public
@@ -3888,7 +3912,10 @@ mod tests {
         assert_eq!(b.face_stored_normal(f).unwrap(), Vec3::new(0.0, 0.0, -1.0));
         assert!((b.tolerance() - 4.0e-5).abs() < 1e-18);
         let r = b.transform(&k, &mut env, &id, Some(Vec3::new(1.0e19, 1.0, 1.0)));
-        assert!(matches!(r, Err(SolidError::Upstream { code: 1007, .. })));
+        assert!(
+            matches!(&r, Err(e) if e.upstream_status() == Some(1007)),
+            "{r:?}"
+        );
     }
 
     #[test]

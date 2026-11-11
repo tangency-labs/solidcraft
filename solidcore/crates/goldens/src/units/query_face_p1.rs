@@ -217,8 +217,7 @@ fn none_output() -> Output {
 fn status_of(r: &Result<(), SolidError>) -> Option<i64> {
     match r {
         Ok(()) => Some(0),
-        Err(SolidError::Upstream { code, .. }) => Some(i64::from(*code)),
-        Err(_) => None,
+        Err(e) => solidcore::error::upstream_status(e).map(i64::from),
     }
 }
 
@@ -463,10 +462,10 @@ fn run_edge_on(i: &EdgeOnInput) -> Result<Output, HarnessError> {
         Vec3::new(qx, qy, qz),
     ) {
         Ok(c) => Curve::from(c),
-        Err(SolidError::Upstream { code, .. }) => {
+        Err(e) if solidcore::error::upstream_status(&e).is_some() => {
             return Ok(Output::err(format!(
                 "line_segment_status_{}",
-                f64::from(code)
+                f64::from(solidcore::error::upstream_status(&e).unwrap_or_default())
             )))
         }
         Err(e) => return Ok(rust_err(&e)),
@@ -489,7 +488,9 @@ fn run_edge_on(i: &EdgeOnInput) -> Result<Output, HarnessError> {
     Ok(match r {
         Ok(c) => edge_on_output(0, c.inside, c.possible_problem, c.problem as i64),
         // the seeded outputs survive a failure
-        Err(SolidError::Upstream { code, .. }) => edge_on_output(i64::from(code), true, true, 7),
+        Err(e) if solidcore::error::upstream_status(&e).is_some() => {
+            edge_on_output(i64::from(solidcore::error::upstream_status(&e).unwrap_or_default()), true, true, 7)
+        }
         Err(e) => rust_err(&e),
     })
 }
@@ -531,7 +532,7 @@ fn run_curve(k: &Kernel, input: &CurveInput) -> Result<Output, HarnessError> {
             Ok(curve_output(0, values))
         }
         Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(curve_output(1007, values)),
-        Err(SolidError::Upstream { code, .. }) => Ok(curve_output(code, values)),
+        Err(e) if solidcore::error::upstream_status(&e).is_some() => Ok(curve_output(solidcore::error::upstream_status(&e).unwrap_or_default(), values)),
         Err(e) => Ok(rust_err(&e)),
     }
 }

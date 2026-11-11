@@ -271,7 +271,7 @@
 {"case":"set_params_single_fsg_0","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1007.0,0.0,0.0,1.0,0.0,1.0,1.0,1.0,0.0,2.0]}}
 {"case":"set_params_single_fsg_1","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,0.0,1.0,0.0,1.0,1.0,1.0,2.0,0.0]}}
 {"case":"set_params_single_fsg_2","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,0.0,1.0,0.0,1.0,1.0,1.0,2.0,0.0]}}
-{"case":"set_params_single_fsg_3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0,1.0,0.0,1.0,0.0,1.0,1.0,1.0,2.0,0.0]}}
+{"case":"set_params_single_fsg_3","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1007.0,0.0,0.0,1.0,0.0,1.0,1.0,1.0,0.0,2.0]}}
 {"case":"set_params_vr_laws","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[1007.0,0.0,0.0,1.0,0.0,1.0,1.0,1.0,1.0,2.0]}}
 {"case":"set_params_vr_null_laws","deferred":null,"error":"null_deref","ints":{},"topology":null,"values":{}}
 {"case":"temp_radius_const","deferred":null,"error":null,"ints":{},"topology":null,"values":{"out":[0.0]}}

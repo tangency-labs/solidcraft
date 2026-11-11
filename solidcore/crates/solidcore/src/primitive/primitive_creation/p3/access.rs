@@ -92,7 +92,12 @@ pub trait PrimitiveAccess: SweepAccess {
     fn wire(&mut self, brep: BrepId, curve: &mut Option<Curve>) -> Result<EdgeId> {
         let input = curve
             .as_ref()
-            .ok_or_else(|| SolidError::null_pointer("primitive::primitive_creation::p3::wire"))?
+            .ok_or_else(|| {
+                SolidError::primitive_missing(
+                    "primitive::primitive_creation::p3::wire",
+                    "the wire's curve",
+                )
+            })?
             .clone();
         let interval = input.natural_interval();
         // under the primitive's own notification environment, like every face it

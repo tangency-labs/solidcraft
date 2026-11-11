@@ -1,8 +1,10 @@
-//! #2704: with `fillet_gn_section_generator` alone, a variable box round failed at one end
-//! ("failure to calculate intersection of fillet surface with side face", 1001) for laws such
-//! as 4 to 0, 2 to 0, 4 to 2, 0.5 to 4 and 8 to 4, and not for 4 to 3 or 0 to 4. The touch
-//! circle's section leaves the end face's plane at an end, so the side curve must come from
-//! the plane's equation (WR-682), not the plane's domain or the surfaces' domains.
+//! #2704: with the G^n section's touch circles alone (the default kernel since its flag,
+//! `fillet_gn_section_generator`, was retired: WR-685 addendum 2026-11-06), a variable box
+//! round failed at one end ("failure to calculate intersection of fillet surface with side
+//! face", 1001) for laws such as 4 to 0, 2 to 0, 4 to 2, 0.5 to 4 and 8 to 4, and not for
+//! 4 to 3 or 0 to 4. The touch circle's section leaves the end face's plane at an end, so
+//! the side curve must come from the plane's equation (WR-682), not the plane's domain or
+//! the surfaces' domains.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -43,7 +45,6 @@ fn pick(k: &Kernel, b: &Brep, q: Point3) -> EdgeId {
 /// to `to` at (10, 20, 30): the volume it removes.
 fn removed(from: f64, to: f64) -> f64 {
     let mut k = Kernel::default();
-    k.fixes.fillet_gn_section_generator = true;
     let mut b = create_box(&mut k, Point3::ZERO, 10.0, 20.0, 30.0).unwrap();
     let e = pick(&k, &b, Point3::new(10.0, 10.0, 30.0));
     let ivl = edge::interval(&b, e).unwrap();
@@ -94,11 +95,13 @@ fn removed(from: f64, to: f64) -> f64 {
     6000.0 - brep_volume(&k, &mut b, 1e-7, &attrs).unwrap()
 }
 
-/// The issue's law, both ways round: one body, 22.596105 off (the union of its balls).
+/// The issue's law, both ways round: one body, 22.594877 off, the union of its balls (its
+/// slices' envelope integrated numerically: 22.5948765). With the arcs of its sections
+/// approximated it took 22.596105, 1.2e-3 too much; its exact circles (WR-708) take 22.594863.
 #[test]
 fn a_round_from_4_to_0_removes_what_0_to_4_removes() {
     let (down, up) = (removed(4.0, 0.0), removed(0.0, 4.0));
-    assert!((down - 22.596105).abs() <= 1e-4, "{down}");
+    assert!((down - 22.594877).abs() <= 1e-4, "{down}");
     assert!((down - up).abs() <= 1e-4, "{down} vs {up}");
 }
 

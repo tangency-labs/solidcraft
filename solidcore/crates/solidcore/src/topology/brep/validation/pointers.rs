@@ -418,6 +418,9 @@ pub fn validate_pointers(
     }
     let faces = p1::faces(b, None)?;
     for &f in &faces {
+        // (not upstream) cooperative cancellation once per face: checking a face's trim
+        // evaluates its curves and surface (solidcore#3247)
+        k.check_cancelled("topology::brep::validation::pointers::validate_pointers")?;
         let tol = b.face(f)?.tolerance;
         let checked =
             crate::topology::trimming_tools::check_face(k, b, f, tol, r.array.as_deref_mut(), walk);
@@ -1193,7 +1196,10 @@ fn edge_geometry(
     // The owner naming scheme belongs to the caller; the type and edge-owner
     // identity resolved by that caller are kept by the curve itself.
     if curve.owner() != Some(keys(EntityRef::Edge(e))) {
-        return Err(crate::SolidError::sm_err(super::OP));
+        return Err(crate::SolidError::topology_failed(
+            super::OP,
+            "the edge's curve is not owned by the edge",
+        ));
     }
     let ivl = b.edge(e)?.interval;
     let p0 = curve.evaluate_point(k, ivl.min())?;
@@ -1206,7 +1212,10 @@ fn edge_geometry(
                 let zone = crate::geom::tol::zone_tol3d(k, dist * 2.0);
                 crate::topology::vertex::set_tolerance(b, v, zone, true, true)?;
             } else {
-                return Err(crate::SolidError::sm_err(super::OP));
+                return Err(crate::SolidError::topology_failed(
+                    super::OP,
+                    "the edge's end is farther from its vertex than their tolerances",
+                ));
             }
         }
     }

@@ -35,7 +35,7 @@
 //!   without loop use, an edge vertex use without edge use, a sector without end edge
 //!   use, a vertex use without vertex, ...) the port returns
 //!   [`SolidError::InvalidInput`]. `NER` / `SER` returns are
-//!   [`SolidError::Upstream`] with the upstream code. `SM_ASSERT`s, `SM_DBG_WARN`s and
+//!   a [`TopologyFailure`](crate::error::topology::TopologyFailure) with the upstream code. `SM_ASSERT`s, `SM_DBG_WARN`s and
 //!   the `SM_DEBUG_CODE` blocks are compiled out of the reference build and are not
 //!   ported (so `SmTol::IsZeroSpeed` of the sector speeds and `SmEdge::IsSeam` are
 //!   never called).
@@ -75,7 +75,8 @@
 //!   `IsSectorGapFreeAndOriented`, `AssertValid`, `Draw*` and the `Dump`s are not
 //!   part of this unit.
 
-use crate::error::{EntityRef, Result, SolidError, SM_ERR_NULL_POINTER};
+use crate::error::topology::TopologyFailure;
+use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::attribute::AttributeStore;
 #[cfg(test)]
 use crate::geom::attribute::ObjectKey;
@@ -139,22 +140,24 @@ fn null(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
 }
 
-/// `NER(ptr)` on a null pointer: `SM_ERR_NULL_POINTER`.
-fn ner(entity: VertexuseId) -> SolidError {
-    SolidError::Upstream {
-        operation: OP,
-        code: SM_ERR_NULL_POINTER,
-        entity: Some(EntityRef::Vertexuse(entity)),
-    }
+/// `NER(ptr)` on a null pointer (`SM_ERR_NULL_POINTER`): `what`, which the vertex use
+/// `entity` needs, is missing.
+fn ner(entity: VertexuseId, what: &'static str) -> SolidError {
+    SolidError::topology_at(
+        OP,
+        TopologyFailure::Missing(what),
+        EntityRef::Vertexuse(entity),
+    )
 }
 
-/// `SER(SM_ERR)` / `return SM_ERR`.
-fn sm_err(entity: VertexuseId) -> SolidError {
-    SolidError::Upstream {
-        operation: OP,
-        code: crate::error::SM_ERR,
-        entity: Some(EntityRef::Vertexuse(entity)),
-    }
+/// `SER(SM_ERR)` / `return SM_ERR`: the vertex use `entity`'s routine could not continue,
+/// as the phrase says.
+fn failed(entity: VertexuseId, what: &'static str) -> SolidError {
+    SolidError::topology_at(
+        OP,
+        TopologyFailure::Failed(what),
+        EntityRef::Vertexuse(entity),
+    )
 }
 
 /// Ignores an ordinary upstream status; unported dependencies, cancellation and
@@ -246,9 +249,9 @@ pub fn compute_t_point(b: &Brep, vu: VertexuseId) -> Result<f64> {
     // for edgeuse type vertexuses
     if !is_edge_vertexuse(b, vu)? {
         // no TPoint to compute
-        return Err(sm_err(vu));
+        return Err(failed(vu, "only an edge vertex use has a curve parameter"));
     }
-    let eu = edgeuse(b, vu)?.ok_or_else(|| ner(vu))?;
+    let eu = edgeuse(b, vu)?.ok_or_else(|| ner(vu, "the vertex use's edge use"))?;
     let e = eu1::edge(b, eu)?.ok_or_else(|| null("ComputeTPoint: edge use without edge"))?;
     let ivl = b.edge(e)?.interval;
 
@@ -989,18 +992,24 @@ pub fn compute_uv_point(
         let r = b.vertex(v)?;
         (r.point, r.tolerance)
     };
-    let fu = faceuse(b, vu)?.ok_or_else(|| ner(vu))?;
-    let f = b.faceuse(fu)?.face.ok_or_else(|| ner(vu))?;
+    let fu = faceuse(b, vu)?.ok_or_else(|| ner(vu, "the vertex use's face use"))?;
+    let f = b
+        .faceuse(fu)?
+        .face
+        .ok_or_else(|| ner(vu, "the face use's face"))?;
     if b.face(f)?.surface.is_none() {
-        return Err(ner(vu));
+        return Err(ner(vu, "the face's surface"));
     }
     let uv_domain = face_uv_domain(b, f)?;
     let nat_domain = face_surface(b, f)?.natural_uv_domain_with_nurb(k)?;
 
     let sol = if is_edge_vertexuse(b, vu)? {
         // Edgeuse locals - thisEdgeuse->StartPt == CWEdgeuse->EndPt (with tolerances)
-        let eu = edgeuse(b, vu)?.ok_or_else(|| ner(vu))?;
-        let prev = b.edgeuse(eu)?.cw.ok_or_else(|| ner(vu))?;
+        let eu = edgeuse(b, vu)?.ok_or_else(|| ner(vu, "the vertex use's edge use"))?;
+        let prev = b
+            .edgeuse(eu)?
+            .cw
+            .ok_or_else(|| ner(vu, "the edge use's clockwise neighbour"))?;
 
         // try quick solution based on this (and prev) Vertexuse->Edgeuse->UVTrimCurve data
         // get this SurfaceUV for ThisEdgeuse start point from UVTrimCurve
@@ -1161,7 +1170,10 @@ pub fn compute_uv_point(
                 ok_to_make,
             )?;
             let Some(&first) = sols.first() else {
-                return Err(sm_err(vu));
+                return Err(failed(
+                    vu,
+                    "the vertex does not drop onto the face's surface",
+                ));
             };
 
             // Use UVTrimCurves to choose the right drop point [B678]
@@ -1212,10 +1224,12 @@ pub fn compute_uv_point(
             )?;
         }
         // return only solution when just 1, or any solution when many (on a pole or seam)
-        sols.first().ok_or_else(|| sm_err(vu))?.uv
+        sols.first()
+            .ok_or_else(|| failed(vu, "the vertex does not drop onto the face's surface"))?
+            .uv
     } else {
         // default case: must be a ShellVertexuse
-        return Err(sm_err(vu));
+        return Err(failed(vu, "a shell vertex use has no face parameters"));
     };
 
     Ok(sol)
@@ -1717,6 +1731,7 @@ pub fn notify(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::SM_ERR_NULL_POINTER;
 
     #[test]
     fn cancellation_status_ignored_preserves_control_errors() {
@@ -1889,13 +1904,8 @@ mod tests {
         );
         // shell and wire vertex uses have no face: NER
         for x in [vu[0], vu[2]] {
-            assert!(matches!(
-                compute_uv_point(&k, &mut b, x, true),
-                Err(SolidError::Upstream {
-                    code: SM_ERR_NULL_POINTER,
-                    ..
-                })
-            ));
+            assert!(compute_uv_point(&k, &mut b, x, true)
+                .is_err_and(|e| e.upstream_status() == Some(SM_ERR_NULL_POINTER)));
             assert!(!compute_uv_sector(&k, &mut b, x, true).unwrap().success);
             assert!(!is_on_pole(&k, &mut b, x).unwrap());
             assert!(!is_sector_missing_seam(&k, &mut b, x, true).unwrap().missing);

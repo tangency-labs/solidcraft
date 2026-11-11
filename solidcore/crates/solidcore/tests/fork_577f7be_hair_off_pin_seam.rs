@@ -4,10 +4,10 @@
 //! radius through a 20 x 20 x 5 plate. Both cylinders are extruded from a circle whose
 //! seam is at 0.6131 rad (SolidCraft's cylinders), so the two seams lie a micrometre
 //! apart. Their walls are one surface to the tolerance: the plate and the pin share no
-//! material. Upstream (and the port's default, as the pinned C++ 1.0.1 does) fails with
-//! `SM_ERR` (1001), because a breakpoint on one seam solves to both ends of the other
-//! wall's period and is dropped as unclassified. With `seam_point_solutions_are_one`
-//! the intersection is empty, as the fork's test requires (`SMLIB_ERR_EMPTY` there).
+//! material. Upstream (the pinned C++ 1.0.1) fails with `SM_ERR` (1001), because a
+//! breakpoint on one seam solves to both ends of the other wall's period and is dropped
+//! as unclassified. The intersection is empty, as the fork's test requires
+//! (`SMLIB_ERR_EMPTY` there).
 //!
 //! The fork's test also intersects a pin 0.01 off, expecting the crescent; that case needs
 //! another fork change (the pinned C++ and the port fail it alike), so it is not here.
@@ -25,7 +25,7 @@ use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_primitives::create_box;
 use solidcore::sweep::api_brep::create_linear_sweep;
-use solidcore::{Brep, Kernel, SolidError};
+use solidcore::{Brep, Kernel};
 
 /// The seam angle of SolidCraft's cylinders.
 const SEAM: f64 = 0.6131;
@@ -42,10 +42,9 @@ fn pin(k: &mut Kernel, x: f64) -> Brep {
     create_linear_sweep(k, &[Some(&circle)], Vec3::new(0.0, 0.0, 1.0), 9.0, true).unwrap()
 }
 
-/// The plate with its hole, intersected with the pin 1e-6 off, with WR-537's `fixed`.
-fn shared(fixed: bool) -> solidcore::Result<Brep> {
+/// The plate with its hole, intersected with the pin 1e-6 off, (WR-537).
+fn shared() -> solidcore::Result<Brep> {
     let mut k = Kernel::default();
-    k.fixes.seam_point_solutions_are_one = fixed;
     let plate = create_box(&mut k, Point3::new(-10.0, -10.0, 0.0), 20.0, 20.0, 5.0).unwrap();
     let drill = pin(&mut k, 0.0);
     let holed = boolean_difference(&mut k, plate, drill).unwrap();
@@ -54,18 +53,7 @@ fn shared(fixed: bool) -> solidcore::Result<Brep> {
 }
 
 #[test]
-fn fork_577f7be_hair_off_pin_shares_nothing_with_the_fix() {
-    let b = shared(true).unwrap();
+fn fork_577f7be_hair_off_pin_shares_nothing() {
+    let b = shared().unwrap();
     assert!(b.face_list().is_empty(), "{} faces", b.face_list().len());
-}
-
-/// Upstream (pinned C++ 1.0.1 alike): `SM_ERR` from the curve classification.
-#[test]
-fn fork_577f7be_hair_off_pin_fails_by_default() {
-    let r = shared(false);
-    assert!(
-        matches!(r, Err(SolidError::Upstream { code: 1001, .. })),
-        "{:?}",
-        r.map(|b| b.face_list().len())
-    );
 }

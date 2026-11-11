@@ -552,8 +552,8 @@ bound (`c7_tiny_loop_parab_1e-7`). Other conics take the field path.
 segment of the cylinder's circle, s / (1 − s) is a ratio of affine functions of the point, so a
 rational curve of degree p on the cylinder has a rational parameter s(t) of degree p and an axial
 height that is a polynomial over its weight. `surface_drop_lib/cylinder_section.rs` builds it in the
-curve's own parameter with twice its degree (`cylinder_plane_section_trims_exact`, WR-680, #2109;
-retiring the flag is #2331). On a plane every curve's UV image is the same curve in the plane's frame.
+curve's own parameter with twice its degree (WR-680); a curve it does not apply to is traced. On a
+plane every curve's UV image is the same curve in the plane's frame.
 Other exact pcurves (sphere, cone, torus sections) are open work.
 
 ## 6. Certification and tolerances
@@ -704,7 +704,6 @@ boolean's side.
 | [#393](https://github.com/tangency-labs/solidcore/issues/393) | curves not split at singular crossing points; fix behind a flag |
 | [#395](https://github.com/tangency-labs/solidcore/issues/395) | tangent and high-order contact curves missed or collapsed; fix behind a flag |
 | [#1552](https://github.com/tangency-labs/solidcore/issues/1552) | how `solidcore-ssi` is wired into the kernel |
-| [#2331](https://github.com/tangency-labs/solidcore/issues/2331) | exact UV trims of plane sections on a cylinder by default |
 | [#2479](https://github.com/tangency-labs/solidcore/issues/2479) | pcurves end one ulp past their face's domain |
 | [#2537](https://github.com/tangency-labs/solidcore/issues/2537) | a tilted cylinder whose cap is bisected by a box face is refused (#36) |
 | [#2538](https://github.com/tangency-labs/solidcore/issues/2538) | a notch cylinder along a slanted box edge fails (1001, #36) |

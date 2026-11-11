@@ -1,8 +1,94 @@
 //! Headless test fixtures. Callers retain frame counts, input and command parameters.
 use crate::{Services, SolveApp, scenario::Harness};
-use egui::{Event, FullOutput, RawInput, Shape, Ui};
 use serde_json::{Value, json};
 use solidcraft_engine::{Sel, Session};
+
+// The generic frame and event helpers are the kit's; SolidCraft's tests use them under these names.
+pub(crate) use crate::ui_kit::test_support::{each_shape, key, pointer, raw_frame as frame, text_shapes};
+
+/// What SolidCraft installs into the shared crates before its first frame: its catalogs, its
+/// icons, its tab table, its navigation slots and its built-in themes. A test that reads theme files or draws icons without an app or a
+/// test context ([`crate::fonts::test_context`]) calls it first.
+/// The UI kit crate's sources (`crates/ui-kit/src`), which SolidCraft's source guards read beside
+/// its own.
+pub(crate) fn kit_src() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../ui-kit/src")
+}
+
+/// The kit's components and their tests, as paths in [`kit_src`]. The source guards hold them to
+/// the rules of SolidCraft's own UI code (they are drawn from the kit's controls), not to the
+/// kit's.
+pub(crate) const KIT_COMPONENTS: &[&str] = &[
+    "app_bar.rs",
+    "app_bar_tests.rs",
+    "blur.rs",
+    "blur.wgsl",
+    "blur_native.rs",
+    "frame.rs",
+    "history_bar.rs",
+    "history_bar_tests.rs",
+    "nav_bar.rs",
+    "nav_bar_layout.rs",
+    "nav_bar_tests.rs",
+    "navigation_bar.rs",
+    "prefs_window.rs",
+    "prefs_window_tests.rs",
+    "ribbon.rs",
+    "ribbon_tests.rs",
+    "start_page.rs",
+    "theme_files.rs",
+    "theme_options.rs",
+    "view_compass.rs",
+    "window_chrome",
+    "window_chrome.rs",
+];
+
+/// Whether `path` (under [`kit_src`]) is kit code proper rather than one of its components.
+pub(crate) fn in_kit(path: &std::path::Path) -> bool {
+    path.strip_prefix(kit_src()).is_ok_and(|relative| !KIT_COMPONENTS.iter().any(|component| relative.starts_with(component)))
+}
+
+/// Every file of the kit crate's sources with the name the source guards give it: `ui_kit/<path>`
+/// for kit code, the bare path for a component (the names they had in `ui-egui`).
+pub(crate) fn kit_files() -> Vec<(std::path::PathBuf, String)> {
+    fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() { walk(&path, out) } else { out.push(path) }
+        }
+    }
+    let root = kit_src();
+    let mut files = Vec::new();
+    walk(&root, &mut files);
+    files.sort();
+    files
+        .into_iter()
+        .map(|path| {
+            let relative = path.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/");
+            let relative = if relative == "lib.rs" { "mod.rs".to_string() } else { relative };
+            let name = if in_kit(&path) { format!("ui_kit/{relative}") } else { relative };
+            (path, name)
+        })
+        .collect()
+}
+
+/// The file a source guard names (`ui_kit/<path>`, a component, or a SolidCraft file).
+pub(crate) fn guard_file(name: &str) -> std::path::PathBuf {
+    if let Some(kit) = name.strip_prefix("ui_kit/") {
+        return kit_src().join(if kit == "mod.rs" { "lib.rs" } else { kit });
+    }
+    if KIT_COMPONENTS.iter().any(|component| name.starts_with(component)) {
+        return kit_src().join(name);
+    }
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(name)
+}
+
+pub(crate) fn host_data() {
+    crate::i18n::install();
+    solidcraft_look::install_tables();
+    crate::workspace::install_tabs();
+    crate::navigation_slots::install();
+}
 
 pub(crate) fn app_with_script(script: Value) -> SolveApp {
     let mut session = Session::default();
@@ -67,33 +153,14 @@ pub(crate) fn selected_text(text: &str, at: [i32; 2]) -> (Harness, String, Strin
     (h, link, curve)
 }
 
-/// A frame without a renderer. Preserve all caller-supplied timing and viewport options.
-pub(crate) fn frame(ctx: &egui::Context, input: RawInput, add: impl FnMut(&mut Ui)) -> FullOutput {
-    let mut output = ctx.run_ui(input, add);
-    output.textures_delta.clear();
-    output
+/// SolidCraft's two-colour built-in themes (1-bit and 1-bit Dark): pure black and white, so a few
+/// looks other themes tell apart by colour are told apart by text or shape instead.
+pub(crate) fn is_two_colour(id: &str) -> bool {
+    matches!(id, "1-bit" | "1-bit-dark")
 }
 
-pub(crate) fn pointer(pos: egui::Pos2, pressed: bool) -> Vec<Event> {
-    vec![Event::PointerMoved(pos), Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() }]
-}
-
-pub(crate) fn key(key: egui::Key) -> Vec<Event> {
-    vec![Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() }]
-}
-
-/// Top-level text shapes only, in their original paint order.
-pub(crate) fn text_shapes(output: &FullOutput) -> impl Iterator<Item = &egui::epaint::TextShape> {
-    output.shapes.iter().filter_map(|clipped| match &clipped.shape {
-        Shape::Text(text) => Some(text),
-        _ => None,
-    })
-}
-
-/// Every leaf of a shape list, in paint order.
-pub(crate) fn each_shape(shape: &Shape, visit: &mut impl FnMut(&Shape)) {
-    match shape {
-        Shape::Vec(shapes) => shapes.iter().for_each(|shape| each_shape(shape, visit)),
-        shape => visit(shape),
-    }
+/// A theme file with per-tab tables for SolidCraft's tabs (`tests/fixtures/theme-tabs.json`).
+pub(crate) fn tab_fixture(base: &str) -> crate::theme_files::ThemeFile {
+    let catalog: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/theme-tabs.json")).unwrap();
+    crate::theme_files::from_value(&catalog[base]).unwrap()
 }

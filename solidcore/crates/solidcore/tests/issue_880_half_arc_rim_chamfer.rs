@@ -14,9 +14,10 @@
 //! linear cross section and bevel corners, at the default fixes.
 //!
 //! One half edge alone (the issue's pick: offsets from setbacks 1 on the cut face and 2
-//! down the wall, as the fork's `sides_offsets` derives them) is refused with 1001. The
-//! whole chain, both halves in one session, builds a closed solid (4 faces to 6), so a
-//! caller chamfers the whole tangent chain.
+//! down the wall, as the fork's `sides_offsets` derives them) builds a closed solid with a
+//! clean check (4 faces to 7), since the generic blend's sections and checks are the
+//! default (WR-685 addendum 2026-11-06); main's default kernel refused it with 1001. The
+//! whole chain, both halves in one session, builds a closed solid (4 faces to 6).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -36,6 +37,7 @@ use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::p1;
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::brep::p5::{stitch_and_orient, transform, StitchAndOrientOptions};
+use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::{edge, EdgeId, EdgeuseId};
 use solidcore::{Brep, Kernel};
 
@@ -154,4 +156,21 @@ fn issue_880_whole_rim_chamfers() {
             "offsets {offsets:?}: {outcome:?}"
         );
     }
+}
+
+/// The issue's own pick: one rim half chamfered by the offsets of setbacks 1 on the cut face
+/// and 2 down the wall builds a closed solid (4 faces to 7) that SMLib's check passes.
+#[test]
+fn issue_880_one_half_chamfers() {
+    let mut k = Kernel::default();
+    let mut b = cut_cylinder(&mut k);
+    let before = p1::faces(&b, None).unwrap().len();
+    let e = rims(&k, &b)[0];
+    let u = edge::blend_edgeuse(&k, &mut b, e).unwrap().unwrap();
+    chamfer(&mut k, &mut b, &[(e, u)], (1.0, 2.0)).unwrap();
+    assert_eq!(finish(&mut k, &mut b, before), (4, 7, true));
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
 }

@@ -366,7 +366,9 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
         Ok(v) => output(v),
         Err(e) => Output::unported(&e).unwrap_or_else(|| {
             let status = match e {
-                solidcore::SolidError::Upstream { code, .. } => f64::from(code),
+                ref e if solidcore::error::upstream_status(e).is_some() => {
+                    f64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+                }
                 _ => 1007.0,
             };
             output(vec![status])

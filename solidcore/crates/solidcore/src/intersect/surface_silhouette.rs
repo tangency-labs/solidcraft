@@ -195,7 +195,12 @@ fn surface_drop_vector(k: &Kernel, surface: &Surface, uv: Point2, vector: Vec3) 
     drop_vectors_at(k, surface, uv, Side::Left, Side::Left, &[vector])?
         .first()
         .copied()
-        .ok_or(SolidError::sm_err(OP_DROP))
+        .ok_or_else(|| {
+            SolidError::intersect_failed(
+                OP_DROP,
+                "dropping the vector onto the surface gave no uv vector",
+            )
+        })
 }
 
 /// `SM_PI - a` for angles past a right angle: parallel and anti-parallel are alike.
@@ -391,7 +396,10 @@ impl<'s> SurfaceSilhouette<'s> {
         if norm.length_squared() < EFF_ZERO_SQ {
             norm = evaluate_normal(k, surface, uv)?;
             if norm.length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::sm_err(OP_CPV));
+                return Err(SolidError::intersect_failed(
+                    OP_CPV,
+                    "the surface has no normal at the point",
+                ));
             }
             if pnt.surface[1][0].length_squared() < EFF_ZERO_SQ {
                 pnt.surface[1][0] = pnt.surface[0][1].cross(norm);
@@ -414,7 +422,10 @@ impl<'s> SurfaceSilhouette<'s> {
         }
 
         if r.length_squared() < EFF_ZERO {
-            return Err(SolidError::sm_err(OP_CPV)); // point on surface must be at the eye point
+            return Err(SolidError::intersect_failed(
+                OP_CPV,
+                "the surface point is at the eye point",
+            ));
         }
 
         let du = pnt.surface[1][0];
@@ -659,7 +670,10 @@ impl<'s> SurfaceSilhouette<'s> {
                     // (operator/, not the guarded operator/=)
                     pnt.curve_3d[1] = (tan_vec / tan_len).unitize_or_z();
                 } else {
-                    return Err(SolidError::sm_err(OP_CPV));
+                    return Err(SolidError::intersect_failed(
+                        OP_CPV,
+                        "the silhouette's tangent is degenerate",
+                    ));
                 }
             }
         }
@@ -710,7 +724,10 @@ impl<'s> SurfaceSilhouette<'s> {
         if normal.length_squared() < EFF_ZERO_SQ {
             normal = evaluate_normal(k, surface, s_uv)?;
             if normal.length_squared() < EFF_ZERO_SQ {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::intersect_failed(
+                    OP,
+                    "the surface has no normal at the point",
+                ));
             }
             if eval[1][0].length_squared() < EFF_ZERO_SQ {
                 eval[1][0] = eval[0][1].cross(normal);
@@ -1145,7 +1162,10 @@ impl<'a> FindSilSingEfo<'a> {
                 r = pnt - self.eye;
             }
             if r.length_squared() < EFF_ZERO {
-                return Err(SolidError::sm_err(OP_EFO)); // point on surface must be at the eye point
+                return Err(SolidError::intersect_failed(
+                    OP_EFO,
+                    "the surface point is at the eye point",
+                ));
             }
             let mut dot1 = r.dot(g1.principle_curvature_vector1);
             if r.dot(g1.principle_curvature_vector2).abs() < dot1.abs() {
@@ -1159,7 +1179,10 @@ impl<'a> FindSilSingEfo<'a> {
                 r = pnt - self.eye;
             }
             if r.length_squared() < EFF_ZERO {
-                return Err(SolidError::sm_err(OP_EFO)); // point on surface must be at the eye point
+                return Err(SolidError::intersect_failed(
+                    OP_EFO,
+                    "the surface point is at the eye point",
+                ));
             }
             let mut dot2 = r.dot(g2.principle_curvature_vector1);
             if r.dot(g2.principle_curvature_vector2).abs() < dot2.abs() {

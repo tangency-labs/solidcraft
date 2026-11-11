@@ -1880,7 +1880,7 @@ pub struct CollapsedOffset {
     pub partial: bool,
 }
 
-/// Not the fork's (#2401; with `fixes.fillet_gn_section_generator`): for a constant ball of
+/// Not the fork's (#2401): for a constant ball of
 /// `radius` (`None`: the solver's own) whose offset of one of its faces collapses (the face
 /// a cylinder or sphere as wide as the ball, the ball inside it: its offset is the axis or
 /// the centre, [`QuadricKind::Line`] or [`QuadricKind::Point`]), the radius of that face
@@ -2527,10 +2527,13 @@ fn keep_definition(
 
 /// `round` kept on `net` where it is proved ([`ExactRound::recertify`]), returning whether it
 /// was. The class is read within `tol`, the body's tolerance, and the certificate to rounding.
-/// Supports only that close to the class (a cylinder's axis 1e-13 off square to a plane, as
-/// read from a record) make a net that is the round but not provably on the class's surface:
-/// no bound of 0, so it keeps no definition. A net further off the
-/// class than `tol` ([`ExactRound::miss`]) is built wrongly, and stays an error.
+/// A net the certificate cannot prove on its class's surface (`check_exact_net`'s refusal),
+/// but that lies within `tol` of it ([`ExactRound::miss`]), is the round all the same: it
+/// keeps no definition and is built. A canal round whose computed spine is not exactly on
+/// both supports' offsets (a plane and a cylinder a few degrees off square,
+/// tangency-labs/solidcraft#14000) is one.
+/// A net further off the class than `tol` is built wrongly, and stays an error, as does the
+/// circle class's own refusal (its net certified on its own torus, #3066).
 ///
 /// # Errors
 ///
@@ -2719,7 +2722,8 @@ fn exact_fillet_geom_of_class(
 mod tests {
     use super::*;
 
-    /// A box's edge rounded 2: the round's net, without its definition, and the definition.
+    /// A cylinder R 10, 20 high, its top rim rounded 2 (a round of the circle class): the
+    /// round's net, without its definition, and the definition.
     fn kept_round() -> (Kernel, Surface, ExactRound) {
         use crate::blend::fillet_executive::session::FilletSession;
         use crate::kernel::UpstreamFixes;
@@ -2729,24 +2733,51 @@ mod tests {
             fixes: UpstreamFixes::all(),
             ..Kernel::default()
         };
-        let mut b = crate::primitive::api_primitives::create_box(
+        let mut b = crate::primitive::api_primitives::create_cylinder(
             &mut k,
             Point3::new(0.0, 0.0, 0.0),
-            30.0,
-            20.0,
             10.0,
+            20.0,
         )
         .unwrap();
-        let edge = b.edge_list()[0];
+        // the top rim: the edge through (10, 0, 20)
+        let rim = *b
+            .edge_list()
+            .iter()
+            .min_by(|&&x, &&y| {
+                let d = |e| {
+                    crate::query::api_queries::edge_closest_point(
+                        &k,
+                        &b,
+                        e,
+                        Point3::new(10.0, 0.0, 20.0),
+                    )
+                    .unwrap()
+                    .closest
+                    .distance
+                        + crate::query::api_queries::edge_closest_point(
+                            &k,
+                            &b,
+                            e,
+                            Point3::new(-10.0, 0.0, 20.0),
+                        )
+                        .unwrap()
+                        .closest
+                        .distance
+                };
+                d(x).total_cmp(&d(y))
+            })
+            .unwrap();
         {
             let mut s = FilletSession::new(&mut k, &mut b).unwrap();
-            s.prepare_constant_radius_edges(&mut k, &[edge], 2.0, 1, 1, 1.0)
+            s.prepare_constant_radius_edges(&mut k, &[rim], 2.0, 1, 1, 1.0)
                 .unwrap();
             s.do_fillet(&mut k).unwrap();
         }
         for &f in b.face_list() {
             let s = face::surface(&b, f).unwrap().unwrap();
             if let Some(BlendRef::Exact { round, .. }) = s.procedural_blend() {
+                assert_eq!(round.class, ExactClass::Circle);
                 let round = round.clone();
                 let mut net = s.clone();
                 net.set_exact_round(None);
@@ -2769,23 +2800,21 @@ mod tests {
         net
     }
 
-    /// The class is read within 2e-5 here. A net on it keeps its definition; one off it by
-    /// less keeps none (the round of supports that close to the class); one further off is
-    /// built wrongly, and stays an error.
+    /// A circle-class round's definition is the torus its net is on, a stated distance from
+    /// the supports' class torus within the tolerance the class was read at (2e-5 here): the
+    /// net as built is at 0, the net moved by (1, 1, 1) 1e-7 is at sqrt 3 1e-7, and the net
+    /// moved by (1, 1, 1) 1e-3 is refused.
     #[test]
-    fn a_net_off_its_class_keeps_no_definition_within_the_tolerance_only() {
-        let tol = 2e-5;
+    fn a_circle_rounds_net_is_certified_on_its_own_torus_near_the_class() {
         let (k, net, round) = kept_round();
-        let mut on = net.clone();
-        assert!(keep_round_if_proved(&k, &mut on, round.clone(), tol).unwrap());
-        assert!(on.procedural_blend().is_some());
-
-        let mut near = moved(&k, &net, 1e-7);
-        assert!(!keep_round_if_proved(&k, &mut near, round.clone(), tol).unwrap());
-        assert!(near.procedural_blend().is_none());
-
-        let mut far = moved(&k, &net, 1e-3);
-        let refused = keep_round_if_proved(&k, &mut far, round, tol);
+        assert_eq!(round.recertify(&k, &net).unwrap(), 0.0);
+        assert!(round.supports_distance(&k, &net).unwrap() < 1e-12);
+        let near = moved(&k, &net, 1e-7);
+        assert_eq!(round.recertify(&k, &near).unwrap(), 0.0);
+        let d = round.supports_distance(&k, &near).unwrap();
+        assert!((d - 3.0_f64.sqrt() * 1e-7).abs() < 1e-12, "{d}");
+        let far = moved(&k, &net, 1e-3);
+        let refused = round.recertify(&k, &far);
         assert!(
             matches!(refused, Err(SolidError::InvalidInput { .. })),
             "{refused:?}"

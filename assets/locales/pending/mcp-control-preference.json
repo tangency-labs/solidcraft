@@ -1,0 +1,74 @@
+{
+  "en": {
+    "ai.prefs.control_port": "Port",
+    "ai.prefs.control_port_note": "The port AI agents connect to on this computer (127.0.0.1). 27878 is the default: when it is in use, the next free port is taken. Any other port is used exactly. Point your MCP client at the same port, for example solidcraft-cli mcp --connect 127.0.0.1:7878.",
+    "ai.prefs.control_listening": "Listening on 127.0.0.1:{port}",
+    "ai.prefs.control_not_listening": "Not listening",
+    "ai.prefs.control_port_taken": "Port {port} is in use by another program (or another SolidCraft window). Choose another port.",
+    "ai.prefs.control_failed": "The control channel could not start: {error}",
+    "ai.prefs.control_from_launch": "Started with --control on port {port} for this run. Changes here take effect the next time SolidCraft starts without --control."
+  },
+  "de": {
+    "ai.prefs.control_port": "Port",
+    "ai.prefs.control_port_note": "Der Port, über den sich KI-Agenten auf diesem Computer verbinden (127.0.0.1). Standard ist 27878: Ist er belegt, wird der nächste freie Port genommen. Jeder andere Port wird genau so verwendet. Richte deinen MCP-Client auf denselben Port, zum Beispiel solidcraft-cli mcp --connect 127.0.0.1:7878.",
+    "ai.prefs.control_listening": "Wartet auf 127.0.0.1:{port}",
+    "ai.prefs.control_not_listening": "Nicht aktiv",
+    "ai.prefs.control_port_taken": "Port {port} wird von einem anderen Programm (oder einem anderen SolidCraft-Fenster) verwendet. Wähle einen anderen Port.",
+    "ai.prefs.control_failed": "Der Steuerkanal konnte nicht starten: {error}",
+    "ai.prefs.control_from_launch": "Für diese Sitzung mit --control auf Port {port} gestartet. Änderungen hier gelten beim nächsten Start von SolidCraft ohne --control."
+  },
+  "ja": {
+    "ai.prefs.control_port": "ポート",
+    "ai.prefs.control_port_note": "このコンピューター上で AI エージェントが接続するポート (127.0.0.1)。既定は 27878 で、使用中の場合は次の空いているポートを使います。それ以外のポートはそのまま使います。MCP クライアントも同じポートに向けてください (例: solidcraft-cli mcp --connect 127.0.0.1:7878)。",
+    "ai.prefs.control_listening": "127.0.0.1:{port} で待機中",
+    "ai.prefs.control_not_listening": "待機していません",
+    "ai.prefs.control_port_taken": "ポート {port} は別のプログラム (または別の SolidCraft ウィンドウ) が使用しています。別のポートを選んでください。",
+    "ai.prefs.control_failed": "コントロールチャネルを開始できませんでした: {error}",
+    "ai.prefs.control_from_launch": "この実行は --control でポート {port} を使って開始されました。ここでの変更は、次に --control なしで SolidCraft を起動したときに反映されます。"
+  },
+  "zh": {
+    "ai.prefs.control_port": "端口",
+    "ai.prefs.control_port_note": "AI 代理在本机上连接的端口 (127.0.0.1)。默认为 27878：若被占用，则使用下一个空闲端口。其他端口按原样使用。请让 MCP 客户端指向同一端口，例如 solidcraft-cli mcp --connect 127.0.0.1:7878。",
+    "ai.prefs.control_listening": "正在监听 127.0.0.1:{port}",
+    "ai.prefs.control_not_listening": "未在监听",
+    "ai.prefs.control_port_taken": "端口 {port} 已被其他程序（或另一个 SolidCraft 窗口）占用。请选择其他端口。",
+    "ai.prefs.control_failed": "控制通道无法启动：{error}",
+    "ai.prefs.control_from_launch": "本次运行通过 --control 在端口 {port} 上启动。此处的更改将在下次不带 --control 启动 SolidCraft 时生效。"
+  },
+  "ko": {
+    "ai.prefs.control_port": "포트",
+    "ai.prefs.control_port_note": "이 컴퓨터에서 AI 에이전트가 연결하는 포트(127.0.0.1)입니다. 기본값은 27878이며, 사용 중이면 다음 빈 포트를 사용합니다. 다른 포트는 그대로 사용합니다. MCP 클라이언트도 같은 포트를 가리키게 하세요(예: solidcraft-cli mcp --connect 127.0.0.1:7878).",
+    "ai.prefs.control_listening": "127.0.0.1:{port}에서 대기 중",
+    "ai.prefs.control_not_listening": "대기하지 않음",
+    "ai.prefs.control_port_taken": "포트 {port}을(를) 다른 프로그램(또는 다른 SolidCraft 창)이 사용 중입니다. 다른 포트를 선택하세요.",
+    "ai.prefs.control_failed": "제어 채널을 시작할 수 없습니다: {error}",
+    "ai.prefs.control_from_launch": "이번 실행은 --control로 포트 {port}에서 시작되었습니다. 여기서 바꾼 내용은 다음에 --control 없이 SolidCraft를 시작할 때 적용됩니다."
+  },
+  "vi": {
+    "ai.prefs.control_port": "Cổng",
+    "ai.prefs.control_port_note": "Cổng mà các tác tử AI kết nối trên máy tính này (127.0.0.1). Mặc định là 27878: nếu cổng đang được dùng, cổng trống tiếp theo sẽ được dùng. Mọi cổng khác được dùng đúng như vậy. Hãy trỏ ứng dụng MCP của bạn đến cùng cổng, ví dụ solidcraft-cli mcp --connect 127.0.0.1:7878.",
+    "ai.prefs.control_listening": "Đang lắng nghe trên 127.0.0.1:{port}",
+    "ai.prefs.control_not_listening": "Không lắng nghe",
+    "ai.prefs.control_port_taken": "Cổng {port} đang được một chương trình khác (hoặc một cửa sổ SolidCraft khác) sử dụng. Hãy chọn cổng khác.",
+    "ai.prefs.control_failed": "Không thể khởi động kênh điều khiển: {error}",
+    "ai.prefs.control_from_launch": "Lần chạy này được khởi động với --control trên cổng {port}. Các thay đổi ở đây có hiệu lực vào lần tới SolidCraft khởi động mà không có --control."
+  },
+  "ar": {
+    "ai.prefs.control_port": "المنفذ",
+    "ai.prefs.control_port_note": "المنفذ الذي يتصل عبره وكلاء الذكاء الاصطناعي على هذا الحاسوب (127.0.0.1). الافتراضي هو 27878: إذا كان مستخدمًا يُستخدم المنفذ الحر التالي. أي منفذ آخر يُستخدم كما هو. وجّه عميل MCP إلى المنفذ نفسه، مثل solidcraft-cli mcp --connect 127.0.0.1:7878.",
+    "ai.prefs.control_listening": "يستمع على 127.0.0.1:{port}",
+    "ai.prefs.control_not_listening": "لا يستمع",
+    "ai.prefs.control_port_taken": "المنفذ {port} يستخدمه برنامج آخر (أو نافذة SolidCraft أخرى). اختر منفذًا آخر.",
+    "ai.prefs.control_failed": "تعذّر بدء قناة التحكم: {error}",
+    "ai.prefs.control_from_launch": "بدأ هذا التشغيل باستخدام --control على المنفذ {port}. تسري التغييرات هنا عند تشغيل SolidCraft في المرة القادمة دون --control."
+  },
+  "he": {
+    "ai.prefs.control_port": "פורט",
+    "ai.prefs.control_port_note": "הפורט שאליו סוכני AI מתחברים במחשב זה (127.0.0.1). ברירת המחדל היא 27878: אם הוא תפוס, נלקח הפורט הפנוי הבא. כל פורט אחר משמש בדיוק כפי שהוא. כוונו את לקוח ה-MCP לאותו פורט, למשל solidcraft-cli mcp --connect 127.0.0.1:7878.",
+    "ai.prefs.control_listening": "מאזין ב-127.0.0.1:{port}",
+    "ai.prefs.control_not_listening": "לא מאזין",
+    "ai.prefs.control_port_taken": "פורט {port} בשימוש של תוכנה אחרת (או חלון SolidCraft אחר). בחרו פורט אחר.",
+    "ai.prefs.control_failed": "לא ניתן היה להפעיל את ערוץ הבקרה: {error}",
+    "ai.prefs.control_from_launch": "הפעלה זו התחילה עם --control בפורט {port}. שינויים כאן ייכנסו לתוקף בפעם הבאה ש-SolidCraft יופעל ללא --control."
+  }
+}

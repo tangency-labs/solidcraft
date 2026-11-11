@@ -68,6 +68,9 @@ pub fn contains_coincident_topology(
     level: u8,
     keys: &dyn Fn(EntityRef) -> crate::geom::object::ObjectRef,
 ) -> Result<CoincidenceResult> {
+    // (not upstream) cooperative cancellation once per vertex, edge and face of each search
+    // (solidcore#3247)
+    const OP: &str = "topology::brep::validation::coincidence::contains_coincident_topology";
     profile_scope!(k, "validation::coincidence");
     if level > 4 {
         return Err(invalid("invalid assert test level"));
@@ -94,6 +97,7 @@ pub fn contains_coincident_topology(
     {
         profile_scope!(k, "validation::coincidence::vertex_vertex");
         for (i, &v) in vertices.iter().enumerate() {
+            k.check_cancelled(OP)?;
             let point = b.vertex(v)?.point;
             let mut previous = i;
             for j in point_index
@@ -157,6 +161,7 @@ pub fn contains_coincident_topology(
     {
         profile_scope!(k, "validation::coincidence::edge_edge");
         for (i, &e) in edges.iter().enumerate() {
+            k.check_cancelled(OP)?;
             let v1 = required(edge::vertex(b, e)?)?;
             let v2 = required(edge::other_vertex(b, e, Some(v1))?)?;
             let candidates: Vec<_> = endpoint_groups
@@ -214,6 +219,7 @@ pub fn contains_coincident_topology(
     let mut caches = FaceCaches::new();
     let mut face_boxes = Vec::new();
     for &f in &faces {
+        k.check_cancelled(OP)?;
         face_boxes.push(ignored(query_face::calculate_bounding_box(
             k, &mut *b, f, false,
         ))?);
@@ -232,6 +238,7 @@ pub fn contains_coincident_topology(
     {
         profile_scope!(k, "validation::coincidence::face_face");
         for (i, &f) in faces.iter().enumerate() {
+            k.check_cancelled(OP)?;
             let key = outer_keys.get(i).ok_or_else(|| invalid("face candidate"))?;
             let mut found = None;
             for &j in outer_groups
@@ -312,6 +319,7 @@ pub fn contains_coincident_topology(
     {
         profile_scope!(k, "validation::coincidence::vertex_edge");
         for &e in &edges {
+            k.check_cancelled(OP)?;
             let bbox = ignored(crate::query::edge::calculate_bounding_box(
                 k,
                 b,

@@ -89,7 +89,7 @@ pub fn operation(fresh: usize, current: usize, side: i8, latch: &mut Option<(usi
 }
 
 /// The view ray at `at`: from the eye for a perspective view, along the view for a parallel one.
-pub fn view_ray(cam: &solidcraft_engine::render::Camera, at: Vec3) -> Vec3 {
+pub fn view_ray(cam: &solidcraft_viewport::Camera, at: Vec3) -> Vec3 {
     if cam.fov > 0.0 { (at - cam.eye()).normalized().unwrap_or(-cam.back()) } else { -cam.back() }
 }
 
@@ -175,7 +175,7 @@ mod tests {
 
     #[test]
     fn view_ray_of_both_projections() {
-        let mut cam = solidcraft_engine::render::Camera { fov: 0.0, ..Default::default() };
+        let mut cam = solidcraft_viewport::Camera { fov: 0.0, ..Default::default() };
         assert!((view_ray(&cam, Vec3::ZERO) + cam.back()).len() < 1e-12);
         cam.fov = 0.8;
         let at = Vec3::new(10.0, 0.0, 0.0);

@@ -35,6 +35,8 @@
 //!   It must disable point testing on that SAME cache for BOTH endpoint solves.
 //! - Signed B-rep/curve and shape/curve queries test only the start parameter and
 //!   rewrite only start parameters, preserving upstream's `i < 1` behavior.
+//! - A near-zero vertex/edge answer never ends a maximum query: the remaining
+//!   edges and faces can contain a larger answer, regardless of retention tolerance.
 
 use super::p1::TopologyObjects;
 use super::p1::{self, best_answer_so_far, CurveRef};
@@ -44,7 +46,9 @@ use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::Branch;
-use crate::geom::global_solver::{GlobalSolve, SolutionRequested, SolverOperation};
+use crate::geom::global_solver::{
+    GlobalSolve, OperationCategory, SolutionRequested, SolverOperation,
+};
 use crate::geom::object::{Shape, ShapeMember};
 use crate::geom::solution_array::SolutionObject;
 use crate::geom::solution_array::{Solution, SolutionArray, SolutionType, SortKey};
@@ -801,7 +805,8 @@ fn early_point_answer<O: SolutionObject>(
     ts: &TopologySolver<'_, '_, O>,
     options: TopologySolveOptions<'_>,
 ) -> bool {
-    options.requested == SolutionRequested::Single
+    ts.base.category != OperationCategory::Maximize
+        && options.requested == SolutionRequested::Single
         && ts
             .base
             .solutions
@@ -832,7 +837,8 @@ fn rewrite_endpoint_solutions<O: SolutionObject>(
 
 impl<'t, O: SolutionObject + 't> TopologySolver<'t, '_, O> {
     /// Solves a query point against a B-rep's vertex, edge and face trees
-    /// (`BrepPointSolve`), retaining upstream's early single-answer exits.
+    /// (`BrepPointSolve`), retaining early single-answer exits only for
+    /// non-maximizing operations.
     ///
     /// # Errors
     /// Invalid operation or null B-rep, unavailable B-rep cache, or a local solve.

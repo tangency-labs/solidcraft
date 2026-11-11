@@ -773,12 +773,18 @@ impl UnbendVolume {
 
         // check - crProjPoint must be in a valid domain
         if !volume.is_point_in_param_domain(proj_point, true)? {
-            return Err(SolidError::sm_err(OP_GLOBAL));
+            return Err(SolidError::surface_failed(
+                OP_GLOBAL,
+                "the point is outside the volume's parameter domain",
+            ));
         }
 
         // check - crProjPoint must be in OptParamDomain
         if param_domain.is_some_and(|d| !d.contains_point(proj_point, EFF_ZERO)) {
-            return Err(SolidError::sm_err(OP_GLOBAL));
+            return Err(SolidError::surface_failed(
+                OP_GLOBAL,
+                "the point is outside the given parameter domain",
+            ));
         }
 
         // inverted ParamPoint

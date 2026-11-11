@@ -22,8 +22,8 @@
 //! `SweepEdgeHigh` makes a swept face's missing extrusion NURB (a recognised tiny-turn
 //! revolution) before its degenerate test, where upstream's lazy
 //! `GetOrCreateGwNurbPointer` in `EdgeSweepHigher` already made it in place.
-//! Opt-in `translation_sweep_regularize` removes degenerate swept faces and
-//! isolated slit loops after non-merged in-place whole-body translations.
+//! Non-merged in-place whole-body translations remove degenerate swept faces and
+//! isolated slit loops (UB-170).
 //!
 //! Cancellation: the sweep polls the cancel token (#2136, #2372) of the source's kernel per repetition, vertex, edge and face.
 
@@ -68,7 +68,7 @@ fn pass_on(a: &impl SweepAccess, brep: crate::topology::BrepId) -> Result<bool> 
 }
 
 fn required<T>(value: Option<T>) -> Result<T> {
-    value.ok_or_else(|| SolidError::null_pointer(OP))
+    value.ok_or_else(|| SolidError::sweep_missing(OP, "an entity the topology sweep needs"))
 }
 fn v(v: VertexRef) -> E {
     E::Vertex(v.0, v.1)
@@ -83,14 +83,20 @@ fn mapped_vertex(value: Option<E>) -> Result<Option<VertexRef>> {
     match value {
         None => Ok(None),
         Some(E::Vertex(b, i)) => Ok(Some((b, i))),
-        _ => Err(SolidError::sm_err(OP)),
+        _ => Err(SolidError::sweep_failed(
+            OP,
+            "a vertex's swept image is not a vertex",
+        )),
     }
 }
 fn mapped_edge(value: Option<E>) -> Result<Option<EdgeRef>> {
     match value {
         None => Ok(None),
         Some(E::Edge(b, i)) => Ok(Some((b, i))),
-        _ => Err(SolidError::sm_err(OP)),
+        _ => Err(SolidError::sweep_failed(
+            OP,
+            "an edge's swept image is not an edge",
+        )),
     }
 }
 fn endpoints(a: &impl SweepAccess, edge: EdgeRef) -> Result<(VertexRef, VertexRef)> {
@@ -171,21 +177,30 @@ impl SweepTargets {
             if let E::Face(b, i) = image {
                 Ok((b, i))
             } else {
-                Err(SolidError::sm_err(OP))
+                Err(SolidError::sweep_failed(
+                    OP,
+                    "a face's swept image is not a face",
+                ))
             }
         };
         let edge = |image| {
             if let E::Edge(b, i) = image {
                 Ok((b, i))
             } else {
-                Err(SolidError::sm_err(OP))
+                Err(SolidError::sweep_failed(
+                    OP,
+                    "an edge's swept image is not an edge",
+                ))
             }
         };
         let vertex = |image| {
             if let E::Vertex(b, i) = image {
                 Ok((b, i))
             } else {
-                Err(SolidError::sm_err(OP))
+                Err(SolidError::sweep_failed(
+                    OP,
+                    "a vertex's swept image is not a vertex",
+                ))
             }
         };
         update(&mut self.faces_higher, sweep, f, face)?;
@@ -382,7 +397,10 @@ impl TopologySweep {
             new_second = Some(new);
         }
         let (Some(new_first), Some(new_second)) = (new_first, new_second) else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::sweep_failed(
+                OP,
+                "the swept edge's end vertices were not built",
+            ));
         };
         let interval = curve.natural_interval();
         let new = a.make_wire_edge(
@@ -422,7 +440,7 @@ impl TopologySweep {
             let mut existing = None;
             self.sweep_edge_same(a, g, region, (original.0, peu), &mut existing)?;
             if existing.is_some() {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::sweep_failed(OP, "a loop edge was swept again"));
             }
         }
         Ok(())
@@ -448,7 +466,10 @@ impl TopologySweep {
             return Ok(());
         };
         if swept.trim_curves.is_empty() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::sweep_failed(
+                OP,
+                "the swept edge has no trimming curves",
+            ));
         }
         // `EdgeSweepHigher`'s `CreateNaturalUVTrimCurves` made the NURB of a recognised
         // extrusion in place (`GetOrCreateGwNurbPointer`); here it is still lazy
@@ -591,7 +612,7 @@ impl TopologySweep {
         };
         a.brep(region.0)?.region(region.1)?;
         if self.get_to_same(Some(f(original))).is_some() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::sweep_failed(OP, "the face was already swept"));
         }
         let fu = required(face::upward_faceuse(a.brep(original.0)?, original.1)?)?;
         let loops = eu::faceuse_loopuses(a.brep(original.0)?, fu, false, None)?;
@@ -699,7 +720,7 @@ impl TopologySweep {
             }
             let index = required(first)?
                 .checked_add(offset)
-                .ok_or_else(|| SolidError::sm_err(OP))?;
+                .ok_or_else(|| SolidError::sweep_failed(OP, "the loop index overflows"))?;
             let new_lu = required(new_loops.get(index).copied())?;
             offset += 1;
             let old_uses = loopuse::vertexuses(a.brep(original.0)?, old_lu, None)?;
@@ -756,17 +777,26 @@ impl TopologySweep {
             let ds = (point - start).length();
             let dt = (point - end).length();
             if ds < tolerance && dt < tolerance {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::sweep_failed(
+                    OP,
+                    "a face vertex is within tolerance of both ends of the sweep",
+                ));
             }
             if ds < tolerance {
                 if vs.is_some() {
-                    return Err(SolidError::sm_err(OP));
+                    return Err(SolidError::sweep_failed(
+                        OP,
+                        "two face vertices are within tolerance of the sweep's start",
+                    ));
                 }
                 vs = Some((face.0, id));
             }
             if dt < tolerance {
                 if vt.is_some() {
-                    return Err(SolidError::sm_err(OP));
+                    return Err(SolidError::sweep_failed(
+                        OP,
+                        "two face vertices are within tolerance of the sweep's end",
+                    ));
                 }
                 vt = Some((face.0, id));
             }
@@ -962,7 +992,6 @@ impl TopologySweep {
                 && !self.do_merge
                 && original == destination_brep
                 && matches!(g, SweepGeometry::Translation(_))
-                && a.kernel(original)?.fixes.translation_sweep_regularize
             {
                 self.regularize_translation(a, original)?;
             }

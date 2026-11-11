@@ -704,6 +704,7 @@ impl<'d> Reader<'d, '_, '_> {
                 positions: positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
                 triangles: triangles.iter().flatten().copied().collect(),
                 color: look.as_ref().map(Look::rgb),
+                corner_normals: Default::default(),
             });
             self.looks.push(look);
             self.plan.bodies.push(slot);

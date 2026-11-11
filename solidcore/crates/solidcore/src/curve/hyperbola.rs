@@ -319,7 +319,10 @@ impl Hyperbola {
     /// `SM_ERR` for more than 3 derivatives.
     pub fn evaluate_step(&self, step_param: f64, num_derivs: usize) -> Result<Vec<Vec3>> {
         if num_derivs > 3 {
-            return Err(SolidError::sm_err(OP_EVAL_STEP));
+            return Err(SolidError::curve_failed(
+                OP_EVAL_STEP,
+                "more than 3 derivatives were asked",
+            ));
         }
         let mut t = step_param;
         if !self.anal_domain.contains_value(t, 0.0) {
@@ -542,7 +545,10 @@ impl Hyperbola {
         let (x1, _) = line_line_closest_point(s0, start_to_end_v, mid_pnt, v1)?;
         // Error: midPoint line fails to intersect hyperpola's base chord
         if x1 < EFF_ZERO || x1 > 1.0 - EFF_ZERO {
-            return Err(SolidError::sm_err(OP_MAKE_NURB));
+            return Err(SolidError::curve_failed(
+                OP_MAKE_NURB,
+                "the midpoint line misses the base chord",
+            ));
         }
 
         // mid ControlPoint weight =
@@ -655,7 +661,10 @@ impl Hyperbola {
             let unit_scale = s.x == 1.0 && s.y == 1.0 && s.z == 1.0;
             if !unit_scale && (!are_same(s.x, s.y) || !are_same(s.x, s.z)) {
                 // Unable to scale analytical curves non-uniformly
-                return Err(SolidError::sm_err(OP_TRANSFORM));
+                return Err(SolidError::curve_failed(
+                    OP_TRANSFORM,
+                    "the scale is not uniform",
+                ));
             }
         }
 

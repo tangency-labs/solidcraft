@@ -131,9 +131,33 @@ pub enum Error {
         /// The longest distance that works.
         largest: Option<f64>,
     },
+    /// A loft guided by rails whose guided edges were asked within `asked` of their rails: at
+    /// the most wires asked, `wires`, the bound the kernel proved was still `reached`
+    /// (`solidcore::sweep::loft_rails`).
+    RailPastTolerance {
+        /// The tolerance asked.
+        asked: f64,
+        /// The largest bound proved between a rail and the skin.
+        reached: f64,
+        /// The wires (sections and stations) at the cap.
+        wires: usize,
+    },
     /// The kernel found its own state inconsistent part way through a call, or was called
     /// before the preparation it needs.
     Exception,
+    /// A contact test the kernel's certified bracket of the boundary distance does not decide
+    /// (`solidcore::query::contact`): the tolerance lies inside `[lower, upper]` (or the
+    /// boundaries are apart but one body's enclosure of the other is not decided), or a
+    /// distance's bracket is still wider than asked. Never read as either answer. `other` is
+    /// the index of the body tested among the call's others.
+    ContactUndecided {
+        /// The other body's index among the call's (0 for one).
+        other: usize,
+        /// No point of either boundary is nearer the other than this.
+        lower: f64,
+        /// A pair of points, one on each boundary, is this far apart.
+        upper: f64,
+    },
     /// The application cancelled the call.
     Cancelled,
     /// Ops was called from inside a kernel call or from the failure callback.
@@ -174,8 +198,9 @@ pub enum Error {
         /// The least radius that rounds it.
         smallest: f64,
     },
-    /// A corner's setback that stops short of where the rails of the rounds beside an edge
-    /// cross it (the kernel's `BlendRefusal::SetbackTooShort`).
+    /// A corner's setback too short for the corner: it stops short of where the rails of the
+    /// rounds beside an edge cross it, or its fill is not certified at it (the kernel's
+    /// `BlendRefusal::SetbackTooShort`, whose `why` says which).
     SetbackTooShort {
         /// The corner's vertex index.
         vertex: usize,
@@ -269,6 +294,14 @@ impl std::fmt::Display for Error {
             Error::Empty => write!(f, "the result is empty"),
             Error::NotSolid => write!(f, "the result is not a closed solid"),
             Error::NoRoom => write!(f, "no room"),
+            Error::RailPastTolerance {
+                asked,
+                reached,
+                wires,
+            } => write!(
+                f,
+                "the loft's guided edges were asked within {asked} of their rails; at {wires} wires the bound proved is {reached}"
+            ),
             Error::WallsTouch => write!(f, "the offset's walls meet"),
             Error::TooLarge { size, kind, .. } => {
                 write!(f, "too large: the largest {kind:?} that fits is {size}")
@@ -325,6 +358,14 @@ impl std::fmt::Display for Error {
             ),
             Error::TooFar { largest } => write!(f, "too far to extend (largest {largest:?})"),
             Error::Exception => write!(f, "solidcore raised an internal exception"),
+            Error::ContactUndecided {
+                other,
+                lower,
+                upper,
+            } => write!(
+                f,
+                "contact with body {other} is undecided: the boundary distance is in [{lower}, {upper}]"
+            ),
             Error::Cancelled => write!(f, "cancelled"),
             Error::Reentered => write!(
                 f,
@@ -392,7 +433,7 @@ pub(crate) fn status(e: SolidError) -> Error {
         SolidError::PortInvariant { .. } | SolidError::PreparationRequired { .. } => {
             Error::Exception
         }
-        // the kernel's statuses (Upstream, Nlib, the refusals the families map further), and any
+        // the kernel's statuses (Upstream, Failed, the refusals the families map further), and any
         // kind the kernel adds by the status it stands for
         e => Error::Status(e.sm_status().unwrap_or(SM_ERR)),
     }

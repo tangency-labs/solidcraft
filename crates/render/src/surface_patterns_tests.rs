@@ -125,7 +125,7 @@ fn surface_dynamic_lease_sum_preserves_every_existing_options_capacity() {
 
 #[test]
 fn procedural_roughness_preserves_the_captured_clear_coat() {
-    let coat = crate::clear_coat::ClearCoat::new(0.8, 0.2, 1.5).unwrap();
+    let coat = solidcraft_viewport::clear_coat::ClearCoat::new(0.8, 0.2, 1.5).unwrap();
     let original = surface().with_clear_coat(coat);
     let mut input = effect();
     input.roughness_amplitude = 0.2;

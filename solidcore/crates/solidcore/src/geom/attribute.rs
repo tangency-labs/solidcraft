@@ -270,9 +270,6 @@ pub mod region_type {
 /// `SM_UNDEF_ULONG`: the id a destroyed attribute is left with.
 pub const UNDEF_ULONG: u64 = 123_456_789;
 
-// `SM_ERR`.
-use crate::error::SM_ERR;
-
 /// Largest attribute count or index [`AttributeStore::read_indexed_attributes_from_db`]
 /// accepts (a guard against corrupt input; upstream allocates whatever it reads).
 pub const MAX_INDEXED_ATTRIBUTES: u64 = 1 << 20;
@@ -491,7 +488,7 @@ impl MergeRegionData {
 
     /// `SetRegions`: overwrites entry `index` of all four lists.
     ///
-    /// `SM_ERR` ([`SolidError::Upstream`]) when `index` is not below the number of
+    /// `SM_ERR` ([`GeomFailure`](crate::error::geom::GeomFailure)) when `index` is not below the number of
     /// "this" regions. [`SolidError::InvalidInput`] (upstream writes past the array)
     /// when it is, but one of the other lists is shorter.
     pub fn set_regions(
@@ -504,11 +501,10 @@ impl MergeRegionData {
     ) -> Result<()> {
         const OP: &str = "geom::attribute::MergeRegionData::set_regions";
         if index >= self.this_regions.len() {
-            return Err(SolidError::Upstream {
-                operation: OP,
-                code: SM_ERR,
-                entity: None,
-            });
+            return Err(SolidError::geom_failed(
+                OP,
+                "the region index is out of range",
+            ));
         }
         let (Some(tr), Some(tt), Some(or), Some(ot)) = (
             self.this_regions.get_mut(index),
@@ -1900,7 +1896,7 @@ impl AttributeStore {
     /// ASCII lines are skipped as upstream's `GOTO_NEXT_ATTLINE`: more than 1000
     /// bytes before the newline, or the end of the data (also a `0xFF` byte, which
     /// compares equal to `EOF` as a `signed char`), is `SM_ERR`
-    /// ([`SolidError::Upstream`]).
+    /// ([`GeomFailure`](crate::error::geom::GeomFailure)).
     pub fn read_indexed_attributes_from_db(
         &mut self,
         all_attributes: &mut Vec<Option<AttributeHandle>>,
@@ -2039,10 +2035,11 @@ fn append_new_regions(
 
 /// `GOTO_NEXT_ATTLINE`: consume through the next `'\n'`.
 fn goto_next_attline(s: &mut InputStream) -> Result<()> {
-    let err = || SolidError::Upstream {
-        operation: "geom::attribute::AttributeStore::read_indexed_attributes_from_db",
-        code: SM_ERR,
-        entity: None,
+    let err = || {
+        SolidError::geom_failed(
+            "geom::attribute::AttributeStore::read_indexed_attributes_from_db",
+            "the attribute line does not end",
+        )
     };
     let mut count = 0u32;
     loop {
@@ -2371,7 +2368,7 @@ mod tests {
         assert!(d.has_any_solid(1) && !d.has_any_solid(2));
         assert!(matches!(
             d.set_regions(1, O1, 1, O2, 1),
-            Err(SolidError::Upstream { code: 1001, .. })
+            Err(e) if e.upstream_status() == Some(1001)
         ));
         d.set_regions(0, O3, 1, O1, 0).unwrap();
         assert_eq!(d.this_region(0), Some(O3));
@@ -2417,7 +2414,7 @@ mod tests {
         assert_eq!(all, before_all);
         assert!(matches!(
             s.read_indexed_attributes_from_db(&mut all, &mut db),
-            Err(SolidError::Upstream { code: 1001, .. })
+            Err(e) if e.upstream_status() == Some(1001)
         ));
     }
 
@@ -2474,7 +2471,7 @@ mod tests {
         assert_eq!(read.indices, vec![3, 1]);
         assert!(matches!(
             read.status,
-            Some(SolidError::Upstream { code: 1001, .. })
+            Some(e) if e.upstream_status() == Some(1001)
         ));
         assert_eq!(s, before_store);
         assert_eq!(all, before_all);

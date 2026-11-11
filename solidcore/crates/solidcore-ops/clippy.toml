@@ -399,8 +399,6 @@ disallowed-methods = [
     { path = "solidcore::geom::geom_utility::p1::add_point", reason = "ops computes no geometry (docs/layers.md §4)" },
     { path = "solidcore::geom::geom_utility::p1::add_sorted", reason = "ops computes no geometry (docs/layers.md §4)" },
     { path = "solidcore::geom::geom_utility::p1::best_fit_line_to_points", reason = "ops computes no geometry (docs/layers.md §4)" },
-    { path = "solidcore::geom::geom_utility::p1::best_fit_line_to_points_opt_in", reason = "ops computes no geometry (docs/layers.md §4)" },
-    { path = "solidcore::geom::geom_utility::p1::best_fit_line_to_points_with_kernel", reason = "ops computes no geometry (docs/layers.md §4)" },
     { path = "solidcore::geom::geom_utility::p1::best_fit_point_to_points", reason = "ops computes no geometry (docs/layers.md §4)" },
     { path = "solidcore::geom::geom_utility::p1::circle_center_from_3_points", reason = "ops computes no geometry (docs/layers.md §4)" },
     { path = "solidcore::geom::geom_utility::p1::circle_coplanar_circle_intersect", reason = "ops computes no geometry (docs/layers.md §4)" },

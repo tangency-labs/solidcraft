@@ -35,9 +35,10 @@
 //!   (`sm_FixBoundaryCurves` only ever sets its flag, so the caller ORs the result
 //!   into its own). On an error the partial outputs upstream may have written
 //!   (`rbSuccessfulIsoDrop` before a failed `CreateLineSegment`) are not returned.
-//! - **Statuses.** `CheckSeamJump`'s `SM_ERR_OUTSIDE_OF_DOMAIN` is
-//!   [`SolidError::Upstream`] with code [`SM_ERR_OUTSIDE_OF_DOMAIN`];
-//!   `sm_PopStack` / `sm_StackLook` on a short stack are `SM_ERR`.
+//! - **Statuses.** `CheckSeamJump`'s `SM_ERR_OUTSIDE_OF_DOMAIN` is an
+//!   [`IntersectFailure::OutsideDomain`] (status [`SM_ERR_OUTSIDE_OF_DOMAIN`]);
+//!   `sm_PopStack` / `sm_StackLook` on a short stack are an
+//!   [`IntersectFailure::Failed`] (`SM_ERR`).
 //! - **Ignored statuses.** `IsMovingAlongBoundary` ignores the statuses of its
 //!   surface evaluations and `TestSpanAccuracy` those of the two `EvaluatePoint`s of
 //!   its domain clamp check; upstream then goes on with whatever the failed
@@ -65,6 +66,7 @@
 
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::hermite_curve::HermiteCurve;
+use crate::error::intersect::IntersectFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -510,8 +512,9 @@ impl DropPt {
             let (crv_pnt, crv_tan) = match (crv.first(), crv.get(1)) {
                 (Some(p), Some(d)) => (*p, *d),
                 _ => {
-                    return Err(SolidError::sm_err(
+                    return Err(SolidError::intersect_failed(
                         "intersect::surface_drop_lib::DropPt::test_span_accuracy",
+                        "the curve's first derivative was not evaluated",
                     ))
                 }
             };
@@ -555,7 +558,7 @@ impl DropPt {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Upstream`] with [`SM_ERR_OUTSIDE_OF_DOMAIN`] for a seam jump that
+    /// [`IntersectFailure::OutsideDomain`] ([`SM_ERR_OUTSIDE_OF_DOMAIN`]) for a seam jump that
     /// cannot be snapped within tolerance (`end` unchanged); those of the surface
     /// evaluations.
     pub fn check_seam_jump(
@@ -573,10 +576,13 @@ impl DropPt {
 
         let start = self;
         let uv_domain = surface.natural_uv_domain_with_nurb(k)?;
-        let outside = || SolidError::Upstream {
-            operation: OP_SEAM,
-            code: SM_ERR_OUTSIDE_OF_DOMAIN,
-            entity: None,
+        let outside = || {
+            SolidError::intersect(
+                OP_SEAM,
+                IntersectFailure::OutsideDomain(
+                    "the span's end crosses the seam and does not snap onto it within the tolerance",
+                ),
+            )
         };
 
         // Check u-direction when srf is closed in U and span length > 1/2 DomainLength
@@ -738,7 +744,10 @@ pub fn push_point(t: f64, uv: [Point2; 2], stack: &mut Vec<f64>) {
 fn top_of(stack: &[f64], op: &'static str) -> Result<(f64, [Point2; 2])> {
     match stack.len().checked_sub(5).and_then(|i| stack.get(i..)) {
         Some([t, u, v, du, dv]) => Ok((*t, [Point2::new(*u, *v), Vec2::new(*du, *dv)])),
-        _ => Err(SolidError::sm_err(op)),
+        _ => Err(SolidError::intersect_failed(
+            op,
+            "the stack holds no point and tangent",
+        )),
     }
 }
 
@@ -1167,7 +1176,10 @@ impl Surface {
             }
             // SM_CAST_PTR(SmBSplineCurve, sUVCurves[ii]): a null cast is not usable
             if !is_bspline_kind(&uv) {
-                return Err(SolidError::null_pointer(OP_TRIM));
+                return Err(SolidError::intersect_missing(
+                    OP_TRIM,
+                    "the B-spline form of the uv curve",
+                ));
             }
             out.uv_curves.push(uv);
             out.max_drop_to_surf = max2(out.max_drop_to_surf, max_drop);

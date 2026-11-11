@@ -318,3 +318,35 @@ fn an_editor_accepts_the_placements_rolling_the_marker_solves() {
     assert_eq!(session.doc.marker, None);
     assert_eq!(occurrence(&session, "B").transform, moved);
 }
+
+/// Cancel on a computing OK (solidcore#3247): a dialog's computation of a long Combine Cut (a
+/// coil cut from a cylinder, as in #3962) stops within 500 ms of Cancel and says it was
+/// cancelled. Nothing it computed is kept in the evaluation cache the session shares: OK again
+/// computes the cut anew, and finishes.
+#[test]
+fn a_cancelled_computation_stops_promptly_and_is_never_cached() {
+    use solidcraft_doc::progress::{Progress, watch};
+    use std::time::{Duration, Instant};
+    let mut session = Session::default();
+    session.execute("solid.cylinder", &json!({"radius": 20, "height": 120, "body_name": "Stock"})).unwrap();
+    let coil = json!({"diameter": 51, "pitch": 15.24, "turns": 6, "section": "square", "section_size": 13, "body_name": "Tool", "operation": "new", "base": [0, 0, 12]});
+    session.execute("solid.coil", &coil).unwrap();
+    let cut = vec![("solid.combine".to_string(), json!({"operation": "cut", "target": "Stock", "tools": ["Tool"]}))];
+    let progress = Arc::new(Progress::default());
+    let (watching, scratch, commands) = (progress.clone(), session.scratch(), cut.clone());
+    let worker = std::thread::spawn(move || {
+        let r = scratch.stop_token().within(|| watch(watching, || scratch.compute_commands(&commands, None)));
+        (r.map(|_| ()).map_err(|e| e.to_string()), Instant::now())
+    });
+    std::thread::sleep(Duration::from_millis(300));
+    let cancelled = Instant::now();
+    progress.cancel();
+    let (r, returned) = worker.join().unwrap();
+    let took = returned.saturating_duration_since(cancelled);
+    assert!(r.as_ref().is_err_and(|e| e.contains("cancelled")), "{r:?}");
+    assert!(took < Duration::from_millis(500), "returned {took:?} after Cancel");
+    let again = session.scratch().compute_commands(&cut, None).unwrap();
+    // The cut is the one feature computed anew (the session's counter carries over to its copies).
+    assert_eq!(again.computed.model.recomputed, session.model.recomputed + 1, "nothing of the cancelled run was cached");
+    assert!(again.computed.model.results.iter().all(|r| r.error.is_none()), "OK again finishes the cut");
+}

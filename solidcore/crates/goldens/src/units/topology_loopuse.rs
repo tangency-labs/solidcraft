@@ -500,7 +500,7 @@ fn put_use_state(o: &mut Vec<f64>, b: &Brep) {
 fn status(r: Result<(), SolidError>) -> Result<Option<f64>, Fail> {
     match r {
         Ok(()) => Ok(Some(0.0)),
-        Err(SolidError::Upstream { code, .. }) => Ok(Some(f64::from(code))),
+        Err(up_err) if solidcore::error::upstream_status(&up_err).is_some() => Ok(Some(f64::from(solidcore::error::upstream_status(&up_err).unwrap_or(-1)))),
         Err(e) => slot(Err(e)).map(|_: Option<()>| None),
     }
 }

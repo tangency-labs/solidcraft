@@ -446,17 +446,17 @@ impl PseudoBox {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` ([`SolidError::Upstream`]) for an undefined box or a singular basis
+    /// `SM_ERR` ([`GeomFailure`](crate::error::geom::GeomFailure)) for an undefined box or a singular basis
     /// (`SM_IS_ZERO(det)`).
     pub fn invert_absolute(&self, p: Point3) -> Result<Point3> {
         const OP: &str = "geom::pseudo_box::PseudoBox::invert_absolute";
         if !self.assert_defined() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::geom_failed(OP, "the box is not defined"));
         }
         let [b0, b1, b2] = self.basis;
         let det = determinant_3_vectors(b0, b1, b2);
         if is_zero(det) {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::geom_failed(OP, "the box's basis is singular"));
         }
         Ok(Vec3::new(
             determinant_3_vectors(p, b1, b2) / det,

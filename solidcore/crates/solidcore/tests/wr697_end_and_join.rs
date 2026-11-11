@@ -517,12 +517,25 @@ fn teardrop_boss(k: &mut Kernel) -> Brep {
 /// foot, rounded r 0.5 and r 1, is the blend corner's closed Turn, Mitred, at the tip
 /// (#2349; 543d25a makes a closed edge meeting itself G1 the Join). It replaced the closed
 /// Nx1 corner, the fork's angle case (smlib#113 caa67d0, 2ac7a17), with its construction
-/// step for step, so the volumes are unchanged: the port's own (no closed form; the fork
-/// was not run on this body), each body clean with the boss's round and the plate's.
+/// step for step. The volumes are the port's own (no closed form; the fork was not run on
+/// this body), each body clean with the boss's round and the plate's. The foot's round,
+/// run on past the teardrop's tip on the wall's extension, is its definition, the round
+/// of the wall and the plate to rounding (#13774; before, the trace's skinned B-spline,
+/// off that round by 1.5e-4 at its 90th percentile, and the volumes 3.1e-4 and 4.9e-4
+/// less). Since #14405 the r 1 round's net has fewer spans (the arc's rows over a piece
+/// bounded by Taylor models too), and its volume moved by 2.9e-7 (from
+/// 7140.722593621167): both nets lie within their certified bounds of the same definition,
+/// so the volumes differ by at most the round's area (68.2 over its two faces) times the
+/// two bounds, which the new bound alone (4.0e-6) puts at 2.7e-4. With the feet over a
+/// piece bounded by Taylor models too (#14405), the nets have fewer spans again and the
+/// volumes moved by 5.5e-7 (r 0.5, from 7133.840421559223614) and 8.9e-6 (r 1, from
+/// 7140.722593330715): each net, sampled at 401 x 9 points of each face, is within its
+/// bound of its definition (r 0.5: 2.3e-6 of 3.9e-6; r 1: 3.2e-6 of 4.0e-6), and the
+/// areas times the bounds (1.3e-4 and 2.7e-4) hold both moves.
 #[test]
 fn a_closed_edge_meeting_itself_at_an_angle_is_the_closed_turn() {
     let foot = [[15.5, 0.0, 0.0]];
-    for (r, want) in [(0.5, 7133.840112885839517), (1.0, 7140.722103719867846)] {
+    for (r, want) in [(0.5, 7133.840421010035243), (1.0, 7140.722584425828245)] {
         let mut k = all_fixes();
         let mut b = teardrop_boss(&mut k);
         let cs = corners(&mut k, &mut b.clone_standing_for_self().unwrap(), &foot, r);

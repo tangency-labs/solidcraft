@@ -244,7 +244,6 @@ fn closed_angle_is_the_blend_corners_mitred_turn() {
 #[ignore = "#2404: the fold refusal names its closed bound 1.875 (less rounding), where the round does not build"]
 fn closed_angle_round_builds_validly_or_refuses_with_a_fit_size() {
     let mut k = Kernel::default();
-    k.fixes.fillet_gn_section_generator = true;
     let mut b = teardrop(&mut k);
     let rim = top_rim(&k, &b);
     let mut s = FilletSession::new(&mut k, &mut b).unwrap();

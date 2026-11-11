@@ -87,7 +87,7 @@ fn key(v: Option<&Value>) -> Option<String> {
 
 fn component_id(s: &Session, p: &Value, cmd: &str) -> Result<u64> {
     let k = key(p.get("component")).ok_or_else(|| bad(cmd, "`component` must be a component id or name"))?;
-    s.doc.find_component(&k).ok_or_else(|| bad(cmd, format!("no component `{k}`")))
+    s.doc.resolve_component(&k).map_err(|error| bad(cmd, error.to_string()))?.ok_or_else(|| bad(cmd, format!("no component `{k}`")))
 }
 
 fn read(s: &mut Session, p: &Value) -> Result<Value> {
@@ -421,13 +421,10 @@ fn rows(s: &Session, ix: &Index, counts: &BTreeMap<u64, u64>, group: Group, kits
     out
 }
 
-/// A CSV field, always quoted.
-fn quote(s: &str) -> String {
-    format!("\"{}\"", s.replace('"', "\"\""))
-}
-
-/// The bill of materials as CSV: fixed columns, every field quoted.
+/// The bill of materials as CSV: fixed columns, every field quoted, and a field a spreadsheet
+/// would run as a formula written as text.
 fn csv(rows: &[Value]) -> String {
+    let quote = solidcraft_doc::csv::quoted;
     let mut out = ["item", "part_number", "description", "revision", "count", "definition"].map(quote).join(",");
     out.push('\n');
     let lines = rows.iter().flat_map(|r| std::iter::once(r).chain(r["children"].as_array().into_iter().flatten()));

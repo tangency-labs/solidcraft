@@ -550,6 +550,46 @@ fn a_rectangle_corner_lines_up_with_two_points_at_once_and_keeps_both() {
     }
 }
 
+/// #13413: a point placed on the dotted guide from a line's midpoint stays plumb with that
+/// midpoint, through a Midpoint point on the line, in the point's one undo step. With the
+/// preference off, the guide only places the point, as before.
+#[test]
+fn a_point_on_a_midpoint_guide_stays_lined_up_with_the_midpoint() {
+    use solidcraft_engine::sketch::ConstraintKind::{Midpoint, VerticalPoints};
+    for aligning in [true, false] {
+        let mut h = lining_up_fixture(&[("sketch.line", json!({"points":[[10.37,5.21],[30.37,5.21]],"infer":false}))]);
+        h.app.preferences.sketch_align_points = aligning;
+        h.app.preferences.sketch_tracking_guides = true;
+        let undo = h.app.session.undo.len();
+        step(&mut h, json!({"start":"sketch.point"}));
+        step(&mut h, json!({"move":{"sketch":[20.37,5.21]}}));
+        step(&mut h, json!({"move":{"sketch":[20.2,30.4]}}));
+        assert!(h.app.viewport.tracking.guide.is_some(), "the midpoint's guide is showing");
+        step(&mut h, json!({"click":{"sketch":[20.2,30.4]}}));
+        let st = crate::open_meshing::session_world(&h.app.session);
+        let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        let placed = sk.points.iter().position(|p| p.pos.y > 25.0).expect("the point is placed");
+        let plumb: Vec<usize> = sk
+            .constraints
+            .iter()
+            .filter_map(|c| match c.kind {
+                VerticalPoints { p, q } if p == placed => Some(q),
+                VerticalPoints { p, q } if q == placed => Some(p),
+                _ => None,
+            })
+            .collect();
+        if !aligning {
+            assert!(plumb.is_empty(), "off: no constraint, {plumb:?}");
+            continue;
+        }
+        assert!((sk.points[placed].pos.x - 20.37).abs() < 1e-6, "on the midpoint's guide: {:?}", sk.points[placed].pos);
+        assert_eq!(plumb.len(), 1, "one Vertical constraint");
+        assert!(sk.constraints.iter().any(|c| matches!(c.kind, Midpoint { p, .. } if p == plumb[0])), "it ties to the line's midpoint");
+        drop(st);
+        assert_eq!(h.app.session.undo.len(), undo + 1, "the constraint is in the point's undo step");
+    }
+}
+
 /// #7828: a line kept horizontal from its start also lines up under a point above, and the
 /// click keeps both: the line's Horizontal and the end's alignment with that point.
 #[test]
@@ -570,4 +610,25 @@ fn a_horizontal_line_ends_plumb_with_a_point_above_and_keeps_both() {
         sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Horizontal { .. })),
         "the line stays horizontal"
     );
+}
+
+/// #7114: a point placed near a visible grid intersection lands on that intersection. The
+/// sketch snapped to a tenth of the drawn grid's spacing, a hidden lattice between the lines
+/// the user can see, so a point placed on an intersection landed beside it.
+#[test]
+fn a_point_near_a_visible_grid_intersection_snaps_to_it_7114() {
+    use solidcore_record::Vec2;
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"sketch.point"})).unwrap();
+    // The drawn grid's own spacing, and a crossing of its lines.
+    let minor = solidcraft_engine::view::grid_step(h.app.cam.half_height()).0;
+    let at = Vec2::new(minor * 4.0, minor * 4.0);
+    // A little off that crossing: on the hidden finer lattice the point would land beside it,
+    // on the grid the user can see it lands on it.
+    let off = Vec2::new(at.x + minor / 16.0, at.y);
+    h.step(&json!({"move":{"sketch":[off.x, off.y]}})).unwrap();
+    let hover = h.app.tool.as_ref().unwrap().hover.as_ref().unwrap().0;
+    assert_eq!(hover, at, "the point lands on the visible grid intersection");
 }

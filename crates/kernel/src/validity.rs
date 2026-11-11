@@ -33,8 +33,8 @@ impl Validity {
 pub fn validity(body: &Body) -> Validity {
     let record = brep_record(body).map_err(|e| e.to_string());
     let checked = record.as_ref().map_err(Clone::clone).and_then(|r| {
-        solidcraft_geom::brep::check::validate_built(r).map_err(|e| format!("structure: {e}"))?;
-        solidcraft_geom::brep::geometry::check(r).map_err(|e| format!("geometry: {e}"))
+        solidcore_ops::record_check::validate_built(r).map_err(|e| format!("structure: {e}"))?;
+        solidcore_ops::record_check::agreement(r).map_err(|e| format!("geometry: {e}"))
     });
     Validity { record: checked, smlib: smlib_validity(body) }
 }

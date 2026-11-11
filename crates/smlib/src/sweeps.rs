@@ -11,6 +11,17 @@ use serde_json::json;
 use crate::trace;
 use crate::{Brep, Result, core};
 
+/// Screw-sweep topology and its approximation tolerance.
+#[derive(Clone, Copy, Debug)]
+pub struct ScrewSweepOptions<'a> {
+    /// Optional radial law as `(turn, offset)` pairs.
+    pub law: Option<&'a [(f64, f64)]>,
+    /// Join spline walls across cylinder seams; false retains the historical faces.
+    pub join_spline_walls: bool,
+    /// Maximum wall approximation error, mm.
+    pub tolerance: f64,
+}
+
 /// A 3D curve of a profile, path or section.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Curve {
@@ -247,7 +258,7 @@ impl Brep {
     /// `turns` right-handed turns about it, rising `pitch` (signed) per turn, capped at both ends,
     /// its walls within about `tolerance` of the true screw surfaces.
     pub fn screw_sweep(profile: &[Curve], origin: [f64; 3], direction: [f64; 3], pitch: f64, turns: f64, tolerance: f64) -> Result<Brep> {
-        let r = core::sweep::screw_sweep(profile, origin, direction, pitch, turns, None, tolerance).map(Brep::made_core);
+        let r = core::sweep::screw_sweep(profile, origin, direction, pitch, turns, None, tolerance, false).map(Brep::made_core);
         trace::made(
             "screw_sweep",
             &[],
@@ -272,10 +283,32 @@ impl Brep {
         law: &[(f64, f64)],
         tolerance: f64,
     ) -> Result<Brep> {
-        let r = core::sweep::screw_sweep(profile, origin, direction, pitch, turns, Some(law), tolerance).map(Brep::made_core);
+        let r = core::sweep::screw_sweep(profile, origin, direction, pitch, turns, Some(law), tolerance, false).map(Brep::made_core);
         trace::made("screw_sweep", &[], &r, || {
             json!({"profile": trace::curves(profile), "origin": origin, "direction": direction, "pitch": pitch, "turns": turns,
                 "law": law, "tolerance": tolerance})
+        });
+        r
+    }
+
+    /// A screw sweep with explicit face layout. The historical entry points retain
+    /// half-turn faces; new thread features request continuous spline walls here.
+    pub fn screw_sweep_with_options(
+        profile: &[Curve],
+        origin: [f64; 3],
+        direction: [f64; 3],
+        pitch: f64,
+        turns: f64,
+        options: ScrewSweepOptions<'_>,
+    ) -> Result<Brep> {
+        let r = core::sweep::screw_sweep(profile, origin, direction, pitch, turns, options.law, options.tolerance, options.join_spline_walls)
+            .map(Brep::made_core);
+        trace::made("screw_sweep", &[], &r, || {
+            json!({
+                "profile": trace::curves(profile), "origin": origin, "direction": direction,
+                "pitch": pitch, "turns": turns, "law": options.law,
+                "tolerance": options.tolerance, "join_spline_walls": options.join_spline_walls,
+            })
         });
         r
     }

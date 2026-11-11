@@ -1,6 +1,5 @@
 //! WR-698 (smlib#79 step 7, the fork's 0d43b4c and b8e3594): with
-//! `fixes.fillet_gn_section_generator` and `fixes.fillet_round_as_definition` a variable
-//! round between NURBS faces is its definition: the order-1 section's `Build` takes the
+//! `fixes.fillet_round_as_definition` a variable round between NURBS faces is its definition: the order-1 section's `Build` takes the
 //! variable radius solver's law (`GnLawRound`), its stations the solver's own, its arcs the
 //! circles the balls' envelope touches each ball along, certified span by span with the
 //! law in the certificate; the rails and the centre line then run over the edge's t.
@@ -39,7 +38,6 @@ const LAW: [f64; 3] = [1.0, 2.5, 1.5];
 
 fn kernel(definition: bool) -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.fillet_gn_section_generator = true;
     k.fixes.fillet_round_as_definition = definition;
     k
 }

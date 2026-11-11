@@ -110,6 +110,24 @@ pub fn is_knife_edge(
 /// `SM_ERR` for an edge with no loop edge use on the material side; those of the
 /// sector test.
 pub fn is_concave_edge(k: &Kernel, target: &mut Brep, edge_id: EdgeId) -> Result<bool> {
+    match material_use(target, edge_id)? {
+        Some(use_) => eu2::is_convex_radial_sector(k, target, use_, 10, false, 0.0),
+        None => Err(SolidError::sm_err(OP)),
+    }
+}
+
+/// Whether the edge bounds material: a use of it in a loop of a shell of a region that is
+/// not a void (where [`is_concave_edge`] judges it). A sheet's edges bound none.
+///
+/// # Errors
+///
+/// Those of the topology queries.
+pub fn edge_bounds_material(target: &Brep, edge_id: EdgeId) -> Result<bool> {
+    Ok(material_use(target, edge_id)?.is_some())
+}
+
+/// The first use of the edge in a loop of a shell of a region that is not a void.
+fn material_use(target: &Brep, edge_id: EdgeId) -> Result<Option<crate::topology::EdgeuseId>> {
     for use_ in edge::edgeuses(target, edge_id, None, None)? {
         if !eu::is_loop_edgeuse(target, use_)? {
             continue;
@@ -124,9 +142,9 @@ pub fn is_concave_edge(k: &Kernel, target: &mut Brep, edge_id: EdgeId) -> Result
         if target.region(region)?.is_void() != 0 {
             continue;
         }
-        return eu2::is_convex_radial_sector(k, target, use_, 10, false, 0.0);
+        return Ok(Some(use_));
     }
-    Err(SolidError::sm_err(OP))
+    Ok(None)
 }
 
 /// `sm_InsideMaterial` (fork, WR-631): whether a rail that leaves `face` near `point`

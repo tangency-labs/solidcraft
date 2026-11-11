@@ -147,7 +147,7 @@ fn scaling(
         )?;
         let solution = solutions
             .get(0)
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::primitive_missing(OP, "the closest point on the path"))?;
         let projected = reference.evaluate_point(k, solution.start.param(0)?)?;
         Ok(point.distance(projected))
     };
@@ -193,7 +193,7 @@ pub fn prepare_curve_sweep(
     test_continuity: bool,
 ) -> Result<PreparedCurveSweep> {
     if profiles.is_empty() {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::primitive_failed(OP, "no profiles to sweep"));
     }
     let mut path = path.clone();
     let mut profiles: Vec<_> = profiles.iter().flatten().filter_map(bspline).collect();
@@ -208,7 +208,7 @@ pub fn prepare_curve_sweep(
     let start = values
         .first()
         .copied()
-        .ok_or_else(|| SolidError::sm_err(OP))?;
+        .ok_or_else(|| SolidError::primitive_failed(OP, "the path has no start point"))?;
     let mut path_to_origin = Axis2Placement::IDENTITY;
     path_to_origin.translate(-start);
     // fork c8f6a31 (WR-662): the statuses below are passed on (`SER`).
@@ -262,7 +262,7 @@ pub fn prepare_curve_sweep(
     let tangent = values
         .get(1)
         .copied()
-        .ok_or_else(|| SolidError::sm_err(OP))?;
+        .ok_or_else(|| SolidError::primitive_failed(OP, "the path has no start tangent"))?;
     let mut from_x = tangent.unitize_or_z();
     let mut from_y = Vec3::UNDEF;
     if let Some([x, y, _]) = ignored(passed_on(tangent.make_unit_ortho_vectors(None), p)?)? {
@@ -314,8 +314,10 @@ pub fn prepare_curve_sweep(
         let mut normal = match compute_crvs_normal(k, &as_curves) {
             Ok(normal) => normal,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(SolidError::Upstream { code: 1001, .. }) => {
-                let first = profiles.first().ok_or_else(|| SolidError::sm_err(OP))?;
+            Err(e) if e.upstream_status() == Some(1001) => {
+                let first = profiles
+                    .first()
+                    .ok_or_else(|| SolidError::primitive_failed(OP, "no profiles to sweep"))?;
                 let values = ignored(passed_on(
                     first.evaluate(first.natural_interval().evaluate(0.0), 1, true, false),
                     p,

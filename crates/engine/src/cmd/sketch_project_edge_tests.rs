@@ -194,7 +194,7 @@ fn a_sketch_that_lost_its_projected_edge_opens_with_its_curves_and_the_link_mark
     assert!(s.model.state().sketch(top).is_none(), "a failed sketch not edited is not shown");
     assert!(boss_error(&s).is_some());
 
-    run(&mut s, "sketch.edit", json!({"sketch": "Top"}));
+    run(&mut s, "sketch.edit", json!({"sketch": "Top", "restore_marker": false}));
     assert_eq!(reselect(&s), Some(name.clone()), "still fails while edited");
     assert!(boss_error(&s).is_some(), "the extrude does not build from the held sketch");
     assert!(link(&s).lost);

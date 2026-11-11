@@ -316,6 +316,7 @@ pub(crate) fn bisect_thousandths<E>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blend::blend_setback::fill_hole_counted;
     use crate::math::Vec3;
 
     fn corner(radii: [f64; 3], frame: usize, concave: bool) -> (Vec<Face>, Vec<Edge>) {
@@ -344,25 +345,32 @@ mod tests {
     #[test]
     fn thousandth_scales_and_attempt_budget() {
         let kernel = Kernel::default();
-        for (radii, setbacks, most, want, want_solves) in [
-            ([2.0, 3.0, 4.0], [4.5, 4.75, 6.0], None, 1.056, 35),
-            ([1.0, 1.5, 2.0], [2.25, 2.375, 3.0], None, 1.056, 35),
+        // The last column: the QPs the search solved with each attempt's degrees least first,
+        // the order before degree 9 first (the same counts on Linux and Windows x86-64). The
+        // search must now solve fewer.
+        for (radii, setbacks, most, want, least_first) in [
+            ([2.0, 3.0, 4.0], [4.5, 4.75, 6.0], None, 1.056, Some(35)),
+            ([1.0, 1.5, 2.0], [2.25, 2.375, 3.0], None, 1.056, Some(35)),
             (
                 [2.0, 3.0, 4.0],
                 [4.5, 4.75, 4.5],
                 Some([20.0, 20.0, 4.5]),
                 1.046,
-                39,
+                Some(39),
             ),
-            ([2.0, 3.0, 4.0], [4.25; 3], None, 1.110, 34),
-            ([5.0; 3], [8.0; 3], None, 1.0, 2),
+            // Eight of its twelve attempts certify below degree 9, each solving degree 9 first,
+            // one QP more: it solves fewer than least first's 34 only where degree 9 decides
+            // at least three of its four failing attempts, so no bound.
+            ([2.0, 3.0, 4.0], [4.25; 3], None, 1.110, None),
+            // One certifying attempt, one QP more than least first's 2 (its budget further on).
+            ([5.0; 3], [8.0; 3], None, 1.0, None),
             // Every edge held at its original setback: no scale can certify.
             (
                 [2.0, 3.0, 4.0],
                 [4.5, 4.75, 6.0],
                 Some([4.5, 4.75, 6.0]),
                 0.0,
-                10,
+                Some(10),
             ),
         ] {
             let (faces, edges) = corner(radii, 0, false);
@@ -385,26 +393,36 @@ mod tests {
             );
             assert_eq!(result.scale, want);
             assert!(result.attempts <= 12);
-            assert_eq!(result.solves, want_solves, "SMLib 20b1c01 QP count");
+            // Degree 9 first, as the corner's own fill: a failing attempt that degree 9 proves
+            // unmet solves that one programme, where least first solved five. Which failing
+            // attempts' degree 9 is not proven infeasible, and so still solve five, differs
+            // between targets and machines, so the count is held below least first's, not
+            // pinned. Every attempt solves degree 9 at least.
+            if let Some(least_first) = least_first {
+                assert!(result.solves < least_first, "QP count {}", result.solves);
+            }
+            assert!(result.solves >= result.attempts);
             assert!(result.qp_rows_built > 0);
             assert!(result.qp_peak_rows_held <= result.qp_rows_built);
             assert!(result.qp_steps >= result.solves);
             // Work budgets leave room for floating-point branch differences while
-            // rejecting the former full matrices (up to 693,051 retained rows).
+            // rejecting the former full matrices (up to 693,051 retained rows) and, on
+            // aarch64, the degrees below 9 a failing attempt tried (the fork's 20b1c01 took
+            // 120,513 steps in one degree-7 programme of the first corner). The QP bounds
+            // above reject that order; a long programme below 9 in an attempt whose degree 9
+            // is not proven infeasible is caught by the step budget only.
             assert!(result.qp_rows_built <= 12_000_000);
             assert!(result.qp_peak_rows_held <= 16_000);
-            // Known failure on aarch64 (tangency-labs/solidcore#2929): the first corner finds
-            // the same scale in the same attempts and solves, but its QP takes 129,085 steps
-            // there. Every other assertion here runs on both targets.
-            if cfg!(not(target_arch = "aarch64")) {
-                assert!(result.qp_steps <= 25_000);
-            }
+            assert!(result.qp_steps <= 25_000);
             if want == 1.0 {
                 // The r=5, setback=8 corner needs no scale search. Its dense
-                // programme built 430,962 rows and retained 254,037 at peak.
+                // programme built 430,962 rows and retained 254,037 at peak. Its one
+                // attempt solves degree 9 before the least degree that certifies: three
+                // programmes, 22 steps on x86-64.
+                assert!(result.solves <= 3);
                 assert!(result.qp_rows_built <= 10_000);
                 assert!(result.qp_peak_rows_held <= 2_000);
-                assert!(result.qp_steps <= 16);
+                assert!(result.qp_steps <= 32);
             }
             assert_eq!(
                 result.attempts,
@@ -417,6 +435,60 @@ mod tests {
                 }
             );
             assert_eq!(result.reason.is_some(), want == 0.0);
+        }
+    }
+
+    /// A search attempt fills its model as the corner's own fill does (`fill_hole_counted`):
+    /// degree 9 first, then up from the least degree. An attempt whose degree 9 proves the
+    /// sector conditions unmet stops there with that one programme, its verdict that of every
+    /// degree by degree raising (from the least degree up, each failing attempt of the first
+    /// corner solved five, and on aarch64 one of degree 7 took 120,513 steps).
+    #[test]
+    fn search_attempts_fill_as_the_corner_does() {
+        let kernel = Kernel::default();
+        let (faces, edges) = corner([2.0, 3.0, 4.0], 0, false);
+        let setbacks = [4.5, 4.75, 6.0];
+        let model = Model {
+            kernel: &kernel,
+            faces: &faces,
+            edges: &edges,
+            setbacks: &setbacks,
+            most: None,
+            size: setbacks.iter().copied().fold(0.0, f64::max),
+        };
+        // 1 fails (the search's first attempt), 1.056 is the least scale that certifies
+        for (k, certifies) in [(1.0, false), (1.056, true)] {
+            let mut search = FillStats::default();
+            assert_eq!(model.run(k, None, &mut search).unwrap(), certifies);
+            let ks = model.at(k).unwrap();
+            let surfaces: Vec<Surface> = model_rounds(&faces, &edges, &ks)
+                .unwrap()
+                .into_iter()
+                .map(Surface::from)
+                .collect();
+            let rounds: Vec<Round<'_>> = surfaces
+                .iter()
+                .zip(&ks)
+                .map(|(surface, &end)| Round {
+                    surface,
+                    along: SurfParamType::U,
+                    end,
+                    corner_above: false,
+                })
+                .collect();
+            let tol = 1.0e-9 * (1.0 + k * model.size);
+            let mut own = FillStats::default();
+            let fill = fill_hole_counted(&kernel, &faces, &rounds, 1, tol, &mut own);
+            println!(
+                "scale {k} search solves {} steps {} own solves {} steps {}",
+                search.solves, search.qp_steps, own.solves, own.qp_steps
+            );
+            assert_eq!(fill.is_ok(), certifies, "scale {k}");
+            assert_eq!(search.solves, own.solves, "scale {k}");
+            assert_eq!(search.qp_steps, own.qp_steps, "scale {k}");
+            if !certifies {
+                assert_eq!(search.solves, 1, "degree 9's proof ends the attempt");
+            }
         }
     }
 

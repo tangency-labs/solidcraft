@@ -538,6 +538,7 @@ pub(super) fn card(app: &mut SolveApp, ui: &mut egui::Ui, bounds: egui::Rect) {
             editor: false,
             enabled: true,
             header_actions: (stage == super::Stage::Look).then_some(&mut actions as &mut dyn FnMut(&mut egui::Ui)),
+            move_command: "view.render_dock",
         },
         &mut side,
         &mut width,
@@ -1972,7 +1973,7 @@ mod studio_browser_tests {
         h.call("ui.resize", json!({"width":1440,"height":3000}));
         h.app.run("solid.box", json!({"length":20,"width":15,"height":10,"body_name":"Sample"})).unwrap();
         h.app.run("select.set", json!({"items":[solidcraft_engine::Sel::Body{name:"Sample".into()}]})).unwrap();
-        let camera = solidcraft_engine::render::Camera {
+        let camera = solidcraft_viewport::Camera {
             distance: 73.0,
             target: solidcore_record::Vec3::new(10.0, 7.5, 5.0),
             yaw: 0.3,
@@ -2001,7 +2002,7 @@ mod studio_browser_tests {
         h.app.render_workspace.view.draft.width = 16;
         h.app.render_workspace.view.draft.height = 12;
         h.frames(4);
-        let navigation = solidcraft_engine::render::Camera { distance: 92.0, yaw: 0.75, ..camera };
+        let navigation = solidcraft_viewport::Camera { distance: 92.0, yaw: 0.75, ..camera };
         h.app.cam = navigation;
         h.frames(2);
         assert_eq!(h.app.cam, navigation);
@@ -2233,7 +2234,7 @@ mod studio_browser_tests {
             h.app.session.set_render_job_host(Some(host.clone())).unwrap();
             h.app.run("solid.box", json!({"length":20,"width":15,"height":10,"body_name":"Sample"})).unwrap();
             let saved_camera =
-                solidcraft_engine::render::Camera { distance: 60.0, target: solidcore_record::Vec3::new(10.0, 7.5, 5.0), ..Default::default() };
+                solidcraft_viewport::Camera { distance: 60.0, target: solidcore_record::Vec3::new(10.0, 7.5, 5.0), ..Default::default() };
             h.app.run("render.settings.set",json!({"name":"Studio","set":{"width":8,"height":8,"camera":saved_camera,"job":{"method":"cpu_raytrace","options":{"progressive":{"samples_per_pixel":2,"seed":47},"area_samples":4,"seed":731,"output":{"linear_exr":true}}}}})).unwrap();
             super::super::enter(&mut h.app, true).unwrap();
             h.app.render_workspace.view.live_paused = true;

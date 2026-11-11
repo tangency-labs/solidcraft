@@ -1,15 +1,13 @@
-//! The two opt-in arc tests of `CreateLinearSweep` together: WR-576
-//! (`Kernel::fixes.linear_sweep_arc_to_cylinder_zero`, #1507, tangency-labs/smlib@fd59111)
-//! tests a generating curve's arc to the cylinder check's zero, `1000 SM_EFF_ZERO * (1 +
-//! size)`, not to the B-rep tolerance; WR-565 (`Kernel::fixes.linear_sweep_arc_is_cylinder`,
+//! The two arc tests of `CreateLinearSweep` together: WR-576 (#1507,
+//! tangency-labs/smlib@fd59111) tests a generating curve's arc to the cylinder check's
+//! zero, `1000 SM_EFF_ZERO * (1 + size)`, not to the B-rep tolerance; WR-565 (`Kernel::fixes.linear_sweep_arc_is_cylinder`,
 //! #1477, tangency-labs/smlib 12918e9) makes an arc short of a whole turn swept square to
 //! its plane a cylinder too. The arc test gates both, as `ArcZero` gates `ArcSweepCylinder`
-//! in the fork: with both on only an exact arc becomes a cylinder, whole or partial.
+//! in the fork: only an exact arc becomes a cylinder, whole or partial.
 //!
 //! Each profile (an ellipse of radii 10 and 10 + 1e-7, an arc to the B-rep tolerance and
 //! not to the cylinder check's zero, or an exact circle, each over a whole turn or half a
-//! turn closed by its chord) is swept 2 along +z, capped, with the two fixes off-off,
-//! off-on, on-off and on-on (WR-576, WR-565).
+//! turn closed by its chord) is swept 2 along +z, capped, with WR-565 off and on.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -86,11 +84,9 @@ fn profile(k: &Kernel, curve: &dyn Fn(&Kernel) -> Curve) -> Vec<Curve> {
     vec![c, Curve::from(chord)]
 }
 
-/// The profile of `curve` extruded 2 along +z and capped, with WR-576's fix `arc_zero`
-/// and WR-565's `partial_arcs`.
-fn sweep(curve: &dyn Fn(&Kernel) -> Curve, arc_zero: bool, partial_arcs: bool) -> &'static str {
+/// The profile of `curve` extruded 2 along +z and capped, with WR-565's `partial_arcs`.
+fn sweep(curve: &dyn Fn(&Kernel) -> Curve, partial_arcs: bool) -> &'static str {
     let mut k = Kernel::default();
-    k.fixes.linear_sweep_arc_to_cylinder_zero = arc_zero;
     k.fixes.linear_sweep_arc_is_cylinder = partial_arcs;
     let curves = profile(&k, curve);
     let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
@@ -102,14 +98,9 @@ fn sweep(curve: &dyn Fn(&Kernel) -> Curve, arc_zero: bool, partial_arcs: bool) -
     kind
 }
 
-/// The side face of `curve` for WR-576 / WR-565 off/off, off/on, on/off and on/on.
-fn matrix(curve: &dyn Fn(&Kernel) -> Curve) -> [&'static str; 4] {
-    [
-        sweep(curve, false, false),
-        sweep(curve, false, true),
-        sweep(curve, true, false),
-        sweep(curve, true, true),
-    ]
+/// The side face of `curve` for WR-565 off and on.
+fn matrix(curve: &dyn Fn(&Kernel) -> Curve) -> [&'static str; 2] {
+    [sweep(curve, false), sweep(curve, true)]
 }
 
 #[test]
@@ -128,29 +119,17 @@ fn arc_flags_near_circle_is_an_arc_only_to_the_brep_tolerance() {
 }
 
 #[test]
-fn arc_flags_near_circle_is_a_cylinder_only_without_wr576() {
-    assert_eq!(
-        matrix(&|k| near_arc(k, 360.0)),
-        ["cylinder", "cylinder", "extrusion", "extrusion"]
-    );
+fn arc_flags_near_circle_is_an_extrusion() {
+    assert_eq!(matrix(&|k| near_arc(k, 360.0)), ["extrusion", "extrusion"]);
 }
 
 #[test]
-fn arc_flags_near_half_circle_is_a_cylinder_only_with_wr565_alone() {
-    assert_eq!(
-        matrix(&|k| near_arc(k, 180.0)),
-        ["extrusion", "cylinder", "extrusion", "extrusion"]
-    );
+fn arc_flags_near_half_circle_is_an_extrusion() {
+    assert_eq!(matrix(&|k| near_arc(k, 180.0)), ["extrusion", "extrusion"]);
 }
 
 #[test]
-fn arc_flags_exact_arcs_keep_their_cylinders_with_wr576() {
-    assert_eq!(
-        matrix(&|k| arc(k, 360.0)),
-        ["cylinder", "cylinder", "cylinder", "cylinder"]
-    );
-    assert_eq!(
-        matrix(&|k| arc(k, 180.0)),
-        ["extrusion", "cylinder", "extrusion", "cylinder"]
-    );
+fn arc_flags_exact_arcs_keep_their_cylinders() {
+    assert_eq!(matrix(&|k| arc(k, 360.0)), ["cylinder", "cylinder"]);
+    assert_eq!(matrix(&|k| arc(k, 180.0)), ["extrusion", "cylinder"]);
 }

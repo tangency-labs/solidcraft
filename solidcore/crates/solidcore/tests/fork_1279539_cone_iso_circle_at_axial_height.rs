@@ -21,7 +21,7 @@ use solidcore::math::{Point3, Vec3};
 use solidcore::surface::cone::Cone;
 use solidcore::surface::sphere::{Sphere, SphereOptions};
 use solidcore::surface::surface::Surface;
-use solidcore::{Kernel, SolidError};
+use solidcore::Kernel;
 
 const TOL: f64 = 1e-3;
 const SEMI: f64 = 70.0;
@@ -53,8 +53,10 @@ fn circle_height(k: &Kernel, cone: &Cone, p: Point3) -> Result<Option<f64>, i32>
             c.evaluate_point(k, c.natural_interval().min()).unwrap().z,
         )),
         Ok(None) => Ok(None),
-        Err(SolidError::Upstream { code, .. }) => Err(code),
-        Err(e) => panic!("unexpected error {e:?}"),
+        Err(e) => match e.sm_status() {
+            Some(code) if !e.is_port_failure() => Err(code),
+            _ => panic!("unexpected error {e:?}"),
+        },
     }
 }
 
@@ -156,7 +158,7 @@ fn sphere_crossing_just_past_the_apex() {
         );
         if !on {
             match status {
-                Err(SolidError::Upstream { code, .. }) => assert_eq!(code, SM_ERR),
+                Err(e) if e.sm_status().is_some() => assert_eq!(e.sm_status(), Some(SM_ERR)),
                 other => panic!("flag off: expected SM_ERR, got {other:?}"),
             }
             continue;

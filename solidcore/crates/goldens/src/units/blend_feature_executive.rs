@@ -365,7 +365,7 @@ fn run_script(k: &mut Kernel, b: &mut Brep, i: &Inputs) -> SolidResult<RustRun> 
     for op in &i.ops {
         match op {
             OpSpec::Defeature => {
-                record.push(status(ex.do_defeature(k))?);
+                record.push(status(ex.do_defeature(k).map(drop))?);
                 record.push(1.);
                 record.push(ex.features().len() as f64);
             }

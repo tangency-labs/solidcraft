@@ -53,6 +53,11 @@ pub struct ConstructionLineParams {
     /// A segment of this length from `at` instead of an infinite line, held by a length
     /// dimension. For the horizontal, vertical, angle, parallel and perpendicular methods.
     pub length: Option<LengthExpr>,
+    /// Positive distance from the reference, on the side of `at`. For a parallel line that is
+    /// the picked line; for a horizontal line, the sketch X axis; for a vertical line, the
+    /// sketch Y axis. A typed value becomes a driving dimension.
+    #[serde(default)]
+    pub offset: Option<LengthExpr>,
     /// `false` makes a line with a `length` a normal sketch line, ready for a profile, instead
     /// of construction geometry (default `true`). An infinite line is always construction.
     pub construction: Option<bool>,
@@ -234,7 +239,7 @@ fn point_arg_schema(generator: &mut SchemaGenerator, snaps: bool) -> Schema {
     let mut forms = vec![
         json!(point),
         json!({
-            "description": "[x, y] where a coordinate may be an expression over the design's parameters, such as [\"w / 2\", 5]: a point that follows the parameters.",
+            "description": "[x, y] where a coordinate may be an expression over the design's parameters, such as [\"w / 2\", 5]: a point that follows the parameters and is fixed; text naming no parameter, such as \"5\", is just that number, in the design's length unit (a JSON number is mm), and does not itself fix the point.",
             "type": "array", "items": coordinate, "minItems": 2, "maxItems": 2
         }),
         json!({"description": "An existing point's id such as \"l1.end\" or \"p3\", or a snap such as \"mid:l1\".", "type": "string"}),
@@ -1115,6 +1120,8 @@ pub struct ArcSlotResult {
     pub drawn: DrawResult,
     /// The id of the construction arc along the slot's middle.
     pub centre_arc: Option<String>,
+    /// The point held halfway along the construction centre arc.
+    pub middle: Option<String>,
 }
 
 /// What `sketch.centerline` and `sketch.infinite` return.

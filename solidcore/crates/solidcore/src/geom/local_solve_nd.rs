@@ -69,6 +69,13 @@ use crate::math::{BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT};
 // Upstream status `SM_ERR`.
 use crate::error::SM_ERR;
 
+/// Whether the Jacobian system's solve failed with `SM_ERR` (the system is not solvable),
+/// which ends the iteration: by its status, so also a typed failure that replaced the
+/// `Upstream` (#13790).
+fn is_bad_jacobian(error: &SolidError) -> bool {
+    error.upstream_status() == Some(SM_ERR)
+}
+
 fn sm_err(operation: &'static str) -> SolidError {
     SolidError::Upstream {
         operation,
@@ -499,7 +506,7 @@ impl<'a, E: EvalNFunctions + ?Sized> LocalSolveNd<'a, E> {
             // parameter steps from the Jacobian system J * deltas = -F
             match jacobian.solve_linear_system(&equation_values) {
                 Ok(s) => step_unclamped = s.x,
-                Err(SolidError::Upstream { code: SM_ERR, .. }) => {
+                Err(e) if is_bad_jacobian(&e) => {
                     // exit case - the Jacobian system is not solvable
                     self.termination_reason = TerminationReason::BadJacobian;
                     break;
@@ -1055,5 +1062,23 @@ mod tests {
         assert!(matches!(r, Err(SolidError::Upstream { code: SM_ERR, .. })));
         // as upstream, the parameter stays perturbed
         assert_eq!(x, [0.5, -1.0]);
+    }
+
+    /// #13790: a typed `SM_ERR` that replaced the linear solve's `Upstream` ends the
+    /// iteration as a bad Jacobian, as the `Upstream` does.
+    #[test]
+    fn bad_jacobian_reads_the_status_of_a_typed_failure() {
+        use crate::error::replaced_upstream_samples::{native_failures, replaced_upstream};
+        let op = "geom::matrix::Matrix::solve_linear_system";
+        assert!(is_bad_jacobian(&SolidError::sm_err(op)));
+        for typed in replaced_upstream(op, SM_ERR, None) {
+            assert!(is_bad_jacobian(&typed), "{typed:?}");
+        }
+        for other in replaced_upstream(op, 1007, None)
+            .into_iter()
+            .chain(native_failures(op, SM_ERR))
+        {
+            assert!(!is_bad_jacobian(&other), "{other:?}");
+        }
     }
 }

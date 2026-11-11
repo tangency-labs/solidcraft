@@ -71,7 +71,7 @@ Importance-sampled f64 furnace quadrature covers shiny bases, rough coats, parti
 weights, IORs and grazing directions, alongside analytic and reciprocity checks.
 
 Continuation selects the coat GGX lobe with probability `weight/2`, otherwise the
-existing equal cosine/GGX base mixture. Evaluation uses the complete layered BRDF;
+existing equal cosine/visible-GGX base mixture. Evaluation uses the complete layered BRDF;
 the PDF is the same combined mixture for continuation and direct-light MIS. GGX
 samples below the surface are rejected without renormalizing the PDF. Zero weight
 preserves the old BRDF and random-number consumption exactly. GPU BRDF/PDF tests

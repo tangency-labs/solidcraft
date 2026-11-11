@@ -341,12 +341,9 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
         }
         Kind::Pick(n) => {
             let hits = curve_operands(tool.cmd, pick(app, proj, pos));
-            // Symmetry's third pick may be an origin axis lying along the sketch's own x or y
-            // (#1075); the command names those `x` / `y`.
-            let axis_ok = tool.cmd == "sketch.constraint.symmetry" && tool.picks.len() == 2;
             let entity = hits.iter().find_map(|h| match h {
                 Hit::SketchPoint { id, .. } | Hit::SketchCurve { id, .. } => Some(id.clone()),
-                Hit::Axis { name } if axis_ok => sketch_axis_of(app, name).map(str::to_string),
+                Hit::Axis { name } => axis_pick(app, &tool, name),
                 _ => None,
             });
             // With nothing of the sketch there, a body's edge or vertex is picked (kept as its
@@ -419,6 +416,13 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                     hits.iter().find_map(|h| match h {
                         Hit::Edge { .. } => crate::sketch_tools::model_ref(app, h).map(|r| (r.to_string(), true, false)),
                         Hit::Vertex { .. } => crate::sketch_tools::model_ref(app, h).map(|r| (r.to_string(), false, false)),
+                        // An origin axis is projected too; it has no length of its own, so it
+                        // waits for the entity measured to it (a line's distance to the axis).
+                        // Only while the dimension takes another pick: once it has two, a click
+                        // on an axis places the dimension as a click on empty space does.
+                        Hit::Axis { name } if matches!(name.as_str(), "X" | "Y" | "Z") && tool.picks.len() < 2 => {
+                            Some((json!({"axis": name}).to_string(), false, false))
+                        }
                         _ => None,
                     })
                 });
@@ -817,6 +821,7 @@ pub(crate) fn projection_preselection(selection: &[solidcraft_engine::Sel]) -> O
                 Sel::Face { body, point, .. } => json!({"body":body,"face":[point.x,point.y,point.z]}),
                 Sel::Axis { name } => json!({"axis":name}),
                 Sel::Plane { name } => json!({"plane":name}),
+                Sel::ConstructionPoint { name } => json!({"point":name}),
                 _ => return None,
             })
         })
@@ -869,6 +874,75 @@ fn symmetry_args(picks: &[Value], sketch: Option<&solidcraft_engine::sketch::Ske
     let mut rest = (0..3).filter(|i| *i != line).filter_map(|i| picks.get(i));
     let (a, b, line) = (rest.next()?, rest.next()?, picks.get(line)?);
     (a != b).then(|| json!({"a": a, "b": b, "line": line}))
+}
+
+/// An origin axis as a pick of `tool`, or None when the tool does not take it. Symmetry's third
+/// pick may be an axis along the sketch's own x or y (#1075), which the command names `x` / `y`;
+/// either Coincident pick may be any origin axis: the sketch's own `x` / `y`, otherwise its
+/// reference, which the command projects.
+fn axis_pick(app: &SolveApp, tool: &Tool, name: &str) -> Option<String> {
+    match tool.cmd {
+        // Symmetry takes no axis reference, so the axis isn't taken when a curve or point of the
+        // sketch has its `x` / `y` as id: the command would read that entity instead.
+        "sketch.constraint.symmetry" if tool.picks.len() == 2 => own_axis(app, name).map(str::to_string),
+        // The sketch's own `x` / `y`, unless a curve or point of the sketch is called that; then
+        // the axis reference, which can't be mistaken for it.
+        "sketch.constraint.coincident" => {
+            own_axis(app, name).map(str::to_string).or_else(|| matches!(name, "X" | "Y" | "Z").then(|| json!({"axis": name}).to_string()))
+        }
+        _ => None,
+    }
+}
+
+/// The sketch's own `x` / `y` that origin axis `name` lies along, unless a curve or point of the
+/// active sketch has that id.
+fn own_axis(app: &SolveApp, name: &str) -> Option<&'static str> {
+    sketch_axis_of(app, name).filter(|id| {
+        let Ok(st) = app.session.world_state() else { return true };
+        !app.session
+            .active_sketch
+            .and_then(|s| st.sketch(s))
+            .is_some_and(|ss| ss.sketch.curve_index(id).is_some() || ss.sketch.point_index(id).is_some())
+    })
+}
+
+/// An origin axis picked in the browser while a pick tool that takes it runs: the same as
+/// clicking it in the view. False when there is no such tool.
+pub(crate) fn pick_axis_from_browser(app: &mut SolveApp, name: &str) -> bool {
+    let Some(mut tool) = app.tool.take() else { return false };
+    // A dimension measures the axis's projection against the other pick, as a click in the view does.
+    if matches!(tool.kind, Kind::Dimension) && matches!(name, "X" | "Y" | "Z") && tool.picks.len() < 2 {
+        let id = json!({"axis": name}).to_string();
+        // A value already typed into the open dimension is kept: the axis joins only before
+        // anything is typed, as a second pick in the view does.
+        if !tool.picks.contains(&id) && crate::dim_view::live() != Some(true) {
+            tool.picks.push(id);
+            if tool.picks.len() == 2 {
+                match crate::dim_view::begin_live(app, tool.picks.clone(), None) {
+                    Ok(true) => {}
+                    Ok(false) => crate::dim_view::cancel(),
+                    Err(error) => app.set_status(error, true),
+                }
+            }
+        }
+        app.tool = Some(tool);
+        return true;
+    }
+    let picked = match tool.kind {
+        Kind::Pick(n) => axis_pick(app, &tool, name).map(|id| (n, id)),
+        _ => None,
+    };
+    let Some((n, id)) = picked else {
+        app.tool = Some(tool);
+        return false;
+    };
+    tool.picks.push(id);
+    if tool.picks.len() >= n {
+        run_pick(app, &tool);
+        tool.picks.clear();
+    }
+    app.tool = Some(tool);
+    true
 }
 
 fn run_pick(app: &mut SolveApp, t: &Tool) {
@@ -1074,6 +1148,10 @@ pub(crate) fn preview_curve(
             sk.add_arc(c1, c1 - n, c1 + n, [None; 3], None).ok()?;
             sk.add_line(c1 + n, c0 + n, None, None, None).ok()?;
             sk.add_arc(c0, c0 + n, c0 - n, [None; 3], None).ok()?;
+            // The construction line between the arc centres the slot's middle sits on (#7908).
+            let axis = sk.add_line(c0, c1, None, None, None).ok()?;
+            sk.curves.get_mut(axis)?.construction = true;
+            sk.add_point((c0 + c1) * 0.5, None).ok()?;
         }
         ("sketch.slot.arc_center" | "sketch.slot.arc_three_point", [a, b, c]) => {
             let (centre, start, end, radius, width) = if t.cmd == "sketch.slot.arc_center" {
@@ -1104,6 +1182,12 @@ pub(crate) fn preview_curve(
             sk.add_arc(at(t0, radius), at(t0, radius - half), at(t0, radius + half), [None; 3], None).ok()?;
             let guide = sk.add_arc(centre, at(t0, radius), at(t1, radius), [None; 3], None).ok()?;
             sk.curves.get_mut(guide)?.construction = true;
+            // The middle, halfway along the centre arc, and its construction chords (#7908).
+            let mid = at(t0 + sweep * 0.5, radius);
+            for end in [at(t0, radius), at(t1, radius)] {
+                let chord = sk.add_line(mid, end, None, None, None).ok()?;
+                sk.curves.get_mut(chord)?.construction = true;
+            }
         }
         ("sketch.ellipse", [c, m]) => {
             let u = (*m - *c).normalized()?;
@@ -1196,6 +1280,14 @@ pub(crate) fn polygon_outline(t: &Tool, hover: Vec2, sides: f64) -> Option<Vec<V
     Some(corners)
 }
 
+/// The pointer ring is left out where it would touch a dimension's value being placed: drawn
+/// after the value, it would sit on the number (#14231). Its largest radius and half its stroke
+/// count, so a ring centred just outside the value is left out too.
+pub(crate) fn pointer_ring_shown(t: &Tool, at: Pos2) -> bool {
+    const REACH: f32 = 6.0 + 1.5 / 2.0;
+    !(t.kind == Kind::Dimension && crate::dim_view::draft_text().is_some_and(|r| r.expand(REACH).contains(at)))
+}
+
 pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
     if crate::sketch3d::preview(app, t, painter, proj) {
         return;
@@ -1213,7 +1305,9 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
     if let Some((hp, snap)) = &t.hover
         && let Some(sp) = to(*hp)
     {
-        painter.circle_stroke(sp, if snap.is_some() { 6.0 } else { 3.0 }, stroke);
+        if pointer_ring_shown(t, sp) {
+            painter.circle_stroke(sp, if snap.is_some() { 6.0 } else { 3.0 }, stroke);
+        }
         if snap.as_deref() == Some("Midpoint") && t.kind == Kind::HorizontalVertical {
             painter.circle_stroke(sp, 8.0, Stroke::new(2.0, tk.accent));
         }
@@ -1222,7 +1316,7 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
             let readout = painter.text(
                 crate::tool_cursor::readout_at(painter, proj.rect, sp),
                 egui::Align2::LEFT_TOP,
-                format!("{}, {}", crate::prefs::show_mm(app, hp.x, 1), crate::prefs::show_mm(app, hp.y, 1)),
+                crate::sketch_cursor_readout::text(app, *hp),
                 egui::FontId::proportional(solidcraft_theme::Tokens::get().font_small),
                 tk.text_dim,
             );

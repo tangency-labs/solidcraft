@@ -6,7 +6,7 @@ use solidcraft_engine::panels::*;
 
 use super::runtime::{RuntimeHostProposal, standalone_header_action};
 use super::*;
-use crate::ui_kit::{self, HostChrome};
+use crate::ui_kit::{self, BackingTooltipExt as _, HostChrome};
 
 // Raw input plus per-control focus, gesture and command outcomes, with room for
 // pass diagnostics. Repeated passes replace a snapshot rather than growing it.
@@ -2408,14 +2408,14 @@ impl PanelHost for WorkspaceContentHost<'_> {
                     let clicked = response.clicked();
                     let secondary = response.secondary_clicked();
                     if let Some(status) = data.and_then(|value| value.status.as_deref()) {
-                        response.clone().on_hover_text(status);
+                        response.clone().backing_on_hover_text(status);
                     }
                     if let HostPointerTarget::HeaderAction { action, .. } = target
                         && let Some(reason) = data
                             .and_then(|presentation| presentation.actions.iter().find(|binding| binding.id == *action))
                             .and_then(|binding| binding.disabled_reason.as_deref())
                     {
-                        response.clone().on_disabled_hover_text(reason);
+                        response.clone().backing_on_disabled_hover_text(reason);
                     }
                     if self.allow_actions && (clicked || secondary) {
                         match target {
@@ -2569,7 +2569,7 @@ impl PanelHost for WorkspaceContentHost<'_> {
                                             self.commands.push(HostCommand::Content(context.instance.clone(), action.id.clone(), response.id));
                                         }
                                         if let Some(reason) = &action.disabled_reason {
-                                            response.on_disabled_hover_text(reason);
+                                            response.backing_on_disabled_hover_text(reason);
                                         }
                                     }
                                 });
@@ -2910,7 +2910,7 @@ impl WorkspacePanelHost {
                                 commands.push(HostCommand::WidgetLayout(action, response.id));
                             }
                             if let Some(reason) = reason {
-                                response.on_disabled_hover_text(reason);
+                                response.backing_on_disabled_hover_text(reason);
                             }
                         }
                         if let Some(presentation) = metadata.get(instance) {
@@ -2945,7 +2945,7 @@ impl WorkspacePanelHost {
                                     }
                                 }
                                 if let Some(reason) = &action.disabled_reason {
-                                    response.on_disabled_hover_text(reason);
+                                    response.backing_on_disabled_hover_text(reason);
                                 }
                             }
                         }
@@ -3026,7 +3026,7 @@ fn menu_row(ui: &mut egui::Ui, id: egui::Id, label: &str, enabled: bool, reveal:
     if response.enabled() && response.has_focus() && (requested || response.gained_focus()) {
         response.scroll_to_me(None);
     }
-    response.on_hover_text(label)
+    response.backing_on_hover_text(label)
 }
 
 fn record_control(frame: &mut HostFrame, response: &egui::Response, target: HostControlTarget, name: &str, enabled: bool, clip: egui::Rect) {
@@ -3079,7 +3079,7 @@ fn menu_instance(
             commands.push(HostCommand::WidgetLayout(action, response.id));
         }
         if let Err(reason) = check {
-            response.on_disabled_hover_text(locale.text(rule_key(reason.rule)));
+            response.backing_on_disabled_hover_text(locale.text(rule_key(reason.rule)));
         }
         let target = HostControlTarget::PanelMenu { instance: instance.clone() };
         let response = menu_row(ui, control_id(runtime, owners, &target), locale.text("ui.panel_host.menu"), true, reveal);

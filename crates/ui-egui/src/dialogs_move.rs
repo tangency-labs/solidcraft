@@ -192,6 +192,34 @@ pub(crate) fn component_pick(app: &SolveApp, hit: &crate::viewport::Hit, sel: Se
     sel
 }
 
+/// A Ctrl or Shift click (adding to the selection, as in the view) on a body once Point to
+/// Point, Point to Position or Rotate has gone on to From, Point or Axis (#6170): the body joins
+/// Bodies, or leaves it if picked already, and the window stays on the input it was on. So
+/// several bodies are picked without clicking back into Bodies each time (#14205). With Shift
+/// adding only (`allow_toggle` false, Preferences), a picked body stays picked. False when the
+/// click is not such a pick, which then goes to the active input as usual, and while OK computes,
+/// when the inputs hold.
+pub(crate) fn add_body_click(app: &mut SolveApp, hits: &[crate::viewport::Hit], allow_toggle: bool) -> bool {
+    if app.applying.is_some() {
+        return false;
+    }
+    let Some(d) = app.dialog.as_mut() else { return false };
+    let Kind::Move { mode, .. } = d.kind else { return false };
+    if !matches!(mode, ROTATE | POINT_TO_POINT | POINT_TO_POSITION) || d.active == 0 || d.inputs.first().is_none_or(|i| i.accept & BODIES == 0) {
+        return false;
+    }
+    // What the click picks for Bodies, made as a click with Bodies active makes it.
+    let on = std::mem::replace(&mut d.active, 0);
+    let body = crate::viewport::candidate(app, hits).map(|(_, sel)| sel);
+    let Some(mut d) = app.dialog.take() else { return false };
+    if let Some(body) = body.clone().filter(|b| allow_toggle || d.inputs.first().is_none_or(|i| !i.items.contains(b))) {
+        d.pick(&app.session, body);
+    }
+    d.active = on;
+    app.dialog = Some(d);
+    body.is_some()
+}
+
 /// What the move moves and copies, as solid.move takes them: the bodies, and with Create Copy the
 /// components picked (copied as components, see `occurrences`).
 fn targets(app: &SolveApp, d: &Dialog) -> (Vec<String>, Vec<Vec<u64>>) {
@@ -541,11 +569,10 @@ pub fn step_value_field(d: &mut Dialog, step: i64) {
     d.extra.insert("value_field".into(), json!(next));
 }
 
-pub fn drag(app: &SolveApp, d: &mut Dialog, g: Drag) {
-    // The box shows the value the handle drives: the distance along a dragged arrow, the angle
-    // of a dragged ring (#4776). A plane square or the ball moves along two or three axes and
-    // leaves it as it is.
-    let field = match g.handle {
+/// Show the value `handle` drives in the box: the distance along an arrow, the angle of a ring
+/// (#4776). A plane square or the ball moves along two or three axes and leaves it as it is.
+pub fn show_handle_value(d: &mut Dialog, handle: crate::gizmo::Handle) {
+    let field = match handle {
         crate::gizmo::Handle::Axis(i) => Some(i.min(2)),
         crate::gizmo::Handle::Ring(i) => Some(3 + i.min(2)),
         _ => None,
@@ -555,6 +582,10 @@ pub fn drag(app: &SolveApp, d: &mut Dialog, g: Drag) {
     {
         d.extra.insert("value_field".into(), json!(f));
     }
+}
+
+pub fn drag(app: &SolveApp, d: &mut Dialog, g: Drag) {
+    show_handle_value(d, g.handle);
     let Kind::Move { x, y, z, rx, ry, rz, .. } = &d.kind else { return };
     if g.started || !d.extra.contains_key("drag0") {
         let v = [len(app, x), len(app, y), len(app, z), ang(app, rx), ang(app, ry), ang(app, rz)].map(|r| r.unwrap_or(0.0));

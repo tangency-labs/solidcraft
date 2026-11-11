@@ -29,7 +29,8 @@ impl CpuSky {
     }
     pub fn radiance(self, direction: Vec3) -> Result<Vec3> {
         self.validate()?;
-        let d = crate::surface::unit_direction(direction).map_err(|_| JobError::new(ErrorCode::InvalidRequest, "invalid CPU sky direction"))?;
+        let d = solidcraft_viewport::surface::unit_direction(direction)
+            .map_err(|_| JobError::new(ErrorCode::InvalidRequest, "invalid CPU sky direction"))?;
         let row = ((d.z.clamp(-1.0, 1.0).acos() / std::f64::consts::PI * 256.0) as u32).min(255);
         let z = (std::f64::consts::PI * (f64::from(row) + 0.5) / 256.0).cos();
         let [r, g, b] = self.gradient.evaluate(z);

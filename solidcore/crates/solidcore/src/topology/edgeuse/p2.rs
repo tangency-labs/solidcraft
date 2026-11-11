@@ -1482,7 +1482,7 @@ mod tests {
             &StepOffOptions::default(),
         )
         .unwrap_err();
-        assert!(matches!(e, SolidError::Upstream { code: 1007, .. }));
+        assert_eq!(e.upstream_status(), Some(1007));
     }
 
     #[test]
@@ -1490,7 +1490,7 @@ mod tests {
         // CreateUVTrimCurve: NER(pFU)
         let (mut b, eu) = lone_edgeuse();
         let e = rebuild_uv_trim_curve(&Kernel::default(), &mut b, eu).unwrap_err();
-        assert!(matches!(e, SolidError::Upstream { .. }));
+        assert!(e.upstream_status().is_some());
     }
 
     #[test]
@@ -1754,7 +1754,7 @@ mod tests {
         .unwrap());
         let err = is_convex_radial_sector(&opt_in_k, &mut b_const, concave_eu, 1, false, 0.0)
             .unwrap_err();
-        assert!(matches!(err, SolidError::Upstream { code: 1001, .. }));
+        assert_eq!(err.upstream_status(), Some(1001));
 
         // Uninitialised 3D B-spline curve (`nurb == None` -> `SM_ERR` 1001) also masks as
         // `Ok(true)` by default and propagates as `Err` under opt-in.
@@ -1785,7 +1785,7 @@ mod tests {
         assert!(is_convex_radial_sector(&default_k, &mut lone_b, lone_eu, 1, false, 0.0).unwrap());
         let lone_err =
             is_convex_radial_sector(&opt_in_k, &mut lone_b, lone_eu, 1, false, 0.0).unwrap_err();
-        assert!(matches!(lone_err, SolidError::Upstream { code: 1007, .. }));
+        assert_eq!(lone_err.upstream_status(), Some(1007));
 
         // Null-dereference (`edge: None`) and dangling-id errors propagate under both modes.
         let edgeless = lone_b.add_edgeuse_record(Edgeuse::default()).unwrap();

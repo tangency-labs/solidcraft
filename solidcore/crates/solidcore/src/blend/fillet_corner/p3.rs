@@ -2471,7 +2471,10 @@ mod tests {
         b.edgeuse_mut(_side1_mate).unwrap().cw = Some(fil_radial);
 
         let raw = p1::check_nx1_degeneracy(&k, &mut b, v, fil);
-        assert!(matches!(raw, Err(SolidError::Upstream { .. })), "{raw:?}");
+        assert!(
+            raw.as_ref().is_err_and(|e| e.upstream_status().is_some()),
+            "{raw:?}"
+        );
         assert!(check_nx1_degeneracy(&k, &mut b, v, fil).unwrap());
 
         // through Create: the status selects the degenerate corner ...

@@ -17,6 +17,7 @@ use solidcraft_doc::expr::{Kind, definition};
 use crate::{
     Result, Session,
     params::{bad, bool_, expr, str_},
+    schema::{frame::SketchSolve, sketch_dimensioned::DrawDimensionedResult},
 };
 
 /// The dimension roles of a sketch creator, in the order `as_drawn` adds them, or None when
@@ -135,13 +136,13 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     let mut scratch = s.scratch();
-    let mut out = scratch.execute(create, &params)?;
+    let out = scratch.execute(create, &params)?;
     let curves = out.get("curves").and_then(Value::as_array).cloned().unwrap_or_default();
     let curve = |index: usize| -> Result<Value> {
         curves.get(index).filter(|v| v.is_string()).cloned().ok_or_else(|| bad(cmd, "creator did not return the expected curve"))
     };
     let mut added = serde_json::Map::new();
-    let mut defined = Vec::new();
+    let mut defined: Vec<String> = Vec::new();
     for (role, value) in wanted(roles, dimensions, as_drawn) {
         let (entities, ty) = match (create, role) {
             ("sketch.line" | "sketch.line.midpoint", "length") => (vec![curve(0)?], "length"),
@@ -187,8 +188,8 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
                 dimension["value"] = value.clone();
                 dimension["if_redundant"] = json!("driven");
                 let result = scratch.execute("sketch.dimension", &dimension)?;
-                if let Some(name) = result.get("defined").filter(|v| v.is_string()) {
-                    defined.push(name.clone());
+                if let Some(name) = result.get("defined").and_then(Value::as_str) {
+                    defined.push(name.to_string());
                 }
                 added.insert(role.to_string(), result);
             }
@@ -203,23 +204,32 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     let located = if locate {
-        // The freedom left once the shape and its sizes are in: the last reply that reports it.
-        let dof = added.values().rev().chain([&out]).find_map(dof_of);
+        // The freedom left once the shape and its sizes are in, read from the sketch itself: `added`
+        // is keyed by role, so its last entry is not the last dimension placed.
+        let dof = solve_now(&scratch, &params).map(|solve| solve.dof as u64);
         place_from_origin(&mut scratch, &out, &params, dof)
     } else {
         Vec::new()
     };
+    // The creator's `sketch` is its solve before the dimensions: the reply's is the sketch's now.
+    let mut out = out;
+    if let (Some(solve), Some(object)) = (solve_now(&scratch, &params), out.as_object_mut()) {
+        object.insert("sketch".to_string(), serde_json::to_value(solve).map_err(|e| bad(cmd, e.to_string()))?);
+    }
     // Session::execute records the wrapper's before snapshot. Nested history must not leak.
     scratch.undo.clear();
     s.accept_computed(scratch);
-    out["dimensions"] = Value::Object(added);
-    if !defined.is_empty() {
-        out["defined"] = Value::Array(defined);
-    }
-    if locate {
-        out["located"] = Value::Array(located);
-    }
-    Ok(out)
+    let reply = DrawDimensionedResult::new(out, added, defined, locate.then_some(located));
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
+}
+
+/// The solve of the target sketch as it is now (what `sketch.dimension` reports after an edit), or
+/// None when the sketch cannot be read or solved.
+fn solve_now(scratch: &Session, params: &Value) -> Option<SketchSolve> {
+    let id = super::sketch_store::target(scratch, params, "sketch.draw.dimensioned").ok()?;
+    let mut sketch = super::sketch_store::read(&scratch.doc, id).ok()?.clone();
+    let report = super::solve_current(&mut sketch, &scratch.doc).ok()?;
+    Some(super::solve_info(&report))
 }
 
 /// The sketch's degrees of freedom as a command reported them.

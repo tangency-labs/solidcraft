@@ -14,6 +14,13 @@ pub struct Saving {
     done: std::sync::mpsc::Receiver<(Session, Result<Value, String>)>,
 }
 
+impl Saving {
+    /// The command writing: `file.save` or `file.save_as`.
+    pub(crate) fn command(&self) -> &'static str {
+        self.command
+    }
+}
+
 /// Run `file.save` or `file.save_as` with `params`. On the desktop it runs on a worker and is
 /// taken up by [`tick`] (true: it is under way); in the browser, or when no thread can start, it
 /// runs here and is finished on return (false).

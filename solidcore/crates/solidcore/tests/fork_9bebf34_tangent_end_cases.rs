@@ -13,7 +13,7 @@
 //! box (0, 0, 0) .. (48, 16, 20), to the blends' tolerance 4e-5. Drafted 5 degrees inward,
 //! the front face runs tangent into a cone instead.
 //!
-//! [`TANGENT_END_CASES`] holds the fork's thirteen cases with its reason for each that fails
+//! [`TANGENT_END_CASES`] holds twelve of the fork's thirteen cases with its reason for each that fails
 //! (`TANGENT_END_CASES` in capi `tests/ops_kernel.cpp`) at cd47efd, kept as they are. cd47efd's are 6d73e4f's: `concave_chamfer_d2`, `drafted_front_round_r2` and
 //! `front_chamfer_d2` pass, and `chamfers_together_d2` fails at the 3x2 mixed corner where the
 //! chamfers meet; 0cc48bd and b34d61b change no mark. Each case checks, as the fork's
@@ -24,23 +24,30 @@
 //!
 //! The marks run under [`solidcraft_kernel`], the fork's profile at cd47efd as far as solidcore
 //! models it: every fix SolidCraft turns on but `geometric_g2_continuity` (as
-//! `issue_2174_cap_rim_two_edges.rs`) and the two that are not the fork's at cd47efd, WR-685's
-//! G^n section (its 11ea2d9 is later) and WR-710's refusal. At 9bebf34 the fork had neither the
+//! `issue_2174_cap_rim_two_edges.rs`) and WR-710's refusal, not the fork's at cd47efd. The G^n
+//! section and the generic blend's regularity and fit checks (WR-685, WR-696; the fork's
+//! later 11ea2d9 and smlib#79) are on, as solidcore builds them always. At 9bebf34 the fork had neither the
 //! tangent end of the trace (its later 6d73e4f/0cc48bd/b34d61b, WR-600) nor the blend corner
 //! (its later smlib#79 step 4); solidcore builds both always (#2400), so 9bebf34's marks are
 //! not run. At 5e8c9c1, with both, the fork's marks of the thirteen cases are cd47efd's, and
 //! solidcore's are too.
 //!
-//! Four of the cases have tests already:
-//! `fork_856b54e_tangent_end.rs` (front chamfer, concave chamfer, front round, against closed
-//! forms) and `fork_cd47efd_tangent_end_rib_sqrt_s.rs` (the curvature round's rib). They stay
-//! in the table for the fork's marks. The fork's twins on its `smlib-tangent-ends` branch,
+//! The thirteenth, `front_curvature_round_r2` (the front top edge rounded 2 by the G2 blend
+//! curve at thirds, the fork's `SetBlendCurveAtThirds`), is not run: solidcore's
+//! curvature-continuous round is the G^n section (WR-685; the blend curve and its at-thirds
+//! option went with `fillet_gn_section_generator`, WR-685 addendum 2026-11-06), the fork's
+//! later 11ea2d9. That round on the same edge is graded against its own quadrature in
+//! `fork_cd47efd_tangent_end_rib_sqrt_s.rs`.
+//!
+//! Three of the cases have tests already: `fork_856b54e_tangent_end.rs` (front chamfer,
+//! concave chamfer, front round, against closed forms). They stay in the table for the
+//! fork's marks. The fork's twins on its `smlib-tangent-ends` branch,
 //! c5ea180 and 169adea, have the same diffs as 9bebf34 and a87c502, and on its `replay/1.0.1`
 //! 6d73e4f, 0cc48bd and b34d61b are 856b54e, 4ee7d3a and cd47efd (the same trees).
 //!
 //! Differences from the fork's capi, all in how the test drives the kernel: blends go
 //! through [`FilletSession`] per edge (constant radius; `Linear` for the chamfer, without
-//! the capi's bevelled corners; `BlendCurve` G2 at thirds for the curvature round), edges
+//! the capi's bevelled corners), edges
 //! are picked as the nearest within 0.1 of each point; the drafted peg is a taper extrude
 //! with `LinearExtension` corners, because `CurveExtension` (the fork's
 //! `SMLIB_DRAFT_CORNER_CURVATURE`) refuses the half disc's 180-degree wall here (`NotExact`
@@ -73,18 +80,14 @@ use solidcore::{Brep, Kernel};
 
 const PI: f64 = core::f64::consts::PI;
 
-/// Every fix SolidCraft turns on: all but `geometric_g2_continuity`, and but WR-685's
-/// `fillet_gn_section_generator`, the fork's later 11ea2d9 (= 0bd3f4d), which smlib#76 does
-/// not have (its section refuses the curvature round's thumbweight 1), and but WR-710's
+/// Every fix SolidCraft turns on: all but `geometric_g2_continuity`, and but WR-710's
 /// `fillet_refuse_mixed_corner_crossing_rails`, not the fork's (it refuses the rounds
 /// together where no Mixed corner takes the corner). The fork's profile at cd47efd.
 fn solidcraft_kernel() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity"
-            && name != "fillet_gn_section_generator"
-            && name != "fillet_refuse_mixed_corner_crossing_rails"
+        if name != "geometric_g2_continuity" && name != "fillet_refuse_mixed_corner_crossing_rails"
         {
             *f.flag_mut(name).unwrap() = true;
         }
@@ -129,7 +132,6 @@ fn tangent_peg(k: &mut Kernel, draft_deg: f64) -> Brep {
 #[derive(Clone, Copy)]
 enum Kind {
     Round,
-    Curvature,
     Chamfer,
 }
 
@@ -180,13 +182,11 @@ fn blend(
     }
     let (xsect, continuity) = match kind {
         Kind::Round => (FilletSurfaceGeneratorType::Circular, 1),
-        Kind::Curvature => (FilletSurfaceGeneratorType::BlendCurve, 2),
         Kind::Chamfer => (FilletSurfaceGeneratorType::Linear, 1),
     };
     let xsects = vec![xsect; edges.len()];
     {
         let mut s = FilletSession::new(k, b).map_err(|e| e.to_string())?;
-        s.set_blend_curve_at_thirds(matches!(kind, Kind::Curvature));
         s.prepare_per_edge_constant_radius(k, &edges, &radii, &xsects, continuity, 1.0)
             .and_then(|()| s.do_fillet(k))
             .map_err(|e| format!("status: {e}"))?;
@@ -207,7 +207,6 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 // The fork's quadratures of the rig's expected answers (tanh-sinh, converged to 1e-13).
 const PEG_V0: f64 = 6400.0 + 960.0 * PI;
 const PEG_FRONT_ROUND_R2: f64 = 32.306_475_043_873_16;
-const PEG_FRONT_CURVATURE_R2: f64 = 22.621_011_133_536_857;
 const PEG_FRONT_CHAMFER_D2: f64 = 74.130_570_575_311_6;
 const PEG_CONCAVE_CHAMFER_D2: f64 = 41.656_784_248_897_58;
 
@@ -338,10 +337,6 @@ fn front_chamfer_d2(k: &mut Kernel) -> Outcome {
     let want = PEG_V0 - PEG_FRONT_CHAMFER_D2;
     one(k, 0.0, Kind::Chamfer, &[PEG_FRONT], &[2.0], want, true)
 }
-fn front_curvature_round_r2(k: &mut Kernel) -> Outcome {
-    let want = PEG_V0 - PEG_FRONT_CURVATURE_R2;
-    one(k, 0.0, Kind::Curvature, &[PEG_FRONT], &[2.0], want, true)
-}
 fn front_round_r1_5_then_concave_round_r3(k: &mut Kernel) -> Outcome {
     rounds_in_turn(k, 1.5, 3.0, true)
 }
@@ -423,7 +418,7 @@ const ROUNDS_R2_HERE: &str = "the rounds together build within the box and check
 const ROUNDS_R5_HERE: &str = "the blend corner's Mixed corner (built in solidcore from smlib#82) builds the rounds together within the box";
 const CHAMFERS_HERE: &str = "the blend corner's Mixed corner (built in solidcore from smlib#82) builds the chamfers together at the tangent seam";
 
-const TANGENT_END_CASES: [TangentEndCase; 13] = [
+const TANGENT_END_CASES: [TangentEndCase; 12] = [
     TangentEndCase {
         name: "chamfers_together_d2",
         run: chamfers_together_d2,
@@ -463,11 +458,6 @@ const TANGENT_END_CASES: [TangentEndCase; 13] = [
     TangentEndCase {
         name: "front_chamfer_d2",
         run: front_chamfer_d2,
-        at_cd47efd: PASSES,
-    },
-    TangentEndCase {
-        name: "front_curvature_round_r2",
-        run: front_curvature_round_r2,
         at_cd47efd: PASSES,
     },
     TangentEndCase {

@@ -1,6 +1,6 @@
 //! Stable palette slots for the model scene.
 //!
-//! Cached block bytes index a scene palette (`solidcraft_gpu::view::Palette`). A body's faces,
+//! Cached block bytes index a scene palette (`solidcraft_viewport_gpu::view::Palette`). A body's faces,
 //! edges and placement keep their slots while the scene rebuilds, so an appearance or theme edit
 //! changes only palette entries — never a block's vertex bytes. Slots are append-only for the
 //! session and are reset when a different design replaces the one they belonged to.

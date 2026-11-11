@@ -15,46 +15,6 @@ pub fn kernel_thread(name: &str) -> std::thread::Builder {
     std::thread::Builder::new().name(name.to_owned()).stack_size(KERNEL_STACK)
 }
 
-/// The kernel's worker pool, its threads with the kernel's stack; `None` when it cannot start
-/// (the work then runs on the calling thread).
-#[cfg(not(target_arch = "wasm32"))]
-fn pool() -> Option<&'static rayon::ThreadPool> {
-    static POOL: std::sync::OnceLock<Option<rayon::ThreadPool>> = std::sync::OnceLock::new();
-    POOL.get_or_init(|| rayon::ThreadPoolBuilder::new().thread_name(|i| format!("solidcraft-kernel-{i}")).stack_size(KERNEL_STACK).build().ok())
-        .as_ref()
-}
-
-/// `f` over `items`, results in item order: on the pool when `parallel`, else on the calling
-/// thread. Waking the pool's workers costs tens of microseconds, so callers ask for it only
-/// when the items carry more work than that (decided from the work, not the item count).
-pub(crate) fn map<T: Sync, R: Send>(what: &'static str, items: &[T], parallel: bool, f: impl Fn(&T) -> Result<R> + Sync) -> Vec<Result<R>> {
-    // The workers run under the caller's validation mode (`crate::validation`) and stop token.
-    let scope = crate::validation::current();
-    let stop = solidcraft_smlib::stop::current();
-    let one = |item: &T| solidcraft_smlib::stop::scoped(stop.clone(), || crate::validation::within(scope.clone(), || guard(what, || f(item))));
-    // The browser build has no worker pool: everything runs on the calling thread.
-    #[cfg(target_arch = "wasm32")]
-    let _ = parallel;
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        use rayon::prelude::*;
-        if parallel && items.len() > 1 {
-            if rayon::current_thread_index().is_some() {
-                // On a pool's worker (the kernel's, or a one-thread pool of
-                // `map_with_local_pools`): that pool's threads, as many as it has.
-                if rayon::current_num_threads() > 1 {
-                    return items.par_iter().map(one).collect();
-                }
-            } else if let Some(pool) = pool()
-                && pool.current_num_threads() > 1
-            {
-                return pool.install(|| items.par_iter().map(one).collect());
-            }
-        }
-    }
-    items.iter().map(one).collect()
-}
-
 /// Run `f` on every item, spread over plain threads (one per core, at most `max_threads`),
 /// each pulling the next item; on the calling thread in the browser build or when threads
 /// cannot be started. Each call runs under [`crate::guard`] (a panic is that item's loss).
@@ -199,7 +159,7 @@ mod tests {
     }
 
     /// Kernel work recurses as deep as solidcore's algorithms do on every thread the kernel runs
-    /// it on: a kernel thread, the pool's workers, and the helpers of `map_on_threads`.
+    /// it on: a kernel thread and the helpers of `map_on_threads`.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn kernel_threads_have_the_kernels_stack() {
@@ -207,22 +167,7 @@ mod tests {
         let on_thread = kernel_thread("deep").spawn(|| deep(80)).unwrap().join().unwrap();
         assert_eq!(on_thread, want);
         let items = [80u8; 16];
-        let on_pool = kernel_thread("deep-pool").spawn(move || map("deep", &items, true, |&d| Ok(deep(d)))).unwrap().join().unwrap();
-        assert!(on_pool.iter().all(|r| r.as_ref().ok() == Some(&want)), "{on_pool:?}");
         let on_helpers = kernel_thread("deep-helpers").spawn(move || map_on_threads(&items, 8, |&d| deep(d))).unwrap().join().unwrap();
         assert!(on_helpers.iter().all(|r| *r == Some(want)), "{on_helpers:?}");
-    }
-
-    #[test]
-    fn keeps_order_and_errors() {
-        let items: Vec<u32> = (0..1000).collect();
-        let out = map("test", &items, true, |x| if *x == 500 { Err(KernelError::Invalid("five hundred".into())) } else { Ok(x * 2) });
-        assert_eq!(out.len(), 1000);
-        for (i, r) in out.iter().enumerate() {
-            match r {
-                Ok(v) => assert_eq!(*v, 2 * i as u32),
-                Err(_) => assert_eq!(i, 500),
-            }
-        }
     }
 }

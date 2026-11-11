@@ -191,7 +191,7 @@ fn button(ui: &mut egui::Ui, rect: Rect, key: &str, tip: &str, icon: &str) -> bo
     crate::icons::paint_icon(ui.painter(), rect.shrink(t.space_4), icon, 1.0);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, tip));
     crate::scenario::publish_target(key, rect);
-    response.on_hover_text(tip).clicked()
+    response.backing_on_hover_text(tip).clicked()
 }
 
 /// Draw the window for the open edit `e` at its dimension's text `at` (screen) and answer it:
@@ -231,7 +231,8 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context, e: &mut Edit, at: Po
                 let (title, _) = ui.allocate_exact_size(egui::vec2(width, t.control_height), egui::Sense::hover());
                 let name = solidcraft_ui_text::format("dialog.dimension_name", &[("name", &e.param)]);
                 ui.scope_builder(egui::UiBuilder::new().max_rect(title).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
-                    crate::ui_kit::text(ui, &name, crate::ui_kit::Text::Inline).on_hover_text(solidcraft_ui_text::tr("dialog.dimension_insert_hint"));
+                    crate::ui_kit::text(ui, &name, crate::ui_kit::Text::Inline)
+                        .backing_on_hover_text(solidcraft_ui_text::tr("dialog.dimension_insert_hint"));
                 });
                 let side = t.control_height;
                 let cancel = Rect::from_min_size(egui::pos2(title.right() - side, title.top()), egui::vec2(side, side));

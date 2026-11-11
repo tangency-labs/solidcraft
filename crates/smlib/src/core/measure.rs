@@ -303,12 +303,18 @@ impl<T> super::dump::Answer for std::result::Result<T, Refusal> {
 /// owners' identities the check cannot know, fails the check with "not supported yet": the check
 /// never reports a body valid on fewer tests than the C++ kernel runs.
 pub(crate) fn check(body: &Body, level: CheckLevel) -> Result<CheckReport> {
+    check_with(body, level, false)
+}
+
+/// [`check`], stopped by the token over this thread's work when `stoppable` (a body the caller
+/// consumes: [`super::with_own_body`]).
+pub(crate) fn check_with(body: &Body, level: CheckLevel, stoppable: bool) -> Result<CheckReport> {
     let lv = match level {
         CheckLevel::Basic => SolidcoreCheckLevel::Level0,
         CheckLevel::Geometry => SolidcoreCheckLevel::Level1,
         CheckLevel::All => SolidcoreCheckLevel::Level2,
     };
-    let c = match with_body("check", body, |k, b| {
+    let checked = |k: &mut Kernel, b: &mut solidcore::topology::Brep| {
         let naming = b.naming();
         if naming == NamingScheme::Unknown {
             return Ok(Err(Refusal::Naming(naming)));
@@ -317,7 +323,9 @@ pub(crate) fn check(body: &Body, level: CheckLevel) -> Result<CheckReport> {
             Err(SolidError::Unported { upstream, unit }) => Ok(Err(Refusal::Unported(upstream, unit))),
             r => r.map(Ok),
         }
-    })? {
+    };
+    let ran = if stoppable { super::with_own_body("check", body, checked) } else { with_body("check", body, checked) };
+    let c = match ran? {
         Ok(c) => c,
         Err(Refusal::Unported(upstream, unit)) => {
             return Err(Error::Solidcore(format!("smlib_brep_check: {upstream}: not supported yet: solidcore has not ported it (unit {unit})")));

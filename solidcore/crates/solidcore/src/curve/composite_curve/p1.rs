@@ -429,12 +429,18 @@ impl CurveEvaluate for CompositeCurve {
         _non_zero_tangents: bool,
     ) -> Result<Vec<Vec3>> {
         // SmCurve::Evaluate (not overridden)
-        Err(SolidError::sm_err(OP))
+        Err(SolidError::curve_failed(
+            OP,
+            "a composite curve has no evaluation of its own",
+        ))
     }
 
     fn evaluate_point(&self, _k: &Kernel, _t: f64) -> Result<Point3> {
         // SmCurve::EvaluatePoint (not overridden)
-        Err(SolidError::sm_err(OP))
+        Err(SolidError::curve_failed(
+            OP,
+            "a composite curve has no point evaluation of its own",
+        ))
     }
 
     fn is_closed_virtual(&self, _k: &Kernel, _interval: &Extent1d, _tol: f64) -> Result<bool> {
@@ -1164,10 +1170,16 @@ impl CompositeCurve {
     ) -> Result<BuiltComposites> {
         // check input
         if same_point_tolerance <= 0.0 {
-            return Err(SolidError::sm_err(OP_BUILD));
+            return Err(SolidError::curve_failed(
+                OP_BUILD,
+                "the same-point tolerance is not positive",
+            ));
         }
         if !(distance_to_create_line == 0.0 || distance_to_create_line > same_point_tolerance) {
-            return Err(SolidError::sm_err(OP_BUILD));
+            return Err(SolidError::curve_failed(
+                OP_BUILD,
+                "the distance to create a line is neither zero nor above the same-point tolerance",
+            ));
         }
 
         // Get the max input tolerance.
@@ -1193,11 +1205,10 @@ impl CompositeCurve {
         for c in curves {
             let mut item = CurveItem::new(c);
             // (status ignored upstream: GetEnds returns void)
-            if let Some(e) = ignored(
-                item.curve
-                    .as_ref()
-                    .map_or_else(|| Err(SolidError::sm_err(OP_BUILD)), |curve| curve.ends(k)),
-            )? {
+            if let Some(e) = ignored(item.curve.as_ref().map_or_else(
+                || Err(SolidError::curve_failed(OP_BUILD, "the item has no curve")),
+                |curve| curve.ends(k),
+            ))? {
                 item.start = e.start;
                 item.end = e.end;
             }
@@ -1872,7 +1883,10 @@ pub fn create_corner(
         }
         OffsetCornerType::CurveExtension => {
             // No other corner cases implemented yet
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::curve_failed(
+                OP,
+                "an offset corner by curve extension is not implemented",
+            ));
         }
     }
     Ok(out)

@@ -17,16 +17,21 @@
 //! knot storage, optional indices in use below the storage) or an upstream `.sms`
 //! file (`{"sms": {"$upstream_file": "Surface.sms"}}`, read here by
 //! [`read_sms`]). Every run has at least [`MIN_GENERATED`] generated cases.
+//!
+//! A surface the Rust constructors refuse (its control points in use mix rational and
+//! non-rational ones) makes the case `rejected` with the constructor's reason; no op
+//! runs on it.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use solidcore::error::nurbs::nlib_number;
 use solidcore::nurbs::geom::Rectangle;
 use solidcore::nurbs::math::{CPoint, NOW, NOZ};
 use solidcore::nurbs::srf_basic::{
     make_rat_compatible, size_arrays, Direction, Surface, SurfaceIndices,
 };
-use solidcore::{Result as SolidResult, SolidError};
+use solidcore::{Result as SolidResult};
 
 use crate::case::CaseContext;
 use crate::runner::default_cases;
@@ -160,7 +165,20 @@ fn indices(idx: &[usize; 6]) -> SurfaceIndices {
     SurfaceIndices { n, m, p, q, r, s }
 }
 
-fn build(s: &InlineSrf) -> Result<Surface, HarnessError> {
+/// Why a case's record was not produced.
+enum Fail {
+    Harness(HarnessError),
+    /// A surface constructor refused an input surface (the reason).
+    Refused(String),
+}
+
+impl From<HarnessError> for Fail {
+    fn from(e: HarnessError) -> Self {
+        Self::Harness(e)
+    }
+}
+
+fn build(s: &InlineSrf) -> Result<Surface, Fail> {
     let (_, used) = shape(s)?;
     let net = s
         .net
@@ -176,7 +194,7 @@ fn build(s: &InlineSrf) -> Result<Surface, HarnessError> {
         s: used[3],
     };
     Surface::with_indices(net, s.u.clone(), s.v.clone(), idx)
-    .map_err(|e| harness(format!("rust surface: {e}")))
+        .map_err(|e| Fail::Refused(format!("rust surface: {e}")))
 }
 
 // ---- output layout ----------------------------------------------------------------
@@ -274,7 +292,7 @@ fn to_output(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
 fn status<T>(r: &SolidResult<T>) -> f64 {
     match r {
         Ok(_) => 0.0,
-        Err(SolidError::Nlib { code, .. }) => f64::from(code.code()),
+        Err(e) if nlib_number(e).is_some() => f64::from(nlib_number(e).unwrap_or_default()),
         Err(_) => -1.0,
     }
 }
@@ -292,7 +310,7 @@ fn dump(o: &mut Vec<f64>, s: &Surface) {
     o.extend_from_slice(s.v_knots());
 }
 
-fn rust_flat(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
+fn rust_flat(i: &Inputs) -> Result<Vec<f64>, Fail> {
     let mut o = Vec::new();
     match i {
         Inputs::Inspect { sur, eps, sized } => {
@@ -398,7 +416,11 @@ fn rust_flat(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
 }
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
-    to_output(i, &rust_flat(i)?)
+    match rust_flat(i) {
+        Ok(flat) => to_output(i, &flat),
+        Err(Fail::Refused(why)) => Ok(Output::rejected(why)),
+        Err(Fail::Harness(e)) => Err(e),
+    }
 }
 
 // ---- generation -------------------------------------------------------------------

@@ -1061,13 +1061,23 @@ impl Torus {
         let ref_frame = ref_iso.reference_frame.ok_or_else(missing)?;
         let other_frame = other_iso.reference_frame.ok_or_else(missing)?;
         let min_rad = other_iso.radius.ok_or_else(missing)?;
-        let sweep_ivl = ref_iso.angles.ok_or_else(missing)?;
         let common_point = other_iso.common_line_point.ok_or_else(missing)?;
         let common_vec = other_iso.common_line_vec.ok_or_else(missing)?;
 
         // get torus origin = MinorCircleCenter projected onto common line
         let torus_origin =
             common_point + common_vec.dot(other_frame.origin() - common_point) * common_vec;
+
+        // not upstream (#3199): the x axis and the sweep interval from the form's own first
+        // sweep row's ends about the axis (`sweep_frame`), not from `is_arc`'s fit of it
+        let Some((torus_x_axis, torus_y_axis, sweep_ivl)) = sweep_frame(
+            torus_origin,
+            ref_frame.z_axis(),
+            fitted_sides(&ref_frame, ref_iso.angles.ok_or_else(missing)?),
+            meridians(test, swap_uv)?,
+        ) else {
+            return Ok(None);
+        };
 
         // get torus orientation and size
         // not upstream (WR-501, #1470, opt-in; tangency-labs/smlib@6136a04): the major
@@ -1079,9 +1089,7 @@ impl Torus {
             other_frame.origin() - ref_frame.origin()
         };
         let maj_rad = major_vec.length();
-        let torus_x_axis = ref_frame.x_axis(); // the frame where all circles are parallel
-        let torus_y_axis = ref_frame.y_axis();
-        let torus_z_axis = ref_frame.z_axis();
+        let torus_z_axis = ref_frame.z_axis(); // the frame where all circles are parallel
 
         // torus must have positive radii
         if min_rad <= EFF_ZERO || maj_rad <= EFF_ZERO {
@@ -1294,7 +1302,6 @@ impl Torus {
         let mut ref_frame = ref_iso.reference_frame.ok_or_else(missing)?;
         let other_frame = other_iso.reference_frame.ok_or_else(missing)?;
         let min_rad = other_iso.radius.ok_or_else(missing)?;
-        let sweep_ivl = ref_iso.angles.ok_or_else(missing)?;
         let common_point = other_iso.common_line_point.ok_or_else(missing)?;
         let common_vec = other_iso.common_line_vec.ok_or_else(missing)?;
 
@@ -1302,8 +1309,18 @@ impl Torus {
         let torus_origin =
             common_point + common_vec.dot(other_frame.origin() - common_point) * common_vec;
 
+        // not upstream (#3199): the x axis and the sweep interval from the form's own first
+        // sweep row's ends about the axis (`sweep_frame`), not from `is_arc`'s fit of it
+        let (x_axis, y_axis, sweep_ivl) = sweep_frame(
+            torus_origin,
+            ref_frame.z_axis(),
+            fitted_sides(&ref_frame, ref_iso.angles.ok_or_else(missing)?),
+            meridians(srf, swap_uv)?,
+        )
+        .ok_or_else(|| SolidError::sm_err(OP_REBUILD))?;
+
         // Install the origin into pRefFrame.  // [B328]
-        let _ = ref_frame.set_canonical(torus_origin, ref_frame.x_axis(), ref_frame.y_axis());
+        let _ = ref_frame.set_canonical(torus_origin, x_axis, y_axis);
 
         // get torus orientation and size
         let major_vec = other_frame.origin() - ref_frame.origin();
@@ -1587,6 +1604,82 @@ impl Revolved for Torus {
 
 /// `SmTorus::CreateIsoParametricCurve` of the surface of revolution `rev` of a torus
 /// of `shape` (also called from the base class's rebuilds, where it is virtual).
+/// The control points, Euclidean, of the form's first and last meridians: the columns of its
+/// net at the sweep's two ends (the sweep is along u, or along v with `swap_uv`). A clamped
+/// end's column is that boundary curve's own control polygon, and a meridian lies in a plane
+/// through the axis, so every one of its control points has the meridian's angle about the
+/// axis.
+fn meridians(srf: &BSplineSurface, swap_uv: bool) -> Result<[Vec<Point3>; 2]> {
+    let nurb = srf
+        .gw_nurb()
+        .ok_or_else(|| SolidError::null_pointer(OP_NURB_TORUS))?;
+    let (n, m) = (nurb.n(), nurb.m());
+    let column = |end: bool| -> Result<Vec<Point3>> {
+        if swap_uv {
+            let j = if end { m } else { 0 };
+            (0..=n).map(|i| Ok(nurb.cpt(i, j)?.to_euclid())).collect()
+        } else {
+            let i = if end { n } else { 0 };
+            (0..=m).map(|j| Ok(nurb.cpt(i, j)?.to_euclid())).collect()
+        }
+    };
+    Ok([column(false)?, column(true)?])
+}
+
+/// The directions, about the axis, of the fitted first sweep row's ends (`is_arc`'s frame and
+/// angles): [`sweep_frame`] reads only their sides from them.
+fn fitted_sides(frame: &Axis2Placement, angles: Extent1d) -> [Vec3; 2] {
+    let at = |deg: f64| {
+        let a = deg * PI / 180.0;
+        a.cos() * frame.x_axis() + a.sin() * frame.y_axis()
+    };
+    [at(angles.min()), at(angles.max())]
+}
+
+/// Not upstream (#3199): a recognised torus's x axis, y axis and sweep interval (degrees) from
+/// its form's first and last meridians (`meridians`: their control points, exact data), about
+/// the axis through `origin` along the unit `z`. A meridian lies in a plane through the axis,
+/// so its control points share its angle on the side the tube's centre is on, and the
+/// opposite angle past the axis (a spindle torus's tube crosses it); `sides` (the fitted
+/// row's end directions, [`fitted_sides`]) says which side that is, and nothing else. Each
+/// meridian's angle is read at its control point farthest from the axis on that side: x is
+/// the first meridian's direction square to the axis (so the interval starts at 0), y `z x
+/// x`, and the interval's end the last meridian's angle from x about z (`atan2` in that
+/// frame), a closed sweep (within `SM_EFF_ZERO_SQRT` of 0) at 360, as `is_arc` maps its end.
+/// `is_arc` fitted the first sweep row's circle through three samples, so on a short arc its
+/// centre, and with it the x axis and the end angle, was off the axis by its conditioning
+/// (1e-14 rad on #3185's grooves); the converter centres the sweep circle on the axis, so its
+/// ends and its inside now agree to rounding. `None` when a meridian has no control point off
+/// the axis on its side.
+fn sweep_frame(
+    origin: Point3,
+    z: Vec3,
+    sides: [Vec3; 2],
+    [first, last]: [Vec<Point3>; 2],
+) -> Option<(Vec3, Vec3, Extent1d)> {
+    let radial = |p: &Point3| {
+        let s = *p - origin;
+        s - s.dot(z) * z
+    };
+    let farthest = |ps: &[Point3], side: Vec3| {
+        ps.iter()
+            .map(radial)
+            .filter(|r| r.dot(side) > 0.0)
+            .max_by(|a, b| a.length().total_cmp(&b.length()))
+    };
+    let [first_side, last_side] = sides;
+    let x = farthest(&first, first_side)?.unitize().ok()?;
+    let y = z.cross(x);
+    let e = farthest(&last, last_side)?;
+    let mut end_deg = e.dot(y).atan2(e.dot(x)) * 180.0 / PI;
+    if end_deg.abs() < EFF_ZERO_SQRT {
+        end_deg = 360.0;
+    } else if end_deg < 0.0 {
+        end_deg += 360.0;
+    }
+    Some((x, y, Extent1d::from_min_max(0.0, end_deg)))
+}
+
 fn iso_curve(
     rev: &SurfOfRevolution,
     shape: Shape,

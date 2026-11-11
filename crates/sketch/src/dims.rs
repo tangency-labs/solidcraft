@@ -217,23 +217,35 @@ pub fn chain_centres(sk: &Sketch) -> Vec<Vec2> {
 
 /// The default text place of a dimension: a linear one on the side of its points away from
 /// `away` (the centre of the geometry it measures), the others where [`dim_layout`] puts them.
-pub fn default_text(f: &DimFrame, away: Vec2, px: f64) -> Option<Vec2> {
+/// `half` is the half size of the text box (sketch units): the text sits far enough out that
+/// its box stays clear of the measured points (#12482).
+pub fn default_text(f: &DimFrame, away: Vec2, px: f64, half: Vec2) -> Option<Vec2> {
     match *f {
         DimFrame::Linear { p0, p1, dir } => {
             let side = if ((p0 + p1) * 0.5 - away).dot(dir.perp()) < -1e-9 { -1.0 } else { 1.0 };
-            Some(Vec2::new(0.0, side * 22.0 * px))
+            Some(Vec2::new(0.0, side * linear_offset(dir, px, half)))
         }
         _ => None,
     }
 }
 
+/// How far across from its measured points a linear dimension's unplaced text sits: 22 pixels,
+/// or more when the text box (drawn level on screen, `half` its half size) reaches further
+/// across `dir` than that, so the box keeps 8 pixels clear of the measured line.
+fn linear_offset(dir: Vec2, px: f64, half: Vec2) -> f64 {
+    let n = dir.perp();
+    let across = half.x.abs() * n.x.abs() + half.y.abs() * n.y.abs();
+    let across = if across.is_finite() { across } else { 0.0 };
+    (22.0 * px).max(across + 8.0 * px)
+}
+
 /// The text offset [`dim_layout_reaching`] uses when a dimension's text was never placed:
-/// frame-relative, as in [`encode_text`].
-pub fn default_text_offset(f: &DimFrame, px: f64) -> Vec2 {
+/// frame-relative, as in [`encode_text`]. `half` is the half size of the text box.
+pub fn default_text_offset(f: &DimFrame, px: f64, half: Vec2) -> Vec2 {
     match *f {
-        DimFrame::Linear { .. } => Vec2::new(0.0, 22.0 * px),
+        DimFrame::Linear { dir, .. } => Vec2::new(0.0, linear_offset(dir, px, half)),
         // Where a linear dimension to the minor axis end puts it.
-        DimFrame::HalfAxis { dir, len, .. } => dir * (len * 0.5) + dir.perp() * (22.0 * px),
+        DimFrame::HalfAxis { dir, len, .. } => dir * (len * 0.5) + dir.perp() * linear_offset(dir, px, half),
         DimFrame::Radial { radius, .. } => Vec2::new(1.0, 1.0) * ((radius + 18.0 * px) * std::f64::consts::FRAC_1_SQRT_2),
         DimFrame::Angular { d0, sweep, .. } => Vec2::from_angle(d0.angle() + sweep * 0.5) * (48.0 * px),
         DimFrame::ArcLength { radius, start, sweep, .. } => Vec2::from_angle(start + sweep * 0.5) * (radius + 20.0 * px),
@@ -324,14 +336,14 @@ pub fn dim_layout_reaching(f: &DimFrame, text: Option<Vec2>, px: f64, half: Vec2
     let mut out = DimLayout::default();
     match *f {
         DimFrame::HalfAxis { center, dir, len } => {
-            let t = text.unwrap_or_else(|| default_text_offset(f, px));
+            let t = text.unwrap_or_else(|| default_text_offset(f, px, half));
             let (linear, t) = half_axis_side(center, dir, len, t);
             return dim_layout_reaching(&linear, Some(t), px, half, reach);
         }
         DimFrame::Linear { p0, p1, dir } => {
             let n = dir.perp();
             let m = (p0 + p1) * 0.5;
-            let t = text.unwrap_or_else(|| default_text_offset(&DimFrame::Linear { p0, p1, dir }, px));
+            let t = text.unwrap_or_else(|| default_text_offset(&DimFrame::Linear { p0, p1, dir }, px, half));
             let (s, h) = (t.x, t.y);
             // The dimension line sits `h` across from the middle of the measured points.
             let q0 = p0 + n * (h - (p0 - m).dot(n));
@@ -375,7 +387,7 @@ pub fn dim_layout_reaching(f: &DimFrame, text: Option<Vec2>, px: f64, half: Vec2
             }
         }
         DimFrame::Radial { center, radius, diameter, arc } => {
-            let t = text.unwrap_or_else(|| default_text_offset(&DimFrame::Radial { center, radius, diameter, arc }, px));
+            let t = text.unwrap_or_else(|| default_text_offset(&DimFrame::Radial { center, radius, diameter, arc }, px, half));
             let u = t.normalized().unwrap_or(Vec2::new(1.0, 1.0) * std::f64::consts::FRAC_1_SQRT_2);
             let d = t.len();
             let at = center + u * radius;
@@ -418,7 +430,7 @@ pub fn dim_layout_reaching(f: &DimFrame, text: Option<Vec2>, px: f64, half: Vec2
         }
         DimFrame::Angular { vertex, d0, sweep } => {
             let a0 = d0.angle();
-            let t = text.unwrap_or_else(|| default_text_offset(&DimFrame::Angular { vertex, d0, sweep }, px));
+            let t = text.unwrap_or_else(|| default_text_offset(&DimFrame::Angular { vertex, d0, sweep }, px, half));
             let r = t.len().max(arrow);
             out.text = vertex + t;
             // Extension rays from the vertex out past the arc.
@@ -447,7 +459,7 @@ pub fn dim_layout_reaching(f: &DimFrame, text: Option<Vec2>, px: f64, half: Vec2
             }
         }
         DimFrame::ArcLength { center, radius, start, sweep } => {
-            let t = text.unwrap_or_else(|| default_text_offset(&DimFrame::ArcLength { center, radius, start, sweep }, px));
+            let t = text.unwrap_or_else(|| default_text_offset(&DimFrame::ArcLength { center, radius, start, sweep }, px, half));
             let r = t.len().max(arrow);
             out.text = center + t;
             for a in [start, start + sweep] {
@@ -491,6 +503,38 @@ mod tests {
         let f = DimFrame::Linear { p0: Vec2::new(0.0, 0.0), p1: Vec2::new(2.0, 0.0), dir: Vec2::X };
         let l = dim_layout(&f, None, 0.1, Vec2::new(2.0, 1.0));
         assert!(close(l.arrows[0].1, Vec2::X) && close(l.arrows[1].1, -Vec2::X));
+    }
+
+    #[test]
+    fn unplaced_linear_text_sits_beside_the_line_it_measures() {
+        // #12482: the value is drawn level on screen, so on a vertical line a wide value reached
+        // back over the line from the fixed 22 px default place. One pixel is 0.1 here and the
+        // text box is 60 x 16 px.
+        let (px, half) = (0.1, Vec2::new(3.0, 0.8));
+        // How far the text box stays from the measured line, along `n`.
+        let clear = |f: &DimFrame, text: Option<Vec2>, n: Vec2| {
+            let DimFrame::Linear { p0, .. } = *f else { return f64::NAN };
+            let at = dim_layout(f, text, px, half).text;
+            let across = half.x * n.x.abs() + half.y * n.y.abs();
+            (at - p0).dot(n).abs() - across
+        };
+        let tall = DimFrame::Linear { p0: Vec2::new(0.0, 0.0), p1: Vec2::new(0.0, 10.0), dir: Vec2::Y };
+        // The shape is to the right of the line: the text goes left, clear of the line.
+        let t = default_text(&tall, Vec2::new(5.0, 5.0), px, half);
+        assert!(dim_layout(&tall, t, px, half).text.x < 0.0, "{t:?}");
+        assert!(clear(&tall, t, Vec2::X) >= 8.0 * px - 1e-9, "{}", clear(&tall, t, Vec2::X));
+        assert!(clear(&tall, None, Vec2::X) >= 8.0 * px - 1e-9);
+        // A slanted line too.
+        let d = Vec2::new(1.0, 2.0).normalized().unwrap_or(Vec2::X);
+        let slant = DimFrame::Linear { p0: Vec2::ZERO, p1: d * 10.0, dir: d };
+        let t = default_text(&slant, Vec2::new(5.0, 0.0), px, half);
+        assert!(clear(&slant, t, d.perp()) >= 8.0 * px - 1e-9);
+        // A short value over a level line keeps the 22 px place it always had.
+        let wide = DimFrame::Linear { p0: Vec2::ZERO, p1: Vec2::new(10.0, 0.0), dir: Vec2::X };
+        let t = default_text(&wide, Vec2::new(5.0, 5.0), px, half);
+        assert!(t.is_some_and(|t| close(t, Vec2::new(0.0, -2.2))), "{t:?}");
+        // A box of no finite size still gets a finite place.
+        assert!(default_text(&tall, Vec2::ZERO, px, Vec2::new(f64::INFINITY, f64::NAN)).is_some_and(|t| t.is_finite()));
     }
 
     #[test]

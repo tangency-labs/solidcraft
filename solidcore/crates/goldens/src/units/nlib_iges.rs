@@ -22,6 +22,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use solidcore::error::nurbs::nlib_number;
 use solidcore::math::Vec3;
 use solidcore::nurbs::crv_basic::Curve;
 use solidcore::nurbs::iges;
@@ -164,7 +165,7 @@ fn is_surface(i: &Inputs) -> bool {
 
 fn status_of(e: &SolidError) -> f64 {
     match e {
-        SolidError::Nlib { code, .. } => f64::from(code.code()),
+        e if nlib_number(e).is_some() => f64::from(nlib_number(e).unwrap_or_default()),
         SolidError::Degenerate { .. } => 1000.0,
         _ => -1.0,
     }

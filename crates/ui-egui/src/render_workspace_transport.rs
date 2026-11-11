@@ -1,5 +1,6 @@
 //! Shared numerical editors for bounded camera sampling and GPU transport extensions.
 use crate::{SolveApp, ui_kit};
+use solidcraft_engine::render::job::adaptive::MAX_PILOT_SAMPLES;
 
 /// Pilot allocation and conditional transmission sampling share portable intent.
 #[cfg(test)]
@@ -8,6 +9,16 @@ pub(super) fn sampling_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     glass_controls(app, ui);
 }
 pub(super) fn adaptive_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let label = app.tr("render.texture_filtering").to_string();
+    let response = ui_kit::checkbox(ui, &label, &mut app.render_workspace.view.studio.texture_filtering);
+    crate::scenario::publish_target("render:texture-filtering", response.rect);
+    app.render_workspace.view.dirty |= response.changed();
+    ui_kit::text(ui, app.tr("render.texture_filtering_help"), ui_kit::Text::Note("render.texture_filtering_help"));
+    let label = app.tr("render.metal_energy_compensation").to_string();
+    let response = ui_kit::checkbox(ui, &label, &mut app.render_workspace.view.studio.metal_energy_compensation);
+    crate::scenario::publish_target("render:metal-energy-compensation", response.rect);
+    app.render_workspace.view.dirty |= response.changed();
+    ui_kit::text(ui, app.tr("render.metal_energy_compensation_help"), ui_kit::Text::Note("render.metal_energy_compensation_help"));
     let before = app.render_workspace.view.studio.adaptive;
     let mut enabled = before.is_some();
     let response = ui_kit::checkbox(ui, app.tr("render.adaptive_enable"), &mut enabled);
@@ -40,8 +51,10 @@ pub(super) fn adaptive_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
                 _ => "render.children.coverage_error",
             };
             let response = ui_kit::row(ui, app.tr(label), |ui| match key {
-                "render.adaptive_pilots" => ui_kit::number_field(ui, &mut options.pilot_samples, 16..=256, 1.0, ""),
-                "render.adaptive_minimum" => ui_kit::number_field(ui, &mut options.min_samples, 16..=4096, 1.0, ""),
+                "render.adaptive_pilots" => ui_kit::number_field_preserving(ui, &mut options.pilot_samples, 16..=MAX_PILOT_SAMPLES, 1.0, ""),
+                "render.adaptive_minimum" => {
+                    ui_kit::number_field_preserving(ui, &mut options.min_samples, 16..=super::quality::MAX_UI_SAMPLES, 1.0, "")
+                }
                 "render.adaptive_relative" => ui_kit::number_field(ui, &mut options.relative_error, 0.0..=1.0, 0.005, ""),
                 "render.adaptive_absolute" => ui_kit::number_field(ui, &mut options.absolute_error, 0.000001..=1e6, 0.001, ""),
                 _ => ui_kit::number_field(ui, &mut options.coverage_error, 0.001..=0.25, 0.001, ""),
@@ -95,9 +108,15 @@ fn caustics_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.render_workspace.view.studio.caustics = enabled.then(solidcraft_engine::render::job::CausticOptions::default);
     }
     if let Some(options) = &mut app.render_workspace.view.studio.caustics {
+        let area_lights = solidcraft_ui_text::tr("render.caustics_area_lights");
+        let response = ui_kit::checkbox(ui, area_lights, &mut options.area_lights);
+        crate::scenario::publish_target("render:caustics:area-lights", response.rect);
+        let environment = solidcraft_ui_text::tr("render.caustics_environment");
+        let response = ui_kit::checkbox(ui, environment, &mut options.environment);
+        crate::scenario::publish_target("render:caustics:environment", response.rect);
         let photons = solidcraft_ui_text::tr("render.caustics_photons");
         ui_kit::row(ui, photons, |ui| {
-            let field = ui_kit::number_field_preserving(ui, &mut options.photons, 1..=65536, 64.0, "");
+            let field = ui_kit::number_field_preserving(ui, &mut options.photons, 1..=solidcraft_engine::render::job::MAX_CAUSTIC_PHOTONS, 64.0, "");
             crate::scenario::publish_target("render:caustics:photons", field.rect);
             field
         });
@@ -115,7 +134,7 @@ fn caustics_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         });
         let depth = solidcraft_ui_text::tr("render.caustics_depth");
         ui_kit::row(ui, depth, |ui| {
-            let field = ui_kit::number_field_preserving(ui, &mut options.max_depth, 1..=16, 1.0, "");
+            let field = ui_kit::number_field_preserving(ui, &mut options.max_depth, 1..=solidcraft_engine::render::job::MAX_PATH_DEPTH, 1.0, "");
             crate::scenario::publish_target("render:caustics:depth", field.rect);
             field
         });

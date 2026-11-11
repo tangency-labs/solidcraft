@@ -572,7 +572,8 @@ pub fn write_curve_to_db(
     } else {
         // database versions 32 and before - limited to BSplineCurves
         db.write_type(crate::curve::curve::p2::BSPLINE_CURVE_TYPE, None);
-        let b = bspline_curve_part(curve).ok_or_else(|| SolidError::null_pointer(OP_CURVE))?;
+        let b = bspline_curve_part(curve)
+            .ok_or_else(|| SolidError::topology_missing(OP_CURVE, "the curve's B-spline part"))?;
         b.write_to_db(db, version)?;
     }
 
@@ -618,12 +619,15 @@ pub fn write_surface_to_db(
         let base = off
             .extended_base_surface()
             .unwrap_or_else(|| off.base_surface());
-        let b = bspline_surface_part(base)?.ok_or_else(|| SolidError::null_pointer(OP_SURFACE))?;
+        let b = bspline_surface_part(base)?.ok_or_else(|| {
+            SolidError::topology_missing(OP_SURFACE, "the offset surface's B-spline base")
+        })?;
         b.write_to_db(db, version)?;
     } else {
         db.write_type(B_SPLINE_SURFACE_TYPE, None);
-        let b =
-            bspline_surface_part(surface)?.ok_or_else(|| SolidError::null_pointer(OP_SURFACE))?;
+        let b = bspline_surface_part(surface)?.ok_or_else(|| {
+            SolidError::topology_missing(OP_SURFACE, "the surface's B-spline part")
+        })?;
         b.write_to_db(db, version)?;
     }
 
@@ -1120,7 +1124,7 @@ fn make_uv_curve_2d(c: &mut Curve) -> Result<()> {
     let cur = b
         .nurb
         .as_mut()
-        .ok_or_else(|| SolidError::null_pointer(OP_UV))?;
+        .ok_or_else(|| SolidError::topology_missing(OP_UV, "the UV curve's NURBS data"))?;
     let cpts = cur.cpts_mut();
     let first_z = cpts.first().map_or(NOZ, |p| p.z);
     if first_z != NOZ && cpts.iter().all(|p| p.z == 0.0) {
@@ -1174,7 +1178,7 @@ pub fn write_brep_to_file(
 
 /// `SM_ERR_NULL_POINTER` of [`BrepData::from_brep`].
 fn null() -> SolidError {
-    SolidError::null_pointer(OP_FROM)
+    SolidError::topology_missing(OP_FROM, "a link of the B-rep's topology")
 }
 
 /// `sm_GetMap`: the record index of `e`, `SM_NO_OBJECT` when it is not mapped (or

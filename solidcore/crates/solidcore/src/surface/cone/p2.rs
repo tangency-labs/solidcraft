@@ -73,6 +73,12 @@
 //!   (upstream copies a null NURB). With the opt-in
 //!   `Kernel::fixes.nurb_cylinder_inside_out_frame` (WR-496, #1463) an inside-out
 //!   NURB gets `IsNurbSurfaceCone`'s frame (top-knot circle, reversed Z).
+//! - **Cylinder iso arcs from control points.** [`Cone::is_nurb_surface_cylinder`] makes its
+//!   end circles from the iso curves' control points (`iso_arc_exact`, The NURBS Book §7.3,
+//!   §7.5), not fitted through three samples as `IsArc` does: two fitted end circles of an
+//!   extruded arc put its axis off the extrusion's direction by more than rounding (1.4e-13
+//!   rad on a 94 mm r 40 wall), so the cylinder was off its own NURBS form and failed the
+//!   exact-class proof (`implicit::lies_on`). The cone recogniser and the rebuild keep `IsArc`.
 //! - **Recursion.** None of these functions recurses.
 //! - **Debug code.** The `SM_DEBUG_CODE` checks and drawing are omitted.
 
@@ -80,7 +86,7 @@ use super::Cone;
 use crate::curve::curve::Curve;
 use crate::curve::ellipse::{Ellipse, EllipseOptions};
 use crate::curve::line::{BoundedLineOptions, Line};
-use crate::error::{ignore_status, ignored, Result, SolidError, SM_ERR};
+use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -105,10 +111,6 @@ const OP_NURB_CYLINDER: &str = "surface::cone::p2::Cone::is_nurb_surface_cylinde
 const OP_REBUILD: &str = "surface::cone::p2::Cone::rebuild_step_from_nurb_parameters";
 const OP_REPARAM: &str = "surface::cone::p2::Cone::reparameterize";
 const OP_TRIM: &str = "surface::cone::p2::ellipse_trim_intervals";
-
-/// The `SmSurfOfRevolution::STEPInversion` operation whose `SM_ERR` means "the rotated
-/// point is not on the generator" (upstream sets `SM_LT_EXTERIOR` there).
-const OP_REV_STEP_INV: &str = "surface::surf_of_revolution::p2::SurfOfRevolution::step_inversion";
 
 /// `ANALYTIC_TOL_SCALE` (`SmConfig.h`).
 const ANALYTIC_TOL_SCALE: f64 = 100.0;
@@ -153,6 +155,152 @@ fn iso_arc(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<Option<
         radius,
         start_ang,
         end_ang,
+    }))
+}
+
+/// The circle a rational quadratic iso curve is, made from its control points (not
+/// upstream, which fits a circle through three samples, `pIsoCrv->IsArc(5, dScaledZero, ..)`).
+///
+/// Each Bézier segment `Q0, Q1, Q2` (weights `w0, w1, w2`) of a circular arc has equal
+/// tangent legs `|Q1 − Q0| = |Q2 − Q1|`, and its middle weight in standard form,
+/// `w1 / √(w0 w2)`, is the cosine of the half sweep `α`, the angle between the leg
+/// `Q1 − Q0` and the chord `Q2 − Q0` (The NURBS Book, Piegl and Tiller, §7.3 and §7.5). The
+/// centre is then `Q0 + r n`, `n` the unit normal into the arc in its plane and
+/// `r = |Q1 − Q0| / tan α`: the circle passes through `Q0` exactly, so an error in `r`
+/// and the matching one in the centre cancel along the arc instead of growing with
+/// `1 / (1 − w1²)` as the centre found from the legs' meeting does. Everything is built from
+/// differences of control points, so rows that are translates of each other (an extruded
+/// arc) give circles that are translates of each other, and the axis through their centres
+/// is the extrusion's direction to rounding, where two independently fitted circles tilt
+/// it (#13536).
+///
+/// The circle is made from the first segment at least half as wide as the widest, a well
+/// conditioned one, and
+/// the curve is that circle when every segment is an arc of it, end to end: its legs equal and
+/// its weight the half sweep's cosine (within `EFF_ZERO_SQRT`), its plane parallel (within
+/// `EFF_ZERO_SQRT`), its end points on the circle and its middle point `r / cos α` from the
+/// centre, the lengths within `scaled_zero`. (A segment a hair long, an arc's extension, fixes
+/// a centre of its own only to the rounding of its points over its sweep, so it is checked on
+/// the circle, not compared by its own centre.)
+/// The frame's X axis points to the start point and its Z axis about which the curve turns
+/// counter-clockwise; the start angle is `0` and the end angle the sweep in degrees, as
+/// `IsArc` gives them. `None` for a degenerate curve, a degree other than 2, or a curve that
+/// is no circle.
+///
+/// # Errors
+///
+/// Those of the degeneracy test and the Bézier decomposition.
+fn iso_arc_exact(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<Option<IsoArc>> {
+    /// One Bézier segment: its Euclidean control points, half sweep and plane normal.
+    struct Segment {
+        q0: Point3,
+        q1: Point3,
+        q2: Point3,
+        half: f64,
+        normal: Option<Vec3>,
+    }
+    if curve.is_degenerate(k, scaled_zero, None)? {
+        return Ok(None);
+    }
+    let Some(nurb) = curve.nurb.as_ref() else {
+        return Ok(None);
+    };
+    let mut segments = Vec::new();
+    for segment in nurb.decompose_bez()? {
+        if segment.degree() != 2 {
+            return Ok(None);
+        }
+        let points = segment.cpts();
+        let (Some(&a), Some(&b), Some(&c)) = (points.first(), points.get(1), points.get(2)) else {
+            return Ok(None);
+        };
+        if !(a.w > 0.0 && b.w > 0.0 && c.w > 0.0) {
+            return Ok(None);
+        }
+        let (q0, q1, q2) = (to_euclid(a), to_euclid(b), to_euclid(c));
+        let (leg0, leg1, chord) = (q1 - q0, q2 - q1, q2 - q0);
+        if (leg0.length() - leg1.length()).abs() > scaled_zero {
+            return Ok(None);
+        }
+        // the legs made unit before their cross product: a short arc's legs are short, and
+        // the product of their lengths would fall under the unit vector's absolute floor
+        let (Ok(tangent), Ok(next)) = (leg0.unitize(), leg1.unitize()) else {
+            return Ok(None);
+        };
+        // the half sweep, from the leg and the chord
+        let half = tangent.cross(chord).length().atan2(tangent.dot(chord));
+        let weight = b.w / (a.w * c.w).sqrt();
+        if (weight - half.cos()).abs() > EFF_ZERO_SQRT {
+            return Ok(None);
+        }
+        segments.push(Segment {
+            q0,
+            q1,
+            q2,
+            half,
+            normal: tangent.cross(next).unitize().ok(),
+        });
+    }
+    // The circle is made from a segment of large sweep, well conditioned: a segment a hair
+    // long (an arc's extension past its face) fixes its centre only to the rounding of its
+    // points over its sweep. The first segment at least half as wide as the widest is taken,
+    // so equal sweeps (a whole circle's quarters) take the first. Every segment must then
+    // lie on that circle.
+    let widest = segments.iter().fold(0.0_f64, |m, s| m.max(s.half));
+    let Some(base) = segments.iter().find(|s| s.half >= 0.5 * widest) else {
+        return Ok(None);
+    };
+    let Some(normal) = base.normal else {
+        return Ok(None);
+    };
+    let (leg0, leg1, chord) = (base.q1 - base.q0, base.q2 - base.q1, base.q2 - base.q0);
+    let (Ok(tangent), Ok(across)) = (leg0.unitize(), chord.unitize()) else {
+        return Ok(None);
+    };
+    // r = |leg| / tan α = |leg| cos α / sin α, from the leg's direction and the chord's
+    let radius = leg0.length() * tangent.dot(across) / tangent.cross(across).length();
+    // as `IsArc`: a radius too large for the arc's length makes no accurate circle
+    if radius.is_nan() || radius > (leg0.length() + leg1.length()) / EFF_ZERO_SQRT {
+        return Ok(None);
+    }
+    let centre = base.q0 + normal.cross(tangent) * radius;
+    let mut sweep = 0.0_f64;
+    for s in &segments {
+        let on = |p: Point3| ((p - centre).length() - radius).abs() <= scaled_zero;
+        // the middle point is where the end tangents meet, r / cos α from the centre
+        let corner = ((s.q1 - centre).length() * s.half.cos() - radius).abs() <= scaled_zero;
+        let flat = s
+            .normal
+            .is_none_or(|n| n.dot(normal) >= 1.0 - EFF_ZERO_SQRT);
+        if !(on(s.q0) && on(s.q2) && corner && flat) {
+            return Ok(None);
+        }
+        sweep += 2.0 * s.half;
+    }
+    let Some(first) = segments.first() else {
+        return Ok(None);
+    };
+    // X toward the start point: away from the centre, square to the first segment's tangent
+    let Ok(start_tangent) = (first.q1 - first.q0).unitize() else {
+        return Ok(None);
+    };
+    let x_axis = start_tangent.cross(normal);
+    // the segments run one way round: each starts where the one before it ends
+    if segments.windows(2).any(|w| match w {
+        [a, b] => a.q2.distance(b.q0) > scaled_zero,
+        _ => false,
+    }) {
+        return Ok(None);
+    }
+    let end_ang = sweep.to_degrees();
+    if !(end_ang > 0.0 && end_ang <= 360.0 + EFF_ZERO_SQRT) {
+        return Ok(None);
+    }
+    Ok(Some(IsoArc {
+        frame: Axis2Placement::new(centre, x_axis, normal.cross(x_axis)),
+        radius,
+        start_ang: 0.0,
+        end_ang: end_ang.min(360.0),
     }))
 }
 
@@ -268,7 +416,12 @@ impl Cone {
     /// `SM_ERR` unless this is a cylinder with a NURB whose radius stays positive; those of
     /// the control point edits and of the rebuild.
     pub fn lean_cylinder(&self, k: &Kernel, slope: f64, neutral_height: f64) -> Result<Cone> {
-        let err = || SolidError::sm_err("surface::cone::p2::Cone::lean_cylinder");
+        let err = || {
+            SolidError::surface_failed(
+                "surface::cone::p2::Cone::lean_cylinder",
+                "the surface is not a cylinder with a NURB whose radius stays positive",
+            )
+        };
         let canonical = self.canonical();
         if !self.is_cylinder()
             || canonical.radius.partial_cmp(&EFF_ZERO) != Some(core::cmp::Ordering::Greater)
@@ -338,7 +491,7 @@ impl Cone {
             ignore_status(self.make_nurb(k))?;
         }
         if self.rev.base.gw_nurb().is_none() {
-            return Err(SolidError::null_pointer(OP_REPARAM));
+            return Err(SolidError::surface_missing(OP_REPARAM, "the cone's NURB"));
         }
         let inside_out = self.inside_out;
         self.rev
@@ -511,11 +664,9 @@ impl Cone {
             } else {
                 tgt_nurb_domain.v_interval()
             };
-            let gen = off_cone
-                .rev
-                .gen_curve
-                .as_mut()
-                .ok_or(SolidError::null_pointer(OP_OFFSET))?;
+            let gen = off_cone.rev.gen_curve.as_mut().ok_or_else(|| {
+                SolidError::surface_missing(OP_OFFSET, "the offset cone's generator curve")
+            })?;
             ignore_status(gen.edit_parameterization(k, &tgt_gen_nurb_ivl))?;
 
             // rebuild the PolarCurve to make sure all is coordinated (status ignored)
@@ -612,11 +763,9 @@ impl Cone {
         // translate the NewCone->GenCurve from current center line (status ignored)
         let mut mv = Axis2Placement::IDENTITY;
         mv.translate(off_vec);
-        let gen = off_cone
-            .rev
-            .gen_curve
-            .as_mut()
-            .ok_or(SolidError::null_pointer(OP_OFFSET))?;
+        let gen = off_cone.rev.gen_curve.as_mut().ok_or_else(|| {
+            SolidError::surface_missing(OP_OFFSET, "the offset cone's generator curve")
+        })?;
         ignore_status(gen.transform(k, &mv, None))?;
 
         Ok(Some(off_cone))
@@ -899,7 +1048,7 @@ impl Cone {
         if top_iso.is_degenerate(k, pt_tol, None)? {
             return Ok(None);
         }
-        let Some(top) = iso_arc(k, &top_iso, pt_tol)? else {
+        let Some(top) = iso_arc_exact(k, &top_iso, pt_tol)? else {
             return Ok(None);
         };
 
@@ -909,7 +1058,7 @@ impl Cone {
         if bot_iso.is_degenerate(k, pt_tol, None)? {
             return Ok(None);
         }
-        let Some(bot) = iso_arc(k, &bot_iso, pt_tol)? else {
+        let Some(bot) = iso_arc_exact(k, &bot_iso, pt_tol)? else {
             return Ok(None);
         };
 
@@ -978,9 +1127,9 @@ impl Cone {
         // (error recovery: the constructor always makes its generator)
 
         // the cylinder's NURB is a copy of the tested one
-        let nurb = test_surface
-            .gw_nurb()
-            .ok_or_else(|| SolidError::null_pointer(OP_NURB_CYLINDER))?;
+        let nurb = test_surface.gw_nurb().ok_or_else(|| {
+            SolidError::surface_missing(OP_NURB_CYLINDER, "the tested surface's NURB")
+        })?;
         cylinder.rev.base.nurb = Some(copy_nurb_surface(nurb)).into();
         cylinder.rev.base.nurb_is_borrowed = false;
 
@@ -1035,7 +1184,10 @@ impl Cone {
             || linear_iso_param == SurfParamType::Neither
         {
             // Modified Nurb SmCone: no longer has degree 1 and 2 basis functions
-            return Err(SolidError::sm_err(OP_REBUILD));
+            return Err(SolidError::surface_failed(
+                OP_REBUILD,
+                "the NURB is no longer of degree 1 by 2 and rational",
+            ));
         }
 
         // evaluate Nurb min/max domain points (the cone's EvaluatePoint; statuses
@@ -1081,13 +1233,19 @@ impl Cone {
         )?
         else {
             // Modified Nurb SmCone: no longer has circular top and bottom IsoParamCurves
-            return Err(SolidError::sm_err(OP_REBUILD));
+            return Err(SolidError::surface_failed(
+                OP_REBUILD,
+                "the NURB's top and bottom iso curves are not circular",
+            ));
         };
 
         // not a cone - top/bot start angles or top/bot end angles vary by more than
         // tolerance
         if twisted(&top, &bot, ang_tol)? {
-            return Err(SolidError::sm_err(OP_REBUILD));
+            return Err(SolidError::surface_failed(
+                OP_REBUILD,
+                "the top and bottom arcs' angles differ by more than the tolerance",
+            ));
         }
 
         // get the cone height = length of axis vector from botCurve Center to TopCurve
@@ -1099,13 +1257,19 @@ impl Cone {
 
         // not a cone - height of cone is degenerate (cone is a disk)
         if height < EFF_ZERO_SQRT {
-            return Err(SolidError::sm_err(OP_REBUILD));
+            return Err(SolidError::surface_failed(
+                OP_REBUILD,
+                "the cone's height is degenerate",
+            ));
         }
         nurb_z_axis = nurb_z_axis.unitize_or_z();
 
         // not a cone - bottom arc's plane is not perpendicular to cone axis
         if !nurb_z_axis.is_parallel_to(bot.frame.z_axis(), ang_tol) {
-            return Err(SolidError::sm_err(OP_REBUILD));
+            return Err(SolidError::surface_failed(
+                OP_REBUILD,
+                "the bottom arc's plane is not perpendicular to the axis",
+            ));
         }
 
         // when the CenterBot to CenterTop vector opposes the circle Z axis, bInsideOut
@@ -1127,7 +1291,10 @@ impl Cone {
                 bot.radius = mean;
                 top.radius = mean;
             } else {
-                return Err(SolidError::sm_err(OP_REBUILD));
+                return Err(SolidError::surface_failed(
+                    OP_REBUILD,
+                    "the cylinder's top and bottom radii differ",
+                ));
             }
         }
 
@@ -1205,11 +1372,10 @@ fn cone_inversion(
         Ok(inv) => Ok((inv.location, inv.uv)),
         Err(e) if e.is_unported_or_cancelled() => Err(e),
         // rotated point not on the generator: upstream sets SM_LT_EXTERIOR
-        Err(SolidError::Upstream {
-            operation: OP_REV_STEP_INV,
-            code: SM_ERR,
-            ..
-        }) => Ok((LocationType::Exterior, Point2::UNDEF)),
+        // (by its status, so also a typed failure that replaced the `Upstream`, #13790)
+        Err(e) if crate::surface::surf_of_revolution::p2::is_off_generator(&e) => {
+            Ok((LocationType::Exterior, Point2::UNDEF))
+        }
         // the fork (tangency-labs/smlib dfc7cb6, `SER` unless `STEPInversionAnswered`):
         // a failure is passed on instead of read as SM_LT_EXTERIOR
         Err(e) if k.fixes.analytic_inversion_answers_apart => Err(e),
@@ -1547,6 +1713,61 @@ mod tests {
         Kernel::default()
     }
 
+    /// The r 40 corner of the battery case's plan outline (#13536): a 0.156 rad arc about
+    /// (-133.12369073537272, -163.5) extruded along z from -1 to 93, its NURBS form as the
+    /// record holds it, which SolidCraft's import recognises. The cylinder recogniser finds the
+    /// cylinder on the form at bound 0, with the extrusion's axis. (Their end circles were
+    /// fitted through samples: its axis tilted 1.44e-13 rad, 1.35e-11 mm
+    /// off the form at the top, so the case wall had no exact class and its shell was
+    /// refused.)
+    #[test]
+    fn an_extruded_short_arc_is_recognised_on_its_form() {
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as Nurb;
+        use crate::surface::implicit::{lies_on, AnalyticSupport};
+        let k = kernel();
+        let w = 0.996_964_674_751_439_2;
+        // (x w, y w, w) of each column, at z = -1 and 93
+        let columns = [
+            (-133.123_690_735_372_72, -203.5, 1.0),
+            (-129.605_407_717_687_06, -202.882_311_311_917_87, w),
+            (-126.914_177_375_687_37, -203.015_085_016_179_46, 1.0),
+        ];
+        let net = columns
+            .into_iter()
+            .map(|(x, y, w)| vec![CPoint::new(x, y, -w, w), CPoint::new(x, y, 93.0 * w, w)])
+            .collect();
+        let knot = 6.234_728_055_932_869;
+        let nurb = Nurb::new(
+            net,
+            2,
+            1,
+            vec![0.0, 0.0, 0.0, knot, knot, knot],
+            vec![0.0, 0.0, 94.0, 94.0],
+        )
+        .unwrap();
+        let form = BSplineSurface::from_nurb(nurb, false);
+        let found = [Cone::is_nurb_surface_cylinder(&k, &form, 1.0).unwrap()];
+        for cone in found {
+            let surface = crate::surface::surface::Surface::from(cone.expect("a cylinder"));
+            let support = AnalyticSupport::of(&surface).expect("an analytic surface");
+            assert!(lies_on(&form, &support.implicit()).unwrap(), "{support:?}");
+            let (AnalyticSupport::Cylinder { placement, .. }
+            | AnalyticSupport::Cone { placement, .. }) = support
+            else {
+                panic!("{support:?}");
+            };
+            let axis = placement.z_axis();
+            assert!(axis.x.abs() < 1e-15 && axis.y.abs() < 1e-15, "{axis:?}");
+        }
+    }
+
+    /// A canonical cylinder of radius 2.94 (the goldens' gen0196), its net reaching ±1.2e6
+    /// along its axis, recognised at a thousandth of the default tolerance. Its control points
+    /// are known to the rounding of coordinates that large (about 2.3e-10), which turns its
+    /// middle circle's plane by about 2.5e-11 rad, more than that scaled tolerance (1.75e-11
+    /// rad): the circle checks take at least the angle that rounding allows, so the cylinder is
+    /// still found (#13536).
     fn canonical(k: &Kernel, bot: f64, top: f64, h: f64, swap: bool, inside: bool) -> Cone {
         Cone::create_canonical(k, &Axis2Placement::IDENTITY, bot, top, h, swap, inside).unwrap()
     }

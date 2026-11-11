@@ -28,7 +28,7 @@
 //! | [`edge_uv_extremes`], [`EdgeUvExtremes`], [`edge_uv_ends`] | `SmTrimmingTools::GetEdgeUVExtremes` (with and without weights) |
 //! | [`surface_continuity_check`]                 | `SmTrimmingTools::SurfaceContinuityCheck`                 |
 //! | [`mirror_curve`]                             | `SmTrimmingTools::MirrorCurve`                            |
-//! | [`is_iso_curve_at`], [`is_iso_curve_at_with_fixes`] | `SmTrimmingTools::IsIsoCurve(curve, side, low, tol)` |
+//! | [`is_iso_curve_at`]                          | `SmTrimmingTools::IsIsoCurve(curve, side, low, tol)`      |
 //! | [`is_iso_curve`]                             | `SmTrimmingTools::IsIsoCurve(curve, &side, &param)`       |
 //! | [`is_iso_curve_on_seam`]                     | `SmTrimmingTools::IsIsoCurveOnSeam`                       |
 //! | [`min`]                                      | `SmTrimmingTools::Min`                                    |
@@ -52,7 +52,7 @@
 //!   upstream dereferences a null pointer (a loop without loop use, a face without
 //!   surface or loops, an edge use whose UV trim curve or vertex use is missing where it
 //!   is used, ...) the port returns [`SolidError::InvalidInput`]. `SER` / `NER` returns
-//!   are [`SolidError::Upstream`] with the upstream code (`SM_ERR`, `SM_ERR_NULL_POINTER`,
+//!   are a [`TopologyFailure`](crate::error::topology::TopologyFailure) with the upstream code (`SM_ERR`, `SM_ERR_NULL_POINTER`,
 //!   `SM_ERR_INVALID_INPUT` for a failed `Unitize`).
 //! - **Projected seam endpoints (WR-440, #530), opt-in.** With
 //!   `Kernel::fixes.check_loop_projected_seam_ends` (off by default: upstream's raw UV
@@ -78,11 +78,10 @@
 //!   point sequences unitize it in place (`SmPointSet3d` with `pOptNormal`). A failing
 //!   `Tessellate`, whose status upstream ignores, is returned.
 //! - **`IsIsoCurve(curve, side, low, tol)`** returns `SER(GetCanonical)`'s nonzero
-//!   status as an `SmBoolean`: a curve without NURB counts as an iso curve, as upstream
-//!   (`plan/upstream-issues/` WR-97); with
-//!   `Kernel::fixes.is_iso_curve_at_propagates_canonical_failure` (off by default;
-//!   [`is_iso_curve_at_with_fixes`], wired into [`is_iso_curve`] and
-//!   [`fix_backwards_outer_loop_on_seam`]) a failing `GetCanonical` propagates as `Err`.
+//!   status as an `SmBoolean` upstream, so a curve without NURB counts as an iso curve
+//!   (`plan/upstream-issues/` WR-97). Here a failing `GetCanonical` propagates as `Err`
+//!   ([`is_iso_curve_at`], and through it [`is_iso_curve`] and
+//!   [`fix_backwards_outer_loop_on_seam`]).
 //!   `MirrorCurve` divides rational control points by their weights twice, as upstream
 //!   (WR-98); with
 //!   `Kernel::fixes.mirror_curve_keeps_euclidean_control_points` (off by default) it
@@ -123,7 +122,7 @@ use crate::geom::point_set::{PointContainment, PointSequence};
 use crate::geom::tol::{self, SmallTopoType, ZONE_TOL_3D};
 use crate::geom::tools::find_first_point_within_tol_to_pnt;
 use crate::geom::vector2d::Point2;
-use crate::kernel::{Kernel, UpstreamFixes};
+use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE};
 use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::b_spline_curve::{BSplineCurve, CanonicalData};
@@ -148,9 +147,6 @@ pub const TYPE: i64 = 12225;
 const FACE_TYPE: i64 = 16002;
 /// `SmLoop_TYPE` (`TOPO_BASE_TYPE + 3`), the owner type of a loop report.
 const LOOP_TYPE: i64 = 16003;
-
-// Upstream `SM_ERR_INVALID_INPUT`.
-use crate::error::SM_ERR_INVALID_INPUT;
 
 /// `SM_LIST_2`: the `CheckFace` label table.
 const LIST_CHECK_FACE: u64 = 2;
@@ -177,13 +173,10 @@ fn null(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
 }
 
-/// An upstream status other than `SM_ERR` / `SM_ERR_NULL_POINTER`.
-pub(crate) const fn status(code: i32) -> SolidError {
-    SolidError::Upstream {
-        operation: OP,
-        code,
-        entity: None,
-    }
+/// A value the trimming tools compute with that has no defined result, as the phrase
+/// says (upstream `SM_ERR_INVALID_INPUT`).
+pub(crate) fn invalid_value(what: &'static str) -> SolidError {
+    SolidError::topology_invalid_value(OP, what)
 }
 
 /// The identity a face or loop has in an assert report (upstream compares pointers):
@@ -507,11 +500,13 @@ enum TrimSurfaceBackend<'a> {
 impl TrimSurfaceBackend<'_> {
     fn surface(&self) -> Result<&Surface> {
         match self {
-            Self::Legacy(surface) => surface.as_ref().ok_or_else(|| SolidError::null_pointer(OP)),
+            Self::Legacy(surface) => surface
+                .as_ref()
+                .ok_or_else(|| SolidError::topology_missing(OP, "the surface to trim")),
             Self::Retained(transfer) => transfer
                 .transfer
                 .as_ref()
-                .ok_or_else(|| SolidError::null_pointer(OP))?
+                .ok_or_else(|| SolidError::topology_missing(OP, "the surface to trim"))?
                 .owned_surface(),
         }
     }
@@ -621,15 +616,19 @@ fn trim_surface_impl(
 ) -> Result<Vec<FaceId>> {
     // Native SmObjDelete/SmObjsDelete remain active through these early checks.
     let early = (|| {
-        let region = region.ok_or(SolidError::null_pointer(OP))?;
+        let region = region
+            .ok_or_else(|| SolidError::topology_missing(OP, "the region for the new faces"))?;
         if !b.region(region)?.in_brep {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::topology_missing(OP, "the region in the B-rep"));
         }
         let _ = first_is_outer; // SM_ASSERT only
         brep_set_tolerance(k, b, tol_3d)?;
         let g1_surface = surface_continuity_check(k, surface.surface()?)?;
         if !g1_surface && !oriented_correctly {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(
+                OP,
+                "the surface is not G1 and the loops are not oriented",
+            ));
         }
         Ok((region, g1_surface))
     })();
@@ -644,7 +643,9 @@ fn trim_surface_impl(
     // Native clears the temporary cleanup immediately before MakeFace(s).
     let mut new_faces = match surface {
         TrimSurfaceBackend::Legacy(surface) => {
-            let surface = surface.take().ok_or_else(|| SolidError::null_pointer(OP))?;
+            let surface = surface
+                .take()
+                .ok_or_else(|| SolidError::topology_missing(OP, "the surface to trim"))?;
             let input = TrimInput {
                 loop_counts: input.loop_counts,
                 curves: input.curves,
@@ -684,7 +685,7 @@ fn trim_surface_impl(
                 transfer
                     .transfer
                     .as_mut()
-                    .ok_or_else(|| SolidError::null_pointer(OP))?,
+                    .ok_or_else(|| SolidError::topology_missing(OP, "the surface to trim"))?,
                 &input.uv_domain,
                 input.surface_orientation,
                 None,
@@ -831,7 +832,7 @@ fn bspline_of(c: &Curve) -> Result<Cow<'_, BSplineCurve>> {
         CurveKind::Ellipse(e) => conic_base(e.base()),
         CurveKind::Hyperbola(h) => conic_base(h.base()),
         CurveKind::Parabola(p) => conic_base(p.base()),
-        _ => Err(null("UV trim curve is not an SmBSplineCurve")),
+        _ => Err(null("UV trim curve is not a B-spline curve")),
     }
 }
 
@@ -866,7 +867,7 @@ fn edit_end_point(
         CurveKind::Ellipse(e) => conic_edit_end_point(e.base_mut(), point, edit_start, weight),
         CurveKind::Hyperbola(h) => conic_edit_end_point(h.base_mut(), point, edit_start, weight),
         CurveKind::Parabola(p) => conic_edit_end_point(p.base_mut(), point, edit_start, weight),
-        _ => Err(null("EditEndPoint: UV trim curve is not an SmBSplineCurve")),
+        _ => Err(null("EditEndPoint: UV trim curve is not a B-spline curve")),
     }
 }
 
@@ -1205,13 +1206,7 @@ pub fn fix_backwards_outer_loop_on_seam(k: &Kernel, b: &mut Brep, f: FaceId) -> 
                             };
                             let slot = uv_slot(b, at(&eus, ii)?)?
                                 .ok_or_else(|| null("edge use without UV trim curve"))?;
-                            if is_iso_curve_at_with_fixes(
-                                held_curve(b, slot)?,
-                                side,
-                                d.low,
-                                tol_j,
-                                &k.fixes,
-                            )? {
+                            if is_iso_curve_at(held_curve(b, slot)?, side, d.low, tol_j)? {
                                 mirror_curve(
                                     k,
                                     held_curve_mut(b, slot)?,
@@ -1313,10 +1308,9 @@ fn move_loopuse_first(
     lu: crate::topology::LoopuseId,
 ) -> Result<()> {
     let list = &mut b.faceuse_mut(fu)?.loopuses;
-    let pos = list
-        .iter()
-        .position(|&x| x == lu)
-        .ok_or(SolidError::sm_err(OP))?;
+    let pos = list.iter().position(|&x| x == lu).ok_or_else(|| {
+        SolidError::topology_failed(OP, "the loop use is not in the face use's loop uses")
+    })?;
     list.remove(pos);
     list.insert(0, lu);
     Ok(())
@@ -1341,7 +1335,7 @@ pub fn fix_trim_loop_order(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<bool> 
     // Get the loops
     let loops = fp2::loops(b, f, false, None)?;
     if loops.is_empty() {
-        return Err(SolidError::sm_err(OP)); // no loops at all
+        return Err(SolidError::topology_failed(OP, "the face has no loops")); // no loops at all
     }
 
     // Find the outer loop
@@ -1423,14 +1417,12 @@ pub fn fix_trim_loop_order(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<bool> 
     // Move outer to the first position
     let (lu_a, lu_b) = lu1::loop_loopuses(b, outer_loop)?;
     let lu_b = lu_b.ok_or_else(|| null("loop without second loop use"))?;
-    let fu_a = b
-        .loopuse(lu_a)?
-        .faceuse
-        .ok_or(SolidError::null_pointer(OP))?;
-    let fu_b = b
-        .loopuse(lu_b)?
-        .faceuse
-        .ok_or(SolidError::null_pointer(OP))?;
+    let fu_a = b.loopuse(lu_a)?.faceuse.ok_or_else(|| {
+        SolidError::topology_missing(OP, "the face use of the loop's first loop use")
+    })?;
+    let fu_b = b.loopuse(lu_b)?.faceuse.ok_or_else(|| {
+        SolidError::topology_missing(OP, "the face use of the loop's second loop use")
+    })?;
     move_loopuse_first(b, fu_a, lu_a)?;
     move_loopuse_first(b, fu_b, lu_b)?;
 
@@ -1480,11 +1472,14 @@ impl OrderedLoops {
     /// # Errors
     ///
     /// `SM_ERR` as described.
-    pub const fn status(&self) -> Result<()> {
+    pub fn status(&self) -> Result<()> {
         if self.closed && self.on_plane {
             Ok(())
         } else {
-            Err(SolidError::sm_err(OP))
+            Err(SolidError::topology_failed(
+                OP,
+                "the loops do not close, or a curve is off their plane",
+            ))
         }
     }
 }
@@ -1554,7 +1549,10 @@ fn next_round_the_vertex(
     };
     let (mut back, _) = leaving(arrive)?;
     if back.length() <= 0.0 {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "the arriving edge's tangent has zero length",
+        ));
     }
     back /= back.length();
 
@@ -1563,7 +1561,10 @@ fn next_round_the_vertex(
     for &end in &candidates {
         let (ray, acc) = leaving(end)?;
         if ray.length() <= 0.0 {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(
+                OP,
+                "a leaving edge's tangent has zero length",
+            ));
         }
         rays.push(ray);
         accs.push(acc);
@@ -1886,7 +1887,7 @@ pub fn order_curves_into_loops(k: &Kernel, curves: &[Curve], tol_3d: f64) -> Res
         }
         let loop_normal = loop_normal
             .unitize()
-            .map_err(|_| status(SM_ERR_INVALID_INPUT))?;
+            .map_err(|_| invalid_value("the loop's normal has zero length"))?;
 
         // Update the plane data for all loops
         if out.loop_counts.len() == 1 {
@@ -1914,7 +1915,7 @@ pub fn order_curves_into_loops(k: &Kernel, curves: &[Curve], tol_3d: f64) -> Res
     out.plane_normal = out
         .plane_normal
         .unitize()
-        .map_err(|_| status(SM_ERR_INVALID_INPUT))?;
+        .map_err(|_| invalid_value("the loops' average normal has zero length"))?;
 
     // test every curve to see if it's on the plane
     for c in curves {
@@ -2196,7 +2197,7 @@ pub fn check_face(
             UNDEF_DOUBLE,
             UNDEF_DOUBLE,
         )?;
-        return Err(SolidError::sm_err(OP)); // Loops are missing
+        return Err(SolidError::topology_failed(OP, "the face has no loops")); // Loops are missing
     }
 
     // it's not a problem when an edge does not have a stored UVTrimCurve
@@ -2247,7 +2248,10 @@ pub fn check_face(
 
         // signal bad loop errors: we want 1st Loop Outer, rest Inner
         if (ii == 0 && lo == OrientType::Opposite) || (ii != 0 && lo == OrientType::Same) {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(
+                OP,
+                "the first loop is not outer, or a later loop is not inner",
+            ));
         }
 
         report(
@@ -2264,7 +2268,7 @@ pub fn check_face(
 
         // Also check for zero-area loop.
         if lo == OrientType::Unknown {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(OP, "a loop has zero area"));
         }
     }
     Ok(())
@@ -2656,7 +2660,10 @@ pub fn check_loop(
                     closure = 1;
                 }
                 if closure >= 2 {
-                    return Err(SolidError::sm_err(OP));
+                    return Err(SolidError::topology_failed(
+                        OP,
+                        "the loop crosses the surface's closure more than once",
+                    ));
                 }
             }
         }
@@ -2676,7 +2683,10 @@ pub fn surface_continuity_check(k: &Kernel, surface: &Surface) -> Result<bool> {
     let (cu, _) = surface.calculate_continuities(k, SurfParamType::U)?;
     let (cv, _) = surface.calculate_continuities(k, SurfParamType::V)?;
     if cu == ContinuityType::Discontinuous || cv == ContinuityType::Discontinuous {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "the surface is discontinuous",
+        ));
     }
     Ok(!(cu == ContinuityType::C0 || cv == ContinuityType::C0))
 }
@@ -2749,71 +2759,22 @@ pub fn mirror_curve(
         CurveKind::Ellipse(e) => e.base_mut().set_canonical(&data)?,
         CurveKind::Hyperbola(h) => h.base_mut().set_canonical(&data)?,
         CurveKind::Parabola(p) => p.base_mut().set_canonical(&data)?,
-        _ => return Err(null("MirrorCurve: not an SmBSplineCurve")),
+        _ => return Err(null("MirrorCurve: not a B-spline curve")),
     }
     curve.convert_to_2d(k)
 }
 
 /// `IsIsoCurve(cpUVCurve, eSide, dLow, d2DTolerance)`: whether every control point's
-/// `side` coordinate is within `tol_2d` of `low`. A curve whose `GetCanonical` fails is
-/// an iso curve (upstream returns `SER(GetCanonical)`'s error status as `TRUE`; WR-97).
-/// See [`is_iso_curve_at_with_fixes`] for the opt-in error-propagation fix.
+/// `side` coordinate is within `tol_2d` of `low`. Not upstream (WR-97): a curve whose
+/// `GetCanonical` fails is an error, where upstream returns `SER(GetCanonical)`'s error
+/// status as `TRUE` and so counts it as an iso curve.
 ///
 /// # Errors
 ///
-/// [`SolidError::InvalidInput`] for a curve that is not an `SmBSplineCurve`;
-/// [`SolidError::Unported`].
+/// [`SolidError::InvalidInput`] for a curve that is not an `SmBSplineCurve`; those of
+/// [`BSplineCurve::canonical`] (such as `SM_ERR` without a NURB); [`SolidError::Unported`].
 pub fn is_iso_curve_at(curve: &Curve, side: SurfParamType, low: f64, tol_2d: f64) -> Result<bool> {
-    is_iso_curve_at_impl(curve, side, low, tol_2d, false)
-}
-
-/// [`is_iso_curve_at`] honouring [`UpstreamFixes::is_iso_curve_at_propagates_canonical_failure`]
-/// (WR-97): when `false` (default), a failing `GetCanonical` status returns `Ok(true)` as
-/// in pinned v1.0.1; when `true`, the [`BSplineCurve::canonical`] error is returned.
-///
-/// # Errors
-///
-/// [`SolidError::InvalidInput`] for a curve that is not an `SmBSplineCurve`;
-/// [`SolidError::Unported`]; and, when
-/// `fixes.is_iso_curve_at_propagates_canonical_failure` is `true`, those of
-/// [`BSplineCurve::canonical`] (such as `SM_ERR` without a NURB).
-pub fn is_iso_curve_at_with_fixes(
-    curve: &Curve,
-    side: SurfParamType,
-    low: f64,
-    tol_2d: f64,
-    fixes: &UpstreamFixes,
-) -> Result<bool> {
-    is_iso_curve_at_impl(
-        curve,
-        side,
-        low,
-        tol_2d,
-        fixes.is_iso_curve_at_propagates_canonical_failure,
-    )
-}
-
-fn is_iso_curve_at_impl(
-    curve: &Curve,
-    side: SurfParamType,
-    low: f64,
-    tol_2d: f64,
-    propagate_canonical_failure: bool,
-) -> Result<bool> {
-    let canon = match bspline_of(curve).and_then(|c| c.canonical()) {
-        Ok(c) => c,
-        Err(e)
-            if propagate_canonical_failure
-                || e.is_unported_or_cancelled()
-                || matches!(
-                    e,
-                    SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }
-                ) =>
-        {
-            return Err(e)
-        }
-        Err(_) => return Ok(true),
-    };
+    let canon = bspline_of(curve)?.canonical()?;
     let coord = usize::from(side != SurfParamType::U);
     for p in &canon.control_points {
         if (p.component(coord) - low).abs() > tol_2d {
@@ -2825,12 +2786,12 @@ fn is_iso_curve_at_impl(
 
 /// `IsIsoCurve(cpUVCurve, rSide, rdParameter)`: for u then v, when the curve's end
 /// points agree in that coordinate within `SM_ZONE_TOL_3D / 10`, whether the curve is an
-/// iso curve at their mean ([`is_iso_curve_at_with_fixes`]); the side and parameter of
+/// iso curve at their mean ([`is_iso_curve_at`]); the side and parameter of
 /// the first that is.
 ///
 /// # Errors
 ///
-/// Those of the curve's ends and [`is_iso_curve_at_with_fixes`].
+/// Those of the curve's ends and [`is_iso_curve_at`].
 pub fn is_iso_curve(k: &Kernel, curve: &Curve) -> Result<Option<(SurfParamType, f64)>> {
     let tolerance = ZONE_TOL_3D / 10.0;
     let ends = curve.ends(k)?;
@@ -2843,7 +2804,7 @@ pub fn is_iso_curve(k: &Kernel, curve: &Curve) -> Result<Option<(SurfParamType, 
                 SurfParamType::V
             };
             let param = (s + e) / 2.0;
-            if is_iso_curve_at_with_fixes(curve, side, param, tolerance, &k.fixes)? {
+            if is_iso_curve_at(curve, side, param, tolerance)? {
                 return Ok(Some((side, param)));
             }
         }
@@ -2873,11 +2834,6 @@ pub fn is_iso_curve_on_seam(k: &Kernel, surface: &Surface, curve: &Curve) -> Res
     let tolerance = range.length() / 1000.0;
     Ok(closed
         && ((param - range.min()).abs() < tolerance || (param - range.max()).abs() < tolerance))
-}
-
-/// `SM_ERR_INVALID_INPUT` as an error.
-pub(crate) const fn invalid_input_status() -> SolidError {
-    status(SM_ERR_INVALID_INPUT)
 }
 
 #[cfg(test)]
@@ -3073,13 +3029,9 @@ mod tests {
             match transfer.into_location().unwrap() {
                 TrimSurfaceLocation::Installed(face) => {
                     if mode == 4 {
-                        assert!(matches!(
-                            result,
-                            Err(SolidError::Upstream {
-                                code: crate::error::SM_ERR,
-                                ..
-                            })
-                        ));
+                        assert!(result
+                            .as_ref()
+                            .is_err_and(|e| e.upstream_status() == Some(crate::error::SM_ERR)));
                         assert_eq!(p1::faces(&b, None).unwrap(), vec![face]);
                         assert!(b.face(face).unwrap().loops.is_empty());
                     } else {
@@ -3103,9 +3055,9 @@ mod tests {
                     } else {
                         crate::error::SM_ERR
                     };
-                    assert!(
-                        matches!(result, Err(SolidError::Upstream {code: got, ..}) if got==code)
-                    );
+                    assert!(result
+                        .as_ref()
+                        .is_err_and(|e| e.upstream_status() == Some(code)));
                     assert!(p1::faces(&b, None).unwrap().is_empty());
                 }
                 TrimSurfaceLocation::Owned(surface) => {
@@ -3839,38 +3791,18 @@ mod tests {
         assert!(r.is_err() || r.unwrap().status().is_err());
     }
 
+    /// WR-97: a curve without NURB, whose `GetCanonical` fails, is an error, not an iso
+    /// curve as upstream counts it.
     #[test]
-    fn wr97_flag_default_off_and_lookup_by_name() {
-        let mut k = Kernel::default();
-        assert!(!k.fixes.is_iso_curve_at_propagates_canonical_failure);
-        let slot = k
-            .fixes
-            .flag_mut("is_iso_curve_at_propagates_canonical_failure")
-            .expect("WR-97 flag must be registered in UpstreamFixes");
-        assert!(!*slot);
-        *slot = true;
-        assert!(k.fixes.is_iso_curve_at_propagates_canonical_failure);
-    }
-
-    #[test]
-    fn wr97_nurb_less_bspline_curve_default_true_vs_opt_in_err() {
-        let k_off = Kernel::default();
-        let mut k_on = Kernel::default();
-        k_on.fixes.is_iso_curve_at_propagates_canonical_failure = true;
-
+    fn wr97_nurb_less_bspline_curve_is_an_error() {
         for empty in [
             Curve::from(BSplineCurve::new(2)),
             Curve::from(BSplineCurve::default()),
         ] {
             for side in [SurfParamType::U, SurfParamType::V] {
                 for (low, tol_2d) in [(0.0, 0.0), (-12.5, 1e-6), (360.0, 1e-3)] {
-                    assert_eq!(is_iso_curve_at(&empty, side, low, tol_2d), Ok(true));
-                    assert_eq!(
-                        is_iso_curve_at_with_fixes(&empty, side, low, tol_2d, &k_off.fixes),
-                        Ok(true)
-                    );
-                    let err = is_iso_curve_at_with_fixes(&empty, side, low, tol_2d, &k_on.fixes)
-                        .expect_err("opt-in WR-97 must propagate failing GetCanonical");
+                    let err = is_iso_curve_at(&empty, side, low, tol_2d)
+                        .expect_err("a failing GetCanonical must propagate (WR-97)");
                     assert_eq!(err.sm_status(), Some(crate::error::SM_ERR));
                 }
             }
@@ -3879,9 +3811,7 @@ mod tests {
 
     #[test]
     fn wr97_valid_iso_non_iso_and_non_bspline_curves_unchanged() {
-        let k_off = Kernel::default();
-        let mut k_on = Kernel::default();
-        k_on.fixes.is_iso_curve_at_propagates_canonical_failure = true;
+        let k = Kernel::default();
 
         let iso_u = uv_line([0.25, -1.0], [0.25, 2.0]);
         let diag = uv_line([0.0, 0.0], [1.0, 1.0]);
@@ -3914,130 +3844,114 @@ mod tests {
             (&bent_v, SurfParamType::V, 0.0, 1e-6, false),
         ] {
             assert_eq!(is_iso_curve_at(curve, side, low, tol_2d), Ok(want));
-            assert_eq!(
-                is_iso_curve_at_with_fixes(curve, side, low, tol_2d, &k_off.fixes),
-                Ok(want)
-            );
-            assert_eq!(
-                is_iso_curve_at_with_fixes(curve, side, low, tol_2d, &k_on.fixes),
-                Ok(want)
-            );
         }
 
-        for k in [&k_off, &k_on] {
-            assert_eq!(is_iso_curve(k, &iso_u), Ok(Some((SurfParamType::U, 0.25))));
-            assert_eq!(
-                is_iso_curve(k, &rational_iso_v),
-                Ok(Some((SurfParamType::V, -0.5)))
-            );
-            assert_eq!(is_iso_curve(k, &diag), Ok(None));
-            assert_eq!(is_iso_curve(k, &bent_v), Ok(None));
-        }
+        assert_eq!(is_iso_curve(&k, &iso_u), Ok(Some((SurfParamType::U, 0.25))));
+        assert_eq!(
+            is_iso_curve(&k, &rational_iso_v),
+            Ok(Some((SurfParamType::V, -0.5)))
+        );
+        assert_eq!(is_iso_curve(&k, &diag), Ok(None));
+        assert_eq!(is_iso_curve(&k, &bent_v), Ok(None));
 
-        // Non-SmBSplineCurve kinds still return InvalidInput in both modes.
+        // A curve kind that is not an SmBSplineCurve is InvalidInput.
         let non_bspline = Curve::new(CurveKind::Conic(crate::curve::conic::Conic::default()));
-        for fixes in [&k_off.fixes, &k_on.fixes] {
-            assert!(matches!(
-                is_iso_curve_at_with_fixes(&non_bspline, SurfParamType::U, 0.0, 1e-6, fixes),
-                Err(SolidError::InvalidInput { .. })
-            ));
-        }
+        assert!(matches!(
+            is_iso_curve_at(&non_bspline, SurfParamType::U, 0.0, 1e-6),
+            Err(SolidError::InvalidInput { .. })
+        ));
     }
 
     #[test]
-    fn wr97_callers_wire_fixes_and_reject_nurb_less_uv_curves() {
-        for flag in [false, true] {
-            let mut k = Kernel::default();
-            k.fixes.is_iso_curve_at_propagates_canonical_failure = flag;
+    fn wr97_callers_reject_nurb_less_uv_curves() {
+        let mut k = Kernel::default();
 
-            // Build a closed cylindrical face and verify `is_iso_curve`,
-            // `is_iso_curve_on_seam`, and `fix_backwards_outer_loop_on_seam`.
-            let mut b =
-                crate::topology::brep::p3::new_brep(&mut k, tol::USE_DEFAULT, tol::USE_DEFAULT)
-                    .unwrap();
-            crate::primitive::primitive_creation::p1::analytic_rotational_sweep(
-                &mut k,
-                &mut b,
-                &line3([2.0, 0.0, 0.0], [2.0, 0.0, 3.0]),
-                Vec3::ZERO,
-                Vec3::Z,
-            )
+        // Build a closed cylindrical face and verify `is_iso_curve`,
+        // `is_iso_curve_on_seam`, and `fix_backwards_outer_loop_on_seam`.
+        let mut b = crate::topology::brep::p3::new_brep(&mut k, tol::USE_DEFAULT, tol::USE_DEFAULT)
             .unwrap();
-            let (l, _) = b.loops().iter().next().unwrap();
-            let f = b.loop_(l).unwrap().face;
-            let surface = b.face(f).unwrap().surface.clone().unwrap();
+        crate::primitive::primitive_creation::p1::analytic_rotational_sweep(
+            &mut k,
+            &mut b,
+            &line3([2.0, 0.0, 0.0], [2.0, 0.0, 3.0]),
+            Vec3::ZERO,
+            Vec3::Z,
+        )
+        .unwrap();
+        let (l, _) = b.loops().iter().next().unwrap();
+        let f = b.loop_(l).unwrap().face;
+        let surface = b.face(f).unwrap().surface.clone().unwrap();
 
-            // `is_iso_curve` and `is_iso_curve_on_seam` fail at `ends()` with `SM_ERR` on
-            // a NURB-less B-spline.
-            let empty = Curve::from(BSplineCurve::new(2));
-            assert_eq!(
-                is_iso_curve(&k, &empty).unwrap_err().sm_status(),
-                Some(crate::error::SM_ERR)
-            );
-            assert_eq!(
-                is_iso_curve_on_seam(&k, &surface, &empty)
-                    .unwrap_err()
-                    .sm_status(),
-                Some(crate::error::SM_ERR)
-            );
+        // `is_iso_curve` and `is_iso_curve_on_seam` fail at `ends()` with `SM_ERR` on
+        // a NURB-less B-spline.
+        let empty = Curve::from(BSplineCurve::new(2));
+        assert_eq!(
+            is_iso_curve(&k, &empty).unwrap_err().sm_status(),
+            Some(crate::error::SM_ERR)
+        );
+        assert_eq!(
+            is_iso_curve_on_seam(&k, &surface, &empty)
+                .unwrap_err()
+                .sm_status(),
+            Some(crate::error::SM_ERR)
+        );
 
-            let eus = loop_edgeuses(&b, l).unwrap();
-            let d = surface.natural_uv_domain_if_built();
-            let (u0, u1, v0, v1) = (d.min().x, d.max().x, d.min().y, d.max().y);
-            let corners = [
-                ([u0, v1], [u0, v0]),
-                ([u0, v0], [u1, v0]),
-                ([u1, v0], [u1, v1]),
-                ([u1, v1], [u0, v1]),
-            ];
-            let install_loop = |b: &mut Brep| {
-                for (&eu, (mut a, mut z)) in eus.iter().zip(corners) {
-                    if eu1::orientation(b, eu).unwrap() == OrientType::Opposite {
-                        core::mem::swap(&mut a, &mut z);
-                    }
-                    b.edgeuse_mut(eu).unwrap().uv_trim_curve = Some(uv_line(a, z));
+        let eus = loop_edgeuses(&b, l).unwrap();
+        let d = surface.natural_uv_domain_if_built();
+        let (u0, u1, v0, v1) = (d.min().x, d.max().x, d.min().y, d.max().y);
+        let corners = [
+            ([u0, v1], [u0, v0]),
+            ([u0, v0], [u1, v0]),
+            ([u1, v0], [u1, v1]),
+            ([u1, v1], [u0, v1]),
+        ];
+        let install_loop = |b: &mut Brep| {
+            for (&eu, (mut a, mut z)) in eus.iter().zip(corners) {
+                if eu1::orientation(b, eu).unwrap() == OrientType::Opposite {
+                    core::mem::swap(&mut a, &mut z);
                 }
-            };
-
-            // 1. Misplaced seam iso-curve on `eus[0]` (`u1` instead of `u0`) is mirrored.
-            install_loop(&mut b);
-            let eu0 = eus[0];
-            let (mut s0, mut e0) = ([u1, v1], [u1, v0]);
-            if eu1::orientation(&b, eu0).unwrap() == OrientType::Opposite {
-                core::mem::swap(&mut s0, &mut e0);
+                b.edgeuse_mut(eu).unwrap().uv_trim_curve = Some(uv_line(a, z));
             }
-            b.edgeuse_mut(eu0).unwrap().uv_trim_curve = Some(uv_line(s0, e0));
-            assert!(fix_backwards_outer_loop_on_seam(&k, &mut b, f).unwrap());
-            assert_eq!(check_loop(&k, &mut b, &surface, l, 1e-5, None).unwrap(), 0);
+        };
 
-            // 2. Bowed curve with endpoints on `u1` reaches `is_iso_curve_at_with_fixes`
-            // and is not mirrored because its interior control point leaves the seam.
-            install_loop(&mut b);
-            let bowed = Curve::from(BSplineCurve::from_nurb(
-                NlCurve::new(
-                    vec![
-                        CPoint::new(s0[0], s0[1], NOZ, NOW),
-                        CPoint::new(0.5 * (u0 + u1), 0.5 * (v0 + v1), NOZ, NOW),
-                        CPoint::new(e0[0], e0[1], NOZ, NOW),
-                    ],
-                    2,
-                    vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
-                )
-                .unwrap(),
-                2,
-                false,
-            ));
-            b.edgeuse_mut(eu0).unwrap().uv_trim_curve = Some(bowed);
-            assert!(!fix_backwards_outer_loop_on_seam(&k, &mut b, f).unwrap());
-
-            // 3. NURB-less UV trim curve on `eu0` returns `SM_ERR`.
-            b.edgeuse_mut(eu0).unwrap().uv_trim_curve = Some(Curve::from(BSplineCurve::new(2)));
-            assert_eq!(
-                fix_backwards_outer_loop_on_seam(&k, &mut b, f)
-                    .unwrap_err()
-                    .sm_status(),
-                Some(crate::error::SM_ERR)
-            );
+        // 1. Misplaced seam iso-curve on `eus[0]` (`u1` instead of `u0`) is mirrored.
+        install_loop(&mut b);
+        let eu0 = eus[0];
+        let (mut s0, mut e0) = ([u1, v1], [u1, v0]);
+        if eu1::orientation(&b, eu0).unwrap() == OrientType::Opposite {
+            core::mem::swap(&mut s0, &mut e0);
         }
+        b.edgeuse_mut(eu0).unwrap().uv_trim_curve = Some(uv_line(s0, e0));
+        assert!(fix_backwards_outer_loop_on_seam(&k, &mut b, f).unwrap());
+        assert_eq!(check_loop(&k, &mut b, &surface, l, 1e-5, None).unwrap(), 0);
+
+        // 2. Bowed curve with endpoints on `u1` reaches `is_iso_curve_at`
+        // and is not mirrored because its interior control point leaves the seam.
+        install_loop(&mut b);
+        let bowed = Curve::from(BSplineCurve::from_nurb(
+            NlCurve::new(
+                vec![
+                    CPoint::new(s0[0], s0[1], NOZ, NOW),
+                    CPoint::new(0.5 * (u0 + u1), 0.5 * (v0 + v1), NOZ, NOW),
+                    CPoint::new(e0[0], e0[1], NOZ, NOW),
+                ],
+                2,
+                vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            )
+            .unwrap(),
+            2,
+            false,
+        ));
+        b.edgeuse_mut(eu0).unwrap().uv_trim_curve = Some(bowed);
+        assert!(!fix_backwards_outer_loop_on_seam(&k, &mut b, f).unwrap());
+
+        // 3. NURB-less UV trim curve on `eu0` returns `SM_ERR`.
+        b.edgeuse_mut(eu0).unwrap().uv_trim_curve = Some(Curve::from(BSplineCurve::new(2)));
+        assert_eq!(
+            fix_backwards_outer_loop_on_seam(&k, &mut b, f)
+                .unwrap_err()
+                .sm_status(),
+            Some(crate::error::SM_ERR)
+        );
     }
 }

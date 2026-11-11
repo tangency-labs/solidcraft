@@ -54,7 +54,7 @@ mod native {
         document: Weak<solidcraft_engine::doc::Document>,
         model: Weak<solidcraft_engine::doc::ModelState>,
         revision: u64,
-        camera: (solidcraft_engine::render::UpAxis, [u64; 8]),
+        camera: (solidcraft_viewport::UpAxis, [u64; 8]),
         moves: BTreeMap<u64, solidcraft_engine::doc::Mat>,
         exploded: BTreeMap<u64, solidcraft_engine::doc::Mat>,
         visibility: Value,
@@ -62,7 +62,7 @@ mod native {
         visual: Value,
         lights: solidcraft_engine::schema::render_lights::Visibility,
     }
-    fn camera(app: &SolveApp) -> (solidcraft_engine::render::UpAxis, [u64; 8]) {
+    fn camera(app: &SolveApp) -> (solidcraft_viewport::UpAxis, [u64; 8]) {
         let c = app.cam;
         (c.up, [c.target.x, c.target.y, c.target.z, c.yaw, c.pitch, c.roll, c.distance, c.fov].map(f64::to_bits))
     }

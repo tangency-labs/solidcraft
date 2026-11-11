@@ -629,15 +629,18 @@ impl<'s> SurfPtGlobalSolver<'s> {
         let b = &self.base;
         // We need a SmBSplineSurface to work with control points.
         let Some(bspl) = b.b_spline else {
-            return Err(SolidError::sm_err(OP_TRI));
+            return Err(SolidError::surface_failed(
+                OP_TRI,
+                "the surface is not a B-spline surface",
+            ));
         };
 
         let (best_idx_u, best_idx_v) = best_idx;
         let mut best_idx_u = best_idx_u;
         let mut best_idx_v = best_idx_v;
-        let (num_u, num_v, cpts) = bspl
-            .control_points()
-            .map_err(|_| SolidError::sm_err(OP_TRI))?;
+        let (num_u, num_v, cpts) = bspl.control_points().map_err(|_| {
+            SolidError::surface_failed(OP_TRI, "the B-spline surface has no control points")
+        })?;
         let rational = bspl.is_rational();
         let mut best_dist = BIG_DOUBLE;
         let mut this_local_u = -1.0;
@@ -768,17 +771,23 @@ impl<'s> SurfPtGlobalSolver<'s> {
         let b = &self.base;
         // This requires an SmBSplineSurface.
         let Some(bspl) = b.b_spline else {
-            return Err(SolidError::sm_err(OP_LEG));
+            return Err(SolidError::surface_failed(
+                OP_LEG,
+                "the surface is not a B-spline surface",
+            ));
         };
 
         // Also, this won't help in this case:
         if b.solver_op == SolverOperation::Signed3dDirectedMaximize {
-            return Err(SolidError::sm_err(OP_LEG));
+            return Err(SolidError::surface_failed(
+                OP_LEG,
+                "a signed directed maximize gets no leg refinement",
+            ));
         }
 
-        let (num_u, num_v, cpts) = bspl
-            .control_points()
-            .map_err(|_| SolidError::sm_err(OP_LEG))?;
+        let (num_u, num_v, cpts) = bspl.control_points().map_err(|_| {
+            SolidError::surface_failed(OP_LEG, "the B-spline surface has no control points")
+        })?;
         let rational = bspl.is_rational();
 
         let best_pt = control_point(&cpts, num_v, best_idx_u, best_idx_v, rational)?;

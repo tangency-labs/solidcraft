@@ -7,8 +7,8 @@
 use solidcraft_geom::prelude::*;
 use std::collections::HashSet;
 
+use solidcore_ops::pcurve::{SURFACE_GAP_MARGIN, TrimFace, Trims};
 use solidcore_record::brep::{self as b, Curve2, EdgeUseRef, Loop, OrientedEdge, OrientedFace, Region, Shell, Vertex};
-use solidcraft_geom::brep::pcurve::{SURFACE_GAP_MARGIN, TrimFace, Trims};
 
 /// [`Trims`] by SMLib.
 #[derive(Clone, Copy, Debug, Default)]
@@ -108,12 +108,7 @@ fn cover_gaps(body: &crate::Brep, face: &TrimFace<'_>, bare: &HashSet<(u32, u32,
 /// [`cover_gaps`]), the pcurve is mapped onto our interval by the affine change of parameter
 /// (exact for a B-spline: its knots move), and the record's check measures it against the edge
 /// as any pcurve. Farther is SMLib trimming the edge, refused with how far.
-pub(crate) fn on_our_interval(
-    pc: Curve2,
-    ours: &solidcraft_geom::brep::pcurve::TrimEdge<'_>,
-    theirs: [f64; 2],
-    tolerance: f64,
-) -> Result<Curve2, String> {
+pub(crate) fn on_our_interval(pc: Curve2, ours: &solidcore_ops::pcurve::TrimEdge<'_>, theirs: [f64; 2], tolerance: f64) -> Result<Curve2, String> {
     let [a, b] = ours.interval;
     let [c, d] = theirs;
     if a == c && b == d {

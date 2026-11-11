@@ -30,6 +30,13 @@
 //!   `fixes.fillet_rail_end_on_continued_surface`, `CalcRailIntEdgeuse` evaluates the
 //!   rail's end on its base surface with out-of-bounds evaluation on (the fork's
 //!   tangency-labs/smlib@3f22e97).
+//! - **A rail's end at a side edge starts from the round's corner section (#13538).**
+//!   `CalcRailIntEdgeuse`'s first guess on the side edge is where the ball's section through
+//!   the filleted edge's end there touches it ([`edge_section`]), not upstream's fraction of
+//!   the edge's length by the radius. Faces that hold a second ball at the side edge (two
+//!   crossing cylinders, whose offsets continued as themselves are whole circles, hold the
+//!   round of each crossing) let a guess away from the corner solve onto the other ball. The
+//!   rest of upstream's guesses follow unchanged.
 //! - **Object model.** As in `blend.fillet_geom_p1` and `_p4`, fillet vertices, edges
 //!   and geometries are ids of the [`FilletBrep`] (`self`). `GetFilletSolver()` is an
 //!   opaque [`FilletSolverId`] resolved in the caller's `solvers` table (index `id.0`;
@@ -131,7 +138,9 @@ use std::borrow::Cow;
 
 use crate::blend::fillet_corner::p3::FilletCorner;
 use crate::blend::fillet_custom_solver::ConstantRadiusAssistedFs;
+use crate::blend::fillet_solver::edge_section::edge_section;
 use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverOps, FilletSurfaceGeneratorType};
+use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{EntityRef, Result, SolidError};
@@ -166,7 +175,7 @@ use crate::topology::edgeuse::p3::{
 use crate::topology::face::p2 as face2;
 use crate::topology::vertex;
 use crate::topology::vertexuse as vertexuse_unit;
-use crate::topology::{edge, Brep, EdgeId, EdgeuseId, FaceId, VertexId, VertexuseId};
+use crate::topology::{edge, Brep, EdgeId, EdgeuseId, FaceId, ObjectHandle, VertexId, VertexuseId};
 
 use super::p1::{
     adjust_uv_on_seam, create_cubic_rail_rail_interpolant, evaluate_mate,
@@ -883,6 +892,88 @@ fn rail_edgeuse_intersect(
     result
 }
 
+/// Where the round of `ops`'s edge touches `side_edge` at the corner `vertex`: the rail
+/// `rail_index`'s contact of the ball's section in the plane through the edge's end at
+/// `vertex`, normal to the edge there ([`edge_section`]), dropped onto the side edge within
+/// `interval`. That section starts on the edge, so it is the ball of this round, not one the
+/// faces hold elsewhere. `None` where `vertex` ends neither end of the solver's edge, or the
+/// section is not found.
+///
+/// # Errors
+///
+/// Those of the topology queries, the section, the evaluation and the drop.
+fn corner_section_on_side_edge(
+    k: &Kernel,
+    ops: &mut dyn FilletSolverOps,
+    target: &mut Brep,
+    vertex: Option<VertexId>,
+    rail_index: usize,
+    side_edge: EdgeId,
+    interval: &Extent1d,
+) -> Result<Option<f64>> {
+    let (Some(vertex), Some(edgeuse)) = (vertex, ops.solver().edgeuse(0)?) else {
+        return Ok(None);
+    };
+    let Some(edge_id) = eu1::edge(target, edgeuse)? else {
+        return Ok(None);
+    };
+    let edge_interval = edge::interval(target, edge_id)?;
+    let t = if edge::start_vertex(target, edge_id)? == Some(vertex) {
+        edge_interval.min()
+    } else if edge::end_vertex(target, edge_id)? == Some(vertex) {
+        edge_interval.max()
+    } else {
+        return Ok(None);
+    };
+    let Some(curve) = edge::curve(target, edge_id)?.cloned() else {
+        return Ok(None);
+    };
+    let (Some(first), Some(second)) = (ops.solver().surface(0)?, ops.solver().surface(1)?) else {
+        return Ok(None);
+    };
+    let domains = [
+        first
+            .surface
+            .base_surface()
+            .natural_uv_domain_with_nurb(k)?,
+        second
+            .surface
+            .base_surface()
+            .natural_uv_domain_with_nurb(k)?,
+    ];
+    let Some(section) = edge_section(ops, k, target, &curve, t, &domains)? else {
+        return Ok(None);
+    };
+    let Some(rail) = ops.solver().surface(rail_index)? else {
+        return Ok(None);
+    };
+    let srf = if rail_index == 0 {
+        SrfIndex::First
+    } else {
+        SrfIndex::Second
+    };
+    let contact = rail
+        .surface
+        .base_surface()
+        .evaluate_point(k, section.uv_pos(srf))?;
+    let Some(side_curve) = edge::curve(target, side_edge)? else {
+        return Ok(None);
+    };
+    let sols = side_curve.global_point_solve(
+        k,
+        interval,
+        SolverOperation::Minimize,
+        contact,
+        ops.solver().approx_tol_3d,
+        SolutionRequested::Single,
+        &GlobalPointSolveOptions::<ObjectHandle>::default(),
+    )?;
+    if sols.len() != 1 {
+        return Ok(None);
+    }
+    sols.get(0).map(|sol| sol.start.param(0)).transpose()
+}
+
 // ---- sm_SrfSrfIntersection --------------------------------------------------------------
 
 /// The curves of [`srf_srf_intersection`]: the 3D intersection curve (`None` only on a
@@ -1071,9 +1162,7 @@ pub fn srf_srf_intersection_with_context(
     // analytic intersector gives exactly. Points off a surface, and an end where the surface
     // touches the plane, are met by the intersectors below. A round of touch circles needs it
     // (#2704): its end section leaves the end face's plane, so its side curve is this one.
-    if (k.fixes.fillet_surface_plane_curve_on_plane_equation || k.fixes.fillet_gn_section_generator)
-        && curves_3d.is_empty()
-    {
+    if curves_3d.is_empty() {
         let plane_first = matches!(surf1.kind(), SurfaceKind::Plane(_));
         if let (Some(start_pnt), Some(end_pnt), true) = (
             start,
@@ -1085,7 +1174,9 @@ pub fn srf_srf_intersection_with_context(
             } else {
                 (surf1, surf2)
             };
-            if !surface.is_planar(k, approx_tol)?.is_planar
+            // a curve between two points: ends that coincide are no such curve
+            if start_pnt.distance(end_pnt) > approx_tol
+                && !surface.is_planar(k, approx_tol)?.is_planar
                 && ends_on_both(k, [surf1, surf2], [start_pnt, end_pnt], approx_tol)?
             {
                 let c = surface_plane_curve(
@@ -1841,8 +1932,90 @@ impl FilletBrep {
             )?)?
             .unwrap_or(0);
 
+            // Not upstream (solidcore-native, [`crate::blend::fillet_tangent_rollover`]): a rail rolled over a smooth far
+            // edge of its solver's face, the whole length, lies on the face beyond, which the
+            // side edge at the corner does not bound. The rail ends on the next side edge, across
+            // the vertex where the rolled-over edge meets this one; it is solved there, on that
+            // edge's use on the rail's face (the side edge's UV curve must be on the rail's
+            // surface), as a rail continues across a seam's vertex.
+            let rolled = {
+                let si = RailSolvers::geom_solver(self, g1)?;
+                let solver = solvers.solver(si)?;
+                solver
+                    .rolled_faces
+                    .get(rail_index)
+                    .copied()
+                    .flatten()
+                    .map(|face| (face, solver.tangency_tolerance))
+            };
+            if let Some((rolled, tol_rad)) = rolled {
+                let on_rolled = eu1::face(target, side_eu1)? == Some(rolled)
+                    || match eu1::radial(target, side_eu1)? {
+                        Some(r) => eu1::face(target, r)? == Some(rolled),
+                        None => false,
+                    };
+                let far = if edge::start_vertex(target, side_edge)? == cp_vertex {
+                    edge::end_vertex(target, side_edge)?
+                } else if edge::end_vertex(target, side_edge)? == cp_vertex {
+                    edge::start_vertex(target, side_edge)?
+                } else {
+                    None
+                };
+                if let (false, Some(far)) = (on_rolled, far) {
+                    let beyond = crate::blend::blend_corner::end::side_edgeuse_across_rolled_edge(
+                        k,
+                        target,
+                        side_eu1,
+                        far,
+                        Some(rolled),
+                        tol_rad,
+                    )?;
+                    let on_face = match beyond {
+                        Some(b) => eu1::radial(target, b)?,
+                        None => None,
+                    };
+                    if let Some(next) = on_face {
+                        if depth >= crate::blend::blend_corner::end::SIDE_EDGE_CHAIN_STEPS {
+                            return Err(SolidError::sm_err(OP));
+                        }
+                        self.fillet_vertex_mut(v)?.set_point_class(
+                            crate::intersect::point_class::PointClassType::Edgeuse,
+                            Some(EntityRef::Edgeuse(next)),
+                        );
+                        return self.calc_rail_int_edgeuse_with_solvers(
+                            k,
+                            v,
+                            opt_fg,
+                            corners,
+                            solvers,
+                            target,
+                            Some(far),
+                            depth + 1,
+                        );
+                    }
+                }
+            }
+
             let vu1 = vu1.ok_or_else(|| SolidError::null_pointer(OP))?;
             let mut tsect1 = self.fillet_vertexuse(vu1)?.tsect_pnt().clone();
+            // Not upstream (#13538): the rail's end continues the round from its section at
+            // the corner, so the search starts where that section touches the side edge, not
+            // at a fraction of the edge's length. Where the faces meet the rail end's solve
+            // twice (two cylinders crossing: the round at each of their crossings), the first
+            // guess decides which ball the solve finds.
+            let mut guess_edge_parameters = guess_edge_parameters;
+            let si = RailSolvers::geom_solver(self, g1)?;
+            if let Some(t) = corner_section_on_side_edge(
+                k,
+                solvers.solver_ops_mut(si)?,
+                target,
+                cp_vertex,
+                rail_index,
+                side_edge,
+                &ivl,
+            )? {
+                guess_edge_parameters[0] = t;
+            }
             let mut found = false;
             let mut edgeuse_parameter = 0.0;
             for &guess in &guess_edge_parameters {

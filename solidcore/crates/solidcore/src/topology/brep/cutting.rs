@@ -47,7 +47,7 @@ use std::collections::BTreeSet;
 
 use crate::curve::curve::p7::PropertyAnalysisOptions;
 use crate::curve::curve::CurvePropertyType;
-use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError, SM_ERR_INVALID_INPUT};
+use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
 use crate::geom::attribute::{ids, Attribute, Behavior};
 use crate::geom::context::{MarkLock, ALL_MARKS};
 use crate::geom::extent3d::Extent3d;
@@ -157,7 +157,7 @@ impl PlaneCutter {
         for f in faces {
             // locals for plane/surface intersections
             let surface = face2::surface(b, f)?
-                .ok_or_else(|| SolidError::null_pointer(OP_MERGE))?
+                .ok_or_else(|| SolidError::topology_missing(OP_MERGE, "the face's surface"))?
                 .clone_for_evaluation()?;
             let uv_domain = face2::uv_domain(b, f)?;
 
@@ -236,10 +236,9 @@ impl PlaneCutter {
             let vectors = [self.plane_normal];
             let solutions = {
                 let e = b.edge(wire_edge)?;
-                let curve = e
-                    .curve
-                    .as_ref()
-                    .ok_or_else(|| SolidError::null_pointer(OP_MERGE))?;
+                let curve = e.curve.as_ref().ok_or_else(|| {
+                    SolidError::topology_missing(OP_MERGE, "the wire edge's curve")
+                })?;
                 // find wire/plane intersection points
                 curve
                     .global_property_analysis::<NoObject>(
@@ -260,17 +259,19 @@ impl PlaneCutter {
             // For every solution - merge points not on the cutplane into TgtBrep
             for sol in solutions.as_slice() {
                 let param = sol.start.param(0)?;
-                let v1 = edge::vertex(b, wire_edge)?
-                    .ok_or_else(|| SolidError::null_pointer(OP_MERGE))?;
-                let v2 = edge::other_vertex(b, wire_edge, Some(v1))?
-                    .ok_or_else(|| SolidError::null_pointer(OP_MERGE))?;
+                let v1 = edge::vertex(b, wire_edge)?.ok_or_else(|| {
+                    SolidError::topology_missing(OP_MERGE, "the wire edge's first vertex")
+                })?;
+                let v2 = edge::other_vertex(b, wire_edge, Some(v1))?.ok_or_else(|| {
+                    SolidError::topology_missing(OP_MERGE, "the wire edge's second vertex")
+                })?;
 
                 // get edge endPoints, Curve, and SolutionPoint
                 let new_v_pnt = b
                     .edge(wire_edge)?
                     .curve
                     .as_ref()
-                    .ok_or_else(|| SolidError::null_pointer(OP_MERGE))?
+                    .ok_or_else(|| SolidError::topology_missing(OP_MERGE, "the wire edge's curve"))?
                     .evaluate_point(k, param)?;
 
                 // when solutionPoint is not close to endPoints
@@ -282,10 +283,16 @@ impl PlaneCutter {
                     // split the wire edge with the solutionPoint
                     let split = p9::make_vertex_split_edge(k, b, wire_edge, param, env, curve_ref)?;
                     if !split.split {
-                        return Err(SolidError::sm_err(OP_MERGE));
+                        return Err(SolidError::topology_failed(
+                            OP_MERGE,
+                            "the wire edge could not be split at the plane",
+                        ));
                     }
                     let (Some([_new_e1, new_e2]), Some(new_v)) = (split.edges, split.vertex) else {
-                        return Err(SolidError::null_pointer(OP_MERGE));
+                        return Err(SolidError::topology_missing(
+                            OP_MERGE,
+                            "the split's new edge or vertex",
+                        ));
                     };
                     // SM_OLDTOL_LINE pNewV->SetTolerance(SM_XSECT_TO_ZONETOL3D(dXSectTol3d))
                     let zone = tol::zone_tol3d(k, tol::zone_tol3d(k, xsect_tol_3d) / 2.0);
@@ -421,7 +428,7 @@ impl PlaneCutter {
                 b.edge(e)?
                     .curve
                     .as_ref()
-                    .ok_or_else(|| SolidError::null_pointer(OP_CLASSIFY))?
+                    .ok_or_else(|| SolidError::topology_missing(OP_CLASSIFY, "the edge's curve"))?
                     .evaluate_point(k, ivl.evaluate(t))
             };
             let mut signed_dist = (point_at(0.45678)? - self.plane_point).dot(self.plane_normal);
@@ -484,11 +491,14 @@ impl PlaneCutter {
             }
 
             // for every edgeuse on the face's upward faceuse
-            let fu = face2::upward_faceuse(b, f)?
-                .ok_or_else(|| SolidError::null_pointer(OP_CLASSIFY))?;
+            let fu = face2::upward_faceuse(b, f)?.ok_or_else(|| {
+                SolidError::topology_missing(OP_CLASSIFY, "the face's upward face use")
+            })?;
             for eu in eu1::faceuse_edgeuses(b, fu, false, None)? {
                 // get edgeuse midPoint binormal vector
-                let e = eu1::edge(b, eu)?.ok_or_else(|| SolidError::null_pointer(OP_CLASSIFY))?;
+                let e = eu1::edge(b, eu)?.ok_or_else(|| {
+                    SolidError::topology_missing(OP_CLASSIFY, "the edge use's edge")
+                })?;
                 let mid = edge::interval(b, e)?.evaluate(0.5);
                 let binormal =
                     eu3::evaluate_binormal(k, b, eu, mid, false, &eu3::BinormalOptions::default())?
@@ -652,7 +662,7 @@ fn do_cut_body(
 ///
 /// # Errors
 ///
-/// `SM_ERR_INVALID_INPUT` ([`SolidError::Upstream`]) for a normal `Unitize` rejects,
+/// `SM_ERR_INVALID_INPUT` (a [`TopologyFailure`](crate::error::topology::TopologyFailure)) for a normal `Unitize` rejects,
 /// before `b` is touched; those of [`do_cut`].
 pub fn cut_notified(
     k: &mut Kernel,
@@ -663,11 +673,10 @@ pub fn cut_notified(
     plane_normal: Vec3,
 ) -> Result<()> {
     let Ok(normal) = plane_normal.unitize() else {
-        return Err(SolidError::Upstream {
-            operation: OP_CUT,
-            code: SM_ERR_INVALID_INPUT,
-            entity: None,
-        });
+        return Err(SolidError::topology_invalid_value(
+            OP_CUT,
+            "the plane normal has zero length",
+        ));
     };
     let mut cutter = PlaneCutter::new(plane_point, normal);
     let tolerance = b.tolerance();

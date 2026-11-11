@@ -86,32 +86,24 @@ const OP_TRIM: &str = "surface::surf_of_revolution::p2::SurfOfRevolution::trim_w
 /// `ANALYTIC_TOL_SCALE` (`SmConfig.h`).
 const ANALYTIC_TOL_SCALE: f64 = 100.0;
 
-// `SM_ERR_OUTSIDE_OF_DOMAIN` (`SmMessages.h`).
-use crate::error::{SM_ERR_NOT_WITHIN_TOLERANCE, SM_ERR_OUTSIDE_OF_DOMAIN};
+use crate::error::surface::SurfaceFailure;
 
 /// The error of [`SurfOfRevolution::step_inversion_with_outputs`] for a point whose
 /// rotation into the generator's plane does not drop onto the generator (upstream
 /// `SM_ERR` after setting `SM_LT_EXTERIOR`): an answer, not a failure, in the
 /// SolidCraft fork (tangency-labs/smlib dfc7cb6, `SM_ERR_NOT_WITHIN_TOLERANCE`).
 pub(crate) fn is_off_generator(e: &SolidError) -> bool {
-    matches!(
-        e,
-        SolidError::Upstream {
-            operation: OP_STEP_INV,
-            code: crate::error::SM_ERR,
-            ..
-        }
-    )
+    // the status, not the variant: a typed failure that replaced the `Upstream` (#13790)
+    e.upstream_status() == Some(crate::error::SM_ERR) && e.operation() == OP_STEP_INV
 }
 
-/// `SM_ERR_NOT_WITHIN_TOLERANCE` of `operation`: an analytic inversion's answer that
-/// the point is off the surface (tangency-labs/smlib dfc7cb6).
+/// The off-surface failure of `operation` (status `SM_ERR_NOT_WITHIN_TOLERANCE`): an
+/// analytic inversion's answer that the point is off the surface (tangency-labs/smlib dfc7cb6).
 pub(crate) fn not_within_tolerance(operation: &'static str) -> SolidError {
-    SolidError::Upstream {
+    SolidError::surface(
         operation,
-        code: SM_ERR_NOT_WITHIN_TOLERANCE,
-        entity: None,
-    }
+        SurfaceFailure::OffSurface("the point is off the surface"),
+    )
 }
 
 /// The solution object of solves whose solutions name no object.
@@ -202,7 +194,7 @@ impl SurfOfRevolution {
         let gen = self
             .gen_curve
             .as_mut()
-            .ok_or(SolidError::null_pointer(OP_ADJUST))?;
+            .ok_or_else(|| SolidError::surface_missing(OP_ADJUST, "the generator curve"))?;
         gen_adjust_step_interval(k, gen, &v_ivl)?;
         if k.fixes.ellipse_step_interval_checks {
             self.anal_uv_domain = *new_step_uv_domain;
@@ -309,11 +301,12 @@ impl SurfOfRevolution {
 
         // check input - new trim UV domain must be inside current natural UV domain
         if !new_nurb_uv_domain.is_contained_by(&current, EFF_ZERO_PARAM) {
-            return Err(SolidError::Upstream {
-                operation: OP_TRIM,
-                code: SM_ERR_OUTSIDE_OF_DOMAIN,
-                entity: None,
-            });
+            return Err(SolidError::surface(
+                OP_TRIM,
+                SurfaceFailure::OutsideDomain(
+                    "the trim domain is outside the surface's natural domain",
+                ),
+            ));
         }
 
         // no work - new and current domains are same size
@@ -394,13 +387,15 @@ impl SurfOfRevolution {
             Ok((r.uv, r.location))
         } else if k.fixes.analytic_inversion_answers_apart {
             // the fork (tangency-labs/smlib dfc7cb6): outside the sweep is an answer
-            Err(SolidError::Upstream {
-                operation: OP_STEP_INV,
-                code: SM_ERR_OUTSIDE_OF_DOMAIN,
-                entity: None,
-            })
+            Err(SolidError::surface(
+                OP_STEP_INV,
+                SurfaceFailure::OutsideDomain("the point is outside the sweep"),
+            ))
         } else {
-            Err(SolidError::sm_err(OP_STEP_INV))
+            Err(SolidError::surface_failed(
+                OP_STEP_INV,
+                "the point is outside the sweep",
+            ))
         }
     }
 
@@ -511,7 +506,10 @@ impl SurfOfRevolution {
         // `is_off_generator`; the public inversion answers it, with the fork's fix, as
         // SM_ERR_NOT_WITHIN_TOLERANCE)
         let Some((sp, (gen, ivl, solutions))) = on_generator else {
-            return Err(SolidError::sm_err(OP_STEP_INV));
+            return Err(SolidError::surface_failed(
+                OP_STEP_INV,
+                "the rotated point is not on the generator",
+            ));
         };
         let num_angles = sp.angles_deg.len();
         let angle0 = sp.angles_deg.first().copied().unwrap_or(0.0);
@@ -556,9 +554,9 @@ impl SurfOfRevolution {
         }
 
         // set output V coordinate
-        let first = solutions
-            .first()
-            .ok_or_else(|| SolidError::sm_err(OP_STEP_INV))?;
+        let first = solutions.first().ok_or_else(|| {
+            SolidError::surface_failed(OP_STEP_INV, "the generator inversion found no solution")
+        })?;
         let mut v = first.start.param(0)?;
 
         // for points on closed genCurve seams - update point classification
@@ -1360,5 +1358,23 @@ mod tests {
         assert!(min_radius(false) < -0.1);
         // the opt-in cuts it at the axis
         assert!(min_radius(true) > -1e-6);
+    }
+
+    /// #13790: a typed `SM_ERR` that replaced the inversion's off-generator `Upstream` is
+    /// the same answer (the cone's trim intervals and intersections read it too).
+    #[test]
+    fn off_generator_reads_the_status_of_a_typed_failure() {
+        use crate::error::replaced_upstream_samples::{native_failures, replaced_upstream};
+        assert!(is_off_generator(&SolidError::sm_err(OP_STEP_INV)));
+        for typed in replaced_upstream(OP_STEP_INV, crate::error::SM_ERR, None) {
+            assert!(is_off_generator(&typed), "{typed:?}");
+        }
+        for other in replaced_upstream(OP_STEP_INV, crate::error::SM_ERR_NOT_WITHIN_TOLERANCE, None)
+            .into_iter()
+            .chain(replaced_upstream(OP_ADJUST, crate::error::SM_ERR, None))
+            .chain(native_failures(OP_STEP_INV, crate::error::SM_ERR))
+        {
+            assert!(!is_off_generator(&other), "{other:?}");
+        }
     }
 }

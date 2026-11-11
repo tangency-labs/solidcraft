@@ -312,7 +312,7 @@ impl BooleanDriver for DependencyMerge {
         // SM_ASSERT(pBrep != NULL); the other B-rep may be null (the stitch methods).
         let first = primary.as_ref().ok_or(SolidError::invalid_input(
             OP,
-            "SmMerge without primary B-rep",
+            "the merge has no primary B-rep",
         ))?;
         let merge = MergeState::with_breps(
             k,
@@ -348,7 +348,7 @@ impl BooleanDriver for DependencyMerge {
         let Some(engine) = self.engine.as_mut() else {
             return Err(SolidError::invalid_input(
                 OP,
-                "ManifoldBoolean before SmMerge::SmMerge",
+                "the Boolean runs before the merge is constructed",
             ));
         };
         engine.intersector.set_intersect_lamina_edges(*lamina_edges);
@@ -404,7 +404,10 @@ pub fn boolean_trees<D: BooleanDriver>(
             stack.push(slot.take());
         } else {
             if stack.len() < 2 {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::stage_failed(
+                    OP,
+                    "a Boolean operator has fewer than two operands",
+                ));
             }
             let mut other = stack.pop().flatten();
             let mut primary = stack.pop().flatten();
@@ -422,7 +425,12 @@ pub fn boolean_trees<D: BooleanDriver>(
                 -4 => BooleanOperation::Merge,
                 -5 => BooleanOperation::ExclusiveOr,
                 -6 => BooleanOperation::Slice,
-                _ => return Err(SolidError::sm_err(OP)),
+                _ => {
+                    return Err(SolidError::stage_failed(
+                        OP,
+                        "a Boolean operator code is not one the tree knows",
+                    ))
+                }
             };
             k.check_cancelled(OP)?;
             let result = driver
@@ -446,7 +454,7 @@ pub fn boolean_trees<D: BooleanDriver>(
                     {
                         e
                     } else {
-                        SolidError::sm_err(OP)
+                        SolidError::failed_after(OP, "a Boolean of the tree failed", e)
                     }
                 })?;
             stack.push(result);
@@ -495,12 +503,15 @@ pub fn merge_breps<D: BooleanDriver>(
     }
     boolean_trees(k, &mut ordered, &trees, options, driver)?;
     if ordered.len() != 1 {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::stage_failed(
+            OP,
+            "the Boolean tree does not reduce to one B-rep",
+        ));
     }
     ordered
         .pop()
         .flatten()
-        .ok_or_else(|| SolidError::sm_err(OP))
+        .ok_or_else(|| SolidError::stage_failed(OP, "the Boolean tree has no result"))
 }
 
 /// Temporarily disable manifold enforcement, set lamina intersection mode to 1,
@@ -593,8 +604,9 @@ where
     D::Surface: Ord,
 {
     let (final_result, original_other) = driver.operands();
-    final_result.ok_or_else(|| SolidError::null_pointer(OP))?;
-    let original_other = original_other.ok_or_else(|| SolidError::null_pointer(OP))?;
+    final_result.ok_or_else(|| SolidError::entity_missing(OP, "the merge has no result B-rep"))?;
+    let original_other = original_other
+        .ok_or_else(|| SolidError::entity_missing(OP, "the merge has no second B-rep"))?;
     // The first surface query is observable even though upstream overwrites it.
     let _ = driver.surfaces(original_other)?;
     // SER: a failed IntersectInsertRelate (a failed imprint leaves both B-reps
@@ -630,8 +642,10 @@ where
     D::Surface: Ord,
 {
     let (final_result, original_other) = driver.operands();
-    let final_result = final_result.ok_or_else(|| SolidError::null_pointer(OP))?;
-    let original_other = original_other.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let final_result = final_result
+        .ok_or_else(|| SolidError::entity_missing(OP, "the merge has no result B-rep"))?;
+    let original_other = original_other
+        .ok_or_else(|| SolidError::entity_missing(OP, "the merge has no second B-rep"))?;
     let surfaces = driver.surfaces(original_other)?;
     driver.clear_relationships()?;
     if let Some(pairs) = skip_pairs {
@@ -676,9 +690,9 @@ where
         driver.clear_relationships()?;
         if create_new_breps_for_faces {
             if let Some(pairs) = skip_pairs {
-                let users = driver
-                    .surface_map_users(surface)?
-                    .ok_or_else(|| SolidError::null_pointer(OP))?;
+                let users = driver.surface_map_users(surface)?.ok_or_else(|| {
+                    SolidError::entity_missing(OP, "the surface has no users in the surface map")
+                })?;
                 for user in users {
                     for skip in pairs.seconds(surface) {
                         if let Some(skip_users) = driver.surface_map_users(skip)? {
@@ -870,12 +884,18 @@ fn create_face_from_base_sliced_surface(
 ) -> Result<FaceId> {
     // check input - crUVDomain contained within the pSurface->GetNaturalUVDomain()
     if !uv_domain.is_contained_by(&BaseSlicedSurface::natural_uv_domain(), EFF_ZERO) {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::stage_failed(
+            OP,
+            "the UV domain is not within the natural domain of the surface",
+        ));
     }
     // SER(pSurface->CreateNaturalUVTrimCurves(...)): the minimum-u side's
     // CreateIsoParametricCurve -> IsSingularity -> EvaluateSimple -> Evaluate (base:
     // SM_ERR, so "singular") -> SER(EvaluatePoint(sUV, sPnt)) (base: SM_ERR)
-    Err(SolidError::sm_err(OP))
+    Err(SolidError::stage_failed(
+        OP,
+        "the sliced surface cannot be trimmed into a face",
+    ))
 }
 
 /// `new (*pContext) SmSurface(*pSurface)` for an output surface of the planar path. That
@@ -963,7 +983,7 @@ fn boolean_2d(
         )?;
     }
     // Upstream dereferences pBrep3 next, even when Boolean2D left it null.
-    result.ok_or_else(|| SolidError::null_pointer(OP))
+    result.ok_or_else(|| SolidError::entity_missing(OP, "the planar Boolean made no result B-rep"))
 }
 
 fn remove_faces(k: &mut Kernel, brep: &mut Brep, faces: &[FaceId]) -> Result<()> {
@@ -984,7 +1004,10 @@ fn list_operand(k: &mut Kernel, breps: &[Brep], surfaces: &[Surface]) -> Result<
         (result, false)
     } else {
         if surfaces.is_empty() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::stage_failed(
+                OP,
+                "there are no surfaces to merge",
+            ));
         }
         let mut result = empty_brep(
             k,
@@ -1166,7 +1189,7 @@ pub fn boolean_lists_with_notifications(
             &mut 0,
             kind,
         )?
-        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .ok_or_else(|| SolidError::entity_missing(OP, "the Boolean made no result B-rep"))?
     };
     shrink_geometry(k, &mut result)?;
     stitch_and_orient(k, &mut result, -0.1, false, None, None)?;
@@ -1176,12 +1199,17 @@ pub fn boolean_lists_with_notifications(
             output.surfaces.push(copy_list_surface(k, surface)?);
         }
     } else {
-        let region = result
-            .infinite_region()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+        let region = result.infinite_region().ok_or_else(|| {
+            SolidError::entity_missing(OP, "the result B-rep has no infinite region")
+        })?;
         let shells = result.region(region)?.get_shells(None, |_, _| Ok(false))?;
         match shells.len() {
-            0 => return Err(SolidError::sm_err(OP)),
+            0 => {
+                return Err(SolidError::stage_failed(
+                    OP,
+                    "the slice result has no shell",
+                ))
+            }
             1 => output.breps.push(result),
             _ => {
                 let mut faces = bp::faces(&result, None)?;
@@ -1473,14 +1501,14 @@ mod tests {
             BooleanOperation::Difference,
             None,
         );
-        assert!(matches!(
-            result,
-            Err(SolidError::Upstream {
-                operation: OP,
-                code: crate::error::SM_ERR_NULL_POINTER,
-                ..
-            })
-        ));
+        let error = result.unwrap_err();
+        assert_eq!(error.operation(), OP);
+        assert_eq!(error.sm_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(error.kind(), crate::error::ErrorKind::Missing);
+        assert_eq!(
+            error.to_string(),
+            "boolean::merge::p3: the planar Boolean made no result B-rep"
+        );
         assert!(!kernel.context.doing_boolean());
     }
 
@@ -1504,16 +1532,12 @@ mod tests {
         let mut k = Kernel::default();
         k.tolerances.zone_tol_3d = 0.002;
         let sliced = |result: Result<(Brep, bool)>| {
-            assert!(
-                matches!(
-                    result,
-                    Err(SolidError::Upstream {
-                        operation: OP,
-                        code: crate::error::SM_ERR,
-                        ..
-                    })
-                ),
-                "{result:?}"
+            let error = result.as_ref().unwrap_err();
+            assert_eq!(error.operation(), OP, "{result:?}");
+            assert_eq!(error.sm_status(), Some(crate::error::SM_ERR), "{result:?}");
+            assert_eq!(
+                error.to_string(),
+                "boolean::merge::p3: the sliced surface cannot be trimmed into a face"
             );
         };
         sliced(list_operand(&mut k, &[], &[square_plane(0.0)]));
@@ -1536,17 +1560,9 @@ mod tests {
             -1,
             None,
         );
-        assert!(
-            matches!(
-                result,
-                Err(SolidError::Upstream {
-                    operation: OP,
-                    code: crate::error::SM_ERR,
-                    ..
-                })
-            ),
-            "{result:?}"
-        );
+        let error = result.as_ref().unwrap_err();
+        assert_eq!(error.operation(), OP, "{result:?}");
+        assert_eq!(error.sm_status(), Some(crate::error::SM_ERR), "{result:?}");
         // a list with a B-rep ignores its surfaces
         let (brep, planar) = list_operand(&mut k, &[Brep::new()], &[square_plane(0.0)]).unwrap();
         assert!(!planar);
@@ -1639,13 +1655,10 @@ mod tests {
         };
         let mut input = vec![Some(1), Some(2), Some(3)];
         let error = boolean_trees(&mut k, &mut input, &[0, 1, -1], None, &mut driver).unwrap_err();
-        assert!(matches!(
-            error,
-            SolidError::Upstream {
-                code: crate::error::SM_ERR,
-                ..
-            }
-        ));
+        assert_eq!(error.sm_status(), Some(crate::error::SM_ERR));
+        assert_eq!(error.kind(), crate::error::ErrorKind::Failed);
+        // the failed Boolean is kept as the cause of the generic failure
+        assert!(error.cause().is_some(), "{error:?}");
         assert_eq!(input, [None, None, Some(3)]);
         // an Unported failure passes through unmapped
         let mut driver = Trace {
@@ -1667,13 +1680,10 @@ mod tests {
         let mut driver = DependencyMerge::default();
         let mut input = vec![Some(Brep::new()), Some(Brep::new())];
         let error = boolean_trees(&mut k, &mut input, &[0, 1, -1], None, &mut driver).unwrap_err();
-        assert!(matches!(
-            error,
-            SolidError::Upstream {
-                code: crate::error::SM_ERR,
-                ..
-            }
-        ));
+        assert_eq!(error.sm_status(), Some(crate::error::SM_ERR));
+        assert_eq!(error.kind(), crate::error::ErrorKind::Failed);
+        // the failed Boolean is kept as the cause of the generic failure
+        assert!(error.cause().is_some(), "{error:?}");
         assert_eq!(input.len(), 2);
         assert!(input.iter().all(Option::is_none));
     }
@@ -1711,13 +1721,9 @@ mod tests {
         });
         // merge_p4 checks both operands (NER) before touching either.
         let (result, ..) = call(&mut driver, &mut k, None);
-        assert!(matches!(
-            result,
-            Err(SolidError::Upstream {
-                code: crate::error::SM_ERR_NULL_POINTER,
-                ..
-            })
-        ));
+        let error = result.unwrap_err();
+        assert_eq!(error.sm_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(error.kind(), crate::error::ErrorKind::Missing);
         // The union of two empty operands completes: the primary becomes the result.
         let (result, primary, other) = call(&mut driver, &mut k, Some(Brep::new()));
         assert!(matches!(result, Ok(Some(ref b)) if b.faces().is_empty()));

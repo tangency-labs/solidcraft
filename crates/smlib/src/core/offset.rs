@@ -54,7 +54,7 @@ const INVALID_INPUT: i32 = 1007;
 /// `status` (smlib_shim.h): an offset whose walls touch is [`Error::WallsTouch`]; a vertex moved
 /// past an edge's other end (`SM_ERR_OFFSET_EDGE_VANISHES`, fork 34318f4) is
 /// `SMLIB_ERR_UNSUPPORTED`; a wall whose face's offset folds, which solidcore's one construction
-/// refuses (`fixes.shell_one_construction`, solidcore#2367), is [`Error::WallFolds`] with the
+/// refuses (solidcore#2367), is [`Error::WallFolds`] with the
 /// largest wall it names; any other status as the blends pass it on. solidcore names an offset's
 /// refusals by their kind and reason (its errors in its own terms, solidcore#2654), whichever
 /// status the pinned C++ gives them.

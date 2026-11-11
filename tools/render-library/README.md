@@ -40,6 +40,55 @@ committed. A passing probe is native renderer evidence for this original scene,
 not GUI acceptance, a full-engine command test, measured material fidelity or a
 performance benchmark.
 
+## Raw render convergence diagnostics
+
+Export the raw EXR from each completed render job. Use fixed samples per pixel
+with adaptive sampling disabled. Keep the scene, framing, materials, lighting,
+depth and other transport settings fixed, and change the seed for each
+independent sequence. Retain the job settings and export receipts alongside
+the images so the declared sample counts and seeds can be checked later.
+
+In a Python 3.11+ virtual environment with `numpy` and the official `OpenEXR`
+package installed, run the report from the repository root.
+
+```sh
+python -B tools/render-library/convergence_report.py \
+  --image cpu 64 4619 /renders/cpu-64-seed-4619.exr \
+  --image cpu 64 8111 /renders/cpu-64-seed-8111.exr \
+  --image gpu 64 4619 /renders/gpu-64-seed-4619.exr \
+  --image gpu 64 8111 /renders/gpu-64-seed-8111.exr \
+  --region glass 720 340 480 360 \
+  --region trim 1280 640 360 240 \
+  > /renders/convergence-64.json
+```
+
+Add `--image` entries for more sample counts to compare their noise estimates
+in one report. Each sample count gets its own CPU/GPU comparison. A group with
+one backend produces its own statistics, and a backend with one seed leaves
+noise unavailable. Repeated seeds or identical EXR payloads within a backend
+and sample group are refused. File hashes and caller-declared counts and seeds
+are recorded in the JSON. The reader checks the native backend tag, matching
+zero-origin canvases and full-resolution FLOAT32 linear sRGB/D65 RGBA.
+
+Regions use top-left pixel coordinates and exact widths and heights. The full
+frame is always included. Use the same regions for every render and choose
+regions small enough to isolate materials and highlights. All statistics use
+coverage-premultiplied RGB and Rec. 709 luminance before presentation. The
+report gives mean and RMS luminance, percentiles through p99.9, the maximum,
+the fraction above one, and alpha coverage. Compare p99 and p99.9 alongside the
+maximum when rare bright samples dominate RMS. The normalized CPU/GPU luminance
+RMSE divides the error between the two mean images by the average of their
+regional signal RMS values. Absolute and signed deltas remain in raw units.
+
+For each backend, single-render noise is the square root of the mean across
+pixels of the unbiased luminance variance across seeds. The standard error
+for the mean image divides this noise by the square root of the sequence count.
+These are descriptive estimates from the supplied seeds. Compare them across
+sample counts and inspect coverage, percentiles and image details before
+interpreting a CPU/GPU difference as persistent. For a depth study, repeat the
+same experiment separately at each depth. The tool reads one source image at
+a time and keeps the accumulators for one sample group in memory.
+
 ## Bounded CPU scale probes
 
 ```sh
@@ -89,3 +138,8 @@ After the complete PNG and unscaled detail crops have actually been inspected, `
 
 
 The read-only `SELENE showcase package` workflow runs on selected integration-branch resource changes. It invokes `package_selene.py`, verifies the committed PNG/master/resource hashes and bounded PNG stream, and uploads only the native PNG, manifest, README and SHA-256 checksums. It does not rerender, build the application or install dependencies. Artifact success is delivery evidence only. Existing output directories are refused by the package tool.
+
+Use `--pair BACKEND SPP SEED CONTROL_EXR CANDIDATE_EXR` for a same-backend
+comparison at equal sample count and seed. This reports signed candidate-minus-control
+deltas, coverage differences, and robust luminance percentiles for the same
+regions. The paired difference does not estimate independent-seed noise.

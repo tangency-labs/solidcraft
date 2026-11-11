@@ -2,8 +2,7 @@
 //! plane's equation.
 //!
 //! Upstream: the SolidCraft fork's `source/SMLib/src/SmFilletGeom.cpp`
-//! (tangency-labs/smlib@5bdcddf, with @14a6daa's quarter points and start direction), under
-//! WR-682's `fillet_surface_plane_curve_on_plane_equation`.
+//! (tangency-labs/smlib@5bdcddf, with @14a6daa's quarter points and start direction; WR-682).
 //!
 //! | Rust                  | Upstream               |
 //! |-----------------------|------------------------|
@@ -15,7 +14,16 @@
 //! net's bound is within the tenth of `tol` the curve is held to (#2510). An end goes onto
 //! the crossing by the least 3D step, not `OntoPlane`'s least uv step, and the curve ends
 //! there, not at the given point (#2907): a point within `tol` of both surfaces is what the
-//! vertices are, and the curve is held to the crossing itself.
+//! vertices are, and the curve is held to the crossing itself. Not the fork's: a station off
+//! the surface's domain in a direction the surface is not closed in is the curve leaving the
+//! surface, and the trace refuses it (`SM_ERR`), where the fork marches on along the
+//! B-spline's extrapolation (the goldens' generated `blend.fillet_geom_p2` case `gen0014`
+//! reached u = -6e5 on a surface of domain [0, 1]). Bounds: the march
+//! and the refinement together hold at most [`MAX_STATIONS`] stations; a curve whose spans
+//! still miss the exact curve when refining would pass it can't be fitted (`SM_ERR`), as when
+//! its 20 passes run out. Each pass splits every span that misses, so without the bound a
+//! curve that never fits doubles its stations each pass (the goldens' generated
+//! `blend.fillet_geom_p2` case `gen0014` ran out of memory).
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // a NaN must take the failing branch, as upstream
 
@@ -26,6 +34,7 @@ use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::b_spline_curve::BSplineCurve;
+use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
 use crate::surface::procedural_blend::NetScope;
@@ -34,6 +43,9 @@ use crate::surface::surface::p5::DropPointOptions;
 use crate::surface::surface::Surface;
 
 const OP: &str = "blend::fillet_geom::surface_plane_curve::surface_plane_curve";
+
+/// The most stations the trace holds, marched and refined.
+const MAX_STATIONS: usize = 100_000;
 
 /// The three curves of [`surface_plane_curve`].
 #[derive(Debug)]
@@ -221,8 +233,8 @@ fn hermite(dim: u64, control: &[Point3], mult: &[usize], knots: &[f64]) -> Resul
 /// # Errors
 ///
 /// `SM_ERR` for an end off the surface or the plane, a surface that touches the plane, a
-/// curve that turns back before its end, a step that vanishes, or curves that can't be
-/// fitted; those of the evaluations and the point drops.
+/// curve that turns back before its end or leaves the surface's domain, a step that
+/// vanishes, or curves that can't be fitted; those of the evaluations and the point drops.
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one upstream routine
 pub fn surface_plane_curve(
     k: &Kernel,
@@ -289,6 +301,17 @@ pub fn surface_plane_curve(
     }
     let [start_uv, stop_uv] = end_uv;
     let [start_x, stop_x] = end_x;
+    // the curve stays on the surface: within its domain, but across a seam it is closed over
+    let closed =
+        |param| -> Result<bool> { Ok(surf.is_closed(k, &dom, param, Some(tol), false)?.0) };
+    let (closed_u, closed_v) = (closed(SurfParamType::U)?, closed(SurfParamType::V)?);
+    let on_domain = |uv: Point2| {
+        let (lo, hi) = (dom.min(), dom.max());
+        let pad = |a: f64, b: f64| 1.0e-12 * (1.0 + a.abs() + b.abs());
+        let (pu, pv) = (pad(lo.x, hi.x), pad(lo.y, hi.y));
+        (closed_u || (uv.x >= lo.x - pu && uv.x <= hi.x + pu))
+            && (closed_v || (uv.y >= lo.y - pv && uv.y <= hi.y + pv))
+    };
 
     // the stations: from the start, along the level line, to the end
     let (t0, r0) = tr.tangent(start_uv, start_dir.unwrap_or(end - start))?;
@@ -299,7 +322,7 @@ pub fn surface_plane_curve(
         rate: r0,
     }];
     let mut h = 0.0625 * start.distance(end);
-    for _ in 0..100_000 {
+    for _ in 0..MAX_STATIONS {
         let last = *st.last().ok_or_else(fail)?;
         if last.x.distance(end) <= 1.5 * h {
             // the last step: onto the end itself
@@ -333,6 +356,10 @@ pub fn surface_plane_curve(
             turned = Some((tn, rn, tn.angle_between(last.t)?));
         }
         match turned {
+            Some(_) if !on_domain(next) => {
+                // the curve leaves the surface
+                return Err(fail());
+            }
             Some((tn, rn, turn)) if turn <= ang_tol => {
                 let x = surf.evaluate_point(k, next)?;
                 st.push(Station {
@@ -439,6 +466,10 @@ pub fn surface_plane_curve(
             });
         }
         // insert those middles as stations
+        if st.len() + off.len() > MAX_STATIONS {
+            // the curves could not be fitted within the tolerance
+            return Err(fail());
+        }
         let mut refined = Vec::with_capacity(st.len() + off.len());
         let mut pending = off.iter().peekable();
         for (j, station) in st.iter().enumerate() {

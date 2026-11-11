@@ -149,7 +149,7 @@ impl FileType {
             3 => Ok(Self::Unknown),
             _ => Err(SolidError::InvalidInput {
                 operation: "topology::database_io::FileType::from_code",
-                reason: "not an SmFileType value",
+                reason: "not a file type value",
             }),
         }
     }
@@ -959,10 +959,9 @@ impl DatabaseReader {
 
     /// Reads exactly `N` raw bytes.
     fn read_raw<const N: usize>(&mut self, operation: &'static str) -> Result<[u8; N]> {
-        let s = self
-            .stream
-            .as_mut()
-            .ok_or_else(|| SolidError::null_pointer(operation))?;
+        let s = self.stream.as_mut().ok_or_else(|| {
+            SolidError::topology_missing(operation, "the database's input stream")
+        })?;
         let bytes = s.read_bytes(N);
         <[u8; N]>::try_from(bytes).map_err(|_| short_read(operation))
     }
@@ -973,10 +972,9 @@ impl DatabaseReader {
         n: usize,
         operation: &'static str,
     ) -> Result<Vec<[u8; N]>> {
-        let s = self
-            .stream
-            .as_mut()
-            .ok_or_else(|| SolidError::null_pointer(operation))?;
+        let s = self.stream.as_mut().ok_or_else(|| {
+            SolidError::topology_missing(operation, "the database's input stream")
+        })?;
         let total = n.checked_mul(N).ok_or_else(|| short_read(operation))?;
         let bytes = s.read_bytes(total);
         if bytes.len() != total {
@@ -1134,7 +1132,7 @@ impl DatabaseReader {
             let s = self
                 .stream
                 .as_mut()
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::topology_missing(OP, "the database's input stream"))?;
             // `char sBuff[SM_MAXSIZE]`: words longer than 255 bytes are split.
             let _ = s.extract_word_limited(MAX_LINE);
             let _ = s.extract_word_limited(MAX_LINE);
@@ -1560,10 +1558,9 @@ mod tests {
     #[test]
     fn no_stream_is_null_pointer() {
         let mut r = DatabaseReader::new();
-        assert!(matches!(
-            r.read_long(),
-            Err(SolidError::Upstream { code: 1006, .. })
-        ));
+        assert!(r
+            .read_long()
+            .is_err_and(|e| e.upstream_status() == Some(1006)));
         r.go_to_next_line();
     }
 

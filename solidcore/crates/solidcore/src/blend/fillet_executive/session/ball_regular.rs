@@ -7,8 +7,7 @@
 //! `BallIsRegular` (`SmFilletSolver.cpp`, `SmFilletSolver.h`) and the virtuals
 //! `GetBallLaw`, `SetBallRadius` and `RollsABall` (`SmFilletStandardSolver.h/.cpp`) in
 //! commits 410dfe1, 20ba5a9, 8c40818 and a34b5e8 (the last deletes the transversality check
-//! 410dfe1 added, so it has no port). They run only with the opt-in
-//! `Kernel::fixes.fillet_gn_section_generator`.
+//! 410dfe1 added, so it has no port).
 //!
 //! | Rust                       | Upstream (fork)                                   |
 //! |----------------------------|---------------------------------------------------|

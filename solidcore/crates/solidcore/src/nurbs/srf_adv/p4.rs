@@ -26,7 +26,7 @@
 //!   inserted) are `&mut` and modified the same way. Upstream's in-place modes
 //!   (`surP == surQ`, `derP == derQ`) compute the same values as the copying modes,
 //!   so the caller replaces its input with the returned value.
-//! - Errors are [`SolidError::Nlib`] values with the upstream `NL_*_ERR` number. A bare
+//! - Errors are [`SolidError::Failed`] values (a [`NurbsFailure`] reason) with the upstream `NL_*_ERR` number. A bare
 //!   upstream error flag (`NL_QUIT` without an error number: the sanity exit of
 //!   `N_MergeKnotVectors`, the missing-input exit of `ST_GetRotationRateOfChange`) is
 //!   `InvalidInput` with reason [`BARE_FLAG_REASON`].
@@ -57,7 +57,7 @@
 //!   `NL_DEGREE` is a `short`) is `InvalidInput`; sample arrays that cannot be
 //!   allocated are `NL_MEM_ERR`.
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::math::Vec3;
 use crate::nurbs::basis_basic::PTOL;
 use crate::nurbs::bezier::{srf_extend_4d, ExtendAt};
@@ -122,7 +122,7 @@ fn ends(k: &[f64], op: &'static str) -> Result<(f64, f64)> {
 ///
 /// # Errors
 ///
-/// [`NlibCode::Geometry`] when a vector cannot be normalised; errors of
+/// [`NurbsFailure::Geometry`] when a vector cannot be normalised; errors of
 /// [`Curve::eval_tangent`]; `InvalidInput` for an empty `t`.
 pub fn create_b_vectors(cur: &Curve, b0: Vec3, t: &[f64]) -> Result<Vec<Vec3>> {
     const OP: &str = OP_BVEC;
@@ -298,7 +298,7 @@ fn combine_coons(sa: &Surface, sb: &Surface, sc: &Surface, op: &'static str) -> 
 ///
 /// # Errors
 ///
-/// Errors of [`extrude_crv`] ([`NlibCode::Geometry`] for a zero `v`).
+/// Errors of [`extrude_crv`] ([`NurbsFailure::Geometry`] for a zero `v`).
 pub fn create_skin_srf_boundary_derivs(
     cur: &mut Curve,
     v: Vec3,
@@ -350,7 +350,7 @@ pub fn create_skin_srf_boundary_derivs(
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] when the end knots differ; `InvalidInput` with reason
+/// [`NurbsFailure::Input`] when the end knots differ; `InvalidInput` with reason
 /// [`BARE_FLAG_REASON`] for upstream's sanity exit (an index past the knots) or
 /// overflow of the starting index `p + 1`;
 /// `InvalidInput` for knots that compare unordered.
@@ -368,7 +368,7 @@ pub fn merge_knot_vectors(
     let s = |j: usize| at(sk, j, OP);
 
     if (r(0)? - s(0)?).abs() > PTOL || (r(mr)? - s(ms)?).abs() > PTOL {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
 
     let tol = PTOL * (r(mr)? - r(0)?);
@@ -658,7 +658,7 @@ fn cross_tangent_row(
 ///
 /// # Errors
 ///
-/// Errors of [`srf_extend_4d`] ([`NlibCode::Input`] when the strip is not Bezier in
+/// Errors of [`srf_extend_4d`] ([`NurbsFailure::Input`] when the strip is not Bezier in
 /// the extended direction); `InvalidInput` for [`Direction::UV`] where an extension
 /// is needed.
 pub fn adjust_deriv_srf(
@@ -713,7 +713,7 @@ pub fn adjust_deriv_srf(
 ///
 /// # Errors
 ///
-/// [`NlibCode::Geometry`] when a line intersection fails (parallel lines) or the
+/// [`NurbsFailure::Geometry`] when a line intersection fails (parallel lines) or the
 /// final division is bad; errors of [`isect_line_line`].
 pub fn adjust_weight_scale(pw: CPoint, qw: CPoint, rw: CPoint) -> Result<(f64, f64)> {
     const OP: &str = OP_ADJ_WEIGHT;
@@ -734,20 +734,20 @@ pub fn adjust_weight_scale(pw: CPoint, qw: CPoint, rw: CPoint) -> Result<(f64, f
         let ls1 = LineSeg::new(a_s, q - p, false);
         let ls2 = LineSeg::new(ps, qs - ps, false);
         bs = isect_line_line(ls1, ls2)?
-            .ok_or_else(|| SolidError::nlib(OP, NlibCode::Geometry))?
+            .ok_or_else(|| SolidError::nurbs(OP, NurbsFailure::Geometry))?
             .p;
     }
 
     let ls1 = LineSeg::new(qs, rs - qs, false);
     let ls2 = LineSeg::new(Vec3::ZERO, bs - Vec3::ZERO, false);
     let ds = isect_line_line(ls1, ls2)?
-        .ok_or_else(|| SolidError::nlib(OP, NlibCode::Geometry))?
+        .ok_or_else(|| SolidError::nurbs(OP, NurbsFailure::Geometry))?
         .p;
 
     let d1 = dist_pt_pt(qs, ds);
     let d2 = dist_pt_pt(qs, rs);
     if float_op_is_bad(d1, d2, FloatOp::Division) {
-        return Err(SolidError::nlib(OP, NlibCode::Geometry));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Geometry));
     }
     Ok((wr, d1 / d2))
 }
@@ -765,7 +765,7 @@ pub fn adjust_weight_scale(pw: CPoint, qw: CPoint, rw: CPoint) -> Result<(f64, f
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] for a rational `der_p`; [`NlibCode::Knot`] when a new knot
+/// [`NurbsFailure::Input`] for a rational `der_p`; [`NurbsFailure::Knots`] when a new knot
 /// falls outside its end span; errors of [`vectors_angle`], [`Curve::derivs`],
 /// [`Curve::insert_knot`] and [`Curve::refine`]; `InvalidInput` for curves with
 /// fewer than two control points or an end angle equal to `eps` (see the module
@@ -780,7 +780,7 @@ pub fn approx_cross_boundary_derivs(
 
     // Check if angular tolerance is maintained.
     if der_p.is_rational() {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
 
     let mut repeat = false;
@@ -832,7 +832,7 @@ pub fn approx_cross_boundary_derivs(
             let d = (sne * p as f64 * a) / (b + sne * c);
             ts = at(up, p, OP)? + d;
             if ts > at(up, p + 1, OP)? {
-                return Err(SolidError::nlib(OP, NlibCode::Knot));
+                return Err(SolidError::nurbs(OP, NurbsFailure::Knots));
             }
             mx_ += 1;
         }
@@ -845,7 +845,7 @@ pub fn approx_cross_boundary_derivs(
             let d = (sne * p as f64 * a) / (b + sne * c);
             te = at(up, n + 1, OP)? - d;
             if te < at(up, n, OP)? {
-                return Err(SolidError::nlib(OP, NlibCode::Knot));
+                return Err(SolidError::nurbs(OP, NurbsFailure::Knots));
             }
             mx_ += 1;
         }
@@ -954,7 +954,7 @@ fn make_four_compatible(cs: [&mut Curve; 4]) -> Result<()> {
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] for a rational curve, differing parameter domains, or a
+/// [`NurbsFailure::Input`] for a rational curve, differing parameter domains, or a
 /// failed compatibility check; errors of [`make_compatible`], [`Curve::eval`],
 /// [`Curve::derivs`] and [`make_compatible_uv`]; `InvalidInput` for curves whose
 /// sizes disagree after being made compatible.
@@ -974,7 +974,7 @@ pub fn create_coons_boundary_crvs(bnd: &mut CoonsBoundary, cpf: bool) -> Result<
         &bnd.top_deriv,
     ];
     if all.iter().any(|c| c.is_rational()) {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
 
     let one_3 = 1.0 / 3.0;
@@ -984,7 +984,7 @@ pub fn create_coons_boundary_crvs(bnd: &mut CoonsBoundary, cpf: bool) -> Result<
     for c in [&bnd.top, &bnd.bottom_deriv, &bnd.top_deriv] {
         let (d1, d2) = c.param_bounds();
         if us != d1 || ue != d2 {
-            return Err(SolidError::nlib(OP, NlibCode::Input));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Input));
         }
     }
     let du = ue - us;
@@ -993,7 +993,7 @@ pub fn create_coons_boundary_crvs(bnd: &mut CoonsBoundary, cpf: bool) -> Result<
     for c in [&bnd.right, &bnd.left_deriv, &bnd.right_deriv] {
         let (d1, d2) = c.param_bounds();
         if vs != d1 || ve != d2 {
-            return Err(SolidError::nlib(OP, NlibCode::Input));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Input));
         }
     }
     let dv = ve - vs;
@@ -1036,10 +1036,10 @@ pub fn create_coons_boundary_crvs(bnd: &mut CoonsBoundary, cpf: bool) -> Result<
             let da = (a - cd1).length();
             let db = (b - cd2).length();
             if da > MODEL_TOL {
-                return Err(SolidError::nlib(OP, NlibCode::Input));
+                return Err(SolidError::nurbs(OP, NurbsFailure::Input));
             }
             if db > MODEL_TOL {
-                return Err(SolidError::nlib(OP, NlibCode::Input));
+                return Err(SolidError::nurbs(OP, NurbsFailure::Input));
             }
         }
     }
@@ -1050,7 +1050,7 @@ pub fn create_coons_boundary_crvs(bnd: &mut CoonsBoundary, cpf: bool) -> Result<
         let (_, cd2) = first_derivs(c2, t2, OP)?;
         let mag = (cd1 - cd2).length();
         if cpf && mag > twist_tol {
-            return Err(SolidError::nlib(OP, NlibCode::Input));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Input));
         }
         Ok(combine2_pts(0.5, cd1, 0.5, cd2))
     };
@@ -1192,7 +1192,7 @@ pub fn create_coons_boundary_crvs(bnd: &mut CoonsBoundary, cpf: bool) -> Result<
 ///
 /// # Errors
 ///
-/// [`NlibCode::Geometry`] when a tangent cannot be normalised or a line
+/// [`NurbsFailure::Geometry`] when a tangent cannot be normalised or a line
 /// intersection fails; errors of [`Curve::derivs`], [`Curve::rat_first_deriv`],
 /// [`CurveFunction::multiply_crv`] and [`Curve::sum_diff`].
 pub fn create_cross_boundary_deriv_crv(
@@ -1223,7 +1223,7 @@ pub fn create_cross_boundary_deriv_crv(
         let ls1 = LineSeg::new(p1, v1, false);
         let ls2 = LineSeg::new(p2, v2, false);
         Ok(isect_line_line(ls1, ls2)?
-            .ok_or_else(|| SolidError::nlib(OP, NlibCode::Geometry))?
+            .ok_or_else(|| SolidError::nurbs(OP, NurbsFailure::Geometry))?
             .p)
     };
     // Signed coordinates at one end.
@@ -1329,9 +1329,9 @@ mod tests {
         let ks = KnotVector::from_slice(&s).unwrap();
         assert_eq!(
             merge_knot_vectors(&kr, &ks, usize::MAX),
-            Err(SolidError::nlib(
+            Err(SolidError::nurbs(
                 "nurbs::srf_adv::p4::merge_knot_vectors",
-                NlibCode::Input,
+                NurbsFailure::Input,
             ))
         );
     }

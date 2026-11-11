@@ -600,7 +600,9 @@ fn build_regions(
     if data.manifold == 1 && data.regions.len() == 1 {
         // smiges_ReadIges: a single solid region; the infinite region and the void
         // regions are implied.
-        let rr = data.regions.first().ok_or(SolidError::sm_err(OP_MAKE))?;
+        let rr = data.regions.first().ok_or_else(|| {
+            SolidError::topology_failed(OP_MAKE, "the single solid region's record is not there")
+        })?;
         let solid = new_region(b, env, Region::default())?;
         add_attributes(env, EntityRef::Region(solid), &rr.topology.attributes)?;
         set_topology(env, EntityRef::Region(solid), &rr.topology);
@@ -695,7 +697,10 @@ fn build_regions(
                 *slot = Some(s);
             }
             if rs.shell_type > 2 {
-                return Err(SolidError::sm_err(OP_MAKE));
+                return Err(SolidError::topology_failed(
+                    OP_MAKE,
+                    "the shell record's type is not a known shell type",
+                ));
             }
             b.shell_mut(s)?.shell_type = match rs.shell_type {
                 0 => ShellType::Faceuse,
@@ -881,7 +886,7 @@ fn face_surface(
         .face(owner_face)?
         .surface
         .as_ref()
-        .ok_or(SolidError::null_pointer(OP_MAKE))?;
+        .ok_or_else(|| SolidError::topology_missing(OP_MAKE, "the owner face's surface"))?;
     let mut copy = owner.copy(k)?;
     let key = env.new_key()?;
     let copy_ref = ObjectRef {
@@ -1136,7 +1141,7 @@ fn edge_curve(
         .edge(owner_edge)?
         .curve
         .as_ref()
-        .ok_or(SolidError::null_pointer(OP_MAKE))?;
+        .ok_or_else(|| SolidError::topology_missing(OP_MAKE, "the owner edge's curve"))?;
     let mut curve = owner.copy(k)?;
     let key = env.new_key()?;
     let curve_ref = ObjectRef {
@@ -1180,7 +1185,10 @@ fn build_edgeuses(
             // NER(pNewVU), NER(pNewVU->m_pNext): the next use of a non-empty
             // circular list is never null
             if list.is_empty() {
-                return Err(SolidError::null_pointer(OP_MAKE));
+                return Err(SolidError::topology_missing(
+                    OP_MAKE,
+                    "the vertex's next vertex use",
+                ));
             }
             continue;
         }
@@ -1591,7 +1599,11 @@ fn link_loops(b: &mut Brep, data: &BrepData, built: &Built) -> Result<()> {
             }
         }
         let Some((mut last1, mut last2)) = last else {
-            return Err(SolidError::sm_err(OP_MAKE)); // Big problems here
+            // Big problems here
+            return Err(SolidError::topology_failed(
+                OP_MAKE,
+                "no edge use of the loop record was built",
+            ));
         };
 
         let mut first = true;
@@ -2266,7 +2278,7 @@ fn faces_to_delete(
                 let c = rec
                     .curve
                     .as_ref()
-                    .ok_or(SolidError::null_pointer(OP_PROJECT))?;
+                    .ok_or_else(|| SolidError::topology_missing(OP_PROJECT, "the edge's curve"))?;
                 let tol1 = 5.0 * (rec.tolerance + tol);
                 let p = c.evaluate_point(k, rec.interval.evaluate(0.5))?;
                 if let Some(side) = ignored(find_side_of_curve(k, curve, p, direction, tol1))? {
@@ -2394,7 +2406,10 @@ fn delete_vertex(k: &mut Kernel, b: &mut Brep, env: &mut NotifyEnv<'_>, v: Verte
 pub fn remove_all_topology(k: &mut Kernel, b: &mut Brep) -> Result<()> {
     // check state - m_bEditingEnabled must be on
     if !b.editing_enabled() {
-        return Err(SolidError::sm_err(OP_REMOVE));
+        return Err(SolidError::topology_failed(
+            OP_REMOVE,
+            "editing is disabled on the B-rep",
+        ));
     }
     crate::topology::brep::p3::with_kernel_callbacks(k, b, remove_all_topology_notified)
 }
@@ -2413,7 +2428,10 @@ pub fn remove_all_topology_notified(
 ) -> Result<()> {
     // check state - m_bEditingEnabled must be on
     if !b.editing_enabled() {
-        return Err(SolidError::sm_err(OP_REMOVE));
+        return Err(SolidError::topology_failed(
+            OP_REMOVE,
+            "editing is disabled on the B-rep",
+        ));
     }
 
     let faces = brep_faces(b)?;
@@ -2477,7 +2495,7 @@ fn test_closure_split_region_at_faceuse(
         fu,
     ) {
         Ok(v) => Ok(Some(v)),
-        Err(SolidError::Upstream { .. }) => Ok(None),
+        Err(e) if e.upstream_status().is_some() => Ok(None),
         Err(e) => Err(e),
     }
 }
@@ -2619,7 +2637,10 @@ fn subdivide_face_body(
             // Null segment at interior of curve: split the edge, both halves inspected
             let split = p9::make_vertex_split_edge(k, b, e, first, env, curve_ref)?;
             if !split.split {
-                return Err(SolidError::sm_err(OP_SUBDIVIDE));
+                return Err(SolidError::topology_failed(
+                    OP_SUBDIVIDE,
+                    "the edge could not be split at its null segment",
+                ));
             }
             let [e1, e2] = split.edges.ok_or(SolidError::invalid_input(
                 OP_SUBDIVIDE,
@@ -3163,10 +3184,12 @@ mod tests {
         ));
         let mut d = square(0);
         d.shells[0].shell_type = 7;
-        assert!(matches!(
-            build(&mut d, MakeTopologyOptions::default()),
-            Err(SolidError::Upstream { code: 1001, .. })
-        ));
+        assert_eq!(
+            build(&mut d, MakeTopologyOptions::default())
+                .err()
+                .and_then(|e| e.upstream_status()),
+            Some(1001)
+        );
         let mut d = square(0);
         d.edgeuses[0].next_eu = 99;
         assert!(matches!(

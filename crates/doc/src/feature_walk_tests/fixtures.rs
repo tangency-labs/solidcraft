@@ -31,6 +31,10 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
     vec![
         ("newer_file_feature", json!({"type": "newer_file_feature", "raw": {"type": "gyroid_lattice", "cell": 2}})),
         (
+            "frame_end_cap",
+            json!({"type":"frame_end_cap","ends":[{"plane":plane("cap1"),"member":{"feature":7,"line":"l1"}}],"thickness":"cap.thickness","ratio":"cap.ratio","chamfer":"cap.chamfer","direction":"inward"}),
+        ),
+        (
             "body_transfer",
             json!({"type": "body_transfer", "bodies": ["B"], "from": 0, "to": 1, "transform": [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]}),
         ),

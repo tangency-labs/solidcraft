@@ -88,6 +88,7 @@
 
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::{Curve, CurveKind};
+use crate::error::topology::TopologyFailure;
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -144,11 +145,7 @@ fn pass<T>(k: &Kernel, r: Result<T>) -> Result<Result<T>> {
 fn vec_status<T>(r: Result<T>) -> Result<T> {
     r.map_err(|e| match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => {
-            SolidError::Upstream {
-                operation: OP,
-                code: 1007, // SM_ERR_INVALID_INPUT
-                entity: None,
-            }
+            SolidError::topology_invalid_value(OP, "a vector of zero length has no angle")
         }
         e => e,
     })
@@ -209,7 +206,7 @@ fn b_spline_of(curve: Curve) -> Result<BSplineCurve> {
         CurveKind::Line(l) => Ok(l.base_with_nurb()?.into_owned()),
         _ => Err(SolidError::invalid_input(
             OP,
-            "drop curve is not an SmBSplineCurve",
+            "drop curve is not a B-spline curve",
         )),
     }
 }
@@ -406,7 +403,8 @@ pub fn create_uv_trim_curve(
 
     // locals
     let e = edge(b, eu)?.ok_or_else(|| null("CreateUVTrimCurve: edge use without edge"))?;
-    let fu = faceuse(b, eu)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let fu = faceuse(b, eu)?
+        .ok_or_else(|| SolidError::topology_missing(OP, "the edge use's face use"))?;
     let f = faceuse_face(b, fu)?.ok_or_else(|| null("CreateUVTrimCurve: face use without face"))?;
     let face_rec = b.face(f)?;
     let face_surface = face_rec
@@ -1535,7 +1533,10 @@ fn brute_force(
 
     // when no sample points projected to the surface
     if params.is_empty() {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "no sample point of the curve drops onto the surface",
+        ));
     }
 
     // when just 1 sample point projected to the surface
@@ -1653,11 +1654,12 @@ pub fn get_or_create_uv_trim_curve(
         // use only (`SetUVTrimCurve` nulls the non-owner's)
         if let Some(f) = b.edgeuse(eu)?.drop_curve_fail.as_deref() {
             if f.fail_status != SM_SUCCESS {
-                out.status = Err(SolidError::Upstream {
-                    operation: OP,
-                    code: f.fail_status,
-                    entity: None,
-                });
+                out.status = Err(SolidError::topology(
+                    OP,
+                    TopologyFailure::DropFailed {
+                        status: f.fail_status,
+                    },
+                ));
             }
         }
         return Ok(out);
@@ -1776,7 +1778,7 @@ pub struct BinormalUv {
 ///
 /// # Errors
 ///
-/// `SM_ERR` (`SolidError::Upstream`) for an edge use not in a loop, for no usable
+/// `SM_ERR` (a `TopologyFailure`) for an edge use not in a loop, for no usable
 /// tangent or binormal and when the edge point does not drop to the surface;
 /// [`SolidError::NotFound`] for a dangling id; [`SolidError::InvalidInput`] where
 /// upstream dereferences null; the evaluators' errors; [`SolidError::Unported`]
@@ -1812,11 +1814,10 @@ pub fn evaluate_binormal_uv(
 
     // check state - only Edgeuses in loops have a binormal vector
     if !crate::topology::edgeuse::p1::is_loop_edgeuse(b, eu)? {
-        return Err(SolidError::Upstream {
-            operation: OP,
-            code: 1007, // SM_ERR_INVALID_INPUT
-            entity: None,
-        });
+        return Err(SolidError::topology_invalid_value(
+            OP,
+            "only an edge use in a loop has a binormal",
+        ));
     }
 
     let e = edge(b, eu)?.ok_or_else(|| null("EvaluateBinormal: edge use without edge"))?;
@@ -1836,7 +1837,7 @@ pub fn evaluate_binormal_uv(
         .edge(e)?
         .curve
         .clone()
-        .ok_or_else(|| SolidError::null_pointer(OP))?; // NER(p3DCurve)
+        .ok_or_else(|| SolidError::topology_missing(OP, "the edge's curve"))?; // NER(p3DCurve)
     let eu_orientation = orientation(b, eu)?;
 
     // evaluate the unoriented curve position and tangent values
@@ -1895,7 +1896,10 @@ pub fn evaluate_binormal_uv(
         } else if edge_ivl.contains_value(parameter - next_step, 0.0) {
             parameter - next_step
         } else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(
+                OP,
+                "no step from the parameter stays inside the edge's interval",
+            ));
         };
 
         // evaluate unoriented curve at modified param value
@@ -2084,7 +2088,10 @@ pub fn evaluate_binormal_uv(
             // We should now have a UV curve, so use it unless indicated otherwise.
             if use_3d_only {
                 // no hope - can't get edge point to project to surface
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::topology_failed(
+                    OP,
+                    "the edge point does not drop onto the surface",
+                ));
             }
             // get sUVTrimCurve
             let trim = match uv_trim_curve(b, eu)?.0.cloned() {
@@ -2221,7 +2228,10 @@ pub fn evaluate_binormal_uv(
 
     // give up if binormal is still zero
     if binormal.length_squared() < EFF_ZERO_SQ {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "the binormal stays zero after every step-off",
+        ));
     }
 
     // normalize the return vector
@@ -2358,11 +2368,14 @@ pub fn normalized_evaluate(
                     .face(f)?
                     .surface
                     .as_ref()
-                    .ok_or_else(|| SolidError::null_pointer(OP))?; // NER(pSurf)
+                    .ok_or_else(|| SolidError::topology_missing(OP, "the face's surface"))?; // NER(pSurf)
                 let domain = surf.natural_uv_domain_with_nurb(k)?;
                 let drop = surface_drop_point(k, surf, three_d.point, &domain)?;
                 if !drop.found {
-                    return Err(SolidError::sm_err(OP));
+                    return Err(SolidError::topology_failed(
+                        OP,
+                        "the point does not drop onto the face's surface",
+                    ));
                 }
                 let uv = drop.uv;
 
@@ -2410,12 +2423,12 @@ fn normalized_evaluate_3d(
     normalized_parameter: f64,
     want_first_deriv: bool,
 ) -> Result<NormalizedEval> {
-    let e = edge(b, eu)?.ok_or_else(|| SolidError::null_pointer(OP))?; // NER(pE)
+    let e = edge(b, eu)?.ok_or_else(|| SolidError::topology_missing(OP, "the edge use's edge"))?; // NER(pE)
     let rec = b.edge(e)?;
     let curve = rec
         .curve
         .as_ref()
-        .ok_or_else(|| SolidError::null_pointer(OP))?; // NER(p3dOrUVCurve)
+        .ok_or_else(|| SolidError::topology_missing(OP, "the edge's curve"))?; // NER(p3dOrUVCurve)
     eval_on_curve(
         k,
         curve,

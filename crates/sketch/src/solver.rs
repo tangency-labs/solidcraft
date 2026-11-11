@@ -1134,6 +1134,16 @@ fn distance_opening_slope(s: &State, b: &Block, v: usize) -> Option<f64> {
             let direction = d.normalized().unwrap_or(Vec2::new(0.6, 0.8));
             Some(point(*q, direction) - point(*p, direction))
         }
+        // The same for a horizontal or vertical distance: the magnitude has no slope where the
+        // two points line up, so open towards `q` being past `p` along the axis.
+        Block::User(_, ConstraintKind::DistanceX { p, q, value }) if *value > TOL && (s.p(*q).x - s.p(*p).x).abs() <= TOL => {
+            let axis = Vec2::new(1.0, 0.0);
+            Some(point(*q, axis) - point(*p, axis))
+        }
+        Block::User(_, ConstraintKind::DistanceY { p, q, value }) if *value > TOL && (s.p(*q).y - s.p(*p).y).abs() <= TOL => {
+            let axis = Vec2::new(0.0, 1.0);
+            Some(point(*q, axis) - point(*p, axis))
+        }
         Block::User(_, ConstraintKind::PointLineDistance { p, l, value }) if *value > TOL => {
             let (a, b) = s.line(*l);
             let signed = line_dist(s.p(*p), a, b);

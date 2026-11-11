@@ -48,7 +48,7 @@
 //! `Fix_SplitEdgesAtSeam` does not format the diagnostic of a pole split refused at
 //! an edge end (`SE_MSG`); another refused split returns `SM_ERR`.
 
-use crate::error::{ignored as ignore_soft, EntityRef, Result, SolidError, SM_ERR};
+use crate::error::{ignored as ignore_soft, EntityRef, Result, SolidError};
 use crate::geom::attribute::ObjectKey;
 use crate::geom::context::{MarkLock, ALL_MARKS};
 use crate::heal::face_props::{HealerOpType, LoopObject};
@@ -131,11 +131,10 @@ impl<O: LoopObject> HealData<O> {
         through: HealerOpType,
     ) -> Result<()> {
         if tracker.is_tracking(Some(&k.context)) {
-            return Err(SolidError::Upstream {
-                operation: OP,
-                code: SM_ERR,
-                entity: None,
-            });
+            return Err(SolidError::heal_failed(
+                OP,
+                "the topology changes are still being tracked",
+            ));
         }
         if let Some(error) = tracker.failure() {
             return Err(error);
@@ -459,10 +458,8 @@ impl<O: LoopObject> HealData<O> {
             let mut changes = Changes::default();
             for id in queue.into_iter().rev() {
                 let p = self.edge_props.props(id)?;
-                let e = p.edge.ok_or(SolidError::Upstream {
-                    operation: OP,
-                    code: SM_ERR,
-                    entity: None,
+                let e = p.edge.ok_or_else(|| {
+                    SolidError::heal_failed(OP, "the edge properties have no edge")
                 })?;
                 if p.bad_degen_edge.is_false() {
                     continue;
@@ -918,7 +915,7 @@ impl<O: LoopObject> HealData<O> {
             // Only endpoint rejection is known to leave the edge unsplit. Other errors
             // can follow interval/curve edits, so do not continue with stale properties.
             if !split.split {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::heal_failed(OP, "the edge was not split"));
             }
             // UpdateTargetLists deletes old properties. Reacquire the next candidate.
             self.update_target_lists(
@@ -1382,6 +1379,7 @@ fn split_face_at_seam<O: LoopObject>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::SM_ERR;
     use crate::heal::face_props::Tri;
     use crate::intersect::point_class::{ClassObject, ClassObjectKind};
     use crate::topology::LoopId;
@@ -1730,7 +1728,7 @@ mod tests {
                 &mut Brep::default(),
                 HealerOpType::FixDegenEdges
             ),
-            Err(SolidError::Upstream { code: SM_ERR, .. })
+            Err(e) if e.upstream_status() == Some(SM_ERR)
         ));
     }
 
@@ -1877,7 +1875,7 @@ mod tests {
         let (mut b, mut k, seen, mut h1, mut h2) = two_healer_setup();
         let r1 = h1.fix_degen_edges(&mut k, &mut b, HealerOpType::FixDegenEdges);
         assert!(
-            matches!(r1, Err(SolidError::Upstream { code: SM_ERR, .. })),
+            matches!(&r1, Err(e) if e.upstream_status() == Some(SM_ERR)),
             "{r1:?}"
         );
         let first = seen.lock().unwrap().len();
@@ -1898,7 +1896,7 @@ mod tests {
         h1_clone.bad_edge_props_degen_edges = h2.bad_edge_props_degen_edges.clone();
         let r1 = h1.fix_degen_edges(&mut k, &mut b, HealerOpType::FixDegenEdges);
         assert!(
-            matches!(r1, Err(SolidError::Upstream { code: SM_ERR, .. })),
+            matches!(&r1, Err(e) if e.upstream_status() == Some(SM_ERR)),
             "{r1:?}"
         );
         let first = seen.lock().unwrap().len();

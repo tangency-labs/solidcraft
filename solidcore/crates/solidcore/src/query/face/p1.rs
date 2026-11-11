@@ -310,7 +310,8 @@ pub fn calculate_shell_bounding_box(
 ///
 /// # Errors
 ///
-/// `SM_ERR` ([`SolidError::Upstream`]) for a region without shells; those of the shell
+/// `SM_ERR`
+/// ([`QueryFailure::Failed`](crate::error::query::QueryFailure::Failed)) for a region without shells; those of the shell
 /// boxes. `output` then holds the union of the shells before the failing one.
 pub fn calculate_region_bounding_box_into(
     k: &mut Kernel,
@@ -323,7 +324,10 @@ pub fn calculate_region_bounding_box_into(
 
     let shells = b.region(id)?.get_shells(None, |_, _| Ok(false))?;
     if shells.is_empty() {
-        return Err(SolidError::sm_err(OP_REGION_BOX));
+        return Err(SolidError::query_failed(
+            OP_REGION_BOX,
+            "the region has no shells",
+        ));
     }
     let mut this_box = Extent3d::new();
     for s in shells {
@@ -489,10 +493,7 @@ pub fn point_3d_classify(
     let mut lease = FaceSurfaceCacheGuard(match face_surface_cache(k, b, f) {
         Ok(lease) => Some(lease),
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
-        Err(SolidError::Upstream {
-            code: crate::error::SM_ERR_NULL_POINTER,
-            ..
-        }) => {
+        Err(e) if e.upstream_status() == Some(crate::error::SM_ERR_NULL_POINTER) => {
             return Err(SolidError::invalid_input(OP_POINT, "face without surface"));
         }
         Err(_) => None,
@@ -743,7 +744,7 @@ pub fn edge_curve_on_classify(
     curve: &Curve,
     opts: &EdgeCurveOnOptions,
 ) -> Result<CurveOnClassification> {
-    let edge = edge.ok_or_else(|| SolidError::null_pointer(OP_EDGE_CURVE))?;
+    let edge = edge.ok_or_else(|| SolidError::query_missing(OP_EDGE_CURVE, "the edge"))?;
 
     // init outputs
     let mut out = CurveOnClassification::default();
@@ -884,7 +885,7 @@ mod tests {
             .unwrap();
         let mut out = Extent3d::from_point(Vec3::new(1., 2., 3.));
         let e = calculate_region_bounding_box_into(&mut k, &b, r, false, &mut out).unwrap_err();
-        assert!(matches!(e, SolidError::Upstream { .. }));
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR), "{e:?}");
         assert_eq!(out, Extent3d::new());
     }
 

@@ -1863,7 +1863,7 @@ impl Ellipse {
             end: end_ang_deg,
         };
         let cur = elliptical_arc_tol(&arc, angle_tol, ConicType::Quadratic)
-            .map_err(SolidError::nl_ser(OP_MAKE_NURB))?;
+            .map_err(SolidError::nurbs_routine(OP_MAKE_NURB))?;
 
         // when arc's domain may have been modified
         if is_zero_to_tol(start_ang_deg, 3.0e-4)

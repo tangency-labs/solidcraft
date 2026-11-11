@@ -9,7 +9,7 @@ parameters and never open dialogs; a dialog is a front-end form that builds the 
 ```rust
 CommandSpec::new("solid.fillet", "Fillet", fillet)
     .at("SOLID", "MODIFY")      // toolbar tab and panel ("" = not on the toolbar)
-    .icon("fillet")             // drawn in code, assets/icons/ui/source/icons.rs
+    .icon("fillet")             // an SVG master in crates/look/icons/design/svg
     .key("F")                   // default shortcut
     .params("edges: [[x,y,z] | {body, index}]; radius: expr; …"),
 ```

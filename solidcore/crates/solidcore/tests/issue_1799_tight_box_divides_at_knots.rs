@@ -37,14 +37,17 @@ use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::nurbs::crv_basic::Curve as NurbCurve;
 use solidcore::nurbs::math::CPoint;
 use solidcore::nurbs::srf_basic::Surface as NurbSurface;
-use solidcore::primitive::api_curves::{create_curve, create_line_segment};
+use solidcore::primitive::api_curves::{create_circle, create_curve, create_line_segment};
 use solidcore::primitive::api_primitives::create_box;
-use solidcore::primitive::api_trim_ops::trim_surface_with_3d_curves;
+use solidcore::primitive::api_trim_ops::{
+    trim_project_parallel, trim_surface_with_3d_curves, TrimObject,
+};
 use solidcore::query::api_queries::brep_bounding_box;
 use solidcore::query::face::p3::calculate_tight_bounding_box;
 use solidcore::surface::surface::Surface;
 use solidcore::sweep::api_brep::create_rotational_sweep;
 use solidcore::topology::brep::p1::faces;
+use solidcore::topology::brep::p10::TrimType;
 use solidcore::Kernel;
 
 /// The arc's knots: three quarter spans, double interior knots at 1/3 and 2/3.
@@ -288,4 +291,105 @@ fn wr_588_barrel_cut_below_its_waist_is_boxed_to_its_upper_bulge() {
             );
         }
     }
+}
+
+/// Clamped uniform cubic knots for `n` control points over [0, 1].
+fn uniform_knots(n: usize) -> Vec<f64> {
+    let spans = n - 3;
+    let mut knots = vec![0.0; 4];
+    knots.extend((1..spans).map(|i| i as f64 / spans as f64));
+    knots.extend([1.0; 4]);
+    knots
+}
+
+/// The sheet's control points each way (37 knot spans).
+const SHEET_N: usize = 40;
+/// The sheet's height: z = `SHEET_RISE` (y - `SHEET_FLAT`)^3, flat across y = `SHEET_FLAT`.
+const SHEET_RISE: f64 = 0.05;
+const SHEET_FLAT: f64 = 6.0;
+/// The disk the sheet is trimmed to: centre (5, 4), radius 2, its top point (5, 6) where
+/// the sheet is flat.
+const DISK: (f64, f64, f64) = (5.0, 4.0, 2.0);
+
+/// The 10 x 10 cubic sheet over u, v in [0, 1]: x = 10 u, y = 10 v and
+/// z = `SHEET_RISE` (y - `SHEET_FLAT`)^3, exactly. Each control value is the polynomial's
+/// blossom at the three knots after it (x and y the Greville abscissae, their blossoms).
+fn sheet() -> Surface {
+    let knots = uniform_knots(SHEET_N);
+    let net: Vec<Vec<CPoint>> = (0..SHEET_N)
+        .map(|i| {
+            let x = 10.0 * (knots[i + 1] + knots[i + 2] + knots[i + 3]) / 3.0;
+            (0..SHEET_N)
+                .map(|j| {
+                    let t = [knots[j + 1], knots[j + 2], knots[j + 3]].map(|t| 10.0 * t);
+                    let y = (t[0] + t[1] + t[2]) / 3.0;
+                    let z = SHEET_RISE
+                        * (t[0] - SHEET_FLAT)
+                        * (t[1] - SHEET_FLAT)
+                        * (t[2] - SHEET_FLAT);
+                    CPoint::new(x, y, z, 1.0)
+                })
+                .collect()
+        })
+        .collect();
+    let nurb = NurbSurface::new(net, 3, 3, knots.clone(), knots).unwrap();
+    Surface::from(BSplineSurface::from_nurb(nurb, false))
+}
+
+/// #14452: a G2 corner patch's tight box took 3-4 s a face (46 s for a box with eight): a
+/// 129 x 131 rational bicubic net, its +x, +y or +z extreme along the trim, where the patch
+/// meets a wall tangentially, the surface past the trim a little higher. The trim search's
+/// cells along that trim were each solved over the whole surface, and a solve's control-net
+/// guesses read every control point of the surface it is given: thousands of cells, each
+/// reading all 16,899. Each cell of a B-spline face is now solved on its own subpatch, and a
+/// cell whose subpatch's control points reach no higher than the box so far is skipped.
+///
+/// Here: a 40 x 40 cubic sheet z = 0.05 (y - 6)^3 trimmed to the disk about (5, 4) of radius
+/// 2. The face's highest point is the disk's top (5, 6, 0), where the sheet is flat; past
+/// the trim the sheet rises. The box is checked against the exact sheet, and the control
+/// points the solves read are counted: 1,433,600 before (896 whole nets of 1,600), 40,562
+/// now.
+#[test]
+fn tight_box_cells_are_solved_on_their_own_subpatch() {
+    let mut k = Kernel::default();
+    k.fixes.face_tight_box_searches_trim = true;
+    let (cx, cy, r) = DISK;
+    let circle = Curve::from(create_circle(Point3::new(cx, cy, 5.0), r).unwrap());
+    let b = trim_project_parallel(
+        &mut k,
+        TrimObject::Surface(Box::new(sheet())),
+        &circle,
+        Vec3::new(0.0, 0.0, -1.0),
+        Point3::new(cx, cy, 0.0),
+        TrimType::KeepPoint,
+    )
+    .unwrap();
+    let fs = faces(&b, None).unwrap();
+    assert_eq!(fs.len(), 1);
+    k.work_counters.reset();
+    let bx = calculate_tight_bounding_box(&k, &b, fs[0]).unwrap();
+    let read = k.work_counters.face_extreme_control_points();
+
+    // The face is the sheet over the disk: x, y the disk's extents, z from
+    // 0.05 (2 - 6)^3 = -3.2 at its bottom point to 0 at its top. The trim is the circle
+    // projected within the trim tolerance (0.01), so x and y are held to that; z is flat at
+    // the top, where a trim 0.01 past the circle rises 0.05 x 0.01^3 = 5e-8.
+    let z = |y: f64| SHEET_RISE * (y - SHEET_FLAT).powi(3);
+    for (what, got, want, tol) in [
+        ("x min", bx.min().x, cx - r, 1e-3),
+        ("x max", bx.max().x, cx + r, 1e-3),
+        ("y min", bx.min().y, cy - r, 1e-3),
+        ("y max", bx.max().y, cy + r, 1e-3),
+        ("z min", bx.min().z, z(cy - r), 1e-3),
+        ("z max", bx.max().z, z(cy + r), 5e-8),
+    ] {
+        assert!((got - want).abs() <= tol, "{what}: {got}, want {want}");
+    }
+
+    let net = (SHEET_N * SHEET_N) as u64;
+    eprintln!("control points read {read} (whole net {net})");
+    assert!(
+        read <= 50 * net,
+        "control points read {read}, whole net {net}"
+    );
 }

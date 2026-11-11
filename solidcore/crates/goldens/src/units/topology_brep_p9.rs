@@ -130,7 +130,7 @@ fn status(e: &SolidError) -> Result<Output, HarnessError> {
 fn ordinary<T>(r: solidcore::Result<T>) -> Result<i32, SolidError> {
     match r {
         Ok(_) => Ok(0),
-        Err(SolidError::Upstream { code, .. }) => Ok(code),
+        Err(e) if solidcore::error::upstream_status(&e).is_some() => Ok(solidcore::error::upstream_status(&e).unwrap_or(-1)),
         Err(e) => Err(e),
     }
 }
@@ -556,7 +556,8 @@ fn rust(i: &Inputs, mut b: Brep, initial: [f64; 2]) -> Result<Output, HarnessErr
             skeleton_caches(&mut b);
             Ok(graph_reachable(&b, record))
         }
-        Err(SolidError::Upstream { code, .. }) if i.op <= 4 => {
+        Err(e) if i.op <= 4 && solidcore::error::upstream_status(&e).is_some() => {
+            let code = solidcore::error::upstream_status(&e).unwrap_or(-1);
             // These APIs clear their pointer outputs before the first fallible
             // operation. Compare defined native failures as statuses, not harness
             // errors; any partial graph changes are still compared normally.

@@ -361,23 +361,54 @@ const UNSTABLE: [(&str, &str); 1] = [(
     "the halves of each swept wall lie level along every axis, so which is `#1` and which `#2` follows the order the kernel gives the faces in, which changes from one build to the next",
 )];
 
+/// The designs that take longest to build, heaviest first, with one build's time (ci profile,
+/// CLI `run`, one design at a time, on P-cores, 2026-11-10). The test hands them out first, and
+/// each design's two builds go to two workers, so a heavy design is never built twice in a row on
+/// one worker while the rest wait. Every other design took under 3.6 s. Only the order of the
+/// work depends on this list: a stale entry makes the test slower, never wrong. Re-measure when a
+/// design here gets much faster, or one not listed takes over 5 s.
+const HEAVIEST: [&str; 6] = [
+    "oracle/77-fillet-variable-linear",   // 35.6 s
+    "oracle/83-boundary-loop-thicken",    // 12.4 s
+    "regressions/closed_sweep_torus_cut", // 6.8 s
+    "oracle/41-tube-radial-holes",        // 4.6 s
+    "oracle/42-overlapping-patterns",     // 4.2 s
+    "oracle/35-fillet-curved-curved",     // 3.2 s
+];
+
 #[test]
 fn corpus_designs_name_alike_every_build_and_fail_where_a_reference_is_gone() {
     let designs = designs();
+    // Every design is built twice, as two jobs: (design, which build). The heaviest go first.
+    for heavy in HEAVIEST {
+        assert!(designs.iter().any(|(name, _)| name == heavy), "HEAVIEST lists `{heavy}`, which is not in the corpus any more");
+    }
+    let rank = |name: &str| HEAVIEST.iter().position(|h| *h == name).unwrap_or(HEAVIEST.len());
+    let mut jobs: Vec<(usize, usize)> = (0..designs.len()).flat_map(|d| [(d, 0), (d, 1)]).collect();
+    jobs.sort_by_key(|&(d, build)| (rank(&designs[d].0), d, build));
     let next = std::sync::atomic::AtomicUsize::new(0);
-    let results = std::sync::Mutex::new(Vec::new());
-    let workers = std::thread::available_parallelism().map_or(4, |n| n.get()).min(designs.len().max(1));
+    let builds = std::sync::Mutex::new(std::collections::BTreeMap::new());
+    let workers = std::thread::available_parallelism().map_or(4, |n| n.get()).min(jobs.len().max(1));
     std::thread::scope(|scope| {
         for _ in 0..workers {
             scope.spawn(|| {
-                while let Some((name, source)) = designs.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)) {
-                    let got = load(source).and_then(|first| Ok((build(&first), build(&load(source)?))));
-                    results.lock().unwrap_or_else(|e| e.into_inner()).push((name.clone(), got));
+                while let Some(&(d, which)) = jobs.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)) {
+                    let got = load(&designs[d].1).map(|s| build(&s));
+                    builds.lock().unwrap_or_else(|e| e.into_inner()).insert((d, which), got);
                 }
             });
         }
     });
-    let mut results = results.into_inner().unwrap_or_else(|e| e.into_inner());
+    let mut builds = builds.into_inner().unwrap_or_else(|e| e.into_inner());
+    let mut results: Vec<(String, Result<(Build, Build), String>)> = designs
+        .iter()
+        .enumerate()
+        .map(|(d, (name, _))| {
+            let first = builds.remove(&(d, 0)).unwrap();
+            let second = builds.remove(&(d, 1)).unwrap();
+            (name.clone(), first.and_then(|first| Ok((first, second?))))
+        })
+        .collect();
     results.sort_by(|a, b| a.0.cmp(&b.0));
     let mut problems = Vec::new();
     for (name, got) in &results {

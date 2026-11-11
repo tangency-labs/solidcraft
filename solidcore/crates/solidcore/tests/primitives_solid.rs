@@ -83,7 +83,7 @@ fn default_sphere_precise_properties_fail_at_tight_accuracy() {
     };
     use solidcore::primitive::api_primitives::create_sphere;
     use solidcore::query::brep::{calculate_bounding_box, BoundingBoxOptions};
-    use solidcore::{math::Vec3, Kernel, SolidError};
+    use solidcore::{math::Vec3, Kernel};
 
     let store = AttributeStore::default();
     let key_of = |_| ObjectKey(0);
@@ -111,13 +111,11 @@ fn default_sphere_precise_properties_fail_at_tight_accuracy() {
         } else {
             assert!(
                 matches!(
-                    result,
+                    &result,
                     // the step control failing: upstream's SM_ERR, named by its cause
-                    Err(SolidError::Upstream {
-                        operation: "mass::integrator::step_control",
-                        code: solidcore::error::SM_ERR,
-                        ..
-                    })
+                    Err(e) if e.operation() == "mass::integrator::step_control"
+                        && solidcore::error::upstream_status(e) == Some(solidcore::error::SM_ERR)
+                        && e.mass_failure() == Some(&solidcore::error::mass::MassFailure::StepControl)
                 ),
                 "{result:?}"
             );

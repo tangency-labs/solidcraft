@@ -143,7 +143,9 @@ fn cross_section_on_the_original_face_drops_points_with_the_face() {
 /// top face past each round's axis (radius 1 - r < 0): its section turned about the axis
 /// would be a spindle torus through its own axis. Refused, naming 1. Upstream and the
 /// port before built an 18-face body whose corner faces cross themselves (the difftest's
-/// `big-rad-filleted_box-r2.0-top-edges` and `-r3.0-`, parked on WR-739).
+/// `big-rad-filleted_box-r2.0-top-edges` and `-r3.0-`, parked on WR-739). The ball's
+/// regularity (`BallIsRegular`, WR-696) finds it first: the R1 rounds curve tighter than
+/// the ball, which does not fit them (`BallDoesNotFit`), naming the same 1.
 #[test]
 fn a_round_wider_than_the_r1_rounds_is_refused_naming_1() {
     for r in [1.01, 2.0, 3.0] {
@@ -153,7 +155,7 @@ fn a_round_wider_than_the_r1_rounds_is_refused_naming_1() {
         let Err(SolidError::FilletRefused { reason, fit, .. }) = result else {
             panic!("r {r}: {result:?}");
         };
-        assert_eq!(reason, Some(NoRoomReason::RailPastAxis), "r {r}");
+        assert_eq!(reason, Some(NoRoomReason::BallDoesNotFit), "r {r}");
         assert!((fit.size - 1.0).abs() < 1e-12, "r {r}: {}", fit.size);
     }
 }

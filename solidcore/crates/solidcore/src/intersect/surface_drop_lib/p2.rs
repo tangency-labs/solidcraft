@@ -190,7 +190,12 @@ impl DropOffset {
         drop_vectors_at(k, off, uv, side(from_left_u), side(from_left_v), &[vector])?
             .first()
             .copied()
-            .ok_or_else(|| SolidError::sm_err(OP_SET))
+            .ok_or_else(|| {
+                SolidError::intersect_failed(
+                    OP_SET,
+                    "dropping the vector onto the offset surface gave no uv vector",
+                )
+            })
     }
 
     /// `rOffset.EvaluateDirectionalDerivs(uv, uv_dir, 1, pd, bFromLeftU, bFromLeftV)`
@@ -209,7 +214,10 @@ impl DropOffset {
         let d = off.evaluate_directional_derivs(k, uv, uv_dir, 1, from_left_u, from_left_v)?;
         match d.as_slice() {
             [p, d1, ..] => Ok([*p, *d1]),
-            _ => Err(SolidError::sm_err(OP_SET)),
+            _ => Err(SolidError::intersect_failed(
+                OP_SET,
+                "the offset surface's directional derivative was not evaluated",
+            )),
         }
     }
 }
@@ -340,8 +348,10 @@ fn find_degen_param(
 
 /// The status upstream would store for a failed callee (see the module notes).
 fn status_of(e: &SolidError) -> i32 {
+    if let Some(code) = e.upstream_status() {
+        return code;
+    }
     match e {
-        SolidError::Upstream { code, .. } => *code,
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => SM_ERR_INVALID_INPUT,
         _ => SM_ERR,
     }
@@ -562,7 +572,10 @@ impl DropPt {
         if crv_speed < EFF_ZERO && self.degen_curve == Some(false) {
             // inform the public (when the drop was good) either way it is SM_ERR
             self.good_drop = Some(false);
-            return Err(SolidError::sm_err(OP_SET));
+            return Err(SolidError::intersect_failed(
+                OP_SET,
+                "the curve's first derivative is zero and the curve is not degenerate",
+            ));
         }
 
         // when m_bDegenCurve != TRUE
@@ -572,7 +585,10 @@ impl DropPt {
                 self.srf_normal.angle_between(self.crv_pd[1]).unwrap_or(0.0);
             if rad_to_deg(srf_norm_crv_tan_ang_rad) < 3.0 {
                 self.good_drop = Some(false);
-                return Err(SolidError::sm_err(OP_SET));
+                return Err(SolidError::intersect_failed(
+                    OP_SET,
+                    "the curve's tangent is within 3 degrees of the surface normal",
+                ));
             }
         }
 
@@ -769,7 +785,10 @@ impl DropPt {
 
         // MINIMIZE should always find some solution.
         if !found_answer {
-            return Err(SolidError::sm_err(OP_NEXT));
+            return Err(SolidError::intersect_failed(
+                OP_NEXT,
+                "the span end could not be dropped onto the surface",
+            ));
         }
 
         // load SpanEnd[UV] from DropPoint(SpandEnd[CrvPt]) solution
@@ -852,10 +871,9 @@ impl DropPt {
             // A larger correction rejects this candidate without moving the endpoint.
             match start.check_seam_jump(k, surface, srf_closure, approx_tol_3d, end) {
                 Ok(()) => {}
-                Err(SolidError::Upstream {
-                    code: SM_ERR_OUTSIDE_OF_DOMAIN,
-                    ..
-                }) => return Ok(SM_ERR_OUTSIDE_OF_DOMAIN),
+                Err(e) if e.upstream_status() == Some(SM_ERR_OUTSIDE_OF_DOMAIN) => {
+                    return Ok(SM_ERR_OUTSIDE_OF_DOMAIN)
+                }
                 Err(e) => return Err(e),
             }
 
@@ -1089,7 +1107,10 @@ pub fn add_to_curve(
 
     // return error for huge drop point counts
     if ctrl_poly.len() >= MAX_CTRL_POINTS {
-        return Err(SolidError::sm_err(OP_ADD));
+        return Err(SolidError::intersect_failed(
+            OP_ADD,
+            "the dropped curve has too many control points",
+        ));
     }
 
     // all done

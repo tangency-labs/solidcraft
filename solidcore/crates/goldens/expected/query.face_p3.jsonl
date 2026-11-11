@@ -350,7 +350,7 @@
 {"case":"adv_sec_b8_e2_m0_f0.0_c2_t0.0_0.0","deferred":null,"error":"rejected","ints":{},"topology":null,"values":{}}
 {"case":"adv_sec_b8_e2_m0_f0.0_c2_t0.5_0.0","deferred":null,"error":null,"ints":{"sector":[1,0,0]},"topology":null,"values":{}}
 {"case":"adv_sec_b8_e2_m0_f0.5_c1_t0.5_0.5","deferred":null,"error":null,"ints":{"sector":[1,0,0]},"topology":null,"values":{}}
-{"case":"adv_sec_b8_e2_m0_f1e-09_c2_t0.0_0.0","deferred":null,"error":"rejected","ints":{},"topology":null,"values":{}}
+{"case":"adv_sec_b8_e2_m0_f1e-09_c2_t0.0_0.0","deferred":null,"error":null,"ints":{"sector":[1,1,5]},"topology":null,"values":{}}
 {"case":"adv_sec_b8_e2_m1_f0.5_c1_t0.0_0.0","deferred":null,"error":null,"ints":{"sector":[1,0,0]},"topology":null,"values":{}}
 {"case":"adv_sec_b8_e2_m1_f0.5_c1_t1.0_0.0","deferred":null,"error":null,"ints":{"sector":[1,0,0]},"topology":null,"values":{}}
 {"case":"adv_sec_b8_e2_m2_f0.5_c2_t0.25_0.75","deferred":null,"error":null,"ints":{"sector":[1,0,0]},"topology":null,"values":{}}

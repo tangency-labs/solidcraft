@@ -176,7 +176,7 @@ fn output(raw: &[f64]) -> Result<Output, HarnessError> {
 /// The status code of a wrapper error (`SM_SUCCESS` is `0`).
 fn status(e: &SolidError) -> Option<f64> {
     match e {
-        SolidError::Upstream { code, .. } => Some(f64::from(*code)),
+        up_err if solidcore::error::upstream_status(up_err).is_some() => Some(f64::from(solidcore::error::upstream_status(up_err).unwrap_or(-1))),
         SolidError::InvalidInput { .. } => Some(1007.),
         _ => None,
     }
@@ -393,7 +393,7 @@ fn put_trims(k: &Kernel, o: &mut Vec<f64>, b: &Brep) -> SolidResult<()> {
                 match c.evaluate_point(k, d.evaluate(f)) {
                     Ok(p) => o.extend([0.0, p.x, p.y, p.z]),
                     Err(e) if e.is_unported() => return Err(e),
-                    Err(SolidError::Upstream { code, .. }) => o.push(f64::from(code)),
+                    Err(up_err) if solidcore::error::upstream_status(&up_err).is_some() => o.push(f64::from(solidcore::error::upstream_status(&up_err).unwrap_or(-1))),
                     Err(_) => o.push(-1.0),
                 }
             }
@@ -687,7 +687,7 @@ fn write_rejection(s: &WriteSrc) -> Option<String> {
 fn write_status(e: &SolidError) -> i64 {
     match e {
         SolidError::InvalidInput { .. } => 1007,
-        SolidError::Upstream { code, .. } => i64::from(*code),
+        up_err if solidcore::error::upstream_status(up_err).is_some() => i64::from(solidcore::error::upstream_status(up_err).unwrap_or(-1)),
         _ => -1,
     }
 }

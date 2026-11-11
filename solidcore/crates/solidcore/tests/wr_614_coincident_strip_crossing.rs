@@ -31,7 +31,7 @@ use solidcore::topology::proto_topology::p1::api_transform::{
     api_rotate, api_translate, TransformObject,
 };
 use solidcore::topology::{edge, vertex};
-use solidcore::{Brep, Kernel, SolidError};
+use solidcore::{Brep, Kernel};
 
 const SIDE: f64 = 4.0;
 const SLOPE: f64 = 0.1;
@@ -124,7 +124,7 @@ fn wr_614_union_fails_upstream() {
     let mut k = Kernel::default();
     let (a, b) = strip_cubes(&mut k, D);
     match boolean_union(&mut k, a, b) {
-        Err(SolidError::Upstream { code, .. }) => assert_eq!(code, SM_ERR),
+        Err(e) => assert_eq!(e.sm_status(), Some(SM_ERR), "{e}"),
         other => panic!("upstream's union fails with SM_ERR, got {other:?}"),
     }
 }
@@ -255,7 +255,7 @@ fn wr_614_imported_tolerances_union_and_intersection_at_5e6() {
     let (mut a, mut b) = strip_cubes(&mut k, 1e-5);
     set_imported_tols(&mut k, &mut a, &mut b);
     match boolean_union(&mut k, a, b) {
-        Err(SolidError::Upstream { code, .. }) => assert_eq!(code, SM_ERR),
+        Err(e) => assert_eq!(e.sm_status(), Some(SM_ERR), "{e}"),
         other => {
             panic!("expected SM_ERR without fix at imported tolerances d=1e-5, got {other:?}")
         }

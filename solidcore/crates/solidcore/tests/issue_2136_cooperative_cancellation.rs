@@ -23,6 +23,7 @@ use std::thread;
 use std::time::Duration;
 
 use solidcore::blend::fillet_executive::api::fillet_edges;
+use solidcore::blend::fillet_section::section::GN_DEFAULT_THUMBWEIGHT;
 use solidcore::boolean::api_brep::boolean_difference;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::global_solver::{
@@ -243,7 +244,15 @@ fn fillet_g2_traced_corner_parity_and_cancellation() {
         let mut setup_copy = Kernel::default();
         let mut body = copy_brep(&mut setup_copy, &box_template, 1);
         let target_edges = corner_edges_at(&body, Point3::new(0.0, 0.0, 10.0));
-        fillet_edges(k, &mut body, &target_edges, 1.5, 2, 2, 1.0)?;
+        fillet_edges(
+            k,
+            &mut body,
+            &target_edges,
+            1.5,
+            2,
+            2,
+            GN_DEFAULT_THUMBWEIGHT,
+        )?;
         Ok(fingerprint_brep(&mut body))
     });
 }
@@ -588,7 +597,15 @@ fn worker_thread_and_group_cancel_in_flight_via_cancel_token() {
             let mut sc = Kernel::default();
             let mut body = copy_brep(&mut sc, &box_w2, 1);
             let target_edges = corner_edges_at(&body, Point3::new(0.0, 0.0, 10.0));
-            fillet_edges(&mut k, &mut body, &target_edges, 1.5, 2, 2, 1.0)?;
+            fillet_edges(
+                &mut k,
+                &mut body,
+                &target_edges,
+                1.5,
+                2,
+                2,
+                GN_DEFAULT_THUMBWEIGHT,
+            )?;
         }
     });
 

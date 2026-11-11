@@ -1,5 +1,6 @@
-//! WR-682 (`fixes.fillet_surface_plane_curve_on_plane_equation`, the SolidCraft fork's
-//! tangency-labs/smlib@5bdcddf, 14a6daa and 4c6571b): `sm_SrfSrfIntersection` traces the
+//! WR-682 (the SolidCraft fork's tangency-labs/smlib@5bdcddf, 14a6daa and 4c6571b; on every
+//! kernel since its flag, `fillet_surface_plane_curve_on_plane_equation`, was retired: WR-682
+//! addendum 2026-11-07): `sm_SrfSrfIntersection` traces the
 //! curve of a surface and a plane between two points on both on the plane's equation, so
 //! that the plane's own domain doesn't end it.
 //!
@@ -27,12 +28,6 @@ use solidcore::Kernel;
 
 const TOL: f64 = 1e-5;
 const ANG_TOL: f64 = 0.2;
-
-fn kernel(flag: bool) -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.fillet_surface_plane_curve_on_plane_equation = flag;
-    k
-}
 
 fn ellipse(deg: f64) -> Point3 {
     let t = deg.to_radians();
@@ -158,7 +153,7 @@ fn check_curves(
 
 #[test]
 fn the_curve_runs_past_the_plane_s_domain_to_its_end() {
-    let k = kernel(true);
+    let k = Kernel::default();
     let (cyl, plane) = (cylinder(&k), patch());
     let c = intersect(&k, &cyl, &plane, 45.0, 135.0, None).unwrap();
     let curve = c.curve_3d.as_ref().unwrap();
@@ -194,7 +189,7 @@ fn the_curve_runs_past_the_plane_s_domain_to_its_end() {
 
 #[test]
 fn the_uv_curves_follow_the_order_of_the_surfaces() {
-    let k = kernel(true);
+    let k = Kernel::default();
     let (cyl, plane) = (cylinder(&k), patch());
     let c = intersect(&k, &plane, &cyl, 45.0, 135.0, None).unwrap();
     check_curves(
@@ -210,7 +205,7 @@ fn the_uv_curves_follow_the_order_of_the_surfaces() {
 /// 14a6daa: the curve leaves its start the way it's told, not towards the end.
 #[test]
 fn the_start_direction_chooses_the_way_round() {
-    let k = kernel(true);
+    let k = Kernel::default();
     let (cyl, plane) = (cylinder(&k), patch());
     let t = 45f64.to_radians();
     // the way the angle grows at 45 degrees, and the other way
@@ -257,18 +252,15 @@ fn the_start_direction_chooses_the_way_round() {
     );
 }
 
-/// Upstream's two-points and general intersectors stop at the plane's domain: status 1001.
-#[test]
-fn without_the_flag_the_curve_is_not_found() {
-    let k = kernel(false);
-    let (cyl, plane) = (cylinder(&k), patch());
-    let e = intersect(&k, &cyl, &plane, 45.0, 135.0, None).unwrap_err();
-    assert!(e.contains("code: 1001"), "{e}");
-}
-
-/// The three curves, in full, to compare the flag on and off.
-fn curves_text(k: &Kernel, a: &Surface, b: &Surface, from: Point3, to: Point3) -> String {
-    let r = srf_srf_intersection(
+/// The intersection between `from` and `to`, as `sm_SrfSrfIntersection` gives it.
+fn curves(
+    k: &Kernel,
+    a: &Surface,
+    b: &Surface,
+    from: Point3,
+    to: Point3,
+) -> solidcore::Result<SrfSrfCurves> {
+    srf_srf_intersection(
         k,
         Some(from),
         Some(to),
@@ -279,26 +271,50 @@ fn curves_text(k: &Kernel, a: &Surface, b: &Surface, from: Point3, to: Point3) -
         TOL,
         ANG_TOL,
         SrfSrfOptions::default(),
-    );
-    format!("{r:?}")
+    )
 }
 
-fn assert_flag_changes_nothing(a: &Surface, b: &Surface, from: Point3, to: Point3) {
-    let (on, off) = (kernel(true), kernel(false));
-    let (with, without) = (
-        curves_text(&on, a, b, from, to),
-        curves_text(&off, a, b, from, to),
+/// Not traced on the plane's equation: the intersectors' own answer, the status 1001 they
+/// give where the plane's domain or an end off a surface stops them.
+fn assert_not_found(a: &Surface, b: &Surface, from: Point3, to: Point3) {
+    let r = curves(&Kernel::default(), a, b, from, to);
+    assert!(
+        matches!(r, Err(solidcore::SolidError::Upstream { code: 1001, .. })),
+        "{r:?}"
     );
-    assert_eq!(with, without);
 }
 
-/// The analytic intersector's answer stands: the cylinder as itself, whose section it finds.
+/// Not traced on the plane's equation: the intersectors' exact line from `from` to `to`
+/// (every point of the curve on the segment), not the trace's Hermite spans.
+fn assert_line(a: &Surface, b: &Surface, from: Point3, to: Point3) {
+    let k = Kernel::default();
+    let c = curves(&k, a, b, from, to).unwrap().curve_3d.unwrap();
+    let ivl = c.natural_interval();
+    let ends = [ivl.min(), ivl.max()].map(|t| c.evaluate_point(&k, t).unwrap());
+    let fits = |p: Point3, q: Point3| ends[0].distance(p) < 1e-9 && ends[1].distance(q) < 1e-9;
+    assert!(fits(from, to) || fits(to, from), "{ends:?}");
+    let along = (to - from) / (to - from).length();
+    for i in 1..16 {
+        let p = c
+            .evaluate_point(&k, ivl.evaluate(f64::from(i) / 16.0))
+            .unwrap();
+        let off = (p - from) - along * (p - from).dot(along);
+        assert!(
+            off.length() < 1e-9,
+            "{p:?} off the line by {}",
+            off.length()
+        );
+    }
+}
+
+/// The analytic intersector's answer stands for the cylinder as itself: its section ends at
+/// the plane's domain, so between these points it finds none.
 #[test]
 fn an_analytic_answer_is_kept() {
-    let k = kernel(true);
+    let k = Kernel::default();
     let cyl =
         Surface::from(create_cylinder_surface(&k, Point3::new(0.0, 0.0, 0.0), 10.0, 40.0).unwrap());
-    assert_flag_changes_nothing(&cyl, &patch(), ellipse(45.0), ellipse(135.0));
+    assert_not_found(&cyl, &patch(), ellipse(45.0), ellipse(135.0));
 }
 
 /// 4c6571b: a flat B-spline surface meets the plane in a line, the analytic intersector's.
@@ -326,13 +342,13 @@ fn a_flat_surface_is_not_traced() {
     let mut big = Extent2d::default();
     big.set_min_max_coords(-30.0, -30.0, 30.0, 30.0).unwrap();
     wide.adjust_step_uv_domain(&big).unwrap();
-    assert_flag_changes_nothing(&nurb, &Surface::from(wide), at(-10.0), at(10.0));
+    assert_line(&nurb, &Surface::from(wide), at(-10.0), at(10.0));
 }
 
 /// An end where the surface touches the plane is a singular point: not traced.
 #[test]
 fn a_surface_touching_the_plane_is_not_traced() {
-    let k = kernel(true);
+    let k = Kernel::default();
     let cyl = cylinder(&k);
     // the plane x = 10 touches the cylinder along the line x = 10, y = 0
     let frame = Axis2Placement::new(
@@ -344,7 +360,7 @@ fn a_surface_touching_the_plane_is_not_traced() {
     let mut d = Extent2d::default();
     d.set_min_max_coords(-30.0, -30.0, 30.0, 60.0).unwrap();
     touching.adjust_step_uv_domain(&d).unwrap();
-    assert_flag_changes_nothing(
+    assert_line(
         &cyl,
         &Surface::from(touching),
         Point3::new(10.0, 0.0, 5.0),
@@ -355,8 +371,8 @@ fn a_surface_touching_the_plane_is_not_traced() {
 /// An end off the surface isn't taken either.
 #[test]
 fn an_end_off_a_surface_is_not_traced() {
-    let k = kernel(true);
+    let k = Kernel::default();
     let cyl = cylinder(&k);
     let off = Point3::new(9.0, 0.0, 24.5);
-    assert_flag_changes_nothing(&cyl, &patch(), ellipse(45.0), off);
+    assert_not_found(&cyl, &patch(), ellipse(45.0), off);
 }

@@ -246,8 +246,11 @@ fn a_definition_off_its_net_s_domain_is_refused() {
 /// foot sits on a face's knot line and its box straddles it, the point is still enclosed (a
 /// check of the feet against one piece refused 67 of the 188 the net then had), and so is
 /// every point between two stations; each enclosure holds the evaluator's point. The net
-/// has 181 inner knots since #2690: the certificate accepts a level by each uv parameter's
-/// own error, so some spans certify without being halved.
+/// had 181 inner knots since #2690 (the certificate accepts a level by each uv parameter's
+/// own error, so some spans certify without being halved), 169 since #13984 (each proved
+/// feet's box is tightened before the Taylor solve, so more spans certify unhalved), 164
+/// since #14405 (the arc's rows over a piece are bounded by Taylor models too), and 113
+/// since #14405's feet (the feet over a piece are bounded by Taylor models too).
 #[test]
 fn every_station_and_every_point_between_is_enclosed() {
     let mut k = solidcraft_kernel();
@@ -281,7 +284,7 @@ fn every_station_and_every_point_between_is_enclosed() {
         .filter(|&x| x > lo && x < hi)
         .collect();
     inner.dedup();
-    assert_eq!(inner.len(), 181);
+    assert_eq!(inner.len(), 113);
     let mut points = Vec::new();
     for w in inner.windows(2) {
         points.push(w[0]);

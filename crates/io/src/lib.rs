@@ -360,12 +360,14 @@ pub fn mesh_import_feature_in(bytes: &[u8], file: &str, mm_per_unit: f64) -> Res
     // Check every mesh now, so the command fails rather than the timeline.
     let mut meshes = Vec::with_capacity(objects.len());
     for o in &objects {
-        solidcraft_kernel::mesh_body(&o.positions, &o.triangles).map_err(|e| IoError::Invalid(format!("mesh `{}`: {e}", o.name)))?;
+        solidcraft_kernel::mesh_body_with_normals(&o.positions, &o.triangles, &o.corner_normals)
+            .map_err(|e| IoError::Invalid(format!("mesh `{}`: {e}", o.name)))?;
         meshes.push(solidcraft_doc::MeshData {
             name: o.name.clone(),
             positions: o.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
             triangles: o.triangles.iter().flatten().copied().collect(),
             color: o.color,
+            corner_normals: o.corner_normals.iter().flatten().flat_map(|n| [n.x, n.y, n.z]).collect(),
         });
     }
     let name = match objects.as_slice() {
@@ -776,12 +778,14 @@ pub fn export_with_quality(
     quality: MeshQuality,
 ) -> Result<Vec<u8>> {
     let _span = solidcraft_profile::span("io", "export_with_quality");
-    export_with_parts(state, bodies, &[], format, name, meta, quality)
+    export_with_parts(state, bodies, &[], format, name, meta, quality, None)
 }
 
 /// [`export_with_quality`], and in 3MF each of `parts` (a name and the names of its bodies)
 /// written as one object with those bodies as its parts ([`model_xml_parts`], #8139).
 /// Bodies of a part that are not exported are left out of it. Other formats have no parts.
+/// A 3MF carries `thumbnail` (a PNG) as its package thumbnail; other formats have no place for it.
+#[allow(clippy::too_many_arguments)]
 pub fn export_with_parts(
     state: &ModelState,
     bodies: &[String],
@@ -790,6 +794,7 @@ pub fn export_with_parts(
     name: &str,
     meta: &Metadata,
     quality: MeshQuality,
+    thumbnail: Option<&[u8]>,
 ) -> Result<Vec<u8>> {
     let sel = selected(state, bodies)?;
     Ok(match format {
@@ -823,7 +828,7 @@ pub fn export_with_parts(
             let objs: Vec<MeshObject> = per_body(&sel, |b| mesh_object(b, format == Format::ThreeMfTagged, quality))?;
             let index = |n: &String| sel.iter().position(|b| &b.name == n);
             let parts: Vec<(String, Vec<usize>)> = parts.iter().map(|(p, names)| (p.clone(), names.iter().filter_map(index).collect())).collect();
-            write_3mf_parts(&objs, &parts, &threemf_metadata(meta))?
+            write_3mf_parts(&objs, &parts, &threemf_metadata(meta), thumbnail)?
         }
         Format::Design => return Err(IoError::Format("sc (save the document instead)".into())),
         Format::Urdf => return Err(IoError::Format("urdf (an assembly package; use file.export)".into())),
@@ -875,7 +880,18 @@ fn mesh_object(b: &solidcraft_doc::ModelBody, tagged: bool, quality: MeshQuality
         (Vec::new(), 0)
     };
     let transparency = 1.0 - paint.map(|p| p.opacity).unwrap_or(1.0);
-    Ok(MeshObject { name: b.name.clone(), positions, triangles, color: b.body.color(), transparency, looks, tri_looks, tri_faces, faces })
+    Ok(MeshObject {
+        name: b.name.clone(),
+        positions,
+        triangles,
+        color: b.body.color(),
+        transparency,
+        looks,
+        tri_looks,
+        tri_faces,
+        faces,
+        corner_normals: Vec::new(),
+    })
 }
 
 /// STEP assembly of a design with components: a product per component holding its bodies in

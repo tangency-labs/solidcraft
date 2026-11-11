@@ -301,6 +301,9 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
     }
     let state_js = STATE_JS.replace("STARTED", started).replace("BUILD_FILES", &json!(files.into_iter().collect::<Vec<_>>()).to_string());
     let count = std::cell::Cell::new(0);
+    // Run once, just before the next launch's page navigation is issued (see the update in another
+    // tab below).
+    let on_navigate: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = std::cell::RefCell::new(None);
     let launch_at = |cdp: &mut Cdp, at: &str, build: &str| -> Result<Duration, String> {
         let n = count.get() + 1;
         count.set(n);
@@ -310,6 +313,9 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
         // One retry: on a heavily loaded machine a launch can stall past the timeout. Loading the
         // same page again must still start the same build.
         for attempt in 1..=2 {
+            if let Some(f) = on_navigate.borrow_mut().take() {
+                f();
+            }
             let r = cdp.call("Page.navigate", json!({ "url": format!("http://127.0.0.1:{}{at}?launch={n}", server.port) }))?;
             if let Some(e) = r["errorText"].as_str().filter(|e| !e.is_empty()) {
                 return Err(format!("launch {n} (build {build}): the page didn't load: {e}"));
@@ -416,11 +422,22 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
     other.eval(age)?;
     cdp.call("Page.navigate", json!({ "url": "about:blank" }))?;
     // The other tab updates once the launch is waiting for build.json, and leaves.
+    // Only a check made after this launch's navigation begins counts: another tab's check, late on a
+    // loaded machine, must not start the update before the launch has loaded its files (the new
+    // worker would then serve the new build's files to the old build's page).
     let waiting = server.checks.clone();
-    let before = waiting.load(Ordering::SeqCst);
+    let before = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(usize::MAX));
+    *on_navigate.borrow_mut() = Some(Box::new({
+        let (before, waiting) = (before.clone(), waiting.clone());
+        move || before.store(waiting.load(Ordering::SeqCst), Ordering::SeqCst)
+    }));
     let updater = std::thread::spawn(move || -> Result<Cdp, String> {
         let t = Instant::now();
-        while waiting.load(Ordering::SeqCst) <= before {
+        loop {
+            let b = before.load(Ordering::SeqCst);
+            if b != usize::MAX && waiting.load(Ordering::SeqCst) > b {
+                break;
+            }
             if t.elapsed() > LAUNCH_TIMEOUT {
                 return Err("the launch never asked for build.json".into());
             }
@@ -440,8 +457,30 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
     wait_for(&mut cdp, &state_js, "v4's worker keeps v4, v3's copy retired", |s| {
         s["kept"].as_object().is_some_and(|k| k.len() == 1 && k.contains_key(&name4))
             && s["retired"].as_array().is_some_and(|r| r.contains(&json!(name3)))
+            && s["settled"] == true
     })?;
     step("update in another tab: the kept v3 still starts; its copy is retired, not deleted", t);
+    // The page still open is v3's: a file it asks for now comes from v3's copy, not from v4 which the
+    // worker has taken over with (nor from the network, which serves v4).
+    let shared = cdp.eval("fetch('shared.js?later', { cache: 'no-store' }).then((r) => r.text())")?;
+    if !shared.as_str().is_some_and(|text| text.contains("\"v3\"")) {
+        let records = cdp
+            .eval(
+                "caches.keys().then(async (ks) => { const out = {}; for (const k of ks) if (k.startsWith('solidcraft-app-pages ')) { const c = await caches.open(k); for (const r of await c.keys()) out[r.url] = await (await c.match(r)).text(); } return out; })",
+            )
+            .unwrap_or_default();
+        return Err(format!("the open v3 page was given another build's file after the update: {shared}; page records: {records}"));
+    }
+    // A page whose record is lost never gets the worker's build instead: its request fails visibly.
+    let lost = cdp.eval(
+        "caches.keys().then(async (ks) => {
+          for (const k of ks) if (k.startsWith('solidcraft-app-pages ')) { const c = await caches.open(k); for (const r of await c.keys()) await c.delete(r); }
+          return (await fetch('shared.js?lost', { cache: 'no-store' })).status;
+        })",
+    )?;
+    if lost != json!(503) {
+        return Err(format!("a page with no remembered build was answered with status {lost}, not the visible failure (503)"));
+    }
     other.call("Page.close", json!({}))?;
 
     server.set(Mode::Serve(v4));
@@ -538,7 +577,10 @@ const STATE_JS: &str = "(async () => {
     scriptStartedBuild: document.documentElement.dataset.started ?? null,
     scriptSharedBuild: document.documentElement.dataset.shared ?? null,
     started: STARTED, controlled: !!navigator.serviceWorker.controller, caches: caches_, kept, retired, complete, filling,
-    registered: (await navigator.serviceWorker.getRegistrations()).filter((r) => r.scope === scope).length };
+    registered: (await navigator.serviceWorker.getRegistrations()).filter((r) => r.scope === scope).length,
+    // The newest worker is active and controls this page (not still taking over from an older one).
+    settled: await navigator.serviceWorker.getRegistration(scope).then((r) => Boolean(r && r.active && r.active.state === 'activated'
+      && !r.installing && !r.waiting && navigator.serviceWorker.controller && navigator.serviceWorker.controller.state === 'activated')) };
 })()";
 
 /// Every file this build downloads, including names shared with the next build.

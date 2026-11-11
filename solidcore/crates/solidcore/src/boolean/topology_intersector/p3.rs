@@ -72,6 +72,7 @@
 //!   which calls `MergeCurveClasses`; none calls back.
 
 use crate::curve::curve::p2::Curve;
+use crate::error::boolean::BooleanStage;
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -234,7 +235,10 @@ fn or_sm_err(r: Result<()>, op: &'static str) -> Result<()> {
     if succeeded(r)? {
         Ok(())
     } else {
-        Err(SolidError::sm_err(op))
+        Err(SolidError::stage_failed(
+            op,
+            "the curve classifications could not be made consistent",
+        ))
     }
 }
 
@@ -986,7 +990,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
             // if there is still a problem - signal an error
             if !fixed {
-                return Err(SolidError::sm_err(OP_CLASSES));
+                return Err(SolidError::stage_failed(
+                    OP_CLASSES,
+                    "the curve classifications could not be fixed",
+                ));
             }
         }
         // when pE1 has a mate but pE2 does not - try to fix things by deleting unneeded
@@ -1020,7 +1027,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 }
             }
             if !fixed {
-                return Err(SolidError::sm_err(OP_CLASSES));
+                return Err(SolidError::stage_failed(
+                    OP_CLASSES,
+                    "the curve classifications could not be fixed",
+                ));
             }
         }
         Ok(())
@@ -1114,17 +1124,15 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
         // Get the face or composite face from the surface.
         let this_face = match input.surface {
-            Some(s) => Some(
-                brep.surface_face(s)?
-                    .ok_or(SolidError::null_pointer(OP_ON_SURFACES))?,
-            ),
+            Some(s) => Some(brep.surface_face(s)?.ok_or_else(|| {
+                SolidError::entity_missing(OP_ON_SURFACES, "a face for the surface")
+            })?),
             None => None,
         };
         let other_face = match input.other_surface {
-            Some(s) => Some(
-                brep.surface_face(s)?
-                    .ok_or(SolidError::null_pointer(OP_ON_SURFACES))?,
-            ),
+            Some(s) => Some(brep.surface_face(s)?.ok_or_else(|| {
+                SolidError::entity_missing(OP_ON_SURFACES, "a face for the other surface")
+            })?),
             None => None,
         };
 
@@ -1133,7 +1141,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         if curve_of(brep, Some(input.curve))?.is_degenerate(k, input.curve_tolerance, None)? {
             // Don't allow degenerate cases when using edges
             if input.surface.is_none() || input.other_surface.is_none() {
-                return Err(SolidError::sm_err(OP_ON_SURFACES));
+                return Err(SolidError::stage_failed(
+                    OP_ON_SURFACES,
+                    "a degenerate curve lies on no pair of surfaces",
+                ));
             }
 
             // get curve point
@@ -1273,7 +1284,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         let partial = crv_class1.test_for_partial_coincident_edges(k, &*brep, &crv_class2)?;
         let new_tol = partial.max_partial_coin_gap;
         if new_tol < 0.0 {
-            return Err(SolidError::sm_err(OP_ON_SURFACES));
+            return Err(SolidError::stage_failed(
+                OP_ON_SURFACES,
+                "the partly coincident edges have no common sub-interval",
+            ));
         }
 
         // when a coincident sub-interval curve was made
@@ -1525,7 +1539,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         while topology_changed {
             passes += 1;
             if passes > MAX_COINCIDENT_SURFACE_PASSES {
-                return Err(SolidError::sm_err(OP_COINCIDENT));
+                return Err(SolidError::boolean_stage_failed(
+                    OP_COINCIDENT,
+                    BooleanStage::Coincidence,
+                    "the coincident faces do not settle within the pass limit",
+                ));
             }
             // step 1 project and merge BFace->edges into OFace (bTopologyChanged is
             // reset to FALSE, then set by the step)
@@ -1597,12 +1615,20 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 // check to see if all their edges match
                 if let Some(fu) = found_fu {
                     // get the coincident matching faces
-                    let o_face_match = brep
-                        .faceuse_face(fu)?
-                        .ok_or(SolidError::null_pointer(OP_COINCIDENT))?;
-                    let b_face_match = brep
-                        .edgeuse_face(eu)?
-                        .ok_or(SolidError::null_pointer(OP_COINCIDENT))?;
+                    let o_face_match = brep.faceuse_face(fu)?.ok_or_else(|| {
+                        SolidError::boolean_entity_missing(
+                            OP_COINCIDENT,
+                            BooleanStage::Coincidence,
+                            "a face for the coincident edge use",
+                        )
+                    })?;
+                    let b_face_match = brep.edgeuse_face(eu)?.ok_or_else(|| {
+                        SolidError::boolean_entity_missing(
+                            OP_COINCIDENT,
+                            BooleanStage::Coincidence,
+                            "a face for the edge use",
+                        )
+                    })?;
 
                     // get face->edges
                     let edges_o = brep.face_edges(o_face_match)?;

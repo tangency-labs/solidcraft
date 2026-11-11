@@ -137,7 +137,7 @@ fn common_dialogs_are_not_stretched() {
 #[test]
 fn floating_windows_stay_within_limits() {
     let mut h = fresh();
-    h.app.prefs_window.open = true;
+    h.app.prefs_window.shell.open = true;
     h.app.keymap.open = true;
     h.app.help.about = true;
     h.app.ui.palette_open = true;

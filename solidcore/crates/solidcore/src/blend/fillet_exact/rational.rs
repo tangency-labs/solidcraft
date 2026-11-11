@@ -1304,7 +1304,7 @@ fn rational_spine_parts(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blend::fillet_exact::{classify_supports, keep_round_if_proved, ClassInputs};
+    use crate::blend::fillet_exact::{classify_supports, ClassInputs};
     use crate::curve::curve::CurveKind;
     use crate::geom::axis2_placement::Axis2Placement;
     use crate::surface::cone::Cone;
@@ -1779,10 +1779,10 @@ mod tests {
                             inputs,
                         )
                         .unwrap();
-                        assert!(
-                            keep_round_if_proved(&k, &mut net, round, inputs.tol).unwrap(),
-                            "{offsets:?}, {contact:?}"
-                        );
+                        if let Err(e) = round.recertify(&k, &net) {
+                            panic!("{offsets:?}, {contact:?}: {e}");
+                        }
+                        net.set_exact_round(Some(round));
                         assert_eq!(
                             net.procedural_blend().unwrap().exact().unwrap().bound(),
                             0.0

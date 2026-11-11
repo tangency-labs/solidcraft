@@ -299,8 +299,7 @@ pub fn get_connected_touches<O: PartialEq + Copy>(
         .collect()
 }
 
-// `SM_ERR_ASSERT_FAILURE` (`SmMessages.h`).
-use crate::error::SM_ERR_ASSERT_FAILURE;
+use crate::error::intersect::IntersectFailure;
 
 /// Filters a consumer's working touch list to transverse crossings
 /// (`SmTouchData::RemoveNonCrossings`): the end directions are normalised (a pole or
@@ -312,18 +311,18 @@ use crate::error::SM_ERR_ASSERT_FAILURE;
 ///
 /// # Errors
 ///
-/// `SM_ERR_ASSERT_FAILURE` for an odd-length list (`AERN`).
+/// [`IntersectFailure::Inconsistent`] (status `SM_ERR_ASSERT_FAILURE`) for an
+/// odd-length list (`AERN`).
 pub fn remove_non_crossings<O: Copy>(touches: &mut Vec<TouchData<O>>) -> Result<()> {
     let mut count = touches.len();
     if count == 0 {
         return Ok(());
     }
     if count % 2 != 0 {
-        return Err(SolidError::Upstream {
-            operation: "intersect::curve_class::remove_non_crossings",
-            code: SM_ERR_ASSERT_FAILURE,
-            entity: None,
-        });
+        return Err(SolidError::intersect(
+            "intersect::curve_class::remove_non_crossings",
+            IntersectFailure::Inconsistent("the touch list has an odd length"),
+        ));
     }
     let at = |touches: &[TouchData<O>], i: usize| -> Result<TouchData<O>> {
         touches.get(i).copied().ok_or_else(|| {
@@ -2330,7 +2329,7 @@ fn apply_point_solution_impl<O, S: Copy>(
         None => return Ok(out),
         Some(Ok(p)) => out.sss_point = p,
         Some(Err(e)) if e.is_unported_or_cancelled() => return Err(e),
-        Some(Err(SolidError::Upstream { code, .. })) if code == SM_ERR => return Ok(out),
+        Some(Err(e)) if e.upstream_status() == Some(SM_ERR) => return Ok(out),
         Some(Err(_)) => {}
     }
 
@@ -2494,8 +2493,13 @@ pub fn make_consistent_classifications<O: ClassObject>(
             if end.point_class() != PointClassType::Vertex {
                 continue;
             }
-            let classify_edge = ivl.mid.object().ok_or(SolidError::null_pointer(OP))?;
-            let classify_vertex = end.object().ok_or(SolidError::null_pointer(OP))?;
+            let classify_edge = ivl
+                .mid
+                .object()
+                .ok_or_else(|| SolidError::intersect_missing(OP, "the interval's edge"))?;
+            let classify_vertex = end
+                .object()
+                .ok_or_else(|| SolidError::intersect_missing(OP, "the interval end's vertex"))?;
             let (edge_vertex1, edge_vertex2) = super::p3::edge_vertices(geometry, classify_edge)?;
 
             // check that classified vertex is one of the Edge's vertices
@@ -2513,7 +2517,9 @@ pub fn make_consistent_classifications<O: ClassObject>(
                 let curve = classification
                     .curve()
                     .and_then(|c| geometry.curve(c))
-                    .ok_or(SolidError::null_pointer(OP))?;
+                    .ok_or_else(|| {
+                        SolidError::intersect_missing(OP, "the classification's source curve")
+                    })?;
                 let mid_pnt = curve.evaluate_point(k, t_mid)?;
                 let xsect_tol_3d = xsect_tol_3d_from_zones(
                     k,
@@ -2523,7 +2529,7 @@ pub fn make_consistent_classifications<O: ClassObject>(
 
                 // drop a midInterval Point to this VertexEdge
                 let edge_curve = super::p3::edge_curve(geometry, vertex_edge)?
-                    .ok_or(SolidError::null_pointer(OP))?;
+                    .ok_or_else(|| SolidError::intersect_missing(OP, "the vertex edge's curve"))?;
                 let drop = edge_curve.drop_point(
                     k,
                     &super::p3::edge_interval(geometry, vertex_edge)?,
@@ -2797,7 +2803,7 @@ pub fn compute_face_point_class_in(
 
     // locals: SmSurface *pSurface = pFace->GetSurface(); NER(pSurface);
     let surface = fp2::surface(b, f)?
-        .ok_or(SolidError::null_pointer(OP))?
+        .ok_or_else(|| SolidError::intersect_missing(OP, "the face's surface"))?
         .clone_for_evaluation()?;
     let uv_domain = fp2::uv_domain(b, f)?;
     let face_zone_tol_3d = fp2::tolerance(b, f)?;
@@ -2815,7 +2821,10 @@ pub fn compute_face_point_class_in(
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => {
             if make_surface_cache(k, &surface, None::<EntityRef>).is_err() {
-                return Err(SolidError::null_pointer(OP));
+                return Err(SolidError::intersect_missing(
+                    OP,
+                    "the face's surface cache",
+                ));
             }
             None
         }
@@ -2849,7 +2858,7 @@ pub fn compute_face_point_class_in(
             solutions = solve(100.0 * xsect_tol_3d)?;
             // signal error and give up if point still fails to project
             if solutions.is_empty() {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::intersect_failed(OP, "the point does not project onto the face's surface even at 100 times the tolerance"));
             }
         }
     }

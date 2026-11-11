@@ -1,3 +1,5 @@
+> **solidcore is developed inside [SolidCraft](https://github.com/tangency-labs/solidcraft), at [`solidcore/`](https://github.com/tangency-labs/solidcraft/tree/main/solidcore).** The [tangency-labs/solidcore](https://github.com/tangency-labs/solidcore) repository is an automatic, read-only mirror of that folder. Open issues and pull requests in [tangency-labs/solidcraft](https://github.com/tangency-labs/solidcraft): kernel-only work against the `kernel` branch.
+
 <p align="center"><img src="assets/logo.svg" width="140" alt="solidcore logo: an isometric solid with one filleted edge and a NURBS curve on its top face"></p>
 
 # solidcore

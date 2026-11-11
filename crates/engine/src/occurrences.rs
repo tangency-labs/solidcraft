@@ -801,6 +801,10 @@ impl Session {
 
     /// Is a browser folder or group hidden itself (by tree key, see `Visibility::hidden_folders`)?
     pub fn folder_hidden(&self, key: &str) -> bool {
+        // A component Origin folder: hidden by default, shown only by name (`shown_component_origins`).
+        if let Some(path) = crate::origins::folder_path(key) {
+            return !self.visibility.shown_component_origins.contains(&path);
+        }
         if let Some(cache) = self.visibility_index() {
             return cache.as_ref().is_none_or(|c| c.folder_keys.contains(key));
         }
@@ -862,12 +866,20 @@ impl Session {
         if self.visibility.hidden_origin.iter().any(|h| h == name) {
             return false;
         }
-        match self.doc.features.iter().find(|f| f.name == name) {
-            Some(f) => self.feature_placement_visible(f.id) && !self.feature_folder_hidden(f.id, "construction"),
-            None => true,
+        // A feature first, so one named like a datum key still reaches it; then a component
+        // origin item, gated by its placement (a hidden placement hides its origin too) and its
+        // folder's own eye.
+        if let Some(f) = self.doc.features.iter().find(|f| f.name == name) {
+            return self.feature_placement_visible(f.id) && !self.feature_folder_hidden(f.id, "construction");
         }
+        if let Some((path, _)) = crate::origins::item(name) {
+            return self.visibility.shown_component_origins.contains(&path) && self.occurrence_visible(&path);
+        }
+        true
     }
 
+    /// Whether an occurrence shows in the world: its own eye and every ancestor placement's
+    /// eye along its path. A hidden placement hides its Origin folder and items too (#7313).
     pub fn body_visible(&self, name: &str) -> bool {
         if self.body_hidden_itself(name) || self.body_removed_later(name) {
             return false;
@@ -1005,5 +1017,10 @@ impl Session {
         }
         let hidden = std::mem::take(&mut self.visibility.hidden_occurrences);
         self.visibility.hidden_occurrences = hidden.into_iter().filter(|p| self.occurrence_placement(p).is_ok()).collect();
+        // A shown Origin folder whose placement is gone cannot be cleared by hand - browser.visibility
+        // refuses a path that no longer resolves, whichever eye it sets - so it prunes like
+        // hidden_occurrences does; undo restores the snapshot with the placement (#7313).
+        let shown = std::mem::take(&mut self.visibility.shown_component_origins);
+        self.visibility.shown_component_origins = shown.into_iter().filter(|p| self.occurrence_placement(p).is_ok()).collect();
     }
 }

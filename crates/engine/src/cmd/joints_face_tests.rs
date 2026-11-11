@@ -323,7 +323,7 @@ fn origins_on_a_body_placed_by_an_offset_agree_named_or_not() {
     let wall = solidcraft_doc::joints::face_name_at(&s.doc, &st, 0, wall_pick, true);
     assert!(top.is_some() && wall.is_some(), "{top:?} {wall:?}");
     let resolve = |snap: Snap| {
-        let o = solidcraft_doc::joints::JointOrigin { occurrence: 0, snap };
+        let o = solidcraft_doc::joints::JointOrigin::new(0, snap);
         let m = solidcraft_doc::joints::resolve_origin(&s.doc, &st, &o).unwrap_or_else(|e| panic!("{e}"));
         (Vec3::new(m[3][0], m[3][1], m[3][2]), Vec3::new(m[2][0], m[2][1], m[2][2]))
     };
@@ -381,7 +381,7 @@ fn a_face_centre_stays_put_when_a_hole_in_its_face_moves_or_goes() {
     let top = face_name(&mut s, "Plate", pick);
     run(&mut s, "joint.origin", json!({"name": "Top", "face": top}));
     let by_point = |s: &Session| {
-        let o = solidcraft_doc::joints::JointOrigin { occurrence: occ(s, "Plate"), snap: Snap::FaceCenter { pick, face: None, x: None } };
+        let o = solidcraft_doc::joints::JointOrigin::new(occ(s, "Plate"), Snap::FaceCenter { pick, face: None, x: None });
         let m = solidcraft_doc::joints::resolve_origin(&s.doc, &s.model.state(), &o).ok()?;
         Some((Vec3::new(m[3][0], m[3][1], m[3][2]), Vec3::new(m[2][0], m[2][1], m[2][2])))
     };

@@ -93,6 +93,11 @@
 //!   walk that needs a UV trim curve made returns [`SolidError::Unported`].
 //! - **Callees in units not ported yet** return [`SolidError::Unported`]: the topology
 //!   zone tolerances of point classifications (through `intersect.point_class`).
+//! - **`HasNearMisses`** measures a vertex end's gap across the curve within surface 1
+//!   when the classification has a surface 1 and a UV curve 1: upstream counts the
+//!   whole gap (or, with `bInSurfaceGaps`, its part in the tangent plane), so two seams
+//!   ending 1e-8 apart along the seam read as a near miss. A coincident edge's gap is
+//!   counted as upstream.
 //! - **Recursion.** None.
 
 use std::borrow::Cow;
@@ -115,6 +120,7 @@ use crate::math::{max2, min2, Point2, Point3, Vec3, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::nurbs::knots::Side;
 use crate::query::face::p1 as qf1;
 use crate::query::face::p2 as qf2;
 use crate::surface::surface::Surface;
@@ -332,12 +338,18 @@ impl<O: ClassObject> CurveClassification<O> {
     ) -> Result<()> {
         // check input - lInterval index is valid
         if index >= self.size() {
-            return Err(SolidError::sm_err(OP_COLLAPSE));
+            return Err(SolidError::intersect_failed(
+                OP_COLLAPSE,
+                "the interval index is past the end of the classification",
+            ));
         }
 
         // Do not squeeze out the only interval.  [B232]
         if self.size() < 2 {
-            return Err(SolidError::sm_err(OP_COLLAPSE));
+            return Err(SolidError::intersect_failed(
+                OP_COLLAPSE,
+                "the only interval of the classification is not squeezed out",
+            ));
         }
 
         // locals
@@ -359,7 +371,10 @@ impl<O: ClassObject> CurveClassification<O> {
 
         // no work and an error - CurveClassification interval is not degenerate
         if !curve_is_degenerate(k, Some(curve), &ivl.interval, xsect_tol_2d_or_3d)? {
-            return Err(SolidError::sm_err(OP_COLLAPSE));
+            return Err(SolidError::intersect_failed(
+                OP_COLLAPSE,
+                "the interval to collapse is not degenerate",
+            ));
         }
 
         // pick the PtClassification data to persist
@@ -664,12 +679,19 @@ impl<O: ClassObject> CurveClassification<O> {
     /// Whether a vertex end or a coincident edge is only a near miss of the curve
     /// (`HasNearMisses`; upstream default `bInSurfaceGaps = FALSE`): its gap is at
     /// least `1000 * SM_EFF_ZERO`, measured within the surface-1 tangent plane with
-    /// `in_surface_gaps` and a surface 1 (see [`PointClassification::gap_3d`]).
+    /// `in_surface_gaps` and a surface 1 (see [`PointClassification::gap_3d`]). A vertex
+    /// end that far off is measured again across the curve within surface 1, when the
+    /// classification has a surface 1 and a UV curve 1 on it ([`Self::gap_across_curve`]),
+    /// and is a near miss only when that gap reaches the threshold too: an offset along
+    /// the curve or off the surface leaves no sliver beside the curve (deviation, see the
+    /// file header). A coincident edge's gap is counted as upstream.
     ///
     /// # Errors
     ///
     /// Those of [`PointClassification::gap_3d`] with a surface;
-    /// [`SolidError::InvalidInput`] for an unresolved surface handle.
+    /// [`SolidError::InvalidInput`] for an unresolved surface handle with
+    /// `in_surface_gaps`; [`SolidError::Unported`] and cancellation from
+    /// [`Self::gap_across_curve`].
     pub fn has_near_misses(
         &self,
         k: &Kernel,
@@ -683,24 +705,82 @@ impl<O: ClassObject> CurveClassification<O> {
             None
         };
         let near_miss_dist_3d = EFF_ZERO * 1000.0;
+        let vertex_misses = |pc: &PointClassification<O>, t: f64, end: bool| -> Result<bool> {
+            if pc.point_class() != PointClassType::Vertex
+                || pc.gap_3d(k, geometry, surface)? < near_miss_dist_3d
+            {
+                return Ok(false);
+            }
+            let across = match self.surface1().and_then(|s| geometry.surface(s)) {
+                Some(s) => self.gap_across_curve(k, geometry, pc, t, end, s)?,
+                None => None,
+            };
+            Ok(across.is_none_or(|gap| gap >= near_miss_dist_3d))
+        };
 
         for ivl in self.intervals() {
-            let beg = &ivl.start;
             let mid = &ivl.mid;
-            let end = &ivl.end;
 
-            if (beg.point_class() == PointClassType::Vertex
-                && beg.gap_3d(k, geometry, surface)? >= near_miss_dist_3d)
+            if vertex_misses(&ivl.start, ivl.interval.min(), false)?
                 || (mid.point_class() == PointClassType::Edge
                     && mid.gap_3d(k, geometry, surface)? >= near_miss_dist_3d)
-                || (end.point_class() == PointClassType::Vertex
-                    && end.gap_3d(k, geometry, surface)? >= near_miss_dist_3d)
+                || vertex_misses(&ivl.end, ivl.interval.max(), true)?
             {
                 return Ok(true);
             }
         }
 
         Ok(false)
+    }
+
+    /// The gap of the vertex end `pc` at curve parameter `t` (the interval's end with
+    /// `end`, its start without) across the curve within `surface`: the component of the
+    /// vertex's offset from `C(t)` along `n × C'(t)`, `n` the surface normal at the UV
+    /// curve 1's point, which shares the curve's parameter (the seam's `CrvOnSurf` and
+    /// its UV curve). The tangent is the interval's own, from its side of `t`. `None`
+    /// where that direction is not available: no curve or UV curve 1, a vanishing
+    /// tangent or normal, or an evaluation that fails.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] and cancellation from the evaluations; any other failure
+    /// is `None`.
+    #[allow(clippy::too_many_arguments)]
+    fn gap_across_curve(
+        &self,
+        k: &Kernel,
+        geometry: &impl ClassGeometry<O>,
+        pc: &PointClassification<O>,
+        t: f64,
+        end: bool,
+        surface: &Surface,
+    ) -> Result<Option<f64>> {
+        let (Some(curve), Some(uv_curve)) = (
+            self.curve().and_then(|c| geometry.curve(c)),
+            self.uv_curve1().and_then(|c| geometry.curve(c)),
+        ) else {
+            return Ok(None);
+        };
+        let Some(derivs) = ignored(curve.evaluate(k, t, 1, end, false))? else {
+            return Ok(None);
+        };
+        let (Some(&point), Some(&tangent)) = (derivs.first(), derivs.get(1)) else {
+            return Ok(None);
+        };
+        let Some(uv) = ignored(uv_curve.evaluate_point(k, t))? else {
+            return Ok(None);
+        };
+        let uv = Point2::new(uv.x, uv.y);
+        let Some(normal) = ignored(surface.evaluate_normal(k, uv, Side::Left, Side::Left))? else {
+            return Ok(None);
+        };
+        let Ok(across) = normal.cross(tangent).unitize() else {
+            return Ok(None);
+        };
+        let Some(vertex) = ignored(pc.find_obj_point_3d(k, geometry))? else {
+            return Ok(None);
+        };
+        Ok(Some((vertex - point).dot(across).abs()))
     }
 
     /// Whether interval `index` of `self` or of its partner `other` (`self` again to
@@ -1249,14 +1329,12 @@ fn set_do_filleting_geometry_with<O: ClassObject>(
         {
             return Ok(());
         }
-        let this_v = this_ivl
-            .start
-            .vertex_object()
-            .ok_or(SolidError::null_pointer(OP_FILLET))?;
-        let other_v = other_ivl
-            .start
-            .vertex_object()
-            .ok_or(SolidError::null_pointer(OP_FILLET))?;
+        let this_v = this_ivl.start.vertex_object().ok_or_else(|| {
+            SolidError::intersect_missing(OP_FILLET, "the vertex at this interval's start")
+        })?;
+        let other_v = other_ivl.start.vertex_object().ok_or_else(|| {
+            SolidError::intersect_missing(OP_FILLET, "the vertex at the other interval's start")
+        })?;
         let point = vertex_point(access.geometry(), other_v)?;
         access.set_vertex_point(this_v, point)?;
     }
@@ -1268,14 +1346,12 @@ fn set_do_filleting_geometry_with<O: ClassObject>(
         {
             return Ok(());
         }
-        let this_v = this_ivl
-            .end
-            .vertex_object()
-            .ok_or(SolidError::null_pointer(OP_FILLET))?;
-        let other_v = other_ivl
-            .end
-            .vertex_object()
-            .ok_or(SolidError::null_pointer(OP_FILLET))?;
+        let this_v = this_ivl.end.vertex_object().ok_or_else(|| {
+            SolidError::intersect_missing(OP_FILLET, "the vertex at this interval's end")
+        })?;
+        let other_v = other_ivl.end.vertex_object().ok_or_else(|| {
+            SolidError::intersect_missing(OP_FILLET, "the vertex at the other interval's end")
+        })?;
         let point = vertex_point(access.geometry(), other_v)?;
         access.set_vertex_point(this_v, point)?;
     }
@@ -1289,18 +1365,16 @@ fn set_do_filleting_geometry_with<O: ClassObject>(
         }
 
         // this mid edge
-        let this_edge = this_ivl
-            .mid
-            .edge_object()
-            .ok_or(SolidError::null_pointer(OP_FILLET))?;
+        let this_edge = this_ivl.mid.edge_object().ok_or_else(|| {
+            SolidError::intersect_missing(OP_FILLET, "the edge of this interval's middle")
+        })?;
         let this_edge_curve = edge_curve(access.geometry(), this_edge)?;
         let this_edge_ivl = edge_interval(access.geometry(), Some(this_edge))?;
 
         // other mid edge
-        let other_edge = other_ivl
-            .mid
-            .edge_object()
-            .ok_or(SolidError::null_pointer(OP_FILLET))?;
+        let other_edge = other_ivl.mid.edge_object().ok_or_else(|| {
+            SolidError::intersect_missing(OP_FILLET, "the edge of the other interval's middle")
+        })?;
         let other_edge_curve = edge_curve(access.geometry(), other_edge)?;
         let other_edge_ivl = edge_interval(access.geometry(), Some(other_edge))?;
 
@@ -1504,10 +1578,9 @@ fn classify_face_interval_on<O: ClassObject>(
     match ivl.start.point_class() {
         PointClassType::Vertex => {
             did_min = true;
-            let v = ivl
-                .start
-                .object()
-                .ok_or(SolidError::null_pointer(OP_FACE))?;
+            let v = ivl.start.object().ok_or_else(|| {
+                SolidError::intersect_missing(OP_FACE, "the vertex at the interval's start")
+            })?;
             let (curve, uv_curve) = context_curves(access.geometry(), ctx)?;
             min = access.find_vertex_sector(
                 k,
@@ -1524,10 +1597,9 @@ fn classify_face_interval_on<O: ClassObject>(
         }
         PointClassType::Edge => {
             did_min = true;
-            let e = ivl
-                .start
-                .object()
-                .ok_or(SolidError::null_pointer(OP_FACE))?;
+            let e = ivl.start.object().ok_or_else(|| {
+                SolidError::intersect_missing(OP_FACE, "the edge at the interval's start")
+            })?;
             let curve = context_curve(access.geometry(), ctx)?.clone();
             min = access.edge_curve_on_classify(
                 k,
@@ -1549,7 +1621,9 @@ fn classify_face_interval_on<O: ClassObject>(
     match ivl.end.point_class() {
         PointClassType::Vertex => {
             did_max = true;
-            let v = ivl.end.object().ok_or(SolidError::null_pointer(OP_FACE))?;
+            let v = ivl.end.object().ok_or_else(|| {
+                SolidError::intersect_missing(OP_FACE, "the vertex at the interval's end")
+            })?;
             let (curve, uv_curve) = context_curves(access.geometry(), ctx)?;
             max = access.find_vertex_sector(
                 k,
@@ -1566,7 +1640,9 @@ fn classify_face_interval_on<O: ClassObject>(
         }
         PointClassType::Edge => {
             did_max = true;
-            let e = ivl.end.object().ok_or(SolidError::null_pointer(OP_FACE))?;
+            let e = ivl.end.object().ok_or_else(|| {
+                SolidError::intersect_missing(OP_FACE, "the edge at the interval's end")
+            })?;
             let curve = context_curve(access.geometry(), ctx)?.clone();
             max = access.edge_curve_on_classify(
                 k,
@@ -1693,8 +1769,12 @@ fn partial_coincidence<O: ClassObject>(
     o_mid: &PointClassification<O>,
     check: CoinCheck,
 ) -> Result<Option<PartialCoincidence>> {
-    let edge = mid.object().ok_or(SolidError::null_pointer(OP_PARTIAL))?;
-    let o_edge = o_mid.object().ok_or(SolidError::null_pointer(OP_PARTIAL))?;
+    let edge = mid.object().ok_or_else(|| {
+        SolidError::intersect_missing(OP_PARTIAL, "the edge of the interval's middle")
+    })?;
+    let o_edge = o_mid.object().ok_or_else(|| {
+        SolidError::intersect_missing(OP_PARTIAL, "the edge of the other interval's middle")
+    })?;
     let curve = edge_curve(geometry, edge)?;
     let o_curve = edge_curve(geometry, o_edge)?;
     let edge_ivl = edge_interval(geometry, Some(edge))?;
@@ -1894,7 +1974,7 @@ fn connect_target<O: ClassObject>(
 /// `SmEdge::GetCurve`; a `NULL` curve is dereferenced by every caller.
 fn edge_curve<O: ClassObject>(geometry: &impl ClassGeometry<O>, edge: O) -> Result<&Curve> {
     let (b, e) = edge_of(geometry, edge, "SmEdge::GetCurve")?;
-    edge::curve(b, e)?.ok_or(SolidError::null_pointer(OP_GEOM))
+    edge::curve(b, e)?.ok_or_else(|| SolidError::intersect_missing(OP_GEOM, "the edge's curve"))
 }
 
 /// `SmEdge::GetInterval` (of the edge object of a classification; a `NULL` edge is
@@ -1903,7 +1983,8 @@ fn edge_interval<O: ClassObject>(
     geometry: &impl ClassGeometry<O>,
     edge: Option<O>,
 ) -> Result<Extent1d> {
-    let edge = edge.ok_or(SolidError::null_pointer(OP_GEOM))?;
+    let edge =
+        edge.ok_or_else(|| SolidError::intersect_missing(OP_GEOM, "the classification's edge"))?;
     let (b, e) = edge_of(geometry, edge, "SmEdge::GetInterval")?;
     edge::interval(b, e)
 }
@@ -2742,5 +2823,89 @@ mod tests {
         let r = cc.test_for_partial_coincident_edges(&k, &geo, &cc).unwrap();
         assert_eq!(r.max_partial_coin_gap, 0.0);
         assert!(r.new_curve_to_test.is_none());
+    }
+
+    /// A seam-like classification: the circle of radius 10 about the origin in the plane
+    /// z = 0, whose UV curve is the same circle (the plane's UV is its x and y), and the
+    /// vertex at its end.
+    struct SeamGeo {
+        curves: Vec<Curve>,
+        plane: Surface,
+        vertex: Point3,
+    }
+
+    impl ClassGeometry<H> for SeamGeo {
+        fn curve(&self, o: H) -> Option<&Curve> {
+            self.curves.get(o.0)
+        }
+        fn surface(&self, o: H) -> Option<&Surface> {
+            (o.0 == 0).then_some(&self.plane)
+        }
+        fn volume(&self, _o: H) -> Option<&Volume> {
+            None
+        }
+        fn point(&self, _o: H) -> Option<Point3> {
+            None
+        }
+        fn classification_vertex_point(&self, _vertex: H) -> Option<Point3> {
+            Some(self.vertex)
+        }
+    }
+
+    /// Whether the circle's first quarter, ending at a vertex 1e-8 from its end point
+    /// along `offset` (in the end's frame: along the circle, along the plane's normal,
+    /// across the circle in the plane), is a near miss; `uv1` and `s1` name the UV curve
+    /// and the surface (index 1 and 0 resolve, others don't).
+    fn quarter_ending_off(offset: [f64; 3], uv1: usize, s1: usize) -> bool {
+        use crate::curve::ellipse::Ellipse;
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::geom::extent2d::Extent2d;
+        use crate::math::Vec2;
+
+        let k = Kernel::default();
+        let circle = Curve::from(
+            Ellipse::create_canonical_circle(&k, &Axis2Placement::IDENTITY, 10.0, None, None)
+                .unwrap(),
+        );
+        let ivl = circle.natural_interval();
+        let t = ivl.min() + 0.25 * (ivl.max() - ivl.min());
+        let d = circle.evaluate(&k, t, 1, true, false).unwrap();
+        let along = d[1].unitize().unwrap();
+        let across = Vec3::Z.cross(along);
+        let gap = 1e-8;
+        let vertex = d[0] + (along * offset[0] + Vec3::Z * offset[1] + across * offset[2]) * gap;
+        let geo = SeamGeo {
+            curves: vec![circle.clone(), circle],
+            plane: Surface::from(crate::surface::plane::Plane::new(
+                Vec3::ZERO,
+                Vec3::X,
+                Vec3::Y,
+                Vec2::new(1.0, 1.0),
+                &Extent2d::from_bounds(-20.0, -20.0, 20.0, 20.0),
+            )),
+            vertex,
+        };
+        let mut cc = classification(&k, &[ivl.min(), t]);
+        cc.set_uv_curve1(Some(H(uv1, K::Curve)));
+        cc.set_surface1(Some(H(s1, K::Surface)));
+        let end = &mut cc.at_mut(0).unwrap().end;
+        end.set_class_object(PointClassType::Vertex, Some(H(0, K::Vertex)));
+        end.set_t_param(t, false);
+        end.set_gap_3d(gap);
+        cc.has_near_misses(&k, &geo, false).unwrap()
+    }
+
+    #[test]
+    fn a_vertex_is_a_near_miss_of_a_curve_only_across_it_in_the_surface() {
+        // across the circle within the plane: a sliver beside it
+        assert!(quarter_ending_off([0.0, 0.0, 1.0], 1, 0));
+        assert!(quarter_ending_off([1.0, 1.0, 1.0], 1, 0));
+        // along the circle, off the plane, or both: no sliver
+        assert!(!quarter_ending_off([1.0, 0.0, 0.0], 1, 0));
+        assert!(!quarter_ending_off([0.0, 1.0, 0.0], 1, 0));
+        assert!(!quarter_ending_off([1.0, 1.0, 0.0], 1, 0));
+        // no UV curve or no surface to measure across in: the whole gap counts
+        assert!(quarter_ending_off([1.0, 0.0, 0.0], 5, 0));
+        assert!(quarter_ending_off([1.0, 0.0, 0.0], 1, 5));
     }
 }

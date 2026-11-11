@@ -31,7 +31,7 @@
 //! | [`FilletSolver::TYPE`], [`FilletSolver::type_string`], [`FilletSolver::is_kind_of`] | `GetType`, `GetTypeString` (`SM_COMMON`), `IsKindOf` |
 //! | [`FilletSolverOps`] (trait, base methods)              | the virtuals `GetJacobianSize`, `SetupOffsetValues`, `CanMakeAnalytic`, `OffsetRadiiCanChange`, `LoadJacobian`, `LoadInitialValues`; `GetSolverType`, `PointOnPlaneSolve` and the `SmConstantDistanceFS::GetDistance` read of `SmFindClippedRadiusEFO` (added by `blend.fillet_solver_p3`) |
 //! | [`FilStatus`] (re-export of `blend.fillet_geom_p1`'s), [`FilletSolverType`], [`FilletSurfaceGeneratorType`] | `SmFilStatus`, `SmFilletSolverType`, `SmFilletSurfaceGeneratorType` |
-//! | [`FilletSurfaceGenerator`]                             | `SmFilletSurfaceGenerator`, `SmLinearCrossSectionFSG`, `SmCircularCrossSectionFSG`, `SmBlendCurveCrossSectionFSG` (constructors, `GetFilletSurfaceGeneratorType`, `GetBlendScale`, `GetContinuity`; `Drop` is each destructor); the circular and blend-curve variants hold `blend.fillet_standard_solver_p1`'s [`CircularCrossSectionFsg`] / [`BlendCurveCrossSectionFsg`] (one type per class) |
+//! | [`FilletSurfaceGenerator`]                             | `SmFilletSurfaceGenerator`, `SmLinearCrossSectionFSG`, `SmCircularCrossSectionFSG` (constructors, `GetFilletSurfaceGeneratorType`, `GetContinuity`; `Drop` is each destructor); the circular variant holds `blend.fillet_standard_solver_p1`'s [`CircularCrossSectionFsg`]; a blend-curve request is the G^n section ([`GnSectionFsg`]; `SmBlendCurveCrossSectionFSG` is retired, WR-685) |
 //! | [`FilletSurfaceGenerator::create_surface`]             | `SmFilletSurfaceGenerator::CreateSurface` (base; the linear one dispatches to [`LinearCrossSectionFsg::create_surface`]) |
 //! | [`FilletSphereSolveEnfo`]                              | `SmFilletSphereSolveENFO` (constructor, `SetPlaneAdjusts`, `Evaluate`) |
 //! | [`RailUvCurveIntersectEnfo`]                           | `SmRailUVCurveIntersectENFO` (constructor, `Evaluate`) |
@@ -126,7 +126,7 @@ use crate::blend::fillet_geom::p3::SplitCorners;
 use crate::blend::fillet_intersector::HandlingAlgorithmType;
 use crate::blend::fillet_section::section::GnSectionFsg;
 use crate::blend::fillet_standard_solver::p1::{
-    BlendCurveCrossSectionFsg, CircularCrossSectionFsg, LinearCrossSectionFsg, VariableRadiusFs,
+    CircularCrossSectionFsg, LinearCrossSectionFsg, VariableRadiusFs,
 };
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::iso_curve::IsoCurve;
@@ -242,12 +242,9 @@ pub enum FilletSurfaceGenerator {
     Circular(CircularCrossSectionFsg),
     /// `SmEiffelTowerCrossSectionFSG` (unit `blend.fillet_custom_solver`).
     EiffelTower,
-    /// `SmBlendCurveCrossSectionFSG` (its members and `CreateSurfaceFromCurves`:
-    /// [`BlendCurveCrossSectionFsg`] of `blend.fillet_standard_solver_p1`).
-    BlendCurve(BlendCurveCrossSectionFsg),
     /// The fork's `SmGnSectionFSG` (tangency-labs/smlib@11ea2d9; [`GnSectionFsg`]), of
-    /// type `SM_FSG_BLEND_CURVE`: built in place of the blend curve with
-    /// `fixes.fillet_gn_section_generator` (WR-685).
+    /// type `SM_FSG_BLEND_CURVE`: every blend-curve request is built by it.
+    /// `SmBlendCurveCrossSectionFSG` is retired with its flag (WR-685, #2273).
     GnSection(GnSectionFsg),
 }
 
@@ -276,42 +273,17 @@ impl FilletSurfaceGenerator {
         Self::circular(true, 0.05, false, false)
     }
 
-    /// `SmBlendCurveCrossSectionFSG(dBlendScale, lContinuity)`.
-    #[must_use]
-    pub const fn blend_curve(blend_scale: f64, continuity: u32) -> Self {
-        Self::blend_curve_at_thirds(blend_scale, continuity, false)
-    }
-
-    /// `SmBlendCurveCrossSectionFSG(dBlendScale, lContinuity, bAtThirds)` (the fork's,
-    /// tangency-labs/smlib `fd3b6a7`): with `at_thirds`, each section's inner control
-    /// points sit a third and two thirds of the way from each contact to where the
-    /// contacts' tangent lines meet.
-    #[must_use]
-    pub const fn blend_curve_at_thirds(blend_scale: f64, continuity: u32, at_thirds: bool) -> Self {
-        Self::BlendCurve(BlendCurveCrossSectionFsg {
-            continuity,
-            blend_scale,
-            at_thirds,
-        })
-    }
-
-    /// `SmBlendCurveCrossSectionFSG()` with its default arguments (`1.5, 1`).
-    #[must_use]
-    pub const fn blend_curve_default() -> Self {
-        Self::blend_curve(1.5, 1)
-    }
-
     /// `MeetsItsFacesTangentially` (virtual; the fork's, tangency-labs/smlib `8bffb23`):
     /// whether each cross section is tangent, at its ends on the rails, to the faces the
     /// fillet rolls on. The linear section cuts across both faces, an arc about the ball's
     /// centre is square to the faces at each rail unless mirrored about the rails' chord,
-    /// and a blend curve takes its end tangents from that arc; the base generator and any
+    /// and a G^n section takes its end tangents from that arc; the base generator and any
     /// custom one are not known to.
     #[must_use]
     pub const fn meets_its_faces_tangentially(&self) -> bool {
         match self {
             Self::Circular(g) => !g.mirror,
-            Self::BlendCurve(_) | Self::GnSection(_) => true,
+            Self::GnSection(_) => true,
             Self::Base | Self::Linear | Self::EiffelTower => false,
         }
     }
@@ -323,16 +295,7 @@ impl FilletSurfaceGenerator {
             Self::Base | Self::EiffelTower => FilletSurfaceGeneratorType::Unknown,
             Self::Linear => FilletSurfaceGeneratorType::Linear,
             Self::Circular(_) => FilletSurfaceGeneratorType::Circular,
-            Self::BlendCurve(_) | Self::GnSection(_) => FilletSurfaceGeneratorType::BlendCurve,
-        }
-    }
-
-    /// `SmBlendCurveCrossSectionFSG::GetBlendScale` (`None` for the other kinds).
-    #[must_use]
-    pub const fn blend_scale(&self) -> Option<f64> {
-        match self {
-            Self::BlendCurve(g) => Some(g.blend_scale),
-            _ => None,
+            Self::GnSection(_) => FilletSurfaceGeneratorType::BlendCurve,
         }
     }
 
@@ -345,12 +308,10 @@ impl FilletSurfaceGenerator {
         }
     }
 
-    /// `SmBlendCurveCrossSectionFSG::GetContinuity`, `SmGnSectionFSG::GetOrder` (`None`
-    /// for the other kinds).
+    /// `SmGnSectionFSG::GetOrder` (`None` for the other kinds).
     #[must_use]
     pub const fn continuity(&self) -> Option<u32> {
         match self {
-            Self::BlendCurve(g) => Some(g.continuity),
             #[allow(clippy::cast_possible_truncation)]
             Self::GnSection(g) => Some(g.order as u32),
             _ => None,
@@ -368,9 +329,9 @@ impl FilletSurfaceGenerator {
     /// `SM_ERR` for [`FilletSurfaceGenerator::Base`]; those of
     /// `SmEiffelTowerCrossSectionFSG::CreateSurface`,
     /// `SmLinearCrossSectionFSG::CreateSurface` ([`LinearCrossSectionFsg::create_surface`])
-    /// and the circular and blend-curve generators' `CreateSurface`;
+    /// and the circular and G^n generators' `CreateSurface`;
     /// [`SolidError::InvalidInput`] for a missing centre line of the circular and
-    /// blend-curve generators (upstream dereferences `NULL`).
+    /// G^n generators (upstream dereferences `NULL`).
     #[allow(clippy::too_many_arguments)]
     pub fn create_surface(
         &self,
@@ -400,16 +361,6 @@ impl FilletSurfaceGenerator {
                 center_line.ok_or_else(no_center)?,
                 rail1,
                 rail2,
-            ),
-            Self::BlendCurve(g) => g.create_surface(
-                k,
-                approx_tol_3d,
-                solver_type,
-                center_line.ok_or_else(no_center)?,
-                rail1,
-                rail2,
-                side1,
-                side2,
             ),
             Self::GnSection(g) => {
                 // the uv curves rebuilt on the stations are dropped: a caller that owns
@@ -452,7 +403,7 @@ impl FilletSurfaceGenerator {
     /// has no such solver); with it and `fixes.fillet_round_as_definition` a constant
     /// round between NURBS faces is its definition, the rails and uv curves rebuilt on its
     /// stations ([`CircularCrossSectionFsg::definition_surface`], the fork's cc08236).
-    /// With it and `fixes.fillet_gn_section_generator`, a round whose centre line or a
+    /// With it, a round whose centre line or a
     /// rail turns at a knot (a corner of its radius law) is skinned piece by piece between
     /// the turns and the pieces joined there
     /// ([`CircularCrossSectionFsg::piecewise_surface`], the fork's 6eecf04); for a ball
@@ -473,6 +424,9 @@ impl FilletSurfaceGenerator {
         ball: Option<&crate::blend::fillet_standard_solver::p2::CircleBall>,
     ) -> Result<(Surface, Option<crate::blend::law_corners::LawCornerPieces>)> {
         use crate::blend::fillet_standard_solver::p1::RailSurface;
+        use crate::blend::fillet_standard_solver::touch_circle::{
+            corner_angle, fillet_curve_corners,
+        };
         if let Self::GnSection(g) = self {
             let center =
                 center_line.ok_or_else(|| SolidError::invalid_input(OP, "NULL centre line"))?;
@@ -500,33 +454,27 @@ impl FilletSurfaceGenerator {
             }
             // the fork's `SmGnSectionFSG::CircleSurface` (6eecf04, 5fbffc9): where the
             // centre line or a rail turns, the round skinned piece by piece and joined
-            if k.fixes.fillet_gn_section_generator {
-                use crate::blend::fillet_standard_solver::touch_circle::{
-                    corner_angle, fillet_curve_corners,
+            let corners =
+                fillet_curve_corners(center, rail1, rail2, corner_angle(ball.ang_tol_rad))?;
+            if !corners.is_empty() {
+                // (each piece by its definition where it is one, #430)
+                let definition = crate::blend::fillet_standard_solver::p2::PieceDefinitionInputs {
+                    points,
+                    surfaces,
+                    uv: [&mut *uv1, &mut *uv2],
+                    ball,
                 };
-                let corners =
-                    fillet_curve_corners(center, rail1, rail2, corner_angle(ball.ang_tol_rad))?;
-                if !corners.is_empty() {
-                    // (each piece by its definition where it is one, #430)
-                    let definition =
-                        crate::blend::fillet_standard_solver::p2::PieceDefinitionInputs {
-                            points,
-                            surfaces,
-                            uv: [&mut *uv1, &mut *uv2],
-                            ball,
-                        };
-                    let (s, kept) = g.piecewise_surface(
-                        k,
-                        approx_tol_3d,
-                        solver_type,
-                        center,
-                        rail1,
-                        rail2,
-                        &corners,
-                        Some(definition),
-                    )?;
-                    return Ok((Surface::from(s), kept));
-                }
+                let (s, kept) = g.piecewise_surface(
+                    k,
+                    approx_tol_3d,
+                    solver_type,
+                    center,
+                    rail1,
+                    rail2,
+                    &corners,
+                    Some(definition),
+                )?;
+                return Ok((Surface::from(s), kept));
             }
         }
         // (a chamfer between NURBS faces is its definition, the chord: #2486)
@@ -725,6 +673,11 @@ pub struct FilletSolver {
     /// delete them, so a saved [`FilletSolverOffsetsData`] still points at them (with
     /// any change made while they were the solver's).
     pub detached: Vec<OffsetSurfaceSlot>,
+    /// Not upstream (solidcore-native, [`crate::blend::fillet_tangent_rollover`]): the face beyond a smooth far edge each
+    /// rail rolls on, the whole length, where the session gave the solver that face's offset
+    /// surface before the trace ([`crate::blend::fillet_tangent_rollover`]); the rails are made
+    /// on it.
+    pub rolled_faces: [Option<FaceId>; 2],
 }
 
 impl FilletSolver {
@@ -770,6 +723,7 @@ impl FilletSolver {
             status: FilStatus::Unprocessed,
             g1_knots: Vec::new(),
             detached: Vec::new(),
+            rolled_faces: [None, None],
             chamfer: None,
             law_corner_pieces: Vec::new(),
         }
@@ -2231,26 +2185,26 @@ pub trait FilletSolverOps: AsFilletSolverOps {
     /// # Errors
     ///
     /// Those of the variable radius solver's law.
-    fn radius_corner_parameters(&mut self, k: &Kernel) -> Result<Vec<f64>> {
+    fn radius_corner_parameters(&mut self) -> Result<Vec<f64>> {
         match self.variable_radius_mut() {
             // (the inherent methods: a method call on `vr` would resolve to this trait's)
-            Some(vr) => VariableRadiusFs::radius_corner_parameters(vr, k),
+            Some(vr) => VariableRadiusFs::radius_corner_parameters(vr),
             None => Ok(Vec::new()),
         }
     }
 
     /// `IsAtRadiusCorner` (virtual, the fork's 6eecf04): whether `point` lies where the
     /// radius has a corner. `false` for the base.
-    fn is_at_radius_corner(&mut self, k: &Kernel, point: &TsectPnt) -> bool {
+    fn is_at_radius_corner(&mut self, point: &TsectPnt) -> bool {
         self.variable_radius_mut()
-            .is_some_and(|vr| VariableRadiusFs::is_at_radius_corner(vr, k, point))
+            .is_some_and(|vr| VariableRadiusFs::is_at_radius_corner(vr, point))
     }
 
     /// `GetRadiusParameter` (virtual, the fork's 6eecf04): the edge parameter of `point`,
     /// `None` where the solver has no radius corners (and for the base).
-    fn radius_parameter(&mut self, k: &Kernel, point: &TsectPnt) -> Option<f64> {
+    fn radius_parameter(&mut self, point: &TsectPnt) -> Option<f64> {
         self.variable_radius_mut()
-            .and_then(|vr| VariableRadiusFs::radius_parameter(vr, k, point))
+            .and_then(|vr| VariableRadiusFs::radius_parameter(vr, point))
     }
 
     /// `((SmConstantDistanceFS*)this)->GetDistance()`: the rail distance of a

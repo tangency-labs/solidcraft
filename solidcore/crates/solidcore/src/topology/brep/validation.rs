@@ -34,7 +34,7 @@ pub use coincidence::{contains_coincident_topology, CoincidenceResult};
 pub(crate) use pointers::validate_geometry;
 pub use pointers::validate_pointers;
 pub(crate) use soundness::lost_manifold;
-pub use soundness::{soundness, standing, volume, Soundness, Standing};
+pub use soundness::{soundness, standing, volume_sign, Soundness, Standing};
 
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::assert_array::{AssertArray, AssertReport, ObjectKey, ReportSpec};

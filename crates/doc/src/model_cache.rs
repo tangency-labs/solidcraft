@@ -409,12 +409,14 @@ impl SavedModel {
         let mut sketches = Vec::new();
         for s in list("sketches")? {
             let sketch: solidcraft_sketch::Sketch = serde_json::from_value(parse(s.get("sketch"))?).map_err(|_| bad("saved model: sketch"))?;
+            let plane: Plane = serde_json::from_value(parse(s.get("plane"))?).map_err(|_| bad("saved model: sketch"))?;
             sketches.push(Arc::new(SolvedSketch {
                 feature: s.get("feature").and_then(Json::as_u64).ok_or_else(|| bad("saved model: sketch"))?,
                 name: text(s.get("name"))?,
-                plane: serde_json::from_value(parse(s.get("plane"))?).map_err(|_| bad("saved model: sketch"))?,
+                plane,
                 report: serde_json::from_value(parse(s.get("report"))?).map_err(|_| bad("saved model: sketch"))?,
                 profiles: find_profiles(&sketch),
+                profiles_3d: solidcraft_sketch::find_planar_3d_profiles(&sketch, plane),
                 ends: solidcraft_sketch::loose_ends(&sketch),
                 sketch,
             }));
@@ -942,8 +944,10 @@ impl Model {
                     before = r.state.clone();
                     continue;
                 }
-                let local = fingerprint(doc, 0, f, &vals, false, &model.import_digests) ^ placement_digest(doc, f, Some(&before));
-                cache.put(
+                let local = fingerprint(doc, 0, f, &vals, false, &model.import_digests)
+                    ^ placement_digest(doc, f, Some(&before))
+                    ^ construct_digest(doc, &vals, f, Some(&before));
+                cache.states.put(
                     cache_key(f, r.fingerprint, local, ctx, &before),
                     CachedEval {
                         error: None,
@@ -951,9 +955,10 @@ impl Model {
                         import_report: r.import_report.clone(),
                         repair: r.repair.clone(),
                         ms: r.ms,
-                        bytes: r.state.retained_bytes(),
                         state: r.state.clone(),
                     },
+                    r.state.retained_bytes(),
+                    r.ms,
                 );
                 before = r.state.clone();
             }

@@ -3009,7 +3009,7 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
                     for corner in patch.pseudo_box.corners() {
                         let vec = corner - test_pnt;
                         if vec.length_squared() > EFF_ZERO {
-                            tmp_polar.add_vector_with_kernel(k, vec, None);
+                            tmp_polar.add_vector(vec, None);
                         }
                     }
 

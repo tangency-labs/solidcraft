@@ -63,7 +63,9 @@ the browser runs serially. Export memory, candidate lines, output lines and tota
 work remain bounded, and exceeding a budget returns an error without writing a partial drawing.
 
 Programmatic callers use `file.export_view_dxf` with `camera: Camera`, `hidden: "omit"` or
-`"dashed"`, optional `tolerance` (0.0001–1 mm) and optional `path`. Without `path`, the
+`"dashed"`, optional `tolerance` (0.0001–1 mm), optional `zero` and optional `path`. The drawing's
+0,0 is the point the camera looks at (`zero: "target"`, the default); with `zero: "origin"` it
+is the model's origin as seen from the camera, for machining from a part corner. Without `path`, the
 command returns the DXF text. The command does not modify the design or its undo history.
 The result also includes `stats`: placed body and shared mesh counts, source triangle count,
 retained mesh bytes, worker limit, candidate segment count, occlusion work, and preparation,

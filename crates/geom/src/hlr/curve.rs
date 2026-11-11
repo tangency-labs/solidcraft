@@ -67,7 +67,7 @@ fn on_both_surfaces(c: &C3, surfaces: &[Box<solidcore_record::brep::Surface>; 2]
 impl C3 {
     /// The bounded curve of an edge. A line, circle or ellipse with a NURBS form has its bounds
     /// on the form ([`Edge::parameters`]): a line's ends are evaluated there, a conic's angles come
-    /// from [`crate::brep::label::edge_curve_interval`].
+    /// from [`solidcore_ops::label::edge_curve_interval`].
     pub fn of_edge(e: &Edge) -> Result<(C3, CurveAccuracy), HlrError> {
         let exact = |c: C3| (c, CurveAccuracy::Analytic);
         match (&e.curve, &e.nurbs) {
@@ -93,7 +93,7 @@ impl C3 {
                 Ok(exact(C3::Line { a: end(e.interval[0])?, b: end(e.interval[1])? }))
             }
             (Curve::Circle { .. } | Curve::Ellipse { .. }, _) => {
-                let angles = crate::brep::label::edge_curve_interval(e).ok_or(HlrError::Invalid("edge form"))?;
+                let angles = solidcore_ops::label::edge_curve_interval(e).ok_or(HlrError::Invalid("edge form"))?;
                 Ok(exact(C3::bounded(&e.curve, angles)?))
             }
             (curve, _) => Ok(exact(C3::bounded(curve, e.interval)?)),
@@ -214,7 +214,7 @@ impl C3 {
 
 fn spline(knots: &[f64], points: Vec<[f64; 4]>) -> Result<C3, HlrError> {
     let degree = knots.len().checked_sub(points.len() + 1).ok_or(HlrError::Unsupported("spline knot count"))?;
-    if degree == 0 || degree > 16 || points.is_empty() {
+    if degree == 0 || degree > crate::bspline::MAX_SPLINE_DEGREE || points.is_empty() {
         return Err(HlrError::Unsupported("spline degree"));
     }
     let pieces = bezier_pieces(degree, knots, &points);
@@ -272,34 +272,13 @@ fn part(knots: &[f64], points: Vec<[f64; 4]>, t: [f64; 2]) -> Result<C3, HlrErro
     spline(&cut, net.iter().map(|h| [h.x, h.y, h.z, h.w]).collect())
 }
 
-/// A spline split into Bézier pieces: clamped, then every inner knot raised to the degree
-/// (NURBS Book §5.2); empty when that fails.
+/// A spline split into Bézier pieces ([`crate::bspline::NurbsCurve::pieces`]); empty when it
+/// isn't a curve or can't be split.
 fn bezier_pieces(p: usize, knots: &[f64], points: &[[f64; 4]]) -> Vec<([f64; 2], Vec<[f64; 4]>)> {
-    use crate::bspline::{HPoint, clamp_row, insert_knot};
+    use crate::bspline::{HPoint, NurbsCurve};
     let row: Vec<HPoint> = points.iter().map(|h| HPoint { x: h[0], y: h[1], z: h[2], w: h[3] }).collect();
-    let Ok((mut k, mut c)) = clamp_row(p, knots, &row) else { return Vec::new() };
-    let (Some(&lo), Some(&hi)) = (k.get(p), k.get(c.len())) else { return Vec::new() };
-    let mut inner: Vec<f64> = k.iter().copied().filter(|x| *x > lo && *x < hi).collect();
-    inner.dedup();
-    for u in &inner {
-        let mut guard = 0;
-        while k.iter().filter(|x| *x == u).count() < p {
-            guard += 1;
-            let Ok((nk, nc)) = insert_knot(p, &k, &c, *u) else { return Vec::new() };
-            if guard > p + 1 {
-                return Vec::new();
-            }
-            (k, c) = (nk, nc);
-        }
-    }
-    let breaks: Vec<f64> = std::iter::once(lo).chain(inner).chain(std::iter::once(hi)).collect();
-    let mut out = Vec::with_capacity(breaks.len());
-    for (j, w) in breaks.windows(2).enumerate() {
-        let (Some(&s0), Some(&s1)) = (w.first(), w.get(1)) else { return Vec::new() };
-        let Some(ctrl) = c.get(j * p..=j * p + p) else { return Vec::new() };
-        out.push(([s0, s1], ctrl.iter().map(|h| [h.x, h.y, h.z, h.w]).collect()));
-    }
-    out
+    let Ok(pieces) = NurbsCurve::from_homogeneous(p, knots.to_vec(), &row).and_then(|c| c.pieces()) else { return Vec::new() };
+    pieces.iter().map(|b| (b.span(), b.ctrl().map(|h| [h.x, h.y, h.z, h.w]).collect())).collect()
 }
 
 /// The Bernstein coefficients of the product of two polynomials given by theirs.

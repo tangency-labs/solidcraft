@@ -1,6 +1,6 @@
 use serde::Serialize;
 use solidcore_record::Vec3;
-use solidcraft_geom::Aabb3;
+use solidcraft_geom::{Aabb3, MeshGeom};
 
 use crate::Result;
 use crate::body::Body;
@@ -133,6 +133,20 @@ mod tests {
         let got = measure_mass(&ring).unwrap().volume;
         assert!((got - want).abs() < 1e-3 * want, "{got} against {want}");
         assert!(measure(&ring).unwrap().merged.faces > 0);
+    }
+
+    /// A body's exact box is measured once and its clones share it; a moved copy is a new body
+    /// and measures its own.
+    #[test]
+    fn exact_box_is_kept_per_record() {
+        let post = cylinder(Vec3::ZERO, Vec3::Z, 1.5, 10.0).unwrap();
+        let clone = post.clone();
+        let first = post.exact_bounds().unwrap();
+        assert_eq!(*clone.bounds.lock().unwrap(), Some(first));
+        assert_eq!(clone.exact_bounds().unwrap(), first);
+        let moved = transform(&post, Vec3::new(5.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0).unwrap();
+        let b = moved.exact_bounds().unwrap();
+        assert!((b.min.x - first.min.x - 5.0).abs() < 1e-9 && (b.max.x - first.max.x - 5.0).abs() < 1e-9, "{b:?} against {first:?}");
     }
 
     /// A cube 1000 mm from the origin with one 0.5 mm² facet left out: about the box's centre

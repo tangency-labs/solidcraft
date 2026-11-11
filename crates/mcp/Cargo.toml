@@ -9,6 +9,8 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+solidcraft-viewport-gpu = { workspace = true }
+solidcraft-viewport = { workspace = true }
 solidcraft-engine = { workspace = true }
 solidcraft-control = { workspace = true }
 solidcraft-mcp-server = { workspace = true }

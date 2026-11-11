@@ -40,7 +40,7 @@ shortcut key caps. Those are HTML on the boards; `pages/*.md` and `measurements.
 
 ## Painters
 
-Step 2 of #9863 paints these in `crates/ui-egui/src/ui_kit/preferences_figures.rs`, one function
+Step 2 of #9863 paints these in `crates/ui-kit/src/preferences_figures.rs`, one function
 per figure, with `Tokens` colours instead of the literals in these files. `tokens.md` lists which
 token each literal maps to.
 

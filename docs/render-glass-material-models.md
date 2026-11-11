@@ -130,8 +130,8 @@ The retained GPU payload uses six `vec4<u32>` lanes: 96 bytes plus separate coun
 and selection RNG state. It preserves the physical point's high/low parts,
 incident direction, IORs, source triangle/event kind and throughput prefix; HG
 requests also retain their current medium. Certified parent metadata reconstructs
-closed-interface media. The existing sixteen-event camera limit, including every
-consumed virtual-sheet interface, bounds K by 16; an exceeded count fails
+closed-interface media. The 64-event camera limit, including every
+consumed virtual-sheet interface, bounds K by 64; an exceeded count fails
 explicitly.
 
 The camera dispatch writes a 128-byte packet per active path in its bounded
@@ -240,7 +240,12 @@ The saved CPU/GPU job can independently enable the following bounded prepass:
     "photons": 16384,
     "radius_mm": 1,
     "max_depth": 16,
-    "seed": 81
+    "seed": 81,
+    "area_lights": false,
+    "environment": false,
+    "guided_emission": false,
+    "refresh_per_pass": false,
+    "power_weighted_sources": false
   }
 }
 ```
@@ -250,12 +255,25 @@ them in the progressive job options. The Render workspace saves them with the
 setup. Enabling caustics does not change existing Glass materials or renderer
 quality defaults.
 
-`photons` is 1–65536, `radius_mm` is finite in [0.000001, 1000000], and light-path
-depth is 1–16 events. The photon seed is independent of the camera sampler.
+`photons` is 1–1,048,576, `radius_mm` is finite in [0.000001, 1000000], and light-path
+depth is 1–64 events. The photon seed is independent of the camera sampler.
 Sources are hard directional lights, point lights and spot lights, including the
 existing three implicit studio directions when that lighting mode is active.
 Directional emission covers the captured scene bounds; point and spot emission
 uses the corresponding bounded source conventions.
+
+With `area_lights: true`, the CPU and GPU also launch photons from one-sided
+rectangular lights. A launch draws a uniform point on the rectangle and a
+cosine-weighted direction from its emitting side. Its unnormalized flux is
+emitted radiance times π times rectangle area. The photon estimate divides by
+source-selection probability and total launches.
+
+Rectangle photons cover paths from the emitter through one or more smooth
+closed glass events to the first opaque receiver. The camera estimator omits
+the reverse suffix only when it belongs to this same family and fits the
+photon depth. The gather checks the camera depth, reserving an event slot for
+the emitter hit. Direct illumination and paths through rough glass, sheets
+or scattering events remain with the camera estimator for rectangle lights.
 
 The prepass follows actual reflected and refracted optical paths, including rough
 interfaces, wavelength-dependent IOR, coatings and supported selected-medium HG
@@ -272,7 +290,7 @@ path has K eligible visits, uniform reservoir selection gives every visit
 probability 1/K, and the selected record stores K times that visit's flux.
 Conditioned on the traced path, the expected gathered contribution is therefore
 `sum_i (1/K) * K * flux_i * response_i = sum_i flux_i * response_i`.
-K is bounded by the authored maximum light-path depth, at most 16. The final
+K is bounded by the authored maximum light-path depth, at most 64. The final
 estimate divides by launched photons, including paths with no deposit, rather
 than the number of retained records. This bounds storage without silently
 truncating later receivers; the reservoir adds variance.
@@ -303,8 +321,98 @@ to the eye path's first actually sampled continuous event. Subsequent continuous
 continuations do not also add the same photon-represented source paths. A coated
 index-matched delta transmission is not a continuous event. Opaque direct lighting
 and gathering remain enabled: light prepasses stop at their first opaque visit.
-Finite-area lights and the environment remain under camera-path estimators and
-are never emitted into this hard-source map.
+With `environment: true`, supported environment sources use the same smooth
+closed glass path family. The photon launcher samples the environment's
+directional distribution and a uniform point on the scene's bounding disk
+perpendicular to that direction. Each launch carries radiance times the disk
+area, divided by the directional density, source probability and total
+launches. The camera estimator omits only the environment term of an owned
+path. Finite sun contributions and paths outside the opt-in family retain
+their camera estimates.
+
+### Sampling bright HDR regions on CPU
+
+CPU jobs can set `environment_importance_sampling: true` alongside `caustics`
+in the job options. This samples the captured HDR map according to luminance
+times exact texel solid angle. Camera lighting, environment-hit MIS and photon
+emission use the same proposal and matching density. Environment rotation,
+intensity and evaluated radiance remain unchanged. GPU rendering already uses
+the shared importance table; its packed table values remain unchanged.
+
+Table preparation is cooperative and charged to the existing memory and work
+budgets. Black maps have a normalized solid-angle proposal. Extreme maps whose
+positive probabilities cannot be represented normally in the packed table fall
+back to uniform sampling on CPU, preserving support. Omission or false retains
+the previous CPU uniform proposal and random stream. The setting is saved with
+the CPU render job and retained by temporary and reopened render setups.
+
+### Guiding photon emission toward optics
+
+`guided_emission: true` changes the photon launch proposal on CPU and GPU.
+It uses conservative bounds around the captured optical geometry, including
+thin sheets, rough interfaces and scattering media. It does not edit the scene,
+change a material, increase the gather radius or clamp deposited energy.
+Omission or false keeps the original emission proposal.
+
+Directional and environment launches use a disk enclosing the optical bounds.
+The launch plane stays upstream of the full scene, so intervening opaque
+blockers still stop photons. The photon walker stops at its first opaque hit;
+a parallel ray that misses all registered optics cannot enter its caustic family.
+Environment direction sampling and analytic emitter visibility remain unchanged.
+
+Rectangle, point and spot launches mix a cone covering the optical bounds with
+their original angular distribution. The cone is computed at each launch point.
+Every draw uses the complete mixture density, including when the two proposals
+overlap. Rectangle power retains the emitting cosine; spot power retains the
+authored cone falloff. Invalid or enclosing guide cones fall back to the original
+distribution. This preserves support and expected power without rejection loops.
+
+Guiding aims to spend more of a fixed photon budget on useful optical paths.
+It preserves the existing camera/photon path partition and finite-radius estimate.
+It is not a guarantee of lower variance for every receiver or every scene.
+With refresh off, camera samples share a single photon map. Increasing the
+photon count or changing the emission proposal can reduce noise in that map.
+Compare independent photon seeds and camera sample counts before interpreting
+a persistent bright cluster as a real highlight.
+
+### Allocating photons by source power
+
+`power_weighted_sources: true` changes how CPU and GPU photon emission chooses
+between lights. It mixes 95% estimated emitted luminance power with 5% uniform
+selection, retaining support for every source. The photon weight divides by
+the probability of the selected source and the number of emitted photons.
+Camera lighting, source radiance, gather radius and camera/photon ownership
+remain unchanged. The setting is saved with both CPU and GPU jobs.
+
+Both backends use the represented probabilities of a shared 24-bit cumulative
+distribution. They divide by the actual interval probability after rounding,
+rather than the unrounded power estimate. All-black sources use quantized
+uniform weights. Preparation and retained storage count toward the job budgets.
+
+This targets unequal packet energies when a few lights supply most of the
+scene's power. It does not account for every occluder, optical path or receiver
+BRDF, so lower emitted-packet variance does not guarantee lower image variance.
+It can be combined with optical guiding, map refresh and CPU HDR importance
+sampling. Omission or false preserves uniform source selection and its random
+sequence.
+
+### Refreshing the photon map per camera pass
+
+`refresh_per_pass: true` builds a fresh map before each camera pass. The photon
+seed and absolute pass number determine the launch sequence. Every pixel and
+Fresnel stratum in a pass uses the same map. The camera film then averages the
+photon estimates across passes, which reduces noise from reusing one sparse
+map. The photon count applies to each map and the gather radius stays fixed.
+The first pass uses the original photon sequence.
+
+Preflight reports the planned map count, emitted paths and maximum light-path
+events in `admission.caustic_work`. Adaptive pilot passes count toward this
+work, and production starts with a separate photon sequence after the pilots.
+Late adaptive passes can still prepare a map when every pixel has stopped.
+The job reuses its admitted map storage, including the CPU sort buffer. The
+CPU profile's cumulative work limit also counts traversal, sorting, gathering,
+and camera work as they run.
+Omission or false builds one map for the job.
 
 **This is a finite-radius density estimate.** It is biased at finite radius and
 has finite-photon variance. Radius controls blur and geometric leakage; photon
@@ -320,6 +428,14 @@ has a power-of-two head count of at least twice the photon count and at most one
 receiver record per launched photon. GPU grid span must not exceed 2²⁰ radius cells on any axis.
 The ordinary six-storage-buffer GPU route remains available on older devices;
 only authored caustics require the separate seven-storage-buffer variant.
+
+GPU initial photon origins use a conservative bound of all retained optical
+vertices before querying a future boundary. A strict exterior proof accounts for
+both stored origin parts with integer-defined round-to-nearest addition and does
+not depend on guiding or source weighting. A distant edge, vertex or tied depth
+along the sampled direction cannot invalidate that proven vacuum; equality and
+uncertain points retain the existing closed-boundary query. The six-float bound
+adds 24 bytes to the prepaid photon buffer and 24 bytes to its upload allowance.
 
 GPU punctual-source origins too close to a closed optical boundary for reliable
 rounded medium classification refuse explicitly. A detected photon medium

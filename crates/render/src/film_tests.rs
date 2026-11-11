@@ -42,6 +42,24 @@ mod camera_passes {
     }
 
     #[test]
+    fn camera_film_resolves_65536_exact_samples_and_half_coverage() {
+        let samples = crate::job::MAX_SAMPLES_PER_PIXEL;
+        let options = CpuProgressiveOptions { samples_per_pixel: samples, seed: 7 };
+        let budget = crate::job::CpuBudget::Workstation;
+        let bytes = PrimaryFilm::required_bytes(1, 1, options, budget).unwrap();
+        let cancel = CancelToken::default();
+        let mut film = PrimaryFilm::new(1, 1, options, bytes, &cancel, budget).unwrap();
+        film.initialize_one(&cancel, &mut || Ok(())).unwrap();
+        for ordinal in 0..samples {
+            let covered = ordinal % 2 == 0;
+            film.add(0, ordinal, if covered { [2.0, 4.0, 8.0] } else { [0.0; 3] }, covered, &cancel, &mut || Ok(())).unwrap();
+        }
+        assert_eq!(film.pixel(0).unwrap(), ([1.0, 2.0, 4.0], samples / 2, samples));
+        assert!(film.add(0, samples, [0.0; 3], false, &cancel, &mut || Ok(())).is_err());
+        assert_eq!(film.samples(), samples);
+    }
+
+    #[test]
     fn camera_film_cancellation_invalid_radiance_and_work_failure_are_atomic() {
         let mut film = primary();
         let cancel = CancelToken::default();
@@ -334,7 +352,7 @@ mod cpu_adaptive_foundation {
             }
         }
     }
-    type Snapshot = (PreviewStage, u32, Vec<([f64; 3], f64, u16, u16)>);
+    type Snapshot = (PreviewStage, u32, Vec<([f64; 3], f64, u32, u32)>);
     fn snapshot(film: &AdaptiveCameraFilm) -> Option<Snapshot> {
         let pass = film.complete_pass().ok()?;
         let metadata = pass.metadata();
@@ -453,6 +471,169 @@ mod cpu_adaptive_foundation {
         assert!(film.complete_pass().unwrap().pixel(2).is_err());
     }
     #[test]
+    fn cpu_adaptive_parallel_identity_lookahead_keeps_owner_publication_ordered() {
+        let mut candidate = film(48);
+        let mut reference = film(48);
+        let mut work = 0;
+        let mut reference_work = 0;
+        let cancel = CancelToken::default();
+        for _ in 0..2 {
+            assert!(!candidate.ready());
+            for index in [0, 1, 2, usize::MAX] {
+                assert!(candidate.sampling_identity_in_pass(index).is_err(), "uninitialized pixel {index}");
+            }
+            step(&mut candidate, &mut work);
+            step(&mut reference, &mut reference_work);
+        }
+        assert!(candidate.ready());
+        let pilot = candidate.sampling_identity(0).unwrap().unwrap();
+        assert_eq!(candidate.sampling_identity_in_pass(0).unwrap(), Some(pilot));
+        assert_eq!(candidate.sampling_identity_in_pass(1).unwrap(), Some(pilot));
+        for index in [2, usize::MAX] {
+            assert!(candidate.sampling_identity_in_pass(index).is_err());
+        }
+        assert!(candidate.sampling_identity(1).is_err(), "owner lookup still requires the next pixel");
+        let state = |film: &AdaptiveCameraFilm| (film.initialized(), film.ready(), film.next_pixel(), film.completed_passes(), snapshot(film));
+        let before = state(&candidate);
+        let (rgb, covered) = source(1, pilot);
+        let mut debits = 0;
+        assert_eq!(
+            candidate
+                .add(1, pilot, rgb, covered, &cancel, &mut || {
+                    debits += 1;
+                    Ok(())
+                })
+                .unwrap_err()
+                .code,
+            ErrorCode::InvalidRequest
+        );
+        assert_eq!(
+            candidate
+                .skip_one(1, &cancel, &mut || {
+                    debits += 1;
+                    Ok(())
+                })
+                .unwrap_err()
+                .code,
+            ErrorCode::InvalidRequest
+        );
+        assert_eq!(debits, 0, "lookahead never authorizes an out-of-order owner transaction");
+        assert_eq!(state(&candidate), before);
+        step(&mut candidate, &mut work);
+        step(&mut reference, &mut reference_work);
+        assert_eq!(candidate.next_pixel(), 1);
+        assert!(candidate.sampling_identity_in_pass(0).is_err(), "a committed pixel cannot be sampled again in this sweep");
+        assert_eq!(candidate.sampling_identity_in_pass(1).unwrap(), Some(pilot));
+        assert_eq!(candidate.sampling_identity(1).unwrap(), Some(pilot));
+        let before = state(&candidate);
+        let (rgb, covered) = source(0, pilot);
+        assert_eq!(
+            candidate
+                .add(0, pilot, rgb, covered, &cancel, &mut || {
+                    debits += 1;
+                    Ok(())
+                })
+                .unwrap_err()
+                .code,
+            ErrorCode::InvalidRequest
+        );
+        assert_eq!(debits, 0);
+        assert_eq!(state(&candidate), before);
+        step(&mut candidate, &mut work);
+        step(&mut reference, &mut reference_work);
+        assert_eq!(snapshot(&candidate), snapshot(&reference), "failed owner writes cannot alter the completed film");
+        assert_eq!(work, reference_work);
+    }
+
+    #[test]
+    fn cpu_adaptive_parallel_identity_lookahead_respects_stage_boundaries_and_stopped_pixels() {
+        let mut candidate = film(48);
+        let mut work = 0;
+        let cancel = CancelToken::default();
+        while candidate.completed_passes() < 16 {
+            step(&mut candidate, &mut work);
+        }
+        assert_eq!(candidate.next_pixel(), 0);
+        for index in [0, 1, 2, usize::MAX] {
+            assert!(candidate.sampling_identity_in_pass(index).is_err(), "complete pilots require reset before lookahead");
+        }
+        candidate
+            .begin_production(&cancel, &mut || {
+                work += 1;
+                Ok(())
+            })
+            .unwrap();
+        assert!(candidate.resetting());
+        while candidate.resetting() {
+            for index in [0, 1, 2, usize::MAX] {
+                assert!(candidate.sampling_identity_in_pass(index).is_err(), "partial reset has no sample identities");
+            }
+            step(&mut candidate, &mut work);
+        }
+        let first = candidate.sampling_identity_in_pass(0).unwrap().unwrap();
+        assert_eq!((first.seed, first.ordinal, first.stage), (81, 0, PreviewStage::Production));
+        assert_eq!(candidate.sampling_identity_in_pass(1).unwrap(), Some(first));
+        while candidate.completed_passes() < 32 {
+            step(&mut candidate, &mut work);
+        }
+        assert_eq!(candidate.sampling_identity_in_pass(0).unwrap(), None);
+        let future = candidate.sampling_identity_in_pass(1).unwrap().unwrap();
+        assert_eq!((future.seed, future.ordinal, future.stage), (81, 16, PreviewStage::Production));
+        assert!(candidate.sampling_identity(1).is_err());
+        step(&mut candidate, &mut work);
+        assert_eq!(candidate.next_pixel(), 1);
+        assert!(candidate.sampling_identity_in_pass(0).is_err());
+        assert_eq!(candidate.sampling_identity_in_pass(1).unwrap(), Some(future));
+        while candidate.completed_passes() < 43 {
+            step(&mut candidate, &mut work);
+        }
+        assert_eq!(candidate.next_pixel(), 0);
+        assert_eq!(candidate.sampling_identity_in_pass(0).unwrap(), None);
+        assert_eq!(candidate.sampling_identity_in_pass(1).unwrap(), None, "a future stopped pixel consumes no variate");
+        let state = |film: &AdaptiveCameraFilm| (film.next_pixel(), film.completed_passes(), snapshot(film));
+        let before = state(&candidate);
+        let mut debits = 0;
+        assert_eq!(
+            candidate
+                .skip_one(1, &cancel, &mut || {
+                    debits += 1;
+                    Ok(())
+                })
+                .unwrap_err()
+                .code,
+            ErrorCode::InvalidRequest
+        );
+        assert_eq!(debits, 0, "a stopped future pixel still cannot be published ahead of the owner cursor");
+        assert_eq!(state(&candidate), before);
+        step(&mut candidate, &mut work);
+        assert_eq!(candidate.next_pixel(), 1);
+        let before = state(&candidate);
+        assert!(candidate.sampling_identity_in_pass(0).is_err());
+        assert_eq!(candidate.sampling_identity_in_pass(1).unwrap(), None);
+        assert_eq!(
+            candidate
+                .skip_one(0, &cancel, &mut || {
+                    debits += 1;
+                    Ok(())
+                })
+                .unwrap_err()
+                .code,
+            ErrorCode::InvalidRequest
+        );
+        assert_eq!(debits, 0);
+        assert_eq!(state(&candidate), before);
+        while !candidate.is_final() {
+            step(&mut candidate, &mut work);
+        }
+        for index in [0, 1, 2, usize::MAX] {
+            assert!(candidate.sampling_identity_in_pass(index).is_err(), "finished films have no active sweep");
+        }
+        let final_pass = candidate.complete_pass().unwrap();
+        assert_eq!((final_pass.counts().pixel(0).unwrap().samples(), final_pass.counts().pixel(1).unwrap().samples()), (16, 27));
+        assert_eq!(work, 133, "lookahead and rejected owner operations consume no additional work");
+    }
+
+    #[test]
     fn cpu_adaptive_pilots_plus_production_obey_every_unchanged_profile_and_camera_work_cap() {
         for budget in CpuBudget::ALL {
             let maximum = budget.limits().max_samples_per_pixel;
@@ -469,7 +650,7 @@ mod cpu_adaptive_foundation {
         );
         let one = AdaptiveCameraFilm::required_bytes(1, 1, production, options(), CpuBudget::Compact).unwrap();
         let two = AdaptiveCameraFilm::required_bytes(2, 1, production, options(), CpuBudget::Compact).unwrap();
-        assert_eq!(two - one, 70, "64-byte moments plus6-byte exact count/allocation plane, with no snapshot plane");
+        assert_eq!(two - one, 76, "64-byte moments plus12-byte exact count/allocation plane, with no snapshot plane");
         assert!(AdaptiveCameraFilm::new(1, 1, production, options(), CpuBudget::Compact, one - 1, &CancelToken::default()).is_err());
         assert!(AdaptiveCameraFilm::required_bytes(0, 1, production, options(), CpuBudget::Compact).is_err());
         assert!(

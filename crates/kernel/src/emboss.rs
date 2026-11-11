@@ -46,7 +46,7 @@ fn wall_angles(b: &Brep, face: usize, o: Vec3, axis: Vec3, radial: Vec3, tangent
         // (`interval` is on its NURBS form where it has one) about the angle of its middle (a
         // whole turn, from the seam, for a wall in one piece).
         let c = CurveEval::new(&e.curve).ok()?;
-        let [t0, t1] = solidcraft_geom::brep::label::edge_curve_interval(e)?;
+        let [t0, t1] = solidcore_ops::label::edge_curve_interval(e)?;
         let am = angle(c.point(0.5 * (t0 + t1))?, o, axis, radial, tangent);
         let half = 0.5 * (t1 - t0);
         return Some((am - half, am + half));

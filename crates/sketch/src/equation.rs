@@ -142,7 +142,7 @@ impl Sketch {
         if at.len() < wanted || at.len() > crate::curves::MAX_SPLINE_POINTS {
             return Err(SketchError::Invalid(format!("an equation curve needs {wanted} to {} points", crate::curves::MAX_SPLINE_POINTS)));
         }
-        if self.points.len().saturating_add(at.len()) > crate::model::MAX_POINTS {
+        if self.points.len().saturating_add(at.len()) > crate::limits::max_points() {
             return Err(SketchError::TooLarge);
         }
         let place = |sk: &mut Sketch, existing: Option<usize>, p: Vec2| -> Result<usize> {

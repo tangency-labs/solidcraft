@@ -1,0 +1,34 @@
+{
+  "en": {
+    "nav.maya_horizontal_zoom.help": "Alt+right drag: right zooms in, left zooms out. Turn off to restore vertical drag zoom.",
+    "nav.maya_horizontal_zoom.label": "Maya: horizontal drag zoom"
+  },
+  "ar": {
+    "nav.maya_horizontal_zoom.help": "اسحب مع Alt وزر الفأرة الأيمن: إلى اليمين للتكبير وإلى اليسار للتصغير. عطّل هذا الخيار لاستعادة التكبير بالسحب العمودي.",
+    "nav.maya_horizontal_zoom.label": "Maya: التكبير بالسحب الأفقي"
+  },
+  "he": {
+    "nav.maya_horizontal_zoom.help": "Alt וגרירה עם לחצן העכבר הימני: ימינה לקירוב, שמאלה להרחקה. כבו כדי לחזור לזום בגרירה אנכית.",
+    "nav.maya_horizontal_zoom.label": "Maya: זום בגרירה אופקית"
+  },
+  "ja": {
+    "nav.maya_horizontal_zoom.help": "Alt+右ドラッグで右に動かすと拡大、左に動かすと縮小します。オフにすると従来の垂直ドラッグに戻ります。",
+    "nav.maya_horizontal_zoom.label": "Maya: 水平方向のドラッグでズーム"
+  },
+  "vi": {
+    "nav.maya_horizontal_zoom.help": "Alt+kéo chuột phải: kéo sang phải để phóng to, sang trái để thu nhỏ. Tắt để khôi phục thu phóng bằng cách kéo dọc.",
+    "nav.maya_horizontal_zoom.label": "Maya: thu phóng bằng cách kéo ngang"
+  },
+  "zh": {
+    "nav.maya_horizontal_zoom.help": "Alt+右键拖动：向右放大，向左缩小。关闭此选项可恢复垂直拖动缩放。",
+    "nav.maya_horizontal_zoom.label": "Maya：水平拖动缩放"
+  },
+  "de": {
+    "nav.maya_horizontal_zoom.help": "Alt+Rechtsziehen: nach rechts vergrößern, nach links verkleinern. Ausschalten, um wieder vertikal zu zoomen.",
+    "nav.maya_horizontal_zoom.label": "Maya: horizontal ziehen zum Zoomen"
+  },
+  "ko": {
+    "nav.maya_horizontal_zoom.help": "Alt+오른쪽 버튼 드래그: 오른쪽으로 움직이면 확대하고 왼쪽으로 움직이면 축소합니다. 끄면 세로 드래그 확대/축소로 돌아갑니다.",
+    "nav.maya_horizontal_zoom.label": "Maya: 가로 드래그로 확대/축소"
+  }
+}

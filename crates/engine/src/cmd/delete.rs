@@ -204,7 +204,7 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     for k in keys(p, "components") {
-        let id = s.doc.find_component(&k).ok_or_else(|| bad(cmd, format!("no component `{k}`")))?;
+        let id = s.doc.resolve_component(&k).map_err(|error| bad(cmd, error.to_string()))?.ok_or_else(|| bad(cmd, format!("no component `{k}`")))?;
         if id == 0 {
             return Err(bad(cmd, "the design itself can't be deleted"));
         }

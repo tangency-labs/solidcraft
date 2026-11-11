@@ -122,7 +122,7 @@ fn an_edge_origin_on_a_body_placed_by_an_offset_lands_on_that_edge() {
     let up = solidcraft_doc::apply_vector(&offset, Vec3::Z);
     let st = s.model.state();
     let resolve = |snap: solidcraft_doc::joints::Snap| {
-        let o = solidcraft_doc::joints::JointOrigin { occurrence: 0, snap };
+        let o = solidcraft_doc::joints::JointOrigin::new(0, snap);
         let m = solidcraft_doc::joints::resolve_origin(&s.doc, &st, &o).unwrap_or_else(|e| panic!("{e}"));
         (Vec3::new(m[3][0], m[3][1], m[3][2]), Vec3::new(m[2][0], m[2][1], m[2][2]))
     };

@@ -113,6 +113,35 @@ fn a_component_using_what_is_outside_it_is_refused_saying_what() {
     assert_eq!(s.doc.to_json(), saved);
 }
 
+/// An end cap in a component, closing a frame member outside it, uses that member and the face
+/// it was picked on: it isn't pasted into another design, which has neither.
+#[test]
+fn an_end_cap_on_a_member_outside_its_component_is_refused_saying_what() {
+    let mut source = design("Rack");
+    run(&mut source, "sketch.create", json!({"plane": "XY", "name": "Post path"}));
+    run(&mut source, "sketch.options", json!({"sketch_3d": true}));
+    run(&mut source, "sketch.line3d", json!({"points": [[0, 0, 0], [0, 0, 300]]}));
+    run(&mut source, "sketch.finish", json!({}));
+    let tube = json!({"kind": "rect_tube", "width": 40, "height": 40, "wall": 3, "outer_radius": 0});
+    run(&mut source, "frame.member", json!({"sketch": "Post path", "name": "Post member", "body_name": "Post", "profile": tube}));
+    let (_, at) = created(&mut source, "Caps");
+    let index = {
+        let st = source.model.state();
+        let b = st.body("Post").unwrap();
+        (0..b.body.face_count())
+            .find(|i| b.body.planar_face(*i).is_some_and(|pl| pl.normal().z > 0.999 && (pl.origin.z - 300.0).abs() < 1e-6))
+            .unwrap()
+    };
+    run(&mut source, "frame.end_cap", json!({"faces": [{"body": "Post", "index": index, "face": [18.5, 0, 300]}], "thickness": 6}));
+
+    let mut s = design("Frame");
+    s.foreign_copy = copied(&source, vec![at]);
+    let saved = s.doc.to_json();
+    let error = s.execute("component.paste_from_design", &json!({})).unwrap_err().to_string();
+    assert!(error.contains("uses feature reference") && error.contains("uses exact face attachment to Post"), "{error}");
+    assert_eq!(s.doc.to_json(), saved);
+}
+
 /// A component that bodies were moved into (a body transfer, as Create Components from Bodies
 /// makes) pastes into another design, which has none of the components the transfer names.
 #[test]

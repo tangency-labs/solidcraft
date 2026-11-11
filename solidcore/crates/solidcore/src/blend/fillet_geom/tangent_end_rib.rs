@@ -16,9 +16,7 @@
 //! Newton solve takes at most 40 steps.
 
 use crate::blend::fillet_section::section::GnSectionFsg;
-use crate::blend::fillet_solver::p1::{
-    FilletSolver, FilletSurfaceGenerator, FilletSurfaceGeneratorType,
-};
+use crate::blend::fillet_solver::p1::{FilletSolver, FilletSurfaceGeneratorType};
 use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
 use crate::geom::global_solver::SolverOperation;
@@ -47,7 +45,7 @@ fn smax(a: f64, b: f64) -> f64 {
 
 /// `sm_SectionContactOrder`: the order of contact `k` of a fillet's cross-section with
 /// the faces it meets: 1 for a chamfer's straight section, 2 for a round's circular
-/// one, `n + 1` for a blend curve of Gn continuity. The section stands off its face as
+/// one; a G^n section's is [`gn_section_contact_order`]'s. The section stands off its face as
 /// `c s^k` at distance `s` from the contact line; where the face runs tangent into an
 /// end face whose normal curvature across the seam differs by `dk`, the end rib leaves
 /// the tangent end as `a ~ s^(k/2)` along the rail.
@@ -62,20 +60,16 @@ pub fn section_contact_order(solver: &FilletSolver) -> Result<u32> {
     match fsg.fillet_surface_generator_type() {
         FilletSurfaceGeneratorType::Linear => Ok(1),
         FilletSurfaceGeneratorType::Circular => Ok(2),
-        // ((SmBlendCurveCrossSectionFSG*)pFSG)->GetContinuity() + 1
-        FilletSurfaceGeneratorType::BlendCurve => match fsg {
-            FilletSurfaceGenerator::BlendCurve(g) => g
-                .continuity
-                .checked_add(1)
-                .ok_or_else(|| SolidError::sm_err(OP_ORDER)),
-            _ => Err(SolidError::sm_err(OP_ORDER)),
-        },
-        FilletSurfaceGeneratorType::Unknown => Err(SolidError::sm_err(OP_ORDER)),
+        // ((SmBlendCurveCrossSectionFSG*)pFSG)->GetContinuity() + 1: that generator is
+        // retired (WR-685); a G^n section's order is [`gn_section_contact_order`]'s
+        FilletSurfaceGeneratorType::BlendCurve | FilletSurfaceGeneratorType::Unknown => {
+            Err(SolidError::sm_err(OP_ORDER))
+        }
     }
 }
 
-/// The fork's `sm_SectionContactOrder` for a G^n section (`SM_FSG_BLEND_CURVE` with
-/// `fixes.fillet_gn_section_generator`, WR-685; tangency-labs/smlib@11ea2d9): the order of
+/// The fork's `sm_SectionContactOrder` for a G^n section (`SM_FSG_BLEND_CURVE`, WR-685;
+/// tangency-labs/smlib@11ea2d9): the order of
 /// contact k of the section with the face it meets at `at`, a point of one of its rails:
 /// `n + 1`, or `n + 2` where its jets make the `t^(n+1)` term vanish (two planes), found at
 /// that rail's station (`SmGnSectionFSG::ContactOrderAt`). The rail through `at` is the one

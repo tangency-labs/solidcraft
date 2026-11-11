@@ -9,7 +9,20 @@ use crate::schema::{ParamCheck, input_schema_for, issues, output_schema_for};
 fn schemas_and_the_key_check_agree() {
     assert_keys(
         input_schema_for::<SketchDimensionParams>(),
-        &["driven", "entities", "half_axes", "if_redundant", "orientation", "previous_axis", "scale_sketch", "sketch", "text_at", "type", "value"],
+        &[
+            "driven",
+            "entities",
+            "half_axes",
+            "if_redundant",
+            "orientation",
+            "previous_axis",
+            "scale_about_origin",
+            "scale_sketch",
+            "sketch",
+            "text_at",
+            "type",
+            "value",
+        ],
     );
     // Only `entities` is required, and the type leaves it to the handler's message.
     let schema = input_schema_for::<SketchDimensionParams>();
@@ -112,6 +125,7 @@ fn strict_refuses_what_the_handler_ignores() {
         (json!({"entities": ["l1"], "text_at": [1]}), "`text_at` must be a point [x, y] of numbers"),
         (json!({"entities": ["l1"], "driven": "yes"}), "`driven` must be true or false"),
         (json!({"entities": ["l1"], "scale_sketch": 1}), "`scale_sketch` must be true or false"),
+        (json!({"entities": ["l1"], "scale_about_origin": 1}), "`scale_about_origin` must be true or false"),
         (json!({"entities": ["l1"], "previous_axis": 1}), "`previous_axis` must be text"),
         (json!({"entities": ["l1"], "if_redundant": 5}), "`if_redundant` must be text"),
         (json!({"entities": ["l1"], "drivn": true}), "unknown key `drivn`; did you mean `driven`?"),
@@ -135,7 +149,13 @@ fn parses(v: Value) -> bool {
 /// keys are read either way.
 #[test]
 fn a_driven_dimension_reads_only_what_the_handler_reads() {
-    for key in [("value", json!(true)), ("scale_sketch", json!("yes")), ("if_redundant", json!(7)), ("value", json!(""))] {
+    for key in [
+        ("value", json!(true)),
+        ("scale_sketch", json!("yes")),
+        ("scale_about_origin", json!("yes")),
+        ("if_redundant", json!(7)),
+        ("value", json!("")),
+    ] {
         let (k, v) = key;
         let driving = json!({"entities": ["l1"], k: v.clone()});
         let driven = json!({"entities": ["l1"], "driven": true, k: v.clone()});
@@ -169,7 +189,9 @@ fn a_driven_dimension_reads_only_what_the_handler_reads() {
 #[test]
 fn the_types_read_each_key_like_the_handler() {
     assert!(parses(json!({"entities": null, "sketch": null, "type": null, "orientation": null, "value": null, "text_at": null})));
-    assert!(parses(json!({"driven": null, "scale_sketch": null, "previous_axis": null, "half_axes": null, "if_redundant": null})));
+    assert!(parses(
+        json!({"driven": null, "scale_sketch": null, "scale_about_origin": null, "previous_axis": null, "half_axes": null, "if_redundant": null})
+    ));
     for entities in [
         json!("l1"),
         json!(["l1"]),
@@ -208,6 +230,23 @@ fn the_types_read_each_key_like_the_handler() {
     }
     for sketch in [json!(-1), json!(1.5), json!(false), json!([1])] {
         assert!(!parses(json!({"entities": ["l1"], "sketch": sketch})), "{sketch}");
+    }
+}
+
+#[test]
+fn the_scale_origin_option_is_typed_and_works_with_strict_checks() {
+    for about_origin in [false, true] {
+        let params = json!({"entities": ["l1"], "value": "40 mm", "scale_sketch": true, "scale_about_origin": about_origin});
+        let typed: SketchDimensionParams = serde_json::from_value(params.clone()).unwrap();
+        assert_eq!(typed.scale_about_origin, Some(about_origin));
+        assert!(issues("sketch.dimension", &params).is_empty());
+
+        let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [90, 90], "p1": [110, 110]}));
+        let result = run(&mut s, "sketch.dimension", params);
+        assert_eq!(result["scaled"], 2.0, "{result}");
+        assert!(result.get("param_warnings").is_none(), "{result}");
     }
 }
 
@@ -279,11 +318,12 @@ fn replies_match_the_output_schema() {
     // The midpoints of two lines.
     let mut s = editing(ParamCheck::Warn);
     dim(&mut s, json!({"entities": ["mid:l1", "mid:l2"], "text_at": [30, 15], "type": "auto"}));
-    // Scaling a sketch's first dimension.
+    // Scaling a sketch's first dimension. A lone circle's diameter only sizes the circle and
+    // does not scale the sketch (#11438), so the sketch here is a line.
     let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
-    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 5}));
-    let r = dim(&mut s, json!({"entities": ["c1"], "value": "30 mm", "scale_sketch": true}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]]}));
+    let r = dim(&mut s, json!({"entities": ["l1"], "value": "30 mm", "scale_sketch": true}));
     assert!(r["scaled"].as_f64().is_some_and(|f| f > 1.0), "{r}");
     // An ellipse's half-axis.
     let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };

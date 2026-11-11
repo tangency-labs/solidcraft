@@ -37,7 +37,7 @@ const USAGE: &str = "\
 usage: cargo xtask <command>
 
 commands:
-  ui-containers   enforce the universal container for all UI hosts
+  ui-containers   enforce the universal container for all UI hosts and the kit's tooltips
   layers          enforce the crate dependency layering (plan/architecture.md §3)
   shared          check that each shared crate (layers' Shared class) has workspace lints, a licence,
                   a README and no includes from outside its directory, then build and test it in a
@@ -47,7 +47,7 @@ commands:
   app-icons       regenerate shared app-icon exports for Linux, FreeBSD and Windows
   icons           validate UI icon standards, discovery and review-tool behavior (Python 3.11+)
   features        list SolidCraft's commands by area in docs/features.md (from the registry)
-  i18n [--check | --add-missing]
+  i18n [--check | --add-missing] [--no-registry | --cli <solidcraft-cli>]
                   report how complete the message catalogs in assets/locales are:
                   which messages a locale has not translated and which command labels the English
                   catalog cannot translate (so they stay English everywhere). --check fails when
@@ -291,6 +291,7 @@ fn cmd_layers() -> Result<(), String> {
     let mut violations: Vec<String> = layers::check(&crates).iter().map(ToString::to_string).collect();
     let allow = std::fs::read_to_string(root().join(layers::SEAM_LIST)).map_err(|e| format!("{}: {e}", layers::SEAM_LIST))?;
     violations.extend(layers::seam_check(&crates, &allow, &layers::read_public(&root())?));
+    violations.extend(layers::standalone_check(&layers::read_solidcore_manifests(&root())?));
     println!();
     if violations.is_empty() {
         println!("OK: {} crates, no layering or solidcore seam violations.", crates.len());

@@ -722,6 +722,41 @@ fn polyhedra_shell_and_draft() {
     assert!(rel(measure(&cup).unwrap().volume, PI * (25.0 * 5.0 - 16.0 * 4.0)) < 1e-4, "cup");
 }
 
+/// #14346: a loft through three sections whose corners lie on straight lines has flat sides,
+/// which the skin builds as B-spline patches. Each is a planar face (an extrude can start on it,
+/// a sketch can lie on it), its plane through the face and facing out of the material. A loft
+/// turned between its ends has curved sides, which are not planar.
+#[test]
+fn flat_loft_sides_are_planar_faces() {
+    let rectangle = |x: f64, y: f64| Loop2::polygon(&[Vec2::new(-x, -y), Vec2::new(x, -y), Vec2::new(x, y), Vec2::new(-x, y)]);
+    let flat =
+        loft(&[(Plane::XY, rectangle(10.0, 6.0)), (Plane::XY.offset(10.0), rectangle(8.0, 5.0)), (Plane::XY.offset(20.0), rectangle(6.0, 4.0))])
+            .unwrap();
+    let faces = flat.faces(0.01).unwrap();
+    assert_eq!(faces.len(), 6);
+    let centre = Vec3::new(0.0, 0.0, 10.0);
+    for face in &faces {
+        let plane = flat.planar_face(face.index).unwrap_or_else(|| panic!("face {} is flat", face.index));
+        assert!(plane.height(face.centroid).abs() < 1e-6, "face {}: its plane runs through it", face.index);
+        assert!((face.centroid - centre).dot(plane.normal()) > 0.0, "face {}: its plane faces out", face.index);
+    }
+    // The sides are B-spline patches, so this reaches the kernel's flatness test (were the loft
+    // to build planes here, another flat B-spline face would have to stand in).
+    let splines = flat
+        .record()
+        .faces
+        .iter()
+        .filter(|face| {
+            matches!(face.surface, solidcore_record::brep::Surface::Spline { .. } | solidcore_record::brep::Surface::RationalSpline { .. })
+        })
+        .count();
+    assert_eq!(splines, 4);
+    let (sin, cos) = std::f64::consts::FRAC_PI_6.sin_cos();
+    let turned = Loop2::polygon(&[(-6.0, -6.0), (6.0, -6.0), (6.0, 6.0), (-6.0, 6.0)].map(|(x, y)| Vec2::new(cos * x - sin * y, sin * x + cos * y)));
+    let twisted = loft(&[(Plane::XY, rectangle(10.0, 10.0)), (Plane::XY.offset(20.0), turned)]).unwrap();
+    assert_eq!((0..twisted.face_count()).filter(|&i| twisted.planar_face(i).is_some()).count(), 2, "only the ends are flat");
+}
+
 #[test]
 fn loft_and_sweep() {
     let sq = Loop2::polygon(&[Vec2::new(-20.0, -20.0), Vec2::new(20.0, -20.0), Vec2::new(20.0, 20.0), Vec2::new(-20.0, 20.0)]);
@@ -1129,6 +1164,29 @@ fn chamfer_wider_than_sloped_basin_rim_builds() {
         let want = measure(&b).unwrap().volume - sloped_basin_rim_chamfer_removed(margin, distance);
         assert!(rel(measure(&made).unwrap().volume, want) < 1e-8, "{margin}, {distance}: {} vs {want}", measure(&made).unwrap().volume);
     }
+}
+
+#[test]
+fn mesh_corner_normals_survive_welding_reflection_and_nonuniform_scale() {
+    let positions = [Vec3::ZERO, Vec3::X, Vec3::Y];
+    let normals = [[Vec3::new(1., 0., 1.), Vec3::new(0., 1., 1.), Vec3::Z]];
+    let body = crate::mesh_body_with_normals(&positions, &[[0, 1, 2]], &normals).unwrap();
+    let matrix = [[-2., 0., 0., 0.], [0., 3., 0., 0.], [0., 0., 0.5, 0.], [7., 11., 13., 1.]];
+    let moved = crate::transform_matrix(&body, matrix).unwrap();
+    let mesh = moved.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
+    let expected = [Vec3::new(-0.5, 0., 2.).normalized().unwrap(), Vec3::Z, Vec3::new(0., 1. / 3., 2.).normalized().unwrap()];
+    for (actual, expected) in mesh.normals.iter().zip(expected) {
+        assert!((*actual - expected).len() < 1e-12);
+    }
+    let tiny = crate::transform_matrix(&body, [[1e-6, 0., 0., 0.], [0., 1e-6, 0., 0.], [0., 0., 1e-6, 0.], [0., 0., 0., 1.]]).unwrap();
+    let tiny = tiny.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
+    assert!((tiny.normals[0] - Vec3::new(1., 0., 1.).normalized().unwrap()).len() < 1e-12);
+    assert!((tiny.normals[0].len() - 1.).abs() < 1e-12, "normal magnitude must not depend on a small geometric scale");
+    let [a, b, c] = mesh.triangles[0].map(|i| mesh.positions[i as usize]);
+    assert!((b - a).cross(c - a).z > 0.);
+    assert_eq!(body.triangle_mesh().unwrap().1, &[[0, 1, 2]]);
+    assert!(crate::mesh_body_with_normals(&positions, &[[0, 1, 2]], &[[Vec3::ZERO; 3]]).is_err());
+    assert!(crate::mesh_body_with_normals(&positions, &[[0, 1, 2]], &[[Vec3::Z; 3]; 2]).is_err());
 }
 
 #[test]
@@ -2188,6 +2246,27 @@ fn boolean_identity_on_tangent_primitives() {
     }
 }
 
+/// #1989: a boolean watched by someone who cancelled (an agent's request cancelled while it
+/// computes off the window thread) does not start, saying so; unwatched, or watched and not
+/// cancelled, it runs as before.
+#[test]
+fn a_cancelled_watch_stops_the_boolean() {
+    struct Cancelled(bool);
+    impl crate::watch::Watch for Cancelled {
+        fn cancelled(&self) -> bool {
+            self.0
+        }
+        fn progress(&self, _: &'static str, _: usize, _: usize) {}
+    }
+    let a = cylinder(Vec3::new(0.0, 0.0, -10.0), Vec3::Z, 3.0, 20.0).unwrap();
+    let b = cylinder(Vec3::new(-10.0, 0.0, 0.0), Vec3::X, 2.0, 20.0).unwrap();
+    let e = crate::watch::watching(std::sync::Arc::new(Cancelled(true)), || boolean(&a, &b, BoolOp::Intersect)).unwrap_err();
+    assert!(e.to_string().contains("cancelled"), "{e}");
+    let r = crate::watch::watching(std::sync::Arc::new(Cancelled(false)), || boolean(&a, &b, BoolOp::Intersect));
+    assert!(r.is_ok_and(|r| r.is_some()));
+    assert!(boolean(&a, &b, BoolOp::Intersect).unwrap().is_some());
+}
+
 /// A body in two pieces: booleans go a piece at a time.
 #[test]
 fn boolean_of_a_body_in_pieces() {
@@ -2452,4 +2531,41 @@ fn a_stopped_job_does_not_decide_which_face_a_refusal_names() {
     stop.stop();
     let stopped = stop.within(|| crate::body::Refusal::of(body.record(), &why));
     assert_eq!(stopped.face, plain.face);
+}
+
+/// A boss R 5 standing 10 out of a 40 x 40 x 10 block (sunk 5 into it), its axis turned 0 to 3
+/// degrees off square to the block's top, its root rounded 1. Turned, the supports are a plane
+/// and a cylinder not square to it: a canal round, its spine an ellipse, whose net the
+/// definition's certificate cannot always prove on the offsets to rounding
+/// (tangency-labs/solidcraft#14000). The round is built as with the axis square, keeping a
+/// definition where it is proved and none where it is not. Square, it adds by Pappus
+/// 2 pi (R + x) r^2 (1 - pi / 4), x = r (10 - 3 pi) / (12 - 3 pi). Turned by a, the corner's
+/// angle round the root is 90 degrees + a cos t, so the change in its area is first order in a
+/// and cancels over the turn: the round adds the square amount to within O(a^2), held to 1 %.
+#[test]
+fn a_round_on_a_boss_tilted_a_few_degrees_is_built() {
+    let (big_r, r) = (5.0, 1.0);
+    let x = r * (10.0 - 3.0 * PI) / (12.0 - 3.0 * PI);
+    let square = 2.0 * PI * (big_r + x) * r * r * (1.0 - PI / 4.0);
+    for deg in [0.0_f64, 0.5, 1.0, 2.0, 3.0] {
+        let a = deg.to_radians();
+        let block = box_solid(Vec3::new(-20.0, -20.0, 0.0), Vec3::new(20.0, 20.0, 10.0)).unwrap();
+        let boss = cylinder(Vec3::new(0.0, 0.0, 5.0), Vec3::new(a.sin(), 0.0, a.cos()), big_r, 15.0).unwrap();
+        let body = boolean(&block, &boss, BoolOp::Union).unwrap().unwrap();
+        let before = measure(&body).unwrap().volume;
+        // the root, where the wall meets the top, as a tangent chain from a point on it off the
+        // turn's plane (as the fillet command takes it)
+        let root = crate::blend::tangent_chain(&body, &[Vec3::new(5.0 * a.tan(), big_r, 10.0)]).unwrap();
+        let round = fillet(&body, &root, r).unwrap_or_else(|e| panic!("{deg} degrees: {e}"));
+        assert!(round.validity().is_empty(), "{deg} degrees: {:?}", round.validity());
+        let added = measure(&round).unwrap().volume - before;
+        // and meshed fine, the round's volume the same to the chord's accuracy
+        let fine = |b: &Body| b.mesh(&crate::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
+        let added_fine = fine(&round) - fine(&body);
+        assert!(rel(added_fine, added) < 1e-3, "{deg} degrees: meshed {added_fine}, exact {added}");
+        // square: the closed form, to the volumes' accuracy (a difference of two of them);
+        // turned: to 1 % of the round's
+        let bound = if deg == 0.0 { 1e-9 * before } else { 1e-2 * square };
+        assert!((added - square).abs() <= bound, "{deg} degrees: adds {added}, square {square}");
+    }
 }

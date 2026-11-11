@@ -1,8 +1,8 @@
-//! #2727: great circles have no corner of a radius law to stop at. The 20 cube's edge rounded
-//! by the linear laws 4, 2, 4 and 3, 2, 4, 2, 3 is refused by name on the kernel that sweeps
-//! them (the net of the first doubles back on itself, `check_brep` #5; the second's reaches
-//! over 140 mm across), and built as the union of the balls with
-//! `fixes.fillet_gn_section_generator` (WR-696), which #2936 makes the default.
+//! #2727: great circles have no corner of a radius law to stop at (the 20 cube's edge rounded
+//! by the linear law 4, 2, 4 built a net that doubles back on itself, `check_brep` #5, and
+//! 3, 2, 4, 2, 3 one over 140 mm across). Every kernel now builds a variable round as the union
+//! of its balls (WR-696; the flag `fillet_gn_section_generator` and the refusal of the great
+//! circles over a law corner are retired with it): each side of a corner is its own piece.
 
 #![allow(
     clippy::unwrap_used,
@@ -69,18 +69,6 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
     brep_volume(k, b, 1e-7, &attrs).unwrap()
 }
 
-#[test]
-fn great_circles_over_a_law_corner_are_refused_by_name_and_the_cube_stays() {
-    for r in [&[4.0, 2.0, 4.0][..], &[3.0, 2.0, 4.0, 2.0, 3.0]] {
-        let mut k = Kernel::default();
-        let mut b = create_box(&mut k, Point3::ZERO, 20.0, 20.0, 20.0).unwrap();
-        let why = round(&mut k, &mut b, r).expect_err("refused");
-        assert!(why.contains("has a corner inside its edge"), "{why}");
-        assert_eq!(b.face_list().len(), 6);
-        assert!((volume(&k, &mut b) - 8000.0).abs() <= 1e-9 * 8000.0);
-    }
-}
-
 /// With the balls' union each side of a corner is its own piece: a sound body with less than
 /// the cube's volume and area (the law peaks at 4, so at most the constant round 4 goes:
 /// 20 x (1 - pi/4) x 16 = 68.7).
@@ -88,7 +76,6 @@ fn great_circles_over_a_law_corner_are_refused_by_name_and_the_cube_stays() {
 fn the_union_of_the_balls_builds_them() {
     for r in [&[4.0, 2.0, 4.0][..], &[3.0, 2.0, 4.0, 2.0, 3.0]] {
         let mut k = Kernel::default();
-        k.fixes.fillet_gn_section_generator = true;
         let mut b = create_box(&mut k, Point3::ZERO, 20.0, 20.0, 20.0).unwrap();
         round(&mut k, &mut b, r).unwrap();
         stitch_and_orient(&mut k, &mut b, &StitchAndOrientOptions::default()).unwrap();

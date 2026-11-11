@@ -274,7 +274,7 @@ fn harness(e: impl ToString) -> HarnessError {
 /// Status code of a Rust error (only upstream statuses are expected).
 fn status_of(e: &SolidError) -> Result<i64, HarnessError> {
     match e {
-        SolidError::Upstream { code, .. } => Ok(i64::from(*code)),
+        err if solidcore::error::upstream_status(err).is_some() => Ok(i64::from(solidcore::error::upstream_status(err).unwrap_or(-1))),
         other => Err(harness(format!("unexpected error {other}"))),
     }
 }

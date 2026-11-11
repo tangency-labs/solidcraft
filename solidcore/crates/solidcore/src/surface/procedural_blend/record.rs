@@ -986,3 +986,90 @@ impl DraftRecord {
         Ok(())
     }
 }
+
+/// One station of a multi-section blend's cross-section (`sweep::section_blend`): its point
+/// and how the blend leaves it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SectionFrameRecord {
+    /// The point.
+    pub p: [f64; 3],
+    /// The direction the blend leaves in.
+    pub leave: [f64; 3],
+    /// The curvature vector along `leave`.
+    pub bend: [f64; 3],
+    /// The arc-length derivative of `bend` along `leave`.
+    pub bend_change: [f64; 3],
+}
+
+/// The continuity a multi-section blend holds at an end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EndOrderRecord {
+    /// Position.
+    G0,
+    /// And tangent direction.
+    G1,
+    /// And curvature.
+    G2,
+    /// And change of curvature.
+    G3,
+}
+
+/// A motion a net took (`Transform`'s arguments): the placement's origin and axes as
+/// stored, and the scale applied first.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MotionRecord {
+    /// The placement's origin.
+    pub origin: [f64; 3],
+    /// The placement's x axis.
+    pub x_axis: [f64; 3],
+    /// The placement's y axis.
+    pub y_axis: [f64; 3],
+    /// The scale, when given.
+    pub scale: Option<[f64; 3]>,
+}
+
+/// A multi-section blend's surface (`sweep::section_blend`, #3140): its cross-sections, end
+/// orders and crowns, the motions its net took since it was made, and the net.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SectionBlendRecord {
+    /// The cross-sections in order, each its stations.
+    pub sections: Vec<Vec<SectionFrameRecord>>,
+    /// The continuity at the first and the last section.
+    pub orders: [EndOrderRecord; 2],
+    /// The crowns at the first and the last section.
+    pub crown: [f64; 2],
+    /// The motions, in order.
+    pub motions: Vec<MotionRecord>,
+    /// The net.
+    pub net: NurbsSurfaceRecord,
+}
+
+impl SectionBlendRecord {
+    /// The structural check: the net a NURBS form, every number finite. What the blend
+    /// itself refuses (counts, crowns, coincident sections) its rebuild refuses.
+    ///
+    /// # Errors
+    ///
+    /// The first [`RecordError`] met.
+    pub fn validate(&self) -> Result<(), RecordError> {
+        self.net.validate("net")?;
+        let frames_finite = self
+            .sections
+            .iter()
+            .flatten()
+            .all(|f| points_finite(&[f.p, f.leave, f.bend, f.bend_change]));
+        if !frames_finite {
+            return Err(refuse("sections", "a section's numbers are finite"));
+        }
+        if !all_finite(&self.crown) {
+            return Err(refuse("crown", "a crown is finite"));
+        }
+        let motions_finite = self.motions.iter().all(|m| {
+            points_finite(&[m.origin, m.x_axis, m.y_axis]) && m.scale.is_none_or(|s| all_finite(&s))
+        });
+        if !motions_finite {
+            return Err(refuse("motions", "a motion's numbers are finite"));
+        }
+        Ok(())
+    }
+}

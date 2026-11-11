@@ -791,10 +791,10 @@ fn c1_collect_points(
 
     // Now, compute 'through points' from all internal G1 knots
     // (the size is re-read every iteration, as upstream's GetSize())
-    // SolidCraft (the fork's 6eecf04, under `fillet_gn_section_generator`): the corners of
+    // SolidCraft (the fork's 6eecf04): the corners of
     // the radius law are through points too, after the G1 knots, so the trace has a point
     // where the fillet turns (a failed one fails the trace, as a G1 knot's does).
-    let corner_knots = ops.radius_corner_parameters(cx.k)?;
+    let corner_knots = ops.radius_corner_parameters()?;
     let mut k = 0;
     while k < ops.solver().g1_knots.len() + corner_knots.len() {
         // get position and tangent at G1 knot (status checked, values unused)
@@ -1218,14 +1218,12 @@ mod tests_c1 {
         // EvaluateBinormal fails (the edge use is in no loop: SM_ERR_INVALID_INPUT) and
         // returns before RemoveLast
         let e = c1_collect_points(&mut ops, &mut cx, &mut st, 0).unwrap_err();
+        assert_eq!(e.operation(), "topology::edgeuse::p3");
         assert_eq!(
-            e,
-            SolidError::Upstream {
-                operation: "topology::edgeuse::p3",
-                code: crate::error::SM_ERR_INVALID_INPUT,
-                entity: None,
-            }
+            e.upstream_status(),
+            Some(crate::error::SM_ERR_INVALID_INPUT)
         );
+        assert_eq!(e.entity(), None);
         assert_eq!(ops.0.g1_knots, vec![0.5]);
         assert_eq!(st.split_tsect_pnt, None);
     }
@@ -1295,14 +1293,9 @@ mod tests_c1 {
         // GetOrCreateUVTrimCurve builds the missing curve; CreateUVTrimCurve's failing
         // status (here NER) is SER'd
         let e = c1_collect_points(&mut ops, &mut cx, &mut st, 0).unwrap_err();
-        assert_eq!(
-            e,
-            SolidError::Upstream {
-                operation: "topology::edgeuse::p3",
-                code: crate::error::SM_ERR_NULL_POINTER,
-                entity: None,
-            }
-        );
+        assert_eq!(e.operation(), "topology::edgeuse::p3");
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(e.entity(), None);
     }
 }
 
@@ -4671,18 +4664,18 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
     }
 
     /// The solver's virtual `GetRadiusCornerParameters` (the fork's 6eecf04).
-    fn radius_corner_parameters(&mut self, k: &Kernel) -> Result<Vec<f64>> {
-        self.ops.radius_corner_parameters(k)
+    fn radius_corner_parameters(&mut self) -> Result<Vec<f64>> {
+        self.ops.radius_corner_parameters()
     }
 
     /// The solver's virtual `IsAtRadiusCorner` (the fork's 6eecf04).
-    fn is_at_radius_corner(&mut self, k: &Kernel, point: &TsectPnt) -> bool {
-        self.ops.is_at_radius_corner(k, point)
+    fn is_at_radius_corner(&mut self, point: &TsectPnt) -> bool {
+        self.ops.is_at_radius_corner(point)
     }
 
     /// The solver's virtual `GetRadiusParameter` (the fork's 6eecf04).
-    fn radius_parameter(&mut self, k: &Kernel, point: &TsectPnt) -> Option<f64> {
-        self.ops.radius_parameter(k, point)
+    fn radius_parameter(&mut self, point: &TsectPnt) -> Option<f64> {
+        self.ops.radius_parameter(point)
     }
 
     /// `GetSurface(rail)->Evaluate1stDerivatives(uv, TRUE, TRUE, ..)` on the solver's
@@ -4791,8 +4784,7 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
         let radii = self.ops.constant_radii();
         // (a variable round between NURBS faces is its definition too, the fork's 0d43b4c;
         // read only where the circle generator may take it)
-        let law = if k.fixes.fillet_gn_section_generator
-            && k.fixes.fillet_round_as_definition
+        let law = if k.fixes.fillet_round_as_definition
             && solver_type == crate::blend::fillet_solver::p1::FilletSolverType::VariableRadius
         {
             let has_edgeuse = matches!(self.ops.solver().edgeuse(0), Ok(Some(_)));
@@ -4824,9 +4816,8 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
             .fillet_surface_generator_mut()
             .ok_or_else(|| SolidError::null_pointer(OP))?;
         // The fork's `SmGnSectionFSG::CircleSurface` folded-balls check (`sm_BallsFold`,
-        // WR-685, d01d7b0's 2714d37) is gone since tangency-labs/smlib#79's 410dfe1: with
-        // `fixes.fillet_gn_section_generator` a round whose balls fold is refused before the
-        // corners by `BallIsRegular` (`blend::fillet_executive::session::ball_regular`).
+        // WR-685, d01d7b0's 2714d37) is gone since tangency-labs/smlib#79's 410dfe1: a round
+        // whose balls fold is refused before the corners by `BallIsRegular` (`blend::fillet_executive::session::ball_regular`).
         // (a constant round between NURBS faces is its definition, the fork's cc08236)
         let ball = crate::blend::fillet_standard_solver::p2::CircleBall {
             radii,

@@ -117,6 +117,9 @@ struct DimensionDraft {
     /// The first dimension of a sketch scales it rather than distorting it (#1365), unless the
     /// Sketch preference is off (#4109).
     scale_sketch: bool,
+    /// It scales about the sketch origin even for a drawing nothing ties there (the Sketch
+    /// preference, off by default: a free drawing scales about its own middle, #11043).
+    scale_about_origin: bool,
 }
 
 impl DimensionDraft {
@@ -130,7 +133,12 @@ impl DimensionDraft {
     fn params(&self, expr: &str) -> serde_json::Value {
         // The first dimension of a sketch scales it rather than distorting it (#1365), unless the
         // Sketch preference is off (#4109).
-        let mut params = json!({"entities": entities_value(&self.entities), "value": expr, "scale_sketch": self.scale_sketch});
+        let mut params = json!({
+            "entities": entities_value(&self.entities),
+            "value": expr,
+            "scale_sketch": self.scale_sketch,
+            "scale_about_origin": self.scale_about_origin,
+        });
         if let Some(at) = self.at {
             params["text_at"] = json!([at.x, at.y]);
         }
@@ -409,6 +417,7 @@ fn draft_of(app: &SolveApp, sketch: u64, entities: &[String], at: Option<Vec2>, 
         driven,
         half_axes: app.preferences.ellipse_axes,
         scale_sketch: app.preferences.first_dimension_scales,
+        scale_about_origin: app.preferences.first_dimension_scales_about_origin,
     };
     if !draft.preview.sketch(sketch).is_some_and(|solved| solved.report.ok()) {
         return Err("That dimension conflicts with the sketch constraints".into());
@@ -474,6 +483,13 @@ thread_local! {
     /// Value texts of finished sketches' shown dimensions (Show Dimensions), as the model view
     /// drew them last frame: sketch, constraint id, parameter (None: driven), text box.
     static MODEL: RefCell<Vec<ModelDim>> = const { RefCell::new(Vec::new()) };
+    /// The value box of the dimension being placed or typed, as drawn this frame.
+    static DRAFT_TEXT: std::cell::Cell<Option<Rect>> = const { std::cell::Cell::new(None) };
+}
+
+/// Where the value of the dimension being placed or typed was drawn this frame.
+pub(crate) fn draft_text() -> Option<Rect> {
+    DRAFT_TEXT.with(std::cell::Cell::get)
 }
 
 /// A shown dimension of a finished sketch, as drawn in the model view (screen space).
@@ -761,6 +777,7 @@ fn label_marked(k: &ConstraintKind, radius_mark: bool, expr: Option<&str>, drive
 
 /// Draw the active sketch's dimensions and remember where they are for picking.
 pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &Proj) {
+    DRAFT_TEXT.with(|d| d.set(None));
     let mut drawn = Vec::new();
     let editor_draft = EDIT.with(|edit| {
         let mut edit = edit.borrow_mut();
@@ -895,7 +912,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         // Unplaced linear dimensions sit outside the shape they measure.
         let away = first_point(sk, &c.kind).and_then(|p| centres.get(p).copied()).unwrap_or(anchor);
         let reach = dim_reach(sk, &c.kind);
-        let mut text = c.text.or_else(|| default_text(&frame, away, px));
+        let mut text = c.text.or_else(|| default_text(&frame, away, px, half));
         let mut lay = dim_layout_reaching(&frame, text, px, half, reach);
         // #44: a text that would land on an already-drawn dimension's text steps to the next
         // row — across the dimension line for a linear one, out from the centre for the rest —
@@ -906,7 +923,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
                 break;
             }
             let row = (f64::from(size.y) + 2.0) * px;
-            let base = text.unwrap_or_else(|| default_text_offset(&frame, px));
+            let base = text.unwrap_or_else(|| default_text_offset(&frame, px, half));
             text = Some(match frame {
                 DimFrame::Linear { .. } => base + Vec2::new(0.0, row * if base.y < 0.0 { -1.0 } else { 1.0 }),
                 _ => base + base.normalized().unwrap_or(Vec2::X) * row,
@@ -929,6 +946,9 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         }
         let Some(tc) = to(lay.text) else { continue };
         let r = Rect::from_center_size(tc, size);
+        if is_draft {
+            DRAFT_TEXT.with(|d| d.set(Some(r)));
+        }
         placed.push(r);
         painter.rect_filled(r, tk.radius_sm / 2, tk.viewport_top.gamma_multiply(0.85));
         painter.galley(r.min + vec2(3.0, 1.0), galley, col);

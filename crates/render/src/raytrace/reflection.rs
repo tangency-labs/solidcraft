@@ -1,9 +1,9 @@
 //! Original bounded specular sampling. All values are linear-light quantities.
 use super::{Result, TraceError};
 use crate::anisotropic_surface::{AnisotropicSurface, VisualFrame};
-use crate::surface::{OpaqueSurface, unit_direction};
 use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
+use solidcraft_viewport::surface::{OpaqueSurface, unit_direction};
 #[cfg(test)]
 use std::f64::consts::{PI, TAU};
 #[derive(Clone, Copy, Debug)]

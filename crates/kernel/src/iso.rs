@@ -130,13 +130,13 @@ impl<'a> FaceTrims<'a> {
                 let (mut x, mut y) = (ta, tb);
                 for _ in 0..80 {
                     let m = 0.5 * (x + y);
-                    match solidcraft_geom::brep::pcurve::eval(c, m).map(across) {
+                    match solidcore_ops::pcurve::eval(c, m).map(across) {
                         Some(k) if (k < 0.0) == (ka < 0.0) => x = m,
                         Some(_) => y = m,
                         None => break,
                     }
                 }
-                if let Some(t) = solidcraft_geom::brep::pcurve::eval(c, 0.5 * (x + y)).map(along).filter(|t| *t > lo && *t < hi) {
+                if let Some(t) = solidcore_ops::pcurve::eval(c, 0.5 * (x + y)).map(along).filter(|t| *t > lo && *t < hi) {
                     cuts.push(t);
                 }
             }
@@ -261,7 +261,7 @@ fn pcurve_samples(c: &brep::Curve2) -> Vec<(f64, [f64; 2])> {
     (0..=n)
         .filter_map(|i| {
             let t = a + (b - a) * i as f64 / n as f64;
-            solidcraft_geom::brep::pcurve::eval(c, t).map(|q| (t, q))
+            solidcore_ops::pcurve::eval(c, t).map(|q| (t, q))
         })
         .collect()
 }

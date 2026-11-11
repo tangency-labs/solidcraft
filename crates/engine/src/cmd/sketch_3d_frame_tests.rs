@@ -251,7 +251,7 @@ fn wire_frame_cross_owner_sweep_follows_world_path_edit_undo_and_reopen() {
     };
     check(&s, 10.0);
     let saved = s.doc.to_json();
-    run(&mut s, "sketch.edit", json!({"sketch":path_sketch}));
+    run(&mut s, "sketch.edit", json!({"sketch":path_sketch,"restore_marker":false}));
     run(&mut s, "sketch.move3d", json!({"sketch":path_sketch,"wire":wire,"index":1,"by":[0,0,10]}));
     check(&s, 20.0);
     run(&mut s, "edit.undo", json!({}));

@@ -653,7 +653,9 @@ const SM_ERR_INVALID_INPUT: f64 = 1007.0;
 /// callee's `SM_ERR_INVALID_INPUT`.
 fn status_of(e: &SolidError) -> f64 {
     match e {
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        e if solidcore::error::nurbs::upstream_status(e).is_some() => {
+            f64::from(solidcore::error::nurbs::upstream_status(e).unwrap_or(-1))
+        }
         SolidError::InvalidInput { operation, .. } | SolidError::PortInvariant { operation, .. } if *operation == "topology::brep::p1" => {
             NULL_DEREF
         }

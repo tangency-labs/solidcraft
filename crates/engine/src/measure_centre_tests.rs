@@ -75,6 +75,37 @@ fn measure(s: &mut Session, items: Vec<Value>) -> Value {
     run(s, "inspect.measure", json!({ "items": items }))
 }
 
+/// Curves drawn in a 3D sketch measure as a 2D sketch's do (#14051): a line its length, an arc
+/// its radius, angle and arc length. The line (0, 0, 0)–(24, 0, 0) is 24 long, the next one on to
+/// (24, 5, 12) is √(5² + 12²) = 13; the arc runs a quarter turn of radius 5 about (0, 10, 0) in the
+/// plane y = 10, so it is 5 · π/2 long.
+#[test]
+fn curves_drawn_in_a_3d_sketch_measure_like_sketch_curves() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Path"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    let lines = run(&mut s, "sketch.line3d", json!({"points": [[0, 0, 0], [24, 0, 0], [24, 5, 12]]}));
+    let h = std::f64::consts::FRAC_1_SQRT_2 * 5.0;
+    let arc = run(&mut s, "sketch.arc3d", json!({"start": [5, 10, 0], "through": [h, 10, h], "end": [0, 10, 5]}));
+    let sketch = run(&mut s, "sketch.finish", json!({}))["sketch"].as_u64().unwrap_or(1);
+    let wire = |v: &Value, i: usize| v["created"]["wires"][i].as_str().unwrap_or_default().to_string();
+    let curve = |id: &str| json!({"type": "sketch_curve", "id": id, "sketch": sketch});
+    let (first, second, quarter) = (wire(&lines, 0), wire(&lines, 1), wire(&arc, 0));
+
+    // One curve's sizes are its item's.
+    let item = |s: &mut Session, pick: Value| measure(s, vec![pick])["items"][0].clone();
+    let one = item(&mut s, curve(&first));
+    assert!(close(&one["length_mm"], 24.0, 1e-9), "{one}");
+    let two = item(&mut s, curve(&second));
+    assert!(close(&two["length_mm"], 13.0, 1e-9), "{two}");
+    let round = item(&mut s, curve(&quarter));
+    assert!(close(&round["radius"], 5.0, 1e-9) && close(&round["angle_deg"], 90.0, 1e-6), "{round}");
+    assert!(close(&round["arc_length"], 5.0 * PI / 2.0, 1e-6) && close(&round["length_mm"], 5.0 * PI / 2.0, 1e-6), "{round}");
+    // Without a sketch named, the lines are found in the sketch that holds them.
+    let found = item(&mut s, json!({"type": "sketch_curve", "id": first}));
+    assert!(close(&found["length_mm"], 24.0, 1e-9), "{found}");
+}
+
 #[test]
 fn connected_lines_measure_the_corner_regardless_of_endpoint_or_selection_order() {
     // cos(angle) = -3/5: the corner is 126.869898°, not its 53.130102° supplement.
@@ -117,6 +148,38 @@ fn solid_edges_measure_the_obtuse_corner() {
     for items in [vec![a.clone(), b.clone()], vec![b, a]] {
         let r = measure(&mut s, items);
         assert!(close(&r["angle_deg"], (-0.6f64).acos().to_degrees(), 1e-8), "{r}");
+    }
+}
+
+/// A face or edge named by body and index alone measures as it does with a point on it (#14011).
+#[test]
+fn faces_and_edges_measure_by_index_without_a_point() {
+    let mut s = Session::default();
+    plate(&mut s);
+    let strip = |mut v: Value| {
+        v.as_object_mut().unwrap().remove("point");
+        v
+    };
+    let (a, b) = (hole(&s, 3.0), hole(&s, 4.0));
+    let r = measure(&mut s, vec![strip(a.clone()), strip(b.clone())]);
+    assert!(close(&r["center_distance"], 30.0, 1e-9) && close(&r["min"], 23.0, 1e-9), "{r}");
+    assert_eq!(r, measure(&mut s, vec![a, b]));
+    let top = flat(&s, |p| (p.z - 10.0).abs() < 1e-9);
+    let r = measure(&mut s, vec![strip(top.clone())]);
+    assert!(r["items"][0]["planar"] == true && r["items"][0]["area_mm2"].as_f64().is_some_and(|a| a > 2300.0 && a < 2400.0), "{r}");
+    assert_eq!(r, measure(&mut s, vec![top]));
+    let e = edge(&s, |p| p.z.abs() < 1e-9 && p.y.abs() < 1e-9);
+    let r = measure(&mut s, vec![strip(e.clone())]);
+    assert!(close(&r["items"][0]["length_mm"], 60.0, 1e-9), "{r}");
+    assert_eq!(r, measure(&mut s, vec![e]));
+    // Neither a point nor an index, or an index the body doesn't have, is refused, not a panic.
+    let name = body(&s);
+    for bad in [
+        json!({"type": "face", "body": name}),
+        json!({"type": "face", "body": name, "index": 9999}),
+        json!({"type": "edge", "body": name, "index": 9999}),
+    ] {
+        assert!(s.execute("inspect.measure", &json!({"items": [bad]})).is_err(), "{bad}");
     }
 }
 

@@ -212,7 +212,7 @@ work budget - is unchanged.
 
 ## Display tessellation plans (#303, 2026-10-12)
 
-`Body::display_mesh` meshes from a `TessPlan` (`crates/kernel/src/tess`): every edge is
+`Body::display_mesh` meshes from a `TessPlan` (`solidcore/crates/solidcore-tess/src/mesher`): every edge is
 sampled once and both faces use those nodes exactly (watertight by construction); planar
 faces are a constrained Delaunay triangulation of their edge nodes alone; faces bounded by
 their parameter box are structured grids zipped to the edge nodes; other four-cornered faces

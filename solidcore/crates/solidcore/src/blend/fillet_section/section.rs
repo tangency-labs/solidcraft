@@ -17,12 +17,16 @@
 //! the solver's stations by t is the stable `sort_by` with `<`'s order (they differ only
 //! for equal t).
 
-use super::certificate::{arc_rows, gn_certify_span, law_series, GnLaw, GnVarying, NurbsCurve};
+use super::certificate::{
+    arc_rows, gn_certify_span_reusing, law_series, CertifiedLevel, GnLaw, GnVarying, NurbsCurve,
+    SpanReuse,
+};
 use super::definition_box::{definition_enclosable, gn_def_face_of, GnDefs};
 use super::form::{gn_form, gn_form_normalized, hermite_knots, hermite_points_sided};
 use super::series::{Ser, Trunc, VSer};
 use super::station::{
-    gn_solve_station_with, smax, surface_partials, vec3, GnStation, Nurbs, StationOptions,
+    feet_on_knots, gn_solve_station_with, smax, surface_partials, vec3, GnStation, Nurbs,
+    StationOptions,
 };
 use super::tay::{
     acos_clamped, gn_area_sum, gn_half_angle, gn_invert, gn_target, gn_wedge_cos, GnAreaCells,
@@ -1841,6 +1845,49 @@ impl GnSectionFsg {
                 stations = next;
             }
         }
+        // a station given on a knot line of a face (the solver's station where the trace
+        // met the face's edge: the old boundary of a face's extension, which is only G1
+        // there), which no pair of stations straddles, takes its sides as a crossing station
+        // does, and as the definition evaluates it (`sm_FeetOnKnots`): the pieces its feet
+        // move into as s grows for the span after it, solved again where they are not the
+        // pieces a solve without sides took, and the pieces they come from for the span
+        // ending there. Without them both spans took one side's series, and the net left the
+        // definition by the jump in the face's partials across the line (2e-3 along a
+        // twisted wall's side round)
+        let partials = tr.s() + tr.e() + 1;
+        for st in &mut stations {
+            k.check_cancelled(OP_CERTIFY)?;
+            if st.before.iter().any(|&q| q != 0) {
+                continue;
+            }
+            let on = [0, 1, 2, 3].map(|q| param(st, q, 0, 0));
+            let dir = [0, 1, 2, 3].map(|q| param(st, q, 1, 0));
+            let (after, other) = feet_on_knots(k, faces, on, dir, false, partials)?;
+            if after.iter().all(|&q| q == 0) {
+                continue;
+            }
+            let (before, _) = feet_on_knots(k, faces, on, dir, true, partials)?;
+            if other {
+                let tol_on = solve_tol(st.s)?;
+                let law_r = law_series(law, st.s, tr.s(), false)?;
+                *st = solve_top(
+                    k,
+                    faces,
+                    center,
+                    st.s,
+                    on,
+                    r,
+                    side,
+                    tr,
+                    tol_on,
+                    self.order,
+                    Some(after),
+                    false,
+                    law_r.as_ref(),
+                )?;
+            }
+            st.before = before;
+        }
         // the equal area thumbweight at every station, and I's enclosures on a grid over
         // their range (a little wider: the stations put in later lie between these)
         let n = self.order;
@@ -1852,15 +1899,26 @@ impl GnSectionFsg {
         }
         let mut vary = varying(n, r, &stations, equal_area);
         let mut bounds = vec![-1.0_f64; stations.len().saturating_sub(1)];
+        // a span's finest proved level, kept while it is over the target: its halves start
+        // from its pieces (not the fork's, which certifies each half afresh)
+        let mut levels: Vec<Option<Arc<CertifiedLevel>>> = vec![None; bounds.len()];
         loop {
             let mut all = true;
-            for (j, bj) in bounds.iter_mut().enumerate() {
+            // a span's first level tried, where it inherits none (not the fork's, which
+            // tries every level from 0): one coarser than the span before first proved
+            let mut hint = 0_u32;
+            for (j, (bj, lj)) in bounds.iter_mut().zip(levels.iter_mut()).enumerate() {
                 k.check_cancelled(OP_CERTIFY)?;
                 if *bj < 0.0 {
                     let (Some(a), Some(b)) = (stations.get(j), stations.get(j + 1)) else {
                         return Err(SolidError::sm_err(OP));
                     };
-                    *bj = gn_certify_span(
+                    let mut reuse = SpanReuse {
+                        inherit: lj.as_deref(),
+                        start: hint,
+                        ..SpanReuse::default()
+                    };
+                    *bj = gn_certify_span_reusing(
                         k,
                         face_n,
                         &leader,
@@ -1875,7 +1933,16 @@ impl GnSectionFsg {
                         if equal_area { Some(&mut vary) } else { None },
                         law,
                         if any_defs { Some(&mut defs) } else { None },
+                        &mut reuse,
                     )?;
+                    // the next span's first level: one coarser than this one's first proved
+                    hint = reuse.first.map_or(0, |f| f.saturating_sub(1));
+                    let within = *bj <= target;
+                    *lj = if within {
+                        None
+                    } else {
+                        reuse.kept.map(Arc::new)
+                    };
                 }
                 let within = *bj <= target;
                 if !within {
@@ -1891,12 +1958,14 @@ impl GnSectionFsg {
             }
             let mut next: Vec<GnStation> = Vec::new();
             let mut next_bounds: Vec<f64> = Vec::new();
-            for (pair, &bj) in stations.windows(2).zip(&bounds) {
+            let mut next_levels: Vec<Option<Arc<CertifiedLevel>>> = Vec::new();
+            for ((pair, &bj), lj) in stations.windows(2).zip(&bounds).zip(&levels) {
                 k.check_cancelled(OP_CERTIFY)?;
                 let [a, b] = pair else { continue };
                 next.push(*a);
                 if bj <= target {
                     next_bounds.push(bj);
+                    next_levels.push(None);
                     continue;
                 }
                 let mid = 0.5 * (a.s + b.s);
@@ -1931,12 +2000,15 @@ impl GnSectionFsg {
                 next.push(st);
                 next_bounds.push(-1.0);
                 next_bounds.push(-1.0);
+                next_levels.push(lj.clone());
+                next_levels.push(lj.clone());
             }
             if let Some(last) = stations.last() {
                 next.push(*last);
             }
             stations = next;
             bounds = next_bounds;
+            levels = next_levels;
         }
         let mut bound = 0.0_f64;
         for &b in &bounds {

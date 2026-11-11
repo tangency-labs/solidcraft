@@ -14,6 +14,7 @@ use serde_json::Value;
 
 use super::clearance::{Overlap, Unchecked};
 use super::config::NameList;
+use super::motion::{PartPlace, PartRef};
 
 /// The longest `budget_s` a call takes: a day (`MAX_BUDGET_S` in `cmd/interference.rs`).
 const MAX_BUDGET_S: f64 = 86_400.0;
@@ -34,6 +35,10 @@ pub struct InterferenceParams {
     #[serde(default, deserialize_with = "budget_s")]
     #[schemars(schema_with = "budget_s_schema")]
     pub budget_s: Option<f64>,
+    /// Pairs left out, such as a pin in its hole: `[a, b]`, each side a body's world name or an
+    /// occurrence's id or name, matching every body under it. Default: none.
+    #[serde(default)]
+    pub exclude_pairs: Option<Vec<[PartRef; 2]>>,
 }
 
 /// `budget_s`: seconds above 0, at most a day, or `null`, as the handler reads it (with
@@ -72,18 +77,37 @@ pub struct PairTime {
     pub tessellate_ms: f64,
 }
 
+/// A pair that shares volume, and where each body sits in the assembly.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PlacedOverlap {
+    #[serde(flatten)]
+    pub overlap: Overlap,
+    pub a_part: PartPlace,
+    pub b_part: PartPlace,
+}
+
+/// A pair or mesh body not checked, and where each body sits in the assembly.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PlacedUnchecked {
+    #[serde(flatten)]
+    pub unchecked: Unchecked,
+    pub a_part: PartPlace,
+    /// `null` for a mesh body.
+    pub b_part: Option<PartPlace>,
+}
+
 /// What `inspect.interference` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct InterferenceResult {
     /// The pairs that share volume, with the volume, its surface area, its box and its centre.
-    pub interferences: Vec<Overlap>,
+    pub interferences: Vec<PlacedOverlap>,
     /// How many: 0 isn't "no overlap" while `unchecked` lists pairs.
     pub count: usize,
     /// How many solid bodies were checked.
     pub checked: usize,
     /// The pairs that couldn't be checked, with the reason (a boolean that failed, or the time
     /// budget ran out), and each mesh body (`b` is then `null`).
-    pub unchecked: Vec<Unchecked>,
+    pub unchecked: Vec<PlacedUnchecked>,
     /// Whether more than 20000 pairs had overlapping boxes, so `skipped_pairs` were left out.
     pub truncated: bool,
     pub skipped_pairs: usize,
@@ -95,6 +119,8 @@ pub struct InterferenceResult {
     pub pairs_intersected: usize,
     /// The pairs not finished within the time budget.
     pub pairs_not_checked: usize,
+    /// The pairs left out by `exclude_pairs`.
+    pub pairs_excluded: usize,
     /// The time budget, in seconds.
     pub budget_s: f64,
     /// Whether it ran out.

@@ -70,7 +70,7 @@
 //! - **Errors.** `AddSortedSolution` returns `Result` because the solution
 //!   queries it makes can fail (counts past the fixed arrays, calls into
 //!   unported geometry). `FindBestSubdivisionNode`'s `SM_ERR` is
-//!   [`SolidError::Upstream`] with code `1001`.
+//!   [`GeomFailure`](crate::error::geom::GeomFailure) with code `1001`.
 //! - **Recursion bound.** [`GlobalSolve::solve_it`] first checks the trees
 //!   ([`GlobalSolver::check_solve_depth`]): cyclic child links (unbounded
 //!   recursion upstream) or trees whose heights add up to more than
@@ -1362,7 +1362,7 @@ impl<'t, O: SolutionObject> GlobalSolver<'t, O> {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Upstream`] (`SM_ERR`) when no node can be subdivided;
+    /// [`GeomFailure`](crate::error::geom::GeomFailure) (`SM_ERR`) when no node can be subdivided;
     /// [`SolidError::InvalidInput`] for a null tree or node of `branch`, a missing optional vector or a
     /// two-tree ordering applied to a third tree.
     pub fn find_best_subdivision_node(&self, branch: &Branch) -> Result<(usize, bool)> {
@@ -1370,7 +1370,7 @@ impl<'t, O: SolutionObject> GlobalSolver<'t, O> {
         self.check_num_trees(OP)?;
         // check for failure
         let Some(best) = self.find_largest_non_leaf(branch)? else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::geom_failed(OP, "no node can be subdivided"));
         };
 
         if self.operation == SolverOperation::Rayfire {

@@ -59,8 +59,10 @@ fn smos_min(a: f64, b: f64) -> f64 {
 
 /// The `SmStatus` the fork's `SER` returns for a failed callee.
 fn status_of(e: &SolidError) -> i32 {
+    if let Some(code) = e.upstream_status() {
+        return code;
+    }
     match e {
-        SolidError::Upstream { code, .. } => *code,
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => SM_ERR_INVALID_INPUT,
         _ => SM_ERR,
     }

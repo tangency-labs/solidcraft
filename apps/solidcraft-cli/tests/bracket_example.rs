@@ -1,6 +1,7 @@
 //! The bracket example must cut two through holes, rather than successfully cutting empty
 //! space beside the body. Check the shipped script and rebuild its saved design from scratch.
 
+use solidcraft_engine::geom::MeshGeom;
 use std::f64::consts::PI;
 
 use serde_json::Value;

@@ -168,3 +168,50 @@ fn rails_the_loft_cannot_follow_are_refused() {
         other => panic!("{other:?}"),
     }
 }
+
+/// A section on the plane through the origin with axes `x` and `y` (normal x × y), with no curves:
+/// enough for the normals.
+fn facing(x: Vec3, y: Vec3) -> crate::loft_rails::Section {
+    crate::loft_rails::Section { plane: Plane { origin: Vec3::ZERO, x, y }, curves: Vec::new(), numbers: Vec::new() }
+}
+
+/// The sections' oriented normals, with the loft's direction `d(v)` at each section.
+fn normals(sections: &[crate::loft_rails::Section], d: impl Fn(f64) -> Option<Vec3>) -> Vec<Vec3> {
+    let along: Vec<f64> = (0..sections.len()).map(|i| i as f64 / (sections.len() - 1) as f64).collect();
+    crate::loft_rails::section_normals(sections, d, &along)
+}
+
+fn same(a: Vec3, b: Vec3) -> bool {
+    a.dist(b) < 1e-12
+}
+
+/// Section normals for the stations (#12031). A keel on a vertical plane and a sheer on a level
+/// one, at 90°, face along the loft whichever way the keel's sketch faces. Sections within 60°
+/// of each other turn the short way, even where the loft's direction reverses. A first section
+/// that the loft can't decide, because its plane lies along the loft or the loft has no
+/// direction there, takes its facing from the next section that the loft decides.
+#[test]
+fn section_normals_face_along_the_loft_and_turn_the_short_way() {
+    let (x, y, z) = (Vec3::X, Vec3::Y, Vec3::new(0.0, 0.0, 1.0));
+    let up_and_over = |_: f64| Some(Vec3::new(0.1, 0.6, 0.8));
+    let level = facing(x, y);
+    for keel in [facing(x, z), facing(z, x)] {
+        let n = normals(&[keel, level.clone()], up_and_over);
+        assert!(same(n[0], y) && same(n[1], z), "{n:?}");
+    }
+    // Three level sections, the loft rising to the second and falling to the third.
+    let n = normals(&[level.clone(), facing(y, x), level.clone()], |v| Some(if v < 0.4 { z } else { z * -1.0 }));
+    assert!(n.iter().all(|m| same(*m, n[0])), "{n:?}");
+    // A first section along the loft (straight up), then one tilted 20° from level.
+    let (c, s) = (20f64.to_radians().cos(), 20f64.to_radians().sin());
+    let tilted = facing(x, Vec3::new(0.0, c, s));
+    for first in [facing(x, z), facing(z, x)] {
+        let n = normals(&[first, tilted.clone()], |_| Some(z));
+        assert!(n[0].dot(n[1]) > 0.0 && n[1].dot(z) > 0.0, "{n:?}");
+    }
+    // No loft direction at the first section.
+    for first in [facing(x, z), facing(z, x)] {
+        let n = normals(&[first, tilted.clone()], |v| (v > 0.0).then_some(Vec3::new(0.0, 0.6, 0.8)));
+        assert!(n[0].dot(n[1]) > 0.0 && n[1].dot(z) > 0.0, "{n:?}");
+    }
+}

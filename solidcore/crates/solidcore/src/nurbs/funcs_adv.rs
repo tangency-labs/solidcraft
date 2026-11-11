@@ -28,7 +28,7 @@
 //! - The three upstream products are copies of one loop that differ only in the type
 //!   of the second operand and the Bezier product routine; they share one generic
 //!   body here, with the upstream operation order on every value.
-//! - Out-params become return values; errors are [`SolidError::Nlib`] values with the
+//! - Out-params become return values; errors are [`SolidError::Failed`] values (a [`NurbsFailure`] reason) with the
 //!   upstream `NL_*_ERR` number instead of a flag plus the global `NL_ERROR` record.
 //!   The `NL_STACKS` arguments, the routine names and the memory error paths have no
 //!   counterpart.
@@ -45,7 +45,7 @@
 // Index arithmetic follows upstream's signed `NL_INDEX` (`isize` here); every access
 // goes through `nurbs::index::{get, set}`, which reject negative or too-large indices.
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::nurbs::basis_basic::{make_knots_compatible, PTOL};
 use crate::nurbs::bezier::{
     check_short_degree, func_multiply_crv, func_multiply_crv_4d, func_multiply_func, product_matrix,
@@ -67,7 +67,7 @@ impl CurveFunction {
     /// Inserts the knots `x` (non-decreasing, strictly inside the knot range) into the
     /// function (`N_CrvFuncRefine`); the result has `x.len()` more values and knots.
     ///
-    /// Errors: [`NlibCode::Input`] when `x` is empty; [`NlibCode::Parameter`] when
+    /// Errors: [`NurbsFailure::Input`] when `x` is empty; [`NurbsFailure::Parameter`] when
     /// `x[0]` or its last knot is on or outside the ends of the knot vector; the errors
     /// of [`crate::nurbs::knots::KnotVector::find_span`]; `InvalidInput` where upstream
     /// would index outside its arrays.
@@ -85,12 +85,12 @@ impl CurveFunction {
 
         // Check input parameters.
         if r < 0 {
-            return Err(SolidError::nlib(OP, NlibCode::Input));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Input));
         }
         let x0 = get(x, 0, OP)?;
         let xr = get(x, r, OP)?;
         if knt.is_end_param(x0) || knt.is_end_param(xr) {
-            return Err(SolidError::nlib(OP, NlibCode::Parameter));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Parameter));
         }
 
         let mut fq: Vec<f64> = storage(n + r + 1, OP)?;
@@ -155,8 +155,8 @@ impl CurveFunction {
 
     /// The `d`-th derivative function, of degree `p - d` (`N_CrvFuncDeriv`).
     ///
-    /// Errors: [`NlibCode::Input`] unless `d <= p`; [`NlibCode::Derivative`] when a
-    /// knot difference `U[i+p+1] - U[i+k]` is zero; [`NlibCode::Numerical`] when a
+    /// Errors: [`NurbsFailure::Input`] unless `d <= p`; [`NurbsFailure::ZeroDerivative`] when a
+    /// knot difference `U[i+p+1] - U[i+k]` is zero; [`NurbsFailure::Numerical`] when a
     /// quotient `(p-k+1) / (U[i+p+1] - U[i+k])` would overflow or underflow;
     /// `InvalidInput` where upstream would index outside its arrays (`n < d` or knots
     /// that do not match the values).
@@ -170,9 +170,9 @@ impl CurveFunction {
         let p = sx(self.degree(), OP)?;
 
         // Check error.
-        let d = isize::try_from(d).map_err(|_| SolidError::nlib(OP, NlibCode::Input))?;
+        let d = isize::try_from(d).map_err(|_| SolidError::nurbs(OP, NurbsFailure::Input))?;
         if d > p {
-            return Err(SolidError::nlib(OP, NlibCode::Input));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Input));
         }
 
         // Output sizes.
@@ -193,10 +193,10 @@ impl CurveFunction {
                 let hi = get(u, i + p + 1, OP)?;
                 let lo = get(u, i + k, OP)?;
                 if hi == lo {
-                    return Err(SolidError::nlib(OP, NlibCode::Derivative));
+                    return Err(SolidError::nurbs(OP, NurbsFailure::ZeroDerivative));
                 }
                 if float_op_is_bad(pf - kf + 1.0, hi - lo, FloatOp::Division) {
-                    return Err(SolidError::nlib(OP, NlibCode::Numerical));
+                    return Err(SolidError::nurbs(OP, NurbsFailure::Numerical));
                 }
                 let alf = (pf - kf + 1.0) / (hi - lo);
                 let t = alf * (get(&ft, i + 1, OP)? - get(&ft, i, OP)?);
@@ -339,14 +339,14 @@ fn multiply<G: Operand>(
     // A sum past `isize::MAX` exceeds `NL_MAXDEG` too.
     let pq = match p.checked_add(q) {
         Some(pq) if pq <= sx(MAX_DEGREE, op)? => pq,
-        _ => return Err(SolidError::nlib(op, NlibCode::Degree)),
+        _ => return Err(SolidError::nurbs(op, NurbsFailure::Degree)),
     };
     let pqu = ux(pq, op)?;
 
     // Handle special case p=0 or q=0.
     if p == 0 || q == 0 {
         if sx(fun.n(), op)? != p || sx(opg.n(), op)? != q {
-            return Err(SolidError::nlib(op, NlibCode::Input));
+            return Err(SolidError::nurbs(op, NurbsFailure::Input));
         }
         let mut h: Vec<G::C> = storage(pq, op)?;
         let mut t: Vec<f64> = storage(pq + pq + 1, op)?;
@@ -410,7 +410,7 @@ fn multiply<G: Operand>(
     let nss = gop.span_count()?;
 
     if nsr != nss {
-        return Err(SolidError::nlib(op, NlibCode::Knot));
+        return Err(SolidError::nurbs(op, NurbsFailure::Knots));
     }
 
     // See if memory is needed.
@@ -477,7 +477,7 @@ fn multiply<G: Operand>(
 
         // Check multiplicities of internal knots.
         if br < mr && bs < ms && (mlr > p || mls > q) {
-            return Err(SolidError::nlib(op, NlibCode::Knot));
+            return Err(SolidError::nurbs(op, NurbsFailure::Knots));
         }
 
         // Adjust multiplicities and compute multiplicity of output knot.
@@ -674,8 +674,8 @@ impl CurveFunction {
     /// otherwise). When either degree is zero, both operands must be single Bezier
     /// segments (`n == p`); the result then takes the knots of the other operand.
     ///
-    /// Errors: [`NlibCode::Degree`] when `p + q > MAX_DEGREE`; [`NlibCode::Input`] for
-    /// a zero degree with more than one segment; [`NlibCode::Knot`] when the refined
+    /// Errors: [`NurbsFailure::Degree`] when `p + q > MAX_DEGREE`; [`NurbsFailure::Input`] for
+    /// a zero degree with more than one segment; [`NurbsFailure::Knots`] when the refined
     /// knot vectors have different span counts or an interior knot multiplicity above
     /// the degree; the errors of [`CurveFunction::refine`], `make_knots_compatible`
     /// and the Bezier product; `InvalidInput` where upstream would index outside its
@@ -742,17 +742,11 @@ mod tests {
         let f = cfn(&[1.0, 2.0, 3.0], 2, &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]);
         assert!(matches!(
             f.refine(&[]),
-            Err(SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
         assert!(matches!(
             f.refine(&[0.0, 0.5]),
-            Err(SolidError::Nlib {
-                code: NlibCode::Parameter,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Parameter))
         ));
     }
 
@@ -775,10 +769,7 @@ mod tests {
         }
         assert!(matches!(
             f.deriv(4),
-            Err(SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
         assert_eq!(f.deriv(0).unwrap(), f);
     }
@@ -830,10 +821,7 @@ mod tests {
         let mut f2 = cfn(&[2.0, 3.0], 0, &[0.0, 0.5, 1.0]);
         assert!(matches!(
             f2.multiply_func(&mut g),
-            Err(SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
     }
 
@@ -844,10 +832,7 @@ mod tests {
         let mut g = f.clone();
         assert!(matches!(
             f.multiply_func(&mut g),
-            Err(SolidError::Nlib {
-                code: NlibCode::Degree,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Degree))
         ));
     }
 
@@ -890,10 +875,7 @@ mod tests {
             assert!(
                 matches!(
                     r,
-                    Err(SolidError::Nlib {
-                        code: NlibCode::Degree,
-                        ..
-                    })
+                    Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Degree))
                 ),
                 "{r:?}"
             );
@@ -901,10 +883,7 @@ mod tests {
             assert!(
                 matches!(
                     r,
-                    Err(SolidError::Nlib {
-                        code: NlibCode::Degree,
-                        ..
-                    })
+                    Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Degree))
                 ),
                 "{r:?}"
             );

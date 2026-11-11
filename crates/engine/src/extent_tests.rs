@@ -234,3 +234,27 @@ fn cut_to_the_far_side_of_a_curved_wall() {
     assert!((removed - want).abs() < want * 2e-2, "removed {removed}, want {want}");
     assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
 }
+
+/// #13188: a stored taper of 0 is a straight extrusion, also for a profile with a hole.
+#[test]
+fn extrude_with_a_taper_of_zero_on_a_profile_with_a_hole_is_straight() {
+    let volume = |taper: Option<&str>| {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+        run(&mut s, "sketch.circle.center", json!({"center": [20, 15], "radius": 5}));
+        run(&mut s, "sketch.finish", json!({}));
+        let mut p = json!({"distance": 10, "body_name": "Plate"});
+        if let Some(t) = taper {
+            p["taper"] = json!(t);
+        }
+        run(&mut s, "solid.extrude", p);
+        body(&mut s, "Plate")["volume_mm3"].as_f64().unwrap()
+    };
+    let plain = volume(None);
+    // Rectangle less the hole, 10 mm tall; the circle is faceted, so within a thousandth.
+    let expected = (40.0 * 30.0 - PI * 25.0) * 10.0;
+    assert!((plain - expected).abs() / expected < 1e-3, "{plain} vs {expected}");
+    let zero = volume(Some("0 deg"));
+    assert!((zero - plain).abs() < 1e-6 * plain, "taper 0 gives {zero}, none gives {plain}");
+}

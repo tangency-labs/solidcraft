@@ -44,7 +44,8 @@
 //!   dereferences a null pointer (a face without surface or face use, an edge use
 //!   without edge, vertex use or UV trim curve, an empty array's `GetLast`) the port
 //!   returns [`SolidError::InvalidInput`]. `SER` / `NER` returns are
-//!   [`SolidError::Upstream`] (`SM_ERR`) or the callee's error.
+//!   topology failures ([`crate::error::topology::TopologyFailure`], status `SM_ERR` or
+//!   `SM_ERR_NULL_POINTER`) or the callee's error.
 //! - **`sm_CheckSeamCrossing`** returns `SM_SUCCESS` (`1000`, true as an
 //!   `SmBoolean`) for a surface closed in neither direction; [`check_seam_crossing`]
 //!   returns `true` there by default (`plan/upstream-issues.md`), and `false` with
@@ -1565,12 +1566,15 @@ fn internal_point<B: QueryBrep>(k: &Kernel, b: B, f: FaceId) -> Result<Point3> {
 
     // no work - no surface
     let Some(surf) = face.surface.as_ref() else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(OP, "the face has no surface"));
     };
 
     // no work - Bspline surface with no owner
     if surf.owner().is_none() {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "the face's surface has no owner",
+        ));
     }
 
     let mut classification: CurveClassification<UvLineHandle> = CurveClassification::new(k);
@@ -1622,7 +1626,7 @@ fn internal_point<B: QueryBrep>(k: &Kernel, b: B, f: FaceId) -> Result<Point3> {
                     // pSurface: the face's surface, read after the classification's
                     // edits (it stays the same surface)
                     let Some(surf) = uv_objects.brep().face(f)?.surface.as_ref() else {
-                        return Err(SolidError::sm_err(OP));
+                        return Err(SolidError::topology_failed(OP, "the face has no surface"));
                     };
                     let Ok(p) = surf.evaluate_point(k, Point2::new(uv3.x, uv3.y)) else {
                         continue;
@@ -1634,7 +1638,10 @@ fn internal_point<B: QueryBrep>(k: &Kernel, b: B, f: FaceId) -> Result<Point3> {
     }
 
     // arrive here when no curve classify to face
-    Err(SolidError::sm_err(OP))
+    Err(SolidError::topology_failed(
+        OP,
+        "no line interval classifies into the face",
+    ))
 }
 
 /// The result of [`points_in_face`].
@@ -1693,7 +1700,10 @@ pub fn points_in_face(
     let mut u_inc = u_interval.length();
     let mut v_inc = v_interval.length();
     if u_inc <= EFF_ZERO || v_inc <= EFF_ZERO {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "the face's UV domain is degenerate",
+        ));
     }
     if point_count == 0 {
         return Ok(out);
@@ -1774,7 +1784,9 @@ pub fn points_in_face(
             Point3::new(uv_start.x, uv_start.y, 0.0),
             Point3::new(uv_end.x, uv_end.y, 0.0),
         )
-        .map_err(|_| SolidError::sm_err(OP))?;
+        .map_err(|_| {
+            SolidError::topology_failed(OP, "the iso-parameter UV line could not be made")
+        })?;
 
         // for all u values of interest - see if any map to inside the face
         let mut classes: Vec<(f64, Vec<CurveInterval<ClassHandle>>, Curve)> = Vec::new();
@@ -1813,7 +1825,10 @@ pub fn points_in_face(
 
         // if we failed to find any U Params inside the face quit
         if classes.is_empty() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(
+                OP,
+                "no iso-parameter line crosses the face",
+            ));
         }
 
         // number of points to sample from each iso curve
@@ -2434,7 +2449,10 @@ pub fn trim_curve_breaks(k: &Kernel, uv_curve: &Curve, surface: &Surface) -> Res
     let ivl = uv_curve.natural_interval();
     let (knots, _) = uv_curve.knots(k, Some(&ivl))?;
     if knots.len() < 2 {
-        return Err(SolidError::sm_err("topology::face::trim_curve_breaks"));
+        return Err(SolidError::topology_failed(
+            "topology::face::trim_curve_breaks",
+            "the trim curve has fewer than two knots",
+        ));
     }
     let req = crate::nurbs::b_spline_curve::p2::BoundingBoxRequest {
         normal: true,
@@ -2782,7 +2800,11 @@ pub fn create_curves_from_face(
 ) -> Result<FaceCurves> {
     // check state
     if !want_3d && !want_uv {
-        return Err(SolidError::sm_err(OP)); // Need one or the other
+        // Need one or the other
+        return Err(SolidError::topology_failed(
+            OP,
+            "neither 3D nor UV curves are asked for",
+        ));
     }
 
     // init outputs
@@ -2863,7 +2885,10 @@ pub fn create_curves_from_face(
                 let copy = uv_curve.copy(k)?;
                 // NER(SM_CAST_PTR(SmBSplineCurve, pNewUV))
                 if bspline_slice(&copy).is_none() {
-                    return Err(SolidError::null_pointer(OP));
+                    return Err(SolidError::topology_missing(
+                        OP,
+                        "the B-spline form of the UV trim curve's copy",
+                    ));
                 }
                 if let Some(list) = out.uv_curves.as_mut() {
                     list.push(copy);
@@ -3901,15 +3926,19 @@ mod tests {
         let s = b.add_shell().unwrap();
         let f = b.add_face(s).unwrap();
         let k = Kernel::default();
-        assert!(matches!(
-            calculate_an_internal_point(&k, &mut b, f),
-            Err(SolidError::Upstream { .. })
-        ));
+        assert_eq!(
+            calculate_an_internal_point(&k, &mut b, f)
+                .err()
+                .and_then(|e| e.upstream_status()),
+            Some(crate::error::SM_ERR)
+        );
         b.face_mut(f).unwrap().surface = Some(plane());
-        assert!(matches!(
-            calculate_an_internal_point(&k, &mut b, f),
-            Err(SolidError::Upstream { .. })
-        ));
+        assert_eq!(
+            calculate_an_internal_point(&k, &mut b, f)
+                .err()
+                .and_then(|e| e.upstream_status()),
+            Some(crate::error::SM_ERR)
+        );
         b.face_mut(f)
             .unwrap()
             .surface
@@ -3926,10 +3955,12 @@ mod tests {
         // ignored; the trimmed cache of a face domain no edge use grew cannot be built,
         // and the classification falls back to the plain cache, as upstream's
         // smsurf_GetSurfaceCache does), so the final SM_ERR
-        assert!(matches!(
-            calculate_an_internal_point(&k, &mut b, f),
-            Err(SolidError::Upstream { .. })
-        ));
+        assert_eq!(
+            calculate_an_internal_point(&k, &mut b, f)
+                .err()
+                .and_then(|e| e.upstream_status()),
+            Some(crate::error::SM_ERR)
+        );
     }
 
     #[test]
@@ -3963,10 +3994,11 @@ mod tests {
         );
         let uv = [Some(line)];
         // a face without loops: CurveOnClassify's status
-        assert!(matches!(
-            create_curves_by_trimming(&k, &mut b, f, Some(1.0), None, Some(&uv), false, true),
-            Err(SolidError::Upstream { .. })
-        ));
+        let r = create_curves_by_trimming(&k, &mut b, f, Some(1.0), None, Some(&uv), false, true);
+        assert!(
+            matches!(&r, Err(e) if e.upstream_status().is_some()),
+            "{r:?}"
+        );
         assert!(create_curves_by_trimming(&k, &mut b, f, None, None, None, true, false).is_err());
     }
 

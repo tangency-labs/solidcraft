@@ -318,6 +318,22 @@ fn grid_small_sphere_thin_box_union_is_sound() {
     check(identity(&a, &b));
 }
 
+/// A sphere and a box apart from each other: moved 1e5 mm away, their union is refused ("a NURBS
+/// form that is not its analytic surface"), where at the origin it is the two solids.
+#[test]
+#[ignore = "kernel bug, solidcore#3131"]
+fn disjoint_sphere_box_union_moved_far() {
+    let a = Prim::Sph { at: [0.0, 0.0, 10.0], r: 2.5 }.body();
+    let b = Prim::Box { at: [0.0, 0.0, 0.0], size: [5.0, 5.0, 5.0] }.body();
+    let t = Vec3::new(1.0e5, -1.0e5 * 0.7, 1.0e5 * 0.3);
+    let mv = |x: &Body| transform(x, t, Vec3::ZERO, Vec3::Z, 0.0).expect("translate");
+    let (va, vb) = (vol(&a), vol(&b));
+    let here = run(&a, &b, BoolOp::Union).unwrap();
+    assert!(close(here, va + vb, va + vb), "{here}");
+    let there = run(&mv(&a), &mv(&b), BoolOp::Union).unwrap();
+    assert!(close(there, here, va + vb), "{there} moved, {here} at the origin");
+}
+
 /// Two crossing cylinders: the union moved 1000 mm away loses about a tenth of its volume.
 #[test]
 #[ignore = "kernel bug, #1649"]

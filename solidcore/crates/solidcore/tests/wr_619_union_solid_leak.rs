@@ -78,11 +78,16 @@ fn wr_619_union_with_the_fix_is_refused() {
     k.fixes.boolean_union_refuses_solid_leak = true;
     let (a, b) = operands(&mut k);
     match boolean_union(&mut k, a, b) {
-        Err(SolidError::Upstream {
-            code,
-            entity: Some(EntityRef::Face(_)),
-            ..
-        }) => assert_eq!(code, SM_ERR),
+        Err(e @ SolidError::Failed(_)) => {
+            assert!(matches!(e.entity(), Some(EntityRef::Face(_))), "{e:?}");
+            assert_eq!(e.sm_status(), Some(SM_ERR));
+            assert_eq!(e.kind(), solidcore::error::ErrorKind::Failed);
+            assert!(
+                e.to_string().contains("the union would delete face")
+                    && !e.to_string().contains("SM_ERR"),
+                "{e}"
+            );
+        }
         other => panic!("refused with SM_ERR at a face, got {other:?}"),
     }
 }

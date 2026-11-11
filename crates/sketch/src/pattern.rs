@@ -387,7 +387,7 @@ impl Sketch {
     }
 
     pub fn validate_patterns(&self) -> Result<(), SketchError> {
-        if self.patterns.len() > crate::MAX_CONSTRAINTS {
+        if self.patterns.len() > crate::CEILING_CONSTRAINTS {
             return Err(SketchError::TooLarge);
         }
         let mut ids = std::collections::BTreeSet::new();
@@ -410,7 +410,7 @@ impl Sketch {
                 || pattern.id.len() > 512
                 || !ids.insert(&pattern.id)
                 || pattern.entities.is_empty()
-                || pattern.entities.len() > crate::MAX_CURVES + crate::MAX_POINTS
+                || pattern.entities.len() > crate::CEILING_CURVES + crate::CEILING_POINTS
                 || pattern.instances.len() >= 500
             {
                 return Err(SketchError::Invalid("invalid sketch pattern".into()));
@@ -454,9 +454,9 @@ impl Sketch {
                     || j >= n2
                     || (i == 0 && j == 0)
                     || !slots.insert(instance.index)
-                    || instance.points.len() > crate::MAX_POINTS
-                    || instance.curves.len() > crate::MAX_CURVES
-                    || instance.constraints.len() > crate::MAX_CONSTRAINTS
+                    || instance.points.len() > crate::CEILING_POINTS
+                    || instance.curves.len() > crate::CEILING_CURVES
+                    || instance.constraints.len() > crate::CEILING_CONSTRAINTS
                     || instance.curves.iter().any(|id| !valid_id(id) || self.curve_index(id).is_none())
                     || instance
                         .points
@@ -529,7 +529,7 @@ fn involved_points(sk: &Sketch, cs: &[usize], ps: &[usize]) -> Vec<usize> {
 
 /// Copy seed curves and their points, returning curves and the original-to-copy point map.
 fn copy_through(sk: &mut Sketch, cs: &[usize], ps: &[usize], f: &dyn Fn(Vec2) -> Vec2) -> Result<(Vec<usize>, Vec<(usize, usize)>), SketchError> {
-    if sk.curves.len().saturating_add(cs.len()) > crate::MAX_CURVES {
+    if sk.curves.len().saturating_add(cs.len()) > crate::limits::max_curves() {
         return Err(crate::SketchError::TooLarge);
     }
     let pts = involved_points(sk, cs, ps);

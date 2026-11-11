@@ -838,3 +838,62 @@ fn a_body_goes_to_the_record_and_back_in_record_order() {
         Err(Error::Record(_))
     ));
 }
+
+/// A record's structure is checked before the kernel sees it: a use's interval outside its
+/// curve's range, a coordinate that is not a number, a circle of no radius, are refused as
+/// invalid records (the kernel's pcurve takes converted, checked values).
+#[test]
+fn pcurves_of_malformed_records_are_refused_as_invalid() {
+    use crate::pcurve::{pcurves, EdgeUse, Error};
+    use solidcore_record::brep::{Curve, Frame, Surface};
+    let plane = Surface::Plane {
+        origin: [0.; 3],
+        u_axis: [1., 0., 0.],
+        v_axis: [0., 1., 0.],
+    };
+    let line = Curve::Line {
+        start: [0.; 3],
+        end: [1., 0., 0.],
+    };
+    let one = |curve: &Curve, interval: [f64; 2]| {
+        let c = curve.clone();
+        pcurves(
+            &plane,
+            &[vec![EdgeUse {
+                edge: 0,
+                curve: &c,
+                interval,
+                forward: true,
+                tolerance: 0.0,
+                given: None,
+            }]],
+            1e-6,
+        )
+    };
+    for interval in [
+        [1., 1.],
+        [2., 1.],
+        [f64::NAN, 1.],
+        [0., f64::INFINITY],
+        [0., 1e13],
+    ] {
+        assert!(
+            matches!(one(&line, interval), Err(Error::Invalid(_))),
+            "{interval:?}"
+        );
+    }
+    let nan = Curve::Line {
+        start: [f64::NAN, 0., 0.],
+        end: [1., 0., 0.],
+    };
+    assert!(matches!(one(&nan, [0., 1.]), Err(Error::Invalid(_))));
+    let frame = Frame {
+        origin: [0.; 3],
+        x_axis: [1., 0., 0.],
+        y_axis: [0., 1., 0.],
+    };
+    let collapsed = Curve::Circle { frame, radius: 0. };
+    assert!(matches!(one(&collapsed, [0., 1.]), Err(Error::Invalid(_))));
+    // And a well-formed one still gets its pcurve.
+    assert!(one(&line, [0., 1.]).is_ok());
+}

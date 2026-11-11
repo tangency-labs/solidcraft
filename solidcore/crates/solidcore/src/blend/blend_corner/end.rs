@@ -20,6 +20,7 @@
 //! | [`fit_of_end_past_side_edges`]    | `SmBlendCorner::FitOfEndPastSideEdges`    |
 //! | [`create_end_cap_patch`]          | `SmBlendCorner::CreateEndPatchOfEnd`'s `SM_BEND_AT_SMOOTH` branch |
 //! | [`end_awaits_rollover`], [`end_can_await_rollover`], [`end_past_tangent_edge`], `end_rolls_over`, `ends_in_tangent_edge` (private) | none (#2406: the End's rail rolls over a tangent edge first) |
+//! | [`side_edgeuse_across_rolled_edge`] | none (solidcore-native tangent rollover: a rail rolled over a tangent edge the whole length ends on the next side edge) |
 //! | [`place_rolled_rail_end`]         | none (#2406: a rail end not reached on the End's plane before the rollover) |
 //! | `side_edge_in_cap` (private)      | none (#2406: a cap edge along a side edge in the cap's plane) |
 //! | [`EndEdges`], `end_face_runs_on_past_side_edge`, `rail_face` (private) | none: an end face running on tangentially past the side edge is the global merge's, not refused |
@@ -735,6 +736,78 @@ pub fn side_edgeuse_across_seam_vertex(
         ang_tol_deg,
     )?;
     Ok(g1.then_some(next))
+}
+
+/// Not the fork's (solidcore-native, [`crate::blend::fillet_tangent_rollover`]): the side edge of `eu` continued across
+/// its end `at` where a smooth (tangent) edge T leaves it: `eu`'s edge E lies between a face F
+/// and the end face P, T between F and a face X it meets tangentially, and the third edge N at
+/// `at` between X and P. A rail rolled over T onto X the whole length ends on N, not on F's
+/// side edge, as a rail continues across a seam's vertex ([`side_edgeuse_across_seam_vertex`]).
+/// Given `rolled`, X must be that face. Returns N's edge use on P (the face E and N share).
+/// `None` otherwise, and for a closed edge or an `at` that is not E's end.
+///
+/// # Errors
+/// Those of the topology walks and the tangency test.
+pub fn side_edgeuse_across_rolled_edge(
+    k: &Kernel,
+    target: &mut Brep,
+    eu: EdgeuseId,
+    at: VertexId,
+    rolled: Option<FaceId>,
+    tangency_tol_rad: f64,
+) -> Result<Option<EdgeuseId>> {
+    let Some(e) = eu1::edge(target, eu)? else {
+        return Ok(None);
+    };
+    if edge::is_closed(target, e)?
+        || (edge::start_vertex(target, e)? != Some(at) && edge::end_vertex(target, e)? != Some(at))
+    {
+        return Ok(None);
+    }
+    let e_faces = edge::faces(target, e, None)?;
+    let edges = vertex::edges(target, at, None)?;
+    if edges.len() != 3 || e_faces.len() != 2 {
+        return Ok(None);
+    }
+    let others: Vec<EdgeId> = edges.iter().copied().filter(|&x| x != e).collect();
+    let [a, b] = <[EdgeId; 2]>::try_from(others).map_err(|_| nul())?;
+    for (t, n) in [(a, b), (b, a)] {
+        let t_faces = edge::faces(target, t, None)?;
+        let n_faces = edge::faces(target, n, None)?;
+        // T: F (a face of E) and X; N: X and P (E's other face)
+        let Some(&f) = t_faces.iter().find(|f| e_faces.contains(f)) else {
+            continue;
+        };
+        let Some(&x) = t_faces.iter().find(|&&g| g != f) else {
+            continue;
+        };
+        let Some(&p) = e_faces.iter().find(|&&g| g != f) else {
+            continue;
+        };
+        if !n_faces.contains(&x)
+            || !n_faces.contains(&p)
+            || x == p
+            || rolled.is_some_and(|r| r != x)
+            || edge::is_closed(target, n)?
+        {
+            continue;
+        }
+        let (tangent, _) = crate::blend::fillet_solver::p1::test_manifold_tangent_rollover(
+            k,
+            target,
+            t,
+            tangency_tol_rad,
+        )?;
+        if !tangent {
+            continue;
+        }
+        for y in edge::edgeuses(target, n, None, None)? {
+            if eu1::face(target, y)? == Some(p) {
+                return Ok(Some(y));
+            }
+        }
+    }
+    Ok(None)
 }
 
 /// The fork's `SmBlendCorner::SideEdgeChainTo` (63c7962): the side edge at the corner's

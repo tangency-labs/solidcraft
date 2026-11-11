@@ -193,7 +193,7 @@ pub fn prepare_cancellable(b: &Brep, opts: &Options, cancel: &dyn Fn() -> bool) 
     if !(1..=MAX_TRIM_SAMPLES).contains(&opts.trim_samples) {
         return Err(HlrError::Invalid("trim samples"));
     }
-    crate::brep::check::validate(b).map_err(|_| HlrError::Invalid("portable B-rep"))?;
+    solidcore_ops::record_check::validate(b).map_err(|_| HlrError::Invalid("portable B-rep"))?;
     // Work on the body moved to its own centre: rounding in ray and inversion formulas grows
     // with the coordinates, and a part may be modelled far from the origin (W05a finding 7).
     let offset = anchor(b);

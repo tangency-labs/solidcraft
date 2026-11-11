@@ -7,13 +7,13 @@
 use serde_json::json;
 use solidcore_record::Vec3;
 use solidcraft_engine::Session;
-use solidcraft_engine::render::{Camera, Rgb, Scene, SceneLine};
 use solidcraft_engine::view::{self, Guides, colors};
-use solidcraft_gpu::GpuError;
-use solidcraft_gpu::capture::{self, Capturer};
+use solidcraft_viewport::{Camera, Rgb, Scene, SceneLine};
+use solidcraft_viewport_gpu::GpuError;
+use solidcraft_viewport_gpu::capture::{self, Capturer};
 
 fn capturer() -> Option<&'static Capturer> {
-    match capture::shared() {
+    match solidcraft_viewport_gpu::capture::shared(solidcraft_gpu::env::policy().unwrap_or_else(|e| panic!("{e}"))) {
         Ok(c) => {
             eprintln!("GPU: {} ({}x MSAA)", c.adapter_name(), c.samples());
             Some(c)
@@ -63,7 +63,7 @@ fn opengl_viewport_pipelines_render_a_model() {
     assert_eq!(adapter.get_info().backend, wgpu::Backend::Gl);
     eprintln!("OpenGL regression: {:?}", adapter.get_info());
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        required_features: solidcraft_gpu::depth_features(&adapter),
+        required_features: solidcraft_viewport_gpu::depth_features(&adapter),
         required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
         ..Default::default()
     }))
@@ -353,7 +353,7 @@ fn colors_of(c: [[f32; 3]; 2]) -> [[u8; 3]; 2] {
 #[test]
 fn an_empty_picture_is_the_background() {
     let Some(c) = capturer() else { return };
-    let sc = solidcraft_engine::render::Scene { background: Some((colors::BG_TOP, colors::BG_BOTTOM)), ..Default::default() };
+    let sc = solidcraft_viewport::Scene { background: Some((colors::BG_TOP, colors::BG_BOTTOM)), ..Default::default() };
     let img = c.rgba(&sc, &Camera::default(), 64, 64).unwrap();
     let at = |row: usize| pixels(&img).nth(row * 64 + 32).unwrap_or_default();
     let near = |p: [u8; 4], c: Rgb| [p[0], p[1], p[2]].iter().zip([c.0, c.1, c.2]).all(|(a, b)| a.abs_diff(b) <= 3);
@@ -364,7 +364,7 @@ fn an_empty_picture_is_the_background() {
 #[test]
 fn bad_picture_sizes_are_errors() {
     let Some(c) = capturer() else { return };
-    let sc = solidcraft_engine::render::Scene::default();
+    let sc = solidcraft_viewport::Scene::default();
     for (w, h) in [(0, 10), (10, 0), (capture::MAX_SIDE + 1, 10), (u32::MAX, u32::MAX)] {
         assert!(c.rgba(&sc, &Camera::default(), w, h).is_err(), "{w} x {h}");
     }
@@ -382,20 +382,20 @@ fn bad_picture_sizes_are_errors() {
 #[test]
 fn pictures_read_back_while_another_thread_uses_the_device() {
     use std::sync::atomic::{AtomicBool, Ordering};
-    let policy = solidcraft_gpu::select::Policy::from_env().unwrap();
-    let Some((adapter, _)) = solidcraft_gpu::select::pick(policy) else {
+    let policy = solidcraft_gpu::env::policy().unwrap();
+    let Some((adapter, _)) = solidcraft_viewport_gpu::select::pick(policy) else {
         assert!(std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "no GPU adapter under the {} policy", policy.name());
         eprintln!("skipping: no GPU adapter under the {} policy", policy.name());
         return;
     };
     let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        required_features: solidcraft_gpu::depth_features(&adapter),
+        required_features: solidcraft_viewport_gpu::depth_features(&adapter),
         required_limits: wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits()),
         ..Default::default()
     }))
     .unwrap();
     let c = Capturer::new(&adapter, device.clone(), queue).unwrap();
-    let sc = solidcraft_engine::render::Scene::default();
+    let sc = solidcraft_viewport::Scene::default();
     const PICTURES: usize = 2000;
     let done = AtomicBool::new(false);
     let failed: Vec<String> = std::thread::scope(|t| {

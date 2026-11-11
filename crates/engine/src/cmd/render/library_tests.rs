@@ -645,7 +645,7 @@ fn cpu_saved_surface_binding_is_offline_undoable_portable_and_preserves_geometry
     s.execute("solid.box", &json!({"length":10,"width":20,"height":5,"body_name":"Coupon"})).unwrap();
     let before = s.doc.clone();
     let undo = s.undo.len();
-    let camera = solidcraft_render::Camera::default();
+    let camera = solidcraft_viewport::Camera::default();
     let set = json!({"camera":camera,"width":8,"height":8,"job":{"method":"cpu_raytrace","options":{"progressive":{"samples_per_pixel":3,"seed":9},"output":{"linear_exr":true}}}});
     let input = json!({"name":"CPU maps","set":set,"surface":{"id":"SURF-001","body_index":0,"body_name":"Coupon"}});
     assert!(s.render_job_host().is_none());

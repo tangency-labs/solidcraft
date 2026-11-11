@@ -129,7 +129,7 @@ pub struct NormalToParams {
 pub struct CameraReply {
     /// The camera now.
     #[schemars(with = "CameraParam")]
-    pub camera: solidcraft_render::Camera,
+    pub camera: solidcraft_viewport::Camera,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -771,7 +771,7 @@ fn navigate_form(p: &serde_json::Map<String, Value>) -> Result<NavigateParams, s
 pub struct NavigateResult {
     /// The camera now.
     #[schemars(with = "CameraParam")]
-    pub camera: solidcraft_render::Camera,
+    pub camera: solidcraft_viewport::Camera,
     /// Frame the whole model from the new direction.
     pub fit: bool,
     /// True for a `motion`; absent for a turn.

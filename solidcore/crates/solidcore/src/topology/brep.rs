@@ -64,28 +64,33 @@ pub use p8::{
 };
 pub use p9::{make_vertex_loop, orient_sheet_surfaces};
 
-/// The relative accuracy [`is_outward_solid`] measures the volume's sign at: the sign of a
-/// solid's volume is its whole volume away from zero.
-const SIGN_ACCURACY: f64 = 1e-3;
-
 /// Whether `b` is a valid closed solid facing out (not upstream): one closed manifold solid
 /// ([`is_manifold_solid`]), passed by the kernel's validity check (its pointer check and
-/// `AssertValid`, [`validation::check_brep`] at `Level0`), and its integrated volume positive.
+/// `AssertValid`, [`validation::check_brep`] at `Level0`), and its volume proved positive by
+/// its certified enclosure ([`crate::mass::enclosure::volume_sign`]; an undecided sign is
+/// not).
 ///
 /// The two guard the faceuse orientation together. A body with every face flipped
 /// (`FlipFaceOrientation`, which leaves a face invalid) is still manifold and keeps a
 /// positive volume (the integrator reads the loops and surfaces, not the uses' orientation):
 /// the pointer check is what refuses it. A valid body turned inside out (its loops and
-/// surfaces reversed with its uses) has a negative volume. The sign's margin is the whole
-/// volume, so it is measured at a relative accuracy of `1e-3`.
+/// surfaces reversed with its uses) has a negative volume.
+///
+/// A sign the enclosure leaves undecided (its interval still holds 0 when refinement ends:
+/// a gap between faces as large as the volume, or the cell budget spent) is "not a solid" on
+/// purpose: a solid is what is proved one, so ops' `finish` refuses the body as `NotSolid`.
+/// A body the enclosure cannot read at all is an error, not `false`: a face with no NURBS form
+/// (an offset surface, as the offset of a round keeps; a curve-bounded or in-volume surface),
+/// a face without trim loops, or weights not proved positive.
 ///
 /// A region the kernel is unsure of is [`crate::SolidError::UnsureRegion`], not "not a solid":
 /// the volume's sign would read it as void.
 ///
 /// # Errors
 ///
-/// Those of the manifold test, the validity check and the volume;
-/// [`crate::SolidError::UnsureRegion`].
+/// Those of the manifold test, the validity check and the volume
+/// ([`crate::mass::enclosure::volume_sign`]: [`crate::SolidError::Unsupported`] for a body
+/// it cannot read); [`crate::SolidError::UnsureRegion`].
 pub fn is_outward_solid(
     k: &mut crate::kernel::Kernel,
     b: &mut crate::topology::Brep,
@@ -123,9 +128,10 @@ fn is_valid_and_outward(
         return Ok(false);
     }
     crate::mass::integrator::properties::no_unsure_region(b)?;
-    let volume = crate::mass::integrator::properties::brep_volume_default(k, b, SIGN_ACCURACY)?;
-    // (false for a NaN too)
-    Ok(volume > 0.0)
+    Ok(matches!(
+        crate::mass::enclosure::volume_sign(k, b)?,
+        crate::mass::enclosure::VolumeSign::Positive(_)
+    ))
 }
 
 #[cfg(test)]

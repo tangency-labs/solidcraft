@@ -286,7 +286,7 @@ pub(crate) fn sections(app: &mut SolveApp, ui: &mut egui::Ui) {
                         ("render.shot.remove", "render.shot_remove"),
                     ] {
                         let item = Item::action(command, app.tr(key), "");
-                        if context_menu::list_row(ui, &item).is_some() {
+                        if crate::ui_kit::menu::list_row(ui, &item).is_some() {
                             if command == "render.settings.apply" {
                                 super::switch_shot(app, name.clone());
                             } else {
@@ -464,7 +464,7 @@ pub(crate) fn objects(app: &mut SolveApp, ui: &mut egui::Ui, hover_bodies: &mut 
         if let Some(response) = row.resp {
             ui_kit::Menu::context(&response, |ui| {
                 let item = context_menu::cmd(app, "select.same_look", "Select Same Look");
-                if context_menu::list_row(ui, &item).is_some()
+                if crate::ui_kit::menu::list_row(ui, &item).is_some()
                     && let Some(params) = &source
                 {
                     let _ = app.run("select.same_look", params.clone());

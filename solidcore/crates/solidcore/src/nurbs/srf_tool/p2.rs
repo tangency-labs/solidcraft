@@ -38,7 +38,7 @@
 //!   [`SolidError::InvalidInput`]. `N_SrfRemoveOneKnot`'s guard `off > last + 1`
 //!   (an error flag without an error number) also returns `InvalidInput`.
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::math::max2;
 use crate::nurbs::basis_basic::find_global_max;
 use crate::nurbs::bezier::{elevation_matrix, srf_elevate_degree};
@@ -99,8 +99,8 @@ fn cut1(k: &[f64], r: isize, op: &'static str) -> Result<Vec<f64>> {
 /// `wmin / (1 + pmax)`) and no new weight leaves `[WEIGHT_MIN, WEIGHT_MAX]`. `nt` is
 /// limited to the multiplicity of `t`.
 ///
-/// Errors: [`NlibCode::Parameter`] for an end or outside parameter;
-/// [`NlibCode::Call`] for [`Direction::UV`]; errors of the span search; the error of
+/// Errors: [`NurbsFailure::Parameter`] for an end or outside parameter;
+/// [`NurbsFailure::CallFailed`] for [`Direction::UV`]; errors of the span search; the error of
 /// the last basis-maximum search when it failed (see the module deviations).
 pub fn remove_knot_conditional(
     sur: &Surface,
@@ -157,7 +157,7 @@ pub(crate) fn remove_knot_conditional_with_status(
             check_interior(vp, t, OP)?;
             span_mult(vp, q, t, OP)?
         }
-        Direction::UV => return Err(SolidError::nlib(OP, NlibCode::Call)),
+        Direction::UV => return Err(SolidError::nurbs(OP, NurbsFailure::CallFailed)),
     };
 
     // Limit removal count to multiplicity of knot.
@@ -287,7 +287,7 @@ fn remove_conditional_rows(
                 *error = None;
                 Ok(max)
             }
-            Err(e @ SolidError::Nlib { .. }) => {
+            Err(e) if e.is_nurbs_failure() => {
                 *error = Some(e);
                 Ok(1.0)
             }
@@ -477,7 +477,7 @@ fn remove_conditional_rows(
 /// Upstream assumes, without checking, that `T[r]` is an interior knot with
 /// `T[r] != T[r+1]` and multiplicity `s > 0`.
 ///
-/// Errors: [`NlibCode::Call`] for [`Direction::UV`]; `InvalidInput` for indices
+/// Errors: [`NurbsFailure::CallFailed`] for [`Direction::UV`]; `InvalidInput` for indices
 /// outside the surface's arrays.
 pub fn remove_one_knot(
     sur: &Surface,
@@ -511,7 +511,7 @@ pub fn remove_one_knot(
     let (deg, kn) = match dir {
         Direction::U => (p, u),
         Direction::V => (q, v),
-        Direction::UV => return Err(SolidError::nlib(OP, NlibCode::Call)),
+        Direction::UV => return Err(SolidError::nurbs(OP, NurbsFailure::CallFailed)),
     };
     // Entry `i` of line `row`: `Pw[i][row]` in u (a column), `Pw[row][i]` in v.
     let line_at = |row: isize, i: isize| -> Result<CPoint> {
@@ -605,8 +605,8 @@ pub fn remove_one_knot(
 /// form of algorithm A5.9): each row of the net is cut into Bezier strips, elevated
 /// and the knots between them removed again.
 ///
-/// Errors: [`NlibCode::Degree`] when the new degree exceeds `MAX_DEGREE`;
-/// [`NlibCode::Knot`] for an invalid knot vector in `dir`; [`NlibCode::Call`] for
+/// Errors: [`NurbsFailure::Degree`] when the new degree exceeds `MAX_DEGREE`;
+/// [`NurbsFailure::Knots`] for an invalid knot vector in `dir`; [`NurbsFailure::CallFailed`] for
 /// [`Direction::UV`]; errors of the Bezier elevation.
 pub fn elevate_degree(sur: &Surface, t: usize, dir: Direction) -> Result<Surface> {
     const OP: &str = "nurbs::srf_tool::p2::elevate_degree";
@@ -625,13 +625,13 @@ pub fn elevate_degree(sur: &Surface, t: usize, dir: Direction) -> Result<Surface
     let (lines, hi, deg, kn, rk) = match dir {
         Direction::U => (transpose(&pw), n, p, up, r),
         Direction::V => (pw, m, q, vp, s),
-        Direction::UV => return Err(SolidError::nlib(OP, NlibCode::Call)),
+        Direction::UV => return Err(SolidError::nurbs(OP, NurbsFailure::CallFailed)),
     };
 
     // Check parameters and compute highest indexes.
     let degu = ix(deg, OP)?;
     if degu.checked_add(t).is_none_or(|d| d > MAX_DEGREE) {
-        return Err(SolidError::nlib(OP, NlibCode::Degree));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Degree));
     }
     let kv = KnotVector::from_slice(kn)?;
     kv.validate(degu)?;
@@ -987,17 +987,11 @@ mod tests {
         assert_eq!(elevate_degree(&s, 0, Direction::U).unwrap(), s);
         assert!(matches!(
             elevate_degree(&s, 15, Direction::U),
-            Err(SolidError::Nlib {
-                code: NlibCode::Degree,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Degree))
         ));
         assert!(matches!(
             elevate_degree(&s, 1, Direction::UV),
-            Err(SolidError::Nlib {
-                code: NlibCode::Call,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::CallFailed))
         ));
     }
 
@@ -1013,10 +1007,7 @@ mod tests {
         assert_eq!(rm.removed, 0);
         assert!(matches!(
             remove_knot_conditional(&s, 0.0, 1, 1.0, Direction::U),
-            Err(SolidError::Nlib {
-                code: NlibCode::Parameter,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Parameter))
         ));
     }
 

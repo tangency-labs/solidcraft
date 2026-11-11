@@ -22,7 +22,7 @@ use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::sweep::api_brep::create_rotational_sweep;
-use solidcore::{Kernel, Point3, SolidError, Vec3};
+use solidcore::{Kernel, Point3, Vec3};
 use std::f64::consts::PI;
 
 /// The circle's reference directions: it starts at (10, 0, 0), (5, 0, 5) and the origin.
@@ -110,7 +110,7 @@ fn wr_590_off_a_circle_meeting_the_axis_inside_itself_fails() {
             } else {
                 let e = r.expect_err("upstream refuses the turn");
                 assert!(
-                    matches!(e, SolidError::Upstream { code: 1001, .. }),
+                    solidcore::error::upstream_status(&e) == Some(1001),
                     "ref {reference:?} turn {turn}: {e}"
                 );
             }

@@ -224,9 +224,9 @@ fn same_cycle(x: &[solidcore_record::brep::OrientedEdge], y: &[solidcore_record:
 }
 
 /// The kernel's checks of a saved body's record that the file's own structural checks leave to
-/// it ([`solidcraft_geom::brep::check::geometry`]: frames, planes, placements).
+/// it ([`solidcore_ops::record_check::geometry`]: frames, planes, placements).
 fn check(saved: &Saved) -> Result<()> {
-    solidcraft_geom::brep::check::geometry(&saved.solid).map_err(invalid)
+    solidcore_ops::record_check::geometry(&saved.solid).map_err(invalid)
 }
 
 /// How many values `v` is (a collection and each of its items): [`file::MAX_VALUES`] at most.

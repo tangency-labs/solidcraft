@@ -381,6 +381,12 @@ fn round_on_a_round(k: &mut Kernel) -> Outcome {
 /// round on the round took 35488 here and 36376 in the fork when this was ported. Main
 /// after #2274 (step 7) raised both runs by the same amount, with or without WR-714: they
 /// were 181076 and 122690 with it, 134718 and 71986 without, on #2274's earlier head.
+///
+/// The spans are not the fork's 45 since #13984: each proved feet's box is tightened before
+/// the Taylor solve (32 spans), a halved span's halves start from its finest proved level
+/// (31), the arc's rows over a piece are bounded by Taylor models too (#14405: 30), and so
+/// are the feet over a piece (#14405: 29), so more spans certify unhalved; the net stays
+/// at 0.36 of its bound (0.37 sampled at 1281 sections along s).
 #[test]
 fn round_on_a_definition_is_its_definition() {
     let mut k = solidcraft_kernel();
@@ -398,7 +404,7 @@ fn round_on_a_definition_is_its_definition() {
     );
     assert!(o.sound, "{o:?}");
     assert!(
-        o.graded == 1 && o.spans == 45 && o.circle <= 1e-11 && o.net <= 1.0,
+        o.graded == 1 && o.spans == 29 && o.circle <= 1e-11 && o.net <= 1.0,
         "{o:?}"
     );
     assert!(
@@ -446,7 +452,10 @@ fn outside(e: V3<Ivl>, p: Point3) -> f64 {
 /// turn), so a piece of it spans a station: where a foot crosses a knot line of the twisted
 /// top, a C2 cubic, or the leader's knot. The enclosure of its definition at 21 points
 /// across that piece must hold the definition there (its own evaluator, the station solved
-/// at that s), and so must its enclosure over a box across the lost station. Before, the
+/// at that s), and so must its enclosure over a box across the lost station (15% of the way
+/// to the stations beside it: a quarter until #14405's feet, after which the net has 114
+/// spans, not 165, and the quarter boxes about as much longer, past what the definition's
+/// enclosure proves at 9 of the 113 stations; every 15% box is proved). Before, the
 /// enclosure took the faces' pieces at the station in the middle of the net's piece,
 /// continued past the station, and every one was proved, up to 1.38e-3 off the definition.
 /// Every point is proved but the round's two ends, where its feet lie on the edge of the
@@ -473,11 +482,11 @@ fn a_net_with_a_knot_removed_is_enclosed_on_its_definition() {
         for j in 1..ks.len() - 1 {
             let coarse = without_knot(&net, along_u, ks[j]);
             let (a, b) = (ks[j - 1], ks[j + 1]);
-            // a box across the station the coarse net lost, a quarter of the way to the
-            // stations beside it along s and 2% of t across the middle line: its feet cross
-            // the knot line or the leader's knot there, and the enclosure, cut at those,
-            // must hold the definition at every point of the box
-            let (sa, sb) = (ks[j] - 0.25 * (ks[j] - a), ks[j] + 0.25 * (b - ks[j]));
+            // a box across the station the coarse net lost, 15% of the way to the stations
+            // beside it along s and 2% of t across the middle line: its feet cross the knot
+            // line or the leader's knot there, and the enclosure, cut at those, must hold
+            // the definition at every point of the box
+            let (sa, sb) = (ks[j] - 0.15 * (ks[j] - a), ks[j] + 0.15 * (b - ks[j]));
             let (c, w) = if along_u {
                 (0.5 * (lo.y + hi.y), 0.01 * (hi.y - lo.y))
             } else {

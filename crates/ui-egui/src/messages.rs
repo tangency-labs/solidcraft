@@ -77,7 +77,7 @@ fn line(m: &Message) -> String {
 }
 
 /// How long ago `at` was, at `now` (both ms): seconds, minutes or hours.
-fn ago(now: f64, at: f64) -> String {
+pub(crate) fn ago(now: f64, at: f64) -> String {
     let s = ((now - at) / 1000.0).max(0.0).floor();
     let (id, n) = if s < 60.0 {
         ("messages.ago_s", s)

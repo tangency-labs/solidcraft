@@ -102,9 +102,9 @@ fn mitred_union(turn: f64) -> (solidcore::Result<Brep>, Kernel, f64) {
 fn small_turns_fail_like_cpp() {
     for turn in [0.1, 0.25, 0.3] {
         let (r, ..) = mitred_union(turn);
-        let e = r.unwrap_err().to_string();
+        let e = r.unwrap_err();
         assert!(
-            e.contains("make_faceuse") && e.contains("1001"),
+            e.operation().contains("make_faceuse") && e.sm_status() == Some(1001),
             "turn {turn}: {e}"
         );
     }

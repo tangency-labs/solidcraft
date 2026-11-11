@@ -88,7 +88,6 @@ fn round(k: &mut Kernel, b: &mut Brep, points: &[[f64; 3]], r: f64) -> i32 {
     let edges = pick(k, b, points);
     let code = {
         let mut s = FilletSession::new(k, b).unwrap();
-        s.set_blend_curve_at_thirds(false);
         s.prepare_per_edge_constant_radius(
             k,
             &edges,

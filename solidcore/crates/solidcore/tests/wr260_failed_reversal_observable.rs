@@ -32,7 +32,7 @@ use solidcore::primitive::api_primitives::create_box;
 use solidcore::topology::edge;
 use solidcore::topology::edgeuse::p3 as eu3;
 use solidcore::topology::{Brep, EdgeId, EdgeuseId};
-use solidcore::{Kernel, SolidError};
+use solidcore::Kernel;
 
 /// The edge state WR-260 changes: its interval, its uses' orientations and their trims.
 #[derive(Debug, Clone, PartialEq)]
@@ -138,14 +138,10 @@ fn failed_reversal_is_observable_on_a_public_box_edge() {
     let (mut b, e, eus) = box_with_failing_reversal_edge(&mut k);
     let before = observe(&b, e, &eus);
     assert_eq!(before.interval, Extent1d::from_min_max(0.0, 20.0));
-    assert_eq!(
-        edge::reverse_orientation(&k, &mut b, e),
-        Err(SolidError::Upstream {
-            operation: "curve::curve::p2::Curve",
-            code: 1001,
-            entity: None,
-        })
-    );
+    let failed = edge::reverse_orientation(&k, &mut b, e).expect_err("the reversal fails");
+    assert_eq!(failed.operation(), "curve::curve::p2::Curve");
+    assert_eq!(solidcore::error::upstream_status(&failed), Some(1001));
+    assert_eq!(failed.entity(), None);
     assert_eq!(observe(&b, e, &eus), before);
     assert_eq!(b.face_list().len(), 6);
     assert_eq!(b.edge_list().len(), 12);

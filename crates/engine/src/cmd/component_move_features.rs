@@ -12,12 +12,13 @@ use solidcraft_doc::{Feature, FeatureKind, is_identity, mat_inverse, mat_mul};
 
 use super::super::clipboard::explicit_planes;
 use super::*;
-use crate::params::name_or_id_list;
+use crate::params::name_or_id_values;
 
 pub(super) fn move_features(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.move_features";
     let dest = if p.get("component").is_some() { component(s, p, "component", cmd)? } else { s.active_component };
-    let keys = name_or_id_list(cmd, p, "features")?;
+    // Named or numbered: an exact name wins over an id it looks like, as in the timeline (#9748).
+    let keys = name_or_id_values(cmd, p, "features")?;
     if keys.is_empty() || keys.len() > 1000 {
         return Err(bad(cmd, "`features` must list 1…1000 features"));
     }
@@ -28,8 +29,8 @@ pub(super) fn move_features(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "finish the component move in progress first"));
     }
     let mut ids = BTreeSet::new();
-    for k in &keys {
-        ids.insert(s.doc.find_feature(k).map(|f| f.id).ok_or_else(|| bad(cmd, format!("no feature `{k}`")))?);
+    for k in keys {
+        ids.insert(crate::cmd::edit::feature_id(s, Some(k), cmd)?);
     }
     let moving: BTreeSet<u64> = ids.into_iter().filter(|id| s.doc.feature(*id).is_some_and(|f| f.component != dest)).collect();
     if moving.is_empty() {

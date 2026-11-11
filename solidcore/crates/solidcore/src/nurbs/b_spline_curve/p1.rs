@@ -1506,7 +1506,7 @@ impl BSplineCurve {
     /// [`BSplineCurve::create_circle_segment`] whose quadratic form is split into at
     /// least `min_arcs` equal arcs (at most four; `0` is upstream's count from the
     /// sweep). Not upstream: an exact circular fillet's sections take one arc count
-    /// along the rails (`fixes.fillet_exact_arc_spans`, WR-711).
+    /// along the rails (WR-711).
     ///
     /// # Errors
     ///

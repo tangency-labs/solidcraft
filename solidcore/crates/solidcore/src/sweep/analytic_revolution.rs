@@ -96,18 +96,10 @@ pub fn analytic_revolution(
         .max(ends.end.max_dimension())
         .max(base_pt.max_dimension());
     // WR-471: the caller's own tolerance, which decides if an arc is centred on the axis
-    let axis_tol = if k.fixes.revolve_arc_centre_near_axis_is_sphere {
-        tol
-    } else {
-        0.0
-    };
+    let axis_tol = tol;
     // WR-552: the caller's own tolerance, within which a circle reaching the axis is
     // the horn torus's
-    let horn_tol = if k.fixes.revolve_arc_touching_axis_is_horn_torus {
-        tol
-    } else {
-        0.0
-    };
+    let horn_tol = tol;
     let tol = tol.min(FIT_REL * (1.0 + size));
     let Some(Some((candidate, reversed))) = ignored(candidate(
         k, curve, base_pt, axis, angle_deg, tol, axis_tol, horn_tol,
@@ -136,16 +128,15 @@ pub fn analytic_revolution(
             &made
         }
     };
-    // Not in the fork's hunk (WR-471): our own layout test, bypassed for this flag's
+    // Not in the fork's hunk (WR-471): our own layout test, bypassed for the
     // sphere so the fork's result holds; orientation signs kept. The fork uses
     // `AnalyticSurface`'s sphere as it is; our corner and boundary tests below (#545)
     // refuse the sphere whose poles it puts on the axis for an arc ending within
     // `axis_tol` of it
-    let fork_sphere = k.fixes.revolve_arc_centre_near_axis_is_sphere
-        && matches!(
-            candidate.kind(),
-            crate::surface::surface::SurfaceKind::Sphere(_)
-        );
+    let fork_sphere = matches!(
+        candidate.kind(),
+        crate::surface::surface::SurfaceKind::Sphere(_)
+    );
     let expected = ignored(Layout::of(k, reference, base_pt, axis))?;
     let actual = ignored(Layout::of(k, &candidate, base_pt, axis))?;
     let same_layout = match (expected, actual) {
@@ -389,8 +380,9 @@ fn candidate(
         // #1490: never inside out (fork 9853e54 builds the sphere over its latitude
         // range); a falling meridian is laid out as the reversed arc's B-spline
         let rising = frame.z_axis().dot(-y) > 0.0;
-        let (mut centre, mut radius) = (centre, radius);
-        let (low, high) = if k.fixes.revolve_arc_centre_near_axis_is_sphere {
+        let mut centre = centre;
+        let radius;
+        let (low, high) = {
             // WR-471 (the fork's c4209ab, as its `AnalyticSurface`): the sphere centred on
             // the axis through the arc's two ends (the corners the neighbouring profile
             // edges share), not the arc's own circle, which misses both ends by up to
@@ -434,17 +426,6 @@ fn candidate(
                 if lat0 < lat1 { lat0 } else { lat1 },
                 if lat0 > lat1 { lat0 } else { lat1 },
             )
-        } else {
-            let latitude = |p: Point3| {
-                let d = p - centre;
-                d.dot(axis).atan2(d.dot(x)) * to_deg
-            };
-            let (start_lat, end_lat) = (latitude(ends.start), latitude(ends.end));
-            if rising {
-                (start_lat, end_lat)
-            } else {
-                (end_lat, start_lat)
-            }
         };
         let inside_out = false;
         if high - low <= EFF_ZERO {
@@ -952,8 +933,7 @@ mod tests {
     #[test]
     fn wr471_arc_ends_within_tolerance_of_the_axis_are_the_poles() {
         use crate::surface::surface::SurfaceKind;
-        let mut k = Kernel::default();
-        k.fixes.revolve_arc_centre_near_axis_is_sphere = true;
+        let k = Kernel::default();
         for off in [3e-7, 9e-7] {
             let c = arc(Vec3::new(off, 0.0, 0.0), -Vec3::Z, Vec3::X, 5.0, 0.0, 180.0);
             let tol = 1e-6_f64.min(FIT_REL * (1.0 + 5.0));
@@ -995,8 +975,7 @@ mod tests {
     #[test]
     fn wr471_sphere_with_poles_on_the_axis_replaces_the_b_spline() {
         use crate::surface::surface::SurfaceKind;
-        let mut k = Kernel::default();
-        k.fixes.revolve_arc_centre_near_axis_is_sphere = true;
+        let k = Kernel::default();
         for off in [3e-7, 9e-7] {
             let c = arc(Vec3::new(off, 0.0, 0.0), -Vec3::Z, Vec3::X, 5.0, 0.0, 180.0);
             assert!(off > FIT_REL * (1.0 + 5.0));

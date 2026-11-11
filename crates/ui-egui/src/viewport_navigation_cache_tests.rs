@@ -114,7 +114,7 @@ fn shadow_cache_follows_visibility_and_world_up() {
     assert_ne!(first.key, hidden.key);
     assert!(hidden.bytes.is_empty());
     app.session.visibility.hidden_bodies.clear();
-    app.cam.up = solidcraft_engine::render::UpAxis::Y;
+    app.cam.up = solidcraft_viewport::UpAxis::Y;
     let turned = shadow_geometry(&app, &st);
     assert_ne!(first.key, turned.key);
     assert_ne!(first.bytes, turned.bytes);

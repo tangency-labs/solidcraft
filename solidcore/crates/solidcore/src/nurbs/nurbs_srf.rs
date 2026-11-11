@@ -74,7 +74,7 @@
 // tiny divisors, so the suggested rewrite would change results.
 #![allow(clippy::assign_op_pattern)]
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -1075,7 +1075,7 @@ pub fn decompose_srf(sur: &Surface) -> Result<Vec<Vec<Surface>>> {
 /// ([`Direction::V`]) (`sm_SplitSrf`). Returns the left part over `[min, t]` and the
 /// right part over `[t, max]`.
 ///
-/// Errors: [`NlibCode::Parameter`] for an end or outside parameter;
+/// Errors: [`NurbsFailure::Parameter`] for an end or outside parameter;
 /// the errors of `N_BasisFindSpanAndMult` and of
 /// [`crate::nurbs::srf_tool::p1::split`]; `InvalidInput` for [`Direction::UV`].
 pub fn split_srf(sur: &Surface, t: f64, dir: Direction) -> Result<(Surface, Surface)> {
@@ -1095,7 +1095,7 @@ pub fn split_srf(sur: &Surface, t: f64, dir: Direction) -> Result<(Surface, Surf
         }
     };
     if kn.is_end_param(t) {
-        return Err(SolidError::nlib(OP_SPLIT, NlibCode::Parameter));
+        return Err(SolidError::nurbs(OP_SPLIT, NurbsFailure::Parameter));
     }
     kn.find_span_and_mult(deg, t, Side::Left)?;
 

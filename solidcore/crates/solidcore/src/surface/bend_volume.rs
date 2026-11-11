@@ -900,7 +900,10 @@ impl BendVolume {
         // turned into negative volumes
         if u_max < self.singularity_tol {
             trim_box.init();
-            return Err(SolidError::sm_err(OP_TRIM));
+            return Err(SolidError::surface_failed(
+                OP_TRIM,
+                "the box is outside the bend's half space",
+            ));
         }
         if u_min < self.singularity_tol {
             u_min = self.singularity_tol;
@@ -913,7 +916,10 @@ impl BendVolume {
         // boxes outside the legal domain are turned into negative volumes
         if v_max < period_min - EFF_ZERO || v_min > period_max + EFF_ZERO {
             trim_box.init();
-            return Err(SolidError::sm_err(OP_TRIM));
+            return Err(SolidError::surface_failed(
+                OP_TRIM,
+                "the box is outside the bend's period",
+            ));
         }
 
         // Trim to Primary Period
@@ -954,7 +960,10 @@ impl BendVolume {
             || u_max < self.singularity_tol
         {
             trim_box.init();
-            return Err(SolidError::sm_err(OP_TRIM));
+            return Err(SolidError::surface_failed(
+                OP_TRIM,
+                "the box is degenerate or outside the bend's half space",
+            ));
         }
         if u_min < self.singularity_tol {
             u_min = self.singularity_tol;
@@ -964,7 +973,10 @@ impl BendVolume {
         if half_period == 0.0 {
             if v_max < -EFF_ZERO || v_min > EFF_ZERO {
                 trim_box.init();
-                return Err(SolidError::sm_err(OP_TRIM));
+                return Err(SolidError::surface_failed(
+                    OP_TRIM,
+                    "the box is outside the bend's zero period",
+                ));
             }
             v_min = 0.0;
             v_max = 0.0;

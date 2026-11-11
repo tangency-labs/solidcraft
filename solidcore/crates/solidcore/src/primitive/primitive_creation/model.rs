@@ -187,7 +187,7 @@ impl<'k> PrimitiveModel<'k> {
             .breps
             .get_mut(id.index() as usize)
             .and_then(Option::take)
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))?;
         // (not upstream) its objects take their attributes with them
         attributes::write_back(&mut self.attributes, id, &mut b)?;
         Ok(b)
@@ -200,7 +200,7 @@ impl<'k> PrimitiveModel<'k> {
             .breps
             .get_mut(id.index() as usize)
             .and_then(Option::as_mut)
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))?;
         attributes::adopt(&mut self.attributes, id, b)?;
         attributes::enter(&mut self.attributes, id, view)
     }
@@ -231,7 +231,7 @@ impl<'k> PrimitiveModel<'k> {
                 .breps
                 .get_mut(id.index() as usize)
                 .and_then(Option::as_mut)
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))?;
             let mut state = ArenaNotifyState::new(b);
             let attributes = &mut self.attributes;
             let run = |k: &mut Kernel, context: Option<&mut crate::geom::context::Context>| {
@@ -289,7 +289,7 @@ impl<'k> PrimitiveModel<'k> {
         self.breps
             .get_mut(id.index() as usize)
             .and_then(Option::as_mut)
-            .ok_or_else(|| SolidError::null_pointer(OP))
+            .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))
     }
 }
 
@@ -307,7 +307,7 @@ impl SweepAccess for PrimitiveModel<'_> {
         self.breps
             .get(id.index() as usize)
             .and_then(Option::as_ref)
-            .ok_or_else(|| SolidError::null_pointer(OP))
+            .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))
     }
     fn brep_mut(&mut self, id: BrepId) -> Result<&mut Brep> {
         self.slot(id)
@@ -353,7 +353,7 @@ impl SweepAccess for PrimitiveModel<'_> {
         let (left, right) = self
             .breps
             .split_at_mut_checked(si.max(di))
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))?;
         let (src, dst) = if si < di {
             (left.get_mut(si), right.first_mut())
         } else {
@@ -361,10 +361,10 @@ impl SweepAccess for PrimitiveModel<'_> {
         };
         let src = src
             .and_then(Option::as_mut)
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))?;
         let dst = dst
             .and_then(Option::as_mut)
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))?;
         let mut state = ArenaNotifyState::new(dst);
         // (not upstream) The model's attributes ride the edit's notifications: the
         // destination's objects under their identities (`notify_ref`), the source's
@@ -408,7 +408,7 @@ impl SweepAccess for PrimitiveModel<'_> {
                 .breps
                 .get_mut(brep.index() as usize)
                 .and_then(Option::as_mut)
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))?;
             let mut state = ArenaNotifyState::new(b);
             let mut env = NotifyEnv {
                 records: &mut state.records,
@@ -508,7 +508,7 @@ impl SweepAccess for PrimitiveModel<'_> {
                 .breps
                 .get(brep.index() as usize)
                 .and_then(Option::as_ref)
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))?;
             let mut state = ArenaNotifyState::default();
             crate::topology::brep::p3::seed_records(&mut state.records, model, &source_ref);
             let mut env = NotifyEnv {
@@ -639,7 +639,7 @@ impl SweepAccess for PrimitiveModel<'_> {
                 use_existing_topology,
                 create_new_breps_for_faces,
             )?
-            .ok_or_else(|| SolidError::null_pointer(OP))
+            .ok_or_else(|| SolidError::primitive_missing(OP, "the piecewise merge's B-rep"))
         })
     }
     fn union(&mut self, merge: SweepMergeId) -> Result<BrepId> {
@@ -677,7 +677,7 @@ impl SweepAccess for PrimitiveModel<'_> {
             .breps
             .get_mut(id.index() as usize)
             .and_then(Option::as_mut)
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))?;
         if !b.is_live_entity(entity) {
             return Err(SolidError::NotFound {
                 operation: OP,
@@ -697,7 +697,7 @@ impl SweepAccess for PrimitiveModel<'_> {
             .edge(edge.1)?
             .curve
             .as_ref()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::primitive_missing(OP, "the edge's curve"))?;
         Ok(None)
     }
     fn set_editing(&mut self, brep: BrepId, editing: bool) -> Result<bool> {
@@ -724,7 +724,7 @@ impl SweepAccess for PrimitiveModel<'_> {
         let marks = self
             .marks
             .get(b.index() as usize)
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::primitive_missing(OP, "the B-rep's marks"))?;
         Ok(marks.is_marked(self.k, x, mark))
     }
     fn mark(&mut self, e: SweepEntity, mark: MarkType) -> Result<()> {
@@ -732,7 +732,7 @@ impl SweepAccess for PrimitiveModel<'_> {
         let marks = self
             .marks
             .get_mut(b.index() as usize)
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::primitive_missing(OP, "the B-rep's marks"))?;
         marks.mark(self.k, x, mark);
         Ok(())
     }
@@ -747,11 +747,11 @@ impl SweepAccess for PrimitiveModel<'_> {
             .breps
             .get(index)
             .and_then(Option::as_ref)
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))?;
         let marks = self
             .marks
             .get_mut(index)
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::primitive_missing(OP, "the B-rep's marks"))?;
         crate::topology::topology_traverser::collect_faces(
             self.k,
             b,
@@ -775,7 +775,7 @@ impl PrimitiveAccess for PrimitiveModel<'_> {
             .breps
             .get_mut(brep.index() as usize)
             .and_then(Option::as_mut)
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::primitive_missing(OP, "the model's B-rep"))?;
         body(self.k, b)
     }
     fn delete_primitive_faces(&mut self, brep: BrepId, faces: &[FaceId]) -> Result<()> {

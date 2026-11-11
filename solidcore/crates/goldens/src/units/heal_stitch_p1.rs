@@ -632,7 +632,7 @@ fn guarded_output(o: Vec<f64>) -> Output {
 /// callee it is `SM_ERR_INVALID_INPUT`.
 fn status_of(e: &SolidError) -> f64 {
     match e {
-        SolidError::Upstream { code, .. } => f64::from(*code),
+        err if solidcore::error::upstream_status(err).is_some() => f64::from(solidcore::error::upstream_status(err).unwrap_or(-1)),
         SolidError::InvalidInput { operation, .. } | SolidError::PortInvariant { operation, .. } if *operation == "heal::stitch::p1" => {
             NULL_DEREF
         }

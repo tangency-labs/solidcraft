@@ -23,8 +23,7 @@
 //! has a fixed two-level call structure, not input-driven recursion. Both levels split
 //! at the surface's knots, as the SolidCraft fork's tangency-labs/smlib@08d9a14 does
 //! (WR-494, #1435): upstream steps across them.
-//! With `UpstreamFixes::brep_area_between_solid_and_void` (WR-535) a volume-separating
-//! faceuse adds its volume only where it bounds a non void region and its area only
+//! A volume-separating faceuse (WR-535) adds its volume only where it bounds a non void region and its area only
 //! where the area behaviour selects it (tangency-labs/smlib@d2d9586).
 //! The iso-u integrals start at the trims' lowest v, not at the face UV domain's
 //! (WR-563, #1556).
@@ -34,6 +33,7 @@
 //! (#2887): upstream's are `BIG_DOUBLE`, so only the edge's length was under error control.
 use super::{OdeIntegrator, OdeOptions};
 use crate::curve::curve::Curve;
+use crate::error::mass::MassFailure;
 use crate::geom::attribute::{ids, AttributeStore, AttributeValue, ObjectKey};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -145,7 +145,8 @@ pub fn edge_properties(
     origin: Point3,
     radius: f64,
 ) -> Result<EdgeProperties> {
-    let curve = edge::curve(b, e)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let curve =
+        edge::curve(b, e)?.ok_or_else(|| SolidError::mass_missing(OP, "the edge's curve"))?;
     curve_properties(k, curve, &edge::interval(b, e)?, accuracy, origin, radius)
 }
 /// The precise edge integration on an already-bound curve and interval.
@@ -178,7 +179,7 @@ pub fn curve_properties(
         .evaluate(k, interval.min(), 0, false, false)?
         .first()
         .copied()
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::mass_missing(OP, "the curve's start point"))?;
     let reach = (start - origin).length() + approx;
     let length_scale = approx / 10.0;
     let area_scale = 2.0 * PI * radius.abs() * length_scale;
@@ -269,7 +270,7 @@ pub fn face_properties(
         .face(f)?
         .surface
         .as_ref()
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::mass_missing(OP, "the face's surface"))?;
     boundary_properties(
         k,
         surface,
@@ -299,7 +300,7 @@ fn trims_base_v(k: &Kernel, trims: &[Curve], domain: &Extent2d) -> Result<f64> {
         let bbox = trim
             .calculate_bounding_box(k, &trim.natural_interval(), req, true)?
             .normal
-            .ok_or_else(|| SolidError::sm_err(OP))?;
+            .ok_or_else(|| SolidError::mass_failed(OP, "the trim has no bounding box"))?;
         let v = bbox.min().y;
         if v < base {
             base = v;
@@ -436,7 +437,7 @@ pub fn boundary_properties(
             if b.partial_cmp(&a) != Some(std::cmp::Ordering::Greater) {
                 continue; // a crossing at a knot
             }
-            let mut status = Err(SolidError::sm_err(OP));
+            let mut status = Err(SolidError::mass_failed(OP, "the span was not integrated"));
             for divisor in [2.0, 8.0, 64.0, 512.0, 4096.0] {
                 k.check_cancelled(OP)?;
                 let mut eval_calls = 0u64;
@@ -471,7 +472,7 @@ pub fn boundary_properties(
                     // Success with no steps means the integrator skipped the span.
                     .and_then(|counts| {
                         if counts.good + counts.reduced == 0 {
-                            Err(SolidError::sm_err(OP_SKIPPED_SPAN))
+                            Err(SolidError::mass(OP_SKIPPED_SPAN, MassFailure::SkippedSpan))
                         } else {
                             Ok(())
                         }
@@ -533,7 +534,8 @@ fn vertices(b: &Brep) -> Result<Vec<VertexId>> {
 /// The region on the side of face use `fu` (`SmFaceuse::GetRegion`); a use with no shell or
 /// no region is upstream's null pointer.
 fn faceuse_region(b: &Brep, fu: FaceuseId) -> Result<RegionId> {
-    crate::topology::edgeuse::p1::faceuse_region(b, fu)?.ok_or_else(|| SolidError::null_pointer(OP))
+    crate::topology::edgeuse::p1::faceuse_region(b, fu)?
+        .ok_or_else(|| SolidError::mass_missing(OP, "the faceuse's region"))
 }
 /// `SmRegion::IsVoid` as a C truth value (`UNSURE`, 2, counts as void).
 fn region_void(b: &Brep, r: RegionId) -> Result<bool> {
@@ -669,11 +671,11 @@ pub fn brep_properties(
         let up = b
             .face(f)?
             .faceuse
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::mass_missing(OP, "the face's faceuse"))?;
         let mate = b
             .faceuse(up)?
             .mate
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::mass_missing(OP, "the faceuse's mate"))?;
         let mut separating = faceuse_region(b, up)? != faceuse_region(b, mate)?;
         for (j, fu) in [up, mate].into_iter().enumerate() {
             let mut do_area = false;
@@ -689,7 +691,7 @@ pub fn brep_properties(
                     let other = b
                         .faceuse(fu)?
                         .mate
-                        .ok_or_else(|| SolidError::null_pointer(OP))?;
+                        .ok_or_else(|| SolidError::mass_missing(OP, "the faceuse's mate"))?;
                     if !region_void(b, faceuse_region(b, fu)?)?
                         && region_void(b, faceuse_region(b, other)?)?
                     {
@@ -723,7 +725,7 @@ pub fn brep_properties(
                     if separating { 0.0 } else { mass.y },
                     PPF_ALL,
                 )?;
-                if separating && k.fixes.brep_area_between_solid_and_void {
+                if separating {
                     // Not upstream (WR-535, the fork's tangency-labs/smlib@d2d9586): the
                     // faceuse's volume and mass enter only when it bounds a non void region,
                     // its area and area moments only when the area behaviour selects it: a
@@ -794,7 +796,8 @@ pub fn brep_properties(
 /// `SmApiEdgeComputeLength` (the curve's virtual Length). The edge's curve is owned by
 /// the edge, so its zone tolerance (`SmTol::GetZoneTol3d(pCurve)`) is the edge's.
 pub fn edge_length(k: &Kernel, b: &Brep, e: EdgeId, accuracy: f64) -> Result<f64> {
-    let c = edge::curve(b, e)?.ok_or_else(|| SolidError::sm_err(OP))?;
+    let c =
+        edge::curve(b, e)?.ok_or_else(|| SolidError::mass_failed(OP, "the edge has no curve"))?;
     let owner_zone_tol_3d = if c.owner().is_some() {
         Some(edge::tolerance(b, e)?)
     } else {
@@ -847,7 +850,11 @@ pub fn face_centroid(k: &Kernel, b: &mut Brep, f: FaceId, accuracy: f64) -> Resu
     }
     Ok((
         p.area.abs(),
-        origin + *p.moments.first().ok_or_else(|| SolidError::sm_err(OP))? / p.area,
+        origin
+            + *p.moments
+                .first()
+                .ok_or_else(|| SolidError::mass_failed(OP, "no first moments"))?
+                / p.area,
     ))
 }
 /// `SmApiBrepComputeArea`, including open shells and sheets: [`brep_area_about`] each
@@ -1058,9 +1065,8 @@ pub struct MassPropertyRequest {
     pub manifold_solid_only: bool,
     /// Add the area of the [`sheet_face`]s (void on both sides, or one material region on
     /// both sides) to the solid boundary's: the area then counts every face once but the
-    /// partitions between two material regions, which are no part of it. That needs
-    /// `brep_area_between_solid_and_void` (WR-535), without which the boundary counts a
-    /// partition once from each side: a body with a partition is then refused.
+    /// partitions between two material regions, which are no part of it (WR-535;
+    /// upstream's boundary counts a partition once from each side).
     pub sheet_faces_area: bool,
     /// For a body with no material region: its faces' area, volume and mass 0, the
     /// centroid of the area, no moments (otherwise refused as no mass).
@@ -1156,9 +1162,7 @@ impl EstimatedMassProperties {
 /// integrator's step control fails (it cannot meet the requested accuracy's estimate:
 /// #2545, WR-472's error scale off; the step count is not reported, `iterations` is 0);
 /// [`SolidError::Degenerate`] for a non-finite integrand; [`SolidError::Unsupported`]
-/// for a span the integrator took no step over, or for `sheet_faces_area` on a body with a
-/// partition without `brep_area_between_solid_and_void` (WR-535: without it each side of a
-/// partition adds its area, so the area would count it twice); [`SolidError::UnsureRegion`]
+/// for a span the integrator took no step over; [`SolidError::UnsureRegion`]
 /// for a body with a region the kernel is unsure of (its volume and its faces' area depend
 /// on whether it is material: refused, not read as void); those of the integration.
 pub fn brep_mass_properties_estimated(
@@ -1170,17 +1174,6 @@ pub fn brep_mass_properties_estimated(
 ) -> Result<EstimatedMassProperties> {
     let accuracy = estimate_accuracy(accuracy)?;
     no_unsure_region(b)?;
-    if request.sheet_faces_area && !k.fixes.brep_area_between_solid_and_void {
-        for f in faces(b)? {
-            if partition_face(b, f)? {
-                return Err(SolidError::Unsupported {
-                    operation: OP,
-                    reason: "a partition's area is counted from both sides without \
-                             brep_area_between_solid_and_void",
-                });
-            }
-        }
-    }
     estimate(k, b, accuracy, request, attributes).map_err(typed_failure)
 }
 
@@ -1189,33 +1182,21 @@ pub fn brep_mass_properties_estimated(
 /// evaluated to no number) is [`SolidError::Degenerate`]; a span it took no step over is
 /// [`SolidError::Unsupported`]. Every other error is as it came.
 fn typed_failure(e: SolidError) -> SolidError {
-    use super::{OP_INTEGRAND, OP_STEP_CONTROL};
-    match e {
-        SolidError::Upstream {
-            operation: OP_STEP_CONTROL,
-            code: crate::error::SM_ERR,
-            ..
-        } => SolidError::NotConverged {
+    use super::OP_INTEGRAND;
+    match e.mass_failure() {
+        Some(MassFailure::StepControl) => SolidError::NotConverged {
             operation: OP,
             iterations: 0,
         },
-        SolidError::Upstream {
+        Some(MassFailure::Integrand) => SolidError::Degenerate {
             operation: OP_INTEGRAND,
-            code: crate::error::SM_ERR,
-            entity,
-        } => SolidError::Degenerate {
-            operation: OP_INTEGRAND,
-            entity,
+            entity: e.entity(),
         },
-        SolidError::Upstream {
-            operation: OP_SKIPPED_SPAN,
-            code: crate::error::SM_ERR,
-            ..
-        } => SolidError::Unsupported {
+        Some(MassFailure::SkippedSpan) => SolidError::Unsupported {
             operation: OP,
             reason: "the integrator took no step over a span of a face",
         },
-        e => e,
+        _ => e,
     }
 }
 
@@ -1284,7 +1265,7 @@ fn estimate(
             .moments
             .get(i)
             .copied()
-            .ok_or_else(|| SolidError::sm_err(OP))
+            .ok_or_else(|| SolidError::mass_failed(OP, "a moment group is missing"))
     };
     let static_moment = moment(4)?;
     let mass = properties.mass;
@@ -1419,7 +1400,7 @@ fn has_material(b: &Brep) -> Result<bool> {
 /// both void (a sheet, standing free or hung on a solid) or are one material region (a
 /// fin inside the material, the same region on both sides). A face between two distinct
 /// material regions (a partition) is in neither: it bounds no part of the area
-/// (`brep_area_between_solid_and_void`, WR-535). A side with no faceuse, no shell or no
+/// (WR-535). A side with no faceuse, no shell or no
 /// region is void; a region the kernel is unsure of is refused ([`region_material`]).
 ///
 /// # Errors
@@ -1484,7 +1465,11 @@ fn faces_area_about(
         area += p.area.abs();
         if first {
             let sign = if p.area < 0.0 { -1.0 } else { 1.0 };
-            sum += *p.moments.first().ok_or_else(|| SolidError::sm_err(OP))? * sign;
+            sum += *p
+                .moments
+                .first()
+                .ok_or_else(|| SolidError::mass_failed(OP, "no first moments"))?
+                * sign;
         }
     }
     Ok((area, sum))
@@ -1641,15 +1626,15 @@ mod tests {
     fn integration_failures_are_typed_by_cause() {
         use super::super::{OP_INTEGRAND, OP_STEP_CONTROL};
         assert!(matches!(
-            typed_failure(SolidError::sm_err(OP_STEP_CONTROL)),
+            typed_failure(SolidError::mass(OP_STEP_CONTROL, MassFailure::StepControl)),
             SolidError::NotConverged { .. }
         ));
         assert!(matches!(
-            typed_failure(SolidError::sm_err(OP_INTEGRAND)),
+            typed_failure(SolidError::mass(OP_INTEGRAND, MassFailure::Integrand)),
             SolidError::Degenerate { .. }
         ));
         assert!(matches!(
-            typed_failure(SolidError::sm_err(OP_SKIPPED_SPAN)),
+            typed_failure(SolidError::mass(OP_SKIPPED_SPAN, MassFailure::SkippedSpan)),
             SolidError::Unsupported { .. }
         ));
         // any other status stays as it came
@@ -1780,7 +1765,6 @@ mod tests {
     fn a_fin_inside_the_material_is_counted_once() {
         use crate::primitive::api_primitives::{create_box, create_plane};
         let mut k = Kernel::default();
-        k.fixes.brep_area_between_solid_and_void = true;
         k.fixes.precise_properties_body_length_scale = true;
         let a = create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0).unwrap();
         let fin = create_plane(&mut k, Point3::new(0.25, 0.5, 1.5), 0.5, 0.5).unwrap();
@@ -1812,7 +1796,6 @@ mod tests {
     fn merged_cubes_area_counts_solid_void_faces_only() {
         use crate::primitive::api_primitives::create_box;
         let mut k = Kernel::default();
-        k.fixes.brep_area_between_solid_and_void = true;
         let a = create_box(&mut k, Point3::ZERO, 10.0, 10.0, 10.0).unwrap();
         let b = create_box(&mut k, Point3::new(5.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
         let mut merged = crate::boolean::api_brep::boolean_merge(&mut k, a, b).unwrap();
@@ -1862,11 +1845,10 @@ mod tests {
         assert!(!upstream_region_is_material(&b, inner[0]).unwrap());
     }
 
-    /// Without WR-535 each side of a partition adds its area, so an area counting every
-    /// face once would count the partition twice: the request is refused; with WR-535 the
-    /// partitions are no part of the area (800).
+    /// Upstream's boundary adds a partition's area from each side, so an area counting every
+    /// face once would count it twice; with WR-535 the partitions are no part of the area (800).
     #[test]
-    fn a_partition_s_area_needs_wr535() {
+    fn a_partition_is_no_part_of_the_area() {
         use crate::primitive::api_primitives::create_box;
         let mut k = Kernel::default();
         let a = create_box(&mut k, Point3::ZERO, 10.0, 10.0, 10.0).unwrap();
@@ -1878,11 +1860,6 @@ mod tests {
             .filter(|&f| partition_face(&merged, f).unwrap())
             .count();
         assert_eq!(partitions, 2);
-        assert!(matches!(
-            estimated(&k, &mut merged, &MassPropertyRequest::centroidal()),
-            Err(SolidError::Unsupported { .. })
-        ));
-        k.fixes.brep_area_between_solid_and_void = true;
         let r = estimated(&k, &mut merged, &MassPropertyRequest::centroidal()).unwrap();
         assert!(near(r.area, 800.0, 1e-9), "{r:?}");
         assert!(near(r.volume, 1500.0, 1e-9), "{r:?}");

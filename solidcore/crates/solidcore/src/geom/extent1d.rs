@@ -72,6 +72,9 @@
 //!   prefix and zero-fills, unbounded dimensions are not written, counts are
 //!   incremented); arrays shorter than the dimension (undefined behaviour upstream)
 //!   are rejected with [`SolidError::InvalidInput`].
+//! - `ContainsPeriodicValue` moves a value within the tolerance of the top of the period
+//!   above the start down by the period, and keeps it where that lies in the interval,
+//!   instead of setting it to the start (WR-509, #1518; tangency-labs/smlib#46).
 //! - `SM_ASSERT*` debug checks and the error-log side effect of `SE(...)` are not
 //!   ported (they do not change results). The destructor's "undefined" sentinel has
 //!   no Rust counterpart; [`Extent1d::is_defined`] still checks for it.
@@ -844,12 +847,16 @@ impl Extent1d {
 
         contained = map > self.min - zero && map < self.max + zero;
 
-        if !contained
-            && are_same_to_tol(map, ivl.max(), zero)
-            && are_same_to_tol(map - period, self.min, zero)
-        {
-            map = self.min;
-            contained = true;
+        let mut kept_down = false;
+        if !contained && are_same_to_tol(map, ivl.max(), zero) {
+            // a period down, kept where it lies in the interval; the C++ sets it to the
+            // start instead (WR-509, #1518; tangency-labs/smlib#46)
+            let down = map - period;
+            if down > self.min - zero && down < self.max + zero {
+                map = down;
+                contained = true;
+                kept_down = true;
+            }
         }
 
         let periodic_value =
@@ -861,6 +868,12 @@ impl Extent1d {
                 map
             };
         let mut dist_to_min = map - self.min;
+        if kept_down {
+            // it can lie up to the tolerance below the start: its distance from it, not a
+            // signed offset (assert_valid takes min2 of the two). Only this new case: other
+            // inputs keep the signed value upstream gives them.
+            dist_to_min = dist_to_min.abs();
+        }
         if dist_to_min > period / 2.0 {
             dist_to_min = period - dist_to_min;
         }
@@ -1148,6 +1161,29 @@ mod tests {
         assert!(q
             .intersect_periodic(&Extent1d::from_min_max(100.0, 200.0), 0.0, false)
             .is_err());
+    }
+
+    #[test]
+    fn issue_1518_value_past_start_moves_down_a_period() {
+        // An interval shorter than the tolerance (1e-4 degrees), and a value 3e-5 past
+        // its start given a period up: the C++ returns the start (-10).
+        let q = Extent1d::from_min_max(-10.0, -10.0 + 7.0e-5);
+        let v = 350.0 + 3.0e-5;
+        let c = q.contains_periodic_value(v, 360.0, -1.0);
+        assert!(c.contained);
+        assert_eq!(c.periodic_value, v - 360.0);
+        assert!((c.dist_to_min - 3.0e-5).abs() < 1e-12);
+        assert_eq!(q.clamp_periodic_value(v, 360.0, -1.0), v - 360.0);
+
+        // a value within the tolerance below the start keeps its place a period down
+        // (the C++: the start, 0)
+        let r = Extent1d::from_min_max(0.0, 90.0);
+        let w = 360.0 - 5.0e-5;
+        let c = r.contains_periodic_value(w, 360.0, -1.0);
+        assert!(c.contained);
+        assert_eq!(c.periodic_value, w - 360.0);
+        // its distance to the start is a distance, not the signed offset -5e-5
+        assert!((c.dist_to_min - 5.0e-5).abs() < 1e-12, "{}", c.dist_to_min);
     }
 
     #[test]

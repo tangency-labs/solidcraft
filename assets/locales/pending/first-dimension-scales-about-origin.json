@@ -1,0 +1,34 @@
+{
+  "en": {
+    "ui.first_dimension_scales_about_origin": "Scale about the sketch origin",
+    "ui.first_dimension_scales_about_origin_tip": "On: the drawing always grows or shrinks about the sketch origin, so a shape drawn away from the origin moves. Off: a drawing that nothing ties to the origin scales about its own middle and stays where it was drawn."
+  },
+  "ar": {
+    "ui.first_dimension_scales_about_origin": "تغيير المقياس حول أصل الرسم",
+    "ui.first_dimension_scales_about_origin_tip": "عند التفعيل: يكبر المرسوم أو يصغر دائمًا حول أصل الرسم، فإذا كان الشكل مرسومًا بعيدًا عن الأصل تحرّك. عند الإيقاف: المرسوم غير المرتبط بالأصل يتغير مقياسه حول منتصفه ويبقى حيث رُسم."
+  },
+  "de": {
+    "ui.first_dimension_scales_about_origin": "Um den Skizzenursprung skalieren",
+    "ui.first_dimension_scales_about_origin_tip": "Ein: Die Zeichnung wird immer um den Skizzenursprung vergrößert oder verkleinert, eine vom Ursprung entfernt gezeichnete Form verschiebt sich also. Aus: Eine Zeichnung, die nichts an den Ursprung bindet, wird um ihre eigene Mitte skaliert und bleibt an ihrem Platz."
+  },
+  "he": {
+    "ui.first_dimension_scales_about_origin": "שינוי קנה מידה סביב ראשית הסקיצה",
+    "ui.first_dimension_scales_about_origin_tip": "מופעל: הציור תמיד גדל או קטן סביב ראשית הסקיצה, כך שצורה שצוירה הרחק מהראשית זזה. כבוי: ציור שדבר אינו קושר לראשית משנה קנה מידה סביב מרכזו ונשאר במקומו."
+  },
+  "ja": {
+    "ui.first_dimension_scales_about_origin": "スケッチ原点を中心にスケールする",
+    "ui.first_dimension_scales_about_origin_tip": "オン: 図形は常にスケッチ原点を中心に拡大・縮小されるため、原点から離れて描いた図形は移動します。オフ: 原点に拘束されていない図形は自身の中心を基準にスケールし、描いた位置に留まります。"
+  },
+  "ko": {
+    "ui.first_dimension_scales_about_origin": "스케치 원점을 기준으로 배율 조정",
+    "ui.first_dimension_scales_about_origin_tip": "켜기: 도면이 항상 스케치 원점을 기준으로 커지거나 작아지므로 원점에서 떨어져 그린 도형은 이동합니다. 끄기: 원점에 묶이지 않은 도면은 자신의 중심을 기준으로 배율이 바뀌고 그린 자리에 그대로 있습니다."
+  },
+  "vi": {
+    "ui.first_dimension_scales_about_origin": "Co giãn quanh gốc phác thảo",
+    "ui.first_dimension_scales_about_origin_tip": "Bật: bản vẽ luôn phóng to hoặc thu nhỏ quanh gốc phác thảo, nên hình vẽ cách xa gốc sẽ di chuyển. Tắt: bản vẽ không gắn với gốc sẽ co giãn quanh tâm của chính nó và giữ nguyên vị trí."
+  },
+  "zh": {
+    "ui.first_dimension_scales_about_origin": "以草图原点为中心缩放",
+    "ui.first_dimension_scales_about_origin_tip": "开启：图形总是以草图原点为中心放大或缩小，因此远离原点绘制的形状会移动。关闭：未与原点关联的图形以其自身中心缩放，并保持在绘制的位置。"
+  }
+}

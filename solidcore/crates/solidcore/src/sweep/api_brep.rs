@@ -78,6 +78,10 @@
 //!   signature and does no extra work; the fork's `bProfileAtPathStart` is
 //!   [`SweepOptions::profile_at_path_start`] (WR-522), off by default.
 //! - Cancellation: a sweep under a fired cancel token (#2136, #2372) returns `Cancelled`, not `Ok`.
+//! - **A pipe past a bend's centre (WR-774, tangency-labs/solidcraft#13766).**
+//!   [`create_pipe_sweep`] refuses, as `InvalidInput`, a radius that reaches the centre of a
+//!   bend in its path. Upstream checks only that the radius is above zero, and builds that
+//!   pipe with its wall folded through itself.
 
 use crate::curve::curve::p2::CurveKind;
 use crate::curve::curve::Curve;
@@ -87,6 +91,7 @@ use crate::geom::tol::ZONE_TOL_3D;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::nurbs::b_spline_curve::p1::BSplineCurve;
+use crate::nurbs::knots::Side;
 use crate::primitive::primitive_creation::model::PrimitiveModel;
 use crate::primitive::primitive_creation::p1::PrimitiveCreation;
 use crate::primitive::primitive_creation::p3::RepeatedSweepOptions;
@@ -297,8 +302,10 @@ pub fn create_draft_sweep(
 ///
 /// # Errors
 ///
-/// `InvalidInput` for no path curve or a radius `<= 0` (a NaN radius passes, as
-/// upstream); [`SolidError::Unported`] otherwise
+/// `InvalidInput` for no path curve, a radius `<= 0` (a NaN radius passes, as
+/// upstream), or a radius that reaches the centre of a bend in the path
+/// ([`path_bends_within`]; not upstream, which builds that pipe with its wall folded
+/// through itself, WR-774); [`SolidError::Unported`] otherwise
 /// (`SmBrep::SmBrep`, until the B-rep constructor is ported).
 pub fn create_pipe_sweep(
     k: &mut Kernel,
@@ -315,6 +322,13 @@ pub fn create_pipe_sweep(
     }
 
     let path = bspline_of(path_curve, OP_PIPE)?;
+    if path_bends_within(&path, pipe_radius) {
+        return Err(SolidError::invalid_input(
+            OP_PIPE,
+            "the pipe radius reaches the centre of a bend in the path, so the pipe's wall \
+             would fold through itself",
+        ));
+    }
     let approx_tol = 0.0;
     let translational_sweep = false;
     build(k, |pc, model| {
@@ -331,6 +345,57 @@ pub fn create_pipe_sweep(
             &mut side,
             &mut end,
         )
+    })
+}
+
+/// The samples per knot span, both span ends included, at which [`path_bends_within`]
+/// measures a pipe path's curvature. A span is one polynomial or rational piece, whose
+/// curvature rises and falls only a few times, so 16 samples find a bend well inside the
+/// pipe at a cost that is small beside the sweep itself. A bend tighter than the pipe that
+/// lies between two samples is missed, and that pipe is built as before.
+const PIPE_BEND_SAMPLES_PER_SPAN: u32 = 16;
+
+/// Whether `path` bends somewhere with a radius of at most `radius`, that is, with
+/// curvature at least `1 / radius`. A pipe of that radius folds its wall through itself on
+/// the inside of such a bend: the circles of neighbouring sections cross there, so the
+/// swept surface is singular (Maekawa, Patrikalakis, Sakkalis and Yu, "Analysis and
+/// applications of pipe surfaces", CAGD 15(5), 1998).
+///
+/// Measured at [`PIPE_BEND_SAMPLES_PER_SPAN`] samples per knot span. A `true` is proved by
+/// the sample that found the bend; a `false` only says that no sample found one. A sample
+/// whose curvature cannot be computed (a zero-length tangent) proves nothing and is
+/// skipped. A pipe that crosses itself between distant parts of its path is not found
+/// here.
+fn path_bends_within(path: &BSplineCurve, radius: f64) -> bool {
+    let Some(nurb) = path.nurb.as_ref() else {
+        return false;
+    };
+    // A clamped curve's spans run between knots[degree] and knots[n + 1].
+    let Some(span_knots) = nurb.knots().get(nurb.degree()..=nurb.n() + 1) else {
+        return false;
+    };
+    let reaches = |u: f64, side: Side| {
+        nurb.eval_curvature(u, side, false)
+            .is_ok_and(|c| c.kappa * radius >= 1.0)
+    };
+    span_knots.windows(2).any(|ends| {
+        let &[start, end] = ends else {
+            return false;
+        };
+        // A repeated knot spans nothing.
+        if end <= start {
+            return false;
+        }
+        (0..=PIPE_BEND_SAMPLES_PER_SPAN).any(|i| {
+            let at = f64::from(i) / f64::from(PIPE_BEND_SAMPLES_PER_SPAN);
+            // At its end knot a span is evaluated from its own side, not the next span's.
+            let side = if i == PIPE_BEND_SAMPLES_PER_SPAN {
+                Side::Right
+            } else {
+                Side::Left
+            };
+            reaches(start + at * (end - start), side)
+        })
     })
 }
 
@@ -1112,13 +1177,7 @@ mod tests {
         // SM_ERR of the Hermite curve's base Copy, before the later NULL is seen
         let err =
             create_rotational_sweep(&mut k, &[Some(&h), None], o, z, 90.0, false).unwrap_err();
-        assert!(matches!(
-            err,
-            SolidError::Upstream {
-                code: crate::error::SM_ERR,
-                ..
-            }
-        ));
+        assert_eq!(err.upstream_status(), Some(crate::error::SM_ERR), "{err:?}");
         assert!(invalid(&create_taper_extrude(
             &mut k,
             &[],
@@ -1169,6 +1228,32 @@ mod tests {
         assert!(invalid(&create_rotational_sweep_with_repetitions(
             &mut k, &ok, o, z, 5.0, 2, false
         )));
+    }
+
+    /// A pipe whose radius reaches the centre of a bend in its path would fold its wall
+    /// through itself on the inside of that bend, so it is refused (#13766). The ellipse
+    /// with semi-axes 2 and 4 bends tightest at the ends of its long axis, with radius
+    /// 2² / 4 = 1; the circle bends with radius 2 everywhere. Each refused radius is
+    /// beyond the bend's, and each built one within it, by at least 1%.
+    #[test]
+    fn a_pipe_reaching_past_a_bend_centre_is_refused() {
+        let mut k = Kernel::default();
+        let ellipse = Curve::from(
+            api_curves::create_ellipse(&k, Point3::new(0.0, 0.0, 0.0), 2.0, 4.0).expect("ellipse"),
+        );
+        for radius in [1.01, 1.5, 3.0, 5.0] {
+            assert!(
+                invalid(&create_pipe_sweep(&mut k, radius, Some(&ellipse), true)),
+                "radius {radius}"
+            );
+        }
+        let inside = create_pipe_sweep(&mut k, 0.99, Some(&ellipse), true).expect("pipe");
+        assert!(crate::topology::brep::p2::is_manifold_solid(&inside).unwrap());
+
+        let c = circle();
+        assert!(invalid(&create_pipe_sweep(&mut k, 2.02, Some(&c), true)));
+        let inside = create_pipe_sweep(&mut k, 1.98, Some(&c), true).expect("pipe");
+        assert!(crate::topology::brep::p2::is_manifold_solid(&inside).unwrap());
     }
 
     #[test]
@@ -1371,9 +1456,8 @@ mod tests {
     /// sketch's arc through (20, 0), a rounded (14.142136, 14.142136) and (0, 20), whose
     /// centre (c, 0, c), c = 1.28e-6, is off the axis by far less than the B-rep
     /// tolerance (SolidCraft rig shell/4847, #1123).
-    fn rounded_quarter_disc(k: &mut Kernel, fix: bool) -> Brep {
+    fn rounded_quarter_disc(k: &mut Kernel) -> Brep {
         k.fixes.revolve_analytic_profile_faces = true;
-        k.fixes.revolve_arc_centre_near_axis_is_sphere = fix;
         let (c, r, a0) = (
             1.2846627950203038e-06,
             19.99999871533725,
@@ -1416,9 +1500,9 @@ mod tests {
             store: &store,
             key_of: &key_of,
         };
-        for fix in [false, true] {
+        {
             let mut k = Kernel::default();
-            let mut b = rounded_quarter_disc(&mut k, fix);
+            let mut b = rounded_quarter_disc(&mut k);
             let dome = *b.face_list().last().unwrap();
             let surface = b.face(dome).unwrap().surface.as_ref().unwrap();
             let d = surface.natural_uv_domain_if_built();
@@ -1471,30 +1555,24 @@ mod tests {
             let volume = brep_volume(&k, &mut b, 1e-8, &attributes).unwrap();
             // 2/3 pi 20^3
             let want = 2.0 / 3.0 * std::f64::consts::PI * 8000.0;
-            if fix {
-                assert_eq!(face_kinds(&b), ["plane", "sphere"]);
-                assert!(stray <= 1e-9, "dome strays {stray} from its sphere");
-                assert!(spread <= 1e-12, "pole row spread {spread}");
-                assert!(pole_off <= 1e-12, "pole {pole_off} off the axis");
-                assert!((rim - 20.0).abs() <= 1e-12, "rim radius {rim}");
-                assert!((volume - want).abs() <= 1e-6 * want, "{volume} vs {want}");
-                assert!(crate::topology::brep::p2::is_manifold_solid(&b).unwrap());
-            } else {
-                // the arc's own circle: a torus 1.28e-6 about the axis, off the sphere
-                assert_eq!(face_kinds(&b), ["plane", "torus"]);
-                assert!(stray > 1e-7, "{stray}");
-            }
+            // (upstream: the arc's own circle, a torus 1.28e-6 about the axis, off the sphere)
+            assert_eq!(face_kinds(&b), ["plane", "sphere"]);
+            assert!(stray <= 1e-9, "dome strays {stray} from its sphere");
+            assert!(spread <= 1e-12, "pole row spread {spread}");
+            assert!(pole_off <= 1e-12, "pole {pole_off} off the axis");
+            assert!((rim - 20.0).abs() <= 1e-12, "rim radius {rim}");
+            assert!((volume - want).abs() <= 1e-6 * want, "{volume} vs {want}");
+            assert!(crate::topology::brep::p2::is_manifold_solid(&b).unwrap());
         }
     }
 
     /// WR-471 (the fork's c4209ab): a half circle of radius 5 whose centre, and so both
     /// ends, are 3e-7 off the axis (more than the fit tolerance, less than the B-rep
     /// tolerance 1e-6, so the sweep takes both ends to be on the axis), turned a whole
-    /// turn, with the flag on.
+    /// turn.
     fn wr471_whole_sphere() -> (Kernel, Brep) {
         let mut k = Kernel::default();
         k.fixes.revolve_analytic_profile_faces = true;
-        k.fixes.revolve_arc_centre_near_axis_is_sphere = true;
         let off = 3e-7;
         let half = Curve::from(
             BSplineCurve::create_circle_segment(
@@ -1587,12 +1665,9 @@ mod tests {
                 } else {
                     assert!(
                         matches!(
-                            result,
-                            Err(SolidError::Upstream {
-                                operation: crate::mass::integrator::OP_STEP_CONTROL,
-                                code: crate::error::SM_ERR,
-                                ..
-                            })
+                            &result,
+                            Err(e) if e.operation() == crate::mass::integrator::OP_STEP_CONTROL
+                                && e.upstream_status() == Some(crate::error::SM_ERR)
                         ),
                         "accuracy={accuracy}: {result:?}"
                     );

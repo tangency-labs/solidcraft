@@ -162,7 +162,6 @@ use solidcore::topology::edgeuse::p1 as eu1;
 /// The section generator and rounds (and chamfers) as their definitions.
 fn definition_kernel() -> Kernel {
     let mut k = Kernel::default();
-    k.fixes.fillet_gn_section_generator = true;
     k.fixes.fillet_round_as_definition = true;
     k
 }

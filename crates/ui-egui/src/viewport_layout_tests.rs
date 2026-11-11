@@ -2,10 +2,16 @@ use super::*;
 use crate::scenario::Harness;
 use crate::viewport::NavMode;
 use serde_json::json;
-use solidcraft_engine::render::StandardView;
+use solidcraft_viewport::StandardView;
+
+/// SolidCraft's default navigation bar measured on `canvas` with `caps`.
+fn default_bar(canvas: Rect, caps: crate::navigation::NavCaps) -> Rect {
+    crate::navigation_slots::install();
+    crate::ui_kit::nav_bar_layout::measure(canvas, &Default::default(), |slot| caps.shows(slot), |_| 0.0).rect
+}
 
 fn bar_rect(canvas: Rect) -> Rect {
-    crate::navigation_bar_view::measure(canvas, &Default::default(), crate::navigation::NavCaps::MODEL, |_| 0.0).rect
+    default_bar(canvas, crate::navigation::NavCaps::MODEL)
 }
 
 fn assert_navigator_shared_zoom(app: &crate::SolveApp, camera: Camera) {
@@ -134,7 +140,7 @@ fn navigator_front_probe_shares_zoom_in_classic_measured_and_unmeasured_hosts() 
         for perspective in [false, true] {
             h.app.ui.perspective = perspective;
             h.app.ui.auto_ortho_faces = false;
-            for up in [solidcraft_engine::render::UpAxis::Z, solidcraft_engine::render::UpAxis::Y] {
+            for up in [solidcraft_viewport::UpAxis::Z, solidcraft_viewport::UpAxis::Y] {
                 assert_navigator_shared_zoom(&h.app, Camera { up, fov: 0.95, ..Default::default() });
             }
         }
@@ -154,7 +160,7 @@ fn navigator_render_keeps_classic_probe_and_host_authored_lens_and_picture() {
             let picture = crate::render_workspace::picture_layout(&h.app, layout);
             let outer = h.app.viewport.rect.unwrap();
             assert!(picture.viewport.width() < outer.width(), "the portrait frame must exercise a distinct projection");
-            for up in [solidcraft_engine::render::UpAxis::Z, solidcraft_engine::render::UpAxis::Y] {
+            for up in [solidcraft_viewport::UpAxis::Z, solidcraft_viewport::UpAxis::Y] {
                 assert_navigator_shared_zoom(&h.app, Camera { up, fov, ..Default::default() });
             }
         }
@@ -293,11 +299,7 @@ fn render_compass_avoids_the_navigation_bar_on_either_inspector_side() {
 }
 
 fn layout(viewport: Rect, docks: &[Rect], scale: f32, style: crate::prefs::NavigatorStyle, visible: bool) -> Layout {
-    let navigation = if visible {
-        crate::navigation_bar_view::measure(viewport, &Default::default(), crate::navigation::NavCaps::MODEL, |_| 0.0).rect
-    } else {
-        Rect::NOTHING
-    };
+    let navigation = if visible { default_bar(viewport, crate::navigation::NavCaps::MODEL) } else { Rect::NOTHING };
     Layout::with_content(viewport, viewport, docks, scale, style, egui::Vec2::ZERO, navigation)
 }
 
@@ -305,7 +307,7 @@ fn layout(viewport: Rect, docks: &[Rect], scale: f32, style: crate::prefs::Navig
 fn render_focus_compass_keeps_clear_of_an_exit_chip_on_either_side() {
     let viewport = Rect::from_min_size(pos2(0.0, 0.0), vec2(1400.0, 900.0));
     let content = Rect::from_min_max(pos2(0.0, 104.0), viewport.max);
-    let navigation = crate::navigation_bar_view::measure(content, &Default::default(), crate::navigation::NavCaps::RENDER, |_| 0.0).rect;
+    let navigation = default_bar(content, crate::navigation::NavCaps::RENDER);
     for x in [8.0, 1250.0] {
         let chip = Rect::from_min_size(pos2(x, content.top()), vec2(142.0, 40.0));
         let layout = Layout::product(viewport, content, &[chip], 1.0, crate::prefs::NavigatorStyle::Axes, egui::Vec2::ZERO, navigation);

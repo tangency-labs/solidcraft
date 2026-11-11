@@ -38,10 +38,10 @@
 //!   `N_FitCrvInterp` when a span gives `l == -1`). Accesses outside a whole block or
 //!   outside the given slices return [`SolidError::InvalidInput`] instead of
 //!   undefined behaviour.
-//! - Errors are [`SolidError::Nlib`] values with the upstream `NL_*_ERR` number;
+//! - Errors are [`SolidError::Failed`] values (a [`NurbsFailure`] reason) with the upstream `NL_*_ERR` number;
 //!   outputs upstream leaves partly written on error are not returned. The
 //!   `NL_STACKS` arguments and the routine-name strings have no counterpart.
-//! - Work arrays that cannot be reserved return [`NlibCode::Memory`] (upstream's
+//! - Work arrays that cannot be reserved return [`NurbsFailure::Memory`] (upstream's
 //!   `NL_MEM_ERR` from a failed `N_Malloc`) instead of aborting. Index arithmetic on
 //!   caller counts (`n + p + 1`, `p + 1`, `2 * p`, ...) that would overflow `NL_INDEX`
 //!   (undefined behaviour upstream) returns [`SolidError::InvalidInput`]; where the
@@ -49,7 +49,7 @@
 //!   mismatch (`NL_INP_ERR`, as upstream's wrapped sum), and sums whose degree check
 //!   comes later are formed after that check (the order is not observable).
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::math::Vec3;
 use crate::nurbs::basis_basic::basis_derivs;
 use crate::nurbs::crv_basic::Curve;
@@ -164,7 +164,7 @@ fn interp_matrix(
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] when `p > n`; errors of [`KnotVector::basis_eval`], of the LU
+/// [`NurbsFailure::Input`] when `p > n`; errors of [`KnotVector::basis_eval`], of the LU
 /// decomposition and of the solve (`NL_NUM_ERR` for a singular system);
 /// `InvalidInput` for empty `f`, fewer than `n + 1` parameters, or `p == 0` (upstream
 /// asks `N_SetRealMatrix` for bandwidth `-1`).
@@ -175,7 +175,7 @@ pub fn func_interp_given_params(f: &[f64], p: usize, u: &[f64]) -> Result<CurveF
 
     // Check for function memory.
     if p > n {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
 
     // Compute knot vector.
@@ -200,7 +200,7 @@ pub fn func_interp_given_params(f: &[f64], p: usize, u: &[f64]) -> Result<CurveF
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] when `p > n`; errors of [`KnotVector::basis_eval`], of the LU
+/// [`NurbsFailure::Input`] when `p > n`; errors of [`KnotVector::basis_eval`], of the LU
 /// decomposition and of the solve; `InvalidInput` for empty `a` or `p == 0`.
 pub fn interp(a: &[Vec3], p: usize, par: ParamMethod) -> Result<Curve> {
     const OP: &str = "nurbs::crv_fit::p2::interp";
@@ -209,7 +209,7 @@ pub fn interp(a: &[Vec3], p: usize, par: ParamMethod) -> Result<Curve> {
 
     // Check for curve memory.
     if p > n {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
 
     // Get parameters and compute knot vector.
@@ -238,7 +238,7 @@ pub fn interp(a: &[Vec3], p: usize, par: ParamMethod) -> Result<Curve> {
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] when `n < 2`, `p > n`, `m < n` or some interior basis function
+/// [`NurbsFailure::Input`] when `n < 2`, `p > n`, `m < n` or some interior basis function
 /// gets no sample; errors of [`KnotVector::basis_i_eval`],
 /// [`KnotVector::basis_eval`], of the LU decomposition and of the solve;
 /// `InvalidInput` for empty `a` or `p == 0` where upstream would index outside its
@@ -251,7 +251,7 @@ pub fn approx_lst_sq(a: &[Vec3], n: usize, p: usize, par: ParamMethod) -> Result
 
     // Check for curve memory.
     if n < 2 || p > n || m < n {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     let mut pw = alloc(n, CPoint::default(), OP)?;
     let (q0, qm) = (at(a, 0, OP)?, at(a, m, OP)?);
@@ -321,7 +321,7 @@ pub fn approx_lst_sq(a: &[Vec3], n: usize, p: usize, par: ParamMethod) -> Result
     }
 
     if sj < n - 2 || at(&end, 0, OP)? == -1 {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     for i in 0.max(ej + 1)..=n - 2 {
         put(&mut end, i, m - 2, OP)?;
@@ -390,7 +390,7 @@ pub struct WeightedData<'a, P> {
 ///
 /// # Errors
 ///
-/// [`NlibCode::Input`] when the constraint count `mc + 1` is at least `n`, `mc + n`
+/// [`NurbsFailure::Input`] when the constraint count `mc + 1` is at least `n`, `mc + n`
 /// exceeds the unconstrained count `mu`, `n < 1`, `p > n`, `knt` does not have
 /// `n + p + 2` knots, or some basis function gets no unconstrained datum; errors of
 /// [`basis_derivs`], of the LU decompositions, inverses, products and solves;
@@ -446,15 +446,15 @@ pub fn weighted_lst_sq_knots<P: LstSqPoint>(
 
     // An overflowing `mc + n` exceeds `mu + 1`.
     if mc >= n || mc.checked_add(n).is_none_or(|t| t > mu) {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     if n < 1 || p > n {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     // An overflowing `n + p + 1` cannot equal `mknt`.
     let mcur = n.checked_add(p).and_then(|t| t.checked_add(1));
     if Some(mknt) != mcur {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
 
     // Check for curve memory.
@@ -529,7 +529,7 @@ pub fn weighted_lst_sq_knots<P: LstSqPoint>(
     }
 
     if sj < n || at(&end, 0, OP)? == -1 {
-        return Err(SolidError::nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
 
     // Compute WN, NTWN and LU-decompose NTWN.
@@ -824,7 +824,7 @@ pub fn knots_high_end_derivs(u: &[f64], p: usize, k: usize, l: usize) -> Result<
 ///
 /// # Errors
 ///
-/// [`NlibCode::Equations`] when a basis span falls outside the matrix band; errors of
+/// [`NurbsFailure::Singular`] when a basis span falls outside the matrix band; errors of
 /// [`KnotVector::basis_eval`] and of the LU decomposition; `InvalidInput` for empty
 /// `t` or a matrix row upstream would write outside its storage.
 pub fn calc_matrix(
@@ -856,7 +856,7 @@ pub fn calc_matrix(
         let (j, nb) = basis(knt, p, ti, OP)?;
         let l = sp - i + j;
         if l < 0 || l + p >= bw {
-            return Err(SolidError::nlib(OP, NlibCode::Equations));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Singular));
         }
         for kk in 0..=p {
             mset(cm, i, l + kk, at(&nb, kk, OP)?, OP)?;
@@ -951,10 +951,7 @@ mod tests {
         }
         assert!(matches!(
             interp(&a, 6, ParamMethod::Uniform),
-            Err(SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
     }
 

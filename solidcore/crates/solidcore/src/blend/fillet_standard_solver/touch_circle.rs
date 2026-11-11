@@ -3,8 +3,7 @@
 //!
 //! Not in the pinned upstream: the SolidCraft fork's `source/SMLib/src/SmFilletSection.cpp`
 //! (`sm_FilletCurveCorners`, from tangency-labs/smlib@6eecf04), called by
-//! `SmGnSectionFSG::CircleSurface`, the fork's circular section, under
-//! `fixes.fillet_gn_section_generator` (WR-685, #2250).
+//! `SmGnSectionFSG::CircleSurface`, the fork's circular section (WR-685, #2250).
 //!
 //! | Rust                      | Fork (`SmFilletSection.cpp`) |
 //! |---------------------------|------------------------------|
