@@ -5917,8 +5917,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             calibration,
             app.space_mouse.raw.into(),
             app.preferences.space_mouse_axis_source,
-            // The mapping navigation really used, so the picture and the view read the device
-            // the same way.
+            // The driver's mapping, the one navigation really used: the picture shows every
+            // motion where the view uses it. The inversions that make the view follow the cap
+            // stay with the view, so the picture shows the device.
             app.space_mouse.mapping,
         );
     }
