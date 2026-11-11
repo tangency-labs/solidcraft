@@ -1986,14 +1986,15 @@ mod tests {
         // MakeRailEdgeuse (blend.fillet_geom_p5) needs the pseudo B-rep's region and
         // shell for its new edge use, which this bare FilletBrep lacks
         // (with topology.brep_p3 ported, this is a null pointer, not a deferral)
-        assert!(
-            matches!(
-                e,
-                SolidError::Upstream {
-                    operation: "blend::fillet_geom::p5::FilletBrep::make_rail_edgeuse",
-                    code: SM_ERR_NULL_POINTER,
-                    ..
-                }
+        // a typed blend failure that keeps the bare `Upstream`'s status (#13790)
+        assert_eq!(
+            (e.operation(), e.blend_failure(), code(&e)),
+            (
+                "blend::fillet_geom::p5::FilletBrep::make_rail_edgeuse",
+                Some(&crate::error::blend::BlendFailure::Missing(
+                    "the base edge use"
+                )),
+                Some(SM_ERR_NULL_POINTER)
             ),
             "{e:?}"
         );
