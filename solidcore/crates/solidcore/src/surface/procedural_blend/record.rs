@@ -577,9 +577,9 @@ impl ExactRoundRecord {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum FaceDefinition {
     /// A procedural blend's definition S.
-    Procedural(BlendDefinitionRecord),
+    Procedural(Box<BlendDefinitionRecord>),
     /// A round of an exact class's definition.
-    ExactRound(ExactRoundDefinition),
+    ExactRound(Box<ExactRoundDefinition>),
 }
 
 /// An [`ExactRoundRecord`] without its net's form, which is the face's surface: the definition

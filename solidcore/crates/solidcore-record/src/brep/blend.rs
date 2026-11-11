@@ -25,9 +25,9 @@ pub const RECORD_MAX_DEPTH: u32 = 3;
 #[serde(rename_all = "snake_case")]
 pub enum BlendDefinition {
     /// A procedural blend: its net within the definition's bound of S.
-    Procedural(BlendDefinitionRecord),
+    Procedural(Box<BlendDefinitionRecord>),
     /// A round of an exact class: its net is S.
-    ExactRound(ExactRoundDefinition),
+    ExactRound(Box<ExactRoundDefinition>),
 }
 
 /// A NURBS curve of a definition (the leader, a seed, a radius law), as stored.
@@ -338,13 +338,13 @@ impl NurbsCurveRecord {
         if knot_count(self.points.len(), self.degree) != Some(self.knots.len()) {
             return Err(refuse(field, "a curve has points + degree + 1 knots"));
         }
-        if let Some(w) = &self.weights {
-            if w.len() != self.points.len() || !all_finite(w) {
-                return Err(refuse(
-                    field,
-                    "a rational curve has a finite weight per point",
-                ));
-            }
+        if let Some(w) = &self.weights
+            && (w.len() != self.points.len() || !all_finite(w))
+        {
+            return Err(refuse(
+                field,
+                "a rational curve has a finite weight per point",
+            ));
         }
         if !all_finite(&self.knots) || !points_finite(&self.points) {
             return Err(refuse(field, "a curve's numbers are finite"));
@@ -391,13 +391,13 @@ impl NurbsSurfaceRecord {
                 "a surface has count + degree + 1 knots each way",
             ));
         }
-        if let Some(w) = &self.weights {
-            if w.len() != self.points.len() || !all_finite(w) {
-                return Err(refuse(
-                    field,
-                    "a rational surface has a finite weight per point",
-                ));
-            }
+        if let Some(w) = &self.weights
+            && (w.len() != self.points.len() || !all_finite(w))
+        {
+            return Err(refuse(
+                field,
+                "a rational surface has a finite weight per point",
+            ));
         }
         if !all_finite(&self.u_knots) || !all_finite(&self.v_knots) || !points_finite(&self.points)
         {

@@ -626,7 +626,6 @@ pub fn exact_rebuild(k: &Kernel, rec: &ExactRoundRecord) -> Result<Surface> {
     Ok(net)
 }
 
-const OP_FACE_DEFINITION: &str = "surface::procedural_blend::convert::face_definition";
 const OP_ADOPT: &str = "surface::procedural_blend::convert::adopt_definitions";
 
 /// The definition a face's surface carries, without its net, when a body's record keeps it as
@@ -647,7 +646,7 @@ pub fn face_definition(k: &Kernel, surface: &Surface) -> Result<Option<FaceDefin
     };
     if let SurfaceKind::ProceduralBlend(pb) = surface.kind() {
         return match to_record(k, pb) {
-            Ok(rec) => Ok(Some(FaceDefinition::Procedural(rec.definition))),
+            Ok(rec) => Ok(Some(FaceDefinition::Procedural(Box::new(rec.definition)))),
             Err(e) => unrecorded(e),
         };
     }
@@ -664,17 +663,19 @@ pub fn face_definition(k: &Kernel, surface: &Surface) -> Result<Option<FaceDefin
         Ok(rec) => rec,
         Err(e) => return unrecorded(e),
     };
-    Ok(Some(FaceDefinition::ExactRound(ExactRoundDefinition {
-        class: rec.class,
-        supports: rec.supports,
-        radius: rec.radius,
-        order: rec.order,
-        leader: rec.leader,
-        inputs: rec.inputs,
-        chamfer: rec.chamfer,
-        leader_map: rec.leader_map,
-        net_kind: rec.net.kind,
-    })))
+    Ok(Some(FaceDefinition::ExactRound(Box::new(
+        ExactRoundDefinition {
+            class: rec.class,
+            supports: rec.supports,
+            radius: rec.radius,
+            order: rec.order,
+            leader: rec.leader,
+            inputs: rec.inputs,
+            chamfer: rec.chamfer,
+            leader_map: rec.leader_map,
+            net_kind: rec.net.kind,
+        },
+    ))))
 }
 
 /// Give each face of `faces` its definition back: its net is the face's surface as it was
@@ -728,7 +729,7 @@ pub fn adopt_definitions(
                 let pb = from_record(
                     k,
                     &ProceduralBlendRecord {
-                        definition: d.clone(),
+                        definition: (**d).clone(),
                         net,
                     },
                 )?;

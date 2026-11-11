@@ -14,9 +14,11 @@ use solidcore_record::brep::blend as r;
 #[must_use]
 pub fn blend(d: &r::BlendDefinition) -> kb::FaceDefinition {
     match d {
-        r::BlendDefinition::Procedural(d) => kb::FaceDefinition::Procedural(definition(d)),
+        r::BlendDefinition::Procedural(d) => {
+            kb::FaceDefinition::Procedural(Box::new(definition(d)))
+        }
         r::BlendDefinition::ExactRound(d) => {
-            kb::FaceDefinition::ExactRound(kb::ExactRoundDefinition {
+            kb::FaceDefinition::ExactRound(Box::new(kb::ExactRoundDefinition {
                 class: class(d.class),
                 supports: [support(&d.supports[0]), support(&d.supports[1])],
                 radius: d.radius,
@@ -37,7 +39,7 @@ pub fn blend(d: &r::BlendDefinition) -> kb::FaceDefinition {
                     along_v: d.leader_map.along_v,
                 },
                 net_kind: net_kind(d.net_kind),
-            })
+            }))
         }
     }
 }
@@ -46,10 +48,13 @@ pub fn blend(d: &r::BlendDefinition) -> kb::FaceDefinition {
 #[must_use]
 pub fn record_blend(d: kb::FaceDefinition) -> r::BlendDefinition {
     match d {
-        kb::FaceDefinition::Procedural(d) => r::BlendDefinition::Procedural(record_definition(d)),
+        kb::FaceDefinition::Procedural(d) => {
+            r::BlendDefinition::Procedural(Box::new(record_definition(*d)))
+        }
         kb::FaceDefinition::ExactRound(d) => {
+            let d = *d;
             let [s0, s1] = d.supports;
-            r::BlendDefinition::ExactRound(r::ExactRoundDefinition {
+            r::BlendDefinition::ExactRound(Box::new(r::ExactRoundDefinition {
                 class: record_class(d.class),
                 supports: [record_support(s0), record_support(s1)],
                 radius: d.radius,
@@ -70,7 +75,7 @@ pub fn record_blend(d: kb::FaceDefinition) -> r::BlendDefinition {
                     along_v: d.leader_map.along_v,
                 },
                 net_kind: record_net_kind(d.net_kind),
-            })
+            }))
         }
     }
 }
@@ -356,7 +361,7 @@ mod tests {
                 wedge: 1.5,
             }),
         };
-        let procedural = r::BlendDefinition::Procedural(r::BlendDefinitionRecord {
+        let procedural = r::BlendDefinition::Procedural(Box::new(r::BlendDefinitionRecord {
             supports: [
                 r::SupportRecord::Blend(Box::new(r::ProceduralBlendRecord {
                     definition: inner.clone(),
@@ -370,8 +375,8 @@ mod tests {
             radius: r::RadiusRecord::Constant { offsets: [2., 3.] },
             chamfer: None,
             ..inner
-        });
-        let exact = r::BlendDefinition::ExactRound(r::ExactRoundDefinition {
+        }));
+        let exact = r::BlendDefinition::ExactRound(Box::new(r::ExactRoundDefinition {
             class: r::ExactClassRecord::Circle,
             supports: [
                 r::SupportRecord::Nurbs {
@@ -401,7 +406,7 @@ mod tests {
                 along_v: true,
             },
             net_kind: r::ExactNetKindRecord::Revolution,
-        });
+        }));
         for d in [procedural, exact] {
             assert_eq!(record_blend(blend(&d)), d);
         }

@@ -149,11 +149,17 @@ pub fn moved(brep: &Brep, motion: &Rigid) -> Option<Brep> {
     let mut out = brep.clone();
     for f in &mut out.faces {
         f.surface = motion.surface(&f.surface)?;
-        f.nurbs = f.nurbs.as_ref().map(|n| motion.surface(n)).transpose()?;
+        f.nurbs = match &f.nurbs {
+            Some(n) => Some(motion.surface(n)?),
+            None => None,
+        };
     }
     for e in &mut out.edges {
         e.curve = motion.curve(&e.curve)?;
-        e.nurbs = e.nurbs.as_ref().map(|n| motion.curve(n)).transpose()?;
+        e.nurbs = match &e.nurbs {
+            Some(n) => Some(motion.curve(n)?),
+            None => None,
+        };
     }
     for v in &mut out.vertices {
         v.point = motion.point(v.point);

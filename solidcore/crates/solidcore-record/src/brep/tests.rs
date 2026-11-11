@@ -900,7 +900,7 @@ fn a_blend(depth: u32) -> blend::BlendDefinitionRecord {
 
 fn blend_label(depth: u32) -> Surface {
     Surface::Blend {
-        definition: Box::new(blend::BlendDefinition::Procedural(a_blend(depth))),
+        definition: Box::new(blend::BlendDefinition::Procedural(Box::new(a_blend(depth)))),
     }
 }
 
