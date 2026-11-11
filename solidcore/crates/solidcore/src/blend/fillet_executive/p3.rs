@@ -203,6 +203,24 @@ pub enum NoRoomReason {
     /// tolerance and the body's together, within which the strip's vertices are one. The
     /// fit is the blend's size less the fit margin (not the fork's, #2404).
     StripBelowResolution,
+    /// An End's rail runs past its side edge's far end, onto the faces beyond (the fork's
+    /// `RefuseEndPastSideEdge`). Named for the typed failure record
+    /// ([`crate::error::ErrorKind::EndPastSideEdge`]); its refusal notes it once it moves onto
+    /// the record.
+    EndPastSideEdge,
+    /// An End of mixed convexity whose rail misses the side edge of the other convexity.
+    /// Named for the typed failure record ([`crate::error::ErrorKind::EndOverflowsSideEdge`]);
+    /// its refusal notes it once it moves onto the record.
+    EndOverflowsSideEdge,
+    /// An End's rail rolls over its face's tangent edge where the round ends at a smooth
+    /// vertex. Named for the typed failure record
+    /// ([`crate::error::ErrorKind::EndRollsIntoSmoothEnd`]); its refusal notes it once it moves
+    /// onto the record.
+    EndRollsIntoSmoothEnd,
+    /// A round's edge runs on across a seam's vertex into an edge that is not blended. Named
+    /// for the typed failure record ([`crate::error::ErrorKind::EndAtSeamVertex`]); its refusal
+    /// notes it once it moves onto the record.
+    EndAtSeamVertex,
 }
 
 /// The initialized error-info members p3 reads or writes. Corner kinds use the

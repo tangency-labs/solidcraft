@@ -2670,6 +2670,33 @@ impl<'target> FilletSession<'target> {
         &self.executive.error
     }
 
+    /// Where the executive noted its last failure, on the caller's body, as the typed failure
+    /// record names it ([`crate::error::Site`]): the error info's filleted edge, side face (else
+    /// end face) and filleted vertex where each is topology of the target body (an object of
+    /// an intermediate body names nothing), and its point. Reading it changes nothing.
+    #[must_use]
+    pub fn error_site(&self) -> crate::error::Site {
+        use crate::error::{Site, TargetEdge, TargetFace, TargetVertex};
+        let info = &self.executive.error;
+        Site {
+            edge: info.edge.as_ref().and_then(TargetEdge::of_fillet_object),
+            face: info
+                .side_face
+                .as_ref()
+                .and_then(TargetFace::of_fillet_object)
+                .or_else(|| {
+                    info.end_face
+                        .as_ref()
+                        .and_then(TargetFace::of_fillet_object)
+                }),
+            vertex: info
+                .vertex
+                .as_ref()
+                .and_then(TargetVertex::of_fillet_object),
+            at: info.location,
+        }
+    }
+
     /// The fork's `SetSweptTurns` (smlib#79 step 4b; WR-697): a blend corner's Turn (two rounds of one
     /// convexity that turn at a sharp side edge) is Swept, its corner face the rounds' end
     /// section revolved about the side edge (an exact torus), instead of Mitred; a Swept
@@ -2818,10 +2845,12 @@ impl<'target> FilletSession<'target> {
     #[must_use]
     pub fn fit_size(&self) -> Option<crate::blend::fillet_executive::FitSize<EdgeId>> {
         let fit = self.executive.fit_size()?;
-        let edge = match fit.edge {
-            Some(FilletObject::Topology(FilletBody::Target, EntityRef::Edge(e))) => Some(e),
-            _ => None,
-        };
+        // the mapping to the caller's body the typed failure record's site uses
+        let edge = fit
+            .edge
+            .as_ref()
+            .and_then(crate::error::TargetEdge::of_fillet_object)
+            .map(crate::error::TargetEdge::id);
         Some(crate::blend::fillet_executive::FitSize {
             size: fit.size,
             edge,
