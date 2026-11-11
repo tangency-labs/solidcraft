@@ -9,24 +9,11 @@
   "rel": 1e-06
  },
  "surface_types": [
-  "bspline",
   "plane",
-  "sphere"
+  "sphere",
+  "torus"
  ],
- "splines": [
-  {
-   "degree": [
-    2,
-    2
-   ]
-  },
-  {
-   "degree": [
-    2,
-    2
-   ]
-  }
- ],
+ "splines": [],
  "continuity": {
   "order": "g1"
  }
