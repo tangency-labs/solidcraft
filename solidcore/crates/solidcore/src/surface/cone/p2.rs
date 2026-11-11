@@ -86,7 +86,7 @@ use super::Cone;
 use crate::curve::curve::Curve;
 use crate::curve::ellipse::{Ellipse, EllipseOptions};
 use crate::curve::line::{BoundedLineOptions, Line};
-use crate::error::{ignore_status, ignored, Result, SolidError, SM_ERR};
+use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -111,10 +111,6 @@ const OP_NURB_CYLINDER: &str = "surface::cone::p2::Cone::is_nurb_surface_cylinde
 const OP_REBUILD: &str = "surface::cone::p2::Cone::rebuild_step_from_nurb_parameters";
 const OP_REPARAM: &str = "surface::cone::p2::Cone::reparameterize";
 const OP_TRIM: &str = "surface::cone::p2::ellipse_trim_intervals";
-
-/// The `SmSurfOfRevolution::STEPInversion` operation whose `SM_ERR` means "the rotated
-/// point is not on the generator" (upstream sets `SM_LT_EXTERIOR` there).
-const OP_REV_STEP_INV: &str = "surface::surf_of_revolution::p2::SurfOfRevolution::step_inversion";
 
 /// `ANALYTIC_TOL_SCALE` (`SmConfig.h`).
 const ANALYTIC_TOL_SCALE: f64 = 100.0;
@@ -1357,11 +1353,10 @@ fn cone_inversion(
         Ok(inv) => Ok((inv.location, inv.uv)),
         Err(e) if e.is_unported_or_cancelled() => Err(e),
         // rotated point not on the generator: upstream sets SM_LT_EXTERIOR
-        Err(SolidError::Upstream {
-            operation: OP_REV_STEP_INV,
-            code: SM_ERR,
-            ..
-        }) => Ok((LocationType::Exterior, Point2::UNDEF)),
+        // (by its status, so also a typed failure that replaced the `Upstream`, #13790)
+        Err(e) if crate::surface::surf_of_revolution::p2::is_off_generator(&e) => {
+            Ok((LocationType::Exterior, Point2::UNDEF))
+        }
         // the fork (tangency-labs/smlib dfc7cb6, `SER` unless `STEPInversionAnswered`):
         // a failure is passed on instead of read as SM_LT_EXTERIOR
         Err(e) if k.fixes.analytic_inversion_answers_apart => Err(e),

@@ -2310,3 +2310,70 @@ mod tests {
         assert_eq!(SolidError::nurbs_routine("native")(c.clone()), c);
     }
 }
+
+/// Samples for the tests of the decisions that read [`SolidError::upstream_status`] (#13790):
+/// typed failures that replaced an [`SolidError::Upstream`], and typed failures that never
+/// stood for an upstream status.
+#[cfg(test)]
+pub(crate) mod replaced_upstream_samples {
+    use super::SolidError;
+
+    /// The typed failures of three areas that replaced an `Upstream` with `code` (#13790):
+    /// an intersection's, a geometry utility's and a topology routine's, at `entity` when one is given.
+    pub(crate) fn replaced_upstream(
+        operation: &'static str,
+        code: i32,
+        entity: Option<crate::error::EntityRef>,
+    ) -> [SolidError; 3] {
+        use crate::error::{
+            geom::GeomFailure, intersect::IntersectFailure, topology::TopologyFailure, Failure,
+            Reason,
+        };
+        let typed = |reason: Reason| {
+            let f = Failure::new(operation, reason).with_status(code);
+            match entity {
+                Some(e) => f.at(e),
+                None => f,
+            }
+            .into_error()
+        };
+        [
+            typed(Reason::Intersect(IntersectFailure::Failed(
+                "replaced an upstream status",
+            ))),
+            typed(Reason::Geom(GeomFailure::Failed(
+                "replaced an upstream status",
+            ))),
+            typed(Reason::Topology(TopologyFailure::Failed(
+                "replaced an upstream status",
+            ))),
+        ]
+    }
+
+    /// Typed failures with `code` that never stood for an upstream status (#13790): a sweep's
+    /// station cap and a curve length's floor.
+    pub(crate) fn native_failures(operation: &'static str, code: i32) -> [SolidError; 2] {
+        use crate::error::{curve::CurveFailure, sweep::SweepFailure, Failure, Reason};
+        let typed = |reason: Reason| {
+            Failure::new(operation, reason)
+                .with_status(code)
+                .into_error()
+        };
+        let natives = [
+            typed(Reason::Sweep(SweepFailure::RailPastStationCap {
+                asked: 1e-6,
+                reached: 1e-3,
+                wires: 64,
+            })),
+            typed(Reason::Curve(CurveFailure::LengthBelowFloor {
+                asked: 1e-12,
+                floor: 1e-9,
+                pieces: 8,
+            })),
+        ];
+        for e in &natives {
+            assert_eq!(e.upstream_status(), None, "{e:?}");
+        }
+        natives
+    }
+}
