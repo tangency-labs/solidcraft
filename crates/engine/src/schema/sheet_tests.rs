@@ -82,7 +82,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<BendTableParams>(), &["body", "format", "path"]);
     assert_keys(
         input_schema_for::<ExportDxfParams>(),
-        &["bend_lines", "bend_notes", "body", "curves", "layers", "note_height", "path", "per_body", "profile", "text", "units"],
+        &["bend_lines", "bend_notes", "body", "curves", "layers", "markings", "note_height", "path", "per_body", "profile", "text", "units"],
     );
 }
 

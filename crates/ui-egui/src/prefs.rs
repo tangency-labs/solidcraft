@@ -33,6 +33,7 @@ mod navigation;
 mod panel_layout;
 mod privacy;
 mod security;
+mod sheet_metal;
 mod sketch;
 mod theme_picker;
 mod tools;
@@ -458,6 +459,7 @@ pub const PAGES: &[&str] = &[
     "Graphics",
     "Design",
     "Security",
+    "Sheet Metal",
     "Sketch",
     "Tools",
     "Navigation",
@@ -473,14 +475,15 @@ pub const PAGE_LAYOUT: usize = 2;
 pub const PAGE_GRAPHICS: usize = 3;
 pub const PAGE_DESIGN: usize = 4;
 pub const PAGE_SECURITY: usize = 5;
-pub const PAGE_SKETCH: usize = 6;
-pub const PAGE_TOOLS: usize = 7;
-pub const PAGE_NAVIGATION: usize = 8;
-pub const PAGE_MOUSE3D: usize = 9;
-pub const PAGE_SHORTCUTS: usize = 10;
-pub const PAGE_ASSISTANT: usize = 11;
-pub const PAGE_PLUGINS: usize = 12;
-pub const PAGE_PRIVACY: usize = 13;
+pub const PAGE_SHEET_METAL: usize = 6;
+pub const PAGE_SKETCH: usize = 7;
+pub const PAGE_TOOLS: usize = 8;
+pub const PAGE_NAVIGATION: usize = 9;
+pub const PAGE_MOUSE3D: usize = 10;
+pub const PAGE_SHORTCUTS: usize = 11;
+pub const PAGE_ASSISTANT: usize = 12;
+pub const PAGE_PLUGINS: usize = 13;
+pub const PAGE_PRIVACY: usize = 14;
 /// What Preferences accepts for `parameter_list_rows`: `parameters.complete` answers at most 200.
 pub const PARAMETER_LIST_ROWS: std::ops::RangeInclusive<u16> = 5..=200;
 const WINDOW_PAGES: &[prefs_window::Page<SolveApp>] = &[
@@ -538,6 +541,16 @@ const WINDOW_PAGES: &[prefs_window::Page<SolveApp>] = &[
         scroll: true,
         draw: page_draw::<PAGE_SECURITY>,
         defaults: page_defaults::<PAGE_SECURITY>,
+    }),
+    prefs_window::Page::Host(prefs_window::HostPage {
+        icon: ui_kit::Icon::Kit("prefs_sheet_metal"),
+        label: "prefs.structure.sheet_metal",
+        // Already in Work, after Security: a group here drew a second "Work" heading.
+        group: None,
+        handle: "prefs:page:Sheet Metal",
+        scroll: true,
+        draw: page_draw::<PAGE_SHEET_METAL>,
+        defaults: page_defaults::<PAGE_SHEET_METAL>,
     }),
     prefs_window::Page::Host(prefs_window::HostPage {
         icon: ui_kit::Icon::Kit("prefs_sketch"),
@@ -1465,6 +1478,16 @@ preference_settings! {
     /// view (`canvas::boxes_shown`). Off: it is typed in the command window only, which takes the
     /// keyboard after a pick instead, and nothing covers the model (#9479).
     value_boxes_in_view: bool = true, PAGE_DESIGN => check_id("prefs.value_boxes_in_view");
+    /// The sheet-metal rule that new designs get: its thickness, K-factor and bend radius; the
+    /// rule's other fields keep their defaults. `Steel (mm)` until the user edits it.
+    sheet_rule: solidcraft_engine::doc::sheet::SheetRule = solidcraft_engine::doc::sheet::SheetRule::steel(), PAGE_SHEET_METAL;
+    /// The units the flat-pattern DXF is exported in: `mm` (the default) or `inches`.
+    sheet_dxf_units: String = "mm".into(), PAGE_SHEET_METAL;
+    /// Whether the exported flat-pattern DXF keeps the bend lines (BEND_UP, BEND_DOWN).
+    sheet_export_bend_lines: bool = true, PAGE_SHEET_METAL => check_id_help("prefs.sheet_export_bend_lines", "prefs.sheet_export_bend_lines_help");
+    /// Whether the exported flat-pattern DXF keeps the markings (the letters on TEXT/ETCH and the
+    /// bend notes).
+    sheet_export_markings: bool = true, PAGE_SHEET_METAL => check_id_help("prefs.sheet_export_markings", "prefs.sheet_export_markings_help");
     /// The Parameters dialog applies an expression as soon as its field is left (#9279). Off: the
     /// edits wait in the dialog until Apply or OK sets them together, in one rebuild and one undo
     /// step. Its checkbox is in the dialog itself.
@@ -2910,6 +2933,30 @@ pub fn apply_network(p: &Prefs) {
 /// blank design left when the last tab closes. A design that already has features is unchanged.
 pub fn apply_new_design(app: &mut SolveApp) {
     apply_new_design_units(app, &app.preferences.default_units.clone());
+    apply_default_sheet_rule(app);
+}
+
+/// New designs get the user's default sheet-metal rule; a design that has geometry keeps its own.
+/// On a blank design this updates the rule in place, so editing the preference follows the open
+/// design.
+pub(crate) fn apply_default_sheet_rule(app: &mut SolveApp) {
+    if app.session.doc.features.is_empty() {
+        let rule = app.preferences.sheet_rule.clone();
+        let saved = !app.session.is_dirty();
+        if app.session.execute("sheet.manage_rules", &json!({ "name": rule.name, "thickness": rule.thickness, "k_factor": rule.k_factor, "bend_radius": rule.bend_radius, "active": true })).is_ok() {
+            app.session.undo.pop();
+            if saved {
+                app.session.mark_saved();
+            }
+        }
+    }
+}
+
+/// The default rule also applies to the blank design already open.
+pub(crate) fn default_sheet_rule_changed(app: &mut SolveApp) {
+    if crate::documents::active_is_blank(app) {
+        apply_default_sheet_rule(app);
+    }
 }
 
 /// What `drawing.create` run from the app starts from when it names no template: the preferred
@@ -3550,6 +3597,7 @@ fn draw_page(app: &mut SolveApp, ui: &mut egui::Ui, index: usize, t: &Tokens) {
         }
         PAGE_DESIGN => design::show(app, ui),
         PAGE_SECURITY => security::show(app, ui),
+        PAGE_SHEET_METAL => sheet_metal::show(app, ui),
         PAGE_PRIVACY => privacy::show(app, ui),
         PAGE_NAVIGATION => navigation::show(app, ui, t),
         PAGE_GRAPHICS => graphics::show(app, ui),
@@ -7589,6 +7637,7 @@ mod tests {
                 "Graphics",
                 "Design",
                 "Security",
+                "Sheet Metal",
                 "Sketch",
                 "Tools",
                 "Navigation",
@@ -7635,6 +7684,17 @@ mod tests {
         for (alias, index) in PAGE_ALIASES {
             open_at(&mut h.app, *index);
             h.frames(4);
+            // The page list scrolls to the opened page; the scroll animates for a dozen frames,
+            // so wait for the rows to stop moving before clicking where the row was published.
+            let mut last = crate::scenario::rect_of(&format!("prefs:page:{alias}"));
+            for _ in 0..30 {
+                h.frames(1);
+                let now = crate::scenario::rect_of(&format!("prefs:page:{alias}"));
+                if now == last {
+                    break;
+                }
+                last = now;
+            }
             h.step(&json!({"click":{"handle":format!("prefs:page:{alias}")}})).unwrap();
             assert_eq!(h.app.prefs_window.shell.section, *index, "{alias} is clickable");
         }
@@ -14912,6 +14972,42 @@ mod kit_use_tests {
             assert!(footer.contains_rect(scenario::rect_of("prefs:profile").unwrap()));
             assert!(nav.contains_rect(scenario::rect_of("prefs:page:Plugins").unwrap()), "last page is reachable in {theme}");
         }
+    }
+
+    #[test]
+    fn the_sheet_metal_page_edits_the_default_rule_and_the_dxf_export_defaults() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width": 1467, "height": 1146}));
+        h.call("ui.prefs", json!({"language": "en", "theme": "light", "open": "Sheet Metal"}));
+        h.frames(6);
+        assert_eq!(h.app.preferences.sheet_rule, solidcraft_engine::doc::sheet::SheetRule::steel());
+        assert_eq!(h.app.preferences.sheet_dxf_units, "mm");
+        assert!(crate::scenario::rect_of("prefs:page:Sheet Metal").is_some());
+        // The export defaults: units, bend lines and markings.
+        super::reveal_preference(&mut h, "prefs:sheet_dxf_units:inches");
+        h.step(&json!({"click": {"handle": "prefs:sheet_dxf_units:inches"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.preferences.sheet_dxf_units, "inches");
+        super::reveal_preference(&mut h, "prefs:sheet_export_bend_lines");
+        h.step(&json!({"click": {"handle": "prefs:sheet_export_bend_lines"}})).unwrap();
+        h.frames(2);
+        assert!(!h.app.preferences.sheet_export_bend_lines);
+        super::reveal_preference(&mut h, "prefs:sheet_export_markings");
+        h.step(&json!({"click": {"handle": "prefs:sheet_export_markings"}})).unwrap();
+        h.frames(2);
+        assert!(!h.app.preferences.sheet_export_markings);
+        // The rule's fields render, and editing the rule follows the open blank design.
+        super::reveal_preference(&mut h, "dialog:Thickness");
+        assert!(crate::scenario::handle_at("dialog:Thickness").is_some());
+        assert!(crate::scenario::handle_at("dialog:K Factor").is_some());
+        assert!(crate::scenario::handle_at("dialog:Bend Radius").is_some());
+        h.app.preferences.sheet_rule.thickness = "3 mm".into();
+        crate::prefs::default_sheet_rule_changed(&mut h.app);
+        let rule = h.app.session.doc.sheet.rules.iter().find(|r| r.name == "Steel (mm)");
+        assert!(rule.is_some_and(|r| r.thickness == "3 mm"), "{:?}", h.app.session.doc.sheet.rules);
+        assert!(!h.app.session.is_dirty());
     }
 
     #[test]

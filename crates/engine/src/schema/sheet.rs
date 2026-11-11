@@ -1054,6 +1054,10 @@ pub struct ExportDxfParams {
     /// a cutter that would cut them.
     #[serde(default)]
     pub bend_lines: Option<bool>,
+    /// The markings: the letters' contours on TEXT/ETCH and the bend notes. Default: true; false
+    /// leaves them out, for a cutter that would etch them.
+    #[serde(default)]
+    pub markings: Option<bool>,
     /// roles: the layer for each role. single: every entity on layer 0. Default: roles.
     #[serde(default)]
     pub layers: Option<DxfLayersParam>,

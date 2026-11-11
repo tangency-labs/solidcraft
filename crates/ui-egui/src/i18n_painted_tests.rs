@@ -151,7 +151,12 @@ fn no_english_is_painted_where_the_language_has_a_translation() {
     crate::i18n::install();
     let english = english_ids();
     let mut h = sample();
-    let names = design_names(&h.app);
+    let mut names = design_names(&h.app);
+    // Values the preference editors show as typed (the sheet rule's expressions).
+    {
+        let r = &h.app.preferences.sheet_rule;
+        names.extend([r.thickness.clone(), r.k_factor.clone(), r.bend_radius.clone()]);
+    }
     assert!(names.contains("Boss") && names.len() > 5, "{names:?}");
     let mut leaks = Vec::new();
     for catalog in crate::i18n::LOCALES.iter().filter(|c| c.id != "en") {

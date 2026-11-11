@@ -203,6 +203,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              bend_notes?: bool (default false: a note beside each bend line on layer BEND_NOTES, `B1 UP 90° R1`, its angle the included angle \
               when the body's rule has angle_display: included), note_height?: mm (default 3), \
              bend_lines?: bool (default true; false leaves BEND_UP and BEND_DOWN out, for a cutter that would cut them), \
+             markings?: bool (default true; false leaves the letter contours on TEXT/ETCH and the bend notes out, for a cutter that would etch them), \
              layers?: roles|single (default roles, the layers below; single: every entity on layer 0), \
              profile?: a DXF profile file's path, or the profile as an object (which layer, colour and linetype each role is written with, and the roles left out; docs/formats/dxf-profiles.md; default: the layers below; not with layers: single), \
              per_body?: bool (a file for every sheet body, `<path>-<body>.dxf`, or their DXF texts without a path → files: [{body, path | dxf, bends}]; not with `body`) \
@@ -1403,6 +1404,9 @@ pub struct DxfOptions {
     pub bend_notes: Option<f64>,
     /// Leave the bend lines out (BEND_UP, BEND_DOWN), for a cutter that would cut them (#4314).
     pub no_bend_lines: bool,
+    /// Leave the markings out (the letters on TEXT/ETCH and the bend notes), for a cutter that
+    /// would etch them.
+    pub no_markings: bool,
     /// Everything on layer 0 instead of a layer for each role (#4314).
     pub one_layer: bool,
 }
@@ -1551,6 +1555,8 @@ impl FlatDrawing {
         let mut loops: Vec<(Pass, &solidcore_record::Loop2, String)> = Vec::new();
         for (j, r) in regions.iter().enumerate() {
             for (k, lp) in std::iter::once(&r.outer).chain(&r.holes).enumerate() {
+                // A letter's cut contour is a marking; a piece whose outer contour is the sheet's own
+                // outline stays.
                 let (pass, layer) = if k == 0 && !nested.get(j).copied().unwrap_or(false) {
                     (Pass::Outline, "OUTLINE")
                 } else if letters.is_letter(lp) {
@@ -1561,6 +1567,9 @@ impl FlatDrawing {
                 } else {
                     (Pass::Cut, "CUT")
                 };
+                if o.no_markings && (layer == "TEXT" || layer == "ETCH") {
+                    continue;
+                }
                 loops.push((pass, lp, layer.to_string()));
             }
         }
@@ -1568,6 +1577,9 @@ impl FlatDrawing {
             let layer = pocket_layer(p);
             for lp in std::iter::once(&p.region.outer).chain(&p.region.holes) {
                 // Text machined to a depth is a marking, whatever its depth.
+                if o.no_markings && letters.is_letter(lp) {
+                    continue;
+                }
                 if letters.is_letter(lp) {
                     loops.push((Pass::Etch, lp, "ETCH".to_string()));
                 } else {
@@ -1620,7 +1632,9 @@ impl FlatDrawing {
                 let layer = dxf_layer(&mut file, if b.up { "BEND_UP" } else { "BEND_DOWN" }, o.one_layer)?;
                 push(&mut file, layer, DxfShape::Line(b.start, b.end))?;
             }
-            if let Some(height) = o.bend_notes {
+            if let Some(height) = o.bend_notes
+                && !o.no_markings
+            {
                 let layer = dxf_layer(&mut file, "BEND_NOTES", o.one_layer)?;
                 push(&mut file, layer, bend_note(b, height, self.display, o.units))?;
             }
@@ -1719,11 +1733,16 @@ fn dxf_options(p: &Value, cmd: &str) -> Result<DxfOptions> {
         Some(Value::Bool(false)) => true,
         Some(_) => return Err(bad(cmd, "`bend_lines` must be true or false")),
     };
+    let no_markings = match p.get("markings").filter(|v| !v.is_null()) {
+        None | Some(Value::Bool(true)) => false,
+        Some(Value::Bool(false)) => true,
+        Some(_) => return Err(bad(cmd, "`markings` must be true or false")),
+    };
     let one_layer = match p.get("layers").filter(|v| !v.is_null()) {
         None => false,
         Some(v) => v.as_str().and_then(dxf_layers).ok_or_else(|| bad(cmd, "`layers` must be roles or single"))?,
     };
-    Ok(DxfOptions { units, curves, text, bend_notes, no_bend_lines, one_layer })
+    Ok(DxfOptions { units, curves, text, bend_notes, no_bend_lines, no_markings, one_layer })
 }
 
 /// A `sheet.export_dxf` call's `profile`: a profile file's path, or the profile itself as an

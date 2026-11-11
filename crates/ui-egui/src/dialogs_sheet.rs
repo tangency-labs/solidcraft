@@ -271,7 +271,9 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             )
         }
         "sheet.flat_pattern" => {
-            (Sm::FlatPattern { data: None, key: None, status: None, dxf_units: 0 }, vec![SelInput::new("Body (last if none)", BODIES, false)])
+            // The units start from the preference; the panel's choice still sets each export's.
+            let dxf_units = (app.preferences.sheet_dxf_units == "inches") as usize;
+            (Sm::FlatPattern { data: None, key: None, status: None, dxf_units }, vec![SelInput::new("Body (last if none)", BODIES, false)])
         }
         _ => Sm::simple_start(id)?,
     };
@@ -759,7 +761,8 @@ pub fn start_export(app: &mut SolveApp, id: &str) -> bool {
     let last = state.surface_sheets.last().map(|sheet| sheet.body.clone());
     drop(state);
     if let Some(body) = last {
-        export_flat(app, &body, extension, DXF_UNITS[0]);
+        // The ribbon's export follows the preference; the panel's choice still sets each export's.
+        export_flat(app, &body, extension, if app.preferences.sheet_dxf_units == "inches" { "inches" } else { "mm" });
     } else {
         // Let the command report its ordinary "no sheet body" error without opening a picker;
         // nothing starts, so the ribbon goes back to the tab it was started from (#10540).
@@ -780,6 +783,8 @@ fn export_flat(app: &mut SolveApp, body: &str, extension: &str, units: &str) -> 
             let mut params = json!({"body": body, "path": path});
             if command == "sheet.export_dxf" {
                 params["units"] = json!(units);
+                params["bend_lines"] = json!(app.preferences.sheet_export_bend_lines);
+                params["markings"] = json!(app.preferences.sheet_export_markings);
             }
             match app.run(command, params) {
                 Ok(_) => {

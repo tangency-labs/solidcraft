@@ -377,7 +377,7 @@ fn flat_pattern_dxf_units_reach_the_exported_drawing() {
         let i = lines.iter().position(|l| l.trim() == var).unwrap();
         [lines[i + 2].trim().parse().unwrap(), lines[i + 4].trim().parse().unwrap()]
     }
-    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
         let mut h = crate::scenario::Harness::new();
         h.call("ui.set", json!({"layout": mode}));
         for (command, params) in [
