@@ -1778,7 +1778,8 @@ fn turns_digest(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature) -> 
         line.hash(&mut h);
         e.hash(&mut h);
         for n in expr::references(e) {
-            vals.get(&n).map(|v| v.v.to_bits()).hash(&mut h);
+            // Its unit too: `30` and `30 rad` are the same number.
+            vals.get(&n).map(|v| (v.v.to_bits(), v.len, v.ang)).hash(&mut h);
         }
     }
     any.then(|| h.finish())

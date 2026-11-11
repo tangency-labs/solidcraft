@@ -1195,12 +1195,21 @@ fn rotate_member_refuses_a_member_in_another_occurrence() {
 /// A 40 × 40 square tube on the sloped line (0, 0, 0)–(300, 0, 300), its member body `Brace`,
 /// made by the feature `Brace member`. Its profile's x runs along world Y.
 fn brace() -> Session {
+    brace_at("origin")
+}
+
+/// [`brace`] with the profile point `anchor` on the line.
+fn brace_at(anchor: &str) -> Session {
     let mut s = Session::default();
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Brace path"}));
     run(&mut s, "sketch.options", json!({"sketch_3d": true}));
     run(&mut s, "sketch.line3d", json!({"points": [[0, 0, 0], [300, 0, 300]]}));
     run(&mut s, "sketch.finish", json!({}));
-    run(&mut s, "frame.member", json!({"sketch": "Brace path", "name": "Brace member", "body_name": "Brace", "profile": square_tube()}));
+    run(
+        &mut s,
+        "frame.member",
+        json!({"sketch": "Brace path", "name": "Brace member", "body_name": "Brace", "profile": square_tube(), "anchor": anchor}),
+    );
     s
 }
 
@@ -1244,6 +1253,21 @@ fn a_rotate_step_turns_its_member_about_the_profile_centre() {
     assert!(near3(turned.4, flat.4), "{turned:?} vs {flat:?}");
 }
 
+/// The pivot is the profile's centre wherever the profile sits on the line: a brace laid by its
+/// bottom-left corner spins in place, not about the line.
+#[test]
+fn an_anchored_member_turns_about_its_profile_centre() {
+    let mut s = brace_at("bottom_left");
+    let flat = measured(&mut s, "Brace");
+    // The tube's centre is its centre of mass; its +x side faces +Y, 20 out from it.
+    let c = flat.4;
+    let face = face_pick(&s, "Brace", [c[0], c[1] + 20.0, c[2]], [0.0, 1.0, 0.0]);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "45 deg"}));
+    let turned = measured(&mut s, "Brace");
+    assert!(!same_box((turned.2, turned.3), (flat.2, flat.3)), "{turned:?}");
+    assert!(near3(turned.4, flat.4), "{turned:?} vs {flat:?}");
+}
+
 #[test]
 fn rotate_follows_suppress_delete_marker_and_edit() {
     let mut s = brace();
@@ -1278,13 +1302,37 @@ fn rotate_follows_suppress_delete_marker_and_edit() {
 fn the_later_rotate_step_wins() {
     let mut s = brace();
     let face = brace_side(&s, 0.0);
-    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "30 deg"}));
-    let face = brace_side(&s, 30.0);
-    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "60 deg"}));
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "20 deg"}));
+    let face = brace_side(&s, 20.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "45 deg"}));
     let got = brace_box(&mut s);
-    let want = brace_turned("60 deg");
+    let want = brace_turned("45 deg");
     assert!(same_box(got, want), "{got:?} vs {want:?}");
-    assert!(!same_box(got, brace_turned("90 deg")), "the turns don't add up");
+    assert!(!same_box(got, brace_turned("20 deg")), "the earlier step doesn't win");
+}
+
+/// Two steps on the line, the later one's angle broken: the earlier one turns the member, and
+/// is the line's turn as the design reads it.
+#[test]
+fn a_bad_later_rotate_step_leaves_the_earlier_one_standing() {
+    let mut s = brace();
+    let face = brace_side(&s, 0.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "20 deg"}));
+    let face = brace_side(&s, 20.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "45 deg"}));
+    let later = s.doc.features.iter().find(|f| f.name == "Rotate2").unwrap().id;
+    if let Some(f) = s.doc_mut().feature_mut(later)
+        && let solidcraft_doc::FeatureKind::FrameMemberTurn { angle, .. } = &mut f.kind
+    {
+        *angle = "nope".into();
+    }
+    s.refresh();
+    let frame = s.doc.features.iter().find(|f| f.name == "Brace member").unwrap().id;
+    let turns = solidcraft_doc::frame::member_turns(&s.doc, &s.doc.evaluation_values(), solidcraft_doc::FeatureId(frame));
+    let angles: Vec<&str> = turns.values().map(|(e, _)| e.as_str()).collect();
+    assert_eq!(angles, ["20 deg"]);
+    let got = brace_box(&mut s);
+    assert!(same_box(got, brace_turned("20 deg")), "{got:?}");
 }
 
 #[test]
@@ -1300,6 +1348,21 @@ fn a_rotate_angle_parameter_drives_the_turn() {
     let got = brace_box(&mut s);
     let want = brace_turned("40 deg");
     assert!(same_box(got, want), "{got:?} vs {want:?}");
+}
+
+/// A unitless parameter that gains an angle unit keeps its number (`30` to `30 rad`): the turn
+/// follows the unit all the same.
+#[test]
+fn a_rotate_angle_parameter_given_a_unit_turns_again() {
+    let mut s = brace();
+    run(&mut s, "parameters.add", json!({"name": "tilt", "expression": "30", "unit": "none"}));
+    let face = brace_side(&s, 0.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "tilt"}));
+    let before = brace_box(&mut s);
+    run(&mut s, "parameters.change", json!({"name": "tilt", "expression": "30 rad", "unit": "rad"}));
+    let got = brace_box(&mut s);
+    let want = brace_turned("30 rad");
+    assert!(!same_box(got, before) && same_box(got, want), "{before:?} {got:?} vs {want:?}");
 }
 
 #[test]

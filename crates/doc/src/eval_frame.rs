@@ -58,9 +58,9 @@ pub(super) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Featu
 }
 
 /// A member feature's lines (in its component frame), profile regions, default name, the
-/// profile point that sits on the lines, the profile's turn about them, the further turn of
-/// each line the Rotate steps after the feature give ([`member_turns`]) and the profile point
-/// those turn about (the centre of its bounding box).
+/// profile point that sits on the lines, the profile's turn about them, each line's further turn
+/// (radians) from the Rotate steps after the feature ([`member_turns`]: a step whose angle fails
+/// is passed over) and the profile point those turn about (the centre of its bounding box).
 struct Layout {
     segments: Vec<(String, Vec3, Vec3)>,
     regions: Vec<Region2>,
@@ -103,9 +103,7 @@ fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &Mode
         Some(e) => val(vals, e, Kind::Angle)?,
         None => 0.0,
     };
-    // A step whose angle doesn't evaluate turns nothing (it reports why itself, `check_turn`): an
-    // earlier step for the line, if any, stands.
-    let turns = turn_steps(doc, FeatureId(f.id)).filter_map(|(line, e)| Some((line.to_string(), turn_angle(vals, e).ok()?))).collect();
+    let turns = member_turns(doc, vals, FeatureId(f.id)).into_iter().map(|(line, (_, a))| (line, a)).collect();
     let centre = frame::anchor_point(&regions, frame::Anchor::Center);
     Ok(Layout { segments, regions, description, at, turn, turns, centre })
 }
@@ -172,13 +170,15 @@ pub fn member_names(st: &ModelState, lines: &[String], pinned: &BTreeMap<String,
 }
 
 /// The angle each line of the frame member `frame` is turned to by active Rotate steps after
-/// it: line id to angle expression, a later step replacing an earlier one.
-pub fn member_turns(doc: &Document, frame: FeatureId) -> BTreeMap<String, Expr> {
-    turn_steps(doc, frame).map(|(line, e)| (line.to_string(), e.clone())).collect()
+/// it: line id to the angle's expression and its value (radians), a later step replacing an
+/// earlier one. A step whose angle doesn't evaluate with `vals` turns nothing (it reports why
+/// itself, `check_turn`): an earlier step for the line, if any, stands.
+pub fn member_turns(doc: &Document, vals: &BTreeMap<String, Value>, frame: FeatureId) -> BTreeMap<String, (Expr, f64)> {
+    turn_steps(doc, frame).filter_map(|(line, e)| Some((line.to_string(), (e.clone(), turn_angle(vals, e).ok()?)))).collect()
 }
 
 /// The active Rotate steps of the frame member `frame`, in timeline order: each one's line id and
-/// angle. Active: after the frame, before the marker, not suppressed; the last for a line wins.
+/// angle, whether it evaluates or not. Active: after the frame, before the marker, not suppressed.
 pub(super) fn turn_steps(doc: &Document, frame: FeatureId) -> impl Iterator<Item = (&str, &Expr)> {
     let at = doc.feature_index(frame.0);
     let end = doc.marker.unwrap_or(doc.features.len()).min(doc.features.len());
