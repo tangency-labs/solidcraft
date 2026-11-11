@@ -770,7 +770,7 @@ mod imp {
             .min_by(f64::total_cmp);
         match (&e, tightest) {
             (solidcraft_smlib::Error::Status(1025), Some(radius)) => KernelError::Invalid(format!(
-                "the profile reaches past the centre of a bend in the path: it must stay within the radius of the tightest bend ({} mm)",
+                "the profile reaches past the centre of a bend in the path: it must stay inside the radius of every bend it turns towards (the tightest bend here is {} mm)",
                 crate::blend::trimmed_mm(radius)
             )),
             _ => failed("sweep", e),
