@@ -1,6 +1,7 @@
 accessibility	false
 activate	false
 agent_chat	false
+airfoil	false
 align	false
 ambient_occlusion	false
 appearance	false
