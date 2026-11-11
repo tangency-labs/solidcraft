@@ -124,6 +124,16 @@ pub enum Error {
         /// The join's index: after piece `join`.
         join: usize,
     },
+    /// The curves bounding a patch (`crate::surface`) that do not meet end to end: the end of
+    /// curve `join` is not proved within the model's zone tolerance of an end of the next one
+    /// (for the last join, `join + 1` the number of curves, of the first), `gap` apart (the
+    /// kernel's distance between the nearest ends).
+    BoundaryGap {
+        /// The join's index: after curve `join`.
+        join: usize,
+        /// How far apart the ends are.
+        gap: f64,
+    },
     /// An extension that cannot run as far as asked (a weight of the extended surface would
     /// vanish, a pole, an apex or a full turn is reached, or its length there cannot be
     /// measured to the kernel's stop): the longest distance proved to work, when there is one.
@@ -354,6 +364,11 @@ impl std::fmt::Display for Error {
             Error::PathGap { join } => write!(
                 f,
                 "the sweep path's pieces {join} and {} do not meet",
+                join.saturating_add(1)
+            ),
+            Error::BoundaryGap { join, gap } => write!(
+                f,
+                "the boundary curves {join} and {} do not meet: {gap} apart",
                 join.saturating_add(1)
             ),
             Error::TooFar { largest } => write!(f, "too far to extend (largest {largest:?})"),
