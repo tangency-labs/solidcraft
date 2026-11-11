@@ -2022,7 +2022,7 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
                 // A picture-only prompt has no text to copy: no action rather than an empty copy (#10675).
                 let copyable = !text.is_empty();
                 let before = ui.cursor();
-                ui_kit::assistant_bubble(ui, |ui| {
+                let bubble = ui_kit::assistant_bubble(ui, |ui| {
                     let gone = chat.gone.sent.get(&n).map_or(&[][..], Vec::as_slice);
                     if !text.is_empty()
                         && let Some(group) = user_text(ui, text, context, gone, &format!("agent_chat:sent:{n}"), all_selected)
@@ -2047,8 +2047,9 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
                     files_line(ui, files.iter().map(String::as_str));
                     if copyable || stamp.known() {
                         // Top-aligned: a row centred across its height takes all the height left in
-                        // the conversation's view, which stretched a prompt near the top.
-                        ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                        // the conversation's view, which stretched a prompt near the top. Through the
+                        // bubble's footer, so the row's own width counts, not the room it spans (#14738).
+                        ui_kit::assistant_bubble_footer(ui, |ui| {
                             if copyable {
                                 copy_message_button(ui, n, text);
                             }
@@ -2056,6 +2057,7 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
                         });
                     }
                 });
+                crate::scenario::publish_rect(&format!("agent_chat:bubble:{n}"), bubble.response.rect);
                 if copyable {
                     let drawn = egui::Rect::from_x_y_ranges(before.x_range(), before.min.y..=ui.cursor().min.y);
                     let resp = ui.interact(drawn, Id::unique(("agent_chat_msg", n)), Sense::hover());
