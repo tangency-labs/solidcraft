@@ -126,9 +126,10 @@ line for **Parallel To** and the side is turned to lie parallel to it. The membe
 centre of its profile's bounding box, so it stays where it is.
 
 - `angle` is the turn to, counter-clockwise looking back from the line's end, measured from the
-  profile as the Frame Member laid it (0 leaves it as laid). It is a number or parameter expression, so a parameter can drive it.
-- **Parallel To** is worked out once, when you press OK, and stored as that number. It is not a
-  lasting constraint: moving the picked line afterwards does not turn the member again. The line
+  profile as the Frame Member laid it (0 leaves it as laid). It is a number or parameter
+  expression, so a parameter can drive it.
+- **Parallel To** is worked out once, when you pick the line, and stored as that number. It is not
+  a lasting constraint: moving the picked line afterwards does not turn the member again. The line
   may be a straight edge, a sketch line or an axis; a line along the member, or a curve, is refused.
 - A side can lie parallel to a line in two ways, 180° apart. The command takes the one nearest the
   member's current turn; to get the other, type the angle yourself and add 180.
