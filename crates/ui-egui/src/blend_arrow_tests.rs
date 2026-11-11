@@ -130,3 +130,43 @@ fn two_distances_chamfer_has_an_arrow_along_each_face() {
         h.app.dialog = None;
     }
 }
+
+/// A box's top front edge, seen from the iso view, and a point 4 mm along the fillet's grow
+/// direction from it (into the body).
+fn creative_box(creative: bool) -> Harness {
+    let mut h = Harness::new();
+    h.app.preferences.creative_mode = creative;
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.step(&json!({"call": "ui.view", "params": {"view": "iso"}})).unwrap();
+    h.step(&json!({"call": "ui.view", "params": {"view": "fit"}})).unwrap();
+    h.settle();
+    h
+}
+
+/// In Creative Mode, pulling an edge the way its fillet grows makes a fillet, and the release
+/// applies it: no window is left waiting for OK.
+#[test]
+fn in_creative_mode_pulling_an_edge_fillets_it() {
+    let mut h = creative_box(true);
+    let features = h.app.session.doc.features.len();
+    let s = std::f64::consts::FRAC_1_SQRT_2 * 4.0;
+    h.step(&json!({"drag": [{"world": [20, 0, 20]}, {"world": [20, s, 20.0 - s]}]})).unwrap();
+    h.frames(6);
+    h.settle();
+    assert!(h.app.dialog.is_none(), "the release applied the fillet");
+    assert_eq!(h.app.session.doc.features.len(), features + 1, "a fillet was added");
+    let measured = h.app.session.execute("inspect.measure", &json!({})).unwrap();
+    assert!(measured["bodies"][0]["faces"].as_u64().unwrap_or(0) > 6, "the edge is rounded: {measured}");
+}
+
+/// Without Creative Mode the same pull is a box selection: nothing is filleted.
+#[test]
+fn pulling_an_edge_does_nothing_without_creative_mode() {
+    let mut h = creative_box(false);
+    let features = h.app.session.doc.features.len();
+    let s = std::f64::consts::FRAC_1_SQRT_2 * 4.0;
+    h.step(&json!({"drag": [{"world": [20, 0, 20]}, {"world": [20, s, 20.0 - s]}]})).unwrap();
+    h.frames(6);
+    assert!(h.app.dialog.is_none());
+    assert_eq!(h.app.session.doc.features.len(), features);
+}

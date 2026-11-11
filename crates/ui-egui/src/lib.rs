@@ -66,6 +66,7 @@ mod dimension_create_ui_tests;
 mod dock_dialog_ui_tests;
 pub mod documents;
 pub mod drag_extrude;
+pub mod drag_fillet;
 pub mod drag_snap;
 pub mod easyprint_ui;
 pub mod edit_clipboard;

@@ -66,7 +66,9 @@ fn wanted(app: &SolveApp) -> bool {
 
 /// Draw the selection pill and run what it is clicked for.
 pub(crate) fn overlays(app: &mut SolveApp, ui: &mut egui::Ui) {
-    if !wanted(app) {
+    // A modal window or the recovery prompt owns the view: the pill must not sit over it.
+    let modal = ui.ctx().memory(|m| m.top_modal_layer().is_some()) || (!app.recoverable.is_empty() && !app.home.open);
+    if modal || !wanted(app) {
         crate::shell::register_panel(app, "creative:selection", None, None);
         return;
     }
