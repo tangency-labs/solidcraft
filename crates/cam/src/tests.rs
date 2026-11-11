@@ -597,6 +597,11 @@ fn hostile_values_are_errors_never_panics() {
     assert!(contour(&square, &drill, &side, &good_cut).unwrap_err().to_string().contains("a drill cannot mill"));
     let lanes = PocketParams { stepover: 2.0, climb: true, stock_to_leave: 0.0, tolerance: 0.01, ramp_angle: 0.0 };
     assert!(pocket(&square, &drill, &lanes, &good_cut).is_err());
+    // A chamfer mill's side is tapered: no contour or pocket with one either.
+    let mut chamfer = Tool::new(5, ToolKind::Chamfer, 10.0, 8.0);
+    chamfer.angle_deg = Some(90.0);
+    assert!(contour(&square, &chamfer, &side, &good_cut).unwrap_err().to_string().contains("tapered"));
+    assert!(pocket(&square, &chamfer, &lanes, &good_cut).is_err());
     let open = Region2 { outer: Loop2 { segs: rect(0.0, 0.0, 10.0, 10.0).outer.segs.into_iter().take(3).collect() }, holes: vec![] };
     assert!(offset_regions(&[open], 1.0, 0.01).is_err());
     assert!(emit(&Program::default(), &Post::rs274()).is_err());

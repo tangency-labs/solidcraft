@@ -2,9 +2,14 @@
 //! pocket milling of planar regions, G-code output through declarative post processors, and a
 //! G-code reader that checks what was written against the toolpaths it was written from.
 //!
-//! Everything here works in a setup's work coordinates: millimetres, tool axis along +Z, feeds
-//! in mm/min. The crate knows nothing of documents or the B-rep kernel; the engine hands it
-//! regions.
+//! Everything here works in a setup's work coordinates: millimetres, feeds in mm/min. The 2D
+//! operations have the tool axis along +Z. The crate knows nothing of documents or the B-rep
+//! kernel; the engine hands it regions and surfaces.
+//!
+//! Beyond 2D: [`Surface`] holds a part's triangles, and the drop-cutter ([`drop_z`],
+//! [`drop_along`]) lowers a flat, ball, bull nose or tapered (chamfer) [`Cutter`] onto them
+//! along any axis, stopping where it first touches. A tip placed there cannot cut into the
+//! surface, which is what 3D toolpaths are built on.
 //!
 //! The region offsetting is our own: every boundary piece is offset, corners that open away
 //! from the offset side get a joining arc, the pieces are cut where they cross, and a piece is
@@ -14,6 +19,9 @@
 #![forbid(unsafe_code)]
 
 mod check;
+mod cutter;
+mod dropcutter;
+mod frame;
 mod gcode;
 mod offset;
 mod ops;
@@ -21,15 +29,20 @@ mod path;
 mod piece;
 mod post;
 mod readback;
+mod surface;
 mod tool;
 
 pub use check::verify;
+pub use cutter::{Cone, Cutter};
+pub use dropcutter::{drop_along, drop_triangle, drop_z};
+pub use frame::{Frame, angle_about, rotate, rotate_about};
 pub use gcode::{Operation, Program, emit, parse, work_offset_code};
 pub use offset::offset_regions;
 pub use ops::{ContourParams, Cut, Feeds, Heights, PocketParams, Side, contour, pocket};
 pub use path::{Move, PathStats, Toolpath, arc_sweep};
 pub use post::{CommentStyle, LineNumbers, Post, Units};
 pub use readback::{Readback, allowed_deviation, readback};
+pub use surface::{Surface, barycentric, nearest_on_triangle, ray_triangle};
 pub use tool::{Tool, ToolKind};
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -54,5 +67,7 @@ pub(crate) fn invalid<T>(why: impl Into<String>) -> Result<T> {
     Err(CamError::Invalid(why.into()))
 }
 
+#[cfg(test)]
+mod foundation_tests;
 #[cfg(test)]
 mod tests;

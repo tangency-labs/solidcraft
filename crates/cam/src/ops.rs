@@ -267,9 +267,14 @@ fn check_leave(leave: f64) -> Result<()> {
     if leave.is_finite() && (0.0..=MAX_COORD).contains(&leave) { Ok(()) } else { invalid("the stock to leave must be 0 or more") }
 }
 
-/// A milling operation needs a tool that cuts with its side: a drill only cuts at its point.
+/// A milling operation needs a tool that cuts with a straight side: a drill only cuts at its
+/// point, and a chamfer mill's side is tapered.
 fn mills(tool: &Tool) -> Result<()> {
-    if tool.kind == ToolKind::Drill { invalid("a drill cannot mill: it cuts only at its point") } else { Ok(()) }
+    match tool.kind {
+        ToolKind::Drill => invalid("a drill cannot mill: it cuts only at its point"),
+        ToolKind::Chamfer => invalid("a chamfer mill's side is tapered: a contour or a pocket needs a tool with a straight side"),
+        ToolKind::FlatEndmill | ToolKind::BallEndmill | ToolKind::BullNose => Ok(()),
+    }
 }
 
 /// The loop turned to start at its corner nearest to `p`.
