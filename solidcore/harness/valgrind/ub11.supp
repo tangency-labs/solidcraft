@@ -1,0 +1,8 @@
+# Known upstream reads that cannot change a result (plan/upstream-issues.md).
+# Pass to valgrind with --suppressions=harness/valgrind/ub11.supp.
+
+{
+   UB-11: N_BasisInsertKnots compares X[mx+1] after the last insert knot (output-invariant)
+   Memcheck:Cond
+   fun:N_BasisInsertKnots
+}

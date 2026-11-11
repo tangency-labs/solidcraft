@@ -1,0 +1,45 @@
+{
+  "area": "history",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-config-rule-range-refuses-a-row",
+  "expected": {
+    "method": "every row is checked against the new rule: Long's 60 is outside it, so the rule is refused",
+    "outcome": "refused",
+    "refusal": "rule `Range` restricts the final value",
+    "source": "invariants",
+    "sources": [],
+    "what": "config.rule limiting W to 30..50 while the row Long has W = 60"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "engine_error": "step 7 (config.rule): invalid parameters for `config.rule`: row `Long`: invalid parameters for `config.activate`: configuration rules: rule `Range` restricts the final value",
+    "ran": false
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": null,
+    "refused_with": "step 7 (config.rule): invalid parameters for `config.rule`: row `Long`: invalid parameters for `config.activate`: configuration rules: rule `Range` restricts the final value",
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "config.rule limiting W to 30..50 while the row Long has W = 60",
+  "why_not": [
+    "the failure is SolidCraft's, not a kernel operation's: step 7 (config.rule): invalid parameters for `config.rule`: row `Long`: invalid parameters for `config.activate`: configuration rules: rule `Range` restricts the final value"
+  ]
+}

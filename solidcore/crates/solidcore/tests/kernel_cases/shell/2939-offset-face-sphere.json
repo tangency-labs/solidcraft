@@ -1,0 +1,138 @@
+{
+  "area": "shell",
+  "bodies": {
+    "b7": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b9"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b9"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b10"
+      ],
+      "op": "offset_faces",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "distance": 2.0,
+        "faces": {
+          "kind": "face",
+          "picked": [
+            {
+              "at": [],
+              "index": 0
+            }
+          ],
+          "points": [
+            [
+              7.861514269215018,
+              3.7312806588411798,
+              4.885996464990495
+            ]
+          ],
+          "tolerance": 0.022361679774997898
+        }
+      }
+    }
+  ],
+  "case": "2939-offset-face-sphere",
+  "expected": {
+    "area_mm2": 1809.5573684677208,
+    "body_count": 1,
+    "center_of_mass": [
+      0,
+      0,
+      0
+    ],
+    "faces": 1,
+    "method": "a sphere r10 whose face moves out 2 mm is a sphere r12: V=4/3*pi*12^3, area 4*pi*144, centroid at the origin, one face",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#2939"
+    ],
+    "volume_mm3": 7238.229473870882,
+    "what": "Offset Face on a sphere's round face"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 1,
+      "faces": 1,
+      "vertices": 2
+    }
+  },
+  "records": "2939-offset-face-sphere.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 1809.5573684858507,
+      "body_count": 1,
+      "edges": 1,
+      "faces": 1,
+      "vertices": 2,
+      "volume_mm3": 7238.229474259726
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#2939"
+  ],
+  "traced_ops": [
+    "make_sphere",
+    "copy",
+    "copy",
+    "tagged",
+    "merge_faces",
+    "copy",
+    "copy",
+    "tagged",
+    "offset_faces"
+  ],
+  "ungraded": [],
+  "what": "Offset Face on a sphere's round face",
+  "why_not": []
+}

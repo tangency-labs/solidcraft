@@ -225,6 +225,19 @@ A dimension can drive the sketch, or be driven by it and only show the value.
 - **Elsewhere:** dimension, dimensional constraint, driving dimension.
 - **For translators:** not a drawing dimension and not a measured value.
 
+### end cap
+
+A plate that closes the open end of a frame member, shaped like the member profile's outer outline
+and set in from its edge.
+
+An end cap is a separate body named after its member. Compare a mounting plate, which is
+rectangular or round and need not follow the profile.
+
+- **In SolidCraft:** `frame.end_cap`; the `frame_end_cap` design-file key.
+- **Don't use:** plug, lid, blank (for the plate).
+- **Elsewhere:** end cap, end plate, cap plate.
+- **For translators:** a closing plate on a tube's end, not a cap of a sketch or surface.
+
 ### equation curve
 
 A sketch curve whose shape comes from formulas over a range of one variable.
@@ -335,6 +348,21 @@ Indirect diffuse and specular illumination computed by tracing finite light path
 - **In SolidCraft:** optional CPU `job.options.path` / runtime `raytrace.path`, enabled explicitly in Sampling.
 - **Don't use:** ambient occlusion, glass, full optical parity.
 - **For translators:** this describes light transport; it is unrelated to a modelling path or physical material density.
+
+### operations panel
+
+The panel in the view's bottom-right corner that lists each long operation under way, with its
+progress and a button that cancels it.
+
+An operation is work that takes long enough to run beside the window: opening or inserting a file,
+a feature dialog's OK computing, an undo or a history marker move recomputing the timeline, an
+agent's command. A new one goes on top; one that ends fades out.
+
+- **In SolidCraft:** the `ui.operations` control method; the `operations_panel` preference.
+- **Don't use:** job, task, activity.
+- **Elsewhere:** progress panel, background tasks.
+- **For translators:** an operation is work under way, not a feature's *operation* (join, cut,
+  intersect).
 
 ### part number
 

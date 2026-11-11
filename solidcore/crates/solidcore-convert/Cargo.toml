@@ -1,0 +1,25 @@
+[package]
+name = "solidcore-convert"
+description = "The one conversion between solidcore-record's plain data and the kernel's values: field copies, no geometry"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+publish = false
+# solidcore-record needs Rust 1.88 (edition 2024 let chains).
+rust-version = "1.88"
+repository = "https://github.com/tangency-labs/solidcore"
+keywords = ["cad", "brep", "nurbs", "geometry"]
+categories = ["data-structures", "science"]
+
+# Layers §3: the conversion sits on the record and the kernel only; the modelling layer and the
+# mesher both use it.
+[dependencies]
+solidcore = { path = "../solidcore" }
+solidcore-record = { path = "../solidcore-record" }
+
+[dev-dependencies]
+flate2 = "1.1"
+serde_json = { version = "1", features = ["float_roundtrip"] }
+
+[lints]
+workspace = true
