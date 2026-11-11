@@ -17,7 +17,6 @@
 //! `operation` path says which routine. A failure names an entity only where the site
 //! it replaces did (the point classification's seam failure, at its face). The failures
 //! that are checks of a caller's arguments stay [`crate::SolidError::InvalidInput`].
-//! `query/api_queries.rs` does not use these yet.
 
 use super::{ErrorKind, Failure, Reason, SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NULL_POINTER};
 
@@ -167,10 +166,7 @@ pub(super) mod tests {
     /// whose conversion waits on other open work.
     #[test]
     fn the_query_routines_build_no_bare_statuses() {
-        assert_eq!(
-            bare_statuses_in("query", 20),
-            [("query/api_queries.rs".to_owned(), 26)]
-        );
+        assert_eq!(bare_statuses_in("query", 20), Vec::<(String, usize)>::new());
     }
 
     /// The files under `src/<area>` (and `src/<area>.rs`) whose library code builds bare
