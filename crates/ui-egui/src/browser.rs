@@ -1010,9 +1010,30 @@ struct Lit {
     /// The placements holding a lit body, and the components holding a lit sketch or plane.
     paths: Vec<Vec<u64>>,
     components: Vec<u64>,
+    /// The feature of what is under the pointer in the 3D view, and of the face or edge picked
+    /// there ([`Lit::features_from_view`]), once worked out this frame.
+    from_view: Option<[Option<u64>; 2]>,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How often the features lit from the 3D view were worked out (the tests count them).
+    static FROM_VIEW_WORKED_OUT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 impl Lit {
+    /// The feature that made what is under the pointer in the 3D view, and the one that made the
+    /// face or edge picked there, as the history lights them. Worked out for the first feature row
+    /// that asks in a frame: every row and folder looked them up again, the pick naming every face
+    /// of its body each time (#14850).
+    fn features_from_view(&mut self, app: &SolveApp) -> [Option<u64>; 2] {
+        *self.from_view.get_or_insert_with(|| {
+            #[cfg(test)]
+            FROM_VIEW_WORKED_OUT.with(|n| n.set(n.get() + 1));
+            [crate::timeline::hovered_feature(app), crate::timeline::picked_feature(app)]
+        })
+    }
+
     fn of(app: &mut SolveApp) -> Lit {
         use crate::viewport::Hit;
         let mut selected = std::collections::HashSet::new();
@@ -1104,7 +1125,7 @@ impl Lit {
         // A body both holding the selection and under the pointer leads to its placement once.
         paths.sort_unstable();
         paths.dedup();
-        Lit { selected, holding, hovered, paths, components }
+        Lit { selected, holding, hovered, paths, components, from_view: None }
     }
 
     fn any(&self) -> bool {

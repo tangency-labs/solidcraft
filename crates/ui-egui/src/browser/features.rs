@@ -16,6 +16,8 @@ pub(crate) struct Reveal {
 thread_local! {
     /// Folded Features folders whose mark was worked out (the tests count them).
     static MARKS_WORKED_OUT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Feature rows built, on screen or next to it (the tests count them).
+    static ROWS_WORKED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// Open the Features folder that lists this feature and scroll to its row, without changing the
@@ -79,7 +81,8 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
     // marker, in place of the timeline.
     let compact = app.preferences.history_in_browser;
     let shown = shown_features(app, compact);
-    let has_features = match app.tree.model.as_ref().filter(|m| m.matches(&app.session) && !compact) {
+    let has_features = match current_model(app) {
+        Some(model) if compact => !model.history_features(&app.session, component).is_empty(),
         Some(model) => model.features.get(&component).is_some_and(|features| features.iter().any(|&index| index < shown)),
         None => app
             .session
@@ -100,20 +103,30 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
     // Folded, it carries the worst mark of what it holds. A row scrolled out of view paints
     // nothing, so its mark is not worked out: in a long tree of placements of a part with a long
     // history, every folder's mark scanned the design's whole history on every frame (#6083).
-    let ids: Vec<u64> = if open || !ui.is_rect_visible(row_rect(ui)) {
-        Vec::new()
+    // With the model, only the folder's own features are read (#14850).
+    let (status, tip) = if open || !ui.is_rect_visible(row_rect(ui)) {
+        (None, None)
     } else {
         #[cfg(test)]
         MARKS_WORKED_OUT.with(|n| n.set(n.get() + 1));
-        app.session
-            .doc
-            .features
-            .iter()
-            .filter(|f| f.component == component && (compact || !matches!(f.kind, FeatureKind::Sketch { .. })))
-            .map(|f| f.id)
-            .collect()
+        match current_model(app) {
+            Some(model) => {
+                let worst = model.folder_status(app, component, compact);
+                (worst.map(|(status, _)| status), worst.and_then(|(_, id)| crate::timeline::feature_message(app, id)))
+            }
+            None => {
+                let ids: Vec<u64> = app
+                    .session
+                    .doc
+                    .features
+                    .iter()
+                    .filter(|f| f.component == component && (compact || !matches!(f.kind, FeatureKind::Sketch { .. })))
+                    .map(|f| f.id)
+                    .collect();
+                crate::timeline::worst_status(app, &ids)
+            }
+        }
     };
-    let (status, tip) = crate::timeline::worst_status(app, &ids);
     let r = draw_row(
         ui,
         ui.scope_id().with(&key),
@@ -128,7 +141,8 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
     if !open {
         return;
     }
-    let indices = match app.tree.model.as_ref().filter(|m| m.matches(&app.session) && !compact) {
+    let indices = match current_model(app) {
+        Some(model) if compact => model.history_features(&app.session, component).to_vec(),
         Some(model) => model.features.get(&component).cloned().unwrap_or_default(),
         None => app
             .session
@@ -143,7 +157,7 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
     let here = Here { component, path, scope: &scope, body_row: None };
     // The feature that made what is under the cursor or picked in the viewport, as the history
     // lights it, and in the history layout what a selected history row lights.
-    let from_view = [crate::timeline::hovered_feature(app), crate::timeline::picked_feature(app)];
+    let from_view = acts.lit.features_from_view(app);
     let lit = if compact { lit_by_selection(app) } else { BTreeSet::new() };
     let mark = |app: &SolveApp, index: usize| {
         let id = app.session.doc.features.get(index).map(|f| f.id);
@@ -209,6 +223,24 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
     drag_rows(app, ui, &plan, drag_id, dragged, &drops, resp.rect.center().y);
 }
 
+/// The Browser's model of the design as it is now: `None` while it is missing or made for
+/// another, and the rows look up what they show without it.
+fn current_model(app: &SolveApp) -> Option<&model::Model> {
+    app.tree.model.as_ref().filter(|model| model.matches(&app.session))
+}
+
+/// Whether feature `id` made bodies in `placement` ([`solidcraft_engine::Session::feature_bodies`])
+/// and whether any of them is shown. With the model, their names are worked out once for each row
+/// drawn rather than from every body of the design on every frame (#14850).
+fn made_bodies_shown(app: &mut SolveApp, id: u64, placement: Option<(u64, &[u64])>) -> (bool, bool) {
+    let hidden = &app.session.visibility.hidden_bodies;
+    let shown = |names: &[String]| (!names.is_empty(), names.iter().any(|name| !hidden.contains(name)));
+    match app.tree.model.as_mut().filter(|model| model.matches(&app.session)) {
+        Some(model) => shown(model.feature_bodies(id, placement)),
+        None => shown(&app.session.feature_bodies(&[id], placement)),
+    }
+}
+
 /// The features that built a body, one level in under its row (#11945): the feature rows the
 /// Features folder draws, without dragging, each lit as there when the view lights it.
 #[allow(clippy::too_many_arguments)]
@@ -224,11 +256,15 @@ pub(super) fn body_rows(
 ) {
     let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(path) };
     let here = Here { component, path, scope: &scope, body_row: Some(body_row) };
-    let from_view = [crate::timeline::hovered_feature(app), crate::timeline::picked_feature(app)];
+    let from_view = acts.lit.features_from_view(app);
     // A feature that built several bodies is listed under each: its rows need ids of their own.
     ui.push_id(("body_features", body_row), |ui| {
         for id in features {
-            let Some(index) = app.session.doc.features.iter().position(|f| f.id == *id) else { continue };
+            let position = match current_model(app) {
+                Some(model) => model.position(&app.session, *id),
+                None => app.session.doc.features.iter().position(|f| f.id == *id),
+            };
+            let Some(index) = position else { continue };
             let mark = if from_view.contains(&Some(*id)) { Mark::Here } else { Mark::None };
             let _ = feature_row(app, ui, acts, &here, index, depth, None, mark, None);
         }
@@ -298,6 +334,8 @@ fn feature_row(
     drag: Option<&mut Option<FeatureDrag>>,
 ) -> bool {
     let Some(feature) = app.session.doc.features.get(index) else { return false };
+    #[cfg(test)]
+    ROWS_WORKED.with(|n| n.set(n.get() + 1));
     let (component, path) = (here.component, here.path);
     let (id, label, icon) = (feature.id, feature.name.clone(), crate::timeline::icon_of(&feature.kind));
     let is_sketch = matches!(feature.kind, FeatureKind::Sketch { .. });
@@ -307,7 +345,8 @@ fn feature_row(
     // A feature picked by its geometry (a face or edge of it chosen in the view) shows as
     // selected in the tree, as NX marks the feature of a picked face; the session's selection
     // stays the face or edge.
-    let by_geometry = !app.session.selection.contains(&Sel::Feature { id }) && crate::timeline::picked_feature(app) == Some(id);
+    let [_, picked] = acts.lit.features_from_view(app);
+    let by_geometry = !app.session.selection.contains(&Sel::Feature { id }) && picked == Some(id);
     let selected = app.session.selection.contains(&Sel::Feature { id }) || by_geometry;
     let order_key = here.body_row.map_or_else(|| format!("f:{id}"), |row| format!("{row}/s:{id}"));
     app.tree.remember(&order_key);
@@ -315,11 +354,12 @@ fn feature_row(
     // A sketch row has the eye its Sketches folder row has. A feature's eye shows and hides the
     // bodies it made (#5099); a component listed on its own stands for all of its placements.
     let placement = (component == 0 || !path.is_empty()).then_some((component, path));
-    let bodies = if is_sketch { Vec::new() } else { app.session.feature_bodies(&[id], placement) };
-    let visible =
-        if is_sketch { crate::browser::sketch_visible(app, id) } else { bodies.iter().any(|b| !app.session.visibility.hidden_bodies.contains(b)) };
-    let eye = (is_sketch || !bodies.is_empty()).then_some(visible);
-    let status = crate::timeline::feature_status(app, id);
+    let (has_bodies, visible) = if is_sketch { (false, crate::browser::sketch_visible(app, id)) } else { made_bodies_shown(app, id, placement) };
+    let eye = (is_sketch || has_bodies).then_some(visible);
+    let status = match current_model(app) {
+        Some(model) => model.status(app, id),
+        None => crate::timeline::feature_status(app, id),
+    };
     let tip = status.and_then(|_| crate::timeline::feature_message(app, id));
     // A cut feature has a dashed outline until Paste moves it.
     let cut = app.cut.features.contains(&id);
@@ -514,6 +554,22 @@ mod tests {
         drawn_rows().into_iter().map(|(label, ..)| label).collect()
     }
 
+    /// `n` construction planes, cheap features of the design's own Features folder (its
+    /// Construction folder, which lists them too, folded away): their ids and names.
+    fn planes(h: &mut Harness, n: usize) -> (Vec<u64>, Vec<String>) {
+        let names: Vec<String> = (0..n).map(|i| format!("Plane{i}")).collect();
+        let ids = names
+            .iter()
+            .enumerate()
+            .map(|(i, name)| {
+                let made = h.app.run("construct.plane.offset", json!({"base":"XY","offset":i + 1,"name":name})).unwrap();
+                made["feature"].as_u64().unwrap()
+            })
+            .collect();
+        h.app.tree.collapsed.insert("c0/construction".into());
+        (ids, names)
+    }
+
     /// #5099: a feature row's eye shows and hides the bodies the feature made.
     #[test]
     fn a_feature_rows_eye_hides_the_bodies_it_made() {
@@ -678,6 +734,39 @@ mod tests {
         crate::semantic_content::set_timeline_feature_hover(&mut h.app, Some(round));
         h.step(&json!({"move":[5,5]})).unwrap();
         assert_eq!(h.app.viewport.hover_feature, Some(round));
+    }
+
+    /// #14850: what a face picked in the view lights in the Features folders (its feature) is
+    /// worked out once a frame, not again for every folder and every row: each time named every
+    /// face of the picked body.
+    #[test]
+    fn a_picked_faces_feature_is_worked_out_once_a_frame() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.ui.show_browser = true;
+        let base = h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Plate"})).unwrap()["feature"].as_u64().unwrap();
+        planes(&mut h, 20);
+        let part = h.app.run("component.create", json!({"name":"Part"})).unwrap()["occurrence"].as_u64().unwrap();
+        h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"corner":[30,0,0],"body_name":"Block"})).unwrap();
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+        let placement = occurrence_key(&[part]);
+        h.app.tree.expanded.extend(["c0/features".to_string(), format!("{placement}/features")]);
+        h.app.tree.open_row(&placement);
+        let state = h.app.session.world_state().unwrap();
+        let faces = solidcraft_engine::doc::naming::face_names(state.body("Plate").unwrap());
+        let index = faces.iter().position(|name| name.starts_with(&format!("F{base}:"))).unwrap();
+        h.app.session.selection = vec![Sel::Face { body: "Plate".into(), index, point: solidcore_record::Vec3::ZERO }];
+        h.frames(2);
+        let passes = h.ctx.cumulative_pass_nr();
+        FROM_VIEW_WORKED_OUT.with(|n| n.set(0));
+        ROWS_WORKED.with(|n| n.set(0));
+        h.frame();
+        let passes = usize::try_from(h.ctx.cumulative_pass_nr() - passes).unwrap();
+        let rows = ROWS_WORKED.with(std::cell::Cell::get);
+        assert!(rows >= 10 * passes, "{rows} feature rows built in {passes} passes");
+        assert_eq!(FROM_VIEW_WORKED_OUT.with(std::cell::Cell::get), passes, "once a frame, for {rows} feature rows");
+        let mut lit = Lit::of(&mut h.app);
+        assert_eq!(lit.features_from_view(&h.app), [None, Some(base)], "the picked face's feature");
     }
 
     fn find_in_timeline(app: &mut SolveApp, feature: u64, body: &str) {
@@ -847,7 +936,8 @@ mod tests {
 
     /// #6083: in a long tree of placements, only the folded Features folders on screen work out
     /// their mark (each scanned the design's whole history, every frame); those on screen still
-    /// show it.
+    /// show it. #14850: on a frame with the same model none looks through the history again; an
+    /// error set in place still shows, as the marks read the results as they are.
     #[test]
     fn only_folded_features_folders_on_screen_work_out_their_mark() {
         let mut h = Harness::new();
@@ -864,9 +954,11 @@ mod tests {
         let result = h.app.session.model.results.iter_mut().find(|r| r.id == feature).unwrap();
         result.error = Some("the blend is larger than the neighbouring faces".into());
         MARKS_WORKED_OUT.with(|n| n.set(0));
+        model::PLACES_BUILT.with(|n| n.set(0));
         h.frame();
         let worked = MARKS_WORKED_OUT.with(std::cell::Cell::get);
         assert!(worked > 0 && worked < 40, "{worked} of 81 folded Features folders worked out their mark");
+        assert_eq!(model::PLACES_BUILT.with(std::cell::Cell::get), 0, "the model is the same: the history is not looked through again");
         assert!(!crate::scenario::handles("status:error:Features").is_empty(), "a folder on screen shows its mark");
     }
 
