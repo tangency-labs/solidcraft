@@ -22,18 +22,29 @@ fn button(id: &'static str, enabled: bool, wide_only: bool) -> BarButton<'static
 struct BarRig {
     ctx: egui::Context,
     width: f32,
+    name: &'static str,
     time: std::cell::Cell<f64>,
     out: std::cell::RefCell<Option<BarOut>>,
 }
 
 impl BarRig {
     fn new(width: f32) -> BarRig {
-        let rig = BarRig { ctx: crate::test_support::context(), width, time: std::cell::Cell::new(0.0), out: Default::default() };
+        BarRig::named(width, "App")
+    }
+
+    /// The bar with the app's name `name`.
+    fn named(width: f32, name: &'static str) -> BarRig {
+        let rig = BarRig { ctx: crate::test_support::context(), width, name, time: std::cell::Cell::new(0.0), out: Default::default() };
         rig.frame(Vec::new());
         rig
     }
 
     fn frame(&self, events: Vec<egui::Event>) -> Vec<BarAction> {
+        self.frame_output(events).0
+    }
+
+    /// A frame: what was chosen, and what was drawn.
+    fn frame_output(&self, events: Vec<egui::Event>) -> (Vec<BarAction>, egui::FullOutput) {
         solidcraft_ui_registry::clear_handles();
         self.time.set(self.time.get() + 1.0 / 60.0);
         let input = egui::RawInput {
@@ -45,7 +56,7 @@ impl BarRig {
         };
         let bar = AppBar {
             mark: &|_, _| {},
-            name: "App",
+            name: self.name,
             home: BarButton { id: "home", icon: "home", tip: "Home", enabled: true, narrow: false, wide_only: false },
             file: "File",
             file_open: false,
@@ -61,13 +72,13 @@ impl BarRig {
             handles: HANDLES,
         };
         let mut actions = Vec::new();
-        crate::test_support::raw_frame(&self.ctx, input, |ui| {
+        let output = crate::test_support::raw_frame(&self.ctx, input, |ui| {
             let rect = Rect::from_min_size(Pos2::ZERO, vec2(self.width, HEIGHT));
             let out = show(ui, &bar, rect, rect);
             actions = out.actions.clone();
             *self.out.borrow_mut() = Some(out);
         });
-        actions
+        (actions, output)
     }
 
     fn click(&self, name: &str) -> Vec<BarAction> {
@@ -112,6 +123,21 @@ fn a_compact_bar_keeps_only_what_fits() {
     assert!(solidcraft_ui_registry::rect_of("t:undo").is_none(), "Undo is left out");
     assert!(rig.out.borrow().as_ref().is_some_and(|out| out.quick.is_none()));
     assert!(solidcraft_ui_registry::handle_at("t:version").is_none(), "no version on a narrow bar");
+}
+
+/// A long app name ends before Home: Home follows the name as drawn, not a place sized for one
+/// name.
+#[test]
+fn home_follows_a_long_app_name() {
+    let name = "A Considerably Longer Application";
+    let rig = BarRig::named(1200.0, name);
+    let (_, output) = rig.frame_output(Vec::new());
+    let text = crate::test_support::text_shapes(&output)
+        .find(|shape| shape.galley.text() == name)
+        .map(|shape| shape.visual_bounding_rect())
+        .expect("the name is drawn");
+    let home = solidcraft_ui_registry::rect_of("t:home").expect("Home is drawn");
+    assert!(text.right() < home.left(), "the name ends at {}, Home starts at {}", text.right(), home.left());
 }
 
 const TAB_HANDLES: TabHandles<'static> =
@@ -216,8 +242,13 @@ fn file_item(id: &str, enabled: bool) -> FileItem {
 /// The File menu drawn for a frame with `events`: what it returned, and where each text was.
 fn file_menu_frame(ctx: &egui::Context, time: f64, events: Vec<egui::Event>) -> (FileMenuOut, Vec<(String, Pos2)>) {
     let rows = vec![FileRow::Item(file_item("new", true)), FileRow::Item(file_item("save", false)), FileRow::Separator];
+    file_menu_frame_of(ctx, &rows, 600.0, time, events)
+}
+
+/// The File menu with `rows` in an 800 by `height` window, drawn for a frame with `events`.
+fn file_menu_frame_of(ctx: &egui::Context, rows: &[FileRow], height: f32, time: f64, events: Vec<egui::Event>) -> (FileMenuOut, Vec<(String, Pos2)>) {
     let input = egui::RawInput {
-        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))),
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, height))),
         time: Some(time),
         events,
         focused: true,
@@ -225,10 +256,37 @@ fn file_menu_frame(ctx: &egui::Context, time: f64, events: Vec<egui::Event>) -> 
     };
     let mut out = FileMenuOut::default();
     let output = crate::test_support::raw_frame(ctx, input, |ui| {
-        out = file_menu(ui.ctx(), &rows, pos2(100.0, HEIGHT), egui::Id::unique("test_file_menu"), false);
+        out = file_menu(ui.ctx(), rows, pos2(100.0, HEIGHT), egui::Id::unique("test_file_menu"), false);
     });
     let texts = crate::test_support::text_shapes(&output).map(|s| (s.galley.text().to_string(), s.visual_bounding_rect().center())).collect();
     (out, texts)
+}
+
+/// A File menu taller than the window stays inside it, and its last row scrolls into view.
+#[test]
+fn a_file_menu_taller_than_the_window_scrolls_its_rows() {
+    let ctx = crate::test_support::context();
+    let rows: Vec<FileRow> = (0..40).map(|i| FileRow::Item(file_item(&format!("r{i}"), true))).collect();
+    let height = 360.0;
+    file_menu_frame_of(&ctx, &rows, height, 0.0, Vec::new());
+    file_menu_frame_of(&ctx, &rows, height, 0.1, Vec::new());
+    let menu = ctx.memory(|m| m.area_rect(egui::Id::unique("test_file_menu"))).expect("the menu is laid out");
+    assert!(menu.bottom() <= height, "the menu ends at {} inside a {height} high window", menu.bottom());
+    let shown = |texts: &[(String, Pos2)], text: &str| texts.iter().any(|(t, p)| t == text && menu.contains(*p));
+    let over = menu.center();
+    let mut texts = Vec::new();
+    for i in 0..20 {
+        let wheel = egui::Event::MouseWheel {
+            source: egui::MouseWheelSource::Unknown,
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -400.0),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        };
+        (_, texts) = file_menu_frame_of(&ctx, &rows, height, 0.2 + f64::from(i) * 0.1, vec![egui::Event::PointerMoved(over), wheel]);
+    }
+    assert!(shown(&texts, "Item r39"), "scrolling shows the last row");
+    assert!(!shown(&texts, "Item r0"), "and the first has scrolled out");
 }
 
 /// A row returns its id and closes the menu; a disabled one returns nothing and keeps it open;

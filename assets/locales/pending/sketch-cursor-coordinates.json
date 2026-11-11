@@ -5,7 +5,7 @@
   },
   "ar": {
     "prefs.sketch.cursor_coordinates": "إظهار إحداثيات المؤشر في الرسم",
-    "prefs.sketch.cursor_coordinates_note": "بجانب المؤشر، قيمتا X وY من أصل الرسم، حتى دون تشغيل أي أداة. إيقاف: فقط أثناء وضع أداة لنقطة."
+    "prefs.sketch.cursor_coordinates_note": "بجانب المؤشر، قيمتا X وY من أصل الرسم، حتى دون تشغيل أي أداة. عند الإيقاف: فقط عندما تضع أداةٌ نقطة."
   },
   "de": {
     "prefs.sketch.cursor_coordinates": "Cursorkoordinaten in der Skizze anzeigen",

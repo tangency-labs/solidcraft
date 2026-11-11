@@ -1462,8 +1462,9 @@ fn sketch_names_schema(_: &mut SchemaGenerator) -> Schema {
     })
 }
 
-/// Make every pending occurrence move the occurrence's placement. The exploded view is shown,
-/// never captured: it stays shown, and the design keeps its placements.
+/// Make every pending occurrence move the occurrence's placement, and save every moving joint's
+/// current values for Revert Position. The exploded view is shown, never captured: it stays
+/// shown, and the design keeps its placements.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct CapturePositionParams {}
@@ -1473,13 +1474,16 @@ pub struct CapturePositionParams {}
 pub struct CapturePositionResult {
     /// How many pending moves became the occurrences' placements.
     pub captured: usize,
+    /// How many joints had their current values saved, for Revert Position to put back.
+    pub joints: usize,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }
 
-/// Drop pending occurrence moves, putting the occurrences back where they were captured. Not an
-/// undo step.
+/// Drop pending occurrence moves, putting the occurrences back where they were captured. Without
+/// `occurrences`, the joints also go back to the values Capture Position saved, clamped to their
+/// limits. One undo step, not a history step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct RevertPositionParams {
@@ -1494,6 +1498,9 @@ pub struct RevertPositionParams {
 pub struct RevertPositionResult {
     /// How many pending moves were dropped.
     pub reverted: usize,
+    /// How many joints went back to the values Capture Position saved (clamped to their
+    /// limits). Only when every occurrence is reverted (no `occurrences`).
+    pub joints: usize,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

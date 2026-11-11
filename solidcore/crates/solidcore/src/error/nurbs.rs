@@ -348,7 +348,6 @@ impl crate::SolidError {
     pub(crate) fn is_nurbs_failure(&self) -> bool {
         self.nurbs_failure()
             .is_some_and(|n| !matches!(n, NurbsFailure::BSpline(_)))
-            || matches!(self, Self::Nlib { .. })
     }
 
     /// [`crate::SolidError::Failed`] for a B-spline curve or surface method that fails
@@ -375,23 +374,6 @@ impl crate::SolidError {
             .into_error(),
         }
     }
-
-    /// The status of an error that answers with an `SmStatus` the way a
-    /// [`crate::SolidError::Upstream`] does: its `code`, or a [`BSplineFailure`]'s status
-    /// (those methods returned an `Upstream` before their failures were described).
-    /// The callers that branch on an upstream status use it so that they treat both
-    /// alike; it goes with `Upstream` in the last PR of the typed-errors work.
-    #[must_use]
-    pub(crate) fn upstream_status(&self) -> Option<i32> {
-        match self {
-            Self::Upstream { code, .. } => Some(*code),
-            Self::Failed(f) => match &f.reason {
-                Reason::Nurbs(NurbsFailure::BSpline(_)) => Some(f.status),
-                _ => None,
-            },
-            _ => None,
-        }
-    }
 }
 
 /// The `NL_*_ERR` number a NURBS failure stands for, when `error` is one.
@@ -405,19 +387,26 @@ pub fn nlib_number(error: &crate::SolidError) -> Option<i32> {
             Reason::Nurbs(n) => n.nlib_number(),
             _ => None,
         },
-        crate::SolidError::Nlib { code, .. } => Some(code.code()),
         _ => None,
     }
 }
 
-/// The status `error` answers with the way a [`crate::SolidError::Upstream`] does: an
-/// `Upstream`'s code, or a [`BSplineFailure`]'s status (those methods returned an
-/// `Upstream` before their failures were described).
-///
-/// For difftest's comparison only: it is removed with `Upstream` and `sm_status` in the
-/// last PR of the typed-errors work. Callers match [`crate::SolidError::kind`] and the
-/// [`Reason`].
-#[must_use]
-pub fn upstream_status(error: &crate::SolidError) -> Option<i32> {
-    error.upstream_status()
+/// [`super::upstream_status`], kept at the path the goldens runners first read it from.
+pub use super::upstream_status;
+
+#[cfg(test)]
+mod tests {
+    /// The NURBS routines describe their failures: their library code builds no bare
+    /// `Upstream` status, except the files listed (with the bare sites each may still hold)
+    /// whose conversion waits on other open work.
+    #[test]
+    fn the_nurbs_routines_build_no_bare_statuses() {
+        assert_eq!(
+            super::super::query::tests::bare_statuses_in("nurbs", 60),
+            [
+                ("nurbs/b_spline_curve/p1.rs".to_owned(), 23),
+                ("nurbs/b_spline_curve/p3.rs".to_owned(), 5),
+            ]
+        );
+    }
 }

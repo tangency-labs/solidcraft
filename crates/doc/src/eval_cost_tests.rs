@@ -141,6 +141,8 @@ fn joint_face_measurements_are_shared_across_motion_samples_and_snap_kinds() {
         angle: 0.0,
         suppressed: false,
         exprs: Default::default(),
+        captured: None,
+        constraint: None,
     });
     // One body supplies both old nearest-face snaps and persistent named-face snaps.
     // A scratch model shares its measurements, even though each sample changes the pose.
@@ -1412,6 +1414,7 @@ fn marking(p: Vec3) -> FeatureKind {
         chamfer_angle: None,
         chamfer_depth: None,
         steep_flank: Default::default(),
+        continuous_flanks: false,
         old_auto_size: false,
     }
 }
@@ -1453,6 +1456,7 @@ fn a_tap_marking_searches_only_the_bodies_near_it() {
         ease_out: None,
         to: None,
         references: Vec::new(),
+        old_surface_start: false,
     };
     let (work, threads) = marking_work(&mut doc, hole);
     assert_eq!(work.cylinder_search, 1, "only the plate is searched");
@@ -1570,6 +1574,7 @@ fn a_tapped_hole_reads_the_bodies_along_its_drill_line() {
         ease_out: None,
         to: None,
         references: Vec::new(),
+        old_surface_start: false,
     };
     let (work, threads) = marking_work(&mut doc, hole);
     assert_eq!(work.tapped_wall, 3, "Plate, Below and Grazing are read");
@@ -1998,6 +2003,56 @@ fn a_hole_classifies_the_faces_it_reads_not_every_face_of_the_design() {
     // A point on a side wall drills into that wall.
     let side = super::hole_direction_at(&st, Vec3::new(252.0, 0.0, 5.0), &[]).unwrap();
     assert!((side - Vec3::new(-1.0, 0.0, 0.0)).len() < 1e-6, "into the side wall: {side:?}");
+}
+
+/// A cut whose target name is taken by another component's sheet, while a body of the cut's own
+/// component was asked for that name, is refused before the sheet is machined (#12141).
+#[test]
+fn an_ambiguous_target_is_refused_before_a_sheet_is_machined() {
+    let mut doc = Document::new("names");
+    let linked = doc.add_component(Some("Encoder"), 0).unwrap();
+    let local = doc.add_component(Some("Assembly"), 0).unwrap();
+    flat_sheet(&mut doc, Vec2::new(0.0, 0.0), 40.0, 40.0);
+    for f in doc.features.iter_mut() {
+        f.component = linked;
+    }
+    let base = doc.features.last().unwrap().id;
+    doc.feature_mut(base).unwrap().body_names = vec!["Plate".into()];
+    let own = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(100.0, 0.0, 0.0)),
+                length: "10".into(),
+                width: "10".into(),
+                height: "2".into(),
+                operation: Operation::NewBody,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(own).unwrap().component = local;
+    doc.feature_mut(own).unwrap().body_names = vec!["Plate".into()];
+    let cut = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(10.0, 10.0, -5.0)),
+                length: "5".into(),
+                width: "5".into(),
+                height: "20".into(),
+                operation: Operation::Cut,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(cut).unwrap().component = local;
+    doc.feature_mut(cut).unwrap().participants = vec!["Plate".into()];
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let err = model.result(cut).and_then(|r| r.error.clone()).expect("the cut is refused");
+    assert!(err.contains("ambiguous") && err.contains("`Encoder`"), "{err}");
+    let st = model.state();
+    let sheet = st.sheets.iter().find(|s| s.body == "Plate").expect("the linked sheet");
+    assert!(sheet.holes.is_empty(), "the linked sheet is not machined");
 }
 
 /// A hole's look at the material over its entry face (#10695) is best effort: when the kernel

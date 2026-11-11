@@ -22,10 +22,25 @@ scopes and unwind guards, so a running setup keeps `gpu-path-setup.json` (its ad
 settings folder and removes it when the setup answers or the app closes normally. A launch that
 finds it for the same adapter key leaves the setup failed with that explanation until the user
 chooses **Try again**; a driver update changes the key and so tries again.
-The path tracer runs on Vulkan, or on Metal on macOS (#3217). A viewport on D3D12 is reopened on the
-same GPU through Vulkan. Where there is no Vulkan or Metal driver (Windows over
-Remote Desktop or on the WARP software adapter, older drivers), the path executor reports
-itself unavailable and images render on the CPU. On an RTX 4090, D3D12 was never faster:
+The path tracer runs on Vulkan, or on Metal on macOS (#3217). On Windows, the viewport
+must already use Vulkan: opening a driver that startup deliberately avoided is unsafe.
+A Direct3D 12 session offers **Restart with Vulkan** in Render. The same saved choice is
+available in **Preferences > Graphics > Graphics API**. The host reads it before creating
+any adapter or device. Automatic keeps the existing Windows Direct3D 12 first policy.
+Elsewhere, an unsupported viewport backend may reopen the same GPU through Vulkan or Metal.
+Where there is no suitable driver or device (Remote Desktop, WARP, older drivers), the path
+executor reports itself unavailable and CPU image methods remain usable.
+
+Changing the API records its previous value in graphics.json. Before the first attempted
+startup, the host atomically marks that choice as started. Only presentation of the first
+frame confirms it. An interrupted attempt restores the previous choice on the next normal
+launch; a handled startup failure restores it before retrying. Safe mode, explicit launch
+overrides and process-local fallback launches leave a pending attempt untouched. This is
+startup recovery, not a timed image-confirmation or post-startup hang watchdog.
+Unrelated graphics preference changes preserve the backend and recovery metadata.
+The normal quit flow asks about unsaved documents before restart and reopens saved tabs.
+
+On an RTX 4090, D3D12 was never faster:
 equal per sample with DXC and about 55% slower with FXC, and it compiles the path shader
 at every start (about 82 s with DXC, about 2 hours with FXC), where Vulkan's compiled
 pipelines persist between runs.

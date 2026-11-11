@@ -38,7 +38,7 @@ use crate::nurbs::b_spline_curve::p1::BSplineCurve;
 use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::crv_adv::p1::CurveEnd;
 use crate::primitive::primitive_creation::p1::{
-    extend_path_curves_with_kernel, position_profile_curves_impl, PrimitiveCreation,
+    extend_path_curves, position_profile_curves_impl, PrimitiveCreation,
 };
 use crate::primitive::primitive_creation::SweepOptions;
 use crate::topology::brep::p10::TrimType;
@@ -360,17 +360,7 @@ impl PrimitiveCreation {
         extend *= 2.0;
 
         // Extend all the path curves at start and end to make sure sweeps go past corner
-        let extended = if checked {
-            super::super::p1::extend_path_curves_impl(
-                &bspline_paths,
-                closed,
-                periodic,
-                extend,
-                true,
-            )?
-        } else {
-            extend_path_curves_with_kernel(k, &bspline_paths, closed, periodic, extend)?
-        };
+        let extended = extend_path_curves(&bspline_paths, closed, periodic, extend)?;
 
         // A plane normal is only needed at a mitre. A single straight path has
         // no unique normal (`ComputeCrvsNormal` returns SM_ERR) and needs none.
@@ -464,14 +454,16 @@ impl PrimitiveCreation {
                 line_into(checked, after[0], cutting_point, &mut cut_line)?;
                 let line = cut_line
                     .as_ref()
-                    .ok_or_else(|| SolidError::null_pointer(OP))?;
+                    .ok_or_else(|| SolidError::primitive_missing(OP, "the cutting line"))?;
                 extend_into(checked, line, extend, CurveEnd::Start, &mut temp_cutting)?;
 
                 cutting = None;
                 let previous = ii
                     .checked_sub(1)
                     .and_then(|i| paths.get(i))
-                    .ok_or_else(|| SolidError::sm_err(OP))?;
+                    .ok_or_else(|| {
+                        SolidError::primitive_failed(OP, "the corner's previous path")
+                    })?;
                 if path.is_linear(a.kernel(context_of)?, tol, false)?.linear
                     && previous
                         .is_linear(a.kernel(context_of)?, tol, false)?
@@ -481,7 +473,9 @@ impl PrimitiveCreation {
                 } else {
                     // Intersect the temp cutting curve with every intersection curve
                     // and build the real cutting curve through the two best points.
-                    let before_id = before_brep.ok_or_else(|| SolidError::null_pointer(OP))?;
+                    let before_id = before_brep.ok_or_else(|| {
+                        SolidError::primitive_missing(OP, "the previous piece's B-rep")
+                    })?;
                     // `pBrepBefore->BrepIntersect(crContext, pBrepAfter, ..)`: the faces'
                     // caches, UV trim curves and classifications are made on their own
                     // B-reps (`after_brep` is of `context_of`'s context)
@@ -500,9 +494,9 @@ impl PrimitiveCreation {
                     .map(|(curves, _)| curves)
                     .unwrap_or_default();
                     if intersections.len() > 1 {
-                        let temp = temp_cutting
-                            .as_ref()
-                            .ok_or_else(|| SolidError::null_pointer(OP))?;
+                        let temp = temp_cutting.as_ref().ok_or_else(|| {
+                            SolidError::primitive_missing(OP, "the temporary cutting curve")
+                        })?;
                         let temp = Curve::from(temp.clone());
                         let mut best = Vec3::UNDEF;
                         let mut best2 = Vec3::UNDEF;
@@ -577,7 +571,9 @@ impl PrimitiveCreation {
                         {
                             let mut line = None;
                             line_into(checked, best, best2, &mut line)?;
-                            let mut line = line.ok_or_else(|| SolidError::null_pointer(OP))?;
+                            let mut line = line.ok_or_else(|| {
+                                SolidError::primitive_missing(OP, "the cutting line")
+                            })?;
                             let mut extended_line = None;
                             extend_into(checked, &line, extend, CurveEnd::End, &mut extended_line)?;
                             if let Some(next) = extended_line {
@@ -596,7 +592,9 @@ impl PrimitiveCreation {
                     // determine reference points on either side of the cutting line
                     let reference1 = before[0] + (-before[1] * 0.1);
                     let reference2 = after[0] + (after[1] * 0.1);
-                    let before_id = before_brep.ok_or_else(|| SolidError::null_pointer(OP))?;
+                    let before_id = before_brep.ok_or_else(|| {
+                        SolidError::primitive_missing(OP, "the previous piece's B-rep")
+                    })?;
                     trim_both(
                         a,
                         [before_id, after_brep],
@@ -617,7 +615,8 @@ impl PrimitiveCreation {
 
             // a closed path trims the end of the last and the beginning of the first
             if closed && ii == paths.len() - 1 {
-                let after_id = first_brep.ok_or_else(|| SolidError::null_pointer(OP))?;
+                let after_id = first_brep
+                    .ok_or_else(|| SolidError::primitive_missing(OP, "the first piece's B-rep"))?;
                 after = first_pv;
 
                 // tangent continuous paths need no trim
@@ -643,13 +642,15 @@ impl PrimitiveCreation {
                     line_into(checked, after[0], cutting_point, &mut cut_line)?;
                     let line = cut_line
                         .as_ref()
-                        .ok_or_else(|| SolidError::null_pointer(OP))?;
+                        .ok_or_else(|| SolidError::primitive_missing(OP, "the cutting line"))?;
                     extend_into(checked, line, 50.0, CurveEnd::Start, &mut cutting)?;
-                    let curve = cutting
-                        .as_ref()
-                        .ok_or_else(|| SolidError::null_pointer(OP))?;
+                    let curve = cutting.as_ref().ok_or_else(|| {
+                        SolidError::primitive_missing(OP, "the extended cutting curve")
+                    })?;
 
-                    let before_id = before_brep.ok_or_else(|| SolidError::null_pointer(OP))?;
+                    let before_id = before_brep.ok_or_else(|| {
+                        SolidError::primitive_missing(OP, "the previous piece's B-rep")
+                    })?;
                     let (reference1, reference2) = if before_id == after_id {
                         (
                             before[0] + (before[1] * 10.0),
@@ -707,16 +708,23 @@ impl PrimitiveCreation {
         ordered.extend(new_breps.pop());
         for ii in 1..count {
             ordered.extend(new_breps.pop());
-            tree.push(i64::try_from(ii).map_err(|_| SolidError::sm_err(OP))?);
+            tree.push(i64::try_from(ii).map_err(|_| {
+                SolidError::primitive_failed(OP, "a piece index does not fit the Boolean tree")
+            })?);
             // Convert to different form of Boolean numbering (0 - 1)
             tree.push(-1);
         }
         a.boolean_trees(&mut ordered, &tree)?;
         if ordered.len() != 1 {
             // Something went wrong
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::primitive_failed(
+                OP,
+                "the pieces did not combine into one B-rep",
+            ));
         }
-        let sweep = *ordered.first().ok_or_else(|| SolidError::sm_err(OP))?;
+        let sweep = *ordered
+            .first()
+            .ok_or_else(|| SolidError::primitive_failed(OP, "the combined pieces left no B-rep"))?;
 
         if let Err(e) = a.stitch_faces(sweep, tol) {
             if !checked {
@@ -756,7 +764,10 @@ impl PrimitiveCreation {
             if !checked {
                 a.delete_brep(sweep);
             }
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::primitive_failed(
+                OP,
+                "the sweep encloses no material",
+            ));
         }
         Ok(sweep)
     }

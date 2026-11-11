@@ -822,11 +822,13 @@ fn open_loop_edge(feature: &Feature) -> Option<EdgeId> {
 /// (#3218), else `SM_ERR`, at its open loop edge.
 pub(crate) fn is_open_base_refusal(error: &SolidError) -> bool {
     match error {
-        SolidError::Upstream {
-            operation: OP,
-            code: SM_ERR,
-            entity: Some(EntityRef::Edge(_)),
-        } => true,
+        // the status, not the variant: a typed failure that replaced the `Upstream` (#13790)
+        e if e.upstream_status() == Some(SM_ERR)
+            && e.operation() == OP
+            && matches!(e.entity(), Some(EntityRef::Edge(_))) =>
+        {
+            true
+        }
         SolidError::Failed(f) => {
             f.operation == OP
                 && matches!(f.reason, Reason::Defeature(_))
@@ -2506,5 +2508,30 @@ mod tests {
             .unwrap();
         assert!(made.is_none());
         assert!(ex.features().is_empty());
+    }
+
+    /// #13790: a typed `SM_ERR` at an edge that replaced the open-base refusal's `Upstream`
+    /// is the same refusal.
+    #[test]
+    fn open_base_refusal_reads_the_status_of_a_typed_failure() {
+        use crate::error::replaced_upstream_samples::{native_failures, replaced_upstream};
+        use crate::topology::EdgeId;
+        let edge = Some(EntityRef::Edge(EdgeId::from_index(5)));
+        let upstream = SolidError::Upstream {
+            operation: OP,
+            code: SM_ERR,
+            entity: edge,
+        };
+        assert!(is_open_base_refusal(&upstream));
+        for typed in replaced_upstream(OP, SM_ERR, edge) {
+            assert!(is_open_base_refusal(&typed), "{typed:?}");
+        }
+        for other in replaced_upstream(OP, SM_ERR, None)
+            .into_iter()
+            .chain(replaced_upstream(OP, 1006, edge))
+            .chain(native_failures(OP, SM_ERR))
+        {
+            assert!(!is_open_base_refusal(&other), "{other:?}");
+        }
     }
 }

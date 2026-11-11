@@ -157,7 +157,11 @@ use crate::SolveApp;
 /// The Browser's rows on screen: (label, row rect, fold arrow area, open).
 /// Other presentations expose their geometry through `semantic_content::output`.
 pub fn drawn_rows() -> Vec<crate::semantic_content::DrawnRow> {
-    crate::semantic_content::output(crate::semantic_content::ContentOwner::BROWSER).rows
+    use crate::semantic_content::{ContentOwner, output};
+    // The design tree over the view (`dialog_tree`) shows these rows while the browser makes way.
+    let mut rows = output(ContentOwner::BROWSER).rows;
+    rows.extend(output(ContentOwner::DESIGN_TREE).rows);
+    rows
 }
 
 pub fn drawn_occurrences() -> Vec<crate::semantic_content::DrawnOccurrence> {
@@ -447,13 +451,17 @@ enum Take {
 /// ([`pick_from_browser`]). Returns false when that input does not take bodies, so the click
 /// keeps its ordinary meaning. A Shift range only adds; a group or component toggles.
 fn offer_bodies(app: &mut SolveApp, names: &[String], take: Take) -> bool {
-    if !dialog_takes_body(app) || app.dialog.as_ref().is_some_and(|d| d.takes_components()) {
-        return false;
-    }
     let world = crate::open_meshing::session_world(&app.session);
     let picked: Vec<Sel> =
         names.iter().filter(|n| world.body(n).is_some() && !app.session.body_removed_later(n)).map(|n| Sel::Body { name: n.clone() }).collect();
     if picked.is_empty() {
+        return false;
+    }
+    // The chat's picker takes them into Bodies whichever list is active (#11318).
+    if let Some(d) = app.dialog.as_mut() {
+        d.activate_input_taking(crate::selection::BODIES);
+    }
+    if !dialog_takes_body(app) || app.dialog.as_ref().is_some_and(|d| d.takes_components()) {
         return false;
     }
     let Some(mut d) = app.dialog.take() else { return false };
@@ -543,6 +551,9 @@ pub(crate) fn sketches_to_parts_item(sketches: Vec<String>) -> Item {
 
 /// The menu of a folder row (Bodies, Sketches, Construction).
 pub fn folder_items(app: &SolveApp, component: u64, folder: &str, scope: &str) -> Vec<Item> {
+    if folder == "origin" {
+        return vec![Item::action("ui.folderVisible", "Show/Hide", "eye").key("V").with(json!({"key":format!("{scope}/origin")}))];
+    }
     let sel: Vec<String> = selected_keys(app, component, folder);
     let all = entries(app, component, folder);
     let mut v = Vec::new();
@@ -955,7 +966,7 @@ pub(crate) struct Actions {
     pub(crate) hovered: bool,
     /// The plane whose row is under the pointer, lit in the view (#6975).
     pub(crate) hover_plane: Option<String>,
-    /// The feature row under the pointer: lit as hovering its timeline item lights it.
+    /// The feature or sketch whose row is under the pointer (#14263).
     pub(crate) hover_feature: Option<u64>,
     pub(crate) hover_joint: Option<u64>,
     drop: Option<(crate::semantic_content::ContentSource, DropAction)>,
@@ -999,9 +1010,30 @@ struct Lit {
     /// The placements holding a lit body, and the components holding a lit sketch or plane.
     paths: Vec<Vec<u64>>,
     components: Vec<u64>,
+    /// The feature of what is under the pointer in the 3D view, and of the face or edge picked
+    /// there ([`Lit::features_from_view`]), once worked out this frame.
+    from_view: Option<[Option<u64>; 2]>,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How often the features lit from the 3D view were worked out (the tests count them).
+    static FROM_VIEW_WORKED_OUT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 impl Lit {
+    /// The feature that made what is under the pointer in the 3D view, and the one that made the
+    /// face or edge picked there, as the history lights them. Worked out for the first feature row
+    /// that asks in a frame: every row and folder looked them up again, the pick naming every face
+    /// of its body each time (#14850).
+    fn features_from_view(&mut self, app: &SolveApp) -> [Option<u64>; 2] {
+        *self.from_view.get_or_insert_with(|| {
+            #[cfg(test)]
+            FROM_VIEW_WORKED_OUT.with(|n| n.set(n.get() + 1));
+            [crate::timeline::hovered_feature(app), crate::timeline::picked_feature(app)]
+        })
+    }
+
     fn of(app: &mut SolveApp) -> Lit {
         use crate::viewport::Hit;
         let mut selected = std::collections::HashSet::new();
@@ -1093,7 +1125,7 @@ impl Lit {
         // A body both holding the selection and under the pointer leads to its placement once.
         paths.sort_unstable();
         paths.dedup();
-        Lit { selected, holding, hovered, paths, components }
+        Lit { selected, holding, hovered, paths, components, from_view: None }
     }
 
     fn any(&self) -> bool {
@@ -1527,7 +1559,7 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
         crate::ui_kit::disclosure(ui.painter(), pos2(right - t.form_section_icon_size / 2.0, rect.center().y), !collapsed, t.text_dim);
         right -= 18.0;
     }
-    let bodies = app.session.model.state().bodies.len();
+    let bodies = listed_bodies(&app.session);
     let key = if bodies == 1 { "ui.browser_bodies_one" } else { "ui.browser_bodies_other" };
     let count = solidcraft_ui_text::format(key, &[("count", &bodies.to_string())]);
     let galley = ui.painter().layout_no_wrap(count, FontId::proportional(t.font_body), t.text_dim);
@@ -1544,6 +1576,13 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
             }
         }
     }
+}
+
+/// How many bodies the Browser lists for its header: one row per placement of each body, so a
+/// component's body placed twice counts twice, as the world shows it. The model's own count when
+/// the design cannot be placed (the rows then still list the model's bodies).
+fn listed_bodies(session: &solidcraft_engine::Session) -> usize {
+    session.world_state().map_or_else(|_| session.model.state().bodies.len(), |world| world.bodies.len())
 }
 
 fn prepare_model(app: &mut SolveApp) {
@@ -1606,6 +1645,25 @@ fn model_feature_indices(app: &SolveApp, component: u64, sketches: bool) -> Vec<
     }
 }
 
+/// The design's Origin, Bodies and Construction rows as the browser draws them (a click picks
+/// for an open dialog as there), for the design tree over the view while a dialog holds the left
+/// column (`dialog_tree`, #6710).
+fn design_tree(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions) {
+    prepare_model(app);
+    // The root's folders as the browser draws them (`browser_cache`).
+    let mut cache = app.tree.cache.take().unwrap_or_default();
+    cache.prepare(app);
+    let folders = ["bodies", "construction"].map(|folder| cache.folder(app, 0, None, folder));
+    app.tree.cache = Some(cache);
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        origin_rows(app, ui, 0, acts);
+        for (folder, data) in ["bodies", "construction"].into_iter().zip(&folders) {
+            folder_rows_at(app, ui, 0, None, folder, 0, acts, data);
+        }
+    });
+}
+
 fn browser_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::semantic_content::show(
         app,
@@ -1659,6 +1717,7 @@ pub(crate) fn render_content(app: &mut SolveApp, ui: &mut egui::Ui, request: cra
     match request {
         crate::semantic_content::ContentRequest::Browser { shrink_height } => rows_scrolling(app, ui, &mut acts, shrink_height),
         crate::semantic_content::ContentRequest::ActiveBodiesOrigin => active_bodies_origin(app, ui, &mut acts),
+        crate::semantic_content::ContentRequest::DesignTree => design_tree(app, ui, &mut acts),
     }
     acts
 }
@@ -2091,6 +2150,9 @@ fn occurrence_rows_inner(
         return;
     }
     let render = crate::render_workspace::active(app);
+    if !render {
+        origin_rows_at(app, ui, depth + 1, acts, path);
+    }
     for (slot, folder) in placement.folders.iter_mut().zip(["bodies", "sketches", "construction"]) {
         if render && folder != "bodies" {
             continue;
@@ -2184,50 +2246,97 @@ fn origin_things() -> [(&'static str, &'static str, Option<Thing>); 7] {
     ]
 }
 
+/// The Origin folder's rows for a placement, as the Browser lists them: the O point, the
+/// X/Y/Z axes and the XY/XZ/YZ planes at the placement's own origin, each with its own eye
+/// and selection reuse. The design's own Origin is the `id == 0` case and keeps its bare
+/// names (#7313).
 fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut Actions) {
-    let key = "origin";
+    origin_rows_at(app, ui, depth, acts, &[]);
+}
+
+/// The Origin rows of one component placement, under its row: [`origin_rows`] keyed by the
+/// complete occurrence path, so repeated and nested placements each get their own folder
+fn origin_rows_at(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut Actions, path: &[u64]) {
+    let component = !path.is_empty();
+    let folder = solidcraft_engine::origins::folder(path);
+    let key = if component { folder.as_str() } else { "origin" };
+    let shown = if component { !app.session.folder_hidden(key) } else { app.origin_shown() };
+    let faded = !shown || (component && !app.session.occurrence_visible(path));
     let open = is_open(app, key, false);
     let lit = |thing: &Option<Thing>| thing.as_ref().map_or((false, false), |t| acts.lit.thing(t));
-    let items = origin_things();
+    let items: Vec<_> = origin_things()
+        .into_iter()
+        .map(|(k, icon, thing)| {
+            let name = if component { solidcraft_engine::origins::key(path, k) } else { k.into() };
+            let thing = if component {
+                Some(match icon {
+                    "plane" => Thing::Plane(name.clone()),
+                    "axis" => Thing::Axis(name.clone()),
+                    _ => Thing::Point(name.clone()),
+                })
+            } else {
+                thing
+            };
+            (k, name, icon, thing)
+        })
+        .collect();
     let r = draw_row(
         ui,
         ui.scope_id().with(key),
         &Row {
             depth,
             fold: Some(open),
-            eye: Some(app.origin_shown()),
+            eye: Some(shown),
             icon: "origin",
             label: "Origin",
-            dim: !app.origin_shown(),
-            mark: if items.iter().any(|(_, _, thing)| lit(thing) != (false, false)) { Mark::Branch } else { Mark::None },
+            handle: component.then_some(key),
+            dim: faded,
+            mark: if items.iter().any(|(_, _, _, thing)| lit(thing) != (false, false)) { Mark::Branch } else { Mark::None },
             ..Default::default()
         },
     );
     if r.fold || r.clicked {
         toggle(app, key, false);
+        if component && r.clicked {
+            pick_folder(app, key);
+        }
     }
     if r.eye {
-        app.set_origin_shown(!app.origin_shown());
+        if component {
+            toggle_folder(app, key);
+        } else {
+            app.set_origin_shown(!shown);
+        }
     }
     if let Some(p) = r.secondary {
-        acts.menu = Some((p, Target::Origin));
+        let target = if component {
+            Target::Folder {
+                component: app.session.occurrence_placement(path).map_or(0, |p| p.component),
+                folder: "origin".into(),
+                scope: solidcraft_engine::Session::folder_scope(path),
+            }
+        } else {
+            Target::Origin
+        };
+        acts.menu = Some((p, target));
     }
     if !open {
         return;
     }
-    for (k, icon, thing) in items {
+    for (k, name, icon, thing) in items {
         // An origin plane by the name the preferences give it; its key stays the id.
         let label = app.preferences.origin_plane_names.label(k);
-        let visible = !app.session.visibility.hidden_origin.iter().any(|h| h == k);
+        let visible = !app.session.visibility.hidden_origin.contains(&name);
         let sel = match icon {
-            "plane" => Some(Sel::Plane { name: k.into() }),
-            "axis" => Some(Sel::Axis { name: k.into() }),
+            "plane" => Some(Sel::Plane { name: name.clone() }),
+            "axis" => Some(Sel::Axis { name: name.clone() }),
+            _ if component => Some(Sel::ConstructionPoint { name: name.clone() }),
             _ => Some(Sel::Vertex { body: String::new(), point: solidcore_record::Vec3::ZERO }),
         };
         let (selected, mark) = lit_row(lit(&thing));
         let r = draw_row(
             ui,
-            ui.scope_id().with(("o", k)),
+            ui.scope_id().with(("o", &name)),
             // Faded when hidden itself or with the whole Origin. A renamed plane's label is already
             // in the interface's language (`name`).
             &Row {
@@ -2235,21 +2344,22 @@ fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
                 eye: Some(visible),
                 icon,
                 label,
+                handle: component.then_some(name.as_str()),
                 name: label != k,
                 selected,
-                dim: !visible || !app.origin_shown(),
+                dim: !visible || faded,
                 mark,
                 ..Default::default()
             },
         );
         if r.eye {
             // Through the command, so the Origin row's eye is an undo step (#2219).
-            let _ = app.run("browser.visibility", json!({ "items": [k], "visible": !visible }));
+            let _ = app.run("browser.visibility", json!({ "items": [&name], "visible": !visible }));
         }
         if let Some(p) = r.secondary {
             let target = match icon {
-                "plane" => Some(Target::OriginPlane { name: k.into() }),
-                "axis" => Some(Target::OriginAxis { name: k.into() }),
+                "plane" => Some(Target::OriginPlane { name: name.clone() }),
+                "axis" => Some(Target::OriginAxis { name: name.clone() }),
                 _ => None,
             };
             if let Some(target) = target {
@@ -2257,7 +2367,7 @@ fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
             }
         }
         if r.hovered && icon == "plane" {
-            acts.hover_plane = Some(k.into());
+            acts.hover_plane = Some(name);
         }
         if r.clicked
             && let Some(x) = sel
@@ -2634,6 +2744,10 @@ pub(crate) fn pick_sketch_into_dialog(app: &mut SolveApp, id: u64) -> bool {
 /// Browser picks go only into compatible active dialog inputs. Outside a dialog, planes and
 /// axes become the selection; body rows use the ordinary Ctrl/Shift-aware selection path.
 fn pick_from_browser(app: &mut SolveApp, x: Sel) {
+    // The chat's picker takes a body into Bodies whichever list is active (#11318).
+    if let (Sel::Body { .. }, Some(d)) = (&x, app.dialog.as_mut()) {
+        d.activate_input_taking(crate::selection::BODIES);
+    }
     if let Sel::Body { name } = &x
         && dialog_takes_body(app)
         && let Some(mut d) = app.dialog.take()
@@ -3402,6 +3516,12 @@ fn entry_row(
         && let Thing::Plane(name) = &e.thing
     {
         acts.hover_plane = Some(name.clone());
+    }
+    if r.hovered
+        && let Thing::Sketch(id) = &e.thing
+    {
+        acts.hover_feature = Some(*id);
+        acts.hovered = true;
     }
     if let Some(p) = r.secondary
         && let Some(t) = e.target.clone()

@@ -40,7 +40,8 @@
 //!   the direct enclosure, not the centred form. The net's piece only seeds the feet.
 
 use super::certificate::{
-    crosses_a_knot, gn_enclose_over, knot_cuts, partials_hull, NurbsCurve, SpanAt,
+    crosses_a_knot, gn_enclose_over, is_foot_past_domain_end, knot_cuts, partials_hull,
+    EndContinuation, NurbsCurve, SpanAt,
 };
 use super::definition::{t2_pow, tv_dot, T2Of, TvOf};
 use super::interval::{cmax, cmin, Ivl};
@@ -104,6 +105,9 @@ pub struct GnDefFace<'a> {
     swapped: bool,
     /// `sPieces`: by the net's knot span along s.
     pieces: Vec<DefPiece>,
+    /// Not the fork's (#14284): which of each support's directions continue past its net's
+    /// ends for the feet's box, by the support's kind ([`EndContinuation::of`]).
+    ends: [EndContinuation; 2],
 }
 
 /// `sm_GnDefs`: the enclosed definitions among a blend's two faces (`None`: a NURBS
@@ -182,7 +186,18 @@ pub fn gn_def_face_of<'a>(k: &Kernel, surface: &'a Surface) -> Result<GnDefFace<
         b,
         swapped,
         pieces: Vec::new(),
+        ends: [EndContinuation::of(s0), EndContinuation::of(s1)],
     })
+}
+
+#[cfg(test)]
+impl GnDefFace<'_> {
+    /// The face with no support continued past its net's ends, as before #14284: a test's
+    /// comparison (which pieces this change newly encloses).
+    pub(crate) fn without_ends(mut self) -> Self {
+        self.ends = [EndContinuation::default(); 2];
+        self
+    }
 }
 
 /// `sm_DefPieceAt`: the station at the middle of the net's piece `kk` along s, solved
@@ -412,9 +427,23 @@ fn partials_on(
         *xb = c0 + db * (c1 + db * c2);
     }
     let [n0, n1] = &d.sup_n;
-    let Ok(Some(e)) = gn_enclose_over(k, [n0, n1], &d.leader, &at, d.r, d.side, 0, lk, None, None)
-    else {
-        return Err(SolidError::sm_err(OP));
+    let e = match gn_enclose_over(
+        k,
+        [n0, n1],
+        &d.leader,
+        &at,
+        d.r,
+        d.side,
+        0,
+        lk,
+        None,
+        None,
+        d.ends,
+    ) {
+        Ok(Some(e)) => e,
+        // a foot past its support's domain end, refused by name (#14284)
+        Err(e) if is_foot_past_domain_end(&e) => return Err(e),
+        _ => return Err(SolidError::sm_err(OP)),
     };
     let mut crossed = false;
     for (f, n) in d.sup_n.iter().enumerate() {
@@ -607,4 +636,121 @@ fn centred_on(
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::certificate::is_foot_past_domain_end;
+    use super::super::station::{knot, span};
+    use super::*;
+
+    /// tangency-labs/solidcraft#14284: `wr698`'s `circle_root` (a pipe of radius 10 lying
+    /// along a 60 x 40 x 10 plate 4 degrees off x, its root rounded r 2 as its definition)
+    /// ends where the pipe ends, so at the round's u end a foot lies on the pipe's net's v end.
+    /// Over a box at that end the definition's feet box crosses the pipe's domain end: without
+    /// a support continued it is refused `FootPastDomainEnd` (what it was, as `SM_ERR`, before);
+    /// with the pipe continued along its axis (a cylinder's line) it is enclosed: `|S_u x S_v|`
+    /// over the box is finite, away from 0, and holds the definition's own value at the box's
+    /// ends and middle.
+    #[test]
+    #[allow(clippy::unwrap_used, clippy::expect_used)]
+    fn a_round_ending_flush_with_its_pipe_is_enclosed_at_its_end() {
+        use crate::blend::fillet_executive::api::fillet_edges;
+        use crate::boolean::api_brep::boolean_union;
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::math::{Point3, Vec3};
+        use crate::primitive::api_primitives::{create_box, create_cylinder};
+        use crate::query::api_queries::{edge_closest_point, get_edges};
+        use crate::topology::face;
+        let mut k = Kernel::default();
+        k.fixes.fillet_round_as_definition = true;
+        let plate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 60.0, 40.0, 10.0).unwrap();
+        let mut pipe = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 60.0).unwrap();
+        let phi = 4.0_f64.to_radians();
+        let place = Axis2Placement::new(
+            Point3::new(0.0, 20.0, 16.0),
+            Vec3::new(-phi.sin(), 0.0, -phi.cos()),
+            Vec3::new(0.0, 1.0, 0.0),
+        );
+        crate::topology::brep::p5::transform(&mut k, &mut pipe, &place, None, false).unwrap();
+        let mut b = boolean_union(&mut k, plate, pipe).unwrap();
+        let q = Point3::new(30.0, 29.2, 10.0);
+        let root = get_edges(&b)
+            .unwrap()
+            .into_iter()
+            .filter_map(|e| {
+                edge_closest_point(&k, &b, e, q)
+                    .ok()
+                    .map(|c| (e, c.closest.distance))
+            })
+            .filter(|&(_, d)| d <= 1.0)
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+            .expect("the root edge")
+            .0;
+        fillet_edges(&mut k, &mut b, &[root], 2.0, 1, 1, 1.0).unwrap();
+        let def = b
+            .faces()
+            .ids()
+            .filter_map(|f| face::p2::surface(&b, f).unwrap())
+            .find(|s| {
+                s.procedural_blend()
+                    .is_some_and(|d| (0..2).all(|i| d.support(i).is_some()))
+            })
+            .expect("the round, a definition on the pipe and the plate")
+            .clone();
+        let net = Nurbs::of(&as_b_spline(&k, &def).unwrap().unwrap()).unwrap();
+        let (u0, u1) = (knot(&net.u, net.p as isize), knot(&net.u, net.nu as isize));
+        let (v0, v1) = (knot(&net.v, net.q as isize), knot(&net.v, net.nv as isize));
+        // a box at the round's u end along its rail on v's start (the pipe's side or the
+        // plate's), as the margin of its edge's last piece asks
+        let (ua, ub) = (u1 - 0.002, u1);
+        let ku = span(&net.u, net.p, net.nu, 0.5 * (ua + ub));
+        let mut crossed = 0;
+        for (va, vb) in [(v0, v0), (v1, v1)] {
+            let kv = span(&net.v, net.q, net.nv, 0.5 * (va + vb));
+            let before = definition_partials_over_box(
+                &k,
+                &mut gn_def_face_of(&k, &def).unwrap().without_ends(),
+                &net,
+                ku,
+                kv,
+                ua,
+                ub,
+                va,
+                vb,
+                1,
+            );
+            let Err(refused) = before else { continue };
+            assert!(is_foot_past_domain_end(&refused), "{refused:?}");
+            crossed += 1;
+            // |S_u x S_v| of the definition's partials over a box
+            let normal_len = |ua: f64, ub: f64| {
+                let mut d = gn_def_face_of(&k, &def).unwrap();
+                let p = definition_partials_over_box(&k, &mut d, &net, ku, kv, ua, ub, va, vb, 1)
+                    .unwrap();
+                let (su, sv) = (p.at(1, 0), p.at(0, 1));
+                let n = [
+                    su.y * sv.z - su.z * sv.y,
+                    su.z * sv.x - su.x * sv.z,
+                    su.x * sv.y - su.y * sv.x,
+                ];
+                (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt()
+            };
+            // enclosed and correct: finite, away from 0, and holding the definition's own
+            // value at the box's ends and middle (each the same partials at that point)
+            let over = normal_len(ua, ub);
+            assert!(over.lo > 0.0 && over.hi.is_finite(), "|S_u x S_v| {over:?}");
+            for u in [ua, 0.5 * (ua + ub), ub] {
+                let at = normal_len(u, u);
+                assert!(
+                    at.hi.is_finite() && over.lo <= at.lo && at.hi <= over.hi,
+                    "at u {u}: {at:?} not in {over:?}"
+                );
+            }
+        }
+        assert!(
+            crossed >= 1,
+            "no box at the round's end crosses its pipe's domain end ({u0}..{u1})"
+        );
+    }
 }

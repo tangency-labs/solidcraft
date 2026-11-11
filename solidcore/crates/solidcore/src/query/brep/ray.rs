@@ -204,7 +204,7 @@ fn face_surface_cache(
         .face(face)?
         .surface
         .as_ref()
-        .ok_or(SolidError::null_pointer(OP))?
+        .ok_or_else(|| SolidError::query_missing(OP, "the face's surface"))?
         .clone_for_evaluation()?;
     // upstream reuses a cache whose tree is built, with the built tree's state bits
     let get_tree = get_tree || surface.cache_tree_state() == CacheTreeState::Built;
@@ -384,7 +384,7 @@ impl SurfaceSolveContext<CacheObject> for RaySurfaceContext<'_> {
             .face(face)?
             .surface
             .as_ref()
-            .ok_or(SolidError::null_pointer(OP))?
+            .ok_or_else(|| SolidError::query_missing(OP, "the face's surface"))?
             .face()?;
         if surface.face()? != owner {
             return Err(SolidError::invalid_input(OP, "surface owner mismatch"));

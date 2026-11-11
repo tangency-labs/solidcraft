@@ -31,6 +31,10 @@
 //! The certificate's series are [`super::tay::Tay`]s over this ring: for s in a piece
 //! `[m - delta, m + delta]`, `t = (s - m) / delta`, each Taylor coefficient of a function of
 //! s is a [`Tm`] in t.
+//!
+//! [`TmN`] holds `N` coefficients (degree `N - 1`, at most [`TM_MAX`]): the arc's rows take
+//! [`Tm`] (degree [`TM_DEG`]); the feet's enclosure over a piece
+//! ([`super::feet_tm`]) takes a lower degree, its series being many more operations.
 
 use core::ops::{Add, Div, Mul, Sub};
 
@@ -40,9 +44,10 @@ use super::tay::{Ring, TayScalar};
 
 /// The degree of a [`Tm`]'s polynomial.
 pub const TM_DEG: usize = 10;
-const N: usize = TM_DEG + 1;
-/// The product's degree before truncation.
-const N2: usize = 2 * TM_DEG + 1;
+/// The most coefficients a [`TmN`] holds.
+pub const TM_MAX: usize = 16;
+/// The most coefficients of a product before truncation.
+const FULL: usize = 2 * TM_MAX - 1;
 
 const ZERO: Ivl = Ivl::new(0.0, 0.0);
 
@@ -105,16 +110,20 @@ fn mul0(a: Ivl, b: Ivl) -> Ivl {
     }
 }
 
-/// A Taylor model in t on `[-1, 1]` (see the [module](self) for what it encloses).
+/// A Taylor model in t on `[-1, 1]` with `N` coefficients, `N <= TM_MAX` (see the
+/// [module](self) for what it encloses). Past [`TM_MAX`] a product is the whole line.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Tm {
-    /// The coefficients of `t^0 ..= t^TM_DEG`.
+pub struct TmN<const N: usize> {
+    /// The coefficients of `t^0 ..= t^(N - 1)`.
     pub c: [Ivl; N],
     /// The remainder.
     pub rem: Ivl,
 }
 
-impl Tm {
+/// The arc's rows' Taylor model, of degree [`TM_DEG`].
+pub type Tm = TmN<{ TM_DEG + 1 }>;
+
+impl<const N: usize> TmN<N> {
     /// The constant `x`.
     #[must_use]
     pub fn constant(x: Ivl) -> Self {
@@ -155,6 +164,61 @@ impl Tm {
             c: p.map(Ivl::from),
             rem: ZERO,
         }
+    }
+
+    /// The polynomial whose coefficients are the numbers `p` (exact points; those past
+    /// `N` bounded over `[-1, 1]` into the remainder).
+    #[must_use]
+    pub fn from_points(p: &[f64]) -> Self {
+        let mut c = [ZERO; N];
+        let mut rem = ZERO;
+        for (j, &x) in p.iter().enumerate() {
+            match c.get_mut(j) {
+                Some(cj) => *cj = Ivl::from(x),
+                None => rem = add0(rem, mul0(Ivl::from(x), power_range(j))),
+            }
+        }
+        Self { c, rem }
+    }
+
+    /// The polynomial of the coefficients' middles (exact points), no remainder: one
+    /// function close to every one this encloses.
+    #[must_use]
+    pub fn mid_poly(&self) -> Self {
+        Self {
+            c: self
+                .c
+                .map(|x| if is_zero(x) { ZERO } else { Ivl::from(x.mid()) }),
+            rem: ZERO,
+        }
+    }
+
+    /// This with `r` added to its remainder.
+    #[must_use]
+    pub fn with_rem(self, r: Ivl) -> Self {
+        Self {
+            c: self.c,
+            rem: add0(self.rem, r),
+        }
+    }
+
+    /// Each coefficient and the remainder times the number range `x`.
+    #[must_use]
+    pub fn scale(self, x: Ivl) -> Self {
+        Self {
+            c: self.c.map(|ci| mul0(ci, x)),
+            rem: mul0(self.rem, x),
+        }
+    }
+
+    /// This plus the number range `x` (on the constant coefficient).
+    #[must_use]
+    pub fn add_ivl(self, x: Ivl) -> Self {
+        let mut c = self.c;
+        if let Some(c0) = c.first_mut() {
+            *c0 = add0(*c0, x);
+        }
+        Self { c, rem: self.rem }
     }
 
     /// The polynomial's range over `[-1, 1]`, bounded term by term.
@@ -277,7 +341,7 @@ impl Tm {
     }
 }
 
-impl Add for Tm {
+impl<const N: usize> Add for TmN<N> {
     type Output = Self;
     fn add(self, b: Self) -> Self {
         let mut c = [ZERO; N];
@@ -291,7 +355,7 @@ impl Add for Tm {
     }
 }
 
-impl Sub for Tm {
+impl<const N: usize> Sub for TmN<N> {
     type Output = Self;
     fn sub(self, b: Self) -> Self {
         let mut c = [ZERO; N];
@@ -305,10 +369,14 @@ impl Sub for Tm {
     }
 }
 
-impl Mul for Tm {
+impl<const N: usize> Mul for TmN<N> {
     type Output = Self;
     fn mul(self, b: Self) -> Self {
-        let mut full = [ZERO; N2];
+        if N > TM_MAX {
+            // the truncation's scratch holds TM_MAX coefficients' products
+            return Self::whole();
+        }
+        let mut full = [ZERO; FULL];
         for (i, &ai) in self.c.iter().enumerate() {
             if is_zero(ai) {
                 continue;
@@ -321,7 +389,7 @@ impl Mul for Tm {
         }
         let mut c = [ZERO; N];
         let mut rem = ZERO;
-        for (n, &fnn) in full.iter().enumerate() {
+        for (n, &fnn) in full.iter().enumerate().take((2 * N).saturating_sub(1)) {
             match c.get_mut(n) {
                 Some(cn) => *cn = fnn,
                 None => rem = add0(rem, mul0(fnn, power_range(n))),
@@ -338,7 +406,7 @@ impl Mul for Tm {
     }
 }
 
-impl Div for Tm {
+impl<const N: usize> Div for TmN<N> {
     type Output = Self;
     fn div(self, b: Self) -> Self {
         // a / b = a * (1 / b)
@@ -346,13 +414,13 @@ impl Div for Tm {
     }
 }
 
-impl Ring for Tm {
+impl<const N: usize> Ring for TmN<N> {
     fn lift(d: f64) -> Self {
         Self::constant(Ivl::from(d))
     }
 }
 
-impl TayScalar for Tm {
+impl<const N: usize> TayScalar for TmN<N> {
     fn sqrt_s(self) -> Self {
         self.sqrt_tm()
     }
@@ -367,7 +435,7 @@ impl TayScalar for Tm {
     }
 }
 
-impl GnScalar for Tm {
+impl<const N: usize> GnScalar for TmN<N> {
     fn of(d: f64) -> Self {
         Self::lift(d)
     }

@@ -23,8 +23,19 @@ const TABS_KEPT: f32 = 124.0;
 pub const REPORT_TEXT_X: f32 = 29.0;
 /// Space between the search field and Settings.
 pub const SEARCH_GAP: f32 = 4.0;
+/// Home's least place from the bar's left edge, and the least gap between the app's name and
+/// Home's button. 128 was Home's fixed place, sized for "SolidCraft": the name starts at 36 and is
+/// 65.1 wide in Plex Sans semibold at the theme's heading size (14), so it ends at 101.1, and Home's
+/// button starts at 108 (20 before its place), 6.9 after it. A longer name moves Home right by
+/// the same gap, rounded down so SolidCraft's bar stays put: 36 + 65.1 + 6 + 20 = 127.1, under 128.
+const HOME_MIN: f32 = 128.0;
+const NAME_GAP: f32 = 6.0;
 /// A bar narrower than this shows no product name, no Undo and Redo, and narrower file actions.
 const COMPACT: f32 = 640.0;
+/// Space the File menu keeps below its rows for its frame and a gap above the window's bottom.
+const FILE_MENU_BOTTOM_GAP: f32 = 24.0;
+/// The least height the File menu's rows get, about three rows, however short the window.
+const FILE_MENU_MIN_ROOM: f32 = 100.0;
 
 /// Where the bar publishes its parts in the widget registry.
 #[derive(Clone, Copy, Debug)]
@@ -231,16 +242,20 @@ pub fn show(ui: &mut egui::Ui, data: &AppBar, bar: Rect, content: Rect) -> BarOu
     let compact = r.right() - left < COMPACT;
     let mut actions = Vec::new();
     (data.mark)(ui.painter(), pos2(left + 20.0, r.center().y));
-    if !compact {
-        ui.painter().text(
+    // Home's place: after the name as drawn, and never before HOME_MIN.
+    let mut x = if compact {
+        left + 56.0
+    } else {
+        let name = ui.painter().text(
             pos2(left + 36.0, r.center().y),
             Align2::LEFT_CENTER,
             data.name,
             crate::type_face::semibold(t.font_heading),
             t.app_bar_text,
         );
-    }
-    let mut x = left + if compact { 56.0 } else { 128.0 };
+        // Home's button starts 20 before its place (32 wide, centred 4 before it).
+        (left + HOME_MIN).max(name.right() + NAME_GAP + 20.0)
+    };
     // Home.
     let home = Rect::from_center_size(pos2(x - 4.0, r.center().y), vec2(32.0, 32.0));
     let idle = data.home.enabled;
@@ -906,17 +921,24 @@ fn file_rows(ui: &mut egui::Ui, rows: &[FileRow], chosen: &mut Option<String>, i
 }
 
 /// Draws the File menu's `rows` at `at` (under the File button) in the area `id`. `just_opened`:
-/// the click that opened it this pass is not a click elsewhere.
+/// the click that opened it this pass is not a click elsewhere. The rows scroll when the menu would
+/// run past the window's bottom, so every row stays reachable in a short window.
 pub fn file_menu(ctx: &egui::Context, rows: &[FileRow], at: Pos2, id: egui::Id, just_opened: bool) -> FileMenuOut {
     use crate::{Container, Surface};
     let mut chosen = None;
+    // Room below `at` for the rows, less the menu frame's margins; never under three rows.
+    let room = (ctx.content_rect().bottom() - at.y - FILE_MENU_BOTTOM_GAP).max(FILE_MENU_MIN_ROOM);
     let resp = Container::new(ctx, Surface::Popup).area(id).fixed_pos(at).order(egui::Order::Foreground).show(ctx, |ui| {
         crate::Menu::show_frame(ui, crate::Menu::frame(), |ui| {
             ui.set_min_width(190.0);
             ui.visuals_mut().widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
             ui.visuals_mut().widgets.inactive.bg_stroke = Stroke::NONE;
             ui.visuals_mut().widgets.hovered.weak_bg_fill = Tokens::get().hover;
-            file_rows(ui, rows, &mut chosen, false);
+            // `min_scrolled_height` lets the rows grow past the size the area kept from an earlier,
+            // shorter list, as the panel drop-downs do (#874); they still shrink to fit their content.
+            egui::ScrollArea::vertical().id_salt("file_menu_rows").max_height(room).min_scrolled_height(room).show(ui, |ui| {
+                file_rows(ui, rows, &mut chosen, false);
+            });
         });
     });
     let close = chosen.is_some() || (!just_opened && resp.response.clicked_elsewhere());

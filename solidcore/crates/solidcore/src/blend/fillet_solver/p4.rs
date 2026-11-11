@@ -1218,14 +1218,12 @@ mod tests_c1 {
         // EvaluateBinormal fails (the edge use is in no loop: SM_ERR_INVALID_INPUT) and
         // returns before RemoveLast
         let e = c1_collect_points(&mut ops, &mut cx, &mut st, 0).unwrap_err();
+        assert_eq!(e.operation(), "topology::edgeuse::p3");
         assert_eq!(
-            e,
-            SolidError::Upstream {
-                operation: "topology::edgeuse::p3",
-                code: crate::error::SM_ERR_INVALID_INPUT,
-                entity: None,
-            }
+            e.upstream_status(),
+            Some(crate::error::SM_ERR_INVALID_INPUT)
         );
+        assert_eq!(e.entity(), None);
         assert_eq!(ops.0.g1_knots, vec![0.5]);
         assert_eq!(st.split_tsect_pnt, None);
     }
@@ -1295,14 +1293,9 @@ mod tests_c1 {
         // GetOrCreateUVTrimCurve builds the missing curve; CreateUVTrimCurve's failing
         // status (here NER) is SER'd
         let e = c1_collect_points(&mut ops, &mut cx, &mut st, 0).unwrap_err();
-        assert_eq!(
-            e,
-            SolidError::Upstream {
-                operation: "topology::edgeuse::p3",
-                code: crate::error::SM_ERR_NULL_POINTER,
-                entity: None,
-            }
-        );
+        assert_eq!(e.operation(), "topology::edgeuse::p3");
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(e.entity(), None);
     }
 }
 

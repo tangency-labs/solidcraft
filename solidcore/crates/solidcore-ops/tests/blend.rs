@@ -1224,3 +1224,72 @@ fn a_setback_too_long_at_a_corner_is_refused_by_the_kernel() {
     .unwrap();
     assert!(volume(&b) < 6000.0);
 }
+
+/// Cancel stops a long fillet promptly (solidcore#3247): a 2 mm round along one helical edge of
+/// a 20-turn square coil, with its tangent chain (the whole edge), runs for minutes. Cancelled
+/// from another thread a second in, the call returns `Cancelled` within 500 ms (about 5 ms
+/// measured on a desktop; the bound leaves room for shared CI runners). nextest runs each test
+/// in a process of its own, so no other test's call holds the session's kernel meanwhile.
+#[test]
+fn a_cancelled_long_fillet_stops_promptly() {
+    use solidcore_ops::cancel::{within, CancelToken};
+    use solidcore_ops::sweep::{screw_sweep, Curve};
+    use std::time::{Duration, Instant};
+    all_fixes();
+    let corners = [
+        [19.0, 0.0, 0.0],
+        [32.0, 0.0, 0.0],
+        [32.0, 0.0, 13.0],
+        [19.0, 0.0, 13.0],
+    ];
+    let square: Vec<Curve> = (0..4)
+        .map(|i| Curve::Line {
+            start: corners[i],
+            end: corners[(i + 1) % 4],
+        })
+        .collect();
+    let coil = screw_sweep(
+        &square,
+        [0.0; 3],
+        [0.0, 0.0, 1.0],
+        15.24,
+        20.0,
+        None,
+        15.24e-4,
+    )
+    .unwrap();
+    // the inner lower helix half a turn in, whichever way the sweep turns
+    let (k, brep) = kernel_copy(&coil);
+    let q = Vec3::new(-19.0, 0.0, 15.24 / 2.0);
+    let edge = (0..brep.edge_list().len())
+        .min_by(|&a, &b| {
+            let d = |i: usize| {
+                edge_closest_point(&k, &brep, brep.edge_list()[i], q)
+                    .unwrap()
+                    .closest
+                    .distance
+            };
+            d(a).total_cmp(&d(b))
+        })
+        .unwrap();
+    let chain = tangent_chain(&coil, &[edge], 0.1).unwrap();
+    let token = CancelToken::new();
+    let watched = token.clone();
+    let worker = std::thread::spawn(move || {
+        let r = within(&watched, || {
+            blend(&coil, Blend::Round, &chain, &[2.0], &[], Corners::Filled)
+        });
+        (r.map(|_| ()), Instant::now())
+    });
+    std::thread::sleep(Duration::from_secs(1));
+    let cancelled = Instant::now();
+    token.cancel();
+    let (r, returned) = worker.join().unwrap();
+    let took = returned.saturating_duration_since(cancelled);
+    eprintln!("the fillet returned {took:?} after Cancel");
+    assert_eq!(r, Err(Error::Cancelled));
+    assert!(
+        took < Duration::from_millis(500),
+        "returned {took:?} after Cancel"
+    );
+}

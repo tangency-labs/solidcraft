@@ -4,7 +4,7 @@ use egui::Color32;
 
 const ROLES: &[&str] = &["ink", "line", "passive-3", "gap", "guide", "active-3"];
 
-static TEST_SET: IconSet = IconSet::new(IconData {
+const TEST_DATA: IconData = IconData {
     role_names: ROLES,
     role_source_hex: &["#34465b", "#34465b", "#8e9faf", "#ffffff", "#6f879c", "#236ead"],
     palette: [
@@ -22,7 +22,23 @@ static TEST_SET: IconSet = IconSet::new(IconData {
     aliases: &[("warm_bar", "bar", "warm"), ("lost", "missing", "")],
     icon_accents: &[("bar", "cool")],
     danger_accent: "warm",
-});
+};
+
+static TEST_SET: IconSet = IconSet::new(TEST_DATA);
+
+/// A host's masters over the test set: one replaces `bar`, one is new, one takes the name of the
+/// set's `warm_bar` alias; a host alias replaces the set's `lost`.
+const HOST: IconExtension = IconExtension {
+    masters: &[
+        ("bar", "model", "<svg><path d='M8 16L56 16' stroke='#236ead' stroke-width='8'/></svg>"),
+        ("dot", "model", "<svg><circle cx='32' cy='32' r='12' fill='#236ead'/></svg>"),
+        ("warm_bar", "model", "<svg><circle cx='20' cy='20' r='10' fill='#8e9faf'/></svg>"),
+    ],
+    aliases: &[("cool_dot", "dot", "cool"), ("lost", "bar", "")],
+    icon_accents: &[("dot", "warm")],
+};
+
+static EXTENDED: IconSet = IconSet::extended(TEST_DATA, HOST);
 
 fn role(name: &str) -> usize {
     ROLES.iter().position(|r| *r == name).unwrap()
@@ -107,4 +123,34 @@ fn hostile_artwork_is_an_error_not_a_panic() {
     assert!(TEST_SET.parse("<svg><path d=\"M 1\"/></svg>").is_err());
     assert!(TEST_SET.parse("<svg><g></svg>").is_err());
     assert!(TEST_SET.parse("<svg><path d=\"M 0 0 L 1 1\" fill=\"#123456\"/></svg>").is_err(), "a colour outside the set's roles");
+}
+
+#[test]
+fn an_extended_set_draws_the_hosts_masters_first_in_the_sets_palette() {
+    let look = Look { dark: false, accent: None, vision: solidcraft_theme::ColorVision::Off, palette: None };
+    let drawn = |set: &'static IconSet, name: &str| render(set.doc_for(set.resolve(name).master, 64).unwrap(), look, 64).unwrap().data().to_vec();
+    let parsed = |src: &str| render(&EXTENDED.parse(src).unwrap(), look, 64).unwrap().data().to_vec();
+    // The host's `bar` replaces the set's; the set's own masters stay.
+    assert_eq!(drawn(&EXTENDED, "bar"), parsed(HOST.masters[0].2));
+    assert_ne!(drawn(&EXTENDED, "bar"), drawn(&TEST_SET, "bar"));
+    assert_eq!(drawn(&EXTENDED, "placeholder"), drawn(&TEST_SET, "placeholder"));
+    assert_eq!(EXTENDED.master_ids(), ["bar", "dot", "placeholder", "warm_bar"]);
+    // The host's names come first: its master over the set's alias, its alias over the set's.
+    let warm_bar = EXTENDED.resolve("warm_bar");
+    assert_eq!((warm_bar.master, warm_bar.accent, warm_bar.placeholder), ("warm_bar", None, false));
+    assert!(TEST_SET.resolve("lost").placeholder);
+    let lost = EXTENDED.resolve("lost");
+    assert_eq!((lost.master, lost.placeholder), ("bar", false));
+    // Default accents: the host's for its ids, the set's for the rest; aliases name theirs.
+    assert_eq!(EXTENDED.resolve("dot").accent, EXTENDED.accent_index("warm"));
+    assert_eq!(EXTENDED.resolve("bar").accent, EXTENDED.accent_index("cool"));
+    let cool_dot = EXTENDED.resolve("cool_dot");
+    assert_eq!((cool_dot.master, cool_dot.accent), ("dot", EXTENDED.accent_index("cool")));
+    // One palette: the set's roles and accents.
+    let warm = Look { accent: EXTENDED.accent_index("warm"), ..look };
+    assert_eq!(EXTENDED.role_colour("active-3", warm), TEST_SET.role_colour("active-3", warm));
+    assert_eq!(EXTENDED.primary("dot", true, solidcraft_theme::ColorVision::Off), Color32::from_rgb(0xd0, 0x60, 0x20));
+    // The set it extends is unchanged.
+    assert_eq!(TEST_SET.master_ids(), ["bar", "placeholder"]);
+    assert_eq!(drawn(&TEST_SET, "warm_bar"), drawn(&TEST_SET, "bar"));
 }

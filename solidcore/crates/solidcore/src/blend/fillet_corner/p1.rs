@@ -51,9 +51,9 @@
 //! | `p3::FilletCorner::adjust_topology` (`_` arm), the executive's tangent step | `SmFilletCorner::AdjustTopology`, `SmFillet4x3Corner::AdjustTopology`, `SmFilletNxNCorner::AdjustTopology`, `SmFilletCorner::AdjustTangentCorner` (all `return SM_SUCCESS`) |
 //!
 //! Deviations:
-//! - **Exact arcs.** With `Kernel::fixes.fillet_exact_arc_sections` (WR-708, the fork's
-//!   tangency-labs/smlib@523bc25) `MakeConstantRadiusFillet`'s circular generator takes
-//!   the exact circle (`bApproximateArcs` FALSE).
+//! - **Exact arcs.** `MakeConstantRadiusFillet`'s circular generator takes the exact
+//!   circle (`bApproximateArcs` FALSE), as the fork's tangency-labs/smlib@523bc25 does;
+//!   upstream takes approximated arcs (WR-708).
 //! - **Shared helpers.** `sm_CheckSeamOut` and `sm_SetSurfaceClosure` are textually the
 //!   same in `SmFilletCorner.cpp` and `SmFilletGeom.cpp` (each file has its own static
 //!   copy): both are the ports in [`crate::blend::fillet_geom::p1`], re-exported here.
@@ -2781,9 +2781,8 @@ impl FilletCorner {
         // Make a constant radius fillet solver
         let fsg = match fsg_type {
             FilletSurfaceGeneratorType::Circular => {
-                // the fork's exact circle (WR-708, tangency-labs/smlib@523bc25)
-                let approx = !env.k.fixes.fillet_exact_arc_sections;
-                FilletSurfaceGenerator::circular(approx, 1.0e-3, false, false)
+                // the exact circle, not upstream's approximated arcs (WR-708)
+                FilletSurfaceGenerator::circular(false, 1.0e-3, false, false)
             }
             FilletSurfaceGeneratorType::BlendCurve => {
                 FilletSurfaceGenerator::GnSection(GnSectionFsg::new(

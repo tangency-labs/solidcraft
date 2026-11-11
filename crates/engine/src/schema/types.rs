@@ -536,6 +536,22 @@ keyword_param!(
     "Whether the profiles are raised from the face (emboss, the default) or sunk into it (deboss). Any case."
 );
 keyword_param!(
+    /// `surface.ruled`'s `mode`.
+    RuledModeParam,
+    "mode",
+    &["normal", "tangent", "angle", "direction"],
+    "normal, tangent, angle or direction",
+    "Which way the rulings run from each edge: normal (the default: along the normal of the face beside the edge), tangent (continuing that face), angle (`angle` from `direction`, else from the face's normal, turned away from the face) or direction (along `direction`). Matching ignores case."
+);
+keyword_param!(
+    /// `surface.ruled`'s `corners`.
+    RuledCornersParam,
+    "corners",
+    &["mitre", "miter", "round"],
+    "mitre or round",
+    "How the strip turns the chain's sharp corners: mitre (the default; miter is an alias) or round. Inside corners are always cut back. Matching ignores case."
+);
+keyword_param!(
     /// `solid.fillet`'s `type`.
     FilletTypeParam,
     "fillet type",
@@ -1289,8 +1305,8 @@ fn geo_problem(v: &Value) -> Option<String> {
 }
 
 /// The reference types a saved reference's `type` names (`solidcraft_doc::construct::GeoRef`).
-const SAVED_REFS: [&str; 11] =
-    ["point", "origin", "vertex", "edge", "face", "plane", "world", "axis", "construct_point", "sketch_point", "sketch_curve"];
+const SAVED_REFS: [&str; 12] =
+    ["point", "datum", "origin", "vertex", "edge", "face", "plane", "world", "axis", "construct_point", "sketch_point", "sketch_curve"];
 
 /// `{key: point}`, unless it has `type` (then it is a saved reference).
 fn picked_at(key: &str, point: &Schema) -> Value {
