@@ -3038,6 +3038,50 @@ mod tests {
         assert!(manifold && (v - want).abs() <= 1e-9 * want, "{v} vs {want}");
     }
 
+    /// The 10 mm cube's round r 2 about (8, 8) given a wider coaxial cylinder `R`. The sides
+    /// x = 10 and y = 10 cut it at 8 ± w, w = √(R² − 4); only 8 + w is on the corner's side
+    /// (the corner square [8, 10]²). The tangent edges are met there, at (10, 8 + w) and
+    /// (8 + w, 10), and the arcs that end the new round at the top and bottom end at those
+    /// vertices. The body is the cube with its corner cut by the circle R: `10 (96 + A)`,
+    /// `A` the part of the corner square inside the circle.
+    #[test]
+    fn tangent_edges_a_round_given_a_wider_coaxial_cylinder_meets_its_sides_on_the_corner_side()
+    {
+        use crate::primitive::api_primitives as ap;
+        use crate::topology::vertex;
+        for radius in [2.3_f64, 2.05] {
+            let mut k = Kernel::default();
+            let (mut b, round) = box_rounded_r2(&mut k);
+            let s = Surface::from(
+                ap::create_cylinder_surface(&k, Point3::new(8.0, 8.0, -1.0), radius, 12.0).unwrap(),
+            );
+            let why = refused_unchanged_or_returned(&mut k, &mut b, &[round], vec![s]);
+            assert_eq!(why, None, "{radius}");
+            let w = (radius * radius - 4.0).sqrt();
+            let points: Vec<Point3> = b
+                .vertices()
+                .ids()
+                .map(|v| vertex::point(&b, v).unwrap())
+                .collect();
+            for z in [0.0, 10.0] {
+                for want in [Point3::new(10.0, 8.0 + w, z), Point3::new(8.0 + w, 10.0, z)] {
+                    assert!(
+                        points.iter().any(|p| p.distance(want) <= 1e-9),
+                        "{radius}: no vertex at {want:?} in {points:?}"
+                    );
+                }
+            }
+            assert_eq!(points.len(), 10, "{radius}: {points:?}");
+            let inside = 2.0 * w + quarter_disc_area(radius, 2.0) - quarter_disc_area(radius, w);
+            let want = 10.0 * (96.0 + inside);
+            let (v, manifold) = volume_and_manifold(&k, &mut b);
+            assert!(
+                manifold && (v - want).abs() <= 1e-9 * want,
+                "{radius}: {v} vs {want}"
+            );
+        }
+    }
+
     /// The same side moved out by 0.1: the plane x = 20.1 passes the round, which bends
     /// away from it, so no extension makes them meet: their edge is apart
     /// (`LocalReach::apart`, adding nothing to the reach), and the straight bridge that
