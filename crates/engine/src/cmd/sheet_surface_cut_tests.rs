@@ -173,6 +173,97 @@ fn a_hole_at_a_slant_is_cut_from_the_flat_as_its_shadow() {
     assert!((exact_volume(&s) - want).abs() < 1e-5 * hole * T, "{} vs {want}", exact_volume(&s));
 }
 
+/// A 100 x 60 base flange on XY of the default rule (T 2.5), its metal z 0 to 2.5:
+/// 100 · 60 · 2.5 = 15000 mm³.
+fn default_plate() -> Session {
+    let mut s = session();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"type": "base", "sketch": "Base", "body_name": "Plate"}));
+    assert!((exact_volume(&s) - 15000.0).abs() < 1e-9 * 15000.0, "{}", exact_volume(&s));
+    s
+}
+
+/// A bore of radius `r`, 20 long, lying along x in the default plate from x 40 to 60 about
+/// y = 30, its axis `z` up, cut from it: what the cut says.
+fn bore(s: &mut Session, r: f64, z: f64) -> std::result::Result<Value, String> {
+    s.execute("solid.cylinder", &json!({"radius": r, "height": 20, "base": [40, 30, z], "axis": "X", "operation": "cut"})).map_err(|e| e.to_string())
+}
+
+/// Each hole of the sheet's panels: its extent along its panel's chart's x and y, from its
+/// segments' ends, and whether its segments are all lines.
+fn panel_holes(s: &Session) -> Vec<(f64, f64, bool)> {
+    let Some(sk) = s.model.state().surface_sheets.first().cloned() else { panic!("the plate is a sheet") };
+    sk.sheet
+        .panels
+        .iter()
+        .flat_map(|p| p.region.holes.iter())
+        .map(|h| {
+            let ends: Vec<Vec2> = h.segs.iter().map(|g| g.start()).collect();
+            let spread =
+                |k: fn(&Vec2) -> f64| ends.iter().map(k).fold(f64::NEG_INFINITY, f64::max) - ends.iter().map(k).fold(f64::INFINITY, f64::min);
+            (spread(|p| p.x), spread(|p| p.y), h.segs.iter().all(|g| matches!(g, Seg2::Line { .. })))
+        })
+        .collect()
+}
+
+/// The default plate less a bore R 2 lying in it (see [`bore`]), its axis at `z` within the metal
+/// and reaching both faces: its shadow is a slot 20 x 4 through the plate, four lines, 80 of the
+/// flat's 6000 mm², and the plate loses 20 · 4 · 2.5 = 200 of its 15000 mm³, 14800 left. Checking
+/// each step, the sheet built again weighs no more than the body the bore cut.
+fn a_bore_cuts_its_shadow(z: f64) {
+    let mut s = default_plate();
+    if let Err(e) = bore(&mut s, 2.0, z) {
+        panic!("axis at z {z}: {e}");
+    }
+    let want = 15000.0 - 20.0 * 4.0 * 2.5;
+    assert!((exact_volume(&s) - want).abs() < 1e-9 * want, "axis at z {z}: {} vs {want}", exact_volume(&s));
+    let (material, outlines, cutouts, cuts, _) = flat_exact(&s);
+    assert!(
+        (material - 5920.0).abs() < 1e-9 * 6000.0 && (outlines - 6000.0).abs() < 1e-9 * 6000.0 && (cutouts, cuts) == (1, 0),
+        "axis at z {z}: the flat holds {material} mm² within {outlines}, {cutouts} cut-outs, {cuts} cuts of the sheet's"
+    );
+    let holes = panel_holes(&s);
+    assert!(holes.len() == 1 && same_size((holes[0].0, holes[0].1), (20.0, 4.0), 1e-9) && holes[0].2, "axis at z {z}: {holes:?}");
+}
+
+/// A bore lying in a plate that runs through both its faces is cut from the flat as its shadow,
+/// as a shop cuts it square through: every fiber through the thickness that meets the bore. R 2
+/// along x from x 40 to 60, its axis at mid-thickness (z 1.25) in the default plate (T 2.5), it
+/// reaches z −0.75 to 3.25. The plate's faces, 1.25 from its axis, show it 2 √(2² − 1.25²) =
+/// 3.1225 across, but at its axis it is 2 · 2 = 4 across, and every fiber within 2 of the axis
+/// meets it there: the flat loses a slot 20 x 4, and the plate 20 · 4 · 2.5 = 200 mm³, 14800
+/// left. Read from what its faces show, the plate kept 15000 − 20 · 2.5 · 3.1225 = 14843.875 mm³:
+/// the metal the bore took at its axis came back.
+#[test]
+fn a_bore_lying_in_a_plate_through_both_faces_is_cut_as_its_shadow() {
+    a_bore_cuts_its_shadow(1.25);
+}
+
+/// The same bore with its axis at z 1 reaches z −1 to 3, both faces still. The faces show it
+/// 2 √(2² − 1²) = 3.4641 across at z 0 and 2 √(2² − 1.5²) = 2.6458 across at z 2.5, each narrower
+/// than it is at its axis, which lies within the metal (0 < 1 < 2.5): there it is 2 · 2 = 4
+/// across, so its shadow is the same slot 20 x 4, 14800 mm³ left.
+#[test]
+fn a_bore_lying_off_the_middle_of_a_plate_is_cut_as_its_shadow() {
+    a_bore_cuts_its_shadow(1.0);
+}
+
+/// A bore lying in a plate that doesn't run through it is no cut through the sheet: refused, and
+/// the plate stays as it was, 15000 mm³. R 2 with its axis at z −1 reaches z −3 to 1: the face
+/// z 0 only, 1.5 short of z 2.5. R 1 at mid-thickness reaches z 0.25 to 2.25: neither face, a
+/// hollow inside the metal.
+#[test]
+fn a_bore_lying_in_a_plate_short_of_either_face_is_refused() {
+    for (r, z) in [(2.0, -1.0), (1.0, 1.25)] {
+        let mut s = default_plate();
+        let e = bore(&mut s, r, z).err().unwrap_or_default();
+        assert!(e.contains("don't run through"), "R {r} at z {z}: {e}");
+        assert!((exact_volume(&s) - 15000.0).abs() < 1e-9 * 15000.0, "R {r} at z {z}: the plate changed to {}", exact_volume(&s));
+    }
+}
+
 /// A half roll of radius 50, 40 long, drawn as a surface about the z axis from +x round to -x
 /// and converted: its metal lies 48 to 50 from the axis.
 fn half_roll() -> Session {

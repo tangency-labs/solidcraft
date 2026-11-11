@@ -5679,7 +5679,9 @@ fn a_box_cut_straight_through_a_flat_sheet_is_a_cutout_like_the_extrude_cut() {
         .execute("solid.cylinder", &json!({"base": [10, 50, 1.25], "axis": "X", "radius": 1, "height": 20, "operation": "cut"}))
         .unwrap_err()
         .to_string();
-    assert!(error.contains("preserv"), "{error}");
+    // R 1 about z 1.25 reaches z 0.25 to 2.25, neither face: a hollow in the metal, whose walls
+    // don't run through the sheet.
+    assert!(error.contains("don't run through"), "{error}");
 }
 
 #[test]

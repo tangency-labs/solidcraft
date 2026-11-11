@@ -13,8 +13,12 @@
 //! The panels' faces are read before and after the feature, exactly, from the bodies' B-rep
 //! records. A cut through a roll, or with walls not square to a flat panel (a hole at a slant),
 //! goes through the panel as its shadow: everything whose fiber through the thickness meets
-//! what the cut took, as a shop cuts it in the flat ([`crate::sheet_surface_shadow`]). A cut
-//! whose walls cross a joint (a bend, a seam) is read the same way across every piece it
+//! what the cut took, as a shop cuts it in the flat ([`crate::sheet_surface_shadow`]). Whether
+//! walls are square is read from their surfaces too, not only from what the panel's faces show
+//! of them: a bore lying in a panel (a cylinder along it) runs face to face, but its faces show it
+//! narrower than it is at its axis. Its shadow is read in closed form, a band as wide as the bore
+//! is where it is widest within the thickness, between its ends (see [`lying`]). A cut whose
+//! walls cross a joint (a bend, a seam) is read the same way across every piece it
 //! reaches at once, its outline in the flat, and kept as a cut of the sheet's: what it leaves
 //! of a bend bends, or is a tab of the one panel it still joins. Unfolded, the sheet lies in one
 //! plane, and such a cut with walls square to it is what the flat's faces lost, read over the
@@ -22,8 +26,10 @@
 //! must be read; checking each step, the sheet built again must also weigh what the cut body
 //! does, or, where a shadow was cut, no more (a tab weighs flat). Refused: walls that don't run
 //! through the sheet from face to face (a countersink, a rounded or chamfered face edge, a cut
-//! that stops inside a bend), a recess in a roll, and, folded, a cut through the sheet's outline
-//! at a slant, on a roll or across a bend (not supported yet).
+//! that stops inside a bend, a bore lying in the sheet that reaches one face or none), a recess in
+//! a roll, a bore lying in a panel that reaches its edge or ends other than square to its axis,
+//! and, folded, a cut through the sheet's outline at a slant, on a roll or across a bend (not
+//! supported yet).
 //! A piece a cut parts from a panel that holds none of its joints (a letter's counter, the end
 //! of a flange cut off beside its bend) stays where it was, a loose piece of the sheet: in the
 //! folded body, in the flat and in its DXF. A cut that parts a panel into pieces that each hold
@@ -36,7 +42,7 @@ use std::collections::BTreeSet;
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use solidcore_record::brep::Loop as Bounds;
-use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_develop::{Cut, Development, EdgeFrom, Fold, Joint, JointKind, Rigid2, Rigid3, Surface};
 use solidcraft_geom::brep::query::Query;
 use solidcraft_kernel::{Body, BoolOp, FaceSurface, face_surface, planar_regions_boolean};
@@ -114,6 +120,142 @@ fn on_panel(b: &Body, q: &Query, frame: &Rigid3, t: f64, own: &[Region2], tol: f
         }
     }
     Ok(out)
+}
+
+/// How a wall of a cut lies to a flat panel, read exactly from its surface (see [`lean`]).
+enum Lean {
+    /// Square to the panel all over (a plane square to it, a cylinder whose axis runs through the
+    /// thickness), or a floor parallel to it: the panel's faces show what it took. A wall of no
+    /// analytic kind is read so too, as it was.
+    Square,
+    /// On a cylinder lying along the panel, its axis square to the fibers: a point of its axis,
+    /// the axis, and its radius.
+    Lying(Vec3, Vec3, f64),
+    /// Leaning otherwise: a plane or a cylinder at a slant, a cone, a ball, a torus.
+    Leaning,
+}
+
+/// How face `f` of `b` lies to a flat panel whose material lies toward `z` (see [`Lean`]): a
+/// direction is along `z`, or square to it, within the body's tolerance across it, as
+/// [`on_panel`] reads a face parallel to the panel.
+fn lean(b: &Body, f: usize, z: Vec3, tol: f64) -> Lean {
+    let size = b.size();
+    let along = |v: Vec3| v.cross(z).len() * size <= tol;
+    let across = |v: Vec3| v.dot(z).abs() * size <= tol;
+    match face_surface(b, f) {
+        Some(FaceSurface::Plane { normal, .. }) if along(normal.vec()) || across(normal.vec()) => Lean::Square,
+        Some(FaceSurface::Cylinder { axis, .. }) if along(axis.vec()) => Lean::Square,
+        Some(FaceSurface::Cylinder { origin, axis, radius }) if across(axis.vec()) => Lean::Lying(origin, axis.vec(), radius),
+        Some(_) => Lean::Leaning,
+        None => Lean::Square,
+    }
+}
+
+/// What the cut takes through flat panel `name` (its frame `frame`, `t` thick) with each bore
+/// lying in it, and the walls of `here` (faces of `now`, the cut's in the panel) it is read from.
+/// A bore lying in the panel is a cylinder along it, ended by planes square to its axis. Its walls
+/// run from face to face but lean into the fibers, so what it takes is its shadow, not what the
+/// panel's faces show of it: the section of its material through the thickness is widest at its
+/// axis, or, where its axis lies past a face, at that face, and every fiber through that widest
+/// section meets the bore. So its shadow is a band as wide as that, along its axis between its
+/// ends, in closed form. Refused, where walls lie on a cylinder along the panel: walls that don't
+/// run through the sheet (a bore that reaches one face or none, a rounded face edge), as the
+/// shadow refuses them; and a bore that reaches the panel's edge or any face but its own and the
+/// panel's two, or with walls of other kinds or ends not square to its axis (not supported yet).
+fn lying(
+    now: &Body,
+    q: &Query,
+    frame: &Rigid3,
+    t: f64,
+    here: &[usize],
+    name: &str,
+    tol: f64,
+) -> std::result::Result<(Vec<Region2>, BTreeSet<usize>), String> {
+    let (mut bands, mut read) = (Vec::new(), BTreeSet::new());
+    if !here.iter().any(|f| matches!(lean(now, *f, frame.z, tol), Lean::Lying(..))) {
+        return Ok((bands, read));
+    }
+    let size = now.size();
+    let parallel = |u: Vec3, v: Vec3| u.cross(v).len() * size <= tol;
+    for group in components(q, here) {
+        let Some((o, a, r)) = group.iter().find_map(|f| match lean(now, *f, frame.z, tol) {
+            Lean::Lying(o, a, r) => Some((o, a, r)),
+            _ => None,
+        }) else {
+            continue;
+        };
+        // Which of the panel's two faces it reaches, and whether it reaches any other face but
+        // its own walls.
+        let (mut near, mut far, mut stray) = (false, false, false);
+        for &f in &group {
+            let Some(face) = q.record().faces.get(f) else { continue };
+            for l in &face.loops {
+                let Bounds::Edges { edges } = l else { continue };
+                for oe in edges {
+                    for g in q.edge_faces(oe.edge as usize) {
+                        if g == f || group.contains(&g) {
+                            continue;
+                        }
+                        let depth = match face_surface(now, g) {
+                            Some(FaceSurface::Plane { normal, point }) if parallel(normal.vec(), frame.z) => Some((point - frame.shift).dot(frame.z)),
+                            _ => None,
+                        };
+                        match depth {
+                            Some(d) if d.abs() <= tol => near = true,
+                            Some(d) if (d - t).abs() <= tol => far = true,
+                            _ => stray = true,
+                        }
+                    }
+                }
+            }
+        }
+        if !(near && far) {
+            return Err(format!(
+                "leaves walls that are not square to the sheet and don't run through it on {name}: not supported yet (a countersink, a rounded or chamfered face edge)"
+            ));
+        }
+        if stray {
+            return Err(format!("reaches the edge of {name} along a bore lying in it: not supported yet"));
+        }
+        let other = || format!("leaves a bore lying in {name} with walls other than its own and two ends square to its axis: not supported yet");
+        // Its walls: the one cylinder, and the planes square to its axis that end it, where they
+        // lie along it.
+        let mut ends: Vec<f64> = Vec::new();
+        for &f in &group {
+            match face_surface(now, f) {
+                Some(FaceSurface::Cylinder { origin, axis, radius }) => {
+                    let off = origin - o;
+                    if !(parallel(axis.vec(), a) && (radius - r).abs() <= tol && (off - a * off.dot(a)).len() <= tol) {
+                        return Err(other());
+                    }
+                }
+                Some(FaceSurface::Plane { normal, point }) if parallel(normal.vec(), a) => {
+                    let s = (point - o).dot(a);
+                    if !ends.iter().any(|e| (e - s).abs() <= tol) {
+                        ends.push(s);
+                    }
+                }
+                _ => return Err(other()),
+            }
+        }
+        let (lo, hi) = match ends.as_slice() {
+            [x, y] => (x.min(*y), x.max(*y)),
+            _ => return Err(other()),
+        };
+        // Where its section through the thickness is widest: at its axis, or at the face nearer
+        // it where the axis lies past that face. Half as wide as that, either side of the axis.
+        let h = (o - frame.shift).dot(frame.z);
+        let off = h.clamp(0.0, t) - h;
+        let half = (r * r - off * off).max(0.0).sqrt();
+        let c = o - frame.shift;
+        let at = Vec2::new(c.dot(frame.x), c.dot(frame.y));
+        let Some(way) = Vec2::new(a.dot(frame.x), a.dot(frame.y)).normalized() else { return Err(other()) };
+        let side = way.perp() * half;
+        let corners = [at + way * lo - side, at + way * hi - side, at + way * hi + side, at + way * lo + side];
+        bands.push(Region2 { outer: Loop2::polygon(&corners).ccw(), holes: Vec::new() });
+        read.extend(group);
+    }
+    Ok((bands, read))
 }
 
 /// The regions' union, their loops closed within `tol`. The regions are faces of a body, which
@@ -986,8 +1128,10 @@ fn holders(sk: &SurfaceSheet, p: usize) -> Vec<Vec2> {
 /// The sheet `sk` with what its body lost between `was` and `now` read onto its flat panels: what
 /// went through is out of their outlines, and their recesses are the floors `now` has in them.
 /// Reading a cut, `walls` are the faces of `now` it made, and where a panel's walls are not
-/// square, or the panel is a roll, what went through is the shadow they cast. Reading a converted
-/// body's engravings (no `walls`), a panel's walls must be square, away from its outline.
+/// square (by their surfaces, see [`lean`], or by what its faces show), or the panel is a roll,
+/// what went through is the shadow they cast: of a bore lying in a flat panel, its band (see
+/// [`lying`]). Reading a converted body's engravings (no `walls`), a panel's walls must be
+/// square, away from its outline.
 fn onto_panels(sk: &SurfaceSheet, was: &Body, now: &Body, walls: Option<&[usize]>) -> std::result::Result<(SurfaceSheet, Read), String> {
     let strict = walls.is_some();
     let dev = sk.develop().map_err(|e| e.to_string())?;
@@ -1019,7 +1163,7 @@ fn onto_panels(sk: &SurfaceSheet, was: &Body, now: &Body, walls: Option<&[usize]
         let fold =
             if sk.unfolded { None } else { Some(crate::sheet_surface_convert::fold_onto(&sk.sheet, &dev, &sk.places).map_err(|e| e.to_string())?) };
         let pieces = crate::sheet_surface::pieces(&dev, &mut FlatWork::new()).map_err(|e| e.to_string())?;
-        let flat = if sk.unfolded { flat_gone(sk, (was, &qa), (now, &qb), tol)? } else { None };
+        let flat = if sk.unfolded { flat_gone(sk, (was, &qa), (now, &qb), walls, tol)? } else { None };
         if let Some(gone) = &flat {
             for g in gone {
                 if !spans_joint(&pieces, g, tol)? {
@@ -1091,6 +1235,12 @@ fn onto_panels(sk: &SurfaceSheet, was: &Body, now: &Body, walls: Option<&[usize]
             }
             continue;
         }
+        // A bore lying in the panel takes its shadow, read in closed form (see [`lying`]); the
+        // cut's other walls here are read as before. Whether they are square is read from their
+        // surfaces too: a wall that leans is not square to the panel, whatever its faces show.
+        let (bands, bored) = lying(now, &qb, frame, t, &here, &panel.name, tol)?;
+        let others: Vec<usize> = here.iter().copied().filter(|f| !bored.contains(f)).collect();
+        let leaning = others.iter().any(|f| !matches!(lean(now, *f, frame.z, tol), Lean::Square));
         let read = |b: &Body, q: &Query| on_panel(b, q, frame, t, std::slice::from_ref(&panel.region), tol).map_err(|e| e.to_string());
         let (before, after) = (read(was, &qa)?, read(now, &qb)?);
         // The panel's flat material before the cut, and each face's after it (its own face, or
@@ -1101,7 +1251,9 @@ fn onto_panels(sk: &SurfaceSheet, was: &Body, now: &Body, walls: Option<&[usize]
         let footprint = union(all(&before), tol).map_err(|e| e.to_string())?;
         // What the cuts across joints took here is theirs, read with them, not here: a region
         // that lies within theirs, by the planar booleans (none of its area left outside them).
-        let theirs: Vec<Region2> = dev
+        // So is what a bore lying in the panel took, which its band holds, whatever the panel's
+        // faces show of it.
+        let mut theirs: Vec<Region2> = dev
             .placements
             .get(p)
             .copied()
@@ -1109,6 +1261,7 @@ fn onto_panels(sk: &SurfaceSheet, was: &Body, now: &Body, walls: Option<&[usize]
             .map(|pl| pl.inverse())
             .map(|back| across.iter().map(|r| back.region(r)).collect())
             .unwrap_or_default();
+        theirs.extend(bands.iter().cloned());
         let ours = |g: &Region2| -> std::result::Result<bool, String> {
             if theirs.is_empty() {
                 return Ok(true);
@@ -1154,10 +1307,11 @@ fn onto_panels(sk: &SurfaceSheet, was: &Body, now: &Body, walls: Option<&[usize]
             Ok(kept)
         };
         let (near_floors, far_floors) = (floors(after.near_floors)?, floors(after.far_floors)?);
-        // Faces with the same loops see material at the same places: square walls.
-        let square = same_regions(&near, &far, tol) || (off_outline(&near, &far)? <= slack && off_outline(&far, &near)? <= slack);
+        // Faces with the same loops see material at the same places: square walls, unless one
+        // leans.
+        let square = !leaning && (same_regions(&near, &far, tol) || (off_outline(&near, &far)? <= slack && off_outline(&far, &near)? <= slack));
         // Through: the flat material no face sees any longer, or, where the walls are not
-        // square, their shadow.
+        // square, their shadow; and each bore's band.
         let through = if square {
             let gone = match gone_by_loops(&footprint, &near, tol) {
                 Some(gone) => gone,
@@ -1170,9 +1324,9 @@ fn onto_panels(sk: &SurfaceSheet, was: &Body, now: &Body, walls: Option<&[usize]
                 }
             }
             kept
-        } else if strict && !here.is_empty() {
+        } else if strict && !others.is_empty() {
             taken.shadowed = true;
-            shadow(now, &qb, &slab, &here, &panel.name, 0.0, tol, sag)?
+            shadow(now, &qb, &slab, &others, &panel.name, 0.0, tol, sag)?
         } else if strict {
             // Its walls here run on past the panel.
             return Err("can't be kept in the sheet yet: it reaches a bend or a seam".into());
@@ -1181,6 +1335,12 @@ fn onto_panels(sk: &SurfaceSheet, was: &Body, now: &Body, walls: Option<&[usize]
                 "leaves walls that are not square to the sheet on {}: not supported yet (a countersink, a rounded or chamfered face edge, a hole at a slant)",
                 panel.name
             ));
+        };
+        let through = if bands.is_empty() {
+            through
+        } else {
+            taken.shadowed = true;
+            union(through.into_iter().chain(bands.iter().cloned()).collect(), tol).map_err(|e| e.to_string())?
         };
         if area(&through) > slack {
             if whole.is_some() {
@@ -1329,14 +1489,19 @@ fn spans_joint(pieces: &[(Piece, Region2)], g: &Region2, tol: f64) -> std::resul
 /// Unfolded, what went through the sheet, read over the whole flat at once in its chart (see
 /// [`SurfaceSheet::flat`]): the flat material that no face of `now` sees any
 /// longer, as a panel's is read (see [`onto_panels`]), through bends and up to the sheet's outline.
-/// None where its two faces don't see material alike (walls not square to the flat): there their
-/// shadow is read instead.
+/// None where its two faces don't see material alike, or where one of the cut's `walls` leans or
+/// bores along the flat, whatever the faces show of it (walls not square to the flat, see
+/// [`lean`]): there their shadow is read instead.
 fn flat_gone(
     sk: &SurfaceSheet,
     (was, qa): (&Body, &Query),
     (now, qb): (&Body, &Query),
+    walls: &[usize],
     tol: f64,
 ) -> std::result::Result<Option<Vec<Region2>>, String> {
+    if walls.iter().any(|f| !matches!(lean(now, *f, sk.flat.z, tol), Lean::Square)) {
+        return Ok(None);
+    }
     let t = sk.sheet.thickness;
     let read = |b: &Body, q: &Query| on_panel(b, q, &sk.flat, t, &sk.regions, tol).map_err(|e| e.to_string());
     let (before, after) = (read(was, qa)?, read(now, qb)?);
