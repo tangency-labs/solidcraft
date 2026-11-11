@@ -11,9 +11,11 @@
 
 use std::path::{Path, PathBuf};
 
-use super::SolveApp;
+use super::AgentChat;
+use super::panel::PanelAction;
 
 /// A picture on the clipboard: RGBA rows, as the system gives them.
+#[derive(Clone, Debug, PartialEq)]
 pub struct Picture {
     pub width: usize,
     pub height: usize,
@@ -106,9 +108,10 @@ fn uri_path(rest: &str) -> Option<PathBuf> {
 /// How long after a text paste the V key coming up still belongs to it.
 const SAME_PASTE_SECS: f64 = 1.5;
 
-/// The paste shortcut for the focused text box this frame. Call before the box is drawn: a paste
-/// that is files is taken out of the input, so the box doesn't type their names.
-pub fn handle(app: &mut SolveApp, ui: &egui::Ui) {
+/// The paste shortcut for the focused text box this frame: what to attach, if the paste is files
+/// or a picture. Call before the box is drawn: a paste that is files is taken out of the input, so
+/// the box doesn't type their names.
+pub fn handle(chat: &mut AgentChat, ui: &egui::Ui) -> Option<PanelAction> {
     let now = ui.input(|i| i.time);
     let (text, released) = ui.input(|i| {
         let text = i.events.iter().find_map(|e| if let egui::Event::Paste(t) = e { Some(t.clone()) } else { None });
@@ -118,37 +121,28 @@ pub fn handle(app: &mut SolveApp, ui: &egui::Ui) {
         });
         (text, released)
     });
-    let after_text = app.agent_chat.text_pasted_at.is_some_and(|at| (0.0..SAME_PASTE_SECS).contains(&(now - at)));
+    let after_text = chat.text_pasted_at.is_some_and(|at| (0.0..SAME_PASTE_SECS).contains(&(now - at)));
     if text.is_none() && !(released && !after_text) {
         if released {
-            app.agent_chat.text_pasted_at = None;
+            chat.text_pasted_at = None;
         }
-        return;
+        return None;
     }
     let paste = decide(text.as_deref(), &mut System);
     if text.is_some() {
-        app.agent_chat.text_pasted_at = if matches!(paste, Paste::Text) { Some(now) } else { None };
+        chat.text_pasted_at = if matches!(paste, Paste::Text) { Some(now) } else { None };
     } else {
-        app.agent_chat.text_pasted_at = None;
+        chat.text_pasted_at = None;
     }
-    apply(app, ui, paste, text.is_some());
-}
-
-/// Do what [`decide`] said.
-fn apply(app: &mut SolveApp, ui: &egui::Ui, paste: Paste, had_text: bool) {
     match paste {
-        Paste::Text | Paste::Nothing => {}
+        Paste::Text | Paste::Nothing => None,
         Paste::Files(paths) => {
-            if had_text {
+            if text.is_some() {
                 ui.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Paste(_))));
             }
-            super::attach_dropped(app, paths.into_iter());
+            Some(PanelAction::AttachDropped(paths))
         }
-        Paste::Picture(p) => {
-            if let Err(e) = super::attach_rgba(app, p.width, p.height, &p.rgba) {
-                app.agent_chat.notice(e, true);
-            }
-        }
+        Paste::Picture(p) => Some(PanelAction::AttachPicture(p)),
     }
 }
 

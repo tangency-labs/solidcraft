@@ -254,9 +254,12 @@ pub(super) fn gen_with_out_of_bounds(c: &Curve, enabled: bool) -> Option<Curve> 
 
 /// The first entry of an evaluation.
 fn first(v: &[Vec3]) -> Result<Vec3> {
-    v.first()
-        .copied()
-        .ok_or(SolidError::sm_err("surface::surf_of_extrusion::p1::first"))
+    v.first().copied().ok_or_else(|| {
+        SolidError::surface_failed(
+            "surface::surf_of_extrusion::p1::first",
+            "the evaluation returned no point",
+        )
+    })
 }
 
 /// A handle naming a curve in the curve solves' solutions (upstream's curve
@@ -520,7 +523,7 @@ impl SurfOfExtrusion {
             gen = self
                 .gen_curve
                 .take()
-                .ok_or(SolidError::null_pointer(OP_GEN))?;
+                .ok_or_else(|| SolidError::surface_missing(OP_GEN, "the generator curve"))?;
             let (start, end) = ignored(gen.ends(k))?
                 .map_or((Vec3::UNDEF, Vec3::UNDEF), |ends| (ends.start, ends.end));
             Some(gen.is_linear_after_ends(k, tol, false, domain, start, end)?)
@@ -611,7 +614,7 @@ impl SurfOfExtrusion {
     /// dereferences the null copy).
     pub fn copy(&self) -> Result<Self> {
         if self.gen_curve.is_none() {
-            return Err(SolidError::null_pointer(OP_COPY));
+            return Err(SolidError::surface_missing(OP_COPY, "the generator curve"));
         }
         Ok(self.clone())
     }
@@ -732,7 +735,7 @@ impl SurfOfExtrusion {
         let gen = self
             .gen_curve
             .as_mut()
-            .ok_or(SolidError::null_pointer(OP_GEN))?;
+            .ok_or_else(|| SolidError::surface_missing(OP_GEN, "the generator curve"))?;
         adjust_generator_interval(k, gen, ivl, owner_ivl)
     }
 
@@ -828,7 +831,7 @@ impl SurfOfExtrusion {
     fn gen(&self) -> Result<&Curve> {
         self.gen_curve
             .as_ref()
-            .ok_or(SolidError::null_pointer(OP_GEN))
+            .ok_or_else(|| SolidError::surface_missing(OP_GEN, "the generator curve"))
     }
 
     /// The generating curve (`GetGenCurve`).
@@ -1103,7 +1106,7 @@ impl SurfOfExtrusion {
         let gen = self
             .gen_curve
             .as_mut()
-            .ok_or(SolidError::null_pointer(OP_GEN))?;
+            .ok_or_else(|| SolidError::surface_missing(OP_GEN, "the generator curve"))?;
         ignore_status(gen_base_mut(gen)?.scale_knot_vector(gen_ivl.min(), gen_ivl.max()))?;
 
         // recompute a m_vOrigin point to ensure that the origin is still on the genCurve
@@ -1145,7 +1148,7 @@ impl SurfOfExtrusion {
             .base
             .nurb
             .as_mut()
-            .ok_or(SolidError::null_pointer(OP_REPARAM))?;
+            .ok_or_else(|| SolidError::surface_missing(OP_REPARAM, "the surface's NURB"))?;
 
         // set NURB Surface domain parameterization - no change in shape
         let _ = sur.reparam_to_interval(rect, Direction::UV);
@@ -1159,7 +1162,7 @@ impl SurfOfExtrusion {
         let gen = self
             .gen_curve
             .as_mut()
-            .ok_or(SolidError::null_pointer(OP_GEN))?;
+            .ok_or_else(|| SolidError::surface_missing(OP_GEN, "the generator curve"))?;
         ignore_status(gen.edit_parameterization(k, &gen_ivl))?;
         Ok(())
     }
@@ -1170,7 +1173,7 @@ impl SurfOfExtrusion {
     /// upstream's `const` method would make it.
     fn nurb_uv_domain(&self, op: &'static str) -> Result<Extent2d> {
         if self.base.gw_nurb().is_none() {
-            return Err(SolidError::sm_err(op));
+            return Err(SolidError::surface_failed(op, "the surface has no NURB"));
         }
         Ok(self.base.natural_uv_domain())
     }
@@ -1304,7 +1307,10 @@ impl SurfOfExtrusion {
     ) -> Result<()> {
         // check state:
         if hu > MAX_DERIV || hv > MAX_DERIV {
-            return Err(SolidError::sm_err(OP_EVAL_STEP));
+            return Err(SolidError::surface_failed(
+                OP_EVAL_STEP,
+                "the derivative order is above the maximum",
+            ));
         }
 
         let n = (hu + 1) * (hv + 1);
@@ -1467,7 +1473,10 @@ impl SurfOfExtrusion {
 
         // failure - projected point is not on GenCurve
         let Some(sol) = solutions.first() else {
-            return Err(SolidError::sm_err(OP_STEP_INV));
+            return Err(SolidError::surface_failed(
+                OP_STEP_INV,
+                "the projected point is not on the generator curve",
+            ));
         };
 
         // set outputs
@@ -1525,7 +1534,10 @@ impl SurfOfExtrusion {
     ) -> Result<SolutionArray<O>> {
         // return SM_ERR when this function can't compute a solution.
         if self.orientation != CurveOrientType::Perpendicular {
-            return Err(SolidError::sm_err(OP_DROP));
+            return Err(SolidError::surface_failed(
+                OP_DROP,
+                "the generator is not perpendicular to the extrusion",
+            ));
         }
 
         // upstream's GetNaturalUVDomain makes a missing NURB (GetOrCreateGwNurbPointer);
@@ -1534,7 +1546,10 @@ impl SurfOfExtrusion {
             let mut copy = self.clone_for_evaluation(0)?;
             copy.make_nurb(k)?;
             if copy.base.gw_nurb().is_none() {
-                return Err(SolidError::sm_err(OP_DROP));
+                return Err(SolidError::surface_failed(
+                    OP_DROP,
+                    "the evaluation copy has no NURB",
+                ));
             }
             return copy.drop_point_fast(
                 k,
@@ -1761,7 +1776,12 @@ impl SurfOfExtrusion {
                 // CurrentHeight equals negative Line Param solution
                 match params.first() {
                     Some(&p) => current_height = -p,
-                    None => return Err(SolidError::sm_err(OP_DIRECTRIX)),
+                    None => {
+                        return Err(SolidError::surface_failed(
+                            OP_DIRECTRIX,
+                            "the directrix solve gave no parameter",
+                        ))
+                    }
                 }
             }
             CurveOrientType::Undefined => {}
@@ -1828,7 +1848,10 @@ impl SurfOfExtrusion {
                 // when scale factors are not all the same
                 d_scale = s.x;
                 if !are_same(s.y, d_scale) || !are_same(s.z, d_scale) {
-                    return Err(SolidError::sm_err(OP_XFORM));
+                    return Err(SolidError::surface_failed(
+                        OP_XFORM,
+                        "the scale is not uniform",
+                    ));
                 }
             }
         }
@@ -1991,7 +2014,8 @@ pub fn intersect_generators(
     // locals
     let extrusion_ivl = surf.step_uv_domain().v_interval();
     let (gen, extrusion_vec) = surf.canonical();
-    let ext_gen = gen.ok_or(SolidError::null_pointer(OP_GENERATORS))?;
+    let ext_gen =
+        gen.ok_or_else(|| SolidError::surface_missing(OP_GENERATORS, "the extrusion's generator"))?;
     let ext_gen_ivl = ext_gen.natural_interval();
     let extrusion_length = extrusion_vec.length();
     let other_length = other_vec.length();
@@ -2585,23 +2609,23 @@ mod tests {
             empty
                 .evaluate_step_point(&k, Point2::new(0.5, 0.5))
                 .unwrap_err(),
-            SolidError::null_pointer(OP_GEN)
+            SolidError::surface_missing(OP_GEN, "the generator curve")
         );
         assert_eq!(
             empty
                 .evaluate_step(&k, Point2::new(0.5, 0.5), 0, 0)
                 .unwrap_err(),
-            SolidError::null_pointer(OP_GEN)
+            SolidError::surface_missing(OP_GEN, "the generator curve")
         );
         assert_eq!(
             s.evaluate_step(&k, Point2::new(0.5, 0.5), 6, 0)
                 .unwrap_err(),
-            SolidError::sm_err(OP_EVAL_STEP)
+            SolidError::surface_failed(OP_EVAL_STEP, "the derivative order is above the maximum")
         );
         assert_eq!(
             s.evaluate_step(&k, Point2::new(0.5, 0.5), 0, 6)
                 .unwrap_err(),
-            SolidError::sm_err(OP_EVAL_STEP)
+            SolidError::surface_failed(OP_EVAL_STEP, "the derivative order is above the maximum")
         );
     }
 

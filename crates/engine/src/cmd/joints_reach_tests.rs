@@ -255,6 +255,46 @@ fn a_lone_slider_travels_all_the_way() {
     assert_eq!((&r["reached"], &r["moved"]), (&json!(true), &json!(true)), "{r}");
 }
 
+/// A ball joint at rest tilts toward a small nudge in any direction, not only along its pitch
+/// (#12873): its yaw and roll turn about the same axis at pitch 0, so a solve over those angles
+/// can't tilt it the other way. It tilts the least way there, without spinning about its axis, and
+/// a pitch limit still holds it, with the limit named.
+#[test]
+fn a_ball_joint_at_rest_tilts_every_way() {
+    let tip = Vec3::new(0.0, 0.0, 21.0);
+    for (dx, dy) in [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0), (0.7, -0.7)] {
+        let mut s = Session::default();
+        part(&mut s, "Socket", [-1.0, -1.0, -3.0]);
+        part(&mut s, "Stick", [-1.0, -1.0, 20.0]);
+        let socket = occ(&s, "Socket");
+        run(&mut s, "occurrence.ground", json!({"occurrence": socket, "grounded": true}));
+        pin(&mut s, "ball", "Ball", "Socket", "Stick", Vec3::ZERO, Vec3::Z);
+        // A point 1 mm across, on the tip's sphere about the joint.
+        let off = Vec3::new(dx, dy, 21.0);
+        let to = off * (21.0 / off.len());
+        let r = reach(&mut s, "Stick", tip, json!({"point": pt(to)}));
+        assert_eq!((&r["reached"], &r["moved"]), (&json!(true), &json!(true)), "toward ({dx}, {dy}): {r}");
+        assert!(place(&s, "Stick", tip).dist(to) < 1e-6, "toward ({dx}, {dy}): {:?}", place(&s, "Stick", tip));
+        // The least turn: a point off the axis moves about as far as the tip, not round it.
+        let side = Vec3::new(10.0, 0.0, 21.0);
+        assert!(place(&s, "Stick", side).dist(side) < 1.5, "toward ({dx}, {dy}) it spun: {:?}", place(&s, "Stick", side));
+    }
+    // A cone of 10°: a target 30° over stops at the limit, toward it, and names it.
+    let mut s = Session::default();
+    part(&mut s, "Socket", [-1.0, -1.0, -3.0]);
+    part(&mut s, "Stick", [-1.0, -1.0, 20.0]);
+    let socket = occ(&s, "Socket");
+    run(&mut s, "occurrence.ground", json!({"occurrence": socket, "grounded": true}));
+    pin(&mut s, "ball", "Ball", "Socket", "Stick", Vec3::ZERO, Vec3::Z);
+    run(&mut s, "joint.limits", json!({"joint": "Ball", "index": 1, "min": -10, "max": 10}));
+    let a = 30f64.to_radians();
+    let r = reach(&mut s, "Stick", tip, json!({"point": [21.0 * a.sin(), 0.0, 21.0 * a.cos()]}));
+    assert_eq!(r["reached"], false, "{r}");
+    let at = place(&s, "Stick", tip);
+    assert!((at.z / 21.0).acos().to_degrees() - 10.0 < 1e-6 && at.x > 0.0 && at.y.abs() < 1e-6, "{at:?} {r}");
+    assert_eq!(r["stopped_by_limit"][0]["joint"], "Ball", "{r}");
+}
+
 /// The four-bar's rocker reaches a point on its swing, the crank and coupler following with the
 /// loop closed; past its toggle position it stops there, and the loop is named.
 #[test]

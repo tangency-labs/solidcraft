@@ -1,4 +1,4 @@
-//! The Rust side of constructor scripts ([`step_import::script`]): runs a script on
+//! The Rust side of constructor scripts ([`crate::script`]): runs a script on
 //! [`BrepConstructor`] and reports the blocks the reference's constructor shim reported:
 //! the geometry statuses, each call's status, a crash marker where upstream dereferences
 //! null (the port's [`SolidError::InvalidInput`] of the constructor), the B-rep dump (mode
@@ -32,8 +32,8 @@ use solidcore::topology::{
 };
 use solidcore::SolidError;
 
-use step_import::model as sm;
-use step_import::script::{Node, Op, Orient, RegionRef, Script, ScriptCurve};
+use crate::script::{Node, Op, Orient, RegionRef, Script, ScriptCurve};
+use solidcore_record::step::model as sm;
 
 use crate::step::{make_curve, make_surface};
 
@@ -79,7 +79,9 @@ fn outcome(e: &SolidError, notes: &mut Vec<String>) -> Result<Outcome, Deferred>
         SolidError::InvalidInput { .. } => {
             Outcome::Code(f64::from(solidcore::error::SM_ERR_INVALID_INPUT))
         }
-        SolidError::Upstream { code, .. } => Outcome::Code(f64::from(*code)),
+        up_err if solidcore::error::upstream_status(up_err).is_some() => Outcome::Code(f64::from(
+            solidcore::error::upstream_status(up_err).unwrap_or(-1),
+        )),
         other => {
             if notes.len() < 20 {
                 notes.push(other.to_string());

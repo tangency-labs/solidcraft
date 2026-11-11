@@ -99,7 +99,7 @@ pub fn mirror_with_notifications(
 }
 
 fn null() -> SolidError {
-    SolidError::null_pointer(OP)
+    SolidError::topology_missing(OP, "a link of the B-rep's topology")
 }
 
 fn mirror_in(
@@ -374,7 +374,12 @@ pub fn transform_matrix_with_notifications(
     let (d_diag, mut ut) = match sv.sv_decompose() {
         Ok(r) => r,
         Err(e) if e.is_unported_or_cancelled() => return Err(e),
-        Err(_) => return Err(SolidError::sm_err(OP)),
+        Err(_) => {
+            return Err(SolidError::topology_failed(
+                OP,
+                "the transform matrix could not be decomposed",
+            ))
+        }
     };
     ut.transpose()?;
     let row = |m: &Matrix, r: usize| -> Result<Vec3> {

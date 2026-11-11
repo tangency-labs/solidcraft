@@ -1,0 +1,34 @@
+{
+  "en": {
+    "cmd.assembly_constraint_create": "Constrain",
+    "cmd.assembly_constraint_edit": "Edit Constraint"
+  },
+  "de": {
+    "cmd.assembly_constraint_create": "Abhängigkeit",
+    "cmd.assembly_constraint_edit": "Abhängigkeit bearbeiten"
+  },
+  "ja": {
+    "cmd.assembly_constraint_create": "拘束",
+    "cmd.assembly_constraint_edit": "拘束を編集"
+  },
+  "zh": {
+    "cmd.assembly_constraint_create": "约束",
+    "cmd.assembly_constraint_edit": "编辑约束"
+  },
+  "ko": {
+    "cmd.assembly_constraint_create": "구속",
+    "cmd.assembly_constraint_edit": "구속 편집"
+  },
+  "vi": {
+    "cmd.assembly_constraint_create": "Ràng buộc",
+    "cmd.assembly_constraint_edit": "Sửa ràng buộc"
+  },
+  "ar": {
+    "cmd.assembly_constraint_create": "تقييد",
+    "cmd.assembly_constraint_edit": "تحرير التقييد"
+  },
+  "he": {
+    "cmd.assembly_constraint_create": "אילוץ",
+    "cmd.assembly_constraint_edit": "עריכת אילוץ"
+  }
+}

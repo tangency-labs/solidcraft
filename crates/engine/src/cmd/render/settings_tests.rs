@@ -19,7 +19,7 @@ fn complete_shot_patch_accepts_all_known_fields_and_refuses_unknowns_without_mut
     let mut complete = json!(RenderSetup::default());
     complete["width"] = json!(16);
     complete["height"] = json!(12);
-    complete["camera"] = json!(solidcraft_render::Camera { distance: 80.0, fov: 0.6, ..Default::default() });
+    complete["camera"] = json!(solidcraft_viewport::Camera { distance: 80.0, fov: 0.6, ..Default::default() });
     complete["job"] = json!({"method":"cpu_raytrace","options":{"path":{"max_depth":4},
         "progressive":{"samples_per_pixel":4,"seed":17},"lens":{"aperture_radius_mm":0.02,"focus_distance_mm":80.0},
         "output":{"linear_exr":true}}});
@@ -263,9 +263,9 @@ fn render_lights_small_area_pose_and_resize_preserve_aspect_and_emitting_side() 
     assert!((resized_u.len() - 20.0).abs() < 1e-10);
     assert!((resized_v.len() - 40.0).abs() < 1e-10);
     assert!(
-        solidcraft_render::surface::unit_direction(u.cross(v))
+        solidcraft_viewport::surface::unit_direction(u.cross(v))
             .unwrap()
-            .dot(solidcraft_render::surface::unit_direction(resized_u.cross(resized_v)).unwrap())
+            .dot(solidcraft_viewport::surface::unit_direction(resized_u.cross(resized_v)).unwrap())
             > 0.999999
     );
 }
@@ -784,7 +784,7 @@ fn invalid_saved_jobs_never_partially_replace_a_setup() {
     save(&mut s, json!({"job":{"method":"cpu_raytrace","options":{"primary_samples":4}},"exposure_ev":2}));
     for patch in [
         json!({"width":800,"job":{"method":"cpu_raytrace","options":{"primary_samples":3}}}),
-        json!({"job":{"method":"gpu_path","options":{"samples":4097}}}),
+        json!({"job":{"method":"gpu_path","options":{"samples":65537}}}),
         json!({"job":{"method":"cpu_raytrace","options":{"emissions":[]}}}),
         json!({"job":{"method":"gpu_path","options":{"environment":{"kind":"hdr","path":"not-opened.hdr"}}}}),
         json!({"job":{"method":"raster"}}),
@@ -864,7 +864,7 @@ fn settings_history_preserves_geometry_cache_and_dirty_state() {
 #[test]
 fn invalid_settings_and_limit_are_atomic() {
     let mut s = Session::default();
-    let mut camera_with_typo = serde_json::to_value(solidcraft_render::Camera::default()).unwrap();
+    let mut camera_with_typo = serde_json::to_value(solidcraft_viewport::Camera::default()).unwrap();
     camera_with_typo["fov_degrees"] = json!(45);
     for patch in [
         json!({"width":0}),

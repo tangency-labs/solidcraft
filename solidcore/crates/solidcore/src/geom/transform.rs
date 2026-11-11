@@ -299,8 +299,12 @@ impl Transform {
     /// `SM_ERR` when the axes sub-matrix is singular.
     pub fn inv_transform_point(&self, p: Point3) -> Result<Point3> {
         let mid = p - self.to_disp();
-        self.inv_transform_vector(mid)
-            .map_err(|_| SolidError::sm_err("geom::transform::Transform::inv_transform_point"))
+        self.inv_transform_vector(mid).map_err(|_| {
+            SolidError::geom_failed(
+                "geom::transform::Transform::inv_transform_point",
+                "the transform is singular",
+            )
+        })
     }
 
     /// Maps a projection-space vector back to parameter space through the inverse
@@ -315,7 +319,12 @@ impl Transform {
             &self.to_y_axis().to_array(),
             &self.to_z_axis().to_array(),
         )
-        .map_err(|_| SolidError::sm_err("geom::transform::Transform::inv_transform_vector"))?;
+        .map_err(|_| {
+            SolidError::geom_failed(
+                "geom::transform::Transform::inv_transform_vector",
+                "the transform is singular",
+            )
+        })?;
         let [i0, i1, i2] = inv.map(Vec3::from_array);
         let t_inv = Self::new(Vec3::ZERO, i0, i1, Some(i2));
         Ok(t_inv.transform_vector(v))
@@ -415,8 +424,12 @@ impl Transform {
     ///
     /// `SM_ERR` when the matrix is singular; the transform is then unchanged.
     pub fn invert_simple(&mut self) -> Result<()> {
-        self.m = inverse_4x4(&self.m)
-            .map_err(|_| SolidError::sm_err("geom::transform::Transform::invert_simple"))?;
+        self.m = inverse_4x4(&self.m).map_err(|_| {
+            SolidError::geom_failed(
+                "geom::transform::Transform::invert_simple",
+                "the transform is singular",
+            )
+        })?;
         Ok(())
     }
 
@@ -733,8 +746,9 @@ impl Transform {
         solutions.set_size(1);
         let res = self.inv_transform_point(proj_point);
         let Some(sol) = solutions.get_mut(0) else {
-            return Err(SolidError::sm_err(
+            return Err(SolidError::geom_failed(
                 "geom::transform::Transform::global_point_solve_simple",
+                "the solution array has no room",
             ));
         };
         match res {
@@ -770,7 +784,10 @@ impl Transform {
         let mut solutions = SolutionArray::new();
         self.global_point_solve_simple(proj_point, &mut solutions, this)?;
         solutions.get(0).copied().ok_or_else(|| {
-            SolidError::sm_err("geom::transform::Transform::local_point_solve_simple")
+            SolidError::geom_failed(
+                "geom::transform::Transform::local_point_solve_simple",
+                "the solve found no solution",
+            )
         })
     }
 

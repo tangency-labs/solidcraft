@@ -1,0 +1,595 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b14": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b4": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b5": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b6": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 124.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "end": 6.283185307179586,
+              "radius": 16.5,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 0.0
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "screw_sweep",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "pitch": -30.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                15.500000000033173,
+                1.9916037001588853,
+                124.0
+              ],
+              "start": [
+                16.082051957790647,
+                2.5654660460962315,
+                124.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                -0.0,
+                -0.0,
+                -1.0
+              ],
+              "center": [
+                0.0,
+                0.0,
+                124.0
+              ],
+              "end": 0.1277903655261984,
+              "radius": 15.627427341040864,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": -0.12779036552232945
+            }
+          },
+          {
+            "line": {
+              "end": [
+                16.08205195777746,
+                -2.5654660462046173,
+                124.0
+              ],
+              "start": [
+                15.50000000002603,
+                -1.9916037002189337,
+                124.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                16.222606424802095,
+                -3.0128127705345857,
+                124.0
+              ],
+              "start": [
+                16.08205195777746,
+                -2.5654660462046173,
+                124.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                17.205794692955955,
+                -3.1954074838129767,
+                124.0
+              ],
+              "start": [
+                16.222606424802095,
+                -3.0128127705345857,
+                124.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                0.0,
+                0.0,
+                124.0
+              ],
+              "end": 0.1836248887672353,
+              "radius": 17.50000000010735,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": -0.18362488876723534
+            }
+          },
+          {
+            "line": {
+              "end": [
+                16.222606424880645,
+                3.012812770469558,
+                124.0
+              ],
+              "start": [
+                17.205794692955955,
+                3.1954074838129767,
+                124.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                16.082051957790647,
+                2.5654660460962315,
+                124.0
+              ],
+              "start": [
+                16.222606424880645,
+                3.012812770469558,
+                124.0
+              ]
+            }
+          }
+        ],
+        "tolerance": 0.003,
+        "turns": 1.0
+      }
+    },
+    {
+      "inputs": [],
+      "op": "screw_sweep",
+      "outputs": [
+        "b3"
+      ],
+      "params": {
+        "direction": [
+          -0.0,
+          -0.0,
+          -1.0
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "pitch": 30.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                15.500000000033173,
+                1.9916037001588853,
+                124.0
+              ],
+              "start": [
+                16.082051957790647,
+                2.5654660460962315,
+                124.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                -0.0,
+                -0.0,
+                -1.0
+              ],
+              "center": [
+                0.0,
+                0.0,
+                124.0
+              ],
+              "end": 0.1277903655261984,
+              "radius": 15.627427341040864,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": -0.12779036552232945
+            }
+          },
+          {
+            "line": {
+              "end": [
+                16.08205195777746,
+                -2.5654660462046173,
+                124.0
+              ],
+              "start": [
+                15.50000000002603,
+                -1.9916037002189337,
+                124.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                16.222606424802095,
+                -3.0128127705345857,
+                124.0
+              ],
+              "start": [
+                16.08205195777746,
+                -2.5654660462046173,
+                124.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                17.205794692955955,
+                -3.1954074838129767,
+                124.0
+              ],
+              "start": [
+                16.222606424802095,
+                -3.0128127705345857,
+                124.0
+              ]
+            }
+          },
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                0.0,
+                0.0,
+                124.0
+              ],
+              "end": 0.1836248887672353,
+              "radius": 17.50000000010735,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": -0.18362488876723534
+            }
+          },
+          {
+            "line": {
+              "end": [
+                16.222606424880645,
+                3.012812770469558,
+                124.0
+              ],
+              "start": [
+                17.205794692955955,
+                3.1954074838129767,
+                124.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                16.082051957790647,
+                2.5654660460962315,
+                124.0
+              ],
+              "start": [
+                16.222606424880645,
+                3.012812770469558,
+                124.0
+              ]
+            }
+          }
+        ],
+        "tolerance": 0.003,
+        "turns": 1.0
+      }
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b9"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b9"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b10"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b10"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b12"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b11",
+        "b12"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b13"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b15"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b16"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b17"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b16"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b19"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b19",
+        "b20"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b21"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "13462-rod-cut-by-two-counter-wound-channel-coils",
+  "expected": {
+    "body_count": 1,
+    "method": "Each horizontal section of a screw sweep of a profile D in a plane normal to the axis is one rotated copy of D. With D_in = D n disk(16.5), A_in its area, one sweep removes A_in*|p|; the two sweeps' sections at one height are D_in turned by +t and -t, whose overlap integrates over the turn to (|p|/2pi)*Int s(r)^2 r dr, s(r) the angle D_in covers on the circle of radius r. s(r) found exactly from the circle's crossings with the profile's lines and axis-centred arcs, integrated by adaptive Gauss-Kronrod: A_in = 4.214046963094, Int s^2 r dr = 1.279023422464. V = pi*16.5^2*124 - 2*A_in*30 + (30/2pi)*Int s^2 r dr. The one-sweep form agrees with a single cut to 3e-12. Tolerance 1e-6: the sweeps' walls are within 3e-3 of the screw surfaces (|p|*1e-4), which moves the two sweeps' overlap by about 2e-3 mm^3 (1.6e-8 here)",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#13462",
+      "tangency-labs/solidcore#3214"
+    ],
+    "tolerance": {
+      "rel": 1e-06
+    },
+    "volume_mm3": 105810.29046175262,
+    "what": "a rod (r 16.5, 124 long) cut by two one-turn screw sweeps of one channel profile, one right-handed and one left-handed, pitch 30, both starting on the rod's top face: the channel's two radial walls meet the rod's surface, so each sweep's rail on it is a helix there and the two rails cross. The cut's new edge along a crossing rail took an interval its UV curve's trim had snapped 2.4e-12 past its 3D curve's end ('SmEdge test 2, Bad Domain')"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 60,
+      "faces": 30,
+      "vertices": 32
+    }
+  },
+  "records": "13462-rod-cut-by-two-counter-wound-channel-coils.bodies.json.gz",
+  "result": [
+    {
+      "body": "Rod",
+      "made": "b21"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 14815.578874890229,
+      "body_count": 1,
+      "edges": 55,
+      "faces": 25,
+      "vertices": 32,
+      "volume_mm3": 105810.28872357338
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#13462",
+    "tangency-labs/solidcore#3214"
+  ],
+  "traced_ops": [
+    "extrude",
+    "screw_sweep",
+    "screw_sweep",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a rod (r 16.5, 124 long) cut by two one-turn screw sweeps of one channel profile, one right-handed and one left-handed, pitch 30, both starting on the rod's top face: the channel's two radial walls meet the rod's surface, so each sweep's rail on it is a helix there and the two rails cross. The cut's new edge along a crossing rail took an interval its UV curve's trim had snapped 2.4e-12 past its 3D curve's end ('SmEdge test 2, Bad Domain')",
+  "why_not": []
+}

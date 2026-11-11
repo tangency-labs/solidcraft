@@ -113,9 +113,12 @@ pub(super) fn surface_assert_valid(
         .face(f)?
         .surface
         .as_ref()
-        .ok_or(SolidError::null_pointer(
-            "topology::brep::validation::assert_valid",
-        ))?
+        .ok_or_else(|| {
+            SolidError::topology_missing(
+                "topology::brep::validation::assert_valid",
+                "the face's surface",
+            )
+        })?
         .clone_for_evaluation()?;
     let mut services = BrepFaceServices::new(&mut *b);
     surface.assert_valid_with_face_context(
