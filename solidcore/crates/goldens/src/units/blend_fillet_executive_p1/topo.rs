@@ -75,7 +75,9 @@ pub(super) fn rust(i: &TopoIn) -> Result<Output, HarnessError> {
                 return Ok(o);
             }
             match e {
-                e if crate::output::blend_status(&e).is_some() => crate::output::blend_status(&e).map_or(-1.0, f64::from),
+                e if solidcore::error::upstream_status(&e).is_some() => {
+                    f64::from(solidcore::error::upstream_status(&e).unwrap_or(-1))
+                }
                 other => return Err(err(&format!("rust: {other}"))),
             }
         }

@@ -158,7 +158,10 @@ pub fn curve_closest_point(k: &Kernel, curve: &Curve, point: Point3) -> Result<C
     curve_result(
         k,
         curve,
-        solutions.as_slice().first().ok_or(SolidError::sm_err(OP))?,
+        solutions
+            .as_slice()
+            .first()
+            .ok_or_else(|| SolidError::query_failed(OP, "the curve has no closest point"))?,
     )
 }
 
@@ -171,7 +174,10 @@ pub fn curve_closest_point_all(
 ) -> Result<Vec<CurveClosestPoint>> {
     let solutions = curve_solutions(k, curve, point, SolutionRequested::All)?;
     if solutions.is_empty() {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::query_failed(
+            OP,
+            "the curve has no closest point",
+        ));
     }
     solutions
         .as_slice()
@@ -198,14 +204,16 @@ pub fn surface_closest_point(
         },
     )?;
     if !drop.success || drop.solutions.is_empty() {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::query_failed(
+            OP,
+            "the point does not drop onto the surface",
+        ));
     }
     let tolerance = zone_tol_3d(k, surface)?;
-    let mut best = drop
-        .solutions
-        .as_slice()
-        .first()
-        .ok_or(SolidError::sm_err(OP))?;
+    let mut best =
+        drop.solutions.as_slice().first().ok_or_else(|| {
+            SolidError::query_failed(OP, "the point does not drop onto the surface")
+        })?;
     for solution in drop.solutions.as_slice().iter().skip(1) {
         if solution.start.solution_value < best.start.solution_value {
             best = solution;
@@ -223,7 +231,10 @@ pub fn surface_closest_point(
         }
     }
     if uvs.is_empty() {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::query_failed(
+            OP,
+            "no surface solution has a parameter",
+        ));
     }
     Ok(SurfaceClosestPoint {
         closest: ClosestPoint {
@@ -258,7 +269,8 @@ fn solution_point<O: SolutionObject>(
         .take(solution.num_objects)
         .enumerate()
     {
-        let object = object.ok_or(SolidError::null_pointer(OP))?;
+        let object =
+            object.ok_or_else(|| SolidError::query_missing(OP, "the solution's object"))?;
         let kind = object.kind();
         if i == index {
             if kind == ObjectKind::Vertex {
@@ -268,7 +280,7 @@ fn solution_point<O: SolutionObject>(
                 let curve = if kind == ObjectKind::Edge {
                     objects
                         .edge_curve(object)?
-                        .ok_or(SolidError::null_pointer(OP))?
+                        .ok_or_else(|| SolidError::query_missing(OP, "the edge's curve"))?
                 } else {
                     object
                 };
@@ -294,7 +306,10 @@ fn solution_point<O: SolutionObject>(
                 ))?
                 .unwrap_or(Point3::UNDEF));
             }
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::query_failed(
+                OP,
+                "the solution's object is not a vertex, curve or edge",
+            ));
         }
         parameter += match kind {
             ObjectKind::Curve | ObjectKind::Edge => 1,
@@ -302,7 +317,10 @@ fn solution_point<O: SolutionObject>(
             _ => 0,
         };
     }
-    Err(SolidError::sm_err(OP))
+    Err(SolidError::query_failed(
+        OP,
+        "the solution has no object at the index",
+    ))
 }
 
 /// Closest point on a B-rep (`SmApiGetClosestPoint`); the adapter supplies its cache.
@@ -331,7 +349,10 @@ pub fn brep_closest_point<O: SolutionObject>(
         point,
         solve_options(k, SolutionRequested::Single),
     )?;
-    let solution = solutions.as_slice().first().ok_or(SolidError::sm_err(OP))?;
+    let solution = solutions
+        .as_slice()
+        .first()
+        .ok_or_else(|| SolidError::query_failed(OP, "the B-rep has no closest point"))?;
     Ok(ClosestPoint {
         point: solution_point(k, objects, solution, 0)?,
         distance: solution.start.solution_value,
@@ -354,7 +375,10 @@ pub fn brep_closest_point_all<O: SolutionObject>(
         solve_options(k, SolutionRequested::All),
     )?;
     if solutions.is_empty() {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::query_failed(
+            OP,
+            "the B-rep has no closest point",
+        ));
     }
     solutions
         .as_slice()
@@ -611,7 +635,7 @@ pub fn brep_relationship_solve<O: SolutionObject>(
         .as_slice()
         .first()
         .copied()
-        .ok_or(SolidError::sm_err(OP))
+        .ok_or_else(|| SolidError::query_failed(OP, "the B-reps have no solution"))
 }
 
 /// The containment and touching classification of [`brep_relationship`] after its
@@ -711,7 +735,7 @@ fn brep_faces(brep: &Brep) -> Result<Vec<FaceId>> {
 pub fn get_edges(brep: &Brep) -> Result<Vec<EdgeId>> {
     let edges = brep_edges(brep)?;
     if edges.is_empty() {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::query_failed(OP, "the B-rep has no edges"));
     }
     Ok(edges)
 }
@@ -721,7 +745,7 @@ pub fn get_edges(brep: &Brep) -> Result<Vec<EdgeId>> {
 pub fn get_faces(brep: &Brep) -> Result<Vec<FaceId>> {
     let faces = brep_faces(brep)?;
     if faces.is_empty() {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::query_failed(OP, "the B-rep has no faces"));
     }
     Ok(faces)
 }
@@ -751,16 +775,24 @@ pub fn face_get_boundary_loops(brep: &Brep, id: FaceId) -> Result<BoundaryLoops>
         Vec::new()
     };
     if loops.is_empty() {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::query_failed(
+            OP,
+            "the face has no boundary loops",
+        ));
     }
     for lu in loops {
         let edges = eu::loopuse_edgeuses(brep, lu)?;
         result.edge_counts.push(edges.len());
         for edgeuse in edges {
             let edgeuse = brep.edgeuse(edgeuse)?;
-            let edge = edgeuse.edge.ok_or(SolidError::sm_err(OP))?;
+            let edge = edgeuse
+                .edge
+                .ok_or_else(|| SolidError::query_failed(OP, "the edge use has no edge"))?;
             if !matches!(edgeuse.orientation, OrientType::Same | OrientType::Opposite) {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::query_failed(
+                    OP,
+                    "the edge use's orientation is neither same nor opposite",
+                ));
             }
             result.edges.push(edge);
             result.orientations.push(edgeuse.orientation);
@@ -771,7 +803,8 @@ pub fn face_get_boundary_loops(brep: &Brep, id: FaceId) -> Result<BoundaryLoops>
 
 /// Finds an edge index and parameter (`SmApiFindEdge`); missing match is `SM_ERR`.
 pub fn find_edge(k: &Kernel, brep: &Brep, point: Point3) -> Result<EdgePick> {
-    tools::find_edge(k, brep, point)?.ok_or(SolidError::sm_err(OP))
+    tools::find_edge(k, brep, point)?
+        .ok_or_else(|| SolidError::query_failed(OP, "no edge is at the point"))
 }
 
 /// Finds a face (`SmApiFindFaces`); missing match is `SM_ERR`.
@@ -783,7 +816,8 @@ pub fn find_faces(
     keys: &dyn Fn(CacheObject) -> ObjectRef,
     owners: &dyn Fn(ObjectRef) -> Option<ObjectRef>,
 ) -> Result<FaceId> {
-    tools::find_face(k, brep, id, point, keys, owners)?.ok_or(SolidError::sm_err(OP))
+    tools::find_face(k, brep, id, point, keys, owners)?
+        .ok_or_else(|| SolidError::query_failed(OP, "no face is at the point"))
 }
 
 /// Manifold solid predicate (`SmApiBrepIsManifoldSolid`: `SmBrep::IsManifoldSolid`).
@@ -926,7 +960,10 @@ pub fn face_closest_point_in_shape<O: SolutionObject>(
     options.tolerance_3d =
         objects.face_tolerance(objects.shape_member_object(ShapeMember::Face(face))?)?;
     let solutions = TopologySolver::shape_point_solve(k, objects, shape, point, options)?;
-    let solution = solutions.as_slice().first().ok_or(SolidError::sm_err(OP))?;
+    let solution = solutions
+        .as_slice()
+        .first()
+        .ok_or_else(|| SolidError::query_failed(OP, "the face has no closest point"))?;
     Ok(ClosestPoint {
         point: solution_point(k, objects, solution, 0)?,
         distance: solution.start.solution_value,
@@ -953,7 +990,7 @@ pub fn edge_bounding_box(k: &Kernel, brep: &Brep, edge: EdgeId, tight: bool) -> 
         false,
     )?
     .normal
-    .ok_or(SolidError::sm_err(OP))
+    .ok_or_else(|| SolidError::query_failed(OP, "the face has no normal there"))
 }
 
 /// Closest point within an edge interval (`SmApiEdgeClosestPoint`).
@@ -964,13 +1001,13 @@ pub fn edge_closest_point(
     id: EdgeId,
     point: Point3,
 ) -> Result<CurveClosestPoint> {
-    let result =
-        crate::query::edge::closest_point(k, brep, id, point)?.ok_or(SolidError::sm_err(OP))?;
+    let result = crate::query::edge::closest_point(k, brep, id, point)?
+        .ok_or_else(|| SolidError::query_failed(OP, "the point does not drop onto the edge"))?;
     let curve = brep
         .edge(id)?
         .curve
         .as_ref()
-        .ok_or(SolidError::sm_err(OP))?;
+        .ok_or_else(|| SolidError::query_failed(OP, "the edge has no curve"))?;
     Ok(CurveClosestPoint {
         closest: ClosestPoint {
             point: curve.evaluate_point(k, result.parameter)?,
@@ -995,7 +1032,10 @@ pub fn edge_classify_parameter(
     parameter: f64,
 ) -> Result<PointClassType> {
     let e = brep.edge(id)?;
-    let curve = e.curve.as_ref().ok_or(SolidError::sm_err(OP))?;
+    let curve = e
+        .curve
+        .as_ref()
+        .ok_or_else(|| SolidError::query_failed(OP, "the edge has no curve"))?;
     if let Some(point) = ignored(curve.evaluate_point(k, parameter))? {
         for v in [edge::start_vertex(brep, id)?, edge::end_vertex(brep, id)?]
             .into_iter()
@@ -1021,12 +1061,12 @@ pub fn edge_tangent(k: &Kernel, brep: &Brep, id: EdgeId, parameter: f64) -> Resu
         .edge(id)?
         .curve
         .as_ref()
-        .ok_or(SolidError::sm_err(OP))?;
+        .ok_or_else(|| SolidError::query_failed(OP, "the edge has no curve"))?;
     let values = curve.evaluate(k, parameter, 1, true, true)?;
     values
         .get(1)
         .copied()
-        .ok_or(SolidError::sm_err(OP))?
+        .ok_or_else(|| SolidError::query_failed(OP, "the curve has no first derivative there"))?
         .unitize()
 }
 
@@ -1294,6 +1334,21 @@ mod tests {
     use crate::nurbs::crv_basic::Curve as NlCurve;
     use crate::nurbs::math::CPoint;
     use crate::nurbs::srf_basic::Surface as NlSurface;
+
+    /// A B-rep without edges or faces is an `SM_ERR` that says so.
+    #[test]
+    fn an_empty_brep_lists_are_typed_failures() {
+        use crate::error::query::QueryFailure;
+        let b = Brep::new();
+        for (e, what) in [
+            (get_edges(&b).unwrap_err(), "the B-rep has no edges"),
+            (get_faces(&b).unwrap_err(), "the B-rep has no faces"),
+        ] {
+            assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR), "{e:?}");
+            assert_eq!(e.operation(), OP);
+            assert_eq!(e.query_failure(), Some(&QueryFailure::Failed(what)));
+        }
+    }
 
     /// The true distance is in `[value - bound, value + bound]` and the value is
     /// `Vec3::distance`'s, bit for bit.

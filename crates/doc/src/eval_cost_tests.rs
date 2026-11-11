@@ -1456,6 +1456,7 @@ fn a_tap_marking_searches_only_the_bodies_near_it() {
         ease_out: None,
         to: None,
         references: Vec::new(),
+        old_surface_start: false,
     };
     let (work, threads) = marking_work(&mut doc, hole);
     assert_eq!(work.cylinder_search, 1, "only the plate is searched");
@@ -1573,6 +1574,7 @@ fn a_tapped_hole_reads_the_bodies_along_its_drill_line() {
         ease_out: None,
         to: None,
         references: Vec::new(),
+        old_surface_start: false,
     };
     let (work, threads) = marking_work(&mut doc, hole);
     assert_eq!(work.tapped_wall, 3, "Plate, Below and Grazing are read");

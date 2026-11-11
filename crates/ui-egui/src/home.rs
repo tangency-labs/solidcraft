@@ -975,6 +975,7 @@ fn export_tiles(app: &SolveApp) -> start_page::Tiles<'_, FileAction> {
         ("mesh", "Mesh", Some("home.export_mesh_hint"), FileAction::Mesh),
         ("view_dxf", "DXF", None, FileAction::ViewDxf),
         ("obj", "OBJ", None, FileAction::Export("obj")),
+        ("glb", "GLB", None, FileAction::Export("glb")),
         ("urdf", "URDF", None, FileAction::Export("urdf")),
         ("json", "JSON", Some("home.export_json_hint"), FileAction::Export("json")),
     ];
@@ -1531,6 +1532,14 @@ mod tests {
         h.settle();
         assert!(!h.app.home.open);
         assert!(h.dir.join(format!("{}.json", h.app.session.doc.name)).is_file());
+        assert_eq!(h.app.session.doc.to_json(), original, "export leaves the design unchanged");
+        // The GLB tile (#1553) writes a binary glTF file of the bodies.
+        h.app.home.show(0);
+        click_file(&mut h, "home:export");
+        click_file(&mut h, "home:export:glb");
+        h.settle();
+        let glb = std::fs::read(h.dir.join(format!("{}.glb", h.app.session.doc.name))).unwrap_or_default();
+        assert!(glb.starts_with(b"glTF"), "{} bytes", glb.len());
         assert_eq!(h.app.session.doc.to_json(), original, "export leaves the design unchanged");
     }
 

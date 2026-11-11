@@ -547,3 +547,165 @@ fn a_long_face_costs_linearly_in_its_knot_spans() {
         "iso evaluations per span {per_span:?} grow with the spans"
     );
 }
+
+/// A bicubic patch `[0, n]²` with `n` unit knot spans each way, wavy, as a G2 corner patch
+/// is a dense spline grid in both directions.
+fn dense_grid(n: usize) -> Surface {
+    let cp: Vec<Vec<_>> = (0..n + 3)
+        .map(|i| {
+            (0..n + 3)
+                .map(|j| {
+                    let (x, y) = (i as f64, j as f64);
+                    let z = 3.0 * (x / 8.0).sin() * (y / 10.0).cos() + 0.02 * x * y;
+                    CPoint::new(x, y, z, 1.0)
+                })
+                .collect()
+        })
+        .collect();
+    let mut kv = vec![0.0; 4];
+    kv.extend((1..n).map(|j| j as f64));
+    kv.extend([n as f64; 4]);
+    Surface::from(
+        BSplineSurface::from_data(n + 2, n + 2, 3, 3, n + 6, n + 6, &cp, &kv, &kv).unwrap(),
+    )
+}
+
+/// The square `[m, n - m]²`, counterclockwise in uv.
+fn grid_trims(n: usize, m: f64) -> Vec<Curve> {
+    let (lo, hi) = (m, n as f64 - m);
+    let line = |a: (f64, f64), b: (f64, f64)| {
+        Curve::from(
+            solidcore::primitive::api_curves::create_line_segment(
+                Point3::new(a.0, a.1, 0.0),
+                Point3::new(b.0, b.1, 0.0),
+            )
+            .unwrap(),
+        )
+    };
+    vec![
+        line((lo, lo), (hi, lo)),
+        line((hi, lo), (hi, hi)),
+        line((hi, hi), (lo, hi)),
+        line((lo, hi), (lo, lo)),
+    ]
+}
+
+/// Every component over the square by tensor Gauss-Legendre with `g` points a knot span
+/// (or partial span) each way.
+fn grid_reference(
+    k: &Kernel,
+    surface: &Surface,
+    n: usize,
+    m: f64,
+    origin: Vec3,
+    layout: &PrecisePropertyLayout,
+    g: usize,
+) -> Vec<f64> {
+    let gl = gauss_legendre(g);
+    let mut total = vec![0.0; layout.num_components + 1];
+    let mut dydx = vec![0.0; layout.num_components + 1];
+    let span = |j: usize| ((j as f64).max(m), ((j + 1) as f64).min(n as f64 - m));
+    for i in 0..n {
+        let (u0, u1) = span(i);
+        let hu = (u1 - u0) / 2.0;
+        for &(xu, wu) in &gl {
+            let eval =
+                OdeIsoCurveLength::new(k, surface, u0 + hu * (xu + 1.0), origin, 0.0, layout);
+            for j in 0..n {
+                let (v0, v1) = span(j);
+                let hv = (v1 - v0) / 2.0;
+                for &(xv, wv) in &gl {
+                    eval.evaluate(v0 + hv * (xv + 1.0), &mut dydx).unwrap();
+                    for (t, d) in total.iter_mut().zip(dydx.iter()) {
+                        *t += wu * hu * wv * hv * d;
+                    }
+                }
+            }
+        }
+    }
+    total
+}
+
+/// #14460: a G2 corner patch is a dense spline grid in both directions, so its banded
+/// integral has a cell per band and u knot span, each integrated along u and, at each u
+/// sample, along v. With nested Runge-Kutta steps (two of six samples each at the least)
+/// this grid cost 826 iso-curve evaluations a cell at the app's accuracy 1e-8; with
+/// nested 7-point Gauss-Kronrod (49 a cell when no piece is halved) it costs 321. Every
+/// property still holds its accuracy against an independent tensor Gauss-Legendre
+/// quadrature, more tightly than before.
+#[test]
+fn a_dense_grid_face_costs_few_evaluations_per_cell() {
+    let k = Kernel::default();
+    let origin = Vec3::new(0.3, -0.2, -1.0);
+    let layout = PrecisePropertyLayout::new(PPF_ALL);
+    let n = 24_usize;
+    let m = 0.3;
+    let surface = dense_grid(n);
+    let reference = grid_reference(&k, &surface, n, m, origin, &layout, 8);
+    let check = grid_reference(&k, &surface, n, m, origin, &layout, 12);
+    for (r, c) in reference.iter().zip(check.iter()) {
+        assert!((r - c).abs() <= 1e-13 * r.abs().max(1.0), "{r} vs {c}");
+    }
+    let trims = grid_trims(n, m);
+    let face_box = Extent3d::from_points(
+        Point3::new(-1.0, -1.0, -4.0),
+        Point3::new(n as f64 + 1.0, n as f64 + 1.0, 4.0 + 0.02 * (n * n) as f64),
+    );
+    let domain = Extent2d::from_bounds(0.0, 0.0, n as f64, n as f64);
+    // (`brep_properties`' estimate: the box's largest side squared over 100)
+    let size = face_box.size();
+    let d = size.z.max(size.x.max(size.y));
+    let mut per_cell = Vec::new();
+    for accuracy in [1e-8, 1e-11] {
+        k.work_counters.reset();
+        let p = boundary_properties(
+            &k,
+            &surface,
+            &trims,
+            &domain,
+            &face_box,
+            OrientType::Opposite,
+            accuracy,
+            origin,
+            d * d / 100.0,
+            0.0,
+            PPF_ALL,
+        )
+        .unwrap();
+        let evaluations = k.work_counters.mass_iso_evaluations();
+        per_cell.push(evaluations as f64 / (n * n) as f64);
+        let r = |i: usize| reference[i];
+        let mut groups = vec![(vec![p.area], vec![r(layout.area)])];
+        groups.push((vec![p.volume], vec![r(layout.volume)]));
+        let moments = |m: &[Vec3], idx: &[usize]| {
+            let got: Vec<f64> = m.iter().flat_map(|v| [v.x, v.y, v.z]).collect();
+            let want: Vec<f64> = idx
+                .iter()
+                .flat_map(|&i| [r(i), r(i + 1), r(i + 2)])
+                .collect();
+            (got, want)
+        };
+        groups.push(moments(&p.moments[0..1], &layout.moments[0..1]));
+        groups.push(moments(&p.moments[1..4], &layout.moments[1..4]));
+        groups.push(moments(&p.moments[4..5], &layout.moments[4..5]));
+        groups.push(moments(&p.moments[5..8], &layout.moments[5..8]));
+        for (gi, (got, want)) in groups.iter().enumerate() {
+            let size = want.iter().fold(0.0_f64, |m, w| m.max(w.abs()));
+            let err = got
+                .iter()
+                .zip(want.iter())
+                .fold(0.0_f64, |m, (g, w)| m.max((g - w).abs()))
+                / size;
+            eprintln!("accuracy {accuracy:e}, group {gi}: {err:e}");
+            assert!(
+                err <= accuracy,
+                "accuracy {accuracy:e}, group {gi}: {err:e} off"
+            );
+        }
+        eprintln!(
+            "accuracy {accuracy:e}: {evaluations} iso evaluations, {:.1} a cell",
+            per_cell.last().unwrap()
+        );
+    }
+    assert!(per_cell[0] <= 450.0, "iso evaluations a cell {per_cell:?}");
+}
