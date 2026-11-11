@@ -301,7 +301,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.bend_volume_bbox_contains_wide_angle_and_inf_u = true;
     f.bend_volume_trim_param_box_across_period = true;
     f.degen_param_tiebreak_uses_actual_param = true;
-    f.cylinder_plane_section_trims_exact = true;
     f.local_surface_intersect_guards_max_boundary_retry = true;
     f.curve_sweep_closed_path_joins_ends = true;
     f.validate_tolerances_fixes_reported_gaps = true;

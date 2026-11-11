@@ -272,8 +272,8 @@ bare net and there is no definition to keep.
   trims are made by dropping the 3D curve onto each surface (`Surface::drop_curve`,
   `intersect/surface_drop_lib`), which traces and fits a cubic within the drop tolerance. So an exact
   edge can carry fitted trims. The exact pcurve of a plane section on a cylinder
-  (`cylinder_plane_section_trims_exact`) replaces one class of them; sphere, cone and torus sections
-  are open.
+  (`surface_drop_lib/cylinder_section.rs`) replaces one class of them; sphere, cone and torus
+  sections are open.
 - A traced SSI curve's UV curves are cubic Hermite interpolants, checked at samples and not certified
   ([ssi.md](ssi.md) §6.1); the imprint passes a copy of them to `MakeEdgeInFace`
   (`topology_intersector/p1.rs`, "Intersection trims").
