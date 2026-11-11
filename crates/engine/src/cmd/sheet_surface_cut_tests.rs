@@ -626,6 +626,70 @@ fn a_tab_cut_while_unfolded_is_the_tab_the_flat_makes() {
     assert!((exact_volume(&s) - want).abs() < 1e-6 * want, "{} vs {want}", exact_volume(&s));
 }
 
+/// A notch 20 along the bend from its end: from 3 into the plate to 3 into the flange, and on
+/// past the flat's edge. Its box in space, the flat lying in the plane of the plate's face.
+fn edge_notch(f: &Flanged) -> (Vec3, Vec3) {
+    let Some(place) = f.sheet.places.first().copied().flatten() else { panic!("the plate has a place") };
+    [(-10.0, -3.0), (20.0, -3.0), (20.0, f.width + 3.0), (-10.0, f.width + 3.0)]
+        .iter()
+        .map(|(a, b)| place.point(Vec3::new(f.at(*a, *b).x, f.at(*a, *b).y, 0.0)))
+        .fold(
+            (Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY), Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY)),
+            |(lo, hi), p| (lo.min(p), hi.max(p)),
+        )
+}
+
+/// A notch cut across a bend from the flat's edge while the sheet is unfolded is a cut of the
+/// sheet's: folded again, the sheet weighs what it does with the same notch drawn on its flat,
+/// less what the notch takes from the plate, the bend and the flange.
+#[test]
+fn a_notch_cut_across_a_bend_from_the_flats_edge_folds_with_the_sheet() {
+    let f = Flanged::new();
+    let w = f.width;
+    let (v0, _) = f.cut(Vec::new());
+    let want = v0 - 2.0 * 20.0 * 3.0 * T - 20.0 * w * bent_per_area();
+    let (drawn, _) = f.cut(vec![f.rect([-10.0, 20.0], [-3.0, w + 3.0])]);
+    assert!((drawn - want).abs() < 1e-6 * want, "drawn on the flat: {drawn} vs {want}");
+    let mut s = plate();
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, T]], "height": 20}));
+    run(&mut s, "sheet.unfold", json!({}));
+    let (lo, hi) = edge_notch(&f);
+    run(&mut s, "solid.box", json!({"corner": [lo.x, lo.y, -10], "length": hi.x - lo.x, "width": hi.y - lo.y, "height": 20, "operation": "cut"}));
+    run(&mut s, "sheet.refold", json!({}));
+    assert!((exact_volume(&s) - want).abs() < 1e-6 * want, "{} vs {want}", exact_volume(&s));
+}
+
+/// What such a cut from the flat's edge can't be is refused, and the sheet stays as it was: a
+/// drill at a slant through the bend's end, its walls leaning, and the notch stopping 1 inside
+/// the thickness.
+#[test]
+fn a_cut_across_a_bend_from_the_flats_edge_at_a_slant_or_short_of_through_is_refused() {
+    let f = Flanged::new();
+    let Some(place) = f.sheet.places.first().copied().flatten() else { panic!("the plate has a place") };
+    // Ø6 across the bend's zone (about 4.5 wide), 1 in from its end, leaning 30° along the bend.
+    let c = place.point(Vec3::new(f.at(1.0, f.width / 2.0).x, f.at(1.0, f.width / 2.0).y, 0.0));
+    let tilt = 30f64.to_radians();
+    let along = place.vector(Vec3::new(f.along.x, f.along.y, 0.0));
+    let axis = Vec3::new(0.0, 0.0, tilt.cos()) + along * tilt.sin();
+    let base = c - axis * 10.0;
+    let drill = json!({"radius": 3, "height": 20, "base": [base.x, base.y, base.z], "axis": [axis.x, axis.y, axis.z], "operation": "cut"});
+    let (lo, hi) = edge_notch(&f);
+    let pocket = json!({"corner": [lo.x, lo.y, T - 1.0], "length": hi.x - lo.x, "width": hi.y - lo.y, "height": 5, "operation": "cut"});
+    let cases: [(&str, &str, Value, fn(&str) -> bool); 2] = [
+        ("at a slant", "solid.cylinder", drill, |e| e.contains("reaches the edge of") && e.contains("at a slant")),
+        ("short of through", "solid.box", pocket, |e| e.contains("reaches a bend or a seam")),
+    ];
+    for (what, cmd, p, refused) in cases {
+        let mut s = plate();
+        run(&mut s, "sheet.flange", json!({"edges": [[50, 0, T]], "height": 20}));
+        run(&mut s, "sheet.unfold", json!({}));
+        let v = exact_volume(&s);
+        let e = s.execute(cmd, &p).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(refused(&e), "{what}: {e}");
+        assert!((exact_volume(&s) - v).abs() < 1e-9 * v, "{what}: the sheet changed");
+    }
+}
+
 /// What a cut takes from a sheet doesn't depend on the cuts before it, their order, or whether
 /// the sheet was folded or laid out flat when each was made. On the R 10 bend: two slots through
 /// the bend from the plate into the flange (their ends on the same planes), a drill through the

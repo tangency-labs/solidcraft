@@ -1051,7 +1051,9 @@ pub struct BendInfo {
     pub up: bool,
     pub allowance: f64,
     pub length: f64,
-    /// Centre line in flat coordinates.
+    /// Centre line in flat coordinates, from `start` to `end`. A bend row runs along the bend with
+    /// the material of the panel the bend was made on (the joint's `a` panel) on the left of its
+    /// direction, as the flat is read.
     pub start: Vec2,
     pub end: Vec2,
 }
