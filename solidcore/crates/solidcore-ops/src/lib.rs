@@ -10,6 +10,7 @@
 //! What every family shares:
 //! - [`session`]: the one process kernel, the fixes the application names, the panic guard, the
 //!   call running now and the failure callback;
+//! - [`cancel`]: stopping the calls of work nobody waits for any more ([`Error::Cancelled`]);
 //! - [`Error`]: why an operation failed, as data (the application words it);
 //! - [`Body`]: a kernel body, with primitives, copy and transform, counts and volume, `.smb`
 //!   bytes ([`file`]) and the validity check ([`check`]), and the record both ways
@@ -31,16 +32,21 @@
 pub mod blend;
 pub mod body;
 pub mod boolean;
+pub mod cancel;
 pub mod check;
 pub mod contact;
+pub mod continuity;
 pub mod error;
 pub mod extend;
 pub mod file;
+pub mod label;
 pub mod measure;
 pub mod offset;
 pub mod order;
+pub mod pcurve;
 pub mod prism;
 pub mod provenance;
+pub mod record_check;
 pub mod session;
 pub mod split;
 pub mod step_assembly;

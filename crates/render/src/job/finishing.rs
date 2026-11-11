@@ -118,8 +118,8 @@ impl Backdrop {
             BackdropMode::Radial => ((position[0] - self.center[0]).powi(2) + (position[1] - self.center[1]).powi(2)).sqrt() / self.radius,
         }
         .clamp(0., 1.);
-        let a = self.first_srgb.map(crate::surface::srgb8_to_linear);
-        let b = self.second_srgb.map(crate::surface::srgb8_to_linear);
+        let a = self.first_srgb.map(solidcraft_viewport::surface::srgb8_to_linear);
+        let b = self.second_srgb.map(solidcraft_viewport::surface::srgb8_to_linear);
         std::array::from_fn(|i| a[i] * (1. - t) + b[i] * t)
     }
 }
@@ -153,7 +153,7 @@ mod tests {
         assert_eq!(g.color([0., 0.]), [0.; 3]);
         assert_eq!(g.color([1., 1.]), [1.; 3]);
         assert_eq!(g.color([0.1, 0.5]), [0.5; 3]);
-        assert_ne!(g.color([0.1, 0.5]), [crate::surface::srgb8_to_linear(128); 3]);
+        assert_ne!(g.color([0.1, 0.5]), [solidcraft_viewport::surface::srgb8_to_linear(128); 3]);
         let radial = Backdrop { mode: BackdropMode::Radial, first_srgb: [255; 3], second_srgb: [0; 3], center: [0.2, 0.4], radius: 0.2 };
         assert_eq!(radial.color([0.2, 0.4]), [1.; 3]);
         assert!(radial.color([0.4, 0.4]).iter().all(|v| v.abs() < 1e-12));

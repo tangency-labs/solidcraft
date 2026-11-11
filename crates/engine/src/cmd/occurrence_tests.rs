@@ -14,6 +14,273 @@ fn near(value: &Value, expected: f64) {
     assert!((value.as_f64().unwrap() - expected).abs() < 1e-6, "{value} != {expected}");
 }
 
+/// Nested and repeated placements each keep their own Origin: the same item under different
+/// paths resolves at its own placement, folders and items follow the browser's eyes, and the
+/// saved state round-trips, undoes and prunes with the placements (#7313).
+#[test]
+fn component_origins_keep_nested_copies_and_visibility_separate() {
+    use crate::origins;
+    use solidcore_record::Vec3;
+    let mut s = Session::default();
+    let (parent, first) = created(&mut s, "Assembly");
+    run(&mut s, "occurrence.move", json!({"occurrence":first,"translate":[100,0,0]}));
+    let (_, child) = created(&mut s, "Child");
+    run(&mut s, "occurrence.move", json!({"occurrence":child,"translate":[20,0,0]}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    let second = run(&mut s, "occurrence.copy", json!({"component":parent,"translate":[50,0,0]}))["occurrence"].as_u64().unwrap();
+    let (one, two) = (vec![first, child], vec![second, child]);
+    assert!(s.origin_plane(&origins::key(&one, "XY")).unwrap().origin.dist(Vec3::new(120., 0., 0.)) < 1e-8);
+    assert!(s.origin_plane(&origins::key(&two, "XY")).unwrap().origin.dist(Vec3::new(170., 0., 0.)) < 1e-8);
+    assert!(s.shown_component_origins().is_empty());
+    run(&mut s, "browser.visibility", json!({"tree_folders":[origins::folder(&two)],"visible":true}));
+    assert!(s.folder_hidden(&origins::folder(&one)));
+    assert!(!s.folder_hidden(&origins::folder(&two)));
+    assert_eq!(s.visibility.origin_hidden, None);
+    assert_eq!(s.shown_component_origins().len(), 7);
+    run(&mut s, "browser.visibility", json!({"items":[origins::key(&two,"X")],"visible":false}));
+    assert_eq!(s.shown_component_origins().len(), 6);
+    assert!(s.construction_visible("X"));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.shown_component_origins().len(), 7);
+    run(&mut s, "edit.redo", json!({}));
+    let mut saved = (*s.doc).clone();
+    saved.visibility = s.visibility.clone();
+    let reopened = Session::new(serde_json::from_str(&serde_json::to_string(&saved).unwrap()).unwrap());
+    assert_eq!(reopened.visibility, s.visibility);
+    assert_eq!(reopened.shown_component_origins().len(), 6);
+    run(&mut s, "browser.visibility", json!({"paths":[[second]],"visible":false}));
+    assert!(s.shown_component_origins().is_empty(), "a hidden parent hides its origin too");
+    let before = s.visibility.clone();
+    assert!(s.execute("browser.visibility", &json!({"tree_folders":[origins::folder(&one),"o:999999/origin"],"visible":true})).is_err());
+    assert_eq!(s.visibility, before, "invalid batches must be atomic");
+    for invalid in ["o:/origin", "o:0/origin", "o:01/origin", "c0/origin"] {
+        assert!(s.execute("browser.visibility", &json!({"tree_folders":[invalid],"visible":true})).is_err(), "{invalid}");
+    }
+    let folded = run(&mut s, "browser.expand_all", json!({"path":one}));
+    assert!(folded["closed_by_default"].as_array().unwrap().contains(&json!(origins::folder(&one))));
+    run(&mut s, "occurrence.move", json!({"occurrence":child,"translate":[10,0,0],"capture":false}));
+    assert!(s.origin_plane(&origins::key(&one, "XY")).unwrap().origin.dist(Vec3::new(130., 0., 0.)) < 1e-8);
+}
+
+/// A component origin pick lands on the geometry as it is placed: a sketch on the datum
+/// follows the component, and axis and plane references resolve at the placement in the
+/// reading component's frame, whoever authors them (#7313).
+#[test]
+fn component_origin_picks_use_world_geometry_and_follow_the_placement() {
+    use crate::origins;
+    use solidcore_record::Vec3;
+    let mut s = Session { param_check: crate::schema::ParamCheck::Strict, ..Session::default() };
+    let (component, occurrence) = created(&mut s, "Part");
+    run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[20,30,40],"axis":[1,0,0],"angle":"90 deg"}));
+    let plane = origins::key(&[occurrence], "XY");
+    let expected = Vec3::new(20., 30., 40.);
+    assert!(s.origin_plane(&plane).unwrap().origin.dist(expected) < 1e-8);
+    assert!(s.origin_plane(&plane).unwrap().normal().dist(-Vec3::Y) < 1e-8);
+    s.selection = vec![crate::Sel::Plane { name: plane.clone() }];
+    run(&mut s, "view.normal_to", json!({}));
+    let camera = s.camera.unwrap();
+    assert!(camera.target.dist(expected) < 1e-8);
+    assert!(camera.back().dot(Vec3::Y).abs() > 1. - 1e-8);
+    for author in [0, component] {
+        run(&mut s, "component.activate", json!({"component":author}));
+        let sketch = run(&mut s, "sketch.create", json!({"plane":plane}))["sketch"].as_u64().unwrap();
+        let state = s.world_state().unwrap();
+        let actual = state.sketch(sketch).unwrap().plane;
+        assert!(actual.origin.dist(expected) < 1e-8, "author {author}: {actual:?}");
+        assert!(actual.normal().dist(-Vec3::Y) < 1e-8);
+        run(&mut s, "sketch.finish", json!({}));
+    }
+    run(&mut s, "component.activate", json!({"component":0}));
+    run(&mut s, "construct.point.vertex", json!({"point":{"construct_point":origins::key(&[occurrence],"O")},"name":"Origin copy"}));
+    let point = crate::view::construction_points(&s).into_iter().find(|(_, n, _)| n == "Origin copy").unwrap().2;
+    assert!(point.dist(expected) < 1e-8);
+    run(&mut s, "construct.plane.at_angle", json!({"base":plane,"axis":origins::key(&[occurrence],"X"),"angle":"90 deg","name":"Turned"}));
+    let turned = crate::view::construction_planes(&s).into_iter().find(|(_, n, _)| n == "Turned").unwrap().2;
+    assert!(turned.origin.dist(expected) < 1e-8);
+    assert!(turned.normal().dot(Vec3::Z).abs() > 1. - 1e-8);
+    run(&mut s, "component.activate", json!({"component":component}));
+    run(&mut s, "construct.plane.perpendicular", json!({"plane":plane,"line":{"axis":origins::key(&[occurrence],"X")},"name":"Perpendicular"}));
+    let perpendicular = crate::view::construction_planes(&s).into_iter().find(|(_, n, _)| n.ends_with("Perpendicular")).unwrap().2;
+    assert!(perpendicular.origin.dist(expected) < 1e-8);
+    assert!(perpendicular.normal().dot(Vec3::Z).abs() > 1. - 1e-8);
+}
+
+/// The cascade rule (the #9791 rule for construction geometry, applied to datums): a hidden
+/// placement hides its Origin folder and its items regardless of their own eyes; showing it
+/// again restores the saved per-item state.
+#[test]
+fn hidden_placement_hides_its_origin_and_restores_it() {
+    use crate::origins;
+    let mut s = Session::default();
+    let (_, occurrence) = created(&mut s, "Part");
+    // The origin shown, one item hidden by itself: the saved per-item state to keep.
+    run(&mut s, "browser.visibility", json!({"tree_folders":[origins::folder(&[occurrence])],"visible":true}));
+    run(&mut s, "browser.visibility", json!({"items":[origins::key(&[occurrence],"X")],"visible":false}));
+    assert_eq!(s.shown_component_origins().len(), 6);
+    assert!(s.construction_visible(&origins::key(&[occurrence], "Y")));
+    assert!(!s.construction_visible(&origins::key(&[occurrence], "X")));
+    // Hiding the placement hides its origin too, whatever the items' own eyes say.
+    run(&mut s, "browser.visibility", json!({"paths":[[occurrence]],"visible":false}));
+    assert!(s.shown_component_origins().is_empty(), "a hidden placement hides its origin");
+    assert!(!s.construction_visible(&origins::key(&[occurrence], "Y")));
+    assert!(!s.construction_visible(&origins::key(&[occurrence], "X")));
+    // Showing it again restores the saved eyes: X stays hidden, the other six are back.
+    run(&mut s, "browser.visibility", json!({"paths":[[occurrence]],"visible":true}));
+    assert_eq!(s.shown_component_origins().len(), 6);
+    assert!(s.construction_visible(&origins::key(&[occurrence], "Y")));
+    assert!(!s.construction_visible(&origins::key(&[occurrence], "X")));
+    assert_eq!(s.visibility.shown_component_origins, vec![vec![occurrence]], "the placement stays shown by name");
+}
+
+/// A placement that is gone cannot be cleared by hand (browser.visibility refuses a path that
+/// no longer resolves), so its shown Origin prunes like hidden_occurrences, and undo brings
+/// the placement and its shown folder back (#7313).
+#[test]
+fn deleting_a_placement_prunes_its_shown_origin_and_undo_restores_it() {
+    use crate::origins;
+    let mut s = Session::default();
+    let (component, occurrence) = created(&mut s, "Part");
+    run(&mut s, "browser.visibility", json!({"tree_folders":[origins::folder(&[occurrence])],"visible":true}));
+    assert_eq!(s.shown_component_origins().len(), 7);
+    // A deleted placement's folder cannot be cleared by hand any more: browser.visibility refuses
+    // a path that no longer resolves, whichever eye it sets. The stale folder prunes the way
+    // hidden_occurrences does.
+    run(&mut s, "component.delete", json!({"component": component}));
+    assert!(s.shown_component_origins().is_empty(), "the deleted placement's shown origin is pruned");
+    // Undo brings the placement back with its saved eyes.
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.shown_component_origins().len(), 7, "undo restores the shown origin with the placement");
+}
+
+/// A bare component origin datum key in a construct reference names its item: O the point, X an
+/// axis, XY a plane (through the plane resolver). Before, only the `{axis}`/`{construct_point}`
+/// forms read the datums, and the bare shorthand refused `o:2/4/origin/O` as "no plane" (#7313).
+#[test]
+fn bare_datum_keys_name_their_item_in_construct_refs() {
+    use crate::origins;
+    use solidcraft_doc::construct::{AxisDef, DatumItem, GeoRef};
+    use solidcraft_doc::{FeatureKind, PlaneRef};
+    let mut s = Session::default();
+    let (parent, first) = created(&mut s, "Parent");
+    run(&mut s, "component.create", json!({"name": "Child", "parent": "Parent"}));
+    let child = s.doc.occurrences.iter().find(|o| o.parent == parent).unwrap().id;
+    let path = vec![first, child];
+    run(&mut s, "component.activate", json!({"component": parent}));
+    run(&mut s, "construct.axis.two_points", json!({"a": origins::key(&path, "O"), "b": {"point": [12, 0, 0]}, "name": "From O"}));
+    run(&mut s, "construct.axis.edge", json!({"edge": origins::key(&path, "X"), "name": "On X"}));
+    run(&mut s, "sketch.create", json!({"plane": origins::key(&path, "XY"), "name": "On the datum"}));
+    // A closure cannot name the output lifetime here (two reference params), so a nested fn
+    // ties the returned kind to the session it is read from.
+    fn saved<'a>(s: &'a Session, name: &str) -> &'a FeatureKind {
+        s.doc.features.iter().find(|f| f.name == name).map(|f| &f.kind).unwrap()
+    }
+    match saved(&s, "From O") {
+        FeatureKind::ConstructionAxis { def } => match def {
+            AxisDef::TwoPoints { a, .. } => match a {
+                GeoRef::Datum { datum } => {
+                    assert_eq!(datum.path, path, "the datum names the nested placement");
+                    assert_eq!(datum.item, DatumItem::O);
+                }
+                other => panic!("expected the O datum, got {other:?}"),
+            },
+            other => panic!("expected two points, got {other:?}"),
+        },
+        other => panic!("expected a construction axis, got {other:?}"),
+    }
+    match saved(&s, "On X") {
+        FeatureKind::ConstructionAxis { def } => match def {
+            AxisDef::Edge { edge } => match edge {
+                GeoRef::Datum { datum } => assert_eq!(datum.item, DatumItem::X),
+                other => panic!("expected the X datum, got {other:?}"),
+            },
+            other => panic!("expected an edge line, got {other:?}"),
+        },
+        other => panic!("expected a construction axis, got {other:?}"),
+    }
+    match saved(&s, "On the datum") {
+        FeatureKind::Sketch { plane, .. } => match plane {
+            PlaneRef::Datum { datum } => {
+                assert_eq!(datum.path, path);
+                assert_eq!(datum.item, DatumItem::XY);
+            }
+            other => panic!("expected the XY datum, got {other:?}"),
+        },
+        other => panic!("expected a sketch, got {other:?}"),
+    }
+}
+
+/// A new component holds no bodies of its own: creating one changes nothing in the design and
+/// rejects body-taking parameters, so its Origin starts empty like the design's own (#7313).
+#[test]
+fn ambiguous_component_names_are_refused_without_changing_the_session() {
+    let mut s = Session::default();
+    let first = run(&mut s, "component.create", json!({"name":"A","activate":false}))["component"].as_u64().unwrap();
+    let second = run(&mut s, "component.create", json!({"name":"A","activate":false}))["component"].as_u64().unwrap();
+    // A placement with that name must not hide an ambiguous component lookup.
+    s.doc_mut().occurrences.first_mut().unwrap().name = "A".into();
+    run(&mut s, "component.create", json!({"name":"Temporary","activate":false}));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(!s.redo.is_empty(), "exercise refusal with an existing redo step");
+    let commands = [
+        ("component.delete", json!({"component":"A"})),
+        ("component.rename", json!({"component":"A","name":"Changed"})),
+        ("component.activate", json!({"component":"A"})),
+        ("component.create", json!({"name":"Child","parent":"A"})),
+        ("component.metadata.set", json!({"component":"A","description":"Changed"})),
+        ("component.break_link", json!({"component":"A"})),
+        ("selection.delete", json!({"components":["A"]})),
+        ("assembly.bom", json!({"component":"A"})),
+        ("config.column", json!({"component_appearance":"A"})),
+        ("appearance.chain", json!({"target":{"component":"A"}})),
+        ("appearance.assign", json!({"components":["A"],"appearance":"ABS - Red"})),
+        ("appearance.replace", json!({"from":"ABS - Red","to":"ABS - Blue","scope":{"components":["A"]}})),
+        ("parts.resize", json!({"component":"A","size":"M6"})),
+        ("solid.pattern.rectangular", json!({"components":["A"],"dir1":[1,0,0],"count1":2,"spacing1":10})),
+    ];
+    for (command, params) in commands {
+        let doc = s.doc.clone();
+        let undo = s.undo.len();
+        let redo = s.redo.len();
+        let error = s.execute(command, &params).unwrap_err();
+        assert!(matches!(&error, crate::EngineError::BadParams { .. }), "{command}: {error}");
+        let message = error.to_string();
+        for expected in ["ambiguous component `A`", &first.to_string(), &second.to_string(), "numeric component ID"] {
+            assert!(message.contains(expected), "{command}: {message}");
+        }
+        assert_eq!(s.doc, doc, "{command} changed the document");
+        assert_eq!(s.undo.len(), undo, "{command} changed undo");
+        assert_eq!(s.redo.len(), redo, "{command} changed redo");
+        assert_eq!(s.active_component, 0, "{command} changed the active component");
+        assert!(s.active_occurrence_path.is_none(), "{command} changed the active placement");
+    }
+    run(&mut s, "component.delete", json!({"component":second}));
+    assert!(s.doc.components.iter().any(|component| component.id == first));
+    assert!(!s.doc.components.iter().any(|component| component.id == second));
+    run(&mut s, "component.rename", json!({"component":"A","name":"Unique"}));
+    assert_eq!(s.doc.find_component("Unique"), Some(first));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.find_component("A"), Some(first));
+}
+
+#[test]
+fn component_ids_take_priority_over_numeric_names_and_survive_reopen() {
+    let mut s = Session::default();
+    let named = run(&mut s, "component.create", json!({"name":"3","activate":false}))["component"].as_u64().unwrap();
+    let target = run(&mut s, "component.create", json!({"name":"Target","activate":false}))["component"].as_u64().unwrap();
+    assert_eq!(target, 3);
+    let zero_name = run(&mut s, "component.create", json!({"name":"03","activate":false}))["component"].as_u64().unwrap();
+    for key in [json!(target), json!(target.to_string())] {
+        run(&mut s, "component.activate", json!({"component":key}));
+        assert_eq!(s.active_component, target);
+    }
+    run(&mut s, "component.activate", json!({"component":"03"}));
+    assert_eq!(s.active_component, zero_name);
+    let mut reopened = Session::opened(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap(), None);
+    run(&mut reopened, "component.rename", json!({"component":target.to_string(),"name":"Renamed"}));
+    assert_eq!(reopened.doc.components.iter().find(|component| component.id == named).unwrap().name, "3");
+    assert_eq!(reopened.doc.find_component("Renamed"), Some(target));
+}
+
 #[test]
 fn component_create_rejects_bodies_without_changing_design() {
     let mut s = Session::default();
@@ -1877,4 +2144,186 @@ fn a_body_seen_in_another_placement_pastes_into_another_design_under_its_own_nam
     assert_eq!(out["bodies"], json!(["Cube"]));
     let is = s.world_state().unwrap().body("Cube").unwrap().mesh().bounds();
     assert!(was.min.dist(is.min) < 1e-6 && was.max.dist(is.max) < 1e-6, "{was:?} vs {is:?}");
+}
+
+// #12150: `occurrence.move` with `to` / `to_matrix` places the occurrence at a target pose, not
+// on top of its current one.
+#[test]
+fn absolute_move_places_at_target_whatever_the_current_placement() {
+    let mut s = Session::default();
+    let (_, occ) = created(&mut s, "Part");
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": [7,8,9], "axis": [1,0,0], "angle": "30 deg"}));
+    for _ in 0..2 {
+        let r = run(&mut s, "occurrence.move", json!({"occurrence": occ, "to": {"position": [10,20,30], "axis": [0,0,1], "angle": "90 deg"}}));
+        let t = &r["transform"];
+        near(&t[3][0], 10.0);
+        near(&t[3][1], 20.0);
+        near(&t[3][2], 30.0);
+        // X turns onto Y about Z.
+        near(&t[0][0], 0.0);
+        near(&t[0][1], 1.0);
+        near(&t[2][2], 1.0);
+    }
+    let r = run(&mut s, "occurrence.move", json!({"occurrence": occ, "to": {"position": [1,2,3]}}));
+    near(&r["transform"][0][0], 1.0);
+    near(&r["transform"][3][2], 3.0);
+}
+
+#[test]
+fn absolute_move_to_matrix_in_world_under_a_turned_parent() {
+    let mut s = Session::default();
+    let (_, parent) = created(&mut s, "Parent");
+    run(&mut s, "occurrence.move", json!({"occurrence": parent, "translate": [100,0,0], "axis": [0,0,1], "angle": "90 deg"}));
+    let (_, child) = created(&mut s, "Child");
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1}));
+    run(&mut s, "occurrence.move", json!({"occurrence": child, "path": [parent, child], "translate": [3,4,5]}));
+    let target = json!([1, 0, 0, 10, 0, 1, 0, 20, 0, 0, 1, 30]);
+    for _ in 0..2 {
+        run(&mut s, "occurrence.move", json!({"occurrence": child, "path": [parent, child], "space": "world", "to_matrix": target}));
+        let result = run(&mut s, "occurrence.properties", json!({"occurrence": child, "path": [parent,child]}));
+        near(&result["total"]["center_of_mass"][0], 10.5);
+        near(&result["total"]["center_of_mass"][1], 20.5);
+        near(&result["total"]["center_of_mass"][2], 30.5);
+    }
+    // Local: the same numbers are the placement in the parent.
+    let r = run(&mut s, "occurrence.move", json!({"occurrence": child, "to_matrix": target}));
+    near(&r["transform"][3][0], 10.0);
+    near(&r["transform"][3][1], 20.0);
+}
+
+#[test]
+fn absolute_move_refuses_relative_keys_and_keeps_capture_and_grounding() {
+    let mut s = Session::default();
+    let (_, occ) = created(&mut s, "Part");
+    for extra in [
+        json!({"translate": [1,0,0]}),
+        json!({"axis": [0,0,1]}),
+        json!({"angle": 1}),
+        json!({"origin": [0,0,0]}),
+        json!({"matrix": [1,0,0,0,0,1,0,0,0,0,1,0]}),
+        json!({"to_matrix": [1,0,0,0,0,1,0,0,0,0,1,0]}),
+    ] {
+        let mut p = json!({"occurrence": occ, "to": {"position": [1,2,3]}});
+        for (k, v) in extra.as_object().unwrap() {
+            p[k] = v.clone();
+        }
+        assert!(s.execute("occurrence.move", &p).is_err(), "{p}");
+    }
+    assert!(s.execute("occurrence.move", &json!({"occurrence": occ, "to_matrix": [1,0,0,0,0,1,0,0,0,0,1,0], "translate": [1,0,0]})).is_err());
+    assert!(s.execute("occurrence.move", &json!({"occurrence": occ, "to": {"axis": [0,0,1]}})).is_err());
+    assert!(s.execute("occurrence.move", &json!({"occurrence": occ, "to": {"position": [0,0,0], "spin": 1}})).is_err());
+    assert!(s.execute("occurrence.move", &json!({"occurrence": occ, "to_matrix": [2,0,0,0,0,1,0,0,0,0,1,0]})).is_err());
+    let before = s.doc.occurrences.iter().find(|o| o.id == occ).unwrap().transform;
+    let r = run(&mut s, "occurrence.move", json!({"occurrence": occ, "to": {"position": [5,0,0]}, "capture": false}));
+    assert_eq!(r["pending"], json!(true));
+    near(&r["transform"][3][0], 5.0);
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == occ).unwrap().transform, before);
+    run(&mut s, "occurrence.ground", json!({"occurrence": occ, "grounded": true}));
+    assert!(s.execute("occurrence.move", &json!({"occurrence": occ, "to": {"position": [9,0,0]}})).is_err());
+    let r = run(&mut s, "occurrence.move", json!({"occurrence": occ, "to": {"position": [9,0,0]}, "move_grounded": true}));
+    near(&r["transform"][3][0], 9.0);
+}
+/// The one resolution order, pinned at the engine's resolver sites: a feature (exact name)
+/// first, then a datum key, then the origin aliases. A construction feature named like a datum
+/// key resolves as the feature at every site (its saved reference names the feature, or its
+/// geometry is where the feature is now); without the feature, the same key is the datum. The
+/// dialog sites (`plane_by_name`, `axis_of`, `named_plane`) pin the same order in the ui tests.
+#[test]
+fn resolver_order_is_feature_first_at_every_site() {
+    use crate::origins;
+    use solidcore_record::Vec3;
+    use solidcraft_doc::{FeatureKind, PlaneRef};
+    let mut s = Session::default();
+    let (_, child) = created(&mut s, "Child");
+    run(&mut s, "occurrence.move", json!({"occurrence": child, "translate": [100, 0, 0]}));
+    // The features are created in the active component, and `component.create` made Child active:
+    // back to the root, so "where the feature is now" is the root origin, not the child placement.
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let axis_key = origins::key(&[child], "X");
+    let plane_key = origins::key(&[child], "XY");
+    // The features the datum-looking names resolve to at every site below.
+    run(&mut s, "construct.axis.two_planes", json!({"a": "XY", "b": "XZ", "name": &axis_key}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "2 mm", "name": &plane_key}));
+
+    // construct.geo: a saved reference keeps the feature's name.
+    run(&mut s, "construct.plane.perpendicular", json!({"plane": "XY", "line": {"axis": &axis_key}, "name": "Geo axis"}));
+    let f = s.doc.features.iter().find(|f| f.name == "Geo axis").unwrap();
+    let FeatureKind::ConstructionPlane { plane: PlaneRef::Perpendicular { line, .. } } = &f.kind else { panic!("{:?}", f.kind) };
+    assert!(matches!(line.as_ref(), solidcraft_doc::construct::GeoRef::Axis { name } if *name == axis_key), "{line:?}");
+
+    // named_axis_line: the axis is where the feature is now (the root origin), not the datum's.
+    run(&mut s, "construct.plane.at_angle", json!({"base": "XY", "axis": &axis_key, "angle": "30 deg", "name": "Axis line"}));
+    let f = s.doc.features.iter().find(|f| f.name == "Axis line").unwrap();
+    let FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { axis_origin, .. } } = &f.kind else { panic!("{:?}", f.kind) };
+    assert!(axis_origin.dist(Vec3::ZERO) < 1e-9, "{axis_origin:?}");
+
+    // axis_param: a revolve saves the construction axis by name, not the datum.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 5], "p1": [15, 15]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.revolve", json!({"sketch": "Profile", "axis": &axis_key, "angle": "180 deg", "name": "Revolved"}));
+    let f = s.doc.features.iter().find(|f| f.name == "Revolved").unwrap();
+    let FeatureKind::Revolve { axis: solidcraft_doc::AxisRef::Construction { name }, .. } = &f.kind else { panic!("{:?}", f.kind) };
+    assert_eq!(name.to_string(), axis_key);
+
+    // plane_param: a sketch on the named plane is attached to the feature, not the datum.
+    let sid = run(&mut s, "sketch.create", json!({"plane": &plane_key, "name": "On the feature"}))["sketch"].as_u64().unwrap();
+    let FeatureKind::Sketch { plane: PlaneRef::Construction { feature }, .. } = &s.doc.feature(sid).unwrap().kind else {
+        panic!("{:?}", s.doc.feature(sid).unwrap().kind)
+    };
+    let named = s.doc.features.iter().find(|f| f.name == plane_key).unwrap().id;
+    assert_eq!(feature.0, named);
+
+    // shown_item: the exact name is the feature, and a datum key with no feature is the datum.
+    run(&mut s, "browser.visibility", json!({"items": [&axis_key], "visible": false}));
+    assert!(s.visibility.hidden_origin.iter().any(|h| h == &axis_key), "the feature hides by its exact name");
+    run(&mut s, "browser.visibility", json!({"items": [origins::key(&[child], "Y")], "visible": false}));
+    assert!(s.visibility.hidden_origin.iter().any(|h| h == &origins::key(&[child], "Y")), "the datum item hides by its key");
+}
+
+/// The world axes keep the precedence they always had at the axis resolvers: X, Y and Z name
+/// the design's axes before a construction axis answers to the same letters, however it is
+/// cased (#7313 review). An angled plane about `x` stands on the world axis, as it did before
+/// component origins, not on a construction axis named `x`.
+#[test]
+fn world_axis_names_keep_their_precedence_at_the_axis_resolvers() {
+    use solidcore_record::Vec3;
+    use solidcraft_doc::{FeatureKind, PlaneRef};
+    let mut s = Session::default();
+    // An older design can hold a construction axis named like a world axis (case included):
+    // away from the origin, so the geometry tells which one the command took.
+    run(&mut s, "construct.axis.two_points", json!({"a":{"point":[7,0,0]},"b":{"point":[12,0,0]},"name":"x"}));
+    for name in ["x", "X"] {
+        run(&mut s, "construct.plane.at_angle", json!({"base":"XY","axis":name,"angle":"30 deg","name":format!("Angled {name}")}));
+        let f = s.doc.features.iter().find(|f| f.name == format!("Angled {name}")).unwrap();
+        let FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { axis_origin, .. } } = &f.kind else { panic!("{:?}", f.kind) };
+        assert!(axis_origin.dist(Vec3::ZERO) < 1e-9, "{name}: the world axis, not the construction axis at {axis_origin:?}");
+    }
+}
+
+/// Look At keeps the world planes for their names: a picked `XY` looks at the design's XY
+/// plane, not at a construction plane of the same name (an older design can hold one), as it
+/// did before component origins (#7313 review). A datum key without a feature of its name
+/// still follows its placement.
+#[test]
+fn look_at_keeps_the_world_planes_for_their_names() {
+    use crate::origins;
+    use solidcore_record::Vec3;
+    let mut s = Session::default();
+    let (_, occurrence) = created(&mut s, "Part");
+    run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[0,0,5]}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    run(&mut s, "construct.plane.offset", json!({"base":"XY","offset":"3 mm","name":"Old plane"}));
+    // The commands refuse a plane named like a world plane today; an older design predates
+    // that check, so the fixture renames it by hand.
+    s.doc_mut().features.iter_mut().find(|f| f.name == "Old plane").unwrap().name = "XY".into();
+    s.selection = vec![crate::Sel::Plane { name: "XY".into() }];
+    run(&mut s, "view.normal_to", json!({}));
+    let camera = s.camera.unwrap();
+    assert!(camera.target.dist(Vec3::ZERO) < 1e-9, "the design's XY plane, not the construction plane of the same name at {:?}", camera.target);
+    let key = origins::key(&[occurrence], "XY");
+    s.selection = vec![crate::Sel::Plane { name: key }];
+    run(&mut s, "view.normal_to", json!({}));
+    let camera = s.camera.unwrap();
+    assert!(camera.target.dist(Vec3::new(0., 0., 5.)) < 1e-9, "the datum follows its placement: {:?}", camera.target);
 }

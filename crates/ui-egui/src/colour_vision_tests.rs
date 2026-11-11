@@ -5,7 +5,7 @@
 //! with their paper, Brettel on white and its own anchors.
 //!
 //! When a token edit breaks a mode here, adjust its measured variant. Shared icon accents live
-//! in `assets/icons/ui/design/palette.toml`; `crates/theme/src/palettes.rs` holds the primary
+//! in `crates/look/icons/design/palette.toml`; `crates/theme/src/palettes.rs` holds the primary
 //! strokes the UI tokens share with them (`icon_strokes`, held equal by an icon test) and owns the remaining UI-only colour-vision adjustments.
 
 use std::collections::BTreeSet;
@@ -997,7 +997,9 @@ fn validation_badges_are_distinct_and_readable_in_every_mode() {
 /// two-colour themes (1-bit) tell them apart by shape alone.
 #[test]
 fn shipped_themes_draw_dimensions_in_their_own_readable_colour() {
-    use crate::theme_files::{builtin, is_two_colour, resolve};
+    crate::test_support::host_data();
+    use crate::test_support::is_two_colour;
+    use crate::theme_files::{builtin, resolve};
     use solidcraft_theme::contrast_ratio;
     let themes = [("light", Tokens::light()), ("dark", Tokens::dark())]
         .into_iter()
@@ -1038,6 +1040,7 @@ fn shipped_themes_draw_dimensions_in_their_own_readable_colour() {
 
 #[test]
 fn onyx_keeps_gold_dimensions_distinct_from_grey_construction_lines() {
+    crate::test_support::host_data();
     use crate::theme_files::{OptionValue, builtin, resolve_with};
     let onyx = builtin().iter().find(|theme| theme.id == "onyx").unwrap();
     for (foreground, gold, driven) in [("muted", [199, 178, 139], [165, 148, 116]), ("vibrant", [255, 209, 102], [255, 177, 102])] {
@@ -1085,7 +1088,7 @@ fn the_sections_messages_are_in_every_catalog() {
     let ids: Vec<&str> = ColorVision::ALL
         .into_iter()
         .flat_map(|m| [m.label_id(), m.help_id()])
-        .chain(crate::ui_kit::COLOUR_VISION_SAMPLE)
+        .chain(crate::prefs::figures::COLOUR_VISION_SAMPLE)
         .chain(["ui.colour_vision", "ui.colour_vision_mode", "ui.colour_vision_sample", "ui.colour_vision_note"])
         .collect();
     for (lang, text) in [

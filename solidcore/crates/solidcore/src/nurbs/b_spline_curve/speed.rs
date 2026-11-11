@@ -33,6 +33,8 @@ pub struct SpanSpeed {
     q: Vec<[f64; 3]>,
     rational: Option<Rational>,
     rounding: f64,
+    /// The span's first control point `P_0`, Euclidean.
+    first: [f64; 3],
 }
 
 /// The rational part of a [`SpanSpeed`].
@@ -122,6 +124,11 @@ impl BSplineCurve {
                 })
                 .collect()
         };
+        let first = if polynomial {
+            coords(p0)
+        } else {
+            coords(p0).map(|h| h / p0.w)
+        };
         let (q, rational, size, ratio) = if polynomial {
             let euclid: Vec<[f64; 3]> = span_points.iter().map(|&c| coords(c)).collect();
             let origin = coords(p0);
@@ -194,6 +201,7 @@ impl BSplineCurve {
             q,
             rational,
             rounding,
+            first,
         }))
     }
 }
@@ -232,6 +240,37 @@ impl SpanSpeed {
             *d = (da - dw * (a / w)) / w;
         }
         Ok(norm(d))
+    }
+
+    /// The span's first control point `P_0`, Euclidean (for a rational span, its
+    /// homogeneous coordinates divided by its weight, rounded).
+    #[must_use]
+    pub const fn first_point(&self) -> [f64; 3] {
+        self.first
+    }
+
+    /// `C(t) - P_0` for `t` in a rational span, its end included, in difference form:
+    /// `A / w` (see [`SpanSpeed::speed`]), whose rounding scales with the span's own size
+    /// `max |P_i - P_0|`, not with its distance from the origin; `None` for a polynomial
+    /// span.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for `t` outside the span.
+    pub fn from_first_point(&self, t: f64) -> Result<Option<[f64; 3]>> {
+        if !(self.lo <= t && t <= self.hi) {
+            return Err(SolidError::invalid_input(
+                OP,
+                "parameter outside the knot span",
+            ));
+        }
+        let Some(r) = &self.rational else {
+            return Ok(None);
+        };
+        let (_, full) = basis(&self.knots, self.degree, t)?;
+        let a = weighted(&full, &r.g);
+        let w: f64 = full.iter().zip(&r.w).fold(0.0, |s, (n, w)| s + n * w);
+        Ok(Some(a.map(|a| a / w)))
     }
 
     /// A bound `delta` on the absolute rounding error of [`SpanSpeed::speed`]'s `C'` on

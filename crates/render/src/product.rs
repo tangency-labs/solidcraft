@@ -10,7 +10,7 @@ pub struct FaceAppearance {
     pub face: u32,
     pub color: [u8; 3],
     pub opacity: f64,
-    pub surface: Option<crate::surface::OpaqueSurface>,
+    pub surface: Option<solidcraft_viewport::surface::OpaqueSurface>,
     pub transmission: Option<crate::transmission::Transmission>,
 }
 
@@ -22,7 +22,7 @@ pub struct ProductMesh {
     pub mesh: Arc<Mesh>,
     pub color: [u8; 3],
     pub opacity: f64,
-    pub surface: Option<crate::surface::OpaqueSurface>,
+    pub surface: Option<solidcraft_viewport::surface::OpaqueSurface>,
     pub transmission: Option<crate::transmission::Transmission>,
     pub faces: Vec<FaceAppearance>,
 }

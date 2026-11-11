@@ -87,7 +87,7 @@ fn key(v: Option<&Value>) -> Option<String> {
 
 fn component_id(s: &Session, p: &Value, cmd: &str) -> Result<u64> {
     let k = key(p.get("component")).ok_or_else(|| bad(cmd, "`component` must be a component id or name"))?;
-    s.doc.find_component(&k).ok_or_else(|| bad(cmd, format!("no component `{k}`")))
+    s.doc.resolve_component(&k).map_err(|error| bad(cmd, error.to_string()))?.ok_or_else(|| bad(cmd, format!("no component `{k}`")))
 }
 
 fn read(s: &mut Session, p: &Value) -> Result<Value> {
