@@ -121,16 +121,19 @@ falls back to the edge's own value, then the feature's.
   is refused as a closed hole that does not part the junction, use `obround` at depth = width/2).
   Only the segment whose `to` is the junction takes one (never the last of an edge, never a
   junction the merge closes). The notch is `width` across the junction, centred, from `depth`
-  before the deeper bend line out to the nearer far edge, cut from the base and both stretches, so
-  the two are parted and joined only through the base `depth` back; `straight` and `rectangular`
-  are the same rectangle, `obround` ends its inner end in a half round, `tear` is the zero-width
-  cut made `depth` deeper, `notch` is none. Half the width must fit the narrower stretch. It shows
+  before the deeper bend line out to the nearer far edge, cut from the parent panel (the base, or
+  the flange the stretches hang off) and both stretches, so the two are parted and joined only
+  through the parent panel `depth` back; `straight` and `rectangular` are the same rectangle,
+  `obround` ends its inner end in a half round, `tear` is the zero-width cut made `depth` deeper,
+  cut whatever the two stretches' sides are, `notch` is none. Half the width must fit the narrower stretch. It shows
   on `OUTLINE`, never on `CUT`, and shortens both bends in the bend table by half the width. A
   relief that cannot be cut refuses the feature naming `edges[i].segments[j].relief`; nothing is
   clamped. Only the outermost segments take part in corner closing
   and end relief. Where the two stretches bend to opposite sides the blank is cut along their
   junction, from the inner bend line out to the nearer stretch's far edge, in the flat pattern and
-  the DXF: a blank joined there cannot fold, one stretch up and the next down. Stretches at
+  the DXF: a blank joined there cannot fold, one stretch up and the next down. Same-side stretches
+  stay joined unless the segment before the junction asks for a `tear`, which cuts the junction's
+  slit there too. Stretches at
   different angles can have different setbacks, depending on the rule's position (`inside` sets
   the bend line back, `outside` does not), so their bend lines can be offset; the cut starts at the
   inner of the two and so covers the strip between them, over which the folded part separates, and
@@ -189,7 +192,7 @@ The refusals are the contract; quote them when a call fails:
 | relief on the last segment | `edges[i].segments[j].relief: the last segment of an edge has no junction after it (put the relief on the segment that ends at the junction)` |
 | relief at a junction the merge closes | `edges[i].segments[j].relief: segments a and b are one bend (same angle, height and side), so there is no junction after segment a` |
 | negative depth | `edges[i].segments[j].relief.depth must be at least 0` |
-| depth past the far edge | `edges[i].segments[j].relief: a depth of D mm reaches past the flange's far edge (R mm away)` |
+| depth past the material inboard of the junction | `edges[i].segments[j].relief: a depth of D mm is deeper than the material inboard of the junction (R mm)` |
 | obround too shallow | `edges[i].segments[j].relief: an obround relief needs a depth of at least half its width (W mm)` |
 | width wider than the narrower stretch | `edges[i].segments[j].relief is W mm wide, wider than segment n (L mm); make the segment wider or the relief narrower` |
 | the notch splits the blank | `edges[i].segments[j].relief would cut the sheet apart; reduce its depth` |

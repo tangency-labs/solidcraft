@@ -850,9 +850,9 @@ fn remove_segment(list: &mut Vec<SegmentRow>, m: usize) {
     }
     let fraction = |text: &str| text.trim().parse::<f64>().ok().filter(|x| x.is_finite() && (0.0..=1.0).contains(x));
     // The relief of the row removed describes the junction at its own end; the row before it takes
-    // that end, so it takes the relief too. Removing the first stretch leaves no row that ends
-    // where it did, so its relief goes.
-    let kept_relief = list.get(m).and_then(|row| row.relief.clone()).filter(|_| m > 0);
+    // that end, so it takes the relief too, as it is: `None` clears the stale one it carried.
+    // Removing the first stretch leaves no row that ends where it did, so its relief goes.
+    let kept_relief = if m > 0 { list.get(m).and_then(|row| row.relief.clone()) } else { None };
     list.remove(m);
     for row in list.iter_mut() {
         row.equal = false;
@@ -886,10 +886,17 @@ fn remove_segment(list: &mut Vec<SegmentRow>, m: usize) {
             row.to = format!("{}", (i + 1) as f64 / n as f64);
         }
     }
-    if let Some(relief) = kept_relief
-        && let Some(took) = list.get_mut(m.wrapping_sub(1))
+    // The row that took the removed end takes the removed row's relief as it is: `None` included,
+    // so a row that asked for no relief no longer leaves the predecessor's stale one behind.
+    if m > 0
+        && let Some(took) = list.get_mut(m - 1)
     {
-        took.relief = Some(relief);
+        took.relief = kept_relief;
+    }
+    // The last stretch ends at the edge's end, where there is no junction to relieve: a relief
+    // there would ask the command for a cut it refuses (R5), so it never stays.
+    if let Some(last) = list.last_mut() {
+        last.relief = None;
     }
     // The stretches cover the whole edge, ends included.
     if let Some(first) = list.first_mut() {

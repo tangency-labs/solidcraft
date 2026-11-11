@@ -1684,26 +1684,10 @@ fn deleting_a_mid_edit_segment_keeps_the_boundaries_it_did_not_touch() {
     h.app.edit_feature(id);
     h.frames(6);
     // The user clears the second stretch's `to` in its field.
-    let dump = |h: &crate::scenario::Harness, when: &str| {
-        let mut found = Vec::new();
-        if let Some(tree) = h.output.accesskit_update.as_ref() {
-            for (_, n) in tree.nodes.iter() {
-                if let Some(label) = n.label().filter(|l| l.contains("Segment 2")) {
-                    found.push((label.to_string(), n.bounds().map(|b| [b.x0, b.y0, b.x1, b.y1]), n.role()));
-                }
-            }
-        }
-        eprintln!("[diag] {when}: widgets-of-interest {found:?}");
-        eprintln!("[diag] {when}: rows {:?}", restored_stretches(h));
-    };
-    dump(&h, "before click");
     h.step(&json!({"widget": "Segment 2 to"})).unwrap();
-    dump(&h, "after click");
     h.step(&json!({"key": "A", "cmd": true})).unwrap();
-    dump(&h, "after ctrl+A");
     h.step(&json!({"key": "Delete"})).unwrap();
     h.frames(3);
-    dump(&h, "after delete");
     assert_eq!(restored_stretches(&h)[0][1], ("0.1".to_string(), String::new()), "the removed stretch's `to` is empty, as while editing");
     // Delete that stretch: the gap is bridged from the neighbours.
     h.step(&json!({"click": {"handle": "dialog:button:Segment 2:Delete"}})).unwrap();
@@ -2081,4 +2065,34 @@ fn editing_a_flange_keeps_every_segments_relief() {
         "the edit sends the reliefs back as they were: {}",
         c[0].1["params"]
     );
+}
+/// Deleting a stretch that asks for no relief clears the relief of the row that takes its end, and
+/// no relief is left on the last stretch, which ends at the edge's end where no junction is.
+/// Carrying only a `Some` relief left the predecessor's stale one behind, at the edge's end as
+/// likely as anywhere (FR-13).
+#[test]
+fn deleting_a_stretch_without_relief_clears_the_one_before_it() {
+    let rows = || {
+        vec![
+            SegmentRow { from: "0".into(), to: "0.3".into(), equal: false, relief: Some((2, String::new(), String::new())), ..Default::default() },
+            SegmentRow { from: "0.3".into(), to: "0.8".into(), equal: false, ..Default::default() },
+            SegmentRow { from: "0.8".into(), to: "1".into(), equal: false, ..Default::default() },
+        ]
+    };
+    // The removed stretch asks for no relief: the row that takes its end takes that, so the stale
+    // relief it carried is cleared.
+    let mut list = rows();
+    remove_segment(&mut list, 1);
+    assert_eq!(list.len(), 2);
+    assert_eq!(list[0].relief, None, "the row that takes the removed end keeps a relief the removed row did not ask for");
+    assert_eq!(list[1].relief, None, "the last stretch carries no relief");
+    assert_eq!((list[0].from.as_str(), list[0].to.as_str()), ("0", "0.8"), "the gap is bridged as before");
+    // Deleting the last stretch takes the relief of the stretch before it with it: that stretch now
+    // ends at the edge's end, where there is no junction to relieve.
+    let mut last = rows();
+    last[1].relief = Some((3, "2 mm".into(), "1 mm".into()));
+    remove_segment(&mut last, 2);
+    assert_eq!(last.len(), 2);
+    assert_eq!(last[1].relief, None, "a relief is left at the edge's end, where no junction is");
+    assert_eq!(last[0].relief, Some((2, String::new(), String::new())), "the junction at 0.3 keeps its relief");
 }

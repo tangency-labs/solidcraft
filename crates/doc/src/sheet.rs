@@ -2928,8 +2928,8 @@ impl SheetBody {
     /// the folded solid; planar unions remove panel/bend seams and turn edge-crossing cuts
     /// into notches. Lines and circular arcs remain exact through clipping and merging; a
     /// free-form loop that comes out whole is the curve it was drawn as, one that is clipped
-    /// follows it with tangent arcs. Where a split edge's stretches bend to opposite sides the
-    /// blank is cut along their junction (see [`Self::junction_slits`]).
+    /// follows it with tangent arcs. Where a split edge's stretches part, the blank is cut along
+    /// their junction (see [`Self::junction_slits`]).
     pub fn flat_regions(&self) -> Result<Vec<Region2>> {
         let mut regions = self.flat_material()?;
         if regions.is_empty() {
@@ -3059,8 +3059,10 @@ impl SheetBody {
         Ok(regions)
     }
 
-    /// Where a split edge's stretches bend to opposite sides: the lines the flat pattern is cut
-    /// along at their junctions. Each runs from the inner bend line out to the nearer stretch's far
+    /// Where a split edge's stretches are cut in the blank: the lines the flat pattern is cut
+    /// along at their junctions. Two stretches that bend to opposite sides are parted whatever the
+    /// relief, and two that bend the same way when the ending one asked for a `tear`. Each runs
+    /// from the inner bend line (or `depth` before it for a tear) out to the nearer stretch's far
     /// edge, the innermost bend line to the nearest far edge, so the material either side of the
     /// junction parts there while the blank stays one piece. A whole-edge flange has no junction.
     fn junction_slits(&self) -> Vec<(Vec2, Vec2)> {
@@ -3073,9 +3075,12 @@ impl SheetBody {
                 let (Some(da), Some(db)) = (a.d.normalized(), b.d.normalized()) else { continue };
                 // One edge's stretches run the same way along it; one bending up and one down
                 // cannot share the bend line.
-                if da.dot(db) < 1.0 - 1e-9 || (a.angle >= 0.0) == (b.angle >= 0.0) {
+                if da.dot(db) < 1.0 - 1e-9 {
                     continue;
                 }
+                // Whether the two bend to opposite sides of the blank, which parts them even
+                // without a relief.
+                let opposite = (a.angle >= 0.0) != (b.angle >= 0.0);
                 // Adjacent stretches: one ends where the other starts.
                 let (early, late) = if a.p.dot(da) <= b.p.dot(da) { (a, b) } else { (b, a) };
                 let junction = early.p + da * early.len;
@@ -3097,13 +3102,18 @@ impl SheetBody {
                 // cutting on would slit the longer stretch's leg on its own (a C-shaped blank's
                 // far foot, for one).
                 // A junction the ending stretch relieved with a real notch (its `segments[].relief`
-                // took material out of the base and both panels) needs no slit: the notch parts the
-                // material, and a line inside it would be a second outline the shop cannot follow.
-                // A tear is the slit itself, starting `depth` deeper, in the base side.
+                // took material out of the parent panel and both stretches) needs no slit: the
+                // notch parts the material, and a line inside it would be a second outline the
+                // shop cannot follow. A tear is the slit itself, starting `depth` deeper, in the
+                // parent side, and it parts the junction whatever the two sides are: a same-side
+                // pair the shop nicks there folds as the two stretches asked. Junctions that ask
+                // for no relief are parted only where the two stretches bend to opposite sides,
+                // which cannot fold otherwise.
                 let (start, end) = match early.relief {
                     Some(r) if matches!(r.shape, ReliefShape::Straight | ReliefShape::Rectangular | ReliefShape::Obround) => continue,
                     Some(r) if r.shape == ReliefShape::Tear => (sa.min(sb) - r.depth, fa.min(fb)),
-                    _ => (sa.min(sb), fa.min(fb)),
+                    _ if opposite => (sa.min(sb), fa.min(fb)),
+                    _ => continue,
                 };
                 if end <= start + 1e-9 {
                     continue;
@@ -4486,10 +4496,10 @@ impl SheetBody {
 
     /// Cut the relief a stretch asks for at the junction its far end makes with the next stretch of
     /// a split edge: `width` across the junction, centred on it, from `depth` before the deeper
-    /// bend line out to the nearer far edge, out of the base and of both stretches' panels. Each
-    /// bend zone follows: `zone_span` measures a bend against the base's edge at its own bend line,
-    /// which the notch interrupts. A relief that cannot be cut refuses the feature, naming the
-    /// segment the caller wrote; nothing is clamped.
+    /// bend line out to the nearer far edge, out of the parent panel (the base, or the panel both
+    /// stretches hang off) and of both stretches' panels. Each bend zone follows: `zone_span`
+    /// measures a bend against its panel's root, which the notch interrupts. A relief that cannot
+    /// be cut refuses the feature, naming the segment the caller wrote; nothing is clamped.
     fn cut_junction_relief(&mut self, i: usize, r: JunctionRelief) -> Result<()> {
         let (edge, seg) = r.at;
         let named = format!("edges[{edge}].segments[{seg}].relief");
@@ -4518,8 +4528,21 @@ impl SheetBody {
             return Err(fail("the two bends leave no material at the junction to relieve".into()));
         }
         let (w, depth) = (r.width, r.depth);
-        if depth > reach + 1e-9 {
-            return Err(fail(format!("a depth of {depth:.3} mm reaches past the flange's far edge ({reach:.3} mm away)")));
+        // The deep end lies `depth` inboard of the inner bend line, so a deeper relief moves it
+        // further inwards, away from the far edge the outer end stops at. What it has to fit is
+        // the material the junction's bends leave inboard of that line: the parent panel (the base,
+        // or the panel the stretches hang off). Past that edge the notch would run into a bend zone,
+        // which is no panel and would keep the strip uncut, so it refuses instead of cutting short.
+        let parent_panel = match f.parent {
+            None => self.base.clone(),
+            Some(k) => match self.flanges.get(k) {
+                Some(g) => self.panel(g),
+                None => return Err(fail("the stretch's parent is missing".into())),
+            },
+        };
+        let room = inner - parent_panel.outer.polyline(1e-3).iter().map(|q| q.dot(n)).fold(f64::MAX, f64::min);
+        if depth > room + 1e-9 {
+            return Err(fail(format!("a depth of {depth:.3} mm is deeper than the material inboard of the junction ({room:.3} mm)")));
         }
         if r.shape == ReliefShape::Obround && depth < w / 2.0 - 1e-9 {
             return Err(fail(format!("an obround relief needs a depth of at least half its width ({:.3} mm)", w / 2.0)));
@@ -4566,7 +4589,12 @@ impl SheetBody {
         if let Some(outline) = outline {
             let tool = planar_region(&Region2 { outer: outline.ccw(), holes: Vec::new() })?;
             let mut work = FlatWork::new();
-            for panel in [None, Some(i), Some(j)] {
+            // Every region that holds material inside the notch: the panel the junction's bends
+            // leave (`f.parent`: the base, or the parent flange's panel when the stretches sit on
+            // a flange's edge) takes the deep-end strip, and each stretch's own panel takes its
+            // bend-line-to-far-edge part. Cutting the base instead of the parent panel cut nothing
+            // there and left the strip in the folded body and the flat pattern alike.
+            for panel in [f.parent, Some(i), Some(j)] {
                 let before = match panel {
                     None => self.base.clone(),
                     Some(k) => match self.flanges.get(k) {

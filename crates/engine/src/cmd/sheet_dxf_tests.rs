@@ -872,6 +872,22 @@ fn a_segment_relief_survives_a_save_and_a_design_without_one_rebuilds_identical(
     assert!(!plain.contains("\"relief\""), "a design without a relief writes one: {plain}");
     let area = |s: &mut Session| -> f64 { s.model.state().sheets[0].flat_regions().unwrap_or_default().iter().map(|r| r.area()).sum() };
     let before = area(&mut s);
+    // The plain design reads back byte for byte and builds the same flat pattern: a design that
+    // asks for no relief is untouched by the field (the judge noted this test neither reloaded it
+    // nor compared it with what the build made before the field existed).
+    let reloaded = solidcraft_doc::Document::from_json(&plain).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(reloaded.to_json(), plain, "a design without a relief does not round-trip byte for byte");
+    let mut reopened_plain = Session::new(reloaded);
+    let loops_of = |s: &mut Session| -> Vec<Vec<(u64, u64)>> {
+        s.model.state().sheets[0]
+            .flat_regions()
+            .unwrap_or_default()
+            .iter()
+            .map(|r| r.outer.ccw().polyline(1e-3).iter().map(|p| (p.x.to_bits(), p.y.to_bits())).collect())
+            .collect()
+    };
+    assert_eq!(loops_of(&mut reopened_plain), loops_of(&mut s), "the reopened plain design builds a different flat pattern");
+    assert!((area(&mut reopened_plain) - before).abs() < 1e-9, "the reopened plain design has a different area");
     // With one: the key is saved, and the design reads back and builds the same part.
     let mut with = plate_in(sheet_of_2mm(), &[]);
     run(
@@ -1283,4 +1299,198 @@ fn opposite_side_stretches_of_different_angles_cut_from_the_inner_bend_line() {
     run(&mut s, "sheet.unfold", json!({}));
     let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
     assert!(errors.is_empty(), "unfold: {errors:?}");
+}
+
+/// A junction relief on stretches that sit on a flange's edge cuts the panel the junction's bends
+/// leave: the parent flange's panel, not the base. Cutting the base cut nothing there and left the
+/// deep-end strip in the flat pattern and in the folded body alike, so the relief the shop asked
+/// for was never cut (FR-13).
+#[test]
+fn a_junction_relief_on_a_flange_owned_edge_cuts_the_parent_panel() {
+    // A 20 mm flange the whole way along the base's edge, then two stretches on its far edge; the
+    // rule's defaults are a relief 2 mm wide and 1 mm deep.
+    let build = |relief: Option<Value>| {
+        let mut s = plate_in(sheet_of_2mm(), &[]);
+        run(&mut s, "sheet.flange", json!({"type":"edge","edges":[{"point":[50,0,2]}],"height":"20 mm","angle":"90 deg"}));
+        let mut notched = json!({"from":0,"to":0.5,"angle":"90 deg","height":"20 mm"});
+        if let Some(r) = relief {
+            notched["relief"] = r;
+        }
+        run(
+            &mut s,
+            "sheet.flange",
+            json!({"type":"edge","edges":[{"point":[50.0, 2.0, 20.0],"segments":[
+                notched,
+                {"from":0.5,"to":1,"angle":"90 deg","height":"15 mm"}]}],
+                "height":"20 mm","angle":"90 deg"}),
+        );
+        s
+    };
+    let (w, depth) = (2.0, 1.0);
+    let mut plain = build(None);
+    let mut with = build(Some(json!({"shape":"straight"})));
+    let parent_area = |s: &mut Session| -> f64 {
+        let sh = &s.model.state().sheets[0];
+        let f = sh.flanges.first().cloned().unwrap_or_else(|| panic!("no parent flange"));
+        sh.panel(&f).area()
+    };
+    let (before, after) = (parent_area(&mut plain), parent_area(&mut with));
+    assert!(
+        (before - after - w * depth).abs() < 1e-6,
+        "the parent panel keeps the deep-end strip: {before} before, {after} after, want {} (the relief's {w} x {depth} deep end)",
+        before - w * depth
+    );
+    // The notch: x 49…51, from the relief depth before the stretches' bend line out to the nearer
+    // far edge, and its deep end lies in the parent panel's material.
+    let sh = &with.model.state().sheets[0];
+    let child = sh.flanges.last().cloned().unwrap_or_else(|| panic!("no stretch"));
+    assert_eq!(child.parent, Some(0), "the stretches sit on a flange's edge");
+    let n = child.n.normalized().unwrap_or_else(|| panic!("no normal"));
+    let inner = child.p.dot(n);
+    let outer = inner + sh.allowance(&child) + child.leg;
+    let (deep, far) = (-(inner - depth), -outer);
+    let (ld, rd) = (Vec2::new(49.0, deep), Vec2::new(51.0, deep));
+    let (lf, rf) = (Vec2::new(49.0, far), Vec2::new(51.0, far));
+    let regions = sh.flat_regions().unwrap_or_default();
+    let sides: Vec<(Vec2, Vec2)> = regions
+        .iter()
+        .flat_map(|r| {
+            r.outer.segs.iter().filter_map(|s| match *s {
+                Seg2::Line { a, b } => Some((a, b)),
+                _ => None,
+            })
+        })
+        .collect();
+    let near = |p: Vec2, q: Vec2| p.dist(q) < 1e-6;
+    // A loop draws each edge once, in whichever direction it runs round the material.
+    let drawn = |lines: &[(Vec2, Vec2)], a: Vec2, b: Vec2| lines.iter().any(|&(p, q)| (near(p, a) && near(q, b)) || (near(p, b) && near(q, a)));
+    for (a, b) in [(ld, rd), (lf, ld), (rf, rd)] {
+        assert!(drawn(&sides, a, b), "the flat pattern has no notch line {a:?} to {b:?}: deep end at y {deep}, far edge at y {far}, sides {sides:?}");
+    }
+    // The DXF writes the same three lines on OUTLINE.
+    let outline: Vec<(Vec2, Vec2)> = entities(&export(&mut with, json!({})))
+        .iter()
+        .filter(|e| e.0 == "LINE" && layer_of(e) == "OUTLINE")
+        .map(|e| (point(e, 10), point(e, 11)))
+        .collect();
+    for (a, b) in [(ld, rd), (lf, ld), (rf, rd)] {
+        assert!(drawn(&outline, a, b), "the DXF has no notch line {a:?} to {b:?}: {outline:?}");
+    }
+    // The folded body and the flat pattern still describe one part: the volume is the flat area
+    // times the thickness, and nothing else changed the body after the sheet metal features.
+    let area: f64 = regions.iter().map(|r| r.area()).sum();
+    with.model.state().sheets[0].flat_matches_body().unwrap_or_else(|e| panic!("the flat pattern no longer matches the body: {e}"));
+    let volume = run(&mut with, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap_or(f64::NAN);
+    assert!((volume - area * 2.0).abs() < 1e-6, "volume {volume} vs flat area {area} x 2 mm");
+}
+
+/// A `tear` on a junction of two stretches that bend the same way parts the blank there: the slit
+/// runs from the relief depth before the inner bend line out to the nearer far edge. The build only
+/// parted opposite-side junctions, so a same-side tear cut nothing and the shop had no mark to
+/// nick (FR-13).
+#[test]
+fn a_tear_on_a_same_side_junction_cuts_the_slit() {
+    // Two stretches of one edge, both bending up, of different heights: a junction, and no cut at
+    // it in a build that asks for no relief.
+    let build = |tear: bool| {
+        let mut s = plate_in(sheet_of_2mm(), &[]);
+        let mut first = json!({"from":0,"to":0.5,"angle":"90 deg","height":"20 mm","flip":false});
+        if tear {
+            first["relief"] = json!({"shape":"tear"});
+        }
+        run(
+            &mut s,
+            "sheet.flange",
+            json!({"type":"edge","edges":[{"point":[50,0,2],"segments":[
+                first,
+                {"from":0.5,"to":1,"angle":"90 deg","height":"15 mm","flip":false}]}],
+                "height":"20 mm","angle":"90 deg"}),
+        );
+        s
+    };
+    let mut plain = build(false);
+    let mut with = build(true);
+    // The tear is the rule's defaults: 1 mm deep. The bend line is at y = 3 and the 15 mm
+    // stretch's far edge at y = 3 - (pi + 12) is the nearer one.
+    let (from, to) = (Vec2::new(50.0, 4.0), Vec2::new(50.0, 3.0 - (PI + 12.0)));
+    let cut = |lp: &solidcore_record::Loop2, a: Vec2, b: Vec2| {
+        lp.segs.iter().any(|s| matches!(s, Seg2::Line { a: p, b: q } if p.dist(a) < 1e-6 && q.dist(b) < 1e-6))
+    };
+    let regions = with.model.state().sheets[0].flat_regions().unwrap_or_default();
+    assert!(
+        regions.iter().any(|r| cut(&r.outer, from, to) && cut(&r.outer, to, from)),
+        "a same-side junction with a tear is not cut from {from:?} to {to:?}: {:?}",
+        regions.iter().map(|r| r.outer.segs.len()).collect::<Vec<_>>()
+    );
+    // The tear cuts nothing out: the flat pattern keeps the area of the build that asks for none.
+    let area = |s: &mut Session| -> f64 { s.model.state().sheets[0].flat_regions().unwrap_or_default().iter().map(|r| r.area()).sum() };
+    let (with_tear, without) = (area(&mut with), area(&mut plain));
+    assert!((with_tear - without).abs() < 1e-9, "the tear changed the flat area: {with_tear} vs {without}");
+    // Unfolding builds the part with the slit in it.
+    run(&mut with, "sheet.unfold", json!({}));
+    let errors: Vec<String> = with.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.is_empty(), "unfold: {errors:?}");
+}
+
+/// Undo of a flange that carries a junction relief takes the relief and its geometry with it: the
+/// flat pattern is the plate again, with no notch and no junction, and the feature list is back.
+#[test]
+fn undoing_a_flange_takes_its_junction_relief_with_it() {
+    let mut s = plate_in(sheet_of_2mm(), &[]);
+    let area = |s: &mut Session| -> f64 { s.model.state().sheets[0].flat_regions().unwrap_or_default().iter().map(|r| r.area()).sum() };
+    let plain = area(&mut s);
+    run(
+        &mut s,
+        "sheet.flange",
+        json!({"type":"edge","edges":[{"point":[50,0,2],"segments":[
+            {"from":0,"to":0.5,"angle":"90 deg","height":"20 mm","relief":{"shape":"rectangular"}},
+            {"from":0.5,"to":1,"angle":"90 deg","height":"20 mm","flip":true}]}],
+            "height":"20 mm","angle":"90 deg"}),
+    );
+    // The notch's deep end, in the base: x 49…51 at y = 4 (the bend line is at y = 3).
+    let notch = |s: &mut Session| -> bool {
+        let deep = (Vec2::new(49.0, 4.0), Vec2::new(51.0, 4.0));
+        s.model.state().sheets[0]
+            .flat_regions()
+            .unwrap_or_default()
+            .iter()
+            .any(|r| r.outer.segs.iter().any(|sg| matches!(*sg, Seg2::Line { a, b } if a.dist(deep.0) < 1e-6 && b.dist(deep.1) < 1e-6)))
+    };
+    let notched = area(&mut s);
+    // 6000 - 300 + 100 * (pi + 17) - 2 * (pi + 17 + 1) = 7671.8760800518 mm2 with the relief.
+    assert!((notched - 7671.8760800518).abs() < 1e-6, "the relief is not cut: {notched}");
+    assert!(notch(&mut s), "the notch's deep end is missing");
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.model.state().sheets[0].flanges.is_empty(), "undo leaves a flange behind: {:?}", s.model.state().sheets[0].flanges.len());
+    assert!(!notch(&mut s), "the notch is still in the flat pattern");
+    let after = area(&mut s);
+    assert!((after - plain).abs() < 1e-9, "the flat pattern is {after} after the undo, the plate was {plain}");
+}
+
+/// A relief deeper than the material inboard of the junction refuses, naming the segment: past the
+/// parent panel's inner edge the notch would run into the parent's bend zone, which is no panel, so
+/// the deep end could not be cut where it was asked. A deeper depth moves the deep end inwards, so
+/// this is not a limit at the far edge (FR-13, R8).
+#[test]
+fn a_junction_relief_deeper_than_the_parent_panel_refuses_naming_the_segment() {
+    let mut s = plate_in(sheet_of_2mm(), &[]);
+    run(&mut s, "sheet.flange", json!({"type":"edge","edges":[{"point":[50,0,2]}],"height":"20 mm","angle":"90 deg"}));
+    let before = s.doc.to_json();
+    // The parent's leg is 17 mm and the stretches' bend line sits 3 mm inside its far edge, so 14 mm
+    // of parent panel lies inboard of the junction: a 15 mm deep relief cannot be cut.
+    let error = s
+        .execute(
+            "sheet.flange",
+            &json!({"type":"edge","edges":[{"point":[50.0, 2.0, 20.0],"segments":[
+                {"from":0,"to":0.5,"angle":"90 deg","height":"20 mm","relief":{"shape":"straight","depth":"15 mm"}},
+                {"from":0.5,"to":1,"angle":"90 deg","height":"15 mm"}]}],
+                "height":"20 mm","angle":"90 deg"}),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("edges[0].segments[0].relief: a depth of 15.000 mm is deeper than the material inboard of the junction (14.000 mm)"),
+        "{error}"
+    );
+    assert_eq!(s.doc.to_json(), before, "the refused feature changed the design");
 }

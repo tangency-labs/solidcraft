@@ -7178,8 +7178,8 @@ fn flange_segment_reliefs_refuse_what_cannot_be_cut() {
             "edges[0].segments[0].relief: segments 1 and 2 are one bend (same angle, height and side), so there is no junction after segment 1",
         ),
         (
-            edge(pair(json!({"shape":"straight","depth":"25 mm"}))),
-            "edges[0].segments[0].relief: a depth of 25.000 mm reaches past the flange's far edge (15.142 mm away)",
+            edge(pair(json!({"shape":"straight","depth":"100 mm"}))),
+            "edges[0].segments[0].relief: a depth of 100.000 mm is deeper than the material inboard of the junction (97.000 mm)",
         ),
         (
             edge(pair(json!({"shape":"obround","depth":"0.5 mm"}))),

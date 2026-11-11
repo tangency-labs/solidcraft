@@ -206,7 +206,8 @@ feature's `flip` is, so it is not a turn relative to the feature. No relief is c
 the junction asks for one (`relief`, below), and
 where the two stretches bend to opposite sides the blank is cut along their junction, from the inner
 bend line out to the nearer stretch's far edge, in the flat pattern and the DXF: a blank still joined
-there cannot fold one stretch up and the next down, while same-side stretches stay one piece.
+there cannot fold one stretch up and the next down, while same-side stretches stay one piece unless
+that segment asks for a `tear`, which is the junction's own cut.
 Stretches at different angles have different setbacks, so their bend lines are offset: the cut starts
 at the inner of the two, so it covers the strip between the bend lines, over which the folded part
 separates. Its outer end is the nearer far edge: past that only the longer stretch's material
@@ -240,7 +241,8 @@ edge's fractions, angle, height and side, an explicit `flip: false` included. Th
 **Relief** choice (`None`, `Notch`, `Straight`, `Rectangular`, `Obround`, `Tear`) with its own
 **Relief width** and **Relief depth**, which the build cuts at the junction after that stretch;
 **Split Edge** moves a relief to the last part, and removing a row moves its relief to the row that
-takes its end.
+takes its end, a row asking for none included, so no stale relief is left behind; the last stretch,
+which has no junction after it, keeps none.
 
 A segment's `relief` asks for a bend relief at the junction after it,
 `{"shape":"straight","width":"3 mm","depth":"1 mm"}`, where `width` and `depth` are lengths and take
@@ -249,16 +251,19 @@ shape is `straight`, `rectangular`, `obround`, `tear` or `notch`; `round` is ref
 round hole closes on itself and leaves material joining the two stretches out to the far edge, so
 the part still cannot fold (use `obround` with a depth of half its width). The relief belongs to
 the segment whose `to` is the junction, so the last segment of an edge takes none, and a junction
-the merge closes takes none either. The build cuts the notch out of the base and of both stretches'
-panels: `width` across the junction, centred on it, from `depth` before the deeper of the two bend
-lines out to the nearer far edge. The two stretches are then parted there and joined only through
-the base, `depth` back from the bend line, so each bend forms with a free end at the notch's side.
+the merge closes takes none either. The build cuts the notch out of the parent panel (the base,
+or, when the stretches sit on a flange's edge, that flange's panel) and of both stretches' panels:
+`width` across the junction, centred on it, from `depth` before the deeper of the two bend lines out
+to the nearer far edge. The two stretches are then parted there and joined only through the parent
+panel, `depth` back from the bend line, so each bend forms with a free end at the notch's side. A
+depth that would run past the parent panel into its bend zone refuses, because the notch could not
+be cut that deep.
 Half of the width comes out of each stretch's own length, so it must fit the narrower one.
 `straight` and `rectangular` cut the same footprint, a rectangle in the junction's frame; `obround`
 closes the notch's inner end with a half round of half its width (so its depth must be at least
 half its width, and the rule's defaults give exactly a half round on the inner bend line); `tear`
-cuts nothing and is the junction's own zero-width cut, started `depth` deeper into the base;
-`notch` is no relief, the default. A relief that cannot be cut refuses the feature, naming the
+cuts nothing and is the junction's own zero-width cut, started `depth` deeper into the parent panel
+and cut whatever the two stretches' sides are; `notch` is no relief, the default. A relief that cannot be cut refuses the feature, naming the
 segment (`edges[i].segments[j].relief ...`): nothing is clamped, because an unrelieved junction is
 the part FR-13 exists to remove. The flat pattern and the DXF carry the notch on `OUTLINE` (an
 `obround` as one `ARC`), the junction's zero-width cut is dropped where a notch parts it, and both
