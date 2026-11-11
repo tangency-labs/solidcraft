@@ -1,15 +1,21 @@
 //! Free curves: a B-spline from the control points a designer places, one of its control points
-//! moved, and its curvature comb. The curve is the record's ([`Curve`]); the knots and the
-//! curvature are the kernel's ([`solidcore::nurbs::knots::clamped_uniform`],
+//! moved, the curve under an affine map, and its curvature comb. The curve is the record's
+//! ([`Curve`]); the knots, the map's carrying of the control points and the curvature are the
+//! kernel's ([`solidcore::nurbs::knots::clamped_uniform`],
+//! [`solidcore::nurbs::crv_basic::Curve::transform`],
 //! [`solidcore::query::continuity::curve_comb`]). Ops checks the inputs and converts.
 
 use solidcore::curve::from_parameters::from_parameters;
+use solidcore::geom::certified::Verdict;
 use solidcore::nurbs::knots::{clamped_uniform, MAX_DEGREE};
+use solidcore::nurbs::math::{MatrixType, RealMatrix};
 use solidcore::query::continuity;
 use solidcore::SolidError;
 use solidcore_record::brep::Curve;
 
+use crate::body::REGULAR_RATIO;
 use crate::continuity::{tooth, CombTooth, MAX_COMB_TEETH, MIN_COMB_TEETH};
+use crate::curve_knots::{net_of, record_of};
 use crate::session::run;
 use crate::sweep::{coord_ok, CURVE_MAX_POINTS};
 use crate::{Error, Result};
@@ -83,6 +89,47 @@ fn periodic_twin(knots: &[f64], points: &[[f64; 3]], index: usize) -> Option<usi
     } else {
         index.checked_sub(distinct).filter(|i| *i < degree)
     }
+}
+
+/// `curve` under the affine `matrix`, as [`Body::transform`](crate::Body::transform) takes it:
+/// rows 0-2 the images of x, y and z, row 3 the translation (`p' = p·A + t`), the fourth column
+/// `(0, 0, 0, 1)`. Every control point is carried by the map
+/// ([`solidcore::nurbs::crv_basic::Curve::transform`], `N_CrvTransform`); the degree, the knots
+/// and the weights stay as they were. An affine map
+/// commutes with the convex combinations a NURBS curve is made of, so the result is the image of
+/// the curve itself, to the rounding of each carried point (none for a map whose entries are 0
+/// and ±1 on a spline's points). Reflections, non-uniform scales and shears are maps like any
+/// other. A spline or a rational spline, clamped or closed (a closed curve's repeated points are
+/// carried alike, so it stays closed).
+///
+/// # Errors
+/// [`Error::Argument`], before the curve is read, for a matrix the kernel does not prove regular
+/// ([`solidcore::Transform::is_regular`] at [`REGULAR_RATIO`]: an entry not finite, a fourth
+/// column that is not `(0, 0, 0, 1)`, a smallest scale not proved above the ratio of the
+/// largest); [`Error::Argument`] for another kind of curve, one the record refuses, or an image
+/// the record refuses (a coordinate carried past what a double holds); the kernel's status
+/// otherwise.
+pub fn transform(curve: &Curve, matrix: &[[f64; 4]; 4]) -> Result<Curve> {
+    let map = solidcore::Transform { m: *matrix };
+    if map.is_regular(REGULAR_RATIO) != Verdict::Yes {
+        return Err(Error::Argument);
+    }
+    let mut nurb = net_of(curve)?;
+    // The kernel's matrix acts on a column (`x' = r00 x + r01 y + r02 z + r03`): the record's
+    // row-vector matrix, its entries moved to their transposed places.
+    let [[a00, a01, a02, a03], [a10, a11, a12, a13], [a20, a21, a22, a23], [a30, a31, a32, a33]] =
+        *matrix;
+    let rows = vec![
+        vec![a00, a10, a20, a30],
+        vec![a01, a11, a21, a31],
+        vec![a02, a12, a22, a32],
+        vec![a03, a13, a23, a33],
+    ];
+    run("curve::transform", |_| {
+        let columns = RealMatrix::from_rows(3, 3, rows, MatrixType::Full, 3)?;
+        nurb.transform(&columns)?;
+        Ok(record_of(&nurb))
+    })?
 }
 
 /// The curvature comb of `curve` over `interval` of its parameter: the kernel's curvature vector
@@ -255,6 +302,132 @@ mod tests {
             panic!()
         };
         assert_eq!(points[4], SQUARE[0]);
+    }
+
+    /// The matrix of the reflection about the plane y = 0.
+    const MIRROR_Y: [[f64; 4]; 4] = [
+        [1.0, 0.0, 0.0, 0.0],
+        [0.0, -1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ];
+
+    #[test]
+    fn a_cubic_reflected_about_y_0_has_its_cvs_mirrored_exactly() {
+        let wave = [
+            [0.0, 1.0, 0.5],
+            [2.0, 3.0, -1.0],
+            [4.0, -2.0, 0.25],
+            [6.0, 0.5, 2.0],
+            [8.0, 4.0, 0.0],
+        ];
+        let c = cv_curve(&wave, 3).unwrap();
+        let image = transform(&c, &MIRROR_Y).unwrap();
+        let (
+            Curve::Spline { knots, points },
+            Curve::Spline {
+                knots: k1,
+                points: p1,
+            },
+        ) = (&c, &image)
+        else {
+            panic!("a spline: {image:?}")
+        };
+        assert_eq!(k1, knots);
+        let mirrored: Vec<[f64; 3]> = points.iter().map(|&[x, y, z]| [x, -y, z]).collect();
+        assert_eq!(p1, &mirrored);
+        // Twice is the curve again.
+        assert_eq!(transform(&image, &MIRROR_Y).unwrap(), c);
+    }
+
+    #[test]
+    fn a_rational_curve_keeps_its_weights_and_knots() {
+        // A quarter circle of radius 10 about the origin, as a rational quadratic.
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        let arc = Curve::RationalSpline {
+            knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            homogeneous: vec![
+                [10.0, 0.0, 0.0, 1.0],
+                [10.0 * w, 10.0 * w, 0.0, w],
+                [0.0, 10.0, 0.0, 1.0],
+            ],
+        };
+        let image = transform(&arc, &MIRROR_Y).unwrap();
+        let (
+            Curve::RationalSpline { knots, homogeneous },
+            Curve::RationalSpline {
+                knots: k1,
+                homogeneous: h1,
+            },
+        ) = (&arc, &image)
+        else {
+            panic!("a rational spline: {image:?}")
+        };
+        assert_eq!(k1, knots);
+        for (p, q) in homogeneous.iter().zip(h1) {
+            assert_eq!(q[3], p[3], "the weight");
+            let mirrored = [p[0], -p[1], p[2]];
+            assert!(
+                q.iter().zip(mirrored).all(|(a, b)| (a - b).abs() < 1e-12),
+                "{q:?} against {mirrored:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_motion_takes_rows_as_the_axes_images_and_row_3_as_the_move() {
+        // A quarter turn about z (x to y, y to -x), then a move by (1, 2, 3): the convention of
+        // `Body::transform`.
+        let turn = [
+            [0.0, 1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [1.0, 2.0, 3.0, 1.0],
+        ];
+        let image = transform(&cv_curve(&SQUARE, 3).unwrap(), &turn).unwrap();
+        let Curve::Spline { points, .. } = &image else {
+            panic!("a spline: {image:?}")
+        };
+        let moved: Vec<[f64; 3]> = SQUARE
+            .iter()
+            .map(|&[x, y, z]| [1.0 - y, 2.0 + x, 3.0 + z])
+            .collect();
+        assert_eq!(points, &moved);
+    }
+
+    #[test]
+    fn a_closed_curve_stays_closed() {
+        let c = crate::curve_fit::closed_cv_curve(&SQUARE, 3).unwrap();
+        let image = transform(&c, &MIRROR_Y).unwrap();
+        let (Curve::Spline { knots, .. }, Curve::Spline { knots: k1, points }) = (&c, &image)
+        else {
+            panic!("a spline: {image:?}")
+        };
+        assert_eq!(k1, knots);
+        // points 0, 1 and 2 are repeated as 4, 5 and 6
+        for (p, copy) in points.iter().zip(&points[4..]) {
+            assert_eq!(p, copy);
+        }
+        assert_eq!(points[1], [10.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn a_singular_matrix_or_another_curve_is_refused() {
+        let c = cv_curve(&SQUARE, 3).unwrap();
+        let mut flat = MIRROR_Y;
+        flat[1][1] = 0.0;
+        assert_eq!(transform(&c, &flat), Err(Error::Argument));
+        let mut projective = MIRROR_Y;
+        projective[0][3] = 1.0;
+        assert_eq!(transform(&c, &projective), Err(Error::Argument));
+        let mut nan = MIRROR_Y;
+        nan[3][0] = f64::NAN;
+        assert_eq!(transform(&c, &nan), Err(Error::Argument));
+        let line = Curve::Line {
+            start: [0.0; 3],
+            end: [1.0; 3],
+        };
+        assert_eq!(transform(&line, &MIRROR_Y), Err(Error::Argument));
     }
 
     #[test]
