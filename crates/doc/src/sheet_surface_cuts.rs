@@ -3,9 +3,9 @@
 //! stays the master and the folded part, its flat and its DXF are all built from it alike:
 //!
 //! - where the cut goes through, the panel's outline loses it, as if the panel had been drawn so:
-//!   no record of the cut is kept; but where it reaches an edge a rip cut the panel back to (the
-//!   gap that closes a corner), it is kept as a cut of the sheet's, in the panel's chart: the
-//!   panel's outline runs on to the rip's line, past its material, for the rip to cut back;
+//!   no record of the cut is kept. Where it reaches an edge a rip cut the panel back to (the gap
+//!   that closes a corner), it runs on across the rip's lap to the rip's line: the panel's
+//!   outline runs to that line, past its material, and the rip cuts back what is left of it;
 //! - where it stops inside the thickness on a floor parallel to the panel, the panel keeps a
 //!   recess, from its own face or the face one thickness into the material, to the floor's depth;
 //!   a later cut through a recess takes it with the material.
@@ -227,19 +227,62 @@ fn touches(g: &Region2, of: &[Region2], near: f64) -> bool {
     of.iter().flat_map(|r| &r.outer.segs).any(|s| (&pts).into_iter().any(|p| s.point_at(s.closest_param(*p).clamp(0.0, 1.0)).dist(*p) <= near))
 }
 
-/// The edges the rips give panel `p` of the development `dev`, in the panel's chart: where a rip
-/// cut the panel back from its own edge along it (see [`EdgeFrom::Rip`]), as a corner closed
-/// with a gap has it. None for a panel no rip cuts.
-fn rip_edges(dev: &Development, p: usize) -> Vec<Seg2> {
+/// The edges the rips give panel `p` of the development `dev`, in the panel's chart, each with its
+/// rip's joint: where a rip cut the panel back from its own edge along it (see
+/// [`EdgeFrom::Rip`]), as a corner closed with a gap has it. None for a panel no rip cuts.
+fn rip_edges(dev: &Development, p: usize) -> Vec<(usize, Seg2)> {
     let (Some(Some(laid)), Some(Some(at))) = (dev.panels.get(p), dev.placements.get(p)) else { return Vec::new() };
     let back = at.inverse();
     std::iter::once(&laid.region.outer)
         .chain(&laid.region.holes)
         .zip(&laid.origins)
         .flat_map(|(l, from)| l.segs.iter().zip(from))
-        .filter(|(_, from)| matches!(from, EdgeFrom::Rip(_)))
-        .map(|(s, _)| back.seg(s))
+        .filter_map(|(s, from)| match from {
+            EdgeFrom::Rip(j) => Some((*j, back.seg(s))),
+            EdgeFrom::Own(_) => None,
+        })
         .collect()
+}
+
+/// `g`, a region a cut took through panel `p` of `sk` (in its chart), run on across the lap of
+/// each rip whose new edge it reaches (`rips`, see [`rip_edges`]) to the rip's line: the band's
+/// rectangle over the stretch where `g` reaches the band's inner line, from that line out to the
+/// rip's (see [`crate::sheet_surface_features::reaches`]), joined to `g` by the planar booleans.
+/// The lap is never material, so this takes no more of the panel than `g` does; it puts the cut
+/// in the panel's outline as drawn. Where `g` only touches the edge, at a point, nothing runs on
+/// (it stays a hole of the panel). Refused where the rip's edge on the panel isn't one straight
+/// edge cut alike all along (see [`crate::sheet_surface_features::lap_band`]).
+fn across_laps(sk: &SurfaceSheet, p: usize, g: Region2, rips: &[(usize, Seg2)], tol: f64) -> std::result::Result<Region2, String> {
+    let t = sk.sheet.thickness;
+    let mut laps: Vec<Region2> = Vec::new();
+    for (j, joint) in sk.sheet.joints.iter().enumerate() {
+        let JointKind::Rip(rip) = &joint.kind else { continue };
+        let edges: Vec<Seg2> = rips.iter().filter(|(k, _)| *k == j).map(|(_, s)| *s).collect();
+        if edges.is_empty() || !reaches(&g, &edges, tol)? {
+            continue;
+        }
+        for (panel, on_a) in [(joint.a.panel, true), (joint.b.panel, false)] {
+            if panel != p {
+                continue;
+            }
+            let Some(band) = crate::sheet_surface_features::lap_band(rip, on_a, t) else {
+                let name = sk.sheet.panels.get(p).map_or("a panel", |x| x.name.as_str());
+                return Err(format!("reaches the edge a rip left on {name}, which isn't one straight edge cut alike all along: not supported yet"));
+            };
+            for (lo, hi) in crate::sheet_surface_features::reaches(&g, &band) {
+                let corners = [band.start + band.way * lo, band.start + band.way * hi, band.inner(hi), band.inner(lo)];
+                laps.push(Region2 { outer: Loop2::polygon(&corners).ccw(), holes: Vec::new() });
+            }
+        }
+    }
+    if laps.is_empty() {
+        return Ok(g);
+    }
+    let joined = planar_regions_boolean(std::slice::from_ref(&g), &laps, BoolOp::Union, tol).map_err(|e| e.to_string())?;
+    match <[Region2; 1]>::try_from(joined) {
+        Ok([one]) => Ok(one),
+        Err(_) => Err("can't be kept in the sheet yet: run on across a rip's lap, it doesn't join up".into()),
+    }
 }
 
 /// Whether region `g` reaches any of `edges`: its outline comes within `near` of one (crosses it,
@@ -1145,19 +1188,16 @@ fn onto_panels(sk: &SurfaceSheet, was: &Body, now: &Body, walls: Option<&[usize]
             }
             // A panel's region runs on past its material to each rip's line, for the rip to cut
             // it back (a corner closed with a gap). What went through ends at the rip's new
-            // edge, inside the region: taken from the region, a cut that reaches that edge would
-            // be a hole the rip leaves on the outline, or would leave a strip as wide as the
-            // rip's cut, which the rip cuts back across along the region's own edges. It is a
-            // cut of the sheet's instead, in the panel's chart, cut from the panel's material as
-            // the rips leave it (see [`crate::sheet_surface::pieces`]).
+            // edge, inside the region: taken from the region as it is, a cut that reaches that
+            // edge would be a hole the rip leaves on the outline, or would leave a strip as wide
+            // as the rip's cut, which the rip cuts back across along the region's own edges. The
+            // strip is the rip's lap, never material: the cut runs on across it to the rip's line
+            // (see [`across_laps`]), so that the panel's outline holds the cut as drawn, and the
+            // rip cuts back what is left of its edge.
             let rips = rip_edges(&dev, p);
             let mut own = Vec::with_capacity(through.len());
             for g in through {
-                if reaches(&g, &rips, tol)? {
-                    out.sheet.cuts.push(Cut { panel: p, region: g });
-                } else {
-                    own.push(g);
-                }
+                own.push(across_laps(sk, p, g, &rips, tol)?);
             }
             let through = own;
             if !through.is_empty() {

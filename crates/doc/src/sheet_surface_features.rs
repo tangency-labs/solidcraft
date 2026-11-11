@@ -2026,8 +2026,13 @@ fn area(r: &[Region2]) -> f64 {
 
 /// `region` with its side from `from` along `m` for `rise` (as `to_line` leaves it) set back `by`
 /// toward `into`, square to it, past `h` along it: the side steps in at `h` and runs on parallel,
-/// and the edge past the side runs on along its line to meet it. `None` where the side or that
-/// edge isn't a straight line of the outline.
+/// and the edge past the side runs on along its line to meet it. Where the side is slanted and
+/// reaches only a little past `h` (a wall at 90° beside one at 60°), the step meets that edge
+/// before it has gone `by`: the line `by` in meets the edge at or below `h`, where the rip's cut
+/// reaches it, so the step stops at the edge and the edge runs on from there. (Stepping on past the
+/// edge left the side running back down that line, the way the rip's cut comes up it.) `None`
+/// where the side or that edge isn't a straight line of the outline, or the edge would run
+/// backwards.
 fn set_back_past(region: &Region2, from: Vec2, m: Vec2, rise: f64, h: f64, into: Vec2, by: f64) -> Option<Region2> {
     let segs = &region.outer.segs;
     let n = segs.len();
@@ -2045,14 +2050,30 @@ fn set_back_past(region: &Region2, from: Vec2, m: Vec2, rise: f64, h: f64, into:
     if cross.abs() <= 1e-12 {
         return None;
     }
-    let new_top = q + m * ((pa - q).cross(w) / cross);
-    let mut out = segs.clone();
-    let side = if up {
-        vec![Seg2::Line { a: from, b: p }, Seg2::Line { a: p, b: q }, Seg2::Line { a: q, b: new_top }]
+    // How far on along `m` from `q` the line `by` in meets the edge past the side: ahead of `q`
+    // where the side runs on past the step; else the step itself reaches the edge, where it stops.
+    let ahead = (pa - q).cross(w) / cross;
+    let mut pts = if ahead > 0.0 {
+        vec![from, p, q, q + m * ahead]
     } else {
-        vec![Seg2::Line { a: new_top, b: q }, Seg2::Line { a: q, b: p }, Seg2::Line { a: p, b: from }]
+        let across = into.cross(w);
+        if across.abs() <= 1e-12 {
+            return None;
+        }
+        vec![from, p, p + into * ((pa - p).cross(w) / across)]
     };
-    out[past_at] = if up { Seg2::Line { a: new_top, b: pb } } else { Seg2::Line { a: pa, b: new_top } };
+    let end = *pts.last()?;
+    // The edge past the side keeps its way.
+    let kept = if up { pb - end } else { end - pa };
+    if !(kept.dot(w) > 0.0) {
+        return None;
+    }
+    if !up {
+        pts.reverse();
+    }
+    let side: Vec<Seg2> = pts.windows(2).map(|x| Seg2::Line { a: x[0], b: x[1] }).collect();
+    let mut out = segs.clone();
+    out[past_at] = if up { Seg2::Line { a: end, b: pb } } else { Seg2::Line { a: pa, b: end } };
     out.splice(k..=k, side);
     Some(Region2 { outer: Loop2 { segs: out }, holes: region.holes.clone() })
 }
@@ -2070,12 +2091,12 @@ fn dist_to_segment(p: Vec2, a: Vec2, b: Vec2) -> f64 {
 /// `into`, its material (as the development cuts it, see [`Lap::cuts`]). The panel's outline runs
 /// to the rip's edge; its material starts at the band's inner line, `cut` in.
 #[derive(Clone, Copy, Debug)]
-struct LapBand {
-    start: Vec2,
-    way: Vec2,
-    length: f64,
-    into: Vec2,
-    cut: f64,
+pub(crate) struct LapBand {
+    pub(crate) start: Vec2,
+    pub(crate) way: Vec2,
+    pub(crate) length: f64,
+    pub(crate) into: Vec2,
+    pub(crate) cut: f64,
 }
 
 impl LapBand {
@@ -2086,7 +2107,7 @@ impl LapBand {
     }
 
     /// The point of the band's inner line `s` along the rip from its start.
-    fn inner(&self, s: f64) -> Vec2 {
+    pub(crate) fn inner(&self, s: f64) -> Vec2 {
         self.start + self.way * s + self.into * self.cut
     }
 
@@ -2102,7 +2123,7 @@ impl LapBand {
 /// The band the lap of `rip` takes off its `a` panel (`on_a`) or its `b` panel (see [`LapBand`]):
 /// the `a` panel's material lies on the left of the rip's way, the `b` panel's on the right. None
 /// where the rip isn't one straight edge cut alike all along (as [`part_rip`] reads it).
-fn lap_band(rip: &Rip, on_a: bool, t: f64) -> Option<LapBand> {
+pub(crate) fn lap_band(rip: &Rip, on_a: bool, t: f64) -> Option<LapBand> {
     let edge = if on_a { &rip.edges.0 } else { &rip.edges.1 };
     let ([start, end], [t0, t1]) = (edge.as_slice(), rip.turns.as_slice()) else { return None };
     let straight = |c: &[Seg2]| c.is_empty() || matches!(c, [Seg2::Line { .. }]);
@@ -2126,7 +2147,7 @@ fn lap_band(rip: &Rip, on_a: bool, t: f64) -> Option<LapBand> {
 /// line with the outline short of it, and nothing there is held. Read off the outline's own edges
 /// where they meet the line, and between those, where the line lies on no edge, by whether the
 /// outline holds it.
-fn reaches(region: &Region2, band: &LapBand) -> Vec<(f64, f64)> {
+pub(crate) fn reaches(region: &Region2, band: &LapBand) -> Vec<(f64, f64)> {
     let on = |p: Vec2| (band.at(p).1 - band.cut).abs() <= ON_LAP;
     // Far enough past the outline, by a box that holds each of its edges exactly.
     let (lo, hi) = region.outer.segs.iter().map(crate::sheet_surface_cuts::seg_box).fold(

@@ -593,6 +593,67 @@ struct RipSide {
     cut: Vec<Seg2>,
 }
 
+/// A rip's side whose edge is straight and is cut back along one line (as an even cut of a
+/// straight edge on a plane is): the edge from `start` along `way` for `length`, and the new edge
+/// from `cut[0]`, beside the edge's start, to `cut[1]`, beside its end.
+struct Straight {
+    start: Vec2,
+    way: Vec2,
+    length: f64,
+    cut: [Vec2; 2],
+}
+
+impl Straight {
+    fn of(side: &RipSide) -> Option<Straight> {
+        let [Seg2::Line { a, b }] = side.cut.as_slice() else { return None };
+        let [start, end] = side.ends;
+        let way = (end - start).normalized()?;
+        // Its middle on the line through its ends.
+        if (side.middle - start).cross(way).abs() > ON_OUTLINE {
+            return None;
+        }
+        Some(Straight { start, way, length: start.dist(end), cut: [*a, *b] })
+    }
+
+    /// Whether `p` lies on the edge's line, within [`ON_OUTLINE`].
+    fn on(&self, p: Vec2) -> bool {
+        (p - self.start).cross(self.way).abs() <= ON_OUTLINE
+    }
+}
+
+/// The stretches of loop `l` that run along the straight rip edge `line`, its way, within its ends:
+/// each from and to (as places on the loop, see [`place_on`]), with the part of the rip's new edge
+/// beside it (its points answer the edge's in proportion along it). Edges one after another along
+/// the line are one stretch.
+fn stretches_along(l: &Loop2, line: &Straight) -> Vec<(f64, f64, Seg2)> {
+    let along = |p: Vec2| (p - line.start).dot(line.way);
+    let mut runs: Vec<(f64, f64, f64, f64)> = Vec::new();
+    for (k, g) in l.segs.iter().enumerate() {
+        let Seg2::Line { a, b } = *g else { continue };
+        if !(line.on(a) && line.on(b)) || (b - a).dot(line.way) <= 0.0 {
+            continue;
+        }
+        let (sa, sb) = (along(a), along(b));
+        let (lo, hi) = (sa.max(0.0), sb.min(line.length));
+        if hi - lo <= ON_OUTLINE {
+            continue;
+        }
+        let place = |s: f64| k as f64 + (s - sa) / (sb - sa);
+        let (from, to) = (place(lo), place(hi));
+        // An edge that starts where the last stretch ended (at the end of the edge before it)
+        // carries it on.
+        match runs.last_mut() {
+            Some(run) if run.1 == from => {
+                run.1 = to;
+                run.3 = hi;
+            }
+            _ => runs.push((from, to, lo, hi)),
+        }
+    }
+    let at = |s: f64| line.cut[0] + (line.cut[1] - line.cut[0]) * (s / line.length);
+    runs.into_iter().map(|(from, to, lo, hi)| (from, to, Seg2::Line { a: at(lo), b: at(hi) })).collect()
+}
+
 /// A stretch of a loop's new outline, each edge with what it is.
 type Stretch = Vec<(Seg2, EdgeFrom)>;
 
@@ -613,24 +674,50 @@ const CROSSING_LIMIT: f64 = 50.0;
 /// is joined to the edge before and after it: both trimmed back to where they cross; else carried
 /// on, the way they leave, to where they meet; else, where they run side by side (a cut ending on
 /// a tangent edge cut less), stepped square across. So the outline is made whole by what each
-/// edge is, never by cutting pieces away, and every edge of it says what it is.
+/// edge is, never by cutting pieces away, and every edge of it says what it is. Where a cut took
+/// part of a straight rip's edge out to the rip's line (its lap is never material), the outline
+/// runs along the edge in stretches, and each is cut back on its own (see [`stretches_along`]).
 fn cut_by_rips(flat: &FlatPanel, sides: &[RipSide]) -> Result<FlatPanel, DevelopError> {
     let loops: Vec<&Loop2> = std::iter::once(&flat.region.outer).chain(&flat.region.holes).collect();
     let far = flat.region.outer.segs.iter().map(Seg2::length).sum::<f64>() + 1.0;
-    let mut on: Vec<Vec<(f64, f64, &RipSide)>> = vec![Vec::new(); loops.len()];
+    // Each loop's stretches to cut back: from and to (as places on the loop), the rip's joint and
+    // its new edge there.
+    let mut on: Vec<Vec<(f64, f64, usize, Vec<Seg2>)>> = vec![Vec::new(); loops.len()];
     for side in sides {
         let lost = || DevelopError::Joint(side.joint, "a rip's edge is not on its panel's outline");
         let found = loops.iter().enumerate().find_map(|(li, l)| {
             let (s, e) = (place_on(&l.segs, side.ends[0], ON_OUTLINE)?, place_on(&l.segs, side.ends[1], ON_OUTLINE)?);
             Some((li, s, e, place_on(&l.segs, side.middle, MIDDLE_TOL)?))
         });
-        let Some((li, s, e, m)) = found else { return Err(lost()) };
-        // The stretch from its start to its end the way the loop runs holds its middle.
-        let n = loops.get(li).map_or(1.0, |l| l.segs.len() as f64);
-        if (m - s).rem_euclid(n) > (e - s).rem_euclid(n) && (e - s).rem_euclid(n) > 0.0 {
-            return Err(DevelopError::Joint(side.joint, "a rip's edge runs against its panel's outline"));
+        let straight = Straight::of(side);
+        if let Some((li, s, e, m)) = found {
+            // The stretch from its start to its end the way the loop runs holds its middle.
+            let n = loops.get(li).map_or(1.0, |l| l.segs.len() as f64);
+            if (m - s).rem_euclid(n) > (e - s).rem_euclid(n) && (e - s).rem_euclid(n) > 0.0 {
+                return Err(DevelopError::Joint(side.joint, "a rip's edge runs against its panel's outline"));
+            }
+            // The whole edge, and nothing else, as it was drawn; a straight edge a cut took part
+            // of is read by its stretches (below).
+            let along = |g: &Seg2, line: &Straight| matches!(g, Seg2::Line { .. }) && line.on(g.start()) && line.on(g.end());
+            let whole = match (&straight, loops.get(li)) {
+                (Some(line), Some(l)) => portion(&l.segs, s, e).iter().all(|(g, _)| along(g, line)),
+                _ => true,
+            };
+            if whole {
+                on.get_mut(li).ok_or_else(lost)?.push((s, e, side.joint, side.cut.clone()));
+                continue;
+            }
         }
-        on.get_mut(li).ok_or_else(lost)?.push((s, e, side));
+        let Some(line) = straight else { return Err(lost()) };
+        let mut any = false;
+        for (li, l) in loops.iter().enumerate() {
+            let runs = stretches_along(l, &line);
+            any |= !runs.is_empty();
+            on.get_mut(li).ok_or_else(lost)?.extend(runs.into_iter().map(|(s, e, cut)| (s, e, side.joint, vec![cut])));
+        }
+        if !any {
+            return Err(lost());
+        }
     }
     let mut out = flat.clone();
     for (li, rips) in on.iter_mut().enumerate() {
@@ -640,8 +727,8 @@ fn cut_by_rips(flat: &FlatPanel, sides: &[RipSide]) -> Result<FlatPanel, Develop
         }
         rips.sort_by(|x, y| x.0.total_cmp(&y.0));
         let mut stretches: Vec<Stretch> = Vec::with_capacity(2 * rips.len());
-        for (i, (_, e, side)) in rips.iter().enumerate() {
-            stretches.push(side.cut.iter().map(|c| (*c, EdgeFrom::Rip(side.joint))).collect());
+        for (i, (_, e, joint, cut)) in rips.iter().enumerate() {
+            stretches.push(cut.iter().map(|c| (*c, EdgeFrom::Rip(*joint))).collect());
             let next = rips.get((i + 1) % rips.len()).map_or(*e, |r| r.0);
             let rest = portion(&lp.segs, *e, next);
             stretches.push(rest.into_iter().map(|(seg, k)| (seg, from.get(k).copied().unwrap_or(EdgeFrom::Own(k)))).collect());
@@ -655,7 +742,7 @@ fn cut_by_rips(flat: &FlatPanel, sides: &[RipSide]) -> Result<FlatPanel, Develop
             }
             let mut b = stretches.get_mut(next).map(std::mem::take).unwrap_or_default();
             if let Some(a) = stretches.get_mut(i) {
-                join(a, &mut b, far);
+                join(a, &mut b, far, count == 2);
             }
             if let Some(slot) = stretches.get_mut(next) {
                 *slot = b;
@@ -740,8 +827,9 @@ fn part(s: &Seg2, t0: f64, t1: f64) -> Seg2 {
 }
 
 /// Joins the stretch `a` to the stretch `b` after it (see [`cut_by_rips`]). An edge the join adds
-/// is the rip's that made the corner: `a`'s where both are rips' and it carries `a` on.
-fn join(a: &mut Stretch, b: &mut Stretch, far: f64) {
+/// is the rip's that made the corner: `a`'s where both are rips' and it carries `a` on. `twice`
+/// where `b` runs on round the loop to `a` again, so that the two are joined at both their ends.
+fn join(a: &mut Stretch, b: &mut Stretch, far: f64, twice: bool) {
     let (Some(&(last, from_a)), Some(&(first, from_b))) = (a.last(), b.first()) else { return };
     let (pa, pb) = (last.end(), first.start());
     if pa.dist(pb) <= ON_OUTLINE {
@@ -760,8 +848,13 @@ fn join(a: &mut Stretch, b: &mut Stretch, far: f64) {
             .min_by(|p, q| (p.4.dist(pa) + p.4.dist(pb)).total_cmp(&(q.4.dist(pa) + q.4.dist(pb))))
     };
     let segs = |s: &Stretch| s.iter().map(|e| e.0).collect::<Vec<Seg2>>();
-    // Where they cross.
-    if let Some((ia, u, ib, v, _)) = nearest(crossings(&segs(a), &segs(b)), CROSSING_LIMIT) {
+    // Where they cross. Two stretches joined at both their ends may cross at each, and a crossing
+    // nearer the far ends than this corner is the join's there, whichever join is made first: a
+    // rip's new edge that starts outside its panel (where the panel's edge crosses the rip's lap
+    // short of the rip's end, as the top of a wall that reaches a little past a slanted rip does)
+    // crosses the stretch after it near its start.
+    let here = |c: &(usize, f64, usize, f64, Vec2)| !twice || c.4.dist(pa) + c.4.dist(pb) <= c.4.dist(a_far) + c.4.dist(b_far);
+    if let Some((ia, u, ib, v, _)) = nearest(crossings(&segs(a), &segs(b)).into_iter().filter(here).collect(), CROSSING_LIMIT) {
         trim_end(a, ia, u);
         trim_start(b, ib, v);
         return;

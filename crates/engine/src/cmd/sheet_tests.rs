@@ -5148,6 +5148,121 @@ fn per_edge_values_are_expressions_and_feature_inputs() {
     assert!(no_errors_or_warnings(&s), "{:?}", s.model.results);
 }
 
+/// A 60 x 40 base of the default rule (T = R = 2.5, K 0.44, gap 2.5) with two walls 10 high,
+/// inside, in one feature: on its front edge (y = 0) at `front` degrees and on its right edge
+/// (x = 60) at `right`, the front one listed first or last.
+fn two_angles_at_a_corner(front: f64, right: f64, front_first: bool) -> Session {
+    let mut s = Session::default();
+    base(&mut s, 60.0, 40.0);
+    let wall = |at: [f64; 3], angle: f64| json!({"point": at, "angle": format!("{angle} deg")});
+    let (f, r) = (wall([30.0, 0.0, 2.5], front), wall([60.0, 20.0, 2.5], right));
+    let edges = if front_first { json!([f, r]) } else { json!([r, f]) };
+    run(&mut s, "sheet.flange", json!({"edges": edges, "height": "10 mm", "position": "inside"}));
+    s
+}
+
+// By hand, for `two_angles_at_a_corner` (T = R = g = 2.5, K = 0.44). A wall at θ starts its bend
+// s0 = (R + T)·tan(θ/2) in from its edge: 5 at 90°, 2.886751 at 60°. The corner is notched: each
+// bend ends where the two bends' tangent lines on the base cross, so the base keeps
+// (60 − s0 of the right wall) × (40 − s0 of the front wall) and each bend runs along its side.
+// Folded, a bend L long holds a ring sector from R to R + T, L·θ·(R + T/2)·T; in the flat its zone
+// is BA = θ·(R + K·T) = 3.6·θ wide: 5.654867 at 90°, 3.769911 at 60°.
+//
+// The walls' surfaces (their inside faces) meet along a line, and the rip there keeps each wall's
+// metal g/2 off the plane halving them. Here they meet square, whichever wall is at 60°: the 90°
+// wall's face is square to the other wall's edge, which that wall's face holds. So each wall is
+// cut back (g/2)·√2 from the line, square to it on its own face, and (as for the tray of
+// `hand_panels`) a wall at θ beside one at φ ends
+// x(w) = ((g/2)·√(2 − 2·cosθ·cosφ) + T·(1 − cosθ·cosφ) − w·sinθ·cosφ) / sinφ along its edge from
+// the corner, w up its outer face from its outer sharp, over its panel's w = s0 … 10:
+// - the 90° wall beside the 60° one: ((g/2)·√2 + T − w/2) / sin 60°, 2.041241 at w = 5 and
+//   −0.845510 at w = 10 (there it reaches past the corner, under the 60° wall leaning out), 0.597866
+//   on average. Along the line it reaches a little past the 60° wall's top, but its end stays the
+//   one line of the rip's cut up to its own top;
+// - the 60° wall beside the 90° one: (g/2)·√2 + T = 4.267767 all the way up.
+// The panels are 10 − s0 high: 5 at 90°, 7.113249 at 60°.
+//
+// Front 90°, right 60° (the part of UI scenario s49):
+//   base 57.113249 × 35 = 1998.963703;
+//   bends folded 57.113249·(π/2)·3.75 + 35·(π/3)·3.75 = 336.424804 + 137.444679 = 473.869483,
+//   flat 57.113249·5.654867 + 35·3.769911 = 322.967812 + 131.946891 = 454.914704;
+//   panels 5·(60 − 0.597866) = 297.010671 and 7.113249·(40 − 4.267767) = 254.172259;
+//   volume 2.5·(1998.963703 + 473.869483 + 297.010671 + 254.172259) = 2.5·3024.016116 = 7560.040289;
+//   flat area 1998.963703 + 454.914704 + 297.010671 + 254.172259 = 3005.061336.
+// Front 60°, right 90°:
+//   base 55 × 37.113249 = 2041.228676;
+//   bends folded 55·(π/3)·3.75 + 37.113249·(π/2)·3.75 = 215.984495 + 218.615080 = 434.599575,
+//   flat 55·3.769911 + 37.113249·5.654867 = 207.345115 + 209.870477 = 417.215592;
+//   panels 7.113249·(60 − 4.267767) = 396.437232 and 5·(40 − 0.597866) = 197.010671;
+//   volume 2.5·(2041.228676 + 434.599575 + 396.437232 + 197.010671) = 2.5·3069.276154 = 7673.190384;
+//   flat area 2041.228676 + 417.215592 + 396.437232 + 197.010671 = 3051.892171.
+// In the flat a point w up a wall's outer face lies s0 − BA − (w − s0) into the base from its edge
+// (−0.654867 at w = 5 and −5.654867 at w = 10 at 90°; −0.883160 at w = s0 and −7.996408 at
+// w = 10 at 60°), x(w) along it from the corner. So each panel's end at the corner runs:
+//   front 90° from (57.958759, −0.654867) to (60.845510, −5.654867), right 60° from
+//   (60.883160, 4.267767) to (67.996408, 4.267767);
+//   front 60° from (55.732233, −0.883160) to (55.732233, −7.996408), right 90° from
+//   (60.654867, 2.041241) to (65.654867, −0.845510).
+
+/// Walls at 90° and 60° in one feature close the corner they meet at, with either wall at 60° and
+/// either listed first. Along the rip the 90° wall reaches a little past the 60° one, and the rip's
+/// cut leaves it through its top: its end is one straight line up to there. Before, its side
+/// stepped in past its top and ran back down the rip's cut, and the flat could not be made
+/// ("trimming panel 1: ... SMLib failed").
+#[test]
+fn walls_at_90_and_60_degrees_close_their_corner_either_way_round() {
+    let (t, r, k, g) = (2.5, 2.5, 0.44, 2.5);
+    let s0 = |th: f64| (r + t) * (th / 2.0).tan();
+    let ba = |th: f64| th * (r + k * t);
+    let ring = |th: f64| th * (r + t / 2.0);
+    let x_end = |th: f64, phi: f64, w: f64| {
+        let c = th.cos() * phi.cos();
+        ((g / 2.0) * (2.0 - 2.0 * c).sqrt() + t * (1.0 - c) - w * th.sin() * phi.cos()) / phi.sin()
+    };
+    let into = |th: f64, w: f64| s0(th) - ba(th) - (w - s0(th));
+    // A wall at θ beside one at φ, on an edge `len` long: its panel, 10 − s0 high.
+    let panel = |th: f64, phi: f64, len: f64| (10.0 - s0(th)) * (len - (x_end(th, phi, s0(th)) + x_end(th, phi, 10.0)) / 2.0);
+    for (front, right, by_hand) in [(90.0_f64, 60.0_f64, (7560.040289, 3005.061336)), (60.0, 90.0, (7673.190384, 3051.892171))] {
+        let (a, b) = (front.to_radians(), right.to_radians());
+        let (front_len, right_len) = (60.0 - s0(b), 40.0 - s0(a));
+        let base_area = front_len * right_len;
+        let panels = panel(a, b, 60.0) + panel(b, a, 40.0);
+        let want_volume = t * (base_area + front_len * ring(a) + right_len * ring(b) + panels);
+        let want_area = base_area + front_len * ba(a) + right_len * ba(b) + panels;
+        assert!((want_volume - by_hand.0).abs() < 1e-6 && (want_area - by_hand.1).abs() < 1e-6, "{want_volume} {want_area}");
+        let ends = [
+            (60.0 - x_end(a, b, s0(a)), into(a, s0(a))),
+            (60.0 - x_end(a, b, 10.0), into(a, 10.0)),
+            (60.0 - into(b, s0(b)), x_end(b, a, s0(b))),
+            (60.0 - into(b, 10.0), x_end(b, a, 10.0)),
+        ];
+        let mut made = Vec::new();
+        for front_first in [true, false] {
+            let what = format!("front {front}°, right {right}°, front listed first: {front_first}");
+            let mut s = two_angles_at_a_corner(front, right, front_first);
+            assert!(no_errors_or_warnings(&s), "{what}: {:?}", s.model.results);
+            // The measure follows the bends by facets.
+            let v = volume(&mut s);
+            assert!(rel(v, want_volume) < 1e-4, "{what}: {v} vs {want_volume}");
+            let f = flat(&mut s);
+            assert_eq!(f["outline"].as_array().map(Vec::len), Some(1), "{what}: {f}");
+            assert!(rel(flat_area(&f), want_area) < 1e-9, "{what}: {} vs {want_area}", flat_area(&f));
+            let mut lengths = bend_lengths(&mut s);
+            lengths.sort_by(f64::total_cmp);
+            let mut want = [front_len, right_len];
+            want.sort_by(f64::total_cmp);
+            assert!(lengths.len() == 2 && lengths.iter().zip(want).all(|(l, w)| (l - w).abs() < 1e-6), "{what}: {lengths:?} vs {want:?}");
+            let outline = outline_points(&f);
+            for (x, y) in ends {
+                assert!(outline.iter().any(|p| (p.0 - x).abs() < 1e-6 && (p.1 - y).abs() < 1e-6), "{what}: ({x}, {y}) not in {outline:?}");
+            }
+            made.push((v, flat_area(&f)));
+        }
+        // Which wall is listed first changes nothing at the corner.
+        assert!(rel(made[0].0, made[1].0) < 1e-6 && rel(made[0].1, made[1].1) < 1e-9, "front {front}°, right {right}°: {made:?}");
+    }
+}
+
 /// The bends' lengths in the flat pattern, in the order the bends were made.
 fn bend_lengths(s: &mut Session) -> Vec<f64> {
     flat(s)["bends"].as_array().cloned().unwrap_or_default().iter().map(|b| b["length"].as_f64().unwrap_or(f64::NAN)).collect()

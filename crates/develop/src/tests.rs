@@ -251,6 +251,40 @@ fn a_rip_lays_its_panels_out_apart_and_bad_joints_are_refused() {
     assert!(matches!(develop(&sheet, &[(0, Rigid2::IDENTITY)]), Err(DevelopError::Joint(0, _))));
 }
 
+/// A cut that took part of a rip's edge out to the rip's line leaves the panel's outline along the
+/// line in stretches, and each is cut back on its own; the cut keeps its shape. The base of the
+/// rip of `a_rip_lays_its_panels_out_apart_and_bad_joints_are_refused` (cut back 0.5 along y = 0)
+/// with a notch 20 wide and 10 deep in that edge, from x `x0`: across the rip's middle (x = 50) or
+/// beside it. By hand: the base keeps 6000 − 20 · 10 = 5800 less 0.5 along the 80 of the edge left,
+/// 5760; its edges along the rip are two lines at y = 0.5, 80 long in all, and the notch's sides
+/// run from y = 0.5 to 10.
+#[test]
+fn a_rip_cuts_back_each_stretch_of_its_edge_a_cut_left() {
+    for x0 in [40.0, 10.0] {
+        let mut sheet = bracket(bend(FRAC_PI_2, Datum::Sharp, (0.0, 100.0)));
+        if let Some(j) = sheet.joints.get_mut(0) {
+            j.kind = rip_along(j, 100.0, FRAC_PI_2, Lap::Cut(0.5, 0.25));
+        }
+        let pts = [(0.0, 0.0), (x0, 0.0), (x0, 10.0), (x0 + 20.0, 10.0), (x0 + 20.0, 0.0), (100.0, 0.0), (100.0, 60.0), (0.0, 60.0)];
+        if let Some(base) = sheet.panels.get_mut(0) {
+            base.region = Region2 { outer: Loop2::polygon(&pts.map(|(x, y)| Vec2::new(x, y))).ccw(), holes: Vec::new() };
+        }
+        let dev = match develop(&sheet, &[(0, Rigid2::IDENTITY)]) {
+            Ok(dev) => dev,
+            Err(e) => panic!("notch from {x0}: {e}"),
+        };
+        let Some(Some(base)) = dev.panels.first() else { panic!("the base is laid out") };
+        assert!((base.region.area() - 5760.0).abs() < 1e-9, "notch from {x0}: {}", base.region.area());
+        let cut = rip_edges(&dev, 0, 0);
+        let on_line = |s: &Seg2| matches!(s, Seg2::Line { a, b } if (a.y - 0.5).abs() < 1e-9 && (b.y - 0.5).abs() < 1e-9);
+        let length: f64 = cut.iter().map(Seg2::length).sum();
+        assert!(cut.len() == 2 && cut.iter().all(on_line) && (length - 80.0).abs() < 1e-9, "notch from {x0}: {cut:?}");
+        let side = |s: &&Seg2| matches!(s, Seg2::Line { a, b } if (a.x - b.x).abs() < 1e-9 && (a.x - x0).abs().min((a.x - x0 - 20.0).abs()) < 1e-9);
+        let sides: Vec<&Seg2> = base.region.outer.segs.iter().filter(side).collect();
+        assert!(sides.len() == 2 && sides.iter().all(|s| (s.length() - 9.5).abs() < 1e-9), "notch from {x0}: {:?}", base.region.outer.segs);
+    }
+}
+
 /// A roll `length` long along its axis, turning through `angle` (radians) round it.
 fn roll(radius: f64, material_inward: bool, length: f64, angle: f64) -> Panel {
     Panel { name: "roll".into(), surface: Surface::Cylinder { radius, material_inward }, region: rect(0.0, 0.0, length, angle) }

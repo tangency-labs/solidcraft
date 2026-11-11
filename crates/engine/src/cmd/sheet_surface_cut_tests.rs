@@ -821,11 +821,21 @@ fn corner_volume(gap: f64) -> (f64, f64) {
     (t * (118.0 * 78.0 + 33.0 * ((120.0 - c) + (80.0 - c))) + 0.75 * PI * (118.0 + 78.0), c)
 }
 
+/// The area of the sheet's panels' own outlines, in their charts, and how many cuts of its own the
+/// sheet keeps.
+fn panel_outlines(s: &Session) -> (f64, usize) {
+    let Some(sk) = s.model.state().surface_sheets.first().cloned() else { panic!("the plate is a sheet") };
+    (sk.sheet.panels.iter().map(|p| p.region.area()).sum(), sk.sheet.cuts.len())
+}
+
 /// The corner sheet (see `corner_sheet`) with a rectangle on the XZ plane from (70, `z0`) to
 /// (119, `z1`) cut 3 either side of it, through the front wall up to the right wall's inside
 /// face: past the front wall's end. The folded sheet loses what the front wall had of the
 /// rectangle, and its flat loses that from its outline, a notch open at the wall's end, with no
-/// new cut-out.
+/// new cut-out. The front wall's own outline runs to the rip's line at x = 119, where the walls'
+/// inside faces meet, past its material (the rip's lap, g/√2 wide, which the rip cuts back): it
+/// loses the rectangle as drawn, x 70..119 by z z0 up to the wall's top (35) at most, and the
+/// sheet keeps no cut of its own for it.
 fn cut_past_a_walls_end(gap: f64, z0: f64, z1: f64) {
     let mut s = corner_sheet(gap);
     let t = 1.0;
@@ -833,6 +843,7 @@ fn cut_past_a_walls_end(gap: f64, z0: f64, z1: f64) {
     let v0 = exact_volume(&s);
     assert!((v0 - whole).abs() < 1e-6 * whole, "gap {gap}: {v0} vs {whole}");
     let (outline0, cutouts0) = flat_outline(&mut s);
+    let (panels0, cuts0) = panel_outlines(&s);
     run(&mut s, "sketch.create", json!({"name": "Cut", "plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}}));
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [70.0, z0], "p1": [119, z1]}));
     run(&mut s, "sketch.finish", json!({}));
@@ -849,6 +860,10 @@ fn cut_past_a_walls_end(gap: f64, z0: f64, z1: f64) {
     let (outline, cutouts) = flat_outline(&mut s);
     assert_eq!(cutouts, cutouts0, "gap {gap}, z {z0}..{z1}: no new cut-out");
     assert!((outline0 - outline - notch).abs() < 1e-6 * outline0, "gap {gap}, z {z0}..{z1}: the outline lost {} of {notch}", outline0 - outline);
+    let (panels, cuts) = panel_outlines(&s);
+    let drawn = (119.0 - 70.0) * (z1.min(35.0) - z0);
+    assert!((panels0 - panels - drawn).abs() < 1e-9 * panels0, "gap {gap}, z {z0}..{z1}: the panels lost {} of {drawn}", panels0 - panels);
+    assert_eq!(cuts, cuts0, "gap {gap}, z {z0}..{z1}: no cut of the sheet's");
 }
 
 /// A notch down through a wall's top, from x 70 to the next wall's inside face, past the wall's
@@ -913,13 +928,14 @@ fn round_hole_by_a_walls_end(inset: f64) -> (f64, (f64, f64, usize, usize, usize
 
 /// A round hole of radius 4 through a wall, its center 4 in from the wall's end where one flange
 /// feature closed the corner with the rule's gap 0.25: it touches the end, the edge the rip left,
-/// at one point, so it is a cut of the sheet's, cut from the wall's material as the rip leaves it
-/// (by hand, see `round_hole_by_a_walls_end`). The flat's outline takes it in at that point, or
-/// keeps it as a cut-out touching it there: either way the material loses 16π.
+/// at one point only, so nothing of it runs on across the rip's lap, and it is a hole of the
+/// wall's own outline (by hand, see `round_hole_by_a_walls_end`). Once the rip cuts the wall
+/// back, the flat's outline takes it in at that point, or keeps it as a cut-out touching it
+/// there: either way the material loses 16π.
 #[test]
-fn a_round_hole_touching_a_walls_end_at_a_closed_corner_is_a_cut_of_the_sheets() {
+fn a_round_hole_touching_a_walls_end_at_a_closed_corner_stays_a_hole_of_the_wall() {
     let (_, before, after) = round_hole_by_a_walls_end(4.0);
-    assert_eq!((after.3, after.4), (before.3 + 1, before.4), "a cut of the sheet's, not a hole of the wall");
+    assert_eq!((after.3, after.4), (before.3, before.4 + 1), "a hole of the wall, not a cut of the sheet's");
     let into_outline = (before.1 - after.1 - 16.0 * PI).abs() < 1e-6 * before.1 && after.2 == before.2;
     let cut_out = (before.1 - after.1).abs() < 1e-6 * before.1 && after.2 == before.2 + 1;
     assert!(into_outline || cut_out, "the outline lost {} of {}, with {} cut-outs from {}", before.1 - after.1, 16.0 * PI, after.2, before.2);
