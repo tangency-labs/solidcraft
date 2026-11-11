@@ -91,6 +91,8 @@
 //!   read every control point of the surface it is given), and a cell whose subpatch's
 //!   control points reach no higher than the box so far is skipped unsolved. A cell whose
 //!   subpatch gives no solution is divided, and at the limits counts with that bound.
+//!   Not the fork's (#14460): a cell is divided only the ways a knot lies inside it while
+//!   either way has one, halved both ways only once it lies within one span each way.
 //!   The step-off loops keep upstream's bounds (20 rounds in the sector
 //!   classification; its UV fallback doubles the step-off until it leaves the curve
 //!   interval, and stops after [`MAX_UV_STEP_OFF_ROUNDS`] rounds when the curve
@@ -673,26 +675,45 @@ const FACE_EXTREME_MAX_DEPTH: u32 = 16;
 /// this distance, so a part nearer than that is no cell of its own.
 const FACE_EXTREME_KNOT_SNAP: f64 = 1.0e-08;
 
-/// Where a cell of `[lo, hi]` is divided along one way (`sm_CellDivision`, WR-651,
-/// tangency-labs/smlib@326de73): at the knot strictly inside it (by more than
-/// [`FACE_EXTREME_KNOT_SNAP`]) nearest its middle, the first such in `knots` on a tie,
-/// else at its middle. Divided at knots, a cell comes to lie within one knot span that
-/// way, as [`cell_monotone`] asks of a rational patch; halved at middles alone, a cell
-/// over a knot off the dyadic points of the domain (a screw surface's at every eighth of
-/// a turn) never does.
-fn cell_division(knots: &[f64], lo: f64, hi: f64) -> f64 {
+/// The knot strictly inside `[lo, hi]` (by more than [`FACE_EXTREME_KNOT_SNAP`]) nearest
+/// its middle, the first such in `knots` on a tie (`sm_CellDivision`, WR-651,
+/// tangency-labs/smlib@326de73); `None` when the cell lies within one knot span that way.
+/// Divided at knots, a cell comes to lie within one knot span, as [`cell_monotone`] asks of
+/// a rational patch; halved at middles alone, a cell over a knot off the dyadic points of
+/// the domain (a screw surface's at every eighth of a turn) never does.
+fn cell_division_knot(knots: &[f64], lo: f64, hi: f64) -> Option<f64> {
     let mid = 0.5 * (lo + hi);
-    let (mut at, mut off) = (mid, crate::math::BIG_DOUBLE);
+    let mut at: Option<(f64, f64)> = None;
     for &knot in knots {
         if knot > lo + FACE_EXTREME_KNOT_SNAP
             && knot < hi - FACE_EXTREME_KNOT_SNAP
-            && (knot - mid).abs() < off
+            && at.is_none_or(|(_, off)| (knot - mid).abs() < off)
         {
-            at = knot;
-            off = (knot - mid).abs();
+            at = Some((knot, (knot - mid).abs()));
         }
     }
-    at
+    at.map(|(knot, _)| knot)
+}
+
+/// Where [`face_directed_max`] divides an undecided cell: each way at the knot inside it
+/// nearest its middle ([`cell_division_knot`]). A way the cell lies within one knot span
+/// is left whole while the other way still has a knot inside the cell, and both ways are
+/// halved at their middles once neither has (not the fork's, which halves a way with no
+/// knot inside at once: #14460). Until a cell lies within one span each way the
+/// monotone test of a rational patch cannot decide it, so halving the way it already
+/// lies within one span only multiplies the cells along a trim: a thread's screw wall,
+/// a knot every eighth of a turn along u and one span across v, came to as many cells as
+/// it has spans along u, each solved twice. Returns the u and v of the division, `None`
+/// for a way left whole.
+fn cell_division(knots_u: &[f64], knots_v: &[f64], cell: &Extent2d) -> (Option<f64>, Option<f64>) {
+    let (u0, v0, u1, v1) = (cell.min().x, cell.min().y, cell.max().x, cell.max().y);
+    match (
+        cell_division_knot(knots_u, u0, u1),
+        cell_division_knot(knots_v, v0, v1),
+    ) {
+        (None, None) => (Some(0.5 * (u0 + u1)), Some(0.5 * (v0 + v1))),
+        at => at,
+    }
 }
 
 /// Whether `x` is above zero, false for NaN (the negation of `x > 0`, without the lint).
@@ -1017,10 +1038,11 @@ fn cell_sub_surface(surface: &Surface, patch: BSplineSurface) -> Surface {
 ///    on the face's boundary or on the cell's own sides, which `best` and the neighbouring
 ///    cells hold;
 ///
-/// otherwise the cell is divided each way ([`cell_division`]: at a knot inside it, else at
-/// its middle; WR-651). A cell left at [`FACE_EXTREME_MAX_DEPTH`] or past
-/// [`FACE_EXTREME_MAX_CELLS`] counts with its greatest value. The cells are an explicit
-/// stack (no recursion), taken last first, as the fork's.
+/// otherwise the cell is divided ([`cell_division`]: at the knots inside it, a way within
+/// one span left whole while the other has a knot inside, else at its middles; WR-651).
+/// A cell left at [`FACE_EXTREME_MAX_DEPTH`] or past [`FACE_EXTREME_MAX_CELLS`] counts
+/// with its greatest value. The cells are an explicit stack (no recursion), taken last
+/// first, as the fork's.
 fn face_directed_max(
     k: &Kernel,
     lb: &mut LazyBrep<'_>,
@@ -1113,17 +1135,23 @@ fn face_directed_max(
             continue;
         }
         let (u0, v0, u1, v1) = (cell.min().x, cell.min().y, cell.max().x, cell.max().y);
-        // WR-651 (tangency-labs/smlib@326de73): divided at a knot inside the cell, else at
-        // its middle (`sm_CellDivision`).
-        let at = Point2::new(
-            cell_division(&knots_u, u0, u1),
-            cell_division(&knots_v, v0, v1),
-        );
+        // WR-651 (tangency-labs/smlib@326de73): divided at a knot inside the cell, a way
+        // within one span left whole while the other has one, else at the middles.
+        let (at_u, at_v) = cell_division(&knots_u, &knots_v, &cell);
+        let us = match at_u {
+            Some(u) => [(u0, u), (u, u1)].to_vec(),
+            None => [(u0, u1)].to_vec(),
+        };
+        let vs = match at_v {
+            Some(v) => [(v0, v), (v, v1)].to_vec(),
+            None => [(v0, v1)].to_vec(),
+        };
         let child_depth = depth + 1;
-        cells.push((Extent2d::from_bounds(u0, v0, at.x, at.y), child_depth));
-        cells.push((Extent2d::from_bounds(at.x, v0, u1, at.y), child_depth));
-        cells.push((Extent2d::from_bounds(u0, at.y, at.x, v1), child_depth));
-        cells.push((Extent2d::from_bounds(at.x, at.y, u1, v1), child_depth));
+        for &(lo_v, hi_v) in &vs {
+            for &(lo_u, hi_u) in &us {
+                cells.push((Extent2d::from_bounds(lo_u, lo_v, hi_u, hi_v), child_depth));
+            }
+        }
     }
     Ok(best)
 }
