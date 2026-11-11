@@ -35,6 +35,7 @@ pub(crate) mod native_affine;
 pub mod offset_curve;
 pub mod parabola;
 pub mod path;
+pub mod plane_of;
 pub mod projected_curve;
 pub mod step_edge;
 pub mod tangent_field;
