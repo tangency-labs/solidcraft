@@ -1670,7 +1670,9 @@ pub fn local_curve_sector(
                 orientation,
                 true,
             )?;
-            let found = sector.radial_edgeuse.ok_or(SolidError::sm_err(OP))?;
+            let found = sector.radial_edgeuse.ok_or_else(|| {
+                SolidError::topology_failed(OP, "the curve's radial sector has no edge use")
+            })?;
 
             // region of point is region of classification sector
             edgeuse_region(b, found)
@@ -1737,14 +1739,20 @@ pub fn local_curve_sector(
                             p1::find_sector_of_face(k, b, f, None, test_pnt, test_dir)?;
                         p1::vote_for_region(&mut regions, &mut votes, found);
                     } else {
-                        return Err(SolidError::sm_err(OP));
+                        return Err(SolidError::topology_failed(
+                            OP,
+                            "the vertex use is neither on an edge nor in a loop",
+                        ));
                     }
                 }
             }
 
             p1::find_highest_vote(&regions, &votes)
         }
-        _ => Err(SolidError::sm_err(OP)),
+        _ => Err(SolidError::topology_failed(
+            OP,
+            "the curve does not hit a face, an edge or a vertex",
+        )),
     }
 }
 
@@ -1925,7 +1933,10 @@ pub(crate) fn ray_fire_with_bbox_and_solver(
     // check solution tolerance for an error
     let tol = EFF_ZERO * (1.0 + start.max_dimension());
     if best.start.solution_value < tol {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "the nearest hit is at the ray's start",
+        ));
     }
     let _ = region;
 
@@ -2277,7 +2288,9 @@ pub fn make_edge_vertex_topology(
     let region = region_or_infinite(b, region)?;
 
     // Find the shell corresponding to the region from the Start vertex.
-    let s = vertex::shell_in_region(b, start, Some(region))?.ok_or(SolidError::sm_err(OP))?;
+    let s = vertex::shell_in_region(b, start, Some(region))?.ok_or_else(|| {
+        SolidError::topology_failed(OP, "the start vertex has no shell in the region")
+    })?;
 
     // Put Vertex into Brep's vertex list and edge into edge list
     let new_v = b.add_vertex_record(Vertex::default())?;
@@ -2315,10 +2328,12 @@ pub fn make_edge_topology(
     let region = region_or_infinite(b, region)?;
 
     // Find the shells corresponding to the region from the Start vertex and end vertex.
-    let mut start_shell =
-        vertex::shell_in_region(b, start, Some(region))?.ok_or(SolidError::sm_err(OP))?;
-    let mut end_shell =
-        vertex::shell_in_region(b, end, Some(region))?.ok_or(SolidError::sm_err(OP))?;
+    let mut start_shell = vertex::shell_in_region(b, start, Some(region))?.ok_or_else(|| {
+        SolidError::topology_failed(OP, "the start vertex has no shell in the region")
+    })?;
+    let mut end_shell = vertex::shell_in_region(b, end, Some(region))?.ok_or_else(|| {
+        SolidError::topology_failed(OP, "the end vertex has no shell in the region")
+    })?;
 
     // Transfer stuff from end shell to start shell if they are different.
     if shell_is_vertex_shell(b, start_shell)? && !shell_is_vertex_shell(b, end_shell)? {
@@ -2563,7 +2578,7 @@ pub fn merge_curves_on_surface<O: ClassObject + Copy>(
 ) -> Result<MergedCurves> {
     // check state - m_bEditingEnabled must be on
     if !objects.brep().editing_enabled() {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(OP, "editing is not enabled"));
     }
 
     let saved = k.context.doing_boolean();
@@ -2637,7 +2652,10 @@ fn merge_curves_body<O: ClassObject + Copy>(
                 let (coin, pos) = cc.are_coincident_maybe(k, &*objects, &cc, kk, false)?;
                 if coin == CoincidentMaybe::Unsure {
                     // This signals an unrecoverable error.
-                    return Err(SolidError::sm_err(OP));
+                    return Err(SolidError::topology_failed(
+                        OP,
+                        "a coincident interval could not be resolved",
+                    ));
                 }
                 if coin == CoincidentMaybe::Fixable {
                     connect_intervals(&mut cc, kk, pos)?;
@@ -2751,7 +2769,10 @@ fn merge_intervals<O: ClassObject + Copy>(
 fn into_bspline(c: Curve) -> Result<BSplineCurve> {
     match c.into_kind() {
         CurveKind::BSpline(b) => Ok(b),
-        _ => Err(SolidError::null_pointer(OP)),
+        _ => Err(SolidError::topology_missing(
+            OP,
+            "the B-spline form of the curve",
+        )),
     }
 }
 
@@ -2840,16 +2861,20 @@ pub fn mate_lamina_edge_to_surface(
     let _ = uv_curve_extension_factor;
     // check state - m_bEditingEnabled must be on
     if !b.editing_enabled() {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(OP, "editing is not enabled"));
     }
 
     // no work - not lamina edge
     if !eu1::edge_is_lamina(b, lamina)? {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "the edge is not a lamina edge",
+        ));
     }
 
     let eu = eu1::primary_edgeuse(b, lamina)?.ok_or(null_deref("edge without edge use"))?;
-    let face = eu1::face(b, eu)?.ok_or(SolidError::null_pointer(OP))?;
+    let face = eu1::face(b, eu)?
+        .ok_or_else(|| SolidError::topology_missing(OP, "the lamina edge use's face"))?;
     let face_ref = (env.key_of)(EntityRef::Face(face));
     face_notify(b, env, face, face_ref, NotifyOperation::PreEdit)?;
 
@@ -2866,7 +2891,10 @@ pub fn mate_lamina_edge_to_surface(
         .edge
         .ok_or(null_deref("edge use without edge"))?;
     if !eu1::edge_is_lamina(b, e_ccw)? && !edge::is_seam_of_surface(k, b, e_ccw, face)? {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "the edge's CCW neighbour is neither lamina nor a seam",
+        ));
     }
     let eu_cw = b.edgeuse(eu)?.cw.ok_or(null_deref("edge use without CW"))?;
     let e_cw = b
@@ -2874,7 +2902,10 @@ pub fn mate_lamina_edge_to_surface(
         .edge
         .ok_or(null_deref("edge use without edge"))?;
     if !eu1::edge_is_lamina(b, e_cw)? && !edge::is_seam_of_surface(k, b, e_cw, face)? {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "the edge's CW neighbour is neither lamina nor a seam",
+        ));
     }
 
     // Create an extended mating surface if it is a plane
@@ -3032,7 +3063,10 @@ pub fn mate_lamina_edge_to_surface(
 
     // If we did not find the solutions we are done with an error
     let Some((sol_ccw, sol_cw, mut found_3d, mut found_uv)) = found else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "no intersection curve meets both neighbouring edges",
+        ));
     };
 
     // Here we found solutions to things - do some trimming and to get the proper
@@ -3400,6 +3434,26 @@ mod tests {
     /// `MakeEdgeTopology` between two shell vertices deletes the end vertex shell
     /// (`delete pEndShell`) and both shell vertex uses (`delete pVU`): the region keeps
     /// one wire shell and the arenas no orphan (the edge's two vertex uses remain).
+    /// Mating a lamina edge with editing off is an `SM_ERR` that says so.
+    #[test]
+    fn mating_without_editing_is_a_typed_failure() {
+        let k = Kernel::default();
+        let (mut b, _, e, f) = brep();
+        let mating = b.face(f).unwrap().surface.clone().unwrap();
+        let mut state = ArenaNotifyState::new(&b);
+        let mut env = state.env(None);
+        let err =
+            mate_lamina_edge_to_surface(&k, &mut b, &mut env, e, &mating, 1.0, 1.0).unwrap_err();
+        assert_eq!(err.upstream_status(), Some(SM_ERR));
+        assert_eq!(err.operation(), OP);
+        assert_eq!(
+            err.topology_failure(),
+            Some(&crate::error::topology::TopologyFailure::Failed(
+                "editing is not enabled"
+            ))
+        );
+    }
+
     #[test]
     fn edge_between_shell_vertices_deletes_the_merged_shell() {
         let mut k = Kernel::default();
