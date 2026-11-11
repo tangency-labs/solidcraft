@@ -1,18 +1,19 @@
 //! A rolling-ball round between a plane and a cylinder square to it is a piece of a torus (the
-//! exact circle class): its face says so, with the torus its definition gives, and keeps saying so
-//! after the body is saved and opened again and after it goes through SMLib again.
+//! exact circle class): its faces say so, with the torus its net is, certified against its
+//! definition, and keep saying so after the body is saved and opened again and after it goes
+//! through SMLib again.
 //!
 //! The torus is known in closed form: the ball of radius r rolls on the plane z = h and the
 //! cylinder of radius R about the axis through (cx, cy); its centre runs on the circle of radius
 //! R + r (the round outside the cylinder's material, a bore's rim or a boss's root) at the height
 //! h - r below the plane's material or h + r above it, and the round is the tube of radius r
-//! about that circle.
+//! about that circle. A closed round may be two faces (split at its surface's seam), each on
+//! that torus.
 
 use solidcore_record::Vec3;
-use solidcraft_geom::prelude::*;
 use solidcraft_kernel::*;
 
-/// The tori among a body's faces.
+/// The tori among a body's faces: centre, axis, major and minor radius.
 fn tori(body: &Body) -> Vec<(Vec3, Vec3, f64, f64)> {
     (0..body.face_count())
         .filter_map(|i| match face_surface(body, i) {
@@ -22,16 +23,19 @@ fn tori(body: &Body) -> Vec<(Vec3, Vec3, f64, f64)> {
         .collect()
 }
 
-/// `body` has one torus face, of centre `center`, axis ±Z and radii `major` and `minor`, each
-/// within `tol`.
+/// `body` has torus faces, every one of centre `center`, axis +Z or -Z and radii `major` and
+/// `minor`, each component within `tol`.
 fn assert_torus(body: &Body, center: Vec3, major: f64, minor: f64, tol: f64, what: &str) {
     let found = tori(body);
-    assert_eq!(found.len(), 1, "{what}: one torus face, found {found:?}");
-    let (c, a, big, small) = found[0];
-    assert!(c.dist(center) <= tol, "{what}: centre {c:?} against {center:?}");
-    assert!(1.0 - a.dot(Vec3::Z).abs() <= tol, "{what}: axis {a:?} against Z");
-    assert!((big - major).abs() <= tol, "{what}: major radius {big} against {major}");
-    assert!((small - minor).abs() <= tol, "{what}: minor radius {small} against {minor}");
+    assert!(!found.is_empty(), "{what}: no torus face");
+    let near = |got: f64, want: f64| (got - want).abs() <= tol;
+    for (c, a, big, small) in found {
+        assert!(near(c.x, center.x) && near(c.y, center.y) && near(c.z, center.z), "{what}: centre {c:?} against {center:?}");
+        let along_z = near(a.x, 0.0) && near(a.y, 0.0) && (near(a.z, 1.0) || near(a.z, -1.0));
+        assert!(along_z, "{what}: axis {a:?} against +Z or -Z");
+        assert!(near(big, major), "{what}: major radius {big} against {major}");
+        assert!(near(small, minor), "{what}: minor radius {small} against {minor}");
+    }
 }
 
 /// The torus survives the body's save and reopen (its record, number for number) and a pass
