@@ -3338,12 +3338,13 @@ fn feature_parts(app: &SolveApp, id: u64, shown_only: bool) -> Vec<Sel> {
             let mut face_points: std::collections::HashMap<usize, solidcore_record::Vec3> = std::collections::HashMap::new();
             for (t, f) in m.triangles.iter().zip(&m.tri_face) {
                 let fi = *f as usize;
-                if target_indices.contains(&fi) && !face_points.contains_key(&fi) {
-                    if let Some([a, b, c]) = m.tri(t) {
-                        face_points.insert(fi, (a + b + c) / 3.0);
-                        if face_points.len() == target_indices.len() {
-                            break;
-                        }
+                if target_indices.contains(&fi)
+                    && !face_points.contains_key(&fi)
+                    && let Some([a, b, c]) = m.tri(t)
+                {
+                    face_points.insert(fi, (a + b + c) / 3.0);
+                    if face_points.len() == target_indices.len() {
+                        break;
                     }
                 }
             }
