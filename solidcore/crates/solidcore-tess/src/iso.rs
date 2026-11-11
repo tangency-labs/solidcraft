@@ -41,7 +41,8 @@ const MAX_COPIES: usize = 8;
 ///
 /// [`TessError::Invalid`] for more than [`MAX_ISOPARMS`] lines a direction; the mesher's errors
 /// for a body none of whose faces can be read; [`TessError::Failed`] for a face whose surface
-/// does not evaluate on a line.
+/// does not evaluate on a line, or a line that needs more points than an edge may have at
+/// `tolerance` (never handed over with chords past it).
 pub fn isoparms(
     sheet: &Brep,
     u_count: usize,
@@ -198,6 +199,13 @@ fn sample(
     let [front, back] = ends;
     let initial = if front.dist(back) <= rules.tol { 4 } else { 1 };
     let nodes = bisect(&at, [x0, x1], ends, initial, rules, f64::INFINITY)?;
+    // a bound stopped a chord that still wants splitting: the line is not within the tolerance
+    if let Some((cap, sag, _)) = nodes.capped {
+        return Err(TessError::Failed(format!(
+            "isoparms: face {fi}: a line needs more points than the sampling bound ({cap:?}) \
+             allows at this tolerance: its chords sag up to {sag} mm"
+        )));
+    }
     Ok(nodes.points.iter().map(|p| [p.x, p.y, p.z]).collect())
 }
 
@@ -480,5 +488,16 @@ mod tests {
                 assert!(radius - r <= 1.0001, "sag {}", radius - r);
             }
         }
+    }
+
+    #[test]
+    fn a_line_too_fine_to_sample_is_refused() {
+        // a circle of radius 10 at a chord of 1e-12 needs millions of points, past an edge's
+        // bound: refused, not handed over with chords past the tolerance
+        let b = fixture("cylinder_r10_h5");
+        assert!(matches!(
+            isoparms(&b, 0, 1, MeshTolerance::chord(1e-12), 0.0),
+            Err(TessError::Failed(why)) if why.contains("sampling bound")
+        ));
     }
 }
