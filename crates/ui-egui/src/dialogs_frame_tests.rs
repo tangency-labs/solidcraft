@@ -312,15 +312,40 @@ fn rotate(d: &mut Dialog) -> &mut crate::dialogs_rotate_member::RotateMember {
 
 /// The dialog's picks: as each frame's rows see them.
 fn sync(app: &SolveApp, d: &mut Dialog) {
-    let inputs = d.inputs.clone();
-    crate::dialogs_rotate_member::sync(app, rotate(d), &inputs);
+    let mut inputs = d.inputs.clone();
+    crate::dialogs_rotate_member::sync(app, rotate(d), &mut inputs);
+    d.inputs = inputs;
 }
 
-/// The dial of an angle-section post in a component moved and turned off the origin: on the
-/// post's profile's box centre (off its line: the line is on a corner), at mid-length, along the
-/// line, all in the world the view draws.
+/// The dial of an angle-section post: on the post's profile's box centre (off its line: the line
+/// is on a corner), at mid-length, along the line.
 #[test]
-fn rotate_member_dial_follows_a_moved_component_and_the_turn_pivot() {
+fn rotate_member_dial_sits_on_the_turn_pivot() {
+    let angle = json!({"kind": "angle", "width": 60, "height": 40, "thickness": 5});
+    let app = app_with(&[
+        ("sketch.create", json!({"plane": "XY", "name": "Post path"})),
+        ("sketch.options", json!({"sketch_3d": true})),
+        ("sketch.line3d", json!({"points": [[0, 0, 0], [0, 0, 300]]})),
+        ("sketch.finish", json!({})),
+        ("frame.member", json!({"sketch": "Post path", "body_name": "Post", "profile": angle, "anchor": "bottom_left"})),
+    ]);
+    // The post runs up Z, so its box centre is the profile's box centre at mid-length.
+    let centre = app.session.model.state().body("Post").unwrap().mesh().bounds().center();
+    assert!((centre.z - 150.0).abs() < 1e-6 && centre.x.hypot(centre.y) > 1.0, "an angle's box centre is off its line: {centre:?}");
+    let st = app.session.model.state();
+    let b = st.body("Post").unwrap();
+    let index = (0..b.body.face_count()).find(|i| b.body.planar_face(*i).is_some()).unwrap();
+    let mut inputs = crate::dialogs_rotate_member::start(&app, "frame.rotate_member").unwrap().1;
+    inputs[0].items = vec![Sel::Face { body: "Post".into(), index, point: centre }];
+    let (at, along) = crate::dialogs_rotate_member::dial(&app, &inputs).expect("a dial on the picked post");
+    assert!(at.dist(centre) < 1e-6, "dial centre {at:?}, the turn's pivot {centre:?}");
+    assert!(along.cross(solidcore_record::Vec3::Z).len() < 1e-9 && along.z > 0.0, "dial axis {along:?}, the post's line +Z");
+}
+
+/// No dial on a member inside a component, moved off the origin: the command refuses those
+/// members (not supported yet), so the dial would set an angle OK can't use.
+#[test]
+fn rotate_member_no_dial_on_a_member_in_a_component() {
     let angle = json!({"kind": "angle", "width": 60, "height": 40, "thickness": 5});
     let mut app = app_with(&[
         ("component.create", json!({"name": "Frame", "grounded": false})),
@@ -333,20 +358,12 @@ fn rotate_member_dial_follows_a_moved_component_and_the_turn_pivot() {
     let frame = app.session.doc.find_component("Frame").unwrap();
     let occurrence = app.session.doc.occurrence_of(frame).unwrap().id;
     app.run("occurrence.move", json!({"occurrence": occurrence, "axis": [1, 2, 3], "angle": "37 deg", "translate": [50, 20, 10]})).unwrap();
-    let transform = app.session.doc.occurrence_of(frame).unwrap().transform;
-    // The post runs up local Z, so its local box centre is the profile's box centre at mid-length.
-    let local = app.session.model.state().body("Post").unwrap().mesh().bounds().center();
-    assert!((local.z - 150.0).abs() < 1e-6 && local.x.hypot(local.y) > 1.0, "an angle's box centre is off its line: {local:?}");
-    let centre = solidcraft_engine::doc::apply_point(&transform, local);
-    let axis = solidcraft_engine::doc::apply_vector(&transform, solidcore_record::Vec3::Z);
     let world = crate::open_meshing::session_world(&app.session);
     let body = world.bodies.iter().find(|b| b.name.contains("Post")).unwrap_or_else(|| panic!("{:?}", body_names(&app)));
     let index = (0..body.body.face_count()).find(|i| body.body.planar_face(*i).is_some()).unwrap();
     let mut inputs = crate::dialogs_rotate_member::start(&app, "frame.rotate_member").unwrap().1;
-    inputs[0].items = vec![Sel::Face { body: body.name.clone(), index, point: centre }];
-    let (at, along) = crate::dialogs_rotate_member::dial(&app, &inputs).expect("a dial on the picked post");
-    assert!(at.dist(centre) < 1e-6, "dial centre {at:?}, the turn's pivot {centre:?}");
-    assert!(along.cross(axis).len() < 1e-9 && along.dot(axis) > 0.0, "dial axis {along:?}, the post's line {axis:?}");
+    inputs[0].items = vec![Sel::Face { body: body.name.clone(), index, point: body.mesh().bounds().center() }];
+    assert!(crate::dialogs_rotate_member::dial(&app, &inputs).is_none());
 }
 
 fn turns(app: &SolveApp) -> Vec<String> {
@@ -424,6 +441,85 @@ fn rotate_member_dialog_same_angle_runs_nothing() {
     h.settle();
     assert!(h.app.dialog.is_none());
     assert_eq!(turns(&h.app), ["30 deg"]);
+}
+
+/// A parameter at the member's current turn still adds a step: OK on `tilt` (0 deg) on a member
+/// never turned adds one, and changing `tilt` turns the member.
+#[test]
+fn rotate_member_dialog_adds_a_parameter_angle_at_the_current_turn() {
+    let mut app = post_app();
+    app.run("parameters.add", json!({"name": "tilt", "expression": "0 deg"})).unwrap();
+    let (side, _) = post_side(&app);
+    app.start("frame.rotate_member");
+    let mut d = app.dialog.clone().unwrap();
+    d.inputs[0].items = vec![side];
+    sync(&app, &mut d);
+    rotate(&mut d).angle = "tilt".into();
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(c.len(), 1, "a step is added: {c:?}");
+    run_all(&mut app, c);
+    assert_eq!(turns(&app), ["tilt"]);
+    let x = |app: &SolveApp| app.session.model.state().body("Post").unwrap().mesh().bounds().max.x;
+    assert!((x(&app) - 20.0).abs() < 1e-6, "{}", x(&app));
+    app.run("parameters.change", json!({"name": "tilt", "expression": "30 deg"})).unwrap();
+    // Turned 30 deg, the 40 x 40 section spans 20 (cos 30 deg + sin 30 deg) each side.
+    let half = 20.0 * (30f64.to_radians().cos() + 30f64.to_radians().sin());
+    assert!((x(&app) - half).abs() < 1e-6, "{} vs {half}", x(&app));
+}
+
+/// The post's design with a second post, `Other`, 100 mm along -X.
+fn two_posts_app() -> SolveApp {
+    let tube = json!({"kind": "rect_tube", "width": 40, "height": 40, "wall": 3, "outer_radius": 0});
+    let mut cmds = post_commands();
+    cmds.extend([
+        ("sketch.create", json!({"plane": "XY", "name": "Other path"})),
+        ("sketch.options", json!({"sketch_3d": true})),
+        ("sketch.line3d", json!({"points": [[-100, 0, 0], [-100, 0, 300]]})),
+        ("sketch.finish", json!({})),
+        ("frame.member", json!({"sketch": "Other path", "body_name": "Other", "profile": tube})),
+    ]);
+    app_with(&cmds)
+}
+
+/// Edit Feature opens with the member fixed: a click on another member leaves the member, the
+/// Angle and the pick as they were.
+#[test]
+fn rotate_member_edit_keeps_its_member() {
+    let mut app = two_posts_app();
+    let (_, face) = post_side(&app);
+    app.run("frame.rotate_member", json!({"face": face, "angle": "30 deg"})).unwrap();
+    let f = app.session.doc.features.iter().find(|f| matches!(f.kind, FeatureKind::FrameMemberTurn { .. })).unwrap().id;
+    let mut e = edit_dialog(&app, f, None).unwrap();
+    let member = rotate(&mut e).member.clone();
+    let picked = e.inputs[0].items.clone();
+    let st = app.session.model.state();
+    let other = st.body("Other").unwrap();
+    let i = (0..other.body.face_count())
+        .find(|i| other.body.planar_face(*i).is_some_and(|pl| pl.normal().x > 0.999 && (pl.origin.x + 80.0).abs() < 1e-6))
+        .unwrap();
+    e.inputs[0].items = vec![Sel::Face { body: "Other".into(), index: i, point: solidcore_record::Vec3::new(-80.0, 0.0, 150.0) }];
+    sync(&app, &mut e);
+    assert_eq!(rotate(&mut e).member, member, "the step's member");
+    assert_eq!(rotate(&mut e).angle, "30 deg");
+    assert_eq!(e.inputs[0].items, picked, "the pick goes back to the step's member");
+}
+
+/// Editing a top-level step while another component is active: Parallel To still works the angle
+/// out, in the step's own component as `timeline.redefine` runs it.
+#[test]
+fn rotate_member_edit_works_parallel_to_out_with_another_component_active() {
+    let mut app = post_app();
+    let (_, face) = post_side(&app);
+    app.run("frame.rotate_member", json!({"face": face, "angle": "30 deg"})).unwrap();
+    let f = app.session.doc.features.iter().find(|f| matches!(f.kind, FeatureKind::FrameMemberTurn { .. })).unwrap().id;
+    app.run("component.create", json!({"name": "Other"})).unwrap();
+    assert_ne!(app.session.active_component, 0, "another component is active");
+    let sketch = sketch_id(&app, "Ref");
+    let mut e = edit_dialog(&app, f, None).unwrap();
+    e.inputs[1].items = vec![Sel::SketchCurve { id: "ref".into(), sketch: Some(sketch) }];
+    sync(&app, &mut e);
+    // The step is left out, so the side facing +X is square to the 30 deg line at -60 deg.
+    assert_eq!(rotate(&mut e).angle, "-60 deg");
 }
 
 /// Picking Parallel To works the angle out (the side facing +X turned square to the 30° line:

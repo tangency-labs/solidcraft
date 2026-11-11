@@ -14,7 +14,7 @@ use solidcraft_engine::{
     doc::{
         FeatureKind, apply_point, apply_vector,
         end_cap::{Member, member_axis, member_pivot},
-        expr::Kind as ValueKind,
+        expr::{Kind as ValueKind, references},
         frame::{member_line_ids, member_turns},
     },
     geom::prelude::*,
@@ -52,15 +52,24 @@ pub fn start(_: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     })
 }
 
-pub fn rows(app: &SolveApp, ui: &mut egui::Ui, c: &mut RotateMember, inputs: &[SelInput]) -> bool {
+pub fn rows(app: &SolveApp, ui: &mut egui::Ui, c: &mut RotateMember, inputs: &mut [SelInput]) -> bool {
     sync(app, c, inputs);
     expr_row(ui, app.tr("ui.rotate_member.angle"), &mut c.angle)
 }
 
 /// Brings the Angle up to date with the picks: a newly picked member's current turn, and a newly
-/// picked Parallel To line's angle.
-pub fn sync(app: &SolveApp, c: &mut RotateMember, inputs: &[SelInput]) {
-    let member = picked_body(inputs).and_then(|body| member_of(app, body));
+/// picked Parallel To line's angle. Editing, the step keeps its member: a pick on another member
+/// goes back to a side of the step's.
+pub fn sync(app: &SolveApp, c: &mut RotateMember, inputs: &mut [SelInput]) {
+    let mut member = picked_body(inputs).and_then(|body| member_of(app, body));
+    if c.step.is_some()
+        && member.is_some()
+        && member != c.member
+        && let (Some(m), Some(input)) = (&c.member, inputs.first_mut())
+    {
+        input.items = side_pick(app, c.step, m).into_iter().collect();
+        member = c.member.clone();
+    }
     if member != c.member {
         if let Some(m) = &member {
             c.angle = current(app, m).map_or_else(|| "0 deg".into(), |(e, _)| e);
@@ -128,9 +137,14 @@ pub fn for_feature(app: &SolveApp, id: u64, kind: &FeatureKind) -> Option<(Kind,
 pub(crate) fn dial(app: &SolveApp, inputs: &[SelInput]) -> Option<(Vec3, Vec3)> {
     let member = member_of(app, picked_body(inputs)?)?;
     let doc = &app.session.doc;
+    let component = doc.feature(member.feature.0)?.component;
+    // The command refuses a member inside a component (not supported yet): no dial for it.
+    if component != 0 {
+        return None;
+    }
     let state = app.session.model.state();
     // Both come in the member's component frame; its placement carries them into the world.
-    let frame = crate::dialogs::feature_frame(&app.session, doc.feature(member.feature.0)?.component);
+    let frame = crate::dialogs::feature_frame(&app.session, component);
     let centre = apply_point(&frame, member_pivot(doc, &state, &member).ok()?);
     let axis = apply_vector(&frame, member_axis(doc, &state, &member).ok()?).normalized()?;
     Some((centre, axis))
@@ -164,11 +178,17 @@ fn worked_out(app: &SolveApp, step: Option<u64>, args: &Value) -> Option<String>
     Some(shown_expr(angle, ValueKind::Angle))
 }
 
-/// Whether the Angle is the picked member's current turn.
+/// Whether the Angle is the picked member's current turn: the same text, or the same value with
+/// no parameter on either side (a parameter at the current value may change later).
 fn unchanged(app: &SolveApp, c: &RotateMember, inputs: &[SelInput]) -> bool {
     let Some(member) = picked_body(inputs).and_then(|body| member_of(app, body)) else { return false };
-    let now = current(app, &member).map_or(0.0, |(_, radians)| radians);
-    crate::length_input::eval(&app.session.doc, &c.angle, ValueKind::Angle).is_ok_and(|a| (a - now).abs() < 1e-9)
+    let (text, now) = current(app, &member).unwrap_or_else(|| ("0 deg".into(), 0.0));
+    if c.angle == text {
+        return true;
+    }
+    references(&c.angle).is_empty()
+        && references(&text).is_empty()
+        && crate::length_input::eval(&app.session.doc, &c.angle, ValueKind::Angle).is_ok_and(|a| (a - now).abs() < 1e-9)
 }
 
 /// The member's current turn, as the Angle shows it and in radians; None: never turned.
@@ -198,6 +218,10 @@ fn design(app: &SolveApp, step: Option<u64>) -> Session {
     {
         if let Some(f) = s.doc_mut().feature_mut(id) {
             f.suppressed = true;
+        }
+        // In the step's component, as `timeline.redefine`'s trial runs it.
+        if let Some(component) = s.doc.feature(id).map(|f| f.component) {
+            s.active_component = component;
         }
         s.doc_mut().marker = Some(at.saturating_add(1));
         s.refresh();
