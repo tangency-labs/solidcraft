@@ -852,6 +852,12 @@ pub fn clamped_uniform(count: usize, degree: usize) -> Result<Vec<f64>> {
 /// there with continuity `degree - 1` (Piegl and Tiller, *The NURBS Book*, 2nd ed., §12.2:
 /// a periodic, uniform knot vector, unclamped).
 ///
+/// Not a clamped vector, so not one for the routines that take only those:
+/// [`KnotVector::validate`] (upstream's clamped check) refuses it, and
+/// [`KnotVector::basis_eval_into`] reads the domain's ends as clamped ones (its end special
+/// cases); evaluate such a curve with the general basis ([`crate::eval`], or the NLib
+/// curve's `derivs`).
+///
 /// Not upstream: the knots of a closed curve made from control points alone.
 ///
 /// # Errors
@@ -887,7 +893,8 @@ mod tests {
         for w in knots.windows(2) {
             assert!((w[1] - w[0] - 0.25).abs() < 1e-15, "{knots:?}");
         }
-        KnotVector::from_slice(&knots).unwrap().validate(3).unwrap();
+        // not a clamped vector: KnotVector::validate, upstream's clamped check, refuses it
+        assert!(KnotVector::from_slice(&knots).unwrap().validate(3).is_err());
         for (count, degree) in [(3, 3), (5, 0), (1, 1)] {
             assert!(
                 periodic_uniform(count, degree).is_err(),

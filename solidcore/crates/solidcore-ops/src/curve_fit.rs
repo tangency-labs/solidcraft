@@ -263,8 +263,10 @@ mod tests {
         assert_eq!(knots.len(), 11);
         assert_eq!((knots[3], knots[7]), (0.0, 1.0));
         let k = unclamped(&c);
-        // the uniform cubic starts at (P0 + 4 P1 + P2) / 6
-        let start = k.eval(0.0, Side::Right).unwrap();
+        // the uniform cubic starts at (P0 + 4 P1 + P2) / 6 (the basis at a knot of a uniform
+        // cubic is 1/6, 4/6, 1/6). Read through `derivs`, the general basis: the NLib `eval`
+        // takes the domain's first knot for a clamped end and answers P0 there.
+        let start = k.derivs(0.0, Side::Right, 0).unwrap()[0];
         assert!((start.x - 50.0 / 6.0).abs() < 1e-12 && (start.y - 10.0 / 6.0).abs() < 1e-12);
         // position, first and second derivatives meet across the seam
         let (a, b) = (
