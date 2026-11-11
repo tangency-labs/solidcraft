@@ -750,7 +750,9 @@ mod tests {
         use solidcore::surface::surf_of_extrusion::SurfOfExtrusion;
         use solidcore::surface::surf_of_revolution::SurfOfRevolution;
         use solidcore::surface::surface::Surface;
+        use solidcore::topology::brep::p2::edgeuses;
         use solidcore::topology::brep::sheet::sheet_on;
+        use solidcore::topology::edgeuse::p3::get_or_create_uv_trim_curve;
         let mut kernel = Kernel::default();
         let origin = Point3::new(0.0, 0.0, 0.0);
         let mut breps = vec![
@@ -775,7 +777,9 @@ mod tests {
         // angle), each a one-face sheet: 20 mm tall at radius 10 about the z axis.
         let x = Vec3::new(1.0, 0.0, 0.0);
         let y = Vec3::new(0.0, 1.0, 0.0);
-        let line = Line::from_points(Point3::new(10.0, 0.0, 0.0), Point3::new(10.0, 0.0, 20.0), 3);
+        let mut line =
+            Line::from_points(Point3::new(10.0, 0.0, 0.0), Point3::new(10.0, 0.0, 20.0), 3);
+        line.make_nurb().unwrap();
         let revolved_line = SurfOfRevolution::new(
             &kernel,
             Curve::from(line),
@@ -817,8 +821,15 @@ mod tests {
             }),
         ];
         for (name, surface, exported_as) in sheets {
-            let (brep, _) = sheet_on(&mut kernel, surface, 1e-6)
+            let (mut brep, _) = sheet_on(&mut kernel, surface, 1e-6)
                 .unwrap_or_else(|e| panic!("{name}: {e}"));
+            // the sheet's sides have no UV curves yet: each edge use gets its own
+            for edgeuse in edgeuses(&brep, None).unwrap() {
+                get_or_create_uv_trim_curve(&kernel, &mut brep, edgeuse, false, false, true)
+                    .unwrap()
+                    .status
+                    .unwrap_or_else(|e| panic!("{name}: {e}"));
+            }
             // the face keeps its kind, so the checks below go through its branch
             let model = brep_to_model(&brep).unwrap_or_else(|e| panic!("{name}: {e}"));
             assert!(
