@@ -1207,10 +1207,21 @@ fn extrude_cut(st: &ModelState, f: &Feature) -> Result<Option<ExtrudeCut>> {
     Ok(Some(ExtrudeCut { plane: ss.plane, regions, text, operation: *operation }))
 }
 
-/// What an extrude cut takes from the sheets made from surfaces it reaches, read straight into
-/// their outlines (#6748): each tool a prism along a flat panel's normal, through its whole
-/// thickness, its footprint clear inside the panel's material and its box apart from the rest
-/// of the sheet. That is what the cut takes in space (see `sheet_surface_cuts`), without cutting
+/// Whether body `b` takes part in feature `f`, as `apply_traced_with` picks the bodies a boolean
+/// changes: the feature's own `targets`, else its explicit participants (`*` for all),
+/// else the bodies of its component and what it made itself. A sheet made from surfaces is one
+/// body among them: a cut aimed at another component's body, or at bodies it names, leaves it be.
+fn takes_part(f: &Feature, targets: &[String], b: &ModelBody) -> bool {
+    let targets: &[String] = if targets.is_empty() { &f.participants } else { targets };
+    let all = targets.len() == 1 && targets.first().is_some_and(|t| t == "*");
+    all || if targets.is_empty() { b.component == f.component || b.feature == f.id } else { targets.contains(&b.name) }
+}
+
+/// What an extrude cut takes from the sheets made from surfaces it reaches, of the bodies it takes
+/// part in (see [`takes_part`]), read straight into their outlines (#6748): each tool a prism
+/// along a flat panel's normal, through its whole thickness, its footprint clear inside the
+/// panel's material and its box apart from the rest of the sheet. That is what the cut takes in
+/// space (see `sheet_surface_cuts`), without cutting
 /// a body the sheet builds again. What lies inside a footprint (a letter's counter) stays, a
 /// loose piece. A footprint through the panel's outline takes what it covers of the panel, the
 /// curves of both kept as drawn; a piece it parts from the panel stays, a loose piece. The
@@ -1263,7 +1274,6 @@ pub(super) fn surface_prism_cut(
             (lo, hi, plane, region, Some(b.inflated(1e-6)))
         })
         .collect();
-    let all = targets.len() == 1 && targets.first().is_some_and(|t| t == "*");
     // The cut's sketch: the curves its holes' walls are named after (see `SurfaceSheet::name_hole`).
     let cut_sketch = match &f.kind {
         FeatureKind::Extrude { sketch, .. } => st.sketch(sketch.0),
@@ -1272,7 +1282,7 @@ pub(super) fn surface_prism_cut(
     let mut plans: Vec<(usize, crate::SurfaceSheet)> = Vec::new();
     for (i, sk) in st.surface_sheets.iter().enumerate() {
         let Some(mb) = st.body(&sk.body) else { continue };
-        if !(all || targets.is_empty() || targets.contains(&sk.body)) {
+        if !takes_part(f, targets, mb) {
             continue;
         }
         let body_box = exact_box(&mb.body);
@@ -1393,13 +1403,13 @@ pub(super) fn surface_prism_cut(
     Ok(handled)
 }
 
-/// What a hole feature's drills take from the sheets made from surfaces they reach (#6748): a
-/// drill square across a flat panel, through its thickness and clear inside its material, is a
-/// round hole in its outline; one along a flat panel, inside its thickness, a bore of it (see
-/// [`crate::sheet::SheetBore`]). Each drill must meet one panel so and nothing else of the
-/// sheet. The sheets' bodies drilled; none, and nothing changed, for any other hole, which the
-/// generic path takes.
-pub(super) fn surface_hole_cut(st: &mut ModelState, tools: &[(Traced, Option<PrimitivePrism>)]) -> Result<Vec<String>> {
+/// What the drills of hole feature `f` take from the sheets made from surfaces they reach, of the
+/// bodies the hole cuts (see [`takes_part`]) (#6748): a drill square across a flat panel, through
+/// its thickness and clear inside its material, is a round hole in its outline; one along a flat
+/// panel, inside its thickness, a bore of it (see [`crate::sheet::SheetBore`]). Each drill must
+/// meet one panel so and nothing else of the sheet. The sheets' bodies drilled; none, and nothing
+/// changed, for any other hole, which the generic path takes.
+pub(super) fn surface_hole_cut(f: &Feature, st: &mut ModelState, tools: &[(Traced, Option<PrimitivePrism>)]) -> Result<Vec<String>> {
     if tools.is_empty() || tools.len() > 10_000 {
         return Ok(Vec::new());
     }
@@ -1411,6 +1421,10 @@ pub(super) fn surface_hole_cut(st: &mut ModelState, tools: &[(Traced, Option<Pri
     let mut plans: Vec<(usize, crate::SurfaceSheet)> = Vec::new();
     for (i, sk) in st.surface_sheets.iter().enumerate() {
         let Some(mb) = st.body(&sk.body) else { continue };
+        // A hole has no targets of its own: its participants, else its component's bodies.
+        if !takes_part(f, &[], mb) {
+            continue;
+        }
         let body_box = exact_box(&mb.body);
         let reaching: Vec<_> = drills.iter().filter(|d| !boxes_apart(&d.4, &body_box)).collect();
         if reaching.is_empty() {
@@ -1494,10 +1508,11 @@ pub(super) fn surface_hole_cut(st: &mut ModelState, tools: &[(Traced, Option<Pri
 }
 
 /// An untapered extrude join one sheet thick in the plane of a flat panel of a sheet made from
-/// surfaces (#6748), folded or flat, that touches that panel's material and no other piece of
-/// the sheet: its footprint becomes part of the panel's outline, so the flat, its DXF and a
-/// refold keep it, and it follows its sketch as a cut there does. The sheets' bodies it joined;
-/// none, and nothing changed, for any other join, which the generic path takes.
+/// surfaces (#6748), folded or flat, of the bodies the join takes part in (see [`takes_part`]),
+/// that touches that panel's material and no other piece of the sheet: its footprint becomes part
+/// of the panel's outline, so the flat, its DXF and a refold keep it, and it follows its sketch as
+/// a cut there does. The sheets' bodies it joined; none, and nothing changed, for any other join,
+/// which the generic path takes.
 pub(super) fn surface_sheet_join(
     f: &Feature,
     st: &mut ModelState,
@@ -1517,9 +1532,8 @@ pub(super) fn surface_sheet_join(
     let plane = ss.plane;
     let n = plane.normal();
     let (lo, hi) = (c.interval.0.min(c.interval.1), c.interval.0.max(c.interval.1));
-    let all = targets.len() == 1 && targets.first().is_some_and(|t| t == "*");
     for (i, sk) in st.surface_sheets.iter().enumerate() {
-        if !(all || targets.is_empty() || targets.contains(&sk.body)) {
+        if !st.body(&sk.body).is_some_and(|mb| takes_part(f, targets, mb)) {
             continue;
         }
         let Some((panels, _)) = sk.pieces_in_space() else { continue };

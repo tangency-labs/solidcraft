@@ -203,8 +203,9 @@ const ON_LINE: f64 = 1e-7;
 
 /// A development's pieces before they are joined: each placed panel less its trims, and the
 /// zones, all less what the development cuts from the flat (the corners' reliefs and the sheet's
-/// cuts), with each piece of a zone sorted by what still holds it (see [`sort_zones`]). The flat
-/// pattern and the folded solid are both made of them.
+/// cuts), with each piece of a zone sorted by what still holds it (see [`sort_zones`]), and their
+/// longest arcs halved (see [`halved`]). The flat pattern and the folded solid are both made of
+/// them, edge for edge.
 pub(crate) fn pieces(dev: &Development, work: &mut FlatWork) -> Result<Vec<(Piece, Region2)>> {
     #[cfg(test)]
     crate::eval::cost_tests::count_flat();
@@ -226,7 +227,7 @@ pub(crate) fn pieces(dev: &Development, work: &mut FlatWork) -> Result<Vec<(Piec
     }
     pieces.extend(dev.zones.iter().enumerate().map(|(z, zone)| (Piece::Zone(z), on_grid(&zone.region))));
     if dev.cuts.is_empty() {
-        return Ok(pieces);
+        return Ok(halved(pieces));
     }
     // A cut clear inside one piece is a hole of it as it is, its curves kept; the rest are cut
     // from every piece they reach. A cut that came clear of the pieces but meets what the others
@@ -241,7 +242,30 @@ pub(crate) fn pieces(dev: &Development, work: &mut FlatWork) -> Result<Vec<(Piec
             None => late.push(c),
         }
     }
-    sort_zones(dev, cut_from(out, &late, work)?)
+    Ok(halved(sort_zones(dev, cut_from(out, &late, work)?)?))
+}
+
+/// The pieces with each arc of more than three quarters of a turn (a hole's whole circle) halved
+/// at the middle of its own sweep: two arcs of its circle that meet where the one did. Until the
+/// kernel (solidcore, #1597) takes a circular edge round any sweep, and a whole circle on one
+/// vertex, the folded solid's wall along such an arc is two faces, one on each half (see
+/// `sheet_surface_fold::cells`, which takes these pieces' arcs as they are). The flat keeps the
+/// same two edges: an edge of the flat is an edge of the folded sheet.
+fn halved(pieces: Vec<(Piece, Region2)>) -> Vec<(Piece, Region2)> {
+    let halves = |l: Loop2| Loop2 {
+        segs: l
+            .segs
+            .into_iter()
+            .flat_map(|e| match e {
+                Seg2::Arc { center, radius, start, sweep } if sweep.abs() > std::f64::consts::PI * 1.5 => {
+                    let half = sweep / 2.0;
+                    vec![Seg2::Arc { center, radius, start, sweep: half }, Seg2::Arc { center, radius, start: start + half, sweep: half }]
+                }
+                e => vec![e],
+            })
+            .collect(),
+    };
+    pieces.into_iter().map(|(piece, r)| (piece, Region2 { outer: halves(r.outer), holes: r.holes.into_iter().map(halves).collect() })).collect()
 }
 
 /// `pieces` less `cuts`, joined first: what each piece leaves, each a piece of the same kind.

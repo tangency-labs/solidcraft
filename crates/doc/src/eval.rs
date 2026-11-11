@@ -7446,9 +7446,9 @@ fn eval_feature(
             }
             let (spots, dir) = hole_spots(vals, st, f)?;
             let tools = hole_feature_tools(vals, st, f)?;
-            // A drill square through a flat panel of a sheet made from surfaces goes into its
-            // outline, and one along the panel into its rim is a bore of it.
-            let handled = if st.surface_sheets.is_empty() { Vec::new() } else { more::surface_hole_cut(st, &tools)? };
+            // A drill square through a flat panel of a sheet made from surfaces the hole cuts goes
+            // into its outline, and one along the panel into its rim is a bore of it.
+            let handled = if st.surface_sheets.is_empty() { Vec::new() } else { more::surface_hole_cut(f, st, &tools)? };
             let tools: Vec<Traced> = tools.into_iter().map(|(tool, _)| tool).collect();
             if handled.is_empty() {
                 // A hole moved off the material (a changed position, parameter or sketch point)
