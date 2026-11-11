@@ -315,7 +315,7 @@ impl Affine {
 }
 
 /// Every coordinate finite and within [`MAX_COORD`].
-fn coord_ok(p: &[f64]) -> bool {
+pub(crate) fn coord_ok(p: &[f64]) -> bool {
     p.iter().all(|x| x.is_finite() && x.abs() <= MAX_COORD)
 }
 
