@@ -777,10 +777,16 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         chamfer_depth,
         steep_flank,
         old_auto_size,
+        additional_faces,
+        target_bodies: _,
     } = &f.kind
     else {
         return Err(DocError::Invalid("not a thread".into()));
     };
+    let targets = super::thread_target_bodies(doc, st, &f.kind)?;
+    if additional_faces.len() >= 1024 {
+        return Err(DocError::Invalid("a Thread feature takes at most 1024 cylindrical faces".into()));
+    }
     if *tip != ThreadTip::None && !*modeled {
         return Err(DocError::Invalid("a chamfered tip is cut only on a modelled thread".into()));
     }
@@ -809,30 +815,46 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         return Err(DocError::Invalid("a runout is cut only on a modelled thread".into()));
     }
     let ask = ThreadAsk { ease_out: runout(vals, ease_out)?, ..ask };
-    let on = thread_on(st, f.id, face.0, &ask)?;
-    if !*modeled {
-        st.threads.push(on.info);
-        return Ok(());
+    let angle = if *modeled { chamfer_angle.as_deref().map(|e| val(vals, e, Kind::Angle)).transpose()? } else { None };
+    let depth = if *modeled { chamfer_depth.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()? } else { None };
+    let mut selected: Vec<ThreadOn> = Vec::new();
+    for (index, face) in std::iter::once(face).chain(additional_faces).enumerate() {
+        let scoped;
+        let input = if let Some(body) = targets.as_ref().and_then(|bodies| bodies.get(index)) {
+            scoped = ModelState { bodies: vec![(**body).clone()], ..ModelState::default() };
+            &scoped
+        } else {
+            &*st
+        };
+        let on = thread_on(input, f.id, face.0, &ask)?;
+        // Resolve against the starting model, before a modelled thread removes a picked surface.
+        if !selected.iter().any(|old| old.info.body == on.info.body && old.cyl == on.cyl) {
+            selected.push(on);
+        }
     }
-    let angle = chamfer_angle.as_deref().map(|e| val(vals, e, Kind::Angle)).transpose()?;
-    let depth = chamfer_depth.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?;
-    if let Some(r) = on.narrow {
-        let note = format!(
-            "narrowed the {} mm hole to {} mm (the {} thread's minor diameter) so the thread has material to cut into",
-            show_mm(2.0 * on.cyl.radius),
-            show_mm(2.0 * r),
-            on.info.designation
-        );
-        *warning = Some(match warning.take() {
-            Some(w) => format!("{w}; {note}"),
-            None => note,
-        });
-    }
-    if let Some(note) = cut_with_flanks(st, on, (*tip, angle, depth), *continuous_flanks)? {
-        *warning = Some(match warning.take() {
-            Some(w) => format!("{w}; {note}"),
-            None => note,
-        });
+    for on in selected {
+        if !*modeled {
+            st.threads.push(on.info);
+            continue;
+        }
+        if let Some(r) = on.narrow {
+            let note = format!(
+                "narrowed the {} mm hole to {} mm (the {} thread's minor diameter) so the thread has material to cut into",
+                show_mm(2.0 * on.cyl.radius),
+                show_mm(2.0 * r),
+                on.info.designation
+            );
+            *warning = Some(match warning.take() {
+                Some(w) => format!("{w}; {note}"),
+                None => note,
+            });
+        }
+        if let Some(note) = cut_with_flanks(st, on, (*tip, angle, depth), *continuous_flanks)? {
+            *warning = Some(match warning.take() {
+                Some(w) => format!("{w}; {note}"),
+                None => note,
+            });
+        }
     }
     Ok(())
 }

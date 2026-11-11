@@ -7,7 +7,7 @@
 use serde_json::{Value, json};
 use solidcraft_engine::doc::thread_forms::{SteepFlank, ThreadForm, ThreadHand, ThreadTip};
 use solidcraft_engine::doc::{
-    Document, Expr, FeatureKind, TappedThread, TappedThreadFamily, ThreadLimit, ThreadRunout, metric_thread_sizes, parse_metric_thread,
+    Document, Expr, Feature, FeatureKind, TappedThread, TappedThreadFamily, ThreadLimit, ThreadRunout, metric_thread_sizes, parse_metric_thread,
     parse_tapped_thread, tapped_thread_sizes,
 };
 use solidcraft_engine::{Sel, Session};
@@ -652,7 +652,8 @@ pub(crate) fn suggested(s: &Session, picks: &[Sel], o: &Options) -> Option<Strin
 }
 
 /// A saved thread's dialog: every option as saved, with its picks.
-pub(crate) fn reopen(d: &mut Dialog, s: &Session, kind: &FeatureKind) {
+pub(crate) fn reopen(d: &mut Dialog, s: &Session, feature: &Feature) {
+    let kind = &feature.kind;
     let FeatureKind::Thread {
         face,
         designation,
@@ -671,6 +672,8 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, kind: &FeatureKind) {
         steep_flank,
         // Kept by the edit itself (`timeline.redefine`), not a dialog option.
         old_auto_size: _,
+        additional_faces,
+        target_bodies,
     } = kind
     else {
         return;
@@ -696,8 +699,36 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, kind: &FeatureKind) {
         chamfer_depth: chamfer_depth.as_ref().map(expr).unwrap_or_default(),
         steep_flank: *steep_flank,
     };
+    let refill = |slot: usize, saved| {
+        let target = kind.thread_target_body(slot);
+        let target_slot = slot != 1 || !matches!(up_to, Some(ThreadLimit::Face(_)));
+        let mut pick = if !target_bodies.is_empty() && target_slot {
+            let body = target.unwrap_or("");
+            feature
+                .face_names
+                .get(slot)
+                .and_then(|name| crate::dialogs::named_refill_on_body(s, body, name, saved))
+                .or_else(|| Some(Sel::Face { body: body.to_string(), index: usize::MAX, point: saved }))
+        } else {
+            feature
+                .face_names
+                .get(slot)
+                .and_then(|name| crate::dialogs::named_refill(s, kind.face_body(), name, saved, false))
+                .or_else(|| face_sel(s, saved))
+        };
+        if let Some(Sel::Face { point, .. }) = &mut pick {
+            *point = solidcraft_engine::doc::restored_thread_pick(saved, *point);
+        }
+        pick
+    };
+    // Face names follow the geometry walk: primary, optional Up To face, then added faces.
+    let added_at = 1 + usize::from(matches!(up_to, Some(ThreadLimit::Face(_))));
     if let Some(inp) = d.inputs.first_mut() {
-        inp.items = face_sel(s, face.0).into_iter().collect();
+        inp.multi = !additional_faces.is_empty() || !target_bodies.is_empty();
+        inp.items = std::iter::once((0, face))
+            .chain(additional_faces.iter().enumerate().map(|(index, pick)| (added_at + index, pick)))
+            .filter_map(|(slot, pick)| refill(slot, pick.0))
+            .collect();
     }
     sync_inputs(&mut d.inputs, &mut d.active, &options);
     // A place no pick finds again (the model changed) is still the place saved.
@@ -711,7 +742,7 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, kind: &FeatureKind) {
         set(d, START_END, place(edge_sel(s, from.0), from.0));
     }
     match up_to {
-        Some(ThreadLimit::Face(at)) => set(d, UP_TO, place(face_sel(s, at.0), at.0)),
+        Some(ThreadLimit::Face(at)) => set(d, UP_TO, place(refill(1, at.0), at.0)),
         Some(ThreadLimit::Plane(plane)) => {
             if let Some(sel) = plane_sel(s, plane) {
                 set(d, UP_TO, sel);
@@ -725,6 +756,7 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, kind: &FeatureKind) {
         length: length.as_ref().map(expr).unwrap_or_default(),
         suggested: None,
         of: Vec::new(),
+        grouped: !target_bodies.is_empty(),
         options,
     };
 }

@@ -1416,7 +1416,176 @@ fn marking(p: Vec3) -> FeatureKind {
         steep_flank: Default::default(),
         continuous_flanks: false,
         old_auto_size: false,
+        additional_faces: Vec::new(),
+        target_bodies: Vec::new(),
     }
+}
+
+/// Four selected cylindrical faces on one plate for a grouped Thread feature.
+fn grouped_thread_document(modeled: bool) -> (Document, u64) {
+    let mut doc = Document::new("grouped threads");
+    block(&mut doc, "Part", Vec3::new(-15.0, -15.0, 0.0), [30.0, 30.0, 2.0]);
+    let mut faces = Vec::new();
+    for (x, y) in [(-8.0, -8.0), (8.0, -8.0), (-8.0, 8.0), (8.0, 8.0)] {
+        doc.add_feature(
+            FeatureKind::Cylinder {
+                base: point_expr(Vec3::new(x, y, 2.0)),
+                axis: Dir(Vec3::Z),
+                radius: "3".into(),
+                height: "4".into(),
+                operation: Operation::Join,
+                references: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+        faces.push(FacePick(Vec3::new(x + 3.0, y, 5.0)));
+    }
+    let mut kind = marking(faces.remove(0).0);
+    if let FeatureKind::Thread { additional_faces, modeled: value, designation, .. } = &mut kind {
+        *additional_faces = faces;
+        *value = modeled;
+        *designation = Some("M6x0.75".into());
+    }
+    let id = doc.add_feature(kind, None).unwrap();
+    (doc, id)
+}
+
+/// A cosmetic group keeps one feature and one marking at each selected cylindrical face.
+#[test]
+fn a_grouped_thread_marks_every_selected_face_with_one_feature() {
+    let (doc, id) = grouped_thread_document(false);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert_eq!(model.result(id).unwrap().error, None);
+    assert_eq!(doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::Thread { .. })).count(), 1);
+    let state = model.state();
+    let threads = &state.threads;
+    assert_eq!(threads.len(), 4);
+    assert!(threads.iter().all(|t| t.feature == id && t.designation == "M6x0.75"));
+    let origins: Vec<_> = threads.iter().map(|t| (t.axis_point.x.round() as i64, t.axis_point.y.round() as i64)).collect();
+    assert_eq!(origins, vec![(-8, -8), (8, -8), (-8, 8), (8, 8)]);
+}
+
+#[test]
+fn a_pattern_replays_every_grouped_thread_pick_on_its_named_body() {
+    let (mut doc, id) = grouped_thread_document(false);
+    if let FeatureKind::Thread { additional_faces, target_bodies, .. } = &mut doc.feature_mut(id).unwrap().kind {
+        additional_faces.truncate(1);
+        *target_bodies = vec!["Part".into(); 2];
+    }
+    let pattern = doc
+        .add_feature(
+            FeatureKind::Pattern {
+                features: vec![FeatureId(id)],
+                pattern: PatternKind::Rectangular {
+                    dir1: Dir(Vec3::Y),
+                    count1: "2".into(),
+                    spacing1: "16".into(),
+                    dir2: None,
+                    count2: None,
+                    spacing2: None,
+                    alignment: solidcraft_sketch::PatternAlignment::Right,
+                    alignment2: Default::default(),
+                    reversed: false,
+                    reversed2: false,
+                },
+                bodies: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert_eq!(model.result(id).unwrap().error, None);
+    assert_eq!(model.result(pattern).unwrap().error, None);
+    let state = model.state();
+    let copied: Vec<_> = state
+        .threads
+        .iter()
+        .filter(|t| t.feature == pattern)
+        .map(|t| (t.body.as_str(), t.axis_point.x.round() as i64, t.axis_point.y.round() as i64))
+        .collect();
+    assert_eq!(copied, vec![("Part", -8, 8), ("Part", 8, 8)]);
+}
+
+/// Different points on the same cylindrical interval create just one marking.
+#[test]
+fn duplicate_grouped_thread_picks_resolve_to_one_marking() {
+    let (mut doc, id) = grouped_thread_document(false);
+    if let FeatureKind::Thread { additional_faces, .. } = &mut doc.feature_mut(id).unwrap().kind {
+        additional_faces.push(FacePick(Vec3::new(-8.0, -5.0, 4.0)));
+    }
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert_eq!(model.result(id).unwrap().error, None);
+    assert_eq!(model.state().threads.len(), 4);
+}
+
+/// A malformed saved group is bounded before expensive geometry is visited.
+#[test]
+fn an_oversized_grouped_thread_is_refused() {
+    let (mut doc, id) = grouped_thread_document(false);
+    if let FeatureKind::Thread { additional_faces, .. } = &mut doc.feature_mut(id).unwrap().kind {
+        *additional_faces = vec![FacePick(Vec3::new(-5.0, -8.0, 5.0)); 1024];
+    }
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.result(id).unwrap().error.as_ref().is_some_and(|e| e.contains("at most 1024")));
+    assert!(model.state().threads.is_empty());
+}
+
+/// A body-qualified modelled group cuts every selected shaft within one timeline feature.
+#[test]
+fn a_grouped_modelled_thread_cuts_every_selected_shaft() {
+    let (mut doc, id) = grouped_thread_document(true);
+    if let FeatureKind::Thread { target_bodies, .. } = &mut doc.feature_mut(id).unwrap().kind {
+        *target_bodies = vec!["Part".into(); 4];
+    }
+    assert_eq!(doc.feature(id).unwrap().kind.input_bodies(), ["Part"; 4]);
+    assert_eq!(doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::Thread { .. })).count(), 1);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert_eq!(model.result(id).unwrap().error, None);
+    let before = model.state_before(id);
+    let after = model.state();
+    assert_eq!(after.bodies.len(), 1);
+    assert!(!before.bodies[0].body.same_shape(&after.bodies[0].body));
+    assert!(after.threads.is_empty(), "modelled threads are geometry, not tap markings");
+    let base_volume = kernel::measure(&before.bodies[0].body).unwrap().volume;
+    let threaded_volume = kernel::measure(&after.bodies[0].body).unwrap().volume;
+    assert!(base_volume - threaded_volume > 8.0, "all four grooves remove material");
+    for (x, y) in [(-8.0, -8.0), (8.0, -8.0), (-8.0, 8.0), (8.0, 8.0)] {
+        // Four phases at radius 2.9 mm, inside the original 3 mm shaft. A 0.75 mm
+        // ISO groove spans more than a quarter turn there, so at least one is cut.
+        let probes = [Vec3::new(x + 2.9, y, 4.0), Vec3::new(x, y + 2.9, 4.0), Vec3::new(x - 2.9, y, 4.0), Vec3::new(x, y - 2.9, 4.0)];
+        assert!(probes.iter().all(|p| before.bodies[0].body.classify_point(*p).unwrap() == kernel::PointClass::Inside));
+        assert!(
+            probes.iter().any(|p| after.bodies[0].body.classify_point(*p).unwrap() == kernel::PointClass::Outside),
+            "shaft at ({x}, {y}) is threaded"
+        );
+        assert_eq!(after.bodies[0].body.classify_point(Vec3::new(x, y, 4.0)).unwrap(), kernel::PointClass::Inside, "the shaft core stays intact");
+        assert_eq!(
+            after.bodies[0].body.classify_point(Vec3::new(x, y, 1.0)).unwrap(),
+            kernel::PointClass::Inside,
+            "the supporting plate stays intact"
+        );
+    }
+}
+
+/// A bad later pick refuses the complete group rather than leaving earlier markings behind.
+#[test]
+fn an_invalid_grouped_thread_face_keeps_the_starting_model() {
+    let (mut doc, id) = grouped_thread_document(false);
+    if let FeatureKind::Thread { additional_faces, .. } = &mut doc.feature_mut(id).unwrap().kind {
+        additional_faces.push(FacePick(Vec3::new(1000.0, 0.0, 0.0)));
+    }
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.result(id).unwrap().error.is_some());
+    assert!(model.state().threads.is_empty());
+    let before = model.state_before(id);
+    assert!(model.state().bodies[0].body.same_shape(&before.bodies[0].body));
 }
 
 /// A tap marking looks for its cylinder in the bodies near it only: each body searched was
