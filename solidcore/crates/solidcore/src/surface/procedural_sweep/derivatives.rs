@@ -183,6 +183,19 @@ impl ProceduralSweep {
                 };
             }
         }
+        // The map's checked powers, each formed once rather than at every partial: a
+        // power is a pure function of its base and order, and a failed one is kept as
+        // its error and met where the partial that needs it first is, as before.
+        let powers = |base: f64, highest: usize| -> Vec<Result<f64>> {
+            (0..=highest).map(|n| checked::powi(base, n)).collect()
+        };
+        let (w_powers, t_powers) = (powers(self.map.b[0], dw), powers(self.map.b[1], dt));
+        let power = |powers: &[Result<f64>], n: usize| -> Result<f64> {
+            powers
+                .get(n)
+                .cloned()
+                .unwrap_or_else(|| Err(SolidError::invalid_input(OP, "missing map power")))
+        };
         let mut result = vec![vec![Vec3::ZERO; dv + 1]; du + 1];
         for (i, row) in result.iter_mut().enumerate() {
             for (j, value) in row.iter_mut().enumerate() {
@@ -192,8 +205,7 @@ impl ProceduralSweep {
                     .and_then(|row| row.get(t))
                     .copied()
                     .ok_or_else(|| SolidError::invalid_input(OP, "missing screw derivative"))?;
-                *value = derivative
-                    * (checked::powi(self.map.b[0], w)? * checked::powi(self.map.b[1], t)?);
+                *value = derivative * (power(&w_powers, w)? * power(&t_powers, t)?);
                 if ![value.x, value.y, value.z].iter().all(|x| x.is_finite()) {
                     return Err(SolidError::invalid_input(
                         OP,
