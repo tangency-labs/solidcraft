@@ -448,15 +448,34 @@ fn plane_section(point: Point3, normal: Vec3, q: &BlendQuadric) -> Result<Conic>
     let b1 = g.dot(u);
     let b2 = g.dot(v);
     let c2 = quad(point, point) + 2.0 * s_bv.dot(point) + dc;
-    // principal axes of A2
-    let tr = a11 + a22;
-    let det = a11 * a22 - a12 * a12;
-    let disc = max2(0.0, 0.25 * tr * tr - det).sqrt();
-    let adl = [0.5 * tr + disc, 0.5 * tr - disc];
+    // principal axes of A2: the eigenvalues m +- hypot(h, a12), h = (a11 - a22) / 2, and
+    // each axis in the form whose terms add (not upstream, which takes the eigenvalues from
+    // sqrt(tr^2 / 4 - det) and the axes from (a12, lambda - a11): both cancel as the section
+    // nears a circle, and the conic then misses the quadric by about eps / a^2,
+    // tangency-labs/solidcraft#15037). The axes are those upstream's give in exact
+    // arithmetic, signs included: (a12, lambda_0 - a11) = (a12, r - h) is a12 / |a12| times
+    // (r + h, a12) scaled by |a12| / (r + h), and (a12, lambda_1 - a11) = (a12, -(r + h)) is
+    // a12 / |a12| times (r - h, -a12) scaled by |a12| / (r - h).
+    let m = 0.5 * (a11 + a22);
+    let h = 0.5 * (a11 - a22);
+    let r = h.hypot(a12);
+    let adl = [m + r, m - r];
+    let sg = if a12 < 0.0 { -1.0 } else { 1.0 };
+    let axes = [
+        if h >= 0.0 {
+            [sg * (r + h), sg * a12]
+        } else {
+            [a12, r - h]
+        },
+        if h <= 0.0 {
+            [sg * (r - h), -sg * a12]
+        } else {
+            [a12, -(r + h)]
+        },
+    ];
     let mut ade = [[0.0; 2]; 2];
-    for (kk, (row, &lk)) in ade.iter_mut().zip(adl.iter()).enumerate() {
-        let mut ex = a12;
-        let mut ey = lk - a11;
+    for (kk, (row, &[x, y])) in ade.iter_mut().zip(axes.iter()).enumerate() {
+        let (mut ex, mut ey) = (x, y);
         if ex.abs() + ey.abs() < EFF_ZERO * (a11.abs() + a22.abs() + 1.0) {
             ex = if (kk == 0) == (a11 >= a22) { 1.0 } else { 0.0 };
             ey = 1.0 - ex;
