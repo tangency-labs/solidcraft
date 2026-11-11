@@ -1038,6 +1038,31 @@ fn a_deferred_drawing_keeps_its_lines_until_it_is_updated() {
     assert_eq!((waiting.stale.len(), bytes(&waiting.scene)), (2, bytes(&now.scene)));
 }
 
+/// The export scratch session shares the exact geometry of each drawn view and dimension with
+/// the open session. A deep copy of the same geometry must not pass this pointer check (#4890).
+#[test]
+fn a_scratch_export_copy_shares_view_and_dimension_groups() {
+    let (mut s, sheet, [front, top]) = front_and_top();
+    let dimension = front_edge(&mut s, front);
+    settled(&mut s, sheet);
+    let scratch = s.scratch_as_shown();
+    let same_group = |a: &Arc<Group>, b: &Arc<Group>| Arc::ptr_eq(a, b);
+
+    for view in [front, top] {
+        let original = s.drawing_scenes.views[&view].drawn.group.as_ref().expect("the view was drawn");
+        let copied = scratch.drawing_scenes.views[&view].drawn.group.as_ref().expect("the scratch copy kept the view");
+        assert!(same_group(original, copied), "view {view} must share the drawn group");
+        let deep_clone = Arc::new((**original).clone());
+        assert!(!same_group(original, &deep_clone), "a deep clone must fail the pointer check");
+    }
+
+    let original = s.drawing_scenes.dimensions[&dimension].drawn.group.as_ref().expect("the dimension was drawn");
+    let copied = scratch.drawing_scenes.dimensions[&dimension].drawn.group.as_ref().expect("the scratch copy kept the dimension");
+    assert!(same_group(original, copied), "the dimension must share its drawn group");
+    let deep_clone = Arc::new((**original).clone());
+    assert!(!same_group(original, &deep_clone), "a deep clone of a dimension must fail the pointer check");
+}
+
 /// The copy a background export runs on ([`Session::scratch_as_shown`]) exports a sheet as the
 /// session does: a drawing that isn't deferred, drawn at once, also after a view's edit; a
 /// deferred drawing after its update, with a view edited since; and one held since its update,
@@ -1262,7 +1287,7 @@ fn a_view_past_the_sheets_records_leaves_out_only_itself() {
         let path = (0..n).map(|i| Seg2::Line { a: Vec2::new(i as f64 * 1e-3, 0.0), b: Vec2::new((i + 1) as f64 * 1e-3, 0.0) }).collect();
         let items = vec![Item::Stroke { path, closed: false, width_mm: 0.5, pattern: None }];
         Drawn {
-            group: Some(Group { object: n as u64, kind: ObjectKind::View, items }),
+            group: Some(Arc::new(Group { object: n as u64, kind: ObjectKind::View, items })),
             status: Status::Drawn,
             stats: None,
             boundary: None,
@@ -1620,7 +1645,7 @@ fn a_views_box_is_what_it_draws() {
     let moved_to = [105.0, 107.0];
     for (items, min, max) in [(vec![], [70.0, 80.0], [130.0, 120.0]), (vec![fill], moved, moved_to), (vec![picture], moved, moved_to)] {
         let drawn = Drawn {
-            group: Some(Group { object: 7, kind: ObjectKind::View, items }),
+            group: Some(Arc::new(Group { object: 7, kind: ObjectKind::View, items })),
             status: Status::Drawn,
             stats: None,
             boundary: Some(boundary),
@@ -1817,7 +1842,7 @@ fn overfill(s: &mut Session, view: u64) -> Drawn {
     entry.serial = serial;
     std::mem::replace(
         &mut entry.drawn,
-        Drawn { group: Some(group), status: Status::Drawn, stats: None, boundary: None, frame: None, owners: None, why: None },
+        Drawn { group: Some(Arc::new(group)), status: Status::Drawn, stats: None, boundary: None, frame: None, owners: None, why: None },
     )
 }
 
@@ -2070,7 +2095,7 @@ fn a_dimension_past_the_scenes_limits_is_left_out_and_says_why() {
     let record = sheet_of(&d, sheet).unwrap();
     let group = |items| Group { object: front, kind: ObjectKind::View, items };
     let view = Drawn {
-        group: Some(group(Vec::new())),
+        group: Some(Arc::new(group(Vec::new()))),
         status: Status::Drawn,
         stats: None,
         boundary: None,
@@ -2086,7 +2111,7 @@ fn a_dimension_past_the_scenes_limits_is_left_out_and_says_why() {
         view: front,
         kind: ObjectKind::Dimension,
         status: solidcraft_doc::drawing::dimension::Status::Ok,
-        group: Some(Group { object: id, kind: ObjectKind::Dimension, items }),
+        group: Some(Arc::new(Group { object: id, kind: ObjectKind::Dimension, items })),
         fonts: Vec::new(),
         why: None,
         pending: false,
@@ -2113,7 +2138,7 @@ fn dimensions_share_one_font_table_and_one_left_out_adds_nothing() {
     let record = sheet_of(&d, sheet).unwrap();
     let frame = ViewFrame::new(solidcore_record::Plane::XY, "1:1".parse().unwrap(), Vec2::ZERO, Vec2::ZERO).unwrap();
     let view = Drawn {
-        group: Some(Group { object: front, kind: ObjectKind::View, items: Vec::new() }),
+        group: Some(Arc::new(Group { object: front, kind: ObjectKind::View, items: Vec::new() })),
         status: Status::Drawn,
         stats: None,
         boundary: None,
@@ -2131,7 +2156,7 @@ fn dimensions_share_one_font_table_and_one_left_out_adds_nothing() {
             view: front,
             kind: ObjectKind::Dimension,
             status: solidcraft_doc::drawing::dimension::Status::Ok,
-            group: Some(Group { object: id, kind: ObjectKind::Dimension, items }),
+            group: Some(Arc::new(Group { object: id, kind: ObjectKind::Dimension, items })),
             fonts,
             why: None,
             pending: false,
