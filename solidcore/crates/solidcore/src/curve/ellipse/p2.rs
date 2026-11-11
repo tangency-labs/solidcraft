@@ -517,7 +517,10 @@ impl PolarConversion {
         let angle_deg = ivl.clamp_value(angle_deg);
 
         if !inside {
-            return Err(SolidError::sm_err(OP_ANGLE));
+            return Err(SolidError::curve_failed(
+                OP_ANGLE,
+                "the angle is outside the arc",
+            ));
         }
 
         // quick convert end parameters
@@ -542,7 +545,10 @@ impl PolarConversion {
 
         // check determinate for error condition
         if d < 0.0 {
-            return Err(SolidError::sm_err(OP_ANGLE));
+            return Err(SolidError::curve_failed(
+                OP_ANGLE,
+                "the quadratic has no real root",
+            ));
         }
 
         // Solve quadratic Equation for Normalized T - get solution in region [0.0 to 1.0]
@@ -553,7 +559,10 @@ impl PolarConversion {
             t = (-b - d) / (2.0 * a);
 
             if !(0.0..=1.0).contains(&t) {
-                return Err(SolidError::sm_err(OP_ANGLE));
+                return Err(SolidError::curve_failed(
+                    OP_ANGLE,
+                    "neither root is in [0, 1]",
+                ));
             }
         }
 
@@ -726,7 +735,10 @@ impl PolarConversion {
                 step_pnt,
             )?;
             if !found {
-                return Err(SolidError::sm_err(OP_TO_NURBS));
+                return Err(SolidError::curve_failed(
+                    OP_TO_NURBS,
+                    "no NURBS parameter was found for the step point",
+                ));
             }
             param
         };
@@ -1204,7 +1216,10 @@ impl Ellipse {
     /// `SM_ERR` for more than 3 derivatives.
     pub fn evaluate_step(&self, step_param: f64, num_derivs: usize) -> Result<Vec<Vec3>> {
         if num_derivs > 3 {
-            return Err(SolidError::sm_err(OP_EVAL_STEP));
+            return Err(SolidError::curve_failed(
+                OP_EVAL_STEP,
+                "more than 3 derivatives were asked",
+            ));
         }
         Ok(self.eval_step(step_param, num_derivs))
     }
@@ -1439,17 +1454,26 @@ impl Ellipse {
 
         // no work - no polar conversion
         if !self.polar.is_polar_conversion_possible() {
-            return Err(SolidError::sm_err(OP_DROP));
+            return Err(SolidError::curve_failed(
+                OP_DROP,
+                "the polar conversion is not possible",
+            ));
         }
 
         // no work - not a circle or circular arc
         if !self.is_circle() {
-            return Err(SolidError::sm_err(OP_DROP));
+            return Err(SolidError::curve_failed(
+                OP_DROP,
+                "the ellipse is not a circle",
+            ));
         }
 
         // no work - operation not minimize or intersect
         if operation != SolverOperation::Minimize && operation != SolverOperation::Intersect {
-            return Err(SolidError::sm_err(OP_DROP));
+            return Err(SolidError::curve_failed(
+                OP_DROP,
+                "the operation is neither minimize nor intersect",
+            ));
         }
 
         // get angle of TestPoint in ellipse coordinate system as a side effect of
@@ -1676,8 +1700,9 @@ impl Ellipse {
                 match intersect_two_planes(this_center, this_normal, other_center, other_normal)? {
                     PlanesIntersection::Line { point, direction } => (point, direction),
                     PlanesIntersection::Parallel { .. } => {
-                        return Err(SolidError::sm_err(
+                        return Err(SolidError::curve_failed(
                             "curve::ellipse::p2::Ellipse::intersect_with_ellipse",
+                            "the ellipses' planes are parallel",
                         ))
                     }
                 };
@@ -2001,7 +2026,10 @@ impl Ellipse {
         let mut d_scale = 1.0;
         if let Some(s) = scale {
             if !are_same(s.x, s.y) || !are_same(s.x, s.z) || s.x.abs() < EFF_ZERO {
-                return Err(SolidError::sm_err(OP_TRANSFORM));
+                return Err(SolidError::curve_failed(
+                    OP_TRANSFORM,
+                    "the scale is not uniform",
+                ));
             }
             d_scale = s.x;
         }
@@ -2014,7 +2042,9 @@ impl Ellipse {
                 self.position.x_axis(),
                 self.position.y_axis(),
             )
-            .map_err(|_| SolidError::sm_err(OP_TRANSFORM))?;
+            .map_err(|_| {
+                SolidError::curve_failed(OP_TRANSFORM, "the placement could not be set")
+            })?;
 
         // apply rotation to scaled placement
         let tmp = ell_place.transform_axis2_placement(rotate_n_move);
@@ -2028,9 +2058,9 @@ impl Ellipse {
 
         // apply transformation to underlying Nurb, which notifies the polar converter
         if self.base.nurb.is_some() {
-            self.base
-                .transform(rotate_n_move, scale)
-                .map_err(|_| SolidError::sm_err(OP_TRANSFORM))?;
+            self.base.transform(rotate_n_move, scale).map_err(|_| {
+                SolidError::curve_failed(OP_TRANSFORM, "the NURB could not be transformed")
+            })?;
             self.notify_post_edit(k)?;
         }
         Ok(())
@@ -2056,14 +2086,20 @@ pub(crate) fn set_up_polar_conversion(
 
     // get curve knots (a NURB-less ellipse would make its NURB here, re-entering)
     if e.base.nurb.is_none() {
-        return Err(SolidError::sm_err(OP_SET_UP));
+        return Err(SolidError::curve_failed(
+            OP_SET_UP,
+            "the ellipse has no NURB",
+        ));
     }
     let (knots, multiplicities) = e.base.knots(None)?;
     pc.natural_knots = knots;
 
     // no work - start/end knots are not full multiplicities
     if multiplicities.first().copied() != Some(3) || multiplicities.last().copied() != Some(3) {
-        return Err(SolidError::sm_err(OP_SET_UP));
+        return Err(SolidError::curve_failed(
+            OP_SET_UP,
+            "the end knots are not of full multiplicity",
+        ));
     }
 
     let cnt = pc.natural_knots.len();
@@ -2274,7 +2310,10 @@ pub(crate) fn set_up_polar_conversion(
     // quit - something went wrong
     if pc.angles.len() != pc.natural_knots.len() || pc.exact_conversion.len() + 1 != pc.angles.len()
     {
-        return Err(SolidError::sm_err(OP_SET_UP));
+        return Err(SolidError::curve_failed(
+            OP_SET_UP,
+            "the angles do not match the knots",
+        ));
     }
 
     // Reset the curve's analytic interval to what we've calculated.
@@ -2328,6 +2367,40 @@ mod tests {
         assert!(pc.exact_conversion().iter().all(|&b| b));
         assert!(c.is_circle());
         assert_eq!(c.base().form(), BSplineCurveForm::EllipticArc);
+    }
+
+    #[test]
+    fn issue_1518_short_arc_inverts_each_point_to_itself() {
+        // The 70.9232 x 16 ellipse of #1518 on an arc 7e-5 degrees long, shorter than
+        // the angular tolerance (1e-4 degrees); atan2 puts its points a period up.
+        let k = kernel();
+        let (d0, d1) = (-10.0, -10.0 + 7.0e-5);
+        let e = Ellipse::new(
+            &k,
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            Extent1d::from_min_max(d0, d1),
+            70.9232,
+            16.0,
+            &EllipseOptions::default(),
+        )
+        .expect("ellipse");
+        let fractions = [0.25, 0.5, 0.75, 1.0];
+        let points: Vec<(f64, Point3)> = fractions
+            .iter()
+            .map(|f| {
+                let a = d0 + f * (d1 - d0);
+                (a, e.evaluate_step_point(a).expect("step point"))
+            })
+            .collect();
+
+        // each point inverts to its own angle, not to the arc's start (the pinned C++
+        // returns -10 for all four)
+        for &(a, p) in &points {
+            let t = e.step_inversion(&k, p, false, 0.0).0;
+            assert!((t - a).abs() <= 1e-9 * a.abs(), "{a}: {t}");
+        }
     }
 
     #[test]

@@ -192,7 +192,7 @@ impl Surface {
                 if e.is_unported_or_cancelled()
                     || matches!(e, SolidError::PreparationRequired { .. }) =>
             {
-                return Err(e)
+                return Err(e);
             }
             Err(e) => (None, Some(e)),
         };
@@ -302,7 +302,10 @@ impl Surface {
 
             // no work - high degree surfaces
             if u_deg > 3 || v_deg > 3 {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::surface_failed(
+                    OP,
+                    "the surface's degree is above cubic",
+                ));
             }
 
             // elevate surface degrees to 3 (statuses ignored)
@@ -379,7 +382,10 @@ impl Surface {
                                 // `Kernel::fixes.approximate_surface_bezier_starter`
                                 // (WR-573): an error, not success with no surface
                                 if k.fixes.approximate_surface_bezier_starter {
-                                    return Err(SolidError::sm_err(OP));
+                                    return Err(SolidError::surface_failed(
+                                        OP,
+                                        "a Bezier starter index is past the control net",
+                                    ));
                                 }
                                 // SE(SM_ERR): some problem here with knots; upstream
                                 // returns SM_SUCCESS without surface
@@ -396,7 +402,12 @@ impl Surface {
                                 .get(ivb)
                                 .and_then(|row| row.get(iub))
                                 .copied()
-                                .ok_or_else(|| SolidError::sm_err(OP))?;
+                                .ok_or_else(|| {
+                                    SolidError::surface_failed(
+                                        OP,
+                                        "a Bezier starter control point is missing",
+                                    )
+                                })?;
                             ignored_or_pass_on(
                                 approx_surf.set_control_point(
                                     form,
@@ -542,7 +553,10 @@ impl Surface {
             // subdivide again
             if more_knots.is_empty() {
                 // Can't happen? Infinite loop if it did.
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::surface_failed(
+                    OP,
+                    "no knots are left to subdivide at",
+                ));
             }
             let param = if testing_u_dir {
                 SurfParamType::U
@@ -553,7 +567,10 @@ impl Surface {
         } // end iter lSubD
 
         // arrive here when approximation failed to converge
-        Err(SolidError::sm_err(OP))
+        Err(SolidError::surface_failed(
+            OP,
+            "the approximation did not converge",
+        ))
     }
 
     /// The bicubic Bezier patch over `uv_domain` from this surface's positions, first
@@ -700,7 +717,12 @@ impl Surface {
                         SurfaceKind::Sphere(s) => s.base().base(),
                         SurfaceKind::Torus(s) => s.base().base(),
                         SurfaceKind::SurfOfRevolution(s) => s.base(),
-                        _ => return Err(SolidError::sm_err(OP_ROOT)),
+                        _ => {
+                            return Err(SolidError::surface_failed(
+                                OP_ROOT,
+                                "the revolved surface kind has no generator",
+                            ));
+                        }
                     };
                     return Ok(Some(Cow::Borrowed(base)));
                 }
@@ -734,8 +756,8 @@ impl BSplineSurface {
         let sur_p = self
             .nurb
             .as_ref()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
-        let sur = elevate_degree(sur_p, increm, dir).map_err(SolidError::nl_ser(OP))?;
+            .ok_or_else(|| SolidError::surface_missing(OP, "the surface's NURB"))?;
+        let sur = elevate_degree(sur_p, increm, dir).map_err(SolidError::nurbs_routine(OP))?;
 
         // place output sur in a temporary and swap the NURBs
         self.nurb = Self::from_gw_nurb(&sur).nurb;
@@ -759,10 +781,10 @@ impl BSplineSurface {
         let sur_p = self
             .nurb
             .as_ref()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::surface_missing(OP, "the surface's NURB"))?;
 
         // Make sur with the union of surP target knot vector and the new knots
-        let sur = insert_knots(sur_p, new_knots, dir).map_err(SolidError::nl_ser(OP))?;
+        let sur = insert_knots(sur_p, new_knots, dir).map_err(SolidError::nurbs_routine(OP))?;
 
         // build a surface from it and swap the NURBs
         self.nurb = Self::from_gw_nurb(&sur).nurb;
@@ -792,8 +814,9 @@ impl BSplineSurface {
         let sur_p = self
             .nurb
             .as_ref()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
-        let sur = insert_knot(sur_p, new_knot, count, dir).map_err(SolidError::nl_ser(OP))?;
+            .ok_or_else(|| SolidError::surface_missing(OP, "the surface's NURB"))?;
+        let sur =
+            insert_knot(sur_p, new_knot, count, dir).map_err(SolidError::nurbs_routine(OP))?;
 
         // build a surface from it and swap the NURBs
         self.nurb = Self::from_gw_nurb(&sur).nurb;
@@ -829,13 +852,13 @@ impl BSplineSurface {
         let sur_p = self
             .nurb
             .as_ref()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::surface_missing(OP, "the surface's NURB"))?;
         let sur = if kept_u_knots.is_some() || kept_v_knots.is_some() {
             remove_knots_constrained(sur_p, kept_u_knots, kept_v_knots, approx_tol_3d, dir)
         } else {
             remove_all_knots(sur_p, approx_tol_3d, dir)
         }
-        .map_err(SolidError::nl_ser(OP))?;
+        .map_err(SolidError::nurbs_routine(OP))?;
 
         self.nurb = Self::from_gw_nurb(&sur).nurb;
         Ok(())

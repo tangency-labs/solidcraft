@@ -214,10 +214,11 @@ fn a_marker_moved_again_replaces_the_move_still_waiting() {
 #[test]
 fn cancel_on_the_computing_toast_gives_up_on_the_move() {
     let mut h = block_boss_hole();
+    h.app.preferences.operations_panel = false;
     // A move that does not finish, with another waiting behind it.
     let (job, _keep) = crate::deferred::Deferred::never_done("timeline.roll_to", json!({"position": 1}), h.app.session.revision);
     h.app.deferred = Some(job);
-    h.app.deferred_queue.push(("timeline.roll_to".into(), json!({"position": 2})));
+    h.app.deferred_queue.push(("timeline.roll_to".into(), json!({"position": 2}), 0));
     h.frames(2);
     let toast = crate::scenario::rect_of("toast:computing").expect("the computing toast");
     let cancel = crate::scenario::handle_at("toast:computing:cancel").expect("its Cancel");
@@ -579,10 +580,12 @@ fn second_hole() -> serde_json::Value {
 }
 
 /// While an agent's batch computes, the chip says which step it is on, of how many, and that
-/// step's command (`2/3 · Cylinder`); a single command shows just its name.
+/// step's command (`2/3 · Cylinder`); a single command shows just its name. The chip is what
+/// shows with the operations panel off.
 #[test]
 fn a_computing_batch_says_its_step() {
     let (mut h, tx) = agent_harness();
+    h.app.preferences.operations_panel = false;
     let hole = |x: f64| json!({"command": "solid.cylinder", "params": {"base": [x, 10, -1], "axis": [0, 0, 1], "radius": 3, "height": 20, "operation": "cut"}});
     let batch = ask(&tx, "engine.batch", json!({"commands": [hole(50.0), hole(30.0), hole(70.0)]}));
     h.frames(1);
@@ -709,7 +712,7 @@ fn a_design_closed_while_its_history_computes_holds_up_nothing() {
     let mut h = block_boss_hole();
     let (job, late) = crate::deferred::Deferred::never_done("timeline.roll_to", json!({"position": 1}), h.app.session.revision);
     h.app.deferred = Some(job);
-    h.app.deferred_queue.push(("timeline.roll_to".into(), json!({"position": 2})));
+    h.app.deferred_queue.push(("timeline.roll_to".into(), json!({"position": 2}), 0));
     h.app.start_after_roll = Some(("solid.extrude".into(), 1));
     crate::documents::close(&mut h.app, 0, true);
     assert!(h.app.computing_since().is_none(), "the blank design has nothing computing");
@@ -759,7 +762,7 @@ fn a_history_command_stays_with_its_tab() {
     let mut h = block_boss_hole();
     let (job, done) = crate::deferred::Deferred::never_done("timeline.roll_to", json!({"position": 1}), h.app.session.revision);
     h.app.deferred = Some(job);
-    h.app.deferred_queue.push(("timeline.roll_to".into(), json!({"position": 2})));
+    h.app.deferred_queue.push(("timeline.roll_to".into(), json!({"position": 2}), 0));
 
     crate::documents::new_tab(&mut h.app);
     assert_eq!(h.app.docs.active, 1);
@@ -796,6 +799,98 @@ fn stopping_an_agent_command_applies_nothing_and_goes_on() {
     h.app.stop_agent_command();
     let r = hole.try_recv().expect("answered at once");
     assert!(r["ok"] == false && r["stopped"] == true, "{r}");
+    let r = reply_to(&mut h, &boss);
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(h.app.session.doc.features.len(), features + 1, "only the boss");
+}
+
+/// A control request for the app, where its reply lands, and its ticket (what its connection
+/// cancels with `control.cancel`).
+fn ask_ticket(
+    tx: &std::sync::mpsc::Sender<crate::ControlRequest>,
+    method: &str,
+    params: serde_json::Value,
+) -> (std::sync::mpsc::Receiver<serde_json::Value>, std::sync::Arc<crate::control_job::Ticket>) {
+    let (req, reply) = crate::ControlRequest::new(method, params);
+    let ticket = req.ticket.clone();
+    tx.send(req).unwrap();
+    (reply, ticket)
+}
+
+fn boss_step() -> serde_json::Value {
+    json!({"command": "solid.box", "params": {"corner": [40, 5, 10], "length": 5, "width": 5, "height": 5, "operation": "join"}})
+}
+
+/// #1989: the agent cancels its design change while it computes off the window thread
+/// (`control.cancel`): stopped as Stop stops it, nothing applied, its worker told to stop, and
+/// the requests behind it go on.
+#[test]
+fn cancelling_an_agent_command_while_it_computes_applies_nothing() {
+    use crate::control_job::Cancel;
+    let (mut h, tx) = agent_harness();
+    let features = h.app.session.doc.features.len();
+    let undo = h.app.session.undo.len();
+    let (hole, ticket) = ask_ticket(&tx, "engine.execute", second_hole());
+    let boss = ask(&tx, "engine.execute", boss_step());
+    h.frames(1);
+    assert!(h.app.agent_computing().is_some());
+    assert_eq!(ticket.cancel(), Cancel::Stopped { writes_file: false });
+    assert_eq!(ticket.cancel(), Cancel::Already, "once");
+    let r = reply_to(&mut h, &hole);
+    assert!(r["ok"] == false && r["stopped"] == true, "{r}");
+    assert!(r["error"].as_str().is_some_and(|e| e.contains("control.cancel") && e.contains("nothing was applied")), "{r}");
+    let r = reply_to(&mut h, &boss);
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(h.app.session.doc.features.len(), features + 1, "only the boss");
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert!(h.app.agent_computing().is_none());
+}
+
+/// A request still waiting its turn behind one that computes is removed when its client cancels
+/// it: answered as cancelled, never run. One that already ran can't be cancelled.
+#[test]
+fn a_queued_agent_request_cancelled_never_runs() {
+    use crate::control_job::Cancel;
+    let (mut h, tx) = agent_harness();
+    let features = h.app.session.doc.features.len();
+    let hole = ask(&tx, "engine.execute", second_hole());
+    let (boss, ticket) = ask_ticket(&tx, "engine.execute", boss_step());
+    h.frames(1);
+    assert!(h.app.agent_computing().is_some() && boss.try_recv().is_err(), "the boss waits its turn");
+    assert_eq!(ticket.cancel(), Cancel::Removed);
+    let r = reply_to(&mut h, &hole);
+    assert_eq!(r["ok"], true, "{r}");
+    let r = reply_to(&mut h, &boss);
+    assert!(r["ok"] == false && r["cancelled"] == true, "{r}");
+    assert!(r["error"].as_str().is_some_and(|e| e.starts_with("cancelled:") && e.contains("nothing was applied")), "{r}");
+    until_settled(&mut h);
+    assert_eq!(h.app.session.doc.features.len(), features + 1, "only the hole");
+    // With the preference off it runs on the window thread at once: done, it can't be cancelled.
+    h.app.preferences.agent_off_thread = false;
+    let (boss, ticket) = ask_ticket(&tx, "engine.execute", boss_step());
+    h.frames(1);
+    assert!(boss.try_recv().is_ok_and(|r| r["ok"] == true));
+    assert_eq!(ticket.cancel(), Cancel::Running);
+    assert_eq!(h.app.session.doc.features.len(), features + 2);
+}
+
+/// With the agent cursor shown, a design change the pointer acts out can be cancelled until it
+/// runs: nothing applied, and the pointer is free for the next request.
+#[test]
+fn cancelling_a_design_change_the_agent_cursor_acts_out_applies_nothing() {
+    use crate::control_job::Cancel;
+    let (mut h, tx) = agent_harness();
+    h.app.ui.agent_cursor.show = true;
+    h.frames(2);
+    let features = h.app.session.doc.features.len();
+    let (hole, ticket) = ask_ticket(&tx, "engine.execute", second_hole());
+    h.frames(1);
+    assert!(h.app.agent.busy(), "the pointer acts it out");
+    assert_eq!(ticket.cancel(), Cancel::Stopped { writes_file: false });
+    let r = reply_to(&mut h, &hole);
+    assert!(r["ok"] == false && r["stopped"] == true, "{r}");
+    assert!(!h.app.agent.busy());
+    let boss = ask(&tx, "engine.execute", boss_step());
     let r = reply_to(&mut h, &boss);
     assert_eq!(r["ok"], true, "{r}");
     assert_eq!(h.app.session.doc.features.len(), features + 1, "only the boss");
@@ -1199,4 +1294,28 @@ fn a_body_renamed_in_the_browser_keeps_the_pattern_after_it() {
     let kept = before.zip(mesh(&h)).is_some_and(|(a, b)| std::sync::Arc::ptr_eq(&a, &b));
     assert!(kept, "no feature computed again");
     assert_eq!(h.app.session.visibility.locked_bodies, ["Plate"]);
+}
+
+/// With the operations panel (the default), an agent's computing batch is a row named after the
+/// step's command, with how many of the batch's steps are done, and no chip; its X stops it as
+/// the chip's Stop did: answered as stopped, nothing applied.
+#[test]
+fn a_computing_batch_is_a_row_of_the_operations_panel_that_stops_it() {
+    let (mut h, tx) = agent_harness();
+    let features = h.app.session.doc.features.len();
+    let hole = |x: f64| json!({"command": "solid.cylinder", "params": {"base": [x, 10, -1], "axis": [0, 0, 1], "radius": 3, "height": 20, "operation": "cut"}});
+    let batch = ask(&tx, "engine.batch", json!({"commands": [hole(50.0), hole(30.0), hole(70.0)]}));
+    h.frames(1);
+    assert!(h.app.agent_computing().is_some(), "the batch computes");
+    let rows = crate::operations::current(&h.app);
+    let row = rows.iter().find(|r| r.key == "agent").expect("a row for the agent's command");
+    assert!(!row.label.is_empty() && !row.label.contains('.'), "the toolbar's name: {row:?}");
+    assert_eq!(row.steps.map(|(_, total)| total), Some(3), "{row:?}");
+    assert!(row.cancellable());
+    assert!(crate::scenario::rect_of("agent:chip").is_none(), "no chip besides the row");
+    crate::operations::cancel(&mut h.app, "agent").unwrap();
+    let reply = reply_to(&mut h, &batch);
+    assert_eq!((reply["ok"].clone(), reply["stopped"].clone()), (json!(false), json!(true)), "{reply}");
+    h.frames(2);
+    assert_eq!(h.app.session.doc.features.len(), features, "nothing applied");
 }

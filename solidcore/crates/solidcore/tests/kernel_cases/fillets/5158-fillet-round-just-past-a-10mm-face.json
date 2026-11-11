@@ -98,7 +98,7 @@
     "what": "a convex r10.01 round on an edge whose top face is 10 mm deep, 0.01 past it: it must build by subtraction (the round on the extended faces cut from the body), not be refused"
   },
   "expressible": true,
-  "gallery_note": "The new view looks toward the bar end at x = 40, showing the overflowing R10.01 section and the consumed 10 mm top face. The inset shows the whole part.",
+  "gallery_note": "R10.01 is 0.01 deeper than the 10 mm top face, so the round uses the top face up: the bar keeps its front, back, bottom and ends, and the round runs from z = 9.99 on the front over to the back face.",
   "operation_expressible": true,
   "outcome": {
     "ran": true,

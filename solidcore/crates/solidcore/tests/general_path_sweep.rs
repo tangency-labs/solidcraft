@@ -106,11 +106,28 @@ const FIT: &[(f64, f64, f64)] = &[
 /// The pipe's radius: the wire's 1.5 mm circle.
 const RADIUS: f64 = 0.75;
 
+/// The pipe's radius along [`spline_path`]. The fitted spline overshoots where a straight
+/// meets a round near the wire's far end, bending there with radius about 0.564 (sampled at
+/// (168.51, -37.90, 50.71)). A pipe of [`RADIUS`] would fold its wall through itself in that
+/// bend, and `create_pipe_sweep` refuses it (#13766), so this pipe stays inside the bend.
+const SPLINE_RADIUS: f64 = 0.5;
+
+/// The balance wire's points fitted open, as the wire runs. Fitted closed (C1 between its
+/// two ends, though the wire's ends are apart), the spline bends with radius about 0.041
+/// near its start and 0.045 near its end, which no pipe of the wire's size fits.
 fn spline_path() -> Curve {
     let pts: Vec<Point3> = FIT.iter().map(|&(x, y, z)| Point3::new(x, y, z)).collect();
     Curve::from(
-        BSplineCurve::interpolate_points(&pts, None, 3, None, None, true, ParamMethod::ChordLength)
-            .unwrap(),
+        BSplineCurve::interpolate_points(
+            &pts,
+            None,
+            3,
+            None,
+            None,
+            false,
+            ParamMethod::ChordLength,
+        )
+        .unwrap(),
     )
 }
 
@@ -642,7 +659,7 @@ fn issue_2572_every_path_wall_is_a_definition_or_in_the_ledger() {
         ),
         (
             "path-spline",
-            create_pipe_sweep(&mut k, RADIUS, Some(&spline_path()), false).unwrap(),
+            create_pipe_sweep(&mut k, SPLINE_RADIUS, Some(&spline_path()), false).unwrap(),
         ),
         (
             "path-b-spline",

@@ -877,7 +877,7 @@ fn edge_pieces(b: &Brep, e: crate::topology::EdgeId) -> Result<Option<Vec<Piece>
     let interval = edge::interval(b, e)?;
     let (lo, hi) = (interval.min(), interval.max());
     let mut pieces = Vec::new();
-    for seg in create_bez_segments(nurb).map_err(SolidError::nl_ser(LOCAL_OP))? {
+    for seg in create_bez_segments(nurb).map_err(SolidError::nurbs_routine(LOCAL_OP))? {
         let (Some(&k0), Some(&k1)) = (seg.knots().first(), seg.knots().last()) else {
             continue;
         };
@@ -1833,6 +1833,191 @@ fn corner_with_quadric(
     }
 }
 
+/// The line a straight edge's curve runs on, from its first control point `a` to its last
+/// `b`, with `dev`, a certified upper bound on how far the curve lies from that line.
+#[derive(Debug, Clone, Copy)]
+struct StraightEdge {
+    a: Vec3,
+    b: Vec3,
+    dev: f64,
+}
+
+/// The edges at `vertex` between the faces `f` and `g` (one use on each) whose curves are
+/// straight: every control point of the curve's Bézier pieces within the B-rep's
+/// `tolerance` of the line through the first and the last ([`StraightEdge`]). The curve
+/// lies in its pieces' hulls, so within the largest of those distances, each raised by its
+/// point's error and the rounding of the cross product, of the line.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; those of the Bézier extraction.
+fn straight_edges_between(
+    b: &Brep,
+    vertex: crate::topology::VertexId,
+    f: FaceId,
+    g: FaceId,
+    tolerance: f64,
+) -> Result<Vec<StraightEdge>> {
+    use crate::topology::{vertex as vx, vertexuse as vu};
+    let mut seen: Vec<crate::topology::EdgeId> = Vec::new();
+    let mut found = Vec::new();
+    for use_ in vx::vertexuses(b, vertex)? {
+        if !vu::is_edge_vertexuse(b, use_)? {
+            continue;
+        }
+        let Some(edgeuse) = vu::edgeuse(b, use_)? else {
+            continue;
+        };
+        let Some(e) = eu::edge(b, edgeuse)? else {
+            continue;
+        };
+        if seen.contains(&e) {
+            continue;
+        }
+        seen.push(e);
+        let this = eu::face(b, edgeuse)?;
+        let across = match eu::radial(b, edgeuse)? {
+            Some(r) if r != edgeuse => eu::face(b, r)?,
+            _ => None,
+        };
+        let between = matches!((this, across), (Some(x), Some(y))
+            if (x == f && y == g) || (x == g && y == f));
+        if !between {
+            continue;
+        }
+        let Some(pieces) = edge_pieces(b, e)? else {
+            continue;
+        };
+        // every piece's control points, or none where a weight is not certified positive
+        let Some(points) = pieces.iter().map(euclidean).collect::<Option<Vec<_>>>() else {
+            continue;
+        };
+        let points: Vec<(Vec3, f64)> = points.into_iter().flatten().collect();
+        let (Some(&(a, _)), Some(&(z, _))) = (points.first(), points.last()) else {
+            continue;
+        };
+        let d = z - a;
+        let length = d.length();
+        if !certified::above(length, 0.0) {
+            continue;
+        }
+        let mut dev = 0.0_f64;
+        for &(c, err) in &points {
+            let v = c - a;
+            let off = v.cross(d).length() / length;
+            let rounding = certified::gamma(8) * (v.length() + off);
+            dev = dev.max(off + rounding + err);
+        }
+        let dev = round_up(dev);
+        if dev <= tolerance {
+            found.push(StraightEdge { a, b: z, dev });
+        }
+    }
+    Ok(found)
+}
+
+/// Where the line of a kept straight edge ([`StraightEdge`]) meets the plane `(o, ν)`,
+/// from the vertex `p`: the line's point `x0 + τ u` (`x0` the foot of `p`, `u` the unit
+/// direction, `τ = (o − x0)·ν / (u·ν)`) at `√(|x0 − p|² + τ²)`, raised by the curve's
+/// distance from the line over the sine of their angle (`dev |ν| / |u·ν|`); nowhere near
+/// where the line is within `tangent_sine` of parallel to the plane (as two planes'
+/// line, [`planes_line`]); not decided where the enclosures do not settle it.
+fn straight_edge_meets_plane(
+    p: Vec3,
+    line: StraightEdge,
+    plane: Tangent,
+    tangent_sine: f64,
+) -> CornerMeeting {
+    let pv = Dv::constant(p);
+    let a = Dv::constant(line.a);
+    let d = Dv::constant(line.b).sub(a);
+    let dd = d.dot(d);
+    if !dd.excludes_zero() {
+        return CornerMeeting::Uncertified;
+    }
+    let u = d.scale(Di::constant(1.0) / dd.sqrt());
+    let x0 = a.add(u.scale(pv.sub(a).dot(u)));
+    let nu = Dv::constant(plane.raw);
+    let nn = nu.dot(nu).sqrt();
+    let un = u.dot(nu);
+    if !un.excludes_zero() || !nn.excludes_zero() {
+        return CornerMeeting::Nowhere;
+    }
+    if un.v.mag() <= tangent_sine * nn.v.lo {
+        return CornerMeeting::Nowhere;
+    }
+    let tau = Dv::constant(plane.point).sub(x0).dot(nu) / un;
+    let foot = x0.sub(pv);
+    let far = (foot.dot(foot) + tau * tau).v.hi.max(0.0);
+    let slack = (Ivl::from(line.dev) * nn.v / Ivl::from(un.v.mig())).hi;
+    let reach = round_up(round_up(sqrt(far)) + slack);
+    if reach.is_finite() {
+        CornerMeeting::Within(reach)
+    } else {
+        CornerMeeting::Uncertified
+    }
+}
+
+/// The corner of `three` surfaces at the vertex of `at`, faces `faces`, where two of them
+/// are kept and share a straight edge there ([`straight_edges_between`]) and the third's
+/// new surface is a plane: faces that keep their surfaces keep their edges, so the three
+/// new surfaces meet on that edge's line, where it crosses the plane
+/// ([`straight_edge_meets_plane`]), whether the two kept surfaces are one (a round drawn
+/// as two faces, split along a ruling: their meeting with the plane is no one point) or
+/// two that cross along the line. Each such edge is taken, the largest meeting kept;
+/// nowhere near where every line runs past the plane; not decided where no kept pair
+/// shares a straight edge, the third is no plane, or a meeting is not decided.
+///
+/// # Errors
+///
+/// Those of [`straight_edges_between`].
+fn kept_straight_edge_corner(
+    b: &Brep,
+    at: &Corner,
+    p: Vec3,
+    faces: [Option<FaceId>; 3],
+    three: &[(Exact, bool); 3],
+) -> Result<CornerMeeting> {
+    let mut reach: Option<f64> = None;
+    let mut any = false;
+    let [fa, fc, fd] = faces;
+    let [a, c, d] = *three;
+    // each pair of the three, with the third
+    for ((fx, x), (fy, y), (_, z)) in [
+        ((fa, a), (fc, c), (fd, d)),
+        ((fa, a), (fd, d), (fc, c)),
+        ((fc, c), (fd, d), (fa, a)),
+    ] {
+        let (Some(fx), Some(fy)) = (fx, fy) else {
+            continue;
+        };
+        // a moved face's edge moves with it
+        if x.1 || y.1 {
+            continue;
+        }
+        let lines = straight_edges_between(b, at.vertex, fx, fy, at.tolerance)?;
+        if lines.is_empty() {
+            continue;
+        }
+        let Exact::Plane(plane) = z.0 else {
+            return Ok(CornerMeeting::Uncertified);
+        };
+        for line in lines {
+            any = true;
+            match straight_edge_meets_plane(p, line, plane, at.tangent_sine) {
+                CornerMeeting::Within(r) => reach = Some(reach.map_or(r, |m| m.max(r))),
+                CornerMeeting::Nowhere => {}
+                CornerMeeting::Uncertified => return Ok(CornerMeeting::Uncertified),
+            }
+        }
+    }
+    Ok(match (any, reach) {
+        (false, _) => CornerMeeting::Uncertified,
+        (true, Some(r)) => CornerMeeting::Within(r),
+        (true, None) => CornerMeeting::Nowhere,
+    })
+}
+
 /// How far past its face the surface of `faceuse` must be extended in a local operation
 /// for the surfaces of its neighbours to meet its own ([`LocalReach::reach`]), how far the
 /// surfaces moved there ([`LocalReach::shift`]), and the edges across which they never
@@ -1884,8 +2069,13 @@ fn corner_with_quadric(
 /// vertex splits and the face's new edges run to the split points, which are among these
 /// meetings. Every pair is taken, so the reach bounds the split points from above. Three
 /// planes meet at [`corner_of`]; two planes and a quadric where the planes' line meets it
-/// ([`corner_with_quadric`]); where they meet in no one point, the edges' meetings stand. A
-/// surface at the vertex moved adds its distance from the vertex to the move.
+/// ([`corner_with_quadric`]); where they meet in no one point, the edges' meetings stand.
+/// Where two curved quadrics are among the three, two of them kept and sharing a straight
+/// edge at the vertex (a round drawn as two faces split along a ruling, or two surfaces
+/// crossing along a line), and the third's new surface a plane: faces that keep their
+/// surfaces keep their edges, so the three meet where that edge's line crosses the plane
+/// ([`kept_straight_edge_corner`]). A surface at the vertex moved adds its distance from the
+/// vertex to the move.
 ///
 /// A moved plane beside a kept face whose surface is a B-spline: along the face's
 /// isocurves across the edge, inside its form and on along its Ruled extension past the
@@ -1897,7 +2087,7 @@ fn corner_with_quadric(
 /// ([`spline_corner`]).
 ///
 /// Anything else beside an edge or at a vertex where something moves (two curved
-/// quadrics, a torus, a procedural blend (extended by its definition, not its net), a
+/// quadrics but along a kept straight edge with a plane, a torus, a procedural blend (extended by its definition, not its net), a
 /// B-spline face that moves or beside anything but a moved plane, a moved plane along the
 /// face's isocurves, a plane not proved on its label, an edge curve with no NURBS form)
 /// has no certified bound here, nor a piece left undecided past the caps:
@@ -1960,9 +2150,23 @@ pub fn local_extension_reach(
         classes.push((face, c));
         c.ok_or_else(uncertified)
     };
+    // A face with no neighbour (every edge a seam or a lamina edge) meets no other surface:
+    // nothing is bounded for it, whatever its class, so it is decided before any bound is
+    // asked (a torus offset whole has no certified class, and needs none).
+    let mut met = false;
+    for lu in eu::faceuse_loopuses(b, faceuse, false, None)? {
+        for edgeuse in loopuse::edgeuses(b, lu, None, None)? {
+            met |= match eu::radial(b, edgeuse)? {
+                Some(r) => r != edgeuse && eu::face(b, r)? != own_face,
+                None => false,
+            };
+        }
+    }
+    if !met {
+        return Ok(None);
+    }
     let own_moved = is_moved(own_face);
     let mut found = LocalReach::default();
-    let mut met = false;
     for lu in eu::faceuse_loopuses(b, faceuse, false, None)? {
         for edgeuse in loopuse::edgeuses(b, lu, None, None)? {
             let Some(e) = eu::edge(b, edgeuse)? else {
@@ -1998,7 +2202,6 @@ pub fn local_extension_reach(
                 Some(r) => eu::face(b, r)?,
                 None => None,
             };
-            met |= radial.is_some();
             let other_moved = radial.is_some() && is_moved(other_face);
             // where both surfaces stay they meet at the edge: nothing to reach
             if !(own_moved || other_moved) {
@@ -2075,7 +2278,7 @@ pub fn local_extension_reach(
             found.reach = found.reach.max(reach);
         }
     }
-    Ok(met.then_some(found))
+    Ok(Some(found))
 }
 
 /// A vertex of a face whose corner [`corner`] bounds, with the tolerances it decides by.
@@ -2090,7 +2293,9 @@ struct Corner {
 /// The reach and the move at a vertex of the face ([`local_extension_reach`]): where a face
 /// there moves, every face there must be of an exact class (`class_of`), and the meetings
 /// of the face's surface with every two others (three planes, or two planes and a
-/// quadric; any more quadrics are `refuse`d), and each moved surface's distance from the
+/// quadric; any more quadrics only where two kept faces share a straight edge there and the
+/// third is a plane, [`kept_straight_edge_corner`], else `refuse`d), and each moved
+/// surface's distance from the
 /// vertex, are taken into `found`. A B-spline face that stays (`splines`), a kept plane
 /// holding one of its net's boundary rows and a moved plane meet where that row's isocurve
 /// crosses the moved plane ([`spline_corner`]); any other three with a B-spline face are
@@ -2123,7 +2328,7 @@ fn corner(
         others.push((c, moved));
     }
     for (i, &c) in others.iter().enumerate() {
-        for &d in others.iter().skip(i + 1) {
+        for (j, &d) in others.iter().enumerate().skip(i + 1) {
             let three = [a, c, d];
             let spline = three.iter().find_map(|&(x, m)| match x {
                 Exact::Spline(index) => Some((index, m)),
@@ -2160,7 +2365,15 @@ fn corner(
                         CornerMeeting::Uncertified => return Err(refuse()),
                     }
                 }
-                _ => return Err(refuse()),
+                // two or more quadrics: the kept straight edge's meeting, if any
+                _ => {
+                    let faces = [at.own, around.get(i).copied(), around.get(j).copied()];
+                    match kept_straight_edge_corner(b, at, p, faces, &three)? {
+                        CornerMeeting::Within(reach) => Some(reach),
+                        CornerMeeting::Nowhere => None,
+                        CornerMeeting::Uncertified => return Err(refuse()),
+                    }
+                }
             };
             if let Some(reach) = reach {
                 found.reach = found.reach.max(reach);
@@ -2801,6 +3014,67 @@ mod tests {
         assert_eq!(at(cut(1.1)), CornerMeeting::Nowhere);
         assert_eq!(
             at(plane(Vec3::new(0.0, 0.0, 1.0), Vec3::Z)),
+            CornerMeeting::Nowhere
+        );
+    }
+
+    /// A kept straight edge along z through (10, 0), from the vertex (10, 0, 10), and a
+    /// plane tilted 3 degrees about the line x = 5 on z = 10: the line crosses it at
+    /// z = 10 + 5 tan 3 degrees, 5 tan 3 degrees from the vertex; an edge 0.4 off the vertex
+    /// adds its foot's distance. A plane along the line, or within the tangency tolerance
+    /// of it, meets it nowhere near.
+    #[test]
+    fn a_kept_straight_edge_meets_a_moved_plane_where_its_line_crosses_it() {
+        let (s, c) = (3.0_f64.to_radians().sin(), 3.0_f64.to_radians().cos());
+        let tilted = Tangent {
+            point: Vec3::new(5.0, 0.0, 10.0),
+            normal: Vec3::new(-s, 0.0, c),
+            raw: Vec3::new(-s, 0.0, c),
+        };
+        let edge = |x: f64| StraightEdge {
+            a: Vec3::new(x, 0.0, 0.0),
+            b: Vec3::new(x, 0.0, 10.0),
+            dev: 0.0,
+        };
+        let p = Vec3::new(10.0, 0.0, 10.0);
+        let want = 5.0 * s / c;
+        let CornerMeeting::Within(r) = straight_edge_meets_plane(p, edge(10.0), tilted, 1e-3)
+        else {
+            panic!("no meeting");
+        };
+        assert!(r >= want && r - want < 1e-12, "{r} {want}");
+        let CornerMeeting::Within(r) = straight_edge_meets_plane(p, edge(10.4), tilted, 1e-3)
+        else {
+            panic!("no meeting");
+        };
+        let want = (0.16 + (5.4 * s / c).powi(2)).sqrt();
+        assert!(r >= want && r - want < 1e-12, "{r} {want}");
+        // the curve's distance from its line, over the sine of the line's angle to the plane
+        let off = StraightEdge {
+            dev: 1e-6,
+            ..edge(10.0)
+        };
+        let CornerMeeting::Within(r) = straight_edge_meets_plane(p, off, tilted, 1e-3) else {
+            panic!("no meeting");
+        };
+        assert!(r >= 5.0 * s / c + 1e-6 / c, "{r}");
+        let along = Tangent {
+            point: Vec3::new(20.0, 0.0, 0.0),
+            normal: Vec3::X,
+            raw: Vec3::X,
+        };
+        assert_eq!(
+            straight_edge_meets_plane(p, edge(10.0), along, 1e-3),
+            CornerMeeting::Nowhere
+        );
+        let nearly = Vec3::new(1.0, 0.0, 1e-4).unitize().unwrap();
+        let grazing = Tangent {
+            point: Vec3::new(20.0, 0.0, 0.0),
+            normal: nearly,
+            raw: nearly,
+        };
+        assert_eq!(
+            straight_edge_meets_plane(p, edge(10.0), grazing, 1e-3),
             CornerMeeting::Nowhere
         );
     }

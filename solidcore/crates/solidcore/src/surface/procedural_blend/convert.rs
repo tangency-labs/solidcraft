@@ -22,6 +22,7 @@ use super::record::{
     QuadricKindRecord, QuadricRecord, RadiusRecord, SetbackCornerRecord, SetbackRoundRecord,
     SupportKindRecord, SupportRecord, SweptCornerRecord,
 };
+use super::record::{EndOrderRecord, MotionRecord, SectionBlendRecord, SectionFrameRecord};
 use super::{BlendDefinitionInput, BlendRef, ProceduralBlend, BLEND_MAX_DEPTH};
 use crate::blend::blend_corner::mixed::algebra::{Crv, Side};
 use crate::blend::blend_setback::{Face, FaceKind, Round};
@@ -1016,6 +1017,135 @@ pub fn draft_rebuild(k: &Kernel, rec: &DraftRecord) -> Result<Surface> {
     let net = draft_from_record(k, rec)?;
     if let Some(d) = net.procedural_blend() {
         d.recertify(k)?;
+    }
+    Ok(net)
+}
+
+const OP_SECTION_TO: &str = "surface::procedural_blend::convert::section_blend_to_record";
+const OP_SECTION_FROM: &str = "surface::procedural_blend::convert::section_blend_from_record";
+
+/// The record of a multi-section blend's surface (`sweep::section_blend`, #3140): its
+/// definition and its net, every number as the kernel stores it.
+///
+/// # Errors
+///
+/// `InvalidInput` for a surface that is not a section blend's, or a net that is not a
+/// B-spline surface; those of the form.
+pub fn section_blend_to_record(surface: &Surface) -> Result<SectionBlendRecord> {
+    use crate::sweep::section_blend::EndOrder;
+    let Some(BlendRef::SectionBlend { blend, net }) = surface.procedural_blend() else {
+        return Err(SolidError::invalid_input(
+            OP_SECTION_TO,
+            "the surface is not a section blend's",
+        ));
+    };
+    let SurfaceKind::BSpline(form) = net.kind() else {
+        return Err(SolidError::invalid_input(
+            OP_SECTION_TO,
+            "a section blend's net is a B-spline surface",
+        ));
+    };
+    let xyz = |p: Point3| [p.x, p.y, p.z];
+    let order = |o: EndOrder| match o {
+        EndOrder::G0 => EndOrderRecord::G0,
+        EndOrder::G1 => EndOrderRecord::G1,
+        EndOrder::G2 => EndOrderRecord::G2,
+        EndOrder::G3 => EndOrderRecord::G3,
+    };
+    let [o0, o1] = blend.orders();
+    Ok(SectionBlendRecord {
+        sections: blend
+            .sections()
+            .iter()
+            .map(|section| {
+                section
+                    .iter()
+                    .map(|f| SectionFrameRecord {
+                        p: xyz(f.p),
+                        leave: xyz(f.leave),
+                        bend: xyz(f.bend),
+                        bend_change: xyz(f.bend_change),
+                    })
+                    .collect()
+            })
+            .collect(),
+        orders: [order(o0), order(o1)],
+        crown: blend.crown(),
+        motions: blend
+            .motions()
+            .iter()
+            .map(|m| MotionRecord {
+                origin: xyz(m.rotate_n_move.origin()),
+                x_axis: xyz(m.rotate_n_move.x_axis()),
+                y_axis: xyz(m.rotate_n_move.y_axis()),
+                scale: m.scale.map(xyz),
+            })
+            .collect(),
+        net: surface_record(form)?,
+    })
+}
+
+/// The multi-section blend's surface a record holds, its definition kept on it, not yet
+/// re-certified: [`section_blend_rebuild`] does that.
+///
+/// # Errors
+///
+/// `InvalidInput` for a record its structural check refuses
+/// ([`SectionBlendRecord::validate`]); those of making the net.
+pub fn section_blend_from_record(rec: &SectionBlendRecord) -> Result<Surface> {
+    use crate::geom::axis2_placement::Axis2Placement;
+    use crate::sweep::section_blend::{EndOrder, Motion, SectionBlendDefinition, SectionFrame};
+    rec.validate()
+        .map_err(|e| SolidError::invalid_input(OP_SECTION_FROM, e.reason))?;
+    let p = |a: [f64; 3]| Point3::new(a[0], a[1], a[2]);
+    let order = |o: EndOrderRecord| match o {
+        EndOrderRecord::G0 => EndOrder::G0,
+        EndOrderRecord::G1 => EndOrder::G1,
+        EndOrderRecord::G2 => EndOrder::G2,
+        EndOrderRecord::G3 => EndOrder::G3,
+    };
+    let sections = rec
+        .sections
+        .iter()
+        .map(|section| {
+            section
+                .iter()
+                .map(|f| SectionFrame {
+                    p: p(f.p),
+                    leave: p(f.leave),
+                    bend: p(f.bend),
+                    bend_change: p(f.bend_change),
+                })
+                .collect()
+        })
+        .collect();
+    let motions = rec
+        .motions
+        .iter()
+        .map(|m| Motion {
+            rotate_n_move: Axis2Placement::from_stored(p(m.origin), p(m.x_axis), p(m.y_axis)),
+            scale: m.scale.map(p),
+        })
+        .collect();
+    let [o0, o1] = rec.orders;
+    let definition =
+        SectionBlendDefinition::from_parts(sections, [order(o0), order(o1)], rec.crown, motions);
+    let mut net = Surface::from(surface_of(&rec.net)?);
+    net.set_section_blend_definition(definition);
+    Ok(net)
+}
+
+/// [`section_blend_from_record`] and the net re-certified against the definition
+/// ([`crate::sweep::section_blend::SectionBlendDefinition::recertify`]): refused unless the
+/// definition rebuilds it exactly.
+///
+/// # Errors
+///
+/// Those of [`section_blend_from_record`] and of the re-certification.
+pub fn section_blend_rebuild(rec: &SectionBlendRecord) -> Result<Surface> {
+    let net = section_blend_from_record(rec)?;
+    if let Some(BlendRef::SectionBlend { blend, net: n }) = net.procedural_blend() {
+        blend.recertify(n)?;
     }
     Ok(net)
 }

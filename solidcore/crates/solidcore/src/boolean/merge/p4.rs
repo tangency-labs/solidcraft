@@ -38,7 +38,8 @@
 //! (the face in the error) instead of returning a body whose solid merged into the outside.
 
 use super::p1::{self, MergeOptions};
-use crate::error::{Result, SolidError, SM_ERR};
+use crate::error::boolean::BooleanFailure;
+use crate::error::{Failure, Result, SolidError};
 use crate::geom::a_object::BooleanOperation;
 use crate::geom::attribute::{
     ids, Attribute, AttributeStore, Behavior, MergeRegionData, ObjectKey,
@@ -369,7 +370,7 @@ pub enum MergeEntity {
 }
 
 fn required<T>(value: Option<T>) -> Result<T> {
-    value.ok_or_else(|| SolidError::null_pointer(OP))
+    value.ok_or_else(|| SolidError::entity_missing(OP, "a topology entity the Boolean needs"))
 }
 
 fn ignored<T>(result: Result<T>) -> Result<Option<T>> {
@@ -804,7 +805,10 @@ fn classify_edge_faces(
                 }
             }
         } else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::stage_failed(
+                OP,
+                "the faces are neither in a shell nor classified",
+            ));
         }
     }
     Ok(true)
@@ -882,7 +886,9 @@ fn classify_remaining(
                 let selected = if reverse {
                     edge_id
                 } else {
-                    *edges.first().ok_or_else(|| SolidError::null_pointer(OP))?
+                    *edges.first().ok_or_else(|| {
+                        SolidError::entity_missing(OP, "the edge list has an edge")
+                    })?
                 };
                 let e = source.edge(selected)?;
                 let curve = required(e.curve.as_ref())?;
@@ -1530,11 +1536,7 @@ fn editing_stages(
     }
     if let Some(f) = leak {
         if !has_solid_region(primary)? {
-            return Err(SolidError::Upstream {
-                operation: OP,
-                code: SM_ERR,
-                entity: Some(EntityRef::Face(f)),
-            });
+            return Err(Failure::new(OP, BooleanFailure::SolidLeaks { face: f }).into_error());
         }
     }
     Ok(false)
@@ -1657,7 +1659,10 @@ fn manifold_boolean_translated(
     }
     if operation == BooleanOperation::Slice {
         if !is_sheet(kernels, b)? {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::stage_failed(
+                OP,
+                "a slice needs a sheet, and the B-rep is not one",
+            ));
         }
         if !is_oriented_sheet(kernels, b)? {
             let first = required(bp::faces(b, None)?.first().copied())?;
@@ -1786,18 +1791,15 @@ fn manifold_boolean_translated(
             *primary = None;
         }
     }
-    // Not upstream (tangency-labs/solidcore#746; opt-in,
-    // `Kernel::fixes.remove_slit_loops_where_solids_touch`): a volumetric Boolean's result
+    // Not upstream (tangency-labs/solidcore#746, WR-360): a volumetric Boolean's result
     // loses the zero-area inner loops a contact curve inside a face left, and the shells
     // joined only through them are split (the fork's `RemoveSlitLoopsWhereSolidsTouch`
     // before `rpResult = m_vTI.m_pBrep`). The destroyed edge uses notify on call-local
     // records under their type code and arena index.
-    if kernels.primary.fixes.remove_slit_loops_where_solids_touch
-        && matches!(
-            operation,
-            BooleanOperation::Union | BooleanOperation::Intersection | BooleanOperation::Difference
-        )
-    {
+    if matches!(
+        operation,
+        BooleanOperation::Union | BooleanOperation::Intersection | BooleanOperation::Difference
+    ) {
         if let Some(a) = primary.as_mut() {
             let editing = a.editing_enabled();
             a.set_editing_enabled(true);
@@ -1858,18 +1860,16 @@ mod tests {
 
     #[test]
     fn paired_mark_contexts_survive_a_failing_action() {
-        for opt_in in [false, true] {
+        {
             let mut first = Kernel::default();
             let mut second = Kernel::default();
-            first.fixes.mark_lock_pair_advances_and_locks_second_context = opt_in;
             first.context.set_doing_boolean(true);
             let mut kernels = BooleanKernels {
                 primary: &mut first,
                 other: Some(&mut second),
             };
-            let fixes = kernels.primary.fixes;
             let mut lock = kernels
-                .mark_action(|contexts| MarkLock::new_pair_with_fixes(contexts, 0, 1, &fixes))
+                .mark_action(|contexts| MarkLock::new_pair(contexts, 0, 1))
                 .unwrap();
             let marks = (lock.mark_type1(), lock.mark_type2());
             let before = (
@@ -1923,7 +1923,7 @@ mod tests {
                                 0 => Ok(()),
                                 1 => Err(SolidError::sm_err("test::cache")),
                                 _ => Err(SolidError::unported(
-                                    "SmBrep::DeleteStaleCaches",
+                                    "topology::brep::p2::delete_stale_caches",
                                     "topology.brep_p2",
                                 )),
                             }
