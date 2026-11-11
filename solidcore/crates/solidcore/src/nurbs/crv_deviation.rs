@@ -20,7 +20,9 @@
 //! differences and its complement one subtraction, so each insertion adds at most
 //! `γ_12 M` per coordinate, `M` the net's largest coordinate (a convex combination neither
 //! grows the coordinates nor the errors it is given); `I` insertions carry `γ_(12 (I + 1))`
-//! of twice `M`. The elevation of a piece by `t` forms each point as a convex combination of
+//! of twice `M`. Both curves are first moved into their own frame (minus the first control
+//! point of the first; each moved coordinate rounds once, `γ_2` of `M`), so `M` is their size
+//! there, not their distance from the origin. The elevation of a piece by `t` forms each point as a convex combination of
 //! at most `p + 1` points with coefficients that are quotients of binomials: `γ_(8 q)` of
 //! `M`, `q` the degree reached. The norm of each difference is rounded up by `γ_8`, and a
 //! coordinate error `e` moves a point by at most `2 e` (`√3 e`).
@@ -40,7 +42,7 @@ use crate::error::{Result, SolidError};
 use crate::math::Vec3;
 use crate::nurbs::crv_basic::Curve;
 use crate::nurbs::knots::{Side, MAX_DEGREE};
-use crate::nurbs::math::{gamma, NOW, NOZ};
+use crate::nurbs::math::{gamma, CPoint, NOW, NOZ};
 
 const OP: &str = "nurbs::crv_deviation::certified_distance";
 const OP_FIT: &str = "nurbs::crv_deviation::interpolation_bound";
@@ -116,10 +118,28 @@ pub fn certified_distance(a: &Curve, b: &Curve) -> Result<f64> {
             "the curves are not on one domain",
         ));
     }
+    // In the curves' own frame: both moved by minus `a`'s first control point, so the
+    // rounding counted below follows their size, not their distance from the origin. The
+    // difference of the two is the same in either frame; each moved coordinate rounds once.
+    let Some(&c0) = a.cpts().first() else {
+        return Err(SolidError::invalid_input(OP, "a curve without points"));
+    };
+    let local = |c: &Curve| -> Result<Curve> {
+        let pw = c
+            .cpts()
+            .iter()
+            .map(|p| CPoint::new(p.x - c0.x, p.y - c0.y, p.z - c0.z, NOW))
+            .collect();
+        Curve::new(pw, c.degree(), c.knots().to_vec())
+    };
+    let (a_local, b_local) = (local(a)?, local(b)?);
+    let (a, b) = (&a_local, &b_local);
     let q = a.degree().max(b.degree());
     let size = largest_coordinate(a).max(largest_coordinate(b));
+    let moved = gamma(2) * size;
     let (pa, ea) = pieces(a, b, q, size)?;
     let (pb, eb) = pieces(b, a, q, size)?;
+    let (ea, eb) = (ea + moved, eb + moved);
     if pa.len() != pb.len() {
         return Err(SolidError::query_failed(
             OP,
@@ -269,7 +289,6 @@ fn pieces(c: &Curve, other: &Curve, q: usize, size: f64) -> Result<(Vec<Curve>, 
 mod tests {
     use super::*;
     use crate::nurbs::knots::clamped_uniform;
-    use crate::nurbs::math::CPoint;
 
     fn spline(points: &[[f64; 3]], degree: usize) -> Curve {
         let pw = points
@@ -421,6 +440,20 @@ mod tests {
         let d = certified_distance(&line, &beside).unwrap();
         assert!(d >= 1e-200, "{d}");
         assert!(d <= 1.0001e-200, "{d}");
+    }
+
+    #[test]
+    fn the_bound_follows_the_curves_size_not_their_place() {
+        // the wave a thousand kilometres along x, against itself and its refinement: the
+        // rounding counted is the wave's, not 1e9's
+        let far: Vec<[f64; 3]> = WAVE.iter().map(|&[x, y, z]| [x + 1e9, y, z]).collect();
+        let c = spline(&far, 3);
+        let d = certified_distance(&c, &c).unwrap();
+        assert!(d < 1e-9, "{d}");
+        let higher = c.elevate_degree(1).unwrap();
+        let d = certified_distance(&c, &higher).unwrap();
+        // the raise itself rounds at 1e9 (u 1e9 is about 1e-7): the bound holds that, no more
+        assert!(d < 1e-5, "{d}");
     }
 
     #[test]
