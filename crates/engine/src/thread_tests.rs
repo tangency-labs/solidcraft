@@ -1732,6 +1732,9 @@ fn a_printed_threads_fit_is_saved_and_checked() {
         (json!({"designation": "M8", "fit": "loose"}), "`fit` is for the print form"),
         (json!({"designation": "PT8x2", "fit": "snug"}), "unknown fit `snug`"),
         (json!({"designation": "PT8x2", "fit": {"root": "deep"}}), "`fit.root` must be a number"),
+        (json!({"designation": "PT8x2", "fit": {"flanks": 0.3}}), "unknown fit clearance `flanks`"),
+        (json!({"designation": "PT8x2", "fit": 0.3}), "`fit` must be tight, normal, loose"),
+        (json!({"designation": "PT8x2", "fit": ["loose"]}), "`fit` must be tight, normal, loose"),
         (json!({"designation": "PT8x2", "fit": {"flank": 0.9}}), "leaves no crest"),
     ] {
         let mut p = p;

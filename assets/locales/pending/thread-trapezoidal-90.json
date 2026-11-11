@@ -33,6 +33,23 @@
     "thread.pitch_from_diameter": "حسب القطر (مم)",
     "thread.chamfer_to_root": "حتى جذر السن"
   },
+  "de": {
+    "thread.form_print": "Trapez 90°",
+    "thread.fit": "Passung",
+    "thread.fit_tip": "Wie viel Spiel gedruckte Schraube und Mutter einander lassen. Normal passt zu einer 0,4-mm-Düse, Eng zu einem gut eingestellten Drucker, Lose zu groben Schichten.",
+    "thread.fit_tight": "Eng",
+    "thread.fit_normal": "Normal",
+    "thread.fit_loose": "Lose",
+    "thread.fit_custom": "Benutzerdefiniert",
+    "thread.flank_clearance": "Flankenspiel",
+    "thread.crest_clearance": "Spitzenspiel",
+    "thread.root_clearance": "Grundspiel",
+    "thread.flank_clearance_hint": "mm, je Flanke",
+    "thread.clearance_hint": "mm",
+    "thread.size_from_face": "passt zur Fläche (mm)",
+    "thread.pitch_from_diameter": "nach Durchmesser (mm)",
+    "thread.chamfer_to_root": "bis zum Gewindegrund"
+  },
   "he": {
     "thread.form_print": "טרפזי 90°",
     "thread.fit": "התאמה",
@@ -66,6 +83,23 @@
     "thread.size_from_face": "面に合わせる (mm)",
     "thread.pitch_from_diameter": "直径から (mm)",
     "thread.chamfer_to_root": "ねじの谷底まで"
+  },
+  "ko": {
+    "thread.form_print": "사다리꼴 90°",
+    "thread.fit": "끼워맞춤",
+    "thread.fit_tip": "출력한 수나사와 암나사 사이에 남기는 틈새입니다. 보통은 0.4 mm 노즐에, 꼭 맞춤은 잘 조정된 프린터에, 헐거움은 거친 레이어에 맞습니다.",
+    "thread.fit_tight": "꼭 맞춤",
+    "thread.fit_normal": "보통",
+    "thread.fit_loose": "헐거움",
+    "thread.fit_custom": "사용자 지정",
+    "thread.flank_clearance": "플랭크 틈새",
+    "thread.crest_clearance": "산마루 틈새",
+    "thread.root_clearance": "골 틈새",
+    "thread.flank_clearance_hint": "mm, 플랭크마다",
+    "thread.clearance_hint": "mm",
+    "thread.size_from_face": "면에 맞춤 (mm)",
+    "thread.pitch_from_diameter": "지름 기준 (mm)",
+    "thread.chamfer_to_root": "나사 골까지"
   },
   "vi": {
     "thread.form_print": "Hình thang 90°",

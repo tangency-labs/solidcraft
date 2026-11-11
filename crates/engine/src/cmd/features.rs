@@ -3949,14 +3949,18 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::String(name)) => Some(
             PrintFit::named(name).ok_or_else(|| bad(cmd, format!("unknown fit `{name}` (tight, normal, loose, or {{flank, crest, root}} in mm)")))?,
         ),
-        Some(v) => {
-            let mm = |key: &str, default: f64| match v.get(key) {
+        Some(Value::Object(o)) => {
+            if let Some(key) = o.keys().find(|k| !["flank", "crest", "root"].contains(&k.as_str())) {
+                return Err(bad(cmd, format!("unknown fit clearance `{}` (flank, crest, root)", brief(key))));
+            }
+            let mm = |key: &str, default: f64| match o.get(key) {
                 None | Some(Value::Null) => Ok(default),
                 Some(n) => n.as_f64().ok_or_else(|| bad(cmd, format!("`fit.{key}` must be a number of millimetres"))),
             };
             let d = PrintFit::NORMAL;
             Some(PrintFit { flank: mm("flank", d.flank)?, crest: mm("crest", d.crest)?, root: mm("root", d.root)? })
         }
+        Some(_) => return Err(bad(cmd, "`fit` must be tight, normal, loose, or {flank, crest, root} in mm")),
     }
     // The normal fit is the default: a thread without it means what it always did.
     .filter(|f| *f != PrintFit::NORMAL);
