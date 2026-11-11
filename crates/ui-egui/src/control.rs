@@ -44,6 +44,9 @@
 //!   (#35); while it is shown, `engine.execute` first glides to the command's button and picks
 //!   and replies once the command has run (`"animate": false` skips that one call)
 //! - `ui.resize {width, height}`, `app.quit`
+//!
+//! `control.pending` and `control.cancel` belong to the connection: its host answers them
+//! (`solidcraft_control::server`) through each request's [`ControlRequest::ticket`].
 
 use solidcraft_engine::geom::prelude::*;
 
@@ -814,6 +817,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             ok(json!({"busy": app.file_load.busy()}))
         }
         "ui.documents" => ok(crate::documents::control(app, p)),
+        "ui.operations" => wrap(crate::operations::control(app, p)),
         "ui.home" => {
             match p.get("open").and_then(Value::as_bool) {
                 Some(true) => {

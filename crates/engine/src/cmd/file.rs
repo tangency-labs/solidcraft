@@ -1187,12 +1187,26 @@ fn export_to(
     } else {
         // Bodies carry the colour they are shown in (appearance, material or imported), and the
         // file the design's properties where the format has a place for them.
-        solidcraft_io::export_with_parts(&s.doc.painted(&*s.world_state()?), bodies, parts, format, &name, &s.doc.metadata, quality)?
+        solidcraft_io::export_with_parts(
+            &s.doc.painted(&*s.world_state()?),
+            bodies,
+            parts,
+            format,
+            &name,
+            &s.doc.metadata,
+            quality,
+            export_thumbnail(s, format, bodies).as_deref(),
+        )?
     };
     solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let reply =
         ExportResult { path: path.to_string(), bytes: bytes.len(), format: format!("{format:?}"), files: Vec::new(), param_warnings: Vec::new() };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+/// A picture of the part, drawn only for a format that has a place for it.
+fn export_thumbnail(s: &Session, format: Format, bodies: &[String]) -> Option<Vec<u8>> {
+    matches!(format, Format::ThreeMf | Format::ThreeMfTagged).then(|| thumbnail::exported(s, bodies)).flatten()
 }
 
 /// [`export_to`] for a mesh file a slicer is sent (STL or 3MF): each body laid on its print face.
@@ -1208,7 +1222,8 @@ fn export_laid_to(
     let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
     let mut state = s.doc.painted(&*s.world_state()?);
     let laid = print_face::lay_on_print_faces(s, &mut state, bodies, parts);
-    let bytes = solidcraft_io::export_with_parts(&state, bodies, parts, format, &name, &s.doc.metadata, quality)?;
+    let thumbnail = export_thumbnail(s, format, bodies);
+    let bytes = solidcraft_io::export_with_parts(&state, bodies, parts, format, &name, &s.doc.metadata, quality, thumbnail.as_deref())?;
     solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let reply = SaveMeshResult {
         path: path.to_string(),
@@ -1507,6 +1522,25 @@ mod urdf_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #9449: a 3MF export carries a picture of the part as its package thumbnail.
+    #[test]
+    fn a_3mf_export_carries_the_design_thumbnail() {
+        crate::capture::install_test_renderer();
+        let mut s = Session::default();
+        // Headless, as from the CLI: nothing has drawn the bodies, so their display meshes are cold.
+        s.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30})).unwrap();
+        let dir = std::env::temp_dir();
+        let has_thumbnail = |s: &mut Session, name: &str| {
+            let path = dir.join(format!("solidcraft-3mf-thumbnail-{}-{name}", std::process::id()));
+            s.execute("file.export", &json!({"path": path})).unwrap();
+            let bytes = std::fs::read(&path).unwrap();
+            std::fs::remove_file(&path).unwrap();
+            bytes.windows(b"Metadata/thumbnail.png".len()).any(|entry| entry == b"Metadata/thumbnail.png")
+        };
+        assert!(has_thumbnail(&mut s, "part.3mf"));
+        assert!(!has_thumbnail(&mut s, "part.stl"), "STL has no place for a picture");
+    }
 
     /// While the profiler records, a STEP import's reply carries its own profile: the import's
     /// stages and the kernel's calls, as diagnostics.profile reports them.

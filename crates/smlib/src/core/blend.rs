@@ -77,6 +77,11 @@ pub(super) fn status(e: SolidError) -> Error {
     match e {
         SolidError::Upstream { code, .. } => Error::Status(code),
         e if is_b_spline_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
+        e if is_intersect_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
+        e if is_primitive_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
+        e if is_mass_heal_or_geom_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
+        e if is_sweep_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
+        e if is_query_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
         SolidError::InvalidInput { .. } => Error::Status(INVALID_INPUT),
         SolidError::Unsupported { reason, .. } if reason == MIXED_CORNER_RAILS_CROSS => Error::Unported(MIXED_CORNER_UNSUPPORTED),
         e if is_boolean_failure(&e) => boolean_status(e),
@@ -108,6 +113,40 @@ fn boolean_status(e: SolidError) -> Error {
 /// method returned (`Upstream` before solidcore described it), and passes on as that status.
 fn is_b_spline_failure(e: &SolidError) -> bool {
     matches!(e.nurbs_failure(), Some(NurbsFailure::BSpline(_)))
+}
+
+/// An intersection or classification failure (solidcore's `IntersectFailure`): it stands for the
+/// status the routine returned (`Upstream` before solidcore described it), and passes on as that
+/// status.
+fn is_intersect_failure(e: &SolidError) -> bool {
+    e.intersect_failure().is_some()
+}
+
+/// A primitive, extrusion, revolution, skin or taper failure (solidcore's `PrimitiveFailure`): it
+/// stands for the status the routine returned (`Upstream` before solidcore described it), and
+/// passes on as that status.
+fn is_primitive_failure(e: &SolidError) -> bool {
+    e.primitive_failure().is_some()
+}
+
+/// A mass-property, healing or geometry-utility failure (solidcore's `MassFailure`,
+/// `HealFailure`, `GeomFailure`): it stands for the status the routine returned (`Upstream`
+/// before solidcore described it), and passes on as that status.
+fn is_mass_heal_or_geom_failure(e: &SolidError) -> bool {
+    e.mass_failure().is_some() || e.heal_failure().is_some() || e.geom_failure().is_some()
+}
+
+/// A sweep routine's failure (solidcore's `SweepFailure`) that replaced a status the routine
+/// returned (`Upstream` before solidcore described it): it passes on as that status. A railed
+/// loft's refusal replaced none and passes on as solidcore's text, as before.
+fn is_sweep_failure(e: &SolidError) -> bool {
+    e.sweep_failure().is_some_and(|w| w.replaces_upstream_status())
+}
+
+/// A query's failure (solidcore's `QueryFailure`): it stands for the status the query returned
+/// (`Upstream` before solidcore described it), and passes on as that status.
+fn is_query_failure(e: &SolidError) -> bool {
+    e.query_failure().is_some()
 }
 
 /// `size_ok`.
@@ -1427,6 +1466,20 @@ mod tests {
         assert!(matches!(status(SolidError::unported("SmX", "x")), Error::Unsupported));
     }
 
+    /// A sweep routine's failure passes on as the status it replaced, as the `Upstream` it replaced
+    /// did; a railed loft's refusal, which replaced no status, keeps passing on as solidcore's text.
+    #[test]
+    fn sweep_failures_pass_on_as_their_status() {
+        use solidcore::error::Failure;
+        use solidcore::error::sweep::SweepFailure;
+        let sweep = |w| Failure::new("sweep::topology_sweep", w).into_error();
+        assert!(matches!(status(sweep(SweepFailure::Failed("the face was already swept"))), Error::Status(1001)));
+        assert!(matches!(status(sweep(SweepFailure::Missing("the edge's curve"))), Error::Status(1006)));
+        assert!(matches!(status(SolidError::sm_err("CopyFaces")), Error::Status(1001)));
+        let cap = SweepFailure::RailPastStationCap { asked: 1e-6, reached: 1e-3, wires: 64 };
+        assert!(matches!(status(sweep(cap)), Error::Solidcore(_)));
+    }
+
     #[test]
     fn laws_are_checked_as_the_capi_checks_them() {
         assert!(law_ok(1, &[0.0, 0.0, 1.0, 1.0], &[1.0, 2.0]));
@@ -1452,5 +1505,16 @@ mod tests {
         assert_eq!(pick(&all, &[[1.0, 0.0, 0.0], [0.5, 0.0, 0.0]], 1.0, 1e-6, d).unwrap(), Err(Miss::Ambiguous(1)));
         // The same entity twice is picked once, by its first point.
         assert_eq!(pick(&all, &[[3.1, 0.0, 0.0], [2.9, 0.0, 0.0]], 0.5, 1e-6, d).unwrap(), Ok((vec![3.0], vec![0])));
+    }
+
+    /// A query's failure passes on as the status it replaced, as the `Upstream` it replaced did.
+    #[test]
+    fn query_failures_pass_on_as_their_status() {
+        use solidcore::error::Failure;
+        use solidcore::error::query::QueryFailure;
+        let query = |q| Failure::new("query::edge", q).into_error();
+        assert!(matches!(status(query(QueryFailure::Failed("the region has no shells"))), Error::Status(1001)));
+        assert!(matches!(status(query(QueryFailure::Missing("the face's surface"))), Error::Status(1006)));
+        assert!(matches!(status(query(QueryFailure::InvalidValue("a vector of zero length has no direction"))), Error::Status(1007)));
     }
 }

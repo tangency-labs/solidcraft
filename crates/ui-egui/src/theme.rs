@@ -10,15 +10,6 @@ use solidcraft_theme::{
     AccentRamp, Custom, Environment, Fade, PublishedTab, Surfaces, TabAccent, Tokens, is_dark, set_custom, set_published, viewport_dark, vision,
 };
 
-// SolidCraft's theme files (`assets/styles/ui/themes`), collected at build time.
-include!(concat!(env!("OUT_DIR"), "/builtin_themes.rs"));
-
-/// Installs SolidCraft's built-in theme files ([`BUILTIN`]) as `theme_files`' built-in themes, once
-/// per process, before preferences are read or the first frame; later calls find them installed.
-pub fn install_builtin_themes() {
-    crate::theme_files::install_builtin(BUILTIN);
-}
-
 #[derive(Clone)]
 struct PreparedTheme {
     file: crate::theme_files::ThemeFile,

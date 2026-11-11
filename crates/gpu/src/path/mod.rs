@@ -132,6 +132,12 @@ pub fn host_on_adapter(adapter: &wgpu::Adapter) -> Result<ImageHost> {
     let policy = crate::env::policy().map_err(gpu)?;
     let info = adapter.get_info();
     if !viewport_path_backends(info.backend, cfg!(target_os = "windows")).intersects(solidcraft_viewport_gpu::select::path_backends()) {
+        if cfg!(target_os = "windows") {
+            return Err(gpu(format!(
+                "GPU path tracing needs a Vulkan session on Windows; the window uses {:?}. Select Vulkan in Preferences > Graphics > Graphics API and restart SolidCraft, or select a CPU image method",
+                info.backend
+            )));
+        }
         return Err(gpu(format!("{VULKAN_ONLY}; the viewport uses {:?}", info.backend)));
     }
     if !policy.admits(solidcraft_viewport_gpu::select::tier_of(info.device_type)) {

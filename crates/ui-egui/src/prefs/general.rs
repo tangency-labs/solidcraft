@@ -46,10 +46,12 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             // Only the web app keeps designs in the browser (#10220).
             if app.services.browser_files.is_some() {
                 let tip = app.tr("prefs.keep_unsaved_in_browser_tip").to_string();
-                ui_kit::checkbox(ui, app.tr("prefs.keep_unsaved_in_browser"), &mut app.preferences.keep_unsaved_in_browser).on_hover_text(tip);
+                ui_kit::checkbox(ui, app.tr("prefs.keep_unsaved_in_browser"), &mut app.preferences.keep_unsaved_in_browser)
+                    .backing_on_hover_text(tip);
                 if app.preferences.keep_unsaved_in_browser {
                     let tip = app.tr("prefs.keep_unsaved_also_asks_tip").to_string();
-                    ui_kit::checkbox(ui, app.tr("prefs.keep_unsaved_also_asks"), &mut app.preferences.keep_unsaved_also_asks).on_hover_text(tip);
+                    ui_kit::checkbox(ui, app.tr("prefs.keep_unsaved_also_asks"), &mut app.preferences.keep_unsaved_also_asks)
+                        .backing_on_hover_text(tip);
                 }
             }
             setting::save_prompt_one_at_a_time(app, ui).on_hover_text(app.tr("prefs.save_prompt_one_at_a_time_help"));
@@ -145,6 +147,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::settings_section(ui, "dialogs", app.tr("prefs.dialogs"), |ui| {
             let right_click = setting::right_click_confirms(app, ui);
             crate::scenario::publish_target("prefs:right_click_confirms", right_click.rect);
+            let first_letter = setting::dialog_first_letter_buttons(app, ui).backing_on_hover_text(app.tr("prefs.dialog_first_letter_buttons_help"));
+            crate::scenario::publish_target("prefs:dialog_first_letter_buttons", first_letter.rect);
         });
         ui_kit::settings_section(ui, "updates", app.tr("prefs.updates"), |ui| {
             crate::update::prefs_rows(app, ui);

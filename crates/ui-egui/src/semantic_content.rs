@@ -18,6 +18,8 @@ pub struct ContentOwner(pub u64);
 impl ContentOwner {
     pub const BROWSER: Self = Self(0);
     pub const HISTORY: Self = Self(1);
+    /// The design tree over the view while a dialog holds the left column (`dialog_tree`, #6710).
+    pub const DESIGN_TREE: Self = Self(2);
 }
 
 /// Runtime identity of the document and presentation which produced an interaction.
@@ -36,8 +38,12 @@ pub(crate) struct FeatureDrag {
 /// Existing row compositions. This interface deliberately contains no panel or host policy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ContentRequest {
-    Browser { shrink_height: bool },
+    Browser {
+        shrink_height: bool,
+    },
     ActiveBodiesOrigin,
+    /// The design's Origin, Bodies and Construction rows, for `dialog_tree` (#6710).
+    DesignTree,
 }
 
 pub type DrawnRow = (String, Rect, Option<Rect>, Option<bool>);
@@ -235,10 +241,16 @@ pub(crate) fn set_external_body_hover(app: &mut SolveApp, bodies: Vec<String>) {
 /// The timeline's own write of the hovered feature. A Browser row that lit the same feature a
 /// frame earlier no longer owns it, so expiring the Browser's hover leaves the timeline's alone.
 pub(crate) fn set_timeline_feature_hover(app: &mut SolveApp, feature: Option<u64>) {
-    app.tree.content.last_feature = None;
-    app.viewport.hover_feature = feature;
+    if feature.is_some() {
+        app.tree.content.last_feature = None;
+        app.viewport.hover_feature = feature;
+    } else if app.tree.content.last_feature.is_none() {
+        app.viewport.hover_feature = None;
+    }
 }
 
+/// Expire previous hover contributions owned by browser or content trees before applying
+/// new actions for the current frame, returning the previous bodies and construction plane.
 fn expire_hover(app: &mut SolveApp) -> (Vec<String>, Option<String>) {
     let old_bodies = std::mem::take(&mut app.tree.content.last_bodies);
     let old_plane = app.tree.content.last_plane.take();
@@ -426,6 +438,8 @@ fn presented(ui: &Ui) -> bool {
     ui.is_visible() && ui.opacity() > 0.0
 }
 
+/// Finalize content tree hover state, pointer ownership, and drag interactions across panels
+/// for the current frame, requesting a repaint if visible hover highlights changed.
 pub(crate) fn finalize(app: &mut SolveApp, ctx: &egui::Context) {
     ensure_session(app, ctx);
     if app.tree.content.finalized {

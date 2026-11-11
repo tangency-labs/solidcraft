@@ -3323,7 +3323,7 @@ pub(crate) fn plane_bounding_box(
         .calculate_bounding_box(k, uv_domain, &base_req)?;
     if req.polar {
         let mut pb = PolarBox::new();
-        pb.add_vector_with_kernel(k, plane.evaluate_normal(), None);
+        pb.add_vector(plane.evaluate_normal(), None);
         r.polar = Some(pb);
     }
     Ok(r)
@@ -4072,9 +4072,7 @@ impl AreaIntegrand<'_> {
     /// # Errors
     ///
     /// [`SolidError::Unported`] from the surface evaluator, plus numerical and
-    /// surface-evaluator failures when
-    /// [`crate::kernel::UpstreamFixes::integrator_propagates_failure`] is enabled
-    /// (WR-94; off by default, where scalar failures yield zero as upstream does).
+    /// surface-evaluator failures (WR-94; upstream yields zero for them).
     pub fn evaluate(&self, k: &Kernel, t: f64) -> Result<f64> {
         // set up the strip integral of [deltaX, IntervalY]
         let eval = IsoCurveLengthIntegrand::new(self.surface, t);

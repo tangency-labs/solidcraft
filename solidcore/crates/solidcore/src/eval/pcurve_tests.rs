@@ -1320,17 +1320,37 @@ fn hostile_records_give_errors() {
             "{tol}"
         );
     }
-    // A record's structure (its intervals, its numbers) is checked where it is converted
-    // (solidcore-ops' pcurve, which refuses these as invalid); here they give errors, never a panic.
-    for interval in [
-        [1., 1.],
-        [2., 1.],
-        [f64::NAN, 1.],
-        [0., f64::INFINITY],
-        [0., 1e13],
-    ] {
-        let _ = pcurves(&plane, &one(&line, interval), 1e-6);
+    // An empty, reversed or non-finite interval is refused, given pcurve or not; one past the
+    // curve's natural range is the record's to refuse (solidcore-ops' pcurve), an error here.
+    for interval in [[1., 1.], [2., 1.], [f64::NAN, 1.], [0., f64::INFINITY]] {
+        assert!(
+            matches!(
+                pcurves(&plane, &one(&line, interval), 1e-6),
+                Err(Error::Invalid(_))
+            ),
+            "{interval:?}"
+        );
+        let given = Curve2::Spline {
+            knots: vec![0., 0., 1., 1.],
+            points: vec![[0., 0.], [1., 0.]],
+        };
+        let uses = vec![vec![EdgeUse {
+            edge: 0,
+            curve: &line,
+            interval,
+            forward: true,
+            tolerance: 0.0,
+            given: Some(&given),
+        }]];
+        assert!(
+            matches!(
+                exact_pcurves(&plane, &uses, 1e-6, None),
+                Err(Error::Invalid(_))
+            ),
+            "given, {interval:?}"
+        );
     }
+    let _ = pcurves(&plane, &one(&line, [0., 1e13]), 1e-6);
     let nan = Curve::Line {
         start: [f64::NAN, 0., 0.],
         end: [1., 0., 0.],

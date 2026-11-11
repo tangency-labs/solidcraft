@@ -2,6 +2,7 @@
 
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
+use solidcraft_doc::construct::DatumItem;
 use solidcraft_doc::{
     AxisRef, Direction, Expr, Extent, FeatureKind, Operation, PointExpr, ProfileSel, RailFit, SweepOrientation, SweepRail, ThinSide, ThinWall,
     Touching, expr::Kind, point_expr,
@@ -163,7 +164,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.thread", "Thread", thread)
         .at("SOLID", "CREATE")
         .icon("thread")
-        .params("face: [x,y,z] on a cylindrical face; form?: metric|trapezoidal|acme|buttress|buttress_asme|bspp|rp|bspt|npt (default: the one `designation` names, else metric; square is refused: no current standard defines it); designation?: the size, as its standard writes it: metric \"M8\", \"M8x1\", \"M16xPh3P1.5\" (ISO 68-1, ISO 261, ISO 965-1); trapezoidal \"Tr20x4\", \"Tr40x14(P7)\" (ISO 2904, ISO 2903); buttress \"S20x4\", \"S40x14(P7)\" (DIN 513, 3°/30°); acme \"1/2-10 ACME\" (ASME B1.5); buttress_asme \"2.5-8 BUTT\" (ASME B1.9, 7°/45°, basic profile; no size table); bspp \"G 1/2\" (ISO 228-1, 55° parallel); rp \"Rp 1/2\" (ISO 7-1's parallel internal thread, 55°, an R screws into it; internal only); bspt \"R 1/2\" external, \"Rc 1/2\" internal (ISO 7-1, 55°, taper 1 in 16); npt \"1/2-14 NPT\" (ASME B1.20.1, 60°, taper 1 in 16) — a taper thread starts at a free end (the pipe end or the hole mouth) with its standard diameter there, and an external one runs its standard length unless `length` or `up_to` says otherwise (default: the standard size that fits the face, a shaft its major diameter, a hole its nominal diameter (a 12 mm hole is M12) or else the size whose tap drill it is); hand?: right|left|both (default right; both: a right- and a left-handed groove crossing); old_auto_size?: bool (an automatic size keeps the rule of designs saved before a hole was sized by its nominal diameter: a 12 mm hole is M14; set on those threads, keeps them as they were when edited); steep_flank?: start|end (buttress only, default end: the steep flank of the screw's teeth faces the thread's end, the way its axis points); starts?: 1..8 (lead = starts x pitch: that many grooves, each a turn's starts-th further round; a designation that gives the lead gives the starts); ease_out?: expr|standard|short (modelled threads: the inner end, away from where the thread starts, fades out over this length (shorter than a turn too), its section moving out of the material as it turns; standard 2.5 P, short 1.25 P per ISO 3508; it lies past the full-form length, up to a shoulder's clearance; at a free end, inside the face; without it the groove stops square there, ending in its own profile; the start never fades: it runs off its free end, plain or chamfered (`tip`)); tip?: none|start|both (modelled external threads: start chamfers the end the thread starts from, which must be free, both each free end the thread reaches, after the groove is cut, ISO 4753's chamfered end, the last teeth tapering into the cone; chamfer_angle?: angle expr to the axis, default 45 deg; chamfer_depth?: expr, radial from the major diameter, default for a metric thread down to the external minor diameter d3 = d - 1.226869 P (ISO 724), the largest ISO 4753 allows; other forms give it); extent?: full|length|up_to (default: length when `length` is given, up_to when `up_to` is, else full: the whole face); length?: expr (from the end the thread starts at); up_to?: [x,y,z] (a point, such as on a shoulder face: the thread runs to its place along the axis) | plane name or {origin, normal} (to where the plane crosses the axis); from?: [x,y,z] near the end of the face the thread starts at (default: the face's only free end, the one with no material past it; else the end the `face` point lies within a third of the face of; a pick in the middle of a face whose ends are alike is refused); modeled?: bool (default false). Cosmetic: the model is unchanged, model.threads lists it. Modeled: cuts the thread profile into the body: past a free end the groove runs out a pitch into the air (or through a chamfer); at a shoulder, a head or a blind hole's bottom it stops with its section clear of it, never cutting into it; a hole as wide as the thread or wider is narrowed to the thread's minor diameter first, and the reply's warning says so; a shaft thicker than the thread is refused with the size to make it, never turned down"),
+        .params("face: [x,y,z] on a cylindrical face; form?: metric|trapezoidal|acme|buttress|buttress_asme|bspp|rp|bspt|npt (default: the one `designation` names, else metric; square is refused: no current standard defines it); designation?: the size, as its standard writes it: metric \"M8\", \"M8x1\", \"M16xPh3P1.5\" (ISO 68-1, ISO 261, ISO 965-1); trapezoidal \"Tr20x4\", \"Tr40x14(P7)\" (ISO 2904, ISO 2903); buttress \"S20x4\", \"S40x14(P7)\" (DIN 513, 3°/30°); acme \"1/2-10 ACME\" (ASME B1.5); buttress_asme \"2.5-8 BUTT\" (ASME B1.9, 7°/45°, basic profile; no size table); bspp \"G 1/2\" (ISO 228-1, 55° parallel); rp \"Rp 1/2\" (ISO 7-1's parallel internal thread, 55°, an R screws into it; internal only); bspt \"R 1/2\" external, \"Rc 1/2\" internal (ISO 7-1, 55°, taper 1 in 16); npt \"1/2-14 NPT\" (ASME B1.20.1, 60°, taper 1 in 16) — a taper thread starts at a free end (the pipe end or the hole mouth) with its standard diameter there, and an external one runs its standard length unless `length` or `up_to` says otherwise (default: the standard size that fits the face, a shaft its major diameter, a hole its nominal diameter (a 12 mm hole is M12) or else the size whose tap drill it is); hand?: right|left|both (default right; both: a right- and a left-handed groove crossing); old_auto_size?: bool (an automatic size keeps the rule of designs saved before a hole was sized by its nominal diameter: a 12 mm hole is M14; set on those threads, keeps them as they were when edited); steep_flank?: start|end (buttress only, default end: the steep flank of the screw's teeth faces the thread's end, the way its axis points); starts?: 1..8 (lead = starts x pitch: that many grooves, each a turn's starts-th further round; a designation that gives the lead gives the starts); ease_out?: expr|standard|short (modelled threads: the inner end, away from where the thread starts, fades out over this length (shorter than a turn too), its section moving out of the material as it turns; standard 2.5 P, short 1.25 P per ISO 3508; it lies past the full-form length, up to a shoulder's clearance; at a free end, inside the face; without it the groove stops square there, ending in its own profile; the start never fades: it runs off its free end, plain or chamfered (`tip`)); tip?: none|start|both (modelled external threads: start chamfers the end the thread starts from, which must be free, both each free end the thread reaches, ISO 4753's chamfered end, the last teeth tapering into the cone; chamfer_angle?: angle expr to the axis, default 45 deg; chamfer_depth?: expr, radial from the major diameter, default for a metric thread down to the external minor diameter d3 = d - 1.226869 P (ISO 724), the largest ISO 4753 allows; other forms give it); extent?: full|length|up_to (default: length when `length` is given, up_to when `up_to` is, else full: the whole face); length?: expr (from the end the thread starts at); up_to?: [x,y,z] (a point, such as on a shoulder face: the thread runs to its place along the axis) | plane name or {origin, normal} (to where the plane crosses the axis); from?: [x,y,z] near the end of the face the thread starts at (default: the face's only free end, the one with no material past it; else the end the `face` point lies within a third of the face of; a pick in the middle of a face whose ends are alike is refused); modeled?: bool (default false); continuous_flanks?: bool (default true; false keeps the historical half-turn faces and groove-before-chamfer construction). Cosmetic: the model is unchanged, model.threads lists it. Modeled: cuts the thread profile into the body: past a free end the groove runs out a pitch into the air (or through a chamfer); at a shoulder, a head or a blind hole's bottom it stops with its section clear of it, never cutting into it; a hole as wide as the thread or wider is narrowed to the thread's minor diameter first, and the reply's warning says so; a shaft thicker than the thread is refused with the size to make it, never turned down"),
     CommandSpec::new("solid.shell", "Shell", shell)
         .at("SOLID", "MODIFY")
         .icon("shell")
@@ -428,6 +429,11 @@ pub(super) fn stable_profiles(s: &Session, kind: &mut FeatureKind, exact: bool) 
     let st = s.model.state();
     for (sketch, sel) in kind.profile_sels_mut() {
         let Some(ss) = st.sketch(sketch) else { continue };
+        // An empty selection (a patch asked for only the sketch's 3D loops, #741) has nothing to
+        // capture: it stays empty.
+        if matches!(sel, ProfileSel::Indices { indices } if indices.is_empty()) {
+            continue;
+        }
         let indices = match sel {
             ProfileSel::Indices { indices } => {
                 let have = ss.profiles.len();
@@ -1392,7 +1398,8 @@ fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// A revolve axis of `sketch` from its parameter: a sketch line id, the sketch's x or y axis, a
 /// world axis (also as saved: {type: world, axis: X|Y|Z}), a construction axis by name
-/// (followed when it is edited), {origin, dir} (each origin coordinate a number or an expression over
+/// (followed when it is edited), a component origin axis (saved as its datum, so it follows the
+/// placement), {origin, dir} (each origin coordinate a number or an expression over
 /// the parameters, which the axis follows), {sketch, curve} (a line of another sketch, followed in
 /// that sketch, #6548; also as saved: {type: sketch_line, …}), or an edge
 /// or round face of the model ({edge|face: [x,y,z]}), which the revolve follows as the model
@@ -1423,6 +1430,13 @@ pub(super) fn axis_param(s: &Session, sketch: u64, p: &Value, cmd: &str) -> Resu
         Some(a @ ("X" | "Y" | "Z")) => Ok(AxisRef::World { axis: a.into() }),
         Some(a @ ("x" | "y")) => Ok(AxisRef::SketchAxis { axis: a.into() }),
         Some(name) if !is_sketch_line(s, sketch, name) && is_construction_axis(s, name) => Ok(AxisRef::Construction { name: name.into() }),
+        // A component origin axis: saved as its datum, so the revolve follows the placement.
+        Some(name) if !is_sketch_line(s, sketch, name) => {
+            match crate::origins::datum(name).filter(|d| matches!(d.item, DatumItem::X | DatumItem::Y | DatumItem::Z)) {
+                Some(datum) => Ok(AxisRef::Model { geo: solidcraft_doc::construct::GeoRef::Datum { datum } }),
+                None => Ok(AxisRef::SketchLine { curve: name.into(), sketch: None }),
+            }
+        }
         Some(id) => Ok(AxisRef::SketchLine { curve: id.into(), sketch: None }),
         None => {
             Err(bad(cmd, "`axis` must be a sketch line id, x, y (sketch axes), X, Y, Z, a construction axis, {origin, dir} or {edge|face: [x,y,z]}"))
@@ -2529,33 +2543,39 @@ fn axis_line(s: &Session, p: &Value, cmd: &str) -> Result<(Vec3, Vec3, Option<so
     if let Some((geo, o, d)) = super::construct::model_axis_param(s, p.get("axis"), cmd)? {
         return Ok((o, d, Some(geo), None));
     }
-    let (o, d, name) = named_axis_line(s, p, cmd)?;
-    Ok((o, d, None, name))
+    named_axis_line(s, p, cmd)
 }
 
-/// An axis line from `axis`: X, Y, Z, a construction axis by name or {origin, dir}. A construction
-/// axis comes back where it is now, with its name.
-fn named_axis_line(s: &Session, p: &Value, cmd: &str) -> Result<(Vec3, Vec3, Option<FeatureName>)> {
-    match p.get("axis") {
-        Some(Value::String(a)) => match a.to_ascii_uppercase().as_str() {
-            "X" => Ok((Vec3::ZERO, Vec3::X, None)),
-            "Y" => Ok((Vec3::ZERO, Vec3::Y, None)),
-            "Z" => Ok((Vec3::ZERO, Vec3::Z, None)),
-            _ if is_construction_axis(s, a) => {
-                let (_, _, origin, dir) = crate::view::construction_axes(s)
-                    .into_iter()
-                    .find(|(_, name, _, _)| name == a)
-                    .ok_or_else(|| bad(cmd, format!("construction axis `{a}` has no geometry: fix its definition first")))?;
-                Ok((origin, dir, Some(a.as_str().into())))
-            }
-            _ => Err(bad(cmd, "axis must be X, Y, Z, a construction axis, {origin, dir} or {edge|face: [x,y,z]}")),
-        },
-        Some(o @ Value::Object(_)) => {
-            let (origin, dir) = axis_line_object(o).map_err(|why| bad(cmd, why))?;
-            Ok((origin, dir, None))
-        }
-        _ => Err(bad(cmd, "`axis` is required")),
+/// An axis line from `axis`: X, Y, Z, a construction axis by name, a component origin axis (its
+/// datum, followed) or {origin, dir}. A construction axis comes back where it is now, with its
+/// name; a component origin axis with the datum that finds it again on each evaluation.
+fn named_axis_line(s: &Session, p: &Value, cmd: &str) -> Result<(Vec3, Vec3, Option<solidcraft_doc::construct::GeoRef>, Option<FeatureName>)> {
+    if let Some(o @ Value::Object(_)) = p.get("axis") {
+        let (origin, dir) = axis_line_object(o).map_err(|why| bad(cmd, why))?;
+        return Ok((origin, dir, None, None));
     }
+    let Some(a) = str_(p, "axis") else { return Err(bad(cmd, "`axis` is required")) };
+    // The world axes keep the precedence they always had: X, Y and Z name the design's axes
+    // before a construction axis answers to the same letters (an older design can hold one
+    // named `x`, and a case-only match must not take them) (#7313 review).
+    match a.to_ascii_uppercase().as_str() {
+        "X" => return Ok((Vec3::ZERO, Vec3::X, None, None)),
+        "Y" => return Ok((Vec3::ZERO, Vec3::Y, None, None)),
+        "Z" => return Ok((Vec3::ZERO, Vec3::Z, None, None)),
+        _ => {}
+    }
+    if is_construction_axis(s, a) {
+        let (_, _, origin, dir) = crate::view::construction_axes(s)
+            .into_iter()
+            .find(|(_, name, _, _)| name == a)
+            .ok_or_else(|| bad(cmd, format!("construction axis `{a}` has no geometry: fix its definition first")))?;
+        return Ok((origin, dir, None, Some(a.into())));
+    }
+    if let Some(datum) = crate::origins::datum(a).filter(|d| matches!(d.item, DatumItem::X | DatumItem::Y | DatumItem::Z)) {
+        let (origin, dir) = s.origin_axis(a).ok_or_else(|| bad(cmd, format!("no axis `{a}`")))?;
+        return Ok((origin, dir, Some(solidcraft_doc::construct::GeoRef::Datum { datum }), None));
+    }
+    Err(bad(cmd, "axis must be X, Y, Z, a construction axis, {origin, dir} or {edge|face: [x,y,z]}"))
 }
 
 /// An axis line `{origin?, dir}` as [`named_axis_line`] reads it: the origin (default: the
@@ -2825,7 +2845,18 @@ pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<s
             }
             Ok(PlaneRef::Origin { name: n.trim().to_ascii_uppercase() })
         }
-        Some(Value::String(n)) => construction(n.trim()),
+        Some(Value::String(n)) => {
+            // A construction plane feature by name first, so a name that looks like a datum key
+            // still reaches it; a component origin plane is saved as its datum, so it follows
+            // the placement instead of staying where it was picked.
+            if s.doc.find_feature(n.trim()).is_some() {
+                return construction(n.trim());
+            }
+            match crate::origins::datum(n).filter(|d| matches!(d.item, DatumItem::XY | DatumItem::XZ | DatumItem::YZ)) {
+                Some(datum) => Ok(PlaneRef::Datum { datum }),
+                None => construction(n.trim()),
+            }
+        }
         Some(Value::Number(id)) => match id.as_u64() {
             Some(id) => construction(&id.to_string()),
             None => Err(bad(cmd, format!("`plane` must be {WANT}"))),
@@ -3568,7 +3599,7 @@ fn draft(s: &mut Session, p: &Value) -> Result<Value> {
     check_expr(s, &angle, Kind::Angle, cmd, "angle")?;
     let neutral = plane_param(s, p.get("neutral"), cmd)?;
     let (vals, _) = s.doc.param_values();
-    let pl = s.doc.resolve_plane_in(&vals, &neutral, 0, Some(&s.model.state()))?;
+    let pl = s.doc.resolve_plane_in(&vals, &neutral, 0, s.active_component, Some(&s.model.state()))?;
     let pull = p.get("pull").and_then(vec3).unwrap_or_else(|| pl.normal());
     add_face_feature(
         &picked,
@@ -3884,11 +3915,17 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, msg));
     }
     let designation_is_none = designation.is_none();
+    let continuous_flanks = match p.get("continuous_flanks") {
+        None => true,
+        Some(Value::Bool(value)) => *value,
+        Some(_) => return Err(bad(cmd, "`continuous_flanks` must be a boolean")),
+    };
     let kind = FeatureKind::Thread {
         face: FacePick(face),
         designation,
         length,
         modeled,
+        continuous_flanks,
         from,
         up_to,
         form,

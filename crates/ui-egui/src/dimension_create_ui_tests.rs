@@ -2166,3 +2166,21 @@ fn a_line_is_dimensioned_against_the_sketch_x_axis() {
         }
     }
 }
+
+/// #14231: while a dimension is placed its value follows the pointer, and the pointer ring,
+/// drawn after it, sat on the number. The ring is left out on the value and kept elsewhere.
+#[test]
+fn the_pointer_ring_stays_off_the_value_being_placed() {
+    let mut h = line([20., 0.]);
+    h.step(&json!({"start":"sketch.dimension"})).unwrap();
+    h.step(&json!({"click":{"world":[10,0,0]}})).unwrap();
+    h.step(&json!({"move":{"world":[10,6,0]}})).unwrap();
+    h.settle();
+    let value = crate::dim_view::draft_text().expect("the value being placed is drawn");
+    let pointer = h.ctx.input(|i| i.pointer.hover_pos()).expect("the pointer is over the view");
+    assert!(value.contains(pointer), "the value follows the pointer: {value:?} {pointer:?}");
+    let tool = h.app.tool.as_ref().expect("the Dimension tool");
+    assert!(!crate::tools::pointer_ring_shown(tool, pointer), "no ring on the value");
+    assert!(!crate::tools::pointer_ring_shown(tool, value.right_center() + egui::vec2(4.0, 0.0)), "nor one that would touch it");
+    assert!(crate::tools::pointer_ring_shown(tool, value.right_center() + egui::vec2(20.0, 0.0)), "the ring elsewhere");
+}

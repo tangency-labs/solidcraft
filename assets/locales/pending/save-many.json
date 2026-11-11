@@ -7,7 +7,7 @@
     "document.save_row": "حفظ",
     "document.save_selected": "حفظ المحدد",
     "prefs.save_prompt_one_at_a_time": "السؤال عن كل تصميم غير محفوظ على حدة عند إغلاق عدة تصاميم",
-    "prefs.save_prompt_one_at_a_time_help": "عرض نافذة حفظ لكل تصميم غير محفوظ بدلاً من قائمة مجمّعة."
+    "prefs.save_prompt_one_at_a_time_help": "عرض نافذة حفظ لكل تصميم غير محفوظ بدلًا من قائمة مجمّعة."
   },
   "de": {
     "document.discard_row": "Verwerfen",

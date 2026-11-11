@@ -24,6 +24,10 @@
 //!   to 32,768 boxes and depth 128 in `projected_pair`. Proof failures propagate.
 //!   Structural affine and identical monotone NURBS All classes share the definition enclosures and
 //!   preserve the existing retention and ordered duplicate rules.
+//! - **Identical open ellipse All maxima.** Bounded interval edge-root
+//!   construction and the antipodal-axis theorem cover the finite candidate set;
+//!   at most 4,096 cells, depth 48 and 64 Newton contractions per root. Selected
+//!   ambiguities refuse; full turns and distinct ellipse pairs keep the old path.
 //! - **Curves and kernel.** The solver's trees only name their curves by the
 //!   caller's handle ([`crate::geom::tree::Tree::owner_object`]), so the solver
 //!   carries the curves and the kernel ([`CcGlobalSolver::with_curves`]); a solver
@@ -1355,6 +1359,24 @@ impl Curve {
             && super::projected_pair_monotone::supports([self, other], [*interval, *other_interval])
         {
             return super::projected_pair_monotone::solve(
+                k,
+                [self, other],
+                [*interval, *other_interval],
+                opt(0)?,
+                dist_tol,
+                opts.handles,
+                opts.target_distance,
+            );
+        }
+
+        // Identical native noncircular open ellipse arcs admit a complete
+        // finite construction. Closed seams and unrelated ellipse pairs are
+        // outside this structural class; selected proof failures propagate.
+        if op == Op::ProjectedMaximize
+            && requested == SolutionRequested::All
+            && super::projected_pair_ellipse::supports([self, other], [*interval, *other_interval])
+        {
+            return super::projected_pair_ellipse::solve(
                 k,
                 [self, other],
                 [*interval, *other_interval],

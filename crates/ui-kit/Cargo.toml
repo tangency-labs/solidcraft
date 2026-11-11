@@ -3,7 +3,7 @@ name = "solidcraft-ui-kit"
 description = "The UI kit and its components: tokenised egui controls, panels, menus and the ribbon, app bar, history bar, navigation bar, view compass, window chrome and theme files, drawn from plain data"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license-file = "LICENSE"
 
 [lints]
 workspace = true
