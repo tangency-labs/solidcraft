@@ -2101,9 +2101,8 @@ fn c3_make_intersector<'s>(
 
 /// :2054-2090: the trace locals (tolerances, `sDir = sPVSt[1]`); a TANGENT last point
 /// reverses `st.tsect_pnts`, sets `sDir = -sPVEn[1]` and `bReverseTracing`; the local
-/// extension flags from the solver's. With
-/// `Kernel::fixes.fillet_trace_from_tangent_point_toward_next` (WR-603) a TANGENT first
-/// point starts the trace toward the next point.
+/// extension flags from the solver's. Not upstream (WR-603): a TANGENT first point starts
+/// the trace toward the next point.
 fn c3_trace_start(
     ops: &mut dyn FilletSolverOps,
     cx: &mut Cx<'_>,
@@ -2129,11 +2128,11 @@ fn c3_trace_start(
         }
     }
 
-    // `fixes.fillet_trace_from_tangent_point_toward_next` (WR-603): a trace whose first
-    // through point is a tangent point starts toward the next through point (the chord
-    // between their points on the first offset surface): the offsets touch there and the
-    // edge's end tangent can be the line along which they touch to second order.
-    if cx.k.fixes.fillet_trace_from_tangent_point_toward_next && st.tsect_pnts.len() > 1 {
+    // Not upstream (WR-603): a trace whose first through point is a tangent point starts
+    // toward the next through point (the chord between their points on the first offset
+    // surface): the offsets touch there and the edge's end tangent can be the line along
+    // which they touch to second order.
+    if st.tsect_pnts.len() > 1 {
         if let (Some(&first), Some(&next)) = (st.tsect_pnts.first(), st.tsect_pnts.get(1)) {
             let first = st.store.get(cx.fillets, first)?;
             if first.point_type == IntersectionPointType::TangentPoint {
@@ -3820,12 +3819,10 @@ fn c6_compute_point_values(
             None
         };
 
-        // :3664 central difference, or one-sided at a domain end. With
-        // `fixes.fillet_tangent_point_one_sided_step` (WR-595) a tangent point, where the
-        // intersection curve ends or branches, takes the forward step alone when it found
-        // one (`bFoundForw && bFoundBack && !bTangentPoint`).
-        let tangent_point = k.fixes.fillet_tangent_point_one_sided_step
-            && point.point_type == IntersectionPointType::TangentPoint;
+        // :3664 central difference, or one-sided at a domain end. Not upstream (WR-595): a
+        // tangent point, where the intersection curve ends or branches, takes the forward
+        // step alone when it found one (`bFoundForw && bFoundBack && !bTangentPoint`).
+        let tangent_point = point.point_type == IntersectionPointType::TangentPoint;
         let (step_pt_forw, step_pt_back) = match (forw_pts, back_pts) {
             (Some((f0, f1)), Some((b0, b1))) if !tangent_point => {
                 let fw = (f0 + f1) / 2.0;

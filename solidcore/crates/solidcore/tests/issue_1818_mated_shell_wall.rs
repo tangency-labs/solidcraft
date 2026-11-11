@@ -303,13 +303,11 @@ fn write_issue_1818_operand() {
 fn solidcraft_fixes() -> UpstreamFixes {
     let mut f = UpstreamFixes::default();
     f.fillet_retry_radius_as_first = true;
-    f.fillet_rail_rim_on_face = true;
     f.fillet_refuse_rails_leaving_faces = true;
     f.fillet_refuse_face_consuming_blends = true;
     f.fillet_refuse_non_manifold_result = true;
     f.fillet_corner_ball_patch = true;
     f.fillet_chamfer_cone_on_arc = true;
-    f.fillet_torus_center_on_axis = true;
     f.offset_excess_faces_after_merge = true;
     f.offset_clip_right_side_out = true;
     f.revolution_offset_axis_both_sides = true;
