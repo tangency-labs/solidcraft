@@ -1477,8 +1477,10 @@ fn extrude_cut(st: &ModelState, f: &Feature) -> Result<Option<ExtrudeCut>> {
 /// thickness, its footprint clear inside the panel's material and its box apart from the rest
 /// of the sheet. That is what the cut takes in space (see `sheet_surface_cuts`), without cutting
 /// a body the sheet builds again. What lies inside a footprint (a letter's counter) stays, a
-/// loose piece. The sheets' bodies cut; none, and nothing changed, for any other cut, which the
-/// generic path takes.
+/// loose piece. A footprint through the panel's outline takes what it covers of the panel, the
+/// curves of both kept as drawn; a piece it parts from the panel stays, a loose piece. The
+/// sheets' bodies cut; none, and nothing changed, for any other cut, which the generic path
+/// takes.
 pub(super) fn surface_prism_cut(
     f: &Feature,
     st: &mut ModelState,
@@ -1566,15 +1568,27 @@ pub(super) fn surface_prism_cut(
                 };
                 let mapped = crate::sheet_surface_convert::rigid_region(region, chart);
                 let outline = Region2 { outer: mapped.outer.clone(), holes: Vec::new() };
-                if !crate::sheet_surface::holds_clear(own, &outline) {
-                    continue;
+                // Clear inside the panel's material, a hole of it; else through its outline or a
+                // hole of it where it covers some of that material, and beside the panel where
+                // it covers none.
+                let clear = crate::sheet_surface::holds_clear(own, &outline);
+                if !clear {
+                    match kernel::planar_regions_boolean(std::slice::from_ref(own), std::slice::from_ref(&outline), kernel::BoolOp::Intersect, tol) {
+                        Ok(on) if on.iter().map(Region2::area).sum::<f64>() > 1e-9 => {}
+                        Ok(_) => continue,
+                        // The boolean failing leaves the cut to the body's own, the 3D path, as
+                        // each `Ok(Vec::new())` here does. That is the conservative choice, not an
+                        // equivalent one: the body's cut brings the panel's curves back as splines
+                        // fitted to them, which is what this path exists to avoid.
+                        Err(_) => return Ok(Vec::new()),
+                    }
                 }
                 if found.is_some() {
                     return Ok(Vec::new());
                 }
-                found = Some((*p, mapped, *frame));
+                found = Some((*p, mapped, *frame, clear));
             }
-            let Some((p, mapped, frame)) = found else { return Ok(Vec::new()) };
+            let Some((p, mapped, frame, clear)) = found else { return Ok(Vec::new()) };
             // Nothing else of the sheet in its way, and nothing the panel keeps there already.
             if boxes.iter().any(|(k, b)| *k != Some(p) && !boxes_apart(tool_box, &Some(*b))) {
                 return Ok(Vec::new());
@@ -1588,6 +1602,24 @@ pub(super) fn surface_prism_cut(
                 || !out.sheet.cuts.is_empty()
             {
                 return Ok(Vec::new());
+            }
+            if !clear {
+                // Through the panel's outline: the panel less the footprint, by the planar
+                // boolean, keeps the panel's curves and the tool's as drawn, where the body's cut
+                // brings both back as splines fitted to them. A piece it parts from the panel
+                // stays, a loose piece, as the body's cut reads it; pieces that each hold a joint
+                // are left to the body's cut, which keeps the panel whole. A bore runs in from the
+                // panel's edge, which the cut moves: the body's cut reads what it leaves of one.
+                if out.bores.iter().any(|b| b.panel == Some(p)) {
+                    return Ok(Vec::new());
+                }
+                let Ok((kept, parted)) = crate::sheet_surface_cuts::left_of_panel(&out, p, std::slice::from_ref(&mapped), tol) else {
+                    return Ok(Vec::new());
+                };
+                let Some(panel) = out.sheet.panels.get_mut(p) else { return Ok(Vec::new()) };
+                panel.region = kept;
+                out.loose.extend(parted.into_iter().map(|region| crate::Loose { panel: p, region }));
+                continue;
             }
             let Some(panel) = out.sheet.panels.get_mut(p) else { return Ok(Vec::new()) };
             if !crate::sheet_surface::holds_clear(&panel.region, &Region2 { outer: mapped.outer.clone(), holes: Vec::new() }) {

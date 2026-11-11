@@ -486,6 +486,18 @@ fn left(region: &Region2, through: &[Region2], holders: &[Vec2], tol: f64) -> st
     Ok(Left::Kept(kept, left))
 }
 
+/// What is left of panel `p` of `sk` without `through` (in the panel's chart): the piece that
+/// holds its joints, and the pieces parted from it, as [`left`] reads them. Pieces that each hold
+/// some of its joints, or nothing left, are an error here: the body's cut keeps that panel whole
+/// (see [`Left::Apart`]).
+pub(crate) fn left_of_panel(sk: &SurfaceSheet, p: usize, through: &[Region2], tol: f64) -> std::result::Result<(Region2, Vec<Region2>), String> {
+    let panel = sk.sheet.panels.get(p).ok_or_else(|| format!("the sheet has no panel {p}"))?;
+    match left(&panel.region, through, &holders(sk, p), tol)? {
+        Left::Kept(kept, parted) => Ok((kept, parted)),
+        Left::Apart => Err(format!("cuts {} apart into pieces that each hold a joint, or leaves nothing of it", panel.name)),
+    }
+}
+
 /// Where joint `j` holds its `a` panel (`a`) or its `b` panel: the middle of a bend's zone along
 /// the anchor, else the anchor's origin.
 fn holds_at(j: &Joint, a: bool) -> Vec2 {
