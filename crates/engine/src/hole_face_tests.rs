@@ -646,3 +646,25 @@ fn a_saved_offset_plane_hole_keeps_starting_at_the_surface() {
     run(&mut opened, "timeline.edit", json!({"feature": "H", "set": {"diameter": 8}}));
     assert!(from_surface(&opened), "an edited saved hole still starts at the surface");
 }
+
+/// #10697: a countersink's cone stops at the hole's depth. A 3.1 mm deep countersunk hole in a
+/// 3.2 mm plate leaves its 0.1 mm floor (the cone used to run on to 90 % of the hole radius and
+/// open the bottom); a hole shallower than its countersink is cut to the hole's depth only.
+#[test]
+fn a_countersink_stops_at_the_depth_of_its_hole() {
+    let plate = |s: &mut Session| run(s, "solid.box", json!({"length": 40, "width": 40, "height": 3.2, "center": [0, 0, 1.6], "body_name": "Block"}));
+    let hole = |depth: f64| json!({"position": [0, 0, 3.2], "diameter": 6, "depth": depth, "type": "countersink", "cs_diameter": 12, "cs_angle": 90, "name": "CS"});
+    let mut s = Session::default();
+    plate(&mut s);
+    run(&mut s, "solid.hole", hole(3.1));
+    assert!(solid_at(&s, 0.0, 0.0, 0.05), "the 0.1 mm floor is still there");
+    assert!(!solid_at(&s, 0.0, 0.0, 0.2), "the hole is open above its floor");
+    // Depth 2: the cone is cut at 2 mm, a frustum from radius 6 to 4: pi h / 3 (R^2 + R r + r^2).
+    let mut s = Session::default();
+    plate(&mut s);
+    run(&mut s, "solid.hole", hole(2.0));
+    let frustum = std::f64::consts::PI * 2.0 / 3.0 * (36.0 + 24.0 + 16.0);
+    let expected = 40.0 * 40.0 * 3.2 - frustum;
+    let v = volume(&mut s);
+    assert!((v - expected).abs() < 1e-3 * expected, "{v} vs {expected}");
+}

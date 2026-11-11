@@ -282,7 +282,7 @@ impl SurfOfExtrusion {
     fn gen_or_null(&self, op: &'static str) -> Result<&Curve> {
         self.gen_curve
             .as_ref()
-            .ok_or_else(|| SolidError::null_pointer(op))
+            .ok_or_else(|| SolidError::surface_missing(op, "the generator curve"))
     }
 
     // ---- GlobalSurfaceIntersect -------------------------------------------------------
@@ -587,7 +587,10 @@ impl SurfOfExtrusion {
             // arrive here when two planes intersect in one line
             let mut lines = plane_x.curves_3d;
             if lines.is_empty() {
-                return Err(SolidError::sm_err(OP_PLANE));
+                return Err(SolidError::surface_failed(
+                    OP_PLANE,
+                    "the plane intersection gave no line",
+                ));
             }
             let line = lines.swap_remove(0);
             let line_ivl = line.natural_interval();
@@ -629,7 +632,12 @@ impl SurfOfExtrusion {
                         None => out
                             .curves_3d
                             .get(moved_to)
-                            .ok_or(SolidError::sm_err(OP_PLANE))?
+                            .ok_or_else(|| {
+                                SolidError::surface_failed(
+                                    OP_PLANE,
+                                    "the moved intersection curve is missing",
+                                )
+                            })?
                             .clone(),
                     };
                     out.curves_3d.push(whole);
@@ -641,10 +649,12 @@ impl SurfOfExtrusion {
                 // interval to existing knots; statuses ignored upstream)
                 let source = match line.as_ref() {
                     Some(l) => l,
-                    None => out
-                        .curves_3d
-                        .get(moved_to)
-                        .ok_or(SolidError::sm_err(OP_PLANE))?,
+                    None => out.curves_3d.get(moved_to).ok_or_else(|| {
+                        SolidError::surface_failed(
+                            OP_PLANE,
+                            "the moved intersection curve is missing",
+                        )
+                    })?,
                 };
                 let mut curve = source.copy(k)?;
                 ignore_status(curve.trim(k, &mut ivl, TrimMode::Notify))?;
@@ -785,7 +795,10 @@ impl SurfOfExtrusion {
                 // upstream, which then reads the points)
                 let crv_pt = gen.evaluate(k, sol.start.parameters[0], 1, true, true)?;
                 let (Some(&pt0), Some(&pt1)) = (crv_pt.first(), crv_pt.get(1)) else {
-                    return Err(SolidError::sm_err(OP_PLANE));
+                    return Err(SolidError::surface_failed(
+                        OP_PLANE,
+                        "the generator evaluation gave no point and tangent",
+                    ));
                 };
                 let crv = match self.create_directrix_from_point(k, pt0, EFF_ZERO_SQRT) {
                     Ok(c) => c,
@@ -797,7 +810,10 @@ impl SurfOfExtrusion {
                 // trim line control Points to plane
                 let nurb = crv.get_or_create_gw_nurb()?;
                 let (Some(&pw0), Some(&pw1)) = (nurb.cpts().first(), nurb.cpts().get(1)) else {
-                    return Err(SolidError::sm_err(OP_PLANE));
+                    return Err(SolidError::surface_failed(
+                        OP_PLANE,
+                        "the directrix has fewer than two control points",
+                    ));
                 };
                 let start_pt = to_euclid(pw0);
                 let end_pt = to_euclid(pw1);
@@ -907,7 +923,9 @@ impl SurfOfExtrusion {
             out.surface2_uv_curves.push(None);
             // Line solutions have already added the curve types
             if cnt != out.curve_types.len() {
-                let crv = out.curves_3d.get(ii).ok_or(SolidError::sm_err(OP_PLANE))?;
+                let crv = out.curves_3d.get(ii).ok_or_else(|| {
+                    SolidError::surface_failed(OP_PLANE, "an intersection curve is missing")
+                })?;
                 let t = if crv.is_degenerate(k, EFF_ZERO, None)? {
                     TsectCurveType::Touching
                 } else {
@@ -1058,7 +1076,7 @@ impl SurfOfExtrusion {
             if !other_vec.is_parallel_to(self.extrusion_vec, crate::math::EFF_ZERO_RAD) {
                 return Ok(true);
             }
-            return Err(SolidError::null_pointer(op));
+            return Err(SolidError::surface_missing(op, "the other generator curve"));
         };
         // (status ignored upstream: every failure comes after sm_IntersectGenerators
         // cleared the needs-more flag, and keeps the curves and types it already
@@ -1196,12 +1214,17 @@ impl SurfOfExtrusion {
 
         // test every end curve controlPoint for constant sweep vectors
         let weight = |w: &[f64], i: usize| -> Result<f64> {
-            w.get(i).copied().ok_or(SolidError::sm_err(OP_IS_NURB))
+            w.get(i).copied().ok_or_else(|| {
+                SolidError::surface_failed(OP_IS_NURB, "an end curve weight is missing")
+            })
         };
         for (i, end_pt) in end_ctrl_pts.iter().enumerate() {
-            let start_pt = start_ctrl_pts
-                .get(i)
-                .ok_or(SolidError::sm_err(OP_IS_NURB))?;
+            let start_pt = start_ctrl_pts.get(i).ok_or_else(|| {
+                SolidError::surface_failed(
+                    OP_IS_NURB,
+                    "the start curve has fewer control points than the end curve",
+                )
+            })?;
 
             // get sVec = this controlPoint sweep - sweepVector
             let vec = (*end_pt - *start_pt) - extrusion_vec;
@@ -1285,7 +1308,10 @@ impl SurfOfExtrusion {
 
         // check input - new trim UV domain must be inside current natural UV domain
         if !new_nurb_uv_domain.is_contained_by(&current_nurb_uv_domain, EFF_ZERO_PARAM) {
-            return Err(SolidError::sm_err(OP_TRIM));
+            return Err(SolidError::surface_failed(
+                OP_TRIM,
+                "the trim domain is outside the natural domain",
+            ));
         }
 
         // no work - new and current domains are same size

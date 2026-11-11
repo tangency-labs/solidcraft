@@ -5,7 +5,7 @@
 
 use serde_json::{Value, json};
 use solidcore_record::{Plane, Vec2, Vec3};
-use solidcraft_doc::project::resolve;
+use solidcraft_doc::project::{resolve, resolve_at};
 use solidcraft_doc::{Document, FeatureKind};
 use solidcraft_geom::prelude::*;
 use solidcraft_sketch::{ConstraintKind, LinkKind, LinkSource, Sketch};
@@ -23,7 +23,7 @@ use crate::{EngineError, Result, Session};
 
 macro_rules! refs_doc {
     () => {
-        "refs: [{edge: [x,y,z], body?} | {face: [x,y,z], body?} (its edge loops) | {body: name} (silhouette) | {vertex: [x,y,z], body?} | {sketch, curve} | {sketch, point} | \"origin\" | {axis: X|Y|Z|name} | {plane: XY|XZ|YZ|name}]"
+        "refs: [{edge: [x,y,z], body?} | {face: [x,y,z], body?} (its edge loops) | {body: name} (silhouette) | {vertex: [x,y,z], body?} | {sketch, curve} | {sketch, point} | {point: name} (a construction point) | \"origin\" | {axis: X|Y|Z|name} | {plane: XY|XZ|YZ|name}]"
     };
 }
 
@@ -100,6 +100,8 @@ pub(crate) enum RefForm<'a> {
     Sketch { key: String, curve: Option<&'a str>, point: Option<&'a str> },
     /// `{body: name}`.
     Body(&'a str),
+    /// `{point: name}`: a construction point (#12075).
+    Point(&'a str),
     /// `{axis: X|Y|Z|name}`.
     Axis(&'a str),
     /// `{plane: XY|XZ|YZ|name}`.
@@ -132,6 +134,9 @@ pub(crate) fn ref_form(v: &Value) -> std::result::Result<RefForm<'_>, String> {
             _ => return Err("`sketch` must be an id or a name".into()),
         };
         return Ok(RefForm::Sketch { key, curve: str_(v, "curve"), point: str_(v, "point") });
+    }
+    if let Some(p) = str_(v, "point") {
+        return Ok(RefForm::Point(p));
     }
     if let Some(b) = str_(v, "body") {
         return Ok(RefForm::Body(b));
@@ -177,9 +182,18 @@ fn source(s: &Session, v: &Value, cmd: &str) -> Result<LinkSource> {
             Err(bad(cmd, "a sketch reference needs `curve` or `point`"))
         }
         RefForm::Body(b) => Ok(LinkSource::Body { body: b.to_string() }),
+        RefForm::Point(p) => point_source(s, p, cmd),
         RefForm::Axis(a) => axis_source(s, a, cmd),
         RefForm::Plane(p) => Ok(LinkSource::Plane { name: p.to_string() }),
         RefForm::Origin => Ok(LinkSource::Origin),
+    }
+}
+
+/// A construction point by its name (#12075).
+fn point_source(s: &Session, name: &str, cmd: &str) -> Result<LinkSource> {
+    match s.doc.find_feature(name) {
+        Some(f) if matches!(f.kind, FeatureKind::ConstructionPoint { .. }) => Ok(LinkSource::ConstructionPoint { name: f.name.clone() }),
+        _ => Err(bad(cmd, format!("unknown point `{name}`: the name of a construction point"))),
     }
 }
 
@@ -200,7 +214,10 @@ fn axis_source(s: &Session, name: &str, cmd: &str) -> Result<LinkSource> {
 fn sketch_plane(doc: &Document, id: u64, st: &solidcraft_doc::ModelState) -> Result<Plane> {
     let (vals, _) = doc.param_values();
     match doc.feature(id).map(|f| &f.kind) {
-        Some(FeatureKind::Sketch { plane, .. }) => Ok(doc.resolve_plane_in(&vals, plane, 0, Some(st))?),
+        Some(FeatureKind::Sketch { plane, .. }) => {
+            let component = doc.feature(id).map(|f| f.component).unwrap_or(0);
+            Ok(doc.resolve_plane_in(&vals, plane, 0, component, Some(st))?)
+        }
         _ => Err(EngineError::Other(format!("feature {id} is not a sketch"))),
     }
 }
@@ -305,6 +322,20 @@ fn owner_frame(s: &Session, doc: &Document, comp: u64) -> solidcraft_doc::Mat {
     if comp == s.active_component { s.active_component_frame() } else { doc.component_transform(comp) }
 }
 
+/// The author component and its placement used by [`state_for_sketch`], including a face
+/// attachment's explicit author path. `None` when that placement is gone.
+fn sketch_frame(s: &Session, doc: &Document, id: u64) -> Option<(u64, solidcraft_doc::Mat)> {
+    let comp = doc.feature(id).map(|f| f.component).unwrap_or(0);
+    let attachment = doc.feature(id).and_then(|feature| match &feature.kind {
+        FeatureKind::Sketch { plane, .. } => super::sketch::face::anchor(plane),
+        _ => None,
+    });
+    match attachment {
+        Some(anchor) => anchor.author_frame(doc, comp).ok().map(|frame| (comp, frame)),
+        None => Some((comp, owner_frame(s, doc, comp))),
+    }
+}
+
 /// Re-resolve the links of a sketch being edited (`sk`, a copy of the stored sketch `id`)
 /// against the model before it, so edits see current reference geometry. Returns warnings.
 ///
@@ -334,10 +365,8 @@ pub(super) fn refresh(s: &Session, doc: &Document, id: u64, sk: &mut Sketch) -> 
         return vec!["lost face attachment; reattach explicitly".into()];
     };
     let Ok(plane) = sketch_plane(&doc, id, &st) else { return Vec::new() };
-    let refreshed = match attachment {
-        Some(anchor) => solidcraft_doc::project::refresh_face_anchor_links(&doc, &vals, &st, &plane, sk, anchor),
-        None => solidcraft_doc::project::refresh_links(&doc, &vals, &st, &plane, sk),
-    };
+    let frame = sketch_frame(s, &doc, id);
+    let refreshed = solidcraft_doc::project::refresh_links_at(&doc, &vals, &st, &plane, sk, attachment, frame.as_ref());
     // A link whose named face or edge is gone fails the sketch when it is evaluated; while it is
     // edited, that is what the refresh says.
     let warnings = match refreshed {
@@ -424,8 +453,13 @@ fn add_link_unless_present(
     // The model as the sketch's component sees it.
     let st = state_for_sketch(s, &doc, id, &st, &src.bodies())?;
     let plane = sketch_plane(&doc, id, &st)?;
-    let r = resolve(&doc, &vals, &st, &plane, kind, &src)?;
-    if skip_present && r.wires.is_empty() && sk.link_geometry_present(&r.geom) {
+    let frame = sketch_frame(s, &doc, id);
+    let r = resolve_at(&doc, &vals, &st, &plane, kind, &src, frame.as_ref())?;
+    let present = match kind {
+        LinkKind::Intersect => sk.link_geometry_or_points_present(&r.geom),
+        _ => sk.link_geometry_present(&r.geom),
+    };
+    if skip_present && r.wires.is_empty() && present {
         return Ok(None);
     }
     // A mesh body is one face whose name says nothing of the flat patch picked: the link keeps
@@ -507,11 +541,12 @@ fn run_links(s: &mut Session, p: &Value, cmd: &str, kind: LinkKind, projection_l
         refresh(s, doc, id, sk);
         let mut out = Vec::new();
         // Projecting what the sketch already shows (the border of the face it is on, an edge
-        // projected before) would lay a second copy over the first: those references are skipped.
+        // projected before), or intersecting what was intersected before, would lay a second copy
+        // over the first: those references are skipped.
         let mut present = Vec::new();
         for src in sources {
             let what = src.describe();
-            match add_link_unless_present(s, doc, id, sk, kind, src, kind == LinkKind::Project) {
+            match add_link_unless_present(s, doc, id, sk, kind, src, matches!(kind, LinkKind::Project | LinkKind::Intersect)) {
                 Ok(Some(l)) => {
                     let (curves, points) = link_parts(sk, &l);
                     if construction {
@@ -530,7 +565,8 @@ fn run_links(s: &mut Session, p: &Value, cmd: &str, kind: LinkKind, projection_l
         }
         // Nothing new: the sketch is kept as it was.
         if out.is_empty() {
-            return Err(bad(cmd, format!("already projected into this sketch: {}", present.join(", "))));
+            let verb = if kind == LinkKind::Intersect { "intersected" } else { "projected" };
+            return Err(bad(cmd, format!("already {verb} into this sketch: {}", present.join(", "))));
         }
         Ok((out, present))
     })?;
@@ -583,9 +619,10 @@ pub(super) fn project_operands(s: &mut Session, p: &Value, cmd: &str, keys: &[&s
 }
 
 /// A model's reference among a command's operands (#6348): an `{edge: [x,y,z], body?}` or a
-/// `{vertex: [x,y,z], body?}`.
+/// `{vertex: [x,y,z], body?}`, or an origin axis `{axis: X|Y|Z}`.
 pub(crate) fn model_ref(v: &Value) -> bool {
-    v.get("edge").is_some() || v.get("vertex").is_some()
+    // Either case, as `source` takes it.
+    v.get("edge").is_some() || v.get("vertex").is_some() || v.get("axis").and_then(Value::as_str).is_some_and(|a| matches!(a, "X" | "Y" | "Z"))
 }
 
 /// Project one model reference into the sketch and report the entity it stands for: an edge's
@@ -594,8 +631,12 @@ fn project_ref(s: &mut Session, doc: &Document, id: u64, sk: &mut Sketch, v: &Va
     let src = source(s, v, cmd)?;
     let what = src.describe();
     let link = add_link(s, doc, id, sk, LinkKind::Project, src).map_err(|e| bad(cmd, format!("{what}: {e}")))?;
-    // An edge stands for its curve (a point when it is seen end on), a vertex for its point.
-    let curve = if v.get("edge").is_some() { sk.link_curves(&link).first().and_then(|c| sk.curves.get(*c)).map(|c| c.id.clone()) } else { None };
+    // An edge or axis stands for its curve (a point when it is seen end on), a vertex for its point.
+    let curve = if v.get("edge").is_some() || v.get("axis").is_some() {
+        sk.link_curves(&link).first().and_then(|c| sk.curves.get(*c)).map(|c| c.id.clone())
+    } else {
+        None
+    };
     curve
         .or_else(|| sk.link_points(&link).first().and_then(|q| sk.points.get(*q)).map(|q| q.id.clone()))
         .ok_or_else(|| bad(cmd, format!("{what} projects to nothing on this sketch")))

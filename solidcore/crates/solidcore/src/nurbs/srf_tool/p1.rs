@@ -18,7 +18,7 @@
 //!   (`surP == surQ`) computes the same result into fresh arrays, so a caller
 //!   replaces its surface with the returned one. The `NL_STACKS` arguments have no
 //!   counterpart and allocation cannot fail.
-//! - Errors are [`SolidError::Nlib`] values with the upstream `NL_*_ERR` number
+//! - Errors are [`SolidError::Failed`] values (a [`NurbsFailure`] reason) with the upstream `NL_*_ERR` number
 //!   instead of a flag plus the global `NL_ERROR` record.
 //! - [`extract_patch`] takes the requested patch as a [`Rectangle`] instead of four
 //!   corner parameters.
@@ -40,7 +40,7 @@
 //!   when the knot multiplicity exceeds the degree (a bad knot vector);
 //!   [`extract_iso_crv`] returns `InvalidInput` instead.
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::nurbs::crv_basic::Curve;
 use crate::nurbs::geom::Rectangle;
 use crate::nurbs::knots::{KnotVector, Side, MAX_DEGREE};
@@ -52,10 +52,6 @@ const PATCH_SNAP_TOL: f64 = 1.0e-08;
 
 /// A control net, `Pw[i][j]`.
 pub(super) type Net = Vec<Vec<CPoint>>;
-
-pub(super) fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
-    SolidError::Nlib { operation, code }
-}
 
 pub(super) fn oob(operation: &'static str) -> SolidError {
     SolidError::InvalidInput {
@@ -103,7 +99,7 @@ pub(super) fn put2<T>(w: &mut [Vec<T>], i: isize, j: isize, x: T, op: &'static s
 fn filled<T: Clone>(len: usize, x: T, op: &'static str) -> Result<Vec<T>> {
     let mut v = Vec::new();
     v.try_reserve_exact(len)
-        .map_err(|_| nlib(op, NlibCode::Memory))?;
+        .map_err(|_| SolidError::nurbs(op, NurbsFailure::Memory))?;
     v.resize(len, x);
     Ok(v)
 }
@@ -119,7 +115,7 @@ pub(super) fn zeros2<T: Clone + Default>(
     let cols = ix(m.checked_add(1).ok_or_else(|| oob(op))?, op)?;
     let mut w = Vec::new();
     w.try_reserve_exact(rows)
-        .map_err(|_| nlib(op, NlibCode::Memory))?;
+        .map_err(|_| SolidError::nurbs(op, NurbsFailure::Memory))?;
     for _ in 0..rows {
         w.push(filled(cols, T::default(), op)?);
     }
@@ -153,7 +149,7 @@ pub(super) fn degree(p: usize, op: &'static str) -> Result<isize> {
     if p > DEGREE_RANGE_MAX {
         return Err(SolidError::InvalidInput {
             operation: op,
-            reason: "degree above upstream's NL_DEGREE (short) range",
+            reason: "degree above the largest degree a knot index can hold",
         });
     }
     sx(p, op)
@@ -223,7 +219,7 @@ fn span(knots: &[f64], p: isize, t: f64, op: &'static str) -> Result<isize> {
 pub(super) fn check_interior(knots: &[f64], t: f64, op: &'static str) -> Result<()> {
     let kv = KnotVector::from_slice(knots)?;
     if kv.is_end_param(t) {
-        return Err(nlib(op, NlibCode::Parameter));
+        return Err(SolidError::nurbs(op, NurbsFailure::Parameter));
     }
     Ok(())
 }
@@ -232,8 +228,8 @@ pub(super) fn check_interior(knots: &[f64], t: f64, op: &'static str) -> Result<
 /// (`N_SrfInsertKnot`). `t` must be an interior parameter and the sum of its old and
 /// new multiplicities must not exceed the degree in that direction.
 ///
-/// Errors: [`NlibCode::Parameter`] for an end or outside parameter, or a total
-/// multiplicity above the degree; [`NlibCode::Call`] for [`Direction::UV`].
+/// Errors: [`NurbsFailure::Parameter`] for an end or outside parameter, or a total
+/// multiplicity above the degree; [`NurbsFailure::CallFailed`] for [`Direction::UV`].
 pub fn insert_knot(sur: &Surface, t: f64, mt: usize, dir: Direction) -> Result<Surface> {
     const OP: &str = "nurbs::srf_tool::p1::insert_knot";
     let Local {
@@ -257,7 +253,7 @@ pub fn insert_knot(sur: &Surface, t: f64, mt: usize, dir: Direction) -> Result<S
             (spu, mlu) = span_mult(up, p, t, OP)?;
             // An overflowing sum exceeds the degree as well.
             if mlu.checked_add(mt).is_none_or(|x| x > p) {
-                return Err(nlib(OP, NlibCode::Parameter));
+                return Err(SolidError::nurbs(OP, NurbsFailure::Parameter));
             }
             (n + mt, m, r + mt, s)
         }
@@ -266,11 +262,11 @@ pub fn insert_knot(sur: &Surface, t: f64, mt: usize, dir: Direction) -> Result<S
             (spv, mlv) = span_mult(vp, q, t, OP)?;
             // An overflowing sum exceeds the degree as well.
             if mlv.checked_add(mt).is_none_or(|x| x > q) {
-                return Err(nlib(OP, NlibCode::Parameter));
+                return Err(SolidError::nurbs(OP, NurbsFailure::Parameter));
             }
             (n, m + mt, r, s + mt)
         }
-        Direction::UV => return Err(nlib(OP, NlibCode::Call)),
+        Direction::UV => return Err(SolidError::nurbs(OP, NurbsFailure::CallFailed)),
     };
 
     let mut qw: Net = zeros2(ni, mi, OP)?;
@@ -432,8 +428,8 @@ pub fn insert_knot(sur: &Surface, t: f64, mt: usize, dir: Direction) -> Result<S
 /// left part over `[U[0], t]` (or `[V[0], t]`) and the right part over `[t, U[r]]`
 /// (or `[t, V[s]]`).
 ///
-/// Errors: [`NlibCode::Parameter`] for an end or outside parameter;
-/// [`NlibCode::Call`] for [`Direction::UV`]; `InvalidInput` for a degree above
+/// Errors: [`NurbsFailure::Parameter`] for an end or outside parameter;
+/// [`NurbsFailure::CallFailed`] for [`Direction::UV`]; `InvalidInput` for a degree above
 /// [`MAX_DEGREE`] or a knot multiplicity above the degree.
 pub fn split(sur: &Surface, t: f64, dir: Direction) -> Result<(Surface, Surface)> {
     const OP: &str = "nurbs::srf_tool::p1::split";
@@ -487,7 +483,7 @@ pub fn split(sur: &Surface, t: f64, dir: Direction) -> Result<(Surface, Surface)
             let mr = m + q - spv;
             (n, ml, r, ml + q + 1, n, mr, r, mr + q + 1)
         }
-        Direction::UV => return Err(nlib(OP, NlibCode::Call)),
+        Direction::UV => return Err(SolidError::nurbs(OP, NurbsFailure::CallFailed)),
     };
 
     let mut lw: Net = zeros2(nl, ml, OP)?;
@@ -913,7 +909,7 @@ pub const ISO_MULT_ABOVE_DEGREE: &str = "knot multiplicity above the degree";
 /// [`Direction::U`] gives the u-curve at `v = t`, [`Direction::V`] the v-curve at
 /// `u = t`. Parameters outside the domain extrapolate the end spans.
 ///
-/// Errors: [`NlibCode::Call`] for [`Direction::UV`]; `InvalidInput` for a degree
+/// Errors: [`NurbsFailure::CallFailed`] for [`Direction::UV`]; `InvalidInput` for a degree
 /// above [`MAX_DEGREE`] or a knot multiplicity above the degree.
 pub fn extract_iso_crv(sur: &Surface, t: f64, dir: Direction) -> Result<Curve> {
     const OP: &str = "nurbs::srf_tool::p1::extract_iso_crv";
@@ -949,7 +945,7 @@ pub fn extract_iso_crv(sur: &Surface, t: f64, dir: Direction) -> Result<Curve> {
             (spu, mlu) = span_mult(up, p, t, OP)?;
             (m, q, s)
         }
-        Direction::UV => return Err(nlib(OP, NlibCode::Call)),
+        Direction::UV => return Err(SolidError::nurbs(OP, NurbsFailure::CallFailed)),
     };
 
     let mut cw: Vec<CPoint> = zeros1(ne, OP)?;
@@ -1074,8 +1070,8 @@ pub fn extract_iso_crv(sur: &Surface, t: f64, dir: Direction) -> Result<Curve> {
 /// Refines `sur` with the knots `x` in u or v (`N_SrfInsertKnots`). The knots must
 /// not decrease and must lie strictly inside the knot vector they refine.
 ///
-/// Errors: [`NlibCode::Input`] for an empty `x`; [`NlibCode::Parameter`] when
-/// `x[0]` or the last knot is an end or outside parameter; [`NlibCode::Call`] for
+/// Errors: [`NurbsFailure::Input`] for an empty `x`; [`NurbsFailure::Parameter`] when
+/// `x[0]` or the last knot is an end or outside parameter; [`NurbsFailure::CallFailed`] for
 /// [`Direction::UV`].
 pub fn insert_knots(sur: &Surface, x: &[f64], dir: Direction) -> Result<Surface> {
     const OP: &str = "nurbs::srf_tool::p1::insert_knots";
@@ -1094,7 +1090,7 @@ pub fn insert_knots(sur: &Surface, x: &[f64], dir: Direction) -> Result<Surface>
 
     // Check parameters and compute highest indexes.
     if xr < 0 {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
     let (x0, xl) = (at(x, 0, OP)?, at(x, xr, OP)?);
     let (ni, mi, ri, si) = match dir {
@@ -1108,7 +1104,7 @@ pub fn insert_knots(sur: &Surface, x: &[f64], dir: Direction) -> Result<Surface>
             check_interior(vp, xl, OP)?;
             (n, m + xr + 1, r, s + xr + 1)
         }
-        Direction::UV => return Err(nlib(OP, NlibCode::Call)),
+        Direction::UV => return Err(SolidError::nurbs(OP, NurbsFailure::CallFailed)),
     };
 
     let mut qw: Net = zeros2(ni, mi, OP)?;
@@ -1281,7 +1277,7 @@ fn snap(x: &mut f64, knots: &[f64], k: isize) -> bool {
 /// first snapped to it; the result is then reparametrised back to the requested
 /// rectangle.
 ///
-/// Errors with [`NlibCode::Input`] for an empty (or, after snapping, inverted)
+/// Errors with [`NurbsFailure::Input`] for an empty (or, after snapping, inverted)
 /// rectangle.
 pub fn extract_patch(sur: &Surface, rect: Rectangle) -> Result<Surface> {
     const OP: &str = "nurbs::srf_tool::p1::extract_patch";
@@ -1309,7 +1305,7 @@ pub fn extract_patch(sur: &Surface, rect: Rectangle) -> Result<Surface> {
 
     // Check for degenerate parameters.
     if ur <= ul || vr <= vl {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
 
     // Find knot spans and set new indexes.
@@ -1335,7 +1331,7 @@ pub fn extract_patch(sur: &Surface, rect: Rectangle) -> Result<Surface> {
     let n = ie - is;
     let r = span_ur - span_ul - mur + 2 * p + 1;
     if n < 0 {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
 
     // Auxiliary control points.
@@ -1385,7 +1381,7 @@ pub fn extract_patch(sur: &Surface, rect: Rectangle) -> Result<Surface> {
     let m = je - js;
     let s = span_vr - span_vl - mvr + 2 * q + 1;
     if m < 0 {
-        return Err(nlib(OP, NlibCode::Input));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Input));
     }
 
     let mut qw: Net = zeros2(n, m, OP)?;
@@ -1517,10 +1513,7 @@ mod tests {
         let par = |r: Result<Surface>| {
             matches!(
                 r,
-                Err(SolidError::Nlib {
-                    code: NlibCode::Parameter,
-                    ..
-                })
+                Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Parameter))
             )
         };
         assert!(par(insert_knot(&s, 0.0, 1, Direction::U)));
@@ -1528,10 +1521,7 @@ mod tests {
         assert!(par(insert_knot(&s, 0.4, 3, Direction::U)));
         assert!(matches!(
             insert_knot(&s, 0.5, 1, Direction::UV),
-            Err(SolidError::Nlib {
-                code: NlibCode::Call,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::CallFailed))
         ));
     }
 
@@ -1588,10 +1578,7 @@ mod tests {
         }
         assert!(matches!(
             insert_knots(&s, &[], Direction::U),
-            Err(SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
     }
 
@@ -1606,10 +1593,7 @@ mod tests {
         assert_eq!(*part.v_knots().last().unwrap(), 0.9);
         assert!(matches!(
             extract_patch(&s, Rectangle::new(0.5, 0.5, 0.0, 1.0)),
-            Err(SolidError::Nlib {
-                code: NlibCode::Input,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Input))
         ));
     }
 

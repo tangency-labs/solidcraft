@@ -347,6 +347,72 @@ fn a_variable_round_runs_from_its_start() {
     assert!(rel(volume(&b), ABC) < 1e-12);
 }
 
+/// #14405: a variable round's definition net is certified on wide pieces. Over a piece of
+/// the round the touch circle's rows are bounded by Taylor models in s as well as by
+/// interval series, which take the rails and the ball's centre (they move together) as
+/// independent ranges: with those alone the circle proved only on pieces some hundredths of
+/// the round long, and this round took 113 span certificates and 8,592 enclosures (about
+/// 10 s at opt 3), its net 23 inner knots along the round; now 3 and 66 (0.6 s), and 1.
+/// The net is the balls' envelope within its certified bound wherever sampled (its distance
+/// from the law's balls, measured without the certificate: 1.6e-14, the bound 3.2e-6), and
+/// the body is sound.
+#[test]
+fn a_variable_round_s_net_is_certified_on_wide_pieces() {
+    all_fixes();
+    let b = make_box([0.0; 3], [10.0, 20.0, 30.0]).unwrap();
+    let (from, middle) = ([10.0, 0.0, 30.0], [10.0, 10.0, 30.0]);
+    let e = edge_at(&b, middle);
+    let start = vertex_at(&b, from);
+    fillet_variable(&b, e, start, 1, &[0.0, 0.0, 1.0, 1.0], &[2.0, 5.0]).unwrap();
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    let (_, made) = kernel_copy(&b);
+    // the ball of radius 2 at the start touches the faces x = 10 and z = 30
+    let balls = LawPieces::new(from, middle, [[10.0, 0.0, 28.0], [8.0, 0.0, 30.0]], 2.0);
+    let mut rounds = 0;
+    for &f in made.face_list() {
+        let s = made.face(f).unwrap().surface.as_ref().unwrap();
+        let Some(round @ BlendRef::Procedural(pb)) = s.procedural_blend() else {
+            continue;
+        };
+        rounds += 1;
+        let net = pb.net();
+        let d = net.natural_uv_domain();
+        let (_, _, swapped) = pb.definition_map();
+        let nurb = net.gw_nurb().unwrap();
+        let (knots, lo, hi) = if swapped {
+            (nurb.v_knots(), d.min().y, d.max().y)
+        } else {
+            (nurb.u_knots(), d.min().x, d.max().x)
+        };
+        let mut inner: Vec<f64> = knots
+            .iter()
+            .copied()
+            .filter(|&x| x > lo && x < hi)
+            .collect();
+        inner.dedup();
+        let bound = round.bound();
+        let mut worst = 0.0_f64;
+        for i in 0..=80 {
+            for j in 0..=8 {
+                let (a, c) = (f64::from(i) / 80.0, f64::from(j) / 8.0);
+                let uv = Point2::new(
+                    d.min().x + a * (d.max().x - d.min().x),
+                    d.min().y + c * (d.max().y - d.min().y),
+                );
+                let p = net.evaluate_point(uv).unwrap();
+                worst = worst.max(balls.off(p, |y| 2.0 + 3.0 * y));
+            }
+        }
+        eprintln!(
+            "{} inner knots, bound {bound:e}, off the balls {worst:e}",
+            inner.len()
+        );
+        assert!(inner.len() <= 2, "{} inner knots", inner.len());
+        assert!(worst <= bound, "{worst} over {bound}");
+    }
+    assert_eq!(rounds, 1);
+}
+
 /// A law with a corner rounds its edge as the union of its balls (`docs/generic-blend.md` §3.2,
 /// "Corners in a radius law"): at a peak the two sides' rounds cross and end on their crossing,
 /// at a dip the corner ball's zone lies between them. Each removes its balls' union, integrated
@@ -684,14 +750,15 @@ fn arguments_are_checked_before_the_kernel() {
         blend(&b, Blend::Chamfer, &[e], &[1.0], &back, Corners::Filled),
         Err(Error::Unsupported(_))
     ));
-    // a setback longer than its edges leaves no room
+    // a setback at a vertex the kernel does not set back (the end of one round), however
+    // long: that corner is refused (#3145: the length is the kernel's, at a real corner)
     let long = [SetBack {
         vertex: corner,
         distance: 50.0,
     }];
     assert_eq!(
         blend(&b, Blend::Round, &[e], &[1.0], &long, Corners::Filled),
-        Err(Error::NoRoom)
+        Err(Error::CornerRefused { corner: 0 })
     );
     assert_eq!(
         chamfer_sides(&b, &[e], &[], 1.0, ChamferSecond::Distance(1.0)),
@@ -1054,4 +1121,175 @@ fn curvature_rounds_over_mixed_wedges_each_take_their_own_balls_area() {
     assert!((ab - 40.0 * per_length).abs() < 1e-5, "[A, B] took {ab}");
     assert!((ba - 40.0 * per_length).abs() < 1e-5, "[B, A] took {ba}");
     assert!((ab - ba).abs() < 1e-7, "{ab} {ba}");
+}
+
+/// #3145: a chamfer too large for its faces is refused with the distance that builds, which the
+/// kernel reads through the chamfer's definition (its offsets linear in its sizes at the edge's
+/// wedge), and that distance builds. A 2 thick wall, both its top edges chamfered 1.5 at
+/// equal distances: square edges, so each chamfer's setback is its distance, and the two bands
+/// on the top meet when the setbacks are 1 each: the fit is 1. Chamfered at it, each edge
+/// loses the prism of the right triangle of side 1 along the wall's 30: `2 * 30 / 2` removed.
+#[test]
+fn a_chamfer_too_large_is_refused_with_the_distance_that_builds() {
+    all_fixes();
+    let b = make_box([0.0; 3], [30.0, 2.0, 10.0]).unwrap();
+    let edges = [
+        edge_at(&b, [15.0, 0.0, 10.0]),
+        edge_at(&b, [15.0, 2.0, 10.0]),
+    ];
+    let size = match blend(&b, Blend::Chamfer, &edges, &[1.5], &[], Corners::Filled) {
+        Err(Error::TooLarge { size, kind, .. }) => {
+            assert_eq!(kind, FitKind::Distance);
+            size
+        }
+        other => panic!("{other:?}"),
+    };
+    // the kernel's fit read through the chamfer's offsets and back: lines, so no quadrature,
+    // only the fit's and the conversions' rounding (measured 1.1e-13)
+    assert!((size - 1.0).abs() <= 1e-12, "{size}");
+    let before = volume(&b);
+    blend(&b, Blend::Chamfer, &edges, &[size], &[], Corners::Filled).unwrap();
+    let removed = before - volume(&b);
+    let want = 30.0 * size * size;
+    assert!(rel(removed, want) <= 1e-9, "{removed} vs {want}");
+}
+
+/// #3145: a setback longer than an edge at a real set-back corner is the kernel's refusal before
+/// the trace, naming the largest that fits: the block's corner at (30, 0, 10) with its three
+/// edges rounded 1 and set back 50, its shortest edge 10 long. A setback of 10 would leave that
+/// edge's round no length (an open bound), so the size named is 10 less a thousand of the
+/// edge's tolerances; set back that, the block builds, and just above it is refused. Without
+/// the check the trace refused first, as a round too large (radius 19.99, the corners taking a
+/// whole edge).
+#[test]
+fn a_setback_too_long_at_a_corner_is_refused_by_the_kernel() {
+    all_fixes();
+    let b = block();
+    let edges = [
+        edge_at(&b, [15.0, 0.0, 10.0]),
+        edge_at(&b, [30.0, 10.0, 10.0]),
+        edge_at(&b, [30.0, 0.0, 5.0]),
+    ];
+    let corner = vertex_at(&b, [30.0, 0.0, 10.0]);
+    let set_back = |distance: f64| {
+        [SetBack {
+            vertex: corner,
+            distance,
+        }]
+    };
+    let tol = {
+        let (_k, kb) = kernel_copy(&b);
+        edge::tolerance(&kb, kb.edge_list()[edges[2]]).unwrap()
+    };
+    let named = match blend(
+        &b,
+        Blend::Round,
+        &edges,
+        &[1.0],
+        &set_back(50.0),
+        Corners::Filled,
+    ) {
+        Err(Error::SetbackTooLong { vertex, largest }) => {
+            assert_eq!(vertex, corner);
+            // the least of the three edges' lengths (lines: exact), the far ends set back none,
+            // less the fit margin
+            let want = 10.0 - 1000.0 * tol;
+            assert!((largest - want).abs() <= 1e-12, "{largest} against {want}");
+            largest
+        }
+        other => panic!("{other:?}"),
+    };
+    // just above the named size: refused by the same test, the block unchanged
+    match blend(
+        &b,
+        Blend::Round,
+        &edges,
+        &[1.0],
+        &set_back(named + 1e-9),
+        Corners::Filled,
+    ) {
+        Err(Error::SetbackTooLong { vertex, .. }) => assert_eq!(vertex, corner),
+        other => panic!("{other:?}"),
+    }
+    assert!(rel(volume(&b), 6000.0) < 1e-12);
+    // at it: the block builds (the rounds take volume)
+    blend(
+        &b,
+        Blend::Round,
+        &edges,
+        &[1.0],
+        &set_back(named),
+        Corners::Filled,
+    )
+    .unwrap();
+    assert!(volume(&b) < 6000.0);
+}
+
+/// Cancel stops a long fillet promptly (solidcore#3247): a 2 mm round along one helical edge of
+/// a 20-turn square coil, with its tangent chain (the whole edge), runs for minutes. Cancelled
+/// from another thread a second in, the call returns `Cancelled` within 500 ms (about 5 ms
+/// measured on a desktop; the bound leaves room for shared CI runners). nextest runs each test
+/// in a process of its own, so no other test's call holds the session's kernel meanwhile.
+#[test]
+fn a_cancelled_long_fillet_stops_promptly() {
+    use solidcore_ops::cancel::{within, CancelToken};
+    use solidcore_ops::sweep::{screw_sweep, Curve};
+    use std::time::{Duration, Instant};
+    all_fixes();
+    let corners = [
+        [19.0, 0.0, 0.0],
+        [32.0, 0.0, 0.0],
+        [32.0, 0.0, 13.0],
+        [19.0, 0.0, 13.0],
+    ];
+    let square: Vec<Curve> = (0..4)
+        .map(|i| Curve::Line {
+            start: corners[i],
+            end: corners[(i + 1) % 4],
+        })
+        .collect();
+    let coil = screw_sweep(
+        &square,
+        [0.0; 3],
+        [0.0, 0.0, 1.0],
+        15.24,
+        20.0,
+        None,
+        15.24e-4,
+    )
+    .unwrap();
+    // the inner lower helix half a turn in, whichever way the sweep turns
+    let (k, brep) = kernel_copy(&coil);
+    let q = Vec3::new(-19.0, 0.0, 15.24 / 2.0);
+    let edge = (0..brep.edge_list().len())
+        .min_by(|&a, &b| {
+            let d = |i: usize| {
+                edge_closest_point(&k, &brep, brep.edge_list()[i], q)
+                    .unwrap()
+                    .closest
+                    .distance
+            };
+            d(a).total_cmp(&d(b))
+        })
+        .unwrap();
+    let chain = tangent_chain(&coil, &[edge], 0.1).unwrap();
+    let token = CancelToken::new();
+    let watched = token.clone();
+    let worker = std::thread::spawn(move || {
+        let r = within(&watched, || {
+            blend(&coil, Blend::Round, &chain, &[2.0], &[], Corners::Filled)
+        });
+        (r.map(|_| ()), Instant::now())
+    });
+    std::thread::sleep(Duration::from_secs(1));
+    let cancelled = Instant::now();
+    token.cancel();
+    let (r, returned) = worker.join().unwrap();
+    let took = returned.saturating_duration_since(cancelled);
+    eprintln!("the fillet returned {took:?} after Cancel");
+    assert_eq!(r, Err(Error::Cancelled));
+    assert!(
+        took < Duration::from_millis(500),
+        "returned {took:?} after Cancel"
+    );
 }

@@ -1423,7 +1423,8 @@ pub fn calc_mixed_edge_geom(
                 Point3::new(to.0, to.1, 0.0),
             )?;
             let side_i = *nth(if turn { &which_t } else { &which }, kk, OP_EDGE)?;
-            *nth_mut(of2m(&mut side_curves, f), side_i, OP_EDGE)? = Some(iso.clone());
+            *nth_mut(of2m(&mut side_curves, f).as_mut_slice(), side_i, OP_EDGE)? =
+                Some(iso.clone());
             of2m(&mut state.curves_3d, f).push(Curve::from(iso));
             of2m(&mut state.uv_curves, f).push(Curve::from(uv));
             of2m(&mut state.orients, f).push(*nth(&orients, kk, OP_EDGE)?);
