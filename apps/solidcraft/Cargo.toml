@@ -37,6 +37,8 @@ solidcraft-control = { workspace = true }
 # The D3D12 shader compiler the window starts with (#6756).
 solidcraft-gpu = { workspace = true }
 solidcraft-ui-egui = { workspace = true }
+# SolidCraft's look (icons, glyphs, built-in themes), installed at startup.
+solidcraft-look = { workspace = true }
 solidcraft-ui-text = { workspace = true }
 solidcraft-theme = { workspace = true }
 solidcraft-space-mouse = { workspace = true }

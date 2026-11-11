@@ -234,7 +234,9 @@ impl Surface {
             if !asked.contains(&source_side) {
                 continue;
             }
-            let side = *on.get(at).ok_or_else(|| SolidError::sm_err(OP))?;
+            let side = *on.get(at).ok_or_else(|| {
+                SolidError::surface_failed(OP, "the side has no counterpart on the surface")
+            })?;
             let surface = current.as_ref().map_or(self, |e| &e.surface);
             let dom = surface.natural_uv_domain_with_nurb(k)?;
             let param = if source_side.is_u() {
@@ -300,7 +302,9 @@ impl Surface {
                     if !matches!(done, SideExtension::Extended(_)) {
                         continue;
                     }
-                    let side = *on.get(at).ok_or_else(|| SolidError::sm_err(OP))?;
+                    let side = *on.get(at).ok_or_else(|| {
+                        SolidError::surface_failed(OP, "the side has no counterpart on the surface")
+                    })?;
                     let across = measured.length_across_side(k, &face, side, super::REL)?;
                     if !across.converged
                         || across.enclosure.lower

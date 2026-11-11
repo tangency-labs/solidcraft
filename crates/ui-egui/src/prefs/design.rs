@@ -10,6 +10,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         "prefs.parameter_list_rows",
         "prefs.origin_plane_names",
         "prefs.stand_up_unknown",
+        "prefs.export_name",
     ]
     .into_iter()
     .map(|id| ui_kit::ContentWidth::label(ui, app.tr(id)))
@@ -170,6 +171,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             });
         });
+        export_name(app, ui, label_width);
         origin_plane_names(app, ui, label_width);
         ui_kit::settings_section(ui, "linked_designs", app.tr("prefs.linked_designs"), |ui| {
             let response = setting::update_changed_links(app, ui);
@@ -187,6 +189,38 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::scenario::publish_target("prefs:insert_lists_open_designs", response.rect);
             crate::scenario::publish_target("dialog:Insert Design lists the designs open in other tabs first", response.rect);
         });
+        ui_kit::settings_section(ui, "assemblies", app.tr("prefs.assemblies"), |ui| {
+            ui.horizontal_wrapped(|ui| {
+                let response = setting::joint_drag_trackball(app, ui).backing_on_hover_text(app.tr("prefs.joint_drag_trackball_help"));
+                crate::scenario::publish_target("prefs:joint_drag_trackball", response.rect);
+                if !crate::ui_kit::settings_search::suppress_chrome(ui) {
+                    ui_kit::help_icon(ui, app.tr("prefs.joint_drag_trackball_help"));
+                }
+            });
+        });
+    });
+}
+
+/// The file name exports offer (`export_name`), with the name it gives the open design.
+fn export_name(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
+    ui_kit::settings_section(ui, "export_name", app.tr("prefs.export"), |ui| {
+        ui_kit::settings_form(ui, label_width, |ui| {
+            let tip = solidcraft_ui_text::format("prefs.export_name_tip", &[("placeholders", &crate::export_name::placeholder_list())]);
+            ui_kit::settings_row_help(ui, app.tr("prefs.export_name"), &tip, |ui| {
+                let hint = app.tr("prefs.export_name_hint").to_string();
+                let (_, response) = ui_kit::text_field_reserving(ui, &mut app.preferences.export_name, &hint, 0.0);
+                crate::scenario::publish_target("prefs:export_name", response.rect);
+            });
+        });
+        if !app.preferences.export_name.trim().is_empty() {
+            let body = crate::export_name::first_body(app);
+            let sample = crate::export_name::offered(app, body.as_deref(), &app.session.doc.name);
+            ui_kit::text(
+                ui,
+                &solidcraft_ui_text::format("prefs.export_name_sample", &[("name", &format!("{sample}.step"))]),
+                ui_kit::Text::Hint("export_name"),
+            );
+        }
     });
 }
 

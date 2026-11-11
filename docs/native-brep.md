@@ -208,7 +208,9 @@ backend (a use's `given` pcurve is taken as it is). It is exact in closed form
 for lines, polylines and whole splines on planes, circles about the axis of a
 cylinder, cone, sphere or torus (v fixed, u the circle's angle plus a constant)
 and lines along a cylinder's or cone's ruling (u fixed, v linear), each checked
-by lifting it; everything else is a cubic B-spline fitted within the tolerance.
+by lifting it. On a spline face, a straight (u, v) line is taken where it lifts
+onto the edge within the tolerance. Anything else, and an exact one that misses,
+is refused (`Failed`, "no exact pcurve"): nothing is fitted.
 
 ## Validation and trust
 

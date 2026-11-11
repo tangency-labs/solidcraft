@@ -27,6 +27,10 @@ pub struct Body {
     /// The body in SMLib, built from `record` on first use (or kept from the operation that
     /// made it), shared by clones because they share the record.
     pub(crate) smlib: std::sync::Arc<std::sync::OnceLock<std::result::Result<solidcraft_smlib::Brep, Refusal>>>,
+    /// The record as solidcore-ops' body, for the kernel's answers about its faces
+    /// ([`Body::flat_spline_face`]): made on first use, shared by clones as `smlib` is. None
+    /// when the record was refused, kept like `smlib`'s refusal so it is not tried again.
+    pub(crate) ops: std::sync::Arc<std::sync::OnceLock<Option<(solidcore_ops::Body, solidcore_ops::Order)>>>,
     /// Bounding-box diagonal of the vertices, measured when the body was made; 0 means "not
     /// measured, walk the geometry". Every kernel tolerance is a fraction of it.
     pub(crate) size: f64,
@@ -236,14 +240,32 @@ pub struct Paint {
     /// 1 = opaque.
     pub opacity: f32,
     pub faces: Vec<FacePaint>,
+    /// The body colour's name in the file it came from (a STEP `COLOUR_RGB` name), if it had one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
-/// A face's own colour: the B-rep face index (`face_iter` order), sRGB as 0..1, opacity.
+/// A face's own colour: the B-rep face index (`face_iter` order), sRGB as 0..1, opacity, and
+/// its name in the file it came from, if it had one.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct FacePaint {
     pub face: usize,
     pub color: [f32; 3],
     pub opacity: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+/// The most characters a colour name read from a file keeps (as a design look's name).
+pub const COLOUR_NAME_MAX: usize = 128;
+
+/// A colour name read from a file, made safe to show and keep: control characters dropped,
+/// surrounding space trimmed, at most [`COLOUR_NAME_MAX`] characters. `None` when nothing is left.
+pub fn colour_name(raw: &str) -> Option<String> {
+    let cleaned: String = raw.chars().filter(|c| !c.is_control()).collect();
+    let name: String = cleaned.trim().chars().take(COLOUR_NAME_MAX).collect();
+    let name = name.trim_end();
+    (!name.is_empty()).then(|| name.to_string())
 }
 
 /// A B-rep edge as seen by the rest of the application.
@@ -270,40 +292,6 @@ pub struct FaceInfo {
 /// How closely [`Body::mesh`] follows the exact surfaces, and the facet angle a viewport draws
 /// at: the mesher's own (solidcore-tess).
 pub use solidcore_tess::{DISPLAY_ANGLE, MeshTolerance};
-
-/// Whether a control net is small enough to test for flatness ([`flat_net`]): the work is one
-/// pass over its points, at most 65,536 of them (a face of an imported design can carry a large
-/// net, and [`Body::planar_face`] is asked of every face a pick passes).
-fn net_fits<T>(net: &[Vec<T>]) -> bool {
-    net.iter().try_fold(0usize, |count, row| count.checked_add(row.len()).filter(|count| *count <= 1 << 16)).is_some()
-}
-
-/// A B-spline control net (`net[i][j]`, i along u) lying on one plane within `tolerance`: a point
-/// of the plane and two directions on it whose cross product runs along the surface's natural
-/// normal (`∂S/∂u × ∂S/∂v`), as a plane surface's axes do. `None` for a net off every plane, or
-/// one too degenerate to have a normal (#14346).
-fn flat_net(net: &[Vec<Vec3>], tolerance: f64) -> Option<(Vec3, Vec3, Vec3)> {
-    let columns = net.first()?.len();
-    if net.len() < 2 || columns < 2 || net.iter().any(|row| row.len() != columns) || !(tolerance.is_finite() && tolerance > 0.0) {
-        return None;
-    }
-    // The net's oriented area, Σ (P[i+1][j] − P[i][j]) × (P[i][j+1] − P[i][j]), runs along the
-    // natural normal of a flat surface that doesn't fold over itself; the u steps give its u way.
-    let (mut area, mut along_u) = (Vec3::ZERO, Vec3::ZERO);
-    for (row, next) in net.iter().zip(net.iter().skip(1)) {
-        for ((p, q), r) in row.iter().zip(row.iter().skip(1)).zip(next) {
-            area += (*r - *p).cross(*q - *p);
-            along_u += *r - *p;
-        }
-    }
-    let normal = area.normalized()?;
-    let origin = *net.first()?.first()?;
-    if net.iter().flatten().any(|p| !p.is_finite() || (*p - origin).dot(normal).abs() > tolerance) {
-        return None;
-    }
-    let u = (along_u - normal * along_u.dot(normal)).normalized()?;
-    Some((origin, u, normal.cross(u)))
-}
 
 pub(crate) fn v3(p: [f64; 3]) -> Vec3 {
     Vec3::new(p[0], p[1], p[2])
@@ -467,6 +455,7 @@ impl Body {
         Body {
             record: std::sync::Arc::new(record),
             smlib: std::sync::Arc::new(std::sync::OnceLock::new()),
+            ops: std::sync::Arc::new(std::sync::OnceLock::new()),
             size,
             volume: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
             bounds: std::sync::Arc::new(std::sync::Mutex::new(None)),
@@ -716,9 +705,7 @@ impl Body {
 
     /// Exact current planar surface for an explicitly fixed snapshot, without source lineage: the
     /// face's plane as the face faces (out of the material in a closed shell). A plane surface,
-    /// or a B-spline whose control points all lie on one plane within the body's tolerance (a
-    /// loft's side between parallel straight edges, #14346): a B-spline surface lies in the
-    /// convex hull of its control points, so the whole face is on that plane.
+    /// or a B-spline face the kernel finds flat ([`Body::flat_spline_face`], #14346).
     pub fn planar_face(&self, index: usize) -> Option<solidcore_record::Plane> {
         let face = self.record.faces.get(index)?;
         let (o, u, v) = match &face.surface {
@@ -727,21 +714,48 @@ impl Body {
                 let o = v3(*origin);
                 (o, v3(*u_point) - o, v3(*v_point) - o)
             }
-            Surface::Spline { points, .. } if net_fits(points) => {
-                flat_net(&points.iter().map(|row| row.iter().map(|p| v3(*p)).collect()).collect::<Vec<Vec<_>>>(), self.record.tolerance)?
-            }
-            // With positive weights a rational patch stays in its points' convex hull too.
-            Surface::RationalSpline { homogeneous, .. } if net_fits(homogeneous) => {
-                let net = homogeneous
-                    .iter()
-                    .map(|row| row.iter().map(|&[x, y, z, w]| (w.is_finite() && w > 0.0).then(|| Vec3::new(x / w, y / w, z / w))).collect())
-                    .collect::<Option<Vec<Vec<_>>>>()?;
-                flat_net(&net, self.record.tolerance)?
-            }
+            Surface::Spline { .. } | Surface::RationalSpline { .. } => return self.flat_spline_face(index),
             _ => return None,
         };
         let v = if self.face_forward(index) { v } else { -v };
         solidcore_record::Plane::new(o, u, v)
+    }
+
+    /// The plane of B-spline face `index` when the kernel finds it flat: SMLib's `IsPlanar` at
+    /// the face's own tolerance, with the normal facing out of the material as the face is used
+    /// ([`solidcore_ops::Body::face_plane_normal`]), through the face's first vertex. A loft's
+    /// side through three or more sections is skinned as a B-spline patch even when it is flat,
+    /// as a face of an imported design can be (#14346).
+    fn flat_spline_face(&self, index: usize) -> Option<solidcore_record::Plane> {
+        let face = self.record.faces.get(index)?;
+        let vertex = face.loops.iter().find_map(|l| match l {
+            Loop::Edges { edges } => edges.first().and_then(|u| self.record.edges.get(u.edge as usize)).and_then(|e| e.vertices.first().copied()),
+            Loop::Vertex { vertex } => Some(*vertex),
+        })?;
+        let point = v3(self.record.vertices.get(vertex as usize)?.point);
+        let (body, order) = self.ops_body()?;
+        let normal = body.face_plane_normal(order, index).ok()??;
+        solidcore_record::Plane::from_normal(point, v3(normal.value))
+    }
+
+    /// The record as solidcore-ops' body and the order of its entities, made on first use and
+    /// kept for every later face. A refusal of the record is kept too, as `smlib`'s is: the same
+    /// record is refused the same way again. A refusal of the moment is not kept, so a later
+    /// query tries again: a call from inside a kernel call or from solidcore-ops' failure
+    /// callback ([`solidcore_ops::Error::Reentered`]), or a cancelled one. None for a mesh body.
+    pub(crate) fn ops_body(&self) -> Option<&(solidcore_ops::Body, solidcore_ops::Order)> {
+        if self.is_mesh() {
+            return None;
+        }
+        if let Some(kept) = self.ops.get() {
+            return kept.as_ref();
+        }
+        // Converted outside the cell: a failure callback that asked about this body again
+        // would otherwise reenter the cell while it is being filled.
+        match solidcraft_smlib::stop::unstoppable(|| solidcore_ops::Body::from_record(&self.record, true)) {
+            Err(solidcore_ops::Error::Reentered | solidcore_ops::Error::Cancelled) => None,
+            made => self.ops.get_or_init(|| made.ok()).as_ref(),
+        }
     }
 
     /// Certify the two caps of a body built by [`crate::cylinder`]. Its wall stays uncertified.
@@ -984,21 +998,24 @@ impl Body {
         self.paint.as_deref()
     }
 
-    /// The same body with opacity and face colours for export (`None` or opaque with no face
-    /// colours clears them).
+    /// The same body with opacity, face colours and colour names for export (`None`, or opaque
+    /// with no face colours and no name, clears them).
     pub fn with_paint(mut self, p: Option<Paint>) -> Body {
         let clean = |x: f32| if x.is_finite() { x.clamp(0.0, 1.0) } else { 1.0 };
         self.paint = p
             .map(|mut p| {
                 p.opacity = clean(p.opacity);
+                p.name = p.name.as_deref().and_then(colour_name);
                 p.faces.retain(|f| f.color.iter().all(|x| x.is_finite()));
                 for f in &mut p.faces {
                     f.color = f.color.map(|x| x.clamp(0.0, 1.0));
                     f.opacity = clean(f.opacity);
+                    f.name = f.name.as_deref().and_then(colour_name);
                 }
                 p
             })
-            .filter(|p| p.opacity < 1.0 || !p.faces.is_empty())
+            // An opaque body colour's name is kept with it: the paint holds it.
+            .filter(|p| p.opacity < 1.0 || !p.faces.is_empty() || p.name.is_some())
             .map(std::sync::Arc::new);
         self.regularization_protected |= self.paint().is_some_and(|paint| !paint.faces.is_empty());
         self

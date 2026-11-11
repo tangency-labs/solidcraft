@@ -456,7 +456,7 @@ type PastedIds = (Vec<String>, Vec<String>, Vec<String>);
 
 /// Add a copy of `clip`, moved by `t`, to `sk`.
 fn paste_clip(sk: &mut Sketch, doc: &mut Document, clip: &SketchClip, t: Vec2) -> Result<PastedIds> {
-    if sk.curves.len().saturating_add(clip.curves.len()) > solidcraft_sketch::MAX_CURVES {
+    if sk.curves.len().saturating_add(clip.curves.len()) > solidcraft_sketch::limits::max_curves() {
         return Err(solidcraft_sketch::SketchError::TooLarge.into());
     }
     let mut pts = Vec::with_capacity(clip.points.len());

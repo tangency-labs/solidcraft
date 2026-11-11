@@ -24,6 +24,10 @@
 //!   to 32,768 boxes and depth 128 in `projected_pair`. Proof failures propagate.
 //!   Structural affine and identical monotone NURBS All classes share the definition enclosures and
 //!   preserve the existing retention and ordered duplicate rules.
+//! - **Identical open ellipse All maxima.** Bounded interval edge-root
+//!   construction and the antipodal-axis theorem cover the finite candidate set;
+//!   at most 4,096 cells, depth 48 and 64 Newton contractions per root. Selected
+//!   ambiguities refuse; full turns and distinct ellipse pairs keep the old path.
 //! - **Curves and kernel.** The solver's trees only name their curves by the
 //!   caller's handle ([`crate::geom::tree::Tree::owner_object`]), so the solver
 //!   carries the curves and the kernel ([`CcGlobalSolver::with_curves`]); a solver
@@ -326,7 +330,10 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
         let curve_node1 = self.base.branch_node(branch, 0)?;
         let curve_node2 = self.base.branch_node(branch, 1)?;
         if !has_data(curve_node1) || !has_data(curve_node2) {
-            return Err(SolidError::null_pointer(OP_LOCAL));
+            return Err(SolidError::curve_missing(
+                OP_LOCAL,
+                "the branch's curve node data",
+            ));
         }
         let tree1: &Tree<O> = self.base.tree(0)?;
         let tree2: &Tree<O> = self.base.tree(1)?;
@@ -924,7 +931,10 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
                         guesses2.push(s.start.parameters[0]);
                     }
                     if guesses1.len() == NUM_PARAM_GUESS {
-                        return Err(SolidError::sm_err(OP_LOCAL));
+                        return Err(SolidError::curve_failed(
+                            OP_LOCAL,
+                            "the parameter guesses are full",
+                        ));
                     }
                 }
             }
@@ -1206,13 +1216,15 @@ fn build_cache<O: SolutionObject>(
     match make_curve_cache::<O>(k, curve, handle) {
         Ok(c) => Ok(c),
         Err(e) if e.is_unported_or_cancelled() => Err(e),
-        Err(_) => Err(SolidError::null_pointer(OP_GCS)),
+        Err(_) => Err(SolidError::curve_missing(OP_GCS, "the curve's cache")),
     }
 }
 
 /// The cache tree (`GetTree`, `NER`).
 fn cache_tree<O: SolutionObject>(cache: &CurveCache<O>) -> Result<&Tree<O>> {
-    cache.tree().ok_or(SolidError::null_pointer(OP_GCS))
+    cache
+        .tree()
+        .ok_or_else(|| SolidError::curve_missing(OP_GCS, "the curve cache's tree"))
 }
 
 /// The axis aligned box of `CalculateBoundingBox` of `curve` over its natural
@@ -1355,6 +1367,24 @@ impl Curve {
             && super::projected_pair_monotone::supports([self, other], [*interval, *other_interval])
         {
             return super::projected_pair_monotone::solve(
+                k,
+                [self, other],
+                [*interval, *other_interval],
+                opt(0)?,
+                dist_tol,
+                opts.handles,
+                opts.target_distance,
+            );
+        }
+
+        // Identical native noncircular open ellipse arcs admit a complete
+        // finite construction. Closed seams and unrelated ellipse pairs are
+        // outside this structural class; selected proof failures propagate.
+        if op == Op::ProjectedMaximize
+            && requested == SolutionRequested::All
+            && super::projected_pair_ellipse::supports([self, other], [*interval, *other_interval])
+        {
+            return super::projected_pair_ellipse::solve(
                 k,
                 [self, other],
                 [*interval, *other_interval],
@@ -1535,7 +1565,7 @@ impl Curve {
             Op::AtDistance => {
                 let target = opts
                     .target_distance
-                    .ok_or(SolidError::null_pointer(OP_GCS))?;
+                    .ok_or_else(|| SolidError::curve_missing(OP_GCS, "the target distance"))?;
                 gs.base.set_at_distance(target);
             }
             Op::SignedDirectedMinimize | Op::Signed3dDirectedMinimize => {

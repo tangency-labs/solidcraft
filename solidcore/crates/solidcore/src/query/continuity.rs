@@ -16,8 +16,8 @@
 //! frame: its normal and its across direction both turn round, so its k-th derivative of
 //! curvature reads `(-1)^(k + 1)` times as much there.
 //!
-//! [`curve_curvature`] and [`iso_curvature`] give the teeth of a comb: an edge curve's
-//! curvature vector `κ N`, and a surface's normal curvature along one of its parameter lines
+//! [`curve_curvature`] (an edge's curve, through [`curvature_of`] any curve) and [`iso_curvature`]
+//! give the teeth of a comb: a curve's curvature vector `κ N`, and a surface's normal curvature along one of its parameter lines
 //! times its normal, `(n · S_tt / |S_t|²) n`.
 //!
 //! What is not proved: the drops find the nearest point of each surface from the given guess
@@ -26,9 +26,11 @@
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests
 
+use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
 use crate::eval::normal_section::normal_section;
 use crate::eval::{Partials, MAX_PARTIAL_ORDER};
+use crate::geom::extent1d::Extent1d;
 use crate::kernel::Kernel;
 use crate::math::{Point2, Point3, Vec3};
 use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
@@ -108,11 +110,12 @@ fn partials(k: &Kernel, s: &Surface, uv: Point2) -> Result<Partials> {
     for (i, row) in out.iter_mut().enumerate() {
         for (j, x) in row.iter_mut().enumerate() {
             if i + j <= MAX_PARTIAL_ORDER {
-                *x = d
-                    .get(i)
-                    .and_then(|r| r.get(j))
-                    .copied()
-                    .ok_or_else(|| SolidError::sm_err(OP))?;
+                *x = d.get(i).and_then(|r| r.get(j)).copied().ok_or_else(|| {
+                    SolidError::query_failed(
+                        OP,
+                        "the surface evaluation has fewer partials than asked",
+                    )
+                })?;
             }
         }
     }
@@ -194,7 +197,10 @@ pub fn continuity_at(
         .ok_or_else(|| SolidError::invalid_input(OP, "edge without a curve"))?;
     let d = curve.evaluate(k, t, 1, true, false)?;
     let (Some(&point), Some(&d1)) = (d.first(), d.get(1)) else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::query_failed(
+            OP,
+            "the curve evaluation has no first derivative",
+        ));
     };
     let speed = d1.length();
     if !(speed > 0.0 && speed.is_finite() && finite(point)) {
@@ -229,7 +235,10 @@ pub fn continuity_at(
     let (Some(a), Some(bb), Some(ja), Some(jb)) =
         (sides.first(), sides.get(1), jets.first(), jets.get(1))
     else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::query_failed(
+            OP,
+            "the edge has fewer than two sides",
+        ));
     };
     let opposed = a.normal.dot(bb.normal) < 0.0;
     let mut jumps = [0.0_f64; 3];
@@ -249,29 +258,42 @@ pub fn continuity_at(
     }))
 }
 
-/// The curvature vector `κ N` of edge `e`'s curve at its parameter `t`, from the curve's first
-/// two derivatives: `(C' × C'') × C' / |C'|⁴` (zero where the curve is straight). `None` where
-/// the curve has no tangent there or a value is not finite.
+/// The curvature vector `κ N` of edge `e`'s curve at its parameter `t`: [`curvature_of`] its
+/// curve. `None` where the curve has no tangent there or a value is not finite.
 ///
 /// # Errors
 ///
 /// [`SolidError::InvalidInput`] for an edge without a curve or a `t` that is not finite; those
 /// of the evaluation.
 pub fn curve_curvature(k: &Kernel, b: &Brep, e: EdgeId, t: f64) -> Result<Option<CurvatureAt>> {
-    if !t.is_finite() {
-        return Err(SolidError::invalid_input(
-            OP,
-            "an edge parameter that is not finite",
-        ));
-    }
     let curve = b
         .edge(e)?
         .curve
         .as_ref()
         .ok_or_else(|| SolidError::invalid_input(OP, "edge without a curve"))?;
+    curvature_of(k, curve, t)
+}
+
+/// The curvature vector `κ N` of `curve` at its parameter `t`, from the curve's first two
+/// derivatives: `(C' × C'') × C' / |C'|⁴` (zero where the curve is straight). `None` where the
+/// curve has no tangent there or a value is not finite.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a `t` that is not finite; those of the evaluation.
+pub fn curvature_of(k: &Kernel, curve: &Curve, t: f64) -> Result<Option<CurvatureAt>> {
+    if !t.is_finite() {
+        return Err(SolidError::invalid_input(
+            OP,
+            "a curve parameter that is not finite",
+        ));
+    }
     let d = curve.evaluate(k, t, 2, true, false)?;
     let (Some(&point), Some(&d1), Some(&d2)) = (d.first(), d.get(1), d.get(2)) else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::query_failed(
+            OP,
+            "the curve evaluation has no second derivative",
+        ));
     };
     let s2 = d1.dot(d1);
     if !(s2 > 0.0) {
@@ -303,10 +325,9 @@ pub fn iso_curvature(
     };
     let d = s.evaluate(k, uv, 2, 2, flags)?;
     let at = |i: usize, j: usize| {
-        d.get(i)
-            .and_then(|r| r.get(j))
-            .copied()
-            .ok_or_else(|| SolidError::sm_err(OP))
+        d.get(i).and_then(|r| r.get(j)).copied().ok_or_else(|| {
+            SolidError::query_failed(OP, "the surface evaluation has fewer partials than asked")
+        })
     };
     let (point, su, sv) = (at(0, 0)?, at(1, 0)?, at(0, 1)?);
     let (along, bend) = if along_u {
@@ -384,12 +405,33 @@ pub fn continuity_along(
 ///
 /// Those of [`curve_curvature`] and the topology lookups.
 pub fn edge_comb(k: &Kernel, b: &Brep, e: EdgeId, teeth: usize) -> Result<Vec<CurvatureAt>> {
-    let interval = b.edge(e)?.interval;
+    let edge = b.edge(e)?;
+    let curve = edge
+        .curve
+        .as_ref()
+        .ok_or_else(|| SolidError::invalid_input(OP, "edge without a curve"))?;
     let (v0, v1) = crate::topology::edge::start_end_vertices(b, e)?;
     let closed = v0.is_some() && v0 == v1;
+    curve_comb(k, curve, edge.interval, teeth, closed)
+}
+
+/// The comb of `curve` over `interval` of its parameter: [`curvature_of`] at `teeth` even
+/// steps, the ends included (a `closed` curve's end is its start, once). Stations with no
+/// tangent are left out.
+///
+/// # Errors
+///
+/// Those of [`curvature_of`].
+pub fn curve_comb(
+    k: &Kernel,
+    curve: &Curve,
+    interval: Extent1d,
+    teeth: usize,
+    closed: bool,
+) -> Result<Vec<CurvatureAt>> {
     let mut out = Vec::new();
     for f in fractions(teeth, closed) {
-        if let Some(c) = curve_curvature(k, b, e, interval.evaluate(f))? {
+        if let Some(c) = curvature_of(k, curve, interval.evaluate(f))? {
             out.push(c);
         }
     }

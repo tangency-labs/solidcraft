@@ -28,10 +28,9 @@
 //! only when the proto vertex is one vertex in each B-rep.
 //! The fork's `sm_CreateExactlyExtendedCurve` (a8caccd) continues any `SmBSplineCurve`
 //! kind and makes the analytic ones plain B-splines; `extended_curve` continues a plain
-//! B-spline only. Its correction bec8a0b (WR-601,
-//! `Kernel::fixes.imprint_extension_keeps_analytic_curve`) continues a line, circle or
-//! ellipse as that kind and no other analytic kind, so with both flags on the port is
-//! the fork at bec8a0b.
+//! B-spline only. Its correction bec8a0b (WR-601) continues a line, circle or ellipse as
+//! that kind and no other analytic kind, so with `imprint_extends_edge_to_proto_vertex` on
+//! the port is the fork at bec8a0b.
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // the fork's NaN-safe tests
 
@@ -422,16 +421,14 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
 /// added. `None` for another curve kind, an unclamped curve, or a `new_end` that is not
 /// outside the natural interval.
 ///
-/// With `Kernel::fixes.imprint_extension_keeps_analytic_curve` (bec8a0b, WR-601) a line,
-/// circle or ellipse is continued too, over its NURB, and comes back as that kind
-/// ([`analytic_of_continued_nurb`]), or `None` when that fails (as for a parabola or a
-/// hyperbola). Without it those kinds are `None`.
+/// A line, circle or ellipse is continued too (bec8a0b, WR-601), over its NURB, and comes
+/// back as that kind ([`analytic_of_continued_nurb`]), or `None` when that fails (as for a
+/// parabola or a hyperbola).
 fn extended_curve(k: &Kernel, curve: &Curve, at_end: bool, new_end: f64) -> Option<Curve> {
-    let analytic = k.fixes.imprint_extension_keeps_analytic_curve;
     let src: std::borrow::Cow<'_, BSplineCurve> = match curve.kind() {
         CurveKind::BSpline(src) => std::borrow::Cow::Borrowed(src),
-        CurveKind::Line(line) if analytic => line.base_with_nurb().ok()?,
-        CurveKind::Ellipse(ellipse) if analytic => std::borrow::Cow::Borrowed(ellipse.base()),
+        CurveKind::Line(line) => line.base_with_nurb().ok()?,
+        CurveKind::Ellipse(ellipse) => std::borrow::Cow::Borrowed(ellipse.base()),
         _ => return None,
     };
     let natural = src.natural_interval();
@@ -767,20 +764,16 @@ mod tests {
 
     /// WR-601 (bec8a0b): a circle continued past either end of its NURB stays a circle
     /// of the same frame and radius, its angular domain carried on to the new end, over
-    /// the continued NURB's parameter; without `imprint_extension_keeps_analytic_curve`
-    /// it is not continued.
+    /// the continued NURB's parameter.
     #[test]
     fn wr601_continued_circle_stays_a_circle() {
         for inside_out in [false, true] {
             for at_end in [true, false] {
-                let mut k = Kernel::default();
+                let k = Kernel::default();
                 let old = quarter_circle(&k, 10.0, inside_out);
                 let nat = old.natural_interval();
                 let h = 0.01 * nat.length();
                 let new_end = if at_end { nat.max() + h } else { nat.min() - h };
-                assert!(extended_curve(&k, &old, at_end, new_end).is_none());
-
-                k.fixes.imprint_extension_keeps_analytic_curve = true;
                 let new = extended_curve(&k, &old, at_end, new_end)
                     .unwrap_or_else(|| panic!("inside_out {inside_out} at_end {at_end}"));
                 let CurveKind::Ellipse(e) = new.kind() else {
@@ -827,8 +820,7 @@ mod tests {
     /// analytic domain `[0, 360]`, so it is not continued, as in the fork.
     #[test]
     fn wr601_circle_not_continued_out_of_its_analytic_domain() {
-        let mut k = Kernel::default();
-        k.fixes.imprint_extension_keeps_analytic_curve = true;
+        let k = Kernel::default();
         let old = quarter_circle(&k, 0.0, false);
         let nat = old.natural_interval();
         assert!(extended_curve(&k, &old, false, nat.min() - 0.01 * nat.length()).is_none());
@@ -838,8 +830,7 @@ mod tests {
     /// WR-601: a continued ellipse stays an ellipse of the same radii.
     #[test]
     fn wr601_continued_ellipse_stays_an_ellipse() {
-        let mut k = Kernel::default();
-        k.fixes.imprint_extension_keeps_analytic_curve = true;
+        let k = Kernel::default();
         let old = Curve::from(
             crate::curve::ellipse::Ellipse::new(
                 &k,
@@ -873,13 +864,11 @@ mod tests {
     #[test]
     fn wr601_continued_line_stays_a_line() {
         for dim in [3, 2] {
-            let mut k = Kernel::default();
+            let k = Kernel::default();
             let (a, b) = (Point3::new(1.0, 2.0, 0.0), Point3::new(4.0, -2.0, 0.0));
             let old = Curve::from(crate::curve::line::Line::from_points(a, b, dim));
             let nat = old.natural_interval();
             let new_end = nat.min() - 0.03 * nat.length();
-            assert!(extended_curve(&k, &old, false, new_end).is_none());
-            k.fixes.imprint_extension_keeps_analytic_curve = true;
             let new = extended_curve(&k, &old, false, new_end).unwrap();
             let CurveKind::Line(line) = new.kind() else {
                 panic!("not a line: {}", new.class_string());

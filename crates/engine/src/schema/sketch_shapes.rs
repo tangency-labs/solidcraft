@@ -226,7 +226,7 @@ pub struct DrawId(pub String);
 /// `id`, or an entry of `ids`, as `named_id` refuses it (the entry's position is not named).
 fn id_problem(id: &str) -> Option<String> {
     (!solidcraft_doc::persistent_name::text_fits_name(id))
-        .then(|| format!("the id `{id}` cannot be written into a name whole; give an id without `|`, `,`, `~`, `#` or `]`"))
+        .then(|| format!("the id `{id}` cannot be written into a name whole; give an id without `|`, `,`, `~`, `#`, `]`, `(` or `)`"))
 }
 
 impl<'de> Deserialize<'de> for DrawId {

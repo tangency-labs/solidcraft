@@ -4,7 +4,8 @@
 //! once, before the first frame (and in every test context that draws icons). Every painter here
 //! draws from that set, in the set's colour roles for the current theme, accent and colour vision;
 //! colours never come from arbitrary caller tints. A name the set does not know draws the set's
-//! placeholder master; with no set installed nothing is drawn.
+//! placeholder master; with no set installed nothing is drawn. A host that draws another host's
+//! icons plus a few of its own installs [`IconSet::extended`] over that host's data.
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -14,8 +15,8 @@ pub mod glyphs;
 mod svg;
 
 pub use svg::{
-    Doc, IconData, IconSet, Look, MAX_ACCENTS, MAX_ROLES, PLACEHOLDER, Palette, Resolved, audit, render, render_tinted, set_theme_palette,
-    theme_palette, theme_palette_state,
+    Doc, IconData, IconExtension, IconSet, Look, MAX_ACCENTS, MAX_ROLES, PLACEHOLDER, Palette, Resolved, audit, render, render_tinted,
+    set_theme_palette, theme_palette, theme_palette_state,
 };
 
 static INSTALLED: OnceLock<&'static IconSet> = OnceLock::new();

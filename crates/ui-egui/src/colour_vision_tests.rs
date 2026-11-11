@@ -5,7 +5,7 @@
 //! with their paper, Brettel on white and its own anchors.
 //!
 //! When a token edit breaks a mode here, adjust its measured variant. Shared icon accents live
-//! in `assets/icons/ui/design/palette.toml`; `crates/theme/src/palettes.rs` holds the primary
+//! in `crates/look/icons/design/palette.toml`; `crates/theme/src/palettes.rs` holds the primary
 //! strokes the UI tokens share with them (`icon_strokes`, held equal by an icon test) and owns the remaining UI-only colour-vision adjustments.
 
 use std::collections::BTreeSet;
