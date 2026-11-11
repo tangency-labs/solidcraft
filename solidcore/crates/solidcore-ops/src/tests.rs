@@ -643,6 +643,72 @@ fn the_result_contract() {
     );
 }
 
+/// `check_solid` names the test a body fails (#15035): a box passes; a sheet is not manifold; a
+/// box with every face flipped fails the pointer check; a box with its material outside is
+/// proved inside out. The body checked is unchanged.
+#[test]
+fn check_solid_names_the_test_a_body_fails() {
+    use crate::SolidTest;
+    use solidcore::primitive::api_primitives::{create_box, create_plane};
+    use solidcore::topology::brep::p1::regions;
+    all_fixes();
+    let boxed = |k: &mut solidcore::Kernel| {
+        create_box(k, solidcore::Vec3::new(0.0, 0.0, 0.0), 1.0, 2.0, 3.0)
+    };
+    let solid = make_box([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap();
+    assert_eq!(solid.check_solid(), Ok(()));
+    let bodies = run("check_solid bodies", |k| {
+        let sheet = create_plane(k, solidcore::Vec3::new(0.0, 0.0, 0.0), 1.0, 1.0)?;
+        let mut flipped = boxed(k)?;
+        for f in flipped.face_list().to_vec() {
+            flip_face_orientation(&mut flipped, f)?;
+        }
+        let mut inside_out = boxed(k)?;
+        for r in regions(&inside_out, None)? {
+            let g = inside_out.region_mut(r)?;
+            g.is_void = 1 - g.is_void;
+        }
+        Ok(Some([sheet, flipped, inside_out].map(Body::new)))
+    })
+    .unwrap()
+    .unwrap();
+    let before = bodies.each_ref().map(|b| b.to_smb(true).unwrap());
+    let tests = bodies.each_ref().map(|b| b.check_solid().err());
+    assert_eq!(
+        tests,
+        [
+            Some(Error::NotSolidBecause(SolidTest::NotManifold)),
+            Some(Error::NotSolidBecause(SolidTest::PointersInvalid)),
+            Some(Error::NotSolidBecause(SolidTest::VolumeNegative)),
+        ]
+    );
+    assert_eq!(bodies.each_ref().map(|b| b.to_smb(true).unwrap()), before);
+}
+
+/// A kernel invariant found broken is `Invariant`, naming the operation and what did not hold;
+/// a call made before its preparation stays `Exception` (#15035). No input reaches a broken
+/// invariant (each one found is a defect, fixed), so the kernel's error is made here.
+#[test]
+fn a_broken_kernel_invariant_is_named_not_an_exception() {
+    use solidcore::SolidError;
+    assert_eq!(
+        crate::error::status(SolidError::PortInvariant {
+            operation: "offset::close_loop_gaps",
+            reason: "a kept edge without a 3D curve",
+        }),
+        Error::Invariant {
+            operation: "offset::close_loop_gaps",
+            reason: "a kept edge without a 3D curve",
+        }
+    );
+    assert_eq!(
+        crate::error::status(SolidError::PreparationRequired {
+            operation: "query::distance",
+        }),
+        Error::Exception
+    );
+}
+
 /// What a refused edit must give back as it came in, beyond the `.smb` bytes (which carry no
 /// attributes): the naming, the key, the locked box, and every face's and edge's attributes in
 /// order (a temporary one and the provenance among them), with the geometry and topology.

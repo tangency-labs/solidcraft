@@ -95,10 +95,53 @@ pub fn is_outward_solid(
     k: &mut crate::kernel::Kernel,
     b: &mut crate::topology::Brep,
 ) -> crate::Result<bool> {
+    Ok(outward_solid_failure(k, b)?.is_none())
+}
+
+/// Which test a body fails to be a closed solid facing out ([`outward_solid_failure`] and its
+/// siblings), in the order the tests run: the first one that fails is the one named.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SolidTest {
+    /// The body is not one closed manifold solid ([`is_manifold_solid`]).
+    NotManifold,
+    /// The body is neither one closed manifold solid nor closed solids touching along edges or
+    /// at vertices ([`crate::query::api_queries::brep_is_closed_touching_solids`]): the test of
+    /// [`is_outward_touching_solids`].
+    NotClosedSolids,
+    /// The validity check's pointer check failed ([`validation::check_brep`] at `Level0`: its
+    /// status, or a report that leaves `AssertValid` unrun): a body with every face flipped
+    /// (`FlipFaceOrientation`), or a vertex whose tolerance is 1000 times the body's.
+    PointersInvalid,
+    /// The pointer check passed but the validity check's `AssertValid` did not: a B-spline
+    /// face whose surface has an internal pole, for one.
+    Invalid,
+    /// A loop's certified area leaves its orientation undecided. No test of the solid check
+    /// decides a loop's orientation by its area yet, so none of the checks here returns it;
+    /// it is named so a caller's match already covers it when one does.
+    LoopOrientationUndecided,
+    /// The volume's certified enclosure lies below 0: the body is proved inside out.
+    VolumeNegative,
+    /// The volume's certified enclosure still holds 0 when refinement ends: its sign is not
+    /// proved ([`crate::mass::enclosure::VolumeSign::Undecided`]).
+    VolumeUndecided,
+}
+
+/// As [`is_outward_solid`], naming the test the body fails: `None` where it is a valid closed
+/// solid facing out, else the first test that fails ([`SolidTest::NotManifold`],
+/// [`SolidTest::PointersInvalid`], [`SolidTest::Invalid`], [`SolidTest::VolumeNegative`],
+/// [`SolidTest::VolumeUndecided`]). The tests and their order are [`is_outward_solid`]'s.
+///
+/// # Errors
+///
+/// As [`is_outward_solid`].
+pub fn outward_solid_failure(
+    k: &mut crate::kernel::Kernel,
+    b: &mut crate::topology::Brep,
+) -> crate::Result<Option<SolidTest>> {
     if !is_manifold_solid(b)? {
-        return Ok(false);
+        return Ok(Some(SolidTest::NotManifold));
     }
-    is_valid_and_outward(k, b)
+    valid_and_outward_failure(k, b)
 }
 
 /// As [`is_outward_solid`], the body allowed to be closed solids touching along edges or at
@@ -112,10 +155,23 @@ pub fn is_outward_touching_solids(
     k: &mut crate::kernel::Kernel,
     b: &mut crate::topology::Brep,
 ) -> crate::Result<bool> {
+    Ok(outward_touching_solids_failure(k, b)?.is_none())
+}
+
+/// As [`is_outward_touching_solids`], naming the test the body fails:
+/// [`SolidTest::NotClosedSolids`] for its topology test, else as [`outward_solid_failure`].
+///
+/// # Errors
+///
+/// As [`is_outward_touching_solids`].
+pub fn outward_touching_solids_failure(
+    k: &mut crate::kernel::Kernel,
+    b: &mut crate::topology::Brep,
+) -> crate::Result<Option<SolidTest>> {
     if !is_manifold_solid(b)? && !crate::query::api_queries::brep_is_closed_touching_solids(b)? {
-        return Ok(false);
+        return Ok(Some(SolidTest::NotClosedSolids));
     }
-    is_valid_and_outward(k, b)
+    valid_and_outward_failure(k, b)
 }
 
 /// The validity check, no unsure region, and the volume's sign, for a closed body: the part
@@ -132,15 +188,34 @@ pub fn is_valid_and_outward(
     k: &mut crate::kernel::Kernel,
     b: &mut crate::topology::Brep,
 ) -> crate::Result<bool> {
+    Ok(valid_and_outward_failure(k, b)?.is_none())
+}
+
+/// As [`is_valid_and_outward`], naming the test the body fails: [`SolidTest::PointersInvalid`],
+/// [`SolidTest::Invalid`], [`SolidTest::VolumeNegative`] or [`SolidTest::VolumeUndecided`], in
+/// that order; `None` where every one passes.
+///
+/// # Errors
+///
+/// As [`is_valid_and_outward`].
+pub fn valid_and_outward_failure(
+    k: &mut crate::kernel::Kernel,
+    b: &mut crate::topology::Brep,
+) -> crate::Result<Option<SolidTest>> {
     let c = validation::check_brep(k, b, validation::CheckLevel::Level0)?;
-    if c.pointers_status != crate::error::SM_SUCCESS || c.assert_valid != Some(true) {
-        return Ok(false);
+    // `AssertValid` does not run (`None`) where a pointer report failed
+    if c.pointers_status != crate::error::SM_SUCCESS || c.assert_valid.is_none() {
+        return Ok(Some(SolidTest::PointersInvalid));
+    }
+    if c.assert_valid != Some(true) {
+        return Ok(Some(SolidTest::Invalid));
     }
     crate::mass::integrator::properties::no_unsure_region(b)?;
-    Ok(matches!(
-        crate::mass::enclosure::volume_sign(k, b)?,
-        crate::mass::enclosure::VolumeSign::Positive(_)
-    ))
+    Ok(match crate::mass::enclosure::volume_sign(k, b)? {
+        crate::mass::enclosure::VolumeSign::Positive(_) => None,
+        crate::mass::enclosure::VolumeSign::Negative(_) => Some(SolidTest::VolumeNegative),
+        crate::mass::enclosure::VolumeSign::Undecided(_) => Some(SolidTest::VolumeUndecided),
+    })
 }
 
 #[cfg(test)]
