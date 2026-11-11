@@ -40,13 +40,14 @@ out short and the round failed.
 
 | case | old | new |
 |---|---|---|
-| seam-opposite | 1001, 10 v, 15 e, 8 f | 0, 12 v, 18 e, 9 f |
-| seam-three-quarter | 1001, 10 v, 15 e, 8 f | 0, 12 v, 18 e, 9 f |
+| `attributed-box-cylinder-arc-round-seam-opposite-r2` | 1001; 10 v, 15 e, 8 f | 0; 12 v, 18 e, 9 f |
+| `attributed-box-cylinder-arc-round-seam-three-quarter-r2` | 1001; 10 v, 15 e, 8 f | 0; 12 v, 18 e, 9 f |
 
 Why right: the same box at 90 degrees (`seam-quarter-r2`), which main already built, gives
 12, 18 and 9 too, and the first two numbers of the attributes digest agree to 1.3e-10
-relative (459392.61597 at 90 degrees; 459392.61592 and 459392.61603 at 180 and 270). The digest's
-third number depends on where the faces lie, so it differs between the three directions.
+relative (459392.61597 at 90 degrees; 459392.61592 and 459392.61603 at 180 and 270). The
+digest's third number depends on where the faces lie, so it differs between the three
+directions.
 
 ## WR-422 and WR-592: a rail point on the arc's axis (5 rows)
 
@@ -56,29 +57,46 @@ third number depends on where the faces lie, so it differs between the three dir
   285988) and the first geometry block's third number grows by exactly 224, while every
   other geometry number agrees to 1e-14: by the digests, the same solid with its entities
   in another order.
-- `issue920-cylinder-rim-edge1/edge2-constant/variable-constant-law-r10.0` (WR-592): a
-  cylinder's rim rounded at its own radius, so the rail runs on the axis. Status, counts,
-  topology digest and the mass check unchanged; the volume, 1570.796, moves by under 5e-13
-  and every other mass property by under 3e-10 (absolute; 5.4e-9 relative at most),
-  the edge2 rows' geometry digest by 1.2e-16 relative: the rail point now lies on the
-  axis instead of up to the solver's tolerance from it.
+- The four `issue920-cylinder-rim-*-r10.0` rows (WR-592): a cylinder's rim rounded at its
+  own radius, so the rail runs on the axis. Status, counts, topology digest and the mass
+  check unchanged; the edge2 rows' geometry digest moves by 1.2e-16 relative. The rail
+  point now lies on the axis instead of up to the solver's tolerance from it.
+
+| case | volume old | volume new | largest mass change |
+|---|---|---|---|
+| `issue920-cylinder-rim-edge1-constant-r10.0` | 1570.796376097398 | 1570.796376097398 | 1.2e-11 |
+| `issue920-cylinder-rim-edge1-variable-constant-law-r10.0` | 1570.796376097398 | 1570.796376097398 | 1.2e-11 |
+| `issue920-cylinder-rim-edge2-constant-r10.0` | 1570.796380667838 | 1570.796380667838 | 2.3e-10 |
+| `issue920-cylinder-rim-edge2-variable-constant-law-r10.0` | 1570.796380667838 | 1570.796380667838 | 2.3e-10 |
+
+  The volumes agree to the 15 digits shown (under 5e-13); the largest change is in a moment
+  of inertia, absolute.
 
 ## WR-595 and WR-603: a trace from a tangent point (7 rows)
 
-`stubs4-degenerate-brepForFillet2-e5/e7/e9-r0.5` and `stubs4-degenerate-test5-e2/e3/e5/e9-r0.5`
-(upstream's `Fillet/brepForFillet2.smb` and `Fillet/test5.smb`, one edge rounded r 0.5). The
+Upstream's `Fillet/brepForFillet2.smb` and `Fillet/test5.smb`, one edge rounded r 0.5. The
 round's trace starts at a tangent point: it now starts toward the next through point and
 takes the point's tangent from the forward step.
 
 | case | volume old | volume new | relative |
 |---|---|---|---|
-| brepForFillet2-e5 | 1440.251409 | 1440.251204 | 1.4e-7 |
-| brepForFillet2-e7 | 1434.446892 | 1434.446720 | 1.2e-7 |
-| brepForFillet2-e9 | 1440.267312 | 1440.267307 | 3.7e-9 |
+| `stubs4-degenerate-brepForFillet2-e5-r0.5` | 1440.251409 | 1440.251204 | 1.4e-7 |
+| `stubs4-degenerate-brepForFillet2-e7-r0.5` | 1434.446892 | 1434.446720 | 1.2e-7 |
+| `stubs4-degenerate-brepForFillet2-e9-r0.5` | 1440.267312 | 1440.267307 | 3.7e-9 |
+
+`test5` records no volume (mass status 1007 before and after); the third number of its first
+geometry digest block:
+
+| case | old | new | relative |
+|---|---|---|---|
+| `stubs4-degenerate-test5-e2-r0.5` | 18376.163061 | 18376.161971 | 5.9e-8 |
+| `stubs4-degenerate-test5-e3-r0.5` | 21582.090046 | 21582.089480 | 2.6e-8 |
+| `stubs4-degenerate-test5-e5-r0.5` | 23475.246059 | 23475.246803 | 3.2e-8 |
+| `stubs4-degenerate-test5-e9-r0.5` | 31560.318670 | 31560.320444 | 5.6e-8 |
 
 - Status, vertex, edge and face counts, the topology digest and the mass status are the same
-  before and after in all seven. `test5` records no volume (mass status 1007 before and
-  after); its geometry digest moves by under 1.3e-7 relative.
+  before and after in all seven. Every number of the `test5` geometry digests moves by under
+  1.3e-7 relative.
 - No closed form exists for these rounds. The rows move by the trace's own accuracy, and the
   path is the fork's (tangency-labs/smlib@68fb916 and f8fd83e), which SolidCraft has run
   since both flags went into its presets. `tests/wr603_trace_from_tangent_point.rs` checks
@@ -92,8 +110,8 @@ the point record (its position, derivatives and tangent, digested to three numbe
 the status (0, or 1001 in `gen0027` and `gen0580`) and the offsets do not. The changed
 line only acts on a point of type `TangentPoint` for which both steps found a point, so
 every moved case is one: its tangent is now the one-sided difference to the forward step,
-not the central difference across the point. These inputs are random, so no row has an independent value; the
-behaviour is the fork's (tangency-labs/smlib@f8fd83e).
+not the central difference across the point. These inputs are random, so no row has an
+independent value; the behaviour is the fork's (tangency-labs/smlib@f8fd83e).
 
 | case | point digest old | point digest new |
 |---|---|---|
