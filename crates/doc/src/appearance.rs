@@ -381,6 +381,12 @@ impl Document {
         looks
     }
 
+    /// A model body's appearance chain (its own look, its component's, its material's), as the
+    /// viewport resolves it, without looking the body up by name.
+    pub fn model_body_chain(&self, body: &crate::ModelBody) -> AppearanceChain {
+        self.body_appearance_chain(body.definition_name(), self.model_body_component(body))
+    }
+
     /// Shared definition appearance for a computed occurrence body.
     pub fn model_body_look(&self, body: &crate::ModelBody) -> Option<Look> {
         self.body_appearance_chain(body.definition_name(), self.model_body_component(body)).resolved().cloned()
@@ -416,7 +422,7 @@ impl Document {
     }
 
     /// Imported paint alone, after applying body-appearance precedence.
-    pub(crate) fn imported_face_colors(&self, b: &crate::ModelBody) -> Vec<(usize, Look)> {
+    pub fn imported_face_colors(&self, b: &crate::ModelBody) -> Vec<(usize, Look)> {
         // An assigned body appearance replaces imported paint; design face appearances still win.
         let to8 = |x: f32| (x.clamp(0.0, 1.0) * 255.0).round() as u8;
         if self.appearances.bodies.contains_key(b.definition_name()) {

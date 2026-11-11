@@ -147,7 +147,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&LIST_CONTRACT)
         .output(crate::schema::output_schema_for::<AppearanceListResult>)
-        .params("body?: name (or a placed copy's, `KB (K:2)`: the body it shows) → assigned appearances; with body, its resolved look and its faces' (face index, look)"),
+        .params("body?: name (or a placed copy's, `KB (K:2)`: the body it shows) → in_design: each look the design shows with its bodies, faces (assigned, by point), imported_faces (by face index), components and sources (assigned | material | imported); bodies/faces/components: the assigned appearances; with body, its resolved look and its faces' (face index, look)"),
     CommandSpec::new("material.list", "List Materials", crate::checked!("material.list", material_list))
         .icon("list")
         .noundo()
@@ -807,8 +807,8 @@ pub(crate) fn color_param(v: &Value) -> Option<[u8; 3]> {
 
 use crate::schema::appearance::{
     AppearanceAssignParams, AppearanceAssignResult, AppearanceLibraryParams, AppearanceLibraryResult, AppearanceListParams, AppearanceListResult,
-    BodyLooks, ComponentLookReply, FaceIndexLook, FaceLookReply, FaceSpot, LibraryAppearance, LookInDesign, LookReply, PbrReply, PlainAppearance,
-    StarterAppearance,
+    BodyFace, BodyLooks, ComponentLookReply, FaceIndexLook, FaceLookReply, FaceSpot, LibraryAppearance, LookInDesign, LookReply, LookSource,
+    PbrReply, PlainAppearance, StarterAppearance,
 };
 
 const ASSIGN_CONTRACT: TypedContract<AppearanceAssignParams> = TypedContract::new();
@@ -1072,39 +1072,80 @@ fn appearance_library(_s: &mut Session, _p: &Value) -> Result<Value> {
 }
 
 fn appearance_list(s: &mut Session, p: &Value) -> Result<Value> {
+    use solidcraft_doc::appearance::Look;
     let a = &s.doc.appearances;
-    // "In this design": each look used, with where.
-    type Used = Vec<(solidcraft_doc::appearance::Look, Vec<String>, Vec<FaceSpot>, Vec<u64>)>;
-    let mut used: Used = Vec::new();
-    fn slot(used: &mut Used, l: &solidcraft_doc::appearance::Look) -> usize {
-        match used.iter().position(|(u, ..)| u == l) {
-            Some(i) => i,
-            None => {
-                used.push((l.clone(), Vec::new(), Vec::new(), Vec::new()));
-                used.len() - 1
-            }
+    // "In this design": each look the design shows, with where and why.
+    #[derive(Default)]
+    struct Used {
+        bodies: Vec<String>,
+        faces: Vec<FaceSpot>,
+        components: Vec<u64>,
+        imported_faces: Vec<BodyFace>,
+        sources: std::collections::BTreeSet<LookSource>,
+    }
+    let mut used: Vec<(Look, Used)> = Vec::new();
+    fn slot<'a>(used: &'a mut Vec<(Look, Used)>, l: &Look, source: LookSource) -> Option<&'a mut Used> {
+        if !used.iter().any(|(u, _)| u == l) {
+            used.push((l.clone(), Used::default()));
         }
+        let (_, entry) = used.iter_mut().find(|(u, _)| u == l)?;
+        entry.sources.insert(source);
+        Some(entry)
     }
     for (b, l) in &a.bodies {
-        let i = slot(&mut used, l);
-        if let Some(u) = used.get_mut(i) {
-            u.1.push(b.clone());
+        if let Some(u) = slot(&mut used, l, LookSource::Assigned) {
+            u.bodies.push(b.clone());
         }
     }
     for f in &a.faces {
-        let i = slot(&mut used, &f.look);
-        if let Some(u) = used.get_mut(i) {
-            u.2.push(FaceSpot { body: f.body.clone(), point: [f.point.x, f.point.y, f.point.z] });
+        if let Some(u) = slot(&mut used, &f.look, LookSource::Assigned) {
+            u.faces.push(FaceSpot { body: f.body.clone(), point: [f.point.x, f.point.y, f.point.z] });
         }
     }
     for (c, l) in &a.components {
-        let i = slot(&mut used, l);
-        if let Some(u) = used.get_mut(i) {
-            u.3.push(*c);
+        if let Some(u) = slot(&mut used, l, LookSource::Assigned) {
+            u.components.push(*c);
         }
     }
-    let in_design =
-        used.into_iter().map(|(l, bodies, faces, components)| LookInDesign { look: LookReply::from(&l), bodies, faces, components }).collect();
+    // What the bodies show without an assignment of their own or their component's: their
+    // physical material's look, else the colours they were imported with, as the viewport draws them.
+    let state = s.model.state();
+    for b in &state.bodies {
+        let imported_faces = s.doc.imported_face_colors(b);
+        let authored: std::collections::BTreeSet<usize> = s.doc.authored_face_colors(b).into_iter().map(|(face, _)| face).collect();
+        let chain = s.doc.model_body_chain(b);
+        // A body every face of which has a colour of its own shows no colour of its own.
+        let painted: std::collections::BTreeSet<usize> = imported_faces.iter().map(|(face, _)| *face).chain(authored.iter().copied()).collect();
+        let face_count = b.body.face_count();
+        let body_shows = face_count == 0 || painted.len() < face_count;
+        if body_shows && chain.body.is_none() && chain.component.is_none() {
+            let shown = match &chain.material {
+                Some(material) => Some((material.clone(), LookSource::Material)),
+                None => s.doc.model_display_look(b).map(|look| (look, LookSource::Imported)),
+            };
+            if let Some((look, source)) = shown
+                && let Some(u) = slot(&mut used, &look, source)
+            {
+                u.bodies.push(b.name.clone());
+            }
+        }
+        for (face, look) in imported_faces.into_iter().filter(|(face, _)| !authored.contains(face)) {
+            if let Some(u) = slot(&mut used, &look, LookSource::Imported) {
+                u.imported_faces.push(BodyFace { body: b.name.clone(), face });
+            }
+        }
+    }
+    let in_design = used
+        .into_iter()
+        .map(|(l, u)| LookInDesign {
+            look: LookReply::from(&l),
+            bodies: u.bodies,
+            faces: u.faces,
+            components: u.components,
+            imported_faces: u.imported_faces,
+            sources: u.sources.into_iter().collect(),
+        })
+        .collect();
     let mut out = AppearanceListResult {
         in_design,
         bodies: a.bodies.iter().map(|(b, l)| (b.clone(), LookReply::from(l))).collect(),

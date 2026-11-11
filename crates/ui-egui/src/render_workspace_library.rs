@@ -442,7 +442,7 @@ pub(super) fn tile_sphere(entry: &Value) -> ui_kit::Sphere {
     ui_kit::Sphere { color, kind, opacity: Some(opacity as f32) }
 }
 fn user_count(entry: &Value) -> usize {
-    ["bodies", "faces", "components"].iter().filter_map(|key| entry[*key].as_array()).map(Vec::len).fold(0, usize::saturating_add)
+    ["bodies", "faces", "imported_faces", "components"].iter().filter_map(|key| entry[*key].as_array()).map(Vec::len).fold(0, usize::saturating_add)
 }
 fn usage_for<'a>(entry: &Value, used: &'a [Value]) -> Option<&'a Value> {
     let source = entry.get("resource").unwrap_or(entry);

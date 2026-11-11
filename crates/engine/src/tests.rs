@@ -3900,6 +3900,47 @@ fn appearances_survive_later_features() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// "In this design" lists the looks the design shows: an imported STEP's body and face colours by
+/// the names the file gives them (an unnamed one by its values), a physical material's look and
+/// the assigned looks, each with where it comes from. A body with no colour of its own is not
+/// listed, and a look given and imported alike is one entry.
+#[test]
+fn appearance_list_names_the_looks_the_design_shows() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-look-names-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let step = dir.join("named.step");
+    let mut source = Session::default();
+    run(&mut source, "solid.box", json!({"corner": [0, 0, 0], "length": 30, "width": 20, "height": 20, "body_name": "Red"}));
+    run(&mut source, "solid.box", json!({"corner": [40, 0, 0], "length": 30, "width": 20, "height": 20, "operation": "new", "body_name": "Plain"}));
+    run(&mut source, "appearance.assign", json!({"bodies": ["Red"], "name": "Signal red", "color": "#c42824"}));
+    run(&mut source, "appearance.assign", json!({"bodies": ["Plain"], "color": "#00ff00"}));
+    run(&mut source, "appearance.assign", json!({"faces": [[15, 10, 20]], "name": "Lid", "color": "#ffff00"}));
+    run(&mut source, "file.export", json!({"path": step.to_string_lossy()}));
+    let mut s = Session::default();
+    run(&mut s, "doc.open", json!({"path": step.to_string_lossy()}));
+    run(&mut s, "solid.box", json!({"corner": [100, 0, 0], "length": 10, "width": 10, "height": 10, "operation": "new", "body_name": "Metal"}));
+    run(&mut s, "solid.box", json!({"corner": [140, 0, 0], "length": 10, "width": 10, "height": 10, "operation": "new", "body_name": "Bare"}));
+    run(&mut s, "material.assign", json!({"bodies": ["Metal"], "material": "Brass"}));
+    let list = |s: &mut Session| run(s, "appearance.list", json!({}))["in_design"].as_array().cloned().unwrap();
+    let entry = |list: &[Value], name: &str| list.iter().find(|l| l["name"] == name).cloned().unwrap_or_else(|| panic!("no {name} in {list:?}"));
+    let used = list(&mut s);
+    let red = entry(&used, "Signal red");
+    assert_eq!((&red["color"], &red["sources"], &red["bodies"]), (&json!("#c42824"), &json!(["imported"]), &json!(["Red"])), "{red}");
+    let lid = entry(&used, "Lid");
+    assert_eq!((&lid["sources"], lid["imported_faces"].as_array().map(Vec::len)), (&json!(["imported"]), Some(1)), "{lid}");
+    assert_eq!(lid["imported_faces"][0]["body"], "Red");
+    let plain = entry(&used, "Custom(0,255,0)");
+    assert_eq!((&plain["sources"], &plain["bodies"]), (&json!(["imported"]), &json!(["Plain"])), "an unnamed colour by its values: {plain}");
+    let brass = entry(&used, "Brass");
+    assert_eq!((&brass["sources"], &brass["bodies"]), (&json!(["material"]), &json!(["Metal"])), "{brass}");
+    assert!(used.iter().all(|l| l["bodies"].as_array().unwrap().iter().all(|b| b != "Bare")), "a body without a colour is not listed: {used:?}");
+    // The imported look given to another body: one entry, both sources.
+    run(&mut s, "appearance.assign", json!({"bodies": ["Bare"], "name": "Signal red", "color": "#c42824"}));
+    let red = entry(&list(&mut s), "Signal red");
+    assert_eq!((&red["sources"], &red["bodies"]), (&json!(["assigned", "imported"]), &json!(["Bare", "Red"])), "{red}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// The original #2 RGB import acceptance, including later topology and placement edits.
 #[test]
 fn imported_rgb_appearances_survive_edits_reopen_and_step_export() {
