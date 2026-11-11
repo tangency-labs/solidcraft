@@ -267,6 +267,6 @@ mod tests {
     /// whose conversion waits on other open work or a later part of the slice.
     #[test]
     fn the_surface_routines_build_no_bare_statuses() {
-        super::super::bare_scan::assert_waiting("surface", 51, &[("surface/plane/p2.rs", 1)]);
+        super::super::bare_scan::assert_waiting("surface", 51, &[]);
     }
 }

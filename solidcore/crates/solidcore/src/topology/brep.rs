@@ -62,7 +62,7 @@ pub use p8::{
     create_face_from_surface, create_faces_with_curves, create_planar_face_with_3d_curves,
     create_planar_faces_with_3d_curves, FaceBuildEnv,
 };
-pub use p9::{make_vertex_loop, orient_sheet_surfaces};
+pub use p9::{make_vertex_loop, orient_sheet_surfaces, OrientSheetNote};
 
 /// Whether `b` is a valid closed solid facing out (not upstream): one closed manifold solid
 /// ([`is_manifold_solid`]), passed by the kernel's validity check (its pointer check and
