@@ -166,6 +166,31 @@ fn atan_point_enclosure(v: f64) -> Ivl {
     }
 }
 
+/// The enclosure of `atan` at the point `v`, either sign, from the series at the half
+/// angle: `atan v = 2 atan(v / (1 + sqrt(1 + v^2)))` for every real `v`, and for
+/// `|v| <= 1/2` the half-angle argument is at most `0.237`, so its series (which
+/// [`super::alternating`] encloses over the interval holding it, its terms falling) needs
+/// about half the terms. Outside `1e-100 <= |v| <= 1/2` it is the whole-angle enclosure.
+fn atan_point_halved(v: f64) -> Ivl {
+    let a = v.abs();
+    if !(1.0e-100..=0.5).contains(&a) {
+        return atan_point_enclosure(v);
+    }
+    let x = Ivl::from(a);
+    let one = Ivl::from(1.0);
+    let y = x / (one + (one + x * x).sqrt());
+    if !(y.lo > 0.0 && y.hi <= 0.25) {
+        return atan_point_enclosure(v);
+    }
+    let half = super::alternating(y, y * y, |n| super::reciprocal(2 * n + 1));
+    let whole = Ivl::from(2.0) * half;
+    if v < 0.0 {
+        Ivl::new(-whole.hi, -whole.lo)
+    } else {
+        whole
+    }
+}
+
 fn atan_enclosure(x: Ivl) -> Ivl {
     Ivl::new(atan_point_enclosure(x.lo).lo, atan_point_enclosure(x.hi).hi)
 }
@@ -173,6 +198,7 @@ fn atan_enclosure(x: Ivl) -> Ivl {
 pub(super) fn tan(x: f64) -> Result<f64> {
     verify(x.tan(), tan_certified(Ivl::from(x)), x)
 }
+#[cfg(test)]
 fn atan(x: f64) -> Result<f64> {
     // atan_enclosure of the point interval [x, x], its one endpoint enclosed once
     verify(x.atan(), atan_point_enclosure(x), x)
@@ -247,6 +273,26 @@ fn magnitude(a: Box3) -> Ivl {
 }
 fn finite_box(a: Box3) -> bool {
     a.iter().all(|v| v.lo.is_finite() && v.hi.is_finite())
+}
+
+/// The exact turn at `t` in the station span `[a, b]` and its rate, enclosed as
+/// [`ProceduralSweep::turn_enclosure`] does but for the atan: `x_box` encloses the exact
+/// `x = tan(width / 4) (2 (t - a) / width - 1)`, `atan_x` the exact `atan` of the double
+/// `x` near it, and as `|atan' | <= 1`, `atan(x_box)` lies within `|x_box - x|` of
+/// `atan(x)` (one series for the turn, not one at each end of `x_box`). Outside
+/// `|x| <= 1/2`, where the series is not taken, the angle's enclosure is the whole line,
+/// as there. The rate is the same expression as there.
+fn turn_near(t: f64, a: f64, b: f64, tau_box: Ivl, x: f64, atan_x: Ivl) -> (Ivl, Ivl) {
+    let width = Ivl::from(b) - Ivl::from(a);
+    let x_box = tau_box * (Ivl::from(2.0) * (Ivl::from(t) - Ivl::from(a)) / width - Ivl::from(1.0));
+    let rate = Ivl::from(4.0) * tau_box / (width * (Ivl::from(1.0) + x_box * x_box));
+    if !(x_box.lo >= -0.5 && x_box.hi <= 0.5) {
+        return (Ivl::whole(), rate);
+    }
+    let off = (x_box - Ivl::from(x)).mag();
+    let atan = atan_x + Ivl::new(-off, off);
+    let theta = (Ivl::from(a) + Ivl::from(b)) / Ivl::from(2.0) + Ivl::from(2.0) * atan;
+    (theta, rate)
 }
 
 impl ProceduralSweep {
@@ -328,6 +374,8 @@ impl ProceduralSweep {
         Ok((t, a, b, index))
     }
 
+    /// The exact turn at `t` and its rate, enclosed from the atan series at both ends of
+    /// the enclosure of `x`.
     fn turn_enclosure(&self, t: f64, ending: bool) -> Result<(Ivl, Ivl)> {
         let (t, a, b, index) = self.checked_span_index(t, ending)?;
         let width = Ivl::from(b) - Ivl::from(a);
@@ -339,16 +387,39 @@ impl ProceduralSweep {
         Ok((theta, rate))
     }
 
+    /// The checked turn at `t`, on the span that ends there when `ending`.
+    ///
+    /// The angle is checked first against the exact turn enclosed from the series that
+    /// checked `atan(x)` ([`Self::turn_near`]), and only where that cannot prove it,
+    /// against the endpoint enclosure [`Self::turn_enclosure`]: it passes when either
+    /// proves it, so the order never changes an answer.
     pub(super) fn checked_turn_at_side(&self, t: f64, ending: bool) -> Result<Turn> {
         let (t, a, b, index) = self.checked_span_index(t, ending)?;
         let width = b - a;
         let tau = self.span_tau_at(index, a, b)?;
         let x = tau * (2.0 * (t - a) / width - 1.0);
-        let theta = 0.5 * (a + b) + 2.0 * atan(x)?;
+        // the half-angle series first; where it cannot prove the candidate, the
+        // whole-angle one (either proves it)
+        let halved = atan_point_halved(x);
+        let (atan, atan_x) = if let Ok(atan) = verify(x.atan(), halved, x) {
+            (atan, halved)
+        } else {
+            let whole = atan_point_enclosure(x);
+            (verify(x.atan(), whole, x)?, whole)
+        };
+        let theta = 0.5 * (a + b) + 2.0 * atan;
         let rate = 2.0 * tau / (1.0 + x * x) * (2.0 / width);
-        let (theta_box, rate_box) = self.turn_enclosure(t, ending)?;
+        let tau_box = self.span_tau_box_at(index, a, b);
+        let (near_box, rate_box) = turn_near(t, a, b, tau_box, x, atan_x);
+        let scale = a.abs().max(b.abs());
+        let theta = if let Ok(theta) = verify(theta, near_box, scale) {
+            theta
+        } else {
+            let (theta_box, _) = self.turn_enclosure(t, ending)?;
+            verify(theta, theta_box, scale)?
+        };
         Ok(Turn {
-            theta: verify(theta, theta_box, a.abs().max(b.abs()))?,
+            theta,
             rate: verify(rate, rate_box, rate_box.mag())?,
             tau,
         })
@@ -625,6 +696,34 @@ mod tests {
         assert!(verify(0.5, s, x).is_err());
         assert!(verify(f64::NAN, s, x).is_err());
         assert!(Rotation::new(3e15).is_err());
+    }
+
+    /// The half-angle atan meets the whole-angle one, within some roundings, on both
+    /// signs and across `|v| <= 1/2`, and is the whole-angle one outside.
+    #[test]
+    fn the_half_angle_atan_meets_the_whole_angle_one() {
+        for i in -5000..=5000 {
+            let v = f64::from(i) * 1.0e-4;
+            for v in [v, v * 1.0e-90, v + 3.3e-5] {
+                if v.abs() > 0.5 {
+                    continue;
+                }
+                let (h, w) = (atan_point_halved(v), atan_point_enclosure(v));
+                let slack = 1.0e-14 * v.abs() + 1.0e-300;
+                assert!(h.lo <= w.hi && w.lo <= h.hi, "{v}: {h:?} {w:?}");
+                assert!(
+                    (h.lo - w.lo).abs() <= slack && (h.hi - w.hi).abs() <= slack,
+                    "{v}"
+                );
+            }
+        }
+        for v in [0.0, 0.6, -0.7, 1.0e-120, f64::NAN] {
+            let (h, w) = (atan_point_halved(v), atan_point_enclosure(v));
+            assert_eq!(
+                [h.lo, h.hi].map(f64::to_bits),
+                [w.lo, w.hi].map(f64::to_bits)
+            );
+        }
     }
 
     /// A class without a checked evaluator (rational controls, a varying radial
