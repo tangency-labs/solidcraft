@@ -48,8 +48,8 @@ const EDGE_VANISHES: &str = "a vertex moved past the other end of an edge";
 /// vertex moved past an edge's other end ([`Error::Unsupported`]); the rest as
 /// [`crate::error::status`].
 fn status(e: SolidError, index: &dyn Fn(FaceId) -> Option<usize>) -> Error {
-    if let Some(Reason::Offset(o)) = e.failure().map(|f| &f.reason) {
-        return offset_refused(*o, index);
+    if let Some((Reason::Offset(o), entity)) = e.failure().map(|f| (&f.reason, f.entity)) {
+        return offset_refused(*o, entity, index);
     }
     match e.kind() {
         ErrorKind::OffsetWallsTouch => Error::WallsTouch,
@@ -63,11 +63,15 @@ fn status(e: SolidError, index: &dyn Fn(FaceId) -> Option<usize>) -> Error {
 /// ([`Error::WallsTouch`]), a wall whose face's offset folds ([`Error::WallFolds`], with the
 /// largest wall the kernel names), a vertex moved past an edge's other end
 /// ([`Error::Unsupported`]), and every other reason as [`Error::OffsetRefused`] (#14783): why,
-/// and the face it names through `index` (`None` where it names none, or one `index` does not
-/// find). The match names every reason, so one the kernel adds does not build until it is
-/// named here (#15035).
-fn offset_refused(o: OffsetFailure, index: &dyn Fn(FaceId) -> Option<usize>) -> Error {
-    let face = match o.entity() {
+/// and the face the failure is about (`entity`, the reason's own unless the kernel set another)
+/// through `index` (`None` where it names none, or one `index` does not find). The match names
+/// every reason, so one the kernel adds does not build until it is named here (#15035).
+fn offset_refused(
+    o: OffsetFailure,
+    entity: Option<EntityRef>,
+    index: &dyn Fn(FaceId) -> Option<usize>,
+) -> Error {
+    let face = match entity {
         Some(EntityRef::Face(f)) => index(f),
         _ => None,
     };
@@ -462,7 +466,7 @@ pub fn draft(
             match draft_surface(k, b, f, &the_draft) {
                 Ok(Ok(s)) => surfaces.push(s),
                 Ok(Err(r)) => return Ok(Err(refused(r))),
-                Err(e) => return Ok(Err(kernel_status(e))),
+                Err(e) => return Ok(Err(status(e, &in_order(order)))),
             }
         }
         // the marks live for this call only: put on the picked faces, read and removed once the

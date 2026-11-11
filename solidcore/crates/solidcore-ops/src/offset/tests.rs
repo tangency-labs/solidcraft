@@ -548,6 +548,19 @@ fn every_other_offset_refusal_says_why_and_where() {
         };
         assert_eq!(why.to_string(), o.to_string());
     }
+    // the face the kernel sets on a failure whose reason names none (a draft's face without a
+    // surface) is the one said
+    let what = "the face has no surface or no outer face use";
+    let at = Failure::new("test", O::InvalidValue(what))
+        .at(solidcore::EntityRef::Face(named))
+        .into_error();
+    assert_eq!(
+        super::status(at, &index),
+        Error::OffsetRefused {
+            face: Some(7),
+            why: R::InvalidValue { what },
+        }
+    );
 }
 
 /// A face whose surface the kernel's room test cannot measure (an offset surface): the room

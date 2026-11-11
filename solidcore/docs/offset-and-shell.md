@@ -201,7 +201,9 @@ away, as upstream does (`offset_face_prefix`, `p2.rs`).
 `offset_refused`), the touching walls and the vanishing edge their own errors, and every other
 reason a named `OffsetRefusal` with the face it names: `Collapses` passes on the distance and the
 radius. The match names every `OffsetFailure`, so a reason the kernel adds does not build until
-ops names it.
+ops names it. The sheet offset and the symmetric thicken do not reach it yet: `offset_brep` wraps
+whatever its executive fails with in a failure of its own (`collapse_offset_status`), so ops sees
+no offset reason there and passes the kernel's status. That mapping is open.
 
 ### 4.3 Room for an inward wall
 
