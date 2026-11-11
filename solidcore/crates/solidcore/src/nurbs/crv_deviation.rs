@@ -179,7 +179,7 @@ pub fn certified_distance(a: &Curve, b: &Curve) -> Result<f64> {
 /// root by `γ_5`, the product by `γ_1`, the subtractions by `γ_1`: `γ_8` in all), and the
 /// smallest subnormals a product with a subnormal largest can lose are added back. `None`
 /// for a difference that overflows.
-fn norm_up(dx: f64, dy: f64, dz: f64) -> Option<f64> {
+pub(crate) fn norm_up(dx: f64, dy: f64, dz: f64) -> Option<f64> {
     let s = dx.abs().max(dy.abs()).max(dz.abs());
     if !s.is_finite() {
         return None;
