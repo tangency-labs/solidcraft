@@ -53,6 +53,7 @@ fn tilted_spline_projection_keeps_one_exact_curve() {
             sketch,
             report,
             profiles: Vec::new(),
+            profiles_3d: Vec::new(),
             ends: Default::default(),
         }));
         let resolved = crate::project::resolve(
