@@ -14,6 +14,10 @@ pub(crate) fn same_item(a: &Sel, b: &Sel) -> bool {
     match (a, b) {
         (Sel::Edge { body: a, index: i, .. }, Sel::Edge { body: b, index: j, .. })
         | (Sel::Face { body: a, index: i, .. }, Sel::Face { body: b, index: j, .. }) => a == b && i == j,
+        // A curve of another sketch is the same item whether a click picked it (`SketchCurve`
+        // naming its sketch, #3726) or a chain or box did (`ExternalSketchCurve`).
+        (Sel::SketchCurve { id: a, sketch: Some(s) }, Sel::ExternalSketchCurve { sketch: t, id: b })
+        | (Sel::ExternalSketchCurve { sketch: t, id: b }, Sel::SketchCurve { id: a, sketch: Some(s) }) => a == b && s == t,
         _ => a == b,
     }
 }

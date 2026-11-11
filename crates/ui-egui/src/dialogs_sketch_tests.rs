@@ -946,3 +946,52 @@ fn project_crossing_box_takes_the_curves_it_touches_14927() {
     assert_eq!(cmds[0].0, "sketch.project");
     assert_eq!(cmds[0].1["refs"].as_array().unwrap().len(), 2);
 }
+
+/// The curves of `sketch` in Geometry, whichever way they were picked: a click on a straight line
+/// gives `SketchCurve` naming the sketch, a chain or box gives `ExternalSketchCurve`.
+fn project_picked_curves(h: &Harness, sketch: u64) -> Vec<String> {
+    let mut ids: Vec<String> = h.app.dialog.as_ref().unwrap().inputs[0]
+        .items
+        .iter()
+        .filter_map(|s| match s {
+            Sel::ExternalSketchCurve { sketch: sk, id } | Sel::SketchCurve { id, sketch: Some(sk) } if *sk == sketch => Some(id.clone()),
+            _ => None,
+        })
+        .collect();
+    ids.sort();
+    ids
+}
+
+/// A click on a line that a double-click or box already took out of the chain takes that one
+/// line out, as a click on a picked line does: it is the same item, not another one added beside it.
+#[test]
+fn project_click_toggles_a_curve_the_chain_already_took_14927() {
+    let (mut h, first, chain, _) = project_chain_fixture();
+    h.step(&json!({"click":{"world":[10,0,0]},"double":true})).unwrap();
+    assert_eq!(project_picked_curves(&h, first), chain);
+    h.frames(30);
+    h.step(&json!({"click":{"world":[10,0,0]}})).unwrap();
+    assert_eq!(project_picked_curves(&h, first), vec![chain[1].clone()], "{:?}", h.app.dialog.as_ref().unwrap().inputs[0].items);
+}
+
+/// And the other way round: a line picked by a click is not taken twice by the chain over it.
+#[test]
+fn project_chain_does_not_duplicate_a_curve_a_click_already_took_14927() {
+    let (mut h, first, chain, _) = project_chain_fixture();
+    h.step(&json!({"click":{"world":[10,0,0]}})).unwrap();
+    assert_eq!(project_picked_curves(&h, first), vec![chain[0].clone()]);
+    h.frames(30);
+    h.step(&json!({"click":{"world":[10,0,0]},"double":true})).unwrap();
+    assert_eq!(project_picked_curves(&h, first), chain, "{:?}", h.app.dialog.as_ref().unwrap().inputs[0].items);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 2);
+}
+
+/// A box over a curve a click already took does not add it a second time.
+#[test]
+fn project_box_does_not_duplicate_a_curve_a_click_already_took_14927() {
+    let (mut h, first, chain, _) = project_chain_fixture();
+    h.step(&json!({"click":{"world":[10,0,0]}})).unwrap();
+    h.step(&json!({"drag": [{"world": [-5, -5, 0]}, {"world": [25, 25, 0]}], "shift": true})).unwrap();
+    assert_eq!(project_picked_curves(&h, first), chain, "{:?}", h.app.dialog.as_ref().unwrap().inputs[0].items);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 2);
+}
