@@ -1,0 +1,169 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b24": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b22"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b22"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b23"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b24"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b25"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b25"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b26"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b23"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b27"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b26"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b28"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b27",
+        "b28"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b29"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "4558-join-tool-grown-past-block",
+  "expected": {
+    "area_mm2": 11000.0,
+    "body_count": 1,
+    "faces": 11,
+    "method": "block 40x30x20 = 24000 plus the slab 60x50x10 = 30000 standing on it: V = 54000. Faces: block bottom and 4 sides, the slab's under face (60x50 less 40x30), its 4 sides and top = 11. Area 1200 + 2800 + 1800 + 2200 + 3000 = 11000. The sketch is made without projected face edges, so its rectangle is one region",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#4558"
+    ],
+    "volume_mm3": 54000.0,
+    "what": "a 10 mm join on a block's top face whose sketch is then edited out past the block on every side (60 x 50 on a 40 x 30 top): truck refused the rebuilt join ('join cannot preserve the original faces') and dropped it"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 24,
+      "faces": 11,
+      "vertices": 16
+    }
+  },
+  "records": "4558-join-tool-grown-past-block.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b29"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 10999.999999807684,
+      "body_count": 1,
+      "edges": 24,
+      "faces": 11,
+      "vertices": 16,
+      "volume_mm3": 53999.99999918635
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#4558"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a 10 mm join on a block's top face whose sketch is then edited out past the block on every side (60 x 50 on a 40 x 30 top): truck refused the rebuilt join ('join cannot preserve the original faces') and dropped it",
+  "why_not": []
+}

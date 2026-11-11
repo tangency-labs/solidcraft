@@ -12,8 +12,8 @@ cargo run --release -p solidcraft-cli -- eval part.step # measure an imported ST
 cargo xtask ci                                          # fmt, clippy, tests, icons, assets, layers, wasm
 ```
 
-UI artwork changes follow the [icon specification](../assets/icons/ui/STYLE_GUIDE.md).
-The [included review tool](../assets/icons/ui/README.md) discovers new icons and keeps
+UI artwork changes follow the [icon specification](../crates/look/icons/STYLE_GUIDE.md).
+The [included review tool](../crates/look/icons/README.md) discovers new icons and keeps
 unaccepted artwork Open; run `cargo xtask icons` to check the collection.
 
 Windows builds: `cargo xwin build --release --target x86_64-pc-windows-msvc -p solidcraft`.

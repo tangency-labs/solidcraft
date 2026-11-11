@@ -1,0 +1,1077 @@
+{
+  "cases": [
+    {
+      "name": "project_brep_fillet_box",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp TestSmProjectBrepOntoPlane",
+      "inputs": {
+        "op": "project_brep",
+        "body": {
+          "box": {
+            "size": [
+              5,
+              10,
+              15
+            ],
+            "fillet": 0.5
+          }
+        },
+        "translate": [
+          0,
+          0,
+          30
+        ],
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "project_brep_fillet_box_long_normal",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp TestSmProjectBrepOntoPlane",
+      "inputs": {
+        "op": "project_brep",
+        "body": {
+          "box": {
+            "size": [
+              5,
+              10,
+              15
+            ],
+            "fillet": 0.5
+          }
+        },
+        "translate": [
+          0,
+          0,
+          30
+        ],
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          4
+        ]
+      }
+    },
+    {
+      "name": "project_brep_fillet_box_zero_normal",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp TestSmProjectBrepOntoPlane",
+      "inputs": {
+        "op": "project_brep",
+        "body": {
+          "box": {
+            "size": [
+              5,
+              10,
+              15
+            ],
+            "fillet": 0.5
+          }
+        },
+        "translate": [
+          0,
+          0,
+          30
+        ],
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "project_brep_null",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp TestSmProjectBrepOntoPlane",
+      "inputs": {
+        "op": "project_brep",
+        "body": "null",
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "project_brep_box_x_prefilled",
+      "inputs": {
+        "op": "project_brep",
+        "body": {
+          "box": {
+            "size": [
+              4,
+              6,
+              8
+            ],
+            "fillet": 0.0
+          }
+        },
+        "point": [
+          -5,
+          0,
+          0
+        ],
+        "normal": [
+          1,
+          0,
+          0
+        ],
+        "prefill": 2
+      }
+    },
+    {
+      "name": "project_brep_box_oblique",
+      "inputs": {
+        "op": "project_brep",
+        "body": {
+          "box": {
+            "size": [
+              4,
+              6,
+              8
+            ],
+            "fillet": 0.0
+          }
+        },
+        "point": [
+          0,
+          0,
+          -10
+        ],
+        "normal": [
+          0.3,
+          -0.4,
+          1
+        ]
+      }
+    },
+    {
+      "name": "project_brep_Solids_cylinder",
+      "inputs": {
+        "op": "project_brep",
+        "body": {
+          "file": {
+            "file": "Solids/cylinder.smb"
+          }
+        },
+        "point": [
+          0,
+          0,
+          -50
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "project_brep_Solids_sphere",
+      "inputs": {
+        "op": "project_brep",
+        "body": {
+          "file": {
+            "file": "Solids/sphere.smb"
+          }
+        },
+        "point": [
+          0,
+          0,
+          -50
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "project_brep_cone",
+      "inputs": {
+        "op": "project_brep",
+        "body": {
+          "file": {
+            "file": "cone.smb"
+          }
+        },
+        "point": [
+          0,
+          0,
+          -50
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "project_brep_torus",
+      "inputs": {
+        "op": "project_brep",
+        "body": {
+          "file": {
+            "file": "torus.smb"
+          }
+        },
+        "point": [
+          0,
+          0,
+          -50
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "silhouette_box10",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp TestSmCreateSilhouetteCurves",
+      "inputs": {
+        "op": "silhouette",
+        "body": {
+          "box": {
+            "size": [
+              10,
+              10,
+              10
+            ],
+            "fillet": 0.0
+          }
+        },
+        "point": [
+          0,
+          0,
+          20
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "silhouette_box10_long_normal",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp TestSmCreateSilhouetteCurves",
+      "inputs": {
+        "op": "silhouette",
+        "body": {
+          "box": {
+            "size": [
+              10,
+              10,
+              10
+            ],
+            "fillet": 0.0
+          }
+        },
+        "point": [
+          0,
+          0,
+          20
+        ],
+        "normal": [
+          0,
+          0,
+          3
+        ]
+      }
+    },
+    {
+      "name": "silhouette_box10_zero_normal",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp TestSmCreateSilhouetteCurves",
+      "inputs": {
+        "op": "silhouette",
+        "body": {
+          "box": {
+            "size": [
+              10,
+              10,
+              10
+            ],
+            "fillet": 0.0
+          }
+        },
+        "point": [
+          0,
+          0,
+          20
+        ],
+        "normal": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "silhouette_box10_appended",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp TestSmCreateSilhouetteCurves",
+      "inputs": {
+        "op": "silhouette",
+        "body": {
+          "box": {
+            "size": [
+              10,
+              10,
+              10
+            ],
+            "fillet": 0.0
+          }
+        },
+        "point": [
+          0,
+          0,
+          20
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "prefill": 1
+      }
+    },
+    {
+      "name": "silhouette_null_zero_normal",
+      "inputs": {
+        "op": "silhouette",
+        "body": "null",
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "silhouette_fillet_box_oblique",
+      "inputs": {
+        "op": "silhouette",
+        "body": {
+          "box": {
+            "size": [
+              5,
+              10,
+              15
+            ],
+            "fillet": 0.5
+          }
+        },
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          1,
+          1,
+          1
+        ]
+      }
+    },
+    {
+      "name": "silhouette_Solids_cylinder",
+      "inputs": {
+        "op": "silhouette",
+        "body": {
+          "file": {
+            "file": "Solids/cylinder.smb"
+          }
+        },
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          1,
+          0.2,
+          0.1
+        ]
+      }
+    },
+    {
+      "name": "silhouette_Solids_sphere",
+      "inputs": {
+        "op": "silhouette",
+        "body": {
+          "file": {
+            "file": "Solids/sphere.smb"
+          }
+        },
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          1,
+          0.2,
+          0.1
+        ]
+      }
+    },
+    {
+      "name": "silhouette_torus",
+      "inputs": {
+        "op": "silhouette",
+        "body": {
+          "file": {
+            "file": "torus.smb"
+          }
+        },
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          1,
+          0.2,
+          0.1
+        ]
+      }
+    },
+    {
+      "name": "project_curve_brep",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp TestSmProjectCurve",
+      "inputs": {
+        "op": "project_curve_brep",
+        "body": {
+          "box": {
+            "size": [
+              10,
+              5,
+              15
+            ],
+            "fillet": 0.5
+          }
+        },
+        "points": [
+          [
+            -10,
+            -2,
+            20
+          ],
+          [
+            0,
+            5,
+            20
+          ],
+          [
+            10,
+            0,
+            20
+          ],
+          [
+            20,
+            2,
+            20
+          ]
+        ],
+        "normal": [
+          0,
+          0,
+          -1
+        ]
+      }
+    },
+    {
+      "name": "project_curve_brep_zero_vector",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp TestSmProjectCurve",
+      "inputs": {
+        "op": "project_curve_brep",
+        "body": {
+          "box": {
+            "size": [
+              10,
+              5,
+              15
+            ],
+            "fillet": 0.5
+          }
+        },
+        "points": [
+          [
+            -10,
+            -2,
+            20
+          ],
+          [
+            0,
+            5,
+            20
+          ],
+          [
+            10,
+            0,
+            20
+          ],
+          [
+            20,
+            2,
+            20
+          ]
+        ],
+        "normal": [
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "project_curve_brep_appended",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp TestSmProjectCurve",
+      "inputs": {
+        "op": "project_curve_brep",
+        "body": {
+          "box": {
+            "size": [
+              10,
+              5,
+              15
+            ],
+            "fillet": 0.5
+          }
+        },
+        "points": [
+          [
+            -10,
+            -2,
+            20
+          ],
+          [
+            0,
+            5,
+            20
+          ],
+          [
+            10,
+            0,
+            20
+          ],
+          [
+            20,
+            2,
+            20
+          ]
+        ],
+        "normal": [
+          0,
+          0,
+          -1
+        ],
+        "prefill": 3
+      }
+    },
+    {
+      "name": "project_curve_brep_miss",
+      "upstream_ref": "tests/SM_API_test/src/TestSmBrep.cpp TestSmProjectCurve",
+      "inputs": {
+        "op": "project_curve_brep",
+        "body": {
+          "box": {
+            "size": [
+              10,
+              5,
+              15
+            ],
+            "fillet": 0.5
+          }
+        },
+        "points": [
+          [
+            990,
+            -2,
+            20
+          ],
+          [
+            1000,
+            5,
+            20
+          ],
+          [
+            1010,
+            0,
+            20
+          ],
+          [
+            1020,
+            2,
+            20
+          ]
+        ],
+        "normal": [
+          0,
+          0,
+          -1
+        ]
+      }
+    },
+    {
+      "name": "project_curve_brep_null",
+      "inputs": {
+        "op": "project_curve_brep",
+        "body": "null",
+        "points": [
+          [
+            -10,
+            -2,
+            20
+          ],
+          [
+            0,
+            5,
+            20
+          ],
+          [
+            10,
+            0,
+            20
+          ],
+          [
+            20,
+            2,
+            20
+          ]
+        ],
+        "normal": [
+          0,
+          0,
+          -1
+        ]
+      }
+    },
+    {
+      "name": "project_curve_brep_box_slanted",
+      "inputs": {
+        "op": "project_curve_brep",
+        "body": {
+          "box": {
+            "size": [
+              10,
+              10,
+              10
+            ],
+            "fillet": 0.0
+          }
+        },
+        "points": [
+          [
+            -2,
+            2,
+            20
+          ],
+          [
+            3,
+            8,
+            18
+          ],
+          [
+            7,
+            1,
+            22
+          ],
+          [
+            12,
+            6,
+            20
+          ]
+        ],
+        "normal": [
+          0.1,
+          0.2,
+          -1
+        ]
+      }
+    },
+    {
+      "name": "project_curve_surface",
+      "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp TestSmProjectCurveToSurface",
+      "inputs": {
+        "op": "project_curve_surface",
+        "points": [
+          [
+            1,
+            1,
+            2
+          ],
+          [
+            3,
+            5,
+            2
+          ],
+          [
+            7,
+            3,
+            2
+          ],
+          [
+            9,
+            8,
+            2
+          ]
+        ],
+        "corners": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            10,
+            0,
+            0
+          ],
+          [
+            0,
+            10,
+            0
+          ],
+          [
+            10,
+            10,
+            0
+          ]
+        ],
+        "want_2d": true,
+        "want_3d": true
+      }
+    },
+    {
+      "name": "project_curve_surface_3d_only",
+      "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp TestSmProjectCurveToSurface",
+      "inputs": {
+        "op": "project_curve_surface",
+        "points": [
+          [
+            1,
+            1,
+            2
+          ],
+          [
+            3,
+            5,
+            2
+          ],
+          [
+            7,
+            3,
+            2
+          ],
+          [
+            9,
+            8,
+            2
+          ]
+        ],
+        "corners": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            10,
+            0,
+            0
+          ],
+          [
+            0,
+            10,
+            0
+          ],
+          [
+            10,
+            10,
+            0
+          ]
+        ],
+        "want_2d": false,
+        "want_3d": true
+      }
+    },
+    {
+      "name": "project_curve_surface_crossing_boundary",
+      "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp TestSmProjectCurveToSurface",
+      "inputs": {
+        "op": "project_curve_surface",
+        "points": [
+          [
+            -5.0,
+            6.438386411994708,
+            0.5
+          ],
+          [
+            -2.142857142857143,
+            3.7388193413071242,
+            0.5
+          ],
+          [
+            0.7142857142857144,
+            5.982616845767778,
+            0.5
+          ],
+          [
+            3.571428571428571,
+            4.374917522369751,
+            0.5
+          ],
+          [
+            6.428571428571429,
+            5.217311732491214,
+            0.5
+          ],
+          [
+            9.285714285714286,
+            5.207923834508877,
+            0.5
+          ],
+          [
+            12.142857142857142,
+            4.383550937545143,
+            0.5
+          ],
+          [
+            15.0,
+            5.975431760235676,
+            0.5
+          ]
+        ],
+        "corners": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            10,
+            0,
+            0
+          ],
+          [
+            0,
+            10,
+            0
+          ],
+          [
+            10,
+            10,
+            0
+          ]
+        ],
+        "want_2d": false,
+        "want_3d": true
+      }
+    },
+    {
+      "name": "project_curve_surface_uv_only",
+      "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp TestSmLiftUVCurve",
+      "inputs": {
+        "op": "project_curve_surface",
+        "points": [
+          [
+            1,
+            1,
+            0
+          ],
+          [
+            5,
+            8,
+            0
+          ],
+          [
+            9,
+            5,
+            0
+          ],
+          [
+            9,
+            1,
+            0
+          ]
+        ],
+        "corners": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            10,
+            0,
+            0
+          ],
+          [
+            0,
+            10,
+            0
+          ],
+          [
+            10,
+            10,
+            0
+          ]
+        ],
+        "want_2d": true,
+        "want_3d": false
+      }
+    },
+    {
+      "name": "project_curve_surface_none_asked",
+      "inputs": {
+        "op": "project_curve_surface",
+        "points": [
+          [
+            1,
+            1,
+            2
+          ],
+          [
+            3,
+            5,
+            2
+          ],
+          [
+            7,
+            3,
+            2
+          ],
+          [
+            9,
+            8,
+            2
+          ]
+        ],
+        "corners": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            10,
+            0,
+            0
+          ],
+          [
+            0,
+            10,
+            0
+          ],
+          [
+            10,
+            10,
+            0
+          ]
+        ],
+        "want_2d": false,
+        "want_3d": false
+      }
+    },
+    {
+      "name": "project_curve_surface_warped",
+      "inputs": {
+        "op": "project_curve_surface",
+        "points": [
+          [
+            1,
+            1,
+            2
+          ],
+          [
+            3,
+            5,
+            2
+          ],
+          [
+            7,
+            3,
+            2
+          ],
+          [
+            9,
+            8,
+            2
+          ]
+        ],
+        "corners": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            10,
+            0,
+            1
+          ],
+          [
+            0,
+            10,
+            -1
+          ],
+          [
+            10,
+            10,
+            3
+          ]
+        ],
+        "want_2d": true,
+        "want_3d": true
+      }
+    },
+    {
+      "name": "silhouette_null_body",
+      "inputs": {
+        "op": "silhouette",
+        "body": "null",
+        "point": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,408 @@
+{
+  "cases": [
+    {
+      "name": "issue919-cylinder-rim-edge1-blend-curve-g2-r10.0",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp (TrimRails); tangency-labs/solidcore#919",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "cylinder",
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "radius": 10,
+            "height": 20
+          },
+          "radius": 10.0,
+          "xsect": 2,
+          "continuity": 2,
+          "thumbweight": 1,
+          "edges": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "issue919-cylinder-rim-edge1-blend-curve-g1-r10.0",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp (TrimRails); tangency-labs/solidcore#919",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "cylinder",
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "radius": 10,
+            "height": 20
+          },
+          "radius": 10.0,
+          "xsect": 2,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "issue920-cylinder-rim-edge1-variable-constant-law-r10.0",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiVariableRadiusFillet); tangency-labs/solidcore#920",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "cylinder",
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "radius": 10,
+            "height": 20
+          },
+          "radius": 10.0,
+          "radius_end": 10.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "issue920-cylinder-rim-edge1-constant-r10.0",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiVariableRadiusFillet); tangency-labs/solidcore#920",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "cylinder",
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "radius": 10,
+            "height": 20
+          },
+          "radius": 10.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "issue919-cylinder-rim-edge1-blend-curve-g2-r9.99",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp (TrimRails); tangency-labs/solidcore#919",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "cylinder",
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "radius": 10,
+            "height": 20
+          },
+          "radius": 9.99,
+          "xsect": 2,
+          "continuity": 2,
+          "thumbweight": 1,
+          "edges": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "issue919-cylinder-rim-edge1-blend-curve-g1-r9.99",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp (TrimRails); tangency-labs/solidcore#919",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "cylinder",
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "radius": 10,
+            "height": 20
+          },
+          "radius": 9.99,
+          "xsect": 2,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "issue920-cylinder-rim-edge1-variable-constant-law-r9.99",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiVariableRadiusFillet); tangency-labs/solidcore#920",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "cylinder",
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "radius": 10,
+            "height": 20
+          },
+          "radius": 9.99,
+          "radius_end": 9.99,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "issue920-cylinder-rim-edge1-constant-r9.99",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiVariableRadiusFillet); tangency-labs/solidcore#920",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "cylinder",
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "radius": 10,
+            "height": 20
+          },
+          "radius": 9.99,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "issue919-cylinder-rim-edge2-blend-curve-g2-r10.0",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp (TrimRails); tangency-labs/solidcore#919",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "cylinder",
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "radius": 10,
+            "height": 20
+          },
+          "radius": 10.0,
+          "xsect": 2,
+          "continuity": 2,
+          "thumbweight": 1,
+          "edges": [
+            2
+          ]
+        }
+      }
+    },
+    {
+      "name": "issue919-cylinder-rim-edge2-blend-curve-g1-r10.0",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp (TrimRails); tangency-labs/solidcore#919",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "cylinder",
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "radius": 10,
+            "height": 20
+          },
+          "radius": 10.0,
+          "xsect": 2,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            2
+          ]
+        }
+      }
+    },
+    {
+      "name": "issue920-cylinder-rim-edge2-variable-constant-law-r10.0",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiVariableRadiusFillet); tangency-labs/solidcore#920",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "cylinder",
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "radius": 10,
+            "height": 20
+          },
+          "radius": 10.0,
+          "radius_end": 10.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            2
+          ]
+        }
+      }
+    },
+    {
+      "name": "issue920-cylinder-rim-edge2-constant-r10.0",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiVariableRadiusFillet); tangency-labs/solidcore#920",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "cylinder",
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "radius": 10,
+            "height": 20
+          },
+          "radius": 10.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            2
+          ]
+        }
+      }
+    },
+    {
+      "name": "issue919-cylinder-rim-edge2-blend-curve-g2-r9.99",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp (TrimRails); tangency-labs/solidcore#919",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "cylinder",
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "radius": 10,
+            "height": 20
+          },
+          "radius": 9.99,
+          "xsect": 2,
+          "continuity": 2,
+          "thumbweight": 1,
+          "edges": [
+            2
+          ]
+        }
+      }
+    },
+    {
+      "name": "issue919-cylinder-rim-edge2-blend-curve-g1-r9.99",
+      "upstream_ref": "source/SMLib/src/SmFilletSolver.cpp (TrimRails); tangency-labs/solidcore#919",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "cylinder",
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "radius": 10,
+            "height": 20
+          },
+          "radius": 9.99,
+          "xsect": 2,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            2
+          ]
+        }
+      }
+    },
+    {
+      "name": "issue920-cylinder-rim-edge2-variable-constant-law-r9.99",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiVariableRadiusFillet); tangency-labs/solidcore#920",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "cylinder",
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "radius": 10,
+            "height": 20
+          },
+          "radius": 9.99,
+          "radius_end": 9.99,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            2
+          ]
+        }
+      }
+    },
+    {
+      "name": "issue920-cylinder-rim-edge2-constant-r9.99",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp (SmApiVariableRadiusFillet); tangency-labs/solidcore#920",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "cylinder",
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "radius": 10,
+            "height": 20
+          },
+          "radius": 9.99,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            2
+          ]
+        }
+      }
+    }
+  ]
+}
