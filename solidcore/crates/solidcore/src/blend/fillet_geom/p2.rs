@@ -160,6 +160,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
 use crate::nurbs::crv_fit::p1::ParamMethod;
 use crate::nurbs::knots::Side;
 use crate::query::brep::BrepFaceServices;
+use crate::surface::plane::p2::stop_on_warning;
 use crate::surface::plane::Plane;
 use crate::surface::procedural_blend::NetScope;
 use crate::surface::surface::p1::SurfaceSolveContext;
@@ -1120,15 +1121,20 @@ pub fn srf_srf_intersection_with_context(
     };
     if let SurfaceKind::Plane(plane) = surf1.kind() {
         // get planar intersection
-        let r = ignore_status(surf2.intersect_with_plane(
-            k,
-            &domain2,
-            plane,
-            &domain1,
-            use_surface_edges,
-            Some(ssi_tol),
-            Some(angle_tol),
-        ))?;
+        // (the plane override's warning was its status, so it drops the result too)
+        let r = ignore_status(
+            surf2
+                .intersect_with_plane(
+                    k,
+                    &domain2,
+                    plane,
+                    &domain1,
+                    use_surface_edges,
+                    Some(ssi_tol),
+                    Some(angle_tol),
+                )
+                .and_then(stop_on_warning),
+        )?;
         push(
             r,
             true,
@@ -1138,15 +1144,20 @@ pub fn srf_srf_intersection_with_context(
         );
     } else if let SurfaceKind::Plane(plane) = surf2.kind() {
         // get planar intersection
-        let r = ignore_status(surf1.intersect_with_plane(
-            k,
-            &domain1,
-            plane,
-            &domain2,
-            use_surface_edges,
-            Some(ssi_tol),
-            Some(angle_tol),
-        ))?;
+        // (the plane override's warning was its status, so it drops the result too)
+        let r = ignore_status(
+            surf1
+                .intersect_with_plane(
+                    k,
+                    &domain1,
+                    plane,
+                    &domain2,
+                    use_surface_edges,
+                    Some(ssi_tol),
+                    Some(angle_tol),
+                )
+                .and_then(stop_on_warning),
+        )?;
         push(
             r,
             false,
