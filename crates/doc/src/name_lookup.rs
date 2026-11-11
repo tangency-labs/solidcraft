@@ -195,8 +195,10 @@ fn edge_through(b: &ModelBody, m: &Mesh, near: Vec3) -> Option<usize> {
 /// edge of the face still found, clear of its ends (see [`edge_through`]). Then the point says
 /// which edge this is: that feature may have named the face differently once (a design saved when
 /// a round wall took the name of a later join's face), and the face may also be gone while the
-/// feature stays (a shorter tab); either way the edge the pick lies on is taken. A face whose
-/// feature made nothing on the body was removed with it, and so is the name. The point must be the
+/// feature stays (a shorter tab); either way the edge the pick lies on is taken. Not where that
+/// edge's other face is one the same feature made: its face there was replaced (a sketch line
+/// swapped for another), and the reference asks again. A face whose feature made nothing on the
+/// body was removed with it, and so is the name. The point must be the
 /// reference's own pick: a caller that passes a point on another edge cannot take what this finds.
 fn renamed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: Vec3) -> Option<usize> {
     let count = faces.faces.len();
@@ -205,23 +207,30 @@ fn renamed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: Vec3
         hits.next().filter(|_| hits.next().is_none())
     };
     let lost = |y: &str| {
-        crate::persistent_name::made_by(y).is_some_and(|id| faces.faces.iter().any(|f| crate::persistent_name::made_by(f) == Some(id)))
-            && (0..count).all(|f| crate::history_names::matches(faces, f, y).is_none())
+        crate::persistent_name::made_by(y)
+            .filter(|id| faces.faces.iter().any(|f| crate::persistent_name::made_by(f) == Some(*id)))
+            .filter(|_| (0..count).all(|f| crate::history_names::matches(faces, f, y).is_none()))
     };
     // Every way the name splits into two face names (a face name may hold `|` itself); they must
     // agree on the face still found.
-    let mut kept: Vec<usize> = Vec::new();
+    let mut kept: Vec<(usize, u64)> = Vec::new();
     for (i, _) in wanted.match_indices('|') {
         let (Some(x), Some(y)) = (wanted.get(..i), wanted.get(i + 1..)) else { continue };
         for (x, y) in [(x, y), (y, x)] {
-            if let Some(f) = found(x).filter(|f| !kept.contains(f) && lost(y)) {
-                kept.push(f);
+            if let Some(hit) = found(x).filter(|f| kept.iter().all(|(k, _)| k != f)).zip(lost(y)) {
+                kept.push(hit);
             }
         }
     }
-    let &[face] = kept.as_slice() else { return None };
+    let &[(face, lost_by)] = kept.as_slice() else { return None };
     let edge = edge_through(b, m, near)?;
-    b.body.record().edges.get(edge)?.uses.iter().any(|u| u.face as usize == face).then_some(edge)
+    let uses = &b.body.record().edges.get(edge)?.uses;
+    // The edge's other face is not one of the lost face's feature: where that feature made the
+    // face at the pick, its face was replaced there (a sketch line swapped for another), not renamed.
+    let made_by = |f: usize| faces.faces.get(f).and_then(|name| crate::persistent_name::made_by(name));
+    let bounds_face = uses.iter().any(|u| u.face as usize == face);
+    let replaced = uses.iter().any(|u| u.face as usize != face && made_by(u.face as usize) == Some(lost_by));
+    (bounds_face && !replaced).then_some(edge)
 }
 
 /// The point of face `face` of a mesh nearest `p`, and how far it is.
