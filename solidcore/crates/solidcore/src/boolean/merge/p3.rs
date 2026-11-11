@@ -804,11 +804,55 @@ pub(crate) fn combine_brep(
     reverse_map: Option<&mut CopyBrepMap<EntityRef>>,
     add_analytics: bool,
 ) -> Result<()> {
+    let mut records = crate::topology::topology::NotifyRecords::new();
+    combine_brep_keeping(
+        k,
+        &mut records,
+        target,
+        source,
+        copy_map,
+        reverse_map,
+        add_analytics,
+    )
+}
+
+/// [`combine_brep`] for a caller that merges many B-reps into one `target` in a row
+/// ([`list_operand`]), keeping the record store of one merge for the next in `records`
+/// (empty before the first).
+///
+/// (not upstream) A merge notifies through a store that holds a default record for every
+/// object of `target` and for `target` itself, and no other, when the merge starts; an
+/// empty store gets them from the merge ([`combine_brep`]), which costs the size of
+/// `target`, so merging N B-reps one after another visited the square of N objects. A kept
+/// store is first left exactly so (`reseed_records`: what the last merge changed, added and
+/// removed is visited, nothing else), and the merge then gives a record only to the objects
+/// it has not seen. The store a merge starts from is the same either way.
+fn combine_brep_keeping(
+    k: &mut Kernel,
+    records: &mut crate::topology::topology::NotifyRecords,
+    target: &mut Brep,
+    source: &Brep,
+    copy_map: Option<&mut CopyBrepMap<EntityRef>>,
+    reverse_map: Option<&mut CopyBrepMap<EntityRef>>,
+    add_analytics: bool,
+) -> Result<()> {
+    use crate::topology::loopuse::{entity_of_notify_key, notify_ref};
+    if !records.is_empty() {
+        // the names the merge gives `target`'s objects and `target` (`ArenaNotifyState::env`
+        // and `brep_ref`), under the serial the merge reads
+        let scheme = crate::topology::brep::p3::KeyScheme {
+            key_of: &notify_ref,
+            entity_of: &entity_of_notify_key,
+            brep_key: crate::topology::brep::p2::brep_ref(target).key,
+            serial: k.context.issued_brep_serial(target.notify_identity()),
+        };
+        crate::topology::brep::p3::reseed_records(records, target, &scheme);
+    }
     // (not upstream) both B-reps' own attributes, the source's under `source_ref`; the
     // target keeps those its objects end with
     let mut state = crate::topology::brep::p2::ArenaNotifyState {
+        records: std::mem::take(records),
         attributes: target.take_attributes(),
-        ..Default::default()
     };
     let seeded = crate::topology::brep::p2::seed_brep_attributes(
         &mut state.attributes,
@@ -830,6 +874,7 @@ pub(crate) fn combine_brep(
     let restored = state.restore_attributes(target);
     k.work_counters
         .add_merge_record_visits(state.records.take_visits());
+    *records = state.records;
     r?;
     restored
 }
@@ -915,10 +960,12 @@ fn remove_faces(k: &mut Kernel, brep: &mut Brep, faces: &[FaceId]) -> Result<()>
 fn list_operand(k: &mut Kernel, breps: &[Brep], surfaces: &[Surface]) -> Result<(Brep, bool)> {
     let (mut result, planar) = if let Some((first, rest)) = breps.split_first() {
         let mut result = copy_brep(k, first, None, None, true, true)?;
+        // (one record store for the merges: each costs its B-rep, not the operand so far)
+        let mut records = crate::topology::topology::NotifyRecords::new();
         for source in rest {
             // MergeBrep's ordinary status is ignored upstream.
             ignored(crate::error::passed_on(
-                combine_brep(k, &mut result, source, None, None, true),
+                combine_brep_keeping(k, &mut records, &mut result, source, None, None, true),
                 k.fixes.brep_edit_statuses_pass_on,
             )?)?;
         }
@@ -1810,6 +1857,63 @@ mod tests {
             for f in bp::faces(b, None).unwrap() {
                 assert_eq!(b.entity_attributes(EntityRef::Face(f)).len(), 1);
             }
+        }
+    }
+
+    /// Keeping the record store from one merge to the next changes nothing: boxes and
+    /// cylinders (with an attribute on every face) merged one after another make the same
+    /// operand, object for object and attribute for attribute (its whole `Debug` dump), and
+    /// leave the same records after every merge, as with a store made for each merge. Both
+    /// ways with the fixes on and off.
+    #[test]
+    fn merges_that_keep_their_record_store_make_the_same_operand() {
+        use crate::geom::attribute::{Attribute, Behavior};
+        use crate::kernel::UpstreamFixes;
+        use crate::math::Point3;
+        use crate::primitive::api_primitives::{create_box, create_cylinder};
+        use crate::topology::topology::NotifyRecords;
+        let operand = |fixes: UpstreamFixes, keep: bool| {
+            let mut k = Kernel {
+                fixes,
+                ..Kernel::default()
+            };
+            let mut breps = Vec::new();
+            for i in 0..7_i64 {
+                let at = Point3::new(20.0 * i as f64, 0.0, 0.0);
+                let mut b = if i % 2 == 0 {
+                    create_cylinder(&mut k, at, 4.0, 14.0).unwrap()
+                } else {
+                    create_box(&mut k, at, 10.0, 10.0, 10.0).unwrap()
+                };
+                for f in bp::faces(&b, None).unwrap() {
+                    b.add_attribute(EntityRef::Face(f), Attribute::long(7, i, Behavior::Copy))
+                        .unwrap();
+                }
+                breps.push(b);
+            }
+            let (first, rest) = breps.split_first().unwrap();
+            let mut result = copy_brep(&mut k, first, None, None, true, true).unwrap();
+            let mut kept = NotifyRecords::new();
+            let mut after = Vec::new();
+            for source in rest {
+                let mut fresh = NotifyRecords::new();
+                let records = if keep { &mut kept } else { &mut fresh };
+                combine_brep_keeping(&mut k, records, &mut result, source, None, None, true)
+                    .unwrap();
+                after.push(records.clone());
+            }
+            assert_eq!(bp::faces(&result, None).unwrap().len(), 4 * 3 + 3 * 6);
+            // (a kept store names the value whose removals it follows, which gives the
+            // B-rep's removal log its tag, as any stitched B-rep has: named here both ways,
+            // so the dumps compare everything else)
+            let _ = result.removal_tag();
+            (format!("{result:?}"), after)
+        };
+        for fixes in [UpstreamFixes::default(), UpstreamFixes::all()] {
+            let (kept, kept_records) = operand(fixes, true);
+            let (fresh, fresh_records) = operand(fixes, false);
+            assert!(kept == fresh, "the operands differ");
+            assert_eq!(kept_records, fresh_records);
         }
     }
 }
