@@ -66,7 +66,17 @@ fn helix_profile(
     }
     // The profile must clear itself after one turn. (Only the outer loop is swept.)
     let numbered = crate::numbered::number_regions(std::slice::from_ref(region)).pop().ok_or_else(|| KernelError::Invalid("profile".into()))?;
-    let profile = numbered.outer.oriented(false);
+    // Wound so that the walls' natural normals face out of the swept solid: counter-clockwise
+    // about the plane's normal when the motion carries the profile against that normal (a
+    // right-handed screw), clockwise when it carries it along it (a left-handed one, which
+    // turns the same way about the reversed axis). The kernel's certified volume sign does not
+    // decide a long left-handed thread's groove with its walls facing in (it runs out of cells),
+    // so the sweep would be refused as no solid.
+    let ccw = numbered.outer.oriented(false);
+    let points: Vec<Vec3> = ccw.lp.segs.iter().map(|s| plane.to_world(s.point_at(0.5))).collect();
+    let mean = points.iter().fold(Vec3::ZERO, |a, p| a + *p) * (1.0 / points.len().max(1) as f64);
+    let motion = k.cross(mean - axis_origin) + k * (pitch / std::f64::consts::TAU);
+    let profile = if motion.dot(plane.normal()) > 0.0 { numbered.outer.oriented(true) } else { ccw };
     let lp = &profile.lp;
     let along: Vec<f64> =
         lp.segs.iter().flat_map(|s| (0..8).map(move |i| s.point_at(i as f64 / 8.0))).map(|q| (plane.to_world(q) - axis_origin).dot(k)).collect();
@@ -161,6 +171,31 @@ mod tests {
         assert!((v - want).abs() / want < 1e-3, "{v} vs {want}");
         assert!(sweep_helix(&pl, &region, Vec3::ZERO, Vec3::Z, 3.0, 3.0).is_err(), "pitch below the section");
         assert!(sweep_helix(&pl, &region, Vec3::ZERO, Vec3::ZERO, 8.0, 3.0).is_err());
+    }
+
+    /// A left-handed M10 thread's groove (turning about the reversed axis while rising along
+    /// it, as the Thread feature sweeps it) over 16 turns, each flank one face: its profile is
+    /// wound so its walls face out, and it is a solid of the axial section's volume,
+    /// 2π ∫ r dA per turn, as the right-handed one is.
+    #[test]
+    fn a_long_left_handed_groove_is_a_solid() {
+        let pl = Plane { origin: Vec3::new(0.0, 0.0, -1.5), x: Vec3::Y, y: Vec3::Z };
+        let pts = [(4.188101183952089, -0.1875), (5.075, -0.699551270189222), (5.075, 0.699551270189222), (4.188101183952089, 0.1875)];
+        let region = Region2 { outer: Loop2::polygon(&pts.map(|(x, y)| Vec2::new(x, y))), holes: vec![] };
+        // 2π ∫ r dA of the trapezoid (the shoelace moment), per turn.
+        let n = pts.len();
+        let moment: f64 = (0..n)
+            .map(|i| {
+                let ((x0, y0), (x1, y1)) = (pts[i], pts[(i + 1) % n]);
+                (x0 * y1 - x1 * y0) * (x0 + x1) / 6.0
+            })
+            .sum();
+        let want = std::f64::consts::TAU * moment.abs() * 16.0;
+        for (axis, pitch) in [(Vec3::Z, 1.5), (-Vec3::Z, -1.5)] {
+            let b = sweep_helix_radial(&pl, &region, pl.origin, axis, pitch, 16.0, &[], true).unwrap();
+            let v = crate::measure(&b).unwrap().volume;
+            assert!((v - want).abs() <= 1e-6 * want, "pitch {pitch}: {v} vs {want}");
+        }
     }
 
     #[test]
