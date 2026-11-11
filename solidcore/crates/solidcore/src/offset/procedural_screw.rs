@@ -1269,6 +1269,47 @@ mod tests {
         }
     }
 
+    /// A seam edge between two half-turn pieces of one wall, as a body read back from its
+    /// record holds it (#11582): a line whose stored support runs far past the edge, across the
+    /// screw axis, since a record's line is unbounded. The edge's own segment lies in the
+    /// authored half-plane and is certified; the whole support crosses the axis and is not.
+    #[test]
+    fn a_seam_line_is_certified_over_its_edge_not_its_whole_support() {
+        use crate::geom::extent1d::Extent1d;
+        let station = 16.0 * std::f64::consts::PI;
+        let source = BSplineCurve::create_line_segment(
+            3,
+            Vec3::new(9.125, -64.0, -1.334_081_216_351_296_3),
+            Vec3::new(7.646_835_306_586_814, -64.0, -2.1875),
+        )
+        .unwrap();
+        let make = |stations: &[f64]| {
+            let motion = ScrewMotion::new(Vec3::new(-1.0, -64.0, 0.0), Vec3::Z, 2.5, None).unwrap();
+            let net = screw_net(&source, &motion, stations).unwrap();
+            let definition = ProceduralSweep::create(&source, motion, stations, 0.05).unwrap();
+            let mut surface = Surface::from(net);
+            surface.set_sweep_definition(definition);
+            surface
+        };
+        let a = make(&[station - 0.1, station]);
+        let b = make(&[station, station + 0.08]);
+        let separator = seam::Separator::new(&a, &b).unwrap().unwrap();
+        // the profile line carried eight pitches up, to the station
+        let p0 = Vec3::new(9.125, -64.0, -1.334_081_216_351_296_3 + 20.0);
+        let p1 = Vec3::new(7.646_835_306_586_814, -64.0, -2.1875 + 20.0);
+        let reach = 1.0e6;
+        let along = p1 - p0;
+        let line = Curve::from(
+            BSplineCurve::create_line_segment(3, p0 - along * reach, p1 + along * reach).unwrap(),
+        );
+        let span = 2.0 * reach + 1.0;
+        let edge = Extent1d::from_min_max(reach / span, (reach + 1.0) / span);
+        separator.certify_curve(&line, edge, 1e-5).unwrap();
+        assert!(separator
+            .certify_curve(&line, Extent1d::from_min_max(0.0, 1.0), 1e-5)
+            .is_err());
+    }
+
     #[test]
     fn segmented_meridian_seam_preserves_the_physical_separator_in_both_charts() {
         let k = Kernel::default();
