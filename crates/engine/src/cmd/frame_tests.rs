@@ -1105,3 +1105,89 @@ fn a_member_feature_mirrors_and_patterns_and_follows_its_lines() {
     run(&mut s, "parameters.change", json!({"name": "L", "expression": "760 mm"}));
     check(&mut s, 760.0);
 }
+
+/// The side of the capped post that faces +X.
+fn post_side(s: &Session) -> Value {
+    face_pick(s, "Post", [20.0, 0.0, 150.0], [1.0, 0.0, 0.0])
+}
+
+fn turn_step(s: &Session) -> &solidcraft_doc::Feature {
+    s.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::FrameMemberTurn { .. })).unwrap()
+}
+
+#[test]
+fn rotate_member_adds_a_rotate_step() {
+    let mut s = capped_post(square_tube());
+    let face = post_side(&s);
+    let r = run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "30 deg"}));
+    assert!(r.to_string().contains("Rotate1"), "{r}");
+    let info = run(&mut s, "timeline.inspect", json!({"feature": "Rotate1"}));
+    assert!(info.to_string().contains("frame_member_turn"), "{info}");
+}
+
+#[test]
+fn rotate_member_refuses_a_face_not_on_a_member() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Cube"}));
+    let face = face_pick(&s, "Cube", [10.0, 5.0, 5.0], [1.0, 0.0, 0.0]);
+    let before = s.doc.to_json();
+    let e = s.execute("frame.rotate_member", &json!({"face": face, "angle": "30 deg"})).unwrap_err().to_string();
+    assert!(e.contains("Select a face of a frame member"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+#[test]
+fn rotate_step_saves_and_reopens() {
+    let mut s = capped_post(square_tube());
+    let face = post_side(&s);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "30 deg"}));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    let (a, b) = (turn_step(&s), turn_step(&reopened));
+    let (
+        solidcraft_doc::FeatureKind::FrameMemberTurn { member: ma, angle: aa },
+        solidcraft_doc::FeatureKind::FrameMemberTurn { member: mb, angle: ab },
+    ) = (&a.kind, &b.kind)
+    else {
+        panic!("not a turn");
+    };
+    assert_eq!((ma, aa), (mb, ab));
+    assert_eq!(aa.as_ref() as &str, "30 deg");
+    assert!(!ma.line.is_empty());
+}
+
+#[test]
+fn a_rotate_step_reports_a_lost_member() {
+    let mut s = capped_post(square_tube());
+    let face = post_side(&s);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "30 deg"}));
+    let step = turn_step(&s).id;
+    run(&mut s, "timeline.suppress", json!({"feature": "Post member"}));
+    let e = s.model.result(step).and_then(|r| r.error.clone()).unwrap_or_default();
+    assert!(e.contains("Its frame member is gone"), "{e}");
+    run(&mut s, "timeline.suppress", json!({"feature": "Post member", "suppressed": false}));
+    assert!(s.model.result(step).is_some_and(|r| r.error.is_none()));
+    if let Some(f) = s.doc_mut().feature_mut(step)
+        && let solidcraft_doc::FeatureKind::FrameMemberTurn { member, .. } = &mut f.kind
+    {
+        member.line = "nope".into();
+    }
+    s.refresh();
+    let e = s.model.result(step).and_then(|r| r.error.clone()).unwrap_or_default();
+    assert!(e.contains("Line `nope` of its frame member is gone"), "{e}");
+}
+
+#[test]
+fn rotate_member_refuses_a_member_in_another_occurrence() {
+    let mut s = Session::default();
+    let part = run(&mut s, "component.create", json!({"name": "Part"}));
+    let occurrence = part["occurrence"].as_u64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Post path"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    run(&mut s, "sketch.line3d", json!({"points": [[0, 0, 0], [0, 0, 300]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "frame.member", json!({"sketch": "Post path", "name": "Post member", "body_name": "Post", "profile": square_tube()}));
+    let mut face = post_side(&s);
+    face["path"] = json!([occurrence]);
+    let e = s.execute("frame.rotate_member", &json!({"face": face, "angle": "30 deg"})).unwrap_err().to_string();
+    assert!(e.contains("Activate the member's component"), "{e}");
+}

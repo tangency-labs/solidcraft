@@ -34,6 +34,7 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             "frame_end_cap",
             json!({"type":"frame_end_cap","ends":[{"plane":plane("cap1"),"member":{"feature":7,"line":"l1"}}],"thickness":"cap.thickness","ratio":"cap.ratio","chamfer":"cap.chamfer","direction":"inward"}),
         ),
+        ("frame_member_turn", json!({"type":"frame_member_turn","member":{"feature":7,"line":"l1"},"angle":"turn.angle"})),
         (
             "body_transfer",
             json!({"type": "body_transfer", "bodies": ["B"], "from": 0, "to": 1, "transform": [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]}),

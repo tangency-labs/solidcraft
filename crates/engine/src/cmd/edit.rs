@@ -2108,6 +2108,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "plastic.snap_fit"
                 | "plastic.rest"
                 | "frame.end_cap"
+                | "frame.rotate_member"
                 | "frame.member"
         );
     if !constructor {
