@@ -59,6 +59,13 @@ pub fn member(doc: &Document, st: &ModelState, plane: &PlaneRef) -> Result<Membe
     Ok(Member { feature: source.id.into(), line: line.clone() })
 }
 
+/// The direction of `member`'s line, start to end.
+pub fn member_axis(doc: &Document, st: &ModelState, member: &Member) -> Result<solidcore_record::Vec3> {
+    let source = doc.feature(member.feature.0).ok_or_else(|| invalid("the member's feature no longer exists"))?;
+    let (section, _, _) = crate::eval::frame_member::member_section(doc, &doc.evaluation_values(), source, st, &member.line)?;
+    Ok(section.normal())
+}
+
 fn length(v: f64, what: &str, min: f64) -> Result<f64> {
     if !v.is_finite() || v > 1e6 || v < min {
         return Err(invalid(format!("the end cap's {what} must be a length from {min} to 1e6 mm")));
