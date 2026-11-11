@@ -4651,7 +4651,10 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                         let failed = unplaced.contains(name.as_str());
                         let colour = c4(if failed { crate::arrange_sheet::no_place(&t) } else { t.body_selected });
                         let lit = WholeBody { selected: true, colour };
-                        if !(gpu_lit(b) && !failed && light_whole_body(app, b, &active_bodies, lit, &body_slots, &mut feedback, &mut selected_instances)) {
+                        if !(gpu_lit(b)
+                            && !failed
+                            && light_whole_body(app, b, &active_bodies, lit, &body_slots, &mut feedback, &mut selected_instances))
+                        {
                             let m = shown(b);
                             let count = b.body.face_count();
                             mesh_tris(&mut feedback, &m, colour, true, |f| (f as usize) < count);
