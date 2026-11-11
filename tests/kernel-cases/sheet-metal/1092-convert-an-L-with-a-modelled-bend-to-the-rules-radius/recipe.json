@@ -121,7 +121,7 @@
    }
   },
   {
-   "command": "sheet.convert",
+   "command": "sheet.recognize",
    "params": {
     "body": "Angle",
     "face": [
@@ -144,4 +144,4 @@
    "params": {}
   }
  ]
-}
+}

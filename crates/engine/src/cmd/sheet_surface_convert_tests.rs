@@ -1,6 +1,8 @@
 //! Convert to Sheet Metal (#6748): no face is fixed, every face but the skipped
-//! ones converts, sharp edges are cut open until picked as bends, modeled rolls keep their
-//! radius, a ring of bends is refused, and the body becomes its folded sheet.
+//! ones converts, each a panel however thin the body, sharp edges are cut open until picked as
+//! bends, modeled rolls keep their radius, a ring of bends is refused, panels whose material
+//! would overlap are refused, and the body becomes its folded sheet. Shells and bent sections,
+//! sheet metal already, are Recognize's (`recognize`), which reads one side of them.
 
 use std::f64::consts::{FRAC_PI_2, PI, SQRT_2};
 
@@ -24,7 +26,18 @@ fn convert(
     let Some(mb) = state.bodies.iter().find(|b| b.name == name) else { panic!("no body {name}") };
     let v = |p: &[f64; 3]| Vec3::new(p[0], p[1], p[2]);
     let skip: Vec<Vec3> = skip.iter().map(v).collect();
-    convert_surfaces(mb, &fixed(rule), &bends.iter().map(v).collect::<Vec<_>>(), SheetFaces::AllBut(&skip), outward, &solidcraft_doc::IDENTITY)
+    convert_surfaces(mb, &fixed(rule), &bends.iter().map(v).collect::<Vec<_>>(), SheetFaces::AllBut(&skip), &[], outward, &solidcraft_doc::IDENTITY)
+}
+
+/// Recognizes the body `name` as sheet metal (#6748): a shell or a bent section, read from its
+/// larger side, less the faces at `skip`.
+fn recognize(s: &Session, name: &str, rule: ConvertRule, bends: &[[f64; 3]], skip: &[[f64; 3]]) -> solidcraft_doc::Result<SurfaceConversion> {
+    let state = s.model.state();
+    let Some(mb) = state.bodies.iter().find(|b| b.name == name) else { panic!("no body {name}") };
+    let v = |p: &[f64; 3]| Vec3::new(p[0], p[1], p[2]);
+    let skip: Vec<Vec3> = skip.iter().map(v).collect();
+    let faces = SheetFaces::Sheet { face: None, skip: &skip };
+    convert_surfaces(mb, &fixed(rule), &bends.iter().map(v).collect::<Vec<_>>(), faces, &[], false, &solidcraft_doc::IDENTITY)
 }
 
 /// The rule's values whatever the sheet's thickness.
@@ -71,17 +84,17 @@ const TEST: ConvertRule = ConvertRule {
     relief_depth: 1.0,
 };
 
-/// A channel whose bends are modeled with the rule's radius, one thickness inside: converted, its
-/// round corners are bends of that radius with no pick at all, and the flat is the one
-/// `sheet.convert` makes picking those corners as bends: 30 + 80 + 30 less two deductions.
+/// A channel whose bends are modeled with the rule's radius, one thickness inside: recognized
+/// (#6748), its round corners are bends of that radius with no pick at all, and the flat is the
+/// one `sheet.convert` makes from the web's outside picking those corners as bends: 30 + 80 + 30
+/// less two deductions.
 #[test]
 fn a_channel_converts_with_its_modelled_corners_as_bends() {
     let (t, k, r) = (2.0, 0.4, 2.0);
     let mut s = Session::default();
     rule(&mut s, "Test", t, k, r, 0.5);
     let corners = bent_section(&mut s, &[(0.0, 30.0), (0.0, 0.0), (80.0, 0.0), (80.0, 30.0)], t, r, 60.0);
-    let c =
-        convert(&s, "Section", ConvertRule { thickness: t, k_factor: k, bend_radius: r, ..TEST }, &[], &[], false).unwrap_or_else(|e| panic!("{e}"));
+    let c = recognize(&s, "Section", ConvertRule { thickness: t, k_factor: k, bend_radius: r, ..TEST }, &[], &[]).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(c.sheet.panels.len(), 3, "the web and its two legs");
     assert!(c.thickness == t && c.development.zones.len() == 2, "a shell's own thickness, and two bends");
     let across = 140.0 - 2.0 * deduction(std::f64::consts::FRAC_PI_2, r, t, k);
@@ -104,32 +117,32 @@ fn a_roll_keeps_its_modeled_radius() {
     let mut s = Session::default();
     rule(&mut s, "Test", t, k, 2.0, 0.5);
     bent_section(&mut s, &[(0.0, 30.0), (0.0, 0.0), (80.0, 0.0), (80.0, 30.0)], t, r, 60.0);
-    let c = convert(&s, "Section", ConvertRule { thickness: t, k_factor: k, bend_radius: 2.0, ..TEST }, &[], &[], false)
-        .unwrap_or_else(|e| panic!("{e}"));
+    // A bent section is sheet metal already: Recognize reads it (#6748).
+    let c = recognize(&s, "Section", ConvertRule { thickness: t, k_factor: k, bend_radius: 2.0, ..TEST }, &[], &[]).unwrap_or_else(|e| panic!("{e}"));
     let across = 2.0 * (30.0 - (r + t)) + (80.0 - 2.0 * (r + t)) + PI * (r + k * t);
     let got = size(&c);
     assert!(same_size(got, (across, 60.0), 1e-6), "{got:?} vs {across}");
 }
 
-/// A shelled tray with no picks is cut open at every sharp edge: five pieces, no bends. Its four
-/// floor edges picked as bends fold it to the flat `sheet.convert` makes from the same picks, its
-/// corners cut open. A skipped wall is left out.
+/// A shelled tray recognized (#6748) with no picks is cut open at every sharp edge: five pieces,
+/// no bends. Its four floor edges picked as bends fold it to the flat `sheet.convert` makes from
+/// the same picks on its outside, its corners cut open. A skipped wall is left out.
 #[test]
 fn a_shell_is_cut_open_until_its_edges_are_picked_as_bends() {
     let mut s = Session::default();
     rule(&mut s, "Test", TEST.thickness, TEST.k_factor, TEST.bend_radius, TEST.gap);
     tray(&mut s, TEST.thickness);
-    let open = convert(&s, "Tray", TEST, &[], &[], false).unwrap_or_else(|e| panic!("{e}"));
+    let open = recognize(&s, "Tray", TEST, &[], &[]).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(
         (open.sheet.panels.len(), open.development.pieces.len(), open.development.zones.len()),
         (5, 5, 0),
         "the floor and four walls, no rims"
     );
-    let c = convert(&s, "Tray", TEST, &BOTTOM_EDGES, &[], false).unwrap_or_else(|e| panic!("{e}"));
+    let c = recognize(&s, "Tray", TEST, &BOTTOM_EDGES, &[]).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!((c.sheet.panels.len(), c.development.pieces.len(), c.development.zones.len()), (5, 1, 4));
-    let skipped = convert(&s, "Tray", TEST, &BOTTOM_EDGES[1..], &[[50.0, 0.0, 15.0]], false).unwrap_or_else(|e| panic!("{e}"));
+    let skipped = recognize(&s, "Tray", TEST, &BOTTOM_EDGES[1..], &[[50.0, 0.0, 15.0]]).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!((skipped.sheet.panels.len(), skipped.development.zones.len()), (4, 3));
-    match convert(&s, "Tray", TEST, &BOTTOM_EDGES, &[[50.0, 0.0, 15.0]], false) {
+    match recognize(&s, "Tray", TEST, &BOTTOM_EDGES, &[[50.0, 0.0, 15.0]]) {
         Err(e) => assert!(e.to_string().contains("is not between two faces of the sheet"), "{e}"),
         Ok(_) => panic!("a bend onto a skipped face converts"),
     }
@@ -145,10 +158,11 @@ fn a_shell_is_cut_open_until_its_edges_are_picked_as_bends() {
 /// edge drawn outside and R short of each end of the one drawn inside.
 #[test]
 fn a_solid_converts_whole_with_its_material_inside_or_outside() {
+    // The shelled tray is sheet metal already: recognized (#6748).
     let shelled = {
         let mut s = Session::default();
         tray(&mut s, TEST.thickness);
-        convert(&s, "Tray", TEST, &BOTTOM_EDGES, &[], false).unwrap_or_else(|e| panic!("{e}"))
+        recognize(&s, "Tray", TEST, &BOTTOM_EDGES, &[]).unwrap_or_else(|e| panic!("{e}"))
     };
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 30, "body_name": "Block"}));
@@ -176,9 +190,9 @@ fn a_solid_converts_whole_with_its_material_inside_or_outside() {
     }
 }
 
-/// A square tube converted with all four of its corners as bends closes a ring: refused, naming
-/// the ring's edges. With three, the fourth corner is cut open, and the flat is the one
-/// `sheet.convert` makes from the same picks.
+/// A square tube (a shell open at both ends, recognized, #6748) with all four of its corners as
+/// bends closes a ring: refused, naming the ring's edges. With three, the fourth corner is cut
+/// open, and the flat is the one `sheet.convert` makes from the same picks on a wall's outside.
 #[test]
 fn a_ring_of_bends_is_refused_and_opens_where_a_corner_is_left_unpicked() {
     let (t, k, r) = (2.0, 0.44, 2.0);
@@ -187,11 +201,11 @@ fn a_ring_of_bends_is_refused_and_opens_where_a_corner_is_left_unpicked() {
     run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 40, "body_name": "Tube"}));
     run(&mut s, "solid.shell", json!({"faces": [[50, 30, 40], [50, 30, 0]], "thickness": t}));
     let corners = [[100.0, 0.0, 20.0], [100.0, 60.0, 20.0], [0.0, 60.0, 20.0], [0.0, 0.0, 20.0]];
-    match convert(&s, "Tube", TEST, &corners, &[], false) {
+    match recognize(&s, "Tube", TEST, &corners, &[]) {
         Err(e) => assert!(e.to_string().contains("closes a ring") && e.to_string().contains("leave one of the ring's edges out"), "{e}"),
         Ok(_) => panic!("a ring of four bends converts"),
     }
-    let c = convert(&s, "Tube", TEST, &corners[..3], &[], false).unwrap_or_else(|e| panic!("{e}"));
+    let c = recognize(&s, "Tube", TEST, &corners[..3], &[]).unwrap_or_else(|e| panic!("{e}"));
     assert!(c.development.loops.is_empty() && c.development.zones.len() == 3);
     // Folded: four walls 40 tall between three full-height bends, the walls at the open corner
     // cut back from it as a rip cuts them.
@@ -209,10 +223,11 @@ fn a_ring_of_bends_is_refused_and_opens_where_a_corner_is_left_unpicked() {
     assert!((v - today).abs() < 1e-9 * today, "{v} vs {today}");
 }
 
-/// Through the commands, as the app runs them: `sheet.convert` makes the body
+/// Through the commands, as the app runs them: `sheet.recognize` makes the body
 /// its folded sheet, which this channel already is, rolls and all (its corners six thicknesses
 /// inside, past a bend's), so it keeps its volume; and `sheet.flat_pattern` shows its flat, its
-/// rolls counted with their lines. The flat survives saving and reopening the design.
+/// rolls counted with their lines. The flat survives saving and reopening the design. (A bent
+/// channel is sheet metal already: Recognize reads it, #6748; Convert makes each face a panel.)
 #[test]
 fn a_conversion_shows_in_the_flat_pattern() {
     let (t, k, r) = (2.0, 0.4, 12.0);
@@ -221,7 +236,7 @@ fn a_conversion_shows_in_the_flat_pattern() {
     bent_section(&mut s, &[(0.0, 30.0), (0.0, 0.0), (80.0, 0.0), (80.0, 30.0)], t, r, 60.0);
     let section = |s: &Session| s.model.state().bodies.iter().find(|b| b.name == "Section").map_or(f64::NAN, |b| fine_volume(&b.body));
     let modeled = section(&s);
-    run(&mut s, "sheet.convert", json!({"body": "Section"}));
+    run(&mut s, "sheet.recognize", json!({"body": "Section"}));
     assert!(s.model.results.iter().all(|x| x.error.is_none()), "{:?}", s.model.results.iter().map(|x| &x.error).collect::<Vec<_>>());
     let sheet = section(&s);
     assert!((sheet - modeled).abs() < 1e-6 * modeled, "the folded sheet is the channel: {sheet} vs {modeled}");
@@ -233,14 +248,15 @@ fn a_conversion_shows_in_the_flat_pattern() {
     assert!(flat["surfaces"] == json!(true) && flat["rolls"] == json!(2) && flat["bends"] == json!([]), "{flat}");
     assert_eq!(flat["roll_lines"].as_array().map(Vec::len), Some(6), "each roll's start, end and middle: {flat}");
     let saved = s.doc.to_json();
-    assert!(saved.contains("\"sheet_surface_convert\""), "the feature saves as a conversion");
+    assert!(saved.contains("\"sheet_recognize\""), "the feature saves as a recognition");
     let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap_or_else(|e| panic!("{e}")));
     assert_eq!(size(&run(&mut reopened, "sheet.flat_pattern", json!({"body": "Section"}))), (w, h));
 }
 
-/// Through the commands: a ring of bends is refused, naming its edge, and with one corner left
-/// unpicked the flat lists the other three as bends. Skipped faces are refused beside picked
-/// ones (the sheet is then only the picked faces), and a material side is inside or outside.
+/// Through the commands: a ring of bends in a shelled tube (recognized, #6748) is refused, naming
+/// its edge, and with one corner left unpicked the flat lists the other three as bends. Converting,
+/// skipped faces are refused beside picked ones (the sheet is then only the picked faces), and a
+/// material side is inside or outside.
 #[test]
 fn a_ring_through_the_commands_is_refused_and_picked_faces_skip_none() {
     let (t, k, r) = (2.0, 0.44, 2.0);
@@ -249,7 +265,7 @@ fn a_ring_through_the_commands_is_refused_and_picked_faces_skip_none() {
     run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 40, "body_name": "Tube"}));
     run(&mut s, "solid.shell", json!({"faces": [[50, 30, 40], [50, 30, 0]], "thickness": t}));
     let corners = [[100.0, 0.0, 20.0], [100.0, 60.0, 20.0], [0.0, 60.0, 20.0], [0.0, 0.0, 20.0]];
-    match s.execute("sheet.convert", &json!({"body": "Tube", "bends": corners})) {
+    match s.execute("sheet.recognize", &json!({"body": "Tube", "bends": corners})) {
         Err(e) => assert!(e.to_string().contains("closes a ring"), "{e}"),
         Ok(v) => panic!("a ring of four bends converts: {v}"),
     }
@@ -262,10 +278,92 @@ fn a_ring_through_the_commands_is_refused_and_picked_faces_skip_none() {
     ] {
         assert!(s.execute("sheet.convert", &bad).is_err(), "{bad}");
     }
-    run(&mut s, "sheet.convert", json!({"body": "Tube", "bends": &corners[..3]}));
+    run(&mut s, "sheet.recognize", json!({"body": "Tube", "bends": &corners[..3]}));
     let flat = run(&mut s, "sheet.flat_pattern", json!({"body": "Tube"}));
     let bends = flat["bends"].as_array().cloned().unwrap_or_default();
     assert!(bends.len() == 3 && bends.iter().all(|b| (b["angle_deg"].as_f64().unwrap_or(0.0) - 90.0).abs() < 1e-9), "{flat}");
+}
+
+/// A block 20 x 20 x 1 on XY, its corner at the origin.
+fn thin_block(s: &mut Session) {
+    run(s, "solid.box", json!({"length": 20, "width": 20, "height": 1, "body_name": "Block"}));
+}
+
+/// Convert takes every face as it is, however thin the body (#6748): a block 20 x 20 x 1 under a
+/// rule 0.1 thick, gap 0.1, is six panels parted by twelve rips, never one sheet (no ratio of its
+/// sizes says what the user meant; Recognize reads a body as sheet metal). Each panel is its face
+/// with the rule's 0.1 inside it, cut back square from each of its four edges by the mitre,
+/// T + g/√2 = 0.1 + 0.1/√2 = 0.170711 (a square corner turning toward the material): the top and
+/// the bottom (20 − 2·0.170711)² = 19.658579² = 386.459714 mm² each, the four sides 19.658579 ×
+/// (1 − 2·0.170711) = 19.658579 × 0.658579 = 12.946720 mm² each. The flat is the six pieces laid
+/// apart, 2·386.459714 + 4·12.946720 = 824.706309 mm²; folded, each panel is its flat 0.1 thick,
+/// 0.1 × 824.706309 = 82.470631 mm³.
+#[test]
+fn a_thin_block_converts_to_six_panels_parted_by_rips() {
+    let (t, gap) = (0.1, 0.1);
+    let mut s = Session::default();
+    rule(&mut s, "Foil", t, TEST.k_factor, t, gap);
+    thin_block(&mut s);
+    let c = convert(&s, "Block", ConvertRule { thickness: t, bend_radius: t, gap, ..TEST }, &[], &[], false).unwrap_or_else(|e| panic!("{e}"));
+    let ripped = c.sheet.joints.iter().filter(|j| matches!(j.kind, solidcraft_develop::JointKind::Rip(_))).count();
+    assert_eq!((c.sheet.panels.len(), ripped, c.development.zones.len(), c.development.pieces.len()), (6, 12, 0, 6));
+    assert!(c.thickness == t && c.own_thickness.is_none(), "the rule's thickness, none read off the body");
+    let cut = t + gap / SQRT_2;
+    let flat = 2.0 * (20.0 - 2.0 * cut).powi(2) + 4.0 * (20.0 - 2.0 * cut) * (1.0 - 2.0 * cut);
+    assert!((flat - 824.706309).abs() < 1e-6, "{flat}");
+    assert!((area(&c) - flat).abs() < 1e-9 * flat, "{} vs {flat}", area(&c));
+    let (v, _) = folded(&c);
+    assert!((v - t * flat).abs() < 1e-8 * t * flat, "{v} vs {}", t * flat);
+    // Through the command, as the app runs it: the same six panels and twelve rips.
+    run(&mut s, "sheet.convert", json!({"body": "Block"}));
+    assert_eq!(rips(&s), 12);
+    let v = body_volume(&s, "Block");
+    assert!((v - t * flat).abs() < 1e-8 * t * flat, "{v} vs {}", t * flat);
+}
+
+/// Panels whose material would overlap are refused, naming them, from the folded panels
+/// themselves (#6748), never from a ratio of the body's sizes. The block 20 x 20 x 1 with its four
+/// sides skipped is its top and its bottom, 1 apart, each with the rule's thickness inside it:
+/// - 0.4 thick, the top's material is z 0.6 … 1 and the bottom's 0 … 0.4, 0.2 apart: two panels,
+///   2 × 20 × 20 × 0.4 = 320 mm³;
+/// - 0.6 thick, they share z 0.4 … 0.6 over the whole 20 x 20 (20 × 20 × 0.2 = 80 mm³, about
+///   (10, 10, 0.5)): refused, naming both panels and where they meet, and the design keeps no sheet;
+/// - 0.6 thick with the material outside the faces, the top's is z 1 … 1.6 and the bottom's
+///   −0.6 … 0: two panels, 2 × 20 × 20 × 0.6 = 480 mm³.
+#[test]
+fn panels_whose_material_would_overlap_are_refused_naming_them() {
+    let sides = [[10.0, 0.0, 0.5], [20.0, 10.0, 0.5], [10.0, 20.0, 0.5], [0.0, 10.0, 0.5]];
+    let mut s = Session::default();
+    thin_block(&mut s);
+    let of = |t: f64| ConvertRule { thickness: t, bend_radius: t, gap: t, ..TEST };
+    let apart = convert(&s, "Block", of(0.4), &[], &sides, false).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!((apart.sheet.panels.len(), apart.sheet.joints.len()), (2, 0));
+    let (v, _) = folded(&apart);
+    assert!((v - 320.0).abs() < 1e-8 * 320.0, "{v}");
+    let e = convert(&s, "Block", of(0.6), &[], &sides, false).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.matches("the panel from the face at").count() == 2 && e.contains("overlap at (10.000, 10.000, 0.500)"), "{e}");
+    let outside = convert(&s, "Block", of(0.6), &[], &sides, true).unwrap_or_else(|e| panic!("{e}"));
+    let (v, _) = folded(&outside);
+    assert!((v - 480.0).abs() < 1e-8 * 480.0, "{v}");
+    // Through the command: refused, and the block stays as it was.
+    rule(&mut s, "Thick", 0.6, TEST.k_factor, 0.6, 0.6);
+    let e = s.execute("sheet.convert", &json!({"body": "Block", "skip": sides})).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("overlap at (10.000, 10.000, 0.500)"), "{e}");
+    assert!(s.model.state().surface_sheets.is_empty());
+}
+
+/// The whole block 20 x 20 x 1, all six faces, under a rule 0.6 thick (gap 0.1) is refused by
+/// the names of its four sides, before any solid is made of them: each rip mitres a panel in
+/// 0.6 + 0.1/√2 = 0.670711 from its edge, and a side, 1 tall, loses that from both its long
+/// edges, 2 × 0.670711 = 1.341421 > 1: its outline turns inside out, no material. (The top and
+/// the bottom keep 20 − 1.341421 = 18.658579 square each; their material would also meet.)
+#[test]
+fn a_whole_thin_block_under_a_thick_rule_is_refused_naming_its_sides() {
+    let mut s = Session::default();
+    thin_block(&mut s);
+    let rule = ConvertRule { thickness: 0.6, bend_radius: 0.6, gap: 0.1, ..TEST };
+    let e = convert(&s, "Block", rule, &[], &[], false).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.matches("the panel from the face at").count() == 4 && e.contains("leave it no material"), "{e}");
 }
 
 /// The shapes of corner relief a rule can ask for.
@@ -313,11 +411,11 @@ fn relief_centers(c: &SurfaceConversion, r: f64) -> Vec<solidcore_record::Vec2> 
     centers
 }
 
-/// Converted, a body becomes one sheet however it was drawn: the shelled
-/// tray, the block drawn from outside and its cavity drawn from inside with the material out
-/// fold to one solid, whatever the rule's corner relief, and the block with its material outside
-/// to the tray a box T bigger all round makes. Notched, that is the solid today's Convert makes,
-/// and the flanged tray's flat.
+/// A body becomes one sheet however it was drawn: the shelled tray (recognized, #6748), the block
+/// drawn from outside and its cavity drawn from inside with the material out (converted) fold to
+/// one solid, whatever the rule's corner relief, and the block with its material outside to the
+/// tray a box T bigger all round makes. Notched, that is the solid today's Convert makes from the
+/// tray's outside, and the flanged tray's flat.
 #[test]
 fn a_body_folds_into_one_sheet_however_it_is_drawn() {
     let top = [[50.0, 30.0, 30.0]];
@@ -331,7 +429,7 @@ fn a_body_folds_into_one_sheet_however_it_is_drawn() {
     for (name, shape) in SHAPES {
         let rule = ConvertRule { corner_relief: shape, ..TEST };
         let drawn = [
-            ("shelled", convert(&shelled, "Tray", rule, &BOTTOM_EDGES, &[], false)),
+            ("shelled", recognize(&shelled, "Tray", rule, &BOTTOM_EDGES, &[])),
             ("inside", convert(&block, "Block", rule, &BOTTOM_EDGES, &top, false)),
             ("outside", convert(&cavity, "Cavity", rule, &cavity_floor, &top, true)),
         ];
@@ -351,7 +449,7 @@ fn a_body_folds_into_one_sheet_however_it_is_drawn() {
             for (what, c, volume, flat) in [
                 (
                     "shelled",
-                    convert(&shelled, "Tray", rule, &BOTTOM_EDGES, &[], false),
+                    recognize(&shelled, "Tray", rule, &BOTTOM_EDGES, &[]),
                     todays_tray(name, [0.0; 3], [100.0, 60.0, 30.0]),
                     notched_tray_flat(100.0, 60.0, 30.0),
                 ),
@@ -366,10 +464,10 @@ fn a_body_folds_into_one_sheet_however_it_is_drawn() {
     }
 }
 
-/// A corner relief belongs to the corner, not to any sheet round it: in a tray whose walls are
-/// larger than its floor, as in a shallow one, each of the four corners gets a round relief
-/// centered where its two bends' center lines cross, BA / 2 out from the floor's tangent lines
-/// both ways, so their centers stand 92 + BA by 52 + BA apart.
+/// A corner relief belongs to the corner, not to any sheet round it: in a shelled tray
+/// (recognized, #6748) whose walls are larger than its floor, as in a shallow one, each of the
+/// four corners gets a round relief centered where its two bends' center lines cross, BA / 2 out
+/// from the floor's tangent lines both ways, so their centers stand 92 + BA by 52 + BA apart.
 #[test]
 fn a_corner_relief_belongs_to_the_corner_whichever_sheet_is_largest() {
     let ba = FRAC_PI_2 * (TEST.bend_radius + TEST.k_factor * TEST.thickness);
@@ -378,7 +476,7 @@ fn a_corner_relief_belongs_to_the_corner_whichever_sheet_is_largest() {
         let mut s = Session::default();
         run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": height, "body_name": "Tray"}));
         run(&mut s, "solid.shell", json!({"faces": [[50, 30, height]], "thickness": TEST.thickness}));
-        let c = convert(&s, "Tray", rule, &BOTTOM_EDGES, &[], false).unwrap_or_else(|e| panic!("{height}: {e}"));
+        let c = recognize(&s, "Tray", rule, &BOTTOM_EDGES, &[]).unwrap_or_else(|e| panic!("{height}: {e}"));
         assert!(c.notes.is_empty() && c.sheet.corners.len() == 4, "{height}: {:?} {:?}", c.notes, c.sheet.corners);
         let centers = relief_centers(&c, rule.corner_relief_size / 2.0);
         assert_eq!(centers.len(), 4, "{height}: {centers:?}");
@@ -393,10 +491,10 @@ fn a_corner_relief_belongs_to_the_corner_whichever_sheet_is_largest() {
 }
 
 /// A plate with a wall along its whole edge y = 0 and one on its edge x = 100 from y = 0 to 30
-/// only: the shorter wall bends only where it stands, and where it ends beside more of the
-/// plate the plate gets the rule's bend relief. Notched where the walls meet, the bends are 96
-/// and 26 long, the flat is a flanged sheet's, and the folded sheet holds the metal that flat
-/// folds to.
+/// only, 2 thick throughout and recognized (#6748): the shorter wall bends only where it stands,
+/// and where it ends beside more of the plate the plate gets the rule's bend relief. Notched where
+/// the walls meet, the bends are 96 and 26 long, the flat is a flanged sheet's, and the folded
+/// sheet holds the metal that flat folds to.
 #[test]
 fn a_shorter_wall_bends_where_it_stands_beside_its_bend_relief() {
     let (t, r, k) = (2.0, 2.0, 0.44);
@@ -407,7 +505,7 @@ fn a_shorter_wall_bends_where_it_stands_beside_its_bend_relief() {
     run(&mut s, "solid.box", json!({"length": 100, "width": 2, "height": 30, "operation": "join", "targets": ["Part"]}));
     run(&mut s, "solid.box", json!({"length": 2, "width": 30, "height": 30, "corner": [98, 0, 0], "operation": "join", "targets": ["Part"]}));
     let bends = [[50.0, 0.0, 0.0], [100.0, 15.0, 0.0]];
-    let c = convert(&s, "Part", TEST, &bends, &[], false).unwrap_or_else(|e| panic!("{e}"));
+    let c = recognize(&s, "Part", TEST, &bends, &[]).unwrap_or_else(|e| panic!("{e}"));
     assert!(c.notes.is_empty(), "{:?}", c.notes);
     let mut lengths: Vec<f64> = c.development.zones.iter().map(|z| z.near[0].dist(z.near[1])).collect();
     lengths.sort_by(f64::total_cmp);
@@ -501,6 +599,7 @@ fn an_icosahedron_bends_whole_edges_to_its_corners() {
         &fixed(ConvertRule { corner_relief: ReliefShape::Round, ..TEST }),
         &picks,
         SheetFaces::AllBut(&[]),
+        &[],
         false,
         &solidcraft_doc::IDENTITY,
     )
@@ -583,6 +682,7 @@ fn a_tombstone_rips_along_its_round_as_along_its_sides() {
                 &fixed(rule),
                 &[Vec3::new(0.0, -23.0, 0.0), Vec3::new(27.5, 0.0, 0.0)],
                 SheetFaces::AllBut(&[]),
+                &[],
                 false,
                 &solidcraft_doc::IDENTITY,
             ),
@@ -594,6 +694,7 @@ fn a_tombstone_rips_along_its_round_as_along_its_sides() {
                 &fixed(rule),
                 &[Vec3::new(0.0, -20.5, 2.5), Vec3::new(25.0, 0.0, 2.5)],
                 SheetFaces::AllBut(&[]),
+                &[],
                 true,
                 &solidcraft_doc::IDENTITY,
             ),
@@ -913,8 +1014,7 @@ fn a_flange_meets_a_bend_thicken_made_at_a_corner() {
 /// Flanges at 45° close their corners along the slanted lines where their planes cross (#6748):
 /// four flanges 40 √2 along their outer faces round a plate 100 x 60 are the same metal as a box
 /// extruded 40 from a 100 x 60 rectangle with a 45° outward taper, converted with its top left
-/// off and its floor edges bent. (Extruded 20, Convert would take that box for a plate 20
-/// thick: its top, 140 x 100, is more than six times as wide.)
+/// off and its floor edges bent.
 #[test]
 fn flanges_at_45_degrees_close_their_corners_as_a_tapered_box_converts() {
     let t = TEST.thickness;

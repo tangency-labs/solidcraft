@@ -72,7 +72,7 @@ fn schemas_and_the_key_check_agree() {
         &keys(&["angle", "body", "curve", "fixed", "flip", "points", "position", "radius", "sketch", "stays"]),
     );
     assert_keys(input_schema_for::<UnfoldParams>(), &keys(&["body"]));
-    assert_keys(input_schema_for::<ConvertParams>(), &keys(&["bends", "body", "direction", "face", "faces", "rule", "skip"]));
+    assert_keys(input_schema_for::<ConvertParams>(), &keys(&["bends", "body", "direction", "engrave", "face", "faces", "rule", "skip"]));
     assert_keys(input_schema_for::<RecognizeParams>(), &keys(&["bends", "body", "face", "new_rule", "rule", "skip"]));
     assert_keys(input_schema_for::<MeasureBodyParams>(), &["body", "face"]);
 }
@@ -237,6 +237,7 @@ fn strict_keeps_todays_errors() {
         ("sheet.convert", json!({"body": "Plate", "face": true})),
         ("sheet.convert", json!({"body": "Plate", "direction": "both"})),
         ("sheet.convert", json!({"body": "Plate", "skip": [[50, 130, 2.5], ""]})),
+        ("sheet.convert", json!({"body": "Plate", "engrave": [[50, 130, 2.5], ""]})),
     ] {
         let error = |level: ParamCheck| {
             let mut s = sheet();

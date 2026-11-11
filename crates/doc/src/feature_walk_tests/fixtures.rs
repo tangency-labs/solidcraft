@@ -160,8 +160,8 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         ),
         ("sheet_path", json!({"type": "sheet_path", "edge": o, "sketch": 1, "curves": ["l1"], "radius": "path.radius"})),
         ("sheet_unfold", json!({"type": "sheet_unfold"})),
-        ("sheet_convert", json!({"type": "sheet_convert", "body": "B", "face": o})),
-        ("sheet_surface_convert", json!({"type": "sheet_surface_convert", "body": "B", "skip": [o]})),
+        ("sheet_convert", json!({"type": "sheet_convert", "body": "B", "face": o, "engrave": [o]})),
+        ("sheet_surface_convert", json!({"type": "sheet_surface_convert", "body": "B", "skip": [o], "engrave": [o]})),
         ("sheet_recognize", json!({"type": "sheet_recognize", "body": "B", "face": o, "skip": [o]})),
         (
             "boss",

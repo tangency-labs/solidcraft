@@ -2,12 +2,18 @@
 //! among them, laid out flat by `solidcraft-develop`. No face is fixed: every face of the sheet
 //! is a panel like any other, and the flat is drawn in the largest one's plane.
 //!
-//! The sheet is every face of a solid or of a surface body, or of one side of a shell or a plate
-//! (the side of the face picked first, else its larger side, reached across every edge but a
-//! rim's), less the faces the user skips. A surface body has no thickness of its own: its faces are the sheet's surface,
-//! however near another faces back at them. Recognize reads a body that is sheet metal already
+//! Convert takes every face of the body, a solid's or a surface body's, less the faces the user
+//! skips (or the faces picked, and every face a bend joins to them): each is a panel, however thin
+//! the body. A thin plate converts to six panels parted by rips, never to one sheet; nothing about
+//! the body's thickness is read. Its material is the rule's thickness on the faces' side the
+//! conversion's `direction` says, and panels whose material would overlap (a thin block's two
+//! sides, each the rule's thickness in) are refused, naming them: their folded pieces are
+//! intersected exactly. So is a panel its rips leave no material (the mitres from its edges
+//! passing each other), from the outline the development draws for it. A face the user picks to
+//! engrave is no panel: its recess is kept on the panel round it, as deep as its floor lies
+//! behind that panel's face. Recognize reads a body that is sheet metal already
 //! (`SheetFaces::Sheet`): its larger side, every face of which has its other side one thickness
-//! behind it. The sheet
+//! behind it, the shell's or the plate's own recesses kept. The sheet
 //! is the rule's, as the tooling makes it: the rule's thickness, taken into the material from
 //! that side whatever the body's, and its bends at the rule's radius. A cylinder modelled between
 //! two planes, its inside radius short of 10^0.7 times the body's thickness (DIN 6935), is a bend
@@ -27,9 +33,10 @@
 //! stands.
 //!
 //! Everything is read from the body's B-rep record, exactly: each face's surface and loops, each
-//! edge's curve. A shell's or a plate's other side is, of the faces level with each face and
-//! facing back at it, the one it meets first over the most of its area; what a hole of a face
-//! opens onto (a hole through, a recess, a boss) is found by following the faces round it. A roll's edges are read into its
+//! edge's curve. Recognizing, a shell's or a plate's other side is, of the faces level with each
+//! face and facing back at it, the one it meets first over the most of its area; what a hole of a
+//! face opens onto (a hole through, a recess, a boss) is found by following the faces round it.
+//! Converting, no face has another side. A roll's edges are read into its
 //! chart at points, as lines where they run straight there and splines through the points
 //! elsewhere. A roll that closes round its axis opens along its own seam.
 //!
@@ -137,9 +144,12 @@ pub struct SurfaceConversion {
     pub thickness: f64,
     pub notes: Vec<String>,
     pub reliefs: Reliefs,
-    /// The body's own thickness, where it has one (a shell's or a plate's): its faces' recesses
-    /// are read there and kept on the sheet, which takes the rule's.
+    /// The body's own thickness, where Recognize read one (a shell's or a plate's): its faces'
+    /// recesses are read there and kept on the sheet, which takes the rule's. Convert reads none.
     pub own_thickness: Option<f64>,
+    /// The engravings Convert keeps, of the faces the user picked to engrave: each a recess of its
+    /// panel from the sheet's surface, as deep as its floor lies behind the panel's face.
+    pub recesses: Vec<crate::Recess>,
     /// Each bend modelled with its radius: its joint and the inside radius the body has there.
     pub modelled_radii: Vec<(usize, f64)>,
     /// The rule's bend radius, every bend's.
@@ -859,12 +869,12 @@ fn charted_on(f: &Shape, g: &Shape) -> Option<(Shape, Vec2)> {
 }
 
 /// What a loop of a shell's or a plate's face opens onto, followed across the faces round it to
-/// the first faces level with the face: material standing on the face (a boss, at that face); a
-/// floor facing the way the face does behind it (a recess: its walls and floors, a hole through
-/// its floor or not); the face's other side, or a floor facing away (a hole through); or none
-/// of these.
+/// the first faces level with the face: material standing on the face (a boss, at that face, and
+/// the boss's faces: its walls and the faces level with the face in front of it); a floor facing
+/// the way the face does behind it (a recess: its walls and floors, a hole through its floor or
+/// not); the face's other side, or a floor facing away (a hole through); or none of these.
 enum Opening {
-    Raised(usize),
+    Raised(usize, BTreeSet<usize>),
     Recess(BTreeSet<usize>),
     Through,
     Open,
@@ -924,10 +934,9 @@ impl Modelled {
 /// The faces of a body that become the sheet.
 #[derive(Clone, Copy, Debug)]
 pub enum SheetFaces<'a> {
-    /// Every face of a solid or a surface body, or of one side of a shell or a plate, less the
-    /// faces at these points.
+    /// Convert: every face of the body, however thin, less the faces at these points.
     AllBut(&'a [Vec3]),
-    /// The faces at these points, and every face a bend joins to them.
+    /// Convert: the faces at these points, and every face a bend joins to them.
     Picked(&'a [Vec3]),
     /// Recognize: every face of one side of a body that is sheet metal already (a shell, a plate,
     /// an imported part), the side of the face at `face` or else of the body's largest face, less
@@ -956,7 +965,7 @@ enum Reading {
 /// side, the side of the face at `face` or else of its largest face. A body that is no sheet of
 /// one thickness is refused, naming the thicknesses found.
 pub fn measure_sheet_body(mb: &ModelBody, face: Option<Vec3>, skip: &[Vec3], to_world: &crate::Mat) -> Result<SheetMeasure> {
-    match read_surfaces(mb, None, &[], SheetFaces::Sheet { face, skip }, false, to_world)? {
+    match read_surfaces(mb, None, &[], SheetFaces::Sheet { face, skip }, &[], false, to_world)? {
         Reading::Measured(m) => Ok(m),
         Reading::Converted(_) => err("the body was converted, not measured"),
     }
@@ -967,18 +976,20 @@ pub fn measure_sheet_body(mb: &ModelBody, face: Option<Vec3>, skip: &[Vec3], to_
 /// modelled with its radius, on its roll: the roll and the faces it runs smoothly into join the
 /// sheet. A solid's material lies inside its faces, or outside them when `outward`. The sheet is
 /// the rule's, as the tooling makes it: its thickness and its bends' radius are the rule's
-/// (`rule(None)`), whatever the body's; a shell's or a plate's own thickness only tells its sides
-/// apart and how a modelled corner is rounded. Points are the body's own; what it says gives
-/// them where `to_world` puts them.
+/// (`rule(None)`), whatever the body's. Converting, every face is a panel and the faces at
+/// `engrave` are engravings of the panels round them; recognizing, a shell's or a plate's own
+/// thickness only tells its sides apart and how a modelled corner is rounded. Points are the
+/// body's own; what it says gives them where `to_world` puts them.
 pub fn convert_surfaces(
     mb: &ModelBody,
     rule: &dyn Fn(Option<f64>) -> Result<ConvertRule>,
     bends: &[Vec3],
     faces: SheetFaces,
+    engrave: &[Vec3],
     outward: bool,
     to_world: &crate::Mat,
 ) -> Result<SurfaceConversion> {
-    match read_surfaces(mb, Some(rule), bends, faces, outward, to_world)? {
+    match read_surfaces(mb, Some(rule), bends, faces, engrave, outward, to_world)? {
         Reading::Converted(c) => Ok(*c),
         Reading::Measured(_) => err("the body was measured, not converted"),
     }
@@ -991,6 +1002,7 @@ fn read_surfaces(
     rule: Option<&dyn Fn(Option<f64>) -> Result<ConvertRule>>,
     bends: &[Vec3],
     faces: SheetFaces,
+    engrave: &[Vec3],
     outward: bool,
     to_world: &crate::Mat,
 ) -> Result<Reading> {
@@ -1043,6 +1055,24 @@ fn read_surfaces(
     for p in skip {
         skipped.insert(face_at(*p, "skipped face")?);
     }
+    // Recognize alone reads a body as sheet metal (#6748): a shell's or a plate's other side, its
+    // rims, and its recesses, which it keeps. Convert reads none of these: every face it takes is a
+    // panel, and a recess is an engraving only where the user picks its faces to engrave.
+    let recognizing = matches!(faces, SheetFaces::Sheet { .. });
+    if recognizing && !engrave.is_empty() {
+        return err("Recognize keeps a body's recesses as they are: faces to engrave are Convert's");
+    }
+    let mut engraved = BTreeSet::new();
+    for p in engrave {
+        let g = face_at(*p, "engraved face")?;
+        if skipped.contains(&g) {
+            return err(format!("the face at {} is picked both to skip and to engrave", at(*p)));
+        }
+        if chosen.as_ref().is_some_and(|c| c.contains(&g)) {
+            return err(format!("the face at {} is picked both for the sheet and to engrave", at(*p)));
+        }
+        engraved.insert(g);
+    }
     // The two faces each edge is between (one face twice for a roll's own seam), and which faces
     // meet at an edge.
     let pair = |e: usize| match q.edge_faces(e).as_slice() {
@@ -1085,18 +1115,18 @@ fn read_surfaces(
             .max_by(|x, y| x.0.total_cmp(&y.0))
             .map(|(_, r)| r)
     };
-    // Behind face `f`: of the faces level with it that face back at it from inside its material,
-    // the one it meets first over the most of its area (a shell's or a plate's other side), and
-    // how far behind it lies; with `true`, that it faces back. Found from the faces' surfaces and
-    // loops: nearest first, each face takes what of `f` the nearer ones left, so a wall's inside
-    // face comes before the wall across the part, and a recess's floor in the other side takes
-    // only its own small part.
-    // A surface body's faces have none: it has no thickness of its own, so its faces are the
-    // sheet's surface however near another faces back at them.
+    // Recognizing, behind face `f`: of the faces level with it that face back at it from inside
+    // its material, the one it meets first over the most of its area (a shell's or a plate's other
+    // side), and how far behind it lies; with `true`, that it faces back. Found from the faces'
+    // surfaces and loops: nearest first, each face takes what of `f` the nearer ones left, so a
+    // wall's inside face comes before the wall across the part, and a recess's floor in the other
+    // side takes only its own small part.
+    // Converting, no face has one: every face is a panel of the sheet, however near another faces
+    // back at it, as a surface body's faces always are (it has no thickness of its own).
     let surface = mb.is_surface();
     let behinds: Vec<Option<(f64, usize)>> = (0..count)
         .map(|f| {
-            let sf = probe(f).filter(|_| !surface)?;
+            let sf = probe(f).filter(|_| recognizing && !surface)?;
             let mut found: Vec<(f64, usize)> = (0..count)
                 .filter(|g| *g != f)
                 .filter_map(|g| {
@@ -1124,8 +1154,9 @@ fn read_surfaces(
         .collect();
     let behind = |f: usize| behinds.get(f).copied().flatten().map(|(d, g)| (d, g, true));
 
-    // A face that another faces back at a small distance behind, as a shell's or a plate's do:
-    // the sheet keeps that thickness and its material.
+    // Recognizing, a face that another faces back at a small distance behind, as a shell's or a
+    // plate's do: the sheet keeps that thickness and its material. (Converting, none: see
+    // `behinds`.)
     let thin = |f: usize| behind(f).filter(|(d, _, back)| *back && *d > 0.0 && d * 6.0 <= extent(f)).map(|(d, ..)| d);
     // A face's area, exactly from its chart: a plane's chart is the plane, a cylinder's runs along
     // its axis and round it in radians. A cone's is no constant times its chart's: none.
@@ -1137,25 +1168,23 @@ fn read_surfaces(
             _ => 0.0,
         }
     };
-    // Where the walk starts, and so which side of a shell or a plate is the sheet's surface:
-    // picking faces, the face picked first; recognizing, the face given. Else the largest face
-    // with another behind it; of two as large (a plate's sides), the one facing most up, then
-    // most along y and x, then the one higher up; and from there the larger of the body's two
-    // sides (below). Chosen from the picks and the geometry, never from the order of the body's
-    // faces. With no face behind any, the body is a solid, which takes the rule's thickness:
-    // every face is the sheet's, and nothing depends on where the walk starts.
-    let recognizing = matches!(faces, SheetFaces::Sheet { .. });
-    let first_thin = match (first_pick, faces) {
-        (Some(f), _) => thin(f).map(|d| (f, d)),
-        (None, SheetFaces::Picked(_)) => None,
-        (None, SheetFaces::Sheet { face: Some(p), .. }) => {
+    // Recognizing, where the walk starts, and so which side of a shell or a plate is the sheet's
+    // surface: the face given, else the largest face with another behind it; of two as large (a
+    // plate's sides), the one facing most up, then most along y and x, then the one higher up;
+    // and from there the larger of the body's two sides (below). Chosen from the picks and the
+    // geometry, never from the order of the body's faces. Converting, the body is surfaces, which
+    // take the rule's thickness: every face is the sheet's (the faces picked, with every face a
+    // bend joins to them), and nothing depends on where the walk starts.
+    let first_thin = match faces {
+        SheetFaces::Sheet { face: Some(p), .. } => {
             let f = face_at(p, "surface face")?;
             match thin(f) {
                 Some(d) => Some((f, d)),
                 None => return err(format!("the face at {} has no face behind it a sheet's thickness away: Convert takes its surfaces", at(p))),
             }
         }
-        (None, _) => {
+        SheetFaces::AllBut(_) | SheetFaces::Picked(_) => None,
+        SheetFaces::Sheet { face: None, .. } => {
             let facing = |f: usize| {
                 let p = face_point(&q, f).unwrap_or_default();
                 let n = probe(f).map_or(Vec3::default(), |s| s.out(p));
@@ -1197,7 +1226,7 @@ fn read_surfaces(
         (None, Some(d)) => d,
         (None, None) => return err("not sheet metal: the body has no even thickness of its own"),
     };
-    // The body as modelled: its own thickness, or the rule's for a solid.
+    // The body as modelled: its own thickness where Recognize read one, else the rule's.
     let modelled_t = own.unwrap_or(t);
     let shapes: Vec<std::result::Result<Shape, &'static str>> = (0..count).map(|f| Shape::of(b, &q, f, outward && sheet.is_none(), tol)).collect();
     let shape = |f: usize| shapes.get(f).copied().unwrap_or(Err("a face the body does not have"));
@@ -1206,21 +1235,21 @@ fn read_surfaces(
         x.out(m).dot(y.out(m)).clamp(-1.0, 1.0).acos() <= SMOOTH
     };
 
-    // The faces of the sheet: a solid's all, a shell's or a plate's side the start is on. That
-    // side runs on smoothly, or across a sharp edge between two planes that is no rim: a face's
-    // rims (its thickness faces) touch the face behind it. A wall's outside that runs on in one
-    // plane with the base's edge touches it too, and is told from a rim by standing the sheet's
-    // thickness in front of the face behind it, unless the face crossed from meets that wall's
-    // inside as well: the inside is then the wall's face on its side, and the outside (one face
-    // with the base's edge strips beside the wall) a rim from there. A face whose face behind is
-    // the sheet's is the sheet's other side.
+    // The faces of the sheet: converting, every face; recognizing, the side of the shell or the
+    // plate the start is on. That side runs on smoothly, or across a sharp edge between two planes
+    // that is no rim: a face's rims (its thickness faces) touch the face behind it. A wall's
+    // outside that runs on in one plane with the base's edge touches it too, and is told from a
+    // rim by standing the sheet's thickness in front of the face behind it, unless the face
+    // crossed from meets that wall's inside as well: the inside is then the wall's face on its
+    // side, and the outside (one face with the base's edge strips beside the wall) a rim from
+    // there. A face whose face behind is the sheet's is the sheet's other side.
     let thick = |g: usize| sheet.is_some_and(|d| behind(g).is_some_and(|(e, _, back)| back && (e - d).abs() <= tol * 10.0));
     let rim = |f: usize, g: usize| -> bool {
         let Some((_, h, _)) = behind(f) else { return false };
         touches(g, h) && (!thick(g) || behind(g).is_some_and(|(_, inside, _)| touches(f, inside)))
     };
-    // What each loop of a shell's or a plate's face opens onto (see `Opening`), followed across
-    // the faces round it to the first faces level with it.
+    // Recognizing, what each loop of a shell's or a plate's face opens onto (see `Opening`),
+    // followed across the faces round it to the first faces level with it.
     let mut around: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); count];
     for (x, y) in (0..edge_count).filter_map(pair) {
         if x != y {
@@ -1247,7 +1276,8 @@ fn read_surfaces(
         }
         let near = tol * 10.0;
         if let Some((g, ..)) = levels.iter().find(|(_, depth, _)| *depth < -near) {
-            return Opening::Raised(*g);
+            let standing = levels.iter().filter(|(_, depth, _)| *depth < -near).map(|x| x.0);
+            return Opening::Raised(*g, walls.into_iter().chain(standing).collect());
         }
         let floors: Vec<usize> = levels.iter().filter(|(_, depth, same)| *same && *depth > near).map(|x| x.0).collect();
         if !floors.is_empty() {
@@ -1279,12 +1309,16 @@ fn read_surfaces(
     };
     let openings: Vec<Vec<(Vec<usize>, Opening)>> = if sheet.is_some() { (0..count).map(loops_of).collect() } else { Vec::new() };
     // A face of a recess in face `f` (its wall or its floor): no panel; the recess is read onto
-    // `f`'s panel once the sheet is built (see `sheet_surface_cuts`).
+    // `f`'s panel once the sheet is built (see `sheet_surface_cuts`). A face of material standing
+    // on `f` (a boss) is none either: the walk does not cross onto it, and `f`'s panel refuses it
+    // as no sheet of even thickness.
     let recessed = |f: usize, g: usize| -> bool {
-        openings.get(f).is_some_and(|ls| ls.iter().any(|(_, what)| matches!(what, Opening::Recess(faces) if faces.contains(&g))))
+        openings.get(f).is_some_and(|ls| {
+            ls.iter().any(|(_, what)| matches!(what, Opening::Recess(faces) | Opening::Raised(_, faces) if faces.contains(&g)))
+        })
     };
-    // The side a walk from face `from` reaches.
-    let walk = |from: usize| -> BTreeSet<usize> {
+    // The side a walk from face `from` reaches, crossing onto none of the faces in `rims`.
+    let reach = |from: usize, rims: &BTreeSet<usize>| -> BTreeSet<usize> {
         let mut side = BTreeSet::from([from]);
         let mut queue = VecDeque::from([from]);
         while let Some(f) = queue.pop_front() {
@@ -1306,6 +1340,7 @@ fn read_surfaces(
                     match (shape(f), shape(g)) {
                         (Ok(sf), Ok(sg)) => {
                             !rim && !other_side
+                                && !rims.contains(&g)
                                 && !recessed(f, g)
                                 && (smooth(e, &sf, &sg) || matches!((sf, sg), (Shape::Plane { .. }, Shape::Plane { .. })))
                         }
@@ -1320,12 +1355,36 @@ fn read_surfaces(
         }
         side
     };
+    // The side a walk from face `from` reaches. A face that a face of the side, one with the
+    // sheet's thickness behind it, has for a rim is no face of the side, whichever face the walk
+    // meets it from first: a plate's end, a rim of its face, is met as well from a wall's outside
+    // that runs on in one plane with the plate's edge (as a bracket's does), which takes it for
+    // none, its own face behind lying elsewhere. So the walk is taken again with such faces left
+    // out, until the side holds none.
+    let walk = |from: usize| -> BTreeSet<usize> {
+        let mut rims: BTreeSet<usize> = BTreeSet::new();
+        loop {
+            let side = reach(from, &rims);
+            if sheet.is_none() {
+                return side;
+            }
+            let more: Vec<usize> = side
+                .iter()
+                .copied()
+                .filter(|g| *g != from && side.iter().any(|k| k != g && thick(*k) && touches(*k, *g) && rim(*k, *g)))
+                .collect();
+            if more.is_empty() {
+                return side;
+            }
+            rims.extend(more);
+        }
+    };
     let mut side = walk(start);
-    // With no face picked or given, a shell's or a plate's surface is the larger of its two sides,
-    // the outside of its bends (by `face_area`, a cone's left out); of two as large (a plate's),
-    // the side of its largest face, where the walk started.
+    // Recognizing with no face given, a shell's or a plate's surface is the larger of its two
+    // sides, the outside of its bends (by `face_area`, a cone's left out); of two as large (a
+    // plate's), the side of its largest face, where the walk started.
     let mut start = start;
-    let given = matches!(faces, SheetFaces::Picked(_) | SheetFaces::Sheet { face: Some(_), .. });
+    let given = matches!(faces, SheetFaces::Sheet { face: Some(_), .. });
     if let (false, Some(_), Some((_, h, true))) = (given, sheet, behind(start)) {
         let size = |s: &BTreeSet<usize>| -> f64 { s.iter().map(|f| face_area(*f)).sum() };
         let other = walk(h);
@@ -1407,8 +1466,9 @@ fn read_surfaces(
     rolled.extend(more);
     let (bent, rolled) = (bent, rolled);
 
-    // Converting, the sheet is that whole side. Thickening, it is the faces picked, the rolls of
-    // modelled bends with the faces they run smoothly into, and every face a bend joins to them.
+    // With no faces picked, the sheet is that whole side (converting, every face). With faces
+    // picked, it is those, the rolls of modelled bends with the faces they run smoothly into, and
+    // every face a bend joins to them.
     let mut sheet_faces = match &chosen {
         None => side.clone(),
         Some(set) => {
@@ -1453,7 +1513,7 @@ fn read_surfaces(
             faces
         }
     };
-    sheet_faces.retain(|f| !skipped.contains(f));
+    sheet_faces.retain(|f| !skipped.contains(f) && !engraved.contains(f));
     let mut shaped: BTreeMap<usize, Shape> = BTreeMap::new();
     for &f in &sheet_faces {
         match shape(f) {
@@ -1462,6 +1522,95 @@ fn read_surfaces(
                 return err(format!("the face at {} can't be a panel: {why}. Skip it to leave it out", at(face_point(&q, f).unwrap_or_default())));
             }
         };
+    }
+
+    // Converting, the engravings the user picked (#6748), by the panel each is cut into: the edges
+    // of the hole in the panel's face it opens from, and its floors, each as deep as it lies
+    // behind the face and drawn in the panel's chart. The faces picked to engrave are no panels,
+    // and the hole they open from is no hole of the sheet: the panel keeps that material, less the
+    // recess. Read exactly from the faces: each floor is level with the panel's face, facing its
+    // way, behind it and short of the rule's thickness; each wall is square to the face; a face
+    // level with the panel's face (an island, as in an O) is the panel's surface, and nothing is
+    // cut there. A cut whose faces are not picked stays panels: it may be a pocket the design means.
+    let mut engravings: BTreeMap<usize, Vec<Engraving>> = BTreeMap::new();
+    let mut reached: BTreeSet<usize> = BTreeSet::new();
+    for (&f, sf) in shaped.iter().filter(|_| !engraved.is_empty()) {
+        let (Some(face), Some(Some((region, uses)))) = (q.record().faces.get(f), charts.get(f)) else { continue };
+        let point = at(face_point(&q, f).unwrap_or_default());
+        for l in &face.loops {
+            let Bounds::Edges { edges } = l else { continue };
+            let edges: Vec<usize> = edges.iter().map(|oe| oe.edge as usize).collect();
+            let beside: Vec<usize> = edges.iter().filter_map(|e| pair(*e)).flat_map(|(x, y)| [x, y]).filter(|g| *g != f).collect();
+            if !beside.iter().any(|g| engraved.contains(g)) {
+                continue;
+            }
+            // Its outer loop is the panel's outline: an engraving there runs off the face.
+            let first = edges.first().and_then(|e| uses.iter().find(|u| u.edge == *e)).and_then(|u| u.chart.first().copied());
+            if first.is_some_and(|c| region.outer.segs.iter().any(|s| s.point_at(s.closest_param(c).clamp(0.0, 1.0)).dist(c) <= tol * 100.0)) {
+                return err(format!("the engraving in the face at {point} reaches the face's edge: not supported yet"));
+            }
+            if beside.iter().any(|g| !engraved.contains(g)) {
+                return err(format!("the engraving in the face at {point} has walls not picked to engrave: pick its walls and its floor"));
+            }
+            let Shape::Plane { out: n, .. } = *sf else {
+                return err(format!("not supported yet: an engraving in a roll, at {point}"));
+            };
+            let mut group = BTreeSet::new();
+            let mut queue: VecDeque<usize> = beside.into_iter().collect();
+            while let Some(g) = queue.pop_front() {
+                if group.insert(g) {
+                    queue.extend(around.get(g).into_iter().flatten().copied().filter(|h| engraved.contains(h)));
+                }
+            }
+            let near = tol * 10.0;
+            let mut floors = Vec::new();
+            for &g in &group {
+                let at_g = at(face_point(&q, g).unwrap_or_default());
+                let unread = |why: String| DocError::Invalid(format!("the engraved face at {at_g} can't be read: {why}"));
+                let sg = shape(g).map_err(|why| unread(why.to_string()))?;
+                match level_of(sf, &sg, tol) {
+                    // An island: the panel's own surface.
+                    Some((depth, true)) if depth.abs() <= near => {}
+                    Some((depth, true)) if depth > near && depth < t => {
+                        let (twin, shift) = charted_on(sf, &sg).ok_or_else(|| unread("no chart on the face's plane".into()))?;
+                        let (floor, _) = face_chart(b, &q, &twin, g, sag, tol).map_err(unread)?;
+                        floors.push((depth, Rigid2 { cos: 1.0, sin: 0.0, shift }.region(&floor)));
+                    }
+                    Some((depth, true)) if depth > near => {
+                        return err(format!(
+                            "the engraving at {at_g} is {depth:.3} mm deep, the sheet {t:.3} mm thick: an engraving stops short of the sheet's thickness"
+                        ));
+                    }
+                    Some((_, true)) => {
+                        return err(format!("the engraved floor at {at_g} lies in front of the face at {point}, away from its material"));
+                    }
+                    Some((_, false)) => {
+                        return err(format!("the engraved face at {at_g} faces back at the face at {point}: no floor of an engraving"));
+                    }
+                    None => {
+                        let square = match sg {
+                            Shape::Plane { out, .. } => out.dot(n).abs() <= 1e-9,
+                            Shape::Cylinder { axis, .. } => axis.cross(n).len() <= 1e-9,
+                            Shape::Cone { .. } => false,
+                        };
+                        if !square {
+                            return err(format!(
+                                "the engraved face at {at_g} is neither a floor level with the face at {point} nor a wall square to it: not supported yet"
+                            ));
+                        }
+                    }
+                }
+            }
+            if floors.is_empty() {
+                return err(format!("the engraving in the face at {point} has no floor: a hole through is no engraving"));
+            }
+            reached.extend(group);
+            engravings.entry(f).or_default().push((edges, floors));
+        }
+    }
+    if let Some(g) = engraved.iter().find(|g| !reached.contains(g)) {
+        let at_g = at(face_point(&q, *g).unwrap_or_default());
+        return err(format!("the face at {at_g}, picked to engrave, is no face of a recess in a face of the sheet"));
     }
 
     // The bends modelled with their radius (see `Modelled`): a cylinder whose inside radius is
@@ -1637,24 +1786,32 @@ fn read_surfaces(
     let mut panels = Vec::with_capacity(order.len());
     let mut places = Vec::with_capacity(order.len());
     let mut uses_of: BTreeMap<usize, Vec<UseChart>> = BTreeMap::new();
+    let mut recesses: Vec<crate::Recess> = Vec::new();
     for &f in &order {
         let Some(shape) = shaped.get(&f) else { continue };
         let point = face_point(&q, f).unwrap_or_default();
         places.push(shape.frame().ok_or_else(|| DocError::Invalid(format!("the face at {} has no frame", at(point))))?);
         let (mut region, uses) =
             face_chart(b, &q, shape, f, sag, tol).map_err(|e| DocError::Invalid(format!("the face at {} can't be a panel: {e}", at(point))))?;
+        // Which of the region's loops a loop of the face is: the one its first edge runs on.
+        let on = |l: &Loop2, edges: &[usize]| {
+            let first = edges.first().and_then(|e| uses.iter().find(|u| u.edge == *e)).and_then(|u| u.chart.first().copied());
+            first.is_some_and(|c| l.segs.iter().any(|s| s.point_at(s.closest_param(c).clamp(0.0, 1.0)).dist(c) <= tol * 100.0))
+        };
+        // An engraving picked in the face: the hole it opens from is no hole of the sheet, and
+        // each of its floors is a recess of the panel from the sheet's surface, as deep as it lies.
+        for (edges, floors) in engravings.get(&f).into_iter().flatten() {
+            region.holes.retain(|h| !on(h, edges));
+            let panel = panels.len();
+            recesses.extend(floors.iter().map(|(depth, r)| crate::Recess { panel, region: r.clone(), far: false, depth: *depth }));
+        }
         // A hole of a shell's or a plate's face opening onto a recess is no hole of the sheet:
         // the panel keeps that material. Material standing on the face (a boss) is no sheet of
         // even thickness.
         if let Some(loops) = openings.get(f) {
-            // Which of the region's loops a loop of the face is: the one its first edge runs on.
-            let on = |l: &Loop2, edges: &[usize]| {
-                let first = edges.first().and_then(|e| uses.iter().find(|u| u.edge == *e)).and_then(|u| u.chart.first().copied());
-                first.is_some_and(|c| l.segs.iter().any(|s| s.point_at(s.closest_param(c).clamp(0.0, 1.0)).dist(c) <= tol * 100.0))
-            };
             for (edges, what) in loops {
                 match what {
-                    Opening::Raised(g) => {
+                    Opening::Raised(g, _) => {
                         let at_g = face_point(&q, *g).unwrap_or_default();
                         return err(format!("the face at {} is raised at {}: not a plate of even thickness", at(point), at(at_g)));
                     }
@@ -2025,7 +2182,28 @@ fn read_surfaces(
             names.join(" and the one at ")
         ));
     }
-    Ok(Reading::Converted(Box::new(SurfaceConversion {
+    // A panel its rips leave no material (#6748): each rip cuts it back from its edge by the
+    // rule's mitre, and where those cuts pass each other (a face narrower than the rule's
+    // thickness taken in from both its edges, as a thin block's sides under a thick rule) the
+    // outline the development draws for it turns inside out. Read from that outline exactly, its
+    // signed area from its own lines and arcs: none, or less, is no material. Refused by name
+    // before any solid is sewn from it. A planar panel's outline runs counter-clockwise in the
+    // flat as in its chart; a roll's is not read here.
+    let planar = |i: usize| model.panels.get(i).is_some_and(|p| p.surface == Surface::Plane);
+    let gone: Vec<String> = development
+        .panels
+        .iter()
+        .enumerate()
+        .filter(|(i, flat)| planar(*i) && flat.as_ref().is_some_and(|f| f.region.outer.signed_area() <= 0.0))
+        .map(|(i, _)| format!("the panel from the face at {}", at(order.get(i).and_then(|f| face_point(&q, *f)).unwrap_or_default())))
+        .collect();
+    if let [rest @ .., last] = gone.as_slice() {
+        let list = if rest.is_empty() { last.clone() } else { format!("{} and {last}", rest.join(", ")) };
+        return err(format!(
+            "{list}: the rips round each leave it no material, the rule's {t:.3} mm mitred in from its edges past each other. Skip those faces, or use a thinner rule"
+        ));
+    }
+    let mut conversion = SurfaceConversion {
         sheet: model,
         development,
         faces: order,
@@ -2035,11 +2213,54 @@ fn read_surfaces(
         notes,
         reliefs,
         own_thickness: own,
+        recesses,
         modelled_radii,
         rule_radius: rule.bend_radius,
         pieces: std::sync::OnceLock::new(),
-    })))
+    };
+    // Converting, each face takes the rule's thickness on its material's side, whatever lies
+    // behind it, so two panels' material may meet (a thin block's two sides, each the rule's
+    // thickness in): refused, naming them, from the folded parts themselves (see
+    // `SurfaceConversion::overlap`). Recognize reads one side of a sheet of one thickness.
+    if !recognizing {
+        let (shared, unchecked) = conversion.overlap()?;
+        let name = |p: Part| match p {
+            Part::Panel(i) => {
+                let face = conversion.faces.get(i).and_then(|f| face_point(&q, *f));
+                format!("the panel from the face at {}", at(face.unwrap_or_default()))
+            }
+            Part::Bend(j) => format!("the bend at {}", at(conversion.edges.get(j).copied().unwrap_or_default())),
+        };
+        if let Some((x, y, m)) = shared {
+            return err(format!(
+                "{} and {} overlap at {}: each is the rule's {t:.3} mm behind its face, and their material meets there. Skip one of the faces, or convert under a thinner rule",
+                name(x),
+                name(y),
+                at(m)
+            ));
+        }
+        let said: Vec<String> =
+            unchecked.into_iter().map(|(x, y, why)| format!("whether {} and {} overlap could not be worked out: {why}", name(x), name(y))).collect();
+        conversion.notes.extend(said);
+    }
+    Ok(Reading::Converted(Box::new(conversion)))
 }
+
+/// An engraving Convert keeps (see [`read_surfaces`]): the edges of the hole in its panel's face
+/// it opens from, and its floors, each as deep as it lies behind the face, in the panel's chart.
+type Engraving = (Vec<usize>, Vec<(f64, Region2)>);
+
+/// A part of a folded sheet, as [`SurfaceConversion::overlap`] weighs it: a panel with the tabs
+/// that ride with it, or the zone of a bend (by its joint).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Part {
+    Panel(usize),
+    Bend(usize),
+}
+
+/// What [`SurfaceConversion::overlap`] finds: the first two parts that share material, with the
+/// middle of what they share; and each pair whose share could not be worked out, with why.
+type Overlaps = (Option<(Part, Part, Vec3)>, Vec<(Part, Part, String)>);
 
 /// Settles where each bend of `sheet` ends and what is cut there, from where `places` put its
 /// panels in space. Where two bends standing on one panel meet at a corner of it, both end where
@@ -2396,6 +2617,73 @@ impl SurfaceConversion {
         Ok(self.pieces.get_or_init(|| cut))
     }
 
+    /// Where two parts of the folded sheet share material (see [`Part`]): the first two found, in
+    /// the parts' order, and the middle of what they share; and each pair whose share the kernel
+    /// could not work out, with why. Each part is its pieces of the flat carried into space through
+    /// the sheet's thickness, as the folded solid has them (`sheet_surface_fold::solid`); every two
+    /// are intersected exactly and what they share weighed, as `inspect.interference` weighs it. No
+    /// sampling and no rule of thumb: parts that only touch (a rip's two panels, kept its gap apart
+    /// or none) share no volume. A panel and the zone of its own bend lie either side of the bend's
+    /// tangent line on it (a bend turns at most half a turn), so that pair is not weighed.
+    fn overlap(&self) -> Result<Overlaps> {
+        let mut parts: BTreeMap<Part, Vec<(Piece, Region2)>> = BTreeMap::new();
+        for (piece, region) in self.pieces()? {
+            let part = match *piece {
+                Piece::Panel(i) | Piece::Tab(_, i) => Part::Panel(i),
+                Piece::Zone(z) => match self.development.zones.get(z) {
+                    Some(zone) => Part::Bend(zone.joint),
+                    None => continue,
+                },
+            };
+            parts.entry(part).or_default().push((*piece, region.clone()));
+        }
+        if parts.len() < 2 {
+            return Ok((None, Vec::new()));
+        }
+        let placed: Vec<Option<Rigid3>> = self.places.iter().copied().map(Some).collect();
+        let folded = fold_onto(&self.sheet, &self.development, &placed)?;
+        let mut solids = Vec::with_capacity(parts.len());
+        for (part, pieces) in parts {
+            let made = crate::sheet_surface_fold::solid(&self.development, &folded, self.thickness, &pieces, &mut FlatWork::new(), &|_, _| None)?;
+            solids.push((part, made.0));
+        }
+        let own_bend = |a: Part, b: Part| match (a, b) {
+            (Part::Panel(i), Part::Bend(j)) | (Part::Bend(j), Part::Panel(i)) => {
+                self.sheet.joints.get(j).is_some_and(|x| x.a.panel == i || x.b.panel == i)
+            }
+            _ => false,
+        };
+        let mut unchecked = Vec::new();
+        for (k, (a, sa)) in solids.iter().enumerate() {
+            for (b, sb) in solids.iter().skip(k + 1) {
+                if own_bend(*a, *b) {
+                    continue;
+                }
+                let shared = match solidcraft_kernel::boolean(sa, sb, solidcraft_kernel::BoolOp::Intersect) {
+                    Ok(Some(o)) => o,
+                    Ok(None) => continue,
+                    Err(e) => {
+                        unchecked.push((*a, *b, e.to_string()));
+                        continue;
+                    }
+                };
+                let m = match solidcraft_kernel::measure_mass(&shared) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        unchecked.push((*a, *b, e.to_string()));
+                        continue;
+                    }
+                };
+                // A rounding of the measure (the one `inspect.interference` allows), so that parts
+                // touching face to face share none: not a tolerance on where the parts lie.
+                if m.volume > 1e-9 * sa.size().max(sb.size()).max(1.0).powi(3) {
+                    return Ok((Some((*a, *b, m.centroid)), unchecked));
+                }
+            }
+        }
+        Ok((None, unchecked))
+    }
+
     /// The folded sheet: its solid, sewn from the flat's pieces carried into space.
     pub fn solid(&self) -> Result<Body> {
         let places: Vec<Option<Rigid3>> = self.places.iter().copied().map(Some).collect();
@@ -2404,13 +2692,14 @@ impl SurfaceConversion {
     }
 
     /// [`Self::solid`], with what each face was made for (see [`crate::sheet::FaceNamer`]) and
-    /// its sketch frame (see [`cap_frame`]), the sheet's panels keyed as `sheet` keys them (the
-    /// conversion's own, in the same order) and made as `recipes` says.
-    pub(crate) fn parted_solid(&self, sheet: &Sheet, recipes: &[(String, PanelMade)]) -> Result<(Body, Vec<Option<SheetFace>>, Vec<Option<Plane>>)> {
+    /// its sketch frame (see [`cap_frame`]), the panels keyed as `sk`'s sheet keys them (the
+    /// conversion's own, in the same order) and made as its recipes say, less `sk`'s recesses (the
+    /// engravings Convert keeps), each from its panel where the fold puts it.
+    pub(crate) fn parted_solid(&self, sk: &SurfaceSheet) -> Result<(Body, Vec<Option<SheetFace>>, Vec<Option<Plane>>)> {
         let places: Vec<Option<Rigid3>> = self.places.iter().copied().map(Some).collect();
         let folded = fold_onto(&self.sheet, &self.development, &places)?;
         let pieces = self.pieces()?;
-        let namer = crate::sheet::FaceNamer::new(sheet, &self.development, pieces, &[], recipes);
+        let namer = crate::sheet::FaceNamer::new(&sk.sheet, &self.development, pieces, &[], &sk.recipes);
         let made = std::cell::RefCell::new(Vec::new());
         let keep = |p: crate::sheet_surface::Piece, r: crate::sheet::FaceRole| {
             let mut made = made.borrow_mut();
@@ -2420,16 +2709,25 @@ impl SurfaceConversion {
         let (body, keys) = crate::sheet_surface_fold::solid(&self.development, &folded, self.thickness, pieces, &mut FlatWork::new(), &keep)?;
         let made = made.into_inner();
         let at = |k: &Option<String>| k.as_deref().and_then(|k| k.parse::<usize>().ok()).and_then(|k| made.get(k).copied());
-        let parts = keys.iter().map(|k| at(k).and_then(|(p, r)| namer.part(p, r, &[]))).collect();
-        let frames = keys
+        // What each face was made for, and a panel's cap's sketch frame, carried through the cuts.
+        type Made = (Option<(SheetPart, Option<f64>)>, Option<Plane>);
+        let named: Vec<Option<Made>> = keys
             .iter()
-            .map(|k| match at(k)? {
-                (crate::sheet_surface::Piece::Panel(i), crate::sheet::FaceRole::Cap { surface, .. }) => {
-                    cap_frame(&self.development, folded.places.get(i).copied().flatten()?, i, surface, self.thickness)
-                }
-                _ => None,
+            .map(|k| {
+                at(k).map(|(p, r)| {
+                    let frame = match (p, r) {
+                        (crate::sheet_surface::Piece::Panel(i), crate::sheet::FaceRole::Cap { surface, .. }) => {
+                            folded.places.get(i).copied().flatten().and_then(|f| cap_frame(&self.development, f, i, surface, self.thickness))
+                        }
+                        _ => None,
+                    };
+                    (namer.part(p, r, &[]), frame)
+                })
             })
             .collect();
+        let (body, named) = sk.recessed_named(body, named, &folded.places)?;
+        let parts = named.iter().map(|n| n.as_ref().and_then(|n| n.0.clone())).collect();
+        let frames = named.into_iter().map(|n| n.and_then(|n| n.1)).collect();
         Ok((body, crate::sheet::ranked(parts), frames))
     }
 }
@@ -2904,7 +3202,8 @@ impl SurfaceSheet {
             reliefs: c.reliefs,
             corner_reliefs: Vec::new(),
             notes: c.notes.clone(),
-            recesses: Vec::new(),
+            // The engravings Convert keeps; Recognize reads a body's own once it is built.
+            recesses: c.recesses.clone(),
             pockets: Vec::new(),
             loose: Vec::new(),
             labels: Vec::new(),
@@ -2919,7 +3218,7 @@ impl SurfaceSheet {
             holes: Vec::new(),
         };
         sheet.laid_out(&c.development, c.pieces()?, c.flat()?)?;
-        let (solid, parts, frames) = c.parted_solid(&sheet.sheet, &sheet.recipes)?;
+        let (solid, parts, frames) = c.parted_solid(&sheet)?;
         sheet.parts = parts;
         sheet.frames = frames;
         Ok((sheet, solid))

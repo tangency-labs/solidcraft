@@ -37,7 +37,7 @@
    }
   },
   {
-   "command": "sheet.convert",
+   "command": "sheet.recognize",
    "params": {
     "body": "Plate",
     "face": [
@@ -53,4 +53,4 @@
    "params": {}
   }
  ]
-}
+}

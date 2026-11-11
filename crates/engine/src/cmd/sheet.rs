@@ -103,15 +103,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&CONVERT_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(
-            "body (a solid, a surface body, or a shell or a plate); rule?; bends?: [[x,y,z] on sharp edges]. \
-             (#6748) surfaces become the rule's sheet, its thickness, radius and reliefs whatever the body's: every face of \
-             a solid or a surface body, or of one side of a shell or a plate, but skip?: [faces left out, as points or names]; \
-             or, with face?: [x,y,z] on a face or its name from model.faces, and faces?: [more faces], those faces and every \
-             face a bend joins to them. No face is fixed. A cylinder or cone is a roll at its own radius, and a bend modelled \
-             with its radius is a bend (pick it on its roll); every sharp edge between two faces of the sheet is cut open with \
-             the rule's gap but the `bends`; a ring of bends is refused; the faces' holes become cut-outs; \
-             direction?: inside (default) | outside (the side of the faces the material lies on; a shell or a plate keeps its \
-             own). The body becomes the folded sheet, and sheet.flat_pattern shows its flat",
+            "body (a solid or a surface body); rule?; bends?: [[x,y,z] on sharp edges]. (#6748) surfaces become the rule's \
+             sheet, its thickness, radius and reliefs whatever the body's: every face of the body but skip?: [faces left out, \
+             as points or names], each a panel however thin the body (a thin plate is six panels; sheet.recognize reads a \
+             body that is sheet metal already as one sheet); or, with face?: [x,y,z] on a face or its name from model.faces, \
+             and faces?: [more faces], those faces and every face a bend joins to them. No face is fixed. A cylinder or cone \
+             is a roll at its own radius, and a bend modelled with its radius is a bend (pick it on its roll); every sharp \
+             edge between two faces of the sheet is cut open with the rule's gap but the `bends`; a ring of bends is refused; \
+             the faces' holes become cut-outs, but engrave?: [the walls and floor of a recess in a face] makes that recess a \
+             pocket of the face's panel, as deep as its floor lies; panels whose material would overlap are refused, naming \
+             them; direction?: inside (default) | outside (the side of the faces the material lies on). The body becomes the \
+             folded sheet, and sheet.flat_pattern shows its flat",
         ),
     CommandSpec::new("sheet.recognize", "Recognize Sheet Metal", crate::checked!("sheet.recognize", recognize))
         .at("SHEET METAL", "CREATE")
@@ -708,12 +710,18 @@ fn convert(s: &mut Session, p: &Value) -> Result<Value> {
     for f in p.get("skip").and_then(Value::as_array).into_iter().flatten() {
         skip.push(FacePick(super::face::face_ref(s, f, Some(&body), cmd)?));
     }
+    // The faces of recesses the user brings in as engravings: no panels, but pockets of the
+    // panels round them. A recess not picked stays panels, as a pocket the design may mean.
+    let mut engrave = Vec::new();
+    for f in p.get("engrave").and_then(Value::as_array).into_iter().flatten() {
+        engrave.push(FacePick(super::face::face_ref(s, f, Some(&body), cmd)?));
+    }
     let direction = material_side_of(p, cmd)?;
     let rule = rule_param(s, p, cmd)?;
     let (body, bends): (BodyName, Vec<Position>) = (BodyName(body), bends.into_iter().map(Position).collect());
     let kind = match picked.split_first() {
-        Some((face, faces)) => FeatureKind::SheetConvert { body, face: *face, faces: faces.to_vec(), rule, bends, direction },
-        None => FeatureKind::SheetSurfaceConvert { body, rule, bends, skip, direction },
+        Some((face, faces)) => FeatureKind::SheetConvert { body, face: *face, faces: faces.to_vec(), rule, bends, engrave, direction },
+        None => FeatureKind::SheetSurfaceConvert { body, rule, bends, skip, engrave, direction },
     };
     add_feature(s, p, kind)
 }
@@ -724,8 +732,8 @@ pub(crate) fn material_side(t: &str) -> Option<String> {
     Some(t.to_ascii_lowercase()).filter(|t| matches!(t.as_str(), "inside" | "outside"))
 }
 
-/// `direction`: the side of the faces of a solid or a surface body its material lies on, inside
-/// (saved as nothing) or outside.
+/// `direction`: the side of the faces of a body its material lies on, inside (saved as nothing)
+/// or outside.
 fn material_side_of(p: &Value, cmd: &str) -> Result<String> {
     match p.get("direction").filter(|v| !v.is_null()) {
         None => Ok(String::new()),

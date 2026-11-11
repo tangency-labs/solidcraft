@@ -527,8 +527,9 @@ fn convert_rule(rv: &crate::sheet::RuleValues) -> crate::ConvertRule {
 }
 
 /// Converts the body `body` to sheet metal from its surfaces (#6748), its `faces` as Convert or
-/// Thicken chooses them: the body becomes the folded sheet, and the model keeps the sheet. The
-/// sheet is the rule's: its thickness and bends are, whatever the body's.
+/// Recognize chooses them, the faces at `engrave` engravings of Convert's panels: the body
+/// becomes the folded sheet, and the model keeps the sheet. The sheet is the rule's: its
+/// thickness and bends are, whatever the body's.
 #[allow(clippy::too_many_arguments)]
 fn convert_to_sheet(
     doc: &Document,
@@ -540,6 +541,7 @@ fn convert_to_sheet(
     rule: &Option<String>,
     bends: &[crate::Position],
     faces: crate::SheetFaces,
+    engrave: &[Vec3],
     direction: &str,
 ) -> Result<()> {
     let mb = st.body(body).cloned().ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
@@ -548,13 +550,15 @@ fn convert_to_sheet(
     let picks = edge_picks(f, &mb, bends, warning)?;
     let placement = doc.component_transform(doc.model_body_component(&mb));
     let to_world = doc.model_body_offset(&mb).map(|offset| crate::mat_mul(&placement, offset)).unwrap_or(placement);
-    let conversion = crate::convert_surfaces(&mb, &values, &picks, faces, direction == "outside", &to_world)?;
+    let conversion = crate::convert_surfaces(&mb, &values, &picks, faces, engrave, direction == "outside", &to_world)?;
     for note in &conversion.notes {
         append_warning(warning, note.clone());
     }
     let (sheet, solid) = crate::SurfaceSheet::converted(&mb.name, &r.name, &conversion, f.id)?;
-    // A shell's or a plate's recesses are the sheet's, from either face: read where the body has
-    // its own thickness, and kept, each as deep from its face, at the rule's.
+    // Recognizing, a shell's or a plate's recesses are the sheet's, from either face: read where
+    // the body has its own thickness, and kept, each as deep from its face, at the rule's.
+    // Converting, the body has none of its own: only the engravings the user picked are kept,
+    // and the conversion has them already.
     let same = |a: f64, b: f64| (a - b).abs() <= 1e-9 * a.abs().max(1.0);
     let as_ruled = |own: f64| same(own, sheet.thickness) && conversion.modelled_radii.iter().all(|(_, r)| same(*r, conversion.rule_radius));
     let (sheet, solid) = match conversion.own_thickness {
@@ -1069,20 +1073,23 @@ pub(super) fn sheet_eval(
         }
         // Convert (#6748): the body becomes the folded sheet, and the model keeps the sheet.
         // Convert takes every face of the body but the skipped ones, or the faces picked and
-        // every face a picked bend joins to them. Recognize takes a body that is sheet metal
-        // already, one side of it.
-        FeatureKind::SheetSurfaceConvert { body, rule, bends, skip, direction } => {
+        // every face a picked bend joins to them, however thin the body: each is a panel, and
+        // the faces picked to engrave are engravings of the panels round them. Recognize alone
+        // reads a body that is sheet metal already, one side of it.
+        FeatureKind::SheetSurfaceConvert { body, rule, bends, skip, engrave, direction } => {
             let skip: Vec<Vec3> = skip.iter().map(|p| p.0).collect();
-            convert_to_sheet(doc, vals, f, st, warning, body, rule, bends, crate::SheetFaces::AllBut(&skip), direction)
+            let engrave: Vec<Vec3> = engrave.iter().map(|p| p.0).collect();
+            convert_to_sheet(doc, vals, f, st, warning, body, rule, bends, crate::SheetFaces::AllBut(&skip), &engrave, direction)
         }
-        FeatureKind::SheetConvert { body, face, faces, rule, bends, direction } => {
+        FeatureKind::SheetConvert { body, face, faces, rule, bends, engrave, direction } => {
             let picked: Vec<Vec3> = std::iter::once(face.0).chain(faces.iter().map(|p| p.0)).collect();
-            convert_to_sheet(doc, vals, f, st, warning, body, rule, bends, crate::SheetFaces::Picked(&picked), direction)
+            let engrave: Vec<Vec3> = engrave.iter().map(|p| p.0).collect();
+            convert_to_sheet(doc, vals, f, st, warning, body, rule, bends, crate::SheetFaces::Picked(&picked), &engrave, direction)
         }
         FeatureKind::SheetRecognize { body, face, skip, bends, rule } => {
             let skip: Vec<Vec3> = skip.iter().map(|p| p.0).collect();
             let faces = crate::SheetFaces::Sheet { face: face.as_ref().map(|p| p.0), skip: &skip };
-            convert_to_sheet(doc, vals, f, st, warning, body, rule, bends, faces, "")
+            convert_to_sheet(doc, vals, f, st, warning, body, rule, bends, faces, &[], "")
         }
         _ => Err(DocError::Invalid(format!("{} is not a sheet metal feature", f.name))),
     }

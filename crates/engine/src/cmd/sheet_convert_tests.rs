@@ -1,5 +1,9 @@
-//! Convert to Sheet Metal: solid and shelled bodies with bend edges (with holes and round edges in
-//! their faces), plates read from STEP files whose walls come in pieces, and plates with recesses.
+//! Convert to Sheet Metal: solid bodies, and faces picked off bent ones, with bend edges (with
+//! holes and round edges in their faces); a recess kept as an engraving only where its faces are
+//! picked to engrave. Recognize Sheet Metal (#6748: Convert takes every face as a panel, however
+//! thin the body; Recognize alone reads a thin solid as one sheet): shelled trays, bent sections
+//! and plates, plates read from STEP files whose walls come in pieces, plates with recesses, and
+//! sheet metal parts read back from STEP.
 
 use solidcraft_geom::prelude::*;
 use std::f64::consts::{FRAC_PI_2, PI, SQRT_2};
@@ -156,13 +160,15 @@ fn rotated_component_disconnected_bend_reports_world_point() {
     assert!(e.contains("the bend at (60.000, -50.000, 40.000) is not between two faces of the sheet"), "{e}");
 }
 
+/// A shelled tray is sheet metal already: Recognize reads it as one sheet (#6748; Convert would
+/// make each of its faces a panel), the same by-hand numbers as before.
 #[test]
 fn a_shelled_tray_keeps_its_walls_and_unfolds_by_the_k_factor() {
     let (t, k, r, gap) = (2.0, 0.44, 2.0, 0.5);
     let mut s = Session::default();
     rule(&mut s, "Test", t, k, r, gap);
     tray(&mut s, t);
-    let out = run(&mut s, "sheet.convert", json!({"body": "Tray", "face": [50, 30, 0], "bends": BOTTOM_EDGES}));
+    let out = run(&mut s, "sheet.recognize", json!({"body": "Tray", "face": [50, 30, 0], "bends": BOTTOM_EDGES}));
     assert!(out["warning"].is_null(), "{out}");
     assert!((flat(&mut s)["thickness"].as_f64().unwrap_or(0.0) - t).abs() < 1e-9);
     // Four 90° bends, down as the flat is read from the outside it was converted from (toward the
@@ -201,6 +207,9 @@ fn a_shelled_tray_keeps_its_walls_and_unfolds_by_the_k_factor() {
     assert_eq!(run(&mut s, "sheet.export_bend_table", json!({"format": "json"}))["bends"], 4);
 }
 
+/// Recognize reads a shell's two sides (#6748): a bend picked on the inside is the same bend, and
+/// the inside as the sheet's surface gives the same blank. (Convert has no other side to read:
+/// it takes faces as they are.)
 #[test]
 fn bends_picked_inside_and_a_fixed_face_inside_give_the_same_sheet() {
     let (t, k, r, gap) = (2.0, 0.44, 2.0, 0.5);
@@ -208,13 +217,13 @@ fn bends_picked_inside_and_a_fixed_face_inside_give_the_same_sheet() {
     let mut s = Session::default();
     rule(&mut s, "Test", t, k, r, gap);
     tray(&mut s, t);
-    run(&mut s, "sheet.convert", json!({"body": "Tray", "face": [50, 30, 0], "bends": BOTTOM_EDGES}));
+    run(&mut s, "sheet.recognize", json!({"body": "Tray", "face": [50, 30, 0], "bends": BOTTOM_EDGES}));
     let (v, f) = (volume(&mut s), flat_size(&mut s));
     // The inner edges (2 mm in and up) are the same bends.
     let mut a = Session::default();
     rule(&mut a, "Test", t, k, r, gap);
     tray(&mut a, t);
-    run(&mut a, "sheet.convert", json!({"body": "Tray", "face": [50, 30, 0], "bends": inner}));
+    run(&mut a, "sheet.recognize", json!({"body": "Tray", "face": [50, 30, 0], "bends": inner}));
     assert!((volume(&mut a) - v).abs() < 1e-6 * v && same_size(flat_size(&mut a), f, 1e-9));
     // From the floor inside, the sheet's other face is the fixed one: the bends turn down from it
     // and the flat is the inside lengths less the inside setbacks, L' + 2H' - 4R + 2BA, which is
@@ -222,7 +231,7 @@ fn bends_picked_inside_and_a_fixed_face_inside_give_the_same_sheet() {
     let mut b = Session::default();
     rule(&mut b, "Test", t, k, r, gap);
     tray(&mut b, t);
-    run(&mut b, "sheet.convert", json!({"body": "Tray", "face": [50, 30, 2], "bends": BOTTOM_EDGES}));
+    run(&mut b, "sheet.recognize", json!({"body": "Tray", "face": [50, 30, 2], "bends": BOTTOM_EDGES}));
     assert!(bend_rows(&mut b).iter().all(|row| row.0 == 90 && row.1 == "up"), "{:?}", bend_rows(&mut b));
     let ba = FRAC_PI_2 * (r + k * t);
     let inside = (96.0 + 2.0 * 28.0 - 4.0 * r + 2.0 * ba, 56.0 + 2.0 * 28.0 - 4.0 * r + 2.0 * ba);
@@ -516,7 +525,8 @@ fn bent_section(s: &mut Session, outer: &[(f64, f64)], t: f64, ri: f64, len: f64
 /// the part. The corner, an inside radius of one thickness, is a bend of the rule's radius at the
 /// legs' virtual sharp, picked on either cylinder, from either side of the sheet. An L: a base 60
 /// and a leg 40 to the sharp corner outside, 2 thick and 100 long, its corner modelled R 2 inside
-/// and R 4 outside, under a rule that bends R 3.
+/// and R 4 outside, under a rule that bends R 3. Recognized (#6748): read from either side, as
+/// Recognize alone reads a bent part's two sides.
 #[test]
 fn a_bend_modelled_with_another_radius_takes_the_rules() {
     let (t, k, r) = (2.0, 0.5, 3.0);
@@ -529,7 +539,7 @@ fn a_bend_modelled_with_another_radius_takes_the_rules() {
         rule(&mut s, "Test", t, k, r, 0.5);
         let (outer, inner) = bent_section(&mut s, &[(0.0, 40.0), (0.0, 0.0), (60.0, 0.0)], t, 2.0, 100.0)[0];
         let bend = if inner_pick { inner } else { outer };
-        run(&mut s, "sheet.convert", json!({"body": "Section", "face": face, "bends": [bend]}));
+        run(&mut s, "sheet.recognize", json!({"body": "Section", "face": face, "bends": [bend]}));
         let f = flat(&mut s);
         let radii: Vec<f64> = f["bends"].as_array().into_iter().flatten().filter_map(|b| b["radius"].as_f64()).collect();
         assert!(f["rolls"] == 0 && radii.len() == 1 && (radii[0] - r).abs() < 1e-9, "{face:?} {bend:?}: {f}");
@@ -582,8 +592,9 @@ fn a_channel_with_its_bends_modelled_folds_back_into_itself_under_its_own_radius
     // Two flat walls, the base and two quarter rounds on the neutral radius R + T/2.
     let expect = t * 100.0 * (2.0 * (30.0 - (r + t)) + (40.0 - 2.0 * (r + t)) + PI * (r + t / 2.0));
     assert!((solid - expect).abs() < 2e-3 * expect, "{solid} vs {expect}");
-    // One bend picked on its outer cylinder, the other on its inner one.
-    run(&mut s, "sheet.convert", json!({"body": "Section", "face": [20, 0, 50], "bends": [corners[0].0, corners[1].1]}));
+    // One bend picked on its outer cylinder, the other on its inner one: Recognize reads the
+    // channel's two sides (#6748).
+    run(&mut s, "sheet.recognize", json!({"body": "Section", "face": [20, 0, 50], "bends": [corners[0].0, corners[1].1]}));
     let f = flat(&mut s);
     assert!(f["rolls"] == 0 && f["bends"].as_array().map(Vec::len) == Some(2), "{f}");
     // 30 + 40 + 30 less two deductions, 2 (R + T) - π/2 (R + K T) each.
@@ -605,14 +616,14 @@ fn a_channel_with_its_bends_modelled_folds_back_into_itself_under_its_own_radius
     assert!((volume(&mut s) - solid).abs() < 1e-3 * solid);
 }
 
-/// A converted shell is the rule's, as the tooling makes it (#6748): an L shell 2 thick, its bend
-/// modelled R 2 inside, converted under the default rule (2.5 thick, bends R `Thickness`) is a
+/// A recognized shell is the rule's, as the tooling makes it (#6748): an L shell 2 thick, its bend
+/// modelled R 2 inside, recognized under the default rule (2.5 thick, bends R `Thickness`) is a
 /// sheet 2.5 thick bent R 2.5 from its picked side; an edge flange added to it bends R 2.5.
 #[test]
 fn a_converted_shell_takes_the_rules_thickness_and_radius() {
     let mut s = Session::default();
     let (outer, _) = bent_section(&mut s, &[(0.0, 40.0), (0.0, 0.0), (60.0, 0.0)], 2.0, 2.0, 100.0)[0];
-    run(&mut s, "sheet.convert", json!({"body": "Section", "face": [30, 0, 50], "bends": [outer]}));
+    run(&mut s, "sheet.recognize", json!({"body": "Section", "face": [30, 0, 50], "bends": [outer]}));
     let f = flat(&mut s);
     let radii = |f: &Value| f["bends"].as_array().into_iter().flatten().filter_map(|b| b["radius"].as_f64()).collect::<Vec<f64>>();
     assert!(f["thickness"].as_f64() == Some(2.5) && f["rolls"] == 0 && radii(&f).iter().all(|r| (r - 2.5).abs() < 1e-9), "{f}");
@@ -872,7 +883,8 @@ fn plate_step(loops: &[Vec<Wall>], t: f64) -> String {
     )
 }
 
-/// The plate inserted from a STEP file and converted, picked on its top face at `pick`.
+/// The plate inserted from a STEP file and recognized as sheet metal (an import, #6748), its
+/// surface the side of its top face at `pick`.
 fn convert_step_plate(tag: &str, loops: &[Vec<Wall>], t: f64, pick: [f64; 2]) -> Session {
     let path = std::env::temp_dir().join(format!("solidcraft-split-walls-{tag}-{}.step", std::process::id()));
     std::fs::write(&path, plate_step(loops, t)).unwrap();
@@ -880,7 +892,7 @@ fn convert_step_plate(tag: &str, loops: &[Vec<Wall>], t: f64, pick: [f64; 2]) ->
     run(&mut s, "file.insert_step", json!({"path": path.to_string_lossy()}));
     let _ = std::fs::remove_file(&path);
     rule(&mut s, "Plate", t, 0.44, t, 0.5);
-    run(&mut s, "sheet.convert", json!({"body": "Plate", "face": [pick[0], pick[1], t]}));
+    run(&mut s, "sheet.recognize", json!({"body": "Plate", "face": [pick[0], pick[1], t]}));
     s
 }
 
@@ -986,7 +998,8 @@ fn rounded_corners_slot_ends_and_split_sides_keep_each_edge_of_the_body() {
 }
 
 /// Holes drilled here come out as circles too (their walls are half-cylinders as well), and a
-/// plate with many small ones converts: nine 4 mm holes in a 30 x 30 x 2 plate were refused too.
+/// plate with many small ones is recognized: nine 4 mm holes in a 30 x 30 x 2 plate were refused
+/// too.
 #[test]
 fn a_plate_with_holes_drilled_here_converts_with_round_holes() {
     let (w, t, r) = (30.0, 2.0, 2.0);
@@ -998,7 +1011,7 @@ fn a_plate_with_holes_drilled_here_converts_with_round_holes() {
             run(&mut s, "solid.hole", json!({"position": [x, y, t], "diameter": 2.0 * r}));
         }
     }
-    run(&mut s, "sheet.convert", json!({"body": "Plate", "face": [10.5, 10.5, t]}));
+    run(&mut s, "sheet.recognize", json!({"body": "Plate", "face": [10.5, 10.5, t]}));
     let want = (w * w - 9.0 * PI * r * r) * t;
     assert!((volume(&mut s) - want).abs() < 1e-4 * want, "{} vs {want}", volume(&mut s));
     let circles = flat_circles(&mut s);
@@ -1006,21 +1019,21 @@ fn a_plate_with_holes_drilled_here_converts_with_round_holes() {
     assert_eq!(dxf_entities(&mut s), (4, 0, 9));
 }
 
-/// A box `l` x `w` x `t` with round holes (centre, diameter) drilled through it, converted,
-/// picked on its top face.
+/// A box `l` x `w` x `t` with round holes (centre, diameter) drilled through it, recognized as a
+/// plate (#6748), its surface the side of its top face.
 fn convert_box(l: f64, w: f64, t: f64, holes: &[([f64; 2], f64)]) -> Session {
     let mut s = Session::default();
-    // Stock of the plate's thickness: Convert makes the rule's sheet.
+    // Stock of the plate's thickness: Recognize makes the rule's sheet.
     rule(&mut s, "Plate", t, 0.44, t, 0.5);
     run(&mut s, "solid.box", json!({"length": l, "width": w, "height": t, "body_name": "Plate"}));
     for (c, d) in holes {
         run(&mut s, "solid.hole", json!({"position": [c[0], c[1], t], "diameter": d}));
     }
-    run(&mut s, "sheet.convert", json!({"body": "Plate", "face": [l * 0.4, w * 0.25, t]}));
+    run(&mut s, "sheet.recognize", json!({"body": "Plate", "face": [l * 0.4, w * 0.25, t]}));
     s
 }
 
-/// A converted plate stays where the plate was, whichever of its faces is picked: the sheet
+/// A recognized plate stays where the plate was, whichever of its faces is picked: the sheet
 /// takes the plate's two faces, not the space one thickness beyond the face picked (a 100 x 60 x 2
 /// plate on XY used to come out at z −2…0 picked on top, and 2…4 picked underneath).
 #[test]
@@ -1030,7 +1043,7 @@ fn a_converted_plate_stays_where_the_plate_was() {
         rule(&mut s, "Plate", 2.0, 0.44, 2.0, 0.5);
         run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 2, "body_name": "Plate"}));
         let before = bbox(&mut s);
-        run(&mut s, "sheet.convert", json!({"body": "Plate", "face": pick}));
+        run(&mut s, "sheet.recognize", json!({"body": "Plate", "face": pick}));
         assert!(!s.model.state().surface_sheets.is_empty(), "{pick:?}");
         let after = bbox(&mut s);
         let moved = before.0.iter().chain(&before.1).zip(after.0.iter().chain(&after.1)).any(|(a, b)| (a - b).abs() > 1e-9);
@@ -1130,16 +1143,17 @@ fn lines_on(dxf: &str, layer: &str) -> usize {
     count
 }
 
-/// A plate with an engraving converts: the engraving is a pocket of the sheet, so the sheet keeps
-/// the plate's shape, and its outline is the flat pattern's pocket, on the DXF's pocket layer.
-/// Picked on the engraved face, the pocket starts from the sheet's z = 0 (the face picked);
-/// picked on the other face, it ends at z = T.
+/// A plate with an engraving is recognized: the engraving is a pocket of the sheet, so the sheet
+/// keeps the plate's shape, and its outline is the flat pattern's pocket, on the DXF's pocket
+/// layer. Picked on the engraved face, the pocket starts from the sheet's z = 0 (the face picked);
+/// picked on the other face, it ends at z = T. (Convert keeps it only where its faces are picked
+/// to engrave: see `an_engraving_is_converted_only_where_its_faces_are_picked`.)
 #[test]
 fn a_plate_with_an_engraving_converts_with_the_engraving_as_a_pocket() {
     for (pick, layer) in [([45.0, 30.0, 1.0], "POCKET_BOTTOM_Z0.000000_TO_0.100000_MM"), ([45.0, 30.0, 0.0], "POCKET_TOP_Z0.900000_TO_1.000000_MM")] {
         let mut s = Session::default();
         engraved_plate(&mut s, 0.1, label_rectangle, &[]);
-        run(&mut s, "sheet.convert", json!({"body": "Plate", "face": pick}));
+        run(&mut s, "sheet.recognize", json!({"body": "Plate", "face": pick}));
         assert!(s.model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{pick:?}: {:?}", s.model.results);
         // By hand: 60·40·1 less the engraving's 20·10·0.1; the faces' 2·60·40 + 2·(60 + 40)·1 and
         // the engraving's walls, 2·(20 + 10)·0.1.
@@ -1185,7 +1199,7 @@ fn a_large_plate_keeps_an_engraving_shallower_than_its_tessellation_tolerance() 
     run(&mut s, "solid.extrude", json!({"sketch": "Label", "distance": 0.1, "direction": "negative", "operation": "cut"}));
     for pick in [[450.0, 300.0, 0.0], [450.0, 300.0, 1.0]] {
         let mut s = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
-        run(&mut s, "sheet.convert", json!({"body": "Plate", "face": pick}));
+        run(&mut s, "sheet.recognize", json!({"body": "Plate", "face": pick}));
         // 600·400·1 less the engraving's 20·10·0.1.
         assert!((volume(&mut s) - 239_980.0).abs() < 1e-3, "{pick:?}: {}", volume(&mut s));
         assert_eq!(flat(&mut s)["pockets"].as_array().map(Vec::len), Some(1), "{pick:?}");
@@ -1208,7 +1222,7 @@ fn an_engraved_ring_converts_as_a_pocket_round_its_island() {
     );
     // The extrude took the ring between the circles, not the island.
     assert!((volume(&mut s) - (2400.0 - 0.1 * PI * (25.0 - 9.0))).abs() < 1e-3, "{}", volume(&mut s));
-    run(&mut s, "sheet.convert", json!({"body": "Plate", "face": [45, 30, 1]}));
+    run(&mut s, "sheet.recognize", json!({"body": "Plate", "face": [45, 30, 1]}));
     // The ring's circles are followed within 0.01 mm (1/100 of the thickness): its area within
     // 2/3 of that times the circumferences.
     let want = 2400.0 - 0.1 * PI * (25.0 - 9.0);
@@ -1220,13 +1234,59 @@ fn an_engraved_ring_converts_as_a_pocket_round_its_island() {
     assert_eq!(f["pockets"][0]["cutouts"].as_array().map(Vec::len), Some(1), "{f}");
 }
 
+/// Convert keeps a recess as an engraving only where its faces are picked to engrave (#6748): a
+/// shallow cut may be a pocket the design means. The plate 60 x 40 x 1 with a label 20 x 10 cut
+/// 0.1 deep into its top, converted from its top face under a rule 1 thick:
+/// - its floor and four walls picked to engrave: the label is a pocket of the top's panel, from
+///   the sheet's surface to the floor, 1 − 0.9 = 0.1 deep (the floor's depth behind the top, with
+///   no face behind the top read): 60·40·1 − 20·10·0.1 = 2380 mm³, the flat 60 x 40 with no
+///   cut-out;
+/// - nothing picked: the label's opening is a hole of the top's panel, and its faces no panels
+///   (only the top is picked): 60·40·1 − 20·10·1 = 2200 mm³, one cut-out and no pocket;
+/// - under a rule 0.05 thick, the label (0.1 deep) is deeper than the sheet: refused.
+#[test]
+fn an_engraving_is_converted_only_where_its_faces_are_picked() {
+    let floor_and_walls = json!([[20, 15, 0.9], [10, 15, 0.95], [30, 15, 0.95], [20, 10, 0.95], [20, 20, 0.95]]);
+    let mut s = Session::default();
+    engraved_plate(&mut s, 0.1, label_rectangle, &[]);
+    run(&mut s, "sheet.convert", json!({"body": "Plate", "face": [45, 30, 1], "engrave": floor_and_walls}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", s.model.results);
+    assert!((volume(&mut s) - 2380.0).abs() < 1e-6, "{}", volume(&mut s));
+    let f = flat(&mut s);
+    assert!(same_size(flat_size(&mut s), (60.0, 40.0), 1e-9), "{f}");
+    assert_eq!(f["cutouts"], json!([]), "{f}");
+    let pockets = f["pockets"].as_array().cloned().unwrap_or_default();
+    assert!(pockets.len() == 1 && (pockets[0]["depth_mm"].as_f64().unwrap_or(f64::NAN) - 0.1).abs() < 1e-9, "{f}");
+    // It stays in the face it was cut into.
+    assert!(!contains(&s, [20.0, 15.0, 0.95]) && contains(&s, [20.0, 15.0, 0.85]) && contains(&s, [45.0, 30.0, 0.95]));
+    // Not picked: a hole of the panel, no pocket.
+    let mut s = Session::default();
+    engraved_plate(&mut s, 0.1, label_rectangle, &[]);
+    run(&mut s, "sheet.convert", json!({"body": "Plate", "face": [45, 30, 1]}));
+    assert!((volume(&mut s) - 2200.0).abs() < 1e-6, "{}", volume(&mut s));
+    let f = flat(&mut s);
+    assert!(f["pockets"].as_array().is_none_or(Vec::is_empty) && f["cutouts"].as_array().map(Vec::len) == Some(1), "{f}");
+    // Deeper than the sheet is thick.
+    let mut s = Session::default();
+    engraved_plate(&mut s, 0.1, label_rectangle, &[]);
+    rule(&mut s, "Foil", 0.05, 0.44, 0.05, 0.05);
+    let e = s
+        .execute("sheet.convert", &json!({"body": "Plate", "face": [45, 30, 1], "engrave": floor_and_walls}))
+        .err()
+        .map(|e| e.to_string())
+        .unwrap_or_default();
+    assert!(e.contains("0.100 mm deep") && e.contains("short of the sheet's thickness"), "{e}");
+    assert!(s.model.state().surface_sheets.is_empty());
+}
+
 /// A plate's recesses are the sheet's at any depth short of its thickness, from either face
-/// (#6748): one 0.6 deep in a plate 1 thick is a pocket 0.6 deep; one in each face, a pocket from
-/// each side of the flat; one that leaves only a rim, a pocket inside the rim. A plate raised in
-/// places (a boss) is no plate of even thickness, and the design stays as it was.
+/// (#6748), as Recognize reads them: one 0.6 deep in a plate 1 thick is a pocket 0.6 deep; one in
+/// each face, a pocket from each side of the flat; one that leaves only a rim, a pocket inside the
+/// rim. A plate raised in places (a boss) is no plate of even thickness, and the design stays as it
+/// was.
 #[test]
 fn a_plates_recesses_are_the_sheets_at_any_depth_from_either_face() {
-    let convert = |s: &mut Session, face: [f64; 3]| run(s, "sheet.convert", json!({"body": "Plate", "face": face}));
+    let convert = |s: &mut Session, face: [f64; 3]| run(s, "sheet.recognize", json!({"body": "Plate", "face": face}));
     let depths = |s: &mut Session| {
         let mut d: Vec<(f64, f64)> = flat(s)["pockets"]
             .as_array()
@@ -1273,13 +1333,13 @@ fn a_plates_recesses_are_the_sheets_at_any_depth_from_either_face() {
     label_rectangle(&mut s);
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"sketch": "Boss", "distance": 0.3, "operation": "join"}));
-    let e = s.execute("sheet.convert", &json!({"body": "Plate", "face": [45, 30, 1]})).err().map(|e| e.to_string()).unwrap_or_default();
+    let e = s.execute("sheet.recognize", &json!({"body": "Plate", "face": [45, 30, 1]})).err().map(|e| e.to_string()).unwrap_or_default();
     assert!(e.contains("not a plate of even thickness"), "{e}");
     assert!(s.model.state().surface_sheets.is_empty());
 }
 
-/// Thickening takes only the faces picked (#6748): one face of a bent part, with no bends, is a
-/// flat sheet of that face alone, at the part's thickness.
+/// Convert takes only the faces picked (#6748): one face of a bent part, with no bends, is a flat
+/// sheet of that face alone, at the rule's thickness (the part's here).
 #[test]
 fn one_face_of_a_bent_part_thickens_alone() {
     let mut s = Session::default();
@@ -1401,7 +1461,8 @@ fn rounded_corners_and_a_notch_on_a_leg_stay_arcs_in_the_flat() {
 
 /// A hole that reaches into the band a bend takes from its panel has no one place in the flat,
 /// and is refused by its place (the web's flat panel starts R + T = 4 from the sharp; the hole
-/// reaches from 2 to 8). A pocket 1.5 deep in the 2 thick web is the sheet's.
+/// reaches from 2 to 8). A pocket 1.5 deep in the 2 thick web is the sheet's, as Recognize reads
+/// the channel (#6748).
 #[test]
 fn a_hole_reaching_into_a_bend_is_refused_and_a_deep_pocket_kept() {
     let convert = |cut: &[(&str, Value)]| {
@@ -1411,7 +1472,7 @@ fn a_hole_reaching_into_a_bend_is_refused_and_a_deep_pocket_kept() {
         for (id, p) in cut {
             run(&mut s, id, p.clone());
         }
-        let e = s.execute("sheet.convert", &json!({"body": "Section", "face": [50, 0, 5], "bends": bends})).err();
+        let e = s.execute("sheet.recognize", &json!({"body": "Section", "face": [50, 0, 5], "bends": bends})).err();
         assert!(s.model.state().surface_sheets.is_empty());
         e.map(|e| e.to_string()).unwrap_or_default()
     };
@@ -1425,7 +1486,7 @@ fn a_hole_reaching_into_a_bend_is_refused_and_a_deep_pocket_kept() {
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [40, -15], "p1": [60, -25]}));
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"sketch": "Pocket", "distance": 1.5, "operation": "cut"}));
-    run(&mut s, "sheet.convert", json!({"body": "Section", "face": [50, 0, 5], "bends": bends}));
+    run(&mut s, "sheet.recognize", json!({"body": "Section", "face": [50, 0, 5], "bends": bends}));
     let p = flat(&mut s)["pockets"].clone();
     assert!(p.as_array().map(Vec::len) == Some(1) && (p[0]["depth_mm"].as_f64().unwrap_or(0.0) - 1.5).abs() < 1e-9, "{p}");
 }
@@ -1442,7 +1503,7 @@ fn pocket_box(p: &Value) -> ([f64; 2], [f64; 2]) {
 /// carry: a channel 80 wide with legs 30 high (outside, to the sharp corners), 2 thick, 60 long,
 /// bent R 2 inside and R 4 outside, with a 6 mm hole 18 up its right leg, a label 20 x 10
 /// engraved 0.5 deep into the outside of its web and one 10 x 20 into the inside of its left leg.
-/// Converted from the outside of the web by its outer cylinders under a rule of the model's
+/// Recognized from the outside of the web by its outer cylinders under a rule of the model's
 /// radius, the sheet is the model again, its corners bends of their own radius (#6748): the hole
 /// is a cut-out where the bends' allowances put it, and each label is a pocket in its own face of
 /// the sheet.
@@ -1468,7 +1529,7 @@ fn a_channel_with_its_bends_modelled_keeps_its_hole_and_engravings_on_either_fac
     let solid = volume(&mut s);
     let model = t * 60.0 * (2.0 * (30.0 - (r + t)) + (80.0 - 2.0 * (r + t)) + PI * (r + t / 2.0)) - cut;
     assert!((solid - model).abs() < 2e-3 * model, "{solid} vs {model}");
-    run(&mut s, "sheet.convert", json!({"body": "Section", "face": [65, 0, 10], "bends": [corners[0].0, corners[1].0]}));
+    run(&mut s, "sheet.recognize", json!({"body": "Section", "face": [65, 0, 10], "bends": [corners[0].0, corners[1].0]}));
     let f = flat(&mut s);
     assert!(bend_rows(&mut s).len() == 2 && f["rolls"].as_u64() == Some(0), "{f}");
     // 30 + 80 + 30 less two deductions; the sheet is the solid again.
@@ -1666,7 +1727,8 @@ fn bracket(s: &mut Session, x0: f64, x1: f64, plate: f64) {
 /// end of the bend that has more plate beside it, as for an edge flange. The strip, lower than the
 /// bend's setback R + T = 4, was used up by it and the conversion refused. Picked from the inside,
 /// the plate's edge strips (one face with the wall's outside) are rims, and the wall's inside is
-/// the sheet's. T 2, R 2, K 0.44: BA = 1.44 π, BD = 8 − BA.
+/// the sheet's: a bracket is sheet metal already, which Recognize reads (#6748). T 2, R 2, K 0.44:
+/// BA = 1.44 π, BD = 8 − BA.
 #[test]
 fn a_bend_ends_where_its_wall_ends_with_the_rules_bend_relief_beside_it() {
     let (t, r, k) = (2.0, 2.0, 0.44);
@@ -1687,7 +1749,7 @@ fn a_bend_ends_where_its_wall_ends_with_the_rules_bend_relief_beside_it() {
         let mut s = Session::default();
         rule(&mut s, "Test", t, k, r, 0.5);
         bracket(&mut s, 20.0, 60.0, 2.0);
-        let out = run(&mut s, "sheet.convert", json!({"body": "Bracket", "face": face, "bends": [bend]}));
+        let out = run(&mut s, "sheet.recognize", json!({"body": "Bracket", "face": face, "bends": [bend]}));
         assert!(out["warning"].is_null(), "{way}: {out}");
         let rows = bend_rows(&mut s);
         assert!(rows.len() == 1 && rows[0].0 == 90 && rows[0].1 == way && (rows[0].2 - 40.0).abs() < 1e-6, "{way}: {rows:?}");
@@ -1706,19 +1768,19 @@ fn a_bend_ends_where_its_wall_ends_with_the_rules_bend_relief_beside_it() {
     let mut s = Session::default();
     rule(&mut s, "Test", t, k, r, 0.5);
     bracket(&mut s, 0.0, 40.0, 2.0);
-    run(&mut s, "sheet.convert", json!({"body": "Bracket", "face": [40, 25, 0], "bends": [[20, 0, 0]]}));
+    run(&mut s, "sheet.recognize", json!({"body": "Bracket", "face": [40, 25, 0], "bends": [[20, 0, 0]]}));
     let rows = bend_rows(&mut s);
     assert!(rows.len() == 1 && (rows[0].2 - 40.0).abs() < 1e-6, "{rows:?}");
     assert!(outline_has(&mut s, &[[0.0, 0.0], [40.0, 0.0], [40.0, edge + 5.0], [42.0, edge + 5.0], [42.0, edge]]), "{:?}", outline_corners(&mut s));
     let (folded, _) = parts(40.0, 1.0);
     assert!((volume(&mut s) - folded).abs() < 1e-4 * folded, "{} vs {folded}", volume(&mut s));
-    // A 5 mm plate with the 2 mm wall: Thickening keeps the plate's own thickness (#6748), and a
+    // A 5 mm plate with the 2 mm wall: Recognize reads the plate's own thickness (#6748), and a
     // wall 2 thick is no panel of a sheet 5 thick: refused, saying so.
     let mut s = Session::default();
     rule(&mut s, "Test", t, k, r, 0.5);
     bracket(&mut s, 20.0, 60.0, 5.0);
     let e = s
-        .execute("sheet.convert", &json!({"body": "Bracket", "face": [40, 25, 0], "bends": [[40, 0, 0]]}))
+        .execute("sheet.recognize", &json!({"body": "Bracket", "face": [40, 25, 0], "bends": [[40, 0, 0]]}))
         .err()
         .map(|e| e.to_string())
         .unwrap_or_default();
@@ -1889,10 +1951,11 @@ fn flat_area_and_bends(s: &mut Session) -> (f64, Vec<f64>) {
     (area, bends)
 }
 
-/// A tray made with this build's sheet metal converts back to the same tray: the walls that run
-/// on past their bends' ends (a notch, a tear) step down to the bend there, and a round relief's
-/// arc stays; also with the short walls made in a second feature, where the corners are notched
-/// or round (a torn butt corner is torn differently from one feature's corner).
+/// A tray made with this build's sheet metal, read back from STEP, is recognized as the same tray
+/// (an import is Recognize's, #6748): the walls that run on past their bends' ends (a notch, a
+/// tear) step down to the bend there, and a round relief's arc stays; also with the short walls
+/// made in a second feature, where the corners are notched or round (a torn butt corner is torn
+/// differently from one feature's corner).
 #[test]
 fn trays_of_its_own_sheet_metal_convert_back() {
     // A round relief's edge on a bend is a circle of the flat folded round the bend: its angle
@@ -1921,7 +1984,7 @@ fn trays_of_its_own_sheet_metal_convert_back() {
             let what = format!("{shape}, {}", if two { "two features" } else { "one feature" });
             let (mut s, picks, mut source) = tray_round_trip(shape, two);
             let body = s.model.state().bodies.first().map(|b| b.name.clone()).unwrap_or_default();
-            let out = s.execute("sheet.convert", &json!({"body": body, "face": [60, 45, 0], "bends": picks, "rule": "T"}));
+            let out = s.execute("sheet.recognize", &json!({"body": body, "face": [60, 45, 0], "bends": picks, "rule": "T"}));
             assert!(out.is_ok(), "{what}: {}", out.err().map(|e| e.to_string()).unwrap_or_default());
             // The same tray: its solid, and its flat with the same bends (a round relief to the
             // fold's tolerance, above).
@@ -1949,6 +2012,7 @@ fn trays_of_its_own_sheet_metal_convert_back() {
 
 /// A bend that slots cross is one bend, however many of its pieces are picked: the pieces of
 /// its cylinder between the slots are all bent, and the slots come back as cut-outs across it.
+/// The tray is read back from STEP, so Recognize reads it (#6748).
 #[test]
 fn a_bend_split_by_slots_across_it_converts_as_one_bend() {
     // Two slots across the long bend at y = 0, one across the short bend at x = 120, from the
@@ -1963,7 +2027,7 @@ fn a_bend_split_by_slots_across_it_converts_as_one_bend() {
                 picks.extend([[15.0, o - d, o - d], [100.0, o - d, o - d], [120.0 - o + d, 20.0, o - d], [120.0 - o + d, 75.0, o - d]]);
             }
             let body = s.model.state().bodies.first().map(|b| b.name.clone()).unwrap_or_default();
-            let out = s.execute("sheet.convert", &json!({"body": body, "face": [60, 45, 0], "bends": picks, "rule": "T"}));
+            let out = s.execute("sheet.recognize", &json!({"body": body, "face": [60, 45, 0], "bends": picks, "rule": "T"}));
             assert!(out.is_ok(), "{what}: {}", out.err().map(|e| e.to_string()).unwrap_or_default());
             let (v, size, (area, bends)) = (volume(&mut source), flat_size(&mut source), flat_area_and_bends(&mut source));
             let cutouts = flat(&mut source)["cutouts"].as_array().map(Vec::len);

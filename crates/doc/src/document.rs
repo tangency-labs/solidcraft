@@ -1482,11 +1482,12 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         refold: bool,
     },
-    /// Convert to sheet metal's thicken mode (#6748): the sheet is the faces picked at `face` and
-    /// `faces`, and every face a bend joins to them. The sharp edges at `bends` become bends and
-    /// every other edge between two faces of the sheet is cut open; cylinders and cones become
-    /// rolls. A bend modelled with its radius is picked on its roll. A shell or a plate keeps its
-    /// thickness; a solid takes its rule's.
+    /// Convert to sheet metal, of picked faces (#6748): the sheet is the faces picked at `face` and
+    /// `faces`, and every face a bend joins to them, each a panel of the rule's thickness, however
+    /// thin the body. The sharp edges at `bends` become bends and every other edge between two
+    /// faces of the sheet is cut open; cylinders and cones become rolls. A bend modelled with its
+    /// radius is picked on its roll. The faces at `engrave` are engravings of the panels round
+    /// them.
     SheetConvert {
         body: BodyName,
         #[walk(pick_if = !bends.is_empty())]
@@ -1500,17 +1501,21 @@ pub enum FeatureKind {
         /// their radius.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         bends: Vec<Position>,
-        /// inside (default) | outside: the side of a solid's faces its material lies on. A shell
-        /// or a plate keeps its own.
+        /// The faces of recesses kept as engravings of the panels round them, not as panels.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        engrave: Vec<FacePick>,
+        /// inside (default) | outside: the side of the faces the material lies on.
         #[serde(default, skip_serializing_if = "String::is_empty")]
         direction: String,
     },
-    /// Convert a body to sheet metal (#6748): every face of a solid, or of one
-    /// side of a shell or a plate, less the faces at `skip`. The sharp edges at `bends` become
-    /// bends and every other sharp edge between two faces of the sheet is cut open; a cylinder
-    /// modelled between two planes is a bend of its own inside radius short of 10^0.7 thicknesses
-    /// (DIN 6935) and a roll from there, and other cylinders and cones are rolls. No face is
-    /// fixed. The body becomes the folded sheet and the model keeps its flat pattern.
+    /// Convert a body to sheet metal (#6748): every face of the body, a solid's or a surface
+    /// body's, less the faces at `skip`, each a panel of the rule's thickness, however thin the
+    /// body (Recognize reads a body that is sheet metal already). The sharp edges at `bends`
+    /// become bends and every other sharp edge between two faces of the sheet is cut open; a
+    /// cylinder modelled between two planes is a bend of its own inside radius short of 10^0.7
+    /// thicknesses (DIN 6935) and a roll from there, and other cylinders and cones are rolls. The
+    /// faces at `engrave` are engravings of the panels round them. No face is fixed. The body
+    /// becomes the folded sheet and the model keeps its flat pattern.
     SheetSurfaceConvert {
         body: BodyName,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1521,8 +1526,10 @@ pub enum FeatureKind {
         /// The faces left out of the sheet.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         skip: Vec<FacePick>,
-        /// inside (default) | outside: the side of a solid's faces its material lies on. A shell
-        /// or a plate keeps its own.
+        /// The faces of recesses kept as engravings of the panels round them, not as panels.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        engrave: Vec<FacePick>,
+        /// inside (default) | outside: the side of the faces the material lies on.
         #[serde(default, skip_serializing_if = "String::is_empty")]
         direction: String,
     },

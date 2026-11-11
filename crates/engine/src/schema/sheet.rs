@@ -558,16 +558,18 @@ pub struct UnfoldParams {
 }
 
 /// Convert to Sheet Metal (#6748): surfaces become the rule's sheet. The surfaces are the faces
-/// of a solid, of a surface body, or of one side of a shell or a plate: every face but the
-/// `skip`ped ones, or with `face` (and `faces`) those and every face a bend joins to them. The
-/// sharp edges at `bends` become bends, and every other sharp edge between two faces of the sheet
-/// is cut open with the rule's gap; a cylinder modelled between two planes is a bend, and other
-/// cylinders and cones are rolls. The thickness, radius and reliefs are the rule's, whatever the
-/// body's; the material lies on the faces' `direction` side. `participants` changes nothing.
+/// of a solid or a surface body: every face but the `skip`ped ones, or with `face` (and `faces`)
+/// those and every face a bend joins to them, each a panel however thin the body (Recognize reads
+/// a body that is sheet metal already). The sharp edges at `bends` become bends, and every other
+/// sharp edge between two faces of the sheet is cut open with the rule's gap; a cylinder modelled
+/// between two planes is a bend, and other cylinders and cones are rolls. The faces of a recess
+/// picked to `engrave` are a pocket of the panel round it. The thickness, radius and reliefs are
+/// the rule's, whatever the body's; the material lies on the faces' `direction` side, and panels
+/// whose material would overlap are refused. `participants` changes nothing.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ConvertParams {
-    /// The body to convert: a solid, a surface body, or a shell or a plate.
+    /// The body to convert: a solid or a surface body.
     pub body: String,
     /// A face of the sheet: the sheet is this face, `faces`, and every face a bend joins to them.
     /// Default: every face but `skip`.
@@ -579,6 +581,11 @@ pub struct ConvertParams {
     /// The faces left out of the sheet, where no face is picked.
     #[serde(default)]
     pub skip: Option<Vec<FaceRef>>,
+    /// The walls and floors of recesses in faces of the sheet, kept as engravings: each recess a
+    /// pocket of the panel round it, as deep as its floor lies, not panels of its own. Default:
+    /// none (a recess's faces are panels).
+    #[serde(default)]
+    pub engrave: Option<Vec<FaceRef>>,
     /// The sharp edges that become bends of the rule's radius at their virtual sharp. A point on
     /// a bend modelled with its radius (a cylinder tangent to two flat faces) picks that bend.
     /// Default: none.
@@ -587,8 +594,7 @@ pub struct ConvertParams {
     /// The sheet metal rule, by name. Default: the active rule.
     #[serde(default)]
     pub rule: Option<String>,
-    /// The side of the faces the material lies on: inside (default) or outside. A shell or a
-    /// plate keeps its own.
+    /// The side of the faces the material lies on: inside (default) or outside.
     #[serde(default)]
     pub direction: Option<MaterialSide>,
     #[serde(flatten, deserialize_with = "feature_common")]
