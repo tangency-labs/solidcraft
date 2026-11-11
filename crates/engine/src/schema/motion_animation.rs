@@ -27,7 +27,7 @@ use serde_json::{Map, Value};
 use super::check::whole;
 use super::motion_analysis::StudyStop;
 use super::types::not_blank_pattern;
-use crate::render::Camera;
+use solidcraft_viewport::Camera;
 
 /// The most frames of one animation. The handler (`cmd/motion_animation.rs`) uses these limits
 /// too, so the schema, the strict check and the handler cannot disagree.

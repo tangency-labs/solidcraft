@@ -12,10 +12,10 @@ use solidcraft_doc::Mat;
 use super::{Plan, drive_with_contact, explode_moves, exploded_at, motion_plan, sample_count, view_index};
 use crate::capture::{self, Renderer};
 use crate::params::{bad, str_};
-use crate::render::Camera;
 use crate::schema::motion_analysis::StudyStop;
 use crate::schema::motion_animation::{AnimationExported, CAMERA_FIELDS, MAX_FRAMES, MAX_GIF_PIXELS, MAX_PNG_PIXELS, MAX_SIDE};
 use crate::{Result, Session};
+use solidcraft_viewport::Camera;
 
 /// What the frames show.
 enum Motion {
@@ -90,7 +90,7 @@ pub(super) fn export_with(s: &Session, p: &Value, renderer: Option<&Renderer>) -
             let assembled = crate::view::bounds(&t)?;
             t.pending_moves = exploded_at(moves, 1.0);
             let mut c = crate::view::home_camera(&t)?;
-            c.fit(&assembled.union(&crate::view::bounds(&t)?));
+            c.fit(&solidcraft_render::view_bounds(&assembled.union(&crate::view::bounds(&t)?)));
             Ok(c)
         }
         Motion::Drive(..) => crate::view::home_camera(s),
@@ -140,7 +140,7 @@ pub(super) fn export_with(s: &Session, p: &Value, renderer: Option<&Renderer>) -
         if gif {
             frames.push(picture.rgba);
         } else {
-            let png = crate::render::png(width as usize, height as usize, picture.rgba).ok_or_else(|| bad(cmd, "PNG encoding failed"))?;
+            let png = solidcraft_viewport::png(width as usize, height as usize, picture.rgba).ok_or_else(|| bad(cmd, "PNG encoding failed"))?;
             let file = frame_path(k + 1);
             solidcraft_io::vfs::write(&file, &png).map_err(|e| bad(cmd, format!("{file}: {e}")))?;
             bytes += png.len();

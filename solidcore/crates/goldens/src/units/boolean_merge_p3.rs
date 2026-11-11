@@ -304,7 +304,7 @@ fn options(mask: u8) -> MergeOptions {
 fn status(error: &SolidError) -> i64 {
     match error {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007,
-        SolidError::Upstream { code, .. } => i64::from(*code),
+        SolidError::Upstream { .. } | SolidError::Failed(_) => error.sm_status().map_or(-1, i64::from),
         _ => -1,
     }
 }

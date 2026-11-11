@@ -331,16 +331,22 @@ fn bspline_of(curve: &Curve) -> Result<BSplineCurve> {
         CurveKind::Ellipse(e) => Ok(e.base().clone()),
         CurveKind::Hyperbola(h) => Ok(h.base().clone()),
         CurveKind::Parabola(p) => Ok(p.base().clone()),
-        _ => Err(SolidError::sm_err(OP)),
+        _ => Err(SolidError::sweep_failed(
+            OP,
+            "the curve has no B-spline form",
+        )),
     }
 }
 
 fn nurbs_of(curve: &Curve) -> Result<Nurbs> {
     let c = bspline_of(curve)?
         .canonical()
-        .map_err(|_| SolidError::sm_err(OP))?;
+        .map_err(|_| SolidError::sweep_failed(OP, "the curve's NURBS form could not be built"))?;
     if c.dim != 3 {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::sweep_failed(
+            OP,
+            "the curve's NURBS form is not three-dimensional",
+        ));
     }
     if c.control_points
         .iter()
@@ -442,7 +448,10 @@ fn cylinder_piece(
     st: &Stations,
 ) -> Result<()> {
     let (Some(&a0), Some(&a1)) = (st.t.first(), st.t.last()) else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::sweep_failed(
+            OP,
+            "a screw piece has no stations",
+        ));
     };
     let w = a - m.o;
     let radial = w - m.k * w.dot(m.k);
@@ -499,7 +508,10 @@ fn cylinder_piece(
         )
     })?;
     if made.faces.len() != 1 {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::sweep_failed(
+            OP,
+            "the screw piece did not build one face",
+        ));
     }
     Ok(())
 }
@@ -526,7 +538,10 @@ fn screw_wall(m: &Screw, c: &Nurbs, st: &Stations) -> Result<BSplineSurface> {
         }
     }
     if net.len() != size {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::sweep_failed(
+            OP,
+            "the screw surface's control net has the wrong size",
+        ));
     }
     let (vknots, vmult) = st.knots();
     BSplineSurface::create_canonical(&CanonicalSurfaceData {
@@ -840,7 +855,10 @@ fn sweep(k: &mut Kernel, profile: &[Curve], m: &mut Screw, tolerance: f64) -> Re
     )?;
     for st in &pieces {
         let (Some(&t0), Some(&t1)) = (st.t.first(), st.t.last()) else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::sweep_failed(
+                OP,
+                "a screw piece has no stations",
+            ));
         };
         for (((wall, curve), nurbs), &r) in walls.iter().zip(profile).zip(&curves).zip(&radius) {
             if r > 0.0 && m.offset(t0) == m.offset(t1) {
@@ -867,9 +885,11 @@ fn sweep(k: &mut Kernel, profile: &[Curve], m: &mut Screw, tolerance: f64) -> Re
         let placement = m.placement(a);
         let mut cap = Vec::new();
         for src in profile {
-            let mut copy = src.copy(k).map_err(|_| SolidError::sm_err(OP))?;
+            let mut copy = src
+                .copy(k)
+                .map_err(|_| SolidError::sweep_failed(OP, "a profile curve could not be copied"))?;
             copy.transform(k, &placement, None)
-                .map_err(|_| SolidError::sm_err(OP))?;
+                .map_err(|_| SolidError::sweep_failed(OP, "a profile curve could not be placed"))?;
             cap.push(copy);
         }
         with_face_env(k, &mut brep, |k, brep, fenv| {
@@ -889,7 +909,10 @@ fn solid(brep: Brep) -> Result<Brep> {
     if crate::topology::brep::p1::faces(&brep, None)?.is_empty()
         || !crate::topology::brep::p2::is_manifold_solid(&brep)?
     {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::sweep_failed(
+            OP,
+            "the screw sweep is not a closed manifold solid",
+        ));
     }
     Ok(brep)
 }
