@@ -318,8 +318,6 @@ mod tests {
             ("blend/fillet_corner/topology/swept_turn.rs", 3),
             ("blend/fillet_custom_solver.rs", 20),
             ("blend/fillet_executive/session/finish.rs", 2),
-            ("blend/fillet_geom/p1.rs", 62),
-            ("blend/fillet_geom/p2.rs", 106),
             ("blend/fillet_geom/p3.rs", 27),
             ("blend/fillet_geom/p4.rs", 63),
             ("blend/fillet_geom/p5.rs", 113),
