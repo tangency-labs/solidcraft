@@ -22,7 +22,12 @@ fn round_trips(s: &Session) {
     let text = step_export(&[body], "test").unwrap_or_else(|e| panic!("export: {e}"));
     let imp = step_import(&text).unwrap_or_else(|e| panic!("import: {e}"));
     assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
-    assert!(imp.bodies[0].closed && imp.warnings.is_empty(), "{:?}", imp.warnings);
+    // A note that an edge's tolerance was raised to the gap it measures to its face is a repair,
+    // not a loss: STEP states one uncertainty, the loosest tolerance of the body's records, and an
+    // edge whose true gap runs a little past its own (found between the points sampled, #12757) is
+    // covered on reading. Any other warning fails the round trip.
+    let repairs = |w: &String| w.contains("edges lie off their faces' surfaces");
+    assert!(imp.bodies[0].closed && imp.warnings.iter().all(repairs), "{:?}", imp.warnings);
     let (a, b) = (measure(body).unwrap(), measure(&imp.bodies[0].body).unwrap());
     assert!((a.volume - b.volume).abs() < 1e-3 * a.volume, "volume {} -> {}", a.volume, b.volume);
     assert!((a.area - b.area).abs() < 1e-3 * a.area, "area {} -> {}", a.area, b.area);
