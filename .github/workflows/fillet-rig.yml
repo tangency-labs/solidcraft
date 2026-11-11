@@ -70,7 +70,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.98.0
       # Only main and develop commit the cache; pull requests and forks mount a clone and never
       # write back.
       - name: Mount the compiler cache
@@ -85,9 +85,15 @@ jobs:
           key: fillet-rig
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
       - name: Set up compiler cache
+        id: sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
           version: v0.16.0
+        # A failed download of sccache (GitHub release outages answer 504) must not fail the build.
+        continue-on-error: true
+      - name: Build without the compiler cache if it could not be set up
+        if: steps.sccache.outcome == 'failure'
+        run: echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
       - name: Build the CLI (release)
         run: cargo build --release --locked -p solidcraft-cli
       - name: Run the fillet cases against the known-failing list

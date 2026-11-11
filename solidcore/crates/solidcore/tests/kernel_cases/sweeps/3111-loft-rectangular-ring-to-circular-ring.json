@@ -1,0 +1,372 @@
+{
+  "area": "sweeps",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "loft",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "degree": 1,
+        "sections": [
+          [
+            {
+              "line": {
+                "end": [
+                  20.0,
+                  -15.0,
+                  0.0
+                ],
+                "start": [
+                  -20.0,
+                  -15.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  20.0,
+                  15.0,
+                  0.0
+                ],
+                "start": [
+                  20.0,
+                  -15.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  -20.0,
+                  15.0,
+                  0.0
+                ],
+                "start": [
+                  20.0,
+                  15.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  -20.0,
+                  -15.0,
+                  0.0
+                ],
+                "start": [
+                  -20.0,
+                  15.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  -15.0,
+                  10.0,
+                  0.0
+                ],
+                "start": [
+                  -15.0,
+                  -10.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  15.0,
+                  10.0,
+                  0.0
+                ],
+                "start": [
+                  -15.0,
+                  10.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  15.0,
+                  -10.0,
+                  0.0
+                ],
+                "start": [
+                  15.0,
+                  10.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "line": {
+                "end": [
+                  -15.0,
+                  -10.0,
+                  0.0
+                ],
+                "start": [
+                  15.0,
+                  -10.0,
+                  0.0
+                ]
+              }
+            }
+          ],
+          [
+            {
+              "arc": {
+                "axis": [
+                  0.0,
+                  0.0,
+                  1.0
+                ],
+                "center": [
+                  0.0,
+                  0.0,
+                  30.0
+                ],
+                "end": -0.6435011087932843,
+                "radius": 12.0,
+                "reference": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "start": -2.498091544796509
+              }
+            },
+            {
+              "arc": {
+                "axis": [
+                  0.0,
+                  0.0,
+                  1.0
+                ],
+                "center": [
+                  0.0,
+                  0.0,
+                  30.0
+                ],
+                "end": 0.6435011087932843,
+                "radius": 12.0,
+                "reference": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "start": -0.6435011087932843
+              }
+            },
+            {
+              "arc": {
+                "axis": [
+                  0.0,
+                  0.0,
+                  1.0
+                ],
+                "center": [
+                  0.0,
+                  0.0,
+                  30.0
+                ],
+                "end": 2.498091544796509,
+                "radius": 12.0,
+                "reference": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "start": 0.6435011087932843
+              }
+            },
+            {
+              "arc": {
+                "axis": [
+                  0.0,
+                  0.0,
+                  1.0
+                ],
+                "center": [
+                  0.0,
+                  0.0,
+                  30.0
+                ],
+                "end": 3.7850937623830774,
+                "radius": 12.0,
+                "reference": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "start": 2.498091544796509
+              }
+            },
+            {
+              "arc": {
+                "axis": [
+                  -0.0,
+                  -0.0,
+                  -1.0
+                ],
+                "center": [
+                  0.0,
+                  0.0,
+                  30.0
+                ],
+                "end": -2.5535900500422257,
+                "radius": 8.0,
+                "reference": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "start": -3.7295952571373605
+              }
+            },
+            {
+              "arc": {
+                "axis": [
+                  -0.0,
+                  -0.0,
+                  -1.0
+                ],
+                "center": [
+                  0.0,
+                  0.0,
+                  30.0
+                ],
+                "end": -0.5880026035475674,
+                "radius": 8.0,
+                "reference": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "start": -2.5535900500422257
+              }
+            },
+            {
+              "arc": {
+                "axis": [
+                  -0.0,
+                  -0.0,
+                  -1.0
+                ],
+                "center": [
+                  0.0,
+                  0.0,
+                  30.0
+                ],
+                "end": 0.5880026035475674,
+                "radius": 8.0,
+                "reference": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "start": -0.5880026035475674
+              }
+            },
+            {
+              "arc": {
+                "axis": [
+                  -0.0,
+                  -0.0,
+                  -1.0
+                ],
+                "center": [
+                  0.0,
+                  0.0,
+                  30.0
+                ],
+                "end": 2.5535900500422257,
+                "radius": 8.0,
+                "reference": [
+                  1.0,
+                  0.0,
+                  0.0
+                ],
+                "start": 0.5880026035475674
+              }
+            }
+          ]
+        ]
+      }
+    }
+  ],
+  "case": "3111-loft-rectangular-ring-to-circular-ring",
+  "expected": {
+    "bbox": {
+      "max": [
+        20,
+        15,
+        30
+      ],
+      "min": [
+        -20,
+        -15,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "no closed form for the ring-to-ring pairing, so only invariants are graded: the loft succeeds as one closed valid solid (outer wall, hole wall and two caps), and since every ruling joins a point of one section to a point of the other, the solid lies in the hull of both sections: bbox x +-20, y +-15 (the 40 x 30 outer rectangle), z 0 to 30.",
+    "source": "invariants",
+    "sources": [
+      "tangency-labs/solidcraft#3111"
+    ],
+    "what": "a loft from a rectangular ring (two nested rectangles) to a circular ring (two concentric circles) 30 mm above: a hollow transition piece"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 36,
+      "faces": 14,
+      "vertices": 24
+    }
+  },
+  "result": [
+    {
+      "body": "Transition",
+      "made": "b1"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 6380.664426124081,
+      "body_count": 1,
+      "edges": 36,
+      "faces": 14,
+      "vertices": 24,
+      "volume_mm3": 12464.183389013679
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3111"
+  ],
+  "traced_ops": [
+    "loft"
+  ],
+  "ungraded": [],
+  "what": "a loft from a rectangular ring (two nested rectangles) to a circular ring (two concentric circles) 30 mm above: a hollow transition piece",
+  "why_not": []
+}

@@ -2,17 +2,21 @@
 //! Run with `--features solidcraft-render/raytrace-cpu`; output directory must not exist.
 use serde_json::json;
 use solidcore_record::Vec3;
+use solidcraft_geom::MeshGeom;
 use solidcraft_geom::{Aabb3, Mesh, Vec3Geom};
 use solidcraft_render::{
-    Camera, ProductMesh, ProductScene,
+    ProductMesh, ProductScene,
     glass_model::{Dispersion, GlassModel, ThinFilm},
     job::{
         AreaLight, AreaLights, CausticOptions, CpuBudget, CpuHost, CpuPathOptions, CpuProgressiveOptions, DielectricBoundary, DielectricOptions,
         DirectionalLightOptions, DirectionalLights, ImageHost, ImageRequest, Integrator, JobId, JobOptions, OutputOptions, Phase,
         PunctualLightOptions, PunctualLights, RaytraceEnvironmentOptions, RaytraceOptions, RectangleLightOptions, SpotConeOptions, StudioLighting,
     },
-    surface::{OpaqueSurface, unit_direction},
     transmission::{Transmission, subsurface::Subsurface},
+};
+use solidcraft_viewport::{
+    Camera,
+    surface::{OpaqueSurface, unit_direction},
 };
 use std::{error::Error, fs, path::Path, sync::Arc, time::Duration};
 

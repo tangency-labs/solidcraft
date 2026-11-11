@@ -60,7 +60,8 @@ function parseDefaults(body) {
 
 const DEFAULTS_HELP =
   'Add one line to the description: `Changes a default: no`, or ' +
-  '`Changes a default: yes — <what>, old behaviour kept behind preference <name>`.';
+  '`Changes a default: yes — <what>, old behaviour kept behind preference <name>`. ' +
+  '(UX defaults only; a kernel result change is \'no\'.)';
 
 function isBot(user) {
   return !!user && (user.type === 'Bot' || BOT_LOGINS.has(user.login) || /\[bot\]$/.test(user.login || ''));

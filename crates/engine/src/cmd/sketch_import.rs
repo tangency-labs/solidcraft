@@ -6,29 +6,48 @@ use std::collections::HashMap;
 use serde_json::{Value, json};
 use solidcore_record::Vec2;
 use solidcraft_io::{DxfEntity, DxfLayer, Geom2, MAX_DRAWING_BYTES};
-use solidcraft_sketch::{CurveKind, LinkKind, LinkSource, Sketch};
+use solidcraft_sketch::{Analysis, CurveKind, LinkKind, LinkSource, Sketch};
 
 use super::CommandSpec;
-use super::sketch::{edit, ids_of};
+use super::sketch::{Left, edit_solved, ids_of};
 use super::sketch_store;
 use crate::params::{bad, num, str_, vec2};
+use crate::schema::sketch_import::{DrawingInserted, DxfExported, ExportDxfParams, ExportDxfResult, InsertDxfParams, InsertSvgParams, SketchSolve};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
+const INSERT_DXF_CONTRACT: TypedContract<InsertDxfParams> = TypedContract::new();
+const INSERT_SVG_CONTRACT: TypedContract<InsertSvgParams> = TypedContract::new();
+const EXPORT_DXF_CONTRACT: TypedContract<ExportDxfParams> = TypedContract::new();
+
+/// A command's reply as JSON, built from the type its output schema describes so the two can't
+/// drift apart.
+fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
+}
+
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("sketch.insert_dxf", "Insert DXF", insert_dxf)
+    CommandSpec::new("sketch.insert_dxf", "Insert DXF", crate::checked!("sketch.insert_dxf", insert_dxf))
         .at("SKETCH", "INSERT")
         .icon("sketch_dxf")
+        .contract(&INSERT_DXF_CONTRACT)
+        .output(output_schema_for::<DrawingInserted>)
         .params(concat!("path | text: ASCII DXF (blocks expanded); at?: [x,y] offset, scale? | width? | height?: mm, the drawing's size before rotation, aspect kept (win over scale); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
-    CommandSpec::new("sketch.insert_svg", "Insert SVG", insert_svg)
+    CommandSpec::new("sketch.insert_svg", "Insert SVG", crate::checked!("sketch.insert_svg", insert_svg))
         .at("SKETCH", "INSERT")
         .icon("svg")
+        .contract(&INSERT_SVG_CONTRACT)
+        .output(output_schema_for::<DrawingInserted>)
         .params(concat!("path | text: SVG; at?: [x,y] offset, scale? | width? | height?: mm, the drawing's size before rotation, aspect kept (win over scale); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
     CommandSpec::new("sketch.drawing_bounds", "Drawing Size", drawing_bounds)
         .icon("svg")
         .noundo()
         .params("path | text: SVG or DXF (by `format`: \"svg\" | \"dxf\", default by the file name, else SVG); returns min, max, width and height in the file's own size"),
-    CommandSpec::new("sketch.export_dxf", "Save As DXF", export_dxf).icon("sketch_dxf")
+    CommandSpec::new("sketch.export_dxf", "Save As DXF", crate::checked!("sketch.export_dxf", export_dxf))
+        .icon("sketch_dxf")
         .noundo()
+        .contract(&EXPORT_DXF_CONTRACT)
+        .output(output_schema_for::<ExportDxfResult>)
         .params("sketch?: id|name (default active); path?: file to write (else the DXF text is returned); units?: \"design\" | \"in\" | \"inch\" | \"mm\" | \"cm\" | \"m\" | \"ft\" (default mm); layer?: profile layer name (default \"0\"); layers?: \"single\" | \"roles\" (default \"single\": all on `layer`; \"roles\": outer on \"OUTLINE\", holes on \"CUT\"); join?: bool (default false: R12 LINE/ARC; true: closed loops as LWPOLYLINE with arc bulges)"),
 ];
 
@@ -73,8 +92,11 @@ fn drawing_error(p: &Value, svg: bool, msg: String) -> EngineError {
 /// Adds the geometry; end points closer than `q` (mm) become one point, so drawings whose
 /// ends almost meet still make closed profiles.
 pub(super) fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> Vec2, k: f64, q: f64) -> Result<(Vec<usize>, Vec<Geom2>)> {
+    // A dense drawing adds tens of thousands of points and curves: a batch finds each new id
+    // without searching the whole sketch, so the insert takes time in proportion to its size.
+    let sk = &mut sk.batch();
     let mut map: HashMap<(i64, i64), Vec<(Vec2, usize)>> = HashMap::new();
-    let mut pt = |sk: &mut Sketch, p: Vec2| -> Result<usize> {
+    let mut pt = |sk: &mut solidcraft_sketch::SketchBatch, p: Vec2| -> Result<usize> {
         let p = f(p);
         let key = ((p.x / q).floor() as i64, (p.y / q).floor() as i64);
         for dx in -1..=1 {
@@ -248,13 +270,16 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
     };
     // A dense SVG/DXF (a floorplan) can yield far more entities than a sketch takes; refuse
     // before adding so the message names the cap (#10874). Scale alone does not shrink the count.
-    if geom.len() > solidcraft_sketch::MAX_POINTS {
+    if geom.len() > solidcraft_sketch::limits::max_points() {
         return Err(solidcraft_sketch::SketchError::TooLarge.into());
     }
-    let ((curves, texts), info) = edit(s, p, cmd, false, |sk, _| {
+    // `sketch::edit`, but keeping the solve as a typed value for the reply.
+    let target = sketch_store::target(s, p, cmd)?;
+    let ((curves, texts), report) = edit_solved(s, target, false, Analysis::Freedom, |sk, _| {
         let (cs, texts) = add_geometry(sk, &geom, &f, k, tol)?;
-        Ok((ids_of(sk, &cs), texts))
+        Ok(((ids_of(sk, &cs), texts), Left::Unsolved))
     })?;
+    let info = report.map(|rep| SketchSolve { solved: rep.keeps_orientation(), dof: rep.dof });
     // Text becomes sketch text.
     let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch"))?;
     let mut n_text = 0;
@@ -279,7 +304,7 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
             }
         }
     }
-    Ok(json!({"sketch": id, "created_sketch": created, "curves": curves.len(), "texts": n_text, "info": info}))
+    reply(cmd, DrawingInserted { sketch: id, created_sketch: created, curves: curves.len(), texts: n_text, info, param_warnings: Vec::new() })
 }
 
 fn insert_dxf(s: &mut Session, p: &Value) -> Result<Value> {
@@ -522,9 +547,10 @@ fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
 
     if let Some(path) = str_(p, "path").filter(|x| !x.trim().is_empty()) {
         solidcraft_io::vfs::write(path, text.as_bytes()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-        return Ok(json!({"path": path, "entities": entity_count}));
+        let exported = DxfExported::Written { path: path.to_string(), entities: entity_count };
+        return reply(cmd, ExportDxfResult { exported, param_warnings: Vec::new() });
     }
-    Ok(json!({"dxf": text, "entities": entity_count}))
+    reply(cmd, ExportDxfResult { exported: DxfExported::Text { dxf: text, entities: entity_count }, param_warnings: Vec::new() })
 }
 
 #[cfg(test)]
@@ -586,10 +612,14 @@ mod tests {
         }
     }
 
+    /// The sketch limit is process-wide: the tests that depend on it take turns.
+    static SKETCH_LIMIT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// #10874: a drawing with more entities than a sketch can hold is refused with the point
     /// cap and that scale alone does not help (a floorplan SVG often hits this).
     #[test]
     fn a_drawing_with_too_many_entities_names_the_sketch_cap() {
+        let _turn = SKETCH_LIMIT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let n = solidcraft_sketch::MAX_POINTS + 1;
         let mut dxf = String::from("0\nSECTION\n2\nENTITIES\n");
         for i in 0..n {
@@ -598,8 +628,32 @@ mod tests {
         dxf.push_str("0\nENDSEC\n0\nEOF\n");
         let mut s = Session::default();
         let e = s.execute("sketch.insert_dxf", &json!({"text": dxf})).unwrap_err().to_string();
-        assert!(e.contains("20000") && e.contains("scale"), "{e}");
+        assert!(e.contains("20000") && e.contains("scale") && e.contains("Largest sketch"), "{e}");
         assert!(s.active_sketch.is_none(), "a refused insert leaves no empty sketch behind");
+    }
+
+    /// #10874: with Preferences › Sketch › Largest sketch raised, a drawing past the default
+    /// limit goes into one sketch; back at the default it is refused again.
+    #[test]
+    fn a_raised_sketch_limit_takes_a_denser_drawing() {
+        use solidcraft_sketch::limits;
+        let _turn = SKETCH_LIMIT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let n = limits::DEFAULT_POINTS + 1;
+        let mut dxf = String::from("0\nSECTION\n2\nENTITIES\n");
+        for i in 0..n {
+            dxf.push_str(&format!("0\nPOINT\n10\n{}\n20\n{}\n", i % 200, i / 200));
+        }
+        dxf.push_str("0\nENDSEC\n0\nEOF\n");
+        let mut s = Session::default();
+        limits::set_max_points(limits::DEFAULT_POINTS + 1000).unwrap();
+        let raised = s.execute("sketch.insert_dxf", &json!({"text": dxf}));
+        limits::set_max_points(limits::DEFAULT_POINTS).unwrap();
+        raised.unwrap();
+        let id = s.active_sketch.unwrap();
+        assert!(super::sketch_store::read(&s.doc, id).unwrap().points.len() > limits::DEFAULT_POINTS, "every point went in");
+        s.execute("sketch.finish", &json!({})).unwrap();
+        let e = s.execute("sketch.insert_dxf", &json!({"text": dxf})).unwrap_err().to_string();
+        assert!(e.contains("at most 20000"), "{e}");
     }
 
     /// #9641: an SVG with nothing SolidCraft can draw (here only an embedded picture) is refused

@@ -1,0 +1,80 @@
+{
+  "en": {
+    "cmd.construct.axis": "Axis",
+    "cmd.construct.plane": "Plane",
+    "cmd.construct.point": "Point",
+    "help.construct.axis": "Creates a construction axis with the method your picks call for: along an edge or line, through a hole or round face, where two planes meet, through two points, or square to a face through a point. Use it when you know the references and not the method.",
+    "help.construct.plane": "Creates a construction plane with the method your picks call for: offset from a plane, through a point, between two planes, through lines or points, tangent to a curved face, or square to a path. Use it when you know the references and not the method.",
+    "help.construct.point": "Creates a construction point with the method your picks call for: at a vertex, at the centre of a circle or sphere, along an edge, where two lines or three planes meet, or where a line crosses a plane. Use it when you know the references and not the method.",
+    "ui.construct_auto.chosen": "Chosen from your picks. Pick another reference, or take one out, to change the method.",
+    "ui.construct_auto.no_fit": "Pick other references: no method builds from these.",
+    "ui.construct_auto.pick": "Pick what to build from: the method follows from your picks.",
+    "ui.construct_auto.refs": "References",
+    "ui.construct_auto.select": "Select references to build from first"
+  },
+  "ja": {
+    "cmd.construct.axis": "軸",
+    "cmd.construct.plane": "平面",
+    "cmd.construct.point": "点",
+    "help.construct.axis": "選択に応じた方法で構築軸を作ります。エッジや線に沿って、穴や丸い面を通って、2つの平面の交線に、2点を通って、または点を通り面に垂直に作ります。参照は決まっているが方法を選びたくないときに使います。",
+    "help.construct.plane": "選択に応じた方法で構築平面を作ります。平面からのオフセット、点を通る、2つの平面の中間、線や点を通る、曲面に接する、またはパスに垂直に作ります。参照は決まっているが方法を選びたくないときに使います。",
+    "help.construct.point": "選択に応じた方法で構築点を作ります。頂点、円や球の中心、エッジ上、2本の線や3つの平面の交点、または線が平面と交わる位置に作ります。参照は決まっているが方法を選びたくないときに使います。",
+    "ui.construct_auto.chosen": "選択から方法を選びました。参照を追加または削除すると方法が変わります。",
+    "ui.construct_auto.no_fit": "別の参照を選択してください。これらから作れる方法がありません。",
+    "ui.construct_auto.pick": "作成元を選択してください。方法は選択から決まります。",
+    "ui.construct_auto.refs": "参照",
+    "ui.construct_auto.select": "先に作成元の参照を選択してください"
+  },
+  "zh": {
+    "cmd.construct.axis": "轴",
+    "cmd.construct.plane": "平面",
+    "cmd.construct.point": "点",
+    "help.construct.axis": "按所选对象对应的方法创建构造轴：沿边或直线、穿过孔或圆形面、两平面的交线、穿过两点，或过一点垂直于面。在已知参照但不想选择方法时使用。",
+    "help.construct.plane": "按所选对象对应的方法创建构造平面：偏移自平面、过一点、两平面之间、过直线或点、与曲面相切，或垂直于路径。在已知参照但不想选择方法时使用。",
+    "help.construct.point": "按所选对象对应的方法创建构造点：在顶点、圆或球的中心、沿边、两直线或三个平面的交点，或直线与平面的交点。在已知参照但不想选择方法时使用。",
+    "ui.construct_auto.chosen": "已根据所选对象选定方法。添加或移除参照即可更换方法。",
+    "ui.construct_auto.no_fit": "请选择其他参照：没有方法能由这些对象创建。",
+    "ui.construct_auto.pick": "选择创建依据：方法由所选对象决定。",
+    "ui.construct_auto.refs": "参照",
+    "ui.construct_auto.select": "请先选择创建依据的参照"
+  },
+  "ar": {
+    "cmd.construct.axis": "محور",
+    "cmd.construct.plane": "مستوى",
+    "cmd.construct.point": "نقطة",
+    "help.construct.axis": "ينشئ محورًا إنشائيًا بالطريقة التي تناسب ما تختاره: على امتداد حافة أو خط، أو عبر ثقب أو وجه دائري، أو عند تقاطع مستويين، أو عبر نقطتين، أو عموديًا على وجه عبر نقطة. استخدمه عندما تعرف المراجع ولا تعرف الطريقة.",
+    "help.construct.plane": "ينشئ مستوى إنشائيًا بالطريقة التي تناسب ما تختاره: إزاحة عن مستوى، أو عبر نقطة، أو بين مستويين، أو عبر خطوط أو نقاط، أو مماسًا لوجه منحنٍ، أو عموديًا على مسار. استخدمه عندما تعرف المراجع ولا تعرف الطريقة.",
+    "help.construct.point": "ينشئ نقطة إنشائية بالطريقة التي تناسب ما تختاره: عند رأس، أو في مركز دائرة أو كرة، أو على امتداد حافة، أو عند تقاطع خطين أو ثلاثة مستويات، أو حيث يقطع خط مستوى. استخدمه عندما تعرف المراجع ولا تعرف الطريقة.",
+    "ui.construct_auto.chosen": "اختيرت الطريقة من اختياراتك. اختر مرجعًا آخر أو أزل مرجعًا لتغيير الطريقة.",
+    "ui.construct_auto.no_fit": "اختر مراجع أخرى: لا توجد طريقة تبني من هذه المراجع.",
+    "ui.construct_auto.pick": "اختر ما تبني منه: الطريقة تتبع اختياراتك.",
+    "ui.construct_auto.refs": "المراجع",
+    "ui.construct_auto.select": "اختر أولًا المراجع التي تبني منها"
+  },
+  "he": {
+    "cmd.construct.axis": "ציר",
+    "cmd.construct.plane": "מישור",
+    "cmd.construct.point": "נקודה",
+    "help.construct.axis": "יוצר ציר עזר בשיטה שמתאימה למה שבחרת: לאורך קצה או קו, דרך חור או פאה עגולה, במפגש של שני מישורים, דרך שתי נקודות, או ניצב לפאה דרך נקודה. השתמש בו כשאתה יודע את ההפניות ולא את השיטה.",
+    "help.construct.plane": "יוצר מישור עזר בשיטה שמתאימה למה שבחרת: בהיסט ממישור, דרך נקודה, בין שני מישורים, דרך קווים או נקודות, משיק לפאה מעוקלת, או ניצב למסלול. השתמש בו כשאתה יודע את ההפניות ולא את השיטה.",
+    "help.construct.point": "יוצר נקודת עזר בשיטה שמתאימה למה שבחרת: בקודקוד, במרכז של מעגל או כדור, לאורך קצה, במפגש של שני קווים או שלושה מישורים, או במקום שבו קו חוצה מישור. השתמש בו כשאתה יודע את ההפניות ולא את השיטה.",
+    "ui.construct_auto.chosen": "השיטה נבחרה לפי הבחירות שלך. בחר הפניה נוספת, או הסר אחת, כדי לשנות את השיטה.",
+    "ui.construct_auto.no_fit": "בחר הפניות אחרות: אין שיטה שבונה מאלה.",
+    "ui.construct_auto.pick": "בחר ממה לבנות: השיטה נקבעת לפי הבחירות שלך.",
+    "ui.construct_auto.refs": "הפניות",
+    "ui.construct_auto.select": "בחר קודם את ההפניות לבנייה"
+  },
+  "vi": {
+    "cmd.construct.axis": "Trục",
+    "cmd.construct.plane": "Mặt phẳng",
+    "cmd.construct.point": "Điểm",
+    "help.construct.axis": "Tạo trục dựng theo phương pháp phù hợp với những gì bạn chọn: dọc theo cạnh hoặc đường, qua lỗ hoặc mặt tròn, nơi hai mặt phẳng giao nhau, qua hai điểm, hoặc vuông góc với mặt qua một điểm. Dùng khi bạn biết các tham chiếu nhưng không biết phương pháp.",
+    "help.construct.plane": "Tạo mặt phẳng dựng theo phương pháp phù hợp với những gì bạn chọn: cách một mặt phẳng, qua một điểm, giữa hai mặt phẳng, qua các đường hoặc điểm, tiếp xúc với mặt cong, hoặc vuông góc với đường dẫn. Dùng khi bạn biết các tham chiếu nhưng không biết phương pháp.",
+    "help.construct.point": "Tạo điểm dựng theo phương pháp phù hợp với những gì bạn chọn: tại đỉnh, tại tâm đường tròn hoặc mặt cầu, dọc theo cạnh, nơi hai đường hoặc ba mặt phẳng giao nhau, hoặc nơi một đường cắt mặt phẳng. Dùng khi bạn biết các tham chiếu nhưng không biết phương pháp.",
+    "ui.construct_auto.chosen": "Đã chọn phương pháp theo lựa chọn của bạn. Chọn thêm hoặc bỏ một tham chiếu để đổi phương pháp.",
+    "ui.construct_auto.no_fit": "Hãy chọn tham chiếu khác: không phương pháp nào dựng được từ các tham chiếu này.",
+    "ui.construct_auto.pick": "Chọn những gì để dựng: phương pháp theo lựa chọn của bạn.",
+    "ui.construct_auto.refs": "Tham chiếu",
+    "ui.construct_auto.select": "Hãy chọn tham chiếu để dựng trước"
+  }
+}

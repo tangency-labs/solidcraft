@@ -2204,6 +2204,7 @@
   "material.editor.preserved_appearance": "Zachovaný vzhled",
   "material.editor.public_reference": "Veřejná reference",
   "material.editor.reference": "Reference",
+  "material.editor.remove": "Odebrat",
   "material.editor.save_or_discard": "Před přiřazením materiálu uložte nebo zahoďte koncept materiálu.",
   "material.editor.saved": "Materiál byl uložen. Přiřazení k tělesům se nezměnila.",
   "material.editor.scope": "Uložením se materiál uloží bez přiřazení k tělesům. Prázdné vlastnosti a podmínky zůstávají neznámé. Hustota z karty nemění přiřazenou hustotu ani hmotnost.",

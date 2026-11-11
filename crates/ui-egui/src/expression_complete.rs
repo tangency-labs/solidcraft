@@ -4,7 +4,7 @@ use crate::ui_kit;
 use egui::Key;
 
 use crate::params_dialog::{every_parameter, exact_token, suggestions_for, unit_token, word_before};
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 #[derive(Clone)]
 struct Popup {
@@ -238,10 +238,10 @@ pub(crate) fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut Stri
         .map(|suggestion| ui_kit::PopupOption {
             text: &suggestion.text,
             kind: match suggestion.kind.as_str() {
-                "parameter" => crate::i18n::tr_label("Parameter"),
-                "function" => crate::i18n::tr("ui.function"),
-                "unit" => crate::i18n::tr_label("Unit"),
-                "constant" => crate::i18n::tr("ui.constant"),
+                "parameter" => solidcraft_ui_text::tr_label("Parameter"),
+                "function" => solidcraft_ui_text::tr("ui.function"),
+                "unit" => solidcraft_ui_text::tr_label("Unit"),
+                "constant" => solidcraft_ui_text::tr("ui.constant"),
                 _ => &suggestion.kind,
             },
             detail: &suggestion.detail,
@@ -261,7 +261,7 @@ pub(crate) fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut Stri
         &options,
         // Unarmed, the typed word is complete and Enter submits it; an arrow key arms the list.
         // Escape is the window's until the box is typed in.
-        crate::i18n::tr_label(if popup.armed {
+        solidcraft_ui_text::tr_label(if popup.armed {
             "↑ ↓ choose · Enter / Tab complete · Esc dismiss"
         } else if popup.typed {
             "↑ ↓ choose · Enter applies what you typed · Esc dismiss"

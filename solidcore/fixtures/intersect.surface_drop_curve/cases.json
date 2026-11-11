@@ -1,0 +1,1500 @@
+{
+ "cases": [
+  {
+   "name": "rect_edge_on_plane",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle: 10 x 6 rectangle at the origin)",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -10,
+      -10,
+      10,
+      10
+     ]
+    },
+    "domain": [
+     -10,
+     -10,
+     10,
+     10
+    ],
+    "curve": {
+     "kind": "segment",
+     "a": [
+      -5,
+      -3,
+      0
+     ],
+     "b": [
+      5,
+      -3,
+      0
+     ]
+    },
+    "interval": [
+     0,
+     1
+    ],
+    "on_surface": true,
+    "working_interval": [
+     0,
+     1
+    ],
+    "working_domain": [
+     -10,
+     -10,
+     10,
+     10
+    ],
+    "knots": [
+     0,
+     1
+    ],
+    "breaks": [
+     0,
+     1
+    ],
+    "ops": [
+     {
+      "op": "cpv",
+      "param": 0,
+      "uv": [
+       -5,
+       -3
+      ]
+     },
+     {
+      "op": "cpv",
+      "param": 0.5,
+      "uv": [
+       0,
+       -3
+      ],
+      "use_prev": true
+     },
+     {
+      "op": "step",
+      "param": 0,
+      "old": 0
+     },
+     {
+      "op": "step",
+      "param": 0.5,
+      "old": 0.2
+     },
+     {
+      "op": "step",
+      "param": 1,
+      "old": 0.2
+     },
+     {
+      "op": "next",
+      "first": false,
+      "kind": 2,
+      "step": 0.1
+     },
+     {
+      "op": "next",
+      "first": true,
+      "kind": 1,
+      "step": 0
+     },
+     {
+      "op": "trace2"
+     },
+     {
+      "op": "interior"
+     },
+     {
+      "op": "hooks",
+      "point": [
+       0,
+       -3,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "rect_edges_lifted_off_plane",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle: 10 x 6 rectangle at the origin)",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -10,
+      -10,
+      10,
+      10
+     ]
+    },
+    "domain": [
+     -10,
+     -10,
+     10,
+     10
+    ],
+    "curve": {
+     "kind": "segment",
+     "a": [
+      5,
+      -3,
+      0.5
+     ],
+     "b": [
+      5,
+      3,
+      0.5
+     ]
+    },
+    "interval": [
+     0,
+     1
+    ],
+    "on_surface": false,
+    "knots": [
+     0,
+     1
+    ],
+    "breaks": [
+     0,
+     1
+    ],
+    "ops": [
+     {
+      "op": "interior"
+     },
+     {
+      "op": "cpv",
+      "param": 0,
+      "uv": [
+       5,
+       -3
+      ]
+     },
+     {
+      "op": "trace2"
+     },
+     {
+      "op": "interior"
+     }
+    ]
+   }
+  },
+  {
+   "name": "rect_edge_partly_outside_domain",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle: 10 x 6 rectangle at the origin)",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -4,
+      -4,
+      4,
+      4
+     ]
+    },
+    "domain": [
+     -4,
+     -4,
+     4,
+     4
+    ],
+    "curve": {
+     "kind": "segment",
+     "a": [
+      -5,
+      3,
+      0
+     ],
+     "b": [
+      5,
+      3,
+      0
+     ]
+    },
+    "interval": [
+     0,
+     1
+    ],
+    "on_surface": true,
+    "working_interval": [
+     0,
+     1
+    ],
+    "working_domain": [
+     -4,
+     -4,
+     4,
+     4
+    ],
+    "knots": [
+     0,
+     1
+    ],
+    "breaks": [
+     0,
+     0.1,
+     0.9,
+     1
+    ],
+    "ops": [
+     {
+      "op": "cpv",
+      "param": 0.1,
+      "uv": [
+       -4,
+       3
+      ]
+     },
+     {
+      "op": "next",
+      "first": true,
+      "kind": 1,
+      "step": 0
+     },
+     {
+      "op": "trace2"
+     },
+     {
+      "op": "interior"
+     }
+    ]
+   }
+  },
+  {
+   "name": "polygon_edge_bspline_over_plane",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:462 (TestSmCreateRegularPolygon)",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -10,
+      -10,
+      10,
+      10
+     ]
+    },
+    "domain": [
+     -10,
+     -10,
+     10,
+     10
+    ],
+    "curve": {
+     "kind": "bspline",
+     "p": 2,
+     "cpts": [
+      [
+       0,
+       0,
+       0.01,
+       -1.7976931348623157e+308
+      ],
+      [
+       2,
+       1,
+       0.02,
+       -1.7976931348623157e+308
+      ],
+      [
+       4,
+       0,
+       0.01,
+       -1.7976931348623157e+308
+      ],
+      [
+       5,
+       -2,
+       0,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "knots": [
+      0,
+      0,
+      0,
+      0.5,
+      1,
+      1,
+      1
+     ]
+    },
+    "interval": [
+     0,
+     1
+    ],
+    "on_surface": false,
+    "working_interval": [
+     0,
+     1
+    ],
+    "working_domain": [
+     -10,
+     -10,
+     10,
+     10
+    ],
+    "knots": [
+     0,
+     0.5,
+     1
+    ],
+    "breaks": [
+     0,
+     0.5,
+     1
+    ],
+    "ops": [
+     {
+      "op": "cpv",
+      "param": 0,
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "param": 0.5,
+      "uv": [
+       3,
+       0.5
+      ],
+      "use_prev": true
+     },
+     {
+      "op": "step",
+      "param": 0,
+      "old": 0
+     },
+     {
+      "op": "step",
+      "param": 0.5,
+      "old": 0.1
+     },
+     {
+      "op": "step",
+      "param": 0.25,
+      "old": 0.4
+     },
+     {
+      "op": "step",
+      "param": 0.75,
+      "old": 0
+     },
+     {
+      "op": "trace2"
+     },
+     {
+      "op": "interior"
+     }
+    ]
+   }
+  },
+  {
+   "name": "tangent_along_normal_uses_prev",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455 (my_test_drop_point)",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -10,
+      -10,
+      10,
+      10
+     ]
+    },
+    "domain": [
+     -10,
+     -10,
+     10,
+     10
+    ],
+    "curve": {
+     "kind": "bspline",
+     "p": 2,
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       0,
+       0,
+       1,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       0,
+       1,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "knots": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "interval": [
+     0,
+     1
+    ],
+    "working_interval": [
+     0,
+     1
+    ],
+    "ops": [
+     {
+      "op": "cpv",
+      "param": 0,
+      "uv": [
+       0,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "param": 0.5,
+      "uv": [
+       0.25,
+       0
+      ]
+     },
+     {
+      "op": "cpv",
+      "param": 0,
+      "uv": [
+       0,
+       0
+      ],
+      "use_prev": true
+     }
+    ]
+   }
+  },
+  {
+   "name": "normal_segment_fails",
+   "upstream_ref": "tests/prog_test/src/smCurveTest.cpp:455 (my_test_drop_point)",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -10,
+      -10,
+      10,
+      10
+     ]
+    },
+    "domain": [
+     -10,
+     -10,
+     10,
+     10
+    ],
+    "curve": {
+     "kind": "segment",
+     "a": [
+      1,
+      1,
+      -1
+     ],
+     "b": [
+      1,
+      1,
+      1
+     ]
+    },
+    "interval": [
+     0,
+     1
+    ],
+    "ops": [
+     {
+      "op": "cpv",
+      "param": 0.5,
+      "uv": [
+       1,
+       1
+      ]
+     },
+     {
+      "op": "interior"
+     }
+    ]
+   }
+  },
+  {
+   "name": "add_break_edges",
+   "upstream_ref": "SmSurfaceDropCurve.cpp sm_AddBreak",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -10,
+      -10,
+      10,
+      10
+     ]
+    },
+    "domain": [
+     -10,
+     -10,
+     10,
+     10
+    ],
+    "curve": {
+     "kind": "segment",
+     "a": [
+      0,
+      0,
+      0
+     ],
+     "b": [
+      1,
+      0,
+      0
+     ]
+    },
+    "interval": [
+     0,
+     1
+    ],
+    "ops": [
+     {
+      "op": "add_break",
+      "values": [],
+      "new": 0.5
+     },
+     {
+      "op": "add_break",
+      "values": [
+       0,
+       0.5,
+       1
+      ],
+      "new": 0.5000000000001
+     },
+     {
+      "op": "add_break",
+      "values": [
+       0,
+       0.5,
+       1
+      ],
+      "new": -1
+     },
+     {
+      "op": "add_break",
+      "values": [
+       0,
+       0.5,
+       1
+      ],
+      "new": 2
+     },
+     {
+      "op": "add_break",
+      "values": [
+       0,
+       0.5,
+       1
+      ],
+      "new": 0.75
+     },
+     {
+      "op": "add_break",
+      "values": [
+       1000
+      ],
+      "new": 1000.00000000005
+     }
+    ]
+   }
+  },
+  {
+   "name": "step_size_at_working_end_without_knots",
+   "upstream_ref": "SmSurfaceDropCurve.cpp ComputeStepSize",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -10,
+      -10,
+      10,
+      10
+     ]
+    },
+    "domain": [
+     -10,
+     -10,
+     10,
+     10
+    ],
+    "curve": {
+     "kind": "segment",
+     "a": [
+      0,
+      0,
+      0
+     ],
+     "b": [
+      1,
+      0,
+      0
+     ]
+    },
+    "interval": [
+     0,
+     1
+    ],
+    "working_interval": [
+     0.2,
+     0.6
+    ],
+    "ops": [
+     {
+      "op": "step",
+      "param": 0.6,
+      "old": 0.1
+     },
+     {
+      "op": "step",
+      "param": 0.6000001,
+      "old": 0.1
+     }
+    ]
+   }
+  },
+  {
+   "name": "step_size_knot_spans",
+   "upstream_ref": "SmSurfaceDropCurve.cpp ComputeStepSize",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -10,
+      -10,
+      10,
+      10
+     ]
+    },
+    "domain": [
+     -10,
+     -10,
+     10,
+     10
+    ],
+    "curve": {
+     "kind": "segment",
+     "a": [
+      0,
+      0,
+      0
+     ],
+     "b": [
+      1,
+      0,
+      0
+     ]
+    },
+    "interval": [
+     0,
+     1
+    ],
+    "working_interval": [
+     0,
+     0.7
+    ],
+    "knots": [
+     0,
+     0.25,
+     0.5,
+     0.75,
+     1
+    ],
+    "ops": [
+     {
+      "op": "step",
+      "param": 0.25,
+      "old": 0.0
+     },
+     {
+      "op": "step",
+      "param": 0.5,
+      "old": 1e-13
+     },
+     {
+      "op": "step",
+      "param": 0.5,
+      "old": 0.5
+     },
+     {
+      "op": "step",
+      "param": 0.7,
+      "old": 0.1
+     },
+     {
+      "op": "step",
+      "param": 0.6999999,
+      "old": 0.1
+     },
+     {
+      "op": "step",
+      "param": 0.1,
+      "old": 0.05
+     },
+     {
+      "op": "step",
+      "param": -1,
+      "old": 0.05
+     },
+     {
+      "op": "step",
+      "param": 2,
+      "old": 0.05
+     }
+    ]
+   }
+  },
+  {
+   "name": "test_point_bilinear",
+   "upstream_ref": "SmSurfaceDropCurve.cpp sm_TestPoint",
+   "inputs": {
+    "surface": {
+     "kind": "bspline",
+     "p": 1,
+     "q": 1,
+     "net": [
+      [
+       [
+        0,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        0,
+        1,
+        0,
+        -1.7976931348623157e+308
+       ]
+      ],
+      [
+       [
+        1,
+        0,
+        0,
+        -1.7976931348623157e+308
+       ],
+       [
+        1,
+        1,
+        0.5,
+        -1.7976931348623157e+308
+       ]
+      ]
+     ],
+     "u": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "domain": [
+     0,
+     0,
+     1,
+     1
+    ],
+    "curve": {
+     "kind": "segment",
+     "a": [
+      0,
+      0,
+      0
+     ],
+     "b": [
+      1,
+      1,
+      1
+     ]
+    },
+    "interval": [
+     0,
+     1
+    ],
+    "ops": [
+     {
+      "op": "test_point",
+      "domain": [
+       0,
+       0,
+       1,
+       1
+      ],
+      "uv": [
+       0.5,
+       0.5
+      ],
+      "point": [
+       0.5,
+       0.5,
+       0.125
+      ],
+      "tol": 1e-06
+     },
+     {
+      "op": "test_point",
+      "domain": [
+       0,
+       0,
+       1,
+       1
+      ],
+      "uv": [
+       0.5,
+       0.5
+      ],
+      "point": [
+       0.4,
+       0.5,
+       0.125
+      ],
+      "tol": 0.001
+     },
+     {
+      "op": "test_point",
+      "domain": [
+       0,
+       0,
+       0.5,
+       0.5
+      ],
+      "uv": [
+       0.9,
+       -0.2
+      ],
+      "point": [
+       0.5,
+       0,
+       0.3
+      ],
+      "tol": 0.5
+     },
+     {
+      "op": "test_point",
+      "domain": [
+       0,
+       0,
+       1,
+       1
+      ],
+      "uv": [
+       0,
+       0
+      ],
+      "point": [
+       0,
+       0,
+       1
+      ],
+      "tol": 0.001
+     }
+    ]
+   }
+  },
+  {
+   "name": "graze_parallel_and_crossing",
+   "upstream_ref": "SmSurfaceDropCurve.cpp sm_IsGrazingIntersection",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -10,
+      -10,
+      10,
+      10
+     ]
+    },
+    "domain": [
+     -10,
+     -10,
+     10,
+     10
+    ],
+    "curve": {
+     "kind": "segment",
+     "a": [
+      0,
+      0,
+      0
+     ],
+     "b": [
+      2,
+      0,
+      0
+     ]
+    },
+    "interval": [
+     0,
+     1
+    ],
+    "ops": [
+     {
+      "op": "graze",
+      "p1": 0.5,
+      "curve": {
+       "kind": "segment",
+       "a": [
+        0,
+        1,
+        0
+       ],
+       "b": [
+        3,
+        1,
+        0
+       ]
+      },
+      "p2": 0.2
+     },
+     {
+      "op": "graze",
+      "p1": 0.5,
+      "curve": {
+       "kind": "segment",
+       "a": [
+        1,
+        -1,
+        0
+       ],
+       "b": [
+        1,
+        1,
+        0
+       ]
+      },
+      "p2": 0.5
+     },
+     {
+      "op": "graze",
+      "p1": 0,
+      "curve": {
+       "kind": "segment",
+       "a": [
+        2,
+        0,
+        0
+       ],
+       "b": [
+        0,
+        0,
+        0
+       ]
+      },
+      "p2": 1
+     },
+     {
+      "op": "graze",
+      "p1": 1,
+      "curve": {
+       "kind": "bspline",
+       "p": 2,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "knots": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ]
+      },
+      "p2": 0.5
+     }
+    ]
+   }
+  },
+  {
+   "name": "boundary_degenerate_interval_on_surface",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle: 10 x 6 rectangle at the origin)",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -10,
+      -10,
+      10,
+      10
+     ]
+    },
+    "domain": [
+     -10,
+     -10,
+     10,
+     10
+    ],
+    "curve": {
+     "kind": "segment",
+     "a": [
+      -5,
+      -3,
+      0
+     ],
+     "b": [
+      5,
+      -3,
+      0
+     ]
+    },
+    "interval": [
+     0.5,
+     0.5
+    ],
+    "on_surface": true,
+    "ops": [
+     {
+      "op": "boundary"
+     },
+     {
+      "op": "interior"
+     }
+    ]
+   }
+  },
+  {
+   "name": "tiny_scale_plane",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle: 10 x 6 rectangle at the origin)",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -0.001,
+      -0.001,
+      0.001,
+      0.001
+     ]
+    },
+    "domain": [
+     -0.001,
+     -0.001,
+     0.001,
+     0.001
+    ],
+    "curve": {
+     "kind": "segment",
+     "a": [
+      -0.0005,
+      -0.0003,
+      1e-07
+     ],
+     "b": [
+      0.0005,
+      -0.0003,
+      1e-07
+     ]
+    },
+    "interval": [
+     0,
+     1
+    ],
+    "tol": 1e-09,
+    "working_interval": [
+     0,
+     1
+    ],
+    "working_domain": [
+     -0.001,
+     -0.001,
+     0.001,
+     0.001
+    ],
+    "knots": [
+     0,
+     1
+    ],
+    "breaks": [
+     0,
+     1
+    ],
+    "ops": [
+     {
+      "op": "cpv",
+      "param": 0,
+      "uv": [
+       -0.0005,
+       -0.0003
+      ]
+     },
+     {
+      "op": "trace2"
+     },
+     {
+      "op": "interior"
+     }
+    ]
+   }
+  },
+  {
+   "name": "huge_scale_plane",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:424 (TestSmCreateRectangle: 10 x 6 rectangle at the origin)",
+   "inputs": {
+    "surface": {
+     "kind": "plane",
+     "o": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "scale": [
+      1,
+      1
+     ],
+     "domain": [
+      -1000000.0,
+      -1000000.0,
+      1000000.0,
+      1000000.0
+     ]
+    },
+    "domain": [
+     -1000000.0,
+     -1000000.0,
+     1000000.0,
+     1000000.0
+    ],
+    "curve": {
+     "kind": "segment",
+     "a": [
+      -500000.0,
+      -300000.0,
+      10
+     ],
+     "b": [
+      500000.0,
+      -300000.0,
+      10
+     ]
+    },
+    "interval": [
+     0,
+     1
+    ],
+    "working_interval": [
+     0,
+     1
+    ],
+    "working_domain": [
+     -1000000.0,
+     -1000000.0,
+     1000000.0,
+     1000000.0
+    ],
+    "knots": [
+     0,
+     1
+    ],
+    "breaks": [
+     0,
+     1
+    ],
+    "ops": [
+     {
+      "op": "cpv",
+      "param": 1,
+      "uv": [
+       500000.0,
+       -300000.0
+      ]
+     },
+     {
+      "op": "next",
+      "first": false,
+      "kind": 2,
+      "step": 0.1
+     },
+     {
+      "op": "trace2"
+     },
+     {
+      "op": "interior"
+     }
+    ]
+   }
+  }
+ ]
+}
