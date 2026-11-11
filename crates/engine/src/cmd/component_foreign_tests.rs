@@ -153,7 +153,6 @@ fn a_rotate_step_on_a_member_outside_its_component_is_refused_saying_what() {
     run(&mut source, "sketch.finish", json!({}));
     let tube = json!({"kind": "rect_tube", "width": 40, "height": 40, "wall": 3, "outer_radius": 0});
     run(&mut source, "frame.member", json!({"sketch": "Post path", "name": "Post member", "body_name": "Post", "profile": tube}));
-    let (_, at) = created(&mut source, "Turns");
     let index = {
         let st = source.model.state();
         let b = st.body("Post").unwrap();
@@ -161,7 +160,12 @@ fn a_rotate_step_on_a_member_outside_its_component_is_refused_saying_what() {
             .find(|i| b.body.planar_face(*i).is_some_and(|pl| pl.normal().x > 0.999 && (pl.origin.x - 20.0).abs() < 1e-6))
             .unwrap()
     };
-    run(&mut source, "frame.rotate_member", json!({"face": {"body": "Post", "index": index, "face": [20, 0, 150]}, "angle": "30 deg"}));
+    // The command refuses a member outside the active component, so the step is made at the
+    // root and moved in, as an old or hand-edited design can hold it.
+    let turn = run(&mut source, "frame.rotate_member", json!({"face": {"body": "Post", "index": index, "face": [20, 0, 150]}, "angle": "30 deg"}));
+    let (turns, at) = created(&mut source, "Turns");
+    source.doc_mut().feature_mut(turn["feature"].as_u64().unwrap()).unwrap().component = turns;
+    source.refresh();
 
     let mut s = design("Frame");
     s.foreign_copy = copied(&source, vec![at]);

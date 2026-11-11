@@ -1439,30 +1439,62 @@ fn a_rotate_step_with_a_bad_angle_errors_alone() {
     }
 }
 
-fn brace_normals(s: &Session) -> Vec<solidcore_record::Vec3> {
-    let st = s.model.state();
-    let b = st.body("Brace").unwrap();
-    (0..b.body.face_count()).filter_map(|i| b.body.planar_face(i)).map(|pl| pl.normal()).collect()
-}
-
 fn ref_line(s: &mut Session, plane: &str, points: Value) {
     run(s, "sketch.create", json!({"plane": plane, "name": "Ref"}));
     run(s, "sketch.line", json!({"points": points, "ids": ["ref"]}));
     run(s, "sketch.finish", json!({}));
 }
 
-#[test]
-fn parallel_to_lines_a_sloped_member_side_up_with_a_line() {
+/// The brace turned `before` degrees (when given), then its side picked at that turn laid
+/// parallel to a line in the XY plane at 45 degrees: the picked side's family (it and its
+/// opposite) is perpendicular to the line afterwards.
+fn parallel_to_after(before: Option<&str>) {
     let mut s = brace();
     ref_line(&mut s, "XY", json!([[200, -50], [250, 0]]));
-    let face = brace_side(&s, 0.0);
+    let start: f64 = before.map_or(0.0, |b| b.trim_end_matches(" deg").parse().unwrap());
+    if let Some(angle) = before {
+        let face = brace_side(&s, 0.0);
+        run(&mut s, "frame.rotate_member", json!({"face": face, "angle": angle}));
+    }
+    let face = brace_side(&s, start);
     run(&mut s, "frame.rotate_member", json!({"face": face, "parallel_to": {"sketch": "Ref", "curve": "ref"}}));
-    // Some side is now parallel to the line (its normal is perpendicular to it).
-    assert!(brace_normals(&s).iter().any(|n| (n.x + n.y).abs() < 1e-9), "{:?}", brace_normals(&s));
-    // The stored angle is the previous turn (0) plus a delta in (-90, 90].
+    let step = s.doc.features.iter().rev().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::FrameMemberTurn { .. })).unwrap();
+    let solidcraft_doc::FeatureKind::FrameMemberTurn { angle, .. } = &step.kind else { panic!("not a turn") };
+    let deg: f64 = angle.as_ref().trim_end_matches(" deg").parse().unwrap();
+    // The nearest turn: within a quarter turn of the previous one.
+    assert!(deg - start > -90.0 - 1e-9 && deg - start <= 90.0 + 1e-9, "{angle}");
+    // The picked side now faces `deg` round (the turn is absolute); its normal is perpendicular to the line.
+    let picked = brace_side(&s, deg);
+    let i = picked["index"].as_u64().unwrap() as usize;
+    let st = s.model.state();
+    let n = st.body("Brace").unwrap().body.planar_face(i).unwrap().normal();
+    assert!((n.x + n.y).abs() < 1e-9, "{n:?} after {before:?}");
+}
+
+#[test]
+fn parallel_to_lines_a_sloped_member_side_up_with_a_line() {
+    parallel_to_after(None);
+    parallel_to_after(Some("30 deg"));
+}
+
+#[test]
+fn parallel_to_null_falls_back_to_the_angle() {
+    let mut s = brace();
+    let face = brace_side(&s, 0.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "30 deg", "parallel_to": null}));
     let solidcraft_doc::FeatureKind::FrameMemberTurn { angle, .. } = &turn_step(&s).kind else { panic!("not a turn") };
-    let deg: f64 = angle.as_ref().trim_end_matches(" deg").trim_end_matches("deg").trim().parse().unwrap();
-    assert!(deg > -90.0 - 1e-9 && deg <= 90.0 + 1e-9, "{angle}");
+    assert_eq!(angle.as_ref() as &str, "30 deg");
+}
+
+#[test]
+fn rotate_member_refuses_a_member_outside_the_active_component() {
+    let mut s = brace();
+    let face = brace_side(&s, 0.0);
+    run(&mut s, "component.create", json!({"name": "Other"}));
+    let before = s.doc.to_json();
+    let e = s.execute("frame.rotate_member", &json!({"face": face, "angle": "30 deg"})).unwrap_err().to_string();
+    assert!(e.contains("Activate the member's component"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
 }
 
 #[test]
