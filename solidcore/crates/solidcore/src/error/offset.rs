@@ -16,6 +16,7 @@
 //! | [`OffsetFailure::ToleranceUnresolved`] | `SM_ERR_INVALID_INPUT` (solidcore-native, WR-749) |
 //! | [`OffsetFailure::SeamOpened`]          | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::ExactCurveUncut`]     | `SM_ERR` (solidcore-native)               |
+//! | [`OffsetFailure::TangentEndOffCurve`]  | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::FacesApart`]          | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::ReachUncertified`]    | `SM_ERR` (solidcore-native)               |
 //! | [`OffsetFailure::LoopGapUncertified`]  | `SM_ERR` (solidcore-native)               |
@@ -140,6 +141,11 @@ pub enum OffsetFailure {
     /// ([`crate::surface::surface::SurfaceIntersection::clip_exact_curves`]; the failure's
     /// cause says why). The edge's offsets cannot be mated on it.
     ExactCurveUncut,
+    /// In a local operation, an edge's new curve ends beside an edge that was tangent in
+    /// the input and whose new surfaces cross, and that edge, already mated, has no new
+    /// vertex on the curve: the end is not where the edges meet, and no cut chosen by
+    /// distance stands in for it.
+    TangentEndOffCurve,
     /// In a local operation, the new surfaces of `face` and of its neighbour across an
     /// edge meet nowhere near the edge, so no extension of either makes them meet there
     /// and the edge cannot be found again. (The reach,
@@ -272,6 +278,7 @@ impl OffsetFailure {
                 .or_else(|| face.map(EntityRef::Face)),
             Self::LoopGapUncertified { face } => face.map(EntityRef::Face),
             Self::ExactCurveUncut
+            | Self::TangentEndOffCurve
             | Self::Unsound { .. }
             | Self::DistanceUnresolved { .. }
             | Self::ToleranceUnresolved { .. }
@@ -360,6 +367,7 @@ impl OffsetFailure {
             | Self::FacesApart { .. }
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
+            | Self::TangentEndOffCurve
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. }
             | Self::Failed(_) => SM_ERR,
@@ -388,6 +396,7 @@ impl OffsetFailure {
             | Self::FacesApart { .. }
             | Self::ReachUncertified { .. }
             | Self::ExactCurveUncut
+            | Self::TangentEndOffCurve
             | Self::LoopGapUncertified { .. }
             | Self::Unsound { .. } => ErrorKind::Unsupported,
             Self::DistanceUnresolved { .. } | Self::ToleranceUnresolved { .. } => {
@@ -585,6 +594,9 @@ impl core::fmt::Display for OffsetFailure {
                 "the extended faces beside an edge meet on an exact curve that could not be \
                  cut into its pieces with their UV curves, so the edge's offsets cannot be \
                  mated",
+            ),
+            Self::TangentEndOffCurve => f.write_str(
+                "an edge ends beside a tangent edge whose new faces now cross, and that edge's                  new vertex is not on the edge's new curve, so the edge cannot end there",
             ),
             Self::ToleranceUnresolved { tolerance } => write!(
                 f,
