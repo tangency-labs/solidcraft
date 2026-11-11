@@ -3705,10 +3705,11 @@ impl SolveApp {
         if render_workspace::active(self) {
             render_ui::overlays(self, ui);
         }
-        // Measure current persistent sketch chrome before the host's early
-        // confirmation pair. Its answer still precedes this frame's dialog.
+        // Refresh persistent chrome before the host's early confirmation pair.
         if self.universal_panel_host_enabled() {
-            sketch_palette::show(self, ui.ctx());
+            if !panel_runtime::production_active(self) {
+                sketch_palette::show(self, ui.ctx());
+            }
             self.viewport.host_windows = ui_kit::Container::host_window_regions(ui.ctx());
             viewport::refresh_layout(self, ui.ctx());
         }
