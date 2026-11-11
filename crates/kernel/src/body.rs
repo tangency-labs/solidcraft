@@ -27,6 +27,10 @@ pub struct Body {
     /// The body in SMLib, built from `record` on first use (or kept from the operation that
     /// made it), shared by clones because they share the record.
     pub(crate) smlib: std::sync::Arc<std::sync::OnceLock<std::result::Result<solidcraft_smlib::Brep, Refusal>>>,
+    /// The record as solidcore-ops' body, for the kernel's answers about its faces
+    /// ([`Body::flat_spline_face`]): made on first use, shared by clones as `smlib` is. None
+    /// when the record was refused, kept like `smlib`'s refusal so it is not tried again.
+    pub(crate) ops: std::sync::Arc<std::sync::OnceLock<Option<(solidcore_ops::Body, solidcore_ops::Order)>>>,
     /// Bounding-box diagonal of the vertices, measured when the body was made; 0 means "not
     /// measured, walk the geometry". Every kernel tolerance is a fraction of it.
     pub(crate) size: f64,
@@ -433,6 +437,7 @@ impl Body {
         Body {
             record: std::sync::Arc::new(record),
             smlib: std::sync::Arc::new(std::sync::OnceLock::new()),
+            ops: std::sync::Arc::new(std::sync::OnceLock::new()),
             size,
             volume: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
             bounds: std::sync::Arc::new(std::sync::Mutex::new(None)),
@@ -681,7 +686,8 @@ impl Body {
     }
 
     /// Exact current planar surface for an explicitly fixed snapshot, without source lineage: the
-    /// face's plane as the face faces (out of the material in a closed shell).
+    /// face's plane as the face faces (out of the material in a closed shell). A plane surface,
+    /// or a B-spline face the kernel finds flat ([`Body::flat_spline_face`], #14346).
     pub fn planar_face(&self, index: usize) -> Option<solidcore_record::Plane> {
         let face = self.record.faces.get(index)?;
         let (o, u, v) = match &face.surface {
@@ -690,10 +696,48 @@ impl Body {
                 let o = v3(*origin);
                 (o, v3(*u_point) - o, v3(*v_point) - o)
             }
+            Surface::Spline { .. } | Surface::RationalSpline { .. } => return self.flat_spline_face(index),
             _ => return None,
         };
         let v = if self.face_forward(index) { v } else { -v };
         solidcore_record::Plane::new(o, u, v)
+    }
+
+    /// The plane of B-spline face `index` when the kernel finds it flat: SMLib's `IsPlanar` at
+    /// the face's own tolerance, with the normal facing out of the material as the face is used
+    /// ([`solidcore_ops::Body::face_plane_normal`]), through the face's first vertex. A loft's
+    /// side through three or more sections is skinned as a B-spline patch even when it is flat,
+    /// as a face of an imported design can be (#14346).
+    fn flat_spline_face(&self, index: usize) -> Option<solidcore_record::Plane> {
+        let face = self.record.faces.get(index)?;
+        let vertex = face.loops.iter().find_map(|l| match l {
+            Loop::Edges { edges } => edges.first().and_then(|u| self.record.edges.get(u.edge as usize)).and_then(|e| e.vertices.first().copied()),
+            Loop::Vertex { vertex } => Some(*vertex),
+        })?;
+        let point = v3(self.record.vertices.get(vertex as usize)?.point);
+        let (body, order) = self.ops_body()?;
+        let normal = body.face_plane_normal(order, index).ok()??;
+        solidcore_record::Plane::from_normal(point, v3(normal.value))
+    }
+
+    /// The record as solidcore-ops' body and the order of its entities, made on first use and
+    /// kept for every later face. A refusal of the record is kept too, as `smlib`'s is: the same
+    /// record is refused the same way again. A refusal of the moment is not kept, so a later
+    /// query tries again: a call from inside a kernel call or from solidcore-ops' failure
+    /// callback ([`solidcore_ops::Error::Reentered`]), or a cancelled one. None for a mesh body.
+    pub(crate) fn ops_body(&self) -> Option<&(solidcore_ops::Body, solidcore_ops::Order)> {
+        if self.is_mesh() {
+            return None;
+        }
+        if let Some(kept) = self.ops.get() {
+            return kept.as_ref();
+        }
+        // Converted outside the cell: a failure callback that asked about this body again
+        // would otherwise reenter the cell while it is being filled.
+        match solidcraft_smlib::stop::unstoppable(|| solidcore_ops::Body::from_record(&self.record, true)) {
+            Err(solidcore_ops::Error::Reentered | solidcore_ops::Error::Cancelled) => None,
+            made => self.ops.get_or_init(|| made.ok()).as_ref(),
+        }
     }
 
     /// Certify the two caps of a body built by [`crate::cylinder`]. Its wall stays uncertified.

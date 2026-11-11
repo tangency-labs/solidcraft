@@ -82,7 +82,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.fillet_refuse_rails_leaving_faces = true;
     f.fillet_refuse_face_consuming_blends = true;
     f.fillet_refuse_non_manifold_result = true;
-    f.fillet_refuse_crossing_rails = true;
     f.fillet_corner_ball_patch = true;
     f.fillet_chamfer_cone_on_arc = true;
     f.fillet_torus_center_on_axis = true;
@@ -90,31 +89,24 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.offset_clip_right_side_out = true;
     f.revolution_offset_axis_both_sides = true;
     f.offset_extended_edges_mated = true;
-    f.remove_slit_loops_where_solids_touch = true;
     f.keep_operand_uv_trims = true;
     f.geometric_g2_continuity = true;
     f.proto_vertex_miss_is_false = true;
     f.check_loop_vertex_tolerance = true;
     f.check_loop_projected_seam_ends = true;
-    f.trim_boundary_seam_wrap = true;
     f.bspline_check_min_radius = true;
     f.oscillating_skips_failed_guesses = true;
     f.refine_cc_range_ends = true;
     f.flat_corners_test_bits = true;
     f.cylinder_rebuild_mean_radius = true;
-    f.planar_path_uncapped_open_profiles = true;
     f.revolve_analytic_profile_faces = true;
-    f.revolve_arc_centre_near_axis_is_sphere = true;
-    f.taper_pivot_nearest_corner = true;
     f.revolve_nested_shells_as_cavities = true;
-    f.curve_sweep_caps_at_sweep_ends = true;
     f.join_touching_loops = true;
     f.uv_trim_reversal_on_surface = true;
     f.offset_resolve_crossing_loops = true;
     f.offset_walls_touch_refused = true;
     f.offset_analytic_mate_edges = true;
     f.nurb_cylinder_inside_out_frame = true;
-    f.shell_inner_shell_of_statuses = true;
     f.offset_collapsed_rounds_mated = true;
     f.offset_missing_surface_fails = true;
     f.fillet_nx1_end_rib_global_merge = true;
@@ -148,11 +140,9 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.corner_blend_stays_inside_neighbours = true;
     f.fillet_cleanup_keeps_target_faces = true;
     f.fillet_nx1_tangent_side_edge = true;
-    f.offset_closed_curve_trim_arc = true;
     f.offset_stitch_at_body_tolerance = true;
     f.curve_contacts_at_curve_ends = true;
     f.shell_empty_cavity_fails = true;
-    f.fillet_refuse_ball_not_fitting = true;
     f.boolean_lists_virtual_surface_copies = true;
     f.ssi_tangent_contact_points = true;
     f.ssi_trace_tangent_curves_once = true;
@@ -198,24 +188,30 @@ fn check(v: f64, want: f64, without_flag: f64) {
 /// With SolidCraft's fixes (the reported configuration; the trimmed cache stub before).
 /// Pinned since #2890 (precise properties integrate from the trims' base): against the
 /// closed form, without the flag +4.26e-4 (it was 10400.212787697543, +4.14e-4), with it
-/// -1.97e-5 (it was 10400.212342134768, -3.17e-5), each within the volume's accuracy.
+/// +4.26e-4, within the volume's accuracy. With the flag it was 10400.212354107192
+/// (-1.97e-5) before the certified offset became the default (#13827): the shell's
+/// non-analytic offsets are certified nets, not `N_SrfOffset`'s fits, and the flag now
+/// moves the volume by 1.5e-12 relative. The shell still runs the flag through the
+/// face-owned surfaces.
 #[test]
 fn shelled_plate_with_solidcraft_fixes() {
     let mut fixes = solidcraft_fixes();
     let without_flag = shelled_volume(&fixes);
     assert!((without_flag - 10400.212799740975).abs() <= 1e-9 * without_flag);
     fixes.shell_edges_on_analytics_exact = true;
-    check(shelled_volume(&fixes), 10400.212354107192, without_flag);
+    check(shelled_volume(&fixes), 10400.212799756418, without_flag);
 }
 
 /// With only the flag on. Pinned since #2890: against the closed form, without the flag
-/// +4.84e-4 (it was 10400.212793536877, +4.20e-4), with it +3.99e-5 (it was
-/// 10400.21294715712, +5.73e-4), each within the volume's accuracy.
+/// +4.84e-4 (it was 10400.212793536877, +4.20e-4), with it +4.80e-4, each within the
+/// volume's accuracy. With the flag it was 10400.212413698822 (+3.99e-5) before the
+/// certified offset became the default (#13827), as above; the flag now moves the volume
+/// by 3.1e-10 relative.
 #[test]
 fn shelled_plate_with_the_flag_alone() {
     let mut fixes = UpstreamFixes::default();
     let without_flag = shelled_volume(&fixes);
     assert!((without_flag - 10400.212857439197).abs() <= 1e-9 * without_flag);
     fixes.shell_edges_on_analytics_exact = true;
-    check(shelled_volume(&fixes), 10400.212413698822, without_flag);
+    check(shelled_volume(&fixes), 10400.212854198868, without_flag);
 }

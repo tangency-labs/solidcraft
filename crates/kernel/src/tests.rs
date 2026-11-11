@@ -722,6 +722,41 @@ fn polyhedra_shell_and_draft() {
     assert!(rel(measure(&cup).unwrap().volume, PI * (25.0 * 5.0 - 16.0 * 4.0)) < 1e-4, "cup");
 }
 
+/// #14346: a loft through three sections whose corners lie on straight lines has flat sides,
+/// which the skin builds as B-spline patches. Each is a planar face (an extrude can start on it,
+/// a sketch can lie on it), its plane through the face and facing out of the material. A loft
+/// turned between its ends has curved sides, which are not planar.
+#[test]
+fn flat_loft_sides_are_planar_faces() {
+    let rectangle = |x: f64, y: f64| Loop2::polygon(&[Vec2::new(-x, -y), Vec2::new(x, -y), Vec2::new(x, y), Vec2::new(-x, y)]);
+    let flat =
+        loft(&[(Plane::XY, rectangle(10.0, 6.0)), (Plane::XY.offset(10.0), rectangle(8.0, 5.0)), (Plane::XY.offset(20.0), rectangle(6.0, 4.0))])
+            .unwrap();
+    let faces = flat.faces(0.01).unwrap();
+    assert_eq!(faces.len(), 6);
+    let centre = Vec3::new(0.0, 0.0, 10.0);
+    for face in &faces {
+        let plane = flat.planar_face(face.index).unwrap_or_else(|| panic!("face {} is flat", face.index));
+        assert!(plane.height(face.centroid).abs() < 1e-6, "face {}: its plane runs through it", face.index);
+        assert!((face.centroid - centre).dot(plane.normal()) > 0.0, "face {}: its plane faces out", face.index);
+    }
+    // The sides are B-spline patches, so this reaches the kernel's flatness test (were the loft
+    // to build planes here, another flat B-spline face would have to stand in).
+    let splines = flat
+        .record()
+        .faces
+        .iter()
+        .filter(|face| {
+            matches!(face.surface, solidcore_record::brep::Surface::Spline { .. } | solidcore_record::brep::Surface::RationalSpline { .. })
+        })
+        .count();
+    assert_eq!(splines, 4);
+    let (sin, cos) = std::f64::consts::FRAC_PI_6.sin_cos();
+    let turned = Loop2::polygon(&[(-6.0, -6.0), (6.0, -6.0), (6.0, 6.0), (-6.0, 6.0)].map(|(x, y)| Vec2::new(cos * x - sin * y, sin * x + cos * y)));
+    let twisted = loft(&[(Plane::XY, rectangle(10.0, 10.0)), (Plane::XY.offset(20.0), turned)]).unwrap();
+    assert_eq!((0..twisted.face_count()).filter(|&i| twisted.planar_face(i).is_some()).count(), 2, "only the ends are flat");
+}
+
 #[test]
 fn loft_and_sweep() {
     let sq = Loop2::polygon(&[Vec2::new(-20.0, -20.0), Vec2::new(20.0, -20.0), Vec2::new(20.0, 20.0), Vec2::new(-20.0, 20.0)]);
@@ -2209,6 +2244,27 @@ fn boolean_identity_on_tangent_primitives() {
     for (seed, c) in cases {
         assert_eq!(c.outcome, "ok", "seed {seed}: {} {:?} {:?}", c.detail, c.a, c.b);
     }
+}
+
+/// #1989: a boolean watched by someone who cancelled (an agent's request cancelled while it
+/// computes off the window thread) does not start, saying so; unwatched, or watched and not
+/// cancelled, it runs as before.
+#[test]
+fn a_cancelled_watch_stops_the_boolean() {
+    struct Cancelled(bool);
+    impl crate::watch::Watch for Cancelled {
+        fn cancelled(&self) -> bool {
+            self.0
+        }
+        fn progress(&self, _: &'static str, _: usize, _: usize) {}
+    }
+    let a = cylinder(Vec3::new(0.0, 0.0, -10.0), Vec3::Z, 3.0, 20.0).unwrap();
+    let b = cylinder(Vec3::new(-10.0, 0.0, 0.0), Vec3::X, 2.0, 20.0).unwrap();
+    let e = crate::watch::watching(std::sync::Arc::new(Cancelled(true)), || boolean(&a, &b, BoolOp::Intersect)).unwrap_err();
+    assert!(e.to_string().contains("cancelled"), "{e}");
+    let r = crate::watch::watching(std::sync::Arc::new(Cancelled(false)), || boolean(&a, &b, BoolOp::Intersect));
+    assert!(r.is_ok_and(|r| r.is_some()));
+    assert!(boolean(&a, &b, BoolOp::Intersect).unwrap().is_some());
 }
 
 /// A body in two pieces: booleans go a piece at a time.

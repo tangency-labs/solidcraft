@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="820" height="450" viewBox="0 0 820 450">
+  <title>scale-search-degree-order</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect id="background" x="0" y="0" width="820" height="450" fill="#ffffff"/>
+    <text transform="matrix(1 0 0 1 20 36)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">One attempt of the setback scale search: the degrees it solves</tspan></text>
+    <text transform="matrix(1 0 0 1 20 92)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">A failing attempt, least degree first (main)</tspan></text>
+    <rect x="360" y="70" width="44" height="32" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
+    <rect x="412" y="70" width="44" height="32" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
+    <rect x="464" y="70" width="44" height="32" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
+    <rect x="516" y="70" width="44" height="32" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
+    <rect x="568" y="70" width="44" height="32" fill="#ffffff" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <rect x="620" y="70" width="44" height="32" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
+    <rect x="672" y="70" width="44" height="32" fill="#f0f0f0" stroke="#555555" stroke-width="3" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 382 91)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">3</tspan></text>
+    <text transform="matrix(1 0 0 1 434 91)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">4</tspan></text>
+    <text transform="matrix(1 0 0 1 486 91)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">5</tspan></text>
+    <text transform="matrix(1 0 0 1 538 91)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">6</tspan></text>
+    <text transform="matrix(1 0 0 1 590 91)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">7</tspan></text>
+    <text transform="matrix(1 0 0 1 642 91)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">8</tspan></text>
+    <text transform="matrix(1 0 0 1 694 91)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">9</tspan></text>
+    <text transform="matrix(1 0 0 1 730 91)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">5 QPs</tspan></text>
+    <line x1="590" y1="102" x2="590" y2="114" fill="none" stroke="#555555" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 360 127)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">degree 7: 120,513 steps on aarch64, ends unproven (fork 20b1c01)</tspan></text>
+    <text transform="matrix(1 0 0 1 20 172)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">A failing attempt, degree 9 first (this PR)</tspan></text>
+    <rect x="360" y="150" width="44" height="32" fill="#f0f0f0" stroke="#555555" stroke-width="3" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 382 171)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">9</tspan></text>
+    <text transform="matrix(1 0 0 1 416 171)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">proven unmet: the attempt stops</tspan></text>
+    <text transform="matrix(1 0 0 1 730 171)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">1 QP</tspan></text>
+    <text transform="matrix(1 0 0 1 20 252)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">A certifying attempt, least degree first (main)</tspan></text>
+    <rect x="360" y="230" width="44" height="32" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
+    <rect x="412" y="230" width="44" height="32" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
+    <rect x="464" y="230" width="44" height="32" fill="#dce9f5" stroke="#000000" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 382 251)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">3</tspan></text>
+    <text transform="matrix(1 0 0 1 434 251)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">…</tspan></text>
+    <text transform="matrix(1 0 0 1 486 251)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">d</tspan></text>
+    <text transform="matrix(1 0 0 1 520 251)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">the least degree that certifies</tspan></text>
+    <text transform="matrix(1 0 0 1 730 251)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">up to d</tspan></text>
+    <text transform="matrix(1 0 0 1 20 332)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">A certifying attempt, degree 9 first (this PR)</tspan></text>
+    <rect x="360" y="310" width="44" height="32" fill="#dce9f5" stroke="#000000" stroke-miterlimit="10"/>
+    <rect x="412" y="310" width="44" height="32" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
+    <rect x="464" y="310" width="44" height="32" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
+    <rect x="516" y="310" width="44" height="32" fill="#dce9f5" stroke="#000000" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 382 331)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">9</tspan></text>
+    <text transform="matrix(1 0 0 1 434 331)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">3</tspan></text>
+    <text transform="matrix(1 0 0 1 486 331)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">…</tspan></text>
+    <text transform="matrix(1 0 0 1 538 331)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">d</tspan></text>
+    <text transform="matrix(1 0 0 1 360 358)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">9 certified, kept while the least degree is sought</tspan></text>
+    <text transform="matrix(1 0 0 1 730 331)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">one QP more</tspan></text>
+    <rect x="20" y="384" width="20" height="16" fill="#ffffff" stroke="#000000" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 46 397)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">a degree tried</tspan></text>
+    <rect x="150" y="384" width="20" height="16" fill="#ffffff" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 176 397)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">the long unproven run</tspan></text>
+    <rect x="320" y="384" width="20" height="16" fill="#f0f0f0" stroke="#555555" stroke-width="3" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 346 397)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">proven unmet</tspan></text>
+    <rect x="450" y="384" width="20" height="16" fill="#dce9f5" stroke="#000000" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 476 397)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">certified</tspan></text>
+    <text transform="matrix(1 0 0 1 20 432)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">Raising the degree keeps met sector conditions met, so conditions proven unmet at 9 are unmet at every lower degree.</tspan></text>
+  </g>
+</svg>

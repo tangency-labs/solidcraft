@@ -42,7 +42,7 @@ use crate::surface::surface_cache::face_context::{
 use crate::surface::surface_cache::SurfaceCache;
 use crate::topology::brep_cache::CacheObject;
 use crate::topology::edgeuse::{p1 as eu1, p3 as eu3};
-use crate::topology::loopuse::notify_ref;
+use crate::topology::loopuse::{entity_of_notify_key, notify_ref};
 use crate::topology::{Brep, EdgeuseId, FaceId};
 
 const OP: &str = "query::brep::ray";
@@ -142,6 +142,33 @@ fn cache_handle(entity: EntityRef) -> Result<CacheObject> {
     })
 }
 
+/// The entity a cache handle names, the inverse of [`cache_handle`]. A use's handle is
+/// its notification reference, decoded directly: it reads nothing of the B-rep, so a
+/// face's cache costs the same in a body of any size (a map of every use of the
+/// B-rep, built per face, made a check of every face quadratic). Only a reference
+/// [`notify_ref`] gives a loop, edge or vertex use is a handle. Every handle a cache
+/// passes back was made by [`cache_handle`] from a live use of its face during the
+/// same call, and the face adapter's lookups reject an entity that is gone.
+fn cache_entity(handle: CacheObject) -> Result<EntityRef> {
+    match handle {
+        CacheObject::Face(f) => Ok(EntityRef::Face(f)),
+        CacheObject::Edge(e) => Ok(EntityRef::Edge(e)),
+        CacheObject::Vertex(v) => Ok(EntityRef::Vertex(v)),
+        CacheObject::Other(r) => entity_of_notify_key(r.key)
+            .filter(|&entity| {
+                matches!(
+                    entity,
+                    EntityRef::Loopuse(_) | EntityRef::Edgeuse(_) | EntityRef::Vertexuse(_)
+                ) && notify_ref(entity) == r
+            })
+            .ok_or_else(|| SolidError::invalid_input(OP, "unknown cache topology handle")),
+        _ => Err(SolidError::invalid_input(
+            OP,
+            "unexpected cache geometry handle",
+        )),
+    }
+}
+
 fn prepare_surface_cache(
     k: &Kernel,
     b: &mut Brep,
@@ -177,35 +204,10 @@ fn face_surface_cache(
         .face(face)?
         .surface
         .as_ref()
-        .ok_or(SolidError::null_pointer(OP))?
+        .ok_or_else(|| SolidError::query_missing(OP, "the face's surface"))?
         .clone_for_evaluation()?;
     // upstream reuses a cache whose tree is built, with the built tree's state bits
     let get_tree = get_tree || surface.cache_tree_state() == CacheTreeState::Built;
-    let entities: BTreeMap<_, _> = b
-        .loopuses()
-        .iter()
-        .map(|(id, _)| EntityRef::Loopuse(id))
-        .chain(b.edgeuses().iter().map(|(id, _)| EntityRef::Edgeuse(id)))
-        .chain(
-            b.vertexuses()
-                .iter()
-                .map(|(id, _)| EntityRef::Vertexuse(id)),
-        )
-        .map(|entity| (notify_ref(entity), entity))
-        .collect();
-    let entity_of = |handle| match handle {
-        CacheObject::Face(f) => Ok(EntityRef::Face(f)),
-        CacheObject::Edge(e) => Ok(EntityRef::Edge(e)),
-        CacheObject::Vertex(v) => Ok(EntityRef::Vertex(v)),
-        CacheObject::Other(key) => entities
-            .get(&key)
-            .copied()
-            .ok_or_else(|| SolidError::invalid_input(OP, "unknown cache topology handle")),
-        _ => Err(SolidError::invalid_input(
-            OP,
-            "unexpected cache geometry handle",
-        )),
-    };
     // WR-732: while editing, classify against the face's current trims; a face whose
     // loops are open has no boundary to implant, and no answer
     let editing = k.fixes.brep_ray_classifies_current_trims && b.editing_enabled();
@@ -216,7 +218,8 @@ fn face_surface_cache(
     if editing && !loops_close(b, face)? {
         return Err(unavailable);
     }
-    let mut mapped = MappedCacheFace::new(BrepCacheFace { b, f: face }, &cache_handle, &entity_of)?;
+    let mut mapped =
+        MappedCacheFace::new(BrepCacheFace { b, f: face }, &cache_handle, &cache_entity)?;
     if editing {
         mapped = mapped.implanting_while_editing();
     }
@@ -381,7 +384,7 @@ impl SurfaceSolveContext<CacheObject> for RaySurfaceContext<'_> {
             .face(face)?
             .surface
             .as_ref()
-            .ok_or(SolidError::null_pointer(OP))?
+            .ok_or_else(|| SolidError::query_missing(OP, "the face's surface"))?
             .face()?;
         if surface.face()? != owner {
             return Err(SolidError::invalid_input(OP, "surface owner mismatch"));
@@ -594,5 +597,67 @@ mod tests {
             preparation.prepare(&k, &mut b, request),
             Err(SolidError::InvalidInput { .. })
         ));
+    }
+
+    /// A cache handle decodes to its entity without a map of the B-rep's uses: every
+    /// face, edge, vertex and use of a body round-trips as the per-face map of every
+    /// use read it, and a reference to any other entity kind, or one no entity has,
+    /// stays an unknown handle.
+    #[test]
+    fn cache_handles_decode_as_the_use_map_did() {
+        use crate::geom::attribute::ObjectKey;
+        use crate::geom::object::ObjectRef;
+        let mut k = Kernel::default();
+        let b = crate::primitive::api_primitives::create_cylinder(
+            &mut k,
+            crate::math::Point3::ZERO,
+            5.0,
+            20.0,
+        )
+        .unwrap();
+        let uses: BTreeMap<_, _> = b
+            .loopuses()
+            .iter()
+            .map(|(id, _)| EntityRef::Loopuse(id))
+            .chain(b.edgeuses().iter().map(|(id, _)| EntityRef::Edgeuse(id)))
+            .chain(
+                b.vertexuses()
+                    .iter()
+                    .map(|(id, _)| EntityRef::Vertexuse(id)),
+            )
+            .map(|entity| (notify_ref(entity), entity))
+            .collect();
+        assert!(uses.len() > 10);
+        for (&r, &entity) in &uses {
+            assert_eq!(cache_entity(CacheObject::Other(r)).unwrap(), entity);
+            assert_eq!(cache_handle(entity).unwrap(), CacheObject::Other(r));
+        }
+        for (f, _) in b.faces().iter() {
+            let e = EntityRef::Face(f);
+            assert_eq!(cache_entity(cache_handle(e).unwrap()).unwrap(), e);
+            // a face's notification reference is not a use handle
+            assert!(cache_entity(CacheObject::Other(notify_ref(e))).is_err());
+        }
+        for (e, _) in b.edges().iter() {
+            let e = EntityRef::Edge(e);
+            assert_eq!(cache_entity(cache_handle(e).unwrap()).unwrap(), e);
+        }
+        let used = *uses.keys().next().unwrap();
+        for bad in [
+            ObjectRef {
+                type_code: used.type_code + 1,
+                key: used.key,
+            },
+            ObjectRef {
+                type_code: used.type_code,
+                key: ObjectKey(0),
+            },
+            ObjectRef {
+                type_code: used.type_code,
+                key: ObjectKey(1 + (11 << 32)),
+            },
+        ] {
+            assert!(cache_entity(CacheObject::Other(bad)).is_err(), "{bad:?}");
+        }
     }
 }
