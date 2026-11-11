@@ -1,0 +1,153 @@
+{
+  "area": "sweeps",
+  "bodies": {
+    "b3": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b6": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b3"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b4"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b4"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b5"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b8"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b5"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b10"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b9",
+        "b10"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b11"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "3156-revolve-join-end-faces-flush-with-a-face",
+  "expected": {
+    "body_count": 1,
+    "method": "plate 10 x 100 x 6 (z 41..47). The 4 mm wide ring (radii 30..37 about the axis y = 0, z = 47) spans -90..+90 degrees below the axis; its end faces lie in z = 47. Overlap with the plate: z >= 41 means r cos(phi) <= 6, i.e. phi from acos(6/r) to 90 degrees on each side: 4 * 2 * integral over r in [30,37] of r asin(6/r) dr, with antiderivative r^2/2 asin(6/r) + 3 sqrt(r^2 - 36). V = 6000 + 4 pi (37^2 - 30^2)/2 - overlap.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#3156",
+      "tangency-labs/solidcraft#3224"
+    ],
+    "volume_mm3": 8608.970248730224,
+    "what": "a rectangle revolved plus and minus 90 degrees about an axis in a plate top face: both planar end faces lie in that face and the join needed a tool nudge"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 24,
+      "faces": 10,
+      "vertices": 16
+    }
+  },
+  "records": "3156-revolve-join-end-faces-flush-with-a-face.bodies.json.gz",
+  "result": [
+    {
+      "body": "Plate",
+      "made": "b11"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 5312.961987945257,
+      "body_count": 1,
+      "edges": 24,
+      "faces": 10,
+      "vertices": 16,
+      "volume_mm3": 8608.970248624486
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3156",
+    "tangency-labs/solidcraft#3224"
+  ],
+  "traced_ops": [
+    "extrude",
+    "revolve",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a rectangle revolved plus and minus 90 degrees about an axis in a plate top face: both planar end faces lie in that face and the join needed a tool nudge",
+  "why_not": []
+}

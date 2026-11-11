@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
 use solidcraft_geom::prelude::*;
+use solidcraft_geom::tess::EvaluateMesh as _;
 
 use crate::Session;
 
@@ -1883,7 +1884,12 @@ fn knife_edge_part() -> Session {
 /// the concave arc). It holds to about 1e-3 of what a blend removes here; the bounds below are
 /// about twice what each test reads.
 fn planned(s: &Session) -> f64 {
-    s.model.state().bodies.iter().map(|b| b.body.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(2e-4)).unwrap().evaluate().measure().volume).sum()
+    s.model
+        .state()
+        .bodies
+        .iter()
+        .map(|b| b.body.mesh_plan(&solidcraft_kernel::MeshTolerance::chord(2e-4)).unwrap().evaluate_mesh().measure().volume)
+        .sum()
 }
 
 /// The middle of the part's arc.
@@ -2404,6 +2410,9 @@ fn a_sketch_coil_refuses_profiles_it_cannot_sweep() {
     run(&mut s, "sketch.finish", json!({}));
     let e = s.execute("solid.coil", &json!({"sketch": "Section", "revolutions": 3, "pitch": 0.5})).unwrap_err().to_string();
     assert!(e.contains("runs into itself"), "{e}");
+    // A section exactly one pitch wide is named as touching turns, with the way out, not as a bad profile (#14490).
+    let e = s.execute("solid.coil", &json!({"sketch": "Section", "revolutions": 3, "pitch": 1})).unwrap_err().to_string();
+    assert!(e.contains("turns touch") && e.contains("slightly smaller"), "{e}");
 }
 
 #[test]
@@ -2703,4 +2712,103 @@ fn an_emboss_that_works_has_no_warning() {
         assert!(reply["warning"].is_null(), "{mode}: {reply}");
         run(&mut s, "edit.undo", json!({}));
     }
+}
+
+/// #9969: a cut whose tool lies clear of the body reported "operation complete" and changed
+/// nothing, with no warning. It now says it removed no material; a cut that works says nothing.
+#[test]
+fn a_cut_that_removes_nothing_says_so() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10}));
+    let before = volume(&mut s);
+    // A square drawn 100 mm beside the box: its prism never meets the body.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [100, 100], "p1": [110, 110]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let reply = run(&mut s, "solid.extrude", json!({"direction": "negative", "distance": 5, "operation": "cut"}));
+    let warning = reply["warning"].as_str().unwrap_or_default();
+    assert!(warning.contains("the cut removes no material"), "{reply}");
+    assert!((volume(&mut s) - before).abs() < 1e-9 * before);
+    // The same cut over the box takes material and says nothing.
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [20, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let reply = run(&mut s, "solid.extrude", json!({"direction": "negative", "distance": 5, "operation": "cut"}));
+    assert!(reply["warning"].is_null(), "{reply}");
+    assert!(volume(&mut s) < before - 400.0);
+}
+
+/// #9969 through sheet metal: a cut the flat pattern takes, drawn clear of the sheet, changes
+/// nothing and says so; the same cut over the sheet takes material and says nothing.
+#[test]
+fn a_sheet_metal_cut_that_removes_nothing_says_so() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+    let before = volume(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Away"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [200, 200], "p1": [210, 210]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let reply = run(&mut s, "solid.extrude", json!({"sketch": "Away", "through_all": true, "direction": "symmetric", "operation": "cut"}));
+    let warning = reply["warning"].as_str().unwrap_or_default();
+    assert!(warning.contains("the cut removes no material"), "{reply}");
+    assert!((volume(&mut s) - before).abs() < 1e-9 * before);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Over"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [20, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let reply = run(&mut s, "solid.extrude", json!({"sketch": "Over", "through_all": true, "direction": "symmetric", "operation": "cut"}));
+    assert!(!reply["warning"].as_str().unwrap_or_default().contains("removes no material"), "{reply}");
+    assert!(volume(&mut s) < before - 50.0);
+}
+
+/// Align by a frame picked on a part in the second copy of a sub-assembly placed twice (#11426):
+/// the frame is the part's own, so the move is the one a pick on the first copy gives, and every
+/// copy shows it. Header (Pin, a 10 mm cube, and Peg, a 2 mm cube at x = 20) sits in Board, placed
+/// at the origin and at +100 mm X.
+#[test]
+fn align_by_a_frame_picked_on_another_copy_moves_the_part_in_its_own_coordinates() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Board", "parent": "root"}));
+    run(&mut s, "component.create", json!({"name": "Header", "parent": "Board"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Pin"}));
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [20, 0, 0], "body_name": "Peg"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let second = run(&mut s, "occurrence.copy", json!({"component": "Board", "translate": [100, 0, 0]}))["occurrence"].as_u64().unwrap();
+    let header = s.doc.find_component("Header").and_then(|c| s.doc.occurrence_of(c)).map(|o| o.id).unwrap();
+    // Peg's bottom onto Pin's top, picked on the second copy: Peg sits on Pin in both copies.
+    let top = json!({"occurrence": header, "path": [second, header], "face": [105, 5, 10]});
+    run(&mut s, "solid.align", json!({"bodies": ["Peg"], "from_frame": {"face": [21, 1, 0]}, "to_frame": top}));
+    assert_bounds(&mut s, "Peg", [4., 4., 10.], [6., 6., 12.]);
+    assert_bounds(&mut s, "Peg (Board:2/Header:1)", [104., 4., 10.], [106., 6., 12.]);
+}
+
+/// A coil cut from a sketch follows that sketch when its points move, and the body it cuts when
+/// that changes upstream: its cached result is not taken back while either differs.
+#[test]
+fn a_sketch_coil_cut_follows_its_profile_and_target() {
+    use std::f64::consts::PI;
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 40, "body_name": "Shaft", "name": "ShaftFeature"}));
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Groove"}));
+    // A 1 x 1 mm square, 18..19 mm from the axis.
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [18, 1], "p1": [19, 2]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let before = volume(&mut s);
+    run(&mut s, "solid.coil", json!({"sketch": "Groove", "revolutions": 3, "pitch": 8, "operation": "cut", "targets": ["Shaft"]}));
+    let removed = before - volume(&mut s);
+    assert!(rel(removed, 2.0 * PI * 3.0 * 18.5) < 1e-3, "{removed}");
+    // Widen the square inward to 17..19 mm: twice the area, centroid at 18 mm.
+    run(&mut s, "sketch.edit", json!({"sketch": "Groove"}));
+    run(&mut s, "sketch.move_point", json!({"point": "p1", "to": [17, 1]}));
+    run(&mut s, "sketch.move_point", json!({"point": "p4", "to": [17, 2]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let removed = before - volume(&mut s);
+    assert!(rel(removed, 2.0 * PI * 3.0 * 2.0 * 18.0) < 1e-3, "the groove kept the old profile: {removed}");
+    // A thinner shaft upstream (radius 18): the groove now cuts only 17..18 mm of it.
+    run(&mut s, "timeline.edit", json!({"feature": "ShaftFeature", "set": {"radius": "18"}}));
+    let removed = PI * 18.0 * 18.0 * 40.0 - volume(&mut s);
+    assert!(rel(removed, 2.0 * PI * 3.0 * 17.5) < 1e-3, "the groove kept the old shaft: {removed}");
 }

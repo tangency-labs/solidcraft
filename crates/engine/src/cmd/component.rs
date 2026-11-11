@@ -11,7 +11,7 @@ use solidcore_record::Vec3;
 use solidcraft_doc::{Feature, FeatureKind, Mat, Occurrence};
 
 use super::CommandSpec;
-use crate::params::{bad, bool_, str_, string_list, vec3};
+use crate::params::{bad, bool_, name_or_id_values, str_, string_list, vec3};
 use crate::schema::component::{
     ActivateParams, ActivateResult, CapturePositionParams, CapturePositionResult, ChildEntry, CompactPlacement, ComponentNode, CopyParams,
     CopyResult, CreateParams, CreateResult, DeleteParams, DeleteResult, DragParams, DragResult, EditInPlaceParams, EditInPlaceResult,
@@ -195,7 +195,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("move")
         .contract(&MOVE_SKETCHES_CONTRACT)
         .output(output_schema_for::<MoveSketchesResult>)
-        .params("sketches: [ids or names], component; the sketches keep their own coordinates (component.move_features keeps them where they are in the world), except that a sketch on an exactly attached face stays where it is on the face"),
+        .params("sketches: [ids or names] (a number is an id; a string is an exact name, then an id), component; the sketches keep their own coordinates (component.move_features keeps them where they are in the world), except that a sketch on an exactly attached face stays where it is on the face"),
     CommandSpec::new(
         "component.move_sketches.to_parts",
         "Move Sketches to Their Parts",
@@ -244,7 +244,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("move")
         .contract(&MOVE_CONTRACT)
         .output(output_schema_for::<MoveResult>)
-        .params("occurrence; path?: exact placement; space?: local|world (default local); translate?: [x,y,z]; axis?: [x,y,z], angle?: radians or \"30 deg\", origin?: [x,y,z]; matrix?: [12 or 16 numbers] (instead of translate/axis/angle/origin: a rigid move as a row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows; one that is a rotation only up to rounding is orthonormalised, a scale, shear or mirror is refused); tolerance?: largest accepted |RᵀR − I| (default 1e-9, at most 1e-3); capture?: bool (default true; false keeps it pending until Capture Position); move_grounded?: bool (default false: a grounded occurrence refuses; true moves it and it stays grounded). Nested occurrence definitions remain shared. Replies {occurrence, transform, pending}; when joints hold it to something fixed and put it back, transform is where it is and the reply adds reverted: true and a warning naming the joint"),
+        .params("occurrence; path?: exact placement; space?: local|world (default local); translate?: [x,y,z]; axis?: [x,y,z], angle?: radians or \"30 deg\", origin?: [x,y,z]; to?: {position: [x,y,z], axis?: [x,y,z], angle?} or to_matrix?: [12 or 16 numbers] (absolute placement: where it goes in space, not a move; not with translate/axis/angle/origin/matrix); matrix?: [12 or 16 numbers] (instead of translate/axis/angle/origin: a rigid move as a row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows; one that is a rotation only up to rounding is orthonormalised, a scale, shear or mirror is refused); tolerance?: largest accepted |RᵀR − I| (default 1e-9, at most 1e-3); capture?: bool (default true; false keeps it pending until Capture Position); move_grounded?: bool (default false: a grounded occurrence refuses; true moves it and it stays grounded). Nested occurrence definitions remain shared. Replies {occurrence, transform, pending}; when joints hold it to something fixed and put it back, transform is where it is and the reply adds reverted: true and a warning naming the joint"),
     CommandSpec::new("occurrence.drag", "Drag Occurrence", crate::checked!("occurrence.drag", drag::drag))
         .icon("move")
         .contract(&DRAG_CONTRACT)
@@ -279,14 +279,16 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("capture")
         .contract(&CAPTURE_POSITION_CONTRACT)
         .output(output_schema_for::<CapturePositionResult>)
-        .params("keeps pending occurrence moves"),
+        .params("keeps pending occurrence moves and saves every moving joint's values → captured, joints"),
     CommandSpec::new("component.revert_position", "Revert Position", crate::checked!("component.revert_position", revert))
         .at("SOLID", "POSITION")
         .icon("revert")
-        .noundo()
         .contract(&REVERT_POSITION_CONTRACT)
         .output(output_schema_for::<RevertPositionResult>)
-        .params("occurrences?: [ids] (default all); drops selected pending occurrence moves"),
+        .params(
+            "occurrences?: [ids] (default all); drops selected pending occurrence moves; with no occurrences the joints also go back to \
+             the values Capture Position saved (clamped to limits) → reverted, joints",
+        ),
 ];
 
 const ALIGN_CONTRACT: TypedContract<OccurrenceAlignParams> = TypedContract::new();
@@ -306,7 +308,7 @@ fn key(v: Option<&Value>) -> Option<String> {
 
 fn component(s: &Session, p: &Value, k: &str, cmd: &str) -> Result<u64> {
     let kk = key(p.get(k)).ok_or_else(|| bad(cmd, format!("`{k}` must be a component id or name")))?;
-    s.doc.find_component(&kk).ok_or_else(|| bad(cmd, format!("no component `{kk}`")))
+    s.doc.resolve_component(&kk).map_err(|error| bad(cmd, error.to_string()))?.ok_or_else(|| bad(cmd, format!("no component `{kk}`")))
 }
 
 fn occurrence(s: &Session, p: &Value, cmd: &str) -> Result<u64> {
@@ -653,12 +655,14 @@ pub(crate) fn transfer_constructor_result(s: &mut Session, p: &Value) -> Result<
 fn move_sketches(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.move_sketches";
     let to = component(s, p, "component", cmd)?;
-    let keys = string_list(cmd, p, "sketches")?;
+    // Named or numbered: an exact name wins over an id it looks like, as in the timeline (#9748).
+    let keys = name_or_id_values(cmd, p, "sketches")?;
     let mut ids = Vec::new();
-    for k in &keys {
-        match s.doc.find_feature(k) {
+    for k in keys {
+        let id = crate::cmd::edit::feature_id(s, Some(k), cmd)?;
+        match s.doc.feature(id) {
             Some(f) if matches!(f.kind, FeatureKind::Sketch { .. }) => ids.push(f.id),
-            _ => return Err(bad(cmd, format!("no sketch `{k}`"))),
+            _ => return Err(bad(cmd, format!("no sketch `{}`", k.as_str().map_or_else(|| k.to_string(), str::to_owned)))),
         }
     }
     if ids.is_empty() {
@@ -795,7 +799,10 @@ fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
         let name = s.doc.components.iter().find(|c| c.id == group).map(|c| c.name.clone()).unwrap_or_default();
         return Err(bad(cmd, format!("{} is held in {name} by a rigid group: move {name}, or Unlock Contents (component.unlock) first", o.name)));
     }
-    let delta = if let Some(m) = p.get("matrix") {
+    let target = absolute_target(s, p, cmd)?;
+    let delta = if target.is_some() {
+        solidcraft_doc::IDENTITY
+    } else if let Some(m) = p.get("matrix") {
         if let Some(k) = ["translate", "axis", "angle", "origin"].into_iter().find(|k| p.get(*k).is_some()) {
             return Err(bad(cmd, format!("give either matrix or {k}, not both")));
         }
@@ -826,6 +833,16 @@ fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "space must be local or world"));
     }
     let path = if p.get("path").is_some() || space == "world" { Some(occurrence_path(s, p, id, cmd)?) } else { None };
+    if let Some(target) = target {
+        let local = if space == "world" {
+            let placement = s.occurrence_placement_with(path.as_deref().unwrap_or(&[]), &s.uncaptured_moves())?;
+            let inverse = solidcraft_doc::mat_inverse(&placement.parent_world).ok_or_else(|| bad(cmd, "parent frame is singular"))?;
+            solidcraft_doc::mat_mul(&inverse, &target)
+        } else {
+            target
+        };
+        return place_occurrence(s, p, id, local, cmd);
+    }
     let delta = if space == "world" {
         let placement = s.occurrence_placement_with(path.as_deref().unwrap_or(&[]), &s.uncaptured_moves())?;
         let inverse = solidcraft_doc::mat_inverse(&placement.parent_world).ok_or_else(|| bad(cmd, "parent frame is singular"))?;
@@ -839,6 +856,53 @@ fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
         s.uncaptured_moves().get(&id).copied().unwrap_or(o.transform)
     };
     let next = solidcraft_doc::mat_mul(&delta, &cur);
+    place_occurrence(s, p, id, next, cmd)
+}
+
+/// `occurrence.move`'s target pose in `space` (#12150): `to: {position, axis?, angle?}` or
+/// `to_matrix`, or `None` for a relative move. Refused together with the relative keys.
+fn absolute_target(s: &Session, p: &Value, cmd: &str) -> Result<Option<Mat>> {
+    let (to, to_matrix) = (p.get("to"), p.get("to_matrix"));
+    if to.is_none() && to_matrix.is_none() {
+        return Ok(None);
+    }
+    if to.is_some() && to_matrix.is_some() {
+        return Err(bad(cmd, "give either to or to_matrix, not both"));
+    }
+    let key = if to.is_some() { "to" } else { "to_matrix" };
+    if let Some(k) = ["translate", "axis", "angle", "origin", "matrix", "base_transform"].into_iter().find(|k| p.get(*k).is_some()) {
+        return Err(bad(cmd, format!("give either {key} or {k}, not both")));
+    }
+    if let Some(m) = to_matrix {
+        return matrix::rigid(m, matrix::tolerance(p, cmd)?, cmd).map(Some);
+    }
+    let to = to.and_then(Value::as_object).ok_or_else(|| bad(cmd, "to must be {position, axis?, angle?}"))?;
+    if let Some(k) = to.keys().find(|k| !matches!(k.as_str(), "position" | "axis" | "angle")) {
+        return Err(bad(cmd, format!("to: unknown key `{k}` (position, axis, angle)")));
+    }
+    let to = Value::Object(to.clone());
+    if to.get("position").is_none() {
+        return Err(bad(cmd, "to needs a position: [x, y, z]"));
+    }
+    let position = move_vector(&to, "position", Vec3::ZERO, true, cmd)?;
+    let axis = move_vector(&to, "axis", Vec3::Z, false, cmd)?;
+    let angle = match to.get("angle") {
+        Some(Value::String(e)) => s.doc.eval(e, solidcraft_doc::expr::Kind::Angle).map_err(|e| bad(cmd, e.to_string()))?,
+        None => 0.0,
+        Some(value) => value.as_f64().ok_or_else(|| bad(cmd, "to.angle must be a number or angle expression"))?,
+    };
+    if !angle.is_finite() {
+        return Err(bad(cmd, "to.angle must be finite"));
+    }
+    if angle != 0.0 && axis.normalized().is_none() {
+        return Err(bad(cmd, "to.axis must have a finite nonzero length"));
+    }
+    Ok(Some(solidcraft_doc::rigid(position, Vec3::ZERO, axis, angle)))
+}
+
+/// Make `next` the occurrence's placement in its parent: captured (and the joints solved) or
+/// pending, as `capture` says.
+fn place_occurrence(s: &mut Session, p: &Value, id: u64, next: Mat, cmd: &str) -> Result<Value> {
     if !valid_position(&next) {
         return Err(bad(cmd, "move transform exceeds supported numeric range"));
     }
@@ -943,8 +1007,9 @@ fn capture(s: &mut Session, _p: &Value) -> Result<Value> {
             o.transform = m;
         }
     }
+    let joints = super::joints::capture_values(s);
     s.revision += 1;
-    reply(CapturePositionResult { captured: n, param_warnings: Vec::new() })
+    reply(CapturePositionResult { captured: n, joints, param_warnings: Vec::new() })
 }
 
 fn revert(s: &mut Session, p: &Value) -> Result<Value> {
@@ -965,8 +1030,11 @@ fn revert(s: &mut Session, p: &Value) -> Result<Value> {
         s.pending_moves.clear();
     }
     let n = before - s.pending_moves.len();
+    // Every occurrence going back takes the joints back too; a revert of some occurrences
+    // leaves the joints alone.
+    let joints = if p.get("occurrences").is_none() { super::joints::revert_values(s) } else { 0 };
     s.revision += 1;
-    reply(RevertPositionResult { reverted: n, param_warnings: Vec::new() })
+    reply(RevertPositionResult { reverted: n, joints, param_warnings: Vec::new() })
 }
 
 /// The active component's frame from world coordinates (for new features' geometry).

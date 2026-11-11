@@ -1,0 +1,228 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "chamfer_sides",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "distance": 2.0,
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  15.0,
+                  10.0,
+                  10.0
+                ],
+                [
+                  45.0,
+                  10.0,
+                  10.0
+                ]
+              ],
+              "index": 5
+            },
+            {
+              "at": [
+                [
+                  45.0,
+                  30.0,
+                  10.0
+                ],
+                [
+                  15.0,
+                  30.0,
+                  10.0
+                ]
+              ],
+              "index": 7
+            },
+            {
+              "at": [
+                [
+                  15.0,
+                  30.0,
+                  10.0
+                ],
+                [
+                  15.0,
+                  10.0,
+                  10.0
+                ]
+              ],
+              "index": 6
+            },
+            {
+              "at": [
+                [
+                  45.0,
+                  10.0,
+                  10.0
+                ],
+                [
+                  45.0,
+                  30.0,
+                  10.0
+                ]
+              ],
+              "index": 4
+            }
+          ],
+          "points": [
+            [
+              30.0,
+              10.0,
+              10.0
+            ],
+            [
+              30.0,
+              30.0,
+              10.0
+            ],
+            [
+              15.0,
+              20.0,
+              10.0
+            ],
+            [
+              45.0,
+              20.0,
+              10.0
+            ]
+          ],
+          "tolerance": 3.6410549446402594
+        },
+        "first": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "second": {
+          "distance": 1.0
+        }
+      }
+    }
+  ],
+  "case": "every-chamfer-pocket-rim-two-distances-2-1",
+  "expected": {
+    "bbox": {
+      "max": [
+        60,
+        40,
+        10
+      ],
+      "min": [
+        0,
+        0,
+        0
+      ]
+    },
+    "body_count": 1,
+    "continuity": {
+      "order": "g0"
+    },
+    "faces": 15,
+    "method": "plate 60x40x10 with the pocket 30x20x5 (x 15..45, y 10..30, floor z = 5, sharp vertical corners): V0 = 24000 - 3000 = 21000. Each rim edge loses the triangle of legs 2 (on the top) and 1 (down the wall), area 1, along 100; at each corner the mitred quadrant loses the points past both walls with s/2 + u < 1 and t/2 + u < 1: int_0^1 (2 (1-u))^2 du = 4/3. Removed = 100 + 16/3 = 105.3333. V = 20894.6667. Faces 15.",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 20894.666666666668,
+    "what": "a rectangular pocket's rim edges chamfered by two distances: 2 along the top (facing up) and 1 down the walls"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 32,
+      "faces": 15,
+      "vertices": 20
+    }
+  },
+  "records": "every-chamfer-pocket-rim-two-distances-2-1.bodies.json.gz",
+  "result": [
+    {
+      "body": "Plate",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 7225.495341569977,
+      "body_count": 1,
+      "edges": 32,
+      "faces": 15,
+      "vertices": 20,
+      "volume_mm3": 20894.66666666667
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "chamfer_sides"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "a rectangular pocket's rim edges chamfered by two distances: 2 along the top (facing up) and 1 down the walls",
+  "why_not": []
+}

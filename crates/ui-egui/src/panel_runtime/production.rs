@@ -110,6 +110,17 @@ impl Product {
     }
     fn presentation(self, app: &crate::SolveApp, play_button: bool) -> PanelPresentation {
         let mut presentation = self.empty_presentation();
+        if self == Self::Assistant {
+            let waiting = app.agent_chat.waiting();
+            let state = app.agent_chat.state();
+            presentation.status = Some(if waiting > 0 {
+                solidcraft_ui_text::format("ui.assistant_waiting", &[("count", &waiting.to_string())])
+            } else {
+                state.label().into()
+            });
+            presentation.attention = waiting > 0
+                || matches!(state, crate::agent_chat::State::NeedsAuth | crate::agent_chat::State::Exited | crate::agent_chat::State::Failed);
+        }
         presentation.actions = match self {
             Self::History => crate::ui_kit::HistoryTransport::shown(play_button)
                 .iter()
@@ -117,7 +128,7 @@ impl Product {
                     let availability = crate::timeline::transport_availability(app, *control);
                     RuntimeAction {
                         id: ControlId(control.id().into()),
-                        label: control.label(app.timeline_playback.is_some()).into(),
+                        label: control.label(app.timeline_playback.is_some(), crate::timeline::play_labels()).into(),
                         enabled: availability.is_ok(),
                         disabled_reason: availability.err(),
                         pressed: (*control == crate::ui_kit::HistoryTransport::Play).then_some(app.timeline_playback.is_some()),
@@ -354,6 +365,10 @@ pub(crate) fn drain_production_actions(app: &mut crate::SolveApp) -> PanelResult
         }
     }
     Ok(())
+}
+
+pub(crate) fn production_active(app: &crate::SolveApp) -> bool {
+    app.panel_content_frame.is_some() || app.panel_runtime.as_ref().is_some_and(|integration| integration.production.is_some())
 }
 
 /// Existing view toggles update remembered placement only when their raw flag
@@ -854,7 +869,7 @@ impl FramePanelContent for ProductionFrame<'_> {
             Product::Browser | Product::RenderBrowser => crate::browser::panel_contents(self.app, ui),
             Product::History if context.flow == Flow::Wide => crate::timeline::panel_inline(self.app, ui),
             Product::History => crate::timeline_left::panel_contents(self.app, ui),
-            Product::Assistant => crate::agent_chat::shared_content(self.app, ui),
+            Product::Assistant => crate::agent_chat::shared_content(self.app, ui, context.flow),
         }
         let capture = ui.ctx().data_mut(|data| data.remove_temp::<Option<FocusCapture>>(focus_capture_id()).flatten());
         if context.document.as_ref().map(|document| document.0.as_str()) != Some(self.app.session.document_id.as_str()) {

@@ -1,0 +1,7 @@
+{
+  "unit": "geom.global_solver",
+  "cases": [
+    {"name": "fuzz01496_tree_node_link", "origin": "fuzz-out/n2000/geom.global_solver/fuzz01496.json (crash: rust: killed by signal 6 (fatal runtime error: stack overflow, aborting))", "cpp": "harness: invalid argument: tree node link", "rust": "ok", "inputs": {"ops": [{"nodes": [{"aux": 8, "bbox": [1.18, -5.78, -3.79, 1.27, -5.78, -3.51], "c1": -1, "c2": -1, "p": 2}], "op": "tree"}]}},
+    {"name": "fuzz01871_shim_rejected_args", "origin": "fuzz-out/n2000/geom.global_solver/fuzz01871.json (crash: rust: killed by signal 6 (fatal runtime error: stack overflow, aborting))", "cpp": "harness: shim_rejected_args", "rust": "harness: no solver", "inputs": {"ops": [{"b": [2, 0, -1], "op": "best"}]}}
+  ]
+}

@@ -79,6 +79,7 @@ test('classifyPaths maps changed files to areas', () => {
     ['area:infra', 'area:kernel', 'area:ui'],
   );
   assert.deepEqual(triage.classifyPaths(['crates/engine/src/cmd/x.rs']), []);
+  assert.deepEqual(triage.classifyPaths(['solidcore/crates/solidcore/src/lib.rs']), ['area:kernel']);
 });
 
 test('parseTriage', () => {

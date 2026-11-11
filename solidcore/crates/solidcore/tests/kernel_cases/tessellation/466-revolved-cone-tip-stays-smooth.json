@@ -1,0 +1,177 @@
+{
+  "area": "tessellation",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "revolve",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "angle": 6.283185307179586,
+        "cap": true,
+        "direction": [
+          -0.0,
+          -1.0,
+          -0.0
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "profile": [
+          {
+            "line": {
+              "end": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                40.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                4.0,
+                6.0,
+                0.0
+              ],
+              "start": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                10.0,
+                15.0,
+                0.0
+              ],
+              "start": [
+                4.0,
+                6.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                10.0,
+                25.0,
+                0.0
+              ],
+              "start": [
+                10.0,
+                15.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                10.0,
+                40.0,
+                0.0
+              ],
+              "start": [
+                10.0,
+                25.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                40.0,
+                0.0
+              ],
+              "start": [
+                10.0,
+                40.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "466-revolved-cone-tip-stays-smooth",
+  "expected": {
+    "area_mm2": 2451.3143,
+    "bbox": {
+      "max": [
+        10,
+        40,
+        10
+      ],
+      "min": [
+        -10,
+        0,
+        -10
+      ]
+    },
+    "body_count": 1,
+    "method": "Profile (x radius, y along the axis): (0,0)-(0,40) on the axis, (0,40)-(10,40), (10,40)-(10,25), (10,25)-(10,15), (10,15)-(4,6), (4,6)-(0,0), revolved 360 degrees about the Y axis. Cylinder R=10 from y=15 to 40: pi 100 25 = 2500 pi. Cone from r=10 at y=15 to r=4 at y=6 then on to the point at y=0 (the two cone lines are collinear, slope 2/3): frustum pi 9/3 (100 + 40 + 16) = 468 pi, tip pi 16 6/3 = 32 pi. V = 3000 pi = 9424.7780 mm3. Area: top disc 100 pi + cylinder 2 pi 10 25 + frustum pi (10+4) sqrt(81+36) + tip pi 4 sqrt(16+36) = 2451.3143 mm2. The dents are a meshing defect this rig can only see through the exact solid's volume and area (no mesh grading field).",
+    "outcome": "solid",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#466"
+    ],
+    "volume_mm3": 9424.778,
+    "what": "a six-line profile revolved a full turn about its first line, with a cone ending in a point: the tip came out with dents every 120 degrees instead of a smooth cone (rebuilt as a pencil-like profile with a collinear frustum and tip; the original design is not in the report)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 8,
+      "faces": 5,
+      "vertices": 5
+    }
+  },
+  "result": [
+    {
+      "body": "Pencil",
+      "made": "b1"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 2451.3142621133766,
+      "body_count": 1,
+      "edges": 5,
+      "faces": 3,
+      "vertices": 4,
+      "volume_mm3": 9424.777960942092
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#466"
+  ],
+  "traced_ops": [
+    "revolve"
+  ],
+  "ungraded": [],
+  "what": "a six-line profile revolved a full turn about its first line, with a cone ending in a point: the tip came out with dents every 120 degrees instead of a smooth cone (rebuilt as a pencil-like profile with a collinear frustum and tip; the original design is not in the report)",
+  "why_not": []
+}
