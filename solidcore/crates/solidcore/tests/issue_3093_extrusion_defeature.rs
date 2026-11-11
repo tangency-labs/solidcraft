@@ -143,9 +143,10 @@ fn the_extrusion_defeatures_to_the_same_solid_at_any_reach() {
         assert!(s.manifold, "reach {dist:?}");
         assert!(s.check.lines().is_empty(), "reach {dist:?}: {:?}", s.check);
         assert_eq!(bp1::faces(&b, None).unwrap().len(), 13, "reach {dist:?}");
-        Some(volume_of(&s))
+        Some(positive(s.volume))
     };
     let Some(v) = base(None) else { return };
+    // the same solid at every reach: the volume enclosures meet
     for d in [10.0, 15.0, 19.999_999_999, 20.0, 25.0] {
         let w = base(Some(d)).unwrap();
         assert!(w.0 <= v.1 && v.0 <= w.1, "reach {d}: {w:?} against {v:?}");
@@ -189,11 +190,19 @@ fn a_feature_whose_cap_cannot_be_built_is_kept_and_named() {
     let s = validation::soundness(&mut k, &mut b).unwrap();
     assert!(s.manifold);
     assert!(s.check.lines().is_empty(), "{:?}", s.check);
-    let v = volume_of(&s);
+    let (lo, hi) = positive(s.volume);
     assert!(
-        v.0 <= 757.499_499_825_162 && 757.499_499_825_162 <= v.1,
-        "{v:?}"
+        lo <= 757.499_499_825_162 && 757.499_499_825_162 <= hi,
+        "[{lo}, {hi}]"
     );
+}
+
+/// A volume proved positive, as its enclosure's ends.
+fn positive(v: Option<VolumeSign>) -> (f64, f64) {
+    match v {
+        Some(VolumeSign::Positive(e)) => (e.lo, e.hi),
+        other => panic!("a volume not proved positive: {other:?}"),
+    }
 }
 
 /// The body's counts and volume, to compare a base with its state before a call.
@@ -203,7 +212,7 @@ fn state(k: &mut Kernel, b: &mut Brep) -> ([usize; 3], (f64, f64)) {
         bp1::edges(b, None).unwrap().len(),
         bp1::vertices(b, None).unwrap().len(),
     ];
-    let v = volume_of(&validation::soundness(k, b).unwrap());
+    let v = positive(validation::soundness(k, b).unwrap().volume);
     (counts, v)
 }
 
@@ -274,14 +283,4 @@ fn a_cancelled_defeature_leaves_the_base() {
         "{r:?}"
     );
     assert_eq!(state(&mut k, &mut b), before);
-}
-
-/// The certified enclosure of the body's volume ([`validation::Soundness::volume`]) as
-/// `(lo, hi)`: main certifies a sign, not a number, so volumes are compared as enclosures.
-fn volume_of(s: &validation::Soundness) -> (f64, f64) {
-    match s.volume.as_ref().unwrap() {
-        VolumeSign::Positive(e) | VolumeSign::Negative(e) | VolumeSign::Undecided(e) => {
-            (e.lo, e.hi)
-        }
-    }
 }

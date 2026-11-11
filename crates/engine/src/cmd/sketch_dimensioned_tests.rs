@@ -687,3 +687,66 @@ fn locate_adds_only_what_the_shape_lacks() {
     close(measure(&s, |k| matches!(k, ConstraintKind::DistanceX { .. })), 20.0);
     close(measure(&s, |k| matches!(k, ConstraintKind::DistanceY { .. })), 12.0);
 }
+
+/// The reply's own `sketch` is the sketch after everything the command did, not the creator's solve
+/// from before the dimensions: a rectangle centred on the origin with both sizes has no freedom
+/// left, as the dimensions' replies add up and `sketch.solve` finds.
+#[test]
+fn the_reply_sketch_is_the_solve_after_the_dimensions() {
+    let mut s = session();
+    let out = draw(&mut s, "sketch.rectangle.center", json!({"center":[0,0],"corner":[10,5]}), json!({"width":20,"height":10}));
+    assert_eq!(out["sketch"], json!({"solved":true,"dof":0}), "{out}");
+    assert_eq!(out["sketch"]["dof"], json!(dof(&mut s)));
+}
+
+/// `dimensions` is a map by role, so its order is not the order the sizes were placed in: a typed
+/// width then the height as drawn is placed width first, though `height` sorts before `width`. The
+/// reply's `sketch` is still the sketch's own solve, for every creator and with `locate` too.
+#[test]
+fn the_reply_sketch_matches_the_sketch_whatever_order_the_dimensions_went_in() {
+    let mut s = session();
+    let out = run(
+        &mut s,
+        "sketch.draw.dimensioned",
+        json!({"command":"sketch.rectangle.center","params":{"center":[3,4],"corner":[13,9]},"dimensions":{"width":20},"as_drawn":true}),
+    );
+    let last_placed = out["dimensions"]["height"]["sketch"]["dof"].as_u64().unwrap();
+    assert!(last_placed < out["dimensions"]["width"]["sketch"]["dof"].as_u64().unwrap(), "height is placed after width: {out}");
+    assert_eq!(out["sketch"]["dof"], json!(last_placed), "{out}");
+    assert_eq!(out["sketch"]["dof"], json!(dof(&mut s)));
+
+    let creators: Vec<&str> = crate::command_specs().iter().map(|c| c.id).filter(|id| super::dimension_roles(id).is_some()).collect();
+    for creator in creators {
+        let params = sample(creator).unwrap_or_else(|| panic!("{creator}: add a sample drawing for it"));
+        for locate in [false, true] {
+            let mut s = session();
+            let out = run(&mut s, "sketch.draw.dimensioned", json!({"command":creator,"params":params,"as_drawn":true,"locate":locate}));
+            assert_eq!(out["sketch"]["dof"], json!(dof(&mut s)), "{creator} locate {locate}: {}", out["sketch"]);
+            assert_eq!(out["sketch"]["solved"], json!(true), "{creator} locate {locate}");
+        }
+    }
+}
+
+/// With `locate` the reply's `sketch` counts the placement too: a rectangle that was free to move
+/// ends with nothing left free, and the reply says so.
+#[test]
+fn the_reply_sketch_counts_what_locate_placed() {
+    let mut s = session();
+    let out = run(
+        &mut s,
+        "sketch.draw.dimensioned",
+        json!({"command":"sketch.rectangle.center","params":{"center":[3,4],"corner":[13,9]},"dimensions":{"width":20,"height":10},"locate":true}),
+    );
+    assert_eq!(out["located"].as_array().unwrap().len(), 2, "{out}");
+    assert_eq!(out["sketch"], json!({"solved":true,"dof":0}), "{out}");
+    assert_eq!(dof(&mut s), 0);
+    // A placement that takes nothing away (a circle on the origin) leaves the sizes' freedom as is.
+    let mut s = session();
+    let out = run(
+        &mut s,
+        "sketch.draw.dimensioned",
+        json!({"command":"sketch.circle.center","params":{"center":[0,0],"radius":5},"dimensions":{"radius":5},"locate":true}),
+    );
+    assert_eq!(out["located"], json!([]), "{out}");
+    assert_eq!(out["sketch"]["dof"], json!(dof(&mut s)));
+}

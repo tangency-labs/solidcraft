@@ -207,9 +207,14 @@ impl Renderer {
         triangles(pass, &depth.built, &model.open_tris);
         triangles(pass, &depth.pbr, &model.pbr);
         for key in &model.block_order {
-            if let Some(block) = model.blocks.get(key).filter(|block| block.class(TriClass::Opaque).is_some()) {
-                pass.set_pipeline(&depth.built);
-                block.draw(pass, TriClass::Opaque, tally);
+            let Some(block) = model.blocks.get(key) else { continue };
+            // PBR triangles are built into the same blocks (the product preview's): they occlude
+            // feedback too, in the block vertex layout the depth pipeline takes.
+            for class in [TriClass::Opaque, TriClass::Pbr] {
+                if block.class(class).is_some() {
+                    pass.set_pipeline(&depth.built);
+                    block.draw(pass, class, tally);
+                }
             }
         }
         for draw in model.planned.iter().filter(|draw| draw.class == TriClass::Opaque) {

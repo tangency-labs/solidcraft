@@ -111,6 +111,11 @@ const PARALLEL_EDGES: usize = 256;
 /// turns a coil's or a thread's wall winds (the grid as a whole stays within
 /// [`grid::MAX_FACE_GRID`]).
 const MAX_LINES: usize = 8192;
+/// The smallest angle the triangles of a flat face with no size keep, where its boundary
+/// allows. Its boundary nodes alone make slivers (a disc's rim fanned to one node); at 15 degrees
+/// the p99 aspect of such faces is below 2.6 for about a quarter more triangles (10 degrees
+/// leaves it above 3, 20 adds a third), measured on the bake-off corpus.
+const FLAT_MIN_ANGLE_DEG: f64 = 15.0;
 /// Most points Ruppert refinement may add to one face, beyond its seeds.
 const MAX_REFINE: usize = 20_000;
 /// Most rounds of splitting the edge segments where a face's sampled boundary crosses itself:
@@ -418,6 +423,12 @@ fn boundary(
     let mut out = Boundary { loops: Vec::with_capacity(face.loops.len()), segments: Vec::with_capacity(face.loops.len()), reach };
     // Each vertex's parameters, from the first edge use of the face to start there.
     let mut at_vertex: HashMap<u32, [f64; 2]> = HashMap::new();
+    // The face's vertices placed so far, by cell of a grid as fine as the chord tolerance: the
+    // nearness below is never farther than that, so the vertex's own cell and its neighbours hold
+    // every candidate (a face of 100,000 vertices is not searched once per vertex).
+    let cell = if rules.tol.is_finite() && rules.tol > 0.0 { rules.tol } else { f64::INFINITY };
+    let key = |p: Vec3| [p.x, p.y, p.z].map(|x| if cell.is_finite() { (x / cell).floor() as i64 } else { 0 });
+    let mut placed: HashMap<[i64; 3], Vec<u32>> = HashMap::new();
     // The vertex pairs an edge of the face joins.
     let joined: std::collections::HashSet<(u32, u32)> = face_edges(face)
         .filter_map(|oe| b.edges.get(oe.edge as usize))
@@ -492,10 +503,18 @@ fn boundary(
                         // corner touches another loop's corner) are one point of the face, so its
                         // loops touch there instead of crossing.
                         let same = vertex_point(v).and_then(|(p, tv)| {
-                            at_vertex.iter().filter(|(w, _)| **w != v && !joined.contains(&(v.min(**w), v.max(**w)))).find_map(|(w, wq)| {
-                                let (pw, tw) = vertex_point(*w)?;
-                                (p.dist(pw) <= tv.max(tw).min(rules.tol)).then_some(*wq)
-                            })
+                            let [x, y, z] = key(p);
+                            let near = (-1..=1).flat_map(|i| (-1..=1).flat_map(move |j| (-1..=1).map(move |k| [x + i, y + j, z + k])));
+                            near.filter_map(|c| placed.get(&c))
+                                .flatten()
+                                .filter(|w| **w != v && !joined.contains(&(v.min(**w), v.max(**w))))
+                                .filter_map(|w| {
+                                    let (pw, tw) = vertex_point(*w)?;
+                                    let d = p.dist(pw);
+                                    (d <= tv.max(tw).min(rules.tol)).then_some((d, *w))
+                                })
+                                .min_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)))
+                                .and_then(|(_, w)| at_vertex.get(&w).copied())
                         });
                         if let Some(mut w) = same.filter(|w| !(0..2).any(|d| pole_along(*w, d) || pole_along(*q, d))) {
                             for (d, per) in dom.period.into_iter().enumerate() {
@@ -506,6 +525,9 @@ fn boundary(
                             *q = w;
                         }
                         at_vertex.insert(v, *q);
+                        if let Some((p, _)) = vertex_point(v) {
+                            placed.entry(key(p)).or_default().push(v);
+                        }
                     }
                 }
             }
@@ -1113,6 +1135,24 @@ fn plan_or_fill(
     }
 }
 
+/// The triangles of a fan over the loop `range` of `uvs` from its first node, leaving out each
+/// one with two corners on one node (`same`) or no area in (u, v), each counter-clockwise.
+fn fan(range: std::ops::Range<usize>, uvs: &[[f64; 2]], same: &dyn Fn(u32, u32) -> bool) -> Vec<[u32; 3]> {
+    let (Ok(start), Ok(end)) = (u32::try_from(range.start), u32::try_from(range.end)) else { return Vec::new() };
+    let at = |i: u32| uvs.get(i as usize).copied();
+    (start + 1..end.saturating_sub(1))
+        .filter_map(|i| {
+            let t = [start, i, i + 1];
+            let (a, b, c) = (at(t[0])?, at(t[1])?, at(t[2])?);
+            let area = (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1]);
+            if same(t[0], t[1]) || same(t[1], t[2]) || same(t[2], t[0]) || area == 0.0 || !area.is_finite() {
+                return None;
+            }
+            Some(if area > 0.0 { t } else { [t[0], t[2], t[1]] })
+        })
+        .collect()
+}
+
 /// One face: boundary loops in 3D (shared edge nodes) to parameters and triangles.
 /// `size`: the face's target side length (mm) and the surface's mean speed along u and v.
 /// `reach`: how near a pole a point is taken as one ([`Boundary::reach`]). `lenient`: the last resort
@@ -1227,6 +1267,7 @@ fn plan_face(
             refine: if bare { None } else { Some((sag, MAX_REFINE)) },
             shape: !matches!(**s, EvalSurface::Plane { .. }),
             lenient: lenient == Lenient::Yes,
+            flat: (bare && lenient == Lenient::No).then(|| cdt::Flat { min_angle: FLAT_MIN_ANGLE_DEG, max_points: uvs.len(), min_area: cdt::smallest_area(tol) }),
         };
         cdt::triangulate(&uvs, &ranges, fill).ok_or_else(|| fail("boundary crosses itself"))
     };
@@ -1331,6 +1372,14 @@ fn plan_face(
     let pole_pair = |i: u32, j: u32| i != j && fixed.get(i as usize).zip(fixed.get(j as usize)).is_some_and(|(p, q)| p == q);
     let mut triangles = triangles;
     triangles.retain(|t| !(pole_pair(t[0], t[1]) || pole_pair(t[1], t[2]) || pole_pair(t[2], t[0])));
+    // A lenient fill left with nothing (a sliver below the tolerance whose boundary nodes are
+    // few points in space, each twice, its pcurves apart in (u, v) where its edges meet: every
+    // Delaunay triangle had two corners on one point): the outer loop fanned from its first node, the
+    // triangles with no two corners on one node, counter-clockwise in (u, v). The face is drawn
+    // between its own edges' nodes, and still named in the stats as a defect upstream.
+    if lenient == Lenient::Yes && triangles.is_empty() {
+        triangles = fan(ranges.first().cloned().unwrap_or(0..0), &uvs, &pole_pair);
+    }
     // A lenient fill leaves out the sides that cross: the boundary is followed everywhere else.
     if lenient == Lenient::No && !closed_boundary(&ranges, &fixed, &uvs, &triangles) {
         return Err(fail("triangulation does not follow the boundary"));
@@ -1483,7 +1532,7 @@ fn plan_pieces(f: &Region) -> Option<(Vec<[f64; 2]>, Vec<[u32; 3]>)> {
                 let seeds = cdt::lattice(bbox, [f.h / f.speed[0], f.h / f.speed[1]], &polys, f.speed);
                 let eval = |u: f64, v: f64| s.derivs(u, v).map(|(p, su, sv)| (p, su.cross(sv).normalized()));
                 let sag = cdt::Sag { eval: &eval, tol: f.rules.tol, h: f.h, turn: f.rules.turn, scale: f.speed };
-                cdt::triangulate(&luv, &ranges, cdt::Fill { seeds: &seeds, refine: Some((sag, MAX_REFINE)), shape: true, lenient: false })
+                cdt::triangulate(&luv, &ranges, cdt::Fill { seeds: &seeds, refine: Some((sag, MAX_REFINE)), shape: true, lenient: false, flat: None })
             })?;
         let (lextra, ltris) = local;
         let base = u32::try_from(n + extra.len()).ok()?;

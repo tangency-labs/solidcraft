@@ -704,11 +704,11 @@ impl<'a> Work<'a> {
     ) -> Result<()> {
         use crate::topology::edgeuse::p1 as eu1;
         let up = crate::topology::face::p2::upward_faceuse(b, f)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::mass_missing(OP, "the face's upward faceuse"))?;
         let mate = b
             .faceuse(up)?
             .mate
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::mass_missing(OP, "the faceuse's mate"))?;
         let material = |fu| -> Result<bool> {
             match eu1::faceuse_region(b, fu)? {
                 Some(r) => region_material(b, r),
@@ -732,7 +732,7 @@ impl<'a> Work<'a> {
             .face(f)?
             .surface
             .as_ref()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::mass_missing(OP, "the face's surface"))?;
         let cn = match as_b_spline(k, surface)? {
             Some(bs) => Nurbs::of(&bs)?,
             None => {
@@ -760,7 +760,7 @@ impl<'a> Work<'a> {
                 let e = b
                     .edgeuse(eu)?
                     .edge
-                    .ok_or_else(|| SolidError::null_pointer(OP))?;
+                    .ok_or_else(|| SolidError::mass_missing(OP, "the edgeuse's edge"))?;
                 lp.push((e, pcurve(k, b, eu)?, dir));
             }
             loops.push(lp);
@@ -801,8 +801,11 @@ impl<'a> Work<'a> {
                 let (a, z) = if *dir > 0.0 { (t0, t1) } else { (t1, t0) };
                 let pa = curve_derivs_over(c, Ivl::from(a), 0, None)?;
                 let pz = curve_derivs_over(c, Ivl::from(z), 0, None)?;
-                let first =
-                    |d: &[V3<Ivl>]| d.first().copied().ok_or_else(|| SolidError::sm_err(OP));
+                let first = |d: &[V3<Ivl>]| {
+                    d.first()
+                        .copied()
+                        .ok_or_else(|| SolidError::mass_failed(OP, "the curve has no point"))
+                };
                 ends.push((first(&pa)?, first(&pz)?));
             }
             let count = lp.len();
@@ -848,7 +851,10 @@ impl<'a> Work<'a> {
         open_length: &mut Ivl,
         zcap: &mut f64,
     ) -> Result<()> {
-        let fg = self.faces.get(face).ok_or_else(|| SolidError::sm_err(OP))?;
+        let fg = self
+            .faces
+            .get(face)
+            .ok_or_else(|| SolidError::mass_failed(OP, "no such face"))?;
         let p = partials_at(&fg.cn, end.x, end.y, 1)?;
         let (s, su, sv) = (p.at(0, 0), p.at(1, 0), p.at(0, 1));
         let (du, dv) = (width(end.x), width(end.y));
@@ -867,7 +873,10 @@ impl<'a> Work<'a> {
     /// whose control points are nearly one point (a pole), from their spread
     /// ([`side_length`]); else from the partials over its box.
     fn segment_length(&self, face: usize, seg: &NurbsCurve) -> Result<Ivl> {
-        let fg = self.faces.get(face).ok_or_else(|| SolidError::sm_err(OP))?;
+        let fg = self
+            .faces
+            .get(face)
+            .ok_or_else(|| SolidError::mass_failed(OP, "no such face"))?;
         let (u, v) = piece_hull(seg, seg.p);
         if let Some(len) = side_length(&fg.cn, u, v) {
             return Ok(len);
@@ -881,7 +890,10 @@ impl<'a> Work<'a> {
     /// Adds the cells of one pcurve on face `face`: each polynomial piece, cut where it may
     /// cross a knot line of the surface, swept down to the base.
     fn add_piece(&mut self, face: usize, cn: &NurbsCurve, dir: f64) -> Result<()> {
-        let fg = self.faces.get(face).ok_or_else(|| SolidError::sm_err(OP))?;
+        let fg = self
+            .faces
+            .get(face)
+            .ok_or_else(|| SolidError::mass_failed(OP, "no such face"))?;
         let mut lines_u: Vec<f64> = Vec::new();
         for &x in &fg.cn.u {
             if lines_u.last() != Some(&x) {
@@ -974,7 +986,7 @@ impl<'a> Work<'a> {
         let sg = self
             .strips
             .get(strip)
-            .ok_or_else(|| SolidError::sm_err(OP))?;
+            .ok_or_else(|| SolidError::mass_failed(OP, "no such strip"))?;
         let mut cuts = vec![t0, t1];
         for (_, cn) in &sg.sides {
             for &x in &cn.u {
@@ -1017,7 +1029,10 @@ impl<'a> Work<'a> {
     fn point(&self, strip: usize, side: usize, t: f64) -> Result<[Ivl; 3]> {
         let (face, cn) = self.strip_side(strip, side)?;
         let d = curve_derivs_over(cn, Ivl::from(t), 0, None)?;
-        let p = d.first().copied().ok_or_else(|| SolidError::sm_err(OP))?;
+        let p = d
+            .first()
+            .copied()
+            .ok_or_else(|| SolidError::mass_failed(OP, "the curve has no point"))?;
         let s = partials_at(&face.cn, p.x, p.y, 0)?.at(0, 0);
         Ok([s.x, s.y, s.z])
     }
@@ -1027,8 +1042,12 @@ impl<'a> Work<'a> {
         let (face, cn) = self.strip_side(strip, side)?;
         let d = curve_derivs_over(cn, Ivl::new(t0, t1), 1, None)?;
         let (p, dp) = (
-            d.first().copied().ok_or_else(|| SolidError::sm_err(OP))?,
-            d.get(1).copied().ok_or_else(|| SolidError::sm_err(OP))?,
+            d.first()
+                .copied()
+                .ok_or_else(|| SolidError::mass_failed(OP, "the curve has no point"))?,
+            d.get(1)
+                .copied()
+                .ok_or_else(|| SolidError::mass_failed(OP, "the curve has no derivative"))?,
         );
         let s = partials_at(&face.cn, p.x, p.y, 1)?;
         let (su, sv) = (s.at(1, 0), s.at(0, 1));
@@ -1042,11 +1061,11 @@ impl<'a> Work<'a> {
             .strips
             .get(strip)
             .and_then(|s| s.sides.get(side))
-            .ok_or_else(|| SolidError::sm_err(OP))?;
+            .ok_or_else(|| SolidError::mass_failed(OP, "no such strip side"))?;
         let fg = self
             .faces
             .get(*face)
-            .ok_or_else(|| SolidError::sm_err(OP))?;
+            .ok_or_else(|| SolidError::mass_failed(OP, "no such face"))?;
         Ok((fg, cn))
     }
 
@@ -1091,17 +1110,17 @@ impl<'a> Work<'a> {
         let p = self
             .pieces
             .get(piece)
-            .ok_or_else(|| SolidError::sm_err(OP))?;
+            .ok_or_else(|| SolidError::mass_failed(OP, "no such piece"))?;
         let fg = self
             .faces
             .get(p.face)
-            .ok_or_else(|| SolidError::sm_err(OP))?;
+            .ok_or_else(|| SolidError::mass_failed(OP, "no such face"))?;
         let sign = Ivl::from(fg.sign * p.dir);
         let a = fg
             .levels
             .get(j)
             .copied()
-            .ok_or_else(|| SolidError::sm_err(OP))?;
+            .ok_or_else(|| SolidError::mass_failed(OP, "no such level"))?;
         let next = fg.levels.get(j + 1).copied();
         let z0 = Ivl::from(self.z0);
         let (tc, sc) = (0.5 * (t.0 + t.1), 0.5 * (s.0 + s.1));
@@ -1122,7 +1141,12 @@ impl<'a> Work<'a> {
             let (v0, vs) = curve_series(&d, 1, n);
             let (b0, bs) = match (whole, next) {
                 (true, Some(top)) => (Ivl::from(top) - Ivl::from(a), Bs::zero()),
-                (true, None) => return Err(SolidError::sm_err(OP)),
+                (true, None) => {
+                    return Err(SolidError::mass_failed(
+                        OP,
+                        "no level above the whole piece",
+                    ))
+                }
                 (false, _) => (v0 - Ivl::from(a), vs),
             };
             // dv = sg (b(x) - b0) + y b(x)
@@ -1257,7 +1281,7 @@ impl<'a> Work<'a> {
             let sp = spans
                 .get(side)
                 .copied()
-                .ok_or_else(|| SolidError::sm_err(OP))?;
+                .ok_or_else(|| SolidError::mass_failed(OP, "no such strip side"))?;
             let (hu, hv) = piece_hull(cn, sp);
             let at = |tt: Ivl, n: usize| -> Result<(Bs, Bs, Ivl, Ivl)> {
                 let d = curve_derivs_over(cn, tt, n, Some(sp))?;
@@ -1291,7 +1315,10 @@ impl<'a> Work<'a> {
             }
         }
         let (Some(o1), Some(o2)) = (over.first(), over.get(1)) else {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::mass_failed(
+                OP,
+                "the cell has fewer than two series",
+            ));
         };
         let comp = |s: &[Bs; 3], i: usize| [s[0].at(i, 0), s[1].at(i, 0), s[2].at(i, 0)];
         let diff = |a: [Ivl; 3], b: [Ivl; 3]| [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
@@ -1500,7 +1527,10 @@ fn crossings(
     }
     let at = |t: f64| -> Result<f64> {
         let d = curve_derivs_over(cn, Ivl::from(t), 0, Some(s))?;
-        let p = d.first().copied().ok_or_else(|| SolidError::sm_err(OP))?;
+        let p = d
+            .first()
+            .copied()
+            .ok_or_else(|| SolidError::mass_failed(OP, "the curve has no point"))?;
         Ok((if c == 0 { p.x } else { p.y }).mid() - line)
     };
     let mut t0 = a;
@@ -1709,7 +1739,7 @@ fn pcurve(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Result<NurbsCurve> {
     fetch.status?;
     let c = crate::topology::edgeuse::p1::uv_trim_curve(b, eu)?
         .0
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::mass_missing(OP, "the edgeuse's pcurve"))?;
     let bs: &BSplineCurve = c.b_spline_base().ok_or(SolidError::Unsupported {
         operation: OP,
         reason: "a pcurve with no NURBS form",
