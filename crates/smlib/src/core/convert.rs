@@ -43,7 +43,7 @@ use solidcore::query::brep::{BoundingBoxOptions, calculate_bounding_box};
 use solidcore::surface::ball_patch::BallPatch;
 use solidcore::surface::cone::Cone;
 use solidcore::surface::plane::Plane;
-use solidcore::surface::round_torus::circle_round_torus;
+use solidcore::surface::round_torus::{RoundTorus, circle_round_torus};
 use solidcore::surface::sphere::Sphere;
 use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::surface::torus::{Torus, TorusOptions};
@@ -290,34 +290,24 @@ fn bspline_surface_part<'s>(k: &Kernel, s: &'s Surface) -> Result<Option<&'s BSp
 }
 
 /// The torus a face's surface is when it is a round of the exact circle class (solidcore#2485):
-/// the net's torus as solidcore reads and certifies it ([`circle_round_torus`]: read off the net's
-/// form, in that form's parameterisation, and certified against the round's definition). The
-/// face then goes out as that torus with its net as its NURBS form, as an SMLib torus does, and
-/// only where the import reads the form back as that torus ([`reads_back`] at the arrays'
-/// tolerance `xsect`, the import's own check), so the arrays, the form and the surface the
-/// import makes agree. `None` for every other surface (a round's net that is an SMLib torus
-/// already goes out as one) and for a round the import would not read back as its torus (it goes
-/// out as its NURBS, as before).
+/// the round's exact surface as solidcore gives and certifies it ([`circle_round_torus`]: the
+/// torus its supports give, its frame, and the net certified on it). The face then goes out as
+/// that torus with its net as its NURBS form, as an SMLib torus does, and only where the import
+/// reads the form back as a torus (`analytic_of_nurbs` at the arrays' tolerance `xsect`, the
+/// import's own check), so a body written is a body read. `None` for every other surface (a
+/// round's net that is an SMLib torus already goes out as one) and for a round the import would
+/// not read back as a torus (it goes out as its NURBS, as before).
 ///
 /// # Errors
 ///
 /// Those of `circle_round_torus` (a definition its net disagrees with) and of making the NURBs.
-fn round_torus(k: &Kernel, surface: &Surface, xsect: f64) -> Result<Option<Surface>> {
+fn round_torus(k: &Kernel, surface: &Surface, xsect: f64) -> Result<Option<RoundTorus>> {
     let Some(round) = circle_round_torus(k, surface).map_err(sc("circle_round_torus"))? else { return Ok(None) };
     let Some(form) = bspline_surface_part(k, surface)? else { return Ok(None) };
-    let torus = Surface::from(round.torus);
-    Ok(reads_back(k, form, &torus, xsect)?.then_some(torus))
-}
-
-/// A torus's entry in the face arrays: its placement's origin, axis and reference direction and
-/// its radii, as SMLib's torus holds them.
-fn torus_out(o: &mut Out, t: &Torus) {
-    let pos = t.base().position();
-    o.r3(FACE_TORUS_ORIGIN, pos.origin());
-    o.r3(FACE_TORUS_AXIS, pos.z_axis());
-    o.r3(FACE_TORUS_REF_DIRECTION, pos.x_axis());
-    o.r(FACE_TORUS_MAJOR_RADIUS).push(t.major_radius());
-    o.r(FACE_TORUS_MINOR_RADIUS).push(t.minor_radius());
+    if analytic_of_nurbs(k, form, SURFACE_TORUS_I, xsect)?.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(round))
 }
 
 // ---- export: FlatFromBrep ----------------------------------------------------------------------
@@ -922,7 +912,7 @@ fn flat_from_brep(k: &mut Kernel, b: &mut Brep) -> Result<Arrays> {
             SurfaceKind::Cone(_) => SURFACE_CONE_I,
             SurfaceKind::Torus(_) => SURFACE_TORUS_I,
             SurfaceKind::BallPatch(_) => SURFACE_BALL_PATCH_I,
-            // A round of the exact circle class: its net's torus, the net its form.
+            // A round of the exact circle class: the torus of its definition, its net the form.
             _ if round_torus.is_some() => SURFACE_TORUS_I,
             _ => SURFACE_NURBS_I,
         };
@@ -1013,15 +1003,26 @@ fn flat_from_brep(k: &mut Kernel, b: &mut Brep) -> Result<Arrays> {
                 o.r(FACE_CONE_RADIUS).push(can.radius);
                 o.r(FACE_CONE_SEMI_ANGLE).push(deg2rad(can.semi_angle_deg));
             }
-            SurfaceKind::Torus(t) => torus_out(&mut o, t),
+            SurfaceKind::Torus(t) => {
+                let pos = t.base().position();
+                o.r3(FACE_TORUS_ORIGIN, pos.origin());
+                o.r3(FACE_TORUS_AXIS, pos.z_axis());
+                o.r3(FACE_TORUS_REF_DIRECTION, pos.x_axis());
+                o.r(FACE_TORUS_MAJOR_RADIUS).push(t.major_radius());
+                o.r(FACE_TORUS_MINOR_RADIUS).push(t.minor_radius());
+            }
             SurfaceKind::BallPatch(bp) => {
                 o.i(FACE_DEFINITION_REAL_COUNT).push(4);
                 o.r3(FACE_DEFINITION_REALS, bp.centre());
                 o.r(FACE_DEFINITION_REALS).push(bp.radius());
             }
             _ => {
-                if let Some(SurfaceKind::Torus(t)) = round_torus.as_ref().map(Surface::kind) {
-                    torus_out(&mut o, t);
+                if let Some(t) = round_torus {
+                    o.r3(FACE_TORUS_ORIGIN, t.centre);
+                    o.r3(FACE_TORUS_AXIS, t.axis);
+                    o.r3(FACE_TORUS_REF_DIRECTION, t.x_axis);
+                    o.r(FACE_TORUS_MAJOR_RADIUS).push(t.major);
+                    o.r(FACE_TORUS_MINOR_RADIUS).push(t.minor);
                 }
             }
         }
@@ -2026,14 +2027,8 @@ fn analytic_of_nurbs(k: &Kernel, nurbs: &BSplineSurface, ty: i64, tol: f64) -> R
         None
     };
     let Some(found) = found else { return Ok(None) };
-    Ok(reads_back(k, nurbs, &found, tol)?.then_some(found))
-}
-
-/// Whether the analytic surface `found` is `nurbs`: its own NURBS the same within `tol`
-/// ([`same_nurbs`]), so a face whose trims are in `nurbs`'s parameters keeps them on it.
-fn reads_back(k: &Kernel, nurbs: &BSplineSurface, found: &Surface, tol: f64) -> Result<bool> {
-    let (Some(want), Some(part)) = (nurbs.gw_nurb(), bspline_surface_part(k, found)?) else { return Ok(false) };
-    Ok(part.gw_nurb().is_some_and(|got| same_nurbs(want, got, tol)))
+    let (Some(want), Some(part)) = (nurbs.gw_nurb(), bspline_surface_part(k, &found)?) else { return Ok(None) };
+    Ok(part.gw_nurb().is_some_and(|got| same_nurbs(want, got, tol)).then_some(found))
 }
 
 /// `Placement`: X the reference direction, Y the axis cross it (`SetCanonical`).
