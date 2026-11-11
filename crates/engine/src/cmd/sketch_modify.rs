@@ -128,7 +128,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "MODIFY")
         .icon("sketch_scale")
         .enabled(in_sketch)
-        .params("entities: [curve/point ids], base: [x,y] or point ref, factor: number"),
+        .params("entities: [curve/point ids], base: [x,y] or point ref, factor: number; the driving length and radius dimensions wholly inside the selection scale too (a formula becomes `(formula) * factor`)"),
     CommandSpec::new("sketch.transform", "Transform", transform)
         .at("SKETCH", "MODIFY")
         .icon("sketch_move")
@@ -141,7 +141,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "MODIFY")
         .icon("sketch_move")
         .enabled(in_sketch)
-        .params(concat!("entities: [ids], translate?: [dx,dy], angle?: deg, center?: [x,y], copy?: bool, rotate_constraints?: bool (default true; false keeps constraints unchanged); a rotation turns the constraints tied to the sketch axes when all their geometry moves (horizontal and vertical relations and dimensions swap at odd quarter turns and stay at half turns, line angles turn with the line) and removes the horizontal and vertical ones that cannot hold at other angles; picking a text outline or linked point transforms its whole text source once, and copies remain editable text; copy also accepts drawn 3D curves, preserving exact arcs and height above the sketch plane", created_doc!())),
+        .params(concat!("entities: [ids], translate?: [dx,dy], angle?: deg, center?: [x,y], copy?: bool, rotate_constraints?: bool (default true; false keeps constraints unchanged); a rotation turns the constraints tied to the sketch axes when all their geometry moves (horizontal and vertical relations and dimensions swap at odd quarter turns and stay at half turns, line angles turn with the line) and removes the horizontal and vertical ones that cannot hold at other angles; picking a text outline or linked point transforms its whole text source once, and copies remain editable text; copy also accepts drawn 3D curves, preserving exact arcs and height above the sketch plane; returns `released`: the constraints tying the moved geometry to what stays that the move let go, as {id, kind}", created_doc!())),
     CommandSpec::new("sketch.mirror", "Mirror", crate::checked!("sketch.mirror", mirror))
         .contract(&MIRROR_CONTRACT)
         .output(output_schema_for::<MirrorResult>)
@@ -509,29 +509,40 @@ fn bracket(sk: &Sketch, ci: usize, tq: f64) -> (Vec<(f64, Vec2, usize)>, bool) {
 /// each mouse move.
 #[derive(Clone, Debug)]
 pub struct TrimHover {
-    sh: Shape,
-    cuts: TrimCuts,
+    how: TrimHoverOf,
 }
 
-/// The [`TrimHover`] of `curve`. `None` where trim works otherwise (a free-form or infinite
-/// curve) or the curve isn't in the sketch: the tool shows the curve.
+#[derive(Clone, Debug)]
+enum TrimHoverOf {
+    Analytic { sh: Shape, cuts: TrimCuts },
+    Freeform(super::sketch_freeform::FreeformTrim),
+}
+
+/// The [`TrimHover`] of `curve`. `None` where trim refuses (an infinite curve) or the curve isn't
+/// in the sketch: the tool shows the curve.
 pub fn trim_hover(sk: &Sketch, curve: &str) -> Option<TrimHover> {
     let ci = sk.curve_index(curve)?;
     let c = sk.curves.get(ci)?;
-    if c.infinite || c.kind.is_freeform() {
+    if c.infinite {
         return None;
     }
+    if c.kind.is_freeform() {
+        return Some(TrimHover { how: TrimHoverOf::Freeform(super::sketch_freeform::FreeformTrim::new(sk, ci)?) });
+    }
     let sh = sk.shape(ci)?;
-    Some(TrimHover { sh, cuts: trim_cuts(sk, ci) })
+    Some(TrimHover { how: TrimHoverOf::Analytic { sh, cuts: trim_cuts(sk, ci) } })
 }
 
 impl TrimHover {
     /// The piece a trim at `at` takes away, as [`trim_piece`] answers it.
     pub fn piece(&self, at: Vec2) -> Option<Vec<Vec2>> {
-        let sh = &self.sh;
+        let (sh, cuts) = match &self.how {
+            TrimHoverOf::Analytic { sh, cuts } => (sh, cuts),
+            TrimHoverOf::Freeform(curve) => return curve.piece(at),
+        };
         let tq = sh.param(sh.project(at));
         let (t0, t1) = sh.range();
-        let (cuts, full) = self.cuts.around(tq);
+        let (cuts, full) = cuts.around(tq);
         let (a, b) = match (cuts.as_slice(), full) {
             ([], _) => (t0, t1),
             // A whole circle: the arc between the two crossings round `at`.
@@ -552,8 +563,8 @@ impl TrimHover {
 
 /// The piece of `curve` a trim at `at` takes away, as points along it, for the Trim tool to show
 /// under the cursor (#3052): the part between the crossings either side of `at`, as `sketch.trim`
-/// cuts it, or the whole curve where nothing crosses it. `None` where trim works otherwise (a
-/// free-form or infinite curve) or the curve isn't in the sketch: the tool shows the curve.
+/// cuts it, or the whole curve where nothing crosses it. `None` where trim refuses (an infinite
+/// curve) or the curve isn't in the sketch: the tool shows the curve.
 pub fn trim_piece(sk: &Sketch, curve: &str, at: Vec2) -> Option<Vec<Vec2>> {
     trim_hover(sk, curve)?.piece(at)
 }
@@ -3161,6 +3172,10 @@ fn offset_ladder(
     Ok((sides, sources))
 }
 
+/// What the offset reply says when a distance names a parameter that drives nothing (#12294).
+const UNLINKED_OFFSET: &str =
+    "the offset is trimmed and not linked to its source, so its distance expression does not drive it: changing the parameter will not move it";
+
 fn offset(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.offset";
     let ids = string_list(cmd, p, "curves")?;
@@ -3192,6 +3207,19 @@ fn offset(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "`symmetric` offsets both sides, so `side` has no side left to pick: drop one of them"));
     }
     let instances = offset_instances(s, p, cmd)?;
+    for key in ["param", "param2"] {
+        if p.get(key).is_some_and(|value| !value.is_null() && !value.is_string()) {
+            return Err(bad(cmd, format!("`{key}` must be a parameter name (a string)")));
+        }
+    }
+    let name = str_(p, "param");
+    let name2 = str_(p, "param2");
+    if name2.is_some() && expression2.is_none() {
+        return Err(bad(cmd, "`param2` names the dimension of the second side: give `distance2` too"));
+    }
+    if name.is_some() && name == name2 {
+        return Err(bad(cmd, "`param` and `param2` must be different names"));
+    }
     let ((sides, param, param2), info) = edit(s, p, cmd, true, |sk, doc| {
         sk.refresh_offsets()?;
         let rep = solve_current(sk, doc)?;
@@ -3200,8 +3228,19 @@ fn offset(s: &mut Session, p: &Value) -> Result<Value> {
         }
         sk.refresh_offsets()?;
         let eligible = sk.curves.iter().map(|c| c.id.clone()).collect::<std::collections::HashSet<_>>();
-        let param = doc.new_model_param(&expression, "mm");
-        let param2 = expression2.as_ref().map(|e| doc.new_model_param(e, "mm"));
+        let mut make = |name: Option<&str>, e: &str| match name {
+            Some(name) => doc.new_named_model_param(name, e, "mm").map_err(|error| bad(cmd, format!("param: {error}"))),
+            None => Ok(doc.new_model_param(e, "mm")),
+        };
+        // A chosen name is made before a generated one, so `param2: "d1"` is not taken by the
+        // `d1` generated for an unnamed first side.
+        let (param, param2) = if name.is_none() && name2.is_some() {
+            let param2 = expression2.as_ref().map(|e| make(name2, e)).transpose()?;
+            (make(name, &expression)?, param2)
+        } else {
+            let param = make(name, &expression)?;
+            (param, expression2.as_ref().map(|e| make(name2, e)).transpose()?)
+        };
         let made: Vec<String> = std::iter::once(param.clone()).chain(param2.clone()).collect();
         let mut pending = ids.clone();
         let mut sides = Vec::new();
@@ -3240,7 +3279,14 @@ fn offset(s: &mut Session, p: &Value) -> Result<Value> {
         [(_, only)] => only.association.clone(),
         _ => None,
     };
-    reply(cmd, OffsetResult { curves, constraints, sketch: info, sides: each, param, instances, param2, association, param_warnings: Vec::new() })
+    // A trimmed offset (a spline with another curve) is not linked to its source, so a distance
+    // that names a parameter drives nothing: say so instead of leaving `param` null unexplained (#12294).
+    let ignored = |expression: &str, param: &Option<String>| param.is_none() && !solidcraft_doc::expr::references(expression).is_empty();
+    let warning = (ignored(&expression, &param) || expression2.as_deref().is_some_and(|e| ignored(e, &param2))).then(|| UNLINKED_OFFSET.to_string());
+    reply(
+        cmd,
+        OffsetResult { curves, constraints, sketch: info, sides: each, param, instances, param2, association, warning, param_warnings: Vec::new() },
+    )
 }
 
 fn break_offset(s: &mut Session, p: &Value) -> Result<Value> {
@@ -3469,7 +3515,7 @@ fn copy_through(
     keep: &dyn Fn(Vec2) -> bool,
     scale_r: f64,
 ) -> Result<(Vec<usize>, Vec<(usize, usize)>)> {
-    if sk.curves.len().saturating_add(cs.len()) > solidcraft_sketch::MAX_CURVES {
+    if sk.curves.len().saturating_add(cs.len()) > solidcraft_sketch::limits::max_curves() {
         return Err(solidcraft_sketch::SketchError::TooLarge.into());
     }
     let pts = involved_points(sk, cs, ps);
@@ -3746,6 +3792,7 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
     let rotate_constraints = bool_(p, "rotate_constraints").unwrap_or(true);
     let selection = string_list(cmd, p, "entities")?;
     let (planar, drawn) = if copy { drawn_copy_selection(s, p, selection)? } else { (selection, Vec::new()) };
+    let mut released = Vec::new();
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let (mut cs, mut ps) =
             if planar.is_empty() && !drawn.is_empty() { (Vec::new(), Vec::new()) } else { entities(sk, &json!({"entities": planar}), cmd)? };
@@ -3777,16 +3824,18 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
             return Ok(ids);
         }
         with_ellipse_axes(sk, &mut cs);
+        let held = holding(sk, &involved_points(sk, &cs, &ps));
         transform_in_place(sk, &cs, &ps, &f, 1.0, cmd)?;
         if rotate_constraints {
             let moved = involved_points(sk, &cs, &ps);
             rotate_axis_constraints(sk, doc, &moved, ang)?;
         }
+        released = release_broken(sk, &held);
         cs.extend(text_curves);
         Ok(ids_of(sk, &cs))
     })?;
     s.doc_mut().prune_model_params();
-    reply(cmd, MoveResult { curves: out, sketch: info, param_warnings: Vec::new() })
+    reply(cmd, MoveResult { curves: out, released, sketch: info, param_warnings: Vec::new() })
 }
 
 /// Scale, turn and move the entities in one step: scaled about `center`, then turned about it,
@@ -3873,17 +3922,70 @@ fn scale_dimensions(sk: &mut Sketch, doc: &mut solidcraft_doc::Document, curves:
     Ok(())
 }
 
+/// The constraints that tie the points about to move to points that stay (a corner on the
+/// origin, a distance to a line left behind) and hold now: their ids and type names. Constraints
+/// among the moved points alone (a rectangle's sides, a line's typed angle) move with them and
+/// are kept.
+fn holding(sk: &Sketch, moved: &[usize]) -> Vec<(String, &'static str)> {
+    sk.constraints
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| {
+            let touched = sk.constraint_points(&c.kind);
+            touched.iter().any(|q| moved.contains(q)) && touched.iter().any(|q| !moved.contains(q))
+        })
+        .filter(|(ci, c)| solidcraft_sketch::constraint_residual(sk, *ci).is_some_and(|r| r <= broken_at(sk, &c.kind)))
+        .map(|(_, c)| (c.id.clone(), c.kind.name()))
+        .collect()
+}
+
+/// After a move: the constraints of `held` that no longer hold are let go. Kept, the solve
+/// would pull the moved geometry back to what stays and bend it (#2980). Returns every
+/// constraint of `held` the move let go, these and the origin holds the move itself dropped
+/// (#5034), as `{id, kind}` for the status line to name them.
+fn release_broken(sk: &mut Sketch, held: &[(String, &'static str)]) -> Vec<Value> {
+    let broken: Vec<String> = sk
+        .constraints
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| held.iter().any(|(id, _)| *id == c.id))
+        .filter(|(ci, c)| solidcraft_sketch::constraint_residual(sk, *ci).is_some_and(|r| r > broken_at(sk, &c.kind)))
+        .map(|(_, c)| c.id.clone())
+        .collect();
+    sk.constraints.retain(|c| !broken.contains(&c.id));
+    held.iter().filter(|(id, _)| !sk.constraints.iter().any(|c| c.id == *id)).map(|(id, kind)| json!({"id": id, "kind": kind})).collect()
+}
+
+/// A residual above this is a constraint that doesn't hold. A distance is judged against the size
+/// of the geometry the constraint itself touches, so a far-away point elsewhere in the sketch can't
+/// hide a broken one; the sine or cosine between two lines has no length to scale by.
+fn broken_at(sk: &Sketch, kind: &ConstraintKind) -> f64 {
+    let direction_only = match *kind {
+        ConstraintKind::Parallel { .. } | ConstraintKind::Perpendicular { .. } => true,
+        ConstraintKind::Horizontal { l } | ConstraintKind::Vertical { l } => sk.curves.get(l).is_some_and(|c| c.infinite),
+        _ => false,
+    };
+    if direction_only {
+        return 1e-7;
+    }
+    1e-7 * sk.constraint_points(kind).iter().filter_map(|&q| sk.points.get(q)).map(|p| p.pos.len()).fold(1.0, f64::max)
+}
+
 fn scale(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.scale";
     let k = num(p, "factor").filter(|k| *k > 1e-9 && *k < 1e6).ok_or_else(|| bad(cmd, "`factor` must be a positive number"))?;
-    let (out, info) = edit(s, p, cmd, false, |sk, _| {
+    let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let (mut cs, ps) = entities(sk, p, cmd)?;
         with_ellipse_axes(sk, &mut cs);
         let b = if p.get("base").is_some() { point_or_ref(sk, p, "base", cmd)? } else { Vec2::ZERO };
         let f = move |q: Vec2| b + (q - b) * k;
         transform_in_place(sk, &cs, &ps, &f, k, cmd)?;
+        // The dimensions go with the geometry, else the solve pulls it back to the old sizes (#14411).
+        let moved = involved_points(sk, &cs, &ps);
+        scale_dimensions(sk, doc, &cs, &moved, k)?;
         Ok(ids_of(sk, &cs))
     })?;
+    s.doc_mut().prune_model_params();
     reply(cmd, ScaleResult { curves: out, sketch: info, param_warnings: Vec::new() })
 }
 
@@ -3902,3 +4004,7 @@ mod corner_tests;
 #[cfg(test)]
 #[path = "sketch_trim_path_tests.rs"]
 mod trim_path_tests;
+
+#[cfg(test)]
+#[path = "offset_param_name_tests.rs"]
+mod offset_param_name_tests;

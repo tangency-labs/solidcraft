@@ -1,0 +1,174 @@
+{
+  "area": "ladder/06-threads",
+  "bodies": {
+    "b13": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b22": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b23"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b23"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b24"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b22"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b25"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b25"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b26"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b24"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b27"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b26"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b28"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b27",
+        "b28"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b29"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "021-internal-rp-1-2",
+  "expected": {
+    "body_count": 1,
+    "method": "groove volume per turn 2 pi int r w(r) dr over the material it cuts (Pappus on the axial section; a screw motion), w(r) = P - flat - depth (tan a + tan b); six whole turns through the block, both ends free, so V = stock - 6 x that. Tolerance 0.01%: SMLib's exact screw sweep. the space between the teeth is a groove of straight flanks, its tooth (H - h) tan(half angle) wide at the crest and its groove as wide at the root (the truncations split equally); the standard's crest and root rounds are flats here. ISO 7-1 Rp 1/2, the parallel internal thread an R screws into: the ISO 228-1 profile (H = 0.960491 P, h = 0.640327 P) at the gauge diameters, d = 20.955, D1 = d - 2h = 18.631, the bore; the groove from the bore wall out to r 10.4775, w(r) = P - 0.16667 P - (r - 9.3155) 2 tan27.5",
+    "source": "analytic",
+    "sources": [],
+    "tolerance": {
+      "rel": 0.0001
+    },
+    "volume_mm3": 14061.219568064,
+    "what": "a modelled Rp 1/2 parallel internal pipe thread (ISO 7-1) in a d18.631 (its minor) bore through a 40x40 block six turns thick"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 5528.39986772297,
+      "body_count": 1,
+      "edges": 96,
+      "faces": 34,
+      "vertices": 64,
+      "volume_mm3": 14061.220081960184
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 129,
+      "faces": 53,
+      "vertices": 78
+    }
+  },
+  "records": "021-internal-rp-1-2.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b29"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 5528.39986772297,
+      "body_count": 1,
+      "edges": 96,
+      "faces": 34,
+      "vertices": 64,
+      "volume_mm3": 14061.220081960184
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "screw_sweep",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a modelled Rp 1/2 parallel internal pipe thread (ISO 7-1) in a d18.631 (its minor) bore through a 40x40 block six turns thick",
+  "why_not": []
+}

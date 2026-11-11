@@ -930,7 +930,7 @@ mod tests {
     /// a guide only on the cam's own side is refused.
     #[test]
     fn the_guide_is_the_side_fewer_moving_joints_from_the_frame() {
-        let origin = JointOrigin { occurrence: 0, snap: super::super::Snap::Point { point: Vec3::ZERO, z: None, x: None } };
+        let origin = JointOrigin::new(0, super::super::Snap::Point { point: Vec3::ZERO, z: None, x: None });
         let joint = |id: u64, kind: JointKind, a: u64, b: u64| super::super::Joint {
             id,
             name: format!("J{id}"),
@@ -944,6 +944,8 @@ mod tests {
             angle: 0.0,
             suppressed: false,
             exprs: Default::default(),
+            captured: None,
+            constraint: None,
         };
         let occ = |id: u64, grounded: bool| crate::Occurrence { id, component: id, parent: 0, name: format!("O{id}"), transform: IDENTITY, grounded };
         // 1 frame (grounded), 2 cam, 3-6 a rigid chain to the guide 7, 8 the piston, 9 crank, 10 rod.
