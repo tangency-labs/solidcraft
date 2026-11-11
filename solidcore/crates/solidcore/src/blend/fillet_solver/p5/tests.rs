@@ -1173,7 +1173,10 @@ fn landed_p3_refinement_is_a_noop_without_small_intervals_and_restores_errors() 
         .unwrap_err();
     assert_eq!(
         error,
-        SolidError::sm_err("blend::fillet_solver::p3::refine_rail_curve_classification")
+        SolidError::blend_failed(
+            "blend::fillet_solver::p3::refine_rail_curve_classification",
+            "a small classification interval could not be removed"
+        )
     );
     let cc = f.fb.fillet_edge(rail).unwrap().curve_class().unwrap();
     assert_eq!(cc.size(), 3);
@@ -1195,7 +1198,10 @@ fn landed_p3_rail_intersection_reports_the_actual_missing_face_use() {
         .unwrap_err();
     assert_eq!(
         error,
-        SolidError::null_pointer("blend::fillet_solver::p3::calc_rail_x_edge")
+        SolidError::blend_missing(
+            "blend::fillet_solver::p3::calc_rail_x_edge",
+            "the side edge's edge use on the rail's face"
+        )
     );
     assert!(f.owners.notifications.is_empty());
 }
