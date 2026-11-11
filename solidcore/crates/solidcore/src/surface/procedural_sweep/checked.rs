@@ -9,7 +9,9 @@ use std::sync::{Mutex, OnceLock};
 
 use super::screw_offset::ScrewOffsetSection;
 use super::{Ivl, ProceduralSweep, TAU};
-use crate::blend::fillet_section::interval::{sin_cos_certified, tan_certified};
+use crate::blend::fillet_section::interval::{
+    sin_cos_certified, sin_cos_point_certified, tan_certified,
+};
 use crate::error::{Result, SolidError};
 use crate::math::{Point2, Point3, Vec3};
 use crate::nurbs::math::gamma;
@@ -226,7 +228,26 @@ pub(super) struct Rotation {
     cosine_box: Ivl,
 }
 impl Rotation {
+    /// The checked rotation by `theta`: its sine and cosine checked against the
+    /// enclosures of a series stopped once its tail is negligible
+    /// ([`sin_cos_point_certified`]), and only where those cannot prove them, against
+    /// the twenty-step ones ([`sin_cos_certified`]); it passes when either proves them,
+    /// so the order never changes an answer.
     pub(super) fn new(theta: f64) -> Result<Self> {
+        let (s, c) = sin_cos_point_certified(theta);
+        match (verify(theta.sin(), s, theta), verify(theta.cos(), c, theta)) {
+            (Ok(sine), Ok(cosine)) => Ok(Self {
+                sine,
+                cosine,
+                sine_box: s,
+                cosine_box: c,
+            }),
+            _ => Self::new_full(theta),
+        }
+    }
+
+    /// [`Self::new`] against the twenty-step enclosures alone.
+    fn new_full(theta: f64) -> Result<Self> {
         let (s, c) = sin_cos_certified(Ivl::from(theta));
         Ok(Self {
             sine: verify(theta.sin(), s, theta)?,

@@ -288,6 +288,70 @@ pub(crate) fn sin_cos_certified(angle: Ivl) -> (Ivl, Ivl) {
     }
 }
 
+/// The term [`sin_cos_point_certified`] stops at: a tail under it moves neither
+/// enclosure by more than `2^-70` (about `1e-21`).
+const POINT_SERIES_REST: f64 = 8.470_329_472_543_003e-22;
+
+/// [`sin_cos_local`] stopped at the first step whose terms are both under
+/// [`POINT_SERIES_REST`]: those terms are left out and widen the sums instead, as the
+/// twenty-first terms do there.
+///
+/// Soundness: on `|x| <= 1.5` the terms of both series fall from the first
+/// (`x^2 / (2n (2n + 1)) <= 2.25 / 6 < 1`), so each alternating tail is bounded by its
+/// first term left out, whichever step the sum stops at; [`sin_cos_local`] takes the
+/// same bound after twenty steps.
+fn sin_cos_local_stopped(x: Ivl) -> (Ivl, Ivl) {
+    if !x.lo.is_finite() || !x.hi.is_finite() || x.lo > x.hi || x.mag() > 1.5 {
+        return (Ivl::whole(), Ivl::whole());
+    }
+    let square = x * x;
+    let mut sine = x;
+    let mut cosine = Ivl::from(1.0);
+    let mut st = x;
+    let mut ct = Ivl::from(1.0);
+    let [sine_steps, cosine_steps] = taylor_steps();
+    for (n, (s_step, c_step)) in (1..=20_u32).zip(sine_steps.iter().zip(cosine_steps)) {
+        st = st * square * *s_step;
+        ct = ct * square * *c_step;
+        if st.mag() <= POINT_SERIES_REST && ct.mag() <= POINT_SERIES_REST {
+            let (sr, cr) = (st.mag(), ct.mag());
+            return (sine + Ivl::new(-sr, sr), cosine + Ivl::new(-cr, cr));
+        }
+        if n % 2 == 0 {
+            sine = sine + st;
+            cosine = cosine + ct;
+        } else {
+            sine = sine - st;
+            cosine = cosine - ct;
+        }
+    }
+    let sr = (st * square / Ivl::from(42.0 * 43.0)).mag();
+    let cr = (ct * square / Ivl::from(41.0 * 42.0)).mag();
+    (sine + Ivl::new(-sr, sr), cosine + Ivl::new(-cr, cr))
+}
+
+/// The sine and cosine of the double `angle`, enclosed with the quadrant reduction of
+/// [`sin_cos_certified`] and the series stopped once its tail is negligible
+/// ([`sin_cos_local_stopped`]): as sound, at most about `1e-21` wider, about half the
+/// steps for a reduced angle under `pi / 4`.
+pub(crate) fn sin_cos_point_certified(angle: f64) -> (Ivl, Ivl) {
+    let angle = Ivl::from(angle);
+    let quadrant = (angle.mid() / std::f64::consts::FRAC_PI_2).round();
+    if !quadrant.is_finite() || quadrant.abs() > 4_503_599_627_370_496.0 {
+        return (Ivl::whole(), Ivl::whole());
+    }
+    let tau = std::f64::consts::TAU;
+    let reduced = angle - Ivl::from(quadrant) * (Ivl::checked(tau, tau) / Ivl::from(4.0));
+    let (s, c) = sin_cos_local_stopped(reduced);
+    let negative = |x: Ivl| Ivl::from(0.0) - x;
+    match (quadrant as i64) & 3 {
+        0 => (s, c),
+        1 => (c, negative(s)),
+        2 => (negative(s), negative(c)),
+        _ => (negative(c), s),
+    }
+}
+
 /// Tangent on an interval inside [-1.5,1.5]. Monotonic endpoint evaluation uses
 /// the same Taylor primitive as sine/cosine and proves the denominator positive.
 /// An unproved finite tangent returns the whole line.
@@ -835,6 +899,40 @@ mod tests {
                 bits(divided(Ivl::from(x)))
             );
         }
+    }
+
+    /// The stopped point series meets the twenty-step one and is no wider than it past
+    /// its stopping term and a few roundings (it takes fewer).
+    #[test]
+    fn the_stopped_point_series_meets_the_full_one() {
+        let close = |p: Ivl, f: Ivl| {
+            let slack = 4.0 * POINT_SERIES_REST + 1.0e-15 * f.mag();
+            p.lo <= f.hi && f.lo <= p.hi && p.lo >= f.lo - slack && p.hi <= f.hi + slack
+        };
+        for i in -4000..=4000 {
+            for x in [
+                f64::from(i) * 2.5e-3,
+                f64::from(i) * 0.7 + 1.0e-3,
+                f64::from(i) * 1.0e-9,
+            ] {
+                let (ps, pc) = sin_cos_point_certified(x);
+                let (fs, fc) = sin_cos_certified(Ivl::from(x));
+                assert!(
+                    close(ps, fs) && close(pc, fc),
+                    "{x}: {ps:?} {fs:?} {pc:?} {fc:?}"
+                );
+                assert!(
+                    ps.lo <= x.sin() + 1.0e-15 && x.sin() - 1.0e-15 <= ps.hi,
+                    "{x}"
+                );
+                assert!(
+                    pc.lo <= x.cos() + 1.0e-15 && x.cos() - 1.0e-15 <= pc.hi,
+                    "{x}"
+                );
+            }
+        }
+        assert_eq!(sin_cos_point_certified(f64::NAN).0, Ivl::whole());
+        assert_eq!(sin_cos_point_certified(1.0e300).1, Ivl::whole());
     }
 
     #[test]
