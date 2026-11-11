@@ -3611,19 +3611,17 @@ mod tests_c5 {
             .unwrap()
             .set_fillet_edge_type(FilletEdgeType::CrossSection);
         f.fb.geom_mut(f.g).unwrap().edges.push(rail);
-        // CalcCrossSection (blend.fillet_geom_p5) runs: no fillet surface on the
-        // edge's geometry, SM_ERR_NULL_POINTER
+        // CalcCrossSection (blend.fillet_geom_p5) runs: the edge has no original face,
+        // a typed blend failure that keeps SM_ERR_NULL_POINTER (#13790)
         let e = f.run().unwrap_err();
-        assert!(
-            matches!(
-                e,
-                SolidError::Upstream {
-                    code: SM_ERR_NULL_POINTER,
-                    ..
-                }
-            ),
-            "{e:?}"
+        assert_eq!(
+            e,
+            SolidError::blend_missing(
+                "blend::fillet_geom::p5::FilletBrep::calc_cross_section",
+                "the edge's original face"
+            )
         );
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
 
         // a cross-section edge of a blends geometry is not calculated
         let mut f = Fixture::new();
