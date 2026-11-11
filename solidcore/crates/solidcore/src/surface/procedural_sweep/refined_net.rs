@@ -1005,10 +1005,6 @@ mod tests {
         let coefficient_error = candidate_coefficient_error(&definition, &refined).unwrap();
         assert!(coefficient_error < 1e-9, "{coefficient_error}");
         let exact_bound = exact_real_error_bound(&definition, &refined).unwrap();
-        println!(
-            "coefficient={coefficient_error:e} exact_real={exact_bound:e} original={:e}",
-            definition.bound()
-        );
         assert!(exact_bound < definition.bound() * 0.5, "{exact_bound}");
         let net_rounding = net_evaluation_rounding(&refined).unwrap();
         assert!(net_rounding < 1e-9, "{net_rounding}");
@@ -1126,11 +1122,6 @@ mod tests {
         let pieces = pieces_for_lift(&definition, 3e-6).unwrap();
         let net = candidate_refined_net(&definition, &profile, pieces).unwrap();
         let bound = exact_real_error_bound(&definition, &net).unwrap();
-        println!(
-            "profile_rows={} refined_spans={} exact_real={bound:e}",
-            profile.canonical().unwrap().control_points.len(),
-            net.canonical().unwrap().v_knots.len() - 1
-        );
         assert!(bound < 1e-5, "{bound}");
         assert_eq!(definition.stations(), stations);
         for t in [0.173, 5.123, 19.321, 41.234, 62.41] {
