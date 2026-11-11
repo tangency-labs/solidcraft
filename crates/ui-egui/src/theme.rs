@@ -647,8 +647,8 @@ mod tests {
                 assert_eq!(t.file_primary, t.accent_soft, "{id} {a:?}: the File view's primary action follows");
                 for tab in ["SKETCH", "SURFACE", "SHEET METAL"] {
                     assert_eq!(
-                        solidcraft_theme::TabAccent::for_tab(&t, tab).color,
-                        solidcraft_theme::TabAccent::for_tab(base, tab).color,
+                        crate::workspace::tab_accent(&t, tab).color,
+                        crate::workspace::tab_accent(base, tab).color,
                         "{id}: {tab} keeps its own accent"
                     );
                 }
