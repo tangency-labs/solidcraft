@@ -217,33 +217,29 @@ fn close_button(ui: &egui::Ui, rect: Rect, id: egui::Id, left: Option<f32>) -> e
 /// the card, which button was clicked, if any, and where each button is (for handles); `None`
 /// where `free` has no room for it. The buttons and the × are not live while input is blocked
 /// ([`crate::input_blocked`]); none is laid outside the card, whose width is bounded by `free`.
-pub fn show(
-    ui: &egui::Ui,
-    free: Rect,
-    place: Place,
-    text: String,
-    lead: Lead,
-    actions: &[(&str, Action)],
-    extras: Extras<'_>,
-) -> Option<Shown> {
+pub fn show(ui: &egui::Ui, free: Rect, place: Place, text: String, lead: Lead, actions: &[(&str, Action)], extras: Extras<'_>) -> Option<Shown> {
     // Rects no screen has are rejected too: the corner layout anchors to `free`'s right edge.
     if !free.is_finite() || !free.is_positive() || free.width() <= 40.0 || free.max.x.abs().max(free.max.y.abs()) > 1.0e7 {
         return None;
     }
     let t = Tokens::get();
     let corner = place == Place::Corner;
+    // The lead (dot or spinner) is centred in the first `space_14` of a `2 × space_14` column, the
+    // text follows it and `space_12` closes the right side; `space_8` above and below.
+    let inset = vec2(2.0 * t.space_14, t.space_8);
+    let padding = vec2(inset.x + t.space_12, 2.0 * inset.y);
     let painter = ui.painter().with_clip_rect(free);
     // In the corner every toast is `WIDTH` wide (or the room there is); at the centre each is as
     // wide as its text, up to 440 points.
-    let wrap = if corner { (WIDTH.min(free.width()) - 40.0).max(0.0) } else { (free.width() - 40.0).min(440.0) };
+    let wrap = if corner { (WIDTH.min(free.width()) - padding.x).max(0.0) } else { (free.width() - padding.x).min(440.0) };
     // The × keeps the top-right corner: the text stops short of its ring.
     let radius = close_radius();
-    let close_room = if extras.close.is_some() { 2.0 * radius + t.space_4 + t.space_8 - 12.0 } else { 0.0 };
+    let close_room = if extras.close.is_some() { 2.0 * radius + t.space_4 + t.space_8 - t.space_12 } else { 0.0 };
     let galley = painter.layout(text, crate::type_face::medium(t.font_label), t.text, (wrap - close_room).max(0.0));
     // The buttons: each as wide as its text and a margin, in rows no wider than the text may be.
     let gap = t.space_8;
     let button_height = crate::row_height();
-    let row_width = if corner { wrap } else { (free.width() - 40.0).clamp(0.0, 440.0) };
+    let row_width = if corner { wrap } else { (free.width() - padding.x).clamp(0.0, 440.0) };
     // Each button's width as the kit drew it: the same text, font and padding, measured from the
     // button itself. Before a button was ever drawn, an estimate stands in for one frame.
     let sizes: Vec<(f32, Action)> = actions
@@ -256,18 +252,15 @@ pub fn show(
             (width.min(row_width), *kind)
         })
         .collect();
-    let spots = if corner {
-        action_spots_trailing(&sizes, row_width, gap, button_height)
-    } else {
-        action_spots(&sizes, row_width, gap, button_height)
-    };
+    let spots =
+        if corner { action_spots_trailing(&sizes, row_width, gap, button_height) } else { action_spots(&sizes, row_width, gap, button_height) };
     let widest = spots.iter().map(|spot| spot.right()).fold(0.0, f32::max);
     let y = spots.iter().map(|spot| spot.top()).fold(0.0, f32::max);
     let actions_height = if spots.is_empty() { 0.0 } else { y + button_height + gap };
     let content = vec2((galley.size().x + close_room).max(widest), galley.size().y + actions_height);
-    let mut size = content + vec2(40.0, 16.0);
+    let mut size = content + padding;
     if corner {
-        size.x = row_width + 40.0;
+        size.x = row_width + padding.x;
     }
     if extras.close.is_some() {
         size.y = size.y.max(2.0 * radius + 12.0);
@@ -282,12 +275,12 @@ pub fn show(
     }
     let frame = Container::new(ui.ctx(), Surface::Toast).frame(ui.ctx(), t.panel, crate::frame::Side::Left);
     Container::paint_frame(ui.painter(), frame, r.shrink(frame.stroke.width));
-    let dot = pos2(r.left() + 14.0, r.center().y.min(r.top() + 8.0 + galley.size().y / 2.0));
+    let dot = pos2(r.left() + t.space_14, r.center().y.min(r.top() + inset.y + galley.size().y / 2.0));
     match lead {
-        Lead::Spinner => egui::Spinner::new().size(12.0).color(t.text).paint_at(ui, Rect::from_center_size(dot, vec2(12.0, 12.0))),
+        Lead::Spinner => egui::Spinner::new().size(t.space_12).color(t.text).paint_at(ui, Rect::from_center_size(dot, vec2(t.space_12, t.space_12))),
         Lead::Dot(error) => drop(painter.circle_filled(dot, 3.0, if error { t.error } else { t.text })),
     }
-    let text_top = r.min + vec2(28.0, 8.0);
+    let text_top = r.min + inset;
     painter.galley(text_top, galley.clone(), t.text);
     // The card's own click goes first, so its buttons and × (added after it) take theirs. With
     // input blocked it is dead too, so a click on the dead × doesn't fall through to it.

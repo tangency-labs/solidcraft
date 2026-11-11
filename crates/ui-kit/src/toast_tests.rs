@@ -111,7 +111,9 @@ fn the_card_sits_at_the_bottom_of_the_free_part() {
             let extras = Extras { close: Some("toast:test:close"), ..Extras::default() };
             shown.push(show(ui, free, place, "A short message".into(), Lead::Dot(true), &[("Undo", Action::Secondary)], extras));
         }
-        for bad in [Rect::NOTHING, Rect::from_min_size(pos2(0.0, 0.0), vec2(30.0, 30.0)), Rect::from_min_size(pos2(f32::NAN, 0.0), vec2(800.0, 500.0))] {
+        for bad in
+            [Rect::NOTHING, Rect::from_min_size(pos2(0.0, 0.0), vec2(30.0, 30.0)), Rect::from_min_size(pos2(f32::NAN, 0.0), vec2(800.0, 500.0))]
+        {
             assert!(show(ui, bad, Place::Centre, "Message".into(), Lead::Spinner, &[], Extras::default()).is_none(), "{bad:?}");
         }
     });
