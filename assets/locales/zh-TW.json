@@ -2744,7 +2744,6 @@
   "prefs.move_drag_highlights_tip": "關閉：用移動的箭頭拖動組件時，不高亮指針下的對象，大型裝配體也能保持流暢。顯示剖切或分析時仍照常高亮；沿關節拖動零件時從不高亮。",
   "prefs.navigation": "導航",
   "prefs.navigation.axes_signed": "座標軸",
-  "prefs.navigation.cube_compact": "立方體",
   "prefs.navigation.device": "設備",
   "prefs.navigation.free": "自由",
   "prefs.navigation.orbit_style": "旋轉方式",

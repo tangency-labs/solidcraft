@@ -2350,7 +2350,7 @@ mod tests {
 
     #[test]
     fn imported_ids_never_take_a_built_in_or_mode_id_and_replace_their_own() {
-        crate::test_support::host_data();
+        crate::test_support::install_catalog();
         let mut custom = Vec::new();
         let mk = |name: &str| ThemeFile { id: slug(name), name: name.into(), ..Default::default() };
         assert_eq!(add(&mut custom, mk("Gruvbox Dark")).unwrap(), "custom-gruvbox-dark");
@@ -2365,10 +2365,6 @@ mod tests {
         }
         assert!(add(&mut custom, mk("one too many")).is_err());
         assert!(find("gruvbox-dark", &custom).is_some() && find("mine", &custom).is_some() && find("dark", &custom).is_none());
-    }
-
-    fn radius_values(mut tokens: Tokens) -> Vec<u8> {
-        RADIUS_KEYS.iter().map(|key| *radius_slot(&mut tokens, key).unwrap()).collect()
     }
 
     #[test]

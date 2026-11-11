@@ -1,5 +1,5 @@
 //! Navigation drawing definitions. Camera projection and picking remain in the UI widgets.
-use egui::{Pos2, Shape, Stroke, pos2, vec2};
+use egui::{Pos2, Shape, Stroke, vec2};
 use solidcraft_theme::Tokens;
 pub(crate) fn arrow(painter: &egui::Painter, at: Pos2, direction: egui::Vec2, hover: bool, t: Tokens) {
     let side = vec2(-direction.y, direction.x);

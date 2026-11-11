@@ -2473,7 +2473,6 @@
   "prefs.move_drag_highlights_tip": "Désactivé : pendant que les flèches de Déplacer font glisser un composant, rien n’est mis en évidence sous le pointeur, ce qui garde les grands assemblages fluides. Avec une coupe ou une analyse affichée, la mise en évidence reste, et une pièce glissée le long de ses liaisons n’en montre jamais.",
   "prefs.navigation": "Navigation",
   "prefs.navigation.axes_signed": "Axes",
-  "prefs.navigation.cube_compact": "Cube",
   "prefs.navigation.device": "Appareil",
   "prefs.navigation.free": "Libre",
   "prefs.navigation.orbit_style": "Style d'orbite",
