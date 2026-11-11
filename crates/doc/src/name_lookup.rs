@@ -52,7 +52,9 @@ pub struct EdgeHit {
 /// The edge of a body a stored edge name finds: the edge with that name; else the one edge
 /// between the faces it names exactly (see [`exactly`]). A numbered name (`~k`) was one of
 /// several edges between its faces, told apart only by where they lay, so the one edge left
-/// between them is it only where the reference's point still lies on it. `Err` explains when
+/// between them is it only where the reference's point still lies on it. A name whose faces no
+/// edge's faces answer to at all, one of them renamed since, is the edge of the other face the
+/// reference's point lies inside (see [`renamed_edge`]). `Err` explains when
 /// there is none: no such edge, the named edge split into several, one of several edges whose
 /// faces now bound one edge elsewhere, or a name saved before format 14.
 pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, String> {
@@ -77,13 +79,22 @@ pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, Str
     }
     // By the faces it separates: the best way any edge matches.
     let wanted = strip_edge_number(name);
-    let mut best: Option<(Match, Vec<usize>)> = None;
+    let (mut best, mut loose): (Option<(Match, Vec<usize>)>, bool) = (None, false);
     for (i, fs) in m.edge_faces.iter().enumerate() {
         let [fa, fb] = fs.as_slice() else { continue };
-        let Some(level) = edge_match(&faces, *fa as usize, *fb as usize, wanted).filter(|level| exactly(*level)) else { continue };
-        keep_best(&mut best, level, i);
+        let Some(level) = edge_match(&faces, *fa as usize, *fb as usize, wanted) else { continue };
+        if exactly(level) {
+            keep_best(&mut best, level, i);
+        } else {
+            loose = true;
+        }
     }
-    let (_, cands) = best.ok_or_else(|| format!("edge `{name}` no longer exists"))?;
+    let Some((_, cands)) = best else {
+        let renamed = if loose { None } else { renamed_edge(b, &m, &faces, wanted, near) };
+        return renamed
+            .map(|i| EdgeHit { edge: i, point: near, verified: false, on_point: true })
+            .ok_or_else(|| format!("edge `{name}` no longer exists"));
+    };
     // When the faces of several numbered edges bound one edge now, every one of their names
     // finds the faces of that edge: taking it for each would put them all on one edge (#13332).
     let numbered = wanted.len() != name.len();
@@ -144,10 +155,70 @@ fn exactly(level: Match) -> bool {
     matches!(level, Match::Exact | Match::Piece)
 }
 
+/// How far from an edge a picked point may lie and still be on it.
+fn pick_reach(b: &ModelBody) -> f64 {
+    (b.body.size() * 2e-3).max(1e-3)
+}
+
 /// Whether the picked point `near` lies on edge `i` of body `b` (whose mesh is `m`): then a
 /// reference keeps it.
 fn edge_near(b: &ModelBody, m: &Mesh, i: usize, near: Vec3) -> bool {
-    m.edges.get(i).is_some_and(|e| e.windows(2).any(|w| near.dist_to_segment(w[0], w[1]) < (b.body.size() * 2e-3).max(1e-3)))
+    m.edges.get(i).is_some_and(|e| e.windows(2).any(|w| near.dist_to_segment(w[0], w[1]) < pick_reach(b)))
+}
+
+/// The edge of body `b` whose exact curve passes through the picked point `near`, by its index
+/// in the body's mesh `m` (the mesh's edges are the B-rep's, in its order: the edge's faces are
+/// checked too). A point at an end of the edge is on the edges that meet there as well, so it
+/// names none. `None` too for a mesh body, or a point a pick's reach from every edge.
+fn edge_through(b: &ModelBody, m: &Mesh, near: Vec3) -> Option<usize> {
+    let reach = pick_reach(b);
+    let (d, i) = solidcraft_kernel::comb_edge_near(&b.body, near).ok().flatten()?;
+    let record = b.body.record();
+    let edge = record.edges.get(i)?;
+    let sorted = |mut fs: Vec<u32>| {
+        fs.sort_unstable();
+        fs.dedup();
+        fs
+    };
+    let same_faces = sorted(edge.uses.iter().map(|u| u.face).collect()) == sorted(m.edge_faces.get(i)?.clone());
+    let clear_of_ends = edge
+        .vertices
+        .iter()
+        .all(|v| record.vertices.get(*v as usize).is_some_and(|v| Vec3::new(v.point[0], v.point[1], v.point[2]).dist(near) > reach));
+    (d <= reach && same_faces && clear_of_ends).then_some(i)
+}
+
+/// The edge a stored edge name `wanted` (without its number) meant when no edge's faces answer to
+/// it at all: one of its two faces is still found exactly, the other finds no face although the
+/// feature that named it still made faces of body `b`, and the reference's point `near` lies inside
+/// an edge of the face still found (see [`edge_through`]). That feature named the face differently
+/// once (a design saved when a round wall took the name of a later join's face), so the point says
+/// which edge this is. A face whose feature made nothing on the body was removed, not renamed: its
+/// edges are gone, and so is the name.
+fn renamed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: Vec3) -> Option<usize> {
+    let count = faces.faces.len();
+    let found = |x: &str| {
+        let mut hits = (0..count).filter(|f| crate::history_names::matches(faces, *f, x).is_some_and(exactly));
+        hits.next().filter(|_| hits.next().is_none())
+    };
+    let renamed = |y: &str| {
+        crate::persistent_name::made_by(y).is_some_and(|id| faces.faces.iter().any(|f| crate::persistent_name::made_by(f) == Some(id)))
+            && (0..count).all(|f| crate::history_names::matches(faces, f, y).is_none())
+    };
+    // Every way the name splits into two face names (a face name may hold `|` itself); they must
+    // agree on the face still found.
+    let mut kept: Vec<usize> = Vec::new();
+    for (i, _) in wanted.match_indices('|') {
+        let (Some(x), Some(y)) = (wanted.get(..i), wanted.get(i + 1..)) else { continue };
+        for (x, y) in [(x, y), (y, x)] {
+            if let Some(f) = found(x).filter(|f| !kept.contains(f) && renamed(y)) {
+                kept.push(f);
+            }
+        }
+    }
+    let &[face] = kept.as_slice() else { return None };
+    let edge = edge_through(b, m, near)?;
+    b.body.record().edges.get(edge)?.uses.iter().any(|u| u.face as usize == face).then_some(edge)
 }
 
 /// The point of face `face` of a mesh nearest `p`, and how far it is.
