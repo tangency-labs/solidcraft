@@ -866,8 +866,9 @@ pub fn clamped_uniform(count: usize, degree: usize) -> Result<Vec<f64>> {
 ///
 /// # Errors
 ///
-/// [`SolidError::InvalidInput`] for a degree of 0 or past [`MAX_DEGREE`], or fewer than
-/// `degree + 1` points.
+/// [`SolidError::InvalidInput`] for a degree of 0 or past [`MAX_DEGREE`], fewer than
+/// `degree + 1` points, or more knots than [`crate::limits::MAX_ALLOC_BYTES`] holds;
+/// [`NurbsFailure::Memory`] when they cannot be reserved.
 pub fn periodic_uniform(count: usize, degree: usize) -> Result<Vec<f64>> {
     if degree == 0 || degree > MAX_DEGREE || count < degree + 1 {
         return Err(SolidError::invalid_input(
@@ -875,12 +876,23 @@ pub fn periodic_uniform(count: usize, degree: usize) -> Result<Vec<f64>> {
             "a degree of 0 or past the most, or too few points for it",
         ));
     }
-    let len = count.checked_add(2 * degree + 1).ok_or_else(|| {
-        SolidError::invalid_input("nurbs::knots::periodic_uniform", "too many points")
-    })?;
+    let len = count
+        .checked_add(2 * degree + 1)
+        .filter(|&len| crate::limits::fits::<f64>(len))
+        .ok_or_else(|| {
+            SolidError::invalid_input("nurbs::knots::periodic_uniform", "too many points")
+        })?;
+    let mut knots = Vec::new();
+    if !crate::limits::try_reserve_total(&mut knots, len) {
+        return Err(SolidError::nurbs(
+            "nurbs::knots::periodic_uniform",
+            NurbsFailure::Memory,
+        ));
+    }
     let n = count as f64;
     let p = degree as f64;
-    Ok((0..len).map(|i| (i as f64 - p) / n).collect())
+    knots.extend((0..len).map(|i| (i as f64 - p) / n));
+    Ok(knots)
 }
 
 #[cfg(test)]
@@ -928,7 +940,7 @@ mod tests {
         }
         // not a clamped vector: KnotVector::validate, upstream's clamped check, refuses it
         assert!(KnotVector::from_slice(&knots).unwrap().validate(3).is_err());
-        for (count, degree) in [(3, 3), (5, 0), (1, 1)] {
+        for (count, degree) in [(3, 3), (5, 0), (1, 1), (usize::MAX / 2, 1), (usize::MAX, 3)] {
             assert!(
                 periodic_uniform(count, degree).is_err(),
                 "{count}, {degree}"
