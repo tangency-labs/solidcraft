@@ -206,7 +206,10 @@ impl NurbsCurve {
         }
         if p < 1 || u.len() != n + p + 1 {
             // "SmGnSectionFSG: the centre line's NURBS data do not agree"
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the centre line's NURBS data do not agree",
+            ));
         }
         let rational = ws.len() == cps.len();
         let mut pw = Vec::new();
@@ -218,7 +221,10 @@ impl NurbsCurve {
             };
             let positive = w > 0.0;
             if !positive {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_failed(
+                    OP,
+                    "the centre line's weights are not positive",
+                ));
             }
             pw.extend_from_slice(&[cp.x * w, cp.y * w, cp.z * w, w]);
         }
@@ -363,7 +369,10 @@ pub fn curve_derivs_over(
         first = false;
     }
     if first {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "no piece covers the parameter",
+        ));
     }
     Ok(rd)
 }
@@ -518,7 +527,10 @@ fn partials_over_piece(
     let positive = w00.lo > 0.0;
     if !positive {
         // "SmGnSectionFSG: a face's weights are not positive over a box"
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "a face's weights are not positive over a box",
+        ));
     }
     let mut out = Partials::default();
     for a in 0..=lk {
@@ -635,7 +647,7 @@ pub fn leader_series_piecewise(
             }
         });
     }
-    out.ok_or_else(|| SolidError::sm_err(OP))
+    out.ok_or_else(|| SolidError::blend_failed(OP, "no piece encloses the box"))
 }
 
 /// `sm_GnLaw` (0d43b4c): a ball whose radius varies, its law r(s) over the leader's
@@ -685,7 +697,10 @@ pub fn law_series(
         derivs = derivs.min(law.curve.degree()?);
     }
     if derivs > MAX_S {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the radius law's order is past the most the series hold",
+        ));
     }
     let d = law.curve.evaluate(s, derivs, !before, false)?;
     let mut fact = 1.0_f64;
@@ -693,13 +708,18 @@ pub fn law_series(
         if i > 0 {
             fact *= i as f64;
         }
-        let di = d.get(i).ok_or_else(|| SolidError::sm_err(OP))?;
+        let di = d.get(i).ok_or_else(|| {
+            SolidError::blend_failed(OP, "the radius law has no derivative of this order")
+        })?;
         r.set(i, 0, di.x / fact);
     }
     let positive = r.at(0, 0) > 0.0;
     if !positive {
         // "SmGnSectionFSG: the radius law is not positive"
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the radius law is not positive",
+        ));
     }
     Ok(Some(r))
 }
@@ -722,7 +742,10 @@ pub fn law_series_over(law: &GnLaw<'_>, s: Ivl, order: usize) -> Result<Ser<Ivl>
         r.set(i, 0, at1(&d, i, VZ).x * (Ivl::from(1.0) / Ivl::from(fact)));
     }
     if !r.at(0, 0).is_positive() {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the radius is not proved positive",
+        ));
     }
     Ok(r)
 }
@@ -926,7 +949,7 @@ pub fn nurbs_partials_over_box(
             });
         }
     }
-    out.ok_or_else(|| SolidError::sm_err(OP))
+    out.ok_or_else(|| SolidError::blend_failed(OP, "no piece encloses the box"))
 }
 
 /// The refusal of a feet's box past a face's net in a direction its kind does not continue
@@ -1032,7 +1055,7 @@ pub fn nurbs_partials_over_box_ending(
             });
         }
     }
-    out.ok_or_else(|| SolidError::sm_err(OP))
+    out.ok_or_else(|| SolidError::blend_failed(OP, "no piece encloses the box"))
 }
 
 /// Whether `e` is the refusal of a foot past its face's domain end, which `gn_try!` passes on
@@ -3665,7 +3688,10 @@ pub fn gn_certify_span_reusing(
     let l_jets = if arc { 0 } else { n }; // the jets graded on their own: the arc's rails only
     if let Some(v) = vary.as_deref() {
         if !(a.w.is_finite() && b.w.is_finite()) {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::blend_failed(
+                OP,
+                "the varying jets' thumbweights are not finite",
+            ));
         }
         bar = gn_form_normalized(v.n, Ivl::from(a.w));
         for (q, oq) in o.iter_mut().enumerate() {
@@ -3835,7 +3861,7 @@ pub fn gn_certify_span_reusing(
             }
             k.check_cancelled(OP_CERTIFY_SPAN)?;
             let [ea, eb] = pair else {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::blend_failed(OP, "the span has no pair of ends"));
             };
             // the piece's enclosures ([`gn_fourth_over_series`]'s); the middle's also where
             // the piece's is not proved, for its feet's Taylor models (#14405)
@@ -5381,5 +5407,21 @@ mod tests {
         assert!(old_failed >= 8, "{old_failed}");
         assert!(ratios.len() >= 4 * 4, "{}", ratios.len());
         assert!(median > 100.0, "{median}");
+    }
+
+    #[test]
+    fn a_curve_without_a_span_is_a_typed_failure() {
+        let cn = NurbsCurve {
+            p: 1,
+            n: 2,
+            u: vec![0.0; 4],
+            pw: vec![0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0],
+        };
+        let error = curve_derivs_over(&cn, Ivl::new(0.0, 0.0), 1, None).unwrap_err();
+        assert_eq!(
+            error,
+            SolidError::blend_failed(OP, "no piece covers the parameter")
+        );
+        assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
     }
 }
