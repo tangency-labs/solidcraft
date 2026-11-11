@@ -7,7 +7,7 @@ use solidcore_record::Vec2;
 use solidcraft_geom::drawing_sheet::{self, Orientation, PaperSize};
 
 use super::*;
-use crate::format::DRAWING;
+use crate::format::{DRAWING, MAX_REAL};
 use crate::ids::{self, IdSource};
 
 const SEED: u64 = 13063;
@@ -234,6 +234,225 @@ fn mutated_symbol_files_read_or_are_refused() {
         let mut v = base.clone();
         let spot = format!("/symbols/{}{}", pick(seed, 1, 2), spots[pick(seed, 3, spots.len())]);
         *v.pointer_mut(&spot).unwrap() = values[pick(seed, 2, values.len())].clone();
+        if let Ok(read) = Drawing::from_json(&v.to_string()) {
+            read.validate().unwrap();
+            assert_eq!(Drawing::from_json(&read.to_json().unwrap()).unwrap(), read, "seed {seed}");
+        }
+    }
+}
+
+// Placements (#13063 Y2a): where a symbol sits, anchored as a note is.
+
+/// The drawing of [`with_symbols`] with a front view, and `Mark` placed three times: on the sheet
+/// (answering its prompt), on the view, and on an edge in the view. Their ids, in that order, and
+/// the view's.
+fn placed() -> (Drawing, [u64; 3], u64) {
+    use crate::drawing::Source as DrawingSource;
+    use crate::drawing::dimension::ModelEdge;
+    use crate::drawing::view::{View, ViewKind, ViewPlace};
+    use crate::drawing_view::{ViewDirection, ViewOverrides};
+    use solidcraft_geom::drawing_view::NamedView;
+    let (mut d, [mark, _]) = with_symbols();
+    let mut id_source = IdSource::seeded(SEED + 1);
+    let source = d.allocate_id(&mut id_source).unwrap();
+    d.sources.push(DrawingSource { id: source, path: None });
+    let (view, sheet) = (d.allocate_id(&mut id_source).unwrap(), d.sheets[0].id);
+    let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
+    d.add_views([Arc::new(View {
+        id: view,
+        sheet,
+        kind,
+        place: ViewPlace::At([150.0, 150.0]),
+        settings: ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() },
+        reference_shown_percent: 0.0,
+        label: None,
+    })]);
+    let edge = ModelEdge { body: "Bolt".into(), origin_feature: 4, name: "F1:side|F2:head".into(), path: vec![3] };
+    let anchors = [Anchor::Sheet(sheet), Anchor::View(view), Anchor::Edge { view, edge }];
+    let mut added = [0; 3];
+    for (i, (anchor, id)) in anchors.into_iter().zip(&mut added).enumerate() {
+        *id = d.allocate_id(&mut id_source).unwrap();
+        let answers = if i == 0 { BTreeMap::from([("rev".to_string(), "C".to_string())]) } else { BTreeMap::new() };
+        let place = PlacedSymbol { id: *id, symbol: mark, anchor, at: [40.0, 25.0], scale: 2.0, angle: FRAC_PI_2, answers };
+        d.placed_symbols.add([Arc::new(place)]);
+    }
+    d.validate().unwrap();
+    (d, added, view)
+}
+
+fn placement(v: &mut Value, id: u64) -> &mut Value {
+    let id = ids::encode(id);
+    v["placed_symbols"].as_array_mut().unwrap().iter_mut().find(|x| x["id"] == id).unwrap()
+}
+
+/// A placement saves its symbol by id, its anchor as a note's, its place, scale, angle and answers,
+/// and reads back as saved. An older drawing reads with none, and one with none writes none.
+#[test]
+fn placements_save_where_a_symbol_sits_and_read_back_as_saved() {
+    let (d, [on_sheet, on_view, _], view) = placed();
+    let mut v = file(&d);
+    let saved = placement(&mut v, on_sheet).clone();
+    assert_eq!(saved["symbol"], json!(ids::encode(d.placed_symbols.by_id(on_sheet).unwrap().symbol)));
+    assert_eq!(saved["anchor"], json!({"sheet": ids::encode(d.sheets[0].id)}));
+    assert_eq!((&saved["at"], &saved["scale"], &saved["angle"]), (&json!([40.0, 25.0]), &json!(2.0), &json!(FRAC_PI_2)));
+    assert_eq!(saved["answers"], json!({"rev": "C"}));
+    let other = placement(&mut v, on_view).clone();
+    assert_eq!(other["anchor"], json!({"view": ids::encode(view)}));
+    assert!(other.get("answers").is_none(), "no answers, none saved: {other}");
+    let read = Drawing::from_json(&v.to_string()).unwrap();
+    assert_eq!(read.placed_symbols, d.placed_symbols);
+    assert_eq!(read.to_json().unwrap(), d.to_json().unwrap(), "the same bytes again");
+    let mut older = file(&d);
+    older.as_object_mut().unwrap().remove("placed_symbols");
+    assert!(Drawing::from_json(&older.to_string()).unwrap().placed_symbols.is_empty());
+    let (bare, _) = with_symbols();
+    assert!(file(&bare).get("placed_symbols").is_none());
+    assert!(DRAWING.pending_names().iter().any(|name| name == "placed-symbols"), "{:?}", DRAWING.pending_names());
+}
+
+/// A drawing a newer build saved, with a field this build can't read, opens with its placements, as
+/// with its symbols.
+#[test]
+fn a_newer_builds_drawing_opens_with_its_placements() {
+    let (d, ..) = placed();
+    let mut v = file(&d);
+    v["format"] = json!(DRAWING.format_string(DRAWING.current() + 1));
+    v["future_views"] = json!([{"id": "a"}]);
+    let opened = Drawing::from_json(&v.to_string()).unwrap();
+    assert_eq!(opened.newer_file.as_ref().unwrap().not_understood, ["field `future_views`"]);
+    assert_eq!((&opened.symbols, &opened.placed_symbols), (&d.symbols, &d.placed_symbols));
+}
+
+/// An older build meets placements as one top-level field it doesn't know: everything they add sits
+/// there, so it sets that field aside, opens the rest unchanged and saving writes it back.
+#[test]
+fn an_older_build_sets_placements_aside_and_reads_the_rest() {
+    let (d, ..) = placed();
+    let mut without = d.clone();
+    without.placed_symbols.retain(|_| false);
+    let mut v = file(&d);
+    let placements = v.as_object_mut().unwrap().remove("placed_symbols").unwrap();
+    assert_eq!(v, file(&without), "nothing else in the file changes");
+    // As a build without them reads it: a newer format with a field it doesn't know.
+    v["format"] = json!(DRAWING.format_string(DRAWING.current() + 1));
+    v["unknown_placements"] = placements.clone();
+    let opened = Drawing::from_json(&v.to_string()).unwrap();
+    assert_eq!(opened.newer_file.as_ref().unwrap().not_understood, ["field `unknown_placements`"]);
+    assert_eq!((&opened.sheets, &opened.symbols, &opened.views), (&d.sheets, &d.symbols, &d.views));
+    let again: Value = serde_json::from_str(&opened.to_json().unwrap()).unwrap();
+    assert_eq!(again["unknown_placements"], placements, "saving writes them back");
+}
+
+/// What reading refuses, on both sides of every bound.
+#[test]
+fn the_placements_rules_are_kept_on_reading() {
+    let (d, [on_sheet, on_view, on_edge], _) = placed();
+    let rule = |rule: &str| format!("damaged drawing: placed symbol {}: {rule}", ids::encode(on_sheet));
+    let set = |key: &str, value: Value| refused(&d, |v| placement(v, on_sheet)[key] = value.clone());
+    let scale = rule("its scale is 0.01 to 100");
+    let sizes = [set("scale", json!(0.01)), set("scale", json!(100.0)), set("scale", json!(0.0099)), set("scale", json!(100.01))];
+    assert_eq!(sizes, ["read".to_string(), "read".into(), scale.clone(), scale.clone()]);
+    assert_eq!([set("scale", json!(0.0)), set("scale", json!(-1.0))], [scale.clone(), scale]);
+    // Any angle the file's own number check lets through is read; past it, that check refuses it first.
+    assert_eq!([set("angle", json!(-MAX_REAL)), set("angle", json!(MAX_REAL)), set("angle", json!(7.0 * TAU))], ["read", "read", "read"]);
+    assert!(set("angle", json!(-1e300)).ends_with("is out of range"), "the file's own number check, before the record's");
+    let place = rule("its place is at most 5000 mm on paper");
+    assert_eq!([set("at", json!([5000.0, -5000.0])), set("at", json!([0.0, 5000.001]))], ["read".to_string(), place]);
+    // Its symbol, sheet and view are the drawing's.
+    let gone = ids::encode(1);
+    assert_eq!(set("symbol", json!(gone)), rule(&format!("it places symbol {gone}, which the drawing doesn't have")));
+    assert_eq!(set("anchor", json!({"sheet": gone})), rule(&format!("it is on sheet {gone}, which the drawing doesn't have")));
+    assert_eq!(set("anchor", json!({"view": gone})), rule(&format!("it is on view {gone}, which the drawing doesn't have")));
+    // Each answer names one of the definition's prompts and is one line.
+    assert_eq!(set("answers", json!({"rev": "D", "weld": "x"})), rule("it answers `weld`, which symbol `Mark` doesn't prompt for"));
+    assert_eq!(set("answers", json!({"rev": ""})), "read");
+    assert_eq!(set("answers", json!({"rev": "x".repeat(4096)})), "read");
+    let line = rule("its answer to `rev`: a label is one line of at most 4096 bytes");
+    assert_eq!([set("answers", json!({"rev": "a\nb"})), set("answers", json!({"rev": "x".repeat(4097)}))], [line.clone(), line]);
+    // A NaN or infinite angle can't be written as JSON: the record refuses it before it is saved.
+    for angle in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut bad = d.clone();
+        let at = bad.placed_symbols.index_of(on_view).unwrap();
+        Arc::make_mut(bad.placed_symbols.get_mut(at).unwrap()).angle = angle;
+        let why = bad.validate().unwrap_err().to_string();
+        assert!(why.ends_with("its angle is a number"), "{angle}: {why}");
+    }
+    // Its id is the drawing's, and fields it doesn't know aren't read.
+    let edge_id = ids::encode(on_edge);
+    assert_eq!(refused(&d, |v| placement(v, on_view)["id"] = json!(edge_id)), format!("damaged drawing: two objects have the id {edge_id}"));
+    assert!(set("leader", json!(true)).starts_with("damaged drawing: "));
+    // At most MAX_PLACEMENTS.
+    let many = |n: usize| {
+        let mut v = file(&d);
+        let one = placement(&mut v, on_sheet).clone();
+        let copies = (1..=n as u64).map(|i| {
+            let mut copy = one.clone();
+            copy["id"] = json!(ids::encode(i));
+            copy
+        });
+        v["placed_symbols"] = Value::Array(copies.collect());
+        Drawing::from_json(&v.to_string()).map(|d| d.placed_symbols.len()).map_err(|e| e.to_string())
+    };
+    assert_eq!(many(MAX_PLACEMENTS), Ok(MAX_PLACEMENTS));
+    assert_eq!(many(MAX_PLACEMENTS + 1), Err(format!("damaged drawing: a drawing has at most {MAX_PLACEMENTS} placed symbols")));
+}
+
+/// A placement goes with its sheet, or with its view as a note does; a symbol's placements are
+/// listed by id.
+#[test]
+fn a_sheets_and_a_views_placements_go_with_them() {
+    let (d, [on_sheet, on_view, on_edge], view) = placed();
+    let sheet = d.sheets[0].id;
+    let by_id = |mut ids: Vec<u64>| {
+        ids.sort_unstable();
+        ids
+    };
+    assert_eq!(d.on_sheet(sheet).placed_symbols, by_id(vec![on_sheet, on_view, on_edge]));
+    assert_eq!(d.with_contents(vec![view]).placed_symbols, by_id(vec![on_view, on_edge]));
+    let mark = d.placed_symbols.by_id(on_sheet).unwrap().symbol;
+    assert_eq!(d.placements_of(mark), by_id(vec![on_sheet, on_view, on_edge]));
+    let other = d.symbols.iter().find(|s| s.id != mark).unwrap().id;
+    assert!(d.placements_of(other).is_empty());
+    assert!(d.has_object(on_edge));
+    let mut without_view = d.clone();
+    without_view.remove_objects(&without_view.with_contents(vec![view]));
+    without_view.validate().unwrap();
+    assert_eq!(without_view.placed_symbols.iter().map(|p| p.id).collect::<Vec<_>>(), [on_sheet]);
+    let mut id_source = IdSource::seeded(SEED + 2);
+    let mut two = d.clone();
+    let second = two.allocate_id(&mut id_source).unwrap();
+    two.sheets.push(Arc::new(crate::drawing::Sheet { id: second, name: "Sheet 2".into(), ..(*two.sheets[0]).clone() }));
+    two.remove_sheet(sheet);
+    two.validate().unwrap();
+    assert!(two.placed_symbols.is_empty());
+    assert!((0..64).all(|_| !d.has_object(d.allocate_id(&mut id_source).unwrap())), "a new id never takes a placement's");
+}
+
+/// Seeded mutations of a drawing's placements never panic, and whatever reads again keeps the rules.
+#[test]
+fn mutated_placement_files_read_or_are_refused() {
+    let (d, _, _) = placed();
+    let base = file(&d);
+    let values = [
+        json!(null),
+        json!(0),
+        json!(-1.5),
+        json!(1e308),
+        json!(0.0099),
+        json!("x"),
+        json!([]),
+        json!({}),
+        json!([1.0, 2.0]),
+        json!({"rev": "a\u{7}"}),
+        json!({"view": "0000000000001"}),
+    ];
+    let pick = |seed: u64, salt: u64, n: usize| (((seed ^ salt).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 33) as usize) % n;
+    let spots = ["/symbol", "/anchor", "/anchor/edge", "/at", "/at/1", "/scale", "/angle", "/answers", "/answers/rev"];
+    for seed in 1..=500u64 {
+        let mut v = base.clone();
+        let spot = format!("/placed_symbols/{}{}", pick(seed, 1, 3), spots[pick(seed, 3, spots.len())]);
+        let Some(at) = v.pointer_mut(&spot) else { continue };
+        *at = values[pick(seed, 2, values.len())].clone();
         if let Ok(read) = Drawing::from_json(&v.to_string()) {
             read.validate().unwrap();
             assert_eq!(Drawing::from_json(&read.to_json().unwrap()).unwrap(), read, "seed {seed}");

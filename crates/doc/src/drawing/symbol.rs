@@ -1,5 +1,5 @@
 //! A drawing's symbols of its own (#13063): a shape made once, from lines, arcs, fills and text,
-//! to be placed many times. Placing comes later; this is the definition.
+//! to be placed many times ([`PlacedSymbol`]).
 //!
 //! - **The insertion point** is the definition's origin: every piece is in paper millimetres from
 //!   it, so a placement moves, turns and scales the pieces there, and no field holds it.
@@ -13,22 +13,32 @@
 //! [`MAX_PIECES`] pieces, at most [`MAX_TEXTS`] of them texts; each path as the paper scene takes
 //! a stroke's ([`paper::check_path`]); every point at most [`MAX_SIDE_MM`] from the origin; a text's
 //! height as a note's ([`CAP_MM`]); at most [`MAX_SYMBOLS`] symbols, listed by id.
+//!
+//! **A placement** sits where a note would ([`Anchor`]): on a sheet, on a view (it moves with the
+//! view), or on an edge or a corner of a view's model. Its insertion point is at `at`, its pieces
+//! scaled by `scale` and turned by `angle` there, and its prompts answered by `answers`. It names
+//! its definition by id and keeps none of it, so a changed definition changes every placement.
+//! The rules: its symbol is one of the drawing's; its anchor's as a note's
+//! ([`Drawing::check_anchor`]); `at` on paper; `scale` in [`SCALE`]; `angle` finite; each answer
+//! names one of the definition's prompts and is one line of text ([`check_label`]); at most
+//! [`MAX_PLACEMENTS`], listed by id.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::ops::RangeInclusive;
 
 use serde::{Deserialize, Serialize};
 use solidcore_record::Seg2;
 use solidcraft_geom::Aabb2;
-use solidcraft_geom::cell::{Content, HAlign, Part, Source};
+use solidcraft_geom::cell::{Content, HAlign, Part, Source, check_label};
 use solidcraft_geom::drawing_view::is_paper_coordinate;
 use solidcraft_geom::paper::line::LineKind;
 use solidcraft_geom::paper::{self, MAX_SIDE_MM};
 use solidcraft_geom::prelude::*;
 
 use super::by_id::Record;
-use super::note::CAP_MM;
+use super::note::{Anchor, CAP_MM};
 use super::{Drawing, check_name, require};
-use crate::{DocError, Result};
+use crate::{DocError, Result, ids};
 
 /// The most symbols a drawing may have.
 pub const MAX_SYMBOLS: usize = 1_000;
@@ -36,6 +46,10 @@ pub const MAX_SYMBOLS: usize = 1_000;
 pub const MAX_PIECES: usize = 1_000;
 /// The most of its pieces that may be texts: each is set in its font wherever it is placed.
 pub const MAX_TEXTS: usize = 64;
+/// The most placements a drawing may have.
+pub const MAX_PLACEMENTS: usize = 1_000;
+/// The sizes a placement may give its symbol: its pieces' millimetres times this.
+pub const SCALE: RangeInclusive<f64> = 0.01..=100.0;
 
 /// One symbol of a drawing.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -79,6 +93,33 @@ impl Record for Symbol {
     }
 }
 
+/// One place a symbol sits on a drawing.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlacedSymbol {
+    #[serde(with = "crate::ids")]
+    pub id: u64,
+    /// Its definition, by id.
+    #[serde(with = "crate::ids")]
+    pub symbol: u64,
+    pub anchor: Anchor,
+    /// Where its insertion point sits, in millimetres of paper from its sheet's corner, or from its
+    /// view's centre.
+    pub at: [f64; 2],
+    pub scale: f64,
+    /// Its turn about its insertion point, counter-clockwise, in radians.
+    pub angle: f64,
+    /// The text each prompt of its definition shows here, by key.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub answers: BTreeMap<String, String>,
+}
+
+impl Record for PlacedSymbol {
+    fn id(&self) -> u64 {
+        self.id
+    }
+}
+
 impl Symbol {
     /// The keys its texts prompt for, each once and sorted: what a placement answers.
     pub fn prompts(&self) -> BTreeSet<&str> {
@@ -103,6 +144,32 @@ impl Drawing {
         self.symbols.check(MAX_SYMBOLS, "symbol", check_symbol)?;
         let mut names = BTreeSet::new();
         require(self.symbols.iter().all(|s| names.insert(s.name.as_str())), || "two symbols have one name".into())
+    }
+
+    /// The placements' rules (the module's notes). The symbols, sheets and views are checked first.
+    pub(super) fn check_placed_symbols(&self) -> Result<()> {
+        self.placed_symbols.check(MAX_PLACEMENTS, "placed symbol", |p| self.check_placed(p))
+    }
+
+    /// The placements of symbol `symbol`, by id.
+    pub fn placements_of(&self, symbol: u64) -> Vec<u64> {
+        self.placed_symbols.iter().filter(|p| p.symbol == symbol).map(|p| p.id).collect()
+    }
+
+    fn check_placed(&self, p: &PlacedSymbol) -> Result<()> {
+        let missing = || DocError::Invalid(format!("it places symbol {}, which the drawing doesn't have", ids::encode(p.symbol)));
+        let symbol = self.symbols.by_id(p.symbol).ok_or_else(missing)?;
+        self.check_anchor(&p.anchor)?;
+        let [x, y] = p.at;
+        require(is_paper_coordinate(x) && is_paper_coordinate(y), || format!("its place is at most {MAX_SIDE_MM} mm on paper"))?;
+        require(SCALE.contains(&p.scale), || format!("its scale is {} to {}", SCALE.start(), SCALE.end()))?;
+        require(p.angle.is_finite(), || "its angle is a number".into())?;
+        let prompts = symbol.prompts();
+        for (key, answer) in &p.answers {
+            require(prompts.contains(key.as_str()), || format!("it answers `{key}`, which symbol `{}` doesn't prompt for", symbol.name))?;
+            check_label(answer).map_err(|e| DocError::Invalid(format!("its answer to `{key}`: {}", e.0)))?;
+        }
+        Ok(())
     }
 }
 

@@ -95,8 +95,8 @@ use balloon::Balloon;
 use by_id::ById;
 use dimension::Dimension;
 use image::{ImageFile, SheetImage};
-use note::{Anchor, Note};
-use symbol::Symbol;
+use note::Note;
+use symbol::{PlacedSymbol, Symbol};
 use table::SheetTable;
 use view::{View, ViewLetters};
 
@@ -197,6 +197,9 @@ pub struct Drawing {
     /// The symbols of its own it places: each made once, however many places it sits.
     #[serde(default, skip_serializing_if = "ById::is_empty")]
     pub symbols: ById<Symbol>,
+    /// Where its symbols sit: each on a sheet, a view or a view's model, as a note is.
+    #[serde(default, skip_serializing_if = "ById::is_empty")]
+    pub placed_symbols: ById<PlacedSymbol>,
     /// Behind an `Arc` as the sheets are, so an undo step shares it while it doesn't change.
     #[serde(default, skip_serializing_if = "no_revisions")]
     pub revisions: Arc<RevisionRecord>,
@@ -240,6 +243,8 @@ const RECORD_FIELDS: &[&str] = &[
     "patterns",
     "tables",
     "notes",
+    "symbols",
+    "placed_symbols",
     "revisions",
     // Where image files, placements and logos are set aside (`image::set_aside`).
     "image_files",
@@ -440,6 +445,8 @@ pub struct OnSheet {
     /// Authored sketches whose coordinates are in this sheet's paper frame.
     pub sketches: Vec<u64>,
     pub fills: Vec<u64>,
+    /// The symbols placed on it and in its views.
+    pub placed_symbols: Vec<u64>,
 }
 
 impl OnSheet {
@@ -454,6 +461,7 @@ impl OnSheet {
             && self.notes.is_empty()
             && self.sketches.is_empty()
             && self.fills.is_empty()
+            && self.placed_symbols.is_empty()
     }
 }
 
@@ -511,6 +519,7 @@ impl Drawing {
             tables: ById::default(),
             notes: ById::default(),
             symbols: ById::default(),
+            placed_symbols: ById::default(),
             revisions: Arc::default(),
             newer_file: None,
             sketches: Vec::new(),
@@ -562,6 +571,7 @@ impl Drawing {
         d.fills.sort_by_key(|record| record.id);
         d.patterns.sort_by_key(|record| record.id);
         d.symbols.put_in_order();
+        d.placed_symbols.put_in_order();
         d.validate().map_err(damaged)?;
         d.check_image_files().map_err(damaged)?;
         Ok(d)
@@ -641,9 +651,14 @@ impl Drawing {
         by_id::named_index(&self.sheets, named, "sheet", |sheet| sheet.id, |sheet| &sheet.name)
     }
 
-    /// Whether `id` names an object a sheet shows: a view, a dimension or a balloon.
+    /// Whether `id` names an object a sheet shows: a view, a dimension, a balloon, a note or a placed
+    /// symbol.
     pub fn has_object(&self, id: u64) -> bool {
-        self.view(id).is_some() || self.dimension(id).is_some() || self.balloons.by_id(id).is_some() || self.notes.by_id(id).is_some()
+        self.view(id).is_some()
+            || self.dimension(id).is_some()
+            || self.balloons.by_id(id).is_some()
+            || self.notes.by_id(id).is_some()
+            || self.placed_symbols.by_id(id).is_some()
     }
 
     /// What is on sheet `id`: its views and the dimensions and balloons in them, and the images and authored sketches placed on it.
@@ -655,8 +670,8 @@ impl Drawing {
         on.images = self.sheet_images.iter().filter(|i| i.sheet == id).map(|i| i.id).collect();
         on.tags = self.revisions.tags().iter().filter(|t| t.sheet == id).map(|t| t.id).collect();
         on.tables = self.tables.iter().filter(|t| t.sheet == id).map(|t| t.id).collect();
-        let in_views = |n: &Note| n.anchor.view().is_some_and(|v| on.views.binary_search(&v).is_ok());
-        on.notes = self.notes.iter().filter(|n| n.anchor == Anchor::Sheet(id) || in_views(n)).map(|n| n.id).collect();
+        on.notes = self.notes.iter().filter(|n| n.anchor.within(Some(id), &on.views)).map(|n| n.id).collect();
+        on.placed_symbols = self.placed_symbols.iter().filter(|p| p.anchor.within(Some(id), &on.views)).map(|p| p.id).collect();
         on.sketches = self.sketches.iter().filter(|record| record.sheet == id).map(|record| record.id).collect();
         on.sketches.sort_unstable();
         on.fills = self.fills.iter().filter(|fill| on.sketches.binary_search(&fill.sketch).is_ok()).map(|fill| fill.id).collect();
@@ -669,7 +684,8 @@ impl Drawing {
     pub fn with_contents(&self, views: Vec<u64>) -> OnSheet {
         let dimensions = self.dimensions.iter().filter(|d| views.binary_search(&d.view).is_ok()).map(|d| d.id).collect();
         let balloons = self.balloons.iter().filter(|b| views.binary_search(&b.view).is_ok()).map(|b| b.id).collect();
-        let notes = self.notes.iter().filter(|n| n.anchor.view().is_some_and(|v| views.binary_search(&v).is_ok())).map(|n| n.id).collect();
+        let notes = self.notes.iter().filter(|n| n.anchor.within(None, &views)).map(|n| n.id).collect();
+        let placed_symbols = self.placed_symbols.iter().filter(|p| p.anchor.within(None, &views)).map(|p| p.id).collect();
         OnSheet {
             views,
             dimensions,
@@ -680,6 +696,7 @@ impl Drawing {
             notes,
             sketches: Vec::new(),
             fills: Vec::new(),
+            placed_symbols,
         }
     }
 
@@ -704,6 +721,7 @@ impl Drawing {
         self.drop_unused_images();
         self.tables.retain(|t| objects.tables.binary_search(&t.id).is_err());
         self.notes.retain(|n| objects.notes.binary_search(&n.id).is_err());
+        self.placed_symbols.retain(|p| objects.placed_symbols.binary_search(&p.id).is_err());
         // A balloon outlives the list it named, and goes back to the lists it could read.
         for balloon in self.balloons.iter_mut() {
             if balloon.parts_list.is_some_and(|list| objects.tables.binary_search(&list).is_ok()) {
@@ -741,6 +759,7 @@ impl Drawing {
             .chain(self.tables.iter().map(|t| t.id))
             .chain(self.notes.iter().map(|n| n.id))
             .chain(self.symbols.iter().map(|s| s.id))
+            .chain(self.placed_symbols.iter().map(|p| p.id))
             .chain(self.revisions.ids())
             .chain(self.sketches.iter().map(|s| s.id))
             .chain(self.fills.iter().map(|fill| fill.id))
@@ -795,6 +814,7 @@ impl Drawing {
         self.check_images()?;
         self.check_notes()?;
         self.check_symbols()?;
+        self.check_placed_symbols()?;
         fill::check_drawing(self)
     }
 

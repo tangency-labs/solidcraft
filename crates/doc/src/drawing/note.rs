@@ -87,6 +87,11 @@ impl Anchor {
         self.reference().map(Reference::path)
     }
 
+    /// Whether it is on sheet `sheet` or in one of `views` (listed by id): it goes with them.
+    pub fn within(&self, sheet: Option<u64>, views: &[u64]) -> bool {
+        sheet.is_some_and(|sheet| *self == Anchor::Sheet(sheet)) || self.view().is_some_and(|v| views.binary_search(&v).is_ok())
+    }
+
     /// The same anchor on view `view`, when it is on one.
     pub fn on_view(&self, view: u64) -> Anchor {
         let mut anchor = self.clone();
@@ -193,8 +198,10 @@ impl Drawing {
         self.sheets.iter().position(|one| one.id == sheet)
     }
 
-    fn check_note(&self, n: &Note) -> Result<()> {
-        match &n.anchor {
+    /// An anchor's rules, for a note and for anything else placed as one is: its sheet or view is
+    /// one of the drawing's, and an edge or a corner keeps a dimension's reference rules.
+    pub(super) fn check_anchor(&self, anchor: &Anchor) -> Result<()> {
+        match anchor {
             Anchor::Sheet(sheet) => {
                 require(self.sheets.iter().any(|s| s.id == *sheet), || {
                     format!("it is on sheet {}, which the drawing doesn't have", ids::encode(*sheet))
@@ -204,9 +211,14 @@ impl Drawing {
             Anchor::Edge { edge, .. } => check_edge(edge)?,
             Anchor::Corner { point, .. } => check_point(point)?,
         }
-        if let Some(view) = n.anchor.view() {
-            require(self.view(view).is_some(), || format!("it is on view {}, which the drawing doesn't have", ids::encode(view)))?;
+        match anchor.view() {
+            Some(view) => require(self.view(view).is_some(), || format!("it is on view {}, which the drawing doesn't have", ids::encode(view))),
+            None => Ok(()),
         }
+    }
+
+    fn check_note(&self, n: &Note) -> Result<()> {
+        self.check_anchor(&n.anchor)?;
         if let Some(why) = leaders_refused(n.anchor.view().is_some(), n.branches.len(), n.paths().count()) {
             return Err(DocError::Invalid(why));
         }
