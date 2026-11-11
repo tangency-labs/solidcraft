@@ -1313,7 +1313,10 @@ fn half_box(
             )?
             .normal
             .ok_or_else(|| invalid(OP_NODE, "no bounding box")),
-        _ => Err(SolidError::sm_err(OP_NODE)),
+        _ => Err(SolidError::surface_failed(
+            OP_NODE,
+            "the node's data is not a surface",
+        )),
     }
 }
 

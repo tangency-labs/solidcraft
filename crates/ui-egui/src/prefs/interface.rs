@@ -261,6 +261,8 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 app.preferences.ribbon_icon_grid = selected == 1;
                             }
                         });
+                        let response = setting::construct_menu_groups(app, ui);
+                        crate::scenario::publish_target("prefs:construct_menu_groups", response.rect);
                         ui_kit::row(ui, app.tr("prefs.toast_place"), |ui| {
                             let places = [crate::viewport::ToastPlace::Corner, crate::viewport::ToastPlace::Centre];
                             let mut selected = places.iter().position(|p| *p == app.preferences.toast_place).unwrap_or(0);
@@ -281,6 +283,14 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                             }
                         }
                         layout_check(ui, app.tr("prefs.status_bar"), app.tr("prefs.status_bar_note"), &mut app.preferences.status_bar, "status_bar");
+                        // The operations under way, with their Cancel, in the view's corner.
+                        layout_check(
+                            ui,
+                            app.tr("prefs.operations_panel"),
+                            app.tr("prefs.operations_panel_note"),
+                            &mut app.preferences.operations_panel,
+                            "operations_panel",
+                        );
                     });
                     ui_kit::LayoutPreview {
                         compact: app.ui.layout == crate::ui_kit::LayoutMode::Docked,

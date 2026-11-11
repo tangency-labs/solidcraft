@@ -4,7 +4,6 @@
 # per line.
 face.delete
 file.insert_step
-motion.export_animation
 render.aging.describe
 render.backends
 render.effects.describe
@@ -23,6 +22,4 @@ solid.pattern.rectangular
 solid.shell
 solid.thread
 surface.extrude
-surface.patch
 surface.revolve
-surface.ruled

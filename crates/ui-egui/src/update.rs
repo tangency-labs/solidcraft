@@ -672,6 +672,8 @@ pub struct Updater {
     pub installed: Option<Result<install::Outcome, String>>,
     /// A program for the host to start as SolidCraft exits (restart, installer).
     launch: Option<(PathBuf, Vec<String>)>,
+    /// The host should drop process-local graphics fallback overrides for this restart.
+    graphics_restart: bool,
 }
 
 impl Updater {
@@ -708,6 +710,7 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     // Quitting to restart or install was cancelled (a "save changes?" answered Cancel).
     if app.updater.launch.is_some() && app.docs.quitting.is_none() && !app.quit_requested {
         app.updater.launch = None;
+        app.updater.graphics_restart = false;
     }
     if !app.updater.started {
         app.updater.started = true;
@@ -922,6 +925,7 @@ fn poll_install(app: &mut SolveApp) {
                 Ok(exe) => install::relaunch_after(program, args, &exe),
                 _ => (program.clone(), args.clone()),
             });
+            app.updater.graphics_restart = false;
             crate::documents::request_quit(app);
         }
         Ok(install::Outcome::Opened(dmg)) => {
@@ -941,8 +945,24 @@ fn poll_install(app: &mut SolveApp) {
 pub fn restart(app: &mut SolveApp) {
     if let Some(Ok(install::Outcome::Restart(program))) = &app.updater.installed {
         app.updater.launch = Some((program.clone(), Vec::new()));
+        app.updater.graphics_restart = false;
         crate::documents::request_quit(app);
     }
+}
+
+/// Apply a saved graphics choice through the ordinary quit/save flow. Cancellation
+/// leaves the app open and tick clears the scheduled relaunch.
+pub fn restart_graphics(app: &mut SolveApp) {
+    if let Some(launch) = app.services.graphics_restart.clone() {
+        app.updater.launch = Some(launch);
+        app.updater.graphics_restart = true;
+        crate::documents::request_quit(app);
+    }
+}
+
+/// Whether the pending launch applies graphics settings, consumed by the native host.
+pub fn take_graphics_restart(app: &mut SolveApp) -> bool {
+    std::mem::take(&mut app.updater.graphics_restart) && app.updater.launch.is_some()
 }
 
 /// For the host, as SolidCraft exits: the program to start (the new version, an installer).

@@ -53,9 +53,8 @@
 //! | [`JacobianSurfaces`]                                     | the `rpSurface1`, `rpSurface2` arguments of `LoadJacobian` |
 //!
 //! Deviations:
-//! - **Exact circles of one arc count.** With `fixes.fillet_exact_arc_spans` (WR-711,
-//!   not upstream or in the fork) `CircularCrossSectionFsg::create_surface_from_curves`
-//!   with exact arcs takes a second pass when its circles' arc counts differ, building
+//! - **Exact circles of one arc count.** (WR-711, not upstream or in the fork)
+//!   `CircularCrossSectionFsg::create_surface_from_curves` with exact arcs takes a second pass when its circles' arc counts differ, building
 //!   each circle of fewer arcs again with the most (`ArcCounts`), as the approximated
 //!   arcs' second pass does with knots; and each point section takes the nearest
 //!   circle's arcs and weights (`collapse_point_sections`).
@@ -2575,9 +2574,8 @@ fn equalise_knots(arc: &mut BSplineCurve, max_unique: usize, op: &'static str) -
     arc.insert_knots(&new_knots)
 }
 
-/// The most and fewest arcs among a round's exact circular sections, with
-/// `fixes.fillet_exact_arc_spans` (WR-711; not upstream): a circle of fewer arcs is
-/// built again as the most.
+/// The most and fewest arcs among a round's exact circular sections (WR-711; not
+/// upstream): a circle of fewer arcs is built again as the most.
 struct ArcCounts {
     on: bool,
     most: usize,
@@ -2617,7 +2615,7 @@ impl ArcCounts {
     }
 }
 
-/// With `fixes.fillet_exact_arc_spans` (WR-711; not upstream): each point section of
+/// WR-711 (not upstream): each point section of
 /// a round of exact circles (where its rails meet, upstream's degree 1 point curve)
 /// becomes the circle nearest it along the rails collapsed onto its point, the same
 /// arcs and weights. The point is the limit of the circles beside it; as a point curve
@@ -2972,7 +2970,7 @@ impl CircularCrossSectionFsg {
         let mut max_num_unique_knots: usize = 0;
         let mut min_num_unique_knots: usize = 1_000_000;
         // the exact circles' most and fewest arcs (WR-711)
-        let mut arcs = ArcCounts::new(!self.approximate_arcs && k.fixes.fillet_exact_arc_spans);
+        let mut arcs = ArcCounts::new(!self.approximate_arcs);
 
         // for two passes - 1st pass allocate curves
         //                  2nd pass make all curve knot vectors compatible

@@ -27,7 +27,7 @@ use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::crv_fit::p1::ParamMethod;
 use solidcore::sweep::api_surfaces::create_skin_primitive;
 use solidcore::topology::brep::p2::is_manifold_solid;
-use solidcore::{Brep, Kernel, SolidError};
+use solidcore::{Brep, Kernel};
 
 const MIN7: &str = include_str!("data/issue_948_min7.txt");
 
@@ -98,7 +98,9 @@ fn issue_948_difference_of_two_ruled_skins_fails_as_upstream() {
     assert!(is_manifold_solid(&inner).unwrap());
 
     match boolean_difference(&mut k, outer, inner) {
-        Err(SolidError::Upstream { code, .. }) => assert_eq!(code, SM_ERR),
+        Err(e) if solidcore::error::upstream_status(&e).is_some() => {
+            assert_eq!(solidcore::error::upstream_status(&e), Some(SM_ERR));
+        }
         other => panic!(
             "expected SM_ERR as upstream, got {:?}",
             other.map(|_| "a body")
@@ -117,11 +119,9 @@ fn a_refined_parameter_outside_the_range_does_not_abort_the_intersection() {
     let outer = ruled_skin(&mut k, &data[0].1);
     let inner = ruled_skin(&mut k, &data[1].1);
     match boolean_difference(&mut k, outer, inner) {
-        Err(SolidError::Upstream {
-            operation, code, ..
-        }) => {
-            assert_eq!(code, SM_ERR);
-            assert_eq!(operation, "topology::brep::p6");
+        Err(e) if solidcore::error::upstream_status(&e).is_some() => {
+            assert_eq!(solidcore::error::upstream_status(&e), Some(SM_ERR));
+            assert_eq!(e.operation(), "topology::brep::p6");
         }
         other => panic!(
             "expected the default path's SM_ERR, got {:?}",

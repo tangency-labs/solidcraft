@@ -348,7 +348,6 @@ impl crate::SolidError {
     pub(crate) fn is_nurbs_failure(&self) -> bool {
         self.nurbs_failure()
             .is_some_and(|n| !matches!(n, NurbsFailure::BSpline(_)))
-            || matches!(self, Self::Nlib { .. })
     }
 
     /// [`crate::SolidError::Failed`] for a B-spline curve or surface method that fails
@@ -388,7 +387,6 @@ pub fn nlib_number(error: &crate::SolidError) -> Option<i32> {
             Reason::Nurbs(n) => n.nlib_number(),
             _ => None,
         },
-        crate::SolidError::Nlib { code, .. } => Some(code.code()),
         _ => None,
     }
 }

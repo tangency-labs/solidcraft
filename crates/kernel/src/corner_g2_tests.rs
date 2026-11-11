@@ -372,3 +372,20 @@ fn curvature_rounds_meet_at_a_g2_corner() {
     let (a, b) = (measure(&g2).unwrap().volume, measure(&smlib_corner).unwrap().volume);
     assert!((a - b).abs() < 7.5f64.powi(3), "{a} vs {b}");
 }
+
+/// fillets/every-box-corner-three-edges-r3-curvature-setback-3-5 (tangency-labs/solidcraft#13913):
+/// the 40 x 30 x 20 box's corner (40, 30, 20), its three edges rounded r3, set back 3.5. The
+/// corner's fill is certified convex only from a setback of 3.5595 (solidcore's
+/// `SetbackTooShort`, from the fill's convex test), so 3.5 is refused naming it. The G2 patch
+/// replaces solidcore's fill here, so 3.5595 is named as what solidcore's corner needs, never as
+/// a setback that builds: the patch does not fit there (it misses the rounds' curvature by
+/// 2.09e-3 against 1.67e-3, measured).
+#[test]
+fn a_setback_too_short_for_the_fill_names_what_solidcores_corner_needs() {
+    let body = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
+    let edges = [Vec3::new(20.0, 30.0, 20.0), Vec3::new(40.0, 15.0, 20.0), Vec3::new(40.0, 30.0, 10.0)];
+    let corner = Vec3::new(40.0, 30.0, 20.0);
+    let short = fillet_g2_corners(&body, &edges, 3.0, &[(corner, 3.5)]).unwrap_err().to_string();
+    assert!(short.contains("is too short for its corner's fill: solidcore's corner needs a setback of at least 3.5595 mm"), "{short}");
+    assert!(!short.contains("builds"), "{short}");
+}

@@ -25,6 +25,8 @@ use crate::tool_modifiers::{Audit, Scope, ToolModifiers};
 use crate::viewport::Hit;
 use solidcraft_theme::Tokens;
 
+#[path = "dialogs_auto.rs"]
+mod auto;
 #[path = "dialogs_dense.rs"]
 mod dense;
 #[cfg(test)]
@@ -264,6 +266,9 @@ crate::dialog_descriptor::dialog_descriptors! {
                 keys: Vec<&'static str>,
                 t: Option<String>,
             },
+            /// Plane, Axis or Point (`construct.plane|axis|point`) while no method takes its picks;
+            /// once one does, the dialog is that method's own (`dialogs_auto`).
+            ConstructAuto { command: &'static str },
             /// A plane perpendicular to one selected path at a fractional distance.
             PathPlane {
                 t: String,
@@ -569,9 +574,16 @@ pub struct Dialog {
     pub press_pull: bool,
     /// The operation the window chooses by itself (#6901).
     pub op_auto: crate::op_auto::OpAuto,
+    /// Plane, Axis or Point standing in for the method its picks call for: this dialog is that
+    /// method's, and picks go to the tool, which chooses the method again (dialogs_auto).
+    pub(crate) auto: Option<auto::Auto>,
     /// Where the face that reopened this fillet or chamfer was clicked (Press Pull): its arrow
     /// sits on the edge nearest it. UI state only, never saved.
     pub(crate) anchor_hint: Option<Vec3>,
+    /// The open sketch an Extrude or Revolve ended on its way to opening (#14128). It stays
+    /// shown while this dialog is open, as an edited feature's sketch does, so its profiles can
+    /// be picked even when an earlier feature uses the sketch and hides it.
+    pub(crate) started_from_sketch: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -808,6 +820,8 @@ impl Dialog {
         self.error = Some(error);
     }
 
+    /// A dialog of `kind` with these inputs and every other field at its starting value: no picks
+    /// taken yet beyond the inputs' own, no error, and not standing in for Plane, Axis or Point.
     pub(crate) fn new(kind: Kind, inputs: Vec<SelInput>) -> Dialog {
         let chain_applied = matches!(kind, Kind::Fillet { chain: true, .. });
         Dialog {
@@ -840,21 +854,18 @@ impl Dialog {
             press_pull: false,
             op_auto: Default::default(),
             anchor_hint: None,
+            started_from_sketch: None,
+            auto: None,
         }
     }
 
-    /// The picker for the agent chat's context, holding what is already picked.
-    pub fn chat_context(picked: &[Sel]) -> Dialog {
-        let mut inputs = vec![
+    /// The picker for a pill in the agent chat's message: elements, features and bodies.
+    pub fn chat_context() -> Dialog {
+        let inputs = vec![
             SelInput::new("Elements", FACES | EDGES | selection::VERTICES, true),
             SelInput::new("Features", selection::FEATURES, true),
             SelInput::new("Bodies", BODIES, true),
         ];
-        for sel in picked {
-            if let Some(input) = inputs.iter_mut().find(|i| fits(i.accept, sel)) {
-                input.items.push(sel.clone());
-            }
-        }
         Dialog::new(Kind::ChatContext, inputs)
     }
 
@@ -889,6 +900,9 @@ impl Dialog {
         }
     }
 
+    /// The dialog a toolbar click on command `id` opens, filled from the current selection where
+    /// its inputs take it; Plane, Axis and Point open as the method their picks call for
+    /// (`dialogs_auto`). `None` for a command that has no dialog.
     pub fn for_command(app: &SolveApp, id: &str) -> Option<Dialog> {
         let s = &app.session;
         let has_bodies = !crate::open_meshing::session_world(s).bodies.is_empty();
@@ -978,6 +992,8 @@ impl Dialog {
                 Kind::MeshConvert { tolerance: crate::length_input::model(&s.doc, 0.05) },
                 vec![SelInput::new("Mesh body", BODIES, false)],
             ),
+            // Plane, Axis and Point open as the method their picks call for (`dialogs_auto`).
+            _ if solidcraft_engine::cmd::is_construct_tool(id) => return auto::start(app, id),
             "construct.plane.midplane" => Dialog::new(
                 Kind::Midplane,
                 vec![SelInput::new("First plane", PLANES | PLANAR_FACES, false), SelInput::new("Second plane", PLANES | PLANAR_FACES, false)],
@@ -1046,7 +1062,7 @@ impl Dialog {
                 let [rail, rail2] = crate::dialogs_sweep::rail_inputs();
                 vec![
                     SelInput::new("Profile", PROFILES, true),
-                    SelInput::new("Path", CURVES, true),
+                    SelInput::new("Path", CURVES | EDGES, true),
                     crate::dialogs_sweep::direction_input(),
                     rail,
                     rail2,
@@ -1246,6 +1262,7 @@ impl Dialog {
                     && (i.multi || i.items.is_empty())
                     && (planar_ok || i.accept & FACES != 0 || !matches!(sel, Sel::Face { .. }))
                     && (i.accept != AXIS_PICKS || takes_as_axis(s, sel))
+                    && !i.rejects(sel)
             };
             if let Some(inp) = d.inputs.iter_mut().find(|i| takes(i)) {
                 if matches!(d.kind, Kind::Fillet { .. }) {
@@ -1360,10 +1377,13 @@ impl Dialog {
     }
 
     /// An Extrude or Revolve started from inside a sketch takes that sketch's profile, as it would
-    /// had the sketch stayed open.
+    /// had the sketch stayed open, and keeps the sketch shown while it is open (#14128).
     pub(crate) fn take_sketch_profile(&mut self, s: &Session, sketch: u64) {
-        if matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. })
-            && let Some(inp) = self.inputs.first_mut()
+        if !matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. }) {
+            return;
+        }
+        self.started_from_sketch = Some(sketch);
+        if let Some(inp) = self.inputs.first_mut()
             && inp.items.is_empty()
         {
             inp.items = single_profile(s, sketch);
@@ -1505,6 +1525,18 @@ impl Dialog {
         self.inputs.get(self.active)
     }
 
+    /// The chat's picker takes a step or a body clicked in the History or the Browser into the
+    /// list that takes it, whichever list is active (#11318): make that list the active one.
+    /// Other dialogs keep their active input.
+    pub(crate) fn activate_input_taking(&mut self, accept: Accept) {
+        if !matches!(self.kind, Kind::ChatContext) || self.active_input().is_some_and(|i| i.accept & accept != 0) {
+            return;
+        }
+        if let Some(i) = self.inputs.iter().position(|i| i.accept & accept != 0) {
+            self.active = i;
+        }
+    }
+
     /// Whether a round edge kept in `inp` stands for its centre: a construction point's input,
     /// or Move's pivot and points (`dialogs_move::sel_point`). Other point inputs take the
     /// centre as a vertex (`circle_centre_pick`).
@@ -1604,12 +1636,37 @@ impl Dialog {
         Some(FaceSnap::new(s, body, *index, &near))
     }
 
+    /// The sketch a sweep's profile is in, when the active input is the sweep's path: a
+    /// sweep's path may never be a curve of the profile's own sketch, so such a curve is
+    /// never a valid pick for the path (#2216). `None` when the dialog is not a sweep's
+    /// path input, or when the profile is not picked yet.
+    fn sweep_path_profile_sketch(&self, s: &Session) -> Option<u64> {
+        let sweep = matches!(self.kind, Kind::Sweep { .. }) || matches!(self.kind, Kind::Surface(crate::dialogs_surface::Surf::Sweep(_)));
+        if !sweep || self.active != 1 {
+            return None;
+        }
+        crate::dialogs_sweep::profile_sketch(&self.inputs.first()?.items, s.active_sketch)
+    }
+
     /// The selection a hit would add to the active input, given the face under the cursor
     /// ([`Dialog::face_snap`] of the same hits). A face place picked on or near a sketch point that
     /// lies on that face (a circle's centre) is taken at the point, as a points input picks it.
     pub(crate) fn candidate_on(&self, s: &Session, h: &Hit, snap: Option<&FaceSnap>) -> Option<Sel> {
         if matches!(self.kind, Kind::SketchModify(_)) {
             return crate::sketch_modify_ui::pick_candidate(self, s, h);
+        }
+        // Plane, Axis and Point take whatever a method of theirs builds from.
+        if self.auto.is_some() {
+            return auto::candidate(s, h);
+        }
+        // A sweep's path is never a curve of the profile's own sketch: the command refuses such
+        // a path ("the path curves must be in one other sketch"), so the pick does not stop on
+        // one and falls through to the next hit, the body's edge under the cursor (#2216).
+        if let Some(sketch) = self.sweep_path_profile_sketch(s)
+            && let Hit::SketchCurve { sketch: other, .. } = h
+            && *other == sketch
+        {
+            return None;
         }
         if let Some(target) = self.extrude_target(s, h) {
             return Some(target);
@@ -1646,6 +1703,9 @@ impl Dialog {
         let sel = inp.accepts(h, s.active_sketch, |body, face| {
             snap.and_then(|f| f.planar(body, face)).unwrap_or_else(|| planar_face(s, body, face).is_some())
         })?;
+        if inp.rejects(&sel) {
+            return None;
+        }
         (inp.accept != AXIS_PICKS || takes_as_axis(s, &sel)).then_some(sel)
     }
 
@@ -1787,6 +1847,16 @@ impl Dialog {
     pub fn pick(&mut self, s: &Session, sel: Sel) {
         self.awaiting_pick = false;
         self.pick_refused = None;
+        if self.active_input().is_some_and(|i| i.rejects(&sel)) {
+            return;
+        }
+        // Plane, Axis and Point: the pick is the tool's, which chooses the method again.
+        if let Some(a) = &mut self.auto {
+            a.toggle(sel);
+            self.error = None;
+            self.focus = true;
+            return;
+        }
         if self.take_extrude_target(s, &sel) {
             return;
         }
@@ -1887,6 +1957,9 @@ impl Dialog {
         }
         let mut accepted = false;
         for x in sels {
+            if inp.rejects(&x) {
+                continue;
+            }
             if takes_components {
                 let occ = match x {
                     Sel::Occurrence { path } if !path.is_empty() => Some(Sel::Occurrence { path }),
@@ -2597,6 +2670,7 @@ fn publish_check(ui: &egui::Ui, response: &egui::Response, selected: bool) {
     response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), selected, tr(crate::ui_kit::row_label(ui))));
 }
 
+/// The dialog's heading for `k`: a message id or label the header translates.
 fn title(k: &Kind) -> &'static str {
     match k {
         Kind::Sketch => "CREATE SKETCH",
@@ -2612,6 +2686,9 @@ fn title(k: &Kind) -> &'static str {
         Kind::Midplane => "MIDPLANE",
         Kind::MeshConvert { .. } => "CONVERT MESH",
         Kind::Construct { title, .. } => title,
+        Kind::ConstructAuto { command: "construct.plane", .. } => "cmd.construct.plane",
+        Kind::ConstructAuto { command: "construct.axis", .. } => "cmd.construct.axis",
+        Kind::ConstructAuto { .. } => "cmd.construct.point",
         Kind::PathPlane { .. } => "PLANE ALONG PATH",
         Kind::Rib { web: false, .. } => "RIB",
         Kind::Rib { web: true, .. } => "WEB",
@@ -2676,7 +2753,7 @@ fn title_of(d: &Dialog) -> &'static str {
     if press_pull_extrude(d) { "PRESS PULL" } else { title(&d.kind) }
 }
 
-fn hint(inp: &SelInput) -> &'static str {
+pub(crate) fn hint(inp: &SelInput) -> &'static str {
     let a = inp.accept;
     if a & PROFILES != 0 {
         "click profiles in the view"
@@ -2699,6 +2776,8 @@ fn hint(inp: &SelInput) -> &'static str {
     } else if inp.label == "Faces/Body" {
         // Shell (#794): faces open the hollow; a body alone seals a closed void inside.
         "click faces to remove, or a body in the Browser for a closed hollow"
+    } else if a & selection::FEATURES != 0 {
+        "click steps in the History or the Browser"
     } else if a & BODIES != 0 {
         "click bodies"
     } else {
@@ -2956,10 +3035,31 @@ fn occurrence_paths(s: &Session, items: &[Sel]) -> Vec<Vec<u64>> {
     out
 }
 
+/// Distinguish a component's reference geometry without exposing its internal placement key.
+/// The pattern is a message (`dialog.component_origin`), so the label reads in the interface's
+/// language; the item goes by the name the preferences give the origin planes.
+pub(crate) fn component_origin_label(s: &Session, names: crate::prefs::OriginPlaneNames, name: &str) -> Option<String> {
+    // A construction feature answers to its own name first, as the resolvers do: a feature
+    // named like a datum key resolves to the feature, so its chip says the feature's name
+    // (`selection_label` falls back to it), not a placement's (#7313 review).
+    if s.doc.find_feature(name).is_some() {
+        return None;
+    }
+    let (path, item) = solidcraft_engine::origins::item(name)?;
+    let placement =
+        path.iter().filter_map(|id| s.doc.occurrences.iter().find(|o| o.id == *id).map(|o| o.name.as_str())).collect::<Vec<_>>().join(" / ");
+    Some(solidcraft_ui_text::format("dialog.component_origin", &[("placement", &placement), ("item", names.label(item))]))
+}
+
 /// A picked item as its chip shows it. A round edge or face says what it stands for in `inp`:
 /// its axis in an axis input, a circle's centre in a point input. An origin plane goes by
 /// the name the preferences give it.
 pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames, d: &Dialog, inp: &SelInput, item: &Sel) -> String {
+    if let Sel::Plane { name } | Sel::Axis { name } | Sel::ConstructionPoint { name } = item
+        && let Some(label) = component_origin_label(s, names, name)
+    {
+        return label;
+    }
     let axis = inp.accept == selection::AXIS_PICKS && round_axis(s, item).is_some();
     let sketch_name = |id| {
         s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_else(|| solidcraft_ui_text::format("browser.sketch_name", &[("number", &id.to_string())]))
@@ -3735,8 +3835,9 @@ fn picked_side(app: &SolveApp, d: &Dialog, first: &Sel) -> Option<usize> {
 
 /// Discard an editor whose target was removed, before its preview can draw again. Show the sketch
 /// of the Extrude, Revolve, sheet metal base or contour flange, or Hole at sketch
-/// points the open dialog edits, and only while it is open: whichever way the dialog closed (OK,
-/// Cancel, another tool, another design), the sketch returns to its own visibility.
+/// points the open dialog edits, or the sketch an Extrude or Revolve ended on its way to opening
+/// (#14128), and only while it is open: whichever way the dialog closed (OK, Cancel, another
+/// tool, another design), the sketch returns to its own visibility.
 pub(crate) fn sync_feature_edit(app: &mut SolveApp) {
     if app.dialog.as_ref().and_then(|d| d.editing).is_some_and(|(id, _)| app.session.doc.feature(id).is_none()) {
         // Undo or deletion already chose the current document and history. Cancel's rollback
@@ -3755,7 +3856,7 @@ pub(crate) fn sync_feature_edit(app: &mut SolveApp) {
         app.preview.reset();
         app.op_check.abandon();
     }
-    app.session.feature_edit_sketch = app.dialog.as_ref().and_then(|d| d.editing).and_then(|(id, _)| match &app.session.doc.feature(id)?.kind {
+    let edited = app.dialog.as_ref().and_then(|d| d.editing).and_then(|(id, _)| match &app.session.doc.feature(id)?.kind {
         FeatureKind::Extrude { sketch, .. }
         | FeatureKind::Revolve { sketch, .. }
         | FeatureKind::SheetBase { sketch, .. }
@@ -3763,6 +3864,8 @@ pub(crate) fn sync_feature_edit(app: &mut SolveApp) {
         | FeatureKind::Hole { points: Some(solidcraft_engine::doc::SketchPoints { sketch, single: false, .. }), .. } => Some(**sketch),
         _ => None,
     });
+    let started_from = app.dialog.as_ref().and_then(|d| d.started_from_sketch).filter(|&id| app.session.doc.feature(id).is_some());
+    app.session.feature_edit_sketch = edited.or(started_from);
 }
 
 /// Does this dialog dock as a card (at the view's edge or in the left column)? A delete
@@ -3827,6 +3930,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     crate::sketch_text::sync_path(&mut d);
+    auto::sync(app, &mut d);
     let _language = solidcraft_ui_text::scope(&app.preferences.language);
     if let Kind::TextMove(k) = &d.kind
         && !crate::sketch_text_move::valid(app, k)
@@ -3902,7 +4006,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let has_ok = !matches!(d.kind, Kind::Sketch | Kind::Measure { .. });
     let valid = match &d.kind {
         Kind::Sketch => false,
-        // Nothing picked is an answer too: OK empties the chat's tray.
+        // Nothing picked is an answer too: OK adds no pill.
         Kind::ChatContext => true,
         Kind::Material { editor, .. } => !editor.editing() && apply_commands(app, &d).is_ok(),
         Kind::SaveMesh(_) => crate::dialogs_save_mesh::ready(&d.inputs),
@@ -4855,6 +4959,16 @@ fn flip_toward_viewer(app: &SolveApp, name: &str) -> Option<&'static str> {
 /// the sketch, the view turning to it and the extrude all went the wrong way. `None` while the
 /// active component sits at the origin (the name says the same) or for a construction plane.
 fn shown_origin_plane(app: &SolveApp, name: &str) -> Option<Value> {
+    // A construction feature named exactly like a datum item keeps its precedence, the order every
+    // other resolver pins: the datum branch only runs when no feature carries the name.
+    if app.session.doc.find_feature(name).is_none()
+        && let Some((path, item)) = solidcraft_engine::origins::item(name)
+    {
+        let active = app.session.active_occurrence_path.clone().unwrap_or_else(|| app.session.doc.first_path(app.session.active_component));
+        if path == active {
+            return Some(json!(item));
+        }
+    }
     let p = solidcore_record::Plane::named(name)?;
     if app.session.doc.find_feature(name).is_some() || solidcraft_engine::doc::is_identity(&app.session.active_component_frame()) {
         return None;
@@ -4878,6 +4992,12 @@ pub(crate) fn plane_by_name(s: &Session, name: &str) -> Option<solidcore_record:
         // With occurrences the world state leaves construction geometry out; the viewport's
         // planes are evaluated in place.
         .or_else(|| solidcraft_engine::view::construction_planes(s).into_iter().find(|(_, n, _)| n == name).map(|(_, _, pl)| pl))
+        // A component origin item key (`o:2/origin/XY`) last: a feature of the same name wins —
+        // the lookup case-insensitive, as `find_feature` answers, so a case-only spelling of a
+        // feature's name is still the feature's (#7313 review) — and a datum follows the
+        // browser's eyes: a disabled Origin folder's plane is not offered here (the
+        // command-side resolvers keep taking it, for saved references).
+        .or_else(|| if s.doc.find_feature(name).is_none() && s.construction_visible(name) { s.origin_plane(name) } else { None })
 }
 
 /// Animate the camera to look straight at the active sketch plane.
@@ -5684,9 +5804,16 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             need(0, "a profile")?;
             need(1, "the path")?;
             let (sketch, idx) = profiles();
-            let path: Vec<String> = sels(d, 1).curve_ids();
-            let path_sketch = picks_sketch(app, sels(d, 1), sketch.as_u64()).ok_or("the path curves must be in one sketch")?;
-            let mut p = json!({"sketch": sketch, "profiles": idx, "path_sketch": path_sketch, "path": path, "operation": OPS.get(*operation).copied().unwrap_or("new")});
+            let mut p = json!({"sketch": sketch, "profiles": idx, "operation": OPS.get(*operation).copied().unwrap_or("new")});
+            // The path is a chain of a body's edges or the curves of a sketch (#2216).
+            if let Some((body, edges)) = crate::dialogs_sweep::edge_path(sels(d, 1))? {
+                p["path_body"] = json!(body);
+                p["path_edges"] = json!(edges);
+            } else {
+                let path: Vec<String> = sels(d, 1).curve_ids();
+                p["path_sketch"] = json!(picks_sketch(app, sels(d, 1), sketch.as_u64()).ok_or("the path curves must be in one sketch")?);
+                p["path"] = json!(path);
+            }
             crate::dialogs_sweep::params(app, opts, sels(d, 2).first(), [sels(d, 3), sels(d, 4)], &mut p)?;
             ("solid.sweep", p)
         }
@@ -5732,6 +5859,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
             (*command, Value::Object(p))
         }
+        Kind::ConstructAuto { .. } => return Err(auto::refusal(d)),
         Kind::PathPlane { t, sketch } => {
             need(0, "a path")?;
             let path = match sels(d, 0).first() {
@@ -5971,10 +6099,14 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     json!({"origin": pt(*point), "normal": pt(n)})
                 }
                 Some(Sel::Plane { name }) => {
+                    // A construction plane keeps the reach it always had here: a feature answers
+                    // to its own name before the world planes do (an older design can hold a
+                    // plane named `Top`), then a datum key, then the origin aliases (#7313 review).
                     let pl = solidcraft_engine::view::construction_planes(s)
                         .into_iter()
                         .find(|(_, n, _)| n == name)
                         .map(|(_, _, pl)| pl)
+                        .or_else(|| plane_by_name(s, name))
                         .ok_or("unknown plane")?;
                     json!({"origin": pt(pl.origin), "normal": pt(pl.normal())})
                 }
@@ -6359,8 +6491,18 @@ pub fn axis_of(app: &SolveApp, sel: &Sel) -> Option<(Vec3, Vec3)> {
             "X" => Some((Vec3::ZERO, Vec3::X)),
             "Y" => Some((Vec3::ZERO, Vec3::Y)),
             "Z" => Some((Vec3::ZERO, Vec3::Z)),
-            // A construction axis.
-            n => solidcraft_engine::view::construction_axes(&app.session).into_iter().find(|(_, an, _, _)| an == n).map(|(_, _, o, d)| (o, d)),
+            // A construction axis by name first, so a name that looks like an origin item key
+            // still reaches it; then a component origin axis by its key, when no feature
+            // carries the name (the case-insensitive `find_feature` lookup, as everywhere the
+            // order is pinned) and its Origin folder is shown (a disabled folder's axis feeds
+            // no preview).
+            n => solidcraft_engine::view::construction_axes(&app.session)
+                .into_iter()
+                .find(|(_, an, _, _)| an == n)
+                .map(|(_, _, o, d)| (o, d))
+                .or_else(|| {
+                    if app.session.doc.find_feature(n).is_none() && app.session.construction_visible(n) { app.session.origin_axis(n) } else { None }
+                }),
         },
         Sel::SketchCurve { id, .. } => {
             let st = crate::open_meshing::session_world(&app.session);
@@ -7596,7 +7738,22 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Sweep { sketch, profiles, path_sketch, path, operation, targets, orientation, twist, scale, rails, rail_fit, .. } => {
+        FeatureKind::Sweep {
+            sketch,
+            profiles,
+            path_sketch,
+            path,
+            path_body,
+            path_edges,
+            operation,
+            targets,
+            orientation,
+            twist,
+            scale,
+            rails,
+            rail_fit,
+            ..
+        } => {
             let mut d = start("solid.sweep")?;
             let (opts, direction) = crate::dialogs_sweep::SweepOpts::of(orientation, twist, scale, *rail_fit, &feature_frame(s, f.component));
             d.kind = Kind::Sweep { operation: op_index(operation), opts };
@@ -7611,7 +7768,12 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 inp.items = items.into_iter().map(|index| Sel::Profile { sketch: sketch.0, index }).collect();
             }
             if let Some(inp) = d.inputs.get_mut(1) {
-                inp.items = path.iter().map(|id| crate::selection::curve_pick(id, path_sketch.0, s.active_sketch)).collect();
+                // The path is a chain of a body's edges or the curves of a sketch (#2216).
+                // A body's edge is looked for on the body the path was picked on (#2216).
+                inp.items = match path_body {
+                    Some(body) => path_edges.iter().filter_map(|p| edge_sel_on(s, Some(body.0.as_str()), p.0)).collect(),
+                    None => path.iter().map(|id| crate::selection::curve_pick(id, path_sketch.0, s.active_sketch)).collect(),
+                };
             }
             if !targets.is_empty() {
                 d.extra.insert("targets".into(), json!(targets));
@@ -8940,5 +9102,63 @@ mod preselected_sketch_line_tests {
             let made = h.app.session.doc.features.iter().filter(|f| format!("{:?}", f.kind).starts_with(kind.trim_end_matches("Feature"))).count();
             assert_eq!(made, 1, "{command} runs on the edge");
         }
+    }
+}
+
+#[cfg(test)]
+mod section_plane_tests {
+    //! Section Analysis keeps the construction plane it picked, by its name (#7313 review).
+
+    use super::*;
+    use crate::scenario::Harness;
+
+    /// An older design can hold a construction plane named like a world plane (`Top`): the
+    /// commands refuse the name today, so the fixture renames the feature by hand and has the
+    /// model follow the rename, as the engine follows `timeline.rename` (a name labels a
+    /// feature, it builds nothing). The cut stands where the feature stands, not at the world
+    /// plane of the same name; a picked datum key or origin alias still reaches its plane
+    /// through [`plane_by_name`].
+    #[test]
+    fn section_keeps_a_construction_plane_of_a_world_plane_name() {
+        let mut h = Harness::new();
+        h.app.run("construct.plane.offset", json!({"base":"XY","offset":"2 mm","name":"Old plane"})).unwrap();
+        let id = h.app.session.doc.features.iter().find(|f| f.name == "Old plane").unwrap().id;
+        h.app.session.doc_mut().feature_mut(id).unwrap().name = "Top".into();
+        assert!(h.app.session.model.rename_feature(&h.app.session.doc, id), "the model follows the rename");
+        h.step(&json!({"start":"inspect.section"})).unwrap();
+        h.frames(2);
+        h.app.dialog.as_mut().expect("the section dialog opens").inputs[0].items.push(Sel::Plane { name: "Top".into() });
+        let d = h.app.dialog.as_ref().expect("the section dialog opens");
+        let commands = dialog_commands(&h.app, d).unwrap();
+        let (cmd, p) = commands.first().unwrap();
+        assert_eq!(cmd, "inspect.section");
+        assert_eq!(p["plane"]["origin"], json!([0.0, 0.0, 2.0]), "the construction plane, not the world plane of the same name: {p}");
+    }
+
+    /// A picked component origin item key reaches its plane once its Origin folder is shown,
+    /// and a picked design origin plane goes to the command by name, as before: the
+    /// feature-first lookup only takes a construction plane that really carries the name.
+    #[test]
+    fn section_still_reaches_datums_and_origin_aliases() {
+        use solidcraft_engine::origins;
+        let mut h = Harness::new();
+        h.app.run("component.create", json!({"name":"Part","grounded":false})).unwrap();
+        let occurrence = h.app.session.doc.occurrences.iter().find(|o| o.component != 0).unwrap().id;
+        h.app.run("occurrence.move", json!({"occurrence":occurrence,"translate":[0,0,5]})).unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        h.app.run("browser.visibility", json!({"tree_folders":[origins::folder(&[occurrence])],"visible":true})).unwrap();
+        h.step(&json!({"start":"inspect.section"})).unwrap();
+        h.frames(2);
+        h.app.dialog.as_mut().expect("the section dialog opens").inputs[0].items.push(Sel::Plane { name: origins::key(&[occurrence], "XY") });
+        let d = h.app.dialog.as_ref().expect("the section dialog opens");
+        let commands = dialog_commands(&h.app, d).unwrap();
+        let (_, p) = commands.first().unwrap();
+        assert_eq!(p["plane"]["origin"], json!([0.0, 0.0, 5.0]), "the datum follows its placement: {p}");
+        h.app.dialog.as_mut().expect("the section dialog stays open").inputs[0].items.clear();
+        h.app.dialog.as_mut().expect("the section dialog stays open").inputs[0].items.push(Sel::Plane { name: "XY".into() });
+        let d = h.app.dialog.as_ref().expect("the section dialog stays open");
+        let commands = dialog_commands(&h.app, d).unwrap();
+        let (_, p) = commands.first().unwrap();
+        assert_eq!(p["plane"], json!("XY"), "the design's own plane goes to the command by name: {p}");
     }
 }

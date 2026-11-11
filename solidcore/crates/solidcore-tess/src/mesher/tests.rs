@@ -490,3 +490,33 @@ mod refusals {
         assert_eq!(meshed_faces(&p), vec![0, 1, 2, 3, 5]);
     }
 }
+
+/// A sliver far below the display tolerance, bounded by two edges whose pcurves lie apart in
+/// (u, v) (a gap within the edges' tolerance), sampled coarsely: six boundary nodes that are
+/// three points in space, each twice. Its sides cross, so it is filled leniently, and every
+/// Delaunay triangle has two corners on one point: the fill was left empty and the
+/// face not drawn ("1 face(s) could not be meshed", a crankshaft's oil drilling in an engine
+/// assembly). It is now fanned from its own boundary nodes, each triangle on three distinct
+/// nodes, and still named as filled leniently.
+#[test]
+fn a_sliver_whose_vertices_come_twice_is_still_drawn() {
+    let (s, _, rules) = a_face_crossing_itself();
+    let uv = vec![[0.40, 0.40], [0.40, 0.46], [0.42, 0.50], [0.42, 0.40], [0.45, 0.46], [0.45, 0.50]];
+    let mut pts: Vec<Vec3> = uv.iter().filter_map(|q| s.derivs(q[0], q[1]).map(|(p, _, _)| p)).collect();
+    assert_eq!(pts.len(), uv.len());
+    // At this tolerance the sliver is three points in space, each sampled twice along the loop
+    // with (u, v) apart: nodes 0 and 1 are one point, 2 and 3 another, 4 and 5 the third.
+    pts[1] = pts[0];
+    pts[3] = pts[2];
+    pts[5] = pts[4];
+    let l = seam::Loop { uv, pts: pts.clone() };
+    let size = size::face_size(&s, &uv::domain(&s), &rules);
+    let Ok((fp, stats)) = plan_or_fill(7, "spline", &poles::Face::new(s.clone(), 0.0), std::slice::from_ref(&l), &rules, size, 0.0, None) else { panic!("planned") };
+    assert!(!fp.triangles.is_empty(), "the face has triangles");
+    assert_eq!(stats.lenient.len(), 1, "{:?}", stats.lenient);
+    for t in &fp.triangles {
+        let p = t.map(|i| fp.fixed.get(i as usize).copied());
+        assert!(p[0] != p[1] && p[1] != p[2] && p[2] != p[0], "a triangle on one node twice: {t:?}");
+    }
+}
+
