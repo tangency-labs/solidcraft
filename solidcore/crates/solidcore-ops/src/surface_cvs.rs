@@ -362,7 +362,7 @@ mod tests {
         }
         // the moved point's span did move
         let (a, b) = if along_u { (0.05, 0.0) } else { (0.0, 0.05) };
-        assert!(at(&s, a, b) != at(&moved, a, b));
+        assert_ne!(at(&s, a, b), at(&moved, a, b));
         // bad moves
         assert_eq!(
             move_cvs(&s, &[((net.rows, 0), [0.0; 3])]),
