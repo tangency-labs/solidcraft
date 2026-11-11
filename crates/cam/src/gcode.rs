@@ -16,6 +16,14 @@ const MAX_OPERATIONS: usize = 10_000;
 const MAX_LINES: usize = 5_000_000;
 /// Longest comment written.
 const MAX_COMMENT: usize = 80;
+/// Slowest and fastest feed written (mm/min).
+pub(crate) const MIN_FEED: f64 = 1.0e-3;
+pub(crate) const MAX_FEED: f64 = 1.0e6;
+
+/// Whether `feed` (mm/min) is one a program may be written with: [`MIN_FEED`] to [`MAX_FEED`].
+pub(crate) fn feed_in_range(feed: f64) -> bool {
+    (MIN_FEED..=MAX_FEED).contains(&feed)
+}
 
 /// One operation of a program: a tool, how it turns, and where it goes.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

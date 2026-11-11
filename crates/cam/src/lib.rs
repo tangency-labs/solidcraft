@@ -15,6 +15,12 @@
 //! scallop, steep and shallow, pencil and rest finishing. Long planning can be stopped from
 //! another thread ([`stop`]).
 //!
+//! Multi-axis toolpaths ([`Toolpath5`]) give the tool tip with the direction of the tool axis.
+//! Machine kinematics ([`kinematics`]) turn them into the positions of a machine's linear and
+//! rotary axes, for machines with up to two rotaries on the table or the head. Indexed (3+1 and
+//! 3+2) work ([`indexed`]) runs a 3-axis toolpath in a tilted work plane, with the rotaries held
+//! still.
+//!
 //! The region offsetting is our own: every boundary piece is offset, corners that open away
 //! from the offset side get a joining arc, the pieces are cut where they cross, and a piece is
 //! kept when its midpoint is no closer to the boundary than the offset distance. Lines and
@@ -29,6 +35,9 @@ mod dropcutter;
 pub mod finish3d;
 mod frame;
 mod gcode;
+pub mod indexed;
+pub mod kinematics;
+mod multiaxis;
 mod offset;
 mod ops;
 mod par;
@@ -50,6 +59,7 @@ pub use finish3d::{
 };
 pub use frame::{Frame, angle_about, rotate, rotate_about};
 pub use gcode::{Operation, Program, emit, parse, work_offset_code};
+pub use multiaxis::{Move5, PathStats5, Pose, Toolpath5, slerp, verify5};
 pub use offset::offset_regions;
 pub use ops::{ContourParams, Cut, Feeds, Heights, PocketParams, Side, contour, pocket};
 pub use path::{Move, PathStats, Toolpath, arc_sweep};
@@ -91,6 +101,8 @@ pub(crate) fn invalid<T>(why: impl Into<String>) -> Result<T> {
 mod finish3d_tests;
 #[cfg(test)]
 mod foundation_tests;
+#[cfg(test)]
+mod kinematics_tests;
 #[cfg(test)]
 mod surface_ops_tests;
 #[cfg(test)]

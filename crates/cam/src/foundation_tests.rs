@@ -1,8 +1,9 @@
-//! Tests of frames, cutters, surfaces and the drop-cutter, and the test surfaces they share.
+//! Tests of frames, cutters, surfaces, the drop-cutter and multi-axis toolpaths, and the test
+//! surfaces they share.
 
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI, TAU};
 
-use solidcore_record::Vec3;
+use solidcore_record::{Loop2, Region2, Vec2, Vec3};
 use solidcraft_geom::Mesh;
 use solidcraft_geom::prelude::*;
 
@@ -274,6 +275,48 @@ fn surfaces_from_meshes() {
     close3(nearest_on_triangle(Vec3::new(-2.0, -2.0, 0.0), &tri), tri[0], 1e-12);
     let w = barycentric(&tri, Vec3::new(1.0, 2.0, 0.0)).unwrap();
     close(w[0] + w[1] + w[2], 1.0, 1e-12);
+}
+
+#[test]
+fn multiaxis_paths_from_3axis_ones() {
+    let square =
+        Region2 { outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(30.0, 0.0), Vec2::new(30.0, 20.0), Vec2::new(0.0, 20.0)]), holes: vec![] };
+    let tool = Tool::new(1, ToolKind::FlatEndmill, 6.0, 20.0);
+    let cut =
+        Cut { heights: Heights { clearance: 10.0, retract: 2.0, top: 0.0, bottom: -3.0 }, feeds: Feeds { cut: 600.0, plunge: 200.0 }, stepdown: 1.5 };
+    let path =
+        contour(&[square], &tool, &ContourParams { side: Side::Outside, climb: true, stock_to_leave: 0.0, tolerance: 0.01, ramp_angle: 0.05 }, &cut)
+            .unwrap();
+    let p5 = Toolpath5::from_3axis(&path, 0.001).unwrap();
+    verify5(&p5, 1e-9).unwrap();
+    let (a, b) = (path.stats(), p5.stats());
+    close(b.cut_length, a.cut_length, 0.05);
+    close(b.cut_minutes, a.cut_minutes, 0.001);
+    assert_eq!(b.max_tilt, 0.0);
+    // Tilted, the tips are the tilted frame's and the axis its Z.
+    let f = tilted(Vec3::new(10.0, 0.0, 5.0), 0.5, 0.0);
+    let t5 = Toolpath5::from_frame(&path, &f, 0.001).unwrap();
+    close(t5.stats().max_tilt, 0.5, 1e-12);
+    for (pose, local) in t5.poses().zip(p5.poses()) {
+        close3(pose.tip, f.to_world(local.tip), 1e-9);
+        close3(pose.axis, f.z, 1e-12);
+    }
+    // The checks catch what must not leave.
+    let start = Move5::Rapid { to: Pose::vertical(Vec3::new(0.0, 0.0, 10.0)) };
+    let tilt = |a: f64| Pose::new(Vec3::new(1.0, 0.0, 0.0), Vec3::new(a.sin(), 0.0, a.cos()));
+    assert!(verify5(&Toolpath5 { moves: vec![start, Move5::Feed { to: tilt(0.2), feed: 100.0 }] }, 0.1).is_err());
+    verify5(&Toolpath5 { moves: vec![start, Move5::Feed { to: tilt(0.05), feed: 100.0 }] }, 0.1).unwrap();
+    assert!(verify5(&Toolpath5 { moves: vec![Move5::Feed { to: tilt(0.0), feed: 100.0 }] }, 0.1).is_err());
+    let bad = Pose::new(Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 2.0));
+    assert!(verify5(&Toolpath5 { moves: vec![Move5::Rapid { to: bad }] }, 0.1).is_err());
+    assert!(verify5(&Toolpath5 { moves: vec![start, Move5::Feed { to: tilt(0.0), feed: 0.0 }] }, 0.1).is_err());
+    // Turning evenly between two directions.
+    let (x, z) = (Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
+    let mid = slerp(z, x, 0.5);
+    close3(mid, Vec3::new(1.0, 0.0, 1.0).normalized().unwrap(), 1e-12);
+    close((slerp(z, -z, 0.5).len() - 1.0).abs(), 0.0, 1e-12);
+    let json = serde_json::to_string(&t5).unwrap();
+    assert_eq!(serde_json::from_str::<Toolpath5>(&json).unwrap(), t5);
 }
 
 #[test]
