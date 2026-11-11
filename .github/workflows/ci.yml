@@ -661,8 +661,14 @@ jobs:
           if [ "$status" -ne 0 ] && [ "$status" -ne 100 ]; then exit "$status"; fi
           cargo xtask known-failing --junit "$junit"
       # Every command label needs an English catalog entry (#8542). The label table is the CLI's
-      # command registry, so this builds the CLI in the profile the tests just used (the shared
-      # crates are cached) and reads it. Skipped when no selected package can change the table.
+      # command registry, so this reads it from a CLI built in the profile the tests just used.
+      # Skipped when no selected package can change the table.
+      # When solidcraft-cli was in the test run, its integration tests (CARGO_BIN_EXE) already made
+      # the binary in this run's feature set. `cargo build -p solidcraft-cli` would resolve features
+      # for the CLI alone (no dev-dependencies, no other members), so every workspace crate got new
+      # metadata and was compiled again: about 4 minutes. No feature that differs between the two
+      # touches the command table. The binary is only missing when the CLI was not tested (a
+      # change to solidcraft-ui-egui or xtask alone); then it is built as before.
       - name: Command labels in the translation catalogs
         env:
           FULL: ${{ needs.changes.outputs.full }}
@@ -672,8 +678,12 @@ jobs:
             true*|*" solidcraft-cli "*|*" solidcraft-ui-egui "*|*" xtask "*) ;;
             *) echo "No package that feeds the command table changed."; exit 0 ;;
           esac
-          cargo build -p solidcraft-cli --profile ci --locked
-          cargo xtask i18n --check --cli "${CARGO_TARGET_DIR:-target}/ci/solidcraft-cli"
+          cli="${CARGO_TARGET_DIR:-target}/ci/solidcraft-cli"
+          case "$FULL $PACKAGES " in
+            true*|*" solidcraft-cli "*) echo "Reusing the CLI the test build made: $cli" ;;
+            *) cargo build -p solidcraft-cli --profile ci --locked ;;
+          esac
+          cargo xtask i18n --check --cli "$cli"
       - name: Compiler cache statistics
         if: always()
         run: if command -v sccache >/dev/null; then sccache --show-stats; else echo "sccache was not set up; built without it"; fi
