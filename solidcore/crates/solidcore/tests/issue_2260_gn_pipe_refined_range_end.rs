@@ -78,8 +78,6 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "close_loop_relates_only_coincident_edges",
     "composite_curve_bbox_segment_intervals",
     "cone_create_canonical_preserves_inside_out_and_checks_height",
-    "cone_parallel_line_domains",
-    "cone_parallel_line_midpoint",
     "corner_blend_coons_patch_tangent_to_sides",
     "corner_blend_stays_inside_neighbours",
     "corner_patch_face_side_twist",

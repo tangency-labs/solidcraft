@@ -27,13 +27,10 @@
 //! Start-plane transform failures propagate here; upstream initializes EXTERIOR
 //! before that transform and skips the point on failure. Parallel boundary-output
 //! arrays are checked before deduplication rather than assuming equal lengths.
-//! Opt-in ([`UpstreamFixes::cone_parallel_line_midpoint`](crate::kernel::UpstreamFixes::cone_parallel_line_midpoint), WR-259): the
-//! parallel-cylinder lines are tested against both face domains at their middle, not
-//! their bottom end, which upstream tests and which a trimmed face domain skips.
-//! Opt-in ([`UpstreamFixes::cone_parallel_line_domains`](crate::kernel::UpstreamFixes::cone_parallel_line_domains), WR-259 / #711):
-//! parallel-cylinder spans use both requested domains converted to STEP, instead of
-//! the full cylinders' axial extents. Conversion errors propagate; the original
-//! tolerance branches are kept. This works independently of the midpoint option.
+//! Parallel-cylinder lines span both requested domains converted to STEP, not the
+//! full cylinders' axial extents, and are tested against both face domains at their
+//! middle, not their bottom end, which a trimmed face domain skips (WR-259).
+//! Conversion errors propagate; the original tolerance branches are kept.
 //! Opt-in ([`UpstreamFixes::cylinder_plane_tangent_within_tolerance`](crate::kernel::UpstreamFixes::cylinder_plane_tangent_within_tolerance), WR-510 / #1525):
 //! a plane parallel to a cylinder's axis is also tangent when it lies within the zone
 //! tolerance of a bounded face's wall along a line (the larger of the cone's and the
@@ -680,28 +677,24 @@ impl Cone {
             if !self.is_cylinder() || !other.is_cylinder() {
                 return Ok(true);
             }
-            let (mut min, mut max, other_min, other_max) = if k.fixes.cone_parallel_line_domains {
-                // Face domains can be shorter than either underlying cylinder.
-                // Work relative to `bottom`, as the circle/line construction below
-                // does. STEP conversion handles swapped UV and inside-out surfaces;
-                // projection also handles the other cylinder's reversed axis.
-                let trim = self.convert_domain_from_nurbs_to_step(k, domain)?;
-                let other_trim = other.convert_domain_from_nurbs_to_step(k, other_domain)?;
-                let min = trim.v_min() - step.v_min();
-                let max = trim.v_max() - step.v_min();
-                let other_trim_bottom = other_origin + other_trim.v_min() * other_axis;
-                let other_trim_top = other_origin + other_trim.v_max() * other_axis;
-                let other_param = line_closest_point(bottom, axis, other_trim_bottom);
-                let other_param2 = line_closest_point(bottom, axis, other_trim_top);
-                let other_min = min2(other_param, other_param2);
-                let other_max = max2(other_param, other_param2);
-                if other_min > max + tol || other_max < min - tol {
-                    return Ok(false);
-                }
-                (min, max, other_min, other_max)
-            } else {
-                (0.0, height, min2(param, param2), max2(param, param2))
-            };
+            // Face domains can be shorter than either underlying cylinder, where
+            // upstream spans the full cylinders (WR-259). Work relative to
+            // `bottom`, as the circle/line construction below does. STEP conversion
+            // handles swapped UV and inside-out surfaces; projection also handles
+            // the other cylinder's reversed axis.
+            let trim = self.convert_domain_from_nurbs_to_step(k, domain)?;
+            let other_trim = other.convert_domain_from_nurbs_to_step(k, other_domain)?;
+            let mut min = trim.v_min() - step.v_min();
+            let mut max = trim.v_max() - step.v_min();
+            let other_trim_bottom = other_origin + other_trim.v_min() * other_axis;
+            let other_trim_top = other_origin + other_trim.v_max() * other_axis;
+            let other_param = line_closest_point(bottom, axis, other_trim_bottom);
+            let other_param2 = line_closest_point(bottom, axis, other_trim_top);
+            let other_min = min2(other_param, other_param2);
+            let other_max = max2(other_param, other_param2);
+            if other_min > max + tol || other_max < min - tol {
+                return Ok(false);
+            }
             if other_min > max - tol {
                 min = max;
             }
@@ -774,14 +767,8 @@ impl Cone {
                 // Upstream tests the bottom end of the line, which lies outside a face
                 // domain trimmed above the surface's own bottom, and skips the whole
                 // line (a face of a cylinder cut by an earlier Boolean; upstream defect
-                // WR-259). The opt-in fix tests the middle instead.
-                // The independent domain-clipping option above also keeps overlaps
-                // away from this full-span midpoint and shortens their output lines.
-                let test_point = if k.fixes.cone_parallel_line_midpoint {
-                    line_point + 0.5 * (max - min) * axis
-                } else {
-                    line_point
-                };
+                // WR-259). The middle of the clipped line lies inside both faces.
+                let test_point = line_point + 0.5 * (max - min) * axis;
                 let zero = EFF_ZERO * (1.0 + line_point.max_dimension());
                 let inv = intersection_inversion(self, k, test_point, zero)?;
                 let other_inv = intersection_inversion(other, k, test_point, zero)?;
