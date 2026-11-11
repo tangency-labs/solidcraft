@@ -1,0 +1,998 @@
+{
+  "samples": [
+    {
+      "command": "inspect.measure",
+      "slug": "inspect-measure",
+      "group": "INSPECT",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 30,
+            "height": 20,
+            "corner": [
+              -20,
+              -15,
+              0
+            ],
+            "body_name": "Block"
+          }
+        }
+      ],
+      "operation": [],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {
+        "select": [
+          {
+            "type": "vertex",
+            "body": "Block",
+            "point": [
+              -20,
+              -15,
+              20
+            ]
+          },
+          {
+            "type": "vertex",
+            "body": "Block",
+            "point": [
+              20,
+              15,
+              20
+            ]
+          }
+        ]
+      },
+      "after_actions": [
+        {
+          "method": "ui.start",
+          "params": {
+            "command": "inspect.measure"
+          }
+        }
+      ],
+      "expected": {
+        "body_count": 1
+      },
+      "explanation": "The native Measure overlay labels a 50 mm diagonal between the top face vertices. Keep its actual dimension annotation.",
+      "crop_scale": 0.5
+    },
+    {
+      "command": "inspect.center_of_mass",
+      "slug": "inspect-center_of_mass",
+      "group": "INSPECT",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 36,
+            "width": 24,
+            "height": 8,
+            "corner": [
+              -18,
+              -12,
+              0
+            ],
+            "body_name": "Block"
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 12,
+            "width": 12,
+            "height": 12,
+            "corner": [
+              6,
+              -6,
+              8
+            ],
+            "operation": "join",
+            "targets": [
+              "Block"
+            ]
+          }
+        }
+      ],
+      "operation": [],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          8
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "after_actions": [
+        {
+          "method": "ui.start",
+          "params": {
+            "command": "inspect.center_of_mass"
+          }
+        }
+      ],
+      "expected": {
+        "body_count": 1,
+        "volume_mm3": 8640
+      },
+      "explanation": "The genuine mass-center marker is at [2.4,0,6] for this uniform stepped solid.",
+      "crop_scale": 0.5
+    },
+    {
+      "command": "inspect.section",
+      "slug": "inspect-section",
+      "group": "INSPECT",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 30,
+            "height": 20,
+            "corner": [
+              -20,
+              -15,
+              0
+            ],
+            "body_name": "Block"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "inspect.section",
+          "params": {
+            "plane": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "normal": [
+                1,
+                0,
+                0
+              ]
+            }
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "after_actions": [],
+      "expected": {
+        "body_count": 1
+      },
+      "explanation": "The native section clips the block and caps the actual cut face."
+    },
+    {
+      "command": "inspect.zebra",
+      "slug": "inspect-zebra",
+      "group": "INSPECT",
+      "setup": [
+        {
+          "command": "solid.sphere",
+          "params": {
+            "radius": 18,
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "body_name": "Ball"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "inspect.zebra",
+          "params": {
+            "stripes": 12
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 105
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "after_actions": [],
+      "expected": {
+        "body_count": 1
+      },
+      "explanation": "A genuine native surface-analysis display on a smooth sphere; clear selection keeps the analysis visible."
+    },
+    {
+      "command": "inspect.draft",
+      "slug": "inspect-draft",
+      "group": "INSPECT",
+      "setup": [
+        {
+          "command": "solid.sphere",
+          "params": {
+            "radius": 18,
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "body_name": "Ball"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "inspect.draft",
+          "params": {
+            "pull": [
+              0,
+              0,
+              1
+            ],
+            "angle": 5
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 105
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "after_actions": [],
+      "expected": {
+        "body_count": 1
+      },
+      "explanation": "A genuine native surface-analysis display on a smooth sphere; clear selection keeps the analysis visible."
+    },
+    {
+      "command": "inspect.environment_map",
+      "slug": "inspect-environment_map",
+      "group": "INSPECT",
+      "setup": [
+        {
+          "command": "solid.sphere",
+          "params": {
+            "radius": 18,
+            "center": [
+              0,
+              0,
+              0
+            ],
+            "body_name": "Ball"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "inspect.environment_map",
+          "params": {}
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 105
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "after_actions": [],
+      "expected": {
+        "body_count": 1
+      },
+      "explanation": "A genuine native surface-analysis display on a smooth sphere; clear selection keeps the analysis visible."
+    },
+    {
+      "command": "inspect.curvature_map",
+      "slug": "inspect-curvature_map",
+      "group": "INSPECT",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 30,
+            "height": 20,
+            "corner": [
+              -20,
+              -15,
+              0
+            ],
+            "body_name": "Block"
+          }
+        },
+        {
+          "command": "solid.fillet",
+          "params": {
+            "edges": [
+              [
+                20,
+                -15,
+                10
+              ]
+            ],
+            "radius": 5
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "inspect.curvature_map",
+          "params": {
+            "radius": 5
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "after_actions": [],
+      "expected": {
+        "body_count": 1
+      },
+      "explanation": "The native curvature map distinguishes the radius-5 fillet from planar faces."
+    },
+    {
+      "command": "inspect.continuity",
+      "slug": "inspect-continuity",
+      "group": "INSPECT",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 30,
+            "height": 20,
+            "corner": [
+              -20,
+              -15,
+              0
+            ],
+            "body_name": "Block"
+          }
+        },
+        {
+          "command": "solid.fillet",
+          "params": {
+            "edges": [
+              [
+                20,
+                -15,
+                10
+              ]
+            ],
+            "radius": 5
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "inspect.continuity",
+          "params": {
+            "body": "Block",
+            "samples": 33
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "after_actions": [],
+      "expected": {
+        "body_count": 1
+      },
+      "explanation": "Native colored seams show the measured continuity between the actual adjacent faces."
+    },
+    {
+      "command": "inspect.accessibility",
+      "slug": "inspect-accessibility",
+      "group": "INSPECT",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 30,
+            "height": 20,
+            "corner": [
+              -20,
+              -15,
+              0
+            ],
+            "body_name": "Block"
+          }
+        },
+        {
+          "command": "solid.cylinder",
+          "params": {
+            "base": [
+              0,
+              -20,
+              10
+            ],
+            "axis": [
+              0,
+              1,
+              0
+            ],
+            "radius": 6,
+            "height": 40,
+            "operation": "cut",
+            "targets": [
+              "Block"
+            ]
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "inspect.accessibility",
+          "params": {
+            "direction": [
+              0,
+              0,
+              1
+            ]
+          }
+        }
+      ],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "after_actions": [],
+      "expected": {
+        "body_count": 1
+      },
+      "explanation": "The actual transverse bore exposes faces blocked from access in the selected vertical direction."
+    },
+    {
+      "command": "inspect.curvature_comb",
+      "slug": "inspect-curvature_comb",
+      "group": "INSPECT",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "AnalysisCurve"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_profile": false,
+            "show_points": false,
+            "show_constraints": false,
+            "show_dimensions": false
+          }
+        },
+        {
+          "command": "sketch.ellipse",
+          "params": {
+            "center": [
+              0,
+              0
+            ],
+            "major": [
+              20,
+              0
+            ],
+            "minor_radius": 8
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "after_actions": [
+        {
+          "method": "ui.start",
+          "params": {
+            "command": "inspect.curvature_comb"
+          }
+        },
+        {
+          "method": "ui.click",
+          "world": [
+            0,
+            8,
+            0
+          ]
+        }
+      ],
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "The native comb teeth and envelope show how curvature varies along a real ellipse.",
+      "crop_scale": 0.5
+    },
+    {
+      "command": "inspect.minimum_radius",
+      "slug": "inspect-minimum_radius",
+      "group": "INSPECT",
+      "setup": [
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "AnalysisCurve"
+          }
+        },
+        {
+          "command": "sketch.options",
+          "params": {
+            "grid": false,
+            "show_profile": false,
+            "show_points": false,
+            "show_constraints": false,
+            "show_dimensions": false
+          }
+        },
+        {
+          "command": "sketch.ellipse",
+          "params": {
+            "center": [
+              0,
+              0
+            ],
+            "major": [
+              20,
+              0
+            ],
+            "minor_radius": 8
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "yaw": 0,
+        "pitch": 1.5707963267948966,
+        "roll": 0,
+        "distance": 110
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "after_actions": [
+        {
+          "method": "ui.start",
+          "params": {
+            "command": "inspect.minimum_radius"
+          }
+        },
+        {
+          "method": "ui.click",
+          "world": [
+            0,
+            8,
+            0
+          ]
+        }
+      ],
+      "expected": {
+        "body_count": 0,
+        "sketch_count": 1
+      },
+      "explanation": "The native minimum-radius marker on the ellipse reports b*b/a = 3.2 mm near a major-axis end.",
+      "crop_scale": 0.5
+    },
+    {
+      "command": "inspect.isocurve",
+      "slug": "inspect-isocurve",
+      "group": "INSPECT",
+      "setup": [
+        {
+          "command": "solid.cylinder",
+          "params": {
+            "base": [
+              0,
+              0,
+              0
+            ],
+            "radius": 14,
+            "height": 28,
+            "body_name": "Cylinder"
+          }
+        }
+      ],
+      "operation": [],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          0,
+          0,
+          14
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 115
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "after_actions": [
+        {
+          "method": "ui.start",
+          "params": {
+            "command": "inspect.isocurve"
+          }
+        },
+        {
+          "method": "ui.click",
+          "world": [
+            0,
+            -14,
+            14
+          ]
+        }
+      ],
+      "expected": {
+        "body_count": 1
+      },
+      "explanation": "The native parameter grid is attached to the picked cylindrical face.",
+      "crop_scale": 0.5
+    },
+    {
+      "command": "inspect.interference",
+      "slug": "inspect-interference",
+      "group": "INSPECT",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 24,
+            "height": 16,
+            "corner": [
+              -24,
+              -12,
+              0
+            ],
+            "body_name": "A"
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 30,
+            "width": 20,
+            "height": 24,
+            "corner": [
+              -2,
+              -10,
+              0
+            ],
+            "operation": "new",
+            "body_name": "B"
+          }
+        }
+      ],
+      "operation": [],
+      "presentation": "single",
+      "camera": {
+        "target": [
+          2,
+          0,
+          12
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 145
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "after_actions": [
+        {
+          "method": "ui.start",
+          "params": {
+            "command": "inspect.interference"
+          }
+        },
+        {
+          "method": "ui.click",
+          "handle_suffix": ":Compute"
+        }
+      ],
+      "expected": {
+        "body_count": 2
+      },
+      "explanation": "The native Compute action shades the real 18*20*16 = 5760 mm3 interference region red."
+    },
+    {
+      "command": "inspect.compare",
+      "slug": "inspect-compare",
+      "group": "INSPECT",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 30,
+            "height": 10,
+            "corner": [
+              -20,
+              -15,
+              0
+            ],
+            "body_name": "Before"
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 30,
+            "height": 10,
+            "corner": [
+              -20,
+              -15,
+              0
+            ],
+            "operation": "new",
+            "body_name": "After"
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 10,
+            "width": 9,
+            "height": 6,
+            "corner": [
+              -8,
+              -4,
+              10
+            ],
+            "operation": "join",
+            "targets": [
+              "After"
+            ]
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "inspect.compare",
+          "params": {
+            "a": "Before",
+            "b": "After",
+            "color": true,
+            "tolerance": 0.01,
+            "spacing": 0.5
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 125
+      },
+      "before_ui": {
+        "hiddenBodies": [
+          "After"
+        ]
+      },
+      "after_ui": {
+        "hiddenBodies": [
+          "Before"
+        ]
+      },
+      "after_actions": [],
+      "expected": {
+        "body_count": 2
+      },
+      "explanation": "The real comparison colors the five new boss faces; the source and changed body are displayed in separate panes."
+    },
+    {
+      "command": "inspect.colored_components",
+      "slug": "inspect-colored_components",
+      "group": "INSPECT",
+      "setup": [
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Left",
+            "parent": "root"
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 16,
+            "width": 16,
+            "height": 16,
+            "corner": [
+              -22,
+              -8,
+              0
+            ],
+            "body_name": "LeftBody"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        },
+        {
+          "command": "component.create",
+          "params": {
+            "name": "Right",
+            "parent": "root"
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 12,
+            "width": 16,
+            "height": 24,
+            "corner": [
+              6,
+              -8,
+              0
+            ],
+            "body_name": "RightBody"
+          }
+        },
+        {
+          "command": "component.activate",
+          "params": {
+            "component": "root"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "inspect.colored_components",
+          "params": {
+            "enabled": true
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703875,
+        "roll": 0,
+        "distance": 125
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "after_actions": [],
+      "expected": {
+        "body_count": 2
+      },
+      "explanation": "Two real sibling components receive the native temporary component colors."
+    }
+  ]
+}

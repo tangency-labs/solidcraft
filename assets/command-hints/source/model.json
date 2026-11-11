@@ -1,0 +1,61 @@
+{
+  "commands": [
+    {
+      "command": "sketch.create",
+      "params": {
+        "plane": "XY",
+        "name": "Profile"
+      }
+    },
+    {
+      "command": "sketch.rectangle.two_point",
+      "params": {
+        "p0": [
+          -24,
+          -16
+        ],
+        "p1": [
+          24,
+          16
+        ]
+      }
+    },
+    {
+      "command": "sketch.finish",
+      "params": {}
+    },
+    {
+      "command": "solid.extrude",
+      "params": {
+        "distance": 18,
+        "name": "Extrusion"
+      }
+    },
+    {
+      "command": "solid.fillet",
+      "params": {
+        "edges": [
+          [
+            24,
+            -16,
+            9
+          ]
+        ],
+        "radius": 7,
+        "name": "Rounded edge"
+      }
+    },
+    {
+      "command": "solid.hole",
+      "params": {
+        "position": [
+          0,
+          0,
+          18
+        ],
+        "diameter": 14,
+        "name": "Through hole"
+      }
+    }
+  ]
+}

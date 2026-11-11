@@ -459,6 +459,35 @@ fn each_newly_hovered_row_waits_the_full_tip_delay() {
     assert_eq!(tips.len(), 2, "both rows showed a tip after their own delay");
 }
 
+#[test]
+fn illustrated_tip_stays_beside_a_menu_in_a_narrow_window() {
+    for x in [20.0, 400.0] {
+        let ctx = crate::test_support::context();
+        let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(640.0, 480.0));
+        let menu = Rect::from_min_size(pos2(x, 20.0), vec2(220.0, 64.0));
+        let mut shown = None;
+        for time in [0.0, 0.1, 0.3, 1.0, 1.2, 1.4] {
+            let raw = egui::RawInput {
+                screen_rect: Some(screen),
+                events: vec![egui::Event::PointerMoved(menu.min + vec2(10.0, 16.0))],
+                time: Some(time),
+                ..Default::default()
+            };
+            crate::test_support::raw_frame(&ctx, raw, |_| {
+                crate::Container::new(&ctx, crate::Surface::Popup).area(egui::Id::unique("narrow_dropdown")).fixed_pos(menu.min).show(&ctx, |ui| {
+                    let resp = ui.interact(menu, egui::Id::unique("illustrated_row"), Sense::hover());
+                    shown = menu_tip(ui, menu, &resp, |ui| {
+                        ui.allocate_exact_size(vec2(ui.available_width().min(480.0), 300.0), Sense::hover());
+                    });
+                });
+            });
+        }
+        let tip = shown.expect("hovered media hint");
+        assert!(!tip.intersects(menu), "{tip:?} covers {menu:?}");
+        assert!(screen.contains_rect(tip), "{tip:?} leaves {screen:?}");
+    }
+}
+
 fn menu_style() -> MenuStyle<'static> {
     MenuStyle {
         pin_tip: "Pin",

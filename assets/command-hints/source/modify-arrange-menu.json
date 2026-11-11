@@ -1,0 +1,1853 @@
+{
+  "samples": [
+    {
+      "command": "solid.chamfer",
+      "slug": "chamfer",
+      "group": "MODIFY",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 48,
+            "width": 32,
+            "height": 16,
+            "center": [
+              0,
+              0,
+              8
+            ],
+            "body_name": "Block",
+            "operation": "new"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "solid.chamfer",
+          "params": {
+            "edges": [
+              [
+                24,
+                0,
+                16
+              ]
+            ],
+            "distance": 7
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703873,
+        "distance": 100
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "before": {
+          "body_count": 1,
+          "volume_mm3": 24576,
+          "faces": 6,
+          "bbox": {
+            "min": [
+              -24.0,
+              -16.0,
+              0.0
+            ],
+            "max": [
+              24.0,
+              16.0,
+              16.0
+            ]
+          },
+          "all_closed": true
+        },
+        "after": {
+          "body_count": 1,
+          "volume_mm3": 23792.0,
+          "faces": 7,
+          "bbox": {
+            "min": [
+              -24.0,
+              -16.0,
+              0.0
+            ],
+            "max": [
+              24.0,
+              16.0,
+              16.0
+            ]
+          },
+          "all_closed": true
+        },
+        "volume_relative_tolerance": 0.001,
+        "validated_cli": "target/ci/solidcraft-cli"
+      },
+      "explanation": "A 7 mm chamfer removes a triangular prism along the visible upper right edge; volume 24576 - 32*7*7/2 = 23792 mm³."
+    },
+    {
+      "command": "solid.press_pull",
+      "slug": "press-pull",
+      "group": "MODIFY",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 48,
+            "width": 32,
+            "height": 16,
+            "center": [
+              0,
+              0,
+              8
+            ],
+            "body_name": "Block",
+            "operation": "new"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "solid.press_pull",
+          "params": {
+            "face": [
+              0,
+              0,
+              16
+            ],
+            "distance": 12
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          14
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703873,
+        "distance": 100
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "before": {
+          "body_count": 1,
+          "volume_mm3": 24576,
+          "faces": 6,
+          "bbox": {
+            "min": [
+              -24.0,
+              -16.0,
+              0.0
+            ],
+            "max": [
+              24.0,
+              16.0,
+              16.0
+            ]
+          },
+          "all_closed": true
+        },
+        "after": {
+          "body_count": 1,
+          "volume_mm3": 43008,
+          "faces": 6,
+          "bbox": {
+            "min": [
+              -24.0,
+              -16.0,
+              0.0
+            ],
+            "max": [
+              24.0,
+              16.0,
+              28.0
+            ]
+          },
+          "all_closed": true
+        },
+        "volume_relative_tolerance": 0.001,
+        "validated_cli": "target/ci/solidcraft-cli"
+      },
+      "explanation": "Pull the top face up by 12 mm. The block height grows from 16 to 28 mm; volume 43008 mm³."
+    },
+    {
+      "command": "solid.draft",
+      "slug": "draft",
+      "group": "MODIFY",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 40,
+            "width": 32,
+            "height": 24,
+            "center": [
+              0,
+              0,
+              12
+            ],
+            "body_name": "Block",
+            "operation": "new"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "solid.draft",
+          "params": {
+            "faces": [
+              [
+                20,
+                0,
+                12
+              ],
+              [
+                -20,
+                0,
+                12
+              ],
+              [
+                0,
+                16,
+                12
+              ],
+              [
+                0,
+                -16,
+                12
+              ]
+            ],
+            "angle": "12 deg",
+            "neutral": "XY"
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          12
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703873,
+        "distance": 100
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "before": {
+          "body_count": 1,
+          "volume_mm3": 30720,
+          "faces": 6,
+          "bbox": {
+            "min": [
+              -20.0,
+              -16.0,
+              0.0
+            ],
+            "max": [
+              20.0,
+              16.0,
+              24.0
+            ]
+          },
+          "all_closed": true
+        },
+        "after": {
+          "body_count": 1,
+          "volume_mm3": 22737.617415,
+          "faces": 6,
+          "bbox": {
+            "min": [
+              -20.0,
+              -16.0,
+              -0.0
+            ],
+            "max": [
+              20.0,
+              16.0,
+              24.0
+            ]
+          },
+          "all_closed": true
+        },
+        "volume_relative_tolerance": 0.001,
+        "validated_cli": "target/ci/solidcraft-cli"
+      },
+      "explanation": "Four walls tilt inward by 12° about the unchanged base plane; the top is narrower in both dimensions."
+    },
+    {
+      "command": "solid.offset_face",
+      "slug": "offset-face",
+      "group": "MODIFY",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 48,
+            "width": 32,
+            "height": 16,
+            "center": [
+              0,
+              0,
+              8
+            ],
+            "body_name": "Block",
+            "operation": "new"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "solid.offset_face",
+          "params": {
+            "faces": [
+              [
+                24,
+                0,
+                8
+              ]
+            ],
+            "distance": 10
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          5,
+          0,
+          8
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703873,
+        "distance": 108
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "before": {
+          "body_count": 1,
+          "volume_mm3": 24576,
+          "faces": 6,
+          "bbox": {
+            "min": [
+              -24.0,
+              -16.0,
+              0.0
+            ],
+            "max": [
+              24.0,
+              16.0,
+              16.0
+            ]
+          },
+          "all_closed": true
+        },
+        "after": {
+          "body_count": 1,
+          "volume_mm3": 29696,
+          "faces": 6,
+          "bbox": {
+            "min": [
+              -24.0,
+              -16.0,
+              0.0
+            ],
+            "max": [
+              34.0,
+              16.0,
+              16.0
+            ]
+          },
+          "all_closed": true
+        },
+        "volume_relative_tolerance": 0.001,
+        "validated_cli": "target/ci/solidcraft-cli"
+      },
+      "explanation": "Offset the right wall outward 10 mm. Width along X grows from 48 to 58 mm, with the other five supporting planes unchanged."
+    },
+    {
+      "command": "solid.replace_face",
+      "slug": "replace-face",
+      "group": "MODIFY",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 48,
+            "width": 32,
+            "height": 16,
+            "center": [
+              0,
+              0,
+              8
+            ],
+            "body_name": "Block",
+            "operation": "new"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "solid.replace_face",
+          "params": {
+            "faces": [
+              [
+                0,
+                0,
+                16
+              ]
+            ],
+            "target": {
+              "origin": [
+                0,
+                0,
+                28
+              ],
+              "normal": [
+                0,
+                0,
+                1
+              ]
+            }
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          14
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703873,
+        "distance": 100
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "before": {
+          "body_count": 1,
+          "volume_mm3": 24576,
+          "faces": 6,
+          "bbox": {
+            "min": [
+              -24.0,
+              -16.0,
+              0.0
+            ],
+            "max": [
+              24.0,
+              16.0,
+              16.0
+            ]
+          },
+          "all_closed": true
+        },
+        "after": {
+          "body_count": 1,
+          "volume_mm3": 43008,
+          "faces": 6,
+          "bbox": {
+            "min": [
+              -24.0,
+              -16.0,
+              0.0
+            ],
+            "max": [
+              24.0,
+              16.0,
+              28.0
+            ]
+          },
+          "all_closed": true
+        },
+        "volume_relative_tolerance": 0.001,
+        "validated_cli": "target/ci/solidcraft-cli"
+      },
+      "explanation": "Replace the top supporting plane with the parallel plane z=28; the side walls extend to meet it."
+    },
+    {
+      "command": "solid.split_face",
+      "slug": "split-face",
+      "group": "MODIFY",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 48,
+            "width": 32,
+            "height": 16,
+            "center": [
+              0,
+              0,
+              8
+            ],
+            "body_name": "Block",
+            "operation": "new"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "solid.split_face",
+          "params": {
+            "faces": [
+              [
+                0,
+                0,
+                16
+              ]
+            ],
+            "plane": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "normal": [
+                1,
+                0,
+                0
+              ]
+            }
+          }
+        },
+        {
+          "command": "appearance.assign",
+          "params": {
+            "faces": [
+              [
+                -12,
+                0,
+                16
+              ]
+            ],
+            "body": "Block",
+            "color": "#e6aa54"
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703873,
+        "distance": 100
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "before": {
+          "body_count": 1,
+          "volume_mm3": 24576,
+          "faces": 6,
+          "bbox": {
+            "min": [
+              -24.0,
+              -16.0,
+              0.0
+            ],
+            "max": [
+              24.0,
+              16.0,
+              16.0
+            ]
+          },
+          "all_closed": true
+        },
+        "after": {
+          "body_count": 1,
+          "volume_mm3": 24576,
+          "faces": 7,
+          "bbox": {
+            "min": [
+              -24.0,
+              -16.0,
+              0.0
+            ],
+            "max": [
+              24.0,
+              16.0,
+              16.0
+            ]
+          },
+          "all_closed": true
+        },
+        "volume_relative_tolerance": 0.001,
+        "validated_cli": "target/ci/solidcraft-cli"
+      },
+      "explanation": "Split only the top face at x=0. The amber appearance is assigned to one real new face to show the division; shape and volume stay unchanged."
+    },
+    {
+      "command": "face.delete",
+      "slug": "delete-face",
+      "group": "MODIFY",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 48,
+            "width": 32,
+            "height": 16,
+            "center": [
+              0,
+              0,
+              8
+            ],
+            "body_name": "Block",
+            "operation": "new"
+          }
+        },
+        {
+          "command": "solid.fillet",
+          "params": {
+            "edges": [
+              [
+                24,
+                0,
+                16
+              ]
+            ],
+            "radius": 7
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "face.delete",
+          "params": {
+            "faces": [
+              [
+                21.949747468305834,
+                0,
+                13.949747468305834
+              ]
+            ]
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703873,
+        "distance": 100
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "before": {
+          "body_count": 1,
+          "volume_mm3": 24239.50432,
+          "faces": 7,
+          "bbox": {
+            "min": [
+              -24.0,
+              -16.0,
+              0.0
+            ],
+            "max": [
+              24.0,
+              16.0,
+              16.0
+            ]
+          },
+          "all_closed": true
+        },
+        "after": {
+          "body_count": 1,
+          "volume_mm3": 24576,
+          "faces": 6,
+          "bbox": {
+            "min": [
+              -24.0,
+              -16.0,
+              0.0
+            ],
+            "max": [
+              24.0,
+              16.0,
+              16.0
+            ]
+          },
+          "all_closed": true
+        },
+        "volume_relative_tolerance": 0.001,
+        "validated_cli": "target/ci/solidcraft-cli"
+      },
+      "explanation": "Delete the cylindrical fillet face and heal from the adjacent planes, restoring the original sharp box."
+    },
+    {
+      "command": "solid.shell",
+      "slug": "shell",
+      "group": "MODIFY",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 48,
+            "width": 32,
+            "height": 24,
+            "center": [
+              0,
+              0,
+              12
+            ],
+            "body_name": "Block",
+            "operation": "new"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "solid.shell",
+          "params": {
+            "faces": [
+              [
+                0,
+                0,
+                24
+              ]
+            ],
+            "thickness": 3
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          12
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703873,
+        "distance": 100
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "before": {
+          "body_count": 1,
+          "volume_mm3": 36864,
+          "faces": 6,
+          "bbox": {
+            "min": [
+              -24.0,
+              -16.0,
+              0.0
+            ],
+            "max": [
+              24.0,
+              16.0,
+              24.0
+            ]
+          },
+          "all_closed": true
+        },
+        "after": {
+          "body_count": 1,
+          "volume_mm3": 13932,
+          "faces": 11,
+          "bbox": {
+            "min": [
+              -24.0,
+              -16.0,
+              0.0
+            ],
+            "max": [
+              24.0,
+              16.0,
+              24.0
+            ]
+          },
+          "all_closed": true
+        },
+        "volume_relative_tolerance": 0.001,
+        "validated_cli": "target/ci/solidcraft-cli"
+      },
+      "explanation": "Remove the top and hollow inward with 3 mm walls. The outer envelope stays fixed; volume 48*32*24 - 42*26*21 = 13932 mm³."
+    },
+    {
+      "command": "solid.combine",
+      "slug": "combine",
+      "group": "MODIFY",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 48,
+            "width": 32,
+            "height": 12,
+            "center": [
+              0,
+              0,
+              6
+            ],
+            "body_name": "Plate",
+            "operation": "new"
+          }
+        },
+        {
+          "command": "solid.cylinder",
+          "params": {
+            "radius": 9,
+            "height": 26,
+            "base": [
+              0,
+              0,
+              -7
+            ],
+            "body_name": "Tool",
+            "operation": "new"
+          }
+        },
+        {
+          "command": "appearance.assign",
+          "params": {
+            "bodies": [
+              "Tool"
+            ],
+            "color": "#e6aa54"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "solid.combine",
+          "params": {
+            "target": "Plate",
+            "tools": [
+              "Tool"
+            ],
+            "operation": "cut"
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          6
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703873,
+        "distance": 100
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "before": {
+          "body_count": 2,
+          "volume_mm3": 25048.194128,
+          "faces": 9,
+          "bbox": {
+            "min": [
+              -24.0,
+              -16.0,
+              -7.0
+            ],
+            "max": [
+              24.0,
+              16.0,
+              19.0
+            ]
+          },
+          "all_closed": true
+        },
+        "after": {
+          "body_count": 1,
+          "volume_mm3": 15378.371941,
+          "faces": 7,
+          "bbox": {
+            "min": [
+              -24.0,
+              -16.0,
+              0.0
+            ],
+            "max": [
+              24.0,
+              16.0,
+              12.0
+            ]
+          },
+          "all_closed": true
+        },
+        "volume_relative_tolerance": 0.001,
+        "validated_cli": "target/ci/solidcraft-cli"
+      },
+      "explanation": "Cut the amber cylinder out of the plate and consume the tool. The resulting plate has a real 18 mm through hole; volume 18432 - pi*81*12 mm³."
+    },
+    {
+      "command": "solid.split_body",
+      "slug": "split-body",
+      "group": "MODIFY",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 48,
+            "width": 32,
+            "height": 16,
+            "center": [
+              0,
+              0,
+              8
+            ],
+            "body_name": "Block",
+            "operation": "new"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "solid.split_body",
+          "params": {
+            "body": "Block",
+            "plane": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "normal": [
+                1,
+                0.3,
+                0
+              ]
+            }
+          }
+        },
+        {
+          "command": "appearance.assign",
+          "params": {
+            "bodies": [
+              "Block (1)"
+            ],
+            "color": "#e6aa54"
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703873,
+        "distance": 100
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "before": {
+          "body_count": 1,
+          "volume_mm3": 24576,
+          "faces": 6,
+          "bbox": {
+            "min": [
+              -24.0,
+              -16.0,
+              0.0
+            ],
+            "max": [
+              24.0,
+              16.0,
+              16.0
+            ]
+          },
+          "all_closed": true
+        },
+        "after": {
+          "body_count": 2,
+          "volume_mm3": 24576,
+          "faces": 12,
+          "bbox": {
+            "min": [
+              -24.0,
+              -16.0,
+              0.0
+            ],
+            "max": [
+              24.0,
+              16.0,
+              16.0
+            ]
+          },
+          "all_closed": true
+        },
+        "volume_relative_tolerance": 0.001,
+        "validated_cli": "target/ci/solidcraft-cli"
+      },
+      "explanation": "Split the block into two closed bodies along an oblique vertical plane. The pieces stay in place; amber is assigned to the actual left result body so the split remains visible."
+    },
+    {
+      "command": "solid.scale",
+      "slug": "scale",
+      "group": "MODIFY",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 28,
+            "width": 20,
+            "height": 16,
+            "center": [
+              0,
+              0,
+              8
+            ],
+            "body_name": "Block",
+            "operation": "new"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "solid.scale",
+          "params": {
+            "bodies": [
+              "Block"
+            ],
+            "factor": 1.5,
+            "origin": [
+              0,
+              0,
+              8
+            ]
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          8
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703873,
+        "distance": 100
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "before": {
+          "body_count": 1,
+          "volume_mm3": 8960,
+          "faces": 6,
+          "bbox": {
+            "min": [
+              -14.0,
+              -10.0,
+              0.0
+            ],
+            "max": [
+              14.0,
+              10.0,
+              16.0
+            ]
+          },
+          "all_closed": true
+        },
+        "after": {
+          "body_count": 1,
+          "volume_mm3": 30240.0,
+          "faces": 6,
+          "bbox": {
+            "min": [
+              -21.0,
+              -15.0,
+              -4.0
+            ],
+            "max": [
+              21.0,
+              15.0,
+              20.0
+            ]
+          },
+          "all_closed": true
+        },
+        "volume_relative_tolerance": 0.001,
+        "validated_cli": "target/ci/solidcraft-cli"
+      },
+      "explanation": "Uniform scaling about the block centre changes dimensions 28×20×16 to 42×30×24, and multiplies volume by 1.5³."
+    },
+    {
+      "command": "sheet.convert",
+      "slug": "convert-sheet-metal",
+      "group": "MODIFY",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 48,
+            "width": 32,
+            "height": 20,
+            "center": [
+              0,
+              0,
+              10
+            ],
+            "body_name": "Block",
+            "operation": "new"
+          }
+        },
+        {
+          "command": "sheet.manage_rules",
+          "params": {
+            "name": "Illustration",
+            "thickness": "2 mm",
+            "k_factor": "0.44",
+            "bend_radius": "2 mm",
+            "gap": "0.5 mm",
+            "active": true
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "sheet.convert",
+          "params": {
+            "body": "Block",
+            "face": [
+              0,
+              0,
+              0
+            ],
+            "bends": [
+              [
+                0,
+                -16,
+                0
+              ],
+              [
+                24,
+                0,
+                0
+              ],
+              [
+                0,
+                16,
+                0
+              ],
+              [
+                -24,
+                0,
+                0
+              ]
+            ],
+            "rule": "Illustration"
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703873,
+        "distance": 100
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "before": {
+          "body_count": 1,
+          "volume_mm3": 30720,
+          "faces": 6,
+          "bbox": {
+            "min": [
+              -24.0,
+              -16.0,
+              0.0
+            ],
+            "max": [
+              24.0,
+              16.0,
+              20.0
+            ]
+          },
+          "all_closed": true
+        },
+        "after": {
+          "body_count": 1,
+          "volume_mm3": 7643.861911,
+          "faces": 46,
+          "bbox": {
+            "min": [
+              -24.0,
+              -16.0,
+              -0.0
+            ],
+            "max": [
+              24.0,
+              16.0,
+              20.0
+            ]
+          },
+          "all_closed": true
+        },
+        "volume_relative_tolerance": 0.001,
+        "validated_cli": "target/ci/solidcraft-cli"
+      },
+      "explanation": "Convert the solid with its bottom fixed and its four bottom edges selected as bends. This command itself creates a sheet tray with four rounded bends and corner relief; no flange command is used."
+    },
+    {
+      "command": "solid.move",
+      "slug": "move",
+      "group": "ARRANGE",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 48,
+            "width": 32,
+            "height": 3,
+            "center": [
+              0,
+              0,
+              -1.5
+            ],
+            "body_name": "Base",
+            "operation": "new"
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 12,
+            "width": 12,
+            "height": 12,
+            "center": [
+              -14,
+              0,
+              6
+            ],
+            "body_name": "Block",
+            "operation": "new"
+          }
+        },
+        {
+          "command": "appearance.assign",
+          "params": {
+            "bodies": [
+              "Base"
+            ],
+            "color": "#9babb5"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "solid.move",
+          "params": {
+            "bodies": [
+              "Block"
+            ],
+            "translate": [
+              28,
+              0,
+              0
+            ]
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          4
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703873,
+        "distance": 100
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "before": {
+          "body_count": 2,
+          "volume_mm3": 6336,
+          "faces": 12,
+          "bbox": {
+            "min": [
+              -24.0,
+              -16.0,
+              -3.0
+            ],
+            "max": [
+              24.0,
+              16.0,
+              12.0
+            ]
+          },
+          "all_closed": true
+        },
+        "after": {
+          "body_count": 2,
+          "volume_mm3": 6336,
+          "faces": 12,
+          "bbox": {
+            "min": [
+              -24.0,
+              -16.0,
+              -3.0
+            ],
+            "max": [
+              24.0,
+              16.0,
+              12.0
+            ]
+          },
+          "all_closed": true
+        },
+        "volume_relative_tolerance": 0.001,
+        "validated_cli": "target/ci/solidcraft-cli"
+      },
+      "explanation": "Translate the small block 28 mm along X across an unchanged reference plate; body count, dimensions and volume are invariant."
+    },
+    {
+      "command": "solid.mirror",
+      "slug": "mirror",
+      "group": "ARRANGE",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 12,
+            "width": 20,
+            "height": 18,
+            "center": [
+              -16,
+              0,
+              9
+            ],
+            "body_name": "Block",
+            "operation": "new"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "solid.mirror",
+          "params": {
+            "bodies": [
+              "Block"
+            ],
+            "plane": "YZ"
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          9
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703873,
+        "distance": 100
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "before": {
+          "body_count": 1,
+          "volume_mm3": 4320,
+          "faces": 6,
+          "bbox": {
+            "min": [
+              -22.0,
+              -10.0,
+              0.0
+            ],
+            "max": [
+              -10.0,
+              10.0,
+              18.0
+            ]
+          },
+          "all_closed": true
+        },
+        "after": {
+          "body_count": 2,
+          "volume_mm3": 8640,
+          "faces": 12,
+          "bbox": {
+            "min": [
+              -22.0,
+              -10.0,
+              0.0
+            ],
+            "max": [
+              22.0,
+              10.0,
+              18.0
+            ]
+          },
+          "all_closed": true
+        },
+        "volume_relative_tolerance": 0.001,
+        "validated_cli": "target/ci/solidcraft-cli"
+      },
+      "explanation": "Mirror the left block across the YZ plane, retaining the source and creating its matching right copy."
+    },
+    {
+      "command": "solid.pattern.rectangular",
+      "slug": "rectangular-pattern",
+      "group": "ARRANGE",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 8,
+            "width": 8,
+            "height": 12,
+            "center": [
+              -18,
+              -9,
+              6
+            ],
+            "body_name": "Seed",
+            "operation": "new"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "solid.pattern.rectangular",
+          "params": {
+            "bodies": [
+              "Seed"
+            ],
+            "dir1": [
+              1,
+              0,
+              0
+            ],
+            "count1": 3,
+            "spacing1": 18,
+            "dir2": [
+              0,
+              1,
+              0
+            ],
+            "count2": 2,
+            "spacing2": 18
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          6
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703873,
+        "distance": 100
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "before": {
+          "body_count": 1,
+          "volume_mm3": 768,
+          "faces": 6,
+          "bbox": {
+            "min": [
+              -22.0,
+              -13.0,
+              0.0
+            ],
+            "max": [
+              -14.0,
+              -5.0,
+              12.0
+            ]
+          },
+          "all_closed": true
+        },
+        "after": {
+          "body_count": 6,
+          "volume_mm3": 4608,
+          "faces": 36,
+          "bbox": {
+            "min": [
+              -22.0,
+              -13.0,
+              0.0
+            ],
+            "max": [
+              22.0,
+              13.0,
+              12.0
+            ]
+          },
+          "all_closed": true
+        },
+        "volume_relative_tolerance": 0.001,
+        "validated_cli": "target/ci/solidcraft-cli"
+      },
+      "explanation": "A 3×2 body pattern places six 8 mm square posts at 18 mm pitch in both directions."
+    },
+    {
+      "command": "solid.align",
+      "slug": "align",
+      "group": "ARRANGE",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 48,
+            "width": 32,
+            "height": 4,
+            "center": [
+              0,
+              0,
+              2
+            ],
+            "body_name": "Base",
+            "operation": "new"
+          }
+        },
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 12,
+            "width": 12,
+            "height": 12,
+            "center": [
+              14,
+              0,
+              14
+            ],
+            "body_name": "Block",
+            "operation": "new"
+          }
+        },
+        {
+          "command": "appearance.assign",
+          "params": {
+            "bodies": [
+              "Base"
+            ],
+            "color": "#9babb5"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "solid.align",
+          "params": {
+            "bodies": [
+              "Block"
+            ],
+            "from": [
+              14,
+              0,
+              8
+            ],
+            "to": [
+              0,
+              0,
+              4
+            ]
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          10
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703873,
+        "distance": 100
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "before": {
+          "body_count": 2,
+          "volume_mm3": 7872,
+          "faces": 12,
+          "bbox": {
+            "min": [
+              -24.0,
+              -16.0,
+              0.0
+            ],
+            "max": [
+              24.0,
+              16.0,
+              20.0
+            ]
+          },
+          "all_closed": true
+        },
+        "after": {
+          "body_count": 2,
+          "volume_mm3": 7872,
+          "faces": 12,
+          "bbox": {
+            "min": [
+              -24.0,
+              -16.0,
+              0.0
+            ],
+            "max": [
+              24.0,
+              16.0,
+              16.0
+            ]
+          },
+          "all_closed": true
+        },
+        "volume_relative_tolerance": 0.001,
+        "validated_cli": "target/ci/solidcraft-cli"
+      },
+      "explanation": "Align the small block’s bottom centre to the base top centre. The block moves by [-14,0,-4] without changing shape."
+    },
+    {
+      "command": "solid.pattern.circular",
+      "slug": "circular-pattern",
+      "group": "ARRANGE",
+      "setup": [
+        {
+          "command": "solid.cylinder",
+          "params": {
+            "radius": 4,
+            "height": 12,
+            "base": [
+              19,
+              0,
+              0
+            ],
+            "body_name": "Seed",
+            "operation": "new"
+          }
+        }
+      ],
+      "operation": [
+        {
+          "command": "solid.pattern.circular",
+          "params": {
+            "bodies": [
+              "Seed"
+            ],
+            "axis": "Z",
+            "count": 6
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          0,
+          6
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703873,
+        "distance": 100
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "before": {
+          "body_count": 1,
+          "volume_mm3": 603.185789,
+          "faces": 3,
+          "bbox": {
+            "min": [
+              15.000062,
+              -3.999893,
+              0.0
+            ],
+            "max": [
+              22.999938,
+              3.999893,
+              12.0
+            ]
+          },
+          "all_closed": true
+        },
+        "after": {
+          "body_count": 6,
+          "volume_mm3": 3619.114737,
+          "faces": 18,
+          "bbox": {
+            "min": [
+              -22.999938,
+              -20.45446,
+              0.0
+            ],
+            "max": [
+              22.999938,
+              20.45446,
+              12.0
+            ]
+          },
+          "all_closed": true
+        },
+        "volume_relative_tolerance": 0.001,
+        "validated_cli": "target/ci/solidcraft-cli"
+      },
+      "explanation": "Six identical posts lie on a 19 mm radius circle about Z. The first post is retained as one of the six."
+    },
+    {
+      "command": "solid.pattern.path",
+      "slug": "path-pattern",
+      "group": "ARRANGE",
+      "setup": [
+        {
+          "command": "solid.box",
+          "params": {
+            "length": 6,
+            "width": 8,
+            "height": 8,
+            "center": [
+              20,
+              0,
+              4
+            ],
+            "body_name": "Seed",
+            "operation": "new"
+          }
+        },
+        {
+          "command": "sketch.create",
+          "params": {
+            "plane": "XY",
+            "name": "Arc"
+          }
+        },
+        {
+          "command": "sketch.arc.center_point",
+          "params": {
+            "center": [
+              0,
+              0
+            ],
+            "start": [
+              20,
+              0
+            ],
+            "sweep": 180,
+            "id": "a1"
+          }
+        },
+        {
+          "command": "sketch.finish",
+          "params": {}
+        }
+      ],
+      "operation": [
+        {
+          "command": "solid.pattern.path",
+          "params": {
+            "bodies": [
+              "Seed"
+            ],
+            "path_sketch": "Arc",
+            "path": [
+              "a1"
+            ],
+            "count": 5,
+            "distance": "pi * 20",
+            "orientation": "path"
+          }
+        }
+      ],
+      "presentation": "pair",
+      "camera": {
+        "target": [
+          0,
+          7,
+          4
+        ],
+        "yaw": -0.7853981633974483,
+        "pitch": 0.6154797086703873,
+        "distance": 100
+      },
+      "before_ui": {},
+      "after_ui": {},
+      "expected": {
+        "before": {
+          "body_count": 1,
+          "volume_mm3": 384,
+          "faces": 6,
+          "bbox": {
+            "min": [
+              17.0,
+              -4.0,
+              0.0
+            ],
+            "max": [
+              23.0,
+              4.0,
+              8.0
+            ]
+          },
+          "all_closed": true
+        },
+        "after": {
+          "body_count": 5,
+          "volume_mm3": 1920,
+          "faces": 30,
+          "bbox": {
+            "min": [
+              -23.0,
+              -4.0,
+              0.0
+            ],
+            "max": [
+              23.0,
+              23.0,
+              8.0
+            ]
+          },
+          "all_closed": true
+        },
+        "volume_relative_tolerance": 0.001,
+        "validated_cli": "target/ci/solidcraft-cli"
+      },
+      "explanation": "Five rectangular tabs follow a half-circle of radius 20 mm and turn with its tangent; the path sketch is genuine construction input."
+    }
+  ]
+}
