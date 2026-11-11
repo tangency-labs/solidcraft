@@ -28,8 +28,10 @@ const MAX_COPIES: usize = 8;
 /// ([`crate::plan`]): the lines are drawn on the triangles of the mesh planned with them. Each
 /// line is cut by the face's triangles in (u, v) and each piece mapped linearly onto its
 /// triangle, so every point lies on a triangle of the evaluated mesh, and the lines follow the
-/// surface as closely as the mesh does; one polyline per run of triangles it crosses (a line
-/// broken by a hole or a trim gives one each side). A face the plan leaves out, or whose nodes
+/// surface as closely as the mesh does; one polyline per run of triangles it crosses, joined
+/// where consecutive triangles share a side or node (a line broken by a hole or a trim gives
+/// one each side), and carried along a side into a pole the line runs into (a sphere's
+/// meridian reaches both poles). A face the plan leaves out, or whose nodes
 /// the evaluator refuses, gets no lines.
 ///
 /// The polylines are display points, not geometry: points on the display mesh for drawing,
@@ -57,6 +59,9 @@ pub fn isoparms(
         return Ok(out);
     }
     let (planned, _) = plan(sheet, &tolerance, size)?;
+    // a node within the plan's chord tolerance of a collapsed side is a pole of the display, as
+    // the planner bounds its own pole reach by it
+    let (reach, _) = tolerance.rules(size);
     for fp in &planned.faces {
         let Some(face) = sheet.faces.get(fp.face as usize) else {
             continue;
@@ -80,6 +85,8 @@ pub fn isoparms(
             continue;
         };
         let period = uv::domain(&surface).period;
+        // the surface's poles, by the planner's classifier
+        let poles = crate::mesher::poles::Face::new(surface, 0.0);
         let [[u0, u1], [v0, v1]] = face.domain;
         for (count, constant_u) in [(u_count, true), (v_count, false)] {
             for i in 1..=count {
@@ -100,8 +107,20 @@ pub fn isoparms(
                     _ => continue,
                 };
                 let per = period.get(d).copied().flatten();
+                // a node where the surface is collapsed along d: the line's every value of d
+                // is that point there
+                let pole = |i: u32| {
+                    fp.uv
+                        .get(i as usize)
+                        .is_some_and(|q| poles.pole(*q, d, reach))
+                };
+                let mesh = Triangles {
+                    uvs: &fp.uv,
+                    at: &nodes.positions,
+                    triangles: &triangles,
+                };
                 for c in copies(&fp.uv, d, comp(&a, d), per) {
-                    out.extend(on_triangles(&fp.uv, &nodes.positions, &triangles, d, c));
+                    out.extend(mesh.line(d, c, &pole));
                 }
             }
         }
@@ -130,77 +149,170 @@ fn copies(uvs: &[[f64; 2]], d: usize, c: f64, period: Option<f64>) -> Vec<f64> {
         .collect()
 }
 
-/// The line where parameter `d` is `c`, on the triangles `triangles` of nodes at `uvs` with
-/// points `at`: each triangle it crosses gives the piece between the two sides it crosses, its
-/// ends the sides' points at the crossing (each piece straight on its flat triangle), and the
-/// pieces join into polylines where one ends where the next starts. A side is crossed by the
-/// half-open rule (one end at or below `c`, the other above), so a line through a node or along
-/// a side between two triangles is taken once.
-fn on_triangles(
-    uvs: &[[f64; 2]],
-    at: &[Vec3],
-    triangles: &[[u32; 3]],
-    d: usize,
-    c: f64,
-) -> Vec<Vec<[f64; 3]>> {
-    let o = usize::from(d == 0);
-    let corner = |i: u32| Some((*uvs.get(i as usize)?, *at.get(i as usize)?));
-    // each piece: its run of the other parameter, and its two points
-    let mut pieces: Vec<([f64; 2], [Vec3; 2])> = Vec::new();
-    for &[i0, i1, i2] in triangles {
-        let (Some(a), Some(b), Some(e)) = (corner(i0), corner(i1), corner(i2)) else {
-            continue;
-        };
-        let mut hits: Vec<(f64, Vec3)> = Vec::with_capacity(2);
-        for (p, q) in [(a, b), (b, e), (e, a)] {
-            let (pd, qd) = (comp(&p.0, d), comp(&q.0, d));
-            if (pd <= c) != (qd <= c) {
-                let s = (c - pd) / (qd - pd);
-                let x = comp(&p.0, o) + s * (comp(&q.0, o) - comp(&p.0, o));
-                hits.push((x, p.1 + (q.1 - p.1) * s));
-            }
-        }
-        if let [(x0, p0), (x1, p1)] = hits.as_slice() {
-            if x0 < x1 {
-                pieces.push(([*x0, *x1], [*p0, *p1]));
-            } else if x1 < x0 {
-                pieces.push(([*x1, *x0], [*p1, *p0]));
-            }
+/// Where a line crosses a triangle's side: at one of its nodes, or inside the side between two.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum Crossing {
+    /// At node `i`.
+    Node(u32),
+    /// Inside the side between nodes `i < j`.
+    Side(u32, u32),
+}
+
+impl Crossing {
+    /// The nodes the crossing is on.
+    fn nodes(self) -> [Option<u32>; 2] {
+        match self {
+            Crossing::Node(i) => [Some(i), None],
+            Crossing::Side(i, j) => [Some(i), Some(j)],
         }
     }
-    pieces.sort_by(|a, b| a.0[0].total_cmp(&b.0[0]));
-    // two pieces meet where one's start is the other's end, to the rounding of the parameters
-    let (lo, hi) = uvs
-        .iter()
-        .map(|q| comp(q, o))
-        .fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), x| {
-            (l.min(x), h.max(x))
-        });
-    let meet = 1e-9 * (hi - lo).abs().max(f64::MIN_POSITIVE);
-    let xyz = |p: Vec3| [p.x, p.y, p.z];
-    let mut lines = Vec::new();
-    let mut line: Vec<[f64; 3]> = Vec::new();
-    let mut end = f64::NEG_INFINITY;
-    for ([x0, x1], [p0, p1]) in pieces {
-        if !line.is_empty() && x0 <= end + meet {
-            // a piece on from the last (one wholly covered already, a side shared by two
-            // triangles, adds nothing)
-            if x1 > end + meet {
-                line.push(xyz(p1));
-                end = x1;
+}
+
+/// One triangle's piece of a line: its ends' parameter along the line, where they cross the
+/// triangle's sides, and their points.
+struct Piece {
+    x: [f64; 2],
+    at: [Crossing; 2],
+    points: [Vec3; 2],
+}
+
+/// A face's display triangles in (u, v): its nodes' parameters and points, and the triangles.
+struct Triangles<'a> {
+    uvs: &'a [[f64; 2]],
+    at: &'a [Vec3],
+    triangles: &'a [[u32; 3]],
+}
+
+impl Triangles<'_> {
+    /// The line where parameter `d` is `c` on the triangles: each triangle it crosses gives
+    /// the piece between the two sides it crosses, its ends the sides' points at the crossing
+    /// (straight on its flat triangle). A side is crossed by the half-open rule (one end at or
+    /// below `c`, the other above), so a line through a node or along a side between two
+    /// triangles is taken once. Pieces join where one ends on the very side or node of the mesh
+    /// the next starts on (two triangles sharing it), never by distance. A polyline that ends on
+    /// a side at a node where the surface collapses along `d` (`pole`: a pole the line runs into,
+    /// every value of `d` the same point there) is carried along that side to the node, so a
+    /// line into a pole reaches it.
+    fn line(&self, d: usize, c: f64, pole: &dyn Fn(u32) -> bool) -> Vec<Vec<[f64; 3]>> {
+        let o = usize::from(d == 0);
+        let corner = |i: u32| Some((*self.uvs.get(i as usize)?, *self.at.get(i as usize)?));
+        let mut pieces: Vec<Piece> = Vec::new();
+        for &[i0, i1, i2] in self.triangles {
+            let (Some(a), Some(b), Some(e)) = (corner(i0), corner(i1), corner(i2)) else {
+                continue;
+            };
+            let mut hits: Vec<(f64, Crossing, Vec3)> = Vec::with_capacity(2);
+            for ((ip, p), (iq, q)) in [((i0, a), (i1, b)), ((i1, b), (i2, e)), ((i2, e), (i0, a))] {
+                let (pd, qd) = (comp(&p.0, d), comp(&q.0, d));
+                if (pd <= c) != (qd <= c) {
+                    let s = (c - pd) / (qd - pd);
+                    let x = comp(&p.0, o) + s * (comp(&q.0, o) - comp(&p.0, o));
+                    // exactly at a node (s is exactly 0 or 1 there): that node, its own point
+                    let (at, point) = if s == 0.0 {
+                        (Crossing::Node(ip), p.1)
+                    } else if s == 1.0 {
+                        (Crossing::Node(iq), q.1)
+                    } else {
+                        (
+                            Crossing::Side(ip.min(iq), ip.max(iq)),
+                            p.1 + (q.1 - p.1) * s,
+                        )
+                    };
+                    hits.push((x, at, point));
+                }
             }
-        } else {
+            if let [(x0, a0, p0), (x1, a1, p1)] = hits.as_slice() {
+                if x0 < x1 {
+                    pieces.push(Piece {
+                        x: [*x0, *x1],
+                        at: [*a0, *a1],
+                        points: [*p0, *p1],
+                    });
+                } else if x1 < x0 {
+                    pieces.push(Piece {
+                        x: [*x1, *x0],
+                        at: [*a1, *a0],
+                        points: [*p1, *p0],
+                    });
+                }
+            }
+        }
+        pieces.sort_by(|a, b| a.x[0].total_cmp(&b.x[0]));
+        // each piece by where it starts; a piece no other ends where it starts heads a polyline
+        let mut starting: std::collections::HashMap<Crossing, Vec<usize>> =
+            std::collections::HashMap::new();
+        for (k, piece) in pieces.iter().enumerate() {
+            starting.entry(piece.at[0]).or_default().push(k);
+        }
+        let ends: std::collections::HashSet<Crossing> = pieces.iter().map(|p| p.at[1]).collect();
+        let mut used = vec![false; pieces.len()];
+        let xyz = |p: Vec3| [p.x, p.y, p.z];
+        let mut lines = Vec::new();
+        for head in 0..pieces.len() {
+            let Some(first) = pieces.get(head) else {
+                continue;
+            };
+            if used.get(head).copied().unwrap_or(true) || ends.contains(&first.at[0]) {
+                continue;
+            }
+            let mut line = Vec::new();
+            if let Some(p) = self.to_pole(first.at[0], first.x[0], o, false, pole) {
+                line.push(xyz(p));
+            }
+            line.push(xyz(first.points[0]));
+            let mut k = head;
+            loop {
+                let Some(piece) = pieces.get(k) else { break };
+                if let Some(u) = used.get_mut(k) {
+                    *u = true;
+                }
+                line.push(xyz(piece.points[1]));
+                let next = starting
+                    .get(&piece.at[1])
+                    .and_then(|ks| ks.iter().find(|&&j| !used.get(j).copied().unwrap_or(true)));
+                match next {
+                    Some(&j) => k = j,
+                    None => {
+                        if let Some(p) = self.to_pole(piece.at[1], piece.x[1], o, true, pole) {
+                            line.push(xyz(p));
+                        }
+                        break;
+                    }
+                }
+            }
+            line.dedup();
             if line.len() >= 2 {
-                lines.push(std::mem::take(&mut line));
+                lines.push(line);
             }
-            line = vec![xyz(p0), xyz(p1)];
-            end = x1;
         }
+        lines
     }
-    if line.len() >= 2 {
-        lines.push(line);
+
+    /// The point of a node of `at` where the surface collapses along the line (`pole`) and that
+    /// lies on along the line from `x` (beyond it at the line's `end`, before it at its start),
+    /// if there is one: the pole the line runs into along that side.
+    fn to_pole(
+        &self,
+        at: Crossing,
+        x: f64,
+        o: usize,
+        end: bool,
+        pole: &dyn Fn(u32) -> bool,
+    ) -> Option<Vec3> {
+        at.nodes().into_iter().flatten().find_map(|i| {
+            let q = self.uvs.get(i as usize)?;
+            let ahead = if end {
+                comp(q, o) >= x
+            } else {
+                comp(q, o) <= x
+            };
+            if ahead && pole(i) {
+                self.at.get(i as usize).copied()
+            } else {
+                None
+            }
+        })
     }
-    lines
 }
 
 #[cfg(test)]
@@ -522,7 +634,7 @@ mod tests {
         let t = MeshTolerance::display_of(size);
         let lines = isoparms(&b, 6, 6, t, size).unwrap();
         assert!(lines.len() >= 12, "{}", lines.len());
-        let (mesh, _) = crate::plan(&b, &t, size).unwrap().0.evaluate();
+        let (mesh, _) = plan(&b, &t, size).unwrap().0.evaluate();
         for l in &lines {
             for p in l {
                 assert!(on_mesh(&mesh, *p, 1e-9), "{p:?} off the mesh");
