@@ -740,15 +740,25 @@ fn pose_result(s: &Session, sessions: &mut ViewSessions, view: &ResolvedView, ow
     let Pose::Joints(joints) = &view.pose.value else { return PoseResult { setting, drawn: None, skipped: None } };
     let skipped = crate::drawing_view::gone_joints(s, view);
     let drawn = match sessions.of(view) {
-        Ok(posed) => joints
-            .iter()
-            .filter_map(|j| posed.doc.assembly.joints.iter().find(|driven| driven.id == j.joint))
-            .map(|driven| DrawnJointResult {
-                joint: driven.id,
-                name: driven.name.clone(),
-                values: driven.values.iter().enumerate().map(|(i, v)| if driven.kind.is_angle(i) { v.to_degrees() } else { *v }).collect(),
-            })
-            .collect(),
+        Ok(posed) => {
+            // As the solver places them, after motion links: a screw's travel follows its turn.
+            let placed = solidcraft_doc::joints::joint_values(&posed.doc.assembly);
+            joints
+                .iter()
+                .filter_map(|j| posed.doc.assembly.joints.iter().find(|driven| driven.id == j.joint))
+                .map(|driven| DrawnJointResult {
+                    joint: driven.id,
+                    name: driven.name.clone(),
+                    values: placed
+                        .get(&driven.id)
+                        .unwrap_or(&driven.values)
+                        .iter()
+                        .enumerate()
+                        .map(|(i, v)| if driven.kind.is_angle(i) { v.to_degrees() } else { *v })
+                        .collect(),
+                })
+                .collect()
+        }
         Err(_) => Vec::new(),
     };
     PoseResult { setting, drawn: Some(drawn), skipped: Some(skipped) }

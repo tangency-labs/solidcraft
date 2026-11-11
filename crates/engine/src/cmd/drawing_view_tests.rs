@@ -2384,6 +2384,41 @@ fn a_pose_naming_a_gone_joint_skips_it() {
     assert_eq!(drawn.map(|v| v.get("reason").cloned()), Some(None), "nothing gone, nothing said: {scene}");
 }
 
+/// A nut on a thread: the design's own plate, 40 x 20 x 2 mm from the origin, and a 10 x 10 x 5 mm
+/// nut on it in component Nut, on cylindrical joint Thread about the vertical through the nut's
+/// centre, which a screw link advances 2 mm a turn. A drawing, open, with a front view at 1:1. The
+/// session and the view.
+fn screw_nut() -> (Session, u64) {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 2, "body_name": "Plate"}));
+    run(&mut s, "component.create", json!({"name": "Nut", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 5, "corner": [15, 5, 2], "body_name": "Nut", "operation": "new"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let at = json!({"occurrence": 0, "point": [20, 10, 2], "z": [0, 0, 1]});
+    run(&mut s, "joint.as_built", json!({"type": "cylindrical", "name": "Thread", "a": 0, "b": "Nut", "at": at}));
+    run(&mut s, "joint.screw", json!({"joint": "Thread", "pitch": 2}));
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let p = json!({"sheet": sheet, "view": "front", "scale": "1:1", "position_mm": [150, 150]});
+    let view = ids::decode(run(&mut s, "drawing.view.base", p)["view"].as_str().unwrap()).unwrap();
+    (s, view)
+}
+
+/// Inspect gives the values a posed view draws as the solver places them: the thread at two turns,
+/// the nut's travel follows its screw link, 4 mm, though the joint saves none.
+#[test]
+fn a_posed_view_says_the_travel_its_screw_link_draws() {
+    let (mut s, view) = screw_nut();
+    // The plate's 2 mm and the nut's 5 above it.
+    assert!((height(&mut s, view) - 7.0).abs() < 1e-6);
+    edit_view(&mut s, view, json!({"pose": [{"joint": "Thread", "values": [720, 0]}]}));
+    let pose = inspect_view(&mut s, view)["settings"]["pose"].clone();
+    assert!((height(&mut s, view) - 11.0).abs() < 1e-6, "{pose}");
+    let values = &pose["drawn"][0]["values"];
+    assert!((values[0].as_f64().unwrap_or(f64::NAN) - 720.0).abs() < 1e-6, "{pose}");
+    assert!((values[1].as_f64().unwrap_or(f64::NAN) - 4.0).abs() < 1e-6, "{pose}");
+}
+
 /// Dimensions on a posed view would measure the design's placement: they are refused there, by the
 /// rule an exploded view follows, and an edit that would pose a view holding one is refused.
 #[test]
