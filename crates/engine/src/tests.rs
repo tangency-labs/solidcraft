@@ -3914,6 +3914,9 @@ fn appearance_list_names_the_looks_the_design_shows() {
     run(&mut source, "solid.box", json!({"corner": [40, 0, 0], "length": 30, "width": 20, "height": 20, "operation": "new", "body_name": "Plain"}));
     run(&mut source, "appearance.assign", json!({"bodies": ["Red"], "name": "Signal red", "color": "#c42824"}));
     run(&mut source, "appearance.assign", json!({"bodies": ["Plain"], "color": "#00ff00"}));
+    // An opaque body colour with a name and no face colours: the name still comes back.
+    run(&mut source, "solid.box", json!({"corner": [200, 0, 0], "length": 10, "width": 10, "height": 10, "operation": "new", "body_name": "Dark"}));
+    run(&mut source, "appearance.assign", json!({"bodies": ["Dark"], "name": "Graphite", "color": "#333333"}));
     run(&mut source, "appearance.assign", json!({"faces": [[15, 10, 20]], "name": "Lid", "color": "#ffff00"}));
     run(&mut source, "file.export", json!({"path": step.to_string_lossy()}));
     let mut s = Session::default();
@@ -3929,6 +3932,8 @@ fn appearance_list_names_the_looks_the_design_shows() {
     let lid = entry(&used, "Lid");
     assert_eq!((&lid["sources"], lid["imported_faces"].as_array().map(Vec::len)), (&json!(["imported"]), Some(1)), "{lid}");
     assert_eq!(lid["imported_faces"][0]["body"], "Red");
+    let dark = entry(&used, "Graphite");
+    assert_eq!((&dark["sources"], &dark["bodies"]), (&json!(["imported"]), &json!(["Dark"])), "an opaque named body colour: {dark}");
     let plain = entry(&used, "Custom(0,255,0)");
     assert_eq!((&plain["sources"], &plain["bodies"]), (&json!(["imported"]), &json!(["Plain"])), "an unnamed colour by its values: {plain}");
     let brass = entry(&used, "Brass");
