@@ -328,6 +328,51 @@ impl solidcraft_render::job::ImageExecutor for NumericalGpu {
     }
 }
 
+/// The keys of Check Render Request's reply in either form, then only in the runtime or the GPU
+/// form, and of its `denoising` in either form (CPU ray tracing adds four), as the handler gave
+/// them before its reply had a type.
+const SHARED_KEYS: &[&str] = &[
+    "admission",
+    "dielectric_boundaries",
+    "environment",
+    "host",
+    "refraction",
+    "request",
+    "resolved",
+    "scene_generation",
+    "stage_panels",
+    "textures",
+    "transparency",
+];
+const RUNTIME_KEYS: &[&str] = &["cpu_budget", "cpu_limits", "ignored_controls", "retained_request_bytes", "stage_transport"];
+const GPU_KEYS: &[&str] = &["options", "retained_options_bytes"];
+const DENOISING_KEYS: &[&str] = &[
+    "bypass",
+    "diagnostics_requested",
+    "guides",
+    "limitation",
+    "method",
+    "optical_policy",
+    "outlier_policy",
+    "output_stage",
+    "passes",
+    "raw_linear_accumulator_preserved",
+    "settings",
+    "steps",
+];
+
+/// An object's keys, sorted.
+fn keys(v: &Value) -> Vec<String> {
+    v.as_object().map(|o| o.keys().cloned().collect()).unwrap_or_default()
+}
+
+/// `keys`, sorted.
+fn sorted(keys: &[&str]) -> Vec<String> {
+    let mut keys: Vec<String> = keys.iter().map(|k| k.to_string()).collect();
+    keys.sort();
+    keys
+}
+
 /// `params` run as `id` in Warn: the reply, which must match `schema` and have no warnings.
 fn reply(s: &mut Session, id: &str, params: &Value, schema: &schemars::Schema) -> Value {
     let r = s.execute(id, params).unwrap_or_else(|e| panic!("{id} {params}: {e}"));
@@ -364,14 +409,13 @@ fn replies_match_the_output_schemas() {
         let r = reply(&mut s, "render.preflight", &p, &checked);
         assert_eq!(r.get("ignored_controls"), ignored.as_ref(), "{p}: {r}");
         let gpu = p["progressive"] == true;
-        for key in ["cpu_budget", "cpu_limits", "stage_transport", "retained_request_bytes"] {
-            assert_eq!(r.get(key).is_some(), !gpu, "{key} {p}: {r}");
+        let mut expected: Vec<&str> = SHARED_KEYS.iter().chain(if gpu { GPU_KEYS } else { RUNTIME_KEYS }).copied().collect();
+        if p["denoise"] == true {
+            expected.extend(["denoising", "indirect_clamp"]);
+            assert_eq!(keys(&r["denoising"]), sorted(DENOISING_KEYS), "{r}");
+            assert_eq!(keys(&r["indirect_clamp"]), sorted(&["biased", "from_bounce", "keeps_hue", "limit", "limitation"]), "{r}");
         }
-        for key in ["options", "retained_options_bytes"] {
-            assert_eq!(r.get(key).is_some(), gpu, "{key} {p}: {r}");
-        }
-        let denoised = p["denoise"] == true;
-        assert_eq!((r.get("denoising").is_some(), r.get("indirect_clamp").is_some()), (denoised, denoised), "{p}: {r}");
+        assert_eq!(keys(&r), sorted(&expected), "{p}");
         assert_eq!(r["resolved"]["executor"], if gpu { "gpu-path" } else { "cpu-product" }, "{p}: {r}");
 
         let job = reply(&mut s, "render.start", &p, &started);
@@ -409,7 +453,15 @@ fn cpu_ray_tracing_replies_match_the_output_schemas() {
         let p = json!({"setup": setup, "replace": true});
         let r = reply(&mut s, "render.preflight", &p, &checked);
         assert_eq!(r["resolved"]["executor"], "cpu-raytrace", "{r}");
-        assert!(r.get(section).is_some(), "{setup}: {r}");
+        let mut expected: Vec<&str> = SHARED_KEYS.iter().chain(RUNTIME_KEYS).copied().collect();
+        expected.push(section);
+        assert_eq!(keys(&r), sorted(&expected), "{setup}");
+        if section == "denoising" {
+            let cpu_only = ["backend", "checkpoints", "raw_linear_exr_preserved", "work_units"];
+            assert_eq!(keys(&r["denoising"]), sorted(&[DENOISING_KEYS, &cpu_only].concat()), "{r}");
+            assert_eq!(r["denoising"]["backend"], "native_cpu", "{r}");
+            assert_eq!(r["denoising"]["guides"], "deterministic_center_ray_albedo_normal_camera_relative_position_depth", "{r}");
+        }
         let job = reply(&mut s, "render.start", &p, &started);
         assert_eq!(job["ignored_controls"], json!([]), "{job}");
     }

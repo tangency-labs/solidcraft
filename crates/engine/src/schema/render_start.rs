@@ -351,7 +351,7 @@ impl JsonSchema for RenderRequest {
 }
 
 /// What Render Image (`render.start`) returns: the queued job's status, as Render Progress gives
-/// it for a job.
+/// it for a job, without the shot queue.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct RenderStarted {
     #[serde(flatten)]
@@ -382,9 +382,11 @@ pub struct RuntimeChecked {
     /// for CPU ray tracing, which refuses them.
     pub ignored_controls: Vec<&'static str>,
     /// How the CPU ray tracer carries light, in words: direct and mirror light only, or path
-    /// lighting through a finite number of bounces, through glass too where it refracts.
+    /// lighting through a finite number of bounces, through glass too where it refracts. A raster
+    /// request gets the first.
     pub stage_transport: &'static str,
-    /// The CPU resource profile: `compact`, `studio` or `workstation`.
+    /// The CPU resource profile: `compact`, `studio` or `workstation`. Always `compact` for a
+    /// raster request.
     pub cpu_budget: String,
     /// That profile's image, geometry, memory and work limits, as the render crate gives them.
     pub cpu_limits: Map<String, Value>,
@@ -424,7 +426,9 @@ pub struct Checked {
     pub host: String,
     /// How many passive stage panels the setup places.
     pub stage_panels: usize,
-    /// The HDR environment's metadata, as the render crate gives it, or `null` without one.
+    /// The environment's metadata, as the render crate gives it: an HDR's, or for a GPU request
+    /// also a gradient sky's. `null` without one, and for a CPU sky or constant environment, which
+    /// are in `request`.
     pub environment: Option<Map<String, Value>>,
     /// The surface maps the scene uses, as the render crate sums them up, or `null` without any.
     pub textures: Option<Map<String, Value>>,

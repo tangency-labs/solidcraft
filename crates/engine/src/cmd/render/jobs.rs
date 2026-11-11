@@ -1016,18 +1016,28 @@ pub(super) fn start(s: &mut Session, params: &Value) -> Result<Value> {
             params.get("setup").and_then(Value::as_str).map(str::to_owned),
         )
         .map_err(job_error)?;
-    started("render.start", &status, &p.reply)
+    Ok(started("render.start", &status, &p.reply))
 }
 
 /// What Render Image returns once its job is queued: the job's `status`, and for a runtime
 /// request the ignored controls of its preflight reply `checked`. The window's own preparation
 /// (`render_preparation`) returns it too.
-pub(crate) fn started(command: &str, status: &solidcraft_render::job::JobStatus, checked: &RenderChecked) -> Result<Value> {
+pub(crate) fn started(command: &str, status: &solidcraft_render::job::JobStatus, checked: &RenderChecked) -> Value {
     let ignored_controls = match checked {
         RenderChecked::Runtime(runtime) => Some(runtime.ignored_controls.clone()),
         RenderChecked::Gpu(_) => None,
     };
-    super::typed_reply(command, RenderStarted { state: retyped(command, status)?, ignored_controls })
+    // The job is queued already, so this never fails: should the status ever not read as a
+    // `JobState`, the reply is the status as the render crate gives it, as before the reply type.
+    let typed =
+        retyped(command, status).and_then(|state| super::typed_reply(command, RenderStarted { state, ignored_controls: ignored_controls.clone() }));
+    typed.unwrap_or_else(|_| {
+        let mut reply = json!(status);
+        if let (Some(out), Some(ignored)) = (reply.as_object_mut(), ignored_controls) {
+            out.insert("ignored_controls".into(), json!(ignored));
+        }
+        reply
+    })
 }
 
 #[derive(Deserialize)]

@@ -151,5 +151,5 @@ fn finish_inner(session: &mut Session, prepared: &mut Prepared, ticket: Option<b
         .try_start_prepared_inner(session.revision, &mut prepared.capture.submission, prepared.capture.replace, prepared.shot.clone(), ticket)
         .map_err(crate::render_jobs::job_error)?;
     prepared.completed = true;
-    crate::cmd::render_started(prepared.kind.command(), &status, &prepared.capture.reply)
+    Ok(crate::cmd::render_started(prepared.kind.command(), &status, &prepared.capture.reply))
 }
