@@ -1133,8 +1133,21 @@ fn reconstructed_m20_continuous_internal_fixture() {
     check_matrix_fixture(MatrixShape::ContinuousInternal);
 }
 
-#[allow(clippy::disallowed_methods)] // Independent test-only geometry oracle; conversion copies fields.
 fn exercise_m20_matrix(shape: MatrixShape, all_lateral: bool, distance: f64) {
+    exercise_m20(shape, all_lateral, false, distance);
+}
+
+/// [`exercise_m20_matrix`] with one flank of the M20 body moved and the other kept, after the body
+/// has been through its record and back as an application holds it: its end caps' supports are then their faces' boxes, short of the
+/// thread's radial disk, and the kept flank's section starts on the root land's radius, a root
+/// no move of its own pads. Both were refused (#11582).
+fn exercise_m20_one_flank(shape: MatrixShape, distance: f64) {
+    exercise_m20(shape, false, true, distance);
+}
+
+#[allow(clippy::disallowed_methods)] // Independent test-only geometry oracle; conversion copies fields.
+#[allow(clippy::too_many_lines)] // one witnessed matrix case
+fn exercise_m20(shape: MatrixShape, all_lateral: bool, one_flank: bool, distance: f64) {
     use solidcore::eval::geometry::sweep::SweepDefinitionRecord;
     use solidcore::math::Point2;
     use solidcore::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
@@ -1150,11 +1163,45 @@ fn exercise_m20_matrix(shape: MatrixShape, all_lateral: bool, distance: f64) {
         assert_eq!(check.failures().count(), 0, "{:?}", check.reports);
     };
     strict(&mut k, &mut body);
+    if one_flank {
+        let (record, _) = to_record(&mut k, &mut body).unwrap();
+        body = to_kernel(&mut k, &record, true).unwrap().0;
+        strict(&mut k, &mut body);
+    }
     let (flanks, lateral) = matrix_m20_selections(&k, &body);
-    let selected = if all_lateral { &lateral } else { &flanks };
     assert!(!flanks.is_empty() && (!all_lateral || lateral.len() > flanks.len()));
+    let profile_of = |id: solidcore::FaceId| {
+        let sweep = body
+            .face(id)
+            .unwrap()
+            .surface
+            .as_ref()
+            .unwrap()
+            .procedural_sweep()
+            .unwrap();
+        let SweepDefinitionRecord::Screw { profile, .. } = sweep
+            .definition()
+            .to_record(sweep.net())
+            .unwrap()
+            .definition;
+        profile
+    };
+    let one: Vec<_> = flanks
+        .iter()
+        .copied()
+        .filter(|&id| profile_of(id) == profile_of(flanks[0]))
+        .collect();
+    assert!(one.len() < flanks.len(), "the other flank stays");
+    let selected = if all_lateral {
+        &lateral
+    } else if one_flank {
+        &one
+    } else {
+        &flanks
+    };
+    let moved_flanks = if one_flank { &one } else { &flanks };
 
-    let originals: Vec<_> = flanks
+    let originals: Vec<_> = moved_flanks
         .iter()
         .map(|&id| {
             let face = body.face(id).unwrap();
@@ -1233,7 +1280,8 @@ fn exercise_m20_matrix(shape: MatrixShape, all_lateral: bool, distance: f64) {
             ..
         } = &saved.definition
         else {
-            panic!("a moved flank lost its exact offset source")
+            assert!(one_flank, "a moved flank lost its exact offset source");
+            continue;
         };
         assert!((offset.signed_distance.abs() - distance.abs()).abs() < 1e-14);
         output_flanks += 1;
@@ -1388,6 +1436,30 @@ m20_case!(
     MatrixShape::ContinuousInternal,
     true,
     0.1
+);
+
+macro_rules! m20_one_flank_case {
+    ($name:ident, $shape:expr, $distance:expr) => {
+        #[test]
+        fn $name() {
+            exercise_m20_one_flank($shape, $distance);
+        }
+    };
+}
+m20_one_flank_case!(
+    m20_continuous_external_one_flank_in,
+    MatrixShape::ContinuousExternal,
+    -0.1
+);
+m20_one_flank_case!(
+    m20_continuous_external_one_flank_out,
+    MatrixShape::ContinuousExternal,
+    0.1
+);
+m20_one_flank_case!(
+    m20_continuous_internal_one_flank_in,
+    MatrixShape::ContinuousInternal,
+    -0.1
 );
 
 fn boxed(k: &mut Kernel, o: [f64; 3], s: f64) -> Brep {

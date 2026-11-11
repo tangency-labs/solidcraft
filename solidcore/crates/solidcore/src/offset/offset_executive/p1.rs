@@ -219,7 +219,7 @@ pub struct OffsetExecutive {
     /// face and by each of its face uses, recorded as the face is offset.
     extension_reaches: BTreeMap<FaceId, f64>,
     /// Certified reach for the retained periodic-thread local operation only.
-    thread_extension_reach: Option<f64>,
+    thread_extension_reach: Option<crate::offset::procedural_screw::ThreadReach>,
     faceuse_extension_reaches: BTreeMap<FaceuseId, f64>,
     /// Not upstream: the edge bounds the local operation's reaches have found, each edge's
     /// taken again from here for its other face ([`super::reach::EdgeBounds`]); forgotten
@@ -663,8 +663,8 @@ impl OffsetExecutive {
         // surfaces of their own, and the move takes the offset's place: the margin is the
         // reach of the new surfaces' meetings and the largest move beside the face, and
         // at least the body's tolerance.
-        let reach = if let Some(reach) = self.thread_extension_reach {
-            reach
+        let reach = if let Some(thread) = &self.thread_extension_reach {
+            thread.margin(face)
         } else if self.local_faces.is_empty() {
             super::reach::extension_reach(
                 kernel,
@@ -716,7 +716,10 @@ impl OffsetExecutive {
 
     /// Supply the reach proved by the retained-thread operation's section certificate.
     /// Other local operations continue to derive each face's reach from its neighbours.
-    pub(crate) fn set_thread_extension_reach(&mut self, reach: Option<f64>) {
+    pub(crate) fn set_thread_extension_reach(
+        &mut self,
+        reach: Option<crate::offset::procedural_screw::ThreadReach>,
+    ) {
         self.thread_extension_reach = reach;
     }
 
@@ -4083,7 +4086,12 @@ mod tests {
             let original = Surface::from(source.clone());
             let domain = original.natural_uv_domain_with_nurb(&k).unwrap();
             let mut executive = executive();
-            executive.set_thread_extension_reach(Some(0.21693393959008678));
+            executive.set_thread_extension_reach(Some(
+                crate::offset::procedural_screw::ThreadReach {
+                    reach: 0.21693393959008678,
+                    caps: Vec::new(),
+                },
+            ));
             let grown = executive
                 .get_create_extended_surface(&k, 1, &original, 0.21693393959008678)
                 .unwrap();
