@@ -27,12 +27,8 @@
 //! ownership are restored explicitly after fallible bodies, including on deferral.
 //! The upstream `cbi_MAP_TOPO_EDGES=0` experiments remain disabled. Parent-linked
 //! stage hooks borrow this live executive, never an adapter-owned duplicate.
-//! Opt-in, not upstream: with `Kernel::fixes.fillet_refuse_non_manifold_result`
-//! (WR-212, tangency-labs/solidcore#422) `do_fillet` ends with a closed-manifold
-//! check of the target (`check_closed_manifold`). A target with an edge that is
-//! not `SmEdge::IsManifold` is then refused with error code `SM_FILERR_BAD_MERGE`,
-//! the edge in the error info and in the error, where upstream (the default)
-//! returns success. `do_filleting` alone is unchanged.
+//! `do_fillet` returns the filleting's status, as upstream: whether a solid stayed one
+//! is decided on the stitched body by the public wrappers (`api`, WR-212).
 //! Not upstream: [`ExecutiveAccess::shrink_face`] shrinks the new fillet faces with
 //! knot snapping of rounding errors (tangency-labs/solidcore#472).
 
@@ -44,8 +40,7 @@ use crate::blend::fillet_geom::p1::{FilStatus, FilletCornerType, FilletEdgeType,
 use crate::blend::fillet_solver::p1::FilletSurfaceGenerator;
 use crate::blend::fillet_solver::p5::RailsFit;
 use crate::boolean::topology_intersector::p1::TopologyIntersector;
-use crate::error::blend::BlendFailure;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::{Result, SolidError};
 use crate::geom::assert_array::c_general;
 use crate::geom::object::NotifyOperation;
 use crate::geom::solution_array::SolutionObject;
@@ -1005,13 +1000,6 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
     fn set_editing_enabled(&mut self, brep: O, enabled: bool) -> Result<()>;
     /// `SmBrep::GetEdges`, preserving list order.
     fn edges(&self, brep: O) -> Result<Vec<O>>;
-    /// `SmEdge::IsManifold` (`topology::edge::is_manifold`): four edge uses, the
-    /// first a loop edge use. Used only by the closed-manifold result check.
-    fn edge_is_manifold(&self, edge: O) -> Result<bool>;
-    /// The typed id of `edge` for error context, when the handle has one.
-    fn edge_entity(&self, _edge: O) -> Option<EntityRef> {
-        None
-    }
     /// `SmBrep::GetVertices`, preserving list order.
     fn vertices(&self, brep: O) -> Result<Vec<O>>;
     /// `SmBrep::GetFaces`, preserving list order.
@@ -2793,40 +2781,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             return Err(invalid("fillet parameters not set up"));
         }
         access.create_corners(k, self, None)?;
-        self.do_filleting(k, access, None)?;
-        if !k.fixes.fillet_refuse_non_manifold_result {
-            return Ok(());
-        }
-        self.check_closed_manifold(access)
-    }
-
-    /// Refuse a filleted target that is not a closed manifold solid (not upstream;
-    /// opt-in `fixes.fillet_refuse_non_manifold_result`, WR-212,
-    /// tangency-labs/solidcore#422). Upstream ignores the `bMaybeNotSolid` that
-    /// `OrientTrimmedSurfaces` reports and returns success, so a round whose
-    /// trimming breaks the shell came back as a valid body. The first edge of the
-    /// target, in `GetEdges` order, that is not `SmEdge::IsManifold` is recorded in
-    /// the error info and named in the error. The target keeps the merged
-    /// topology, as on upstream's other merge failures.
-    fn check_closed_manifold(&mut self, access: &impl ExecutiveAccess<O>) -> Result<()> {
-        let target = self.target.ok_or_else(|| invalid("missing target B-rep"))?;
-        for edge in access.edges(target)? {
-            if access.edge_is_manifold(edge)? {
-                continue;
-            }
-            self.error.code = 7; // SM_FILERR_BAD_MERGE
-            self.error.status = 2; // SM_FIL_FAILURE
-            self.error.edge = Some(edge);
-            self.error.comment =
-                "Fillet Merge Failure: Result Is Not A Closed Manifold Solid".into();
-            let failure =
-                BlendFailure::Failed("the fillet's result is not a closed manifold solid");
-            return Err(match access.edge_entity(edge) {
-                Some(at) => SolidError::blend_at(OP, failure, at),
-                None => SolidError::blend(OP, failure),
-            });
-        }
-        Ok(())
+        self.do_filleting(k, access, None)
     }
 
     fn record_corner_failure(&mut self, view: CornerView<O>, comment: &str) -> Result<()> {

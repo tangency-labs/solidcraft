@@ -7,7 +7,6 @@
   "fillet_refuse_rails_leaving_faces",
   "fillet_refuse_face_consuming_blends",
   "fillet_refuse_overlapping_bands",
-  "fillet_refuse_non_manifold_result",
   "fillet_vertex_error_diagnostics",
   "fillet_corner_ball_patch",
   "fillet_corner_ball_center_from_axes",

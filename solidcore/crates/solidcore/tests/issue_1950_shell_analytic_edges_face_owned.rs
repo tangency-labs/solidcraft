@@ -79,7 +79,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     let mut f = UpstreamFixes::default();
     f.fillet_refuse_rails_leaving_faces = true;
     f.fillet_refuse_face_consuming_blends = true;
-    f.fillet_refuse_non_manifold_result = true;
     f.fillet_corner_ball_patch = true;
     f.fillet_chamfer_cone_on_arc = true;
     f.offset_excess_faces_after_merge = true;

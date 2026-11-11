@@ -1,9 +1,9 @@
 //! tangency-labs/solidcore#422 (WR-212): an R4 round over a through hole returns success with
 //! a body that is not a closed manifold solid (SolidCraft rig case fillets/324). The round
-//! would have to be trimmed by the hole's wall, which SMLib does not do. The opt-in
-//! `Kernel::fixes.fillet_refuse_non_manifold_result` refuses the result instead, as the
-//! issue's "Expected" allows ("a refusal naming the edge that can't be blended"). The
-//! fork's trim by the hole's wall (tangency-labs/smlib@3dbe54a) is not ported.
+//! would have to be trimmed by the hole's wall, which SMLib does not do. `fillet_edges`
+//! refuses a result of a solid that is no solid, as the issue's "Expected" allows ("a
+//! refusal naming the edge that can't be blended"). The fork's trim by the hole's wall
+//! (tangency-labs/smlib@3dbe54a) is not ported.
 //!
 //! The case is the rig's: a 40 x 20 x 10 block minus a through hole of radius 3 about
 //! (20, 14.5), rounded R4 along its top long edge at y = 20. The round covers y = 16..20
@@ -48,41 +48,29 @@ fn block(k: &mut Kernel) -> (Brep, EdgeId) {
     (b, top[0])
 }
 
-/// The round of radius `r` with the fix as `fix` says: its status and whether the block is
-/// a closed manifold solid after it.
-fn round(fix: bool, r: f64) -> (Result<()>, bool) {
+/// The round of radius `r`: its status and whether the block is a closed manifold solid
+/// after it.
+fn round(r: f64) -> (Result<()>, bool) {
     let mut k = Kernel::default();
-    k.fixes.fillet_refuse_non_manifold_result = fix;
     let (mut b, top) = block(&mut k);
     let result = fillet_edges(&mut k, &mut b, &[top], r, 1, 1, 1.0);
     let solid = is_manifold_solid(&b).unwrap();
     (result, solid)
 }
 
-#[test]
-fn issue_422_flag_is_off_by_default() {
-    assert!(!Kernel::default().fixes.fillet_refuse_non_manifold_result);
-}
-
-/// A round clear of the hole (R2, the hole's wall at y = 17.5) still builds a solid,
-/// and with the fix it is the round without it: the same check report (the refusal's
-/// rollback copy must not leave the kept result's curves without owner, Test #61).
+/// A round clear of the hole (R2, the hole's wall at y = 17.5) still builds a solid whose
+/// curves keep their owners (the rollback copy must not leave the kept result's curves
+/// without owner, Test #61).
 #[test]
 fn issue_422_round_clear_of_the_hole_is_kept() {
-    let mut reports = Vec::new();
-    for fix in [false, true] {
-        let (result, solid) = round(fix, 2.0);
-        result.unwrap();
-        assert!(solid, "fix {fix}");
-        let mut k = Kernel::default();
-        k.fixes.fillet_refuse_non_manifold_result = fix;
-        let (mut b, top) = block(&mut k);
-        fillet_edges(&mut k, &mut b, &[top], 2.0, 1, 1, 1.0).unwrap();
-        reports.push(
-            check_brep(&mut k, &mut b, CheckLevel::Level2)
-                .unwrap()
-                .lines(),
-        );
-    }
-    assert_eq!(reports[1], reports[0]);
+    let (result, solid) = round(2.0);
+    result.unwrap();
+    assert!(solid);
+    let mut k = Kernel::default();
+    let (mut b, top) = block(&mut k);
+    fillet_edges(&mut k, &mut b, &[top], 2.0, 1, 1, 1.0).unwrap();
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(!lines.iter().any(|l| l.contains("Test #61")), "{lines:?}");
 }
