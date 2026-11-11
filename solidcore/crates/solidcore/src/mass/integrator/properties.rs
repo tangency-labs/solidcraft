@@ -27,7 +27,8 @@
 //! where the area behaviour selects it (tangency-labs/smlib@d2d9586).
 //! The iso-u integrals start at the trims' lowest v, not at the face UV domain's
 //! (WR-563, #1556).
-//! A face is integrated in bands between its surface's v knots (#14460): each trim piece's
+//! A face whose trims span at least `MIN_BANDS` surface v knots is integrated in bands
+//! between them (#14460): each trim piece's
 //! iso-u integral starts at its own band's floor, and each band's full height under the
 //! trims is integrated once along u between their crossings of its top line, so the cost
 //! grows with the knot spans, where upstream's grows with their square.
@@ -60,6 +61,9 @@ const OP: &str = "mass::integrator::properties";
 /// The operation the `SM_ERR` of a span the integrator took no step over names (not
 /// upstream: the code is upstream's, the name says which failure it is).
 const OP_SKIPPED_SPAN: &str = "mass::integrator::properties::skipped_span";
+/// The fewest surface v knots inside a face's trims for which the face is integrated in
+/// bands between them (#14460).
+const MIN_BANDS: usize = 12;
 
 /// Surface/volume measures and the eight moment vectors of upstream.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -455,14 +459,15 @@ pub fn boundary_properties(
     // full-height part is `G_i` integrated once along u between where the trims cross
     // the band's top line: the area of that band under the trims, once per band.
     // The same Green's-theorem integral, regrouped by band; linear in the spans.
+    // A face crossing fewer than `MIN_BANDS` knot lines keeps the one base: its iso-u
+    // integrals are short already, and a band's own integral along u would cost more
+    // than it saves.
     let mut floors = vec![base_v];
-    floors.extend(surface_knots_inside(
-        k,
-        surface,
-        SurfParamType::V,
-        base_v,
-        top_v,
-    )?);
+    let lines = surface_knots_inside(k, surface, SurfParamType::V, base_v, top_v)?;
+    if lines.len() >= MIN_BANDS {
+        floors.extend(lines);
+    }
+    let banded = floors.len() > 1;
     let v_lines = floors.get(1..).unwrap_or_default();
     let band_of = |v: f64| floors.partition_point(|&f| f <= v).saturating_sub(1);
     let floor = |band: usize| floors.get(band).copied().unwrap_or(base_v);
@@ -541,16 +546,24 @@ pub fn boundary_properties(
         // expansion that holds only where the integrand is smooth across the step.
         // Also at its crossings of the bands' floors, where its iso-u base changes.
         let knots = trim_curve_breaks(k, trim, surface, v_lines)?;
-        let mut u_at = Vec::with_capacity(knots.len());
-        for &t in &knots {
-            u_at.push(trim.evaluate_point(k, t)?.x);
+        let mut u_at = Vec::new();
+        if banded {
+            for &t in &knots {
+                u_at.push(trim.evaluate_point(k, t)?.x);
+            }
         }
-        for (pair, us) in knots.windows(2).zip(u_at.windows(2)) {
-            let (&[a, b], &[ua, ub]) = (pair, us) else {
+        let mut trim_y = vec![0.0; layout.num_components];
+        for (i, pair) in knots.windows(2).enumerate() {
+            let &[a, b] = pair else {
                 continue;
             };
-            let band = band_of(trim.evaluate_point(k, 0.5 * (a + b))?.y);
-            pieces.push((ua, ub, band));
+            let mut band = 0;
+            if banded {
+                band = band_of(trim.evaluate_point(k, 0.5 * (a + b))?.y);
+                if let (Some(&ua), Some(&ub)) = (u_at.get(i), u_at.get(i + 1)) {
+                    pieces.push((ua, ub, band));
+                }
+            }
             // (`!(dB > dA)`: also an unordered pair)
             if b.partial_cmp(&a) != Some(std::cmp::Ordering::Greater) {
                 continue; // a crossing at a knot
@@ -569,9 +582,12 @@ pub fn boundary_properties(
                 }
                 Ok(())
             })?;
-            for (total, part) in y.iter_mut().zip(span_y.iter()) {
+            for (total, part) in trim_y.iter_mut().zip(span_y.iter()) {
                 *total += *part;
             }
+        }
+        for (total, part) in y.iter_mut().zip(trim_y.iter()) {
+            *total += *part;
         }
     }
     // Each band's full height under the pieces above it: the pieces' `-∫ G_i du`, as

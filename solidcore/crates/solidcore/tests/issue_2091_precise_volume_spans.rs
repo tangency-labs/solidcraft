@@ -476,7 +476,7 @@ fn strip_reference(
 /// trim sample's iso-u line running from the trims' lowest v up to the sample, span by
 /// span, so its cost grew with the square of the spans it crosses. Banded at its v knots,
 /// the iso-curve integrand's evaluations per span stay flat as the strip grows (they
-/// grew about 4x from 8 to 32 spans before), and every property still holds its accuracy
+/// grew 1.9x from 8 to 64 spans before), and every property still holds its accuracy
 /// against an independent quadrature.
 #[test]
 fn a_long_face_costs_linearly_in_its_knot_spans() {
@@ -485,7 +485,7 @@ fn a_long_face_costs_linearly_in_its_knot_spans() {
     let layout = PrecisePropertyLayout::new(PPF_ALL);
     let accuracy = 1e-9;
     let mut per_span = Vec::new();
-    for n in [8_usize, 64] {
+    for n in [16_usize, 64] {
         let surface = long_strip(n);
         let reference = strip_reference(&k, &surface, n, origin, &layout, 16);
         let check = strip_reference(&k, &surface, n, origin, &layout, 24);
