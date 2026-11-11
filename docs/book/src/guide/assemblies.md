@@ -46,8 +46,10 @@ angle. A ghost shows where the part started. **OK** keeps the new angle.
 
 A component is placed by its **occurrences**. Paste creates another instance of the same
 component, and **Paste New** creates an independent copy. Move an occurrence with the move
-triad, then **Capture Position** to keep it or **Revert** to put it back. SolidCraft asks before
-the next command if a move wasn't captured. **Ground** fixes an occurrence in place, and
+triad, then **Capture Position** to keep it or **Revert** to put it back. **Capture Position**
+also saves every joint's current values, and **Revert Position** puts the joints back to them,
+clamped to their limits, together with the parts, as one undo step. SolidCraft asks before the
+next command if a move wasn't captured. **Ground** fixes an occurrence in place, and
 **Unground** (the same row of **Placement** in the browser's context menu) frees it again.
 
 The design's first part is grounded when it is made: the first occurrence placed directly in the
@@ -127,6 +129,11 @@ In the Joint and Joint Origin dialogs, picking a straight edge puts the origin a
 with the motion axis along that edge. A revolute joint turns about the picked edge; a slider
 moves along it. Round edges use their circle's centre and normal. Existing saved joint origins
 keep their axes.
+
+A joint origin picked on a part inside a sub-assembly that is placed more than once stays on the
+copy it was picked on. A joint at it holds or moves that copy as a whole, since every copy shares
+the part inside. Scripts give the copy with `"path"`: the occurrence ids from the root down to the
+part, as `occurrence.properties` reports them.
 
 A joint origin on a face or a hole keeps the turn it had when it was picked: when the face tilts
 (a bend angle or a rotation changing with a parameter) the part on it tilts with the face but
@@ -460,7 +467,8 @@ To edit the source, right-click a linked component or occurrence in the Browser 
 **Open Linked Design**. It opens the part in another tab and reports if its file is missing.
 **Break Link** (`component.break_link`) keeps the bodies and forgets the file, and
 `component.links` lists the links, whether their files are found, and whether they changed since
-the assembly last read them (`changed`). A linked component holds
+the assembly last read them (`changed`). When a file can't be reached it also gives a
+`state` (`missing`, `unreadable` or `not_allowed`) and a `reason`. A linked component holds
 the part's bodies only: its timeline, parameters and sheet-metal data (flat pattern, bend
 table) stay in the part's own design.
 
@@ -483,6 +491,14 @@ to use. Relinking updates that component's stored path and solid bodies for **al
 instances**, keeping their identities and placements. Cancelling or choosing a missing,
 invalid, empty or self-referencing design leaves the assembly unchanged. The operation is
 one undo step and the new path is saved relative to the assembly when possible.
+
+To swap only one occurrence of a component placed several times, right-click that occurrence
+and choose **Component → Relink Source…**. Only that occurrence shows the chosen design. It
+keeps its position, grounding and joints, which move to the same faces of the new design where
+it has them. It becomes an occurrence of the component already linked to that design, or of a
+new linked component; the other occurrences keep the old source. Scripts pass the occurrence:
+`component.relink {component, occurrence, path}`, and the reply's `component` is then the one
+the occurrence shows and `previous_component` the one it showed.
 
 Scripts use `component.relink {component, path}`. The reply includes `previous_path`, `path`,
 `warnings`, `joint_errors` and `joint_conflicts`. Changed geometry can invalidate a joint's
@@ -557,7 +573,16 @@ Rows are sorted by part number (rows without one come last) and hold `item`, `pa
 `description`, `revision`, `bom_type`, `count`, `definition` (the component names), `components` (their ids)
 and `properties`, with `total_occurrences` beside them. `path` writes them to a `.csv` file
 (the columns item, part_number, description, revision, count and definition, every field
-quoted; children follow their row) or a `.json` file. The window lists the same rows, switches
+quoted, and a field that a spreadsheet would run as a formula written with a `'` before it so the
+spreadsheet shows it as text; children follow their row) or a `.json` file. A formula field is one that
+starts with `=`, `+`, `-` or `@`, their full-width forms, a tab or a line break, after any spaces and
+`'`; a plain number such as `-5` is not one. A script that reads the CSV sees the `'` too: a part number
+`=1+1` is `'=1+1` in the file, and `'=1+1` is `''=1+1`. To get the value back, take off one leading `'`
+when what follows starts a formula, as `solidcraft_doc::csv::unguard` does, or read the `.json` file,
+which holds the values unchanged. The `'` holds only while the file is as SolidCraft wrote it: a
+spreadsheet that saves the file again as CSV can drop it (Excel does), and the formula then runs the next
+time that file opens. Export again from SolidCraft instead of passing on a CSV a spreadsheet has saved.
+The window lists the same rows, switches
 between the levels and groupings and shows children under their part, edits a picked row's part
 number, description and revision, and exports them. Changing part properties changes no
 geometry, so it doesn't evaluate the model or re-seat joints again.

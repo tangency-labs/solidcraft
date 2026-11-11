@@ -86,6 +86,22 @@ fn cache_key(st: &ModelState, plane: &Plane, kind: LinkKind, src: &LinkSource) -
 
 /// Resolve a link source against the model state before the sketch.
 pub fn resolve(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, plane: &Plane, kind: LinkKind, src: &LinkSource) -> Result<Resolved> {
+    resolve_at(doc, vals, st, plane, kind, src, None)
+}
+
+/// [`resolve`] for a sketch evaluated in `frame`: its author component and that component's
+/// world placement, including the author path of a face-attached sketch. A construction point
+/// is kept in its own component's frame and is brought into this one (#12075); without a frame
+/// it is taken in the root's.
+pub fn resolve_at(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    st: &ModelState,
+    plane: &Plane,
+    kind: LinkKind,
+    src: &LinkSource,
+    frame: Option<&(u64, crate::Mat)>,
+) -> Result<Resolved> {
     let key = cache_key(st, plane, kind, src);
     if let Some(k) = &key
         && let Ok(c) = CACHE.lock()
@@ -93,7 +109,7 @@ pub fn resolve(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, 
     {
         return Ok(r.clone());
     }
-    let r = resolve_uncached(doc, vals, st, plane, kind, src)?;
+    let r = resolve_uncached(doc, vals, st, plane, kind, src, frame)?;
     if let Some(k) = key
         && let Ok(mut c) = CACHE.lock()
     {
@@ -110,6 +126,7 @@ fn resolve_uncached(
     plane: &Plane,
     kind: LinkKind,
     src: &LinkSource,
+    frame: Option<&(u64, crate::Mat)>,
 ) -> Result<Resolved> {
     let lost = |what: &str| DocError::Invalid(format!("{what} no longer exists"));
     let mut moved = false;
@@ -149,8 +166,14 @@ fn resolve_uncached(
                 LinkKind::Intersect => section(plane, &mesh, Some(f)),
                 _ => {
                     let target = st.bodies.get(bi).ok_or_else(|| lost("the projection body"))?;
-                    let g = projected_edges(target, &mesh, plane, &projection_face_edges(target, &mesh, f, plane)?);
-                    if certified_planar_construction(target, f as usize) { merge_family_lines(g)? } else { g }
+                    // A mesh body is one face with no edges: the flat patch of triangles picked,
+                    // traced (#13464).
+                    if target.body.is_mesh() {
+                        crate::project3d::flat_outline(&mesh, q).iter().flat_map(|outline| fit_mesh_outline(plane, outline)).collect()
+                    } else {
+                        let g = projected_edges(target, &mesh, plane, &projection_face_edges(target, &mesh, f, plane)?);
+                        if certified_planar_construction(target, f as usize) { merge_family_lines(g)? } else { g }
+                    }
                 }
             }
         }
@@ -286,6 +309,13 @@ fn resolve_uncached(
             vec![LinkGeom::Point(plane.to_local(ss.plane.to_world(p)))]
         }
         LinkSource::Origin => vec![LinkGeom::Point(plane.to_local(Vec3::ZERO))],
+        // A construction point, by name (#12075), where the timeline so far puts it, in the
+        // sketch's frame.
+        LinkSource::ConstructionPoint { name } => {
+            let (author, frame) = frame.copied().unwrap_or((0, crate::IDENTITY));
+            let p = crate::eval::construction_point_in(doc, st, name, author, &frame).map_err(|_| lost(&format!("point {name}")))?;
+            vec![LinkGeom::Point(plane.to_local(p))]
+        }
         LinkSource::Axis { name } => {
             let (o, d) = match name.to_ascii_uppercase().as_str() {
                 "X" => (Vec3::ZERO, Vec3::X),
@@ -318,7 +348,7 @@ fn resolve_uncached(
                 let feature = doc.find_feature(name).map(|f| crate::FeatureId(f.id)).unwrap_or(crate::FeatureId::DANGLING);
                 PlaneRef::Construction { feature }
             };
-            let other = doc.resolve_plane_in(vals, &pr, 0, Some(st)).map_err(|_| lost(&format!("plane {name}")))?;
+            let other = doc.resolve_plane_in(vals, &pr, 0, 0, Some(st)).map_err(|_| lost(&format!("plane {name}")))?;
             plane_trace(plane, &other).into_iter().collect()
         }
     };
@@ -588,7 +618,8 @@ fn circular(samples: &[Vec2]) -> Option<(LinkGeom, f64)> {
         sweep += d;
     }
     let turn = sweep.abs();
-    if turn > std::f64::consts::TAU + 1e-6 || turn < CIRCLE_MIN_TURN {
+    // A NaN turn is not refused here, as before.
+    if !turn.is_nan() && !(CIRCLE_MIN_TURN..=std::f64::consts::TAU + 1e-6).contains(&turn) {
         return None;
     }
     if first.dist(last) <= tol {
@@ -754,8 +785,12 @@ fn lost(reference: &str) -> DocError {
 /// The edge a link's stored name finds, and the body it is on: the link's body, or, when no
 /// body has that name any more (it was joined into another), the one body on which the name
 /// finds an edge.
-fn locate_named_edge(st: &ModelState, body: &str, name: &str, at: Vec3) -> Option<(String, crate::naming::EdgeHit)> {
-    let hit = |b: &crate::ModelBody| crate::naming::locate_edge(b, name, at).ok().map(|hit| (b.name.clone(), hit));
+fn locate_named_edge(st: &ModelState, kind: LinkKind, body: &str, name: &str, at: Vec3) -> Option<(String, crate::naming::EdgeHit)> {
+    let locate = |b: &crate::ModelBody| match kind {
+        LinkKind::Project => crate::name_lookup::locate_projected_edge(b, name, at),
+        _ => crate::naming::locate_edge(b, name, at),
+    };
+    let hit = |b: &crate::ModelBody| locate(b).ok().map(|hit| (b.name.clone(), hit));
     match st.body(body) {
         Some(b) => hit(b),
         None => {
@@ -912,7 +947,7 @@ pub fn refresh_face_anchor_links(
     sk: &mut Sketch,
     anchor: &crate::FaceAnchor,
 ) -> Result<Vec<String>> {
-    refresh_links_in(doc, vals, st, plane, sk, Some(anchor), LostNames::Fail)
+    refresh_links_in(doc, vals, st, plane, sk, Some(anchor), LostNames::Fail, None)
 }
 
 /// What a link kept by the name of a face or edge does when the name finds nothing any more.
@@ -926,17 +961,33 @@ pub(crate) enum LostNames {
     Mark,
 }
 
-/// [`refresh_links`] (or [`refresh_face_anchor_links`] with `anchor`) that marks a link whose
-/// named face or edge is gone lost instead of failing ([`LostNames::Mark`]).
-pub(crate) fn refresh_links_marking_lost(
+/// [`refresh_links`] (or [`refresh_face_anchor_links`] with `anchor`) for a sketch evaluated in
+/// `frame`, as [`resolve_at`] takes it.
+pub fn refresh_links_at(
     doc: &Document,
     vals: &BTreeMap<String, Value>,
     st: &ModelState,
     plane: &Plane,
     sk: &mut Sketch,
     anchor: Option<&crate::FaceAnchor>,
+    frame: Option<&(u64, crate::Mat)>,
 ) -> Result<Vec<String>> {
-    refresh_links_in(doc, vals, st, plane, sk, anchor, LostNames::Mark)
+    refresh_links_in(doc, vals, st, plane, sk, anchor, LostNames::Fail, frame)
+}
+
+/// [`refresh_links_at`] with `lost_names` [`LostNames::Mark`] for a link whose named face or edge
+/// is gone to be marked lost instead of failing the sketch.
+pub(crate) fn refresh_links_with(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    st: &ModelState,
+    plane: &Plane,
+    sk: &mut Sketch,
+    anchor: Option<&crate::FaceAnchor>,
+    lost_names: LostNames,
+    frame: Option<&(u64, crate::Mat)>,
+) -> Result<Vec<String>> {
+    refresh_links_in(doc, vals, st, plane, sk, anchor, lost_names, frame)
 }
 
 /// Remove degree-two straight stations introduced by coplanar face subdivision.
@@ -1013,7 +1064,7 @@ fn merge_family_lines(geom: Vec<LinkGeom>) -> Result<Vec<LinkGeom>> {
 /// longer finds exactly that face or edge is not lost: the sketch fails, asking for the
 /// reference to be picked again ([`DocError::Reselect`]).
 pub fn refresh_links(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, plane: &Plane, sk: &mut Sketch) -> Result<Vec<String>> {
-    refresh_links_in(doc, vals, st, plane, sk, None, LostNames::Fail)
+    refresh_links_in(doc, vals, st, plane, sk, None, LostNames::Fail, None)
 }
 
 /// Lay every text that runs along a curve of its sketch along that curve as the solve left it.
@@ -1050,6 +1101,7 @@ fn refresh_links_in(
     sk: &mut Sketch,
     anchor: Option<&crate::FaceAnchor>,
     lost_names: LostNames,
+    frame: Option<&(u64, crate::Mat)>,
 ) -> Result<Vec<String>> {
     let mut warn = Vec::new();
     let links = sk.links.clone();
@@ -1077,7 +1129,7 @@ fn refresh_links_in(
         // edge has the name any more no other edge is taken for it: the sketch fails.
         let mut named_edge = None;
         if let (Some(name), LinkSource::Edge { body, at }) = (&l.edge_name, &source) {
-            let Some((body, hit)) = locate_named_edge(st, body, name, *at) else {
+            let Some((body, hit)) = locate_named_edge(st, l.kind, body, name, *at) else {
                 lose_named(sk, &l.id, name, lost_names, &mut warn)?;
                 continue;
             };
@@ -1104,7 +1156,7 @@ fn refresh_links_in(
         } else if let Some((body, index, at)) = named_edge {
             resolve_named_edge(st, plane, l.kind, &body, index, at)
         } else {
-            resolve(doc, vals, st, plane, l.kind, &source)
+            resolve_at(doc, vals, st, plane, l.kind, &source, frame)
         };
         match resolved {
             Ok(r) => {
@@ -1308,8 +1360,8 @@ fn project_sketch_curve(sk: &Sketch, from: &Plane, ci: usize, to: &Plane) -> Vec
 }
 
 /// A circle in space (centre, unit normal, radius) through the polyline's points, and whether
-/// the polyline closes.
-fn circle3(pts: &[Vec3]) -> Option<(Vec3, Vec3, f64, bool)> {
+/// the polyline closes. Its points lie on it within `within`, by default 1e-7 of the radius.
+fn circle3(pts: &[Vec3], within: Option<f64>) -> Option<(Vec3, Vec3, f64, bool)> {
     let n = pts.len();
     if n < 4 {
         return None;
@@ -1326,15 +1378,15 @@ fn circle3(pts: &[Vec3]) -> Option<(Vec3, Vec3, f64, bool)> {
     let centre = a + (nrm.cross(ab) * ac.len2() + ac.cross(nrm) * ab.len2()) / (2.0 * l2);
     let r = centre.dist(a);
     let un = nrm.normalized()?;
-    let tol = 1e-7 * r.max(1.0);
+    let tol = within.unwrap_or(1e-7 * r.max(1.0));
     pts.iter().all(|p| (p.dist(centre) - r).abs() < tol && (*p - centre).dot(un).abs() < tol).then_some((centre, un, r, closed))
 }
 
 /// A circle seen at a slant is an ellipse, exactly: a full circle becomes an ellipse; an arc
 /// becomes conics (rational quadratic Béziers of at most 90 degrees each — parallel projection
 /// keeps their weights).
-fn tilted_circle(plane: &Plane, pts: &[Vec3]) -> Option<Vec<LinkGeom>> {
-    let (c, n, r, closed) = circle3(pts)?;
+fn tilted_circle(plane: &Plane, pts: &[Vec3], within: Option<f64>) -> Option<Vec<LinkGeom>> {
+    let (c, n, r, closed) = circle3(pts, within)?;
     let sn = plane.normal();
     let cosang = n.dot(sn).abs();
     if !(1e-9..=1.0 - 1e-12).contains(&cosang) {
@@ -1429,9 +1481,37 @@ fn plane_trace(sk: &Plane, other: &Plane) -> Option<LinkGeom> {
     Some(LinkGeom::Line(p0 - u * AXIS_HALF, p0 + u * AXIS_HALF))
 }
 
+/// Most corners a mesh face's outline has and is still taken for a polygon.
+const MESH_POLYGON_CORNERS: usize = 12;
+
+/// The outline of a mesh body's flat patch (a closed loop of its corners) as lines and arcs. Any
+/// triangle's corners and any rectangle's lie on one circle, so only a loop of more corners than
+/// [`MESH_POLYGON_CORNERS`], all on one circle, is a tessellated circle, an ellipse on a slanted
+/// plane; and the sides of a polygon stay lines, never one fitted spline (#13464). A mesh file
+/// keeps its corners in single precision, so they lie on the circle within about 1e-7 of their
+/// distance from the origin, not of the circle's size; and never more loosely than 1e-4 of the
+/// outline's own size, so a small outline far from the origin is not taken for a circle it misses.
+fn fit_mesh_outline(plane: &Plane, pts: &[Vec3]) -> Vec<LinkGeom> {
+    let (lo, hi) = pts.iter().fold(
+        (Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY), Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY)),
+        |(lo, hi), p| (lo.min(*p), hi.max(*p)),
+    );
+    let size = lo.dist(hi);
+    let within = (pts.iter().map(|p| p.len()).fold(1.0, f64::max) * 1e-6).min(size * 1e-4);
+    if pts.len() > MESH_POLYGON_CORNERS + 1
+        && let Some(e) = tilted_circle(plane, pts, Some(within))
+    {
+        return e;
+    }
+    let p2: Vec<Vec2> = pts.iter().map(|p| plane.to_local(*p)).collect();
+    let mut out = Vec::new();
+    fit_chain(&p2, None, &mut out);
+    out
+}
+
 /// Project a world polyline and fit lines and arcs to it.
 fn fit_world(plane: &Plane, pts: &[Vec3]) -> Vec<LinkGeom> {
-    if let Some(e) = tilted_circle(plane, pts) {
+    if let Some(e) = tilted_circle(plane, pts, None) {
         return e;
     }
     let p2: Vec<Vec2> = pts.iter().map(|p| plane.to_local(*p)).collect();

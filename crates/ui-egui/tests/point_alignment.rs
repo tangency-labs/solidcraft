@@ -465,11 +465,11 @@ fn context_menu_alignment_review_images() {
     use solidcraft_engine::Sel;
     use solidcraft_ui_egui::{
         context_menu::{self, Target},
-        fonts, theme,
+        fonts,
     };
     let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/point-alignment-review");
     std::fs::create_dir_all(&dir).unwrap();
-    let previous = theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
         let mut h = Harness::new();
         h.app.home.open = false;
@@ -487,7 +487,7 @@ fn context_menu_alignment_review_images() {
         h.frames(3);
         h.ctx = egui::Context::default();
         fonts::setup_fonts_for(&h.ctx, "ja", "");
-        theme::apply(&h.ctx);
+        solidcraft_theme::apply(&h.ctx);
         let mut textures = std::collections::HashMap::new();
         for _ in 0..8 {
             raster::paint(&mut h, &mut textures, vec![]);
@@ -509,7 +509,7 @@ fn context_menu_alignment_review_images() {
             raster::raster(&mut h, &textures, output).save(dir.join(format!("{mode}-{shot}.png"))).unwrap();
         }
     }
-    theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
@@ -708,15 +708,15 @@ fn midpoint_menu_aligns_rectangle_sides_and_refuses_conflicts_atomically() {
 fn midpoint_selection_review_images() {
     use solidcraft_ui_egui::{
         context_menu::{self, Target},
-        fonts, theme,
+        fonts,
     };
     let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/midpoint-selection-review");
     std::fs::create_dir_all(&dir).unwrap();
     solidcraft_engine::capture::install(std::sync::Arc::new(|scene, cam, w, h| {
-        let (rgba, renderer) = solidcraft_gpu::capture::headless_rgba(scene, cam, w, h)?;
+        let (rgba, renderer) = solidcraft_gpu::env::headless_rgba(scene, cam, w, h)?;
         Ok(solidcraft_engine::capture::Picture { rgba, renderer })
     }));
-    let previous = theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     for dark in [false, true] {
         for horizontal in [false, true] {
             let mut h = Harness::new();
@@ -734,7 +734,7 @@ fn midpoint_selection_review_images() {
             h.frames(3);
             h.ctx = egui::Context::default();
             fonts::setup_fonts_for(&h.ctx, "ja", "");
-            theme::apply(&h.ctx);
+            solidcraft_theme::apply(&h.ctx);
             let mut textures = std::collections::HashMap::new();
             for _ in 0..8 {
                 raster::paint(&mut h, &mut textures, vec![]);
@@ -774,5 +774,5 @@ fn midpoint_selection_review_images() {
             }
         }
     }
-    theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }

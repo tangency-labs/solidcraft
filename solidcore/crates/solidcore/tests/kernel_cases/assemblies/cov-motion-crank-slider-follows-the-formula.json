@@ -1,0 +1,476 @@
+{
+  "area": "assemblies",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 2.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                50.0,
+                -10.0,
+                -12.0
+              ],
+              "start": [
+                -10.0,
+                -10.0,
+                -12.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                50.0,
+                10.0,
+                -12.0
+              ],
+              "start": [
+                50.0,
+                -10.0,
+                -12.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -10.0,
+                10.0,
+                -12.0
+              ],
+              "start": [
+                50.0,
+                10.0,
+                -12.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -10.0,
+                -10.0,
+                -12.0
+              ],
+              "start": [
+                -10.0,
+                10.0,
+                -12.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 2.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                12.0,
+                -2.0,
+                0.0
+              ],
+              "start": [
+                -2.0,
+                -2.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                12.0,
+                2.0,
+                0.0
+              ],
+              "start": [
+                12.0,
+                -2.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -2.0,
+                2.0,
+                0.0
+              ],
+              "start": [
+                12.0,
+                2.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -2.0,
+                -2.0,
+                0.0
+              ],
+              "start": [
+                -2.0,
+                2.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b3"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 2.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                42.0,
+                -1.0,
+                2.0
+              ],
+              "start": [
+                8.0,
+                -1.0,
+                2.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                42.0,
+                1.0,
+                2.0
+              ],
+              "start": [
+                42.0,
+                -1.0,
+                2.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                8.0,
+                1.0,
+                2.0
+              ],
+              "start": [
+                42.0,
+                1.0,
+                2.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                8.0,
+                -1.0,
+                2.0
+              ],
+              "start": [
+                8.0,
+                1.0,
+                2.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b4"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 2.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                43.0,
+                -3.0,
+                4.0
+              ],
+              "start": [
+                37.0,
+                -3.0,
+                4.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                43.0,
+                3.0,
+                4.0
+              ],
+              "start": [
+                43.0,
+                -3.0,
+                4.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                37.0,
+                3.0,
+                4.0
+              ],
+              "start": [
+                43.0,
+                3.0,
+                4.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                37.0,
+                -3.0,
+                4.0
+              ],
+              "start": [
+                37.0,
+                3.0,
+                4.0
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "cov-motion-crank-slider-follows-the-formula",
+  "expected": {
+    "body_count": 4,
+    "method": "a crank-slider: crank r 10 about z through the origin, rod l 30 from the crank pin (10,0) to the slider's pin (40,0), slider on +x; the slider sits at x = r cos θ + √(l² - r² sin² θ); the guide's value is x - 40",
+    "results": [
+      {
+        "json": {
+          "conflicts": []
+        },
+        "step": 17
+      },
+      {
+        "json": {
+          "joints": [
+            {
+              "value": [
+                0.0,
+                -1.759347,
+                -6.277187,
+                -11.715729,
+                -16.277187,
+                -19.079855,
+                -20.0,
+                -19.079855,
+                -16.277187,
+                -11.715729,
+                -6.277187,
+                -1.759347,
+                0.0
+              ]
+            }
+          ],
+          "point": {
+            "position": [
+              [
+                40.0,
+                0.0,
+                5.0
+              ],
+              [
+                38.240653,
+                0.0,
+                5.0
+              ],
+              [
+                33.722813,
+                0.0,
+                5.0
+              ],
+              [
+                28.284271,
+                0.0,
+                5.0
+              ],
+              [
+                23.722813,
+                0.0,
+                5.0
+              ],
+              [
+                20.920145,
+                0.0,
+                5.0
+              ],
+              [
+                20.0,
+                0.0,
+                5.0
+              ],
+              [
+                20.920145,
+                0.0,
+                5.0
+              ],
+              [
+                23.722813,
+                0.0,
+                5.0
+              ],
+              [
+                28.284271,
+                0.0,
+                5.0
+              ],
+              [
+                33.722813,
+                0.0,
+                5.0
+              ],
+              [
+                38.240653,
+                0.0,
+                5.0
+              ],
+              [
+                40.0,
+                0.0,
+                5.0
+              ]
+            ]
+          },
+          "samples": 13,
+          "stopped_at": null
+        },
+        "step": 19
+      }
+    ],
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 2720,
+    "what": "motion.plot of a crank-slider's slider over a full turn of the crank, every 30 degrees"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 48,
+      "faces": 24,
+      "vertices": 32
+    }
+  },
+  "result": [
+    {
+      "body": "BedBox",
+      "made": "b1"
+    },
+    {
+      "body": "CrankBox",
+      "made": "b2"
+    },
+    {
+      "body": "RodBox",
+      "made": "b3"
+    },
+    {
+      "body": "SliderBox",
+      "made": "b4"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3304.0,
+      "body_count": 4,
+      "edges": 48,
+      "faces": 24,
+      "vertices": 32,
+      "volume_mm3": 2720.0
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude"
+  ],
+  "ungraded": [
+    "results: SolidCraft computes it"
+  ],
+  "what": "motion.plot of a crank-slider's slider over a full turn of the crank, every 30 degrees",
+  "why_not": []
+}

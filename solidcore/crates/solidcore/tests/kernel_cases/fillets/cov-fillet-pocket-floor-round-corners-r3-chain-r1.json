@@ -1,0 +1,304 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b17": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b17"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b18"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b18"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b19"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b19"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b20"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b20"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b21"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  13.0,
+                  10.0,
+                  5.0
+                ],
+                [
+                  27.0,
+                  10.0,
+                  5.0
+                ]
+              ],
+              "index": 23
+            },
+            {
+              "at": [
+                [
+                  13.0,
+                  10.0,
+                  5.0
+                ],
+                [
+                  10.0,
+                  13.0,
+                  5.0
+                ]
+              ],
+              "index": 22
+            },
+            {
+              "at": [
+                [
+                  30.0,
+                  13.0,
+                  5.0
+                ],
+                [
+                  27.0,
+                  10.0,
+                  5.0
+                ]
+              ],
+              "index": 24
+            },
+            {
+              "at": [
+                [
+                  10.0,
+                  17.0,
+                  5.0
+                ],
+                [
+                  10.0,
+                  13.0,
+                  5.0
+                ]
+              ],
+              "index": 21
+            },
+            {
+              "at": [
+                [
+                  30.0,
+                  13.0,
+                  5.0
+                ],
+                [
+                  30.0,
+                  17.0,
+                  5.0
+                ]
+              ],
+              "index": 25
+            },
+            {
+              "at": [
+                [
+                  10.0,
+                  17.0,
+                  5.0
+                ],
+                [
+                  13.0,
+                  20.0,
+                  5.0
+                ]
+              ],
+              "index": 20
+            },
+            {
+              "at": [
+                [
+                  27.0,
+                  20.0,
+                  5.0
+                ],
+                [
+                  30.0,
+                  17.0,
+                  5.0
+                ]
+              ],
+              "index": 26
+            },
+            {
+              "at": [
+                [
+                  27.0,
+                  20.0,
+                  5.0
+                ],
+                [
+                  13.0,
+                  20.0,
+                  5.0
+                ]
+              ],
+              "index": 27
+            }
+          ],
+          "points": [
+            [
+              20.0,
+              10.0,
+              5.0
+            ],
+            [
+              10.878679656440358,
+              10.878679656440358,
+              5.0
+            ],
+            [
+              29.121320343559642,
+              10.878679656440356,
+              5.0
+            ],
+            [
+              10.0,
+              15.0,
+              5.0
+            ],
+            [
+              30.0,
+              15.0,
+              5.0
+            ],
+            [
+              10.878679656440358,
+              19.121320343559642,
+              5.0
+            ],
+            [
+              29.121320343559642,
+              19.121320343559642,
+              5.0
+            ],
+            [
+              20.0,
+              20.0,
+              5.0
+            ]
+          ],
+          "tolerance": 2.5505097567963926
+        },
+        "kind": "round",
+        "sizes": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ]
+      }
+    }
+  ],
+  "case": "cov-fillet-pocket-floor-round-corners-r3-chain-r1",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "pocket 20x10x5 with R3 vertical corners: V0 = 12000 - 5 (200 - (4 - pi) 9) = 11038.628330588. The floor round: straight runs 14, 4, 14, 4 add A each per length; at each corner the section turns about the corner's axis, its spandrel at distance R - u from it (u from the wall): (pi/2)(R A - M) each (Pappus). V = 11050.097960471. Every seam G1. Graded to 1e-7 relative: the Mitre and Swept turns differ by (8 - 2 pi) M = 0.0823 mm^3 at these four corners, 6.6e-6 of the volume.",
+    "source": "analytic",
+    "sources": [],
+    "tolerance": {
+      "rel": 1e-7
+    },
+    "volume_mm3": 11050.097960470617,
+    "what": "a pocket whose vertical corners are rounded R3 first, then its floor outline rounded R1 as one tangent chain: the round follows the corners round, a torus at each (no turn to choose)"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 52,
+      "faces": 23,
+      "vertices": 32
+    }
+  },
+  "records": "cov-fillet-pocket-floor-round-corners-r3-chain-r1.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b21"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 4050.26132230198,
+      "body_count": 1,
+      "edges": 52,
+      "faces": 23,
+      "vertices": 32,
+      "volume_mm3": 11050.097960378986
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "a pocket whose vertical corners are rounded R3 first, then its floor outline rounded R1 as one tangent chain: the round follows the corners round, a torus at each (no turn to choose)",
+  "why_not": []
+}

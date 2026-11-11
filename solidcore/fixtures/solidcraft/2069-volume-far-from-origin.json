@@ -1,0 +1,636 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/2069",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/2069",
+ "test": "crates/kernel/src/measure_placement_tests.rs: ring_volume_does_not_depend_on_placement, cylinder_and_cone_volumes_far_from_the_origin (PR closed unmerged; kernel-paused under tangency-labs/solidcraft#3992)",
+ "summary": "A body's measured volume grew with its distance from the world origin on SolidCraft's earlier kernel (no separate issue; #2069 is the fixing PR): a part ring measured 992.03 mm^3 at the origin, 999.17 moved 100 mm and 1063.48 moved 1000 mm. Its meshes left a crack, and the divergence-theorem sums, taken about the world origin, closed it with a cone to the origin. The fix measured such a body about its box centre. Volume is a property of the solid, so it must not depend on placement. Geometry is the PR's kernel tests: a full ring revolved about Z from the section (5,0) (9,0) (11,2) (11,6) (8,8) (5,8) in (radius, height), with cones top and bottom and cylinders inside and out, placed at the origin and with its axis 100, 1000 and 10000 mm away along X, Y, Z and the diagonal; a cylinder r 7, h 12 and a frustum, radii 7 and 3, height 10, at the origin and at (5000, -3000, 8000). The PR's combine-cut ring is left out: its expected value came from a grid quadrature, not a closed form. Volumes are closed forms (Pappus for the ring); only lumps and volume are expected, at the 0.01 mm^3 tolerance of the other cases.",
+ "cases": [
+  {
+   "name": "ring_origin",
+   "note": "The ring of cones and cylinders at the origin (control).",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "result",
+     "plane": "xz",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         5.0,
+         0.0
+        ],
+        [
+         9.0,
+         0.0
+        ],
+        [
+         11.0,
+         2.0
+        ],
+        [
+         11.0,
+         6.0
+        ],
+        [
+         8.0,
+         8.0
+        ],
+        [
+         5.0,
+         8.0
+        ]
+       ]
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 2094.3951023931954,
+     "tol": 0.01,
+     "formula": "2 pi * (first moment of the section about the axis) = 2 pi * 1000/3 = 2000/3 pi (Pappus; section (5,0) (9,0) (11,2) (11,6) (8,8) (5,8) in (radius, height))"
+    }
+   }
+  },
+  {
+   "name": "ring_x_100",
+   "note": "The same ring with its axis through [100.0, 0.0, 0.0].",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "result",
+     "plane": "xz",
+     "origin": [
+      100.0,
+      0.0,
+      0.0
+     ],
+     "axis_point": [
+      100.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         5.0,
+         0.0
+        ],
+        [
+         9.0,
+         0.0
+        ],
+        [
+         11.0,
+         2.0
+        ],
+        [
+         11.0,
+         6.0
+        ],
+        [
+         8.0,
+         8.0
+        ],
+        [
+         5.0,
+         8.0
+        ]
+       ]
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 2094.3951023931954,
+     "tol": 0.01,
+     "formula": "2 pi * (first moment of the section about the axis) = 2 pi * 1000/3 = 2000/3 pi (Pappus; section (5,0) (9,0) (11,2) (11,6) (8,8) (5,8) in (radius, height))"
+    }
+   }
+  },
+  {
+   "name": "ring_x_1000",
+   "note": "The same ring with its axis through [1000.0, 0.0, 0.0].",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "result",
+     "plane": "xz",
+     "origin": [
+      1000.0,
+      0.0,
+      0.0
+     ],
+     "axis_point": [
+      1000.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         5.0,
+         0.0
+        ],
+        [
+         9.0,
+         0.0
+        ],
+        [
+         11.0,
+         2.0
+        ],
+        [
+         11.0,
+         6.0
+        ],
+        [
+         8.0,
+         8.0
+        ],
+        [
+         5.0,
+         8.0
+        ]
+       ]
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 2094.3951023931954,
+     "tol": 0.01,
+     "formula": "2 pi * (first moment of the section about the axis) = 2 pi * 1000/3 = 2000/3 pi (Pappus; section (5,0) (9,0) (11,2) (11,6) (8,8) (5,8) in (radius, height))"
+    }
+   }
+  },
+  {
+   "name": "ring_x_10000",
+   "note": "The same ring with its axis through [10000.0, 0.0, 0.0].",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "result",
+     "plane": "xz",
+     "origin": [
+      10000.0,
+      0.0,
+      0.0
+     ],
+     "axis_point": [
+      10000.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         5.0,
+         0.0
+        ],
+        [
+         9.0,
+         0.0
+        ],
+        [
+         11.0,
+         2.0
+        ],
+        [
+         11.0,
+         6.0
+        ],
+        [
+         8.0,
+         8.0
+        ],
+        [
+         5.0,
+         8.0
+        ]
+       ]
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 2094.3951023931954,
+     "tol": 0.01,
+     "formula": "2 pi * (first moment of the section about the axis) = 2 pi * 1000/3 = 2000/3 pi (Pappus; section (5,0) (9,0) (11,2) (11,6) (8,8) (5,8) in (radius, height))"
+    }
+   }
+  },
+  {
+   "name": "ring_y_10000",
+   "note": "The same ring with its axis through [0.0, 10000.0, 0.0].",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "result",
+     "plane": "xz",
+     "origin": [
+      0.0,
+      10000.0,
+      0.0
+     ],
+     "axis_point": [
+      0.0,
+      10000.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         5.0,
+         0.0
+        ],
+        [
+         9.0,
+         0.0
+        ],
+        [
+         11.0,
+         2.0
+        ],
+        [
+         11.0,
+         6.0
+        ],
+        [
+         8.0,
+         8.0
+        ],
+        [
+         5.0,
+         8.0
+        ]
+       ]
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 2094.3951023931954,
+     "tol": 0.01,
+     "formula": "2 pi * (first moment of the section about the axis) = 2 pi * 1000/3 = 2000/3 pi (Pappus; section (5,0) (9,0) (11,2) (11,6) (8,8) (5,8) in (radius, height))"
+    }
+   }
+  },
+  {
+   "name": "ring_z_10000",
+   "note": "The same ring with its axis through [0.0, 0.0, 10000.0].",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "result",
+     "plane": "xz",
+     "origin": [
+      0.0,
+      0.0,
+      10000.0
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      10000.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         5.0,
+         0.0
+        ],
+        [
+         9.0,
+         0.0
+        ],
+        [
+         11.0,
+         2.0
+        ],
+        [
+         11.0,
+         6.0
+        ],
+        [
+         8.0,
+         8.0
+        ],
+        [
+         5.0,
+         8.0
+        ]
+       ]
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 2094.3951023931954,
+     "tol": 0.01,
+     "formula": "2 pi * (first moment of the section about the axis) = 2 pi * 1000/3 = 2000/3 pi (Pappus; section (5,0) (9,0) (11,2) (11,6) (8,8) (5,8) in (radius, height))"
+    }
+   }
+  },
+  {
+   "name": "ring_xyz_10000",
+   "note": "The same ring with its axis through [10000.0, 10000.0, 10000.0].",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "result",
+     "plane": "xz",
+     "origin": [
+      10000.0,
+      10000.0,
+      10000.0
+     ],
+     "axis_point": [
+      10000.0,
+      10000.0,
+      10000.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         5.0,
+         0.0
+        ],
+        [
+         9.0,
+         0.0
+        ],
+        [
+         11.0,
+         2.0
+        ],
+        [
+         11.0,
+         6.0
+        ],
+        [
+         8.0,
+         8.0
+        ],
+        [
+         5.0,
+         8.0
+        ]
+       ]
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 2094.3951023931954,
+     "tol": 0.01,
+     "formula": "2 pi * (first moment of the section about the axis) = 2 pi * 1000/3 = 2000/3 pi (Pappus; section (5,0) (9,0) (11,2) (11,6) (8,8) (5,8) in (radius, height))"
+    }
+   }
+  },
+  {
+   "name": "cylinder_origin",
+   "note": "A cylinder r 7, h 12, base centre [0.0, 0.0, 0.0].",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "result",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "radius": 7.0,
+     "height": 12.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 1847.2564803107982,
+     "tol": 0.01,
+     "formula": "pi * 7^2 * 12 = 588 pi"
+    }
+   }
+  },
+  {
+   "name": "frustum_origin",
+   "note": "A frustum, radii 7 and 3, height 10, revolved about the Z line through [0.0, 0.0, 0.0].",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "result",
+     "plane": "xz",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0.0,
+         0.0
+        ],
+        [
+         7.0,
+         0.0
+        ],
+        [
+         3.0,
+         10.0
+        ],
+        [
+         0.0,
+         10.0
+        ]
+       ]
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 827.2860654453123,
+     "tol": 0.01,
+     "formula": "pi * 10 / 3 * (7^2 + 7*3 + 3^2) = 790/3 pi"
+    }
+   }
+  },
+  {
+   "name": "cylinder_far",
+   "note": "A cylinder r 7, h 12, base centre [5000.0, -3000.0, 8000.0].",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "result",
+     "origin": [
+      5000.0,
+      -3000.0,
+      8000.0
+     ],
+     "radius": 7.0,
+     "height": 12.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 1847.2564803107982,
+     "tol": 0.01,
+     "formula": "pi * 7^2 * 12 = 588 pi"
+    }
+   }
+  },
+  {
+   "name": "frustum_far",
+   "note": "A frustum, radii 7 and 3, height 10, revolved about the Z line through [5000.0, -3000.0, 8000.0].",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "result",
+     "plane": "xz",
+     "origin": [
+      5000.0,
+      -3000.0,
+      8000.0
+     ],
+     "axis_point": [
+      5000.0,
+      -3000.0,
+      8000.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0.0,
+         0.0
+        ],
+        [
+         7.0,
+         0.0
+        ],
+        [
+         3.0,
+         10.0
+        ],
+        [
+         0.0,
+         10.0
+        ]
+       ]
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 827.2860654453123,
+     "tol": 0.01,
+     "formula": "pi * 10 / 3 * (7^2 + 7*3 + 3^2) = 790/3 pi"
+    }
+   }
+  }
+ ]
+}

@@ -20,7 +20,9 @@ pub mod easyprint;
 pub mod frames;
 pub mod fuzz;
 pub mod licences;
+mod mesh_lines;
 pub mod occurrences;
+pub mod origins;
 pub mod panels;
 pub mod params;
 pub mod product_scene;
@@ -50,8 +52,8 @@ use solidcraft_doc::{Document, Model, ModelState};
 
 pub use cmd::settings::{MAX_PROFILE_NAME, profile_name};
 pub use cmd::{
-    Addition, CommandInfo, CommandSpec, OpenSteps, addition, auto_operation, command_specs, dimension_roles, extrude_reach, find_command,
-    resolve_design_links, shown_scope, standard_view,
+    Addition, CommandInfo, CommandSpec, LinkProblem, LinkState, OpenSteps, addition, auto_operation, command_specs, dimension_roles, extrude_reach,
+    find_command, resolve_design_links, shown_scope, standard_view,
 };
 pub use solidcraft_doc as doc;
 pub use solidcraft_doc::Visibility;
@@ -86,6 +88,10 @@ pub enum EngineError {
     /// A command panicked; the document was kept as it was (a bug: please report it).
     #[error("internal error in `{0}` (the design was kept as it was): {1}")]
     Internal(String, String),
+    /// The work running the command was cancelled ([`solidcraft_doc::progress::Progress::cancel`])
+    /// while it ran: nothing was applied, whatever was computed before the cancel came in.
+    #[error("`{0}` was cancelled; nothing was applied")]
+    Cancelled(String),
 }
 
 impl From<solidcraft_doc::DocError> for EngineError {
@@ -354,7 +360,10 @@ impl Ahead {
         let stop = self.0.stop.clone();
         stop.within(|| {
             let (after, _) = self.0.preview_in_place(commands, Some(step))?;
-            after.world_state()?.warm_display();
+            // Stopped by its watcher: nothing it ends with will be shown.
+            if !solidcraft_doc::progress::cancelled() {
+                after.world_state()?.warm_display();
+            }
             Ok(Evaluated(after.model))
         })
     }
@@ -519,6 +528,10 @@ pub struct Session {
     pub(crate) followed: Option<cmd::inspect::Followed>,
     /// Project a face's edges into a sketch created on it (the default; `sketch.auto_project`).
     pub auto_project: bool,
+    /// Project, Intersect, Include 3D Geometry and the face edges projected into a new sketch
+    /// make construction geometry rather than normal geometry (off by default; #13142). A
+    /// preference, kept like `auto_project` when another design is opened or started.
+    pub project_construction: bool,
     /// How calls that break a command's parameter contract are treated (off by default). It
     /// belongs to the session, not the design, so it survives opening and starting designs.
     pub param_check: schema::ParamCheck,
@@ -614,7 +627,7 @@ pub struct Session {
     /// The camera `view.apply` asked the view to use (view state, not saved). The desktop app
     /// moves its viewport there and takes it; headless renders keep using it until a standard
     /// view is chosen.
-    pub camera: Option<render::Camera>,
+    pub camera: Option<solidcraft_viewport::Camera>,
     /// Host-owned viewport metadata, never saved or included in history.
     render_viewport: Option<Arc<render::ExecutorDescriptor>>,
     render_jobs: render_jobs::Jobs,
@@ -738,8 +751,8 @@ pub enum CombPick {
 
 impl SurfaceAnalysis {
     /// How a picture shades the faces for this analysis.
-    pub fn mode(self) -> render::AnalysisMode {
-        use render::AnalysisMode as M;
+    pub fn mode(self) -> solidcraft_viewport::AnalysisMode {
+        use solidcraft_viewport::AnalysisMode as M;
         match self {
             SurfaceAnalysis::Zebra { stripes } => M::Zebra { stripes },
             SurfaceAnalysis::Draft { pull, angle } => M::Draft { pull, angle },
@@ -827,6 +840,7 @@ impl Session {
             document_id: cmd::inspect::new_document_id(),
             followed: None,
             auto_project: true,
+            project_construction: false,
             param_check: schema::ParamCheck::Off,
             easyprint_upload: None,
             live_links: None,
@@ -890,6 +904,7 @@ impl Session {
             self.stop_computing();
         }
         let auto_project = self.auto_project;
+        let project_construction = self.project_construction;
         let validation = self.validation();
         let single_surface_analysis = self.single_surface_analysis;
         let param_check = self.param_check;
@@ -907,6 +922,7 @@ impl Session {
         self.crash_journal = crash_journal;
         self.command_check = command_check;
         self.auto_project = auto_project;
+        self.project_construction = project_construction;
         // The user's, like `auto_project`: the commands that open a design evaluate it under it
         // already (`Session::opened_validating`).
         self.set_validation(validation);
@@ -1271,8 +1287,12 @@ impl Session {
 
     /// A component by its id or name, or by the name of one of its placements (`K:2`); never the
     /// root.
-    pub(crate) fn component_or_placement(&self, key: &str) -> Option<u64> {
-        self.doc.find_component(key).or_else(|| self.doc.occurrences.iter().find(|o| o.name == key).map(|o| o.component)).filter(|id| *id != 0)
+    pub(crate) fn component_or_placement(&self, key: &str) -> solidcraft_doc::Result<Option<u64>> {
+        Ok(self
+            .doc
+            .resolve_component(key)?
+            .or_else(|| self.doc.occurrences.iter().find(|o| o.name == key).map(|o| o.component))
+            .filter(|id| *id != 0))
     }
 
     /// Number of live-model evaluations after this session's initialization.
@@ -1688,6 +1708,9 @@ impl Session {
         // Picks in the world go into their component's frame (once: commands run by commands
         // already have them there).
         let (_nested, outermost) = frames::Nested::enter(spec.id);
+        if outermost {
+            frames::reset_inner_undoable();
+        }
         let mapped = if outermost {
             frames::forget_picks();
             frames::to_local(self, spec.id, params)?
@@ -1711,9 +1734,21 @@ impl Session {
                 Err(EngineError::Internal(spec.id.to_string(), msg))
             }
         };
+        // Cancelled while it ran: no result, even one finished before the cancel came in, and
+        // the design goes back as it was (solidcore#3247). Opening, starting or recovering a
+        // design (which replaces the session) keeps its own Cancel: the features not yet built
+        // are skipped and what is built so far is shown (#10577).
+        let r = if solidcraft_doc::progress::cancelled() && self.replacements == replacements {
+            Err(EngineError::Cancelled(spec.id.to_string()))
+        } else {
+            r
+        };
         // The kernel's internal errors come up without the command's id.
         let r = r.map_err(|e| match e {
-            EngineError::Internal(id, msg) if id.is_empty() => EngineError::Internal(spec.id.to_string(), msg),
+            EngineError::Internal(id, msg) if id.is_empty() => {
+                crash::kernel_caught();
+                EngineError::Internal(spec.id.to_string(), msg)
+            }
             e => e,
         });
         // A value typed as `name = expression` defines the user parameter `name` (#4071), in the
@@ -1765,7 +1800,18 @@ impl Session {
                     let render_only = self.replacements == replacements && self.render_only_change(&before);
                     let display_only = !changed && hidden;
                     let previous_doc = before.doc.clone();
-                    if spec.undoable {
+                    // One undo step per command: the outermost one saves it, for itself or for an
+                    // undoable command it ran (#12393), unless it replaced the session (opening a design starts
+                    // a fresh history). A command run inside another saves none.
+                    let saves = if outermost {
+                        spec.undoable || (frames::inner_undoable() && self.replacements == replacements)
+                    } else {
+                        if spec.undoable {
+                            frames::note_inner_undoable();
+                        }
+                        false
+                    };
+                    if saves {
                         self.undo.push(before);
                         if self.undo.len() > MAX_UNDO {
                             self.undo.remove(0);
@@ -1945,6 +1991,7 @@ impl Session {
             document_id: self.document_id.clone(),
             followed: None,
             auto_project: self.auto_project,
+            project_construction: self.project_construction,
             param_check: self.param_check,
             easyprint_upload: self.easyprint_upload.clone(),
             live_links: None,
@@ -2321,16 +2368,7 @@ impl Session {
     }
 
     fn run_script_with(&mut self, script: &Value, profile: Option<bool>, each: &mut dyn FnMut(usize, &Value)) -> Result<(Vec<Value>, Option<Value>)> {
-        let list = match script {
-            Value::Array(a) => a.clone(),
-            Value::Object(o) => {
-                o.get("commands").and_then(Value::as_array).cloned().ok_or_else(|| EngineError::Other("script: missing `commands` array".into()))?
-            }
-            _ => return Err(EngineError::Other("script must be a JSON array or {\"commands\": [...]}".into())),
-        };
-        if list.len() > 100_000 {
-            return Err(EngineError::Other("script too long".into()));
-        }
+        let list = script_steps(script)?;
         let mut out = Vec::new();
         let mut steps = Vec::new();
         let clock = timing::Clock::start();
@@ -2356,6 +2394,21 @@ impl Session {
         let timings = profile.map(|_| serde_json::json!({"timings": steps, "total_ms": timing::round_ms(clock.ms())}));
         Ok((out, timings))
     }
+}
+
+/// A script's steps: the JSON array itself, or the `commands` array of an object; at most 100 000.
+pub fn script_steps(script: &Value) -> Result<&Vec<Value>> {
+    let list = match script {
+        Value::Array(a) => a,
+        Value::Object(o) => {
+            o.get("commands").and_then(Value::as_array).ok_or_else(|| EngineError::Other("script: missing `commands` array".into()))?
+        }
+        _ => return Err(EngineError::Other("script must be a JSON array or {\"commands\": [...]}".into())),
+    };
+    if list.len() > 100_000 {
+        return Err(EngineError::Other("script too long".into()));
+    }
+    Ok(list)
 }
 
 #[cfg(test)]
@@ -2384,6 +2437,8 @@ mod hole_matrix_tests;
 mod hole_reference_tests;
 #[cfg(test)]
 mod large_assembly_tests;
+#[cfg(test)]
+mod loft_sheet_tests;
 #[cfg(test)]
 mod measure_centre_tests;
 #[cfg(test)]
@@ -2487,6 +2542,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         timeline_groups,
         browser_order,
         named_views,
+        notes,
         visibility,
         next_component_color_index,
     } = a;
@@ -2523,6 +2579,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *timeline_groups == b.timeline_groups
         && *browser_order == b.browser_order
         && *named_views == b.named_views
+        && *notes == b.notes
         && *visibility == b.visibility
         && *next_component_color_index == b.next_component_color_index
 }

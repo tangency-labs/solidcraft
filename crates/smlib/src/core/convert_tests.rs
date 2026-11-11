@@ -38,8 +38,8 @@ fn rel(a: f64, b: f64) -> f64 {
 /// The record of solidcore's arrays, validated and its geometry checked.
 fn record(a: &Arrays) -> b::Brep {
     let (rec, _) = native(a).unwrap();
-    solidcraft_geom::brep::check::validate(&rec).unwrap();
-    solidcraft_geom::brep::geometry::check(&rec).unwrap();
+    solidcore_ops::record_check::validate(&rec).unwrap();
+    solidcore_ops::record_check::agreement(&rec).unwrap();
     rec
 }
 

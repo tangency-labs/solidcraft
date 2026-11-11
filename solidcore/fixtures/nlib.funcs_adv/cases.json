@@ -1,0 +1,1910 @@
+{
+ "cases": [
+  {
+   "name": "curve0_refine",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "refine",
+    "f": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     },
+     "coord": "w"
+    },
+    "x": [
+     50.0,
+     100.5,
+     150.0
+    ]
+   }
+  },
+  {
+   "name": "curve0_refine_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "refine",
+    "f": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     },
+     "coord": "w"
+    },
+    "x": [
+     50.0,
+     100.5,
+     150.0
+    ],
+    "inplace": true
+   }
+  },
+  {
+   "name": "curve0_deriv1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "deriv",
+    "f": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     },
+     "coord": "w"
+    },
+    "d": 1
+   }
+  },
+  {
+   "name": "curve0_deriv2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "deriv",
+    "f": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     },
+     "coord": "w"
+    },
+    "d": 2
+   }
+  },
+  {
+   "name": "curve0_square",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "mul_func",
+    "f": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     },
+     "coord": "w"
+    }
+   }
+  },
+  {
+   "name": "curve0_mul_func",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "mul_func",
+    "f": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     },
+     "coord": "w"
+    },
+    "g": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     },
+     "coord": "y"
+    }
+   }
+  },
+  {
+   "name": "curve0_mul_crv",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "mul_crv",
+    "f": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     },
+     "coord": "w"
+    },
+    "g": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "curve0_mul_crv4d",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "mul_crv4d",
+    "f": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     },
+     "coord": "w"
+    },
+    "g": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "closedCurve_refine",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "refine",
+    "f": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     },
+     "coord": "x"
+    },
+    "x": [
+     0.5,
+     3.0,
+     3.0,
+     6.5
+    ]
+   }
+  },
+  {
+   "name": "closedCurve_refine_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "refine",
+    "f": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     },
+     "coord": "x"
+    },
+    "x": [
+     0.5,
+     3.0,
+     3.0,
+     6.5
+    ],
+    "inplace": true
+   }
+  },
+  {
+   "name": "closedCurve_deriv1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "deriv",
+    "f": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     },
+     "coord": "x"
+    },
+    "d": 1
+   }
+  },
+  {
+   "name": "closedCurve_deriv2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "deriv",
+    "f": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     },
+     "coord": "x"
+    },
+    "d": 2
+   }
+  },
+  {
+   "name": "closedCurve_square",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "mul_func",
+    "f": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     },
+     "coord": "x"
+    }
+   }
+  },
+  {
+   "name": "closedCurve_mul_func",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "mul_func",
+    "f": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     },
+     "coord": "x"
+    },
+    "g": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     },
+     "coord": "y"
+    }
+   }
+  },
+  {
+   "name": "closedCurve_mul_crv",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "mul_crv",
+    "f": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     },
+     "coord": "x"
+    },
+    "g": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "closedCurve_mul_crv4d",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "mul_crv4d",
+    "f": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     },
+     "coord": "x"
+    },
+    "g": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "crvToOffset_refine",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "refine",
+    "f": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     },
+     "coord": "y"
+    },
+    "x": [
+     -40.25,
+     -20.0,
+     -1.0
+    ]
+   }
+  },
+  {
+   "name": "crvToOffset_refine_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "refine",
+    "f": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     },
+     "coord": "y"
+    },
+    "x": [
+     -40.25,
+     -20.0,
+     -1.0
+    ],
+    "inplace": true
+   }
+  },
+  {
+   "name": "crvToOffset_deriv1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "deriv",
+    "f": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     },
+     "coord": "y"
+    },
+    "d": 1
+   }
+  },
+  {
+   "name": "crvToOffset_deriv2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "deriv",
+    "f": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     },
+     "coord": "y"
+    },
+    "d": 2
+   }
+  },
+  {
+   "name": "crvToOffset_square",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "mul_func",
+    "f": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     },
+     "coord": "y"
+    }
+   }
+  },
+  {
+   "name": "crvToOffset_mul_func",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "mul_func",
+    "f": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     },
+     "coord": "y"
+    },
+    "g": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     },
+     "coord": "x"
+    }
+   }
+  },
+  {
+   "name": "crvToOffset_mul_crv",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "mul_crv",
+    "f": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     },
+     "coord": "y"
+    },
+    "g": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "crvToOffset_mul_crv4d",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvToOffset.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "mul_crv4d",
+    "f": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     },
+     "coord": "y"
+    },
+    "g": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "crvTrim1_refine",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "refine",
+    "f": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     },
+     "coord": "x"
+    },
+    "x": [
+     1.0,
+     10.0,
+     19.0
+    ]
+   }
+  },
+  {
+   "name": "crvTrim1_refine_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "refine",
+    "f": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     },
+     "coord": "x"
+    },
+    "x": [
+     1.0,
+     10.0,
+     19.0
+    ],
+    "inplace": true
+   }
+  },
+  {
+   "name": "crvTrim1_deriv1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "deriv",
+    "f": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     },
+     "coord": "x"
+    },
+    "d": 1
+   }
+  },
+  {
+   "name": "crvTrim1_deriv2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "deriv",
+    "f": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     },
+     "coord": "x"
+    },
+    "d": 2
+   }
+  },
+  {
+   "name": "crvTrim1_square",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "mul_func",
+    "f": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     },
+     "coord": "x"
+    }
+   }
+  },
+  {
+   "name": "crvTrim1_mul_func",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "mul_func",
+    "f": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     },
+     "coord": "x"
+    },
+    "g": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     },
+     "coord": "y"
+    }
+   }
+  },
+  {
+   "name": "crvTrim1_mul_crv",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "mul_crv",
+    "f": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     },
+     "coord": "x"
+    },
+    "g": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "crvTrim1_mul_crv4d",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "mul_crv4d",
+    "f": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     },
+     "coord": "x"
+    },
+    "g": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "crvTrim2_refine",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "refine",
+    "f": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     },
+     "coord": "y"
+    },
+    "x": [
+     0.25,
+     1.0,
+     1.5
+    ]
+   }
+  },
+  {
+   "name": "crvTrim2_refine_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "refine",
+    "f": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     },
+     "coord": "y"
+    },
+    "x": [
+     0.25,
+     1.0,
+     1.5
+    ],
+    "inplace": true
+   }
+  },
+  {
+   "name": "crvTrim2_deriv1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "deriv",
+    "f": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     },
+     "coord": "y"
+    },
+    "d": 1
+   }
+  },
+  {
+   "name": "crvTrim2_deriv2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "deriv",
+    "f": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     },
+     "coord": "y"
+    },
+    "d": 2
+   }
+  },
+  {
+   "name": "crvTrim2_square",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "mul_func",
+    "f": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     },
+     "coord": "y"
+    }
+   }
+  },
+  {
+   "name": "crvTrim2_mul_func",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "mul_func",
+    "f": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     },
+     "coord": "y"
+    },
+    "g": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     },
+     "coord": "x"
+    }
+   }
+  },
+  {
+   "name": "crvTrim2_mul_crv",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "mul_crv",
+    "f": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     },
+     "coord": "y"
+    },
+    "g": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "crvTrim2_mul_crv4d",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "mul_crv4d",
+    "f": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     },
+     "coord": "y"
+    },
+    "g": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveCurve_refine",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "refine",
+    "f": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     },
+     "coord": "x"
+    },
+    "x": [
+     10.0,
+     42.0
+    ]
+   }
+  },
+  {
+   "name": "DropCurveCurve_refine_inplace",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "refine",
+    "f": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     },
+     "coord": "x"
+    },
+    "x": [
+     10.0,
+     42.0
+    ],
+    "inplace": true
+   }
+  },
+  {
+   "name": "DropCurveCurve_deriv1",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "deriv",
+    "f": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     },
+     "coord": "x"
+    },
+    "d": 1
+   }
+  },
+  {
+   "name": "DropCurveCurve_deriv2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "deriv",
+    "f": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     },
+     "coord": "x"
+    },
+    "d": 2
+   }
+  },
+  {
+   "name": "DropCurveCurve_square",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "mul_func",
+    "f": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     },
+     "coord": "x"
+    }
+   }
+  },
+  {
+   "name": "DropCurveCurve_mul_func",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "mul_func",
+    "f": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     },
+     "coord": "x"
+    },
+    "g": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     },
+     "coord": "y"
+    }
+   }
+  },
+  {
+   "name": "DropCurveCurve_mul_crv",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "mul_crv",
+    "f": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     },
+     "coord": "x"
+    },
+    "g": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "DropCurveCurve_mul_crv4d",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/DropCurveCurve.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "mul_crv4d",
+    "f": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     },
+     "coord": "x"
+    },
+    "g": {
+     "smc": {
+      "$upstream_file": "DropCurveCurve.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "closedCurve_x_times_crvTrim2",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/closedCurve.smc, crvTrim2.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "mul_crv",
+    "f": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     },
+     "coord": "x"
+    },
+    "g": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "crvTrim1_x_times_crvToOffset",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim1.smc, crvToOffset.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "mul_crv4d",
+    "f": {
+     "smc": {
+      "$upstream_file": "crvTrim1.smc"
+     },
+     "coord": "x"
+    },
+    "g": {
+     "smc": {
+      "$upstream_file": "crvToOffset.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "crvTrim2_y_times_closedCurve_x",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/crvTrim2.smc, closedCurve.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "mul_func",
+    "f": {
+     "smc": {
+      "$upstream_file": "crvTrim2.smc"
+     },
+     "coord": "y"
+    },
+    "g": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     },
+     "coord": "x"
+    }
+   }
+  },
+  {
+   "name": "curve0_w_times_closedCurve",
+   "upstream_ref": "upstream/TestFiles/pt_TestFiles/curve0.smc, closedCurve.smc (curve input of prog_test/SM_API tests; SM_API tests TestSmCreateSkinSurface / TestSmCreateExtrude / TestSmCreateSkinFromFaces / TestSmCreateSkinPrimitive reach these NL_FuncsAdv routines through the symbolic curve/surface operators of NL_CrvAdv / NL_SrfCommon, which multiply denominator functions with curves as here)",
+   "inputs": {
+    "op": "mul_crv",
+    "f": {
+     "smc": {
+      "$upstream_file": "curve0.smc"
+     },
+     "coord": "w"
+    },
+    "g": {
+     "smc": {
+      "$upstream_file": "closedCurve.smc"
+     }
+    }
+   }
+  },
+  {
+   "name": "mul_func_p0",
+   "upstream_ref": "edge case (NL_FuncsAdv.cpp)",
+   "inputs": {
+    "op": "mul_func",
+    "f": {
+     "v": [
+      2.5
+     ],
+     "p": 0,
+     "u": [
+      0,
+      1
+     ]
+    },
+    "g": {
+     "v": [
+      1.0,
+      3.0,
+      -1.0
+     ],
+     "p": 2,
+     "u": [
+      4,
+      4,
+      4,
+      7,
+      7,
+      7
+     ]
+    }
+   }
+  },
+  {
+   "name": "mul_func_q0",
+   "upstream_ref": "edge case (NL_FuncsAdv.cpp)",
+   "inputs": {
+    "op": "mul_func",
+    "f": {
+     "v": [
+      1.0,
+      3.0,
+      -1.0
+     ],
+     "p": 2,
+     "u": [
+      4,
+      4,
+      4,
+      7,
+      7,
+      7
+     ]
+    },
+    "g": {
+     "v": [
+      -0.5
+     ],
+     "p": 0,
+     "u": [
+      0,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "mul_func_p0_q0",
+   "upstream_ref": "edge case (NL_FuncsAdv.cpp)",
+   "inputs": {
+    "op": "mul_func",
+    "f": {
+     "v": [
+      2.0
+     ],
+     "p": 0,
+     "u": [
+      0,
+      1
+     ]
+    },
+    "g": {
+     "v": [
+      3.0
+     ],
+     "p": 0,
+     "u": [
+      5,
+      9
+     ]
+    }
+   }
+  },
+  {
+   "name": "mul_func_p0_multiseg",
+   "upstream_ref": "edge case (NL_FuncsAdv.cpp)",
+   "inputs": {
+    "op": "mul_func",
+    "f": {
+     "v": [
+      1.0,
+      2.0
+     ],
+     "p": 0,
+     "u": [
+      0,
+      0.5,
+      1
+     ]
+    },
+    "g": {
+     "v": [
+      1.0,
+      -2.0,
+      3.0,
+      0.5
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      0.3,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "mul_func_q0_g_multiseg",
+   "upstream_ref": "edge case (NL_FuncsAdv.cpp)",
+   "inputs": {
+    "op": "mul_func",
+    "f": {
+     "v": [
+      2.0
+     ],
+     "p": 0,
+     "u": [
+      0,
+      1
+     ]
+    },
+    "g": {
+     "v": [
+      1.0,
+      -2.0,
+      3.0,
+      0.5
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      0.3,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "mul_crv_p0",
+   "upstream_ref": "edge case (NL_FuncsAdv.cpp)",
+   "inputs": {
+    "op": "mul_crv",
+    "f": {
+     "v": [
+      2.0
+     ],
+     "p": 0,
+     "u": [
+      0,
+      1
+     ]
+    },
+    "g": {
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       1
+      ],
+      [
+       2,
+       4,
+       6,
+       2
+      ],
+      [
+       1,
+       1,
+       1,
+       1
+      ]
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "mul_crv4d_p0",
+   "upstream_ref": "edge case (NL_FuncsAdv.cpp)",
+   "inputs": {
+    "op": "mul_crv4d",
+    "f": {
+     "v": [
+      2.0
+     ],
+     "p": 0,
+     "u": [
+      0,
+      1
+     ]
+    },
+    "g": {
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       1
+      ],
+      [
+       2,
+       4,
+       6,
+       2
+      ],
+      [
+       1,
+       1,
+       1,
+       1
+      ]
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "mul_crv_q0",
+   "upstream_ref": "edge case (NL_FuncsAdv.cpp)",
+   "inputs": {
+    "op": "mul_crv",
+    "f": {
+     "v": [
+      1.0,
+      2.0,
+      4.0
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "g": {
+     "cpts": [
+      [
+       1,
+       2,
+       1.7976931348623157e+308,
+       0.5
+      ]
+     ],
+     "p": 0,
+     "u": [
+      0,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "mul_crv4d_q0",
+   "upstream_ref": "edge case (NL_FuncsAdv.cpp)",
+   "inputs": {
+    "op": "mul_crv4d",
+    "f": {
+     "v": [
+      1.0,
+      2.0,
+      4.0
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    },
+    "g": {
+     "cpts": [
+      [
+       1,
+       2,
+       3,
+       0.5
+      ]
+     ],
+     "p": 0,
+     "u": [
+      0,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "mul_func_degree_limit",
+   "upstream_ref": "edge case (NL_FuncsAdv.cpp)",
+   "inputs": {
+    "op": "mul_func",
+    "f": {
+     "v": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "p": 9,
+     "u": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "mul_func_degree_17",
+   "upstream_ref": "edge case (NL_FuncsAdv.cpp)",
+   "inputs": {
+    "op": "mul_func",
+    "f": {
+     "v": [
+      1.0,
+      2.0,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.5
+     ],
+     "p": 8,
+     "u": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ]
+    },
+    "g": {
+     "v": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ],
+     "p": 9,
+     "u": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "mul_func_rescale_g",
+   "upstream_ref": "edge case (NL_FuncsAdv.cpp)",
+   "inputs": {
+    "op": "mul_func",
+    "f": {
+     "v": [
+      1,
+      2,
+      0,
+      3
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      1,
+      2,
+      2,
+      2
+     ]
+    },
+    "g": {
+     "v": [
+      1,
+      3,
+      -1
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      0.25,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "mul_func_rescale_f",
+   "upstream_ref": "edge case (NL_FuncsAdv.cpp)",
+   "inputs": {
+    "op": "mul_func",
+    "f": {
+     "v": [
+      1,
+      3,
+      -1
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      0.25,
+      1,
+      1
+     ]
+    },
+    "g": {
+     "v": [
+      1,
+      2,
+      0,
+      3
+     ],
+     "p": 2,
+     "u": [
+      -1,
+      -1,
+      -1,
+      1,
+      3,
+      3,
+      3
+     ]
+    }
+   }
+  },
+  {
+   "name": "mul_func_ends_within_ptol",
+   "upstream_ref": "edge case (NL_FuncsAdv.cpp)",
+   "inputs": {
+    "op": "mul_func",
+    "f": {
+     "v": [
+      1,
+      2,
+      0,
+      3
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      0.5,
+      1,
+      1,
+      1
+     ]
+    },
+    "g": {
+     "v": [
+      1,
+      3,
+      -1
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      0.5,
+      1.0000000000005,
+      1.0000000000005
+     ]
+    }
+   }
+  },
+  {
+   "name": "mul_func_near_equal_knot",
+   "upstream_ref": "edge case (NL_FuncsAdv.cpp)",
+   "inputs": {
+    "op": "mul_func",
+    "f": {
+     "v": [
+      1,
+      2,
+      0,
+      3
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      0.5,
+      1,
+      1,
+      1
+     ]
+    },
+    "g": {
+     "v": [
+      1,
+      3,
+      -1
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      0.5000000000003,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "mul_crv_mult_knots",
+   "upstream_ref": "edge case (NL_FuncsAdv.cpp)",
+   "inputs": {
+    "op": "mul_crv",
+    "f": {
+     "v": [
+      1,
+      2,
+      0,
+      3,
+      1
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      0.5,
+      0.5,
+      1,
+      1,
+      1
+     ]
+    },
+    "g": {
+     "cpts": [
+      [
+       0,
+       0,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       1,
+       2,
+       0,
+       -1.7976931348623157e+308
+      ],
+      [
+       3,
+       1,
+       1,
+       -1.7976931348623157e+308
+      ],
+      [
+       4,
+       0,
+       2,
+       -1.7976931348623157e+308
+      ],
+      [
+       5,
+       5,
+       5,
+       -1.7976931348623157e+308
+      ]
+     ],
+     "p": 3,
+     "u": [
+      0,
+      0,
+      0,
+      0,
+      0.25,
+      1,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "mul_crv4d_2d_rational",
+   "upstream_ref": "edge case (NL_FuncsAdv.cpp)",
+   "inputs": {
+    "op": "mul_crv4d",
+    "f": {
+     "v": [
+      1,
+      2,
+      0.5
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      0.6,
+      1,
+      1
+     ]
+    },
+    "g": {
+     "cpts": [
+      [
+       0,
+       0,
+       1.7976931348623157e+308,
+       1
+      ],
+      [
+       2,
+       2,
+       1.7976931348623157e+308,
+       2
+      ],
+      [
+       3,
+       0,
+       1.7976931348623157e+308,
+       1
+      ]
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      1,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "refine_empty",
+   "upstream_ref": "edge case (NL_FuncsAdv.cpp)",
+   "inputs": {
+    "op": "refine",
+    "f": {
+     "v": [
+      1.0,
+      -2.0,
+      3.0,
+      0.5
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      0.3,
+      1,
+      1,
+      1
+     ]
+    },
+    "x": []
+   }
+  },
+  {
+   "name": "refine_at_start",
+   "upstream_ref": "edge case (NL_FuncsAdv.cpp)",
+   "inputs": {
+    "op": "refine",
+    "f": {
+     "v": [
+      1.0,
+      -2.0,
+      3.0,
+      0.5
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      0.3,
+      1,
+      1,
+      1
+     ]
+    },
+    "x": [
+     0.0,
+     0.5
+    ]
+   }
+  },
+  {
+   "name": "refine_at_end",
+   "upstream_ref": "edge case (NL_FuncsAdv.cpp)",
+   "inputs": {
+    "op": "refine",
+    "f": {
+     "v": [
+      1.0,
+      -2.0,
+      3.0,
+      0.5
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      0.3,
+      1,
+      1,
+      1
+     ]
+    },
+    "x": [
+     0.5,
+     1.0
+    ]
+   }
+  },
+  {
+   "name": "refine_existing_knot",
+   "upstream_ref": "edge case (NL_FuncsAdv.cpp)",
+   "inputs": {
+    "op": "refine",
+    "f": {
+     "v": [
+      1.0,
+      -2.0,
+      3.0,
+      0.5
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      0.3,
+      1,
+      1,
+      1
+     ]
+    },
+    "x": [
+     0.3,
+     0.3
+    ]
+   }
+  },
+  {
+   "name": "refine_full_mult",
+   "upstream_ref": "edge case (NL_FuncsAdv.cpp)",
+   "inputs": {
+    "op": "refine",
+    "f": {
+     "v": [
+      1.0,
+      -2.0,
+      3.0,
+      0.5
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      0.3,
+      1,
+      1,
+      1
+     ]
+    },
+    "x": [
+     0.3,
+     0.3,
+     0.3
+    ]
+   }
+  },
+  {
+   "name": "deriv_order_too_high",
+   "upstream_ref": "edge case (NL_FuncsAdv.cpp)",
+   "inputs": {
+    "op": "deriv",
+    "f": {
+     "v": [
+      1.0,
+      -2.0,
+      3.0,
+      0.5
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      0.3,
+      1,
+      1,
+      1
+     ]
+    },
+    "d": 3
+   }
+  },
+  {
+   "name": "deriv_zero",
+   "upstream_ref": "edge case (NL_FuncsAdv.cpp)",
+   "inputs": {
+    "op": "deriv",
+    "f": {
+     "v": [
+      1.0,
+      -2.0,
+      3.0,
+      0.5
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      0.3,
+      1,
+      1,
+      1
+     ]
+    },
+    "d": 0
+   }
+  },
+  {
+   "name": "deriv_full",
+   "upstream_ref": "edge case (NL_FuncsAdv.cpp)",
+   "inputs": {
+    "op": "deriv",
+    "f": {
+     "v": [
+      1.0,
+      -2.0,
+      3.0,
+      0.5
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      0.3,
+      1,
+      1,
+      1
+     ]
+    },
+    "d": 2
+   }
+  },
+  {
+   "name": "deriv_der_err",
+   "upstream_ref": "edge case (NL_FuncsAdv.cpp)",
+   "inputs": {
+    "op": "deriv",
+    "f": {
+     "v": [
+      1,
+      2,
+      0,
+      3,
+      1
+     ],
+     "p": 2,
+     "u": [
+      0,
+      0,
+      0,
+      0.5,
+      0.5,
+      1,
+      1,
+      1
+     ]
+    },
+    "d": 2
+   }
+  },
+  {
+   "name": "deriv_p0",
+   "upstream_ref": "edge case (NL_FuncsAdv.cpp)",
+   "inputs": {
+    "op": "deriv",
+    "f": {
+     "v": [
+      4.0
+     ],
+     "p": 0,
+     "u": [
+      0,
+      1
+     ]
+    },
+    "d": 0
+   }
+  },
+  {
+   "name": "deriv_tiny_span",
+   "upstream_ref": "edge case (NL_FuncsAdv.cpp)",
+   "inputs": {
+    "op": "deriv",
+    "f": {
+     "v": [
+      1,
+      2,
+      3
+     ],
+     "p": 1,
+     "u": [
+      0,
+      0,
+      1e-310,
+      1,
+      1
+     ]
+    },
+    "d": 1
+   }
+  }
+ ]
+}

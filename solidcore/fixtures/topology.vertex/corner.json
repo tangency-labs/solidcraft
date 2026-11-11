@@ -1,0 +1,5281 @@
+{
+ "cases": [
+  {
+   "name": "corner_Endcap_v0_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "corner",
+    "v": 0
+   }
+  },
+  {
+   "name": "corner_Endcap_v0_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_Endcap_v0_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_Endcap_v0_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_Endcap_v1_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "corner",
+    "v": 1
+   }
+  },
+  {
+   "name": "corner_Endcap_v1_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_Endcap_v1_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_Endcap_v1_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_Endcap_v2_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "corner",
+    "v": 2
+   }
+  },
+  {
+   "name": "corner_Endcap_v2_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_Endcap_v2_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_Endcap_v2_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_Endcap_v3_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "corner",
+    "v": 3
+   }
+  },
+  {
+   "name": "corner_Endcap_v4_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "corner",
+    "v": 4
+   }
+  },
+  {
+   "name": "corner_Endcap_v5_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "corner",
+    "v": 5
+   }
+  },
+  {
+   "name": "corner_Endcap_v6_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "corner",
+    "v": 6
+   }
+  },
+  {
+   "name": "corner_Endcap_v7_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/Endcap.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb"
+    },
+    "op": "corner",
+    "v": 7
+   }
+  },
+  {
+   "name": "corner_Mouse_v0_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "corner",
+    "v": 0
+   }
+  },
+  {
+   "name": "corner_Mouse_v0_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_Mouse_v0_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_Mouse_v0_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_Mouse_v1_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "corner",
+    "v": 1
+   }
+  },
+  {
+   "name": "corner_Mouse_v1_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_Mouse_v1_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_Mouse_v1_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_Mouse_v2_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "corner",
+    "v": 2
+   }
+  },
+  {
+   "name": "corner_Mouse_v2_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_Mouse_v2_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_Mouse_v2_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_Mouse_v3_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "corner",
+    "v": 3
+   }
+  },
+  {
+   "name": "corner_Mouse_v4_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "corner",
+    "v": 4
+   }
+  },
+  {
+   "name": "corner_Mouse_v5_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "corner",
+    "v": 5
+   }
+  },
+  {
+   "name": "corner_Mouse_v6_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "corner",
+    "v": 6
+   }
+  },
+  {
+   "name": "corner_Mouse_v7_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/Mouse.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb"
+    },
+    "op": "corner",
+    "v": 7
+   }
+  },
+  {
+   "name": "corner_box_with_large_fillet_v0_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "corner",
+    "v": 0
+   }
+  },
+  {
+   "name": "corner_box_with_large_fillet_v0_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_box_with_large_fillet_v0_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_box_with_large_fillet_v0_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_box_with_large_fillet_v1_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "corner",
+    "v": 1
+   }
+  },
+  {
+   "name": "corner_box_with_large_fillet_v1_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_box_with_large_fillet_v1_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_box_with_large_fillet_v1_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_box_with_large_fillet_v2_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "corner",
+    "v": 2
+   }
+  },
+  {
+   "name": "corner_box_with_large_fillet_v2_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_box_with_large_fillet_v2_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_box_with_large_fillet_v2_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_box_with_large_fillet_v3_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "corner",
+    "v": 3
+   }
+  },
+  {
+   "name": "corner_box_with_large_fillet_v4_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "corner",
+    "v": 4
+   }
+  },
+  {
+   "name": "corner_box_with_large_fillet_v5_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "corner",
+    "v": 5
+   }
+  },
+  {
+   "name": "corner_box_with_large_fillet_v6_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "corner",
+    "v": 6
+   }
+  },
+  {
+   "name": "corner_box_with_large_fillet_v7_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/box_with_large_fillet.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb"
+    },
+    "op": "corner",
+    "v": 7
+   }
+  },
+  {
+   "name": "corner_cone_v0_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "corner",
+    "v": 0
+   }
+  },
+  {
+   "name": "corner_cone_v0_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_cone_v0_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_cone_v0_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_cone_v1_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "corner",
+    "v": 1
+   }
+  },
+  {
+   "name": "corner_cone_v1_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_cone_v1_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_cone_v1_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_cone_v2_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "corner",
+    "v": 2
+   }
+  },
+  {
+   "name": "corner_cone_v2_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_cone_v2_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_cone_v2_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_cone_v3_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "corner",
+    "v": 3
+   }
+  },
+  {
+   "name": "corner_cone_v4_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "corner",
+    "v": 4
+   }
+  },
+  {
+   "name": "corner_cone_v5_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "corner",
+    "v": 5
+   }
+  },
+  {
+   "name": "corner_cone_v6_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "corner",
+    "v": 6
+   }
+  },
+  {
+   "name": "corner_cone_v7_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb"
+    },
+    "op": "corner",
+    "v": 7
+   }
+  },
+  {
+   "name": "corner_disk_v0_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "corner",
+    "v": 0
+   }
+  },
+  {
+   "name": "corner_disk_v0_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_disk_v0_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_disk_v0_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_disk_v1_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "corner",
+    "v": 1
+   }
+  },
+  {
+   "name": "corner_disk_v1_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_disk_v1_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_disk_v1_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_disk_v2_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "corner",
+    "v": 2
+   }
+  },
+  {
+   "name": "corner_disk_v2_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_disk_v2_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_disk_v2_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_disk_v3_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "corner",
+    "v": 3
+   }
+  },
+  {
+   "name": "corner_disk_v4_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "corner",
+    "v": 4
+   }
+  },
+  {
+   "name": "corner_disk_v5_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "corner",
+    "v": 5
+   }
+  },
+  {
+   "name": "corner_disk_v6_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "corner",
+    "v": 6
+   }
+  },
+  {
+   "name": "corner_disk_v7_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/disk.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb"
+    },
+    "op": "corner",
+    "v": 7
+   }
+  },
+  {
+   "name": "corner_ellips_ts2_v0_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "corner",
+    "v": 0
+   }
+  },
+  {
+   "name": "corner_ellips_ts2_v0_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_ellips_ts2_v0_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_ellips_ts2_v0_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_ellips_ts2_v1_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "corner",
+    "v": 1
+   }
+  },
+  {
+   "name": "corner_ellips_ts2_v1_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_ellips_ts2_v1_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_ellips_ts2_v1_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_ellips_ts2_v2_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "corner",
+    "v": 2
+   }
+  },
+  {
+   "name": "corner_ellips_ts2_v2_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_ellips_ts2_v2_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_ellips_ts2_v2_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_ellips_ts2_v3_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "corner",
+    "v": 3
+   }
+  },
+  {
+   "name": "corner_ellips_ts2_v4_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "corner",
+    "v": 4
+   }
+  },
+  {
+   "name": "corner_ellips_ts2_v5_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "corner",
+    "v": 5
+   }
+  },
+  {
+   "name": "corner_ellips_ts2_v6_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "corner",
+    "v": 6
+   }
+  },
+  {
+   "name": "corner_ellips_ts2_v7_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/ellips_ts2.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb"
+    },
+    "op": "corner",
+    "v": 7
+   }
+  },
+  {
+   "name": "corner_plane_circ_v0_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "corner",
+    "v": 0
+   }
+  },
+  {
+   "name": "corner_plane_circ_v0_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_plane_circ_v0_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_plane_circ_v0_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_plane_circ_v1_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "corner",
+    "v": 1
+   }
+  },
+  {
+   "name": "corner_plane_circ_v1_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_plane_circ_v1_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_plane_circ_v1_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_plane_circ_v2_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "corner",
+    "v": 2
+   }
+  },
+  {
+   "name": "corner_plane_circ_v2_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_plane_circ_v2_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_plane_circ_v2_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_plane_circ_v3_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "corner",
+    "v": 3
+   }
+  },
+  {
+   "name": "corner_plane_circ_v4_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "corner",
+    "v": 4
+   }
+  },
+  {
+   "name": "corner_plane_circ_v5_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "corner",
+    "v": 5
+   }
+  },
+  {
+   "name": "corner_plane_circ_v6_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "corner",
+    "v": 6
+   }
+  },
+  {
+   "name": "corner_plane_circ_v7_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_circ.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb"
+    },
+    "op": "corner",
+    "v": 7
+   }
+  },
+  {
+   "name": "corner_plane_square_v0_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "corner",
+    "v": 0
+   }
+  },
+  {
+   "name": "corner_plane_square_v0_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_plane_square_v0_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_plane_square_v0_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_plane_square_v1_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "corner",
+    "v": 1
+   }
+  },
+  {
+   "name": "corner_plane_square_v1_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_plane_square_v1_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_plane_square_v1_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_plane_square_v2_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "corner",
+    "v": 2
+   }
+  },
+  {
+   "name": "corner_plane_square_v2_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_plane_square_v2_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_plane_square_v2_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_plane_square_v3_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "corner",
+    "v": 3
+   }
+  },
+  {
+   "name": "corner_plane_square_v4_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "corner",
+    "v": 4
+   }
+  },
+  {
+   "name": "corner_plane_square_v5_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "corner",
+    "v": 5
+   }
+  },
+  {
+   "name": "corner_plane_square_v6_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "corner",
+    "v": 6
+   }
+  },
+  {
+   "name": "corner_plane_square_v7_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb"
+    },
+    "op": "corner",
+    "v": 7
+   }
+  },
+  {
+   "name": "corner_sphere_v0_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "corner",
+    "v": 0
+   }
+  },
+  {
+   "name": "corner_sphere_v0_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_sphere_v0_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_sphere_v0_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_sphere_v1_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "corner",
+    "v": 1
+   }
+  },
+  {
+   "name": "corner_sphere_v1_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_sphere_v1_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_sphere_v1_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_sphere_v2_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "corner",
+    "v": 2
+   }
+  },
+  {
+   "name": "corner_sphere_v2_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_sphere_v2_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_sphere_v2_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_sphere_v3_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "corner",
+    "v": 3
+   }
+  },
+  {
+   "name": "corner_sphere_v4_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "corner",
+    "v": 4
+   }
+  },
+  {
+   "name": "corner_sphere_v5_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "corner",
+    "v": 5
+   }
+  },
+  {
+   "name": "corner_sphere_v6_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "corner",
+    "v": 6
+   }
+  },
+  {
+   "name": "corner_sphere_v7_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/sphere.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb"
+    },
+    "op": "corner",
+    "v": 7
+   }
+  },
+  {
+   "name": "corner_surf_extrude_v0_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "corner",
+    "v": 0
+   }
+  },
+  {
+   "name": "corner_surf_extrude_v0_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_surf_extrude_v0_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_surf_extrude_v0_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_surf_extrude_v1_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "corner",
+    "v": 1
+   }
+  },
+  {
+   "name": "corner_surf_extrude_v1_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_surf_extrude_v1_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_surf_extrude_v1_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_surf_extrude_v2_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "corner",
+    "v": 2
+   }
+  },
+  {
+   "name": "corner_surf_extrude_v2_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_surf_extrude_v2_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_surf_extrude_v2_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_surf_extrude_v3_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "corner",
+    "v": 3
+   }
+  },
+  {
+   "name": "corner_surf_extrude_v4_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "corner",
+    "v": 4
+   }
+  },
+  {
+   "name": "corner_surf_extrude_v5_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "corner",
+    "v": 5
+   }
+  },
+  {
+   "name": "corner_surf_extrude_v6_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "corner",
+    "v": 6
+   }
+  },
+  {
+   "name": "corner_surf_extrude_v7_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_extrude.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb"
+    },
+    "op": "corner",
+    "v": 7
+   }
+  },
+  {
+   "name": "corner_surf_rev_v0_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "corner",
+    "v": 0
+   }
+  },
+  {
+   "name": "corner_surf_rev_v0_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_surf_rev_v0_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_surf_rev_v0_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_surf_rev_v1_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "corner",
+    "v": 1
+   }
+  },
+  {
+   "name": "corner_surf_rev_v1_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_surf_rev_v1_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_surf_rev_v1_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_surf_rev_v2_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "corner",
+    "v": 2
+   }
+  },
+  {
+   "name": "corner_surf_rev_v2_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_surf_rev_v2_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_surf_rev_v2_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_surf_rev_v3_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "corner",
+    "v": 3
+   }
+  },
+  {
+   "name": "corner_surf_rev_v4_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "corner",
+    "v": 4
+   }
+  },
+  {
+   "name": "corner_surf_rev_v5_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "corner",
+    "v": 5
+   }
+  },
+  {
+   "name": "corner_surf_rev_v6_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "corner",
+    "v": 6
+   }
+  },
+  {
+   "name": "corner_surf_rev_v7_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb"
+    },
+    "op": "corner",
+    "v": 7
+   }
+  },
+  {
+   "name": "corner_surf_sphere150_v0_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "corner",
+    "v": 0
+   }
+  },
+  {
+   "name": "corner_surf_sphere150_v0_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_surf_sphere150_v0_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_surf_sphere150_v0_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_surf_sphere150_v1_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "corner",
+    "v": 1
+   }
+  },
+  {
+   "name": "corner_surf_sphere150_v1_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_surf_sphere150_v1_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_surf_sphere150_v1_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_surf_sphere150_v2_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "corner",
+    "v": 2
+   }
+  },
+  {
+   "name": "corner_surf_sphere150_v2_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_surf_sphere150_v2_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_surf_sphere150_v2_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_surf_sphere150_v3_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "corner",
+    "v": 3
+   }
+  },
+  {
+   "name": "corner_surf_sphere150_v4_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "corner",
+    "v": 4
+   }
+  },
+  {
+   "name": "corner_surf_sphere150_v5_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "corner",
+    "v": 5
+   }
+  },
+  {
+   "name": "corner_surf_sphere150_v6_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "corner",
+    "v": 6
+   }
+  },
+  {
+   "name": "corner_surf_sphere150_v7_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/surf_sphere150.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb"
+    },
+    "op": "corner",
+    "v": 7
+   }
+  },
+  {
+   "name": "corner_torus_v0_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "corner",
+    "v": 0
+   }
+  },
+  {
+   "name": "corner_torus_v0_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_torus_v0_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_torus_v0_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_torus_v1_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "corner",
+    "v": 1
+   }
+  },
+  {
+   "name": "corner_torus_v1_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_torus_v1_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_torus_v1_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_torus_v2_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "corner",
+    "v": 2
+   }
+  },
+  {
+   "name": "corner_torus_v2_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_torus_v2_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_torus_v2_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_torus_v3_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "corner",
+    "v": 3
+   }
+  },
+  {
+   "name": "corner_torus_v4_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "corner",
+    "v": 4
+   }
+  },
+  {
+   "name": "corner_torus_v5_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "corner",
+    "v": 5
+   }
+  },
+  {
+   "name": "corner_torus_v6_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "corner",
+    "v": 6
+   }
+  },
+  {
+   "name": "corner_torus_v7_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb"
+    },
+    "op": "corner",
+    "v": 7
+   }
+  },
+  {
+   "name": "corner_toruswvy_v0_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "corner",
+    "v": 0
+   }
+  },
+  {
+   "name": "corner_toruswvy_v0_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_toruswvy_v0_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_toruswvy_v0_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_toruswvy_v1_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "corner",
+    "v": 1
+   }
+  },
+  {
+   "name": "corner_toruswvy_v1_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_toruswvy_v1_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_toruswvy_v1_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_toruswvy_v2_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "corner",
+    "v": 2
+   }
+  },
+  {
+   "name": "corner_toruswvy_v2_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_toruswvy_v2_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_toruswvy_v2_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_toruswvy_v3_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "corner",
+    "v": 3
+   }
+  },
+  {
+   "name": "corner_toruswvy_v4_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "corner",
+    "v": 4
+   }
+  },
+  {
+   "name": "corner_toruswvy_v5_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "corner",
+    "v": 5
+   }
+  },
+  {
+   "name": "corner_toruswvy_v6_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "corner",
+    "v": 6
+   }
+  },
+  {
+   "name": "corner_toruswvy_v7_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/toruswvy.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb"
+    },
+    "op": "corner",
+    "v": 7
+   }
+  },
+  {
+   "name": "corner_vase_rev_v0_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "corner",
+    "v": 0
+   }
+  },
+  {
+   "name": "corner_vase_rev_v0_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_vase_rev_v0_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_vase_rev_v0_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "corner",
+    "v": 0,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_vase_rev_v1_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "corner",
+    "v": 1
+   }
+  },
+  {
+   "name": "corner_vase_rev_v1_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_vase_rev_v1_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_vase_rev_v1_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "corner",
+    "v": 1,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_vase_rev_v2_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "corner",
+    "v": 2
+   }
+  },
+  {
+   "name": "corner_vase_rev_v2_off1em3",
+   "upstream_ref": "TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     0.001,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_vase_rev_v2_off1em7",
+   "upstream_ref": "TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     0,
+     1e-07,
+     0
+    ]
+   }
+  },
+  {
+   "name": "corner_vase_rev_v2_off1em5",
+   "upstream_ref": "TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "corner",
+    "v": 2,
+    "d": [
+     1e-05,
+     -1e-05,
+     2e-06
+    ]
+   }
+  },
+  {
+   "name": "corner_vase_rev_v3_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "corner",
+    "v": 3
+   }
+  },
+  {
+   "name": "corner_vase_rev_v4_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "corner",
+    "v": 4
+   }
+  },
+  {
+   "name": "corner_vase_rev_v5_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "corner",
+    "v": 5
+   }
+  },
+  {
+   "name": "corner_vase_rev_v6_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "corner",
+    "v": 6
+   }
+  },
+  {
+   "name": "corner_vase_rev_v7_none",
+   "upstream_ref": "TestFiles/pt_TestFiles/vase_rev.smb",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb"
+    },
+    "op": "corner",
+    "v": 7
+   }
+  },
+  {
+   "name": "corner_net_v0_q_v0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "corner",
+    "v": 0
+   }
+  },
+  {
+   "name": "corner_net_v0_q_v1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "corner",
+    "v": 1
+   }
+  },
+  {
+   "name": "corner_net_v0_q_v2",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "op": "corner",
+    "v": 2
+   }
+  },
+  {
+   "name": "corner_repair_v0_settol_1em4_v0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        10,
+        0,
+        0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 0
+   }
+  },
+  {
+   "name": "corner_repair_v0_settol_1em4_v1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        10,
+        0,
+        0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 1
+   }
+  },
+  {
+   "name": "corner_repair_v0_settol_1em4_v2",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        10,
+        0,
+        0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 2
+   }
+  },
+  {
+   "name": "corner_turn0p0_sml_cont_topo_v0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 0
+   }
+  },
+  {
+   "name": "corner_turn0p0_sml_cont_topo_v1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 1
+   }
+  },
+  {
+   "name": "corner_turn0p0_sml_cont_topo_v2",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 2
+   }
+  },
+  {
+   "name": "corner_turn0p0_sml_reset_topo_v0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 0
+   }
+  },
+  {
+   "name": "corner_turn0p0_sml_reset_topo_v1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 1
+   }
+  },
+  {
+   "name": "corner_turn0p0_sml_reset_topo_v2",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 2
+   }
+  },
+  {
+   "name": "corner_turn0p0_bsl_cont_topo_v0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2.0,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 0
+   }
+  },
+  {
+   "name": "corner_turn0p0_bsl_cont_topo_v1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2.0,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 1
+   }
+  },
+  {
+   "name": "corner_turn0p0_bsl_cont_topo_v2",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2.0,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 2
+   }
+  },
+  {
+   "name": "corner_turn0p0_rev_topo_v0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ],
+       "rev": true
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 0
+   }
+  },
+  {
+   "name": "corner_turn0p0_rev_topo_v1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ],
+       "rev": true
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 1
+   }
+  },
+  {
+   "name": "corner_turn0p0_rev_topo_v2",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        2.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ],
+       "rev": true
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 2
+   }
+  },
+  {
+   "name": "corner_turn0p3_sml_cont_topo_v0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.9999862922474267,
+        0.00523596383141958,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 0
+   }
+  },
+  {
+   "name": "corner_turn0p3_sml_cont_topo_v1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.9999862922474267,
+        0.00523596383141958,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 1
+   }
+  },
+  {
+   "name": "corner_turn0p3_sml_cont_topo_v2",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.9999862922474267,
+        0.00523596383141958,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 2
+   }
+  },
+  {
+   "name": "corner_turn0p3_sml_reset_topo_v0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.9999862922474267,
+        0.00523596383141958,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 0
+   }
+  },
+  {
+   "name": "corner_turn0p3_sml_reset_topo_v1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.9999862922474267,
+        0.00523596383141958,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 1
+   }
+  },
+  {
+   "name": "corner_turn0p3_sml_reset_topo_v2",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.9999862922474267,
+        0.00523596383141958,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 2
+   }
+  },
+  {
+   "name": "corner_turn0p3_bsl_cont_topo_v0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.9999862922474267,
+        0.00523596383141958,
+        0.0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 0
+   }
+  },
+  {
+   "name": "corner_turn0p3_bsl_cont_topo_v1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.9999862922474267,
+        0.00523596383141958,
+        0.0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 1
+   }
+  },
+  {
+   "name": "corner_turn0p3_bsl_cont_topo_v2",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "smline": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.9999862922474267,
+        0.00523596383141958,
+        0.0
+       ],
+       "smline": false
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 2
+   }
+  },
+  {
+   "name": "corner_turn0p3_rev_topo_v0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.9999862922474267,
+        0.00523596383141958,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ],
+       "rev": true
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 0
+   }
+  },
+  {
+   "name": "corner_turn0p3_rev_topo_v1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.9999862922474267,
+        0.00523596383141958,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ],
+       "rev": true
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 1
+   }
+  },
+  {
+   "name": "corner_turn0p3_rev_topo_v2",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.9999862922474267,
+        0.00523596383141958,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ],
+       "rev": true
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 2
+   }
+  },
+  {
+   "name": "corner_turn0p49_sml_cont_topo_v0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.9999634309016399,
+        0.008552009086826821,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 0
+   }
+  },
+  {
+   "name": "corner_turn0p49_sml_cont_topo_v1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.9999634309016399,
+        0.008552009086826821,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 1
+   }
+  },
+  {
+   "name": "corner_turn0p49_sml_cont_topo_v2",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.9999634309016399,
+        0.008552009086826821,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        1.0,
+        2.0
+       ]
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 2
+   }
+  },
+  {
+   "name": "corner_turn0p49_sml_reset_topo_v0",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.9999634309016399,
+        0.008552009086826821,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 0
+   }
+  },
+  {
+   "name": "corner_turn0p49_sml_reset_topo_v1",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.9999634309016399,
+        0.008552009086826821,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 1
+   }
+  },
+  {
+   "name": "corner_turn0p49_sml_reset_topo_v2",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "b": [
+        1.9999634309016399,
+        0.008552009086826821,
+        0.0
+       ],
+       "smline": true,
+       "ivl": [
+        0.0,
+        1.0
+       ]
+      }
+     ]
+    },
+    "op": "corner",
+    "v": 2
+   }
+  }
+ ]
+}
