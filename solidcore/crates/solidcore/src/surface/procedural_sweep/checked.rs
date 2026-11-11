@@ -127,9 +127,14 @@ fn span_tau(a: f64, b: f64) -> Result<f64> {
 fn bad(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
 }
+/// The requested accuracy `gamma(ACCURACY_UNITS)` enclosed, formed once: a function of
+/// constants, so the kept interval is the one formed afresh.
 fn accuracy() -> Ivl {
-    let g = gamma(ACCURACY_UNITS);
-    Ivl::checked(g, g)
+    static ACCURACY: OnceLock<Ivl> = OnceLock::new();
+    *ACCURACY.get_or_init(|| {
+        let g = gamma(ACCURACY_UNITS);
+        Ivl::checked(g, g)
+    })
 }
 fn scalar_cap(scale: f64) -> f64 {
     (accuracy() * (Ivl::from(1.0) + Ivl::from(scale.abs()))).hi

@@ -380,8 +380,25 @@ fn alternating(p0: Ivl, r: Ivl, c: impl Fn(u32) -> Ivl) -> Ivl {
     sum + Ivl::new(-rest, rest)
 }
 
-/// `1 / m` enclosed.
+/// `1 / m` enclosed, kept for the `m` the series' coefficients take ([`RECIPROCALS`]).
 fn reciprocal(m: u32) -> Ivl {
+    static KEPT: OnceLock<[Ivl; RECIPROCALS]> = OnceLock::new();
+    let kept = KEPT.get_or_init(|| {
+        std::array::from_fn(|m| reciprocal_formed(u32::try_from(m).unwrap_or(u32::MAX)))
+    });
+    usize::try_from(m)
+        .ok()
+        .and_then(|m| kept.get(m))
+        .copied()
+        .unwrap_or_else(|| reciprocal_formed(m))
+}
+
+/// How many [`reciprocal`]s are kept: every `1 / (2n + 1)` and `1 / (2n + 3)` the series
+/// take for `n <= SERIES_TERMS`. A pure function of `m`, so a kept one is the one formed.
+const RECIPROCALS: usize = 2 * SERIES_TERMS as usize + 4;
+
+/// `1 / m` enclosed, formed.
+fn reciprocal_formed(m: u32) -> Ivl {
     Ivl::from(1.0) / Ivl::from(f64::from(m))
 }
 
@@ -1336,6 +1353,21 @@ mod tests {
                 "kappa {tau}"
             );
         }
+    }
+
+    /// The kept reciprocals are the ones formed, bit for bit, and past the table they are
+    /// formed.
+    #[test]
+    fn kept_reciprocals_are_the_formed_ones() {
+        for m in 0..(RECIPROCALS as u32 + 8) {
+            let (kept, formed) = (reciprocal(m), reciprocal_formed(m));
+            assert_eq!(
+                [kept.lo, kept.hi].map(f64::to_bits),
+                [formed.lo, formed.hi].map(f64::to_bits),
+                "1 / {m}"
+            );
+        }
+        assert_eq!(reciprocal(1_000_003), reciprocal_formed(1_000_003));
     }
 
     /// At a corner of the profile inside a face, the first-order partials and the higher-order

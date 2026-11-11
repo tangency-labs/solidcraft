@@ -214,6 +214,27 @@ pub(crate) fn linear_basis_quotient_rounding(width: Ivl) -> Ivl {
     (numerator + edelta) / delta + unit * (width + numerator) / delta + tiny
 }
 
+/// The reciprocals [`Ivl`] division multiplies by for the Taylor steps of
+/// [`sin_cos_local`], `k = 2n (2n + 1)` for the sine and `(2n - 1) 2n` for the cosine,
+/// `n = 1..=20`: each `Ivl::checked(1 / k, 1 / k)`, the very interval `x / [k, k]` forms
+/// (a point divisor excludes 0), kept once rather than formed at every step. A pure
+/// function of constants, so the kept values are the ones formed afresh.
+fn taylor_steps() -> &'static [[Ivl; 20]; 2] {
+    static STEPS: std::sync::OnceLock<[[Ivl; 20]; 2]> = std::sync::OnceLock::new();
+    STEPS.get_or_init(|| {
+        let step = |k: u32| {
+            let k = f64::from(k);
+            Ivl::checked(1.0 / k, 1.0 / k)
+        };
+        // index i is the step n = i + 1
+        let n = |i: usize| u32::try_from(i + 1).unwrap_or(u32::MAX);
+        [
+            std::array::from_fn(|i| step(2 * n(i) * (2 * n(i) + 1))),
+            std::array::from_fn(|i| step((2 * n(i) - 1) * 2 * n(i))),
+        ]
+    })
+}
+
 /// Rigorous sine/cosine intervals from Taylor's alternating remainder on |x|<=1.5.
 /// Twenty terms are evaluated with outward arithmetic and widened by the next
 /// term. This primitive makes no assumption about a platform libm error bound.
@@ -226,9 +247,11 @@ fn sin_cos_local(x: Ivl) -> (Ivl, Ivl) {
     let mut cosine = Ivl::from(1.0);
     let mut st = x;
     let mut ct = Ivl::from(1.0);
-    for n in 1..=20_u32 {
-        st = st * square / Ivl::from(f64::from(2 * n * (2 * n + 1)));
-        ct = ct * square / Ivl::from(f64::from((2 * n - 1) * 2 * n));
+    let [sine_steps, cosine_steps] = taylor_steps();
+    for (n, (s_step, c_step)) in (1..=20_u32).zip(sine_steps.iter().zip(cosine_steps)) {
+        // `st * square / k` is `st * square * [1/k]`, its divisor's reciprocal kept
+        st = st * square * *s_step;
+        ct = ct * square * *c_step;
         if n % 2 == 0 {
             sine = sine + st;
             cosine = cosine + ct;
@@ -772,6 +795,45 @@ mod tests {
             for &b in intervals.iter().step_by(step) {
                 same(a, b);
             }
+        }
+    }
+
+    /// The Taylor steps by kept reciprocals are the steps by division, bit for bit, at
+    /// points and on intervals across the local range.
+    #[test]
+    fn kept_taylor_steps_are_the_divisions() {
+        fn divided(x: Ivl) -> (Ivl, Ivl) {
+            let square = x * x;
+            let (mut sine, mut cosine, mut st, mut ct) = (x, Ivl::from(1.0), x, Ivl::from(1.0));
+            for n in 1..=20_u32 {
+                st = st * square / Ivl::from(f64::from(2 * n * (2 * n + 1)));
+                ct = ct * square / Ivl::from(f64::from((2 * n - 1) * 2 * n));
+                if n % 2 == 0 {
+                    sine = sine + st;
+                    cosine = cosine + ct;
+                } else {
+                    sine = sine - st;
+                    cosine = cosine - ct;
+                }
+            }
+            let sr = (st * square / Ivl::from(42.0 * 43.0)).mag();
+            let cr = (ct * square / Ivl::from(41.0 * 42.0)).mag();
+            (sine + Ivl::new(-sr, sr), cosine + Ivl::new(-cr, cr))
+        }
+        let bits = |(s, c): (Ivl, Ivl)| [s.lo, s.hi, c.lo, c.hi].map(f64::to_bits);
+        for i in -1500..=1500 {
+            let x = f64::from(i) * 1.0e-3 + 1.0e-7;
+            for x in [Ivl::from(x), Ivl::new(x, x + 1.0e-9), Ivl::new(x - 0.2, x)] {
+                if x.mag() <= 1.5 {
+                    assert_eq!(bits(sin_cos_local(x)), bits(divided(x)), "{x:?}");
+                }
+            }
+        }
+        for x in [0.0, -0.0, 1.0e-300, -1.0e-200, 1.5, -1.5] {
+            assert_eq!(
+                bits(sin_cos_local(Ivl::from(x))),
+                bits(divided(Ivl::from(x)))
+            );
         }
     }
 
