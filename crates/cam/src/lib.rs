@@ -28,6 +28,11 @@
 //! the tool's shank or holder ([`Tool::envelopes`]) comes closer to it than a clearance. A
 //! toolpath whose holder would touch can be tilted clear ([`collision::tilt_away`]).
 //!
+//! On a 4th axis ([`rotary`]) the rotary axis is work X and the tool points at it. A flat
+//! toolpath can be wrapped round a cylinder ([`wrap`]), a part turned on the axis can be
+//! finished ([`rotary_finish`]) or roughed from round stock ([`rotary_roughing`]), and 2D
+//! pockets and contours can be cut into a cylinder in depth levels ([`wrapped`]).
+//!
 //! A post ([`Post`]) is data: besides its templates it holds switches for the program's
 //! layout (a tool list, comment characters, blank lines, lines at every operation, a safe
 //! retract to the machine's top, the tool length offset on the first Z move, modal motion
@@ -61,10 +66,12 @@ mod piece;
 mod post;
 mod readback;
 pub mod readback5;
+pub mod rotary;
 pub mod stop;
 mod surface;
 pub mod surface_ops;
 mod tool;
+pub mod wrapped;
 
 pub use check::{lift_entries, verify};
 pub use cutter::{Cone, Cutter};
@@ -81,6 +88,10 @@ pub use ops::{ContourParams, Cut, Feeds, Heights, PocketParams, Side, contour, p
 pub use path::{Move, PathStats, Toolpath, arc_sweep};
 pub use post::{CommentStyle, LineNumbers, Post, SafeRetract, Units};
 pub use readback::{Readback, allowed_deviation, readback};
+pub use rotary::{
+    DEFAULT_MAX_ANGLE_STEP, RotaryParams, RotaryPattern, RotaryRoughingParams, radial, rotary_finish, rotary_pose, rotary_roughing, wrap,
+    wrap_with_step,
+};
 pub use surface::{Surface, barycentric, nearest_on_triangle, nearest_segments, ray_triangle, segment_triangle_distance};
 pub use surface_ops::{
     Boundary, DEFAULT_DESCENT_LIMIT, ENTRY_GAP, MAX_GRID_NODES, MAX_SAMPLES, ParallelParams, RoughingParams, WaterlineParams, parallel, roughing,
@@ -126,6 +137,10 @@ mod kinematics_tests;
 #[cfg(test)]
 mod machine_time_tests;
 #[cfg(test)]
+mod rotary_tests;
+#[cfg(test)]
 mod surface_ops_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod wrapped_tests;

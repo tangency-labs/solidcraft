@@ -84,6 +84,37 @@ pub(crate) fn cylinder_x(r: f64, x0: f64, x1: f64, n: usize) -> Surface {
     Surface::from_mesh(&m).unwrap()
 }
 
+/// `t` wound so that its normal points along `outward`.
+pub(crate) fn facing(t: [Vec3; 3], outward: Vec3) -> [Vec3; 3] {
+    if (t[1] - t[0]).cross(t[2] - t[0]).dot(outward) < 0.0 { [t[0], t[2], t[1]] } else { t }
+}
+
+/// A round bar of radius `r` about X from `x0` to `x1` with a flat at height `h` along Z over
+/// its whole length, closed at its ends, wound outwards.
+pub(crate) fn flatted_bar(r: f64, h: f64, x0: f64, x1: f64) -> Surface {
+    let edge = (h / r).acos();
+    let mut angles: Vec<f64> = (0..720).map(|k| -PI + TAU * k as f64 / 720.0).filter(|a| (a.abs() - edge).abs() > 1e-6).collect();
+    angles.extend([-edge, edge]);
+    angles.sort_by(f64::total_cmp);
+    let at = |x: f64, a: f64| {
+        let rho = if a.abs() <= edge + 1e-12 { h / a.cos() } else { r };
+        Vec3::new(x, rho * a.sin(), rho * a.cos())
+    };
+    let mut tris = Vec::new();
+    let n = angles.len();
+    for k in 0..n {
+        let (a, b) = (angles[k], angles[(k + 1) % n]);
+        let out = Vec3::new(0.0, (0.5 * (a + b)).sin(), (0.5 * (a + b)).cos());
+        let (p, q, rr, s) = (at(x0, a), at(x1, a), at(x1, b), at(x0, b));
+        tris.push(facing([p, q, rr], out));
+        tris.push(facing([p, rr, s], out));
+        for (x, sign) in [(x0, -1.0), (x1, 1.0)] {
+            tris.push(facing([Vec3::new(x, 0.0, 0.0), at(x, a), at(x, b)], Vec3::new(sign, 0.0, 0.0)));
+        }
+    }
+    Surface::new(tris).unwrap()
+}
+
 /// A closed box from `lo` to `hi`, wound outwards.
 pub(crate) fn block(lo: Vec3, hi: Vec3) -> Surface {
     let p = |i: usize| Vec3::new(if i & 1 == 0 { lo.x } else { hi.x }, if i & 2 == 0 { lo.y } else { hi.y }, if i & 4 == 0 { lo.z } else { hi.z });

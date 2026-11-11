@@ -329,8 +329,13 @@ pub(crate) struct Pass<'a> {
 }
 
 impl Pass<'_> {
-    /// Samples `t0..=t1` at `n` even steps, refining each at most `depth` halvings deep, taking
-    /// no stretch longer than `cap` (in the parameter) as straight while it can still be halved.
+    /// Samples `t0..=t1` at `n` even steps, refining each at most `depth` halvings deep.
+    pub(crate) fn sample(&self, t0: f64, t1: f64, n: usize, depth: u32) -> Result<Profile> {
+        self.sample_within(t0, t1, n, depth, f64::INFINITY)
+    }
+
+    /// As [`Pass::sample`], taking no stretch longer than `cap` (in the parameter) as straight
+    /// while it can still be halved.
     pub(crate) fn sample_within(&self, t0: f64, t1: f64, n: usize, depth: u32, cap: f64) -> Result<Profile> {
         self.sample_within_from((t0, (self.tip)(t0)?), t1, n, depth, cap)
     }
