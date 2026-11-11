@@ -37,6 +37,114 @@ pub enum ThreadForm {
     /// American National Standard taper pipe thread, 60°, taper 1 in 16 (ASME B1.20.1):
     /// `1/2-14 NPT`.
     Npt,
+    /// Trapezoidal 90°, a thread for 3D printing (no standard): `PT30x3`, `PT30x6(P3)`. Its 45°
+    /// flanks print without support, and the clearances of its [`PrintFit`] are built into both
+    /// profiles, so a printed nut turns on a printed screw as modelled.
+    Print,
+}
+
+/// The finest printed thread: at it the normal fit leaves a crest flat of 0.344 P − 0.4 = 0.12 mm.
+pub const PRINT_MIN_PITCH: f64 = 1.5;
+
+/// The narrowest root flat a printed thread's groove keeps (mm): its root and crest clearances
+/// stop where they would leave less ([`PrintFit::depths`]).
+pub const PRINT_MIN_ROOT_FLAT: f64 = 0.1;
+
+/// The fit of a printed thread: how far its surfaces stand back from the basic profile (mm).
+/// `flank` is each flank's axial allowance, `crest` what the nut's root clears the screw's crest
+/// by, `root` what the screw's root clears the nut's crest by. A screw and a nut modelled with
+/// the same fit turn on each other with 4 × `flank` of axial play.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PrintFit {
+    /// How far each flank stands back from the basic profile along the axis (mm).
+    pub flank: f64,
+    /// What the nut's root clears the screw's crest by (mm).
+    pub crest: f64,
+    /// What the screw's root clears the nut's crest by (mm).
+    pub root: f64,
+}
+
+impl PrintFit {
+    /// A snug fit for a well tuned printer.
+    pub const TIGHT: PrintFit = PrintFit { flank: 0.10, crest: 0.25, root: 0.40 };
+    /// The default, for FDM prints with a 0.4 mm nozzle: 0.8 mm of axial play.
+    pub const NORMAL: PrintFit = PrintFit { flank: 0.20, crest: 0.40, root: 0.55 };
+    /// An easy fit for coarse layers or a printer that over-extrudes.
+    pub const LOOSE: PrintFit = PrintFit { flank: 0.30, crest: 0.55, root: 0.70 };
+    /// The presets by the names `solid.thread`'s `fit` takes, tightest first.
+    pub const PRESETS: [(&str, PrintFit); 3] = [("tight", PrintFit::TIGHT), ("normal", PrintFit::NORMAL), ("loose", PrintFit::LOOSE)];
+
+    /// The preset a name gives (`tight`, `normal`, `loose`).
+    pub fn named(s: &str) -> Option<PrintFit> {
+        PrintFit::PRESETS.iter().find(|(n, _)| n.eq_ignore_ascii_case(s.trim())).map(|(_, f)| *f)
+    }
+
+    /// The preset this fit is, if it is one.
+    pub fn name(self) -> Option<&'static str> {
+        PrintFit::PRESETS.iter().find(|(_, f)| *f == self).map(|(n, _)| *n)
+    }
+
+    /// The root and crest clearances cut at pitch `p`: as set, but no deeper than leaves each
+    /// groove a root flat of [`PRINT_MIN_ROOT_FLAT`]. Past the other part's crest a groove is
+    /// P/2 + 2 `flank` − H1 wide and its 45° flanks narrow it 2 mm per mm deeper, so at a fine
+    /// pitch they would meet before a deep clearance (Normal at 2 mm: 0.54 mm of room for 0.55).
+    pub fn depths(self, p: f64) -> (f64, f64) {
+        let room = ((p / 2.0 + 2.0 * self.flank - 7.0 * p / 45.0 - PRINT_MIN_ROOT_FLAT) / 2.0).max(0.0);
+        (self.root.min(room), self.crest.min(room))
+    }
+
+    /// Why a fit cannot be cut on a thread of major diameter `d` and pitch `p`, if it cannot: a
+    /// clearance out of range, flanks set so far back that no crest is left, or a root so deep
+    /// that the screw keeps less than a pitch of core.
+    pub fn refused(self, d: f64, p: f64) -> Option<String> {
+        let ok = |v: f64| v.is_finite() && (0.0..=2.0).contains(&v);
+        if !(ok(self.flank) && ok(self.crest) && ok(self.root)) {
+            return Some("a printed thread's clearances are between 0 and 2 mm".into());
+        }
+        let h1 = 7.0 * p / 45.0;
+        if p / 2.0 - 2.0 * self.flank - h1 < 0.05 {
+            return Some(format!(
+                "a flank clearance of {} mm leaves no crest on a {} mm pitch: lower it or use a coarser pitch",
+                show(self.flank),
+                show(p)
+            ));
+        }
+        let core = d - 2.0 * (h1 + self.depths(p).0);
+        (core < p).then(|| {
+            format!(
+                "a root clearance of {} mm leaves a {} mm core in a {} mm thread: lower it or use a larger diameter",
+                show(self.root),
+                show(core.max(0.0)),
+                show(d)
+            )
+        })
+    }
+}
+
+impl Default for PrintFit {
+    fn default() -> Self {
+        PrintFit::NORMAL
+    }
+}
+
+/// The pitches [`print_pitch_for`] chooses from, coarsest first.
+const PRINT_PITCHES: &[f64] = &[5.0, 4.0, 3.0, 2.5, 2.0];
+
+fn same(a: f64, b: f64) -> bool {
+    (a - b).abs() < 1e-9
+}
+
+/// The pitch a printed thread takes on a cylinder of this diameter when none is given: coarse
+/// enough to print cleanly, fine enough to leave wall.
+pub fn print_pitch_for(diameter: f64) -> f64 {
+    match diameter {
+        // 2 mm at the smallest, so every fit keeps a crest.
+        d if d < 20.0 => 2.0,
+        d if d < 30.0 => 2.5,
+        d if d < 45.0 => 3.0,
+        d if d < 70.0 => 4.0,
+        _ => 5.0,
+    }
 }
 
 /// Which way a thread turns.
@@ -242,7 +350,7 @@ impl GrooveProfile {
 }
 
 impl ThreadForm {
-    pub const ALL: [ThreadForm; 10] = [
+    pub const ALL: &[ThreadForm] = &[
         ThreadForm::Metric,
         ThreadForm::Trapezoidal,
         ThreadForm::Acme,
@@ -253,6 +361,7 @@ impl ThreadForm {
         ThreadForm::Rp,
         ThreadForm::Bspt,
         ThreadForm::Npt,
+        ThreadForm::Print,
     ];
 
     pub fn name(self) -> &'static str {
@@ -267,11 +376,12 @@ impl ThreadForm {
             ThreadForm::Rp => "rp",
             ThreadForm::Bspt => "bspt",
             ThreadForm::Npt => "npt",
+            ThreadForm::Print => "print",
         }
     }
 
     pub fn from_name(s: &str) -> Option<ThreadForm> {
-        ThreadForm::ALL.into_iter().find(|f| f.name().eq_ignore_ascii_case(s.trim()))
+        ThreadForm::ALL.iter().copied().find(|f| f.name().eq_ignore_ascii_case(s.trim()))
     }
 
     /// The standard a form's profile and sizes come from.
@@ -286,6 +396,7 @@ impl ThreadForm {
             ThreadForm::Bspp => "ISO 228-1",
             ThreadForm::Rp | ThreadForm::Bspt => "ISO 7-1",
             ThreadForm::Npt => "ASME B1.20.1",
+            ThreadForm::Print => "none (3D printing)",
         }
     }
 
@@ -326,6 +437,8 @@ impl ThreadForm {
             Some(ThreadForm::Acme)
         } else if t.contains("BUTT") {
             Some(ThreadForm::ButtressAsme)
+        } else if t.strip_prefix("PT").is_some_and(then_size) {
+            Some(ThreadForm::Print)
         } else if t.starts_with("TR") {
             Some(ThreadForm::Trapezoidal)
         } else if t.starts_with('S') {
@@ -351,7 +464,7 @@ impl ThreadForm {
             ThreadForm::Trapezoidal => ISO_2902_MEDIUM.to_vec(),
             ThreadForm::Buttress => ISO_2902_MEDIUM.iter().copied().filter(|(d, _)| *d >= 10.0).collect(),
             ThreadForm::Acme => ACME_SIZES.iter().map(|(_, d, n)| (d * INCH, INCH / n)).collect(),
-            ThreadForm::ButtressAsme | ThreadForm::Square => Vec::new(),
+            ThreadForm::ButtressAsme | ThreadForm::Square | ThreadForm::Print => Vec::new(),
             ThreadForm::Bspp | ThreadForm::Rp | ThreadForm::Bspt | ThreadForm::Npt => {
                 self.pipe_sizes().iter().map(|s| (s.major, s.pitch())).collect()
             }
@@ -405,8 +518,13 @@ impl ThreadForm {
                     }
                 }
             }
-            ThreadForm::Trapezoidal | ThreadForm::Buttress => {
-                let body = t.strip_prefix(if self == ThreadForm::Trapezoidal { "TR" } else { "S" }).ok_or_else(bad)?;
+            ThreadForm::Trapezoidal | ThreadForm::Buttress | ThreadForm::Print => {
+                let pre = match self {
+                    ThreadForm::Trapezoidal => "TR",
+                    ThreadForm::Print => "PT",
+                    _ => "S",
+                };
+                let body = t.strip_prefix(pre).ok_or_else(bad)?;
                 // Tr40x7, Tr40x14(P7) (ISO 2903: lead 14, pitch 7), Tr40 (the standard pitch).
                 match body.split_once('X') {
                     Some((d, rest)) => {
@@ -443,6 +561,9 @@ impl ThreadForm {
             }
             ThreadForm::Square | ThreadForm::Bspp | ThreadForm::Rp | ThreadForm::Bspt | ThreadForm::Npt => return Err(bad()),
         };
+        if self == ThreadForm::Print && pitch.is_finite() && pitch < PRINT_MIN_PITCH - 1e-9 {
+            return Err(format!("a printed thread's pitch is {} mm or more (`{s}`)", show(PRINT_MIN_PITCH)));
+        }
         if !(major.is_finite() && pitch.is_finite() && lead.is_finite() && major > 0.0 && pitch > 0.0 && pitch < major) {
             return Err(bad());
         }
@@ -465,6 +586,7 @@ impl ThreadForm {
             ThreadForm::Rp => "like Rp 1/2, internal (ISO 7-1, 1/16 to 6)",
             ThreadForm::Bspt => "like R 1/2 external or Rc 1/2 internal (ISO 7-1, 1/16 to 6)",
             ThreadForm::Npt => "like 1/2-14 NPT (1/16 to 12)",
+            ThreadForm::Print => "like PT30x3 or PT30x6(P3)",
         }
     }
 
@@ -516,8 +638,12 @@ impl ThreadForm {
                     format!("M{}x{}", show(d), show(p))
                 }
             }
-            ThreadForm::Trapezoidal | ThreadForm::Buttress => {
-                let pre = if self == ThreadForm::Trapezoidal { "Tr" } else { "S" };
+            ThreadForm::Trapezoidal | ThreadForm::Buttress | ThreadForm::Print => {
+                let pre = match self {
+                    ThreadForm::Trapezoidal => "Tr",
+                    ThreadForm::Print => "PT",
+                    _ => "S",
+                };
                 if multi { format!("{pre}{}x{}(P{})", show(d), show(lead), show(p)) } else { format!("{pre}{}x{}", show(d), show(p)) }
             }
             ThreadForm::Acme | ThreadForm::ButtressAsme => {
@@ -564,6 +690,20 @@ impl ThreadForm {
     /// as a size's nominal diameter (within 1% and 0.03 mm) is that size, a 12 mm hole is M12,
     /// and only a hole near no nominal diameter is matched by tap drill.
     pub fn fit_with(self, diameter: f64, internal: bool, old_rule: bool) -> Option<(f64, f64)> {
+        if self == ThreadForm::Print {
+            // No size table: a shaft is the major diameter; a hole is the nut's minor diameter,
+            // which lies the tooth overlap (7P/45 a side) inside the major.
+            if !(diameter.is_finite() && diameter > 2.0 * PRINT_MIN_PITCH) {
+                return None;
+            }
+            // A hole takes the largest pitch whose nut has this minor diameter and whose major
+            // diameter that pitch is chosen for, so a hole bored for a screw gets the screw's size.
+            // Whole hundredths, so the designation reads back to the same size (and 29.9999 is 30).
+            let major_of = |p: f64| ((if internal { diameter + 2.0 * 7.0 * p / 45.0 } else { diameter }) * 100.0).round() / 100.0;
+            let p = PRINT_PITCHES.iter().copied().find(|p| same(print_pitch_for(major_of(*p)), *p)).unwrap_or(print_pitch_for(diameter));
+            let major = major_of(p);
+            return Some((major, p));
+        }
         if internal && !old_rule {
             let near = |n: f64| (n - diameter).abs() <= 0.01 * diameter + 0.03;
             if let Some((n, p)) = self.sizes().into_iter().find(|(n, _)| near(*n)) {
@@ -582,7 +722,14 @@ impl ThreadForm {
     /// `flank_lo`/`flank_hi` are for a buttress with its steep flank towards the end (+z); the
     /// caller swaps them for [`SteepFlank::Start`].
     pub fn groove(self, d: f64, p: f64, internal: bool) -> GrooveProfile {
+        self.groove_fit(d, p, internal, None)
+    }
+
+    /// [`groove`](Self::groove) with a printed thread's fit (`None`: [`PrintFit::NORMAL`]); the
+    /// other forms have no fit and ignore it.
+    pub fn groove_fit(self, d: f64, p: f64, internal: bool, fit: Option<PrintFit>) -> GrooveProfile {
         let deg = |a: f64| a.to_radians();
+        let fit = fit.unwrap_or_default();
         let half = |a: f64| (deg(a), deg(a));
         // (flanks, tooth crest flat, basic depth, external minor radius, internal minor radius,
         // internal major radius)
@@ -631,6 +778,15 @@ impl ThreadForm {
                 // (P - 0.6 P (tan 7° + tan 45°))/2 = 0.16316 P, no allowances.
                 let flat = (p - 0.6 * p * (deg(7.0).tan() + deg(45.0).tan())) / 2.0;
                 ((deg(7.0), deg(45.0)), flat, 0.6 * p, d / 2.0 - 0.6 * p, d / 2.0 - 0.6 * p, d / 2.0)
+            }
+            ThreadForm::Print => {
+                // 90°, the basic teeth half a pitch wide at the pitch line, each flank the
+                // fit's flank clearance back from it; the teeth overlap H1 = 7P/45 about the pitch
+                // line, so a crest flat is P/2 - 2 allowance - H1 (tan 45° = 1).
+                let h1 = 7.0 * p / 45.0;
+                let flat = p / 2.0 - 2.0 * fit.flank - h1;
+                let (root, crest) = fit.depths(p);
+                (half(45.0), flat, h1, d / 2.0 - h1 - root, d / 2.0 - h1, d / 2.0 + crest)
             }
             ThreadForm::Bspp | ThreadForm::Rp | ThreadForm::Bspt | ThreadForm::Npt => {
                 // ISO 228-1 / ISO 7-1: 55°, h = 0.640327 P of the triangle H = 0.960491 P
@@ -769,6 +925,65 @@ mod tests {
         // ASME B1.9 flat 0.16316 P, B1.5 flat 0.3707 P.
         assert!((ThreadForm::ButtressAsme.groove(50.0, 4.0, false).crest_flat - 0.16316 * 4.0).abs() < 1e-4);
         assert!((ThreadForm::Acme.groove(25.4, 5.08, false).crest_flat - 0.3707 * 5.08).abs() < 1e-3);
+    }
+
+    #[test]
+    fn print_threads_read_write_and_carry_their_fit() {
+        let f = ThreadForm::Print;
+        let t = f.parse("PT30x4.5", 1).unwrap();
+        assert_eq!((t.major, t.pitch, t.lead), (30.0, 4.5, 4.5));
+        assert_eq!(f.format(30.0, 4.5, 9.0), "PT30x9(P4.5)");
+        assert_eq!(f.parse("PT30x9(P4.5)", 1).unwrap().lead, 9.0);
+        assert_eq!(ThreadForm::of_designation("PT30x4.5"), Some(f));
+        assert!(f.parse("PT30x1", 1).is_err(), "finer than a nozzle line");
+        // Every fit keeps a crest at every pitch the size is chosen with.
+        for d in [6.0, 15.0, 25.0, 40.0, 60.0, 90.0] {
+            for (name, fit) in PrintFit::PRESETS {
+                assert!(fit.refused(d, print_pitch_for(d)).is_none(), "{name} at Ø{d}");
+            }
+        }
+        // A hole bored to a screw's nut minor diameter takes that screw's size.
+        assert_eq!(f.fit(29.066666, true), Some((30.0, 3.0)), "a bore modelled to 6 decimals");
+        for (d, p) in [(30.0, 3.0), (50.0, 4.0), (16.0, 2.0)] {
+            let bore = d - 2.0 * 7.0 * p / 45.0;
+            assert_eq!(f.fit(bore, true), Some((d, p)), "bore {bore}");
+            assert_eq!(f.fit(d, false), Some((d, p)));
+        }
+        // The tested profile: screw crest/root 15 / 13.75, nut crest/root 14.3 / 15.4 at Ø30 P4.5.
+        let (s, n) = (f.groove(30.0, 4.5, false), f.groove(30.0, 4.5, true));
+        assert!((s.crest_r - 15.0).abs() < 1e-9 && (s.root_r - 13.75).abs() < 1e-9, "{s:?}");
+        assert!((n.crest_r - 14.3).abs() < 1e-9 && (n.root_r - 15.4).abs() < 1e-9, "{n:?}");
+        assert!((s.flank_lo - std::f64::consts::FRAC_PI_4).abs() < 1e-12, "45° flanks");
+        // A looser fit opens both clearances and thins the tooth; the normal fit is the default.
+        let loose = f.groove_fit(30.0, 4.5, true, Some(PrintFit::LOOSE));
+        assert!(loose.root_r > n.root_r && loose.crest_flat < n.crest_flat);
+        assert_eq!(f.groove_fit(30.0, 4.5, false, Some(PrintFit::NORMAL)), s);
+        assert_eq!(PrintFit::named("Loose"), Some(PrintFit::LOOSE));
+        assert_eq!(PrintFit::LOOSE.name(), Some("loose"));
+        assert!(PrintFit { flank: 0.9, ..PrintFit::NORMAL }.refused(30.0, 4.5).is_some(), "no crest left");
+        assert!(PrintFit::NORMAL.refused(30.0, 4.5).is_none());
+        // With no size a shaft is its own diameter, a hole the nut's minor diameter.
+        assert_eq!(f.fit(30.0, false), Some((30.0, 3.0)));
+        let (hole_major, p) = f.fit(28.6, true).unwrap();
+        assert!((hole_major - 28.6 - 2.0 * 7.0 * p / 45.0).abs() < 0.01, "{hole_major}");
+        assert!(PrintFit::LOOSE.refused(10.0, 1.5).is_some(), "a loose fit needs a coarser pitch than 1.5");
+        assert!(PrintFit { root: 2.0, ..PrintFit::NORMAL }.refused(4.0, 3.0).is_some(), "too little core");
+        // At every pitch a fit is accepted on, both grooves keep a root flat: a deep clearance
+        // at a fine pitch stops where the 45° flanks would meet (PT8x2 Normal, PT15x2 Loose).
+        for p in [1.5, 2.0, 2.5, 3.0, 4.0, 5.0] {
+            for (name, fit) in PrintFit::PRESETS.into_iter().chain([("deep", PrintFit { root: 2.0, crest: 2.0, ..PrintFit::NORMAL })]) {
+                if fit.refused(60.0, p).is_some() {
+                    continue;
+                }
+                for internal in [false, true] {
+                    let g = f.groove_fit(60.0, p, internal, Some(fit));
+                    let w = g.width(p, g.root_r);
+                    assert!(w >= PRINT_MIN_ROOT_FLAT - 1e-9, "{name} P{p} internal {internal}: root flat {w}");
+                }
+            }
+        }
+        assert_eq!(PrintFit::NORMAL.depths(3.0), (0.55, 0.40), "a coarse pitch cuts the fit as set");
+        assert!(PrintFit::NORMAL.depths(2.0).0 < 0.55);
     }
 
     /// The basic profiles mesh: at the pitch line (half the basic depth in from the crest) groove

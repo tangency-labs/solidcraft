@@ -1072,6 +1072,10 @@ pub enum FeatureKind {
         /// was left to the tap drill: a 12 mm hole stays M14 there. New threads leave it off.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         old_auto_size: bool,
+        /// A printed thread's fit (its clearances); `None`: the normal fit. The other forms
+        /// have none.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        print_fit: Option<crate::thread_forms::PrintFit>,
     },
     /// Ruled loft through profiles of several sketches, in order.
     Loft {

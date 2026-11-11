@@ -5,7 +5,7 @@
 //! thread forms ([`ThreadForm`]).
 
 use serde_json::{Value, json};
-use solidcraft_engine::doc::thread_forms::{SteepFlank, ThreadForm, ThreadHand, ThreadTip};
+use solidcraft_engine::doc::thread_forms::{PrintFit, SteepFlank, ThreadForm, ThreadHand, ThreadTip};
 use solidcraft_engine::doc::{
     Document, Expr, FeatureKind, TappedThread, TappedThreadFamily, ThreadLimit, ThreadRunout, metric_thread_sizes, parse_metric_thread,
     parse_tapped_thread, tapped_thread_sizes,
@@ -222,6 +222,7 @@ const FORMS: &[(&str, ThreadForm)] = &[
     ("thread.form_rp", ThreadForm::Rp),
     ("thread.form_bspt", ThreadForm::Bspt),
     ("thread.form_npt", ThreadForm::Npt),
+    ("thread.form_print", ThreadForm::Print),
 ];
 const HANDS: &[(&str, ThreadHand)] = &[("Right", ThreadHand::Right), ("Left", ThreadHand::Left), ("Both", ThreadHand::Both)];
 /// A tapped hole's and a pipe thread's hands: one groove, so never both.
@@ -296,7 +297,71 @@ pub struct Options {
     pub chamfer_angle: String,
     pub chamfer_depth: String,
     pub steep_flank: SteepFlank,
+    /// The printing form's size and fit, as the dialog shows them.
+    pub print: PrintRows,
 }
+
+/// The printing form's rows: its diameter and pitch as typed (they write the designation), and
+/// its fit, a preset or the three clearances.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PrintRows {
+    pub diameter: String,
+    pub pitch: String,
+    /// The designation the two fields were last read from or written to.
+    synced: String,
+    /// An index into [`FITS`]; the last is Custom.
+    pub fit: usize,
+    pub flank: String,
+    pub crest: String,
+    pub root: String,
+}
+
+impl Default for PrintRows {
+    fn default() -> PrintRows {
+        let n = PrintFit::NORMAL;
+        PrintRows {
+            diameter: String::new(),
+            pitch: String::new(),
+            synced: String::new(),
+            fit: FIT_NORMAL,
+            flank: mm(n.flank),
+            crest: mm(n.crest),
+            root: mm(n.root),
+        }
+    }
+}
+
+/// A length as a field shows it, every digit it has: `0.2`, `4.5`, `0.125`.
+fn mm(v: f64) -> String {
+    format!("{v}")
+}
+
+/// The millimetres a field holds (`4.5`, `4.5 mm`, `4,5`).
+fn field_mm(t: &str) -> Option<f64> {
+    t.trim().trim_end_matches("mm").trim().replace(',', ".").parse::<f64>().ok().filter(|v| v.is_finite())
+}
+
+impl PrintRows {
+    /// The rows of a saved fit: its preset, or Custom with its clearances.
+    fn of(fit: Option<PrintFit>) -> PrintRows {
+        let fit = fit.unwrap_or_default();
+        let index = PrintFit::PRESETS.iter().position(|(_, f)| *f == fit).unwrap_or(FIT_CUSTOM);
+        PrintRows { fit: index, flank: mm(fit.flank), crest: mm(fit.crest), root: mm(fit.root), ..Default::default() }
+    }
+
+    /// The fit the rows give; `None` while a Custom clearance does not read as a number.
+    pub fn fit(&self) -> Option<PrintFit> {
+        match PrintFit::PRESETS.get(self.fit) {
+            Some((_, f)) => Some(*f),
+            None => Some(PrintFit { flank: field_mm(&self.flank)?, crest: field_mm(&self.crest)?, root: field_mm(&self.root)? }),
+        }
+    }
+}
+
+/// The Fit choices: [`PrintFit::PRESETS`] in order, then Custom.
+const FITS: &[&str] = &["thread.fit_tight", "thread.fit_normal", "thread.fit_loose", "thread.fit_custom"];
+const FIT_NORMAL: usize = 1;
+const FIT_CUSTOM: usize = PrintFit::PRESETS.len();
 
 impl Default for Options {
     fn default() -> Options {
@@ -310,6 +375,7 @@ impl Default for Options {
             chamfer_angle: String::new(),
             chamfer_depth: String::new(),
             steep_flank: SteepFlank::default(),
+            print: PrintRows::default(),
         }
     }
 }
@@ -449,14 +515,18 @@ pub(crate) fn rows(
     if !f.sizes().is_empty() {
         size_rows(ui, f, designation, suggested);
     }
-    let hint = solidcraft_ui_text::format("thread.fits_the_face", &[("example", &example(f))]);
-    let (submitted, changed) = text_row(ui, "Designation", designation, &hint);
-    enter |= submitted;
-    if let Some(at) = crate::scenario::handle_at("dialog:Designation") {
-        crate::scenario::publish_handle("dialog:thread_size", at);
-    }
-    if changed {
-        *suggested = None;
+    if f == ThreadForm::Print {
+        enter |= print_rows(ui, designation, suggested, &mut o.print);
+    } else {
+        let hint = solidcraft_ui_text::format("thread.fits_the_face", &[("example", &example(f))]);
+        let (submitted, changed) = text_row(ui, "Designation", designation, &hint);
+        enter |= submitted;
+        if let Some(at) = crate::scenario::handle_at("dialog:Designation") {
+            crate::scenario::publish_handle("dialog:thread_size", at);
+        }
+        if changed {
+            *suggested = None;
+        }
     }
 
     if is_pipe(f) {
@@ -497,8 +567,12 @@ pub(crate) fn rows(
         if o.tip != ThreadTip::None {
             enter |= hint_row(ui, "Chamfer Angle", &mut o.chamfer_angle, tr("ui.iso_4753"));
             // ISO 4753's depth is for ISO metric threads; the other forms give theirs.
-            let depth = if f == ThreadForm::Metric { "ui.iso_4753" } else { "thread.chamfer_depth_needed" };
-            enter |= hint_row(ui, "Chamfer Depth", &mut o.chamfer_depth, tr(depth));
+            let depth = match f {
+                ThreadForm::Metric => tr("ui.iso_4753"),
+                ThreadForm::Print => tr("thread.chamfer_to_root"),
+                _ => tr("thread.chamfer_depth_needed"),
+            };
+            enter |= hint_row(ui, "Chamfer Depth", &mut o.chamfer_depth, depth);
         }
         enter |= end_rows(ui, &mut o.ease_out);
     });
@@ -516,6 +590,59 @@ pub(crate) fn end_rows(ui: &mut egui::Ui, ease: &mut Ease) -> bool {
     }
     let hint = if ease.short { tr("thread.fade_short") } else { tr("thread.fade_standard") };
     hint_row(ui, "Fade Length", &mut ease.length, hint)
+}
+
+/// The printing form's size and fit: Diameter and Pitch as plain numbers (they write the
+/// designation, so nobody has to know how it is spelled), then the fit, a preset or its three
+/// clearances. Empty size fields mean the size that fits the face. Returns Enter pressed.
+fn print_rows(ui: &mut egui::Ui, designation: &mut String, suggested: &mut Option<String>, r: &mut PrintRows) -> bool {
+    let f = ThreadForm::Print;
+    // A size that came from elsewhere (the face's, or a saved thread's) fills the fields.
+    if *designation != r.synced {
+        match parse(f, designation) {
+            Some((d, p)) => {
+                r.diameter = mm(d);
+                r.pitch = mm(p);
+            }
+            None => {
+                r.diameter.clear();
+                r.pitch.clear();
+            }
+        }
+        r.synced = designation.clone();
+    }
+    let mut enter = false;
+    let (submitted, d_changed) = text_row(ui, "Diameter", &mut r.diameter, tr("thread.size_from_face"));
+    enter |= submitted;
+    let (submitted, p_changed) = text_row(ui, "Pitch", &mut r.pitch, tr("thread.pitch_from_diameter"));
+    enter |= submitted;
+    if d_changed || p_changed {
+        *suggested = None;
+        match (field_mm(&r.diameter), field_mm(&r.pitch)) {
+            (Some(d), Some(p)) if d > 0.0 && p > 0.0 && p < d => *designation = designation_of(f, d, p),
+            // A diameter alone takes the pitch chosen for it.
+            (Some(d), None) if d > 0.0 && r.pitch.trim().is_empty() => {
+                *designation = designation_of(f, d, solidcraft_engine::doc::thread_forms::print_pitch_for(d));
+            }
+            // Both cleared: the size that fits the face again.
+            (None, None) if r.diameter.trim().is_empty() && r.pitch.trim().is_empty() => designation.clear(),
+            _ => {}
+        }
+        // The fields keep what was typed; they are not rewritten from the designation.
+        r.synced = designation.clone();
+    }
+    choice_row(ui, "thread.fit", "thread_fit", &mut r.fit, FITS).on_hover_text(tr("thread.fit_tip"));
+    if r.fit == FIT_CUSTOM {
+        enter |= hint_row(ui, "thread.flank_clearance", &mut r.flank, tr("thread.flank_clearance_hint"));
+        enter |= hint_row(ui, "thread.crest_clearance", &mut r.crest, tr("thread.clearance_hint"));
+        enter |= hint_row(ui, "thread.root_clearance", &mut r.root, tr("thread.clearance_hint"));
+    } else if let Some((_, fit)) = PrintFit::PRESETS.get(r.fit) {
+        // Custom starts from the preset last shown.
+        r.flank = mm(fit.flank);
+        r.crest = mm(fit.crest);
+        r.root = mm(fit.root);
+    }
+    enter
 }
 
 /// The Size choice of a form with a size table, and the Pitch choice of the metric ones (an
@@ -633,6 +760,22 @@ pub(crate) fn put_params(p: &mut Value, length: &str, o: &Options, inputs: &[Sel
     if is_buttress(o.form) && o.steep_flank != SteepFlank::default() {
         p["steep_flank"] = json!(o.steep_flank);
     }
+    if o.form == ThreadForm::Print {
+        match o.print.fit() {
+            Some(fit) if fit == PrintFit::NORMAL => {}
+            Some(fit) => {
+                p["fit"] = match fit.name() {
+                    Some(name) => json!(name),
+                    None => json!({"flank": fit.flank, "crest": fit.crest, "root": fit.root}),
+                }
+            }
+            // A Custom clearance that is not a number goes as typed, so the command says which.
+            None => {
+                let field = |t: &str| field_mm(t).map_or_else(|| json!(t), |v| json!(v));
+                p["fit"] = json!({"flank": field(&o.print.flank), "crest": field(&o.print.crest), "root": field(&o.print.root)});
+            }
+        }
+    }
 }
 
 /// The picked Up To place: a plane's name, or a point on a face.
@@ -671,6 +814,7 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, kind: &FeatureKind) {
         steep_flank,
         // Kept by the edit itself (`timeline.redefine`), not a dialog option.
         old_auto_size: _,
+        print_fit,
     } = kind
     else {
         return;
@@ -695,6 +839,7 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, kind: &FeatureKind) {
         chamfer_angle: chamfer_angle.as_ref().map(expr).unwrap_or_default(),
         chamfer_depth: chamfer_depth.as_ref().map(expr).unwrap_or_default(),
         steep_flank: *steep_flank,
+        print: PrintRows::of(*print_fit),
     };
     if let Some(inp) = d.inputs.first_mut() {
         inp.items = face_sel(s, face.0).into_iter().collect();

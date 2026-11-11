@@ -253,6 +253,7 @@ pub enum ThreadForm {
     Rp,
     Bspt,
     Npt,
+    Print,
 }
 
 impl From<&solidcraft_doc::ThreadInfo> for ModelThread {
@@ -277,6 +278,7 @@ impl From<&solidcraft_doc::ThreadInfo> for ModelThread {
                 Form::Rp => ThreadForm::Rp,
                 Form::Bspt => ThreadForm::Bspt,
                 Form::Npt => ThreadForm::Npt,
+                Form::Print => ThreadForm::Print,
             },
             hand: match t.hand {
                 Hand::Right => ThreadHand::Right,

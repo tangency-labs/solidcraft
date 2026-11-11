@@ -355,3 +355,38 @@ fn a_saved_thread_reopens_with_every_option() {
         h.app.session.execute(&cmd, &params).unwrap_or_else(|e| panic!("{made}: OK on the reopened dialog: {e}"));
     }
 }
+
+/// Trapezoidal 90°: Diameter and Pitch write the designation, the Fit reaches the command by
+/// name or as its three clearances, a clearance that is not a number goes as typed so the command
+/// says which, and an edited thread shows the fit it was made with.
+#[test]
+fn a_printed_thread_sends_its_size_and_fit_and_reopens_with_them() {
+    let mut h = shaft();
+    choose(&mut h, "Form", "thread.form_print");
+    let p = params(&h);
+    assert_eq!((&p["form"], p.get("fit")), (&json!("print"), None), "the normal fit is the default: {p}");
+    type_in(&mut h, "Diameter", "8");
+    type_in(&mut h, "Pitch", "2");
+    assert_eq!(params(&h)["designation"], "PT8x2");
+    choose(&mut h, "thread.fit", "thread.fit_loose");
+    assert_eq!(params(&h)["fit"], "loose");
+    choose(&mut h, "thread.fit", "thread.fit_custom");
+    assert!(shown("thread.flank_clearance") && shown("thread.crest_clearance") && shown("thread.root_clearance"));
+    type_in(&mut h, "thread.flank_clearance", "0.125");
+    assert_eq!(params(&h)["fit"], json!({"flank": 0.125, "crest": 0.55, "root": 0.7}), "Custom starts from the fit last shown");
+    type_in(&mut h, "thread.root_clearance", "deep");
+    assert_eq!(params(&h)["fit"]["root"], "deep");
+
+    let custom = PrintFit { flank: 0.125, crest: 0.3, root: 0.45 };
+    for (fit, want) in [(json!("loose"), PrintFit::LOOSE), (json!({"flank": 0.125, "crest": 0.3, "root": 0.45}), custom)] {
+        let mut h = shaft();
+        h.app.run("solid.thread", json!({"face": [4,0,5], "designation": "PT8x2", "fit": fit, "modeled": true})).unwrap();
+        let saved = h.app.session.doc.features.last().unwrap().kind.clone();
+        let mut d = crate::dialogs::Dialog::for_command(&h.app, "solid.thread").unwrap();
+        crate::dialogs_thread::reopen(&mut d, &h.app.session, &saved);
+        h.app.dialog = Some(d);
+        h.frames(2);
+        let o = options(&h);
+        assert_eq!((o.form, o.print.fit()), (ThreadForm::Print, Some(want)), "an edit keeps the saved fit {fit}");
+    }
+}
