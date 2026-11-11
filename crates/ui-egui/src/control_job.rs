@@ -333,6 +333,11 @@ pub struct Ahead {
     pub(crate) label: String,
     /// How far it has got.
     pub(crate) steps: Arc<Steps>,
+    /// What it computes, and for which design: `doc` and `revision`, as in [`Work::Ahead`].
+    commands: Vec<(String, Value)>,
+    doc: Arc<solidcraft_engine::doc::Document>,
+    revision: u64,
+    tries: u8,
 }
 
 impl Ahead {
@@ -344,10 +349,26 @@ impl Ahead {
         if !app.preferences.agent_off_thread || app.file_load_holds() || app.file_picker.is_some() {
             return None;
         }
-        let commands = ahead_commands(method, request);
+        Self::start(app, request, ticket, ahead_commands(method, request), 0)
+    }
+
+    fn start(app: &SolveApp, request: &Value, ticket: &Ticket, commands: Vec<(String, Value)>, tries: u8) -> Option<Ahead> {
         let label = label(app, &commands.first()?.0);
-        let (done, kept, steps) = evaluate_ahead(app, request, ticket, commands)?;
-        Some(Ahead { done, kept, started: crate::now_ms(), label, steps })
+        let (done, kept, steps) = evaluate_ahead(app, request, ticket, commands.clone())?;
+        let (doc, revision) = (app.session.doc.clone(), app.session.revision);
+        Some(Ahead { done, kept, started: crate::now_ms(), label, steps, commands, doc, revision, tries })
+    }
+
+    /// A person's edit went first (as for [`Work::Ahead`]): this was computed for another design.
+    pub(crate) fn stale(&self, app: &SolveApp) -> bool {
+        (!Arc::ptr_eq(&app.session.doc, &self.doc) || app.session.revision != self.revision) && self.tries < MAX_TRIES
+    }
+
+    /// Computed again for the design as it is now, off the window thread.
+    pub(crate) fn restart(&self, app: &SolveApp, request: &Value, ticket: &Ticket) -> Option<Ahead> {
+        let again = Self::start(app, request, ticket, self.commands.clone(), self.tries + 1)?;
+        ticket.computing(false);
+        Some(Ahead { started: self.started, ..again })
     }
 
     /// The evaluation is in (or its worker ended).
