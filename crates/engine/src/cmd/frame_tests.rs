@@ -1535,6 +1535,28 @@ fn rotate_member_refuses_a_member_outside_the_active_component() {
     assert_eq!(s.doc.to_json(), before);
 }
 
+/// An edit of a Rotate step can't move it to another member (the dialog opens with the member
+/// fixed).
+#[test]
+fn a_rotate_step_keeps_its_member_through_an_edit() {
+    let mut s = brace();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Post path"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    run(&mut s, "sketch.line3d", json!({"points": [[-100, 0, 0], [-100, 0, 300]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "frame.member", json!({"sketch": "Post path", "name": "Post member", "body_name": "Post", "profile": square_tube()}));
+    let face = brace_side(&s, 0.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "30 deg"}));
+    let other = face_pick(&s, "Post", [-80.0, 0.0, 150.0], [1.0, 0.0, 0.0]);
+    let before = s.doc.to_json();
+    let e = s
+        .execute("timeline.redefine", &json!({"feature": "Rotate1", "command": "frame.rotate_member", "params": {"face": other, "angle": "30 deg"}}))
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("A Rotate step keeps its member"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
 #[test]
 fn parallel_to_refuses_an_end_face_a_curve_and_a_line_along_the_member() {
     let mut s = brace();

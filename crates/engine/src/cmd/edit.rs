@@ -2234,6 +2234,12 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     if std::mem::discriminant(&new.kind) != std::mem::discriminant(&old.kind) && !(boundary(&new.kind) && boundary(&old.kind)) {
         return Err(bad(cmd, format!("{} is not a {} feature", old.name, cid)));
     }
+    // A Rotate step turns one member: an edit changes its angle, never which member it turns.
+    if let (FeatureKind::FrameMemberTurn { member: before, .. }, FeatureKind::FrameMemberTurn { member: after, .. }) = (&old.kind, &new.kind)
+        && before != after
+    {
+        return Err(bad(cmd, "A Rotate step keeps its member"));
+    }
     // The trial still holds the old feature, so a plane offset from its own name was made there,
     // and once swapped in it would be built on itself (#3567).
     if new.kind.names_feature(old.id, &old.name) {
