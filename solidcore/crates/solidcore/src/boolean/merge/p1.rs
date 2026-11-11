@@ -44,15 +44,17 @@
 //! it on both sides (slits), skipping any a later removal deleted.
 //! Opt-in `Kernel::fixes.fillet_cleanup_keeps_target_faces` (WR-459, #423): the edges in
 //! `CleanupRelations::kept_edges`, and those whose faces are all in `kept_faces`, stay.
-//! Of those, an edge with one face on both sides (a slit) is checked all the same, and
-//! the kept-faces test needs two faces (WR-602, the fork's tangency-labs/smlib@cac11ea).
+//! Opt-in `Kernel::fixes.fillet_cleanup_removes_input_slits` (WR-602, the fork's
+//! tangency-labs/smlib@cac11ea): of those, an edge with one face on both sides (a slit)
+//! is checked all the same, and the kept-faces test needs two faces.
 //! Opt-in `Kernel::fixes.cover_wraps_across_closed_seam` (WR-599, the fork's
 //! tangency-labs/smlib@16bf1cb): after each face merge `boolean_post_process` runs
 //! `HasSeamProblem` on the merged face and `SplitAtSeam` when a seam is crossed or missing.
 //! The temporary origin shift (WR-586, #483): failed boxes and temporary translations
 //! propagate, a failed second translation restores the first operand, and inverse
-//! transforms attempt all surviving operands before returning their first error. A callback that fails may already have mutated its
-//! operand; this does not promise transactionality within a transform.
+//! transforms attempt all surviving operands before returning their first error. A
+//! callback that fails may already have mutated its operand; this does not promise
+//! transactionality within a transform.
 //! Not upstream (#3090, WR-756): [`place_vertices_on_face_corners`] (after the boolean's
 //! cleanup, a vertex more than the intersection tolerance off one of its faces moves to the
 //! corner its faces define, within half its tolerance and only when that cures the gap).
@@ -649,15 +651,20 @@ pub(crate) fn boolean_post_process_with_notifications(
         } else if !check_all_edges && relations.mates.edges.other(e).is_none() {
             continue;
         }
-        // WR-602 (the fork's tangency-labs/smlib@cac11ea): an edge of the fillet's input,
-        // or one between two of its faces, stays, unless one face lies on both its sides:
-        // removing that slit merges no faces.
-        if relations.kept_edges.contains(&e) && edge::faces(brep, e, None)?.len() != 1 {
+        // WR-602 (`Kernel::fixes.fillet_cleanup_removes_input_slits`, the fork's
+        // tangency-labs/smlib@cac11ea): an edge of the fillet's input, or one between two
+        // of its faces, stays, unless one face lies on both its sides: removing that slit
+        // merges no faces.
+        let input_slits = k.fixes.fillet_cleanup_removes_input_slits;
+        if relations.kept_edges.contains(&e)
+            && !(input_slits && edge::faces(brep, e, None)?.len() == 1)
+        {
             continue;
         }
         if !relations.kept_faces.is_empty() {
             let faces = edge::faces(brep, e, None)?;
-            if faces.len() >= 2 && faces.iter().all(|f| relations.kept_faces.contains(f)) {
+            let least = if input_slits { 2 } else { 1 };
+            if faces.len() >= least && faces.iter().all(|f| relations.kept_faces.contains(f)) {
                 continue;
             }
         }
@@ -1129,8 +1136,9 @@ const MIN_SHIFT_CENTER_LENGTH_SQ: f64 = 1.0e6;
 /// manifold Booleans: the union of the operands' boxes (`brep` boxed in
 /// `primary_kernel`'s context, `other` in `other_kernel`'s; a failure is returned, where
 /// upstream left the box initialised, WR-586) gives a center; when its squared length
-/// exceeds `MIN_SHIFT_CENTER_LENGTH_SQ` the operands need the translation by `-center`. [`TemporaryBrepShift::apply`] is the
-/// second half (the boxes are computed before either operand moves, as upstream).
+/// exceeds `MIN_SHIFT_CENTER_LENGTH_SQ` the operands need the translation by `-center`.
+/// [`TemporaryBrepShift::apply`] is the second half (the boxes are computed before either
+/// operand moves, as upstream).
 ///
 /// # Errors
 ///
