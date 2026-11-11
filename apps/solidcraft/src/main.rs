@@ -1917,6 +1917,7 @@ mod viewport_tests {
             ctx.set_zoom_factor(zoom);
             let mut app = super::SolveApp::new(super::Session::default(), Default::default());
             app.integrated_titlebar = true;
+            app.preferences.language = "en".into();
             for (command, params) in [
                 ("sketch.create", json!({"plane":"XY"})),
                 ("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})),

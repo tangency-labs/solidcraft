@@ -1660,6 +1660,38 @@ fn thread_size_suggestion_follows_picks_without_overwriting_manual_sizes() {
     assert_eq!(apply_commands(&app, &d).unwrap()[0].1["designation"], "M8x1");
 }
 
+/// Automatic sizing stays per face when a new dialog retains several shaft diameters.
+#[test]
+fn threads_on_different_selected_diameters_keep_each_faces_automatic_size() {
+    let mut app = app_with(json!([
+        {"command":"solid.cylinder","params":{"radius":4,"height":10}},
+        {"command":"solid.cylinder","params":{"base":[30,0,0],"radius":10,"height":10}}
+    ]));
+    let small = thread_face(&app, "Body1");
+    let large = thread_face(&app, "Body2");
+    let before = app.session.doc.to_json();
+    let d = start(&mut app, vec![small.clone(), large.clone()], "solid.thread");
+    assert_eq!(d.inputs[0].items, vec![small, large]);
+    assert!(matches!(&d.kind, Kind::Thread { designation, .. } if designation == "M8"));
+    assert_eq!(app.session.doc.to_json(), before, "suggesting a size is read-only");
+    let commands = apply_commands(&app, &d).unwrap();
+    assert_eq!(commands.len(), 1);
+    let (command, params) = &commands[0];
+    assert_eq!(command, "solid.thread");
+    assert_eq!(params["faces"].as_array().unwrap().len(), 2);
+    assert!(params.get("designation").is_none(), "each face must keep automatic sizing");
+    let reply = app.session.execute(command, params).unwrap();
+    let id = reply["feature"].as_u64().unwrap();
+    let state = app.session.model.state();
+    assert_eq!(state.threads.len(), 2);
+    for (thread, (body, expected)) in state.threads.iter().zip([("Body1", "M8"), ("Body2", "M20")]) {
+        assert_eq!(thread.body, body);
+        assert_eq!(thread.designation, expected);
+        assert!(!thread.internal);
+        assert_eq!(thread.feature, id, "different automatic sizes still belong to one feature");
+    }
+}
+
 #[test]
 fn thread_size_suggestion_reopens_without_changing_saved_thread_parameters() {
     for designation in [None, Some("M8"), Some("M8x1")] {
@@ -1675,6 +1707,7 @@ fn thread_size_suggestion_reopens_without_changing_saved_thread_parameters() {
         h.app.edit_feature(id);
         h.frames(2);
         let d = h.app.dialog.as_ref().unwrap();
+        assert!(!d.inputs[0].multi, "a saved single face keeps replacement clicks");
         assert!(matches!(&d.kind, Kind::Thread { designation: size, .. } if size == designation.unwrap_or("M8")), "{d:?}");
         let (command, params) = apply_commands(&h.app, d).unwrap().remove(0);
         h.app.session.execute(&command, &params).unwrap();

@@ -86,7 +86,19 @@ impl Checks {
                 .bodies
                 .iter()
                 .filter(|b| !before.bodies.iter().any(|old| old.body.same_shape(&b.body)))
-                .map(|b| (b.name.clone(), kernel::detach_kept(&b.body)))
+                .filter(|b| {
+                    let reused = super::checked_thread_output(&b.body);
+                    #[cfg(test)]
+                    if reused {
+                        super::cost_tests::count(|c| c.reused_checks += 1);
+                    }
+                    !reused
+                })
+                .map(|b| {
+                    #[cfg(test)]
+                    super::cost_tests::count(|c| c.detached_checks += 1);
+                    (b.name.clone(), kernel::detach_kept(&b.body))
+                })
                 .collect()
         })
     }
@@ -209,6 +221,46 @@ mod tests {
 
     fn checks() -> Checks {
         Checks { on: true, most: 4, running: VecDeque::new(), held: Vec::new(), refused: HashMap::new() }
+    }
+
+    /// Only an exact checked shape is excluded before detaching can copy its native form.
+    #[test]
+    fn checked_thread_outputs_are_excluded_before_the_native_check_is_detached() {
+        use super::super::{EvalValidationGuard, cost_tests, remember_checked_thread_output};
+        let body = kernel::box_solid(solidcore_record::Vec3::ZERO, solidcore_record::Vec3::new(2.0, 2.0, 2.0)).unwrap();
+        let equal_geometry = kernel::box_solid(solidcore_record::Vec3::ZERO, solidcore_record::Vec3::new(2.0, 2.0, 2.0)).unwrap();
+        let after = ModelState {
+            bodies: vec![ModelBody::new("Checked".into(), body.clone(), 1), ModelBody::new("Other".into(), equal_geometry, 1)],
+            ..ModelState::default()
+        };
+        let _scope = EvalValidationGuard::new(kernel::Validation::EachFeature);
+        kernel::check_kept(&body).unwrap();
+        remember_checked_thread_output("Checked", &body);
+        let mut detached = None;
+        let work = cost_tests::counted(|| detached = checks().detach(&ModelState::default(), &after));
+        let detached = detached.unwrap();
+        assert_eq!(work.detached_checks, 1, "only the other native shape is detached");
+        assert_eq!(work.reused_checks, 1);
+        assert_eq!(detached.len(), 1);
+        assert_eq!(detached[0].0, "Other");
+        assert!(super::super::run_kept(detached).is_ok(), "the other result still runs its full check");
+    }
+
+    /// Keeping a body's name cannot validate a later output that has another shape record.
+    #[test]
+    fn a_changed_thread_output_still_detaches_its_final_check() {
+        use super::super::{EvalValidationGuard, cost_tests, remember_checked_thread_output};
+        let body = kernel::box_solid(solidcore_record::Vec3::ZERO, solidcore_record::Vec3::new(2.0, 2.0, 2.0)).unwrap();
+        let changed = kernel::box_solid(solidcore_record::Vec3::ZERO, solidcore_record::Vec3::new(3.0, 2.0, 2.0)).unwrap();
+        let after = ModelState { bodies: vec![ModelBody::new("Part".into(), changed, 1)], ..ModelState::default() };
+        let _scope = EvalValidationGuard::new(kernel::Validation::EachFeature);
+        kernel::check_kept(&body).unwrap();
+        remember_checked_thread_output("Part", &body);
+        let mut detached = None;
+        let work = cost_tests::counted(|| detached = checks().detach(&ModelState::default(), &after));
+        assert_eq!(work.detached_checks, 1);
+        assert_eq!(work.reused_checks, 0);
+        assert!(super::super::run_kept(detached.unwrap()).is_ok());
     }
 
     /// A check that ends after the evaluation went on, with `r`.

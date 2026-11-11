@@ -107,6 +107,7 @@ pub use eval::{
 };
 pub use eval::{EvalCache, KeptResults};
 pub use expr::Expr;
+pub use feature_geometry::restored_thread_pick;
 pub use names::{BodyName, FeatureId, FeatureName, SketchId, copy_name};
 pub use params::{ParamRow, ParamUser, cycles, name_words_match};
 pub use points::{Dir, FacePick, Position, plain};

@@ -2415,15 +2415,24 @@ mod card_tests {
 
     fn list_settled(h: &mut Harness) {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        h.frames(2);
-        while (h.app.agent_chat.settings.listing.is_some() || h.app.agent_chat.settings.card_listing.is_some())
-            && std::time::Instant::now() < deadline
-        {
-            std::thread::sleep(std::time::Duration::from_millis(1));
+        let mut settled_frames = 0;
+        while settled_frames < 2 {
             h.frames(1);
+            let state = &h.app.agent_chat.settings;
+            // A dialog can have a replacement request ready while no worker is active.
+            let dialog_pending = state.add.as_ref().is_some_and(|add| {
+                add.kind == AddKind::Api
+                    && add.confirm_insecure_http.is_none()
+                    && (add.list_again || add.listing.as_ref().is_some_and(|key| !state.endpoint_models.contains_key(key)))
+            });
+            if state.listing.is_some() || state.card_listing.is_some() || dialog_pending {
+                assert!(std::time::Instant::now() < deadline, "model listing did not settle");
+                settled_frames = 0;
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            } else {
+                settled_frames += 1;
+            }
         }
-        assert!(h.app.agent_chat.settings.listing.is_none());
-        h.frames(2);
     }
 
     /// The dialog lists an endpoint's models off the window's thread, once per endpoint and key, of

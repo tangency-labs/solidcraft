@@ -37,6 +37,11 @@ pub(super) struct Counts {
     pub miss_intersects: usize,
     pub cut_tools: usize,
     pub surfaces: usize,
+    pub kept_checks: usize,
+    pub detached_checks: usize,
+    pub reused_checks: usize,
+    pub thread_cuts: usize,
+    pub grouped_thread_fallbacks: usize,
 }
 
 thread_local! {
@@ -55,6 +60,11 @@ thread_local! {
             miss_intersects: 0,
             cut_tools: 0,
             surfaces: 0,
+            kept_checks: 0,
+            detached_checks: 0,
+            reused_checks: 0,
+            thread_cuts: 0,
+            grouped_thread_fallbacks: 0,
         })
     };
 }
@@ -95,7 +105,7 @@ fn searched(f: impl FnOnce()) -> usize {
 }
 
 /// The work `f` does on this thread.
-fn counted(f: impl FnOnce()) -> Counts {
+pub(super) fn counted(f: impl FnOnce()) -> Counts {
     COUNTS.with(|c| c.set(Counts::default()));
     f();
     COUNTS.with(Cell::get)
@@ -1416,7 +1426,525 @@ fn marking(p: Vec3) -> FeatureKind {
         steep_flank: Default::default(),
         continuous_flanks: false,
         old_auto_size: false,
+        additional_faces: Vec::new(),
+        target_bodies: Vec::new(),
     }
+}
+
+/// Four selected cylindrical faces on one plate for a grouped Thread feature.
+fn grouped_thread_document(modeled: bool) -> (Document, u64) {
+    let mut doc = Document::new("grouped threads");
+    block(&mut doc, "Part", Vec3::new(-15.0, -15.0, 0.0), [30.0, 30.0, 2.0]);
+    let mut faces = Vec::new();
+    for (x, y) in [(-8.0, -8.0), (8.0, -8.0), (-8.0, 8.0), (8.0, 8.0)] {
+        doc.add_feature(
+            FeatureKind::Cylinder {
+                base: point_expr(Vec3::new(x, y, 2.0)),
+                axis: Dir(Vec3::Z),
+                radius: "3".into(),
+                height: "4".into(),
+                operation: Operation::Join,
+                references: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+        faces.push(FacePick(Vec3::new(x + 3.0, y, 5.0)));
+    }
+    let mut kind = marking(faces.remove(0).0);
+    if let FeatureKind::Thread { additional_faces, modeled: value, designation, .. } = &mut kind {
+        *additional_faces = faces;
+        *value = modeled;
+        *designation = Some("M6x0.75".into());
+    }
+    let id = doc.add_feature(kind, None).unwrap();
+    (doc, id)
+}
+
+/// A cosmetic group keeps one feature and one marking at each selected cylindrical face.
+#[test]
+fn a_grouped_thread_marks_every_selected_face_with_one_feature() {
+    let (doc, id) = grouped_thread_document(false);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert_eq!(model.result(id).unwrap().error, None);
+    assert_eq!(doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::Thread { .. })).count(), 1);
+    let state = model.state();
+    let threads = &state.threads;
+    assert_eq!(threads.len(), 4);
+    assert!(threads.iter().all(|t| t.feature == id && t.designation == "M6x0.75"));
+    let origins: Vec<_> = threads.iter().map(|t| (t.axis_point.x.round() as i64, t.axis_point.y.round() as i64)).collect();
+    assert_eq!(origins, vec![(-8, -8), (8, -8), (-8, 8), (8, 8)]);
+}
+
+#[test]
+fn a_pattern_replays_every_grouped_thread_pick_on_its_named_body() {
+    let (mut doc, id) = grouped_thread_document(false);
+    if let FeatureKind::Thread { additional_faces, target_bodies, .. } = &mut doc.feature_mut(id).unwrap().kind {
+        additional_faces.truncate(1);
+        *target_bodies = vec!["Part".into(); 2];
+    }
+    let pattern = doc
+        .add_feature(
+            FeatureKind::Pattern {
+                features: vec![FeatureId(id)],
+                pattern: PatternKind::Rectangular {
+                    dir1: Dir(Vec3::Y),
+                    count1: "2".into(),
+                    spacing1: "16".into(),
+                    dir2: None,
+                    count2: None,
+                    spacing2: None,
+                    alignment: solidcraft_sketch::PatternAlignment::Right,
+                    alignment2: Default::default(),
+                    reversed: false,
+                    reversed2: false,
+                },
+                bodies: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert_eq!(model.result(id).unwrap().error, None);
+    assert_eq!(model.result(pattern).unwrap().error, None);
+    let state = model.state();
+    let copied: Vec<_> = state
+        .threads
+        .iter()
+        .filter(|t| t.feature == pattern)
+        .map(|t| (t.body.as_str(), t.axis_point.x.round() as i64, t.axis_point.y.round() as i64))
+        .collect();
+    assert_eq!(copied, vec![("Part", -8, 8), ("Part", 8, 8)]);
+}
+
+/// A pattern replays the continuous-flank group and reuses only its final exact output.
+#[test]
+fn a_patterned_modelled_thread_reuses_its_final_check() {
+    let (mut doc, id) = grouped_thread_document(true);
+    if let FeatureKind::Thread { additional_faces, target_bodies, continuous_flanks, .. } = &mut doc.feature_mut(id).unwrap().kind {
+        additional_faces.truncate(1);
+        *target_bodies = vec!["Part".into(); 2];
+        *continuous_flanks = true;
+    }
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|result| result.error.is_none()));
+    let pattern = doc
+        .add_feature(
+            FeatureKind::Pattern {
+                features: vec![FeatureId(id)],
+                pattern: PatternKind::Rectangular {
+                    dir1: Dir(Vec3::Y),
+                    count1: "2".into(),
+                    spacing1: "16".into(),
+                    dir2: None,
+                    count2: None,
+                    spacing2: None,
+                    alignment: solidcraft_sketch::PatternAlignment::Right,
+                    alignment2: Default::default(),
+                    reversed: false,
+                    reversed2: false,
+                },
+                bodies: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    let result = model.result(pattern).unwrap();
+    assert_eq!(result.error, None);
+    assert_eq!(work.thread_cuts, 1);
+    assert_eq!(work.kept_checks, 1);
+    assert_eq!(work.detached_checks, 0);
+    assert_eq!(work.reused_checks, 1);
+    let body = &result.state.body("Part").unwrap().body;
+    assert!(!super::checked_thread_output(body), "the pattern's receipt ends with its scope");
+    kernel::check_kept(body).unwrap();
+}
+
+/// Different points on the same cylindrical interval create just one marking.
+#[test]
+fn duplicate_grouped_thread_picks_resolve_to_one_marking() {
+    let (mut doc, id) = grouped_thread_document(false);
+    if let FeatureKind::Thread { additional_faces, .. } = &mut doc.feature_mut(id).unwrap().kind {
+        additional_faces.push(FacePick(Vec3::new(-8.0, -5.0, 4.0)));
+    }
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert_eq!(model.result(id).unwrap().error, None);
+    assert_eq!(model.state().threads.len(), 4);
+}
+
+/// A malformed saved group is bounded before expensive geometry is visited.
+#[test]
+fn an_oversized_grouped_thread_is_refused() {
+    let (mut doc, id) = grouped_thread_document(false);
+    if let FeatureKind::Thread { additional_faces, .. } = &mut doc.feature_mut(id).unwrap().kind {
+        *additional_faces = vec![FacePick(Vec3::new(-5.0, -8.0, 5.0)); 1024];
+    }
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.result(id).unwrap().error.as_ref().is_some_and(|e| e.contains("at most 1024")));
+    assert!(model.state().threads.is_empty());
+}
+
+/// A body-qualified modelled group cuts every selected shaft within one timeline feature.
+#[test]
+fn a_grouped_modelled_thread_cuts_every_selected_shaft() {
+    let (mut doc, id) = grouped_thread_document(true);
+    if let FeatureKind::Thread { target_bodies, .. } = &mut doc.feature_mut(id).unwrap().kind {
+        *target_bodies = vec!["Part".into(); 4];
+    }
+    assert_eq!(doc.feature(id).unwrap().kind.input_bodies(), ["Part"; 4]);
+    assert_eq!(doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::Thread { .. })).count(), 1);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert_eq!(model.result(id).unwrap().error, None);
+    let before = model.state_before(id);
+    let after = model.state();
+    assert_eq!(after.bodies.len(), 1);
+    assert!(!before.bodies[0].body.same_shape(&after.bodies[0].body));
+    assert!(after.threads.is_empty(), "modelled threads are geometry, not tap markings");
+    let base_volume = kernel::measure(&before.bodies[0].body).unwrap().volume;
+    let threaded_volume = kernel::measure(&after.bodies[0].body).unwrap().volume;
+    assert!(base_volume - threaded_volume > 8.0, "all four grooves remove material");
+    for (x, y) in [(-8.0, -8.0), (8.0, -8.0), (-8.0, 8.0), (8.0, 8.0)] {
+        // Four phases at radius 2.9 mm, inside the original 3 mm shaft. A 0.75 mm
+        // ISO groove spans more than a quarter turn there, so at least one is cut.
+        let probes = [Vec3::new(x + 2.9, y, 4.0), Vec3::new(x, y + 2.9, 4.0), Vec3::new(x - 2.9, y, 4.0), Vec3::new(x, y - 2.9, 4.0)];
+        assert!(probes.iter().all(|p| before.bodies[0].body.classify_point(*p).unwrap() == kernel::PointClass::Inside));
+        assert!(
+            probes.iter().any(|p| after.bodies[0].body.classify_point(*p).unwrap() == kernel::PointClass::Outside),
+            "shaft at ({x}, {y}) is threaded"
+        );
+        assert_eq!(after.bodies[0].body.classify_point(Vec3::new(x, y, 4.0)).unwrap(), kernel::PointClass::Inside, "the shaft core stays intact");
+        assert_eq!(
+            after.bodies[0].body.classify_point(Vec3::new(x, y, 1.0)).unwrap(),
+            kernel::PointClass::Inside,
+            "the supporting plate stays intact"
+        );
+    }
+}
+
+/// A bad later pick refuses the complete group rather than leaving earlier markings behind.
+#[test]
+fn an_invalid_grouped_thread_face_keeps_the_starting_model() {
+    let (mut doc, id) = grouped_thread_document(false);
+    if let FeatureKind::Thread { additional_faces, .. } = &mut doc.feature_mut(id).unwrap().kind {
+        additional_faces.push(FacePick(Vec3::new(1000.0, 0.0, 0.0)));
+    }
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.result(id).unwrap().error.is_some());
+    assert!(model.state().threads.is_empty());
+    let before = model.state_before(id);
+    assert!(model.state().bodies[0].body.same_shape(&before.bodies[0].body));
+}
+
+/// Evaluate just the grouped thread, after its unchanged support geometry is already cached.
+fn grouped_thread_work(mode: kernel::Validation, refuse_trim: bool, continuous_flanks: bool) -> (Counts, Model, u64) {
+    let (mut doc, id) = grouped_thread_document(true);
+    if let FeatureKind::Thread { continuous_flanks: value, .. } = &mut doc.feature_mut(id).unwrap().kind {
+        *value = continuous_flanks;
+    }
+    doc.feature_mut(id).unwrap().suppressed = true;
+    let mut model = Model::new();
+    model.set_validation(mode);
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|result| result.error.is_none()));
+    doc.feature_mut(id).unwrap().suppressed = false;
+    let prior = super::thread::replace_empty_trim_for_test(refuse_trim);
+    let work = counted(|| model.evaluate(&doc));
+    super::thread::replace_empty_trim_for_test(prior);
+    assert_eq!(model.result(id).unwrap().error, None, "the grouped thread builds");
+    kernel::check_kept(&model.state().bodies[0].body).unwrap();
+    (work, model, id)
+}
+
+/// Separate tools share one target cut and one full native-result validity check.
+#[test]
+fn a_grouped_modelled_thread_cuts_and_checks_each_target_once() {
+    use solidcore_record::brep::Surface;
+    for continuous_flanks in [false, true] {
+        let (work, model, _) = grouped_thread_work(kernel::Validation::EachFeature, false, continuous_flanks);
+        assert_eq!(work.thread_cuts, 1);
+        assert_eq!(work.kept_checks, 1);
+        assert_eq!(work.detached_checks, 0, "reuse the check before copying a native body for another check");
+        assert_eq!(work.reused_checks, 1);
+        assert_eq!(work.grouped_thread_fallbacks, 0);
+        let state = model.state();
+        assert_eq!(state.bodies.len(), 1);
+        let flanks = state.bodies[0]
+            .body
+            .record()
+            .faces
+            .iter()
+            .filter(|f| f.nurbs.is_none() && matches!(f.surface, Surface::Spline { .. } | Surface::RationalSpline { .. }))
+            .count();
+        if continuous_flanks {
+            assert_eq!(flanks, 8, "two whole flank faces on each of the four shafts");
+        } else {
+            assert!(flanks > 8, "historical half-turn faces remain segmented");
+        }
+    }
+}
+
+/// A refused grouped trim returns to the existing per-face square-stop fallback.
+#[test]
+fn a_grouped_thread_keeps_the_established_shoulder_fallback() {
+    let (work, model, id) = grouped_thread_work(kernel::Validation::EachFeature, true, false);
+    assert_eq!(work.grouped_thread_fallbacks, 1);
+    assert_eq!(work.thread_cuts, 4, "the failed preparation never cut a target");
+    assert_eq!(work.kept_checks + work.detached_checks, 1, "the fallback still validates its final body");
+    assert_eq!(work.reused_checks, 0);
+    assert!(model.result(id).unwrap().warning.as_ref().is_some_and(|w| w.contains("left uncut")));
+}
+
+/// Explicit Off mode keeps the original sequential orchestration and shoulder checks.
+#[test]
+fn grouped_thread_batching_does_not_change_explicit_off_validation() {
+    let (work, _, _) = grouped_thread_work(kernel::Validation::Off, false, false);
+    assert_eq!(work.thread_cuts, 4);
+    assert_eq!(work.kept_checks, 4);
+    assert_eq!(work.reused_checks, 0);
+    assert_eq!(work.grouped_thread_fallbacks, 0);
+}
+
+/// A grouped thread over custom support bodies, with only its work counted.
+fn custom_grouped_thread_work(mut doc: Document, faces: &[Vec3]) -> (Counts, Model, u64) {
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|result| result.error.is_none()));
+    let mut kind = marking(faces[0]);
+    if let FeatureKind::Thread { additional_faces, modeled, designation, .. } = &mut kind {
+        *additional_faces = faces.iter().skip(1).copied().map(FacePick).collect();
+        *modeled = true;
+        *designation = Some("M6x0.75".into());
+    }
+    let id = doc.add_feature(kind, None).unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    assert_eq!(model.result(id).unwrap().error, None, "the custom grouped thread builds");
+    for body in &model.state().bodies {
+        kernel::check_kept(&body.body).unwrap();
+    }
+    (work, model, id)
+}
+
+/// Distinct target bodies each keep one final cut and one complete native-result check.
+#[test]
+fn a_grouped_modelled_thread_cuts_and_checks_each_of_two_bodies_once() {
+    let mut doc = Document::new("two threaded bodies");
+    let mut faces = Vec::new();
+    for (name, x) in [("First", 0.0), ("Second", 40.0)] {
+        block(&mut doc, name, Vec3::new(x - 10.0, -10.0, 0.0), [20.0, 20.0, 2.0]);
+        let boss = doc
+            .add_feature(
+                FeatureKind::Cylinder {
+                    base: point_expr(Vec3::new(x, 0.0, 2.0)),
+                    axis: Dir(Vec3::Z),
+                    radius: "3".into(),
+                    height: "4".into(),
+                    operation: Operation::Join,
+                    references: Vec::new(),
+                },
+                None,
+            )
+            .unwrap();
+        doc.feature_mut(boss).unwrap().participants = vec![name.into()];
+        faces.push(Vec3::new(x + 3.0, 0.0, 5.0));
+    }
+    let (work, model, id) = custom_grouped_thread_work(doc, &faces);
+    assert_eq!(work.thread_cuts, 2);
+    assert_eq!(work.kept_checks, 2);
+    assert_eq!(work.reused_checks, 2);
+    assert_eq!(work.grouped_thread_fallbacks, 0);
+    let before = model.state_before(id);
+    let after = model.state();
+    assert_eq!(after.bodies.len(), 2);
+    for body in &after.bodies {
+        assert!(!body.body.same_shape(&before.body(&body.name).unwrap().body));
+    }
+}
+
+/// Overlapping exact boxes are not proof that two diagonally separated grooves can be joined.
+#[test]
+fn overlapping_grouped_thread_tool_boxes_keep_the_sequential_cutter() {
+    let mut doc = Document::new("diagonal threads");
+    block(&mut doc, "Part", Vec3::new(-10.0, -10.0, 0.0), [25.0, 25.0, 2.0]);
+    let mut faces = Vec::new();
+    for (x, y) in [(0.0, 0.0), (5.0, 5.0)] {
+        doc.add_feature(
+            FeatureKind::Cylinder {
+                base: point_expr(Vec3::new(x, y, 2.0)),
+                axis: Dir(Vec3::Z),
+                radius: "3".into(),
+                height: "4".into(),
+                operation: Operation::Join,
+                references: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+        faces.push(Vec3::new(x + 3.0, y, 5.0));
+    }
+    let (work, model, _) = custom_grouped_thread_work(doc, &faces);
+    assert_eq!(work.thread_cuts, 2, "no grouped target cut runs when the tool boxes overlap");
+    assert_eq!(work.kept_checks, 2, "each ordinary shoulder cut still checks its own result");
+    assert_eq!(work.reused_checks, 1, "only the last unchanged output satisfies the feature-end check");
+    assert_eq!(work.grouped_thread_fallbacks, 0, "an unproven grouping is not a kernel failure");
+    assert_eq!(model.state().bodies.len(), 1);
+}
+
+/// EachStep explicitly retains the existing per-face sequence and its shoulder checks.
+#[test]
+fn grouped_thread_batching_does_not_change_explicit_each_step_validation() {
+    let (work, _, _) = grouped_thread_work(kernel::Validation::EachStep, false, false);
+    assert_eq!(work.thread_cuts, 4);
+    assert_eq!(work.kept_checks, 4);
+    assert_eq!(work.reused_checks, 0);
+    assert_eq!(work.grouped_thread_fallbacks, 0);
+}
+
+/// The validation work of a short modelled thread on a shaft joined to a plate.
+fn shoulder_thread_checks(tip: crate::thread_forms::ThreadTip, continuous_flanks: bool) -> Counts {
+    let mut doc = Document::new("shoulder checks");
+    block(&mut doc, "Part", Vec3::new(-10.0, -10.0, 0.0), [20.0, 20.0, 2.0]);
+    doc.add_feature(
+        FeatureKind::Cylinder {
+            base: point_expr(Vec3::new(0.0, 0.0, 2.0)),
+            axis: Dir(Vec3::Z),
+            radius: "3".into(),
+            height: "4".into(),
+            operation: Operation::Join,
+            references: Vec::new(),
+        },
+        None,
+    )
+    .unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|result| result.error.is_none()));
+    let mut kind = marking(Vec3::new(3.0, 0.0, 5.0));
+    if let FeatureKind::Thread { modeled, designation, tip: value, continuous_flanks: flanks, .. } = &mut kind {
+        *modeled = true;
+        *designation = Some("M6x0.75".into());
+        *value = tip;
+        *flanks = continuous_flanks;
+    }
+    let id = doc.add_feature(kind, None).unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    let result = model.result(id).unwrap();
+    assert_eq!(result.error, None, "the thread builds");
+    assert!(!super::checked_thread_output(&result.state.bodies[0].body), "the receipt ends with the feature");
+    // The retained native result passed inside the feature. Its reconstructed record must also pass.
+    kernel::check_kept(&result.state.bodies[0].body).unwrap();
+    work
+}
+
+/// A successful shoulder check already satisfies EachFeature's native-result check contract.
+#[test]
+fn a_modelled_thread_reuses_its_successful_shoulder_check() {
+    for continuous_flanks in [false, true] {
+        let work = shoulder_thread_checks(crate::thread_forms::ThreadTip::None, continuous_flanks);
+        assert_eq!(work.kept_checks, 1, "check the native shoulder result once");
+        assert_eq!(work.detached_checks, 0);
+        assert_eq!(work.reused_checks, 1, "the unchanged final output reuses that success");
+    }
+}
+
+/// A tip boolean creates another result; the shoulder's success cannot validate that result.
+#[test]
+fn a_chamfered_thread_still_checks_its_changed_output() {
+    let work = shoulder_thread_checks(crate::thread_forms::ThreadTip::Both, false);
+    assert_eq!(work.kept_checks + work.detached_checks, 2, "check the shoulder and the later chamfered result");
+    assert_eq!(work.reused_checks, 0);
+}
+
+/// Continuous flanks cut the chamfer first, so the checked shoulder result includes the tip.
+#[test]
+fn a_continuous_chamfered_thread_reuses_its_final_shoulder_check() {
+    let work = shoulder_thread_checks(crate::thread_forms::ThreadTip::Both, true);
+    assert_eq!(work.kept_checks, 1);
+    assert_eq!(work.detached_checks, 0);
+    assert_eq!(work.reused_checks, 1);
+}
+
+/// Replaying a thread on one body retains one latest receipt, while other bodies keep theirs.
+#[test]
+fn thread_check_receipts_retain_only_the_latest_shape_per_body() {
+    use super::{EvalValidationGuard, checked_thread_output, remember_checked_thread_output};
+    let original = kernel::box_solid(Vec3::ZERO, Vec3::new(2.0, 2.0, 2.0)).unwrap();
+    let replacement = kernel::box_solid(Vec3::ZERO, Vec3::new(3.0, 2.0, 2.0)).unwrap();
+    let other = kernel::box_solid(Vec3::new(10.0, 0.0, 0.0), Vec3::new(2.0, 2.0, 2.0)).unwrap();
+    let _scope = EvalValidationGuard::new(kernel::Validation::EachFeature);
+    let retained = || {
+        super::CHECKED_THREAD_OUTPUTS.with(|cell| {
+            let checked = cell.take();
+            let count = checked.as_ref().map_or(0, BTreeMap::len);
+            cell.set(checked);
+            count
+        })
+    };
+    remember_checked_thread_output("First", &original);
+    remember_checked_thread_output("Second", &other);
+    assert_eq!(retained(), 2);
+    for _ in 0..16 {
+        remember_checked_thread_output("First", &replacement);
+        assert_eq!(retained(), 2, "updates replace the previous receipt for this body");
+    }
+    assert!(!checked_thread_output(&original), "the earlier shape is no longer retained");
+    assert!(checked_thread_output(&replacement.clone()));
+    assert!(checked_thread_output(&other), "another body keeps its own receipt");
+    let equal_geometry = kernel::box_solid(Vec3::ZERO, Vec3::new(3.0, 2.0, 2.0)).unwrap();
+    assert!(!checked_thread_output(&equal_geometry), "equal geometry is not the checked record");
+}
+
+/// Successful checks belong to one exact shape and one feature, including nested and failed work.
+#[test]
+fn thread_check_receipts_are_scoped_to_one_feature_and_validation_mode() {
+    use super::{EvalValidationGuard, checked_thread_output, remember_checked_thread_output};
+    use kernel::Validation;
+    let body = kernel::box_solid(Vec3::ZERO, Vec3::new(2.0, 2.0, 2.0)).unwrap();
+    let other = kernel::box_solid(Vec3::ZERO, Vec3::new(2.0, 2.0, 2.0)).unwrap();
+    let original_mode = super::EVAL_VALIDATION.get();
+    remember_checked_thread_output("Part", &body);
+    assert!(!checked_thread_output(&body), "there is no receipt outside a feature");
+    {
+        let _outer = EvalValidationGuard::new(Validation::EachFeature);
+        remember_checked_thread_output("Part", &body);
+        assert!(checked_thread_output(&body.clone()));
+        assert!(!checked_thread_output(&other), "equal geometry is not the same result");
+        for mode in [Validation::EachStep, Validation::Off, Validation::EachFeature] {
+            let _inner = EvalValidationGuard::new(mode);
+            assert!(!checked_thread_output(&body), "the inner feature has no outer receipts");
+            remember_checked_thread_output("Other", &other);
+            assert_eq!(checked_thread_output(&other), mode == Validation::EachFeature);
+        }
+        assert!(checked_thread_output(&body));
+        assert!(!checked_thread_output(&other));
+        let failed: std::result::Result<(), &str> = {
+            let _inner = EvalValidationGuard::new(Validation::EachFeature);
+            remember_checked_thread_output("Other", &other);
+            Err("feature failed")
+        };
+        assert!(failed.is_err());
+        assert!(checked_thread_output(&body));
+        assert!(!checked_thread_output(&other), "failed feature receipts do not escape");
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _inner = EvalValidationGuard::new(Validation::EachFeature);
+            remember_checked_thread_output("Other", &other);
+            panic!("feature unwound");
+        }));
+        assert!(unwound.is_err());
+        assert!(checked_thread_output(&body));
+        assert!(!checked_thread_output(&other), "unwound feature receipts do not escape");
+        let on_worker = body.clone();
+        std::thread::spawn(move || assert!(!checked_thread_output(&on_worker), "worker scopes stay separate")).join().unwrap();
+    }
+    assert_eq!(super::EVAL_VALIDATION.get(), original_mode);
+    assert!(!checked_thread_output(&body));
 }
 
 /// A tap marking looks for its cylinder in the bodies near it only: each body searched was

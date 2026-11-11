@@ -533,16 +533,61 @@ fn removed_note(gone: &[Vec3]) -> String {
 thread_local! {
     /// Current feature evaluation validation mode (`EachStep`, `EachFeature`, or `Off`).
     static EVAL_VALIDATION: std::cell::Cell<kernel::Validation> = const { std::cell::Cell::new(kernel::Validation::EachFeature) };
+    /// Latest successful thread output per body, confined to the current feature evaluation.
+    static CHECKED_THREAD_OUTPUTS: std::cell::Cell<Option<BTreeMap<String, Body>>> = const { std::cell::Cell::new(None) };
 }
 
-/// Restores `EVAL_VALIDATION` to its previous value when dropped.
-struct EvalValidationGuard(kernel::Validation);
+/// Restores the validation mode and the enclosing feature's checks on scope exit.
+struct EvalValidationGuard {
+    mode: kernel::Validation,
+    checked: Option<BTreeMap<String, Body>>,
+}
+
+impl EvalValidationGuard {
+    fn new(mode: kernel::Validation) -> Self {
+        Self { mode: EVAL_VALIDATION.replace(mode), checked: CHECKED_THREAD_OUTPUTS.replace(Some(BTreeMap::new())) }
+    }
+}
 
 impl Drop for EvalValidationGuard {
-    /// Restores the saved validation mode on scope exit.
     fn drop(&mut self) {
-        EVAL_VALIDATION.set(self.0);
+        CHECKED_THREAD_OUTPUTS.set(self.checked.take());
+        EVAL_VALIDATION.set(self.mode);
     }
+}
+
+/// Record only an unchanged final thread output after its native check succeeded.
+fn remember_checked_thread_output(name: &str, body: &Body) {
+    if EVAL_VALIDATION.get() != kernel::Validation::EachFeature {
+        return;
+    }
+    CHECKED_THREAD_OUTPUTS.with(|cell| {
+        let mut checked = cell.take();
+        if let Some(bodies) = checked.as_mut() {
+            bodies.insert(name.to_owned(), body.clone());
+        }
+        cell.set(checked);
+    });
+}
+
+/// A successful thread check can replace only the same feature's check of that exact shape.
+fn checked_thread_output(body: &Body) -> bool {
+    if EVAL_VALIDATION.get() != kernel::Validation::EachFeature {
+        return false;
+    }
+    CHECKED_THREAD_OUTPUTS.with(|cell| {
+        let checked = cell.take();
+        let found = checked.as_ref().is_some_and(|bodies| bodies.values().any(|old| old.same_shape(body)));
+        cell.set(checked);
+        found
+    })
+}
+
+/// Run a full check, counting the calls separately from reused successful thread checks.
+fn check_feature_body(body: &Body) -> kernel::Result<()> {
+    #[cfg(test)]
+    cost_tests::count(|c| c.kept_checks += 1);
+    kernel::check_kept(body)
 }
 
 /// A blend's refusal as too large (`why`) with the largest `size` (radius, distance) that fits,
@@ -1880,7 +1925,12 @@ fn check_kept(before: &ModelState, after: &ModelState) -> kernel::Result<()> {
         if before.bodies.iter().any(|old| old.body.same_shape(&b.body)) {
             continue;
         }
-        kernel::check_kept(&b.body).map_err(|e| kernel::KernelError::Failed(format!("body `{}`: {e}", b.name)))?;
+        if checked_thread_output(&b.body) {
+            #[cfg(test)]
+            cost_tests::count(|c| c.reused_checks += 1);
+            continue;
+        }
+        check_feature_body(&b.body).map_err(|e| kernel::KernelError::Failed(format!("body `{}`: {e}", b.name)))?;
     }
     Ok(())
 }
@@ -3424,7 +3474,7 @@ impl Model {
                         }
                     }
                     None => kernel::guard(&f.name, || {
-                        let _val_guard = EvalValidationGuard(EVAL_VALIDATION.replace(validation));
+                        let _val_guard = EvalValidationGuard::new(validation);
                         let (r, deferred) =
                             kernel::validating(validation, || eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair));
                         r.map_err(|e| match e {
@@ -8412,6 +8462,36 @@ fn copied_features(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelSta
     }
 }
 
+/// Resolve the ordered identity domain of a new plural Thread using only input-state metadata.
+/// Legacy threads have no domain. Repeated bodies are intentional: several faces may share one body.
+fn thread_target_bodies<'a>(doc: &Document, st: &'a ModelState, kind: &FeatureKind) -> Result<Option<Vec<&'a ModelBody>>> {
+    let FeatureKind::Thread { target_bodies, additional_faces, .. } = kind else { return Ok(None) };
+    if target_bodies.is_empty() {
+        return Ok(None);
+    }
+    if target_bodies.len() != 1 + additional_faces.len() || target_bodies.len() > 1024 {
+        return Err(DocError::Invalid("a Thread target body is required for each selected face".into()));
+    }
+    let mut owner = None;
+    let mut bodies = Vec::with_capacity(target_bodies.len());
+    for name in target_bodies {
+        let mut matches = st.bodies.iter().filter(|body| body.name == name.as_ref());
+        let body = matches
+            .next()
+            .filter(|_| matches.next().is_none())
+            .ok_or_else(|| DocError::Invalid(format!("Thread target body `{name}` is missing or ambiguous")))?;
+        let component = doc.model_body_component(body);
+        if owner.is_some_and(|owner| owner != component) {
+            return Err(DocError::Invalid(
+                "all faces of one Thread feature must belong to the same component; create a separate Thread feature for each component".into(),
+            ));
+        }
+        owner = Some(component);
+        bodies.push(body);
+    }
+    Ok(Some(bodies))
+}
+
 /// The copies a pattern or mirror of `features` at `mats` makes, source by source: the source
 /// feature, the transforms of its copies, and the instance number of its first copy less one.
 /// A source that is itself a pattern or mirror of features (#395) stands for what it copied: its
@@ -8423,6 +8503,7 @@ fn copied_features(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelSta
 /// when `f` names no face; an error when a name no longer finds its face (the feature asks for
 /// it to be picked again), or when the frame the faces are looked up in cannot be made.
 fn with_named_face_points(doc: &Document, state: &ModelState, f: &Feature) -> Result<Option<(Feature, Vec<String>)>> {
+    thread_target_bodies(doc, state, &f.kind)?;
     // Cylindrical emboss resolves its named face in the selected body's frame
     // and certifies an analytic anchor; mesh projection here would undo that.
     let explicit_emboss = matches!(&f.kind, FeatureKind::Emboss { face: Some(_), .. });
@@ -8443,13 +8524,20 @@ fn with_named_face_points(doc: &Document, state: &ModelState, f: &Feature) -> Re
         if n.is_empty() {
             continue;
         }
-        match crate::name_lookup::locate_face_on_body(&fst, f.kind.face_body(), n, *p) {
+        let scoped;
+        let input = if let Some(body) = f.kind.thread_target_body(k) {
+            scoped = ModelState { bodies: fst.bodies.iter().filter(|b| b.name == body).cloned().collect(), ..ModelState::default() };
+            &scoped
+        } else {
+            &fst
+        };
+        match crate::name_lookup::locate_face_on_body(input, f.kind.thread_target_body(k).or_else(|| f.kind.face_body()), n, *p) {
             Some(hit) => {
                 if let Some(note) = hit.note(n) {
                     notes.push(note);
                 }
                 match (k, hole_axis) {
-                    (0, Some(axis)) => match hit.along(&fst, *p, axis) {
+                    (0, Some(axis)) => match hit.along(input, *p, axis) {
                         Some(q) => *p = q,
                         // The place still lies on the face (the axis may run along it).
                         None if hit.on_point => {}
@@ -8458,7 +8546,7 @@ fn with_named_face_points(doc: &Document, state: &ModelState, f: &Feature) -> Re
                             p.x, p.y, p.z
                         )),
                     },
-                    _ => *p = hit.pick_point(&fst, *p),
+                    _ => *p = hit.pick_point(input, *p),
                 }
             }
             None => return Err(DocError::reselect(n.as_str())),
@@ -8654,8 +8742,12 @@ fn replay(
                 let mut copy = (*src).clone();
                 copy.id = f.id;
                 copy.face_names.clear();
-                if let FeatureKind::Thread { face, from, up_to, .. } = &mut copy.kind {
+                if let FeatureKind::Thread { face, additional_faces, from, up_to, .. } = &mut copy.kind {
                     face.0 = crate::apply_point(m, face.0);
+                    // Keep each explicit target body while moving its picked point.
+                    for q in additional_faces {
+                        q.0 = crate::apply_point(m, q.0);
+                    }
                     if let Some(q) = from {
                         q.0 = crate::apply_point(m, q.0);
                     }
@@ -10509,6 +10601,20 @@ pub fn face_point_state<'a>(doc: &Document, st: &'a ModelState, kind: &FeatureKi
 /// own coordinates there, where a part inserted twice has a face at the same point in each.
 pub fn face_point_names(doc: &Document, st: &ModelState, kind: &FeatureKind, comp: u64) -> Result<Vec<String>> {
     let pts = kind.face_points();
+    if thread_target_bodies(doc, st, kind)?.is_some() {
+        let mut names = Vec::with_capacity(pts.len());
+        for (slot, point) in pts.iter().enumerate() {
+            let scoped;
+            let input = if let Some(body) = kind.thread_target_body(slot) {
+                scoped = ModelState { bodies: st.bodies.iter().filter(|b| b.name == body).cloned().collect(), ..ModelState::default() };
+                &scoped
+            } else {
+                st
+            };
+            names.push(crate::naming::face_names_at(input, std::slice::from_ref(point)).pop().unwrap_or_default());
+        }
+        return Ok(names);
+    }
     if !matches!(kind, FeatureKind::Extrude { .. } | FeatureKind::Revolve { .. }) {
         let own = ModelState { bodies: st.bodies.iter().filter(|b| doc.model_body_component(b) == comp).cloned().collect(), ..ModelState::default() };
         let names = crate::naming::face_names_at(&own, &pts);
