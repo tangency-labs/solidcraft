@@ -267,9 +267,7 @@ mod tests {
     /// whose conversion waits on other open work or a later part of the slice.
     #[test]
     fn the_surface_routines_build_no_bare_statuses() {
-        const WAITING: [(&str, usize); 1] = [
-            ("surface/plane/p2.rs", 1),
-        ];
+        const WAITING: [(&str, usize); 1] = [("surface/plane/p2.rs", 1)];
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut files = vec![root.join("surface.rs")];
         let mut dirs = vec![root.join("surface")];
