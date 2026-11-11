@@ -20,6 +20,7 @@ These are settled and override older text in this RFC, in #1221 and in the draft
 4. **Plugin UI is host-drawn, and only where the app allows it.** Forms come from declared input schemas drawn with the design-forms mechanism in [#15100](https://github.com/tangency-labs/solidcraft/issues/15100). A plugin ships no UI code.
 5. **Phase 1 sets the shape, so it gets a design review.** The phase 1 PR is reviewed on its design (WIT, manifest, permissions, limits) before phase 2 starts. See section 8.
 6. **Examples and converters live outside this repository.** The repo carries the WIT, the host and the tests, not each plugin.
+7. **Agent-first.** Plugins are written by agents from a spec, docs and the API. See section 6a.
 
 ## 1. Goals and non-goals
 
