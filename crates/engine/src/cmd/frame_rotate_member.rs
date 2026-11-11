@@ -87,7 +87,8 @@ fn parallel_angle(s: &Session, plane: &PlaneRef, member: &end_cap::Member, targe
     })?;
     let current = solidcraft_doc::frame::member_turns(&s.doc, &vals, member.feature)
         .get(&member.line)
-        .map_or(0.0, |(_, radians)| radians.rem_euclid(std::f64::consts::TAU));
+        // Reduced to [-180°, 180°), so -30° stays -30° and a huge turn keeps its delta.
+        .map_or(0.0, |(_, radians)| (radians + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI);
     let degrees = (current + delta).to_degrees();
     if !degrees.is_finite() {
         return Err(bad(cmd, "the turn is out of range"));
