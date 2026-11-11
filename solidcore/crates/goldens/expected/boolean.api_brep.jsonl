@@ -639,7 +639,7 @@
 {"case":"issue1036_coincident_skins_difference","deferred":null,"error":null,"ints":{"record":[1,1,0,0,0,0,1,0,1,1,0],"status":[0]},"topology":null,"values":{}}
 {"case":"issue1036_coincident_skins_difference_measured","deferred":null,"error":null,"ints":{"record":[1,1,0,0,0,0,1,0,1,1,0],"status":[0]},"topology":null,"values":{"measures":[0.0,0.0,0.0]}}
 {"case":"issue1036_coincident_skins_intersection","deferred":null,"error":null,"ints":{"record":{"blocks":[[24,210]],"n":18},"status":[0]},"topology":null,"values":{}}
-{"case":"issue1036_coincident_skins_intersection_measured","deferred":null,"error":null,"ints":{"record":{"blocks":[[24,210]],"n":18},"status":[0]},"topology":null,"values":{"measures":[0.0,26136.26817288386,3.0,557.4792567413689,754.1618241502823,3788.6586869951957]}}
+{"case":"issue1036_coincident_skins_intersection_measured","deferred":null,"error":null,"ints":{"record":{"blocks":[[24,210]],"n":18},"status":[0]},"topology":null,"values":{"measures":[0.0,26136.268243625735,3.0,557.4792567413687,754.1618241502823,3788.658561467813]}}
 {"case":"issue1036_coincident_skins_union","deferred":null,"error":null,"ints":{"record":[],"status":[1001]},"topology":null,"values":{}}
 {"case":"issue1036_coincident_skins_union_measured","deferred":null,"error":null,"ints":{"record":[],"status":[1001]},"topology":null,"values":{}}
 {"case":"issue1059_grazing_bar_union_alpha-0.1_beta30","deferred":null,"error":null,"ints":{"record":{"blocks":[[128,990]],"n":18},"status":[0]},"topology":null,"values":{"measures":{"blocks":[[1884.1560500054973,1884.1560500054973,13106.7310003794]],"n":19}}}

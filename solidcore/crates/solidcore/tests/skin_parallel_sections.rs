@@ -1,19 +1,20 @@
 //! A skin through sections on parallel planes stays between its first and last planes.
 //!
-//! Its cross-section parameters are the planes' distances from the first
-//! (`parallel_section_params` in `primitive_creation::p3::construct`): every section's
-//! height above the first plane is then one linear function of the parameter, which the
-//! interpolating skin reproduces exactly, so every control point of the side faces lies
-//! between the two end planes and, by the convex hull, so does the skin. Checked on the
-//! control points, never on samples.
+//! The skin takes upstream's chord-length parameters across the sections. Only where that
+//! skin's control points leave the slab between the first and last planes does it take the
+//! planes' distances from the first instead (`SectionPlanes` in
+//! `primitive_creation::p3::construct`): every section's height above the first plane is then
+//! one linear function of the parameter, which the interpolating skin reproduces exactly, so
+//! every control point of the side faces lies between the two end planes and, by the convex
+//! hull, so does the skin. Checked on the control points, never on samples. A skin whose
+//! chord-length control points stay in the slab is built as before, bit for bit.
 //!
-//! The sections are a carved top's: wide steps sideways for small steps up near the
-//! first section (0.6 high, up to 16 in), larger ones after. Chord-length parameters
-//! (upstream's) come from the whole motion of the control points, so the first step's
-//! parameter is far larger than its share of the height; the cubic interpolant of the
-//! height then overshoots: control points fall 0.24 below the first plane, the skin dips
-//! behind it and crosses its own start cap, and its union with a slab whose top is that
-//! cap's plane comes out with a negative volume.
+//! The carved top's sections take wide steps sideways for small steps up near the first
+//! section (0.6 high, up to 16 in), larger ones after. Chord-length parameters come from the
+//! whole motion of the control points, so the first step's parameter is far larger than its
+//! share of the height; the cubic interpolant of the height overshoots: control points fall
+//! 0.24 below the first plane, the skin dips behind it and crosses its own start cap, and its
+//! union with a slab whose top is that cap's plane comes out with a negative volume.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -128,5 +129,55 @@ fn a_skin_through_parallel_sections_joins_a_slab_under_its_first_section() {
     assert!(
         (v - want).abs() <= 1e-7 * want,
         "union volume {v} against slab + skin {want}"
+    );
+}
+
+/// A closed cubic through 16 points of the circle of radius `r` about the z axis at height
+/// `z`.
+fn circle(z: f64, r: f64) -> Curve {
+    let mut pts: Vec<Point3> = (0..16)
+        .map(|j| {
+            let t = 2.0 * std::f64::consts::PI * f64::from(j) / 16.0;
+            Point3::new(r * t.cos(), r * t.sin(), z)
+        })
+        .collect();
+    pts.extend(pts.first().copied());
+    Curve::from(
+        BSplineCurve::interpolate_points(&pts, None, 3, None, None, true, ParamMethod::ChordLength)
+            .unwrap(),
+    )
+}
+
+/// The capped skin through circles given as (height, radius), and its volume.
+fn round_loft(sections: &[(f64, f64)]) -> f64 {
+    let mut k = Kernel::default();
+    let cs: Vec<Curve> = sections.iter().map(|&(z, r)| circle(z, r)).collect();
+    let refs: Vec<Option<&Curve>> = cs.iter().map(Some).collect();
+    let mut b = create_skin_primitive(&mut k, &vec![1; cs.len()], &refs, 3, true)
+        .unwrap()
+        .brep;
+    volume(&k, &mut b)
+}
+
+/// The volumes of the chord-length skins below, measured with the skin as it was before
+/// plane distances (solidcore at origin/main of 2026-11-11).
+const WAIST_VOLUME: f64 = 16791.357595192487;
+const BULGE_VOLUME: f64 = 272283.3927004977;
+
+/// Lofts whose chord-length skins stay between their end planes keep their shape: a waist
+/// (r 20, 10, 20 at z 0, 5, 40) that plane distances would pinch through its axis, and four
+/// unevenly spaced sections that plane distances would grow by 29%. Their volumes are the
+/// chord-length skins', as built before plane distances existed.
+#[test]
+fn lofts_that_stay_between_their_end_planes_keep_their_chord_length_shape() {
+    let waist = round_loft(&[(0.0, 20.0), (5.0, 10.0), (40.0, 20.0)]);
+    assert!(
+        (waist - WAIST_VOLUME).abs() <= 1e-9 * WAIST_VOLUME,
+        "waist {waist}"
+    );
+    let bulge = round_loft(&[(0.0, 30.0), (10.0, 50.0), (60.0, 15.0), (80.0, 25.0)]);
+    assert!(
+        (bulge - BULGE_VOLUME).abs() <= 1e-9 * BULGE_VOLUME,
+        "bulge {bulge}"
     );
 }

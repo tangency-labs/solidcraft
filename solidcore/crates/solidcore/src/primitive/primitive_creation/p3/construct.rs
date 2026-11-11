@@ -27,8 +27,9 @@
 //! [`PrimitiveCreation::create_curve_sweep_with_placements`] reports the rigid motions
 //! carrying the profile onto the first, middle and last sections.
 //! Not upstream: [`PrimitiveCreation::create_skin_from_faces`] skins sections on
-//! parallel planes at their planes' distances (`parallel_section_params`), not at
-//! chord-length parameters, so the skin stays between its first and last planes.
+//! parallel planes at their planes' distances (`SectionPlanes`) where the chord-length
+//! skin's control points leave the slab between the first and last planes, so the skin
+//! stays between them; every other skin keeps the chord-length parameters.
 //! **Statuses pass on** (opt-in `Kernel::fixes.sweep_statuses_pass_on`, WR-662;
 //! SolidCraft change, tangency-labs/smlib c8f6a31): the statuses upstream drops here
 //! are returned instead (`SER`).
@@ -76,82 +77,115 @@ fn face_surface(a: &impl PrimitiveAccess, face: FaceRef) -> Result<&Surface> {
         .ok_or_else(|| SolidError::primitive_missing(OP, "the face's surface"))
 }
 
-/// Not upstream: the skinning parameters of section faces that are planes, three or more,
-/// all parallel to the first (within `EFF_ZERO_DEG`) and strictly in order along its
-/// normal: each plane's distance from the first along that normal over the last's, so 0 at
-/// the first section and 1 at the last. `None` for any other sections, which keep
-/// upstream's chord-length parameters.
+/// Not upstream: section faces that are planes, three or more, all parallel to the first
+/// (within `EFF_ZERO_DEG`) and strictly in order along its normal.
 ///
-/// Every section's points then share one height `d_i = t_i * d_last` above the first
-/// plane, a linear function of the parameter. A spline space of degree 1 or more holds the
-/// linear functions, so the interpolating skin reproduces that height exactly: its control
-/// rows lie on the planes at their Greville abscissae's heights, and by the convex hull the
-/// skin stays between the first and last planes. Chord-length parameters come from the
-/// control points' whole motion: where sections move far sideways for a small step along
-/// the normal (a carved top's first steps), the height's interpolant overshoots, the skin
-/// dips behind its first section's plane and crosses its own cap face there, and a union
-/// with a body whose face is coplanar with that cap fails (solidcraft: a carved top lofted
-/// onto its slab).
-fn parallel_section_params(
-    a: &impl PrimitiveAccess,
-    faces: &[FaceRef],
-) -> Result<Option<Vec<f64>>> {
-    use crate::math::EFF_ZERO_DEG;
-    use crate::surface::surface::SurfaceKind;
-    if faces.len() < 3 {
-        return Ok(None);
-    }
-    let mut planes = Vec::new();
-    for &face in faces {
-        let k = a.kernel(face.0)?;
-        match face_surface(a, face)?.kind_with_nurb(k)? {
-            SurfaceKind::Plane(p) => {
-                let (point, normal, _) = p.is_planar();
-                planes.push((point, normal));
-            }
-            _ => return Ok(None),
-        }
-    }
-    let Some(&(origin, normal)) = planes.first() else {
-        return Ok(None);
-    };
-    let Ok(unit) = normal.unitize() else {
-        return Ok(None);
-    };
-    let mut heights = Vec::new();
-    for &(point, n) in &planes {
-        if !unit.is_parallel_to(n, EFF_ZERO_DEG) {
+/// A skin through them is meant to stay in the slab between the first and last planes.
+/// Upstream's chord-length parameters come from the control points' whole motion: where
+/// sections move far sideways for a small step along the normal (a carved top's first
+/// steps), the height's interpolant overshoots, the skin dips behind its first section's
+/// plane and crosses its own cap face, and a union with a body whose face is coplanar
+/// with that cap fails. [`SectionPlanes::leaves`] finds that on the chord-length skin's
+/// control points; only then is the skin built again at [`SectionPlanes::params`].
+struct SectionPlanes {
+    origin: crate::math::Point3,
+    unit: Vec3,
+    /// The last plane's height above the first along `unit` (non-zero).
+    last: f64,
+    /// Each plane's height over `last`: 0 at the first section, 1 at the last.
+    params: Vec<f64>,
+}
+
+impl SectionPlanes {
+    /// `None` for sections that are not all on parallel planes in order.
+    fn of(a: &impl PrimitiveAccess, faces: &[FaceRef]) -> Result<Option<Self>> {
+        use crate::math::EFF_ZERO_DEG;
+        use crate::surface::surface::SurfaceKind;
+        if faces.len() < 3 {
             return Ok(None);
         }
-        heights.push(unit.dot(point - origin));
+        let mut planes = Vec::new();
+        for &face in faces {
+            let k = a.kernel(face.0)?;
+            match face_surface(a, face)?.kind_with_nurb(k)? {
+                SurfaceKind::Plane(p) => {
+                    let (point, normal, _) = p.is_planar();
+                    planes.push((point, normal));
+                }
+                _ => return Ok(None),
+            }
+        }
+        let Some(&(origin, normal)) = planes.first() else {
+            return Ok(None);
+        };
+        let Ok(unit) = normal.unitize() else {
+            return Ok(None);
+        };
+        let mut heights = Vec::new();
+        for &(point, n) in &planes {
+            if !unit.is_parallel_to(n, EFF_ZERO_DEG) {
+                return Ok(None);
+            }
+            heights.push(unit.dot(point - origin));
+        }
+        let Some(&last) = heights.last() else {
+            return Ok(None);
+        };
+        // Strictly in order along the normal, either way (NaN fails every comparison).
+        let increasing = heights
+            .iter()
+            .zip(heights.iter().skip(1))
+            .all(|(p, q)| q > p);
+        let decreasing = heights
+            .iter()
+            .zip(heights.iter().skip(1))
+            .all(|(p, q)| q < p);
+        if !(increasing || decreasing) || !last.is_finite() || last == 0.0 {
+            return Ok(None);
+        }
+        let mut params: Vec<f64> = heights.iter().map(|h| h / last).collect();
+        // The ends exactly 0 and 1, as the interpolation's knot vector needs.
+        if let Some(f) = params.first_mut() {
+            *f = 0.0;
+        }
+        if let Some(l) = params.last_mut() {
+            *l = 1.0;
+        }
+        if !params.iter().all(|t| t.is_finite()) {
+            return Ok(None);
+        }
+        Ok(Some(Self {
+            origin,
+            unit,
+            last,
+            params,
+        }))
     }
-    let Some(&last) = heights.last() else {
-        return Ok(None);
-    };
-    // Strictly in order along the normal, either way (NaN fails every comparison).
-    let increasing = heights
-        .iter()
-        .zip(heights.iter().skip(1))
-        .all(|(p, q)| q > p);
-    let decreasing = heights
-        .iter()
-        .zip(heights.iter().skip(1))
-        .all(|(p, q)| q < p);
-    if !(increasing || decreasing) || !last.is_finite() || last == 0.0 {
-        return Ok(None);
+
+    /// Whether a control point of `surface` lies farther than `tol` outside the slab
+    /// between the first and last planes. A non-rational skin lies in its control points'
+    /// convex hull, so with none outside it stays in the slab (within `tol`); a rational
+    /// one (positive weights) likewise, read on its Euclidean points.
+    fn leaves(&self, surface: &BSplineSurface, tol: f64) -> Result<bool> {
+        let (low, high) = if self.last > 0.0 {
+            (-tol, self.last + tol)
+        } else {
+            (self.last - tol, tol)
+        };
+        let (_, _, points) = surface.control_points()?;
+        Ok(points.into_iter().any(|p| {
+            let h = self.unit.dot(p.to_euclid() - self.origin);
+            // NaN counts as leaving.
+            !(h >= low && h <= high)
+        }))
     }
-    let mut params: Vec<f64> = heights.iter().map(|h| h / last).collect();
-    // The ends exactly 0 and 1, as the interpolation's knot vector needs.
-    if let Some(f) = params.first_mut() {
-        *f = 0.0;
+
+    /// Plane-distance parameters (each section's height is then one linear function of
+    /// its parameter, which the interpolation reproduces exactly: the control rows lie
+    /// on the planes at their Greville abscissae's heights and the skin in the slab).
+    fn params(&self) -> &[f64] {
+        &self.params
     }
-    if let Some(l) = params.last_mut() {
-        *l = 1.0;
-    }
-    if !params.iter().all(|t| t.is_finite()) {
-        return Ok(None);
-    }
-    Ok(Some(params))
 }
 
 /// Parameters for `CreateBlendPrimitive`.
@@ -373,28 +407,51 @@ impl PrimitiveCreation {
             layers.resize(skin_curves.len(), 0);
             untraced = Some(NotTraced::OpenProfiles);
         }
-        // Not upstream: sections on parallel planes are skinned at their planes' distances.
-        let section_params = parallel_section_params(a, faces)?;
-        let mut traced: Vec<(FaceId, Vec<usize>)> = Vec::new();
-        let mut made = Vec::new();
+        // Each layer's skin at chord-length parameters, as upstream.
+        let skin = |k: &crate::kernel::Kernel, curves: &[BSplineCurve], params: Option<&[f64]>| {
+            BSplineSurface::create_skinned_surface(
+                k,
+                curves,
+                SkinnedSurfaceOptions {
+                    approx_tol,
+                    degree,
+                    deriv_surfs: Some([None, None]),
+                    section_params: params,
+                    ..Default::default()
+                },
+            )
+        };
+        let mut layer_curves = Vec::new();
+        let mut surfaces = Vec::new();
         for layer in 0..layer_count {
-            let curves: Vec<_> = skin_curves
+            let curves: Vec<BSplineCurve> = skin_curves
                 .iter()
                 .zip(&layers)
                 .filter(|(_, l)| **l == layer)
                 .map(|(c, _)| c.clone())
                 .collect();
-            let surface = BSplineSurface::create_skinned_surface(
-                a.kernel(brep)?,
-                &curves,
-                SkinnedSurfaceOptions {
-                    approx_tol,
-                    degree,
-                    deriv_surfs: Some([None, None]),
-                    section_params: section_params.as_deref(),
-                    ..Default::default()
-                },
-            )?;
+            surfaces.push(skin(a.kernel(brep)?, &curves, None)?);
+            layer_curves.push(curves);
+        }
+        // Not upstream: sections on parallel planes whose chord-length skin leaves the slab
+        // between the first and last planes are skinned at their planes' distances, every
+        // layer alike (`SectionPlanes`).
+        if let Some(planes) = SectionPlanes::of(&*a, faces)? {
+            let tol = a.brep(brep)?.tolerance();
+            let mut leaves = false;
+            for s in &surfaces {
+                leaves = leaves || planes.leaves(s, tol)?;
+            }
+            if leaves {
+                surfaces.clear();
+                for curves in &layer_curves {
+                    surfaces.push(skin(a.kernel(brep)?, curves, Some(planes.params()))?);
+                }
+            }
+        }
+        let mut traced: Vec<(FaceId, Vec<usize>)> = Vec::new();
+        let mut made = Vec::new();
+        for (layer, surface) in surfaces.into_iter().enumerate() {
             // (the trace: the surface's knots across the sections, V)
             let surface_knots = trace
                 .is_some()
