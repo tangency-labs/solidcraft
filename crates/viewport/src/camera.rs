@@ -29,6 +29,13 @@ impl Mat4 {
     pub fn to_f32(&self) -> [[f32; 4]; 4] {
         self.0.map(|c| c.map(|x| x as f32))
     }
+    /// Each column's depth turned round (w - z) for a reversed depth buffer, worked out here in
+    /// f64. With a near plane far smaller than the scene (the eye inside a large assembly's box)
+    /// z and w differ only past an f32's digits, and turning them round after [`Mat4::to_f32`]
+    /// leaves every point at the far plane.
+    pub fn turned_depth_f32(&self) -> [f32; 4] {
+        self.0.map(|c| (c[3] - c[2]) as f32)
+    }
 }
 
 /// Named view orientations.
@@ -230,7 +237,8 @@ pub struct Camera {
     pub roll: f64,
     /// Distance from target to eye.
     pub distance: f64,
-    /// Vertical field of view (radians); 0 = orthographic.
+    /// Vertical field of view (radians); 0 = orthographic, also when a camera leaves it out.
+    #[serde(default)]
     pub fov: f64,
     /// The world's up axis.
     #[serde(default)]
@@ -639,6 +647,31 @@ fn wrap_half_turn(a: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// With the eye inside a large assembly's box the near plane is tiny beside the scene. The
+    /// depth turned round in f64 still tells a nearer point from a farther one in f32; turned
+    /// round after the f32 conversion both land on the far plane.
+    #[test]
+    fn turned_depth_keeps_its_order_with_the_eye_inside_the_scene() {
+        let cam = Camera { target: Vec3::new(54091.0, 1654.2, -695.2), distance: 13261.2, yaw: -0.785, pitch: 0.615, fov: 0.6, ..Camera::default() };
+        let bounds = Bounds { min: Vec3::new(-2000.0, -90000.0, -2000.0), max: Vec3::new(120000.0, 90000.0, 6000.0) };
+        let vp = cam.view_proj_bounds(1.6, &bounds);
+        let (m, turned) = (vp.to_f32(), vp.turned_depth_f32());
+        let depth = |p: Vec3, row: [f32; 4]| {
+            let v = [p.x as f32, p.y as f32, p.z as f32, 1.0];
+            let w: f32 = (0..4).map(|c| m[c][3] * v[c]).sum();
+            (0..4).map(|c| row[c] * v[c]).sum::<f32>() / w
+        };
+        let back = cam.basis().2;
+        let (near, far) = (cam.target + back * 5.0, cam.target - back * 5.0);
+        let (dn, df) = (depth(near, turned), depth(far, turned));
+        assert!(dn > df && df > 0.0, "nearer {dn:e}, farther {df:e}");
+        let late = [0, 1, 2, 3].map(|c| m[c][3] - m[c][2]);
+        assert!(
+            depth(near, late) <= depth(far, late) || depth(near, late) <= 0.0,
+            "the f32 turn is exact here; this test no longer covers the fault"
+        );
+    }
 
     /// Orbiting about a point keeps it on its pixel, with and without perspective and roll.
     #[test]

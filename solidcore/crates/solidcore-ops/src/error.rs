@@ -131,6 +131,17 @@ pub enum Error {
         /// The longest distance that works.
         largest: Option<f64>,
     },
+    /// A loft guided by rails whose guided edges were asked within `asked` of their rails: at
+    /// the most wires asked, `wires`, the bound the kernel proved was still `reached`
+    /// (`solidcore::sweep::loft_rails`).
+    RailPastTolerance {
+        /// The tolerance asked.
+        asked: f64,
+        /// The largest bound proved between a rail and the skin.
+        reached: f64,
+        /// The wires (sections and stations) at the cap.
+        wires: usize,
+    },
     /// The kernel found its own state inconsistent part way through a call, or was called
     /// before the preparation it needs.
     Exception,
@@ -187,8 +198,9 @@ pub enum Error {
         /// The least radius that rounds it.
         smallest: f64,
     },
-    /// A corner's setback that stops short of where the rails of the rounds beside an edge
-    /// cross it (the kernel's `BlendRefusal::SetbackTooShort`).
+    /// A corner's setback too short for the corner: it stops short of where the rails of the
+    /// rounds beside an edge cross it, or its fill is not certified at it (the kernel's
+    /// `BlendRefusal::SetbackTooShort`, whose `why` says which).
     SetbackTooShort {
         /// The corner's vertex index.
         vertex: usize,
@@ -215,6 +227,134 @@ pub enum Error {
         /// The bound below which an angle meets the other face.
         largest: f64,
     },
+    /// An offset, shell, thicken, sheet offset or draft the kernel refuses with a reason of
+    /// its own (its `OffsetFailure`, other than those [`Error::WallsTouch`],
+    /// [`Error::WallFolds`] and [`Error::Unsupported`] carry): why, and the face it names, by
+    /// its record index where the call takes the body's [`crate::Order`] (else by its index
+    /// among the body's faces), when it names one the body holds.
+    OffsetRefused {
+        /// The face the refusal names.
+        face: Option<usize>,
+        /// Why.
+        why: OffsetRefusal,
+    },
+}
+
+/// Why the kernel refuses an offset or a draft ([`Error::OffsetRefused`]), as its
+/// `OffsetFailure` names it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum OffsetRefusal {
+    /// The face's offset by `distance` is not proved regular, and no wall size would help:
+    /// the face bends towards that side nowhere the kernel's sizing looked, so no radius of
+    /// curvature limits the wall, and the proof ran out (not a wall thicker than the face
+    /// curves, [`Error::WallFolds`]).
+    NotCertified {
+        /// The offset distance asked for (signed).
+        distance: f64,
+    },
+    /// The face's offset by `distance` collapses onto a line or point: the face has a radius
+    /// of curvature `radius` on the displaced side that the distance reaches.
+    Collapses {
+        /// The offset distance asked for (signed).
+        distance: f64,
+        /// The radius of curvature the face attains on the displaced side.
+        radius: f64,
+    },
+    /// Loops of the face's offset cross in a way the offset does not resolve: how.
+    LoopsCross {
+        /// How they cross.
+        crossing: solidcore::error::offset::LoopCrossing,
+    },
+    /// The offset distance is not a finite length at least the body's tolerance, the
+    /// smallest distance it resolves.
+    DistanceUnresolved {
+        /// The distance asked for.
+        distance: f64,
+        /// The smallest distance the body resolves.
+        resolution: f64,
+    },
+    /// The offset body's tolerance would be nonzero but no more than the effective zero: one
+    /// no body can hold.
+    ToleranceUnresolved {
+        /// The tolerance asked for.
+        tolerance: f64,
+    },
+    /// The face meets itself across a seam, and the surface the operation gives it is not
+    /// closed there.
+    SeamOpened,
+    /// The faces beside an edge meet on an exact curve that could not be cut into its pieces.
+    ExactCurveUncut,
+    /// In a local operation, the new surfaces of the face and of its neighbour across an
+    /// edge meet nowhere near the edge, so the edge cannot be found again.
+    FacesApart,
+    /// How far the surfaces beside an edge or at a vertex of the face must be extended to
+    /// meet has no certified bound (a pair or corner of kinds it does not bound yet): refused
+    /// before anything changed.
+    ReachUncertified,
+    /// An offset face has a gap in its loops, and the segment that would bridge it is not
+    /// established within tolerance.
+    LoopGapUncertified,
+    /// The body built fails what the input did not: what.
+    Unsound {
+        /// What the built body fails.
+        what: solidcore::error::offset::Unsoundness,
+    },
+    /// A reason this version of ops does not name yet: the kernel's own statement of it.
+    Other {
+        /// The kernel's statement of its reason.
+        message: String,
+    },
+}
+
+impl std::fmt::Display for OffsetRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OffsetRefusal::NotCertified { distance } => {
+                write!(f, "its offset by {distance} is not proved regular")
+            }
+            OffsetRefusal::Collapses { distance, radius } => write!(
+                f,
+                "its offset by {distance} collapses (a radius of curvature {radius})"
+            ),
+            OffsetRefusal::LoopsCross { crossing } => {
+                write!(f, "its offset's loops cross ({crossing:?})")
+            }
+            OffsetRefusal::DistanceUnresolved {
+                distance,
+                resolution,
+            } => write!(
+                f,
+                "the distance {distance} is below the body's resolution {resolution}"
+            ),
+            OffsetRefusal::ToleranceUnresolved { tolerance } => {
+                write!(f, "the tolerance {tolerance} is one no body can hold")
+            }
+            OffsetRefusal::SeamOpened => write!(f, "its surface opens across its seam"),
+            OffsetRefusal::ExactCurveUncut => {
+                write!(f, "an exact curve between extended faces could not be cut")
+            }
+            OffsetRefusal::FacesApart => {
+                write!(
+                    f,
+                    "its new surface and a neighbour's meet nowhere near their edge"
+                )
+            }
+            OffsetRefusal::ReachUncertified => {
+                write!(
+                    f,
+                    "how far its neighbours extend to meet it has no certified bound"
+                )
+            }
+            OffsetRefusal::LoopGapUncertified => {
+                write!(
+                    f,
+                    "a gap in its offset's loops cannot be bridged within tolerance"
+                )
+            }
+            OffsetRefusal::Unsound { what } => write!(f, "the body built is unsound ({what:?})"),
+            OffsetRefusal::Other { message } => write!(f, "{message}"),
+        }
+    }
 }
 
 /// Why an edge has no blend ([`Error::EdgeNotBlendable`]), as the kernel names it
@@ -282,6 +422,14 @@ impl std::fmt::Display for Error {
             Error::Empty => write!(f, "the result is empty"),
             Error::NotSolid => write!(f, "the result is not a closed solid"),
             Error::NoRoom => write!(f, "no room"),
+            Error::RailPastTolerance {
+                asked,
+                reached,
+                wires,
+            } => write!(
+                f,
+                "the loft's guided edges were asked within {asked} of their rails; at {wires} wires the bound proved is {reached}"
+            ),
             Error::WallsTouch => write!(f, "the offset's walls meet"),
             Error::TooLarge { size, kind, .. } => {
                 write!(f, "too large: the largest {kind:?} that fits is {size}")
@@ -384,6 +532,10 @@ impl std::fmt::Display for Error {
                 f,
                 "the chamfer angle {angle} rad of edge {edge} runs past the other face: below {largest} rad fits"
             ),
+            Error::OffsetRefused { face, why } => match face {
+                Some(face) => write!(f, "the offset is refused at face {face}: {why}"),
+                None => write!(f, "the offset is refused: {why}"),
+            },
         }
     }
 }
@@ -413,7 +565,7 @@ pub(crate) fn status(e: SolidError) -> Error {
         SolidError::PortInvariant { .. } | SolidError::PreparationRequired { .. } => {
             Error::Exception
         }
-        // the kernel's statuses (Upstream, Nlib, the refusals the families map further), and any
+        // the kernel's statuses (Upstream, Failed, the refusals the families map further), and any
         // kind the kernel adds by the status it stands for
         e => Error::Status(e.sm_status().unwrap_or(SM_ERR)),
     }

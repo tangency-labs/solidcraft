@@ -11,13 +11,14 @@ use solidcraft_sketch::CurveKind;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, str_, string_list};
+use crate::schema::inspect::{BodiesDetail, DocumentBodies, TimelineDetail, TimelineRow};
 use crate::schema::inspect::{
     BodyFailure, BodyFeaturesParams, BodyFigures, BodyListParams, BodyMeasurement, BodyName, BodyNames, BodyOutcome, BoundingBox, CommandEntry,
     CommandsParams, CurveShape, DocumentBody, DocumentBodyDetail, DocumentInspectParams, DocumentInspectResult, DocumentParam, DocumentSketch,
     FaceCylinder, KernelCounts, ListedMaterial, MaterialAssignParams, MaterialAssignResult, MaterialListParams, MaterialListResult, MeasureParams,
     MeasureResult, MeasureTotal, Measured, MeasuredBodies, MeasuredBody, ModelBodyFeatures, ModelEdge, ModelEdges, ModelFace, ModelFaces,
     ModelThread, ModelThreads, ModelThreadsParams, SketchConstraint, SketchCurve, SketchInspectParams, SketchInspected, SketchPoint, SketchProfile,
-    SketchWire, TimelineEntry, WireArcInfo,
+    SketchWire, TimelineEntry, TimelineSummary, WireArcInfo,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -52,13 +53,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&MEASURE_CONTRACT)
         .output(output_schema_for::<MeasureResult>)
-        .params("bodies?: [names] (default all); names_only?: bool (each world body's name and its definition's, nothing measured) → closed per body; volume_mm3, center_of_mass, density_g_cm3 and mass_g only for closed, consistently oriented bodies; area, bbox and counts for all; total.open_bodies_skipped counts bodies excluded from volume/mass totals; or items: [1-2 selections] (face/edge: type, body, point; index optional) → length/area/volume; diameter, radius, circumference or arc_length/angle_deg of circles, arcs and cylinders; slot sizes; min (distance_mm, from, to), max, center_distance (centre to centre, or from an axis) and angle"),
+        .params("bodies?: [names] (default all); names_only?: bool (each world body's name and its definition's, nothing measured) → closed per body; volume_mm3, center_of_mass, density_g_cm3 and mass_g only for closed, consistently oriented bodies; area, bbox and counts for all; total.open_bodies_skipped counts bodies excluded from volume/mass totals; or items: [1-2 selections] (face/edge: type, body, and point on it or index from model.faces/model.edges, or both) → length/area/volume; a face's perimeter_mm, with outer_perimeter_mm and inner_perimeter_mm on a flat face with holes; diameter, radius, circumference or arc_length/angle_deg of circles, arcs and cylinders; slot sizes; min (distance_mm, from, to), max, center_distance (centre to centre, or from an axis) and angle"),
     CommandSpec::new("document.inspect", "Inspect Design", crate::checked!("document.inspect", inspect))
         .icon("inspect")
         .noundo()
         .contract(&DOCUMENT_INSPECT_CONTRACT)
         .output(output_schema_for::<DocumentInspectResult>)
-        .params("measure?: bool (include body measurements); sketch_counts?: bool (each sketch also gives its plane and its number of points and constraints)"),
+        .params(
+            "measure?: bool (include body measurements); sketch_counts?: bool (each sketch also gives its plane and its number of points and constraints); \
+             timeline?: true (default) | \"summary\" (each feature as id, name, type, with error, warning, suppressed and rolled_back only when set) | false (left out); \
+             bodies?: true (default) | \"names\" (only the body names, nothing measured) | false (left out)",
+        ),
     CommandSpec::new("document.revision", "Design Revision", revision).icon("inspect").noundo().params(
         "→ document_id (this open design's id: kept while it stays open, another for each design started or opened), \
          revision (moves whenever the design, what is hidden or a component's uncaptured position changes, \
@@ -428,6 +433,23 @@ fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Opti
             holes: p.hole_curves.iter().map(|h| solidcraft_sketch::distinct_curves(h)).collect(),
         })
         .collect();
+    // Planar loops the 3D sketch curves close in planes of their own (#741): the plane is given
+    // as an origin and a unit normal, and the centroid is in the same frame as the sketch plane.
+    let profiles_3d: Vec<Value> = ss
+        .profiles_3d
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            json!({
+                "index": i,
+                "area_mm2": p.area,
+                "plane": { "origin": p.plane.origin, "normal": p.plane.normal() },
+                "centroid": p.centroid,
+                "curves": p.outer_curves,
+                "holes": p.hole_curves,
+            })
+        })
+        .collect();
     let wires = sk
         .wires
         .iter()
@@ -458,6 +480,7 @@ fn sketch_json(s: &Session, world: &solidcraft_doc::ModelState, id: u64) -> Opti
         points,
         constraints,
         profiles,
+        profiles_3d,
         links: serde_json::to_value(&sk.links).unwrap_or_default(),
         wires,
         visible: crate::view::sketch_shown(s, id),
@@ -526,6 +549,8 @@ fn revision(s: &mut Session, _p: &Value) -> Result<Value> {
 }
 
 fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
+    let timeline_detail = TimelineDetail::read(p.get("timeline")).map_err(|e| bad("document.inspect", e))?;
+    let bodies_detail = BodiesDetail::read(p.get("bodies")).map_err(|e| bad("document.inspect", e))?;
     let st = s.model.state();
     let (vals, perr) = s.doc.param_values();
     let params: Vec<DocumentParam> = s
@@ -543,27 +568,41 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
         })
         .collect();
     let marker = s.doc.marker.unwrap_or(s.doc.features.len());
-    let timeline: Vec<TimelineEntry> = s
-        .doc
-        .features
-        .iter()
-        .enumerate()
-        .map(|(i, f)| {
-            let r = s.model.result(f.id);
-            TimelineEntry {
-                id: f.id,
-                name: f.name.clone(),
-                kind: f.kind.type_name().to_string(),
-                suppressed: f.suppressed,
-                rolled_back: i >= marker,
-                error: r.and_then(|r| r.error.clone()),
-                warning: r.and_then(|r| r.warning.clone()),
-                ms: r.map(|r| r.ms),
-            }
-        })
-        .collect();
+    let timeline: Option<Vec<TimelineRow>> = (timeline_detail != TimelineDetail::Left).then(|| {
+        s.doc
+            .features
+            .iter()
+            .enumerate()
+            .map(|(i, f)| {
+                let r = s.model.result(f.id);
+                let (error, warning) = (r.and_then(|r| r.error.clone()), r.and_then(|r| r.warning.clone()));
+                if timeline_detail == TimelineDetail::Summary {
+                    return TimelineRow::Summary(TimelineSummary {
+                        id: f.id,
+                        name: f.name.clone(),
+                        kind: f.kind.type_name().to_string(),
+                        error,
+                        warning,
+                        suppressed: f.suppressed.then_some(true),
+                        rolled_back: (i >= marker).then_some(true),
+                    });
+                }
+                TimelineRow::Full(TimelineEntry {
+                    id: f.id,
+                    name: f.name.clone(),
+                    kind: f.kind.type_name().to_string(),
+                    suppressed: f.suppressed,
+                    rolled_back: i >= marker,
+                    error,
+                    warning,
+                    ms: r.map(|r| r.ms),
+                })
+            })
+            .collect()
+    });
     let definitions = s.model.state();
-    let with_measure = bool_(p, "measure").unwrap_or(false);
+    // Only bodies given in full are measured.
+    let with_measure = bool_(p, "measure").unwrap_or(false) && bodies_detail == BodiesDetail::Full;
     let with_counts = bool_(p, "sketch_counts").unwrap_or(false);
     // Each body is measured on its own: on all cores, in body order (as `inspect.measure`).
     let mut measured =
@@ -583,6 +622,11 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             DocumentBody { detail, visible: s.body_visible(&b.name), removed_later: s.body_removed_later(&b.name).then_some(true) }
         })
         .collect();
+    let bodies = match bodies_detail {
+        BodiesDetail::Full => Some(DocumentBodies::Full(bodies)),
+        BodiesDetail::Names => Some(DocumentBodies::Names(st.bodies.iter().map(|b| b.name.clone()).collect())),
+        BodiesDetail::Left => None,
+    };
     let sketches: Vec<DocumentSketch> = st
         .sketches
         .iter()

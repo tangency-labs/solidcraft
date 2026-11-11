@@ -892,7 +892,7 @@ pub fn set_member_uv_trim_curve(
 /// upstream dereferences) and [`SolidError::NotFound`] propagate.
 fn ignore_status<T>(r: Result<T>) -> Result<()> {
     match r {
-        Err(e) if matches!(e, SolidError::Upstream { .. }) || e.is_nurbs_failure() => Ok(()),
+        Err(e) if e.upstream_status().is_some() || e.is_nurbs_failure() => Ok(()),
         Err(e) => Err(e),
         Ok(_) => Ok(()),
     }
@@ -994,7 +994,10 @@ pub fn calc_max_edge_face_gap(
     // construct gap function
     let interval = b.edge(e)?.interval;
     if interval.min() == interval.max() {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "the edge's interval is a single point",
+        ));
     }
     let sample = {
         let curve = b
@@ -1666,7 +1669,10 @@ impl EvalNFunctions for FindStepOff<'_> {
         let dv_len_sq = s_dv.length_squared();
         // if we have a zero length tangent then we must fail
         if du_len_sq < EFF_ZERO_SQ || dv_len_sq < EFF_ZERO_SQ {
-            return Err(SolidError::sm_err(OP_STEP));
+            return Err(SolidError::topology_failed(
+                OP_STEP,
+                "the surface has a zero-length tangent",
+            ));
         }
 
         let s_minus_p = s_point - self.point;
@@ -2133,10 +2139,8 @@ mod tests {
         assert!(is_max_edge_face_gap_init(&b, a0).unwrap());
         // a degenerate edge interval fails before the gap function
         b.edge_mut(EdgeId::from_index(0)).unwrap().interval = Extent1d::from_value(0.5);
-        assert!(matches!(
-            calc_max_edge_face_gap(&k, &mut b, a0, true),
-            Err(SolidError::Upstream { .. })
-        ));
+        assert!(calc_max_edge_face_gap(&k, &mut b, a0, true)
+            .is_err_and(|e| e.upstream_status().is_some()));
     }
 
     #[test]

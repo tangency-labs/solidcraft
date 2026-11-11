@@ -110,8 +110,18 @@ fn fit_circle(pts: &[Vec3], tol: f64) -> Option<(Vec3, UnitVec3, f64)> {
 /// is the same edge (its ends on the polyline), else fitted to the polyline's points; and
 /// whether it is the exact one.
 fn edge_round(b: &solidcraft_doc::ModelBody, m: &Mesh, index: usize, whole: bool) -> Option<(Shape, bool)> {
+    edge_round_within(b, m, index, whole, edge_tolerance(m))
+}
+
+/// How far a point may lie from an exact curve and still count as on it, for mesh `m`.
+fn edge_tolerance(m: &Mesh) -> f64 {
+    (m.bounds().diagonal().max(1.0) * 1e-6).max(1e-9)
+}
+
+/// [`edge_round`] with the mesh's tolerance already worked out: finding it reads every vertex of
+/// the mesh, which a caller going through many edges should do once.
+fn edge_round_within(b: &solidcraft_doc::ModelBody, m: &Mesh, index: usize, whole: bool, tol: f64) -> Option<(Shape, bool)> {
     let pts = m.edges.get(index)?;
-    let tol = (m.bounds().diagonal().max(1.0) * 1e-6).max(1e-9);
     let exact = solidcraft_kernel::edge_circle(&b.body, index).filter(|c| {
         let ends = [pts.first(), pts.last()].into_iter().flatten().all(|p| p.dist(c.start).min(p.dist(c.end)) <= tol * 10.0);
         let on = pts.iter().all(|p| (p.dist(c.center) - c.radius).abs() <= tol * 10.0);
@@ -156,7 +166,7 @@ fn arc_points(center: Vec3, axis: UnitVec3, start: Vec3, angle: f64) -> Vec<Vec3
 
 /// The solved sketch holding a picked curve or point: `sketch` when given, else the active
 /// sketch, else the last sketch with that id.
-fn sketch_of<'a>(
+pub(super) fn sketch_of<'a>(
     s: &Session,
     st: &'a solidcraft_doc::ModelState,
     sketch: Option<u64>,
@@ -392,6 +402,19 @@ fn describe(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<I
             let normals: Vec<UnitVec3> = tris.iter().filter_map(|[a, b, c]| (*b - *a).cross(*c - *a).unit()).collect();
             let planar = normals.first().copied().filter(|n0| normals.iter().all(|n| n.dot(*n0) > 1.0 - 1e-6));
             let mut json = json!({"type": "face", "area_mm2": area, "planar": planar.is_some()});
+            // Each border edge counts for what Measure shows for that edge on its own.
+            let tol = edge_tolerance(&m);
+            let edge_len = |edge: usize| {
+                let polyline = m.edges.get(edge).map_or(0.0, |pts| polyline_len(pts));
+                edge_round_within(b, &m, edge, false, tol).map_or(polyline, |(shape, exact)| curve_len(&shape, exact, polyline))
+            };
+            if let Some(perimeter) = super::measure_exact::patch_perimeter(&m, &patch, planar.is_some(), edge_len) {
+                json["perimeter_mm"] = json!(perimeter.total);
+                if let Some((outer, inner)) = perimeter.outer_inner {
+                    json["outer_perimeter_mm"] = json!(outer);
+                    json["inner_perimeter_mm"] = json!(inner);
+                }
+            }
             let verts: Vec<Vec3> = tris.iter().flat_map(|t| t.iter().copied()).collect();
             let surface = solidcraft_kernel::face_surface(&b.body, *index);
             let shape = match surface {
@@ -464,6 +487,23 @@ pub(crate) fn shape_of(s: &Session, sel: &Sel) -> Option<(Shape, Vec<Vec3>, Vec<
         Geo::Points(p) => (item.shape, p, Vec::new()),
         Geo::Tris(t) => (item.shape, Vec::new(), t),
     })
+}
+
+/// What `selection.get` reports of a picked item beyond its identity: the measurement
+/// `inspect.measure` gives it (length, area, volume, radius…), its direction where it has one
+/// (a planar face's normal, a straight edge's direction) and, for an edge, whether it is a line,
+/// a circle, an arc or another curve.
+pub(super) fn resolve(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<(Value, Option<Vec3>)> {
+    let item = describe(s, st, sel)?;
+    let mut json = item.json;
+    if matches!(sel, Sel::Edge { .. }) {
+        json["curve"] = match item.shape {
+            Shape::Line { .. } => json!("line"),
+            Shape::Round { .. } => json.get("round").cloned().unwrap_or_else(|| json!("arc")),
+            _ => json!("other"),
+        };
+    }
+    Some((json, item.dir))
 }
 
 fn sample<T: Copy>(v: &[T], max: usize) -> Vec<T> {
@@ -635,12 +675,14 @@ fn corner_cos(a: Shape, b: Shape) -> Option<f64> {
     Some((end_a - p).normalized()?.dot((end_b - q).normalized()?))
 }
 
-/// A face or edge as `inspect.measure` takes it: the body and a point on the item; `index` is
-/// optional (the point finds the item).
+/// A face or edge as `inspect.measure` takes it: the body and a point on the item, its index, or
+/// both (the point finds the item without an index; an index alone names it, as `model.faces`
+/// and `model.edges` list it, even after a joint has moved the body) (#14011).
 #[derive(serde::Deserialize)]
 struct Pick {
     body: String,
-    point: Vec3,
+    #[serde(default)]
+    point: Option<Vec3>,
     #[serde(default)]
     index: Option<usize>,
 }
@@ -651,6 +693,12 @@ fn resolve_pick(st: &solidcraft_doc::ModelState, face: bool, value: &Value) -> s
     let Pick { body, point, index } = serde_json::from_value(value.clone()).map_err(|e| e.to_string())?;
     let b = st.body(&body).ok_or_else(|| format!("no body named '{body}'"))?;
     let m = b.mesh();
+    let point = match (point, index) {
+        (Some(p), _) => p,
+        (None, Some(i)) if face => face_tris(&m, i).first().map(|t| t[0]).ok_or_else(|| format!("'{body}' has no face {i}"))?,
+        (None, Some(i)) => m.edges.get(i).and_then(|e| e.get(e.len() / 2).copied()).ok_or_else(|| format!("'{body}' has no edge {i}"))?,
+        (None, None) => return Err("give a `point` on the item or its `index`".into()),
+    };
     if face {
         let index = match index {
             Some(i) => i,

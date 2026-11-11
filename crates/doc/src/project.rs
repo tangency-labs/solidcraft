@@ -348,7 +348,7 @@ fn resolve_uncached(
                 let feature = doc.find_feature(name).map(|f| crate::FeatureId(f.id)).unwrap_or(crate::FeatureId::DANGLING);
                 PlaneRef::Construction { feature }
             };
-            let other = doc.resolve_plane_in(vals, &pr, 0, Some(st)).map_err(|_| lost(&format!("plane {name}")))?;
+            let other = doc.resolve_plane_in(vals, &pr, 0, 0, Some(st)).map_err(|_| lost(&format!("plane {name}")))?;
             plane_trace(plane, &other).into_iter().collect()
         }
     };
@@ -618,7 +618,8 @@ fn circular(samples: &[Vec2]) -> Option<(LinkGeom, f64)> {
         sweep += d;
     }
     let turn = sweep.abs();
-    if turn > std::f64::consts::TAU + 1e-6 || turn < CIRCLE_MIN_TURN {
+    // A NaN turn is not refused here, as before.
+    if !turn.is_nan() && !(CIRCLE_MIN_TURN..=std::f64::consts::TAU + 1e-6).contains(&turn) {
         return None;
     }
     if first.dist(last) <= tol {
@@ -784,8 +785,12 @@ fn lost(reference: &str) -> DocError {
 /// The edge a link's stored name finds, and the body it is on: the link's body, or, when no
 /// body has that name any more (it was joined into another), the one body on which the name
 /// finds an edge.
-fn locate_named_edge(st: &ModelState, body: &str, name: &str, at: Vec3) -> Option<(String, crate::naming::EdgeHit)> {
-    let hit = |b: &crate::ModelBody| crate::naming::locate_edge(b, name, at).ok().map(|hit| (b.name.clone(), hit));
+fn locate_named_edge(st: &ModelState, kind: LinkKind, body: &str, name: &str, at: Vec3) -> Option<(String, crate::naming::EdgeHit)> {
+    let locate = |b: &crate::ModelBody| match kind {
+        LinkKind::Project => crate::name_lookup::locate_projected_edge(b, name, at),
+        _ => crate::naming::locate_edge(b, name, at),
+    };
+    let hit = |b: &crate::ModelBody| locate(b).ok().map(|hit| (b.name.clone(), hit));
     match st.body(body) {
         Some(b) => hit(b),
         None => {
@@ -1124,7 +1129,7 @@ fn refresh_links_in(
         // edge has the name any more no other edge is taken for it: the sketch fails.
         let mut named_edge = None;
         if let (Some(name), LinkSource::Edge { body, at }) = (&l.edge_name, &source) {
-            let Some((body, hit)) = locate_named_edge(st, body, name, *at) else {
+            let Some((body, hit)) = locate_named_edge(st, l.kind, body, name, *at) else {
                 lose_named(sk, &l.id, name, lost_names, &mut warn)?;
                 continue;
             };
@@ -1484,9 +1489,15 @@ const MESH_POLYGON_CORNERS: usize = 12;
 /// [`MESH_POLYGON_CORNERS`], all on one circle, is a tessellated circle, an ellipse on a slanted
 /// plane; and the sides of a polygon stay lines, never one fitted spline (#13464). A mesh file
 /// keeps its corners in single precision, so they lie on the circle within about 1e-7 of their
-/// size, not of the circle's.
+/// distance from the origin, not of the circle's size; and never more loosely than 1e-4 of the
+/// outline's own size, so a small outline far from the origin is not taken for a circle it misses.
 fn fit_mesh_outline(plane: &Plane, pts: &[Vec3]) -> Vec<LinkGeom> {
-    let within = pts.iter().map(|p| p.len()).fold(1.0, f64::max) * 1e-6;
+    let (lo, hi) = pts.iter().fold(
+        (Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY), Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY)),
+        |(lo, hi), p| (lo.min(*p), hi.max(*p)),
+    );
+    let size = lo.dist(hi);
+    let within = (pts.iter().map(|p| p.len()).fold(1.0, f64::max) * 1e-6).min(size * 1e-4);
     if pts.len() > MESH_POLYGON_CORNERS + 1
         && let Some(e) = tilted_circle(plane, pts, Some(within))
     {

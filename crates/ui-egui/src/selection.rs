@@ -24,6 +24,7 @@ pub(crate) fn alignment_points(selection: &[Sel]) -> Option<[serde_json::Value; 
     let point = |s: &Sel| match s {
         Sel::SketchPoint { id } => Some(serde_json::json!(id)),
         Sel::SketchMidpoint { id } => Some(serde_json::json!({"midpoint": id})),
+        // Horizontal/Vertical takes no origin axis yet: a selection with one isn't consumed.
         _ => None,
     };
     let (a, b) = (point(a)?, point(b)?);
@@ -37,6 +38,8 @@ pub(crate) fn coincident_operands(selection: &[Sel]) -> Option<serde_json::Value
     let operand = |s: &Sel| match s {
         Sel::SketchPoint { id } | Sel::SketchCurve { id, .. } => Some(serde_json::json!(id)),
         Sel::SketchMidpoint { id } => Some(serde_json::json!({"midpoint": id})),
+        // An origin axis, either operand: the command projects it into the sketch.
+        Sel::Axis { name } if matches!(name.as_str(), "X" | "Y" | "Z") => Some(serde_json::json!({"axis": name})),
         _ => None,
     };
     let (a, b) = (operand(a)?, operand(b)?);
@@ -122,6 +125,15 @@ impl SelInput {
         self
     }
 
+    /// Joint-origin inputs (`SNAPS`) have no snap for a sketch curve: `fits`/`accepts` let
+    /// `Sel::SketchCurve` through via its `AXES` bit, but `snap_of` can't resolve it. Reject it
+    /// here so every path into a `SNAPS` input shares one definition. Only an input that takes
+    /// exactly the joint-origin kinds: one that takes more besides them (Measure's items take
+    /// sketch curves too) handles them itself.
+    pub fn rejects(&self, sel: &Sel) -> bool {
+        self.accept == crate::dialogs_assembly::SNAPS && matches!(sel, Sel::SketchCurve { .. } | Sel::ExternalSketchCurve { .. })
+    }
+
     /// The selection a hit stands for, if this input accepts it. A curve of another sketch than
     /// the `active` one names its sketch: curve ids repeat from one sketch to the next (#3726).
     pub fn accepts(&self, h: &Hit, active: Option<u64>, planar: impl Fn(&str, usize) -> bool) -> Option<Sel> {
@@ -136,6 +148,7 @@ impl SelInput {
             Hit::Plane { name, .. } if a & PLANES != 0 => Some(Sel::Plane { name: name.clone() }),
             Hit::Axis { name } if a & AXES != 0 => Some(Sel::Axis { name: name.clone() }),
             Hit::ConstructionPoint { name } if a & CONSTRUCTION_POINTS != 0 => Some(Sel::ConstructionPoint { name: name.clone() }),
+            Hit::SketchPoint3d { sketch, id, .. } if a & POINTS != 0 => Some(Sel::SketchPoint { id: format!("{sketch}:{id}") }),
             // A straight sketch line stands for an axis only in an input that takes axes for
             // what they are: an input that takes curves too (Measure) takes the line as its curve.
             Hit::SketchCurve { sketch, id, straight: true, .. } if a & AXES != 0 && a & CURVES == 0 => Some(curve_pick(id, *sketch, active)),

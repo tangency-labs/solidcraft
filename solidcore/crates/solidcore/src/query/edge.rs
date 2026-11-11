@@ -48,7 +48,7 @@
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::euclidian_step_off;
 use crate::curve::curve::Curve;
-use crate::error::{ignored, Result, SolidError, SM_ERR_INVALID_INPUT};
+use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -240,7 +240,10 @@ pub fn calculate_bounding_box(
         if ok1 && ok2 {
             return Ok(out);
         }
-        return Err(SolidError::sm_err(OP_BBOX));
+        return Err(SolidError::query_failed(
+            OP_BBOX,
+            "the curve's bounding box could not be found",
+        ));
     }
 
     // get all the bounding boxes from the curve
@@ -285,7 +288,9 @@ pub fn calculate_tight_bounding_box(
     let curve_bbox = curve
         .calculate_bounding_box(k, &e.interval, req, true)?
         .normal
-        .ok_or_else(|| SolidError::sm_err(OP_TIGHT))?;
+        .ok_or_else(|| {
+            SolidError::query_failed(OP_TIGHT, "the curve's bounding box has no normal box")
+        })?;
 
     let tol = EFF_ZERO * (1.0 + curve_bbox.max_dimension());
 
@@ -483,11 +488,7 @@ fn evaluate_binormal_step_off(
 fn vec_status<T>(r: Result<T>, operation: &'static str) -> Result<T> {
     r.map_err(|e| match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => {
-            SolidError::Upstream {
-                operation,
-                code: SM_ERR_INVALID_INPUT,
-                entity: None,
-            }
+            SolidError::query_invalid_value(operation, "a vector of zero length has no direction")
         }
         e => e,
     })
@@ -530,7 +531,8 @@ fn on_plane(brep: &Brep, eu: EdgeuseId) -> Result<bool> {
 /// # Errors
 ///
 /// `SM_ERR` when the point cannot be dropped onto the other edge or the first step-off
-/// leaves a face; `SM_ERR_INVALID_INPUT` (as [`SolidError::Upstream`]) when the first
+/// leaves a face; `SM_ERR_INVALID_INPUT` (as
+/// [`QueryFailure::InvalidValue`](crate::error::query::QueryFailure::InvalidValue)) when the first
 /// step-off's tangent or a binormal to measure is zero-length (a failed first step-off
 /// leaves the tangent uninitialised, which `Unitize` rejects before the step-off
 /// failure is looked at); [`SolidError::InvalidInput`] where upstream dereferences a null
@@ -589,12 +591,12 @@ pub fn radial_sector_classify_between(
     let other_edge = other_ref
         .edgeuse(classify_eu)?
         .edge
-        .ok_or(SolidError::null_pointer(OP_RADIAL))?;
+        .ok_or_else(|| SolidError::query_missing(OP_RADIAL, "the other edge use's edge"))?;
     let other = other_ref.edge(other_edge)?;
     let other_curve = other
         .curve
         .as_ref()
-        .ok_or(SolidError::null_pointer(OP_RADIAL))?;
+        .ok_or_else(|| SolidError::query_missing(OP_RADIAL, "the other edge's curve"))?;
     let tolerance = other.tolerance + this.tolerance;
 
     // get the corresponding classify edge parameter value
@@ -623,7 +625,10 @@ pub fn radial_sector_classify_between(
         }
         if !success {
             // Unable to drop point to other curve.
-            return Err(SolidError::sm_err(OP_RADIAL));
+            return Err(SolidError::query_failed(
+                OP_RADIAL,
+                "the point could not be dropped onto the other curve",
+            ));
         }
         param
     };
@@ -709,18 +714,26 @@ pub fn radial_sector_classify_between(
         if stepped_off_surface {
             // its an error to step off on first pass
             if count == 0 {
-                return Err(SolidError::sm_err(OP_RADIAL));
+                return Err(SolidError::query_failed(
+                    OP_RADIAL,
+                    "the first step stepped off the surface",
+                ));
             }
 
             // (the angle values are from the previous iteration)
+            // The classify face lies on the face it coincides with (the sector edge use's
+            // face for ang2, the radial partner's for ang3), so its side is read against that
+            // face's normal, as the coincidence test below reads it. Upstream reads both
+            // against the radial partner's normal, which for ang2 is another face at the
+            // sector angle: past 90 degrees the coincident pair is taken for opposite sides.
             if ang2 <= ang3 + EFF_ZERO && ang2 < 0.5 * PI / 180.0 {
-                return Ok(if norm2.dot(norm3) > 0.0 {
+                return Ok(if norm1.dot(norm3) >= 0.0 {
                     RadialSectorClass::CoincidentSector
                 } else {
                     RadialSectorClass::CoincidentSectorMate
                 });
             } else if ang3 <= ang2 + EFF_ZERO && ang3 < 0.5 * PI / 180.0 {
-                return Ok(if norm2.dot(norm3) > 0.0 {
+                return Ok(if norm2.dot(s3.tangent.cross(bin3)) >= 0.0 {
                     RadialSectorClass::CoincidentRadial
                 } else {
                     RadialSectorClass::CoincidentRadialMate
@@ -915,7 +928,7 @@ pub fn radial_sector_classify_between(
 /// # Errors
 ///
 /// `SM_ERR` when the curve's projected direction vanishes; `SM_ERR_INVALID_INPUT` (as
-/// [`SolidError::Upstream`]) for a zero-length vector to unitize or measure;
+/// [`QueryFailure::InvalidValue`](crate::error::query::QueryFailure::InvalidValue)) for a zero-length vector to unitize or measure;
 /// [`SolidError::InvalidInput`]
 /// for a sector edge use without radial partner; those of the step-offs and
 /// evaluations; [`SolidError::Unported`] for the step-offs
@@ -985,15 +998,15 @@ pub fn radial_sector_of_curve_classify(
         ))?
         .unwrap_or(start_param);
         let pv = curve.evaluate(k, step_param, 1, true, true)?;
-        let mut tan = *pv
-            .get(1)
-            .ok_or_else(|| SolidError::sm_err(OP_RADIAL_CURVE))?;
+        let mut tan = *pv.get(1).ok_or_else(|| {
+            SolidError::query_failed(OP_RADIAL_CURVE, "the curve evaluation has no tangent")
+        })?;
         if orientation == OrientType::Opposite {
             tan = -tan;
         }
-        let pnt3 = *pv
-            .first()
-            .ok_or_else(|| SolidError::sm_err(OP_RADIAL_CURVE))?;
+        let pnt3 = *pv.first().ok_or_else(|| {
+            SolidError::query_failed(OP_RADIAL_CURVE, "the curve evaluation has no point")
+        })?;
 
         // Project binormals into plane which is perpendicular to edge
         let tan1 = vec_status(s1.tangent.unitize(), OP_RADIAL_CURVE)?;
@@ -1001,7 +1014,10 @@ pub fn radial_sector_of_curve_classify(
         let bin2 = tan1.cross(s2.binormal).cross(tan1);
         let bin3 = tan1.cross(tan).cross(tan1);
         if bin3.length_squared() < EFF_ZERO_SQ {
-            return Err(SolidError::sm_err(OP_RADIAL_CURVE));
+            return Err(SolidError::query_failed(
+                OP_RADIAL_CURVE,
+                "the curve's tangent is parallel to the edge's tangent",
+            ));
         }
 
         // test the curve against the sector boundaries
@@ -1283,7 +1299,7 @@ mod tests {
         // the step-off reaches `EvaluateBinormal`, which returns `SM_ERR_INVALID_INPUT`
         // for an edge use outside a loop (without dereferencing it)
         assert!(
-            matches!(r, Err(SolidError::Upstream { code: 1007, .. })),
+            r.as_ref().is_err_and(|e| e.upstream_status() == Some(1007)),
             "{r:?}"
         );
         assert_eq!(RadialSectorClass::ZeroSectorMate.code(), 7);

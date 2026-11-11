@@ -229,7 +229,7 @@ fn inputs(k: &Surf) -> Vec<SelInput> {
             let [rail, rail2] = crate::dialogs_sweep::rail_inputs();
             vec![
                 SelInput::new("Profiles or curves", PROFILES | CURVES, true),
-                SelInput::new("Path", CURVES, true),
+                SelInput::new("Path", CURVES | EDGES, true),
                 crate::dialogs_sweep::direction_input(),
                 rail,
                 rail2,
@@ -580,11 +580,17 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             need(0, "profiles or curves to sweep")?;
             need(1, "the path")?;
             let mut p = sheet_picks(app, items(inputs, 0))?;
-            let path: Vec<String> = items(inputs, 1).curve_ids();
-            p["path_sketch"] = json!(
-                crate::dialogs::picks_sketch(app, items(inputs, 1), p["sketch"].as_u64()).ok_or("the path curves must be in one other sketch")?
-            );
-            p["path"] = json!(path);
+            // The path is a chain of a body's edges or the curves of a sketch (#2216).
+            if let Some((body, edges)) = crate::dialogs_sweep::edge_path(items(inputs, 1))? {
+                p["path_body"] = json!(body);
+                p["path_edges"] = json!(edges);
+            } else {
+                let path: Vec<String> = items(inputs, 1).curve_ids();
+                p["path_sketch"] = json!(
+                    crate::dialogs::picks_sketch(app, items(inputs, 1), p["sketch"].as_u64()).ok_or("the path curves must be in one other sketch")?
+                );
+                p["path"] = json!(path);
+            }
             crate::dialogs_sweep::params(app, opts, items(inputs, 2).first(), [items(inputs, 3), items(inputs, 4)], &mut p)?;
             ("surface.sweep", p)
         }
@@ -909,7 +915,8 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             let (pick, stored) = match axis {
                 AxisRef::World { axis } => (Some(Sel::Axis { name: axis.to_ascii_uppercase() }), None),
                 AxisRef::SketchAxis { axis } => (Some(Sel::Axis { name: axis.to_ascii_lowercase() }), None),
-                AxisRef::SketchLine { curve } => (Some(crate::selection::curve_pick(curve, sketch.0, s.active_sketch)), None),
+                AxisRef::SketchLine { curve, sketch: Some(owner) } => (Some(crate::selection::curve_pick(curve, *owner, s.active_sketch)), None),
+                AxisRef::SketchLine { curve, sketch: None } => (Some(crate::selection::curve_pick(curve, sketch.0, s.active_sketch)), None),
                 AxisRef::Construction { name } => (Some(Sel::Axis { name: name.to_string() }), None),
                 AxisRef::Line { origin, dir } => (None, Some(crate::dialogs::line_axis_value(s, frame, origin, dir.0))),
                 // An edge or face that is gone stays the reference until another is picked.
@@ -929,14 +936,33 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
             }
             return Some((Kind::Surface(k), ins, extra));
         }
-        FeatureKind::SurfaceSweep { sketch, profiles, curves, path_sketch, path, orientation, twist, scale, rails, rail_fit, .. } => {
+        FeatureKind::SurfaceSweep {
+            sketch,
+            profiles,
+            curves,
+            path_sketch,
+            path,
+            path_body,
+            path_edges,
+            orientation,
+            twist,
+            scale,
+            rails,
+            rail_fit,
+            ..
+        } => {
             let (opts, direction) = crate::dialogs_sweep::SweepOpts::of(orientation, twist, scale, *rail_fit, frame);
             let [rail, rail2] = crate::dialogs_sweep::rail_sels(rails, s.active_sketch);
             (
                 Surf::Sweep(opts),
                 vec![
                     sheet_sels(app, sketch.0, profiles.as_ref(), curves),
-                    path.iter().map(|id| crate::selection::curve_pick(id, path_sketch.0, s.active_sketch)).collect(),
+                    // The path is a chain of a body's edges or the curves of a sketch (#2216).
+                    // A body's edge is looked for on the body the path was picked on (#2216).
+                    match path_body {
+                        Some(body) => path_edges.iter().filter_map(|p| crate::dialogs::edge_sel_on(s, Some(body.0.as_str()), p.0)).collect(),
+                        None => path.iter().map(|id| crate::selection::curve_pick(id, path_sketch.0, s.active_sketch)).collect(),
+                    },
                     direction.into_iter().collect(),
                     rail,
                     rail2,

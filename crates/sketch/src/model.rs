@@ -7,13 +7,17 @@ use std::collections::{BTreeMap, HashSet};
 use crate::link::{LinkGeom, LinkKind, LinkSource, sketch_axis_geom};
 use crate::union_find::{find, union};
 
-/// Hard caps that keep hostile input from exhausting memory or time.
-pub const MAX_POINTS: usize = 20_000;
-pub const MAX_CONSTRAINTS: usize = 40_000;
+/// The default caps on what a sketch builds; [`crate::limits`] says the caps in force, which the
+/// app may raise up to the ceilings below.
+pub const MAX_POINTS: usize = crate::limits::DEFAULT_POINTS;
+pub const MAX_CONSTRAINTS: usize = 2 * MAX_POINTS;
 /// Curves need points, so this follows the point cap.
 pub const MAX_CURVES: usize = MAX_POINTS;
-// [`SketchError::TooLarge`]'s message names this number; keep them matched (#10874).
-const _: () = assert!(MAX_POINTS == 20_000);
+/// Hard caps that keep hostile input from exhausting memory or time: the most a sketch read from
+/// a design may hold, whatever limit the app that made it had (#10874).
+pub const CEILING_POINTS: usize = crate::limits::CEILING_POINTS;
+pub const CEILING_CONSTRAINTS: usize = 2 * CEILING_POINTS;
+pub const CEILING_CURVES: usize = CEILING_POINTS;
 
 /// Largest coordinate or dimension value (mm) a sketch accepts.
 pub const MAX_COORD: f64 = 1e9;
@@ -43,11 +47,13 @@ pub enum SketchError {
     Duplicate(String),
     #[error("invalid value: {0}")]
     Invalid(String),
-    /// Cap hit on points, curves or constraints ([`MAX_POINTS`], [`MAX_CURVES`],
-    /// [`MAX_CONSTRAINTS`]). Insert SVG/DXF of a dense drawing (a floorplan) often hits this;
-    /// scale alone does not reduce how many curves the file has (#10874).
+    /// Cap hit on points, curves or constraints ([`crate::limits::max_points`] and the others).
+    /// Insert SVG/DXF of a dense drawing (a floorplan) often hits this; scale alone does not
+    /// reduce how many curves the file has, and the limit can be raised (#10874).
     #[error(
-        "sketch is too large (at most 20000 points or curves); simplify the drawing or split it across sketches — changing scale does not reduce how many curves it has"
+        "sketch is too large (at most {} points or curves); simplify the drawing, split it across sketches or raise Preferences > Sketch > Largest sketch (up to {}) — changing scale does not reduce how many curves it has",
+        crate::limits::max_points(),
+        crate::limits::CEILING_POINTS
     )]
     TooLarge,
 }
@@ -972,7 +978,7 @@ impl Sketch {
     /// [`Sketch::add_point`], with the ids a [`SketchBatch`] keeps when given.
     fn add_point_with(&mut self, p: Vec2, id: Option<&str>, taken: Option<&HashSet<String>>) -> Result<usize> {
         let p = Self::check_pos(p)?;
-        if self.points.len() >= MAX_POINTS {
+        if self.points.len() >= crate::limits::max_points() {
             return Err(SketchError::TooLarge);
         }
         let id = self.new_id(id, "p", taken)?;
@@ -1101,7 +1107,7 @@ impl Sketch {
         if let Some(same) = self.same_constraint(&kind) {
             return Ok(same.to_string());
         }
-        if self.constraints.len() >= MAX_CONSTRAINTS {
+        if self.constraints.len() >= crate::limits::max_constraints() {
             return Err(SketchError::TooLarge);
         }
         let id = self.fresh("k")?;
@@ -1310,27 +1316,26 @@ impl Sketch {
         Ok(())
     }
 
-    /// The sketch scaled by `factor` about its origin, for its first dimension (#1365): drawn
+    /// The sketch scaled by `factor`, for its first dimension (#1365): drawn
     /// geometry has no size of its own until a dimension gives it one, so the first length
     /// dimension scales the whole sketch to its value instead of distorting it. Only a sketch
     /// with nothing that fixes a size: no other driving length dimension, nothing fixed,
     /// projected or patterned, no offsets and no 3D curves. A linked sketch axis can give a
     /// direction or symmetry line through the origin without giving the drawing a size. Every
     /// geometric constraint and angle holds on the scaled sketch as it held before.
-    /// `None` when the sketch does not qualify, also
-    /// when its curves form several separate chains (#3786): the dimension sizes only its own.
-    pub fn scaled_for_first_dimension(&self, factor: f64) -> Option<Sketch> {
+    /// `None` when the sketch does not qualify, also when its curves form several separate
+    /// chains (#3786): the dimension sizes only its own, and when `dimension` is a radius or
+    /// diameter and the sketch's only drawn curve is a circle (#11438): a radius or diameter
+    /// cannot distort a circle, so scaling would only move its centre. Any other first
+    /// dimension on a lone circle scales it as before.
+    /// A drawing tied to the origin scales about the origin; one drawn away from it scales about
+    /// its own middle and stays where it was drawn (#11043), unless `about_origin` asks for the
+    /// origin anyway (the behaviour before #11043).
+    pub fn scaled_for_first_dimension(&self, factor: f64, dimension: &ConstraintKind, about_origin: bool) -> Option<Sketch> {
         if !(factor.is_finite() && (1e-6..=1e6).contains(&factor)) {
             return None;
         }
-        let sizes = self.constraints.iter().any(|c| match c.kind {
-            ConstraintKind::Fix { .. } | ConstraintKind::PatternPoint { .. } | ConstraintKind::PatternRadius { .. } => true,
-            // A pierce holds its point where another sketch's curve crosses this plane:
-            // scaling the sketch would move it off the crossing.
-            ConstraintKind::Pierce { .. } => true,
-            ref k => k.is_dimension() && !k.is_angle() && !c.driven,
-        });
-        if sizes || !self.patterns.is_empty() || !self.offsets.is_empty() || !self.freeform_offsets.is_empty() || !self.wires.is_empty() {
+        if self.lone_circle_for(dimension).is_some() || self.has_size() {
             return None;
         }
         let mut axes = BTreeMap::new();
@@ -1388,15 +1393,34 @@ impl Sketch {
                 }
             }
         }
-        let mut roots = drawn_curves().filter_map(|c| c.kind.point_ids().first().map(|&p| find(&mut parent, p)));
-        if let Some(first) = roots.next()
-            && roots.any(|r| r != first)
-        {
+        let roots: Vec<usize> = drawn_curves().filter_map(|c| c.kind.point_ids().first().copied()).map(|p| find(&mut parent, p)).collect();
+        let first = roots.first().copied();
+        if roots.iter().any(|&r| Some(r) != first) {
             return None;
         }
+        // The fixed point the drawing grows or shrinks about (#11043): the sketch origin when
+        // asked, or when the drawing is tied to it (joined to the origin, or held by a constraint
+        // to a sketch axis); otherwise the middle of the drawing, so a shape drawn away from the
+        // origin keeps its place and only changes size.
+        let anchor = match first {
+            Some(root) if !about_origin && find(&mut parent, 0) != root && !self.tied_to_axes() => {
+                let mut lo = Vec2::new(f64::INFINITY, f64::INFINITY);
+                let mut hi = Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY);
+                for (i, p) in self.points.iter().enumerate() {
+                    if find(&mut parent, i) == root && !p.fixed && p.link.is_none() {
+                        lo = Vec2::new(lo.x.min(p.pos.x), lo.y.min(p.pos.y));
+                        hi = Vec2::new(hi.x.max(p.pos.x), hi.y.max(p.pos.y));
+                    }
+                }
+                let mid = (lo + hi) * 0.5;
+                if in_range(mid) { mid } else { Vec2::ZERO }
+            }
+            _ => Vec2::ZERO,
+        };
+        let scale = |p: Vec2| anchor + (p - anchor) * factor;
         let mut out = self.clone();
         for p in out.points.iter_mut().filter(|p| !p.fixed && p.link.is_none()) {
-            p.pos = p.pos * factor;
+            p.pos = scale(p.pos);
             if !in_range(p.pos) {
                 return None;
             }
@@ -1411,9 +1435,75 @@ impl Sketch {
         }
         // Dimension texts keep their places relative to what they measure.
         for t in out.constraints.iter_mut().filter_map(|c| c.text.as_mut()) {
-            *t = *t * factor;
+            *t = scale(*t);
         }
         Some(out)
+    }
+
+    /// Does a driving constraint hold drawn geometry to a projected sketch axis or the origin
+    /// point: the drawing then has a place relative to the origin, and scales about it.
+    fn tied_to_axes(&self) -> bool {
+        let held_point = |i: usize| i == 0 || self.points.get(i).is_some_and(|p| p.link.is_some());
+        let held_curve = |i: usize| self.curves.get(i).is_some_and(|c| c.link.is_some());
+        self.constraints.iter().filter(|c| !c.driven).any(|c| {
+            let (points, curves) = c.kind.indices();
+            points.into_iter().any(held_point) || curves.into_iter().any(held_curve)
+        })
+    }
+
+    /// The sketch with its lone circle's radius scaled by `factor` and its centre where it is,
+    /// for a first radius or diameter `dimension` that [`Sketch::scaled_for_first_dimension`]
+    /// leaves to the solver (#11438). The solve then starts at the requested size, however far
+    /// it is from the drawn one, instead of squeezing the circle there. `None` when the sketch
+    /// is not one lone circle sized by nothing else, when anything is fixed or projected (a
+    /// sketch axis too: the solver then sizes the circle against it), or the new radius is out
+    /// of range.
+    pub fn lone_circle_sized_for_first_dimension(&self, factor: f64, dimension: &ConstraintKind) -> Option<Sketch> {
+        if !(factor.is_finite() && (1e-6..=1e6).contains(&factor))
+            || self.has_size()
+            || !self.links.is_empty()
+            || self.curves.iter().any(|c| c.fixed || c.link.is_some())
+            || self.points.iter().enumerate().any(|(i, p)| (p.fixed || p.link.is_some()) && (i != 0 || p.pos != Vec2::ZERO))
+        {
+            return None;
+        }
+        let i = self.lone_circle_for(dimension)?;
+        let mut out = self.clone();
+        if let Some(CurveKind::Circle { r, .. }) = out.curves.get_mut(i).map(|c| &mut c.kind) {
+            *r *= factor;
+            if !radius_in_range(*r) {
+                return None;
+            }
+        }
+        Some(out)
+    }
+
+    /// The index of the sketch's only drawn curve when it is a circle and `dimension` is a
+    /// radius or diameter: one that cannot distort the circle. A projected sketch axis is not
+    /// drawn and does not count.
+    fn lone_circle_for(&self, dimension: &ConstraintKind) -> Option<usize> {
+        if !matches!(dimension, ConstraintKind::Radius { .. } | ConstraintKind::Diameter { .. }) {
+            return None;
+        }
+        let mut drawn = self.curves.iter().enumerate().filter(|(_, c)| c.link.is_none());
+        match (drawn.next(), drawn.next()) {
+            (Some((i, c)), None) if matches!(c.kind, CurveKind::Circle { .. }) => Some(i),
+            _ => None,
+        }
+    }
+
+    /// Does something already fix a size of the sketch: a driving length dimension, a fix,
+    /// pattern or pierce constraint, a pattern, an offset or a 3D curve? Fixed and projected
+    /// geometry is left to the callers, since a linked sketch axis gives no size.
+    fn has_size(&self) -> bool {
+        let sizes = self.constraints.iter().any(|c| match c.kind {
+            ConstraintKind::Fix { .. } | ConstraintKind::PatternPoint { .. } | ConstraintKind::PatternRadius { .. } => true,
+            // A pierce holds its point where another sketch's curve crosses this plane:
+            // scaling the sketch would move it off the crossing.
+            ConstraintKind::Pierce { .. } => true,
+            ref k => k.is_dimension() && !k.is_angle() && !c.driven,
+        });
+        sizes || !self.patterns.is_empty() || !self.offsets.is_empty() || !self.freeform_offsets.is_empty() || !self.wires.is_empty()
     }
 
     /// Is point `i` held in place: fixed, projected (linked), fixed by a Fix constraint or a
@@ -1589,7 +1679,7 @@ impl Sketch {
     /// drawing.
     pub fn virtual_corners(&self) -> Vec<(usize, Vec<(Vec2, Vec2)>)> {
         const MAX_POINT_REFERENCES: usize = 1_000_000;
-        if self.points.len() > MAX_POINTS || self.constraints.len() > MAX_CONSTRAINTS || self.curves.len() > MAX_POINT_REFERENCES {
+        if self.points.len() > CEILING_POINTS || self.constraints.len() > CEILING_CONSTRAINTS || self.curves.len() > MAX_POINT_REFERENCES {
             return Vec::new();
         }
         let mut remaining = MAX_POINT_REFERENCES;

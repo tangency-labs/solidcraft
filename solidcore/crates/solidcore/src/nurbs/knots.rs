@@ -23,6 +23,7 @@
 //! | [`KnotVector::basis_i_derivs`]         | `N_BasisIDerivs`                  |
 //! | [`Side`]                               | `NL_LEFT` / `NL_RIGHT` flags      |
 //! | [`MAX_DEGREE`]                         | `NL_MAXDEG`                       |
+//! | [`clamped_uniform`]                    | none (not upstream)               |
 //!
 //! Deviations:
 //! - Out-params become return values ([`Basis`], tuples, `Vec`s sized by the callee).
@@ -122,7 +123,7 @@ fn out_of_range(operation: &'static str) -> SolidError {
 fn degree_too_high(operation: &'static str) -> SolidError {
     SolidError::InvalidInput {
         operation,
-        reason: "degree above NL_MAXDEG + 1 (upstream scratch array size)",
+        reason: "degree above one more than the largest degree the NURBS routines handle",
     }
 }
 
@@ -818,8 +819,57 @@ impl<'a> KnotVector<'a> {
     }
 }
 
+/// The clamped uniform knot vector of `count` control points of `degree` on `[0, 1]`: `degree +
+/// 1` zeros, the interior knots `i / (count - degree)` for `i` in `1..count - degree`, and
+/// `degree + 1` ones (Piegl and Tiller, *The NURBS Book*, 2nd ed., §2.2: a non-periodic,
+/// uniform knot vector).
+///
+/// Not upstream: the knots of a curve made from control points alone.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a degree of 0 or past [`MAX_DEGREE`], or fewer than
+/// `degree + 1` points.
+pub fn clamped_uniform(count: usize, degree: usize) -> Result<Vec<f64>> {
+    if degree == 0 || degree > MAX_DEGREE || count < degree + 1 {
+        return Err(SolidError::invalid_input(
+            "nurbs::knots::clamped_uniform",
+            "a degree of 0 or past the most, or too few points for it",
+        ));
+    }
+    let spans = count - degree;
+    let mut knots = vec![0.0; degree + 1];
+    knots.extend((1..spans).map(|i| i as f64 / spans as f64));
+    knots.extend(std::iter::repeat_n(1.0, degree + 1));
+    Ok(knots)
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn clamped_uniform_knots_clamp_both_ends_and_space_the_rest_evenly() {
+        assert_eq!(
+            clamped_uniform(4, 3).unwrap(),
+            vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]
+        );
+        assert_eq!(
+            clamped_uniform(5, 2).unwrap(),
+            vec![0.0, 0.0, 0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0, 1.0, 1.0]
+        );
+        assert_eq!(clamped_uniform(2, 1).unwrap(), vec![0.0, 0.0, 1.0, 1.0]);
+        for (count, degree) in [(3, 3), (5, 0), (1, 1)] {
+            assert!(clamped_uniform(count, degree).is_err(), "{count}, {degree}");
+        }
+        for (count, degree) in [(7, 3), (12, 5)] {
+            let knots = clamped_uniform(count, degree).unwrap();
+            assert_eq!(knots.len(), count + degree + 1);
+            KnotVector::from_slice(&knots)
+                .unwrap()
+                .validate(degree)
+                .unwrap();
+        }
+    }
     use super::*;
     use crate::kernel::UpstreamFixes;
     use crate::nurbs::math::{CPoint, NOW};

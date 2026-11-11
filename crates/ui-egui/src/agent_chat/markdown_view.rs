@@ -64,8 +64,12 @@ fn host(url: &str) -> &str {
 /// text selection, so a selection whose start had scrolled away was dropped, and Copy missed the
 /// hidden text (#11527). Out of view this one still takes part: it keeps its end of the selection
 /// and gives its text to Copy, clipped to nothing so it is not drawn and never moves the selection.
-pub(super) fn selectable(ui: &mut egui::Ui, label: egui::Label) -> egui::Response {
+/// `selected`: the whole transcript is selected (#10676), so its text is drawn over the selection
+/// colour, as egui draws a label's own selection, and outlined with the selection stroke: a
+/// prompt's bubble is filled with that same colour, so the fill alone would not show there.
+pub(super) fn selectable(ui: &mut egui::Ui, label: egui::Label, selected: bool) -> egui::Response {
     use egui::text_selection::LabelSelectionState;
+    let behind = ui.painter().add(egui::Shape::Noop);
     let (pos, galley, response) = label.selectable(true).layout_in_ui(ui);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), galley.text()));
     // As `egui::Label` draws a label that is not a button.
@@ -79,14 +83,20 @@ pub(super) fn selectable(ui: &mut egui::Ui, label: egui::Label) -> egui::Respons
         LabelSelectionState::label_text_selection(ui, &response, pos, galley, colour, Stroke::NONE);
         ui.set_clip_rect(clip);
     }
+    if selected {
+        let selection = ui.visuals().selection;
+        let corner = egui::CornerRadius::same(Tokens::get().radius_sm / 2);
+        let mark = egui::epaint::RectShape::new(response.rect, corner, selection.bg_fill, selection.stroke, egui::StrokeKind::Outside);
+        ui.painter().set(behind, mark);
+    }
     response
 }
 
 /// A paragraph's text, then its links as buttons (a laid-out text cannot be clicked in parts).
-fn spans(ui: &mut egui::Ui, spans: &[Span], size: f32, color: Color32) {
+fn spans(ui: &mut egui::Ui, spans: &[Span], size: f32, color: Color32, selected: bool) {
     let t = Tokens::get();
     let text = job(ui, spans, size, color);
-    selectable(ui, egui::Label::new(text).wrap());
+    selectable(ui, egui::Label::new(text).wrap(), selected);
     let links: Vec<(&str, &str)> =
         spans.iter().filter_map(|s| if let Span::Link { label, url } = s { Some((label.as_str(), url.as_str())) } else { None }).collect();
     if !links.is_empty() {
@@ -100,14 +110,39 @@ fn spans(ui: &mut egui::Ui, spans: &[Span], size: f32, color: Color32) {
     }
 }
 
-/// Draw `src` as Markdown. `slot`: the conversation item it belongs to.
-pub fn show(ui: &mut egui::Ui, slot: usize, src: &str) {
+/// The blocks as plain text, as they read on screen: what Copy takes from a reply when the whole
+/// transcript is selected (#10676).
+pub(super) fn plain_text(blocks: &[Block]) -> String {
+    let mut out: Vec<String> = Vec::new();
+    for block in blocks {
+        out.push(match block {
+            Block::Paragraph(s) | Block::Heading { spans: s, .. } => markdown::plain(s),
+            Block::Code { text, .. } | Block::Pre(text) => text.trim_end_matches('\n').to_owned(),
+            Block::List { ordered, start, items } => items
+                .iter()
+                .enumerate()
+                .map(|(i, item)| {
+                    let mark = if *ordered { format!("{}.", start.saturating_add(i as u64)) } else { "•".to_string() };
+                    format!("{mark} {}", markdown::plain(item))
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+            Block::Quote(s) => format!("> {}", markdown::plain(s)),
+            Block::Rule => "---".to_string(),
+        });
+    }
+    out.join("\n\n")
+}
+
+/// Draw `src` as Markdown. `slot`: the conversation item it belongs to; `selected`: the whole
+/// transcript is selected.
+pub fn show(ui: &mut egui::Ui, slot: usize, src: &str, selected: bool) {
     let t = Tokens::get();
     let size = t.font_button;
     let parsed = blocks(ui.ctx(), slot, src);
     for block in parsed.iter() {
         match block {
-            Block::Paragraph(s) => spans(ui, s, size, t.text),
+            Block::Paragraph(s) => spans(ui, s, size, t.text, selected),
             Block::Heading { level, spans: s } => {
                 let size = match level {
                     1 => t.font_article_heading,
@@ -115,7 +150,7 @@ pub fn show(ui: &mut egui::Ui, slot: usize, src: &str) {
                     _ => t.font_heading,
                 };
                 ui.add_space(4.0);
-                selectable(ui, egui::Label::new(RichText::new(markdown::plain(s)).size(size).semibold().color(t.text)).wrap());
+                selectable(ui, egui::Label::new(RichText::new(markdown::plain(s)).size(size).semibold().color(t.text)).wrap(), selected);
             }
             Block::Code { text, .. } => {
                 crate::ui_kit::Container::show_backing(
@@ -126,6 +161,7 @@ pub fn show(ui: &mut egui::Ui, slot: usize, src: &str) {
                         selectable(
                             ui,
                             egui::Label::new(RichText::new(text).monospace().size(size - (t.font_button - t.font_body)).color(t.text)).wrap(),
+                            selected,
                         );
                         if crate::ui_kit::button(ui, tr("ui.agent_chat_copy"), crate::ui_kit::Button::Small).clicked() {
                             ui.ctx().copy_text(text.clone());
@@ -138,7 +174,7 @@ pub fn show(ui: &mut egui::Ui, slot: usize, src: &str) {
                     ui.horizontal_top(|ui| {
                         let mark = if *ordered { format!("{}.", start.saturating_add(i as u64)) } else { "•".to_string() };
                         ui.label(RichText::new(mark).size(size).color(t.text_dim));
-                        ui.vertical(|ui| spans(ui, item, size, t.text));
+                        ui.vertical(|ui| spans(ui, item, size, t.text, selected));
                     });
                 }
             }
@@ -146,12 +182,12 @@ pub fn show(ui: &mut egui::Ui, slot: usize, src: &str) {
                 ui.horizontal_top(|ui| {
                     let (bar, _) = ui.allocate_exact_size(vec2(3.0, 16.0), egui::Sense::hover());
                     ui.painter().rect_filled(bar, t.radius_sm / 4, t.border);
-                    ui.vertical(|ui| spans(ui, s, size, t.text_dim));
+                    ui.vertical(|ui| spans(ui, s, size, t.text_dim, selected));
                 });
             }
             Block::Pre(text) => {
                 egui::ScrollArea::horizontal().id_salt(("agent_chat_pre", slot, text.len())).show(ui, |ui| {
-                    selectable(ui, egui::Label::new(RichText::new(text).monospace().size(t.font_small).color(t.text)));
+                    selectable(ui, egui::Label::new(RichText::new(text).monospace().size(t.font_small).color(t.text)), selected);
                 });
             }
             Block::Rule => {
