@@ -32,6 +32,7 @@ solidcraft-viewport-gpu = { workspace = true }
 solidcraft-viewport = { workspace = true }
 solidcore-record = { workspace = true }
 solidcraft-engine = { workspace = true }
+solidcraft-exchange = { workspace = true }
 solidcraft-gpu = { workspace = true }
 solidcraft-mcp = { workspace = true }
 log = { workspace = true }
