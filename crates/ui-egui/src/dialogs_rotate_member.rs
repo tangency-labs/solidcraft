@@ -12,8 +12,8 @@ use solidcore_record::Vec3;
 use solidcraft_engine::{
     Sel, Session,
     doc::{
-        FeatureKind,
-        end_cap::{Member, member_axis},
+        FeatureKind, apply_point, apply_vector,
+        end_cap::{Member, member_axis, member_pivot},
         expr::Kind as ValueKind,
         frame::{member_line_ids, member_turns},
     },
@@ -111,10 +111,11 @@ pub fn commands(
     Ok(vec![(COMMAND.into(), args)])
 }
 
-pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelInput>, Map<String, Value>)> {
+/// The dialog editing the step `id` of kind `kind`.
+pub fn for_feature(app: &SolveApp, id: u64, kind: &FeatureKind) -> Option<(Kind, Vec<SelInput>, Map<String, Value>)> {
     let FeatureKind::FrameMemberTurn { member, angle } = kind else { return None };
     let (_, mut inputs) = start(app, COMMAND)?;
-    let step = app.session.doc.features.iter().find(|f| f.kind == *kind).map(|f| f.id);
+    let step = Some(id);
     if let Some(input) = inputs.first_mut() {
         input.items = side_pick(app, step, member).into_iter().collect();
     }
@@ -122,13 +123,16 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
     Some((Kind::RotateMember(c), inputs, Map::new()))
 }
 
-/// The dial: the picked member's mid-point and its line's direction, start to end.
+/// The dial: the point the picked member turns about, halfway along it, and its line's direction
+/// (start to end), in the world the view draws.
 pub(crate) fn dial(app: &SolveApp, inputs: &[SelInput]) -> Option<(Vec3, Vec3)> {
-    let body = picked_body(inputs)?;
-    let member = member_of(app, body)?;
-    let axis = member_axis(&app.session.doc, &app.session.model.state(), &member).ok()?;
-    // ponytail: the body's box centre, on the line for profiles symmetric about their centre.
-    let centre = crate::open_meshing::session_world(&app.session).body(body)?.mesh().bounds().center();
+    let member = member_of(app, picked_body(inputs)?)?;
+    let doc = &app.session.doc;
+    let state = app.session.model.state();
+    // Both come in the member's component frame; its placement carries them into the world.
+    let frame = crate::dialogs::feature_frame(&app.session, doc.feature(member.feature.0)?.component);
+    let centre = apply_point(&frame, member_pivot(doc, &state, &member).ok()?);
+    let axis = apply_vector(&frame, member_axis(doc, &state, &member).ok()?).normalized()?;
     Some((centre, axis))
 }
 

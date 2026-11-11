@@ -316,6 +316,39 @@ fn sync(app: &SolveApp, d: &mut Dialog) {
     crate::dialogs_rotate_member::sync(app, rotate(d), &inputs);
 }
 
+/// The dial of an angle-section post in a component moved and turned off the origin: on the
+/// post's profile's box centre (off its line: the line is on a corner), at mid-length, along the
+/// line, all in the world the view draws.
+#[test]
+fn rotate_member_dial_follows_a_moved_component_and_the_turn_pivot() {
+    let angle = json!({"kind": "angle", "width": 60, "height": 40, "thickness": 5});
+    let mut app = app_with(&[
+        ("component.create", json!({"name": "Frame", "grounded": false})),
+        ("sketch.create", json!({"plane": "XY", "name": "Post path"})),
+        ("sketch.options", json!({"sketch_3d": true})),
+        ("sketch.line3d", json!({"points": [[0, 0, 0], [0, 0, 300]]})),
+        ("sketch.finish", json!({})),
+        ("frame.member", json!({"sketch": "Post path", "body_name": "Post", "profile": angle, "anchor": "bottom_left"})),
+    ]);
+    let frame = app.session.doc.find_component("Frame").unwrap();
+    let occurrence = app.session.doc.occurrence_of(frame).unwrap().id;
+    app.run("occurrence.move", json!({"occurrence": occurrence, "axis": [1, 2, 3], "angle": "37 deg", "translate": [50, 20, 10]})).unwrap();
+    let transform = app.session.doc.occurrence_of(frame).unwrap().transform;
+    // The post runs up local Z, so its local box centre is the profile's box centre at mid-length.
+    let local = app.session.model.state().body("Post").unwrap().mesh().bounds().center();
+    assert!((local.z - 150.0).abs() < 1e-6 && local.x.hypot(local.y) > 1.0, "an angle's box centre is off its line: {local:?}");
+    let centre = solidcraft_engine::doc::apply_point(&transform, local);
+    let axis = solidcraft_engine::doc::apply_vector(&transform, solidcore_record::Vec3::Z);
+    let world = crate::open_meshing::session_world(&app.session);
+    let body = world.bodies.iter().find(|b| b.name.contains("Post")).unwrap_or_else(|| panic!("{:?}", body_names(&app)));
+    let index = (0..body.body.face_count()).find(|i| body.body.planar_face(*i).is_some()).unwrap();
+    let mut inputs = crate::dialogs_rotate_member::start(&app, "frame.rotate_member").unwrap().1;
+    inputs[0].items = vec![Sel::Face { body: body.name.clone(), index, point: centre }];
+    let (at, along) = crate::dialogs_rotate_member::dial(&app, &inputs).expect("a dial on the picked post");
+    assert!(at.dist(centre) < 1e-6, "dial centre {at:?}, the turn's pivot {centre:?}");
+    assert!(along.cross(axis).len() < 1e-9 && along.dot(axis) > 0.0, "dial axis {along:?}, the post's line {axis:?}");
+}
+
 fn turns(app: &SolveApp) -> Vec<String> {
     app.session
         .doc
