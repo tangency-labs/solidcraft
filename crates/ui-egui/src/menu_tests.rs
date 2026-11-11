@@ -950,6 +950,9 @@ fn canvas_menu_hides_renames_calibrates_and_deletes() {
     act(&mut app, &t, "Calibrate");
     let p = app.tree.canvas_panel.clone().unwrap();
     assert!(p.calibrate && (p.distance - 80.0).abs() < 1e-9, "starts from the image's width");
+    act(&mut app, &t, "Straighten");
+    let p = app.tree.canvas_panel.clone().unwrap();
+    assert!(p.straighten && !p.calibrate && p.picks_points() && p.target_angle() == 0.0, "{p:?}");
     act(&mut app, &t, "Delete");
     assert!(app.session.doc.canvases.is_empty());
     app.run("edit.undo", json!({})).unwrap();
@@ -958,7 +961,7 @@ fn canvas_menu_hides_renames_calibrates_and_deletes() {
     act(&mut app, &t, "Lock");
     assert!(app.session.doc.canvases[0].locked);
     let items = context_menu::items(&app, &t);
-    for label in ["Edit Canvas", "Calibrate", "Delete"] {
+    for label in ["Edit Canvas", "Calibrate", "Straighten", "Delete"] {
         let item = find(&items, label);
         assert!(!item.enabled && item.tip.as_deref() == Some(solidcraft_ui_text::tr("browser.canvas_locked")), "{label}: {item:?}");
     }
@@ -1050,6 +1053,18 @@ fn menus_follow_fusion_order() {
     order(&empty, &["Pan", "Zoom", "Orbit", "Show All", "Unisolate", "Extrude", "Fillet"]);
     context_menu::run_item(&mut app, &find(&empty, "Pan"), pos2(0.0, 0.0));
     assert!(matches!(app.viewport.nav, Some(crate::viewport::NavMode::Pan)));
+}
+
+#[test]
+fn v_on_a_selected_profile_toggles_its_sketch() {
+    let mut app = sample_app();
+    let sk = app.session.doc.features.iter().find(|f| f.name == "Base").unwrap().id;
+    crate::browser::set_sketch_visible(&mut app, sk, true);
+    app.session.selection = vec![solidcraft_engine::Sel::Profile { sketch: sk, index: 0 }];
+    context_menu::toggle_visibility(&mut app);
+    assert!(!crate::browser::sketch_visible(&app, sk), "V on a picked profile hides its sketch");
+    context_menu::toggle_visibility(&mut app);
+    assert!(crate::browser::sketch_visible(&app, sk), "and shows it again");
 }
 
 #[test]
@@ -1416,6 +1431,30 @@ fn toolbar_pins_removes_reorders_and_keeps_its_layout() {
     // Reset Toolbar puts the tab back.
     act(&mut app, &Target::ToolbarCommand { id: extra.into() }, "Reset Toolbar");
     assert_eq!(ids(&app, "CREATE"), create);
+}
+
+/// The Construct panel's default buttons are Plane, Axis and Point (#11340). The old layout, Offset
+/// Plane alone, stays one pin and three removals away, and is kept with the `toolbar` preference.
+#[test]
+fn the_old_construct_layout_is_kept_with_the_toolbar_preference() {
+    use crate::toolbar_custom as tc;
+    let mut app = sample_app();
+    app.ui.tab = "MODEL".into();
+    let ids = |app: &SolveApp| -> Vec<&'static str> {
+        let lists = tc::panel_lists("MODEL");
+        let (_, cmds, n) = lists.iter().find(|(p, ..)| *p == "CONSTRUCT").unwrap();
+        tc::buttons(app, "MODEL", "CONSTRUCT", cmds, *n).iter().map(|c| c.id).collect()
+    };
+    assert_eq!(ids(&app), vec!["construct.plane", "construct.axis", "construct.point"]);
+    act(&mut app, &Target::ToolbarCommand { id: "construct.plane.offset".into() }, "Pin to Toolbar");
+    for id in ["construct.plane", "construct.axis", "construct.point"] {
+        act(&mut app, &Target::ToolbarCommand { id: id.into() }, "Remove from Toolbar");
+    }
+    assert_eq!(ids(&app), vec!["construct.plane.offset"]);
+    let mut reopened = sample_app();
+    reopened.ui.tab = "MODEL".into();
+    reopened.load_prefs(&app.prefs());
+    assert_eq!(ids(&reopened), vec!["construct.plane.offset"], "the old layout comes back with the preferences");
 }
 
 #[test]
@@ -1792,6 +1831,19 @@ fn appearance_submenu_swatches_apply_to_the_clicked_body_and_keep_library_action
     let swatch = appearance.children.iter().find(|row| row.swatch.is_some()).unwrap();
     context_menu::run_item(&mut app, swatch, pos2(0.0, 0.0));
     assert_eq!(app.session.doc.appearances.bodies[&name].color, swatch.swatch.unwrap());
+}
+
+/// The A key opens the Appearance editor, so the quick looks and Remove override show no key.
+#[test]
+fn appearance_quick_choices_show_no_shortcut() {
+    let app = sample_app();
+    let appearance = find(&context_menu::items(&app, &Target::Body { name: body(&app) }), "Appearance");
+    assert_eq!(appearance.children[0].shortcut, "A");
+    let quick: Vec<_> = appearance.children.iter().filter(|row| row.id == "appearance.assign").collect();
+    assert!(quick.len() > 1, "quick looks and Remove override expected");
+    for row in quick {
+        assert_eq!(row.shortcut, "", "{}", row.label);
+    }
 }
 
 fn appearance_selection_app() -> SolveApp {

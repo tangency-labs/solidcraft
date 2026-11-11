@@ -1,6 +1,6 @@
 //! SolidCraft's own Preferences specimens: figures drawn from SolidCraft's content (a feature row,
-//! its status colours, the autosave interval, the agent pointer) with the kit's painters. Every
-//! colour and metric comes from tokens.
+//! its status colours, what the colour vision modes recolour, the autosave interval, the agent
+//! pointer) with the kit's painters. Every colour and metric comes from tokens.
 use crate::ui_kit::{self, BackingTooltipExt as _, dimension};
 use egui::{FontId, Rect, Sense, Stroke, Ui, pos2, vec2};
 use solidcraft_theme::{ColorVision, Tokens};
@@ -86,6 +86,40 @@ pub(crate) fn status_palette_sample(ui: &mut Ui, mode: ColorVision) {
             ui.painter().galley(pos2(r.left() + t.space_24, r.center().y - galley.size().y / 2.0), galley, ink);
         }
     });
+}
+
+/// The names under the Colour vision sample (message ids), one per figure of
+/// [`ui_kit::paint_colour_vision`].
+pub(crate) const COLOUR_VISION_SAMPLE: [&str; 6] =
+    ["ui.colour_vision_fixed", "ui.colour_vision_projected", "ui.axes", "ui.colour_vision_bends", "ui.draft", "ui.colour_vision_failed"];
+
+/// The Colour vision sample (#778): fixed and projected sketch lines, the X and Y axes, bends up
+/// and down, Draft Analysis and a failed feature, each drawn as it is where it appears, in the
+/// colours of `t` (the preference passes the mode being chosen, #7152). The six cells share one
+/// responsive, clipped area.
+pub(crate) fn colour_vision_sample(ui: &mut Ui, t: &Tokens) {
+    if ui_kit::settings_search::suppress_chrome(ui) {
+        return;
+    }
+    let count = COLOUR_VISION_SAMPLE.len() as f32;
+    let gap = t.space_8.min(dimension(ui.available_width()) / (count - 1.0));
+    let width = ((dimension(ui.available_width()) - gap * (count - 1.0)) / count).min(t.space_24 * 3.0 + t.space_12);
+    let figure_height = t.space_24 + t.space_16 + t.space_4;
+    let (area, _) = ui.allocate_exact_size(vec2(width * count + gap * (count - 1.0), figure_height + t.space_3 + t.space_16), Sense::hover());
+    solidcraft_ui_registry::publish_rect("prefs:colour_vision_samples", area);
+    let p = ui.painter_at(area);
+    for (i, name) in COLOUR_VISION_SAMPLE.iter().enumerate() {
+        let cell = Rect::from_min_size(area.min + vec2((width + gap) * i as f32, 0.0), vec2(width, figure_height));
+        solidcraft_ui_registry::publish_rect(&format!("prefs:colour_vision_sample:{i}"), cell);
+        ui_kit::paint_colour_vision(&p, cell, i, t);
+        ui_kit::centred_text(
+            &p,
+            Rect::from_min_size(cell.left_bottom() + vec2(0.0, t.space_3), vec2(cell.width(), t.space_16)),
+            solidcraft_ui_text::tr(name),
+            FontId::proportional(t.font_small),
+            t.text_dim,
+        );
+    }
 }
 
 /// An illustrative half-hour of autosave marks, using the actual configured interval.

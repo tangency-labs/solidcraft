@@ -53,7 +53,7 @@ pub(crate) mod trim;
 mod trim_tests;
 
 pub(crate) use convert::{from_arrays, to_arrays};
-pub(crate) use measure::{area, bounds, check, classify_point, edge_face_distance, is_manifold_solid, mass_properties, solid_count};
+pub(crate) use measure::{area, bounds, check, check_with, classify_point, edge_face_distance, is_manifold_solid, mass_properties, solid_count};
 
 /// A solidcore body. Its own lock: solidcore's operations take `&mut Brep`, even to measure.
 pub(crate) struct Body(pub(crate) Mutex<solidcore::topology::Brep>);
@@ -83,19 +83,16 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_clip_right_side_out = true;
     f.revolution_offset_axis_both_sides = true;
     f.offset_extended_edges_mated = true;
-    f.remove_slit_loops_where_solids_touch = true;
     f.keep_operand_uv_trims = true;
     f.proto_vertex_miss_is_false = true;
     f.check_loop_vertex_tolerance = true;
     f.check_loop_projected_seam_ends = true;
-    f.trim_boundary_seam_wrap = true;
     f.bspline_check_min_radius = true;
     f.oscillating_skips_failed_guesses = true;
     f.refine_cc_range_ends = true;
     f.flat_corners_test_bits = true;
     f.cylinder_rebuild_mean_radius = true;
     f.revolve_analytic_profile_faces = true;
-    f.revolve_arc_centre_near_axis_is_sphere = true;
     f.taper_tangent_corner_planes = true;
     f.revolve_nested_shells_as_cavities = true;
     f.revolve_holed_profile_void = true;
@@ -105,7 +102,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_walls_touch_refused = true;
     f.offset_analytic_mate_edges = true;
     f.nurb_cylinder_inside_out_frame = true;
-    f.shell_inner_shell_of_statuses = true;
     f.local_operation_refuses_loose_tangent_edges = true;
     f.torus_major_radius_from_origin = true;
     f.fillet_corner_sphere_from_four_arcs = true;
@@ -160,7 +156,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.found_torus_sphere_keep_tested_nurb = true;
     f.boolean_skips_faces_apart = true;
     f.uv_trim_checks_on_surface = true;
-    f.loop_orientation_floor_from_loop_box = true;
     f.local_operation_box_holds_new_surfaces = true;
     f.uv_trim_joins_drop_pieces = true;
     f.shell_edges_on_analytics_exact = true;
@@ -178,7 +173,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.torus_check_spindle_apex = true;
     f.local_operation_step_walls = true;
     f.edge_check_orders_tangent_faces = true;
-    f.revolve_arc_touching_axis_is_horn_torus = true;
     f.thicken_planar_side_walls = true;
     f.fillet_torus_span_from_start_section = true;
     f.fillet_knife_edge_rounds = true;
@@ -199,7 +193,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.loops_go_on_round_the_vertex = true;
     f.revolve_splits_curves_on_axis = true;
     f.cover_wraps_across_closed_seam = true;
-    f.imprint_extension_keeps_analytic_curve = true;
     f.fillet_trace_from_tangent_point_toward_next = true;
     f.fillet_tangent_point_one_sided_step = true;
     f.fillet_rails_meet_at_one_end_point = true;
@@ -228,8 +221,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.ssi_low_angle_start_on_probation = true;
     f.fillet_variable_span_follows_fillet = true;
     f.simple_coincidence_crossing_is_point = true;
-    f.boolean_temporary_transform_statuses = true;
-    f.primitive_path_curve_statuses = true;
     f.planar_path_sweep_statuses = true;
     f.planar_path_profile_placement_statuses = true;
     f.fillet_trim_status = true;
@@ -260,7 +251,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.sphere_from_arcs_common_centre = true;
     f.dupin_bottom_hyperbola_axis = true;
     f.extent3d_contains_both_segment_endpoints = true;
-    f.translation_sweep_regularize = true;
     f.gap_samples_use_trimmed_spans = true;
     f.twist_simple_duw_sign = true;
     f.offset_swap_uv_extended_distance = true;
@@ -269,7 +259,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.iso_curve_uv_line_both_params = true;
     f.extrusion_step_uses_clamped_uv = true;
     f.analytic_corner_failure_is_false = true;
-    f.fillet_refuse_crossing_rails = true;
     f.proto_edge_split_upper_keeps_the_old_max = true;
     f.point_on_start_point_squared_tolerance = true;
     f.bspline_trim_keeps_rational_end_spans = true;
@@ -281,7 +270,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.transform_aligned_bbox_image = true;
     f.bspline_simple_offset_matches_parameterization = true;
     f.offset_edges_keep_source_tolerance = true;
-    f.best_fit_line_largest_scatter_eigenvector = true;
     f.circle_silhouette_perspective_center = true;
     f.ellipse_convert_to_2d_uses_both_axes = true;
     f.circle_offset_antiparallel_normal = true;
@@ -289,19 +277,15 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.surface_continuity_checks_last_v_knot = true;
     f.surface_point_solver_propagates_bbox_failure = true;
     f.volume_lift_third_derivative_terms = true;
-    f.periodic_extent_add_empty_interval = true;
     f.stop_tracking_checks_own_callback = true;
     f.plane_reparameterize_moves_origin = true;
     f.crv_in_volume_mults_by_break_index = true;
     f.curve_bounded_surface_read_uv_type_and_implicit_outer = true;
-    f.polar_box_region_to_arc_transposes_domain = true;
-    f.local_solve1d_unbounded_newton_step = true;
     f.composite_curve_bbox_segment_intervals = true;
     f.knot_vector_valid_requires_span = true;
     f.projected_curve_transform_when_owned = true;
     f.curve_property_gs_branch_bounds = true;
     f.volume_representational_end_continuities = true;
-    f.integrator_propagates_failure = true;
     f.offset_open_edge_second_trim_point = true;
     f.close_loop_relates_only_coincident_edges = true;
     f.ssi_split_curves_at_singular_points = true;
@@ -310,15 +294,11 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.geometric_g2_continuity = true;
     f.bend_volume_bbox_contains_wide_angle_and_inf_u = true;
     f.bend_volume_trim_param_box_across_period = true;
-    f.point_set_tight_pbox_projects_points = true;
     f.degen_param_tiebreak_uses_actual_param = true;
-    f.cylinder_plane_section_trims_exact = true;
     f.local_surface_intersect_guards_max_boundary_retry = true;
     f.curve_sweep_closed_path_joins_ends = true;
     f.validate_tolerances_fixes_reported_gaps = true;
     f.edgeuse_convexity_propagates_step_off_failure = true;
-    f.mark_lock_pair_advances_and_locks_second_context = true;
-    f.is_iso_curve_at_propagates_canonical_failure = true;
     f.database_io_byte_swaps_read_boolean_and_u16 = true;
     f.is_topological_vertex_rejects_cusps_and_tangent_errors = true;
     f.cone_create_canonical_preserves_inside_out_and_checks_height = true;
@@ -329,8 +309,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_overflow_trim_at_creases = true;
     f.fillet_section_end_trim_at_creases = true;
     f.fillet_refuse_mixed_corner_crossing_rails = true;
-    f.fillet_exact_arc_sections = true;
-    f.fillet_exact_arc_spans = true;
     // Held back: see `HELD_BACK`.
     f.fillet_refuse_rounds_breaking_through = false;
     f.cone_unbounded_parameterized_as_nurb = true;
@@ -339,7 +317,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_overflow_crease_along_edge = true;
     f.plane_first_torus_section_exact = true;
     f.keep_exact_pcurves = true;
-    f.shell_one_construction = true;
     f.approximate_surface_checks_every_row = true;
     f.topological_vertex_has_only_edge_uses = true;
     f.planar_section_face_tolerance = true;
@@ -491,7 +468,7 @@ pub(crate) fn run_on<T: dump::Answer>(
 ) -> Result<T> {
     let stop = crate::stop::token();
     if stop.as_ref().is_some_and(CancelToken::is_cancelled) {
-        return Err(Error::Solidcore(format!("{call}: cancelled")));
+        return Err(Error::Cancelled(call));
     }
     call_on(call, inputs, stop, f)
 }
@@ -534,9 +511,14 @@ fn call_on<T: dump::Answer>(
     };
     drop(in_flight);
     // Stopped, it is no failure to look into, and solidcore may have left the kernel part way.
+    // No result either, even one solidcore finished first: the caller never has to ask whether
+    // it came in time (as solidcore-ops' session answers).
     if stop.is_some_and(|s| s.is_cancelled()) {
         put_kernel(None);
-        return r;
+        return match r {
+            Err(Error::Internal(e)) => Err(Error::Internal(e)),
+            _ => Err(Error::Cancelled(call)),
+        };
     }
     let why = match &r {
         Ok(v) => v.refusal(),
@@ -579,6 +561,23 @@ pub(crate) fn with_body<T: dump::Answer>(
     }
     // No token stops it: stopped part way, solidcore may leave the body it borrows half-changed.
     call_on(call, &[("brep", body)], None, |k| f(k, &mut body.0.lock().unwrap_or_else(PoisonError::into_inner)))
+}
+
+/// [`with_body`] on a body only this call reads (one the caller consumes): the token over this
+/// thread's work stops it, since what a stopped call leaves half-changed is never read again.
+pub(crate) fn with_own_body<T: dump::Answer>(
+    call: &'static str,
+    body: &Body,
+    f: impl FnOnce(&mut Kernel, &mut solidcore::topology::Brep) -> std::result::Result<T, solidcore::SolidError>,
+) -> Result<T> {
+    if body.0.is_poisoned() {
+        return Err(Error::Internal(format!("{call}: the body was left unfinished by an earlier panic")));
+    }
+    let stop = crate::stop::token();
+    if stop.as_ref().is_some_and(CancelToken::is_cancelled) {
+        return Err(Error::Cancelled(call));
+    }
+    call_on(call, &[("brep", body)], stop, |k| f(k, &mut body.0.lock().unwrap_or_else(PoisonError::into_inner)))
 }
 
 /// An axis-aligned box from its lower corner (`SmApiCreateBox`, as `smlib_make_box` checks it:

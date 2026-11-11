@@ -1744,15 +1744,11 @@ fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
     let field = match name {
         "sweep_frame_on_planar_path_normal" => &mut k.fixes.sweep_frame_on_planar_path_normal,
         "imprint_extends_edge_to_proto_vertex" => &mut k.fixes.imprint_extends_edge_to_proto_vertex,
-        "imprint_extension_keeps_analytic_curve" => {
-            &mut k.fixes.imprint_extension_keeps_analytic_curve
-        }
         "delete_vertex_joins_seam_iso_curve" => &mut k.fixes.delete_vertex_joins_seam_iso_curve,
         "cover_refuses_folded_continuation" => &mut k.fixes.cover_refuses_folded_continuation,
         "fillet_cleanup_removes_input_slits" => &mut k.fixes.fillet_cleanup_removes_input_slits,
         "cover_wraps_across_closed_seam" => &mut k.fixes.cover_wraps_across_closed_seam,
         "fillet_refuse_non_manifold_result" => &mut k.fixes.fillet_refuse_non_manifold_result,
-        "fillet_refuse_crossing_rails" => &mut k.fixes.fillet_refuse_crossing_rails,
         "fillet_torus_rail_on_axis" => &mut k.fixes.fillet_torus_rail_on_axis,
         "cone_parallel_line_midpoint" => &mut k.fixes.cone_parallel_line_midpoint,
         "fillet_trace_from_tangent_point_toward_next" => {

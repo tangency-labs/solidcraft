@@ -528,6 +528,29 @@ fn patterns_of_a_blind_hole_drill_every_copy() {
     assert!((c - 2.0 * one).abs() < 1e-3 * one, "{c} vs 2 × {one}");
 }
 
+/// #14050: a through hole at a sketch point on a plane below the box drills up into it, and so
+/// does every copy of it. Judged where the source hole already left an empty bore, the copies
+/// drilled away from the box and cut almost nothing (test and analysis by Ehuntabi).
+#[test]
+fn patterns_of_a_sketch_point_hole_below_the_box_drill_every_copy() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 90, "width": 60, "height": 10, "center": [0, 0, 5]}));
+    let v0 = volume(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "VP", "offset": -1}));
+    run(&mut s, "sketch.point", json!({"point": [-20, -10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "VP", "points": ["p1"], "diameter": 6, "depth": 12, "name": "H1"}));
+    let one = v0 - volume(&mut s);
+    assert!((one - PI * 9.0 * 10.0).abs() < 1e-3 * one, "{one}");
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"features": ["H1"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 20, "dir2": [0, 1, 0], "count2": 2, "spacing2": 20}),
+    );
+    let six = v0 - volume(&mut s);
+    assert!((six - 6.0 * one).abs() < 1e-3 * one, "{six} vs 6 × {one}");
+}
+
 /// Feature patterns and mirrors reference features by id (#1134): a rename leaves the
 /// references alone, and they keep pointing at the same feature (#401).
 #[test]
@@ -607,7 +630,13 @@ fn hole_pattern(count1: usize, count2: usize) -> (f64, std::time::Duration) {
 /// time and the ratio is taken of those: a retry cannot pass a regression on a small run that a
 /// spike happened to slow, once an earlier small run was fast. (A spike on the very first small
 /// run can still hide one, as it could before the retries.)
-fn scales_linearly(mut pair: impl FnMut() -> (std::time::Duration, std::time::Duration)) -> Result<(), String> {
+fn scales_linearly(pair: impl FnMut() -> (std::time::Duration, std::time::Duration)) -> Result<(), String> {
+    scales_within(8.0, pair)
+}
+
+/// `scales_linearly` with the allowed multiple of the small time given: at most `factor` times the
+/// fastest small run plus 2 s.
+fn scales_within(factor: f64, mut pair: impl FnMut() -> (std::time::Duration, std::time::Duration)) -> Result<(), String> {
     let (mut small, mut big) = (f64::INFINITY, f64::INFINITY);
     let mut runs = Vec::new();
     for _ in 0..3 {
@@ -615,11 +644,11 @@ fn scales_linearly(mut pair: impl FnMut() -> (std::time::Duration, std::time::Du
         small = small.min(s.as_secs_f64());
         big = big.min(b.as_secs_f64());
         runs.push(format!("{s:?} then {b:?}"));
-        if big < 8.0 * small + 2.0 {
+        if big < factor * small + 2.0 {
             return Ok(());
         }
     }
-    Err(format!("{}; fastest {small:.2} s and {big:.2} s, limit {:.2} s", runs.join(", "), 8.0 * small + 2.0))
+    Err(format!("{}; fastest {small:.2} s and {big:.2} s, limit {:.2} s", runs.join(", "), factor * small + 2.0))
 }
 
 #[test]
@@ -643,7 +672,10 @@ fn scales_linearly_keeps_each_sizes_fastest_run() {
 /// times slower than a machine running this alone (about 6 s for 512 holes there).
 #[test]
 fn pattern_of_512_hole_cuts_finishes_in_reasonable_time() {
-    if let Err(missed) = scales_linearly(|| (hole_pattern(16, 8).1, hole_pattern(32, 16).1)) {
+    // #14515: on the merge-queue runner, with every test binary running at once, the small run keeps
+    // its parallel speed-up while the big one does not, and three pairs in a row took 10.7x to 11.1x
+    // (2.9 s then 31 s) though the cost is linear. The old quadratic cost is 16x or more, so allow 13x.
+    if let Err(missed) = scales_within(13.0, || (hole_pattern(16, 8).1, hole_pattern(32, 16).1)) {
         panic!("128 holes, then 512, took {missed}");
     }
 }

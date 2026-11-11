@@ -291,18 +291,21 @@ fn variable_round(cliff: bool, r0: f64, r1: f64) -> Outcome {
 
 #[test]
 fn a_variable_round_past_a_box_top_is_subtracted() {
-    // The round is the union of its balls (WR-685): the fork's d01d7b0 and 58d03ef builds of
-    // 2 -> 11, 20, 30, 50, the G^n section's touch circles of upstream's approximated arcs,
-    // as this kernel builds them (`wr685_variable_round_touch_circle`), from either end, to
-    // the subtraction's 1e-7. Its great circles took off up to 1147 more (2 -> 50: 3546.18768).
-    for (r1, fork) in [
-        (11.0, 5_802.427_752_997_301_5),
-        (20.0, 5_503.840_689_738_950_5),
-        (30.0, 5_184.010_536_341_764_2),
-        (50.0, 4_693.488_044_680_034_4),
+    // The round is the union of its balls (WR-685), here the balls' cone: the box less the corner
+    // between the planes and the cone, cut by the 10 wide top's far face and the box's bottom, by
+    // Gauss-Legendre quadrature of each plane across the edge (5 and 10 panels along it agree to
+    // 1e-9; 2 -> 11 is `wr685_variable_round_touch_circle`'s `CLIFF_2_11_VOLUME` within its 1e-5),
+    // from either end, to the subtraction's 1e-7. Upstream's approximated arcs (the fork's
+    // d01d7b0) kept up to 0.12 less (2 -> 50: 4693.48804); its great circles took off up to 1147
+    // more (3546.18768).
+    for (r1, closed) in [
+        (11.0, 5_802.443_145_423),
+        (20.0, 5_503.887_121_531),
+        (30.0, 5_184.057_273_581),
+        (50.0, 4_693.608_889_860),
     ] {
-        assert_builds(&variable_round(true, 2.0, r1), fork, 1e-7);
-        assert_builds(&variable_round(true, r1, 2.0), fork, 1e-7);
+        assert_builds(&variable_round(true, 2.0, r1), closed, 1e-7);
+        assert_builds(&variable_round(true, r1, 2.0), closed, 1e-7);
     }
     assert_no_room(&variable_round(false, 2.0, 11.0));
 }

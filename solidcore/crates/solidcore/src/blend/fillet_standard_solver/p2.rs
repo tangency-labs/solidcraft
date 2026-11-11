@@ -104,10 +104,6 @@
 //!   the other base is the edge use's own UV point. Upstream reads an existing curve only and
 //!   otherwise solves globally on the base, which finds a point on a closed surface's seam
 //!   once at each end of the period and refuses the two answers.
-//! - **The drop onto the other offset** (solidcore's): when that offset continues as itself
-//!   (`offset_continues_as_itself`) `LoadInitialValues` drops the rail end onto the face's own
-//!   domain, not the extended one, which holds a second root of the rail-end solve on the far
-//!   side of the whole circle (the solve's interval is the extended one, as upstream's).
 
 use std::borrow::Cow;
 
@@ -152,7 +148,7 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
 use crate::nurbs::knots::Side;
-use crate::surface::offset_surface::{offset_continues_as_itself, SS_UNKNOWN};
+use crate::surface::offset_surface::{closed_turn, SS_UNKNOWN};
 use crate::surface::surface::p3::{out_of_bounds_enabled, set_out_of_bounds_enabled};
 use crate::surface::surface::Surface;
 use crate::topology::edgeuse::p1 as edgeuse;
@@ -711,13 +707,7 @@ fn cr_initial_body<S: ConstantRadiusOps + ?Sized>(
         // to get a better guess
         let uv_guess = Point2::new(srf2_guess_uv.x, srf2_guess_uv.y);
         let mut domain = base2.natural_uv_domain_with_nurb(k)?;
-        // Not upstream (#3045): an offset continued as itself is the whole circle, not upstream's
-        // tangent extension that stays near the face. The drop on the extended domain finds the
-        // nearest point of that circle, whose far side holds a second root of the rail-end solve
-        // outside the face; the rail end lies on the face's edge, so the drop stays on the face.
-        if !offset_continues_as_itself(k, base2) {
-            solver.setup_offset_extension(k, base2, &mut domain)?; // expands sDomain
-        }
+        solver.setup_offset_extension(k, base2, &mut domain)?; // expands sDomain
 
         if let Some((sol_uv, dist)) = offset_local_point_solve(k, surface2, &domain, pnt, uv_guess)?
         {
@@ -752,15 +742,31 @@ fn cr_initial_body<S: ConstantRadiusOps + ?Sized>(
     // the next two entries in rIntervals and rPeriodicities.
     let mut domain = base2.natural_uv_domain_with_nurb(k)?;
     solver.setup_offset_extension(k, base2, &mut domain)?; // expands sDomain
+    let mut ivls = [
+        Extent1d::from_min_max(domain.min().x, domain.max().x),
+        Extent1d::from_min_max(domain.min().y, domain.max().y),
+    ];
+    let mut periodic = [false, false];
+    // Not upstream (#13538): an offset continued as itself names each of its points by one
+    // parameter pair inside its closed turn (`closed_turn`): round the axis it wraps there
+    // (WR-650), along a circle generator it ends there. Solved on the extension's multiple
+    // turns, a rail end found the right point by another turn's parameters, which the face's
+    // trim reads as off the face.
+    if let Some(dirs) = closed_turn(k, base2)? {
+        for ((ivl, p), dir) in ivls.iter_mut().zip(periodic.iter_mut()).zip(dirs) {
+            if let Some((closed, wraps)) = dir {
+                *ivl = closed;
+                *p = wraps;
+            }
+        }
+    }
 
     let surface2_index = guess_t.len();
-    *interval_at(intervals, surface2_index, OP)? =
-        Extent1d::from_min_max(domain.min().x, domain.max().x);
-    *interval_at(intervals, plus(surface2_index, 1, OP)?, OP)? =
-        Extent1d::from_min_max(domain.min().y, domain.max().y);
+    let [ivl_u, ivl_v] = ivls;
+    *interval_at(intervals, surface2_index, OP)? = ivl_u;
+    *interval_at(intervals, plus(surface2_index, 1, OP)?, OP)? = ivl_v;
 
-    periodicities.push(false);
-    periodicities.push(false);
+    periodicities.extend(periodic);
 
     // set output
     guess_t.push(srf2_guess_uv.x);
@@ -2554,6 +2560,54 @@ struct PieceDefinitions {
     uvs: [Vec<BSplineCurve>; 2],
 }
 
+/// Puts `piece`'s weights on `joined`'s homogeneous scale where `piece`'s u-min side
+/// meets `joined`'s u-max side (#14405): one factor on every weight of `piece`, which
+/// leaves it the same surface, matching the weights at the joint's two ends, where the
+/// rails' pieces meet (the geometric mean of the two ends' ratios where they differ).
+/// `BSplineCurve::create_by_joining` scales the rails' pieces so, and `JoinSurface`
+/// averages the boundary rows as they are: unmatched, the joined row's weights are
+/// neither piece's and move the spans either side of the joint off both, the rails' iso
+/// curves with them. Nothing to do unless both surfaces are rational.
+///
+/// # Errors
+///
+/// `SM_ERR` for a weight at the joint's ends that is not positive.
+fn scale_to_joint(joined: &BSplineSurface, piece: &mut BSplineSurface) -> Result<()> {
+    let (Some(a), Some(b)) = (joined.gw_nurb(), piece.gw_nurb()) else {
+        return Ok(());
+    };
+    if !(a.is_rational() && b.is_rational()) {
+        return Ok(());
+    }
+    let ratio = |ja: usize, jb: usize| -> Result<f64> {
+        let wa = a.cpt(a.n(), ja)?.w;
+        let wb = b.cpt(0, jb)?.w;
+        let r = wa / wb;
+        if wa > 0.0 && wb > 0.0 && r.is_finite() {
+            Ok(r)
+        } else {
+            Err(SolidError::sm_err(OP_PIECEWISE))
+        }
+    };
+    let (r0, r1) = (ratio(0, 0)?, ratio(a.m(), b.m())?);
+    let scale = if r0 == r1 {
+        r0
+    } else {
+        crate::geom::vector3d::sqrt(r0 * r1)
+    };
+    if scale == 1.0 {
+        return Ok(());
+    }
+    let nurb = piece.get_or_create_gw_nurb()?;
+    for i in 0..=nurb.n() {
+        for j in 0..=nurb.m() {
+            let c = nurb.cpt_mut(i, j)?;
+            *c = c.scale(scale);
+        }
+    }
+    Ok(())
+}
+
 /// The joined curve of `pieces`, end to end in order (`CreateByJoining`).
 fn joined_curve(mut pieces: Vec<BSplineCurve>) -> Result<BSplineCurve> {
     let mut joined = BSplineCurve::create_by_joining(&mut pieces, None)?;
@@ -2576,8 +2630,11 @@ impl CircularCrossSectionFsg {
     /// Not the fork's (#430): with `definition`, where each piece is a round by its
     /// definition ([`Self::definition_surface`] on its own curves and stations, the law
     /// trimmed to its span, [`LawBall::span`]), the pieces are those definitions and the
-    /// joined surface is their nets'; the centre line, the rails and their uv curves are
-    /// then the pieces' rebuilt ones joined, as a whole round's definition rebuilds them.
+    /// joined surface is their nets', each net first put on the joined surface's
+    /// homogeneous scale at its joint (#14405: each net's weights are centred on 1, and
+    /// `JoinSurface` averages unmatched boundary rows); the centre line, the rails and their
+    /// uv curves are then the pieces' rebuilt ones joined, as a whole round's definition
+    /// rebuilds them.
     ///
     /// # Errors
     ///
@@ -2632,7 +2689,13 @@ impl CircularCrossSectionFsg {
                 else {
                     return Err(SolidError::sm_err(OP_PIECEWISE));
                 };
-                (pb.net().copy(), surface.clone())
+                let mut net = pb.net().copy();
+                // each definition's net is on its own homogeneous scale (its section's
+                // weights centred on 1): the joined surface's, at their joint
+                if let Some(j) = joined.as_ref() {
+                    scale_to_joint(j, &mut net)?;
+                }
+                (net, surface.clone())
             } else {
                 let mut trimmed = [center_line.copy(), rail1.copy(), rail2.copy()];
                 for curve in &mut trimmed {
@@ -4173,5 +4236,84 @@ mod tests {
             .expect("circular");
         let corner = s.evaluate_point(Point2::new(0.0, 0.0)).expect("point");
         assert!(corner.distance(p(0.0, 0.0, 1.0)) < 1e-6);
+    }
+
+    /// A quarter of the unit cylinder about the x axis over `x0..x1`: a cubic in u whose
+    /// rows' weights are `rows` (a rational parameterisation of x) by the quarter circle in
+    /// v, every weight times `scale` (the same surface for every `scale`).
+    fn quarter_cylinder(x0: f64, x1: f64, rows: [f64; 4], scale: f64) -> BSplineSurface {
+        use crate::nurbs::b_spline_curve::KnotType;
+        use crate::nurbs::b_spline_surface::p1::CanonicalSurfaceData;
+        use crate::nurbs::b_spline_surface::BSplineSurfaceForm;
+        let h = core::f64::consts::FRAC_1_SQRT_2;
+        let arc = [(1.0, 0.0, 1.0), (1.0, 1.0, h), (0.0, 1.0, 1.0)];
+        let mut cps = Vec::new();
+        let mut wts = Vec::new();
+        for (i, f) in rows.into_iter().enumerate() {
+            let x = x0 + (x1 - x0) * i as f64 / 3.0;
+            for (y, z, w) in arc {
+                cps.push(p(x, y, z));
+                wts.push(scale * f * w);
+            }
+        }
+        BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 3,
+            v_degree: 2,
+            control_points: &cps,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[4, 4],
+            v_multiplicities: &[3, 3],
+            u_knots: &[x0, x1],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&wts),
+            uv_domain: None,
+        })
+        .expect("surface")
+    }
+
+    #[test]
+    fn a_definition_net_joins_on_the_joined_surface_s_weight_scale() {
+        // #14405: each definition's net centres its weights on 1, so neighbouring pieces
+        // meet on different homogeneous scales. Joined as they are, the joint row's
+        // weights are averaged to neither piece's: the spans either side leave both pieces
+        // at the same parameters (here by over 1e-2), the rails' iso curves with them, and
+        // the rails (joined by `create_by_joining`, which matches the weights) no longer
+        // lie on the surface where the trim looks for them. Put on the joined surface's
+        // scale first, the join is the two pieces.
+        use crate::nurbs::b_spline_surface::SurfParamType;
+        let a = quarter_cylinder(0.0, 1.0, [1.0, 1.3, 0.8, 1.0], 1.0);
+        let b = quarter_cylinder(1.0, 2.0, [1.0, 0.9, 1.2, 1.0], 1.7);
+        let off = |joined: &BSplineSurface| {
+            let mut d = 0.0_f64;
+            for i in 0..=40 {
+                let u = 2.0 * f64::from(i) / 40.0;
+                let piece = if u <= 1.0 { &a } else { &b };
+                for v in [0.0, 0.25, 0.5, 1.0] {
+                    let uv = Point2::new(u, v);
+                    let want = piece.evaluate_point(uv).expect("piece");
+                    d = d.max(joined.evaluate_point(uv).expect("joined").distance(want));
+                }
+            }
+            d
+        };
+        let mut plain = b.copy();
+        let averaged = a
+            .copy()
+            .join_surface(&mut plain, SurfParamType::U, 0.0)
+            .expect("join");
+        assert!(off(&averaged) > 1e-2, "{:e}", off(&averaged));
+        let mut scaled = b.copy();
+        scale_to_joint(&a, &mut scaled).expect("scale");
+        let joined = a
+            .copy()
+            .join_surface(&mut scaled, SurfParamType::U, 0.0)
+            .expect("join");
+        assert!(off(&joined) < 1e-14, "{:e}", off(&joined));
+        // the pieces' own scales match: nothing to do
+        let mut same = quarter_cylinder(1.0, 2.0, [1.0, 0.9, 1.2, 1.0], 1.0);
+        let before = same.copy();
+        scale_to_joint(&a, &mut same).expect("scale");
+        assert_eq!(same.control_points().ok(), before.control_points().ok());
     }
 }
