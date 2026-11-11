@@ -11,7 +11,7 @@
 //! | [`BSplineCurve::calculate_bounding_box`], [`BoundingBoxRequest`], [`BoundingBoxes`] | `CalculateBoundingBox` |
 //! | [`BSplineCurve::is_planar`], [`Planar`]     | `SmCurve::IsPlanar`                    |
 //! | [`BSplineCurve::create_analytic_curve`], [`AnalyticCurve`] | `CreateAnalyticCurve`         |
-//! | [`BSplineCurve::create_by_joining`]               | `CreateByJoining`                      |
+//! | [`BSplineCurve::create_by_joining`], [`BSplineCurve::create_by_joining_with_breaks`] | `CreateByJoining` |
 //! | [`BSplineCurve::create_point_curve`]              | `CreatePointCurve`                     |
 //! | [`BSplineCurve::create_simple_offset`]            | `CreateSimpleOffset`                   |
 //! | [`BSplineCurve::has_repeated_end_control_points`] | `HasRepeatedEndControlPoints`          |
@@ -43,6 +43,9 @@
 //!   `p1`). `CalculateBoundingBox`'s unused `bExpandBox` flag is dropped and the boxes
 //!   asked for come back in [`BoundingBoxes`] (fresh boxes, as a caller passing new
 //!   `SmExtent3d` / `SmPseudoBox` / `SmPolarBox` objects gets).
+//! - **Join breaks** (not upstream). [`BSplineCurve::create_by_joining_with_breaks`]
+//!   also returns the knot at which each segment ends, read off the knot vector as it is
+//!   built (the skin's face sources, tangency-labs/solidcore#3139).
 //! - **Missing NURB.** Where upstream dereferences the `NULL` NURB of a curve built
 //!   without one (`GetOrCreateGwNurbPointer` cannot make it for a plain B-spline), the
 //!   port returns `SM_ERR` ([`BSplineFailure::NoNurbsForm`]). That includes
@@ -896,6 +899,34 @@ impl BSplineCurve {
     /// different dimension or degree; `SM_ERR` without a NURB, for a zero end weight or
     /// when degree elevation or the canonical construction fails.
     pub fn create_by_joining(segments: &mut [Self], senses: Option<&[bool]>) -> Result<Self> {
+        Self::join(segments, senses, None)
+    }
+
+    /// [`BSplineCurve::create_by_joining`], also returning where each segment lies in
+    /// the joined curve: the joined curve's first knot, then each segment's last knot,
+    /// in segment order (`segments.len() + 1` values). Segment `i` spans
+    /// `[breaks[i], breaks[i + 1]]`. Each value is one of the joined curve's knots, the
+    /// very value its knot vector holds. The curve is the one
+    /// [`BSplineCurve::create_by_joining`] makes.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`BSplineCurve::create_by_joining`].
+    pub fn create_by_joining_with_breaks(
+        segments: &mut [Self],
+        senses: Option<&[bool]>,
+    ) -> Result<(Self, Vec<f64>)> {
+        let mut breaks = Vec::new();
+        let joined = Self::join(segments, senses, Some(&mut breaks))?;
+        Ok((joined, breaks))
+    }
+
+    /// `CreateByJoining`, recording the segments' breaks in `breaks` when asked.
+    fn join(
+        segments: &mut [Self],
+        senses: Option<&[bool]>,
+        mut breaks: Option<&mut Vec<f64>>,
+    ) -> Result<Self> {
         let mut ctrl_pts: Vec<Point3> = Vec::new();
         let mut weights: Vec<f64> = Vec::new();
         let mut knot_mult: Vec<usize> = Vec::new();
@@ -994,6 +1025,9 @@ impl BSplineCurve {
                 }
                 ctrl_pts.push(last_point);
                 knots.push(first_of(&seg_knots)?);
+                if let Some(b) = breaks.as_mut() {
+                    b.push(first_of(&seg_knots)?);
+                }
                 knot_mult.push(
                     *seg_knot_mult
                         .first()
@@ -1113,6 +1147,13 @@ impl BSplineCurve {
                     );
                 }
                 ctrl_pts.push(pt);
+            }
+            if let Some(b) = breaks.as_mut() {
+                b.push(
+                    *knots
+                        .last()
+                        .ok_or_else(|| invalid(OP_JOIN, "empty joined data"))?,
+                );
             }
         }
 
