@@ -833,6 +833,24 @@ pub fn blend_edges(body: &Body, picks: &[Vec3]) -> Result<Vec<usize>> {
 /// vertex.
 /// Picks that find no edge are refused.
 pub fn tangent_chain(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
+    let (rec, chain, picked) = picked_chain(body, picks)?;
+    let mut out = picks.to_vec();
+    for e in chain.into_iter().skip(picked) {
+        out.push(edge_middle(&rec, e).ok_or_else(|| KernelError::Failed("a point on a chain edge".into()))?);
+    }
+    Ok(out)
+}
+
+/// [`tangent_chain`] as the record's edge indices (the display's edge indices,
+/// [`Body::edges`]): the edges `picks` take, each once, then the edges that continue them.
+/// For a caller that shows the chain: it needs no point looked up on a tessellated edge.
+pub fn tangent_chain_edges(body: &Body, picks: &[Vec3]) -> Result<Vec<usize>> {
+    picked_chain(body, picks).map(|(_, chain, _)| chain)
+}
+
+/// The body's record, the picked edges' tangent chain as its edge indices (the picked edges
+/// first, each once), and how many of those the picks took.
+fn picked_chain(body: &Body, picks: &[Vec3]) -> Result<(Faces, Vec<usize>, usize)> {
     if picks.is_empty() || picks.len() > 1000 || picks.iter().any(|p| !p.is_finite()) {
         return Err(KernelError::Invalid("select 1…1000 edges by finite points".into()));
     }
@@ -845,11 +863,7 @@ pub fn tangent_chain(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
         }
     }
     let chain = chain_of(&rec, &picked, &hidden)?;
-    let mut out = picks.to_vec();
-    for e in chain.into_iter().skip(picked.len()) {
-        out.push(edge_middle(&rec, e).ok_or_else(|| KernelError::Failed("a point on a chain edge".into()))?);
-    }
-    Ok(out)
+    Ok((rec, chain, picked.len()))
 }
 
 /// Edges meeting at an angle (radians) below this continue one another; faces meeting at an

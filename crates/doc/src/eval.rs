@@ -263,21 +263,18 @@ impl ModelBody {
     }
 
     /// The display edges a Fillet or Chamfer with tangent propagation rounds from display edge
-    /// `edge`: `edge` first, then each edge of the body's exact tangent chain through it
-    /// ([`kernel::tangent_chain`], the walk the feature itself takes, which stops where a
-    /// concave edge runs on as a convex one), each found as the body's edge nearest the point
-    /// the kernel names on it ([`kernel::Body::nearest_edge`], whose indices are the display
-    /// edges'). `at` is the picked point on `edge`. Just `edge` when the kernel cannot walk the
-    /// chain.
+    /// `edge`: `edge` first, then each other edge of the body's exact tangent chain through it
+    /// ([`kernel::tangent_chain_edges`], the walk the feature itself takes, which stops where a
+    /// concave edge runs on as a convex one). The kernel names the chain by the record's edge
+    /// indices, which are the display edges'. `at` is the picked point on `edge`. Just `edge`
+    /// when the kernel cannot walk the chain.
     pub fn blend_chain(&self, edge: usize, at: Vec3) -> Vec<usize> {
-        let Ok(points) = kernel::tangent_chain(&self.body, &[at]) else { return vec![edge] };
-        let tol = (self.body.size() * 2e-3).max(1e-3);
         let mut out = vec![edge];
-        for p in points.iter().skip(1) {
-            if let Ok(Some((i, _))) = self.body.nearest_edge(*p, tol)
-                && !out.contains(&i)
-            {
-                out.push(i);
+        if let Ok(chain) = kernel::tangent_chain_edges(&self.body, &[at]) {
+            for i in chain {
+                if !out.contains(&i) {
+                    out.push(i);
+                }
             }
         }
         out
@@ -11318,19 +11315,13 @@ mod chain_tests {
         m.evaluate(&doc);
         let st = m.state();
         let b = &st.bodies[0];
-        let mesh = b.mesh();
-        let near = |p: Vec3| {
-            let d = |e: &[Vec3]| e.windows(2).map(|s| p.dist_to_segment(s[0], s[1])).fold(f64::INFINITY, f64::min);
-            (0..mesh.edges.len()).min_by(|&i, &j| d(&mesh.edges[i]).total_cmp(&d(&mesh.edges[j]))).unwrap()
-        };
-        let boss = near(Vec3::new(20.0, 0.0, 30.0));
-        let step = near(Vec3::new(20.0, 0.0, 10.0));
+        // The edge the kernel takes for a pick, exactly: its index is the display edge's.
+        let picked = |p: Vec3| kernel::blend_edges(&b.body, &[p]).unwrap()[0];
+        let boss = picked(Vec3::new(20.0, 0.0, 30.0));
+        let step = picked(Vec3::new(20.0, 0.0, 10.0));
         assert_ne!(boss, step);
-        assert!(mesh.tangent_chain(boss, 2f64.to_radians()).contains(&step), "the mesh walk took the step");
+        assert!(b.mesh().tangent_chain(boss, 2f64.to_radians()).contains(&step), "the mesh walk took the step");
         assert_eq!(b.blend_chain(boss, Vec3::new(20.0, 0.0, 30.0)), vec![boss]);
-        // The kernel numbers the edges as the display does, so a chain's indices are display edges.
-        let kernel_edge = |p: Vec3| b.body.nearest_edge(p, 1e-3).unwrap().map(|(i, _)| i);
-        assert_eq!((kernel_edge(Vec3::new(20.0, 0.0, 30.0)), kernel_edge(Vec3::new(20.0, 0.0, 10.0))), (Some(boss), Some(step)));
     }
 
     fn fillet(at: Vec3, radius: &str, tangent_chain: bool) -> FeatureKind {
