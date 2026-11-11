@@ -4306,10 +4306,11 @@ version = "0.40.0-rc.4"
 
 [[package]]
 name = "solidcraft-cam"
-version = "0.23.1"
+version = "0.40.0-rc.4"
 dependencies = [
  "serde",
  "serde_json",
+ "solidcore-record",
  "solidcraft-geom",
  "thiserror 2.0.21",
 ]

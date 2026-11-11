@@ -4,7 +4,8 @@
 use std::f64::consts::PI;
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Region2, Vec2, Vec3};
+use solidcore_record::{Region2, Vec2, Vec3};
+use solidcraft_geom::prelude::*;
 
 use crate::check::verify;
 use crate::offset::{Shape, reversed};
