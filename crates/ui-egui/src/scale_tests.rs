@@ -280,6 +280,7 @@ pub(crate) fn view_frame(
         pv_hide: false,
         preview_bounds: None,
         view_proj: proj.vp.to_f32(),
+        turned_depth: Some(proj.vp.turned_depth_f32()),
         back: proj.cam.back().to_f32(),
         size_px: [size as f32; 2],
         clip: [0.0; 4],

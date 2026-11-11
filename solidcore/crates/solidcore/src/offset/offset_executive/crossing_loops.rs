@@ -74,7 +74,6 @@ const OP: &str = "offset::offset_executive::crossing_loops::resolve_crossing_loo
 use crate::error::offset::{LoopCrossing, OffsetFailure, WallContact};
 use crate::error::Failure;
 // `SM_ERR_ASSERT_FAILURE`.
-use crate::error::SM_ERR_ASSERT_FAILURE;
 
 /// A stretch of a loop of an offset face between two of its crossings with other loops
 /// or the ends of its edge use, in the loop's direction (`sm_LoopStretch`).
@@ -334,28 +333,35 @@ fn cut_at_crossings_refusing_touch(
     Ok(num_crossings)
 }
 
-fn assert_failure() -> SolidError {
-    SolidError::Upstream {
-        operation: OP,
-        code: SM_ERR_ASSERT_FAILURE,
-        entity: None,
-    }
+/// The UV trim curve of an edge use does not run over its edge's interval
+/// (`SM_ERR_ASSERT_FAILURE`).
+fn trim_interval_mismatch() -> SolidError {
+    SolidError::offset(
+        OP,
+        OffsetFailure::Inconsistent(
+            "an edge use's UV trim curve does not span its edge's interval",
+        ),
+    )
 }
 
+/// `value`, or `SM_ERR_NULL_POINTER` (upstream `NER`) for an entity or curve that is not
+/// there.
 fn required<T>(value: Option<T>) -> Result<T> {
-    value.ok_or_else(|| SolidError::null_pointer(OP))
+    value.ok_or_else(|| SolidError::offset_missing(OP, "an entity or curve of the offset face"))
 }
 
 fn at<T>(v: &[T], i: usize) -> Result<&T> {
-    v.get(i).ok_or_else(|| SolidError::null_pointer(OP))
+    v.get(i)
+        .ok_or_else(|| SolidError::offset_missing(OP, "an entry of the crossings' own lists"))
 }
 
 fn at_mut<T>(v: &mut [T], i: usize) -> Result<&mut T> {
-    v.get_mut(i).ok_or_else(|| SolidError::null_pointer(OP))
+    v.get_mut(i)
+        .ok_or_else(|| SolidError::offset_missing(OP, "an entry of the crossings' own lists"))
 }
 
 fn index_i64(i: usize) -> Result<i64> {
-    i64::try_from(i).map_err(|_| SolidError::null_pointer(OP))
+    i64::try_from(i).map_err(|_| SolidError::offset_missing(OP, "a node number for the edge use"))
 }
 
 /// The vertex node of edge use `k`: `-1 - k`.
@@ -436,6 +442,11 @@ impl OffsetExecutive {
         let crate::error::Reason::Offset(refusal) = failure.reason else {
             return SolidError::Failed(failure);
         };
+        // a failed routine's status (not a refusal) is returned as it is, as it was before
+        // the routine described it
+        if refusal.replaces_upstream_status() {
+            return SolidError::Failed(failure);
+        }
         let input_face = match self.faceuse_to_faces.firsts(f).as_slice() {
             [fu] => eu::faceuse_face(original, *fu).ok().flatten(),
             _ => None,
@@ -513,7 +524,7 @@ impl OffsetExecutive {
                 let uv = required(eu::uv_trim_curve(b, edgeuse)?.0.cloned())?;
                 let e = edge_of(b, edgeuse)?;
                 if !uv.natural_interval().are_equal(&b.edge(e)?.interval, 0.0) {
-                    return Err(assert_failure());
+                    return Err(trim_interval_mismatch());
                 }
                 loop_of.push(ll);
                 edgeuses.push(edgeuse);

@@ -19,10 +19,8 @@
 //! wrong; the failure's `operation` path says which routine. No failure names an
 //! entity: the sites they replace named none. The failures that are checks of a
 //! caller's arguments stay [`crate::SolidError::InvalidInput`]. `extent1d`, `extent2d`,
-//! `expansion` and `local_solve_nd` do not use these yet, and
-//! the singular system of `Matrix::solve_linear_system` (and of
-//! `Matrix::solve_with_lu`, which it calls) stays a bare status while `local_solve_nd`
-//! matches it.
+//! `expansion` and `local_solve_nd` do not use these yet. `local_solve_nd` reads the
+//! singular system of `Matrix::solve_linear_system` by its `SM_ERR` status.
 
 use super::{
     ErrorKind, Failure, Reason, SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NULL_POINTER, SM_ERR_WARNING,
@@ -179,50 +177,18 @@ mod tests {
         assert_eq!(SolidError::sm_err("geom::op").geom_failure(), None);
     }
 
-    /// The geometry utilities that describe their failures build no bare `Upstream`
-    /// status in their library code (the count is the bare sites a file may still hold
-    /// while a site waits on other work).
+    /// The geometry utilities describe their failures: their library code builds no bare
+    /// `Upstream` status, except the files listed (with the bare sites each may still hold)
+    /// whose conversion waits on other open work.
     #[test]
-    fn the_described_geom_routines_build_no_bare_statuses() {
-        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/geom");
-        let files = [
-            ("a_object.rs", 0),
-            ("attribute.rs", 0),
-            ("extent3d.rs", 0),
-            ("geom_utility/p1.rs", 0),
-            ("geom_utility/p2.rs", 0),
-            ("global_solver.rs", 0),
-            ("grid.rs", 0),
-            ("local_solve1d.rs", 0),
-            // the singular system of `solve_linear_system` and of `solve_with_lu`, which
-            // it calls: `local_solve_nd` matches it
-            ("matrix.rs", 2),
-            ("periodic_extent1d.rs", 0),
-            ("polar_box.rs", 0),
-            ("pseudo_box.rs", 0),
-            ("tol.rs", 0),
-            ("tools.rs", 0),
-            ("transform.rs", 0),
-            ("tree.rs", 0),
-            ("vector2d.rs", 0),
-            ("vector3d.rs", 0),
-        ];
-        for (rel, allowed) in files {
-            let text = std::fs::read_to_string(src.join(rel))
-                .expect("read")
-                .replace("\r\n", "\n");
-            let library = text
-                .find("#[cfg(test)]\nmod tests")
-                .map_or(text.as_str(), |at| &text[..at]);
-            let bare: usize = [
-                "SolidError::sm_err(",
-                "SolidError::null_pointer(",
-                "SolidError::Upstream {",
+    fn the_geom_routines_build_no_bare_statuses() {
+        assert_eq!(
+            super::super::query::tests::bare_statuses_in("geom", 30),
+            [
+                ("geom/extent1d.rs".to_owned(), 1),
+                ("geom/extent2d.rs".to_owned(), 2),
+                ("geom/local_solve_nd.rs".to_owned(), 1),
             ]
-            .iter()
-            .map(|needle| library.matches(needle).count())
-            .sum();
-            assert_eq!(bare, allowed, "bare statuses in {rel}");
-        }
+        );
     }
 }

@@ -14,11 +14,10 @@
 //! | [`QueryFailure::InvalidValue`] | `SM_ERR_INVALID_INPUT`   |
 //!
 //! Deviations: not upstream. A failure says in a phrase what went wrong; the failure's
-//! `operation` path says which routine. No failure names an entity: the sites they
-//! replace named none. The failures that are checks of a caller's arguments stay
-//! [`crate::SolidError::InvalidInput`]. `query/api_queries.rs` and `query/brep.rs` do not
-//! use these yet, and `query/face/p2.rs` keeps one bare status (the point classification's
-//! seam failure, which names its face).
+//! `operation` path says which routine. A failure names an entity only where the site
+//! it replaces did (the point classification's seam failure, at its face). The failures
+//! that are checks of a caller's arguments stay [`crate::SolidError::InvalidInput`].
+//! `query/api_queries.rs` does not use these yet.
 
 use super::{ErrorKind, Failure, Reason, SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NULL_POINTER};
 
@@ -112,7 +111,7 @@ impl crate::SolidError {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use crate::SolidError;
 
@@ -164,13 +163,25 @@ mod tests {
     }
 
     /// The query routines describe their failures: their library code builds no bare
-    /// `Upstream` status (the count is the bare sites a file may still hold while a site
-    /// waits on other work).
+    /// `Upstream` status, except the files listed (with the bare sites each may still hold)
+    /// whose conversion waits on other open work.
     #[test]
     fn the_query_routines_build_no_bare_statuses() {
+        assert_eq!(
+            bare_statuses_in("query", 20),
+            [("query/api_queries.rs".to_owned(), 26)]
+        );
+    }
+
+    /// The files under `src/<area>` (and `src/<area>.rs`) whose library code builds bare
+    /// statuses, with the number each builds, sorted by path; at least `least` files are
+    /// read. Test files (`tests.rs`, `*_tests.rs`) are skipped, and the library part of a
+    /// file ends at its test module: `#[cfg(test)]`, then any attributes (such as an
+    /// `#[allow(..)]` for the tests' unwraps), then `mod` with any visibility.
+    pub(in crate::error) fn bare_statuses_in(area: &str, least: usize) -> Vec<(String, usize)> {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        let mut files = vec![root.join("query.rs")];
-        let mut dirs = vec![root.join("query")];
+        let mut files = vec![root.join(format!("{area}.rs"))];
+        let mut dirs = vec![root.join(area)];
         while let Some(dir) = dirs.pop() {
             for entry in std::fs::read_dir(dir).expect("read dir") {
                 let path = entry.expect("entry").path();
@@ -181,37 +192,52 @@ mod tests {
                 }
             }
         }
-        files.sort();
-        assert!(files.len() > 20, "{files:?}");
-        // files that still hold bare statuses, and how many
-        let held = [
-            // open work on these files elsewhere
-            ("api_queries.rs", 26),
-            ("brep.rs", 2),
-            // the point classification's seam failure names its face
-            ("face/p2.rs", 1),
-        ];
+        assert!(files.len() >= least, "{files:?}");
+        let mut found = Vec::new();
         for path in files {
+            let relative = path
+                .strip_prefix(&root)
+                .expect("under src")
+                .to_string_lossy()
+                .replace('\\', "/");
+            if relative.ends_with("/tests.rs") || relative.ends_with("_tests.rs") {
+                continue;
+            }
             let text = std::fs::read_to_string(&path)
                 .expect("read")
                 .replace("\r\n", "\n");
             let library = text
-                .find("\n#[cfg(test)]\nmod ")
-                .map_or(text.as_str(), |at| &text[..at]);
+                .match_indices("\n#[cfg(test)]\n")
+                .find(|(at, _)| {
+                    let mut rest = text[at + "\n#[cfg(test)]\n".len()..].lines();
+                    rest.find(|line| {
+                        let line = line.trim_start();
+                        !(line.starts_with("#[") || line.starts_with("clippy::") || line == ")]")
+                    })
+                    .is_some_and(|line| {
+                        let line = line
+                            .strip_prefix("pub(crate) ")
+                            .or_else(|| line.strip_prefix("pub(super) "))
+                            .or_else(|| line.strip_prefix("pub "))
+                            .unwrap_or(line);
+                        line.starts_with("mod ")
+                    })
+                })
+                .map_or(text.as_str(), |(at, _)| &text[..at]);
             let bare: usize = [
                 "SolidError::sm_err(",
                 "SolidError::null_pointer(",
                 "SolidError::Upstream {",
+                "SolidError::nl_ser(",
             ]
             .iter()
             .map(|needle| library.matches(needle).count())
             .sum();
-            let rel = path.strip_prefix(root.join("query")).unwrap_or(&path);
-            let want = held
-                .iter()
-                .find(|(name, _)| rel == std::path::Path::new(name))
-                .map_or(0, |(_, n)| *n);
-            assert_eq!(bare, want, "bare statuses in {}", path.display());
+            if bare > 0 {
+                found.push((relative, bare));
+            }
         }
+        found.sort();
+        found
     }
 }

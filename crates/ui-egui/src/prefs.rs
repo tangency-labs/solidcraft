@@ -4905,6 +4905,57 @@ mod tests {
     }
 
     #[test]
+    fn layout_page_checkboxes_keep_their_labels_at_every_width() {
+        // "Origin and bodies on top" is greyed out unless History is on the left. Its disabled area once
+        // started at its row's end, so the label was squeezed away behind the (i) icon (#14564).
+        let checks = [
+            ("history_play_button", "prefs.layout_page.play_history"),
+            ("history_group_joints", "prefs.history_group_joints"),
+            ("history_bar_groups", "prefs.history_bar_groups"),
+            ("history_origin_bodies", "prefs.layout_page.origin_bodies"),
+            ("browser_components_open", "prefs.browser_components_open"),
+            ("browser_rows_start_closed", "prefs.browser_rows_start_closed"),
+            ("browser_eye_left", "prefs.browser_eye_left"),
+            ("browser_body_features", "prefs.browser_body_features"),
+        ];
+        for timeline_left in [false, true] {
+            for width in [1600, 1100, 960, 800, 640] {
+                let mut h = crate::scenario::Harness::new();
+                h.app.preferences.language = "en".into();
+                h.app.home.open = false;
+                h.app.preferences.timeline_left = timeline_left;
+                h.call("ui.resize", json!({"width":width,"height":1100}));
+                h.call("ui.prefs", json!({"open":"Layout"}));
+                h.frames(20);
+                let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+                for (key, label) in checks {
+                    let label = solidcraft_ui_text::tr(label);
+                    let check = crate::scenario::rect_of(&format!("prefs:{key}")).unwrap();
+                    assert!(check.left() >= body.left() - 0.5 && check.right() <= body.right() + 0.5, "{key} at {width}: {check:?} outside {body:?}");
+                    let mut text_found = false;
+                    for shape in &h.shapes {
+                        crate::test_support::each_shape(&shape.shape, &mut |shape| {
+                            if let egui::Shape::Text(text) = shape
+                                && text.galley.job.text == label
+                            {
+                                let bounds = text.galley.rect.translate(text.pos.to_vec2());
+                                if check.contains(bounds.center()) {
+                                    assert!(
+                                        !text.galley.elided && check.expand(0.5).contains_rect(bounds),
+                                        "{key} label cut at {width}: {bounds:?} in {check:?}"
+                                    );
+                                    text_found = true;
+                                }
+                            }
+                        });
+                    }
+                    assert!(text_found, "{key} shows its label \"{label}\" at {width} (History left: {timeline_left})");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn navigation_bar_appearance_segments_stay_inside_the_page_at_narrow_widths() {
         for width in [1600, 880, 640, 600, 480] {
             let mut h = crate::scenario::Harness::new();
