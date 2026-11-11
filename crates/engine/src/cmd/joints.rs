@@ -1706,7 +1706,10 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
         .filter_map(|id| name(*id))
         .map(|j| ReachedJoint { joint: j.id, name: j.name.clone(), values: named_value_list(j, effective.get(&j.id).unwrap_or(&j.values)) })
         .collect();
-    let stopped_by_limit = (!reached.limits.is_empty()).then(|| {
+    // A contact that stopped it came first: the limits and loop the reach found further on are
+    // not where it rests.
+    let contact_stopped = stopped_by_contact.is_some();
+    let stopped_by_limit = (!contact_stopped && !reached.limits.is_empty()).then(|| {
         reached
             .limits
             .iter()
@@ -1730,7 +1733,7 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
         values,
         moved: super::motion::moved(&before, &super::motion::positions(s)).next().is_some(),
         stopped_by_limit,
-        stopped_by_loop: reached.stopped_by_loop.and_then(name).map(|j| ReachLoopStop { joint: j.name.clone() }),
+        stopped_by_loop: reached.stopped_by_loop.filter(|_| !contact_stopped).and_then(name).map(|j| ReachLoopStop { joint: j.name.clone() }),
         stopped_by_contact,
         reason: r.err(),
         continuous: (bool_(p, "continuous") == Some(true)).then_some(true),
