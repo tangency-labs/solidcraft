@@ -595,6 +595,20 @@ fn hole_from_a_sketch_on_an_offset_plane_inside_the_part_starts_at_the_plane() {
     assert!(solid_at(&s, 20.0, 20.0, 12.05) && solid_at(&s, 20.0, 20.0, 12.3), "the material just above the plane stays");
 }
 
+/// #11538: a sketch plane just under the top face (z 19.95 in a 20 mm part) is still a start
+/// inside the part: the tool's reach above a face, wider than the 0.05 mm roof, does not open it.
+#[test]
+fn hole_from_a_sketch_plane_just_under_the_top_face_keeps_the_roof() {
+    let mut s = Session::default();
+    box_part(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": "19.95 mm", "name": "Pts"}));
+    run(&mut s, "sketch.point", json!({"point": [20, 20], "id": "p1"}));
+    run(&mut s, "sketch.finish", json!({}));
+    drill(&mut s, &["p1".to_string()], json!({"depth": 5}));
+    assert!(!solid_at(&s, 20.0, 20.0, 17.0) && !solid_at(&s, 20.0, 20.0, 19.9), "the hole is drilled below the plane");
+    assert!(solid_at(&s, 20.0, 20.0, 19.98), "the roof above the plane stays");
+}
+
 /// A sketch on a standard plane through the middle of a part keeps drilling from the part's
 /// surface, as before #11538 limited the new rule to derived planes.
 #[test]
