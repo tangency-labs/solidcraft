@@ -116,7 +116,7 @@ fn member_plane(a: Vec3, b: Vec3, turn: f64, at: Vec2, centre: Vec2, own: Option
     let origin = a - x * at.x - y * at.y;
     let Some(t) = own else { return Plane::new(origin, x, y) };
     let pivot = origin + x * centre.x + y * centre.y;
-    let (x, y) = frame::member_axes(b - a, turn + t)?;
+    let (x, y) = frame::member_axes(b - a, turn + t.rem_euclid(std::f64::consts::TAU))?;
     Plane::new(pivot - x * centre.x - y * centre.y, x, y)
 }
 
