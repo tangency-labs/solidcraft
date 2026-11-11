@@ -279,11 +279,10 @@ impl SurfOfRevolution {
         if self.base.nurb.is_none() {
             ignore_status(self.make_nurb(k))?;
         }
-        let sur = self
-            .base
-            .nurb
-            .as_mut()
-            .ok_or(SolidError::null_pointer(OP_REPARAM))?;
+        let sur = self.base.nurb.as_mut().ok_or(SolidError::surface_missing(
+            OP_REPARAM,
+            "the surface's NURB",
+        ))?;
 
         // set NURB Surface domain parameterization - no change in shape
         sur.reparam_to_interval(r, Direction::UV)?;
@@ -373,7 +372,10 @@ impl SurfOfRevolution {
         let mut d_scale = 1.0;
         if let Some(s) = scale {
             if !are_same(s.x, s.y) || !are_same(s.x, s.z) || s.x < EFF_ZERO {
-                return Err(SolidError::sm_err(OP_XFORM));
+                return Err(SolidError::surface_failed(
+                    OP_XFORM,
+                    "the scale is not uniform and positive",
+                ));
             }
             d_scale = s.x;
         }
@@ -393,7 +395,7 @@ impl SurfOfRevolution {
         let gen = self
             .gen_curve
             .as_mut()
-            .ok_or(SolidError::null_pointer(OP_GEN))?;
+            .ok_or(SolidError::surface_missing(OP_GEN, "the generator curve"))?;
         ignore_status(gen.transform_at_depth(k, rotate_n_move, scale, depth + 1))?;
 
         // apply transformation to underlying Nurb
@@ -451,7 +453,7 @@ impl SurfOfRevolution {
         let gen = self
             .gen_curve
             .as_mut()
-            .ok_or(SolidError::null_pointer(OP_GEN))?;
+            .ok_or(SolidError::surface_missing(OP_GEN, "the generator curve"))?;
         gen_adjust_step_interval(k, gen, &v_ivl)?;
 
         // make sure m_pGenCurve Nurb domain matches crNewNurbsDomain (status ignored)
@@ -503,9 +505,10 @@ impl SurfOfRevolution {
         }
 
         // arrive here when polar conversions are possible
-        let circle = self
-            .polar_curve()
-            .ok_or(SolidError::null_pointer(OP_TO_NURBS))?;
+        let circle = self.polar_curve().ok_or(SolidError::surface_missing(
+            OP_TO_NURBS,
+            "the polar conversion circle",
+        ))?;
         let (mut x, exact_conversion) = self
             .polar
             .convert_to_nurbs_parameter(k, circle, step_uv.x, 0.0)?;
@@ -637,10 +640,16 @@ impl SurfOfRevolution {
     ) -> Result<SolutionArray<O>> {
         // no work - can't convert to polar coordinates - does not have a planar generator
         if !self.have_polar_conversion() {
-            return Err(SolidError::sm_err(OP_DROP));
+            return Err(SolidError::surface_failed(
+                OP_DROP,
+                "the surface has no polar conversion",
+            ));
         }
         if !self.planar_generator {
-            return Err(SolidError::sm_err(OP_DROP));
+            return Err(SolidError::surface_failed(
+                OP_DROP,
+                "the generator is not planar",
+            ));
         }
 
         // the generator with the surface's out-of-bounds flag
@@ -672,7 +681,10 @@ impl SurfOfRevolution {
 
         // when point is not in sweep interval
         if !inside {
-            return Err(SolidError::sm_err(OP_DROP));
+            return Err(SolidError::surface_failed(
+                OP_DROP,
+                "the point is outside the sweep interval",
+            ));
         }
 
         // For testPoints on seams and given a pointing vector - only keep the specified
@@ -727,9 +739,10 @@ impl SurfOfRevolution {
         sol.nodes[0] = None;
         sol.num_variables = 2;
 
-        let circle = self
-            .polar_curve()
-            .ok_or(SolidError::null_pointer(OP_DROP))?;
+        let circle = self.polar_curve().ok_or(SolidError::surface_missing(
+            OP_DROP,
+            "the polar conversion circle",
+        ))?;
         let num_gen = gen_solutions.len();
 
         // for every rotation angle (normally 1, 2 for points on seams)
@@ -766,7 +779,12 @@ impl SurfOfRevolution {
                         let (r, sol3) = iso_point_inversion(k, &iso, &nurb_ivl, u_parameter, pnt)?;
                         match r {
                             Ok(true) => u_parameter = sol3.start.param(0)?,
-                            _ => return Err(SolidError::sm_err(OP_DROP)),
+                            _ => {
+                                return Err(SolidError::surface_failed(
+                                    OP_DROP,
+                                    "the iso circle inversion did not converge",
+                                ))
+                            }
                         }
                     }
                 }
@@ -989,7 +1007,10 @@ impl SurfOfRevolution {
         let deg_u = self.base.degree(SurfParamType::U);
         let deg_v = self.base.degree(SurfParamType::V);
         if (deg_u != 2 && deg_v != 2) || !self.base.is_rational() {
-            return Err(SolidError::sm_err(OP_REBUILD));
+            return Err(SolidError::surface_failed(
+                OP_REBUILD,
+                "the NURB is not of degree 2 and rational in one direction",
+            ));
         }
 
         // evaluate min/max domain points (statuses ignored upstream; the points are
@@ -1041,7 +1062,10 @@ impl SurfOfRevolution {
 
         // no work - no sweep direction
         if !is_revolution_with_swap_uv && !is_revolution_no_swap_uv {
-            return Err(SolidError::sm_err(OP_REBUILD));
+            return Err(SolidError::surface_failed(
+                OP_REBUILD,
+                "the NURB has no sweep direction",
+            ));
         }
 
         // Let GenCurve = iso-curve from the 'other' parameter
@@ -1052,11 +1076,18 @@ impl SurfOfRevolution {
             // constant U isoParamCurves are circles
             (SurfParamType::V, true, nurb_uv_domain.min().y, circles_u)
         };
-        let circles = circles.ok_or(SolidError::sm_err(OP_REBUILD))?;
-        let ref_frame = circles
-            .reference_frame
-            .ok_or(SolidError::sm_err(OP_REBUILD))?;
-        let angles = circles.angles.ok_or(SolidError::sm_err(OP_REBUILD))?;
+        let circles = circles.ok_or(SolidError::surface_failed(
+            OP_REBUILD,
+            "the iso circle test found no circles",
+        ))?;
+        let ref_frame = circles.reference_frame.ok_or(SolidError::surface_failed(
+            OP_REBUILD,
+            "the iso circles have no reference frame",
+        ))?;
+        let angles = circles.angles.ok_or(SolidError::surface_failed(
+            OP_REBUILD,
+            "the iso circles have no angle interval",
+        ))?;
         let (min_ang_deg, max_ang_deg) = (angles.min(), angles.max());
 
         // create GenCurve isoParamCurve
@@ -1068,7 +1099,10 @@ impl SurfOfRevolution {
 
         // no work - GenCurve is degenerate
         if iso_crv.is_degenerate(k, scaled_zero, None)? {
-            return Err(SolidError::sm_err(OP_REBUILD));
+            return Err(SolidError::surface_failed(
+                OP_REBUILD,
+                "the generator iso curve is degenerate",
+            ));
         }
 
         // verify GenCurve is planar and coplanar with refFrame ZAxis
@@ -1078,7 +1112,10 @@ impl SurfOfRevolution {
         let is_planar = planar.is_planar;
         let is_linear = linear.linear;
         if !is_planar {
-            return Err(SolidError::sm_err(OP_REBUILD));
+            return Err(SolidError::surface_failed(
+                OP_REBUILD,
+                "the generator iso curve is not planar",
+            ));
         }
 
         // verify that plane containing genCurve also contains refFrame Z axis
@@ -1101,7 +1138,10 @@ impl SurfOfRevolution {
             origin_point_dist < scaled_zero && frame_plane_ortho < scaled_zero
         };
         if !is_co_planar {
-            return Err(SolidError::sm_err(OP_REBUILD));
+            return Err(SolidError::surface_failed(
+                OP_REBUILD,
+                "the generator iso curve is not in the plane of the axis",
+            ));
         }
 
         // set m_pGenCurve
@@ -1162,7 +1202,7 @@ impl SurfOfRevolution {
                 let vec = |db: &mut DatabaseReader| -> Result<Vec3> {
                     let s = db
                         .in_stream_mut()
-                        .ok_or(SolidError::null_pointer(OP_READ))?;
+                        .ok_or(SolidError::surface_missing(OP_READ, "the input stream"))?;
                     let a = ascii(s.extract_double())?;
                     let b = ascii(s.extract_double())?;
                     let c = ascii(s.extract_double())?;
@@ -1176,7 +1216,7 @@ impl SurfOfRevolution {
                 let y = vec(db)?;
                 let s = db
                     .in_stream_mut()
-                    .ok_or(SolidError::null_pointer(OP_READ))?;
+                    .ok_or(SolidError::surface_missing(OP_READ, "the input stream"))?;
                 let a = ascii(s.extract_double())?;
                 let b = ascii(s.extract_double())?;
                 let c = ascii(s.extract_double())?;
@@ -1363,7 +1403,10 @@ pub(crate) fn intersect_revolved_into<T: Revolved + ?Sized, R: Revolved + ?Sized
                 ..BoundingBoxRequest::default()
             };
             let boxes = me.base.calculate_bounding_box(k, uv_domain, &req)?;
-            let bbox = boxes.normal.ok_or(SolidError::null_pointer(OP_ISECT))?;
+            let bbox = boxes.normal.ok_or(SolidError::surface_missing(
+                OP_ISECT,
+                "the surface's bounding box",
+            ))?;
             let size = bbox.size().length();
             EFF_ZERO_SQRT * (1.0 + size)
         }

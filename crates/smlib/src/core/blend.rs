@@ -85,6 +85,7 @@ pub(super) fn status(e: SolidError) -> Error {
         e if is_query_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
         e if is_topology_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
         e if is_curve_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
+        e if is_surface_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
         SolidError::InvalidInput { .. } => Error::Status(INVALID_INPUT),
         SolidError::Unsupported { reason, .. } if reason == MIXED_CORNER_RAILS_CROSS => Error::Unported(MIXED_CORNER_UNSUPPORTED),
         e if is_boolean_failure(&e) => boolean_status(e),
@@ -163,6 +164,12 @@ fn is_topology_failure(e: &SolidError) -> bool {
 /// bracket's refusal replaced none and passes on as solidcore's text, as before.
 fn is_curve_failure(e: &SolidError) -> bool {
     e.curve_failure().is_some_and(|c| c.replaces_upstream_status())
+}
+
+/// A surface routine's failure (solidcore's `SurfaceFailure`): it stands for the status the
+/// routine returned (`Upstream` before solidcore described it), and passes on as that status.
+fn is_surface_failure(e: &SolidError) -> bool {
+    e.surface_failure().is_some()
 }
 
 /// `size_ok`.
@@ -1584,5 +1591,19 @@ mod tests {
         let at =
             Failure::new("topology::vertexuse", TopologyFailure::Failed("x")).at(solidcore::EntityRef::Vertex(VertexId::from_index(2))).into_error();
         assert!(matches!(status(at), Error::Status(1001)));
+    }
+
+    /// A surface routine's failure passes on as the status it replaced, as the `Upstream` it
+    /// replaced did.
+    #[test]
+    fn surface_failures_pass_on_as_their_status() {
+        use solidcore::error::Failure;
+        use solidcore::error::surface::SurfaceFailure;
+        let surface = |s| Failure::new("surface::surface::p2::Surface::step_inversion", s).into_error();
+        assert!(matches!(status(surface(SurfaceFailure::Failed("the point is not on the generator"))), Error::Status(1001)));
+        assert!(matches!(status(surface(SurfaceFailure::Missing("the surface's cache"))), Error::Status(1006)));
+        assert!(matches!(status(surface(SurfaceFailure::InvalidValue("the line direction is the zero vector"))), Error::Status(1007)));
+        assert!(matches!(status(surface(SurfaceFailure::OutsideDomain("the point is outside the sweep"))), Error::Status(1020)));
+        assert!(matches!(status(surface(SurfaceFailure::OffSurface("the point is off the surface"))), Error::Status(1021)));
     }
 }
