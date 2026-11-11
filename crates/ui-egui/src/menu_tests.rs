@@ -2284,6 +2284,38 @@ fn a_tall_flyout_moves_up_to_fit_and_its_last_entries_can_be_clicked() {
     assert!(h.app.session.doc.appearances.components.contains_key(&c), "a late quick choice is reachable");
 }
 
+/// A right-click menu taller than the window stays inside it and scrolls, so its last entries can
+/// be reached on a small screen (#15145).
+#[test]
+fn a_menu_taller_than_the_window_scrolls_to_its_last_entries() {
+    use crate::scenario::{Harness, rect_of};
+    let mut h = Harness::new();
+    h.app = sample_app();
+    h.app.preferences.radial_context_menu = false;
+    let height = 360.0;
+    h.call("ui.resize", json!({"width":1200,"height":height}));
+    h.frames(3);
+    let target = Target::Body { name: body(&h.app) };
+    let rows = context_menu::items(&h.app, &target);
+    let last = rows.iter().rev().find(|i| !i.is_sep() && !i.is_heading()).expect("the body's menu has entries");
+    let handle = format!("menu:{}", last.id);
+    context_menu::open_for(&mut h.app, pos2(400.0, 120.0), target);
+    h.frames(3);
+    let first = rect_of(&handle).expect("the last entry is laid out");
+    assert!(first.bottom() > height, "the menu must be taller than the window for this test: {first:?}");
+    let over = rows.iter().find(|i| i.enabled && !i.is_sep() && !i.is_heading()).and_then(|i| rect_of(&format!("menu:{}", i.id))).unwrap();
+    for _ in 0..40 {
+        if rect_of(&handle).is_some_and(|r| r.bottom() <= height) {
+            break;
+        }
+        h.call("ui.scroll", json!({"x":over.center().x,"y":over.center().y,"delta":-100}));
+        h.frames(5);
+    }
+    let shown = rect_of(&handle).unwrap();
+    assert!(shown.top() >= 0.0 && shown.bottom() <= height, "scrolling the menu brings `{}` into the window: {shown:?}", last.label);
+    assert!(h.app.viewport.context_menu.is_some(), "scrolling leaves the menu open");
+}
+
 #[test]
 fn narrow_overflow_submenu_keeps_opening_click_and_accepts_the_next_click() {
     use crate::scenario::Harness;

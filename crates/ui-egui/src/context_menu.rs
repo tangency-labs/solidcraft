@@ -2698,6 +2698,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut picked: Option<Item> = None;
     let pointer = ctx.input(|i| i.pointer.latest_pos());
     let mut inside = app.menu.opener.is_some_and(|r| pointer.is_some_and(|p| r.contains(p)));
+    // The list's rows scroll, so the area cannot outgrow the room below where it was placed: place
+    // it by the whole height the rows measured last frame, the estimate only before that.
+    let rows_id = egui::Id::unique("sc_context_menu_rows").with(list.iter().map(|i| (&i.id, &i.label)).collect::<Vec<_>>());
+    let height = ctx.data(|d| d.get_temp::<f32>(rows_id)).filter(|h| h.is_finite() && *h > 0.0).unwrap_or_else(|| list_height(&list));
 
     let list_at = if target == Target::Workspace {
         pos2(at.x.clamp(screen.left(), (screen.right() - 470.0).max(screen.left())), at.y)
@@ -2716,9 +2720,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 picked = crate::ui_kit::radial_menu(ui, c, &radial, hot).or(picked.take());
             });
         inside |= resp.response.contains_pointer();
-        list_place(c, list_height(&list), screen)
+        list_place(c, height, screen)
     } else {
-        place(at, Vec2::ZERO, vec2(LIST_W, list_height(&list)), screen)
+        place(at, Vec2::ZERO, vec2(LIST_W, height), screen)
     };
 
     // The keys act on the innermost open level: Up and Down choose a row, Right or Enter open its
@@ -2754,8 +2758,15 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let leaving = app.menu.submenu_leave.map(|(depth, _)| depth);
     let key_row = app.menu.key_row;
     let mut seen: Vec<Seen> = Vec::new();
+    // A menu taller than the window scrolls instead of running past its bottom edge (#15145). A
+    // menu that has just opened starts at its top.
+    let rows_height = (screen.height() - 18.0).max(30.0);
+    let just_opened = !app.menu.shown;
     let resp = Container::new(ctx, Surface::Popup)
         .area(egui::Id::unique("sc_context_menu"))
+        // egui's sizing pass caps the contents at the default size (400 points high), and the
+        // scrolling rows would keep that height.
+        .default_size(vec2(LIST_W, screen.height()))
         .fixed_pos(list_at)
         .constrain(true)
         .order(egui::Order::Foreground)
@@ -2763,7 +2774,24 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             if target == Target::Workspace {
                 picked = workspace_menu(ui, &list, key_row, (screen.bottom() - list_at.y).max(160.0)).or(picked.take());
             } else {
-                menu_frame(ui, |ui| seen.push(level_rows(ui, &list, 0, key_row, path.first().copied(), leaving == Some(0), &mut picked)));
+                menu_frame(ui, |ui| {
+                    // An area keeps the size it had, so the rows ask for their whole height (up to
+                    // the window's) rather than only what that size leaves them.
+                    let mut rows = egui::ScrollArea::vertical()
+                        .id_salt(rows_id)
+                        .max_height(rows_height)
+                        .min_scrolled_height((height - 14.0).clamp(30.0, rows_height));
+                    if just_opened {
+                        rows = rows.vertical_scroll_offset(0.0);
+                    }
+                    let shown =
+                        rows.show(ui, |ui| seen.push(level_rows(ui, &list, 0, key_row, path.first().copied(), leaving == Some(0), &mut picked)));
+                    // The rows' whole height plus the frame, as `list_height` counts it.
+                    let whole = shown.content_size.y + 14.0;
+                    if whole.is_finite() {
+                        ui.ctx().data_mut(|d| d.insert_temp(rows_id, whole));
+                    }
+                });
             }
         });
     inside |= resp.response.contains_pointer() || resp.response.rect.contains(pointer.unwrap_or(Pos2::ZERO));
