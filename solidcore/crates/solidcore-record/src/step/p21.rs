@@ -9,9 +9,8 @@
 //! capped, nothing is allocated from a count read out of the file (lists grow as their items are
 //! read), and every refusal is an [`Error`], never a panic.
 //!
-//! Origin: SolidCraft's `crates/step/src/p21.rs` at `a5b71ca2` (MIT OR Apache-2.0). With the STEP
-//! merge (#2577) this becomes solidcore's one Part 21 implementation; `step-import`'s `part21.rs`
-//! goes with #2585.
+//! Origin: SolidCraft's `crates/step/src/p21.rs` at `a5b71ca2` (MIT OR Apache-2.0). This is
+//! solidcore's one Part 21 implementation (`step-import`'s `part21.rs` is gone, #14123).
 //!
 //! Deviations from SolidCraft: [`Exchange::entities`] is a `BTreeMap` (was a `HashMap`), so
 //! iterating it is in id order on every platform; what is stored and which definition wins a
@@ -198,9 +197,34 @@ impl Entity {
     }
 }
 
+/// The HEADER section's file description and file name, as written.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Header {
+    /// `FILE_DESCRIPTION` lines.
+    pub descriptions: Vec<String>,
+    /// `FILE_DESCRIPTION` implementation level.
+    pub implementation_level: String,
+    /// `FILE_NAME` name.
+    pub file_name: String,
+    /// `FILE_NAME` time stamp.
+    pub time_stamp: String,
+    /// `FILE_NAME` authors.
+    pub authors: Vec<String>,
+    /// `FILE_NAME` organizations.
+    pub organizations: Vec<String>,
+    /// `FILE_NAME` preprocessor version.
+    pub preprocessor_version: String,
+    /// `FILE_NAME` originating system.
+    pub originating_system: String,
+    /// `FILE_NAME` authorization.
+    pub authorization: String,
+}
+
 /// A parsed exchange file.
 #[derive(Clone, Debug, Default)]
 pub struct Exchange {
+    /// The HEADER's description and file name, field by field.
+    pub header: Header,
     /// `FILE_SCHEMA` names.
     pub schemas: Vec<String>,
     /// `FILE_NAME` originating system.
@@ -546,12 +570,65 @@ impl Lexer<'_> {
             });
         }
         self.records += 1;
-        let name = self.keyword()?;
+        let name = long_name(self.keyword()?);
         self.expect(b'(')?;
         Ok(Record {
             name,
             params: self.list_rest(1)?,
         })
+    }
+}
+
+/// Part 21 short entity names (the short-name form ISO 10303-21 allows, which some AP203 writers
+/// use, STEP Tools' among them) of the entities a B-rep, its representation, product and units
+/// are read from, with their long names. Every pair is as ISO's short-names file gives it
+/// (<http://standards.iso.org/iso/10303/tech/short_names/short-names.txt>), checked entry by entry.
+/// `step-import`'s table (#2582) mapped `CMCRSG` to `COMPOSITE_CURVE`; it is
+/// `COMPOSITE_CURVE_SEGMENT`, and `COMPOSITE_CURVE` is `CMPCRV`.
+const SHORT_NAMES: [(&str, &str); 36] = [
+    ("A2PL3D", "AXIS2_PLACEMENT_3D"),
+    ("ADVFC", "ADVANCED_FACE"),
+    ("BSCWK", "B_SPLINE_CURVE_WITH_KNOTS"),
+    ("BSSWK", "B_SPLINE_SURFACE_WITH_KNOTS"),
+    ("CLSSHL", "CLOSED_SHELL"),
+    ("CMCRSG", "COMPOSITE_CURVE_SEGMENT"),
+    ("CMPCRV", "COMPOSITE_CURVE"),
+    ("CNBSUN", "CONVERSION_BASED_UNIT"),
+    ("CRTPNT", "CARTESIAN_POINT"),
+    ("DMNEXP", "DIMENSIONAL_EXPONENTS"),
+    ("DRCTN", "DIRECTION"),
+    ("EDGCRV", "EDGE_CURVE"),
+    ("EDGLP", "EDGE_LOOP"),
+    ("FBSR", "FACETED_BREP_SHAPE_REPRESENTATION"),
+    ("FCBND", "FACE_BOUND"),
+    ("FCOTBN", "FACE_OUTER_BOUND"),
+    ("FCSRF", "FACE_SURFACE"),
+    ("FCTBR", "FACETED_BREP"),
+    ("GMRPCN", "GEOMETRIC_REPRESENTATION_CONTEXT"),
+    ("GMTST", "GEOMETRIC_SET"),
+    ("LMWU", "LENGTH_MEASURE_WITH_UNIT"),
+    ("LNGUNT", "LENGTH_UNIT"),
+    ("MNSLBR", "MANIFOLD_SOLID_BREP"),
+    ("NMDUNT", "NAMED_UNIT"),
+    ("ORNEDG", "ORIENTED_EDGE"),
+    ("PAMWU", "PLANE_ANGLE_MEASURE_WITH_UNIT"),
+    ("PLYLP", "POLY_LOOP"),
+    ("PRDCT", "PRODUCT"),
+    ("PRDDFN", "PRODUCT_DEFINITION"),
+    ("PRDFSH", "PRODUCT_DEFINITION_SHAPE"),
+    ("SHDFRP", "SHAPE_DEFINITION_REPRESENTATION"),
+    ("SHPRPR", "SHAPE_REPRESENTATION"),
+    ("SHRPRL", "SHAPE_REPRESENTATION_RELATIONSHIP"),
+    ("TRMCRV", "TRIMMED_CURVE"),
+    ("UMWU", "UNCERTAINTY_MEASURE_WITH_UNIT"),
+    ("VRTPNT", "VERTEX_POINT"),
+];
+
+/// An entity name as its long form where it is one of [`SHORT_NAMES`].
+fn long_name(name: String) -> String {
+    match SHORT_NAMES.iter().find(|(short, _)| *short == name) {
+        Some((_, long)) => (*long).to_string(),
+        None => name,
     }
 }
 
@@ -755,9 +832,39 @@ fn parse_limited(
                                     .filter_map(|p| p.as_str())
                                     .collect::<Vec<_>>()
                                     .join(" ");
+                                ex.header.descriptions = v
+                                    .iter()
+                                    .filter_map(|p| p.as_str().map(str::to_string))
+                                    .collect();
+                            }
+                            if let Some(level) = params.get(1).and_then(Param::as_str) {
+                                level.clone_into(&mut ex.header.implementation_level);
                             }
                         }
                         "FILE_NAME" => {
+                            let string = |i: usize| {
+                                params
+                                    .get(i)
+                                    .and_then(Param::as_str)
+                                    .unwrap_or("")
+                                    .to_string()
+                            };
+                            let strings = |i: usize| -> Vec<String> {
+                                params
+                                    .get(i)
+                                    .and_then(Param::as_list)
+                                    .unwrap_or(&[])
+                                    .iter()
+                                    .filter_map(|p| p.as_str().map(str::to_string))
+                                    .collect()
+                            };
+                            ex.header.file_name = string(0);
+                            ex.header.time_stamp = string(1);
+                            ex.header.authors = strings(2);
+                            ex.header.organizations = strings(3);
+                            ex.header.preprocessor_version = string(4);
+                            ex.header.originating_system = string(5);
+                            ex.header.authorization = string(6);
                             ex.preprocessor = params
                                 .get(4)
                                 .and_then(Param::as_str)
@@ -951,6 +1058,21 @@ FILE_NAME('a');junk').;ENDSEC;DATA;ENDSEC;END-ISO-10303-21;"
             format!("ISO-10303-21;\nHEADER;\n{bad}DATA;\n#1=A();\nENDSEC;\nEND-ISO-10303-21;\n");
         let e = parse(&broken).unwrap_err().to_string();
         assert!(e.contains(&format!("line {}", n + 3)), "{e}");
+    }
+
+    #[test]
+    fn short_entity_names_read_as_their_long_names() {
+        let ex = parse(&data(
+            "#1=CRTPNT('',(0.,1.,2.));#2=PLYLP('',(#1));#3=SOME_SHRT('');#4=VRTPNT('',#1);#5=FCBND('',#2,.T.);",
+        ))
+        .unwrap();
+        let name = |id: u64| ex.get(id).map(|e| e.name().to_string());
+        assert_eq!(name(1).as_deref(), Some("CARTESIAN_POINT"));
+        assert_eq!(name(2).as_deref(), Some("POLY_LOOP"));
+        assert_eq!(name(4).as_deref(), Some("VERTEX_POINT"));
+        assert_eq!(name(5).as_deref(), Some("FACE_BOUND"));
+        // A name outside the table is kept as written.
+        assert_eq!(name(3).as_deref(), Some("SOME_SHRT"));
     }
 
     #[test]

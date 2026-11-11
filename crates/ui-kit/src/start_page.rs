@@ -4,7 +4,7 @@
 //! returns the entry chosen this frame, which the host runs. Nothing here knows the app.
 //!
 //! Tiles and samples take a host [`Icon`] (a kit icon name, a texture or the host's painter);
-//! menu entries take a kit icon name. Thumbnails are textures the host made.
+//! menu entries do too. Thumbnails are textures the host made.
 
 use std::borrow::Cow;
 
@@ -118,8 +118,7 @@ pub struct Recent<'a, A> {
 
 pub struct MenuEntry<'a, A> {
     pub label: Label<'a>,
-    /// A kit icon name: the menu row is a `crate::MenuItem`, which takes a host `Icon` with #13379.
-    pub icon: &'a str,
+    pub icon: Icon<'a>,
     pub chosen: A,
 }
 
@@ -436,8 +435,8 @@ mod tests {
                         thumbnail_failed: false,
                         chosen: Picked::Recent(i),
                         menu: vec![
-                            MenuEntry { label: "Remove from list".into(), icon: "delete", chosen: Picked::Forget(i) },
-                            MenuEntry { label: "Show in folder".into(), icon: "folder", chosen: Picked::ShowInFolder(i) },
+                            MenuEntry { label: "Remove from list".into(), icon: "delete".into(), chosen: Picked::Forget(i) },
+                            MenuEntry { label: "Show in folder".into(), icon: "folder".into(), chosen: Picked::ShowInFolder(i) },
                         ],
                     })
                     .collect(),

@@ -2286,3 +2286,21 @@ fn a_linked_components_row_shows_the_state_of_its_file() {
     h.frames(2);
     assert!(h.app.tree.links.get(component).is_none(), "a design with no links shows no badge");
 }
+
+/// A component's body placed twice is two body rows in the Browser; the header's count agrees
+/// with the rows it lists instead of counting the model's bodies ("1 body" over two rows).
+#[test]
+fn the_browser_header_counts_one_body_per_placement() {
+    let (mut h, _, _) = crate::test_support::component_box();
+    h.app.preferences.browser_components_open = true;
+    h.settle();
+    assert_eq!(listed_bodies(&h.app.session), 1);
+    h.app.run("occurrence.copy", json!({"component": "Block", "translate": [0, 40, 0]})).unwrap();
+    h.settle();
+    assert_eq!(crate::open_meshing::session_world(&h.app.session).bodies.len(), 2);
+    // One body row under each placement's row, both labelled with the body's own name.
+    let rows = drawn_rows();
+    let body_rows = rows.iter().filter(|(label, ..)| label == "Body1").count();
+    assert_eq!(body_rows, 2, "a body row per placement: {rows:?}");
+    assert_eq!(listed_bodies(&h.app.session), body_rows, "the header counts the rows it lists");
+}

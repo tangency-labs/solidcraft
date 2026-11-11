@@ -2,9 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 """STEP reader bake-off: run one or more readers over the corpus fetch.sh built.
 
-Each reader is LABEL=COMMAND, a command that takes a STEP file as its last argument and prints
-JSON with `bodies`: a list of objects with `volume_mm3`, `faces` and `closed` (as
-`solidcraft-cli eval FILE` does; older builds name `closed` `solid`, which is read in its place). A `.p21` file is passed as a `.step` copy.
+Each reader is LABEL=COMMAND, run as `COMMAND eval FILE --json-out OUT` and read as
+`solidcraft-cli eval` writes it (`bodies`: objects with `volume_mm3`, `faces` and `closed`; older
+builds name `closed` `solid`, which is read in its place), or
+LABEL=probe:COMMAND, run as `COMMAND FILE` and printing one JSON object with `status`
+("opened"/"refused"), `bodies`, `solids`, `faces` and `volume` (a reader without SolidCraft's
+CLI, such as a probe over another library). A `.p21` file is passed as a `.step` copy.
 
     bench/step/run.py --corpus bench/step/corpus --out /tmp/bake \\
         --reader base=/path/to/old/solidcraft-cli --reader new=/path/to/new/solidcraft-cli
@@ -30,19 +33,49 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
+def run_probe(command, local, tmp, timeout):
+    start = time.monotonic()
+    try:
+        p = subprocess.run(command + [local], capture_output=True, timeout=timeout, cwd=tmp)
+    except subprocess.TimeoutExpired:
+        return {"status": "timeout", "wall_s": timeout}
+    except OSError as e:
+        return {"status": "crashed", "wall_s": time.monotonic() - start, "error": str(e)[:200]}
+    wall = time.monotonic() - start
+    try:
+        data = json.loads(p.stdout.decode("utf-8", "replace").strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return {"status": "crashed", "wall_s": wall, "error": p.stderr.decode("utf-8", "replace")[-200:]}
+    try:
+        if data.get("status") != "opened" or not data.get("bodies"):
+            return {"status": "refused", "wall_s": wall, "error": str(data.get("error", "no bodies"))[:200]}
+        counts = {"bodies": int(data["bodies"]), "closed": int(data.get("solids") or 0), "faces": int(data.get("faces") or 0)}
+        volume = float(data.get("volume") or 0.0)
+    except (TypeError, ValueError, AttributeError):
+        return {"status": "refused", "wall_s": wall, "error": "bad json"}
+    return {"status": "opened", **counts, "volume": volume, "wall_s": wall}
+
+
 def run_one(label, command, path, timeout):
     with tempfile.TemporaryDirectory() as tmp:
         name = os.path.basename(path)
         if name.lower().endswith(".p21"):
             name = name[:-4] + ".step"
         local = os.path.join(tmp, name)
-        shutil.copyfile(path, local)
+        try:
+            shutil.copyfile(path, local)
+        except OSError as e:
+            return {"status": "crashed", "wall_s": 0.0, "error": f"copy: {e}"[:200]}
+        if command and command[0].startswith("probe:"):
+            return run_probe([command[0][len("probe:"):]] + command[1:], local, tmp, timeout)
         out = os.path.join(tmp, "out.json")
         start = time.monotonic()
         try:
             p = subprocess.run(command + ["eval", local, "--json-out", out], capture_output=True, timeout=timeout, cwd=tmp)
         except subprocess.TimeoutExpired:
             return {"status": "timeout", "wall_s": timeout}
+        except OSError as e:
+            return {"status": "crashed", "wall_s": time.monotonic() - start, "error": str(e)[:200]}
         wall = time.monotonic() - start
         try:
             with open(out) as f:
@@ -57,9 +90,12 @@ def run_one(label, command, path, timeout):
             vol = sum(float(b.get("volume_mm3") or 0.0) for b in bodies)
             faces = sum(int(b.get("faces") or 0) for b in bodies)
             closed = sum(1 for b in bodies if b.get("closed", b.get("solid")) is True)
+            # Faces the import left out, as its warnings name them ("left out: face #…").
+            warnings = " ".join(str(t.get("warning") or "") for t in data.get("timeline") or [])
         except (TypeError, ValueError, AttributeError):
             return {"status": "refused", "wall_s": wall, "error": "bad json"}
-        return {"status": "opened", "bodies": len(bodies), "closed": closed, "faces": faces, "volume": vol, "wall_s": wall}
+        left_out = warnings.count("left out:")
+        return {"status": "opened", "bodies": len(bodies), "closed": closed, "faces": faces, "volume": vol, "wall_s": wall, "left_out": left_out}
 
 
 def references():
@@ -92,11 +128,12 @@ def main():
     refs = references()
     results = {}
     with concurrent.futures.ThreadPoolExecutor(a.jobs) as pool:
-        futs = {pool.submit(run_one, label, cmd, os.path.join(a.corpus, rel), a.timeout): (label, rel) for label, cmd in readers for _, _, rel, _ in files}
+        # File by file, every reader on a file together, so that each meets the same load.
+        futs = {pool.submit(run_one, label, cmd, os.path.join(a.corpus, rel), a.timeout): (label, rel) for _, _, rel, _ in files for label, cmd in readers}
         for fut in concurrent.futures.as_completed(futs):
             results[futs[fut]] = fut.result()
     os.makedirs(a.out, exist_ok=True)
-    cols = ["status", "bodies", "closed", "faces", "volume", "wall_s", "error"]
+    cols = ["status", "bodies", "closed", "faces", "volume", "wall_s", "left_out", "error"]
     with open(os.path.join(a.out, "per-file.tsv"), "w") as f:
         f.write("\t".join(["file", "section", "ref_volume"] + [f"{l}:{c}" for l, _ in readers for c in cols]) + "\n")
         for sha, section, rel, _ in files:
@@ -120,6 +157,7 @@ def main():
     row("refused", lambda l: len(of(l, "refused")))
     row("timed out", lambda l: len(of(l, "timeout")))
     row("crashed", lambda l: len(of(l, "crashed")))
+    row("opened with faces left out (named in its warnings)", lambda l: sum(1 for rel in of(l, "opened") if results[(l, rel)].get("left_out")))
     row("opened, every body closed", lambda l: sum(1 for rel in of(l, "opened") if results[(l, rel)]["closed"] == results[(l, rel)]["bodies"]))
     ref_live = [(sha, rel) for sha, rel in live if sha in refs]
 

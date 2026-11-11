@@ -120,16 +120,15 @@ fn box_size(app: &SolveApp, d: &Dialog) -> Vec3 {
 }
 
 /// A stored or typed point of expressions (numbers, or strings in the design's terms); an empty
-/// field is 0, as OK sends it.
+/// field is 0, as OK sends it. Text is read as the model reads it (`length_input::eval`): a bare
+/// number or a unitless expression such as `2 * 1` is in the design's unit.
 fn expr_point(app: &SolveApp, v: &Value) -> Option<Vec3> {
     let c = |i: usize| -> Option<f64> {
         let x = v.as_array()?.get(i)?;
         if x.as_str().is_some_and(|t| t.trim().is_empty()) {
             return Some(0.0);
         }
-        x.as_f64()
-            .or_else(|| app.session.doc.eval(&app.session.doc.with_design_unit(x.as_str()?, ValueKind::Length), ValueKind::Length).ok())
-            .filter(|v| v.is_finite())
+        x.as_f64().or_else(|| crate::length_input::eval(&app.session.doc, x.as_str()?, ValueKind::Length).ok()).filter(|v| v.is_finite())
     };
     Some(Vec3::new(c(0)?, c(1)?, c(2)?))
 }

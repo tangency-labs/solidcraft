@@ -382,6 +382,7 @@ fn feature_row(
     }
     if r.hovered {
         acts.hover_feature = Some(id);
+        acts.hovered = true;
     }
     if let Some(at) = r.secondary {
         acts.menu = Some((at, if is_sketch { Target::Sketch { id } } else { Target::Feature { id } }));
@@ -1512,5 +1513,37 @@ mod tests {
         let picked = h.app.dialog.as_ref().map(|dialog| dialog.inputs[0].items.clone());
         assert_eq!(picked, Some(vec![Sel::Feature { id }]), "the row's click goes to the dialog");
         assert!(h.app.session.selection.is_empty(), "dialog picks leave the ordinary selection alone");
+    }
+
+    #[test]
+    fn browser_feature_and_sketch_hover_lights_it_until_leaving() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.ui.show_browser = true;
+        h.app.run("solid.box", json!({"length":20,"width":20,"height":20})).unwrap();
+        let round = h.app.run("solid.fillet", json!({"edges":[[0,0,10]],"radius":2,"name":"Round"})).unwrap()["feature"].as_u64().unwrap();
+        h.app.run("sketch.create", json!({"plane":"XY","name":"MySketch"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let sketch = h.app.session.doc.find_feature("MySketch").unwrap().id;
+        h.app.tree.expanded.insert("c0/features".into());
+        h.app.tree.expanded.insert("c0/sketches".into());
+        h.frames(2);
+
+        // Hovering a browser feature row sets hover_feature without selecting.
+        let row_feature = crate::scenario::handle_at(&format!("row:browser-feature:c0:{round}")).unwrap();
+        h.step(&json!({"move":[row_feature.x, row_feature.y]})).unwrap();
+        assert_eq!(h.app.viewport.hover_feature, Some(round));
+        assert!(h.app.session.selection.is_empty(), "hovering doesn't select");
+        h.step(&json!({"move":[5, 5]})).unwrap();
+        assert_eq!(h.app.viewport.hover_feature, None);
+
+        // Hovering a browser sketch row sets hover_feature without selecting.
+        let row_sketch = crate::scenario::handle_at("row:MySketch").unwrap();
+        h.step(&json!({"move":[row_sketch.x, row_sketch.y]})).unwrap();
+        assert_eq!(h.app.viewport.hover_feature, Some(sketch));
+        assert!(h.app.session.selection.is_empty(), "hovering sketch doesn't select");
+        h.step(&json!({"move":[5, 5]})).unwrap();
+        assert_eq!(h.app.viewport.hover_feature, None);
     }
 }

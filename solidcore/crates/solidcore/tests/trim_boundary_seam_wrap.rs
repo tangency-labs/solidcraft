@@ -2,8 +2,8 @@
 //! seam its circles start and end at. The edge's UV trim then sits at the far side of the
 //! seam from its neighbours' ends, a whole period away, and `CreateOrientedTrimBoundary`
 //! fills that gap with a line across the whole domain. The loop doubles back on itself, so
-//! the lateral face integrates to nothing and the body to the wrong volume. The opt-in
-//! `Kernel::fixes.trim_boundary_seam_wrap` takes the gap for a seam crossing instead.
+//! the lateral face integrates to nothing and the body to the wrong volume. Here the gap
+//! is taken for a seam crossing instead.
 //!
 //! The body is a frustum of base radius 3, top radius 2 and height 4, its seam edge
 //! replaced by the same line turned about the axis by an arc `offset` long at the base.
@@ -67,10 +67,9 @@ fn frustum(k: &mut Kernel, offset: f64) -> Brep {
     b
 }
 
-/// Area and volume of the frustum with the fix on or off.
-fn measure(offset: f64, fixed: bool) -> (f64, f64) {
+/// Area and volume of the frustum.
+fn measure(offset: f64) -> (f64, f64) {
     let mut k = Kernel::default();
-    k.fixes.trim_boundary_seam_wrap = fixed;
     let mut b = frustum(&mut k, offset);
     let store = AttributeStore::default();
     let attrs = PropertyAttributes {
@@ -92,25 +91,10 @@ fn exact() -> (f64, f64, f64) {
 }
 
 #[test]
-fn wr491_seam_wrap_collapses_the_lateral_face_by_default() {
-    let (lateral, caps, volume) = exact();
-    for offset in [5e-5, -5e-5] {
-        let (area, v) = measure(offset, false);
-        // Upstream: the lateral face integrates to ~0, leaving the two caps.
-        assert!(
-            (area - caps).abs() < 1e-2,
-            "{offset}: area {area} vs caps {caps}"
-        );
-        assert!((v - volume).abs() > 1.0, "{offset}: volume {v} vs {volume}");
-        assert!(area < 0.5 * (lateral + caps));
-    }
-}
-
-#[test]
 fn wr491_seam_wrap_fix_gives_the_exact_frustum() {
     let (lateral, caps, volume) = exact();
     for offset in [5e-5, -5e-5, 5e-4] {
-        let (area, v) = measure(offset, true);
+        let (area, v) = measure(offset);
         assert!(
             (area - lateral - caps).abs() < 1e-3 * (lateral + caps),
             "{offset}: area {area}"
@@ -122,12 +106,10 @@ fn wr491_seam_wrap_fix_gives_the_exact_frustum() {
     }
 }
 
-/// A seam edge on its seam has no gap: the fix changes nothing.
+/// A seam edge on its seam has no gap: the body is the exact frustum.
 #[test]
 fn wr491_seam_wrap_fix_keeps_a_sound_body() {
-    let (off, on) = (measure(0.0, false), measure(0.0, true));
-    assert_eq!(off.0.to_bits(), on.0.to_bits());
-    assert_eq!(off.1.to_bits(), on.1.to_bits());
+    let on = measure(0.0);
     let (lateral, caps, volume) = exact();
     assert!((on.0 - lateral - caps).abs() < 1e-6 * (lateral + caps));
     assert!((on.1 - volume).abs() < 1e-6 * volume);
@@ -140,14 +122,12 @@ use solidcore::primitive::api_primitives::{
     create_box, create_cylinder, create_partial_sphere, create_sphere, create_torus,
 };
 
-/// Area and volume of `make`'s body at accuracy `acc` with the fix on or off.
+/// Area and volume of `make`'s body at accuracy `acc`.
 fn measure_body(
     make: fn(&mut Kernel) -> Brep,
     acc: f64,
-    fixed: bool,
 ) -> (solidcore::Result<f64>, solidcore::Result<f64>) {
     let mut k = Kernel::default();
-    k.fixes.trim_boundary_seam_wrap = fixed;
     let mut b = make(&mut k);
     let store = AttributeStore::default();
     let attrs = PropertyAttributes {
@@ -209,28 +189,14 @@ fn bodies() -> [Body; 5] {
     ]
 }
 
-/// #1437: with the fix on, every body measures what it does with the fix off (bit for
-/// bit: none has a seam gap to wrap) and its exact area and volume. Before the fix, the
-/// sphere's two pole gaps were taken for seam crossings and it measured 0.
+/// #1437: every body measures its exact area and volume. None has a seam gap to wrap,
+/// and a pole gap is not taken for a seam crossing: before #1437 the sphere's two pole
+/// gaps were, and it measured 0.
 #[test]
 fn i1437_pole_gaps_are_not_seam_crossings() {
     for (name, make, area, volume) in bodies() {
-        let (off, on) = (
-            measure_body(make, 1e-6, false),
-            measure_body(make, 1e-6, true),
-        );
-        let (a_off, v_off) = (off.0.unwrap(), off.1.unwrap());
+        let on = measure_body(make, 1e-6);
         let (a_on, v_on) = (on.0.unwrap(), on.1.unwrap());
-        assert_eq!(
-            a_off.to_bits(),
-            a_on.to_bits(),
-            "{name}: area {a_off} vs {a_on}"
-        );
-        assert_eq!(
-            v_off.to_bits(),
-            v_on.to_bits(),
-            "{name}: volume {v_off} vs {v_on}"
-        );
         assert!(
             (a_on - area).abs() < 1e-5 * area,
             "{name}: area {a_on} vs {area}"
@@ -242,13 +208,12 @@ fn i1437_pole_gaps_are_not_seam_crossings() {
     }
 }
 
-/// #1437's reproduction at 1e-8: the sphere's area, volume and inertia with the fix on
-/// (the flag-off volume is #1431's `SM_ERR 1001`, so this compares with the exact values).
+/// #1437's reproduction at 1e-8: the sphere's area, volume and inertia, against the
+/// exact values.
 #[test]
 fn i1437_sphere_properties_with_the_fix() {
     const R: f64 = 7.0;
     let mut k = Kernel::default();
-    k.fixes.trim_boundary_seam_wrap = true;
     k.fixes.precise_properties_body_length_scale = true;
     let mut b = create_sphere(&mut k, Point3::new(1.0, -2.0, 3.0), R).unwrap();
     let store = AttributeStore::default();

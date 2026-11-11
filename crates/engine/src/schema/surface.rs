@@ -1,6 +1,7 @@
-//! Contracts for the surface edit commands in `cmd/surface.rs` (#12627): Stitch, Unstitch, Reverse
+//! Contracts for the surface edit commands in `cmd/surface.rs` (#12627): Patch, Stitch, Unstitch, Reverse
 //! Normal, Thicken, Offset Surface, Untrim, Fair Surface, Extend, Trim and Surface Loft. Each adds a feature and returns
-//! `add_feature`'s reply, a [`super::features::FeatureResult`].
+//! `add_feature`'s reply, a [`super::features::FeatureResult`] (Patch adds its crown and continuity,
+//! a [`PatchResult`]).
 //!
 //! The handlers read their parameters from the raw JSON, so each key here reads as its handler
 //! reads it and fails with the handler's message. Whether a body or a face exists, and whether a
@@ -12,17 +13,18 @@ use std::borrow::Cow;
 
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::Error as _;
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Value, json};
 use solidcraft_geom::fill::{MAX_CROWN, MIN_CROWN};
 use solidcraft_kernel::Construction;
 
 use super::check::{truncate, whole};
 use super::config::NameList;
+use super::features::FeatureResult;
 use super::motion::require;
 use super::surface_boundary::message;
 use super::types::{
-    FeatureCommon, LengthExpr, OperationParam, PlaneParam, Point3, ProfilesParam, RailFitParam, SketchRef, TouchingParam, feature_common,
+    FeatureCommon, IdOrName, LengthExpr, OperationParam, PlaneParam, Point3, ProfilesParam, RailFitParam, SketchRef, TouchingParam, feature_common,
     guide_rails_problem, present,
 };
 use crate::params::{self, MAX_STRING_LIST};
@@ -840,6 +842,238 @@ pub struct SurfaceLoftParams {
     pub rail_fit: Option<RailFitParam>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
+}
+
+/// What `surface_patch` says about itself, for the readers the contract shares with it.
+const PATCH: &str = "surface.patch";
+
+/// The continuity word a patch takes: g0 … g4, what `Construction::Patch` builds.
+fn patch_word() -> Value {
+    json!({"type": "string", "pattern": "^\\s*[gG][0-4]\\s*$"})
+}
+
+/// The words a patch's `continuity` may be, as the handler spells them out when it is neither.
+fn patch_continuity_words() -> String {
+    let (lowest, highest) = Construction::Patch.orders();
+    solidcraft_kernel::Continuity::words(lowest, highest)
+}
+
+/// One `{edge, g}` list of a patch's `continuity`, read as `patch_continuity` reads it, with its
+/// messages.
+fn patch_continuity_edges(list: &Value) -> Result<(), String> {
+    let list = list.as_array().ok_or_else(|| whole("`continuity` edges must be a list of {edge: [x,y,z], g}"))?;
+    if list.len() > MAX_PICKS {
+        return Err(whole("`continuity` lists at most 10000 edges"));
+    }
+    for e in list {
+        if e.get("edge").and_then(params::vec3).is_none() {
+            return Err(whole("a `continuity` entry's `edge` must be a point [x,y,z]"));
+        }
+        params::continuity(PATCH, e.get("g"), "a patch's continuity", Construction::Patch).map_err(|e| whole(message(e)))?;
+    }
+    Ok(())
+}
+
+/// A patch's `continuity`: one word for every edge, a list of `{edge, g}` for some edges (the
+/// rest g0), or `{all, edges}`. Read as `patch_continuity` reads it, with its messages; kept as
+/// given, for the handler. That a word only applies to a patch on a loop of edges is the
+/// handler's to check.
+fn patch_continuity<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
+    let v = Value::deserialize(d)?;
+    let word = |g: Option<&Value>| {
+        params::continuity(PATCH, g, "a patch's continuity", Construction::Patch).map_err(|e| D::Error::custom(whole(message(e))))
+    };
+    match &v {
+        Value::String(_) => {
+            word(Some(&v))?;
+        }
+        Value::Array(_) => patch_continuity_edges(&v).map_err(D::Error::custom)?,
+        Value::Object(fields) => {
+            if let Some(all) = fields.get("all") {
+                word(Some(all))?;
+            }
+            if let Some(edges) = fields.get("edges") {
+                patch_continuity_edges(edges).map_err(D::Error::custom)?;
+            }
+        }
+        _ => {
+            return Err(D::Error::custom(whole(format!("`continuity` must be {}, or a list of {{edge, g}}", patch_continuity_words()))));
+        }
+    }
+    Ok(Some(v))
+}
+
+fn patch_continuity_schema(generator: &mut SchemaGenerator) -> Schema {
+    let word = patch_word();
+    let entry = json!({
+        "type": "object",
+        "properties": {"edge": point_schema(generator), "g": word},
+        "required": ["edge", "g"],
+        "additionalProperties": false
+    });
+    json_schema!({
+        "description": "How the patch meets the faces beside the loop (a patch on a loop of edges only): one word for every edge — g0 (the default), g1 their tangent planes, g2 also their curvature, g3 also its rate of change, g4 the change of that rate —, a list of {\"edge\": a point on it, \"g\": the word} for those edges (the rest g0), or {\"all\": the word, \"edges\": that list}.",
+        "anyOf": [
+            word,
+            {"type": "array", "items": entry.clone(), "maxItems": MAX_PICKS},
+            {"type": "object", "properties": {"all": word, "edges": {"type": "array", "items": entry, "maxItems": MAX_PICKS}}, "additionalProperties": false}
+        ]
+    })
+}
+
+/// A patch's `points`: at most 64 finite points, with the handler's messages. The handler reads
+/// a `points` that isn't a list (or `null`) as left out; the contract refuses it.
+fn patch_points<'de, D: Deserializer<'de>>(d: D) -> Result<Option<FacePoints>, D::Error> {
+    let v = Value::deserialize(d)?;
+    let Some(list) = v.as_array().filter(|a| a.len() <= solidcraft_geom::fill_general::MAX_FILL_POINTS) else {
+        return Err(D::Error::custom(whole(format!("`points` must list at most {} points [x,y,z]", solidcraft_geom::fill_general::MAX_FILL_POINTS))));
+    };
+    if list.iter().all(|q| params::vec3(q).is_some_and(|q| q.is_finite())) {
+        Ok(Some(FacePoints(list.clone())))
+    } else {
+        Err(D::Error::custom(whole("a patch point must be a finite [x,y,z]")))
+    }
+}
+
+fn patch_points_schema(generator: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "Points the patch passes through: at most 64 (a patch on a loop of edges only).",
+        "type": "array",
+        "items": point_schema(generator),
+        "maxItems": solidcraft_geom::fill_general::MAX_FILL_POINTS
+    })
+}
+
+/// A patch's `crown`: a number between -0.9 and 3, with the handler's message; `null` is refused
+/// as the handler refuses it.
+fn patch_crown<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    match Value::deserialize(d)? {
+        v if v.as_f64().is_some_and(|x| (MIN_CROWN..=MAX_CROWN).contains(&x)) => Ok(v.as_f64()),
+        _ => Err(D::Error::custom(whole("`crown` must be a number between -0.9 and 3"))),
+    }
+}
+
+fn patch_crown_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "How much fuller a fitted patch's middle is made, -0.9 flattest to 3 fullest (a patch on a loop of edges only). The bump vanishes on the loop. Default: 0.",
+        "type": "number",
+        "minimum": MIN_CROWN,
+        "maximum": MAX_CROWN
+    })
+}
+
+/// A patch's `edges`: points on a closed loop of a body's edges, at most 10 000, with the
+/// handler's message for too many. The handler skips an item that isn't a point and reads an
+/// `edges` that isn't a list as left out; the contract refuses both (`null` reads as left out,
+/// as the handler reads it).
+fn patch_edges<'de, D: Deserializer<'de>>(d: D) -> Result<Option<FacePoints>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        Value::Array(list) if list.len() > MAX_PICKS => Err(D::Error::custom(whole("too many edges"))),
+        Value::Array(list) if list.iter().all(|p| params::vec3(p).is_some()) => Ok(Some(FacePoints(list))),
+        _ => Err(D::Error::custom("must list points [x, y, z] on a closed loop of a body's edges")),
+    }
+}
+
+fn patch_edges_schema(generator: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "Points on a closed loop of a body's edges: one face on them, planar when the loop is, else a smooth B-spline surface. Up to 10 000. With `edges`, `sketch`, `profiles` and `profiles_3d` do nothing.",
+        "anyOf": [
+            {"type": "array", "items": point_schema(generator), "maxItems": MAX_PICKS},
+            {"type": "null"}
+        ]
+    })
+}
+
+/// A patch's `profiles_3d`: 1 to 128 indices of the sketch's planar 3D loops, as listed by
+/// `sketch.inspect`, read as `profiles_3d_param` reads it, with its messages.
+fn patch_profiles_3d<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
+    let v = Value::deserialize(d)?;
+    let Some(list) = v.as_array() else {
+        return Err(D::Error::custom(whole("`profiles_3d` must be a list of indices")));
+    };
+    if list.is_empty() || list.len() > 128 {
+        return Err(D::Error::custom(whole("`profiles_3d` needs 1 to 128 indices")));
+    }
+    for i in list {
+        let n = i.as_u64().ok_or_else(|| D::Error::custom(whole("`profiles_3d` indices must be whole numbers")))?;
+        usize::try_from(n).map_err(|_| D::Error::custom(whole(format!("there is no profile {n}"))))?;
+    }
+    Ok(Some(v))
+}
+
+fn patch_profiles_3d_schema(_: &mut SchemaGenerator) -> Schema {
+    json_schema!({
+        "description": "Indices of the sketch's planar 3D-sketch loops to patch, each in its own plane, as `sketch.inspect` lists them under `profiles_3d`: 1 to 128. Without `profiles`, the sketch's own-plane profiles stay untouched.",
+        "type": "array",
+        "items": {"type": "integer", "minimum": 0},
+        "minItems": 1,
+        "maxItems": 128
+    })
+}
+
+/// A planar face on a sketch's regions or on its planar 3D-sketch loops, or one face on a closed
+/// loop of a body's edges. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct PatchParams {
+    /// The sketch to patch, by id or name. Default: the active sketch, else the last sketch.
+    /// Ignored when `edges` is given.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "IdOrName")]
+    pub sketch: Option<IdOrName>,
+    /// Which of the sketch's planar regions to patch. Default: all of them — unless `profiles_3d`
+    /// is given without `profiles`, which leaves the sketch's own-plane profiles untouched.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "ProfilesParam")]
+    pub profiles: Option<ProfilesParam>,
+    #[serde(default, deserialize_with = "patch_profiles_3d", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "patch_profiles_3d_schema")]
+    pub profiles_3d: Option<Value>,
+    #[serde(default, deserialize_with = "patch_edges", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "patch_edges_schema")]
+    pub edges: Option<FacePoints>,
+    /// The body whose edges `edges` picks. Default: the only body, else the last one.
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(default, deserialize_with = "patch_continuity", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "patch_continuity_schema")]
+    pub continuity: Option<Value>,
+    #[serde(default, deserialize_with = "patch_points", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "patch_points_schema")]
+    pub points: Option<FacePoints>,
+    #[serde(default, deserialize_with = "patch_crown", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "patch_crown_schema")]
+    pub crown: Option<f64>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// What `surface.patch` returns: [`FeatureResult`]'s fields, plus the crown and continuity the
+/// patch was built with.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PatchResult {
+    #[serde(flatten)]
+    pub feature: FeatureResult,
+    /// How much fuller a fitted patch's middle was made (the call's `crown`, 0 by default).
+    pub crown: f64,
+    /// How the patch meets the faces beside its loop: `all` when it is not g0, and the edges
+    /// picked with their own `g`; `{}` when every edge is g0.
+    #[schemars(schema_with = "patch_continuity_reply_schema")]
+    pub continuity: solidcraft_doc::PatchContinuity,
+}
+
+fn patch_continuity_reply_schema(generator: &mut SchemaGenerator) -> Schema {
+    let entry = json!({
+        "type": "object",
+        "properties": {"edge": point_schema(generator), "g": patch_word()},
+        "required": ["edge", "g"]
+    });
+    json_schema!({
+        "description": "How the patch meets the faces beside its loop: `all` when it is not g0, and the edges picked with their own `g`; `{}` when every edge is g0.",
+        "type": "object",
+        "properties": {"all": patch_word(), "edges": {"type": "array", "items": entry}}
+    })
 }
 
 #[cfg(test)]

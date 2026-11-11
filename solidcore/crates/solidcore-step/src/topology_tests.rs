@@ -538,6 +538,164 @@ fn bands_and_caps_without_seams_get_one() {
     faces_away(&s.brep, 0, |p| [0.0, 0.0, p[2].clamp(1.0, 2.0)]);
 }
 
+/// A half torus between its rims (a fillet round a bore, `torus_ring` of the step-conformance
+/// set): its face winds around the axis between two circles about it, and gets a seam round the
+/// tube on the face's side, closing the solid with the annulus.
+#[test]
+fn a_half_torus_between_its_rims_gets_a_seam_round_the_tube() {
+    let mut w = W::default();
+    let ring = |w: &mut W, r: f64| {
+        let v = w.vertex([r, 0.0, 0.0]);
+        let k = w.circle([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], r);
+        w.add(format!("EDGE_CURVE('',#{v},#{v},#{k},.T.)"))
+    };
+    let (inner, outer) = (ring(&mut w, 15.0), ring(&mut w, 25.0));
+    let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let torus = w.add(format!("TOROIDAL_SURFACE('',#{a},20.,5.)"));
+    let (x, y) = (w.oe(outer, true), w.oe(inner, false));
+    let (bx, by) = (w.bound(&[x], true, true), w.bound(&[y], false, true));
+    let tube = w.face(&[bx, by], torus, true);
+    let plane = w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let (x, y) = (w.oe(outer, false), w.oe(inner, true));
+    let (bx, by) = (w.bound(&[x], true, true), w.bound(&[y], false, true));
+    let annulus = w.face(&[bx, by], plane, false);
+    let shell = closed_shell(&mut w, &[tube, annulus]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('ring',#{shell})"));
+    let s = one_solid(&w.file(&[solid]));
+    // The two rims and one seam, a tube half circle from the outer rim's vertex to the inner's.
+    assert_eq!(counts(&s.brep), [2, 1, 2, 3, 2]);
+    assert!(s.notes.iter().any(|n| n.contains("1 seam edges added")), "{:?}", s.notes);
+    let seam = s.brep.edges.iter().find(|e| matches!(e.curve, solidcore_record::brep::Curve::Circle { radius, .. } if (radius - 5.0).abs() < 1e-9));
+    let seam = seam.expect("a tube circle seam");
+    // On the face's side: up the tube, over its top (z > 0), from angle 0 to π.
+    let [t0, t1] = solidcore_ops::label::edge_curve_interval(seam).unwrap();
+    assert!((t1 - t0 - std::f64::consts::PI).abs() < 1e-9, "{t0} {t1}");
+    faces_away(&s.brep, 0, |p| {
+        let r = p[0].hypot(p[1]).max(1e-9);
+        [20.0 * p[0] / r, 20.0 * p[1] / r, 1.0]
+    });
+}
+
+/// A quarter elbow: a torus face winding round its tube between two tube circles (at u = 0 and
+/// u = π/2), closed by the two disks they bound. The tube face gets a seam round the axis at a
+/// vertex's angle round the tube, as a band round the axis gets one round the tube.
+#[test]
+fn a_quarter_elbow_gets_a_seam_round_the_axis() {
+    let mut w = W::default();
+    // The tube circle at u = 0 (in the plane y = 0, about (20, 0, 0)) and at u = π/2 (x = 0).
+    let ring = |w: &mut W, c: V, n: V, x: V| {
+        let v = w.vertex([c[0] + 5.0 * x[0], c[1] + 5.0 * x[1], c[2] + 5.0 * x[2]]);
+        let k = w.circle(c, n, x, 5.0);
+        w.add(format!("EDGE_CURVE('',#{v},#{v},#{k},.T.)"))
+    };
+    // Each circle runs with the torus's v about its normal −(the tube's direction there).
+    let start = ring(&mut w, [20.0, 0.0, 0.0], [0.0, -1.0, 0.0], [1.0, 0.0, 0.0]);
+    let end = ring(&mut w, [0.0, 20.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+    let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let torus = w.add(format!("TOROIDAL_SURFACE('',#{a},20.,5.)"));
+    // The face lies to the left of its loops in (u, v): from u = 0 it runs −v, from π/2 +v.
+    let (x, y) = (w.oe(start, false), w.oe(end, true));
+    let (bx, by) = (w.bound(&[x], true, true), w.bound(&[y], false, true));
+    let tube = w.face(&[bx, by], torus, true);
+    // The end disks, facing out of the elbow: −y at its start, −x at its end.
+    let p0 = w.plane([20.0, 0.0, 0.0], [0.0, -1.0, 0.0], [1.0, 0.0, 0.0]);
+    let x = w.oe(start, true);
+    let bx = w.bound(&[x], true, true);
+    let d0 = w.face(&[bx], p0, true);
+    let p1 = w.plane([0.0, 20.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+    let x = w.oe(end, false);
+    let bx = w.bound(&[x], true, true);
+    let d1 = w.face(&[bx], p1, true);
+    let shell = closed_shell(&mut w, &[tube, d0, d1]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('elbow',#{shell})"));
+    let r = read_solids(&w.file(&[solid]));
+    assert!(r.failures.is_empty(), "{:?}", r.failures);
+    let s = r.solids.into_iter().next().unwrap();
+    solidcore_ops::record_check::validate(&s.brep).unwrap();
+    solidcore_ops::record_check::agreement(&s.brep).unwrap();
+    assert!(s.notes.iter().any(|n| n.contains("1 seam edges added")), "{:?}", s.notes);
+    // The seam: a circle about the axis (centred on it), a quarter turn long.
+    let seam = s.brep.edges.iter().find(
+        |e| matches!(&e.curve, solidcore_record::brep::Curve::Circle { frame, .. } if frame.origin[0].abs() < 1e-9 && frame.origin[1].abs() < 1e-9),
+    );
+    let [t0, t1] = solidcore_ops::label::edge_curve_interval(seam.expect("a seam about the axis")).unwrap();
+    assert!((t1 - t0 - std::f64::consts::FRAC_PI_2).abs() < 1e-9, "{t0} {t1}");
+}
+
+/// A ball whose one face is bounded by two vertex loops, at its poles: the whole sphere, closed
+/// by a meridian seam from pole to pole.
+#[test]
+fn a_ball_bounded_by_vertex_loops_at_its_poles() {
+    let mut w = W::default();
+    let a = w.axis([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let sphere = w.add(format!("SPHERICAL_SURFACE('',#{a},5.)"));
+    let (n, s_) = (w.vertex([0.0, 0.0, 5.0]), w.vertex([0.0, 0.0, -5.0]));
+    let (ln, ls) = (w.add(format!("VERTEX_LOOP('',#{n})")), w.add(format!("VERTEX_LOOP('',#{s_})")));
+    let (bn, bs) = (w.add(format!("FACE_OUTER_BOUND('',#{ln},.T.)")), w.add(format!("FACE_BOUND('',#{ls},.T.)")));
+    let face = w.face(&[bn, bs], sphere, true);
+    let shell = closed_shell(&mut w, &[face]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('ball',#{shell})"));
+    let s = one_solid(&w.file(&[solid]));
+    assert_eq!(counts(&s.brep), [2, 1, 1, 1, 2]);
+    faces_away(&s.brep, 0, |_| [0.0; 3]);
+}
+
+/// A disk bounded by a closed quadratic B-spline written unclamped (uniform knots from −2 to 6,
+/// its first two points repeated at the end, as cadmpeg's N04 recipes and periodic writers do):
+/// the curve is clamped to its domain [0, 4] exactly, so its pcurve on the plane is the closed
+/// form and the face reads.
+#[test]
+fn a_face_bounded_by_an_unclamped_periodic_spline_reads() {
+    let mut w = W::default();
+    let corners = [[-10.0, -10.0, 0.0], [10.0, -10.0, 0.0], [10.0, 10.0, 0.0], [-10.0, 10.0, 0.0]];
+    let p: Vec<u64> = corners.iter().map(|c| w.pt(*c)).collect();
+    let curve = w.add(format!(
+        "B_SPLINE_CURVE_WITH_KNOTS('',2,(#{},#{},#{},#{},#{},#{}),.UNSPECIFIED.,.T.,.U.,(1,1,1,1,1,1,1,1,1),(-2.,-1.,0.,1.,2.,3.,4.,5.,6.),.UNSPECIFIED.)",
+        p[0], p[1], p[2], p[3], p[0], p[1]
+    ));
+    // The curve at its domain's start: the middle of its first two corners.
+    let v = w.vertex([0.0, -10.0, 0.0]);
+    let e = w.add(format!("EDGE_CURVE('',#{v},#{v},#{curve},.T.)"));
+    let oe = w.oe(e, true);
+    let bound = w.bound(&[oe], true, true);
+    let plane = w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let face = w.face(&[bound], plane, true);
+    let shell = w.add(format!("OPEN_SHELL('',(#{face}))"));
+    let model = w.add(format!("SHELL_BASED_SURFACE_MODEL('disk',(#{shell}))"));
+    let s = one_solid(&w.file(&[model]));
+    let edge = s.brep.edges.first().unwrap();
+    let solidcore_record::brep::Curve::Spline { knots, .. } = edge.parameters() else { panic!("{:?}", edge.curve) };
+    assert_eq!((knots[..3].to_vec(), knots[knots.len() - 3..].to_vec()), (vec![0.0; 3], vec![4.0; 3]));
+}
+
+/// A FACETED_BREP: a tetrahedron of four FACE_SURFACEs on planes, each bounded by a POLY_LOOP of
+/// three of its four points. Each point is one vertex and each side one edge, shared by the two
+/// faces it bounds, so the shell closes.
+#[test]
+fn a_faceted_brep_of_poly_loops_is_a_closed_solid() {
+    let mut w = W::default();
+    let p = [[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 10.0]].map(|q| w.pt(q));
+    // Each face's points counter-clockwise seen from outside.
+    let tri = |w: &mut W, i: [usize; 3], o: V, z: V, x: V| {
+        let l = w.add(format!("POLY_LOOP('',(#{},#{},#{}))", p[i[0]], p[i[1]], p[i[2]]));
+        let b = w.add(format!("FACE_OUTER_BOUND('',#{l},.T.)"));
+        let s = w.plane(o, z, x);
+        w.add(format!("FACE_SURFACE('',(#{b}),#{s},.T.)"))
+    };
+    let k = 1.0 / 3f64.sqrt();
+    let faces = [
+        tri(&mut w, [0, 2, 1], [0.0; 3], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]),
+        tri(&mut w, [0, 1, 3], [0.0; 3], [0.0, -1.0, 0.0], [1.0, 0.0, 0.0]),
+        tri(&mut w, [0, 3, 2], [0.0; 3], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+        tri(&mut w, [1, 2, 3], [10.0, 0.0, 0.0], [k, k, k], [-k * 3f64.sqrt() / 2f64.sqrt(), k * 3f64.sqrt() / 2f64.sqrt(), 0.0]),
+    ];
+    let shell = closed_shell(&mut w, &faces);
+    let solid = w.add(format!("FACETED_BREP('tetra',#{shell})"));
+    let s = one_solid(&w.file(&[solid]));
+    assert_eq!(counts(&s.brep), [2, 1, 4, 6, 4]);
+    faces_away(&s.brep, 0, |_| [2.0, 2.0, 2.0]);
+}
+
 /// A 20 × 20 × 5 plate with a hole of radius 3 through it; with `marked`, its square bounds are
 /// FACE_OUTER_BOUNDs, otherwise every bound is a FACE_BOUND and the hole is listed first.
 fn plate(marked: bool) -> p21::Exchange {
@@ -886,7 +1044,6 @@ fn hostile_topology_is_an_error_never_a_panic() {
             }),
         ),
         ("an unsupported loop", Box::new(|t: &str| t.replacen("EDGE_LOOP(", "POLY_LOOP(", 1))),
-        ("an unsupported solid", Box::new(|t: &str| t.replace("MANIFOLD_SOLID_BREP", "FACETED_BREP"))),
     ];
     for (what, edit) in cases {
         let r = edited(edit);
@@ -1277,6 +1434,20 @@ fn parabola_and_hyperbola_edges_bound_faces() {
     }
 }
 
+/// SolidCraft's own export of a cross-bored rod whose bore rim is a B-spline of 1 399 control
+/// points running back and forth across the bore (tests/step-regressions in SolidCraft, #4598):
+/// the rim's faces have no closed-form pcurves there, and the refusal names the face rather
+/// than build the folded rim. Ported from step-brep's `tests/issue_2583_topology_first.rs` with
+/// its fixture; step-brep built the rim as written.
+#[test]
+fn rod_doubled_edge_names_the_face_of_its_folded_rim() {
+    let text = include_str!("../tests/fixtures/rod_doubled_edge.step");
+    let r = read_solids(&p21::parse(text).unwrap());
+    assert!(r.solids.is_empty());
+    let why = &r.failures.first().expect("a refusal").message;
+    assert!(super::named_face(why).is_some(), "{why}");
+}
+
 /// A sliver face's parameter box is `OPEN_DOMAIN_SPAN` across even against a bound of its
 /// surface's natural range, and pcurves wholly outside that range stay an empty box (#12757).
 #[test]
@@ -1294,4 +1465,121 @@ fn face_domain_sliver_at_a_natural_bound() {
     let mid = face_domain(&ball, &loop_at(0.0, 1e-6)).unwrap();
     assert!((mid[1][1] - mid[1][0] - OPEN_DOMAIN_SPAN).abs() < 1e-12 && mid[1][0] < 0.0 && mid[1][1] > 1e-6, "{mid:?}");
     assert!(face_domain(&ball, &loop_at(FRAC_PI_2 + 1e-4, FRAC_PI_2 + 2e-4)).is_err());
+}
+
+/// A prism over a closed periodic cubic (an octagon's uniform B-spline, written unclamped with
+/// v_closed .T., its first three control points repeated at the end, as exporters write a closed
+/// spline) from z = 0 to 4: its side is a ruled spline closed in v, bounded by the two closed
+/// B-spline curves without a seam edge, closed by two planar caps. The unclamped knots are
+/// clamped on reading (the same surface: its points at the domain's ends are the curves'), and
+/// the side gets a seam along its boundary row from the bottom curve's vertex to the top's.
+#[test]
+fn a_spline_closed_in_v_without_a_seam_gets_one() {
+    let octagon: Vec<V> = (0..8).map(|k| f64::from(k) * std::f64::consts::FRAC_PI_4).map(|t| [5.0 * t.cos(), 5.0 * t.sin(), 0.0]).collect();
+    let wrapped: Vec<V> = octagon.iter().chain(octagon.iter().take(3)).copied().collect();
+    let knots = (0..15).map(|k| real(f64::from(k))).collect::<Vec<_>>().join(",");
+    let ones = vec!["1"; 15].join(",");
+    let mut w = W::default();
+    let at = |p: V, z: f64| [p[0], p[1], z];
+    let curve = |w: &mut W, z: f64| {
+        let pts: Vec<u64> = wrapped.iter().map(|p| w.pt(at(*p, z))).collect();
+        w.add(format!("B_SPLINE_CURVE_WITH_KNOTS('',3,({}),.UNSPECIFIED.,.T.,.F.,({ones}),({knots}),.UNSPECIFIED.)", list(&pts)))
+    };
+    // The uniform cubic at its domain's start (t = 3): (P0 + 4 P1 + P2) / 6.
+    let start = |z: f64| {
+        let [a, b, c] = [octagon[0], octagon[1], octagon[2]];
+        [(a[0] + 4.0 * b[0] + c[0]) / 6.0, (a[1] + 4.0 * b[1] + c[1]) / 6.0, z]
+    };
+    let edge = |w: &mut W, z: f64| {
+        let k = curve(w, z);
+        let v = w.vertex(start(z));
+        w.add(format!("EDGE_CURVE('',#{v},#{v},#{k},.T.)"))
+    };
+    let (bottom, top) = (edge(&mut w, 0.0), edge(&mut w, 4.0));
+    let rows: Vec<String> = [0.0, 4.0]
+        .iter()
+        .map(|z| {
+            let pts: Vec<u64> = wrapped.iter().map(|p| w.pt(at(*p, *z))).collect();
+            format!("({})", list(&pts))
+        })
+        .collect();
+    let surface = w.add(format!(
+        "B_SPLINE_SURFACE_WITH_KNOTS('',1,3,({}),.RULED_SURF.,.F.,.T.,.F.,(2,2),({ones}),(0.,1.),({knots}),.UNSPECIFIED.)",
+        rows.join(",")
+    ));
+    // The side's normal (along z, then round counter-clockwise) points in: same_sense .F.;
+    // outward, the bottom curve runs counter-clockwise about +z, the top clockwise.
+    let (x, y) = (w.oe(bottom, true), w.oe(top, false));
+    let (bx, by) = (w.bound(&[x], true, true), w.bound(&[y], false, true));
+    let side = w.face(&[bx, by], surface, false);
+    let plane_b = w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let x = w.oe(bottom, false);
+    let bx = w.bound(&[x], true, true);
+    let cap_b = w.face(&[bx], plane_b, false);
+    let plane_t = w.plane([0.0, 0.0, 4.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let x = w.oe(top, true);
+    let bx = w.bound(&[x], true, true);
+    let cap_t = w.face(&[bx], plane_t, true);
+    let shell = closed_shell(&mut w, &[side, cap_b, cap_t]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('prism',#{shell})"));
+    let s = one_solid(&w.file(&[solid]));
+    assert_eq!(counts(&s.brep), [2, 1, 3, 3, 2]);
+    assert!(s.notes.iter().any(|n| n.contains("1 seam edges added")), "{:?}", s.notes);
+    // Clamped: the side's knots repeat their ends four times.
+    let side = s.brep.faces.iter().find_map(|f| match &f.surface {
+        BSurface::Spline { v_knots, .. } => Some(v_knots.clone()),
+        _ => None,
+    });
+    let v_knots = side.expect("the side's spline");
+    assert!(v_knots.iter().take(4).all(|k| *k == 3.0) && v_knots.iter().rev().take(4).all(|k| *k == 11.0), "{v_knots:?}");
+    faces_away(&s.brep, 0, |p| [0.0, 0.0, p[2].clamp(1.0, 3.0)]);
+}
+
+/// A cone as a B-spline surface closed in v whose first u row collapses to its apex, bounded by
+/// its base curve alone (a closed B-spline without a seam edge) and a planar cap: the face covers
+/// the apex, a pole at the start of its u range, which lies on the side of lower u of a loop
+/// running +v. It gets one seam along its boundary row, from the base curve's vertex to a new
+/// vertex at the apex.
+#[test]
+fn a_spline_cone_closed_in_v_gets_a_seam_to_its_apex() {
+    let octagon: Vec<V> = (0..8).map(|k| f64::from(k) * std::f64::consts::FRAC_PI_4).map(|t| [5.0 * t.cos(), 5.0 * t.sin(), 0.0]).collect();
+    let wrapped: Vec<V> = octagon.iter().chain(octagon.iter().take(3)).copied().collect();
+    let knots = (0..15).map(|k| real(f64::from(k))).collect::<Vec<_>>().join(",");
+    let ones = vec!["1"; 15].join(",");
+    let mut w = W::default();
+    let pts: Vec<u64> = wrapped.iter().map(|p| w.pt(*p)).collect();
+    let base = w.add(format!("B_SPLINE_CURVE_WITH_KNOTS('',3,({}),.UNSPECIFIED.,.T.,.F.,({ones}),({knots}),.UNSPECIFIED.)", list(&pts)));
+    // The uniform cubic at its domain's start (t = 3): (P0 + 4 P1 + P2) / 6.
+    let [a, b, c] = [octagon[0], octagon[1], octagon[2]];
+    let v = w.vertex([(a[0] + 4.0 * b[0] + c[0]) / 6.0, (a[1] + 4.0 * b[1] + c[1]) / 6.0, 0.0]);
+    let edge = w.add(format!("EDGE_CURVE('',#{v},#{v},#{base},.T.)"));
+    let apex: Vec<u64> = wrapped.iter().map(|_| w.pt([0.0, 0.0, 4.0])).collect();
+    let rim: Vec<u64> = wrapped.iter().map(|p| w.pt(*p)).collect();
+    let surface = w.add(format!(
+        "B_SPLINE_SURFACE_WITH_KNOTS('',1,3,(({}),({})),.UNSPECIFIED.,.F.,.T.,.F.,(2,2),({ones}),(0.,1.),({knots}),.UNSPECIFIED.)",
+        list(&apex),
+        list(&rim)
+    ));
+    // From the apex (u = 0) down to the rim, then round counter-clockwise: the normal points
+    // out, and outward the base curve runs counter-clockwise about +z.
+    let x = w.oe(edge, true);
+    let bx = w.bound(&[x], true, true);
+    let side = w.face(&[bx], surface, true);
+    let plane = w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let x = w.oe(edge, false);
+    let bx = w.bound(&[x], true, true);
+    let cap = w.face(&[bx], plane, false);
+    let shell = closed_shell(&mut w, &[side, cap]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('cone',#{shell})"));
+    let s = one_solid(&w.file(&[solid]));
+    assert_eq!(counts(&s.brep), [2, 1, 2, 2, 2]);
+    assert!(s.notes.iter().any(|n| n.contains("1 seam edges added")), "{:?}", s.notes);
+    assert!(
+        s.brep.vertices.iter().any(|v| {
+            let d = sub3(v.point, [0.0, 0.0, 4.0]);
+            (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt() <= 1e-9
+        }),
+        "no vertex at the apex"
+    );
+    faces_away(&s.brep, 0, |_| [0.0, 0.0, 1.0]);
 }

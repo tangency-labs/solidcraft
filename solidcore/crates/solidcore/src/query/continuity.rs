@@ -108,11 +108,12 @@ fn partials(k: &Kernel, s: &Surface, uv: Point2) -> Result<Partials> {
     for (i, row) in out.iter_mut().enumerate() {
         for (j, x) in row.iter_mut().enumerate() {
             if i + j <= MAX_PARTIAL_ORDER {
-                *x = d
-                    .get(i)
-                    .and_then(|r| r.get(j))
-                    .copied()
-                    .ok_or_else(|| SolidError::sm_err(OP))?;
+                *x = d.get(i).and_then(|r| r.get(j)).copied().ok_or_else(|| {
+                    SolidError::query_failed(
+                        OP,
+                        "the surface evaluation has fewer partials than asked",
+                    )
+                })?;
             }
         }
     }
@@ -194,7 +195,10 @@ pub fn continuity_at(
         .ok_or_else(|| SolidError::invalid_input(OP, "edge without a curve"))?;
     let d = curve.evaluate(k, t, 1, true, false)?;
     let (Some(&point), Some(&d1)) = (d.first(), d.get(1)) else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::query_failed(
+            OP,
+            "the curve evaluation has no first derivative",
+        ));
     };
     let speed = d1.length();
     if !(speed > 0.0 && speed.is_finite() && finite(point)) {
@@ -229,7 +233,10 @@ pub fn continuity_at(
     let (Some(a), Some(bb), Some(ja), Some(jb)) =
         (sides.first(), sides.get(1), jets.first(), jets.get(1))
     else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::query_failed(
+            OP,
+            "the edge has fewer than two sides",
+        ));
     };
     let opposed = a.normal.dot(bb.normal) < 0.0;
     let mut jumps = [0.0_f64; 3];
@@ -271,7 +278,10 @@ pub fn curve_curvature(k: &Kernel, b: &Brep, e: EdgeId, t: f64) -> Result<Option
         .ok_or_else(|| SolidError::invalid_input(OP, "edge without a curve"))?;
     let d = curve.evaluate(k, t, 2, true, false)?;
     let (Some(&point), Some(&d1), Some(&d2)) = (d.first(), d.get(1), d.get(2)) else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::query_failed(
+            OP,
+            "the curve evaluation has no second derivative",
+        ));
     };
     let s2 = d1.dot(d1);
     if !(s2 > 0.0) {
@@ -303,10 +313,9 @@ pub fn iso_curvature(
     };
     let d = s.evaluate(k, uv, 2, 2, flags)?;
     let at = |i: usize, j: usize| {
-        d.get(i)
-            .and_then(|r| r.get(j))
-            .copied()
-            .ok_or_else(|| SolidError::sm_err(OP))
+        d.get(i).and_then(|r| r.get(j)).copied().ok_or_else(|| {
+            SolidError::query_failed(OP, "the surface evaluation has fewer partials than asked")
+        })
     };
     let (point, su, sv) = (at(0, 0)?, at(1, 0)?, at(0, 1)?);
     let (along, bend) = if along_u {

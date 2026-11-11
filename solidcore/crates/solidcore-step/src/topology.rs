@@ -177,6 +177,64 @@ fn representation(e: &Entity) -> Option<(Vec<u64>, Option<u64>)> {
 }
 
 const SOLID_ITEMS: [&str; 4] = ["MANIFOLD_SOLID_BREP", "BREP_WITH_VOIDS", "SHELL_BASED_SURFACE_MODEL", "FACETED_BREP"];
+/// The shells a file may hold outside any solid or surface model.
+const SHELL_ITEMS: [&str; 4] = ["CLOSED_SHELL", "OPEN_SHELL", "ORIENTED_CLOSED_SHELL", "ORIENTED_OPEN_SHELL"];
+/// The faces a file may hold outside any shell.
+const FACE_ITEMS: [&str; 4] = ["ADVANCED_FACE", "FACE_SURFACE", "FACE", "ORIENTED_FACE"];
+
+/// Whether an item is a solid or a surface model, read as a body wherever a representation lists
+/// it.
+pub fn is_solid_item(name: &str) -> bool {
+    SOLID_ITEMS.contains(&name)
+}
+
+/// Whether an item of the file's unlisted topology ([`roots`]) is read as a body: a solid or
+/// surface model, or a shell or face on its own. A representation's own shell or face items (a
+/// presentation's, a tolerance's) are not bodies.
+pub fn is_body_item(name: &str) -> bool {
+    SOLID_ITEMS.contains(&name) || SHELL_ITEMS.contains(&name) || FACE_ITEMS.contains(&name)
+}
+
+/// The topology a file holds outside any representation, as bodies to read (a file of bare
+/// geometry, or one whose topology no shape representation lists): every solid or surface model
+/// no other entity refers to, then every shell no solid, model or other shell lists, then every
+/// face no shell lists (each a one-face sheet), in id order within each. A presentation's reference
+/// (a style, a layer, an invisibility) does not count: a styled loose shell is still unlisted. As
+/// solidcore's
+/// step-import read such files (#2583, topology first): what the file's topology holds is read
+/// whether or not a product structure names it.
+pub fn roots(ex: &Exchange) -> Vec<u64> {
+    fn refer(p: &Param, out: &mut HashSet<u64>, depth: usize) {
+        match p {
+            Param::Ref(id) => {
+                out.insert(*id);
+            }
+            Param::List(items) | Param::Typed(_, items) if depth < 64 => {
+                for q in items {
+                    refer(q, out, depth + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    let presentation = |name: &str| name.ends_with("STYLED_ITEM") || matches!(name, "PRESENTATION_LAYER_ASSIGNMENT" | "INVISIBILITY");
+    let mut referenced = HashSet::new();
+    for e in ex.entities.values() {
+        for r in e.records.iter().filter(|r| !presentation(&r.name)) {
+            for p in &r.params {
+                refer(p, &mut referenced, 0);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for kinds in [&SOLID_ITEMS[..], &SHELL_ITEMS[..], &FACE_ITEMS[..]] {
+        let mut ids: Vec<u64> =
+            ex.entities.iter().filter(|(id, e)| kinds.contains(&e.name()) && !referenced.contains(id)).map(|(id, _)| *id).collect();
+        ids.sort_unstable();
+        out.extend(ids);
+    }
+    out
+}
 
 /// Where each solid item sits: its representation's context, and the product that representation
 /// (or one related to it) is the shape of.
@@ -431,7 +489,8 @@ fn item_shells(ex: &Exchange, item: u64) -> R<(Vec<u64>, Kind)> {
     let e = entity(ex, item)?;
     let p = e.params();
     match e.name() {
-        "MANIFOLD_SOLID_BREP" => Ok((vec![rid(p.get(1), "outer shell")?], Kind::Solid)),
+        // A FACETED_BREP is a manifold solid whose faces are planar polygons (POLY_LOOPs).
+        "MANIFOLD_SOLID_BREP" | "FACETED_BREP" => Ok((vec![rid(p.get(1), "outer shell")?], Kind::Solid)),
         "BREP_WITH_VOIDS" => {
             let mut shells = vec![rid(p.get(1), "outer shell")?];
             let voids = refs(p.get(2), "voids")?;
@@ -450,8 +509,10 @@ fn item_shells(ex: &Exchange, item: u64) -> R<(Vec<u64>, Kind)> {
             let (closed, open) = model_shells(ex, &ids);
             Ok((if closed.is_empty() || open.is_empty() { ids } else { open }, Kind::Model))
         }
-        // A closed shell of a surface model that has open shells too ([`items`]).
-        "CLOSED_SHELL" | "ORIENTED_CLOSED_SHELL" => Ok((vec![item], Kind::Model)),
+        // A closed shell of a surface model that has open shells too ([`items`]), or a shell or
+        // face no solid or model lists ([`roots`]): a model of that one shell, or of the one face.
+        "CLOSED_SHELL" | "ORIENTED_CLOSED_SHELL" | "OPEN_SHELL" | "ORIENTED_OPEN_SHELL" => Ok((vec![item], Kind::Model)),
+        n if FACE_ITEMS.contains(&n) => Ok((vec![item], Kind::Model)),
         n => Err(unsupported(n)),
     }
 }
@@ -463,6 +524,8 @@ fn shell_faces(ex: &Exchange, id: u64) -> R<(Vec<u64>, bool)> {
     let p = e.params();
     let (faces, flip) = match e.name() {
         "CLOSED_SHELL" | "OPEN_SHELL" => (refs(p.get(1), "shell faces")?, false),
+        // A face read on its own ([`roots`]) is a shell of that face.
+        n if FACE_ITEMS.contains(&n) => (vec![id], false),
         "ORIENTED_CLOSED_SHELL" | "ORIENTED_OPEN_SHELL" => {
             let inner = rid(p.get(2), "oriented shell element")?;
             let inner_e = entity(ex, inner)?;
@@ -534,8 +597,15 @@ struct Builder<'b, 'a> {
     face_ids: HashSet<u64>,
     faces: Vec<FaceB>,
     sense_mismatches: usize,
+    /// Line edges whose vertices lie off their LINE, read as the segment between the vertices.
+    lines_between_vertices: usize,
+    /// Inner loops written running the way the outer loop runs, run the other way.
+    inner_loops_turned: usize,
     /// Edges whose tolerance was raised to the gap their curve has to a face's surface.
     raised_edges: HashSet<u32>,
+    /// The line edges of POLY_LOOPs, by their two CARTESIAN_POINTs (lower id first): faces that
+    /// share a side share its edge, as a faceted B-rep's do.
+    poly_edges: HashMap<(u64, u64), u32>,
 }
 
 impl<'b, 'a> Builder<'b, 'a> {
@@ -553,7 +623,10 @@ impl<'b, 'a> Builder<'b, 'a> {
             face_ids: HashSet::new(),
             faces: Vec::new(),
             sense_mismatches: 0,
+            lines_between_vertices: 0,
+            inner_loops_turned: 0,
             raised_edges: HashSet::new(),
+            poly_edges: HashMap::new(),
         }
     }
 
@@ -714,13 +787,28 @@ impl<'b, 'a> Builder<'b, 'a> {
         let vertices = if mapped.with_step { [vs, ve] } else { [ve, vs] };
         // The gaps as the record will be read: its curve at its interval's ends.
         let eval = CurveEval::new(&mapped.curve).map_err(|m| format!("edge #{id}: {m}"))?;
-        for (t, v) in mapped.interval.into_iter().zip(vertices) {
+        let mut gaps = [0.0; 2];
+        for ((t, v), g) in mapped.interval.into_iter().zip(vertices).zip(gaps.iter_mut()) {
             let at = eval.point(t).ok_or_else(|| format!("edge #{id}: no point at {t}"))?;
-            let gap = at.dist(v3(self.point(v)?));
+            *g = at.dist(v3(self.point(v)?));
+        }
+        let (mut curve, mut interval) = (mapped.curve, mapped.interval);
+        // Topology first: a straight edge whose vertices lie off its LINE (a direction or a
+        // magnitude written wrong) is the segment between its vertices, which the faces it
+        // bounds share; any other curve is the edge's shape, and a vertex far off it is refused.
+        let far = gaps.iter().any(|g| !(VERTEX_GAP_MARGIN * g <= MAX_TOLERANCE));
+        if far && matches!(curve, BCurve::Line { .. }) && !closed && ps != pe {
+            let [a, z] = vertices;
+            curve = BCurve::Line { start: self.point(a)?, end: self.point(z)? };
+            interval = [0.0, 1.0];
+            gaps = [0.0; 2];
+            self.lines_between_vertices += 1;
+        }
+        for (v, gap) in vertices.into_iter().zip(gaps) {
             self.raise_vertex(v, gap, id)?;
         }
         let i = index(self.edges.len())?;
-        self.edges.push(EdgeB { curve: mapped.curve, interval: mapped.interval, vertices, tolerance: self.tol, form: None });
+        self.edges.push(EdgeB { curve, interval, vertices, tolerance: self.tol, form: None });
         self.edge_ids.insert(id, (i, mapped.with_step));
         Ok((i, mapped.with_step))
     }
@@ -822,8 +910,70 @@ impl<'b, 'a> Builder<'b, 'a> {
                 Ok((LoopB::Edges(uses), outer))
             }
             "VERTEX_LOOP" => Ok((LoopB::Vertex(self.vertex(rid(lp.params().get(1), "vertex loop")?)?), outer)),
+            "POLY_LOOP" => {
+                let mut uses = self.poly_loop(lp_id, edges_so_far)?;
+                if !orientation {
+                    reverse(&mut uses);
+                }
+                Ok((LoopB::Edges(uses), outer))
+            }
             n => Err(format!("#{lp_id}: {}", unsupported(format!("loop {n}")))),
         }
+    }
+
+    /// A POLY_LOOP (ISO 10303-42: a closed polygon of points) as edge uses: a line from each
+    /// point to the next and from the last back to the first, a point written twice in a row
+    /// skipped. Each point is a vertex and each side an edge, shared with every other loop that
+    /// has the same two points, as the faces of a FACETED_BREP share them.
+    fn poly_loop(&mut self, lp_id: u64, edges_so_far: &mut usize) -> R<Vec<(u32, bool)>> {
+        let lp = entity(self.ex, lp_id)?;
+        let mut pts = refs(lp.params().get(1), "poly loop")?;
+        pts.dedup();
+        if pts.len() > 1 && pts.first() == pts.last() {
+            pts.pop();
+        }
+        *edges_so_far = edges_so_far.saturating_add(pts.len());
+        if pts.len() < 3 || *edges_so_far > MAX_LOOP {
+            return Err(format!("poly loop #{lp_id} with {} points", pts.len()));
+        }
+        let mut uses = Vec::with_capacity(pts.len());
+        for (k, &a) in pts.iter().enumerate() {
+            let b = *pts.get((k + 1) % pts.len()).ok_or("poly loop point")?;
+            let key = (a.min(b), a.max(b));
+            let forward = a < b;
+            if let Some(&e) = self.poly_edges.get(&key) {
+                uses.push((e, forward));
+                continue;
+            }
+            let (va, vb) = (self.point_vertex(key.0)?, self.point_vertex(key.1)?);
+            let (pa, pb) = (self.point(va)?, self.point(vb)?);
+            if v3(pa).dist(v3(pb)) <= self.tol {
+                return Err(format!("poly loop #{lp_id}: a side of no length"));
+            }
+            let e = index(self.edges.len())?;
+            self.edges.push(EdgeB {
+                curve: BCurve::Line { start: pa, end: pb },
+                interval: [0.0, 1.0],
+                vertices: [va, vb],
+                tolerance: self.tol,
+                form: None,
+            });
+            self.poly_edges.insert(key, e);
+            uses.push((e, forward));
+        }
+        Ok(uses)
+    }
+
+    /// The vertex at CARTESIAN_POINT `id` (a POLY_LOOP's corner), one per point.
+    fn point_vertex(&mut self, id: u64) -> R<u32> {
+        if let Some(v) = self.vertex_ids.get(&id) {
+            return Ok(*v);
+        }
+        let point = self.reader.point(id)?;
+        let i = index(self.vertices.len())?;
+        self.vertices.push(Vertex { point, tolerance: self.tol });
+        self.vertex_ids.insert(id, i);
+        Ok(i)
     }
 
     /// A face as a shell uses it: its index and whether its normal there is its surface's
@@ -838,7 +988,9 @@ impl<'b, 'a> Builder<'b, 'a> {
             let (f, forward) = self.face(rid(p.get(2), "oriented face element")?, depth + 1)?;
             return Ok((f, forward == flag(p.get(3), "oriented face orientation")?));
         }
-        if !matches!(e.name(), "ADVANCED_FACE" | "FACE_SURFACE") {
+        // A plain FACE carries no surface: it is the plane its loops lie in.
+        let implicit = e.name() == "FACE";
+        if !matches!(e.name(), "ADVANCED_FACE" | "FACE_SURFACE" | "FACE") {
             return Err(format!("#{id}: {}", unsupported(format!("face {}", e.name()))));
         }
         if !self.face_ids.insert(id) {
@@ -848,8 +1000,6 @@ impl<'b, 'a> Builder<'b, 'a> {
         if self.faces.len() >= MAX_FACES {
             return Err(format!("more than {MAX_FACES} faces"));
         }
-        let step_surface = self.reader.surface(rid(p.get(2), "face geometry")?).map_err(|m| format!("face #{id}: {m}"))?;
-        let same_sense = flag(p.get(3), "face same_sense")?;
         let bounds = refs(p.get(1), "face bounds")?;
         if bounds.len() > MAX_BOUNDS {
             return Err(format!("face #{id} with {} bounds", bounds.len()));
@@ -864,8 +1014,17 @@ impl<'b, 'a> Builder<'b, 'a> {
             }
             loops.push(l);
         }
+        let (step_surface, same_sense) = if implicit {
+            if !loops.iter().any(|l| matches!(l, LoopB::Edges(_))) {
+                return Err(format!("face #{id}: {}", unsupported("a face without an edge loop")));
+            }
+            (std::sync::Arc::new(self.loop_plane(&loops).map_err(|m| format!("face #{id}: {m}"))?), true)
+        } else {
+            let s = self.reader.surface(rid(p.get(2), "face geometry")?).map_err(|m| format!("face #{id}: {m}"))?;
+            (s, flag(p.get(3), "face same_sense")?)
+        };
         if !loops.iter().any(|l| matches!(l, LoopB::Edges(_))) {
-            return Err(format!("face #{id}: {}", unsupported("a face without an edge loop")));
+            loops = self.whole_sphere(&step_surface, &loops).map_err(|m| format!("face #{id}: {m}"))?;
         }
         let extent = self.extent(&loops)?;
         let (surface, reversed) = swept::map_surface(&step_surface, &extent, self.tol).map_err(|m| format!("face #{id}: {m}"))?;
@@ -882,6 +1041,83 @@ impl<'b, 'a> Builder<'b, 'a> {
         let i = index(self.faces.len())?;
         self.faces.push(FaceB { step: id, surface, loops, outer, forward: sense, extent: None });
         Ok((i, sense))
+    }
+
+    /// A sphere face bounded by vertex loops alone, each at one of its poles (ISO 10303-42: a face
+    /// of a closed surface bounded by vertices is all of the surface): the whole sphere, its loop
+    /// a meridian from the south pole to the north and back, which [`Builder::complete_slits`]
+    /// keeps as its seam. Any other face without an edge loop is refused.
+    fn whole_sphere(&mut self, surface: &crate::geom::Surface, loops: &[LoopB]) -> R<Vec<LoopB>> {
+        let unsupported_here = || unsupported("a face without an edge loop");
+        let crate::geom::Surface::Sphere { position, radius } = surface else { return Err(unsupported_here()) };
+        let (o, z, x) = (v3(position.origin), v3(position.axis), v3(position.ref_direction));
+        let poles = [o - z * *radius, o + z * *radius];
+        let mut at = [None, None];
+        for l in loops {
+            let LoopB::Vertex(v) = l else { return Err(unsupported_here()) };
+            let p = v3(self.point(*v)?);
+            let tol = self.vertices.get(*v as usize).map_or(self.tol, |x| x.tolerance.max(self.tol));
+            let k = poles.iter().position(|q| q.dist(p) <= tol).ok_or_else(unsupported_here)?;
+            if let Some(slot) = at.get_mut(k) {
+                *slot = Some(*v);
+            }
+        }
+        let mut ends = [0u32; 2];
+        for ((end, found), pole) in ends.iter_mut().zip(at).zip(poles) {
+            *end = match found {
+                Some(v) => v,
+                None => {
+                    let i = index(self.vertices.len())?;
+                    self.vertices.push(Vertex { point: [pole.x, pole.y, pole.z], tolerance: self.tol });
+                    i
+                }
+            };
+        }
+        let e = index(self.edges.len())?;
+        let frame = Frame { origin: position.origin, x_axis: [x.x, x.y, x.z], y_axis: [z.x, z.y, z.z] };
+        let half = std::f64::consts::FRAC_PI_2;
+        self.edges.push(EdgeB {
+            curve: BCurve::Circle { frame, radius: *radius },
+            interval: [-half, half],
+            vertices: ends,
+            tolerance: self.tol,
+            form: None,
+        });
+        Ok(vec![LoopB::Edges(vec![(e, true), (e, false)])])
+    }
+
+    /// The plane a plain FACE's loops lie in (ISO 10303-42: a FACE with no face geometry is
+    /// bounded by loops in one plane): its normal by Newell's method over the first edge loop's
+    /// points (each edge at nine points), so its outer loop runs counter-clockwise about it; its
+    /// origin the loop's first point. Refused where the points span no plane or leave it by more
+    /// than the tolerance.
+    fn loop_plane(&self, loops: &[LoopB]) -> R<crate::geom::Surface> {
+        let Some(LoopB::Edges(es)) = loops.iter().find(|l| matches!(l, LoopB::Edges(_))) else { return Err("no edge loop".into()) };
+        let mut pts: Vec<Vec3> = Vec::new();
+        for &(e, forward) in es {
+            let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+            let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
+            let [lo, hi] = edge.interval;
+            for k in 0..8 {
+                let f = f64::from(k) / 8.0;
+                pts.push(c.point(if forward { lo + (hi - lo) * f } else { hi - (hi - lo) * f }).ok_or("edge point")?);
+            }
+        }
+        let first = *pts.first().ok_or("an empty loop")?;
+        let mut normal = Vec3::new(0.0, 0.0, 0.0);
+        for (a, b) in pts.iter().zip(pts.iter().cycle().skip(1)) {
+            normal += (*a - first).cross(*b - first);
+        }
+        let z = normal.normalized().ok_or_else(|| unsupported("a face with no surface whose loop spans no plane"))?;
+        if pts.iter().any(|p| (*p - first).dot(z).abs() > self.tol) {
+            return Err(unsupported("a face with no surface whose loop leaves its plane"));
+        }
+        let far = pts.iter().copied().max_by(|a, b| (*a - first).len().total_cmp(&(*b - first).len())).ok_or("an empty loop")?;
+        let d = far - first;
+        let x = (d - z * d.dot(z)).normalized().ok_or("a degenerate loop")?;
+        Ok(crate::geom::Surface::Plane {
+            position: Placement { origin: [first.x, first.y, first.z], axis: [z.x, z.y, z.z], ref_direction: [x.x, x.y, x.z] },
+        })
     }
 
     /// Points along a face's loops (each edge at nine points, and its vertex loops), and along
@@ -963,6 +1199,12 @@ impl<'b, 'a> Builder<'b, 'a> {
         let seams = self.add_seams()?;
         if seams > 0 {
             notes.push(format!("{seams} seam edges added to faces that wind around their surface"));
+        }
+        if self.inner_loops_turned > 0 {
+            notes.push(format!("{} inner loops written the way their outer loop runs turned round", self.inner_loops_turned));
+        }
+        if self.lines_between_vertices > 0 {
+            notes.push(format!("{} line edges whose vertices lie off their LINE read as the segment between them", self.lines_between_vertices));
         }
         if self.sense_mismatches > 0 {
             notes.push(format!("{} edges run against their same_sense (read by their vertices)", self.sense_mismatches));
@@ -1364,6 +1606,7 @@ impl<'b, 'a> Builder<'b, 'a> {
         self.measure_edges(&label, &edge_loops)?;
         // Closed forms where the geometry has them; the kernel makes the rest (`trims`).
         let exact = pcurve::exact_pcurves(&surface, &uses_of(&self.edges, &edge_loops, None)?, tol, box_on_form).map_err(|e| e.to_string())?;
+
         // Without a kernel, a use with neither is refused below with why.
         let made = match self.trims {
             Some(trims) if exact.iter().flatten().any(Option::is_none) => {
@@ -1470,7 +1713,26 @@ impl<'b, 'a> Builder<'b, 'a> {
         if flip {
             face.forward = !face.forward;
         }
-        let pcs: Vec<Vec<Curve2>> = if rerun { pcs.into_iter().map(|l| l.into_iter().rev().collect()).collect() } else { pcs };
+        let mut pcs: Vec<Vec<Curve2>> = if rerun { pcs.into_iter().map(|l| l.into_iter().rev().collect()).collect() } else { pcs };
+        // An inner bound written the way the outer one runs (its FACE_BOUND orientation wrong):
+        // on a face whose loops all close in (u, v), each loop but the outer runs clockwise, so
+        // such a loop is run the other way. Its uses and their pcurves are the same.
+        if can_turn && !seams_only && shapes.iter().all(Option::is_some) {
+            for (i, area) in shapes.iter().enumerate() {
+                let Some(a) = *area else { continue };
+                let a = if rerun { -a } else { a };
+                if i == outer || !(a > 0.0) {
+                    continue;
+                }
+                if let Some(LoopB::Edges(es)) = positions.get(i).and_then(|&p| face.loops.get_mut(p)) {
+                    reverse(es);
+                }
+                if let Some(l) = pcs.get_mut(i) {
+                    l.reverse();
+                }
+                self.inner_loops_turned += 1;
+            }
+        }
         let domain = face_domain(&surface, &pcs)?;
         Ok((pcs, domain, flip, form))
     }
@@ -1653,7 +1915,15 @@ fn face_domain(surface: &BSurface, pcs: &[Vec<Curve2>]) -> R<[[f64; 2]; 2]> {
                 y = y.min(*n1);
                 if x < y && y - x < OPEN_DOMAIN_SPAN {
                     let span = OPEN_DOMAIN_SPAN.min(*n1 - *n0);
-                    let lo = (0.5 * (x + y) - 0.5 * span).clamp(*n0, *n1 - span);
+                    // the box's latest start: the range's own where the range is narrower than
+                    // the span (`n1 - span` there is `n0`, which rounding may put below it)
+                    let last = if span < OPEN_DOMAIN_SPAN { *n0 } else { *n1 - span };
+                    // the range is the surface's, from the file: refused where it leaves no
+                    // room (crossed, or not a number), never clamped into one
+                    if !(*n0 <= last) {
+                        return Err(format!("a face's natural range [{n0}, {n1}] leaves no room for a box {span} across"));
+                    }
+                    let lo = (0.5 * (x + y) - 0.5 * span).clamp(*n0, last);
                     (x, y) = (lo, (lo + span).min(*n1));
                 }
             }
@@ -1697,15 +1967,56 @@ fn full_knots(knots: &[f64], mults: &[usize], count: usize, degree: usize) -> R<
 
 fn map_bspline_curve(b: &BSplineCurve) -> R<BCurve> {
     let knots = full_knots(&b.knots, &b.multiplicities, b.points.len(), b.degree)?;
-    Ok(match &b.weights {
-        None => BCurve::Spline { knots, points: b.points.clone() },
+    let homogeneous: Vec<[f64; 4]> = match &b.weights {
+        None => b.points.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect(),
         Some(w) => {
             if w.len() != b.points.len() {
                 return Err("B-spline weights and points differ in number".into());
             }
-            BCurve::RationalSpline { knots, homogeneous: b.points.iter().zip(w).map(|(p, w)| [p[0] * w, p[1] * w, p[2] * w, *w]).collect() }
+            b.points.iter().zip(w).map(|(p, w)| [p[0] * w, p[1] * w, p[2] * w, *w]).collect()
         }
+    };
+    let (knots, homogeneous) = clamped(b.degree, knots, homogeneous).map_err(|e| format!("an unclamped B-spline curve: {e}"))?;
+    Ok(match &b.weights {
+        None => BCurve::Spline { knots, points: homogeneous.iter().map(|h| [h[0], h[1], h[2]]).collect() },
+        Some(_) => BCurve::RationalSpline { knots, homogeneous },
     })
+}
+
+/// A spline of `degree` on `knots` over `homogeneous` control points with an unclamped knot
+/// vector (a periodic spline written with uniform knots, its first points repeated at its end) as
+/// the same spline over [knots[degree], knots[n]] clamped there, exactly (knot insertion): its
+/// parameters unchanged, its ends its own points, as every evaluator and pcurve takes a spline,
+/// and a closed one's first and last points one. A clamped one comes back as it is.
+fn clamped(degree: usize, knots: Vec<f64>, homogeneous: Vec<[f64; 4]>) -> Result<(Vec<f64>, Vec<[f64; 4]>), String> {
+    let (p, n) = (degree, homogeneous.len());
+    let (lo, hi) = (knots.get(p).copied(), knots.get(n).copied());
+    let repeats = |at: &[f64], x: Option<f64>| x.is_some_and(|x| at.iter().all(|k| *k == x));
+    match (knots.get(..=p), knots.get(n..), lo, hi) {
+        (Some(head), Some(tail), Some(a), Some(z)) if !(repeats(head, lo) && repeats(tail, hi)) => {
+            solidcore::eval::pcurve::segment(p, &knots, &homogeneous, a, z).map_err(|e| e.to_string())
+        }
+        _ => Ok((knots, homogeneous)),
+    }
+}
+
+/// Each of `lines`, a spline of `degree` on `knots`, clamped ([`clamped`]), and the knots they
+/// share after it.
+fn clamped_lines(degree: usize, knots: Vec<f64>, lines: Vec<Vec<[f64; 4]>>) -> R<(Vec<f64>, Vec<Vec<[f64; 4]>>)> {
+    let mut out = Vec::new();
+    let mut shared = None;
+    for line in lines {
+        let (k, c) = clamped(degree, knots.clone(), line).map_err(|e| format!("an unclamped B-spline surface: {e}"))?;
+        shared = Some(k);
+        out.push(c);
+    }
+    Ok((shared.unwrap_or(knots), out))
+}
+
+/// `grid`'s columns as rows.
+fn transposed(grid: &[Vec<[f64; 4]>]) -> Vec<Vec<[f64; 4]>> {
+    let width = grid.first().map_or(0, Vec::len);
+    (0..width).map(|j| grid.iter().filter_map(|r| r.get(j).copied()).collect()).collect()
 }
 
 fn map_bspline_surface(b: &BSplineSurface) -> R<BSurface> {
@@ -1716,16 +2027,28 @@ fn map_bspline_surface(b: &BSplineSurface) -> R<BSurface> {
     if b.points.iter().any(|r| r.len() != nv) {
         return Err("ragged B-spline surface".into());
     }
+    if let Some(w) = &b.weights
+        && (w.len() != nu || w.iter().any(|r| r.len() != nv))
+    {
+        return Err("B-spline surface weights and points differ in number".into());
+    }
+    // Control point (i, j) is row i (along u), entry j (along v), homogeneous.
+    let weight = |i: usize, j: usize| b.weights.as_ref().and_then(|w| w.get(i)?.get(j).copied()).unwrap_or(1.0);
+    let homogeneous = |i: usize, j: usize, p: &[f64; 3]| {
+        let w = weight(i, j);
+        [p[0] * w, p[1] * w, p[2] * w, w]
+    };
+    let rows: Vec<Vec<[f64; 4]>> =
+        b.points.iter().enumerate().map(|(i, r)| r.iter().enumerate().map(|(j, p)| homogeneous(i, j, p)).collect()).collect();
+    // Unclamped knots in either direction are clamped exactly, line by line: every row is a
+    // spline in v on the v knots, every column one in u on the u knots, and inserting the same
+    // knots into each gives the surface's.
+    let (v_knots, rows) = clamped_lines(b.v_degree, v_knots, rows)?;
+    let (u_knots, columns) = clamped_lines(b.u_degree, u_knots, transposed(&rows))?;
+    let rows = transposed(&columns);
     Ok(match &b.weights {
-        None => BSurface::Spline { u_knots, v_knots, points: b.points.clone() },
-        Some(w) => {
-            if w.len() != nu || w.iter().any(|r| r.len() != nv) {
-                return Err("B-spline surface weights and points differ in number".into());
-            }
-            let homogeneous =
-                b.points.iter().zip(w).map(|(row, wr)| row.iter().zip(wr).map(|(p, w)| [p[0] * w, p[1] * w, p[2] * w, *w]).collect()).collect();
-            BSurface::RationalSpline { u_knots, v_knots, homogeneous }
-        }
+        None => BSurface::Spline { u_knots, v_knots, points: rows.iter().map(|r| r.iter().map(|h| [h[0], h[1], h[2]]).collect()).collect() },
+        Some(_) => BSurface::RationalSpline { u_knots, v_knots, homogeneous: rows },
     })
 }
 

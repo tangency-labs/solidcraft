@@ -1251,6 +1251,8 @@ struct Rows<'a> {
     sketch_states: crate::sketch_state::SketchStates,
 }
 
+/// Draw the vertical history column's feature rows, folders, markers, and drag-and-drop targets,
+/// updating selection, edits, and viewport feature hover.
 pub(crate) fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
     let t = Tokens::get();
     // Show origin and bodies at the top (#6490): the browser's Bodies folder and Origin rows lead
