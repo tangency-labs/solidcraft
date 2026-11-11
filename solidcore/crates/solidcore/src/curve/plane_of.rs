@@ -54,7 +54,7 @@ pub struct PlaneOf {
 ///
 /// `InvalidInput` for no curves, a tolerance not finite and positive, numbers not finite, or
 /// a rational spline with a weight not positive; `Unsupported` for a traced intersection
-/// curve.
+/// curve; a query failure for curves so large their chords or normal overflow.
 pub fn plane_of(curves: &[Curve], tol: f64) -> Result<Option<PlaneOf>> {
     if curves.is_empty() {
         return Err(SolidError::invalid_input(OP, "no curves"));
@@ -106,17 +106,25 @@ pub fn plane_of(curves: &[Curve], tol: f64) -> Result<Option<PlaneOf>> {
     let Ok(normal) = cross.unitize() else {
         return Ok(None);
     };
+    // A size past the floating range (a chord or a cross product overflowing) leaves no
+    // normal to bound with: refused, never read as a plane. `f64::max` would drop a NaN.
+    let overflow = || SolidError::query_failed(OP, "the curves' size overflows the bound");
+    if !(reach.is_finite() && normal.x.is_finite() && normal.y.is_finite() && normal.z.is_finite())
+    {
+        return Err(overflow());
+    }
     let mut deviation = 0.0_f64;
     for &(q, e) in &points {
         let w = q - c0;
         let d = w.dot(normal).abs();
-        let bound = d * (1.0 + gamma(8))
+        let bound = (d * (1.0 + gamma(8))
             + 2.0 * (gamma(1) + gamma(3)) * w.length() * (1.0 + gamma(5))
-            + 2.0 * (e + e0);
-        deviation = deviation.max(bound * (1.0 + gamma(2)));
-    }
-    if !deviation.is_finite() {
-        return Err(SolidError::query_failed(OP, "the bound is not finite"));
+            + 2.0 * (e + e0))
+            * (1.0 + gamma(2));
+        if !bound.is_finite() {
+            return Err(overflow());
+        }
+        deviation = deviation.max(bound);
     }
     Ok((deviation <= tol).then_some(PlaneOf {
         origin: c0,
@@ -259,6 +267,18 @@ mod tests {
         let z = Vec3::new(s * s, -s * s, s * 0.5 + s * 0.5);
         let along = plane.normal.dot(z).abs() / z.length();
         assert!((along - 1.0).abs() < 1e-12, "{:?}", plane.normal);
+    }
+
+    #[test]
+    fn curves_too_large_for_the_bound_are_refused_not_read_as_a_plane() {
+        // finite points whose chords' cross product overflows: no finite normal
+        let huge = Curve::Polyline {
+            points: vec![[0.0; 3], [1e200, 0.0, 0.0], [0.0, 1e200, 0.0]],
+        };
+        assert!(matches!(
+            plane_of(&[huge], 1e-6),
+            Err(SolidError::Failed(_))
+        ));
     }
 
     #[test]
