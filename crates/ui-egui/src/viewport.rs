@@ -2695,7 +2695,10 @@ fn measuring_mesh_edges(app: &SolveApp) -> bool {
 /// The same policy participates in the pick cache when the active dialog changes.
 fn picking_3d_curve_points(app: &SolveApp) -> bool {
     app.preferences.select_3d_curve_points
-        && app.dialog.as_ref().is_none_or(|d| matches!(d.kind, crate::dialogs::Kind::OffsetPlane { .. } | crate::dialogs::Kind::Construct { .. }))
+        && app.dialog.as_ref().is_none_or(|d| {
+            matches!(d.kind, crate::dialogs::Kind::OffsetPlane { .. } | crate::dialogs::Kind::Construct { .. })
+                || d.active_input().is_some_and(|input| input.accept == crate::dialogs_move::PLACEMENT_POINTS)
+        })
 }
 
 fn edge_pickable(app: &SolveApp, mesh: &solidcraft_engine::geom::Mesh, index: usize) -> bool {
@@ -2915,6 +2918,8 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     // while idle or projecting, and while 3D drawing snaps to points on other visible sketches).
     let accept = app.dialog.as_ref().and_then(|d| d.active_input()).map_or(0, |i| i.accept);
     let wants_points = accept & crate::selection::POINTS != 0;
+    let move_points = accept == crate::dialogs_move::PLACEMENT_POINTS;
+    let wire_nodes = picking_3d_curve_points(app);
     // An input that takes only points of other sketches (Project, #13246) is offered those and
     // not the active sketch's own, which it can't take.
     let only_other_points = !wants_points && accept & crate::selection::EXTERNAL_POINTS != 0 && accept & crate::selection::SKETCH_POINTS == 0;
@@ -2938,11 +2943,14 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     // click on a small circle's edge still takes the circle.
     let mut woken_far: Option<(f32, Hit)> = None;
     for ss in point_sketches.iter().filter_map(|sid| st.sketch(*sid)) {
+        if move_points && ss.sketch.view.hide_points {
+            continue;
+        }
         let sid = ss.feature;
         let shown = snapping.then(|| crate::dialogs::SnapPoints::of(&ss.sketch));
         let visible = solidcraft_engine::view::SketchPointVisibility::new(&ss.sketch);
-        if picking_3d_curve_points(app) && !ss.sketch.view.hide_points {
-            for wire in &ss.sketch.wires {
+        if (wire_nodes || move_points) && !ss.sketch.view.hide_points {
+            for wire in ss.sketch.wires.iter().filter(|wire| wire_nodes || wire.fit.len() == 1) {
                 for (index, at) in wire.fit.iter().enumerate() {
                     if let Some(sp) = proj.to_screen(*at) {
                         let dd = sp.distance(pos) - if s.active_sketch == Some(sid) { 2.0 } else { 0.0 };
@@ -2955,7 +2963,8 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
             }
         }
         for (p, locked) in ss.sketch.points.iter().zip(ss.sketch.locked_points()) {
-            if !visible.takes(p) || shown.as_ref().is_some_and(|f| !f.takes(p)) {
+            // A finished sketch does not draw its own origin point.
+            if (move_points && p.id == "origin") || !visible.takes(p) || shown.as_ref().is_some_and(|f| !f.takes(p)) {
                 continue;
             }
             if let Some(sp) = proj.to_screen(ss.plane.to_world(p.pos)) {
@@ -7203,6 +7212,7 @@ fn midpoint_marker(painter: &egui::Painter, at: Pos2, color: Color32) {
 /// hides them.
 pub(crate) fn standalone_points(app: &SolveApp) -> Vec<Vec3> {
     let st = crate::open_meshing::session_world(&app.session);
+    let move_points = app.dialog.as_ref().is_some_and(|d| d.inputs.iter().any(|input| input.accept == crate::dialogs_move::PLACEMENT_POINTS));
     let mut out = Vec::new();
     for sid in visible_sketches(app) {
         if app.session.active_sketch == Some(sid) {
@@ -7213,9 +7223,12 @@ pub(crate) fn standalone_points(app: &SolveApp) -> Vec<Vec3> {
         if sk.view.hide_points {
             continue;
         }
-        if app.preferences.select_3d_curve_points {
-            out.extend(sk.wires.iter().flat_map(|wire| wire.fit.iter().copied()));
-        }
+        out.extend(
+            sk.wires
+                .iter()
+                .filter(|wire| app.preferences.select_3d_curve_points || (move_points && wire.fit.len() == 1))
+                .flat_map(|wire| wire.fit.iter().copied()),
+        );
         let used: std::collections::HashSet<usize> = sk.curves.iter().flat_map(|c| c.kind.point_ids()).collect();
         let visible = solidcraft_engine::view::SketchPointVisibility::new(sk);
         for (i, p) in sk.points.iter().enumerate().skip(1) {
