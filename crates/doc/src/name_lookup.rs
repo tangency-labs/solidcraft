@@ -7,7 +7,9 @@
 //! face, when only a face of the same stem is left, when the name is on several bodies, or when
 //! the name was saved before format 14 ([`LEGACY_MARK`]), the name finds nothing and the feature
 //! that uses it fails, asking for the reference to be picked again
-//! ([`crate::DocError::Reselect`]). A face whose name was worked out from geometry, found where
+//! ([`crate::DocError::Reselect`]). An edge name has one more way: when no edge's faces answer
+//! to it, and one of its faces is gone from a feature still on the body, the reference's point
+//! decides (see [`renamed_edge`]). A face whose name was worked out from geometry, found where
 //! the reference's point no longer lies, is reported: only geometry decided.
 //! Saved numbered Project links also have a compatibility check for a whole face that
 //! contains the saved pick and comes directly from its original construction feature.

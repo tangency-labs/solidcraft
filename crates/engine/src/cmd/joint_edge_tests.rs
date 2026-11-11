@@ -151,6 +151,10 @@ fn an_edge_origin_on_a_body_placed_by_an_offset_lands_on_that_edge() {
 fn a_corner_whose_other_edge_is_gone_asks_again() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 5, "corner": [0, 0, 0], "body_name": "Plate"}));
+    let boss = run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 5, "base": [20, 20, 5], "operation": "join", "targets": ["Plate"]}))
+        ["feature"]
+        .as_u64()
+        .unwrap();
     let st = s.model.state();
     let snap = solidcraft_doc::joints::edge_snap(
         &s.doc,
@@ -162,9 +166,9 @@ fn a_corner_whose_other_edge_is_gone_asks_again() {
     )
     .unwrap_or_else(|e| panic!("{e}"));
     let solidcraft_doc::joints::Snap::Edge { pick, edge, face: Some(face), corner: Some(_), axis } = snap else { panic!("{snap:?}") };
-    let made = solidcraft_doc::persistent_name::made_by(&face).unwrap_or_default();
-    // The top face, and a face of the same feature that no face answers to.
-    let corner = Some(format!("{face}|F{made}:side:l99"));
+    // The top face, and a face of the boss (a feature with faces on the plate) that no face
+    // answers to: the edge the pick lies on would take that name's place.
+    let corner = Some(format!("{face}|F{boss}:side:l99"));
     let stale = solidcraft_doc::joints::Snap::Edge { pick, edge, face: Some(face), corner, axis };
     let origin = solidcraft_doc::joints::JointOrigin::new(0, stale);
     assert!(solidcraft_doc::joints::resolve_origin(&s.doc, &st, &origin).is_err());
