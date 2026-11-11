@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1669"
+ ],
+ "what": "a closed hollow box (60 x 60 x 40, 2.5 mm walls) with a window cut in one end wall and a loft joined into it, both mirrored about the middle plane x = 30 onto the far wall (\"Union: no result\" on the mirror only)",
+ "source": "analytic",
+ "method": "as for one wall: each window is filled by its loft (the loft section is larger than the window), and what is added to the plain hollow case (60 x 60 x 40 minus the 55 x 55 x 35 cavity = 38125) is the overhanging strip of the loft outside the wall (x in [-0.5, 0]) and the strip inside the cavity (x in [2.5, 3]), 938.966 each; the mirror gives the far wall the same: V = 38125 + 2 * 938.966. The windows are filled again, so the cavity is sealed (an internal void: shell count 2, which the rig cannot grade, so valid is false).",
+ "valid": false,
+ "body_count": 1,
+ "volume_mm3": 40002.93197278911
+}

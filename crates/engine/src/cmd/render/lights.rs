@@ -4,7 +4,7 @@ use serde_json::Value;
 use solidcraft_doc::render_settings::{RenderSettings, RenderSetup};
 
 use crate::params::bad;
-use crate::schema::render_lights::{EditParams, EditResult, Geometry, Light};
+use crate::schema::render_lights::{EditParams, EditResult, Geometry, Light, LightIdRemap};
 use crate::schema::render_lights::{ListParams, ListResult};
 use crate::{Result, Session};
 
@@ -35,6 +35,33 @@ pub(super) fn list(s: &mut Session, params: &Value) -> Result<Value> {
     serde_json::to_value(ListResult { lights: crate::render_lights::inspect(&setup).map_err(|e| bad(cmd, e))? }).map_err(|e| bad(cmd, e.to_string()))
 }
 
+fn canonical_id(setup: &RenderSetup, lights: &[Light], index: usize) -> Option<String> {
+    lights.get(index).map(|light| {
+        let kind = light.geometry.kind();
+        let finite_directional = matches!(
+            setup.job,
+            Some(solidcraft_doc::render_settings::RenderJob::GpuPath { .. } | solidcraft_doc::render_settings::RenderJob::CpuRaytrace { .. })
+        ) && kind == "directional";
+        let slot = if finite_directional {
+            if matches!(light.geometry, Geometry::Directional { angular_radius_rad: Some(_), .. }) {
+                0
+            } else {
+                usize::from(lights.iter().any(|l| matches!(l.geometry, Geometry::Directional { angular_radius_rad: Some(_), .. })))
+                    + lights.iter().take(index).filter(|l| matches!(l.geometry, Geometry::Directional { angular_radius_rad: None, .. })).count()
+            }
+        } else {
+            lights
+                .iter()
+                .take(index)
+                .filter(|prior| {
+                    if matches!(kind, "point" | "spot") { matches!(prior.geometry.kind(), "point" | "spot") } else { prior.geometry.kind() == kind }
+                })
+                .count()
+        };
+        format!("{kind}:{slot}")
+    })
+}
+
 fn change(s: &mut Session, params: &Value, operation: &str) -> Result<Value> {
     let command = format!("render.lights.{operation}");
     if !params.is_object() {
@@ -51,6 +78,7 @@ fn change(s: &mut Session, params: &Value, operation: &str) -> Result<Value> {
         None => s.doc.render.setups.get(&input.name).cloned().unwrap_or_default(),
     };
     let mut lights = crate::render_lights::inspect(&setup).map_err(|e| bad(&command, e))?;
+    let original_lights = lights.clone();
     let target = [setup.camera.target.x, setup.camera.target.y, setup.camera.target.z];
     let mut selected = None;
     match operation {
@@ -90,13 +118,15 @@ fn change(s: &mut Session, params: &Value, operation: &str) -> Result<Value> {
                 if input.set.is_some() {
                     return Err(bad(&command, "duplicate does not accept set"));
                 }
-                let light = lights.get(index).cloned().ok_or_else(|| bad(&command, "missing light"))?;
+                let mut light = lights.get(index).cloned().ok_or_else(|| bad(&command, "missing light"))?;
+                // A new source, even when every numerical value equals its parent.
+                light.id.clear();
                 lights.push(light);
                 selected = lights.len().checked_sub(1);
             } else {
                 let patch = input.set.ok_or_else(|| bad(&command, "set is required"))?;
                 let light = lights.get_mut(index).ok_or_else(|| bad(&command, "missing light"))?;
-                if matches!(setup.job, Some(solidcraft_doc::render_settings::RenderJob::CpuRaytrace { .. }))
+                if matches!(&setup.job, Some(solidcraft_doc::render_settings::RenderJob::CpuRaytrace { options, .. }) if options.path.is_none())
                     && light.geometry.kind() == "directional"
                     && patch.softness.is_some()
                 {
@@ -108,19 +138,17 @@ fn change(s: &mut Session, params: &Value, operation: &str) -> Result<Value> {
         }
         _ => return Err(bad(&command, "unknown light operation")),
     }
-    let id = selected.and_then(|index| {
-        lights.get(index).map(|light| {
-            let kind = light.geometry.kind();
-            let slot = lights
+    let id = selected.and_then(|index| canonical_id(&setup, &lights, index));
+    let id_remap = lights
+        .iter()
+        .enumerate()
+        .filter_map(|(index, light)| {
+            original_lights
                 .iter()
-                .take(index)
-                .filter(|prior| {
-                    if matches!(kind, "point" | "spot") { matches!(prior.geometry.kind(), "point" | "spot") } else { prior.geometry.kind() == kind }
-                })
-                .count();
-            format!("{kind}:{slot}")
+                .find(|before| !light.id.is_empty() && before.id == light.id)
+                .and_then(|before| canonical_id(&setup, &lights, index).map(|after_id| LightIdRemap { before: before.clone(), after_id }))
         })
-    });
+        .collect();
     crate::render_lights::write(&mut setup, &lights).map_err(|e| bad(&command, e))?;
     let mut settings = (*s.doc.render).clone();
     settings.setups.insert(input.name.clone(), setup.clone());
@@ -128,7 +156,7 @@ fn change(s: &mut Session, params: &Value, operation: &str) -> Result<Value> {
     if *s.doc.render != settings {
         s.doc_mut().render = std::sync::Arc::new(settings);
     }
-    serde_json::to_value(EditResult { id, name: input.name, setup: serde_json::to_value(setup).map_err(|e| bad(&command, e.to_string()))? })
+    serde_json::to_value(EditResult { id, id_remap, name: input.name, setup: serde_json::to_value(setup).map_err(|e| bad(&command, e.to_string()))? })
         .map_err(|e| bad(&command, e.to_string()))
 }
 

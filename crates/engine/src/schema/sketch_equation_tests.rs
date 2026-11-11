@@ -7,8 +7,11 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<EquationCurveParams>(), &["construction", "end", "explicit", "sketch", "start", "tolerance", "x", "y"]);
-    assert_keys(input_schema_for::<EquationEditParams>(), &["curve", "end", "explicit", "sketch", "start", "tolerance", "x", "y"]);
+    assert_keys(
+        input_schema_for::<EquationCurveParams>(),
+        &["construction", "end", "explicit", "sketch", "start", "tolerance", "variable_unit", "x", "y"],
+    );
+    assert_keys(input_schema_for::<EquationEditParams>(), &["curve", "end", "explicit", "sketch", "start", "tolerance", "variable_unit", "x", "y"]);
 }
 
 #[test]
@@ -21,6 +24,9 @@ fn strict_keeps_todays_errors() {
         ("sketch.equation_curve", json!({"x": "t", "y": "t", "start": 0, "end": 1, "explicit": 1})),
         ("sketch.equation_curve", json!({"x": "t", "y": "t", "start": 0, "end": 1e12})),
         ("sketch.equation_curve", json!({"y": "t", "start": 0, "end": 1})),
+        ("sketch.equation_curve", json!({"x": "t", "y": "t", "start": 0, "end": 1, "variable_unit": "mm"})),
+        ("sketch.equation_curve", json!({"x": "t", "y": "t", "start": 0, "end": 1, "variable_unit": true})),
+        ("sketch.equation_curve", json!({"x": "t", "y": "t", "start": 0, "end": 1, "variable_unit": "range"})),
         ("sketch.equation_curve.edit", json!({"curve": 7})),
         ("sketch.equation_curve.edit", json!({"curve": "nope", "y": "t"})),
     ]);
@@ -42,5 +48,12 @@ fn replies_match_their_schemas() {
     let edited = output_schema_for::<EquationEditResult>();
     let edited = edited.as_value();
     let r = run(&mut s, "sketch.equation_curve.edit", json!({"curve": id, "end": "6 * pi"}));
+    assert!(conforms(edited, edited, &r), "{r} doesn't match {edited}");
+    // The variable in its range's unit, then back: both accepted in strict, nothing warned.
+    s.param_check = ParamCheck::Strict;
+    let r = run(&mut s, "sketch.equation_curve", json!({"x": "t", "y": "t / 2", "start": 0, "end": "10 mm", "variable_unit": "range"}));
+    assert!(conforms(created, created, &r), "{r} doesn't match {created}");
+    let id = r["curve"].as_str().unwrap_or_else(|| panic!("{r}")).to_string();
+    let r = run(&mut s, "sketch.equation_curve.edit", json!({"curve": id, "variable_unit": "number"}));
     assert!(conforms(edited, edited, &r), "{r} doesn't match {edited}");
 }

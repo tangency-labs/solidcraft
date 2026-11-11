@@ -1,0 +1,127 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 30,
+    "width": 30,
+    "height": 2,
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     6,
+     6,
+     2
+    ],
+    "diameter": 4
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     6,
+     15,
+     2
+    ],
+    "diameter": 4
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     6,
+     24,
+     2
+    ],
+    "diameter": 4
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     15,
+     6,
+     2
+    ],
+    "diameter": 4
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     15,
+     15,
+     2
+    ],
+    "diameter": 4
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     15,
+     24,
+     2
+    ],
+    "diameter": 4
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     24,
+     6,
+     2
+    ],
+    "diameter": 4
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     24,
+     15,
+     2
+    ],
+    "diameter": 4
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     24,
+     24,
+     2
+    ],
+    "diameter": 4
+   }
+  },
+  {
+   "command": "sheet.convert",
+   "params": {
+    "body": "Plate",
+    "face": [
+     10.5,
+     10.5,
+     2
+    ]
+   }
+  },
+  {
+   "command": "inspect.measure",
+   "params": {}
+  }
+ ]
+}

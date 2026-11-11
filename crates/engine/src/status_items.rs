@@ -90,6 +90,14 @@ pub struct StatusItems {
     pub items: Vec<StatusItem>,
 }
 
+impl StatusItem {
+    /// Capability independent of a window's presentation preferences. `has_key` retains
+    /// the existing read-only legend contract; live details also include settings/findings.
+    pub fn has_details(&self) -> bool {
+        !matches!(self.setting, StatusSetting::Environment)
+    }
+}
+
 impl Session {
     /// Whether shading and Continuity share one slot (the default). This is session
     /// configuration, never design data; SDK clients may choose the legacy independent policy.
@@ -136,7 +144,7 @@ impl Session {
             self.status_slot(id, active);
         }
         if self.status_items() != before {
-            self.revision += 1;
+            self.refresh_display();
         }
     }
 

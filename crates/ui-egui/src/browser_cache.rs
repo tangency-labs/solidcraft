@@ -205,7 +205,15 @@ impl Cache {
             "sketches" => &model.sketches,
             _ => &model.planes,
         };
-        let Some(indices) = indices.get(&component) else { return Folder::default() };
+        // A folder that holds only groups (a New Group made before anything is in it) is still
+        // drawn, or the group can't be seen or filled (#10526).
+        let grouped = doc.browser_groups.iter().any(|g| g.component == component && g.folder == folder);
+        let none = Vec::new();
+        let indices = match indices.get(&component) {
+            Some(indices) => indices,
+            None if grouped => &none,
+            None => return Folder::default(),
+        };
         let mut all = Vec::with_capacity(indices.len());
         for i in indices {
             let entry = match folder {
@@ -226,7 +234,7 @@ impl Cache {
                 all.push(entry);
             }
         }
-        if all.is_empty() {
+        if all.is_empty() && !grouped {
             return Folder::default();
         }
         let rows = arrange(&doc, component, folder, &prefix, all);

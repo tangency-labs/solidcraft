@@ -1,13 +1,13 @@
 //! The model cache: a design's evaluated timeline (every feature's result and the state after
 //! it, [`SavedModel`]), saved with it so opening need not evaluate it again. Bodies use
 //! SolidCraft's exact native B-rep encoding (a mesh body, its own triangles); the key ties the
-//! cache to the exact document, and to the source and platform that computed it
+//! cache to the exact document, and to the source, platform and geometry kernel that computed it
 //! (docs/design-container.md).
 use super::*;
 use solidcraft_doc::{ModelState, SavedModel};
 
-const FORMAT: &str = "solidcraft-model-cache/5";
-const PRODUCER: &str = "solidcraft-truck-adapter/3";
+const FORMAT: &str = "solidcraft-model-cache/9";
+const PRODUCER: &str = "solidcraft-truck-adapter/4";
 const MANIFEST: &str = "cache/model.json";
 const PAYLOAD: &str = "cache/bodies.bin";
 /// Body records (a placed copy is one record; its part is stored once).
@@ -28,6 +28,11 @@ fn build() -> String {
 fn evaluation() -> String {
     format!("{}/{}-{}", env!("SOLIDCRAFT_EVALUATION_SOURCE"), std::env::consts::ARCH, std::env::consts::OS)
 }
+
+/// The geometry kernel that computed a cache. A cache another kernel wrote (the C++ SMLib, which
+/// earlier builds could run on) is not this build's result: the kernels differ in tolerances and in
+/// what they refuse, so a design opened from it evaluates again.
+pub(super) const KERNEL: &str = "solidcore";
 
 /// A 4 x 4 matrix as its 16 numbers, in storage order.
 fn matrix(t: &[[f64; 4]; 4]) -> Vec<f64> {
@@ -126,13 +131,19 @@ const MAX_MESH_HEADER: usize = 16 << 20;
 /// colour and paint), then each vertex as three f64 and each triangle as three u32, little-endian.
 fn encode_mesh_body(body: &solidcraft_kernel::Body) -> Option<Vec<u8>> {
     let (positions, triangles) = body.triangle_mesh()?;
+    let normals = body.triangle_corner_normals()?;
     let header =
-        serde_json::to_vec(&json!({"positions": positions.len(), "triangles": triangles.len(), "color": body.color(), "paint": body.paint()}))
+        serde_json::to_vec(&json!({"positions": positions.len(), "triangles": triangles.len(), "corner_normals": normals.len(), "color": body.color(), "paint": body.paint()}))
             .ok()?;
     if header.len() > MAX_MESH_HEADER {
         return None;
     }
-    let size = positions.len().checked_mul(24)?.checked_add(triangles.len().checked_mul(12)?)?.checked_add(12 + header.len())?;
+    let size = positions
+        .len()
+        .checked_mul(24)?
+        .checked_add(triangles.len().checked_mul(12)?)?
+        .checked_add(normals.len().checked_mul(72)?)?
+        .checked_add(12 + header.len())?;
     let mut out = Vec::with_capacity(size);
     out.extend_from_slice(MESH_TAG);
     out.extend_from_slice(&u32::try_from(header.len()).ok()?.to_le_bytes());
@@ -147,6 +158,11 @@ fn encode_mesh_body(body: &solidcraft_kernel::Body) -> Option<Vec<u8>> {
             out.extend_from_slice(&i.to_le_bytes());
         }
     }
+    for n in normals.iter().flatten() {
+        for x in [n.x, n.y, n.z] {
+            out.extend_from_slice(&x.to_le_bytes());
+        }
+    }
     Some(out)
 }
 
@@ -159,39 +175,57 @@ fn decode_mesh_body(bytes: &[u8]) -> Option<solidcraft_kernel::Body> {
     let header: Value = serde_json::from_slice(header).ok()?;
     let count = |key: &str| header.get(key).and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok());
     let (vertices, triangles) = (count("positions")?, count("triangles")?);
+    let normals = count("corner_normals").unwrap_or(0);
+    if normals != 0 && normals != triangles {
+        return None;
+    }
     if triangles > solidcraft_kernel::MAX_TRIANGLES {
         return None;
     }
     // The counts must account for every byte, so nothing is allocated for data that is not there.
     let split = vertices.checked_mul(24)?;
-    if split.checked_add(triangles.checked_mul(12)?)? != data.len() {
+    let normal_start = split.checked_add(triangles.checked_mul(12)?)?;
+    if normal_start.checked_add(normals.checked_mul(72)?)? != data.len() {
         return None;
     }
-    let (coordinates, corners) = data.split_at_checked(split)?;
+    let (coordinates, rest) = data.split_at_checked(split)?;
+    let (corners, shading) = rest.split_at_checked(triangles.checked_mul(12)?)?;
     let f64_at = |c: &[u8], at: usize| c.get(at..at + 8)?.try_into().ok().map(f64::from_le_bytes);
     let u32_at = |c: &[u8], at: usize| c.get(at..at + 4)?.try_into().ok().map(u32::from_le_bytes);
-    let positions: Vec<solidcraft_geom::Vec3> = coordinates
+    let positions: Vec<solidcore_record::Vec3> = coordinates
         .as_chunks::<24>()
         .0
         .iter()
-        .map(|c| Some(solidcraft_geom::Vec3::new(f64_at(c, 0)?, f64_at(c, 8)?, f64_at(c, 16)?)))
+        .map(|c| Some(solidcore_record::Vec3::new(f64_at(c, 0)?, f64_at(c, 8)?, f64_at(c, 16)?)))
         .collect::<Option<_>>()?;
     let triangles: Vec<[u32; 3]> =
         corners.as_chunks::<12>().0.iter().map(|c| Some([u32_at(c, 0)?, u32_at(c, 4)?, u32_at(c, 8)?])).collect::<Option<_>>()?;
+    let normals: Vec<[solidcore_record::Vec3; 3]> = shading
+        .as_chunks::<72>()
+        .0
+        .iter()
+        .map(|c| {
+            let n = |offset| Some(solidcore_record::Vec3::new(f64_at(c, offset)?, f64_at(c, offset + 8)?, f64_at(c, offset + 16)?));
+            Some([n(0)?, n(24)?, n(48)?])
+        })
+        .collect::<Option<_>>()?;
     let color: Option<[f32; 3]> = serde_json::from_value(header.get("color").cloned().unwrap_or(Value::Null)).ok()?;
     let paint: Option<solidcraft_kernel::Paint> = serde_json::from_value(header.get("paint").cloned().unwrap_or(Value::Null)).ok()?;
     if color.is_some_and(|c| c.iter().any(|x| !x.is_finite())) {
         return None;
     }
-    Some(solidcraft_kernel::mesh_body(&positions, &triangles).ok()?.with_color(color).with_paint(paint))
+    Some(solidcraft_kernel::mesh_body_with_normals(&positions, &triangles, &normals).ok()?.with_color(color).with_paint(paint))
 }
 
 /// A mesh body decoded is the one encoded: the same vertices, bit for bit, the same triangles,
 /// colour and paint.
 fn same_mesh(a: &solidcraft_kernel::Body, b: &solidcraft_kernel::Body) -> bool {
     let (Some((pa, ta)), Some((pb, tb))) = (a.triangle_mesh(), b.triangle_mesh()) else { return false };
-    let bits = |p: &[solidcraft_geom::Vec3]| p.iter().map(|v| [v.x.to_bits(), v.y.to_bits(), v.z.to_bits()]).collect::<Vec<_>>();
-    ta == tb && bits(pa) == bits(pb) && a.color() == b.color() && a.paint() == b.paint()
+    let bits = |p: &[solidcore_record::Vec3]| p.iter().map(|v| [v.x.to_bits(), v.y.to_bits(), v.z.to_bits()]).collect::<Vec<_>>();
+    let normals = |body: &solidcraft_kernel::Body| {
+        body.triangle_corner_normals().unwrap_or_default().iter().flatten().map(|n| [n.x.to_bits(), n.y.to_bits(), n.z.to_bits()]).collect::<Vec<_>>()
+    };
+    ta == tb && bits(pa) == bits(pb) && normals(a) == normals(b) && a.color() == b.color() && a.paint() == b.paint()
 }
 
 /// A body of the cache's payload, mesh or B-rep by the slice's tag.
@@ -289,14 +323,44 @@ impl Encoded {
             slices.push(json!([data.len(), bytes.len()]));
             data.extend_from_slice(bytes);
         }
-        let manifest = serde_json::to_vec(&json!({
-            "format": FORMAT, "producer": PRODUCER, "app": env!("CARGO_PKG_VERSION"), "build": build(),
-            "evaluation": evaluation(), "document": digest(document), "payload": digest(&data),
-            "slices": slices, "shares": shares, "bodies": table, "model": records,
-        }))
+        let manifest = serde_json::to_vec(&Manifest {
+            app: env!("CARGO_PKG_VERSION"),
+            bodies: table,
+            build: build(),
+            document: digest(document),
+            evaluation: evaluation(),
+            format: FORMAT,
+            kernel: KERNEL,
+            model: records,
+            payload: digest(&data),
+            producer: PRODUCER,
+            shares,
+            slices,
+        })
         .map_err(invalid)?;
         Ok((manifest, data))
     }
+}
+
+/// A model cache's manifest as written: the model's records are written where they are, not
+/// copied into a JSON tree first (copying a large model's records took as long as writing them,
+/// and a cache too big for the file is written again for each try at fewer states). The fields
+/// are in the order a JSON object keeps its keys (sorted), so the manifest is the one a tree
+/// wrote, byte for byte.
+#[derive(serde::Serialize)]
+struct Manifest<'a> {
+    app: &'a str,
+    bodies: Vec<Value>,
+    build: String,
+    document: String,
+    evaluation: String,
+    format: &'a str,
+    kernel: &'a str,
+    model: &'a Value,
+    payload: String,
+    producer: &'a str,
+    shares: Vec<usize>,
+    slices: Vec<Value>,
 }
 
 /// The final state of the model a design keeps, when this build's evaluation source computed it
@@ -308,16 +372,23 @@ pub fn read_design_geometry(bytes: &[u8]) -> Option<std::sync::Arc<ModelState>> 
     DesignContainerReader::new(Cursor::new(bytes)).ok()?.geometry()?.final_state().ok()
 }
 
-/// Whether `manifest` is a model cache of this build's evaluation source for `document`. The
-/// application version and commit that wrote it are not asked: another version of the same
+/// Whether `manifest` is a model cache of this build's evaluation source and kernel for `document`.
+/// The application version and commit that wrote it are not asked: another version of the same
 /// evaluation source computed the same model.
 fn current(manifest: &Value, document: &[u8]) -> bool {
     let is = |key: &str, value: &str| manifest.get(key).and_then(Value::as_str) == Some(value);
     is("format", FORMAT)
         && is("producer", PRODUCER)
         && is("evaluation", &evaluation())
+        && is("kernel", KERNEL)
         && is("document", &digest(document))
         && source_trusted(env!("SOLIDCRAFT_EVALUATION_SOURCE"), cfg!(any(test, feature = "trust-unknown-source")))
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How often reading a model cache validated its document (tests count it).
+    pub(super) static VALIDATED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// A build of unknown source (no git) never trusts a cache, unless `in_tests`: test builds
@@ -328,6 +399,17 @@ pub(super) fn source_trusted(commit: &str, in_tests: bool) -> bool {
 }
 
 pub(super) fn read_geometry_with<R: Read + Seek>(reader: &mut PackageReader<R>, document: &[u8]) -> Result<SavedModel> {
+    read_geometry(reader, document, true)
+}
+
+/// [`read_geometry_with`] for a reader whose document is read next: reading it runs the same
+/// migrations and validation and fails the open when they fail, so validating it here as well
+/// parsed and validated a large design twice (the model is dropped with the failed open).
+pub(super) fn read_geometry_before_document<R: Read + Seek>(reader: &mut PackageReader<R>, document: &[u8]) -> Result<SavedModel> {
+    read_geometry(reader, document, false)
+}
+
+fn read_geometry<R: Read + Seek>(reader: &mut PackageReader<R>, document: &[u8], validate: bool) -> Result<SavedModel> {
     let container: Value = serde_json::from_slice(&reader.limited_part("container.json", 4096)?).map_err(invalid)?;
     if container.get("format").and_then(Value::as_str) != Some(VERSION) {
         return Err(invalid("container version"));
@@ -337,7 +419,11 @@ pub(super) fn read_geometry_with<R: Read + Seek>(reader: &mut PackageReader<R>, 
         return Err(invalid("model cache key"));
     }
     // Validate the small parametric metadata before decoding any geometry.
-    Document::from_json(std::str::from_utf8(document).map_err(invalid)?)?;
+    if validate {
+        #[cfg(test)]
+        VALIDATED.with(|n| n.set(n.get() + 1));
+        Document::from_json(std::str::from_utf8(document).map_err(invalid)?)?;
+    }
     let data = reader.limited_part(PAYLOAD, max_design())?;
     if manifest.get("payload").and_then(Value::as_str) != Some(digest(&data).as_str()) {
         return Err(invalid("model cache payload key"));
@@ -405,7 +491,7 @@ fn matrix_of(numbers: &[f64]) -> Result<[[f64; 4]; 4]> {
 
 pub(super) fn geometry_preview(document: &[u8], model: &SavedModel) -> Result<DesignPreview> {
     let doc = Document::from_json(std::str::from_utf8(document).map_err(invalid)?)?;
-    let world = solidcraft_doc::world_state(&doc, &*model.final_state()?);
+    let world = solidcraft_doc::world_state(&doc, &*model.final_state()?)?;
     let mut preview = DesignPreview::default();
     let mut triangles = 0usize;
     let mut display_bytes = 0usize;
@@ -429,7 +515,7 @@ pub(super) fn geometry_preview(document: &[u8], model: &SavedModel) -> Result<De
             }
         };
         triangles = triangles.saturating_add(faces.len());
-        display_bytes = display_bytes.saturating_add(positions.len().saturating_mul(24)).saturating_add(faces.len().saturating_mul(12));
+        display_bytes = display_bytes.saturating_add(positions.len().saturating_mul(24)).saturating_add(faces.len().saturating_mul(84));
         if triangles > 1_000_000 || display_bytes > 128 << 20 {
             return Err(invalid("regenerated display budget"));
         }
@@ -438,6 +524,7 @@ pub(super) fn geometry_preview(document: &[u8], model: &SavedModel) -> Result<De
             positions: positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
             triangles: faces.iter().flatten().copied().collect(),
             color: entry.body.color(),
+            corner_normals: entry.body.triangle_corner_normals().unwrap_or_default().iter().flatten().flat_map(|n| [n.x, n.y, n.z]).collect(),
         };
         validate_mesh(&displayed)?;
         preview.meshes.push(displayed);

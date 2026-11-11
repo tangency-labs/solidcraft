@@ -1,0 +1,44 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Section"
+   }
+  },
+  {
+   "command": "frame.profile.insert",
+   "params": {
+    "profile": {
+     "kind": "channel",
+     "height": 60,
+     "width": 30,
+     "web": 5,
+     "flange": 6,
+     "root_radius": 0,
+     "toe_radius": 0
+    },
+    "at": [
+     10,
+     10
+    ],
+    "anchor": "bottom_left",
+    "angle": 1.5707963267948966
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {
+    "sketch": "Section"
+   }
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Section",
+    "distance": 20
+   }
+  }
+ ]
+}

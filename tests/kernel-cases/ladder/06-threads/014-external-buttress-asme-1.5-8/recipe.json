@@ -1,0 +1,30 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "radius": 19.049999999999997,
+    "height": 19.049999999999997,
+    "body_name": "Part"
+   }
+  },
+  {
+   "command": "solid.thread",
+   "params": {
+    "face": [
+     19.049999999999997,
+     0,
+     9.524999999999999
+    ],
+    "modeled": true,
+    "form": "buttress_asme",
+    "designation": "1.5-8 BUTT"
+   }
+  }
+ ]
+}

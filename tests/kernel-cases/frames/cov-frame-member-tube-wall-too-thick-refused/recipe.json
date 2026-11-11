@@ -1,0 +1,48 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "Frame"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      100,
+      0
+     ]
+    ],
+    "ids": [
+     "l1"
+    ],
+    "infer": false
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {
+    "sketch": "Frame"
+   }
+  },
+  {
+   "command": "frame.member",
+   "params": {
+    "sketch": "Frame",
+    "profile": {
+     "kind": "rect_tube",
+     "width": 40,
+     "height": 40,
+     "wall": 20
+    }
+   }
+  }
+ ]
+}

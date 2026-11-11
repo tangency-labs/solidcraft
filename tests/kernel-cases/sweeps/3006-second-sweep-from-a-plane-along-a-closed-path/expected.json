@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#3006"
+ ],
+ "what": "a circle of radius 3 on a plane at 0.5 of a closed circular path (R 30) swept round it, then a 5 x 5 square on a plane at 0.75 swept round the same path and joined (it did not follow the path)",
+ "source": "analytic",
+ "method": "both sections are centred on the path and square to it, so the union is a ring whose section is the union of the disc (r 3) and the square (half side 2.5): A = 25 + 9 pi - A(disc and square), A(disc and square) = integral over x in [-2.5, 2.5] of 2 min(2.5, sqrt(9 - x^2)) = 23.7719; V = A * 2 pi 30 (the same however the square is turned about the path).",
+ "body_count": 1,
+ "volume_mm3": 5561.078930711061
+}

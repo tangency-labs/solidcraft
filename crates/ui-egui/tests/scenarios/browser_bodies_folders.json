@@ -1,4 +1,5 @@
 [
+  {"call": "ui.prefs", "params": {"browser_components_open": true}},
   {"note": "Bodies folders (#4217, Preferences › Interface): a nested assembly of plain boxes. Frame:1 holds the body Plate and the placement Pin:1, which holds the body Shaft. The design itself has no bodies, so every Bodies row is a component's."},
   {"note": "Each row's indent handle is where its depth puts it, so their order shows each row's depth."},
   {"call": "engine.execute", "params": {"command": "component.create", "params": {"name": "Frame"}}},

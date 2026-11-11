@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "what": "a box's top front edge chamfered 2",
+ "source": "analytic",
+ "method": "box 40x30x20, the edge y=0, z=20 chamfered 2: the right triangle of legs 2 (area 2) along 40: V = 24000 - 80 = 23920. Faces 7; creases (G0).",
+ "body_count": 1,
+ "volume_mm3": 23920.0,
+ "faces": 7,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   30,
+   20
+  ]
+ },
+ "continuity": {
+  "order": "g0"
+ }
+}

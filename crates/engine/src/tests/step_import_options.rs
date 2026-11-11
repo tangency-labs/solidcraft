@@ -2,7 +2,7 @@
 //! on `file.insert_step` and `doc.open`.
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec3;
+use solidcore_record::Vec3;
 use solidcraft_kernel::{ExportBody, ExportProduct, StepHeader, box_solid, step_export_products};
 
 use super::run;
@@ -44,7 +44,7 @@ fn frame_file(tag: &str) -> String {
 
 /// The lowest and highest corner of everything the design shows.
 fn extent(s: &Session) -> ([f64; 3], [f64; 3]) {
-    let b = crate::view::bounds(s);
+    let b = crate::view::bounds(s).unwrap();
     ([b.min.x, b.min.y, b.min.z], [b.max.x, b.max.y, b.max.z])
 }
 

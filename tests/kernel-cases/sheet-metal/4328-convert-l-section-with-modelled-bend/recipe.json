@@ -1,0 +1,148 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Section"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      36,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     36,
+     0
+    ],
+    "through": [
+     38.828427,
+     1.171573
+    ],
+    "end": [
+     40,
+     4
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      40,
+      4
+     ],
+     [
+      40,
+      30
+     ],
+     [
+      38,
+      30
+     ],
+     [
+      38,
+      4
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     38,
+     4
+    ],
+    "through": [
+     37.414214,
+     2.585786
+    ],
+    "end": [
+     36,
+     2
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      36,
+      2
+     ],
+     [
+      0,
+      2
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Section",
+    "distance": 20,
+    "body_name": "Angle"
+   }
+  },
+  {
+   "command": "sheet.convert",
+   "params": {
+    "body": "Angle",
+    "face": [
+     18,
+     -10,
+     0
+    ],
+    "bends": [
+     [
+      38.82842712474619,
+      -10,
+      1.1715728752538102
+     ]
+    ]
+   }
+  }
+ ]
+}

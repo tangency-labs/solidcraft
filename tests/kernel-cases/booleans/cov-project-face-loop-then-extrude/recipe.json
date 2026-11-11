@@ -1,0 +1,48 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 10,
+    "height": 10,
+    "body_name": "Post"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "offset": 20,
+    "name": "Above"
+   }
+  },
+  {
+   "command": "sketch.project",
+   "params": {
+    "refs": [
+     {
+      "face": [
+       0,
+       0,
+       10
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {
+    "sketch": "Above"
+   }
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Above",
+    "distance": 5,
+    "operation": "new"
+   }
+  }
+ ]
+}

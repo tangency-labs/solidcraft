@@ -1,0 +1,152 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "P"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      60,
+      0
+     ]
+    ],
+    "infer": false
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      0,
+      20
+     ]
+    ],
+    "infer": false
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      20
+     ],
+     [
+      60,
+      20
+     ]
+    ],
+    "infer": false
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      30,
+      20
+     ],
+     [
+      30,
+      0
+     ]
+    ],
+    "infer": false
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      60,
+      20
+     ],
+     [
+      60,
+      0
+     ]
+    ],
+    "infer": false
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.revolve",
+   "params": {
+    "sketch": "P",
+    "profiles": [
+     0,
+     1
+    ],
+    "axis": "X",
+    "body_name": "Hand"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 40,
+    "height": 2,
+    "base": [
+     -1,
+     0,
+     0
+    ],
+    "axis": [
+     1,
+     0,
+     0
+    ],
+    "body_name": "Holder"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Holder",
+    "tools": [
+     "Hand"
+    ],
+    "operation": "cut",
+    "keep_tools": true
+   }
+  }
+ ]
+}

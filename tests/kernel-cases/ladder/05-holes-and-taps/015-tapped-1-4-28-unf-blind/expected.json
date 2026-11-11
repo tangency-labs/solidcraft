@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a 1/4-28 UNF tapped blind hole 10 deep, flat bottom: drilled 5.45 mm, cosmetic thread",
+ "source": "analytic",
+ "method": "ASME B1.1 1/4-28 UNF: D = 0.25 in, P = 1/28 in, basic minor D1 = D - 1.082532 P = 5.368 mm; the tap maker's drill 5.45 mm (Guhring, thread_catalog.rs), above D1 as a drill must be; removed pi 2.725^2 10; + wall and floor",
+ "body_count": 1,
+ "volume_mm3": 47766.717110517,
+ "faces": 8
+}

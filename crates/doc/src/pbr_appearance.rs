@@ -1,8 +1,8 @@
 //! Persistable opaque optical parameters, independent of engineering material data.
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::Vec3;
-use solidcraft_render::surface::{OpaqueSurface, SurfaceError, srgb8_to_linear};
+use solidcore_record::Vec3;
+use solidcraft_viewport::surface::{OpaqueSurface, SurfaceError, srgb8_to_linear};
 
 /// Explicitly selected opaque response. Existing scalar looks have no such record.
 /// Construction and deserialization share the renderer's finite admission bounds.

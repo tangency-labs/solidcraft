@@ -4,6 +4,7 @@
 //! `{"pending": "why"}` step (its test is ignored with that reason). Adding a scenario is adding
 //! its file.
 
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_ui_egui::scenario::Harness;
 
 fn run(name: &str) {
@@ -103,7 +104,7 @@ fn dragging_a_conic_after_the_tool_sets_rho_and_its_apex_stays_separately_dragga
         .expect("the three clicks created a conic");
     assert!((rho - 0.5).abs() < 1e-6, "default rho {rho}");
     let apex_before = sk.point(apex_idx).expect("apex point resolves");
-    assert!(apex_before.dist(solidcraft_engine::geom::Vec2::new(20.0, 20.0)) < 1e-6);
+    assert!(apex_before.dist(solidcore_record::Vec2::new(20.0, 20.0)) < 1e-6);
 
     // Grabbed on the curve itself, at its default-rho midpoint (20, 10): the chord's midpoint
     // is (20, 0), the apex (20, 20), so (20, 14) is 0.7 of the way from one to the other.
@@ -194,17 +195,18 @@ fn narrow_toolbar_reaches_collapsed_commands() {
     use serde_json::json;
     let mut h = Harness::new();
     h.run(&json!([
-        // The compact ribbon still fits every button at 640 wide.
+        // At 640 wide the ribbon still needs no » menu: Construct's three buttons (Plane, Axis
+        // and Point) fold into the panel's own button.
         {"call":"ui.resize","params":{"width":640,"height":800}},
-        {"expect":{"shown_handles":["button:construct.plane.offset"],"hidden_handles":["toolbar:overflow"]}},
+        {"expect":{"shown_handles":["collapsed:MODEL:CONSTRUCT"],"hidden_handles":["toolbar:overflow","button:construct.plane"]}},
         // Too narrow for every button: the panels go into the » menu.
         {"call":"ui.resize","params":{"width":440,"height":800}},
-        {"expect":{"shown_handles":["toolbar:overflow"],"hidden_handles":["button:construct.plane.offset"]}},
+        {"expect":{"shown_handles":["toolbar:overflow"],"hidden_handles":["button:construct.plane","collapsed:MODEL:CONSTRUCT"]}},
         {"click":{"handle":"toolbar:overflow"}},
         {"widget":"CONSTRUCT"},
-        {"expect":{"shown_handles":["toolbar:construct.plane.offset"]}},
-        {"click":{"handle":"toolbar:construct.plane.offset"}},
-        {"expect":{"dialog":"OffsetPlane"}}
+        {"expect":{"shown_handles":["toolbar:construct.plane"]}},
+        {"click":{"handle":"toolbar:construct.plane"}},
+        {"expect":{"dialog":"ConstructAuto"}}
     ]))
     .unwrap();
 }

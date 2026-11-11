@@ -1,0 +1,72 @@
+{
+ "commands": [
+  {
+   "command": "parameters.add",
+   "params": {
+    "name": "W",
+    "expression": "20 mm",
+    "unit": "mm"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "S"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     0,
+     0
+    ],
+    "p1": [
+     40,
+     10
+    ]
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "l1"
+    ],
+    "type": "length",
+    "value": "2 * W"
+   }
+  },
+  {
+   "command": "sketch.dimension",
+   "params": {
+    "entities": [
+     "l4"
+    ],
+    "type": "length",
+    "value": "W / 2"
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "S",
+    "distance": 10,
+    "operation": "new",
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "parameters.change",
+   "params": {
+    "name": "W",
+    "expression": "30 mm"
+   }
+  }
+ ]
+}

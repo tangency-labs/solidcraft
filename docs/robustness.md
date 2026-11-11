@@ -36,64 +36,22 @@ rejected before any jobs or output directories are created. The maximum seed
 - `cargo test` runs a fixed set of seeds that must stay clean
   (`crates/engine/src/tests/robustness.rs`), next to the minimised cases fixed so far.
 
-## Seeded goldens
+## Reference results
 
-`tests/robustness/goldens.json` records what each of seeds 0–95 builds (eight steps at most):
-its steps, how it ended (ok, or the kind and the start of the error it was refused with), and
-for the design it left the bodies' total volume and area (within a relative 1e-6) and their
-face, edge and shell counts (exact). `tests::robustness_goldens` fails on any change, better or
-worse, so a kernel change shows every seed it moves. Pull requests that can change them (the
-kernel, engine, doc, sketch and geom crates) run every seed but the slowest few (`SLOW_SEEDS` in
-`.github/workflows/ci.yml`, about four fifths of their time); the merge queue, pushes to `main`
-and the nightly run them all. Each seed is its own test
-(`seed_00` … `seed_95`), so the CI shards and their cores share them out.
-
-Reference selection uses the compilation target's operating system and environment.
-On Windows, `platforms.windows.seeds` contains the MSVC-verified records;
-`platforms.windows-gnu.seeds`, when present, contains GNU records. An override
-replaces the whole seed record. Seeds missing from the selected group use the shared
-record, never another Windows group's record. Non-Windows targets keep their existing
-OS-group selection and shared fallback. Unknown Windows environments compare with the
-shared records and refuse recording until an explicit policy is defined.
-All 96 seeds and the strict measurement and topology tolerances remain unchanged.
-
-The Windows records for seeds 1, 23 and 34 were independently reproduced on unmodified
-main `1e984c8e`; seed 94 was independently reproduced on unmodified main `c5992386`
-after the extrusion rebase. Both match the extrusion branch. Seed 13's was recorded on
-unmodified main `65e6d9da`; seed 23's was re-recorded after #1653. Seed 36's, recorded
-on main `79a843c9`, holds a failure: on Windows (and macOS) its last step leaves a body that fails the
-validity check, where Linux builds it ok (#3583). The record only makes a further change
-show; it does not accept the failure. Recording on a platform with such entries updates its
-changed seeds and preserves shared references. A platform record replaces the shared
-one whole, so a change that moves a seed with a platform record needs that seed checked
-on that platform too: seed 67's Windows record went stale this way after #2064 and
-#2247 and was removed once Windows built the shared record again.
-The Windows records were made with the MSVC target (`x86_64-pc-windows-msvc`) and all
-six were checked again on main `e9490093`. GNU builds (`x86_64-pc-windows-gnu`)
-use the shared records unless an explicit GNU override exists, so MSVC-only outcomes
-do not leak into GNU validation (#4104).
-
-To record an intended change, give the reason:
-
-```
-ROBUSTNESS_GOLDENS_BLESS="why it changed" cargo test --profile ci -p solidcraft-engine --lib robustness_goldens::seed_
-```
-
-The changed seeds and the reason are added to the file's `notes`; say why in the pull request too.
-Recording on Windows always writes to the current environment's own group, even when
-that group does not exist yet. It preserves shared records and the other Windows
-environment's records. Non-Windows recording keeps its existing OS-group policy.
-Notes coalesce only when both the reason and destination match.
+The robustness runs check that every step builds a sound solid; they do not record what each
+seed builds. The reference for what the kernel builds is the kernel-cases ladder
+([`tests/kernel-cases/ladder/`](../tests/kernel-cases/ladder/), run by
+`cargo xtask kernel-cases --ladder`, [docs/kernel-ladder.md](kernel-ladder.md)): every case has
+its own right answer from analysis or invariants. The seeded goldens that recorded truck's results for seeds 0–95 are
+superseded by it and gone.
 
 The generator feeds the current geometry's bounds and face/edge picks back into later
 commands. The same RNG seed can therefore generate different command coordinates or picks
-on different math libraries. The original inputs are retained, including near-contact cases.
-Platform snapshots track repeatability; they do not certify cross-platform geometric
-equivalence or resolve the numerical differences tracked in #924.
+on different math libraries.
 
 ### Independent measurement checks
 
-The seeded snapshots also have checks against geometric references. Seed 34 starts with a
+Two seeds also have checks against geometric references. Seed 34 starts with a
 quarter cylinder of radius 15 and height 12.5 (`x,y >= 0`, `-12.5 <= z <= 0`), cuts it with a
 radius-2.5 sphere centred at (10, 12.5, 0), then drills an independent radius-2, depth-5 blind
 hole from (0, 7.5, -6.25) along +X, with a 118-degree tip.
@@ -109,63 +67,13 @@ body after a cut (#2247), with a combined analytic surface inventory of 22 plana
 cylindrical and one conical face after merging redundant subdivisions. The commands are
 fixed because the generator chooses later operations from the current body and edge layout;
 changes to body grouping can therefore change the generated design. This preserves the
-original geometric reference independently of those choices. These checks supplement the
-snapshots' stricter repeatability comparisons of raw topology and tessellated measurements.
+original geometric reference independently of those choices.
 
-## Successful Boolean retries
+## Booleans
 
-When an accepted Boolean result needs a retry that can make it differ from the
-exact one (a tool nudge, or the unverified shortcut), the feature shows a
-warning in the timeline. Every other retry works on temporary geometry or
-tolerances and leaves the exact result, so it is recorded but not warned about.
-`timeline.inspect` and `doc.inspect` expose every retry in the feature's
-`boolean_diagnostics`, including the strategy and the applied translation,
-rotation, face offset and tessellation tolerance in millimetres/radians.
-Candidates those retries discarded before measuring them are listed in its
-`rejected`, with the reason: a candidate with an edge further outside the
-operands than 5% of their size cannot be their union, cut or intersection,
-and meshing one (a trim loop running metres along a cone's continuation)
-could take minutes or never finish (#3020).
-
-A common shift of both operands is reversed on the result. Coincident-face
-separation and bore offsets describe temporary working geometry; they are not
-claims about the final model's error. A coincident face is separated only
-where the space it moves through holds what the Boolean leaves there anyway
-(nothing of the target for a cut's face, the target's material for a join's);
-a face with no such room stays, and the exact planar fallback is tried first.
-A tool nudge changes the relative operand
-placement and reports both its translation magnitude and rotation angle. When it
-fails, or leaves a sliver face (narrower than 1/200 of the part), it is tried the
-other way too: one way can push a face into a curved face it only touched (a cut
-whose end lies tangent to a round side) and leave a sliver of it, where the other
-way parts them (#897, #827).
-Exact planar and piecewise fallbacks report zero displacement. When a conical
-cutter meets a body with earlier conical faces (pointed bores copied in a pattern),
-two finer, unshifted passes are tried first, at 1e-5 and 1e-6 of their size (never
-below 1e-6 mm). A coarse first cut can leave tiny junctions that later copies cannot
-intersect, so refining only the failing copy is too late. Every candidate must pass
-the volume, membership and spatial checks; a rejected candidate continues to the
-next tolerance, then the ordinary routes. The existing acceptance checks still
-apply to all results.
-
-A join or a cut that needed any retry is then held to what it can do at all
-(`crates/kernel/src/boolean_guard.rs`, #616): the result is closed, a join
-never loses volume and a cut never gains any, and outside the tool's box the
-result's surface is the target's and the target's is the result's (a join or
-a cut can only change the target where the tool is). A cut may come out empty
-only when the tool covers the target. A result that fails is refused with an
-error naming what was wrong and where, rather than returned: a wrong result
-that looks right is worse than an error.
-
-Reports belong to the evaluated feature and survive cached rebuilds and
-undo/redo. Cold reopening regenerates them from the embedded design. Failed or
-discarded retry branches do not contribute successful-retry events. Reports
-are capped at 1024 events per feature and explicitly identify truncation.
-
-Fuzz JSON and the text report count successful retry events by strategy for
-designs and Boolean identity checks separately, including nested operations.
-These are event counts, so a single Boolean or seed can contribute several.
-Truncated reports are counted separately rather than implying complete totals.
+Booleans run in SMLib, with no retries or fallbacks: a Boolean SMLib cannot do exactly is an
+error that names why, never a nudged or approximate result. The retry reports truck's Booleans
+kept (`boolean_diagnostics` in `timeline.inspect` and `doc.inspect`) are gone with them.
 
 ## Results
 

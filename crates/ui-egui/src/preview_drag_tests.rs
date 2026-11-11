@@ -3,7 +3,16 @@ use super::*;
 use serde_json::json;
 
 fn colors() -> Colors {
-    Colors { body: [1, 1, 1, 255], added: [2, 2, 2, 255], new_body: [2, 2, 2, 255], removed: [3, 3, 3, 100], edge: [0, 0, 0, 255], ghost: true }
+    Colors {
+        body: [1, 1, 1, 255],
+        added: [2, 2, 2, 255],
+        new_body: [2, 2, 2, 255],
+        removed: [3, 3, 3, 100],
+        edge: [0, 0, 0, 255],
+        ghost: true,
+        tint_new: true,
+        cut_tint: true,
+    }
 }
 
 fn fixture() -> Session {

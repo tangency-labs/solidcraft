@@ -1,0 +1,127 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY"
+   }
+  },
+  {
+   "command": "sketch.circle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "diameter": 5
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 10,
+    "body_name": "Screw"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "face": [
+      0,
+      0,
+      10
+     ]
+    }
+   }
+  },
+  {
+   "command": "sketch.polygon.circumscribed",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "radius": 2,
+    "sides": 6
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 3,
+    "profiles": [
+     {
+      "point": [
+       0,
+       0
+      ]
+     }
+    ],
+    "operation": "join",
+    "targets": [
+     "Screw"
+    ]
+   }
+  },
+  {
+   "command": "solid.thread",
+   "params": {
+    "face": [
+     2.5,
+     0,
+     5
+    ],
+    "designation": "M5",
+    "length": 4,
+    "modeled": true
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      1.7320508075688774,
+      0.9999999999999999,
+      13
+     ],
+     [
+      1.2246467991473532e-16,
+      2.0,
+      13
+     ],
+     [
+      -1.7320508075688774,
+      0.9999999999999999,
+      13
+     ],
+     [
+      -1.7320508075688772,
+      -1.0000000000000002,
+      13
+     ],
+     [
+      -3.6739403974420594e-16,
+      -2.0,
+      13
+     ],
+     [
+      1.7320508075688767,
+      -1.0000000000000009,
+      13
+     ]
+    ],
+    "radius": 0.3
+   }
+  }
+ ]
+}

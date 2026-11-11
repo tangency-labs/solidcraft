@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a pipe d4 along a planar Bezier path",
+ "source": "analytic",
+ "method": "a disk swept square to a planar path whose curvature radius stays above 20.85 > 2: V = pi r^2 L, A = 2 pi r L + 2 pi r^2, L = 46.220575543",
+ "body_count": 1,
+ "volume_mm3": 580.824882281,
+ "area_mm2": 605.95762351
+}

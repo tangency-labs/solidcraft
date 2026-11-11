@@ -47,6 +47,9 @@
 //! `cargo xtask web-offline`'s generator and a `data-build` marker on `<html>`. Chrome comes from
 //! `CHROME` or the usual install locations; `cargo xtask ci` skips this test when there is none.
 //!
+//! A real build's copies each get a file of their own, as successive deployments have files
+//! named differently.
+//!
 //! The stand-in app has a content-named script, a `shared.js` whose name is the same in every
 //! build (a page must get its own build's), more files under `icons/` than the browser asks for
 //! at once, and an on-demand file under `fonts/` (not kept).
@@ -174,6 +177,17 @@ const API_TEST: &str = r#"(async () => {
     check(settled.filter(r => r.status === 'rejected' && r.reason instanceof Error && r.reason.message.includes('pending')).length === 1,
         'queue limit rejects excess work');
     check((await app.inspect()).bodies.length === 1, 'API still works after rejected requests');
+    // A host page keeps the design itself (#8517): out, changed, and back in its place.
+    const kept = await app.request('document.export');
+    check(kept.format === 'json' && kept.dirty === true && kept.text.includes('Browser API box'), 'export gives the design as its file holds it');
+    check((await app.request('document.saved', {revision: kept.revision})).dirty === false, 'the host saved that revision');
+    await app.execute('solid.box', {length: 10, width: 10, height: 10, body_name: 'Second box'});
+    await rejects(() => app.request('document.saved', {revision: kept.revision}), 'changed since');
+    await rejects(() => app.request('document.import', {text: 'not a design'}), '');
+    check((await app.inspect()).bodies.length === 2, 'a refused import leaves the design as it was');
+    check((await app.request('document.import', {text: kept.text})).errors === 0, 'import evaluates the kept design');
+    check((await app.inspect()).bodies.length === 1, 'import puts the kept design back');
+    check((await app.request('document.export')).dirty === false, 'an imported design opens saved');
     const ui = await app.request('ui.inspect');
     check(ui.home === false && ui.viewport[2] > 600, 'model viewport is visible');
     // #3431: a native Instant compiles for wasm but panics when exporting in the browser.
@@ -221,7 +235,8 @@ const API_TEST: &str = r#"(async () => {
     await app.request('ui.documents', {action: 'switch', index: 0});
     check((await app.execute('component.links')).links[0].component === linked.component, 'assembly remains in its tab');
     return {commands: 'discovered', bodies: [0, 1, 0, 1], errors: 'rejected', queue: '256 completed, 1 rejected',
-        dxf: 'omit and dashed exported; dialog download checked', linked: 'source opened from browser storage'};
+        dxf: 'omit and dashed exported; dialog download checked', linked: 'source opened from browser storage',
+        host: 'exported, saved and imported back'};
 })()"#;
 
 /// Run the test; `required: false` (from `cargo xtask ci`) skips it when Chrome is missing.
@@ -240,6 +255,10 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
             check_site(root, Path::new(dir), &work.0.join("check"))?;
             for (to, build) in &builds {
                 copy_dir(Path::new(dir), to)?;
+                // Trunk names files after their contents, so two real deployments differ in more
+                // than `index.html`; copies of one build don't. A file of its own per copy lets
+                // a step hold back what one build has and the next lacks (step 13).
+                std::fs::write(to.join(format!("own-{build}.txt")), format!("{build}\n")).map_err(|e| format!("{}: {e}", to.display()))?;
                 let index = to.join("index.html");
                 let html = std::fs::read_to_string(&index).map_err(|e| format!("{}: {e}", index.display()))?;
                 std::fs::write(&index, mark(&html, build)?).map_err(|e| format!("{}: {e}", index.display()))?;
@@ -282,6 +301,9 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
     }
     let state_js = STATE_JS.replace("STARTED", started).replace("BUILD_FILES", &json!(files.into_iter().collect::<Vec<_>>()).to_string());
     let count = std::cell::Cell::new(0);
+    // Run once, just before the next launch's page navigation is issued (see the update in another
+    // tab below).
+    let on_navigate: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = std::cell::RefCell::new(None);
     let launch_at = |cdp: &mut Cdp, at: &str, build: &str| -> Result<Duration, String> {
         let n = count.get() + 1;
         count.set(n);
@@ -291,6 +313,9 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
         // One retry: on a heavily loaded machine a launch can stall past the timeout. Loading the
         // same page again must still start the same build.
         for attempt in 1..=2 {
+            if let Some(f) = on_navigate.borrow_mut().take() {
+                f();
+            }
             let r = cdp.call("Page.navigate", json!({ "url": format!("http://127.0.0.1:{}{at}?launch={n}", server.port) }))?;
             if let Some(e) = r["errorText"].as_str().filter(|e| !e.is_empty()) {
                 return Err(format!("launch {n} (build {build}): the page didn't load: {e}"));
@@ -397,11 +422,22 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
     other.eval(age)?;
     cdp.call("Page.navigate", json!({ "url": "about:blank" }))?;
     // The other tab updates once the launch is waiting for build.json, and leaves.
+    // Only a check made after this launch's navigation begins counts: another tab's check, late on a
+    // loaded machine, must not start the update before the launch has loaded its files (the new
+    // worker would then serve the new build's files to the old build's page).
     let waiting = server.checks.clone();
-    let before = waiting.load(Ordering::SeqCst);
+    let before = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(usize::MAX));
+    *on_navigate.borrow_mut() = Some(Box::new({
+        let (before, waiting) = (before.clone(), waiting.clone());
+        move || before.store(waiting.load(Ordering::SeqCst), Ordering::SeqCst)
+    }));
     let updater = std::thread::spawn(move || -> Result<Cdp, String> {
         let t = Instant::now();
-        while waiting.load(Ordering::SeqCst) <= before {
+        loop {
+            let b = before.load(Ordering::SeqCst);
+            if b != usize::MAX && waiting.load(Ordering::SeqCst) > b {
+                break;
+            }
             if t.elapsed() > LAUNCH_TIMEOUT {
                 return Err("the launch never asked for build.json".into());
             }
@@ -421,8 +457,30 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
     wait_for(&mut cdp, &state_js, "v4's worker keeps v4, v3's copy retired", |s| {
         s["kept"].as_object().is_some_and(|k| k.len() == 1 && k.contains_key(&name4))
             && s["retired"].as_array().is_some_and(|r| r.contains(&json!(name3)))
+            && s["settled"] == true
     })?;
     step("update in another tab: the kept v3 still starts; its copy is retired, not deleted", t);
+    // The page still open is v3's: a file it asks for now comes from v3's copy, not from v4 which the
+    // worker has taken over with (nor from the network, which serves v4).
+    let shared = cdp.eval("fetch('shared.js?later', { cache: 'no-store' }).then((r) => r.text())")?;
+    if !shared.as_str().is_some_and(|text| text.contains("\"v3\"")) {
+        let records = cdp
+            .eval(
+                "caches.keys().then(async (ks) => { const out = {}; for (const k of ks) if (k.startsWith('solidcraft-app-pages ')) { const c = await caches.open(k); for (const r of await c.keys()) out[r.url] = await (await c.match(r)).text(); } return out; })",
+            )
+            .unwrap_or_default();
+        return Err(format!("the open v3 page was given another build's file after the update: {shared}; page records: {records}"));
+    }
+    // A page whose record is lost never gets the worker's build instead: its request fails visibly.
+    let lost = cdp.eval(
+        "caches.keys().then(async (ks) => {
+          for (const k of ks) if (k.startsWith('solidcraft-app-pages ')) { const c = await caches.open(k); for (const r of await c.keys()) await c.delete(r); }
+          return (await fetch('shared.js?lost', { cache: 'no-store' })).status;
+        })",
+    )?;
+    if lost != json!(503) {
+        return Err(format!("a page with no remembered build was answered with status {lost}, not the visible failure (503)"));
+    }
     other.call("Page.close", json!({}))?;
 
     server.set(Mode::Serve(v4));
@@ -516,8 +574,13 @@ const STATE_JS: &str = "(async () => {
   }
   const filling = (await navigator.locks.query()).held.map((l) => l.name).filter((n) => n.startsWith(prefix));
   return { search: location.search, ready: document.readyState, build: document.documentElement.dataset.build ?? null,
+    scriptStartedBuild: document.documentElement.dataset.started ?? null,
+    scriptSharedBuild: document.documentElement.dataset.shared ?? null,
     started: STARTED, controlled: !!navigator.serviceWorker.controller, caches: caches_, kept, retired, complete, filling,
-    registered: (await navigator.serviceWorker.getRegistrations()).filter((r) => r.scope === scope).length };
+    registered: (await navigator.serviceWorker.getRegistrations()).filter((r) => r.scope === scope).length,
+    // The newest worker is active and controls this page (not still taking over from an older one).
+    settled: await navigator.serviceWorker.getRegistration(scope).then((r) => Boolean(r && r.active && r.active.state === 'activated'
+      && !r.installing && !r.waiting && navigator.serviceWorker.controller && navigator.serviceWorker.controller.state === 'activated')) };
 })()";
 
 /// Every file this build downloads, including names shared with the next build.

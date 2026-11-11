@@ -17,7 +17,7 @@ use solidcraft_engine::geom::Aabb3;
 
 use crate::SolveApp;
 use crate::gpu::GpuScene;
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 /// The assembly around a part being edited in place.
 #[derive(Clone)]
@@ -77,7 +77,7 @@ impl EditInPlace {
 
 /// A linked component the window edits in place when it is double-clicked: in a saved design
 /// (its links are found from its file) with `double_click_components` on.
-fn edits_on_double_click(app: &SolveApp, component: u64) -> bool {
+pub(crate) fn edits_on_double_click(app: &SolveApp, component: u64) -> bool {
     app.preferences.double_click_components && app.session.path.is_some() && app.session.doc.links.contains_key(&component)
 }
 
@@ -101,7 +101,7 @@ pub(crate) fn double_click_face(app: &mut SolveApp, body: &str) -> bool {
     if !app.preferences.double_click_components {
         return false;
     }
-    let Some(component) = app.session.world_state().body(body).map(|b| b.component).filter(|c| *c != 0) else { return false };
+    let Some(component) = crate::open_meshing::session_world(&app.session).body(body).map(|b| b.component).filter(|c| *c != 0) else { return false };
     let placement = app
         .session
         .doc
@@ -139,8 +139,8 @@ fn busy(app: &SolveApp) -> bool {
 /// Why [`busy`]: the assembly's refresh, or something else that has to finish first.
 fn busy_reason(app: &SolveApp) -> String {
     match &app.edit_in_place.refresh {
-        Some(r) => crate::i18n::format("ui.edit_in_place_refreshing", &[("name", &file_name(&r.assembly))]),
-        None => crate::i18n::tr("ui.edit_in_place_wait").to_string(),
+        Some(r) => solidcraft_ui_text::format("ui.edit_in_place_refreshing", &[("name", &file_name(&r.assembly))]),
+        None => solidcraft_ui_text::tr("ui.edit_in_place_wait").to_string(),
     }
 }
 
@@ -165,7 +165,7 @@ fn working(app: &SolveApp) -> bool {
 /// at `placement`: how many, their triangles and their extent. `None` when the placement is gone.
 fn snapshot(session: &Session, component: u64, placement: &[u64]) -> Option<(usize, Vec<([f32; 3], [f32; 3])>, Aabb3)> {
     let frame = session.occurrence_placement(placement).ok().and_then(|p| mat_inverse(&p.world))?;
-    let world = session.world_state();
+    let world = crate::open_meshing::session_world(session);
     let (mut bodies, mut triangles, mut bounds) = (0, Vec::new(), Aabb3::default());
     for b in world.bodies.iter().filter(|b| b.component != component && session.body_visible(&b.name)) {
         let (mesh, placed) = b.mesh_in_place();
@@ -207,15 +207,15 @@ pub(crate) fn command_ran(app: &mut SolveApp, result: &Value) -> Result<bool, St
     // (a command, which it sends during its turn), the part opens once the turn ends.
     if app.agent_chat.state() == crate::agent_chat::State::Busy {
         if ask {
-            return Err(crate::i18n::tr("ui.edit_in_place_agent_busy").to_string());
+            return Err(solidcraft_ui_text::tr("ui.edit_in_place_agent_busy").to_string());
         }
         if app.edit_in_place.enter_after_turn.is_some() {
-            return Err(crate::i18n::tr("ui.edit_in_place_already_queued").to_string());
+            return Err(solidcraft_ui_text::tr("ui.edit_in_place_already_queued").to_string());
         }
         // Everything that would make it fail at the turn's end fails it now.
         let (context, _) = prepare(app, component, path.clone(), false)?;
         app.edit_in_place.enter_after_turn = Some((context.assembly, component, path));
-        app.set_status(crate::i18n::tr("ui.edit_in_place_opens_after_turn").to_string(), false);
+        app.set_status(solidcraft_ui_text::tr("ui.edit_in_place_opens_after_turn").to_string(), false);
         return Ok(true);
     }
     enter(app, component, path, ask).map(|()| false)
@@ -227,10 +227,10 @@ fn check_enter(app: &SolveApp) -> Result<(), String> {
         return Err(busy_reason(app));
     }
     if working(app) {
-        return Err(crate::i18n::tr("ui.edit_in_place_busy").to_string());
+        return Err(solidcraft_ui_text::tr("ui.edit_in_place_busy").to_string());
     }
     if app.session.path.is_none() {
-        return Err(crate::i18n::tr("ui.edit_in_place_save_first").to_string());
+        return Err(solidcraft_ui_text::tr("ui.edit_in_place_save_first").to_string());
     }
     Ok(())
 }
@@ -249,7 +249,7 @@ fn enter(app: &mut SolveApp, component: u64, path: Option<Vec<u64>>, ask: bool) 
 fn prepare(app: &mut SolveApp, component: u64, path: Option<Vec<u64>>, ask: bool) -> Result<(PartContext, Value), String> {
     check_enter(app)?;
     let Some(assembly) = app.session.path.clone() else {
-        return Err(crate::i18n::tr("ui.edit_in_place_save_first").to_string());
+        return Err(solidcraft_ui_text::tr("ui.edit_in_place_save_first").to_string());
     };
     let links = app.session.execute("component.links", &json!({})).map_err(|e| e.to_string())?;
     let Some(link) = links["links"].as_array().into_iter().flatten().find(|l| l["component"].as_u64() == Some(component)).cloned() else {
@@ -270,7 +270,7 @@ fn prepare(app: &mut SolveApp, component: u64, path: Option<Vec<u64>>, ask: bool
             && solidcraft_engine::io::design_lock::held_elsewhere(std::path::Path::new(&part), solidcraft_engine::io::design_lock::now_secs())
                 .is_some()
         {
-            return Err(crate::i18n::format("ui.edit_in_place_open_elsewhere", &[("name", &file_name(&part))]));
+            return Err(solidcraft_ui_text::format("ui.edit_in_place_open_elsewhere", &[("name", &file_name(&part))]));
         }
     }
     let placement = path.unwrap_or_else(|| app.session.doc.first_path(component));
@@ -329,7 +329,7 @@ pub(crate) fn refresh(app: &mut SolveApp) {
     let Some(assembly) = app.edit_in_place.active.as_ref().map(|c| c.assembly.clone()) else { return };
     let Some(session) = crate::documents::session_at(app, &assembly) else {
         let name = app.edit_in_place.active.as_ref().map(|c| c.assembly_name.clone()).unwrap_or_default();
-        app.set_status(crate::i18n::format("ui.edit_in_place_assembly_closed", &[("name", &name)]), true);
+        app.set_status(solidcraft_ui_text::format("ui.edit_in_place_assembly_closed", &[("name", &name)]), true);
         return;
     };
     let mut scratch = session.scratch();
@@ -344,14 +344,14 @@ pub(crate) fn refresh(app: &mut SolveApp) {
     };
     #[cfg(not(target_arch = "wasm32"))]
     if std::thread::Builder::new().name("edit-in-place-links".into()).spawn(run).is_err() {
-        app.set_status(crate::i18n::tr("ui.edit_in_place_refresh_stopped").to_string(), true);
+        app.set_status(solidcraft_ui_text::tr("ui.edit_in_place_refresh_stopped").to_string(), true);
         return;
     }
     #[cfg(target_arch = "wasm32")]
     run();
     app.edit_in_place.refresh = Some(Refresh { assembly, base, stamps, done });
     let name = app.edit_in_place.active.as_ref().map(|c| c.assembly_name.clone()).unwrap_or_default();
-    app.set_status(crate::i18n::format("ui.edit_in_place_refreshing", &[("name", &name)]), false);
+    app.set_status(solidcraft_ui_text::format("ui.edit_in_place_refreshing", &[("name", &name)]), false);
 }
 
 /// Take up a finished refresh: the assembly's tab adopts it when it is still the assembly the
@@ -367,7 +367,7 @@ fn take_refresh(app: &mut SolveApp) {
     let result = match r.done.try_recv() {
         Ok(result) => result,
         Err(std::sync::mpsc::TryRecvError::Empty) => return,
-        Err(std::sync::mpsc::TryRecvError::Disconnected) => Err(crate::i18n::tr("ui.edit_in_place_refresh_stopped").to_string()),
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => Err(solidcraft_ui_text::tr("ui.edit_in_place_refresh_stopped").to_string()),
     };
     let Some(r) = app.edit_in_place.refresh.take() else { return };
     let mut computed = match result {
@@ -379,7 +379,7 @@ fn take_refresh(app: &mut SolveApp) {
     };
     let Some(session) = crate::documents::session_at_mut(app, &r.assembly) else { return };
     if !Arc::ptr_eq(&session.doc, &r.base) {
-        app.set_status(crate::i18n::tr("ui.edit_in_place_refresh_dropped").to_string(), true);
+        app.set_status(solidcraft_ui_text::tr("ui.edit_in_place_refresh_dropped").to_string(), true);
         return;
     }
     // What changed in the assembly meanwhile without changing its document (a pick, an
@@ -408,7 +408,7 @@ fn take_refresh(app: &mut SolveApp) {
             (context.bodies, context.triangles, context.bounds) = (bodies, Arc::new(triangles), bounds);
         }
     }
-    let language = crate::i18n::Locale::for_language(&app.preferences.language);
+    let language = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
     app.set_status(language.format("ui.command_done", &[("command", language.label(crate::command_label("component.update_links")))]), false);
 }
 
@@ -431,21 +431,21 @@ pub(crate) fn finish_command(app: &mut SolveApp) -> Result<bool, String> {
 /// the edit opened it and read the assembly's links again. `true`: it waits for the agent.
 fn finish_with(app: &mut SolveApp, save: bool) -> Result<bool, String> {
     let Some(part) = app.edit_in_place.active.as_ref().map(|c| c.part.clone()) else {
-        return Err(crate::i18n::tr("ui.edit_in_place_none").to_string());
+        return Err(solidcraft_ui_text::tr("ui.edit_in_place_none").to_string());
     };
     if busy(app) {
         return Err(busy_reason(app));
     }
     if !can_finish(app) {
-        return Err(crate::i18n::tr("ui.edit_in_place_busy").to_string());
+        return Err(solidcraft_ui_text::tr("ui.edit_in_place_busy").to_string());
     }
     // Saved to another file (Save As, a copy of a read-only design): the assembly still links this one.
     if !app.session.path.as_deref().is_some_and(|p| crate::documents::same_path(p, &part)) {
-        return Err(crate::i18n::format("ui.edit_in_place_saved_elsewhere", &[("name", &file_name(&part))]));
+        return Err(solidcraft_ui_text::format("ui.edit_in_place_saved_elsewhere", &[("name", &file_name(&part))]));
     }
     if app.session.is_dirty() {
         if !save {
-            return Err(crate::i18n::tr("ui.edit_in_place_not_saved").to_string());
+            return Err(solidcraft_ui_text::tr("ui.edit_in_place_not_saved").to_string());
         }
         app.edit_in_place.finish_after_save = Some(part);
         crate::toolbar::save(app);
@@ -455,16 +455,16 @@ fn finish_with(app: &mut SolveApp, save: bool) -> Result<bool, String> {
     // (a command, which it can only send during its turn), the edit finishes once the turn ends.
     if app.agent_chat.state() == crate::agent_chat::State::Busy {
         if save {
-            return Err(crate::i18n::tr("ui.edit_in_place_agent_busy").to_string());
+            return Err(solidcraft_ui_text::tr("ui.edit_in_place_agent_busy").to_string());
         }
         app.edit_in_place.finish_after_turn = Some(part);
-        app.set_status(crate::i18n::tr("ui.edit_in_place_after_turn").to_string(), false);
+        app.set_status(solidcraft_ui_text::tr("ui.edit_in_place_after_turn").to_string(), false);
         return Ok(true);
     }
     let Some(context) = app.edit_in_place.active.take() else { return Ok(false) };
     let part_tab = app.docs.active;
     if !matches!(crate::documents::reuse_path(app, &context.assembly), Ok(true)) {
-        let why = crate::i18n::format("ui.edit_in_place_assembly_closed", &[("name", &context.assembly_name)]);
+        let why = solidcraft_ui_text::format("ui.edit_in_place_assembly_closed", &[("name", &context.assembly_name)]);
         app.edit_in_place.active = Some(context);
         return Err(why);
     }
@@ -510,7 +510,7 @@ pub(crate) fn tick(app: &mut SolveApp) {
         if shown && !app.session.is_dirty() {
             finish(app);
         } else if shown {
-            app.set_status(crate::i18n::tr("ui.edit_in_place_not_saved").to_string(), true);
+            app.set_status(solidcraft_ui_text::tr("ui.edit_in_place_not_saved").to_string(), true);
         }
     }
     // The agent's turn ended: the finish it asked for goes on, as the command would have, in the
@@ -575,7 +575,7 @@ pub(crate) fn browser_strip(app: &SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let refreshing = app.edit_in_place.refresh.as_ref().is_some_and(|r| crate::documents::same_path(&r.assembly, &context.assembly));
     let key = if refreshing { "ui.edit_in_place_refreshing" } else { "ui.edit_in_place_banner" };
-    let text = crate::i18n::format(key, &[("name", &context.assembly_name)]);
+    let text = solidcraft_ui_text::format(key, &[("name", &context.assembly_name)]);
     ui.horizontal(|ui| {
         ui.add_space(t.space_6);
         crate::ui_kit::text(ui, &text, crate::ui_kit::Text::Hint("edit_in_place"));

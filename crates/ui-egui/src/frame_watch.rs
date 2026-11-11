@@ -18,6 +18,14 @@ pub(crate) struct Watch {
     pub slowest: (f64, &'static str),
 }
 
+#[cfg(test)]
+impl Watch {
+    /// The last frame's named steps and their milliseconds (the scaling measurements read them).
+    pub(crate) fn steps(&self) -> &[(&'static str, f64)] {
+        &self.steps
+    }
+}
+
 /// What the app is doing this frame, as far as opening a design goes.
 pub(crate) fn phase(app: &SolveApp) -> &'static str {
     if let Some(p) = crate::file_load::phase(app) {
@@ -57,6 +65,6 @@ pub(crate) fn end(app: &mut SolveApp) {
     }
     if ms > SLOW_MS && solidcraft_engine::geom::env::var_os("PROFILE_FRAMES").is_some() {
         let steps: Vec<String> = app.frame_watch.steps.iter().filter(|(_, t)| *t >= 1.0).map(|(n, t)| format!("{n} {t:.0}")).collect();
-        eprintln!("SolidCraft slow frame: {ms:.0} ms ({phase}) [{}]", steps.join(", "));
+        solidcraft_engine::note!("SolidCraft slow frame: {ms:.0} ms ({phase}) [{}]", steps.join(", "));
     }
 }

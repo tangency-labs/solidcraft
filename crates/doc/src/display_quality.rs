@@ -164,7 +164,7 @@ mod tests {
     /// closer to the surface, and the reference mesh the model reads never changes.
     #[test]
     fn each_level_has_its_own_plan_and_the_reference_mesh_stays() {
-        use solidcraft_geom::Vec3;
+        use solidcore_record::Vec3;
         let body = solidcraft_kernel::cylinder(Vec3::ZERO, Vec3::Z, 20.0, 50.0).unwrap();
         let mb = crate::ModelBody::new("Body1".into(), body, 1);
         let reference = mb.mesh();
@@ -176,7 +176,12 @@ mod tests {
             let sag = mesh
                 .triangles
                 .iter()
-                .map(|t| t.map(|i| mesh.positions[i as usize]))
+                .zip(&mesh.tri_face)
+                // The side wall's own triangles: the flat caps have corners on the rim too.
+                .filter(|(_, f)| {
+                    matches!(solidcraft_kernel::face_surface(&mb.body, **f as usize), Some(solidcraft_kernel::FaceSurface::Cylinder { .. }))
+                })
+                .map(|(t, _)| t.map(|i| mesh.positions[i as usize]))
                 .filter(|t| t.iter().all(|p| (r(*p) - 20.0).abs() < 1e-9))
                 .map(|[a, b, c]| 20.0 - r((a + b + c) * (1.0 / 3.0)))
                 .fold(0.0, f64::max);
@@ -187,7 +192,13 @@ mod tests {
         }
         assert!(std::sync::Arc::ptr_eq(&reference, &mb.mesh()));
         assert_eq!(mb.display_plan_at(DisplayQuality::Normal).unwrap().vertex_count(), {
-            let plan = mb.body.display_plan_angular((mb.body.size() * 1e-3).max(1e-3), solidcraft_kernel::DISPLAY_ANGLE).unwrap();
+            let plan = mb
+                .body
+                .mesh_plan(&solidcraft_kernel::MeshTolerance {
+                    chord: (mb.body.size() * 1e-3).max(1e-3),
+                    angle: Some(solidcraft_kernel::DISPLAY_ANGLE),
+                })
+                .unwrap();
             plan.vertex_count()
         });
     }

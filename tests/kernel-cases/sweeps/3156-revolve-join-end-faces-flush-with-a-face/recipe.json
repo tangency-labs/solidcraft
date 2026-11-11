@@ -1,0 +1,107 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 10,
+    "width": 100,
+    "height": 6,
+    "corner": [
+     -50,
+     -50,
+     41
+    ],
+    "body_name": "Plate"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Prof"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -47,
+      10
+     ],
+     [
+      -43,
+      10
+     ],
+     [
+      -43,
+      17
+     ],
+     [
+      -47,
+      17
+     ]
+    ],
+    "infer": false,
+    "closed": true
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -60,
+      47
+     ],
+     [
+      -30,
+      47
+     ]
+    ],
+    "infer": false,
+    "construction": true,
+    "ids": [
+     "ax"
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.revolve",
+   "params": {
+    "axis": "ax",
+    "angle": "90 deg",
+    "angle2": "90 deg",
+    "operation": "join",
+    "profiles": [
+     {
+      "point": [
+       -45,
+       13.5
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}

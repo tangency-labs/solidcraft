@@ -1,0 +1,32 @@
+{
+  "en": {
+    "ui.agent_chat_state_no_design": "No design access",
+    "ui.agent_chat_no_design_hint": "The agent runs without SolidCraft's tools, so it can't read or change the design: solidcraft-cli was not found next to the app. Install SolidCraft with solidcraft-cli beside it (on Windows, the MSI or the portable zip), or set SOLIDCRAFT_CLI to its path, then connect again.",
+    "ui.agent_chat_tools_not_started": "The agent runs without SolidCraft's tools, so it can't read or change the design: solidcraft-cli was found, but its tools did not start (the error in the chat says why). Connect again; if it keeps happening, reinstall SolidCraft."
+  },
+  "ar": {
+    "ui.agent_chat_state_no_design": "لا وصول إلى التصميم",
+    "ui.agent_chat_no_design_hint": "يعمل الوكيل دون أدوات SolidCraft، لذا لا يستطيع قراءة التصميم أو تغييره: لم يُعثر على solidcraft-cli بجانب التطبيق. ثبّت SolidCraft مع solidcraft-cli بجانبه (في Windows: حزمة MSI أو ملف zip المحمول)، أو اضبط SOLIDCRAFT_CLI على مساره، ثم اتصل مرة أخرى.",
+    "ui.agent_chat_tools_not_started": "يعمل الوكيل دون أدوات SolidCraft، لذا لا يستطيع قراءة التصميم أو تغييره: عُثر على solidcraft-cli، لكن أدواته لم تبدأ (رسالة الخطأ في المحادثة توضح السبب). اتصل مرة أخرى، وإذا تكرر ذلك فأعد تثبيت SolidCraft."
+  },
+  "he": {
+    "ui.agent_chat_state_no_design": "אין גישה לתכן",
+    "ui.agent_chat_no_design_hint": "הסוכן פועל בלי הכלים של SolidCraft, ולכן אינו יכול לקרוא או לשנות את התכן: solidcraft-cli לא נמצא ליד היישום. התקינו את SolidCraft עם solidcraft-cli לצידו (ב-Windows: קובץ ה-MSI או ה-zip הנייד), או הגדירו את SOLIDCRAFT_CLI לנתיב שלו, ואז התחברו שוב.",
+    "ui.agent_chat_tools_not_started": "הסוכן פועל בלי הכלים של SolidCraft, ולכן אינו יכול לקרוא או לשנות את התכן: solidcraft-cli נמצא, אבל הכלים שלו לא הופעלו (הודעת השגיאה בצ'אט מסבירה למה). התחברו שוב, ואם זה חוזר, התקינו מחדש את SolidCraft."
+  },
+  "ja": {
+    "ui.agent_chat_state_no_design": "デザインにアクセスできません",
+    "ui.agent_chat_no_design_hint": "エージェントは SolidCraft のツールなしで動作しているため、デザインを読み取ることも変更することもできません。アプリの隣に solidcraft-cli が見つかりませんでした。solidcraft-cli が同梱された SolidCraft をインストールするか（Windows では MSI またはポータブル zip）、SOLIDCRAFT_CLI にそのパスを設定してから、もう一度接続してください。",
+    "ui.agent_chat_tools_not_started": "エージェントは SolidCraft のツールなしで動作しているため、デザインを読み取ることも変更することもできません。solidcraft-cli は見つかりましたが、そのツールが起動しませんでした（理由はチャットのエラーに表示されています）。もう一度接続してください。繰り返し起きる場合は SolidCraft を再インストールしてください。"
+  },
+  "vi": {
+    "ui.agent_chat_state_no_design": "Không truy cập được thiết kế",
+    "ui.agent_chat_no_design_hint": "Tác tử đang chạy mà không có công cụ của SolidCraft, nên không thể đọc hay thay đổi thiết kế: không tìm thấy solidcraft-cli cạnh ứng dụng. Hãy cài SolidCraft có solidcraft-cli đi kèm (trên Windows: bản MSI hoặc bản zip di động), hoặc đặt SOLIDCRAFT_CLI thành đường dẫn của nó, rồi kết nối lại.",
+    "ui.agent_chat_tools_not_started": "Tác tử đang chạy mà không có công cụ của SolidCraft, nên không thể đọc hay thay đổi thiết kế: đã tìm thấy solidcraft-cli, nhưng công cụ của nó không khởi động được (lỗi trong cuộc trò chuyện cho biết lý do). Hãy kết nối lại; nếu vẫn xảy ra, hãy cài lại SolidCraft."
+  },
+  "zh": {
+    "ui.agent_chat_state_no_design": "无法访问设计",
+    "ui.agent_chat_no_design_hint": "代理在没有 SolidCraft 工具的情况下运行，因此无法读取或修改设计：在应用旁边找不到 solidcraft-cli。请安装附带 solidcraft-cli 的 SolidCraft（在 Windows 上为 MSI 或便携版 zip），或将 SOLIDCRAFT_CLI 设置为它的路径，然后重新连接。",
+    "ui.agent_chat_tools_not_started": "代理在没有 SolidCraft 工具的情况下运行，因此无法读取或修改设计：已找到 solidcraft-cli，但其工具未能启动（聊天中的错误信息说明了原因）。请重新连接；如果问题仍然出现，请重新安装 SolidCraft。"
+  }
+}

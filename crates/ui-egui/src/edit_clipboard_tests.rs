@@ -1,8 +1,12 @@
 //! Copy and Paste from the keyboard and the context menu (#1480).
 
 use serde_json::{Value, json};
-use solidcraft_engine::Sel;
-use solidcraft_engine::geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_engine::geom::prelude::*;
+use solidcraft_engine::{
+    Sel,
+    doc::{FeatureKind, PlaneRef},
+};
 
 use crate::scenario::Harness;
 
@@ -49,7 +53,7 @@ fn start(h: &Harness, id: &str) -> Vec2 {
 }
 
 fn clipboard_frame(h: &mut Harness, ctx: &egui::Context, events: Vec<egui::Event>) {
-    let _ = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| super::handle(&mut h.app, ui.ctx()));
+    ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| super::handle(&mut h.app, ui.ctx())).textures_delta.clear();
 }
 
 fn middle_button(pressed: bool) -> egui::Event {
@@ -222,6 +226,41 @@ fn completed_sketch_copies_and_pastes_into_a_new_design() {
     assert!(h.app.session.model.result(copied.id).unwrap().error.is_none());
 }
 
+/// Sketch geometry copied in a sketch pastes into a sketch of another design (tab) with Ctrl+V,
+/// at the cursor, with its constraints and dimensions, in one undo step; the context menu offers
+/// it there too. A copy made since in that design is what pastes back in the first (#9258).
+#[test]
+fn sketch_geometry_copies_into_a_sketch_of_another_design() {
+    let (mut h, _) = rectangle();
+    clipboard_event(&mut h, egui::Event::Copy, Some([10.0, 5.0]));
+    crate::documents::new_tab(&mut h.app);
+    assert!(!super::can_paste(&h.app), "outside a sketch, sketch geometry has nowhere to go");
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.call("ui.view", json!({"view": "top"}));
+    h.call("ui.camera", json!({"target": [20, 10, 0], "distance": 150}));
+    h.frames(4);
+    assert!(super::can_paste(&h.app));
+    let menu = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
+    assert!(menu.iter().any(|i| i.id == "ui.paste" && i.enabled), "the sketch menu's Paste is on");
+    let undo = h.app.session.undo.len();
+    clipboard_event(&mut h, egui::Event::Paste("SolidCraft sketch geometry".into()), Some([60.0, 40.0]));
+    let pasted = curves(&h);
+    assert_eq!(pasted.len(), 4, "{:?}", h.app.status);
+    let corner = start(&h, &pasted[0]);
+    assert!(corner.dist(Vec2::new(50.0, 35.0)) < 1.0, "{corner:?}");
+    let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+    assert_eq!(sk.constraints.iter().filter(|c| c.param.is_some()).count(), 2, "both dimensions came along");
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    // A copy in this design is now the last: the first design pastes it.
+    let items: Vec<Value> = pasted.iter().take(1).map(|id| json!({"type": "sketch_curve", "id": id})).collect();
+    h.app.run("select.set", json!({ "items": items })).unwrap();
+    assert!(super::copy(&mut h.app));
+    crate::documents::switch(&mut h.app, 0);
+    let before = curves(&h).len();
+    assert!(super::paste(&mut h.app, None), "{:?}", h.app.status);
+    assert_eq!(curves(&h).len(), before + 1, "the one line copied last, not the rectangle copied here before");
+}
+
 #[test]
 fn copied_sketch_survives_source_close_and_pastes_from_a_sketch_group_menu() {
     use crate::context_menu::{Target, items, run_item};
@@ -333,7 +372,7 @@ fn contribution_occurrence_move_panel_belongs_to_its_document() {
 
 #[test]
 fn contribution_linked_paste_uses_the_pointer_and_pending_numeric_move() {
-    use solidcraft_engine::geom::Vec3;
+    use solidcore_record::Vec3;
     let file = ContributionPart::new();
     let mut h = crate::scenario::Harness::new();
     h.app = contribution_saved_part(&file);
@@ -376,7 +415,8 @@ fn contribution_linked_paste_uses_the_pointer_and_pending_numeric_move() {
 
 #[test]
 fn contribution_paste_pointer_uses_parent_coordinates_and_safe_fallbacks() {
-    use solidcraft_engine::{doc, geom::Vec3};
+    use solidcore_record::Vec3;
+    use solidcraft_engine::doc;
     let mut h = crate::scenario::Harness::new();
     let parent = h.app.run("component.create", json!({"name":"Parent","grounded":false})).unwrap();
     h.app
@@ -655,13 +695,13 @@ fn design_with_cube(name: &str) -> solidcraft_engine::Session {
 #[test]
 fn copied_bodies_paste_into_another_design_as_imported_bodies() {
     let mut app = crate::SolveApp::new(design_with_cube("Bracket"), crate::Services::default());
-    let was = app.session.world_state().body("Cube").unwrap().mesh().bounds();
+    let was = crate::open_meshing::session_world(&app.session).body("Cube").unwrap().mesh().bounds();
     select(&mut app, json!({"type": "body", "name": "Cube"}));
     assert!(super::copy(&mut app));
     crate::documents::open_tab(&mut app, design_with_cube("Frame")).unwrap();
     assert!(super::can_paste(&app) && super::pasting_bodies(&app));
     assert!(super::paste(&mut app, None));
-    let is = app.session.world_state().body("Cube (2)").unwrap().mesh().bounds();
+    let is = crate::open_meshing::session_world(&app.session).body("Cube (2)").unwrap().mesh().bounds();
     assert!(was.min.dist(is.min) < 1e-6 && was.max.dist(is.max) < 1e-6, "{was:?} vs {is:?}");
     let feature = app.session.doc.find_feature("Import1").expect("one Import feature");
     assert!(matches!(feature.kind, solidcraft_engine::doc::FeatureKind::Import { .. }));
@@ -823,6 +863,84 @@ fn paste_new_is_off_while_a_component_is_cut() {
     assert!(!find("ui.pasteNew").enabled);
 }
 
+/// Paste New from a parent component's menu keeps face-attached sketches in a copied child.
+#[test]
+fn paste_new_into_selected_parent_keeps_child_face_attachment() {
+    use crate::context_menu::{Target, items, run_item};
+
+    let mut app = plain_app();
+    let parent = app.run("component.create", json!({"name":"Component1"})).unwrap();
+    let parent_component = parent["component"].as_u64().unwrap();
+    let parent_occurrence = parent["occurrence"].as_u64().unwrap();
+    let child = app.run("component.create", json!({"name":"Component2"})).unwrap();
+    let child_component = child["component"].as_u64().unwrap();
+    let child_occurrence = child["occurrence"].as_u64().unwrap();
+
+    app.run("sketch.create", json!({"plane":"XY","name":"Sketch1"})).unwrap();
+    app.run("sketch.circle.center", json!({"center":[0,0],"diameter":32})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("solid.extrude", json!({"sketch":"Sketch1","distance":10,"operation":"new_body","body_name":"Disc"})).unwrap();
+    let source_path = vec![parent_occurrence, child_occurrence];
+    let placed = app.session.placed_document();
+    let body_name = placed.body_frames_with_source(&app.session.model.state()).into_iter().find(|(_, _, _, path, _)| path == &source_path).unwrap().0;
+    let world = app.session.world_state().unwrap();
+    let body = world.body(&body_name).unwrap();
+    let face = body
+        .body
+        .faces(0.01)
+        .unwrap()
+        .into_iter()
+        .find(|face| body.body.face_plane(face.index).is_some_and(|plane| plane.normal().dot(solidcore_record::Vec3::Z) > 0.999))
+        .unwrap();
+    let uncut_volume = app.run("inspect.measure", json!({"bodies":[body_name]})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+    app.run("sketch.create", json!({"plane":{"body":body_name,"face":face.centroid,"index":face.index,"path":source_path},"name":"Sketch2"}))
+        .unwrap();
+    app.run("sketch.circle.center", json!({"center":[0,0],"diameter":16})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    app.run("solid.extrude", json!({"sketch":"Sketch2","distance":-10,"operation":"cut","targets":["Disc"]})).unwrap();
+    let cut_volume = app.run("inspect.measure", json!({"bodies":[body_name]})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+    assert!(cut_volume < uncut_volume, "the face-attached sketch must cut Disc: {cut_volume} >= {uncut_volume}");
+
+    select(&mut app, json!({"type":"occurrence","path":source_path}));
+    assert!(super::copy(&mut app));
+    assert!(super::paste_into(&mut app, None, false, Some((parent_component, vec![parent_occurrence]))));
+    select(&mut app, json!({"type":"occurrence","path":[parent_occurrence,child_occurrence]}));
+    assert!(super::copy(&mut app));
+    select(&mut app, json!({"type":"occurrence","path":[parent_occurrence]}));
+    assert_eq!(app.session.active_component, child_component);
+    let paste_new = items(&app, &Target::Occurrence { path: vec![parent_occurrence] }).into_iter().find(|item| item.id == "ui.pasteNew").unwrap();
+    assert!(paste_new.enabled);
+    run_item(&mut app, &paste_new, egui::Pos2::ZERO);
+    assert!(!app.status.as_ref().is_some_and(|(_, _, error)| *error), "{:?}", app.status);
+
+    let [Sel::Occurrence { path: copied_path }] = app.session.selection.as_slice() else { panic!("Paste New did not select one occurrence") };
+    assert_eq!(copied_path.first(), Some(&parent_occurrence));
+    let copied_occurrence = *copied_path.last().unwrap();
+    let copied_component = app.session.doc.occurrences.iter().find(|occurrence| occurrence.id == copied_occurrence).unwrap().component;
+    let copied_body = app
+        .session
+        .placed_document()
+        .body_frames_with_source(&app.session.model.state())
+        .into_iter()
+        .find(|(_, _, _, body_path, _)| body_path == copied_path)
+        .unwrap()
+        .0;
+    let copied_anchor = app
+        .session
+        .doc
+        .features
+        .iter()
+        .find_map(|feature| {
+            if feature.component != copied_component {
+                return None;
+            }
+            let FeatureKind::Sketch { plane: PlaneRef::Face { anchor: Some(anchor), .. }, .. } = &feature.kind else { return None };
+            Some(anchor)
+        })
+        .expect("copied Sketch2 has no face anchor");
+    assert_eq!(copied_anchor.target.body, copied_body);
+}
+
 /// A body of a component's second placement is that component's body seen there: it isn't cut on
 /// its own (that would take it out of every placement), but it copies, and pastes where that
 /// placement shows it.
@@ -845,7 +963,7 @@ fn a_second_placements_body_copies_but_is_not_cut() {
     select(&mut app, json!({"type": "body", "name": seen}));
     assert!(super::copy(&mut app));
     assert!(super::paste(&mut app, None), "{:?}", app.status);
-    let world = app.session.world_state();
+    let world = app.session.world_state().unwrap();
     let (there, copy) = (world.body(&seen).unwrap().mesh().bounds(), world.body("Cube (2)").expect("the copy").mesh().bounds());
     assert!(there.min.dist(copy.min) < 1e-6 && there.max.dist(copy.max) < 1e-6, "{there:?} vs {copy:?}");
 }

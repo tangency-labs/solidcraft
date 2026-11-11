@@ -1,0 +1,940 @@
+{
+  "cases": [
+    {
+      "name": "round2_voxel_count_cancellation",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "set_done_heal_op",
+            "op": 9
+          },
+          {
+            "step": "update_targets",
+            "op": 6,
+            "remove": [
+              [
+                9,
+                0
+              ],
+              [
+                9,
+                1
+              ]
+            ],
+            "add": [
+              [
+                9,
+                0
+              ],
+              [
+                9,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459"
+    },
+    {
+      "name": "round2_face_hole_null_add",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "update_targets",
+            "op": 0,
+            "remove": [
+              [
+                3,
+                0
+              ]
+            ],
+            "add": [
+              [
+                10,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459"
+    },
+    {
+      "name": "round2_degen_face_hole",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "cache_edge_props"
+          },
+          {
+            "step": "cache_vertex_props"
+          },
+          {
+            "step": "set_done_heal_op",
+            "op": 12
+          },
+          {
+            "step": "update_targets",
+            "op": 9,
+            "remove": [
+              [
+                3,
+                0
+              ]
+            ],
+            "add": [
+              [
+                3,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459"
+    },
+    {
+      "name": "round2_uncached_vertex_add_10",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "update_targets",
+            "op": 0,
+            "remove": [
+              [
+                9,
+                0
+              ]
+            ],
+            "add": [
+              [
+                10,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459"
+    },
+    {
+      "name": "round2_uncached_vertex_add_9",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "update_targets",
+            "op": 0,
+            "remove": [
+              [
+                9,
+                0
+              ]
+            ],
+            "add": [
+              [
+                9,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459"
+    },
+    {
+      "name": "round2_uncached_vertex_add_3",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "update_targets",
+            "op": 0,
+            "remove": [
+              [
+                9,
+                0
+              ]
+            ],
+            "add": [
+              [
+                3,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459"
+    },
+    {
+      "name": "round2_prior_uncached_vertex_remove",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "remove_vertex_props",
+            "sel": 0
+          },
+          {
+            "step": "update_targets",
+            "op": 0,
+            "remove": [],
+            "add": [
+              [
+                10,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459"
+    },
+    {
+      "name": "round2_prior_uncached_vertex_lookup_past_props",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "remove_vertex_props",
+            "sel": 0
+          },
+          {
+            "step": "update_targets",
+            "op": 0,
+            "remove": [
+              [
+                9,
+                7
+              ]
+            ],
+            "add": []
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459"
+    },
+    {
+      "name": "round2_uncached_vertex_remove_only_is_valid",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "update_targets",
+            "op": 0,
+            "remove": [
+              [
+                9,
+                0
+              ]
+            ],
+            "add": []
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459"
+    },
+    {
+      "name": "round2_uncached_edge_add_10",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "update_targets",
+            "op": 0,
+            "remove": [
+              [
+                7,
+                0
+              ]
+            ],
+            "add": [
+              [
+                10,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459"
+    },
+    {
+      "name": "round2_uncached_edge_add_9",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "update_targets",
+            "op": 0,
+            "remove": [
+              [
+                7,
+                0
+              ]
+            ],
+            "add": [
+              [
+                9,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459"
+    },
+    {
+      "name": "round2_uncached_edge_add_3",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "update_targets",
+            "op": 0,
+            "remove": [
+              [
+                7,
+                0
+              ]
+            ],
+            "add": [
+              [
+                3,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459"
+    },
+    {
+      "name": "round2_prior_uncached_edge_remove",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "remove_edge_props",
+            "sel": 0
+          },
+          {
+            "step": "update_targets",
+            "op": 0,
+            "remove": [],
+            "add": [
+              [
+                10,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459"
+    },
+    {
+      "name": "round2_prior_uncached_edge_lookup_past_props",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "remove_edge_props",
+            "sel": 0
+          },
+          {
+            "step": "update_targets",
+            "op": 0,
+            "remove": [
+              [
+                7,
+                11
+              ]
+            ],
+            "add": []
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459"
+    },
+    {
+      "name": "round2_uncached_edge_remove_only_is_valid",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "update_targets",
+            "op": 0,
+            "remove": [
+              [
+                7,
+                0
+              ]
+            ],
+            "add": []
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459"
+    },
+    {
+      "name": "round2_uncached_face_add_10",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "update_targets",
+            "op": 0,
+            "remove": [
+              [
+                3,
+                0
+              ]
+            ],
+            "add": [
+              [
+                10,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459"
+    },
+    {
+      "name": "round2_uncached_face_add_9",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "update_targets",
+            "op": 0,
+            "remove": [
+              [
+                3,
+                0
+              ]
+            ],
+            "add": [
+              [
+                9,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459"
+    },
+    {
+      "name": "round2_uncached_face_add_3",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "update_targets",
+            "op": 0,
+            "remove": [
+              [
+                3,
+                0
+              ]
+            ],
+            "add": [
+              [
+                3,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459"
+    },
+    {
+      "name": "round2_prior_uncached_face_remove",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "remove_face_props",
+            "sel": 0
+          },
+          {
+            "step": "update_targets",
+            "op": 0,
+            "remove": [],
+            "add": [
+              [
+                10,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459"
+    },
+    {
+      "name": "round2_prior_uncached_face_lookup_past_props",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "remove_face_props",
+            "sel": 0
+          },
+          {
+            "step": "update_targets",
+            "op": 0,
+            "remove": [
+              [
+                3,
+                5
+              ]
+            ],
+            "add": []
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459"
+    },
+    {
+      "name": "round2_uncached_face_remove_only_is_valid",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "update_targets",
+            "op": 0,
+            "remove": [
+              [
+                3,
+                0
+              ]
+            ],
+            "add": []
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459"
+    },
+    {
+      "name": "round2_uncached_null_add_without_remove_is_valid",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "update_targets",
+            "op": 0,
+            "remove": [],
+            "add": [
+              [
+                10,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459"
+    },
+    {
+      "name": "round2_uncached_vertex_add_without_remove_is_valid",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "update_targets",
+            "op": 0,
+            "remove": [],
+            "add": [
+              [
+                9,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459"
+    },
+    {
+      "name": "round2_cached_face_remove_null_add_is_valid",
+      "inputs": {
+        "case": "heal",
+        "brep": {
+          "kind": "box",
+          "size": [
+            1,
+            2,
+            3
+          ]
+        },
+        "init_gaps": true,
+        "targets": {
+          "v": "all",
+          "e": "all",
+          "f": "all"
+        },
+        "steps": [
+          {
+            "step": "cache_edge_props"
+          },
+          {
+            "step": "cache_vertex_props"
+          },
+          {
+            "step": "cache_face_props_gaps"
+          },
+          {
+            "step": "update_targets",
+            "op": 0,
+            "remove": [
+              [
+                3,
+                0
+              ]
+            ],
+            "add": [
+              [
+                10,
+                0
+              ]
+            ]
+          }
+        ]
+      },
+      "upstream_ref": "PR #164 round 2 review: https://github.com/tangency-labs/solidcore/pull/164#pullrequestreview-5554396459"
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used)]
 use crate::{ForeignCopy, Session};
 use serde_json::{Value, json};
+use solidcraft_geom::prelude::*;
 use std::sync::Arc;
 
 fn run(s: &mut Session, cmd: &str, p: Value) -> Value {
@@ -20,7 +21,7 @@ fn design(name: &str) -> Session {
 }
 /// `s` copies its placement `path` for another design.
 fn copied(s: &Session, path: Vec<u64>) -> Option<Arc<ForeignCopy>> {
-    Some(Arc::new(ForeignCopy::of(s, Vec::new(), vec![path])))
+    ForeignCopy::of(s, Vec::new(), vec![path]).ok().map(Arc::new)
 }
 
 /// A component copied in another design pastes as an independent copy of it and what it holds:
@@ -37,7 +38,7 @@ fn a_component_from_another_design_pastes_with_its_history() {
     run(&mut source, "component.activate", json!({"component": 0}));
     run(&mut source, "occurrence.ground", json!({"occurrence": at, "grounded": false}));
     run(&mut source, "occurrence.move", json!({"occurrence": at, "translate": [0, 30, 0]}));
-    let was = source.world_state().body("Cube").unwrap().mesh().bounds();
+    let was = source.world_state().unwrap().body("Cube").unwrap().mesh().bounds();
     let box_features = source.doc.features.len();
 
     let mut s = design("Frame");
@@ -55,7 +56,7 @@ fn a_component_from_another_design_pastes_with_its_history() {
     assert_eq!(s.doc.features.len(), box_features, "the box's history came along");
     assert!((volume(&mut s, new) - 16.0).abs() < 1e-6);
     assert_eq!(s.doc.appearances.bodies["Cube"].color, [0xab, 0xcd, 0xef]);
-    let is = s.world_state().body("Cube").unwrap().mesh().bounds();
+    let is = s.world_state().unwrap().body("Cube").unwrap().mesh().bounds();
     assert!(was.min.dist(is.min) < 1e-6 && was.max.dist(is.max) < 1e-6, "{was:?} vs {is:?}");
     // Its history is its own: changing it here leaves the original as it was.
     let copy = s.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Box { .. })).unwrap();
@@ -109,6 +110,35 @@ fn a_component_using_what_is_outside_it_is_refused_saying_what() {
     let saved = s.doc.to_json();
     let error = s.execute("component.paste_from_design", &json!({})).unwrap_err().to_string();
     assert!(error.contains("uses body Cube"), "{error}");
+    assert_eq!(s.doc.to_json(), saved);
+}
+
+/// An end cap in a component, closing a frame member outside it, uses that member and the face
+/// it was picked on: it isn't pasted into another design, which has neither.
+#[test]
+fn an_end_cap_on_a_member_outside_its_component_is_refused_saying_what() {
+    let mut source = design("Rack");
+    run(&mut source, "sketch.create", json!({"plane": "XY", "name": "Post path"}));
+    run(&mut source, "sketch.options", json!({"sketch_3d": true}));
+    run(&mut source, "sketch.line3d", json!({"points": [[0, 0, 0], [0, 0, 300]]}));
+    run(&mut source, "sketch.finish", json!({}));
+    let tube = json!({"kind": "rect_tube", "width": 40, "height": 40, "wall": 3, "outer_radius": 0});
+    run(&mut source, "frame.member", json!({"sketch": "Post path", "name": "Post member", "body_name": "Post", "profile": tube}));
+    let (_, at) = created(&mut source, "Caps");
+    let index = {
+        let st = source.model.state();
+        let b = st.body("Post").unwrap();
+        (0..b.body.face_count())
+            .find(|i| b.body.planar_face(*i).is_some_and(|pl| pl.normal().z > 0.999 && (pl.origin.z - 300.0).abs() < 1e-6))
+            .unwrap()
+    };
+    run(&mut source, "frame.end_cap", json!({"faces": [{"body": "Post", "index": index, "face": [18.5, 0, 300]}], "thickness": 6}));
+
+    let mut s = design("Frame");
+    s.foreign_copy = copied(&source, vec![at]);
+    let saved = s.doc.to_json();
+    let error = s.execute("component.paste_from_design", &json!({})).unwrap_err().to_string();
+    assert!(error.contains("uses feature reference") && error.contains("uses exact face attachment to Post"), "{error}");
     assert_eq!(s.doc.to_json(), saved);
 }
 

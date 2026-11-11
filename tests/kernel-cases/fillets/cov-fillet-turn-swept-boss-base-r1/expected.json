@@ -1,0 +1,14 @@
+{
+ "sources": [],
+ "what": "the same boss's base rounds turned Swept: at each convex corner the section is revolved about the vertical corner edge through the corner's 90 degrees, a torus piece G1 to both rounds",
+ "source": "analytic",
+ "method": "V0 = 12500. Straight rounds 40 A; each corner the spandrel revolved a quarter turn about the corner edge, at distance u from it: (pi/2) M (Pappus). V = 12500 + 40 A + 2 pi M = 12508.885259020. Every seam G1. Graded to 1e-7 relative: the Mitre and Swept turns differ by (8 - 2 pi) M = 0.0823 mm^3 at these four corners, 6.6e-6 of the volume.",
+ "body_count": 1,
+ "volume_mm3": 12508.88525901954,
+ "continuity": {
+  "order": "g1"
+ },
+ "tolerance": {
+  "rel": 1e-07
+ }
+}

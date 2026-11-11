@@ -1,10 +1,10 @@
 //! Helpers to read hostile JSON parameters.
 
 use serde_json::Value;
+use solidcore_record::{Vec2, Vec3};
 use solidcraft_doc::Expr;
-use solidcraft_geom::{Vec2, Vec3};
 
-use crate::{EngineError, Result};
+use crate::{EngineError, Result, kernel};
 
 pub fn bad(cmd: &str, msg: impl Into<String>) -> EngineError {
     EngineError::BadParams { cmd: cmd.to_string(), msg: msg.into() }
@@ -88,14 +88,16 @@ pub fn req_expr(cmd: &str, p: &Value, k: &str) -> Result<Expr> {
 }
 
 /// The most names a list parameter may carry.
-const MAX_STRING_LIST: usize = 10_000;
+pub(crate) const MAX_STRING_LIST: usize = 10_000;
 
 /// The command name for a caller that does not know it: the engine names the command that ran
 /// when the error reaches it.
 pub const UNKNOWN_COMMAND: &str = "";
 
-/// A short description of a value that is not a name, for the message that refuses it.
-fn json_brief(v: &Value) -> String {
+/// A short description of a value that is not a name, for the message that refuses it. The
+/// schema contracts quote it too (`schema::config::NameList`), so strict refuses with the same
+/// words.
+pub(crate) fn json_brief(v: &Value) -> String {
     match v {
         Value::Null => "null".to_string(),
         Value::Bool(b) => b.to_string(),
@@ -140,27 +142,23 @@ pub fn string_list(cmd: &str, p: &Value, k: &str) -> Result<Vec<String>> {
 }
 
 /// A list of keys, where an entry is a name or an id: a feature can be named or numbered, and
-/// both kinds can sit in one list.
+/// both kinds can sit in one list (#6651). The entries keep their JSON types, so a name that
+/// looks like a number stays a name and resolves before an id (#9748).
 ///
 /// A value of the wrong kind is refused, and so is an entry that is neither a name nor an id,
-/// named by its position as in [`string_list`]. The commands that take feature keys read them
-/// here, because their list is not a list of names (#6651).
-pub fn name_or_id_list(cmd: &str, p: &Value, k: &str) -> Result<Vec<String>> {
+/// named by its position as in [`string_list`].
+pub(crate) fn name_or_id_values<'a>(cmd: &str, p: &'a Value, k: &str) -> Result<&'a [Value]> {
     match p.get(k) {
-        None | Some(Value::Null) => Ok(Vec::new()),
-        Some(Value::String(s)) => Ok(vec![s.clone()]),
+        None | Some(Value::Null) => Ok(&[]),
+        Some(v @ Value::String(_)) => Ok(std::slice::from_ref(v)),
         Some(Value::Array(a)) => {
             if a.len() > MAX_STRING_LIST {
                 return Err(bad(cmd, format!("`{k}` must list at most {MAX_STRING_LIST} keys")));
             }
-            a.iter()
-                .enumerate()
-                .map(|(i, v)| match v {
-                    Value::String(s) => Ok(s.clone()),
-                    Value::Number(n) if n.is_u64() => Ok(n.to_string()),
-                    other => Err(bad(cmd, format!("`{k}` must list names or ids; the entry {} is {}", i + 1, json_brief(other)))),
-                })
-                .collect()
+            if let Some((i, v)) = a.iter().enumerate().find(|(_, v)| !v.is_string() && !v.is_u64()) {
+                return Err(bad(cmd, format!("`{k}` must list names or ids; the entry {} is {}", i + 1, json_brief(v))));
+            }
+            Ok(a)
         }
         Some(v) => Err(bad(cmd, format!("`{k}` must be a list of names or ids; it is {}", json_brief(v)))),
     }
@@ -178,6 +176,21 @@ pub fn string_list_or_default(p: &Value, k: &str) -> Vec<String> {
         Some(Value::String(s)) => vec![s.clone()],
         _ => Vec::new(),
     }
+}
+
+/// A continuity word (`g0` … `g4`, [`kernel::Continuity::parse`]) for `what` (the key or entry
+/// it was given as), refused when it is not a word and when `by` does not build that order: the
+/// kernel's [`kernel::Construction`] table says which orders it does.
+pub fn continuity(cmd: &str, v: Option<&Value>, what: &str, by: kernel::Construction) -> Result<kernel::Continuity> {
+    let (lowest, highest) = by.orders();
+    let g = v
+        .and_then(Value::as_str)
+        .and_then(kernel::Continuity::parse)
+        .ok_or_else(|| bad(cmd, format!("{what} must be {}", kernel::Continuity::words(lowest, highest))))?;
+    g.built_by(by).map_err(|e| match e {
+        kernel::KernelError::Invalid(why) => bad(cmd, format!("{what}: {why}")),
+        other => other.into(),
+    })
 }
 
 /// Whether any text in `p` is shaped like a definition, `name = expression` (#4071), so the
@@ -215,8 +228,8 @@ mod tests {
         list(p).expect_err("the parameter is refused")
     }
 
-    fn keys(p: &Value) -> Result<Vec<String>> {
-        name_or_id_list(CMD, p, "features")
+    fn keys(p: &Value) -> Result<Vec<Value>> {
+        name_or_id_values(CMD, p, "features").map(<[Value]>::to_vec)
     }
 
     #[test]
@@ -285,10 +298,12 @@ mod tests {
 
     #[test]
     fn a_list_of_names_or_ids_is_read_in_the_order_given() {
-        assert_eq!(keys(&json!({"features": ["Base", 3]})).unwrap(), ["Base", "3"]);
-        assert_eq!(keys(&json!({"features": [3, "Base"]})).unwrap(), ["3", "Base"]);
-        assert_eq!(keys(&json!({"features": "Base"})).unwrap(), ["Base"]);
-        assert_eq!(keys(&json!({})).unwrap(), Vec::<String>::new());
+        assert_eq!(keys(&json!({"features": ["Base", 3]})).unwrap(), [json!("Base"), json!(3)]);
+        assert_eq!(keys(&json!({"features": [3, "Base"]})).unwrap(), [json!(3), json!("Base")]);
+        // A name that looks like a number stays a name.
+        assert_eq!(keys(&json!({"features": ["3"]})).unwrap(), [json!("3")]);
+        assert_eq!(keys(&json!({"features": "Base"})).unwrap(), [json!("Base")]);
+        assert_eq!(keys(&json!({})).unwrap(), Vec::<Value>::new());
     }
 
     #[test]

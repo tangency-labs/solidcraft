@@ -1,0 +1,66 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "offset": 7.1
+   }
+  },
+  {
+   "command": "sketch.rectangle.rounded",
+   "params": {
+    "p0": [
+     -40.2,
+     -9.85
+    ],
+    "p1": [
+     40.2,
+     13.05
+    ],
+    "radius": 2
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 2,
+    "operation": "new",
+    "body_name": "lid"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 10,
+    "width": 10,
+    "height": 10,
+    "corner": [
+     158,
+     0,
+     -5.9
+    ],
+    "operation": "new",
+    "body_name": "case"
+   }
+  },
+  {
+   "command": "solid.hole",
+   "params": {
+    "position": [
+     -38.7,
+     -8.35,
+     9.1
+    ],
+    "diameter": 2.4,
+    "type": "countersink",
+    "cs_diameter": 4.2,
+    "cs_angle": "90 deg"
+   }
+  }
+ ]
+}

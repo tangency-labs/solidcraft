@@ -1,0 +1,44 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "length": 40,
+    "width": 20,
+    "height": 10,
+    "body_name": "Block"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     20,
+     14.5,
+     -1
+    ],
+    "radius": 3,
+    "height": 12,
+    "operation": "cut"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      10,
+      20,
+      10
+     ]
+    ],
+    "radius": "4 mm"
+   }
+  }
+ ]
+}

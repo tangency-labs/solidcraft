@@ -1,0 +1,140 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/1648",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/1850",
+ "test": "crates/kernel/src/thin_face_tests.rs: sphere_touching_a_box_edge_unites_soundly",
+ "summary": "The union of a sphere (centre (2.5, 15, 27.5), radius 12.5) and a 5 x 7.5 x 5 box at (0, 0, 17.5), from SolidCraft's boolean property tests, was not a sound solid ('1 face(s) don't mesh'). The sphere takes in the box's edge at y = 7.5, z = 22.5 and touches the edge below it, y = 7.5, z = 17.5, in one point, (2.5, 7.5, 17.5): on the box's face y = 7.5 the sphere's circle (centre (2.5, 27.5), radius 10) is tangent to that edge, so the part of the face outside the sphere is a strip 5 mm long, 0.318 mm tall at its ends and pinched to a point in the middle (0.526 mm^2). truck made no vertex at the touch, and its mesher, given that face's loop crossing itself by 2.8e-7 mm, left the face without triangles. Geometry is the PR test's, with the sphere 0.1 smaller (clear of the edge) and 0.1 larger (across it) as controls. Each volume is the sphere plus the box less O, the ball inside the box. With u = x - 2.5, the ball meets the box only where |u| <= 2.5, y <= 7.5 and 17.5 <= z <= 22.5 (the face y = 0 is out of its reach), so O is an integral over u of the area of a disc beyond two chords. It is integrated in closed form with int (R^2 - u^2)*asin(c/sqrt(R^2 - u^2)) du = (R^2*u - u^3/3)*asin(c/sqrt(R^2 - u^2)) - c*((p^2/6 - 2*R^2/3)*asin(u/p) - u*sqrt(p^2 - u^2)/6) - 2*R^3/3*atan(c*u/(R*sqrt(p^2 - u^2))), p^2 = R^2 - c^2. The tolerance is 0.01 mm^3, as in the other boolean cases.",
+ "cases": [
+  {
+   "name": "sphere_clear_of_edge",
+   "note": "Control: the sphere 0.1 smaller. The box's edge at y = 7.5, z = 17.5 clears it by 0.1 mm, so the box's face y = 7.5 keeps a strip at least 0.125 mm tall below the sphere.",
+   "steps": [
+    {
+     "op": "sphere",
+     "id": "ball",
+     "center": [
+      2.5,
+      15.0,
+      27.5
+     ],
+     "radius": 12.4
+    },
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      0.0,
+      0.0,
+      17.5
+     ],
+     "size": [
+      5.0,
+      7.5,
+      5.0
+     ]
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "ball",
+     "b": "block"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 8121.456190007691,
+     "tol": 0.01,
+     "formula": "4/3*pi*12.4^3 + 5*7.5*5 - O, O = 52.49174540296 the ball inside the box: O = int_{-2.5}^{2.5} [Q(r; 7.5, 5) - Q(r; 7.5, 10)] du, r = sqrt(R^2 - u^2), Q(r; b, c) = r^2/2*(pi/2 - asin(b/r) - asin(c/r)) - b/2*sqrt(r^2 - b^2) - c/2*sqrt(r^2 - c^2) + b*c if b^2 + c^2 < r^2, else 0 (the second Q is 0), integrated in closed form"
+    }
+   }
+  },
+  {
+   "name": "sphere_touching_edge",
+   "note": "#1648: the sphere touches the box's edge at y = 7.5, z = 17.5 in one point, (2.5, 7.5, 17.5), so the part of the box's face y = 7.5 outside the sphere is pinched to a point there.",
+   "steps": [
+    {
+     "op": "sphere",
+     "id": "ball",
+     "center": [
+      2.5,
+      15.0,
+      27.5
+     ],
+     "radius": 12.5
+    },
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      0.0,
+      0.0,
+      17.5
+     ],
+     "size": [
+      5.0,
+      7.5,
+      5.0
+     ]
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "ball",
+     "b": "block"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 8313.109083371473,
+     "tol": 0.01,
+     "formula": "4/3*pi*12.5^3 + 5*7.5*5 - O, O = 55.62178535194 the ball inside the box: O = int_{-2.5}^{2.5} [Q(r; 7.5, 5) - Q(r; 7.5, 10)] du, r = sqrt(R^2 - u^2), Q(r; b, c) = r^2/2*(pi/2 - asin(b/r) - asin(c/r)) - b/2*sqrt(r^2 - b^2) - c/2*sqrt(r^2 - c^2) + b*c if b^2 + c^2 < r^2, else 0 (the second Q is 0: the bottom face touches the ball only at u = 0), integrated in closed form"
+    }
+   }
+  },
+  {
+   "name": "sphere_across_edge",
+   "note": "Control: the sphere 0.1 larger. It crosses that edge, so the part of the face y = 7.5 outside it is two pieces, and it also cuts into the box's bottom face z = 17.5.",
+   "steps": [
+    {
+     "op": "sphere",
+     "id": "ball",
+     "center": [
+      2.5,
+      15.0,
+      27.5
+     ],
+     "radius": 12.6
+    },
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      0.0,
+      0.0,
+      17.5
+     ],
+     "size": [
+      5.0,
+      7.5,
+      5.0
+     ]
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "ball",
+     "b": "block"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 8507.835027885498,
+     "tol": 0.01,
+     "formula": "4/3*pi*12.6^3 + 5*7.5*5 - O, O = 58.82036680428 the ball inside the box: O = int_{-2.5}^{2.5} [Q(r; 7.5, 5) - Q(r; 7.5, 10)] du, r = sqrt(R^2 - u^2), Q(r; b, c) = r^2/2*(pi/2 - asin(b/r) - asin(c/r)) - b/2*sqrt(r^2 - b^2) - c/2*sqrt(r^2 - c^2) + b*c if b^2 + c^2 < r^2, else 0 (the second Q, from the box's bottom face, is nonzero for |u| < 1.5843), integrated in closed form"
+    }
+   }
+  }
+ ]
+}

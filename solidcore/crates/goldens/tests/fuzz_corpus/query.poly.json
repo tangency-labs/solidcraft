@@ -1,0 +1,7 @@
+{
+  "unit": "query.poly",
+  "cases": [
+    {"name": "fuzz01197_loop_vertex_count_mode", "origin": "fuzz-out/n2000/query.poly/fuzz01197.json (panic: rust: attempt to subtract with overflow)", "cpp": "harness: invalid argument: loop vertex count / mode", "rust": "harness: loop vertex count / mode", "inputs": {"brep": {"faces": [{"loops": [{"edge_tol": 1e-09, "mode": 2, "verts": []}], "shell": 1, "tol": 1e-05}], "regions": [2], "tol": 1e-05, "vertices": [[-2.89, 1.19, -1.41, 1e-05]]}, "op": {"cmds": [{"cmd": "delete_face", "f": 3}], "kind": "mutate"}}},
+    {"name": "fuzz01255_too_many_shells_in_a_region", "origin": "fuzz-out/n2000/query.poly/fuzz01255.json (crash: rust: killed by signal 6 (memory allocation of 2147483648 bytes failed))", "cpp": "harness: invalid argument: too many shells in a region", "rust": "harness: too many shells in a region", "inputs": {"brep": {"faces": [], "regions": [2147483648], "tol": 1e-05, "vertices": []}, "op": {"centroid": true, "kind": "bbox", "pseudo": false}}}
+  ]
+}

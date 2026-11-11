@@ -1,0 +1,214 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 60,
+    "width": 60,
+    "height": 40,
+    "corner": [
+     0,
+     -30,
+     0
+    ],
+    "body_name": "Case"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 55,
+    "width": 55,
+    "height": 35,
+    "corner": [
+     2.5,
+     -27.5,
+     2.5
+    ],
+    "body_name": "Cavity"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Case",
+    "tools": [
+     "Cavity"
+    ],
+    "operation": "cut",
+    "name": "Hollow"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -1.0,
+      0.0,
+      0.0
+     ],
+     "x_dir": [
+      0,
+      1,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Win"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -15,
+     10
+    ],
+    "p1": [
+     15,
+     30
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Win",
+    "distance": 3.5,
+    "operation": "cut",
+    "targets": [
+     "Case"
+    ],
+    "name": "PleatCut"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      -0.5,
+      0.0,
+      0.0
+     ],
+     "x_dir": [
+      0,
+      1,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Near"
+   }
+  },
+  {
+   "command": "sketch.rectangle.center",
+   "params": {
+    "center": [
+     0,
+     20
+    ],
+    "corner": [
+     17,
+     32
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      3.0,
+      0.0,
+      0.0
+     ],
+     "x_dir": [
+      0,
+      1,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Far"
+   }
+  },
+  {
+   "command": "sketch.rectangle.center",
+   "params": {
+    "center": [
+     0,
+     20
+    ],
+    "corner": [
+     19,
+     34
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.loft",
+   "params": {
+    "sections": [
+     {
+      "sketch": "Near"
+     },
+     {
+      "sketch": "Far"
+     }
+    ],
+    "operation": "join",
+    "name": "PleatNear",
+    "targets": [
+     "Case"
+    ]
+   }
+  },
+  {
+   "command": "solid.mirror",
+   "params": {
+    "features": [
+     "PleatCut",
+     "PleatNear"
+    ],
+    "plane": {
+     "origin": [
+      30,
+      0,
+      0
+     ],
+     "normal": [
+      1,
+      0,
+      0
+     ]
+    }
+   }
+  }
+ ]
+}

@@ -28,7 +28,8 @@ pub enum Verdict {
 
 /// Methods the bridged MCP server uses; nothing else (clicks, preferences, quitting, the chat
 /// itself) is the agent's.
-const METHODS: &[&str] = &["engine.commands", "document.inspect", "engine.execute", "engine.batch", "ui.view", "ui.render", "ui.screenshot"];
+const METHODS: &[&str] =
+    &["engine.commands", "document.inspect", "engine.execute", "engine.batch", "ui.view", "ui.render", "ui.screenshot", "mcp.options"];
 
 /// Parameter names that hold a file or folder and nothing else.
 const FILE_KEYS: &[&str] = &["file", "files", "dir", "folder", "out", "output", "filename", "target_path"];
@@ -67,7 +68,10 @@ fn reads_only(id: &str) -> bool {
         || id.starts_with("model.")
         || id.ends_with(".inspect")
         || id.ends_with(".list")
-        || matches!(id, "edit.checkpoint" | "render.status" | "render.backends" | "render.settings.get" | "file.slicers" | "engine.describe")
+        || matches!(
+            id,
+            "edit.checkpoint" | "selection.get" | "render.status" | "render.backends" | "render.settings.get" | "file.slicers" | "engine.describe"
+        )
 }
 
 /// Commands that read or write a file by their nature: any string they are given in a path
@@ -248,6 +252,7 @@ mod tests {
         assert_eq!(exec("solid.box", json!({"x": 10})), Verdict::Run { change: true });
         assert_eq!(exec("sketch.inspect", json!({"sketch": 1})), Verdict::Run { change: false });
         assert_eq!(exec("inspect.measure", json!({})), Verdict::Run { change: false });
+        assert_eq!(exec("selection.get", json!({})), Verdict::Run { change: false });
         assert_eq!(request("document.inspect", &json!({}), 0), Verdict::Run { change: false });
         assert_eq!(exec("engine.describe", json!({"command": "solid.box"})), Verdict::Run { change: false });
     }
@@ -342,6 +347,10 @@ mod tests {
         for m in ["app.quit", "ui.click", "ui.prefs", "ui.agent_chat", "engine.script", "ui.key", "ui.file"] {
             assert!(matches!(request(m, &json!({}), 0), Verdict::Refuse(_)), "{m}");
         }
+        // How a host page keeps the design (#8517) is not the agent's.
+        for m in ["document.export", "document.import", "document.saved"] {
+            assert!(matches!(request(m, &json!({}), 0), Verdict::Refuse(_)), "{m}");
+        }
     }
 
     #[test]
@@ -350,6 +359,11 @@ mod tests {
         assert!(matches!(request("engine.execute", &json!({"command": "edit.undo"}), 0), Verdict::Ask(_)));
         let batch = json!({"commands": [{"command": "solid.box"}, {"command": "edit.undo"}, {"command": "edit.undo"}]});
         assert!(matches!(request("engine.batch", &batch, 0), Verdict::Ask(_)));
+    }
+
+    #[test]
+    fn the_mcp_server_may_read_its_output_options() {
+        assert_eq!(request("mcp.options", &json!({}), 0), Verdict::Run { change: false });
     }
 
     #[test]

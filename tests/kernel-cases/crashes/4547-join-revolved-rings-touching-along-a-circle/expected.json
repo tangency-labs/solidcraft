@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4547",
+  "tangency-labs/solidcraft#4542"
+ ],
+ "what": "a join of two revolved rings that touch only along a circle (r 20.5 at z 4: the corner of one ring on the corner of the other): the app hung in the boolean",
+ "source": "analytic",
+ "method": "ring A r 20..20.5, z 0..4: pi*(20.5^2-20^2)*4 = 254.469; ring B r 20.5..28, z 4..18: pi*(28^2-20.5^2)*14 = 15997.83. They share only the circle r 20.5, z 4, so the join keeps them as two bodies (touching: separate, the default) or refuses cleanly; never a hang",
+ "outcome": "solid_or_refused",
+ "body_count": 2,
+ "volume_mm3": 16253.0296
+}

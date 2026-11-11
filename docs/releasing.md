@@ -33,6 +33,15 @@ service worker after the code that registered it is gone, so to switch it off de
 `apps/solidcraft-web/sw.js` unbuilt (as `trunk serve` builds do): it deletes what it kept and
 unregisters. A site without `build.json` is also safe: launches then go to the network.
 
+The site serves the web app three ways (`packaging/web-channels.sh`, run by `pages.yml`):
+`/app/` is the web zip attached to the latest release that is not a pre-release, `/app-rc/` the
+zip of the newest published `v*-rc.N` pre-release (a page saying there is none, when it is not
+newer than the release), and `/app-edge/` the build of `main`. Publishing a release or
+pre-release deploys the site again through `flatpak-pages.yml`. The directories are separate
+because a service worker controls everything beneath its own, and each pre-release channel keeps
+its browser storage under its own names (`apps/solidcraft-web/src/channel.rs`), so a design saved
+in one can't reach another. Nightly tags (`vX.Y.Z-nightly...`) are not release candidates.
+
 ## Nightly prereleases
 
 `release.yml` also runs at midnight in `America/New_York` (Eastern time, following daylight

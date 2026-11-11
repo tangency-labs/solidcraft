@@ -1,0 +1,244 @@
+{
+  "cases": [
+    {
+      "name": "ozt_hermite_hook_loose_stitch",
+      "upstream_ref": "source/SMLib/src/SmStitch.cpp:546 (sm_TestAndSplitEdge: pCurve->DropPoint builds the edge curve's cache at SmTol::GetApproxTol3d(&m_crCurve), half pEdge->GetTolerance()); scaled Hermite geometry makes the approximation-distance tolerance observable independently of the stitch tolerance",
+      "inputs": {
+        "brep": {
+          "kind": "hermite_wire",
+          "p1": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "d1": [
+            18000000000.0,
+            0.0,
+            0.0
+          ],
+          "p2": [
+            10000000000.0,
+            16000000000.0,
+            1500000000.0
+          ],
+          "d2": [
+            -6000000000.0,
+            15000000000.0,
+            0.0
+          ],
+          "interval": [
+            0.0,
+            1.0
+          ],
+          "edge_tol": 0.05,
+          "vertex_tol": 1e-05
+        },
+        "op": {
+          "op": "split",
+          "edge": 0,
+          "s": 0.5,
+          "offset": [
+            0.0,
+            0.0,
+            0.0001
+          ],
+          "tol": 1e-06,
+          "editing": true,
+          "probe": true
+        }
+      }
+    },
+    {
+      "name": "ozt_hermite_hook_off_center",
+      "upstream_ref": "source/SMLib/src/SmStitch.cpp:546 (sm_TestAndSplitEdge: the drop's cache tolerance is the edge's, not the caller's dTol); scaled Hermite geometry makes the approximation-distance tolerance observable independently of the stitch tolerance",
+      "inputs": {
+        "brep": {
+          "kind": "hermite_wire",
+          "p1": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "d1": [
+            1800000.0,
+            0.0,
+            0.0
+          ],
+          "p2": [
+            1000000.0,
+            1600000.0,
+            150000.0
+          ],
+          "d2": [
+            -600000.0,
+            1500000.0,
+            0.0
+          ],
+          "interval": [
+            0.0,
+            1.0
+          ],
+          "edge_tol": 1e-10,
+          "vertex_tol": 1e-05
+        },
+        "op": {
+          "op": "split",
+          "edge": 0,
+          "s": 0.31,
+          "offset": [
+            0.0001,
+            0.0,
+            0.0
+          ],
+          "tol": 1e-05,
+          "editing": true,
+          "probe": true
+        }
+      }
+    },
+    {
+      "name": "ozt_hermite_hook_stiff_edge_tol",
+      "upstream_ref": "source/SMLib/src/SmStitch.cpp:546 (sm_TestAndSplitEdge: a tighter edge tolerance refines the drop's cache); scaled Hermite geometry makes the approximation-distance tolerance observable independently of the stitch tolerance",
+      "inputs": {
+        "brep": {
+          "kind": "hermite_wire",
+          "p1": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "d1": [
+            18000000000.0,
+            0.0,
+            0.0
+          ],
+          "p2": [
+            10000000000.0,
+            16000000000.0,
+            1500000000.0
+          ],
+          "d2": [
+            -6000000000.0,
+            15000000000.0,
+            0.0
+          ],
+          "interval": [
+            0.0,
+            1.0
+          ],
+          "edge_tol": 0.005,
+          "vertex_tol": 1e-05
+        },
+        "op": {
+          "op": "split",
+          "edge": 0,
+          "s": 0.7,
+          "offset": [
+            0.0,
+            0.0001,
+            0.0
+          ],
+          "tol": 0.0001,
+          "editing": true,
+          "probe": true
+        }
+      }
+    },
+    {
+      "name": "ozt_hermite_s_large_stitch_tol",
+      "upstream_ref": "source/SMLib/src/SmStitch.cpp:546 (sm_TestAndSplitEdge: dTol above pEdge->GetTolerance() must not coarsen the cache); scaled Hermite geometry makes the approximation-distance tolerance observable independently of the stitch tolerance",
+      "inputs": {
+        "brep": {
+          "kind": "hermite_wire",
+          "p1": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "d1": [
+            22000000000.0,
+            3000000000.0,
+            0.0
+          ],
+          "p2": [
+            12000000000.0,
+            -9000000000.0,
+            4000000000.0
+          ],
+          "d2": [
+            2000000000.0,
+            20000000000.0,
+            0.0
+          ],
+          "interval": [
+            0.0,
+            1.0
+          ],
+          "edge_tol": 0.01,
+          "vertex_tol": 1e-05
+        },
+        "op": {
+          "op": "split",
+          "edge": 0,
+          "s": 0.5,
+          "offset": [
+            0.0,
+            0.0,
+            0.0001
+          ],
+          "tol": 0.5,
+          "editing": true,
+          "probe": true
+        }
+      }
+    },
+    {
+      "name": "ozt_hermite_s_default_edge_tol",
+      "upstream_ref": "source/SMLib/src/SmStitch.cpp:546 (sm_TestAndSplitEdge: the edge at the system zone tolerance resolves the same cache either way)",
+      "inputs": {
+        "brep": {
+          "kind": "hermite_wire",
+          "p1": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "d1": [
+            2.2,
+            0.3,
+            0.0
+          ],
+          "p2": [
+            1.2,
+            -0.9,
+            0.4
+          ],
+          "d2": [
+            0.2,
+            2.0,
+            0.0
+          ],
+          "interval": [
+            0.0,
+            1.0
+          ],
+          "edge_tol": 1e-05,
+          "vertex_tol": 1e-05
+        },
+        "op": {
+          "op": "split",
+          "edge": 0,
+          "s": 0.44,
+          "offset": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "tol": 1e-06,
+          "editing": true,
+          "probe": true
+        }
+      }
+    }
+  ]
+}

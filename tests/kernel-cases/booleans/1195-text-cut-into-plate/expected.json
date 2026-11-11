@@ -1,0 +1,21 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1195"
+ ],
+ "what": "text cut into a plate: a boundary curve's end meeting a point whatever its parameter (glyph outlines through a text cut)",
+ "source": "invariants",
+ "method": "cutting engraved text 1 mm deep into a 60x20x5 plate keeps one valid closed solid with less volume than the plate (V < 6000) ; a clean solid, no refusal",
+ "body_count": 1,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   20,
+   5
+  ]
+ }
+}

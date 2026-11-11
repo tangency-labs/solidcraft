@@ -1,0 +1,71 @@
+{
+ "sources": [],
+ "what": "motion.plot of a hinge keyed 0 to 90 over 10 steps, played in 1 s",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); 11 samples, 9 degrees apart; with duration 1 s the rate is 90 deg/s throughout and the acceleration 0",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "results": [
+  {
+   "step": 10,
+   "json": {
+    "samples": 11,
+    "joints": [
+     {
+      "value": [
+       0.0,
+       9.0,
+       18.0,
+       27.0,
+       36.0,
+       45.0,
+       54.0,
+       63.0,
+       72.0,
+       81.0,
+       90.0
+      ],
+      "velocity": [
+       90.0,
+       90.0,
+       90.0,
+       90.0,
+       90.0,
+       90.0,
+       90.0,
+       90.0,
+       90.0,
+       90.0,
+       90.0
+      ],
+      "acceleration": [
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.0,
+       0.0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "step": 11,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      20.0,
+      0.0,
+      5.0
+     ]
+    }
+   }
+  }
+ ]
+}

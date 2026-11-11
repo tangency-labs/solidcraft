@@ -1,0 +1,102 @@
+{
+ "sources": [],
+ "what": "three isocurves each way across a 40 x 30 face",
+ "source": "analytic",
+ "method": "box 40 x 30 x 10 with a corner at the origin: its top is the plane z = 10, x 0..40 and y 0..30. count 3 curves each way, evenly spaced across it (the command's contract), divide each side into 4: x = 10, 20, 30 (each from y 0 to 30) and y = 7.5, 15, 22.5 (each from x 0 to 40), every curve the straight line across the face. In the order the reply lists them (along the surface's first parameter first, as its parameters run), to 1e-9 mm",
+ "results": [
+  {
+   "step": 2,
+   "pointer": "/faces/0/count",
+   "json": 3
+  },
+  {
+   "step": 2,
+   "pointer": "/faces/0/u_curves",
+   "json": 3
+  },
+  {
+   "step": 2,
+   "pointer": "/faces/0/v_curves",
+   "json": 3
+  },
+  {
+   "step": 2,
+   "pointer": "/curves",
+   "json": [
+    [
+     [
+      30.0,
+      0.0,
+      10.0
+     ],
+     [
+      30.0,
+      30.0,
+      10.0
+     ]
+    ],
+    [
+     [
+      20.0,
+      0.0,
+      10.0
+     ],
+     [
+      20.0,
+      30.0,
+      10.0
+     ]
+    ],
+    [
+     [
+      10.0,
+      0.0,
+      10.0
+     ],
+     [
+      10.0,
+      30.0,
+      10.0
+     ]
+    ],
+    [
+     [
+      40.0,
+      7.5,
+      10.0
+     ],
+     [
+      0.0,
+      7.5,
+      10.0
+     ]
+    ],
+    [
+     [
+      40.0,
+      15.0,
+      10.0
+     ],
+     [
+      0.0,
+      15.0,
+      10.0
+     ]
+    ],
+    [
+     [
+      40.0,
+      22.5,
+      10.0
+     ],
+     [
+      0.0,
+      22.5,
+      10.0
+     ]
+    ]
+   ],
+   "abs_mm": 1e-09
+  }
+ ]
+}

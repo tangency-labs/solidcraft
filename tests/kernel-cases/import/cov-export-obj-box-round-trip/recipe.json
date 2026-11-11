@@ -1,0 +1,49 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 30,
+    "width": 20,
+    "height": 10,
+    "corner": [
+     5,
+     -10,
+     0
+    ],
+    "operation": "new",
+    "body_name": "Block"
+   }
+  },
+  {
+   "command": "file.export_obj",
+   "params": {
+    "path": "$OUT/cov-export-obj-box.obj"
+   }
+  },
+  {
+   "command": "file.new",
+   "params": {
+    "name": "Reimported"
+   }
+  },
+  {
+   "command": "file.insert_mesh",
+   "params": {
+    "path": "$OUT/cov-export-obj-box.obj"
+   }
+  },
+  {
+   "command": "component.activate",
+   "params": {
+    "component": "cov-export-obj-box"
+   }
+  },
+  {
+   "command": "mesh.convert",
+   "params": {
+    "body": "Block"
+   }
+  }
+ ]
+}
