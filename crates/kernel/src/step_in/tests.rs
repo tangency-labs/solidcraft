@@ -3135,7 +3135,8 @@ fn colour_names_come_in_with_their_colours_and_go_out_again() {
         assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
         imp.bodies.into_iter().next().unwrap()
     };
-    let named = |name: &str| import(&style(70, "#101", &format!("COLOUR_RGB('{name}',1.,0.5,0.)"), "")).body.paint().unwrap().name.clone();
+    // An opaque colour without a name needs no paint; with one, the paint holds it.
+    let named = |name: &str| import(&style(70, "#101", &format!("COLOUR_RGB('{name}',1.,0.5,0.)"), "")).body.paint().and_then(|p| p.name.clone());
     assert_eq!(named("Steel - Satin").as_deref(), Some("Steel - Satin"));
     assert_eq!(named("Opaque(97,69,55)").as_deref(), Some("Opaque(97,69,55)"));
     assert_eq!(named(""), None);
