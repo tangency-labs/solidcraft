@@ -8,6 +8,12 @@
 //!   chip opens the full context menu. The commands come from the context menu's own list for
 //!   the selection ([`crate::context_menu::items`]), so the pill offers nothing the menu would
 //!   refuse, and every action stays an ordinary command on the timeline.
+//! - Dragging an edge across itself rounds it when pulled out of the material and cuts it flat
+//!   when pushed in (`drag_fillet`).
+//! - Double-clicking a body picks it up: Move opens on it with its triad, and releasing a
+//!   triad drag applies the move (`move_body`).
+//!
+//! The Creative switch in the application bar turns it on and off without opening Preferences.
 
 use crate::SolveApp;
 use crate::context_menu::Target;
@@ -35,6 +41,79 @@ const MAX_ACTIONS: usize = 6;
 /// Creative Mode is on.
 pub fn on(app: &SolveApp) -> bool {
     app.preferences.creative_mode
+}
+
+/// Turn Creative Mode on or off, as the application bar's switch does. The preferences writer
+/// saves the change with the other settings.
+pub fn toggle(app: &mut SolveApp) {
+    app.preferences.creative_mode = !app.preferences.creative_mode;
+}
+
+/// In Creative Mode, select the whole of `body` and open Move on it, its triad ready to drag.
+/// False (nothing done) when Creative Mode is off or Move does not start.
+pub fn move_body(app: &mut SolveApp, body: &str) -> bool {
+    if !on(app) || crate::render_workspace::active(app) {
+        return false;
+    }
+    if app.run("select.set", serde_json::json!({"items": [{"type": "body", "name": body}]})).is_err() {
+        return false;
+    }
+    app.start("solid.move");
+    matches!(app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Move { .. }))
+}
+
+/// The Creative switch at the right of `span` (the application bar's free space): filled with
+/// the accent while Creative Mode is on, outlined while it is off. Its label is dropped when the
+/// bar is too narrow, and it is left out when even the icon does not fit. Returns its rectangle.
+pub(crate) fn bar_switch(app: &mut SolveApp, ui: &mut egui::Ui, span: egui::Rect) -> Option<egui::Rect> {
+    let t = solidcraft_theme::Tokens::get();
+    let height = crate::toolbar::PILL_HEIGHT;
+    let font = egui::FontId::proportional(t.font_label);
+    let label = app.tr("creative_mode.switch").to_string();
+    let (icon_x, text_x, right_pad) = (16.0, 29.0, 11.0);
+    let galley_w = ui.fonts_mut(|f| f.layout_no_wrap(label.clone(), font.clone(), t.app_bar_text).size().x);
+    // Keep room for the document tabs before showing the label.
+    let labeled = text_x + galley_w + right_pad + 160.0 <= span.width();
+    let width = if labeled { text_x + galley_w + right_pad } else { height + 4.0 };
+    if width > span.width() {
+        return None;
+    }
+    let rect = egui::Rect::from_min_size(egui::pos2(span.right() - width, span.center().y - height / 2.0), egui::vec2(width, height));
+    let response = ui.interact(rect, ui.scope_id().with("sc_creative_switch"), egui::Sense::click());
+    let on = on(app);
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), on, &label));
+    crate::scenario::publish_target("titlebar:creative", rect);
+    let hot = response.hovered() || response.has_focus();
+    let radius = height / 2.0 * f32::from(t.radius_xl) / 10.0;
+    let fill = match (on, hot) {
+        (true, false) => t.accent,
+        (_, true) => t.app_bar_hover_button,
+        (false, false) => egui::Color32::TRANSPARENT,
+    };
+    ui.painter().rect_filled(rect, radius, fill);
+    if !on {
+        ui.painter().rect_stroke(rect, radius, egui::Stroke::new(1.0, t.app_bar_text.gamma_multiply(0.45)), egui::StrokeKind::Inside);
+    }
+    if response.has_focus() {
+        ui.painter().rect_stroke(
+            rect.expand(2.0),
+            solidcraft_theme::Tokens::outset_radius(radius, 2.0),
+            egui::Stroke::new(1.0, t.app_bar_text),
+            egui::StrokeKind::Outside,
+        );
+    }
+    let glyph_x = if labeled { rect.left() + icon_x } else { rect.center().x };
+    let glyph = egui::Rect::from_center_size(egui::pos2(glyph_x, rect.center().y), egui::vec2(16.0, 16.0));
+    crate::icons::paint_on(ui.painter(), glyph, "style", Some(true), 1.0);
+    if labeled {
+        ui.painter().text(egui::pos2(rect.left() + text_x, rect.center().y), egui::Align2::LEFT_CENTER, &label, font, t.app_bar_text);
+    }
+    let tip = app.tr(if on { "creative_mode.switch_on_tip" } else { "creative_mode.switch_off_tip" }).to_string();
+    use crate::ui_kit::BackingTooltipExt as _;
+    if response.backing_on_hover_text(tip).clicked() {
+        toggle(app);
+    }
+    Some(rect)
 }
 
 /// The pill's actions for the current selection, in [`PILL`] order.
@@ -157,6 +236,49 @@ mod tests {
         h.app.run("select.set", json!({"items":[{"type":"edge","body":"Body1","point":[10,0,10]}]})).unwrap();
         let ids = ids(&h);
         assert_eq!(&ids[..2], ["solid.fillet", "solid.chamfer"], "{ids:?}");
+    }
+
+    #[test]
+    fn the_bar_switch_turns_creative_mode_on_and_off() {
+        let mut h = boxed();
+        h.frames(2);
+        h.step(&json!({"click": {"handle": "titlebar:creative"}})).unwrap();
+        h.frames(2);
+        assert!(on(&h.app), "the first click turns it on");
+        h.step(&json!({"click": {"handle": "titlebar:creative"}})).unwrap();
+        h.frames(2);
+        assert!(!on(&h.app), "the second turns it off");
+    }
+
+    #[test]
+    fn double_clicking_a_body_picks_it_up_and_a_triad_drag_moves_it() {
+        let mut h = boxed();
+        h.app.preferences.creative_mode = true;
+        h.step(&json!({"call": "ui.view", "params": {"view": "iso"}})).unwrap();
+        h.step(&json!({"call": "ui.view", "params": {"view": "fit"}})).unwrap();
+        h.settle();
+        h.step(&json!({"click": {"world": [10, 10, 10]}, "double": true})).unwrap();
+        h.frames(3);
+        let Some(d) = h.app.dialog.as_ref() else { panic!("Move opened") };
+        assert!(matches!(d.kind, crate::dialogs::Kind::Move { .. }), "{:?}", d.kind);
+        assert_eq!(d.inputs[0].items, vec![Sel::Body { name: "Body1".into() }], "Move holds the body");
+        let features = h.app.session.doc.features.len();
+        let before = h.app.session.execute("inspect.measure", &json!({})).unwrap()["bodies"][0]["bbox"].clone();
+        h.step(&json!({"drag": [{"gizmo": "x"}, {"gizmo": "x", "by": [10.0, 0.0, 0.0]}]})).unwrap();
+        h.frames(6);
+        h.settle();
+        assert!(h.app.dialog.is_none(), "the release applied the move");
+        assert_eq!(h.app.session.doc.features.len(), features + 1);
+        let after = h.app.session.execute("inspect.measure", &json!({})).unwrap()["bodies"][0]["bbox"].clone();
+        assert_ne!(before, after, "the body moved");
+    }
+
+    #[test]
+    fn without_creative_mode_a_double_click_does_not_move() {
+        let mut h = boxed();
+        h.step(&json!({"click": {"world": [10, 10, 10]}, "double": true})).unwrap();
+        h.frames(3);
+        assert!(!h.app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Move { .. })));
     }
 
     #[test]

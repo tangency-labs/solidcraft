@@ -380,6 +380,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
             if let Some(g) = crate::gizmo::show(ui, painter, proj, triad_id, &t, snap_step(app.cam.half_height())) {
                 crate::dialogs_move::drag(app, &mut d, g);
                 dragging = true;
+                // In Creative Mode the release applies the move, as OK would.
+                if g.done && crate::creative_mode::on(app) {
+                    d.confirm = true;
+                }
             } else if let Some(handle) = crate::gizmo::take_click(ui, triad_id) {
                 // A click on a handle, with no drag, still shows the value it drives.
                 crate::dialogs_move::show_handle_value(&mut d, handle);

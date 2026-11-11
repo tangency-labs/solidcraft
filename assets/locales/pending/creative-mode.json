@@ -2,6 +2,9 @@
   "en": {
     "prefs.creative_mode": "Creative Mode",
     "prefs.creative_mode.section": "Creative Mode",
-    "prefs.creative_mode_help": "Shape the model directly: pulling a flat face applies on release without a window, and the commands that fit the selection float above it."
+    "prefs.creative_mode_help": "Shape the model directly: pulling a flat face applies on release without a window, and the commands that fit the selection float above it.",
+    "creative_mode.switch": "Creative",
+    "creative_mode.switch_on_tip": "Creative Mode is on: drag faces to push or pull them, drag edges out to round them or in to chamfer them. Click to turn it off.",
+    "creative_mode.switch_off_tip": "Turn on Creative Mode: shape the model by dragging faces and edges, with the commands for the selection floating above it."
   }
 }
