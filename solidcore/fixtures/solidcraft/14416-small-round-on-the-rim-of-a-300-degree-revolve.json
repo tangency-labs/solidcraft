@@ -137,7 +137,7 @@
   },
   {
    "name": "round_0_4_at_280_degrees",
-   "note": "The report's angle series, 280 degrees. solidcraft-cli on GitHub's runners (fork run 42978928893): main 27de5ba0 and v0.40.0-rc.3 refuse it ('not supported yet: the fillet is larger than the faces beside its edges allow'; the largest radius that fits is 0.3428 mm); v0.30.1 builds it.",
+   "note": "The report's angle series, 280 degrees. solidcraft-cli on GitHub's runners (fork run 42978928893): main 27de5ba0 and v0.40.0-rc.3 refuse it ('not supported yet: the fillet is larger than the faces beside its edges allow; the largest radius that fits is 0.3428 mm'); v0.30.1 builds it.",
    "steps": [
     {
      "op": "revolve",
