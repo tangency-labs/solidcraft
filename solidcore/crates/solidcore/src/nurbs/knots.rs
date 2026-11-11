@@ -25,6 +25,7 @@
 //! | [`MAX_DEGREE`]                         | `NL_MAXDEG`                       |
 //! | [`clamped_uniform`]                    | none (not upstream)               |
 //! | [`periodic_uniform`]                   | none (not upstream)               |
+//! | [`is_periodic`]                        | none (not upstream)               |
 //!
 //! Deviations:
 //! - Out-params become return values ([`Basis`], tuples, `Vec`s sized by the callee).
@@ -860,7 +861,8 @@ pub fn clamped_uniform(count: usize, degree: usize) -> Result<Vec<f64>> {
 /// a periodic, uniform knot vector, unclamped).
 ///
 /// Not a clamped vector, so not one for the routines that take only those:
-/// [`KnotVector::validate`] (upstream's clamped check) refuses it.
+/// [`KnotVector::validate`] (upstream's clamped check) refuses it; [`is_periodic`] is its
+/// check.
 ///
 /// Not upstream: the knots of a closed curve made from control points alone.
 ///
@@ -895,8 +897,62 @@ pub fn periodic_uniform(count: usize, degree: usize) -> Result<Vec<f64>> {
     Ok(knots)
 }
 
+/// Whether `knots` are a periodic curve's of `degree`: unclamped (`U[0] < U[p]`), and every
+/// knot `n` places on, `n = len - 2 degree - 1` the curve's distinct control points, one
+/// period `T = U[n + p] - U[p]` (the domain's length) past it: `U[i + n] - U[i] = T` for
+/// `i = 0..=2 degree`, within the rounding of knots computed on the domain (8 ε of the
+/// largest knot and the period). Then a polygon that repeats its first `degree` points after
+/// its last closes on itself with continuity `degree - 1` (Piegl and Tiller, *The NURBS Book*,
+/// 2nd ed., §12.2); repeated points on other knots do not.
+///
+/// Not upstream.
+#[must_use]
+pub fn is_periodic(knots: &[f64], degree: usize) -> bool {
+    if degree == 0 || degree > MAX_DEGREE || !knots.iter().all(|k| k.is_finite()) {
+        return false;
+    }
+    let Some(n) = knots.len().checked_sub(2 * degree + 1).filter(|&n| n > 0) else {
+        return false;
+    };
+    let (Some(&u0), Some(&up), Some(&unp)) =
+        (knots.first(), knots.get(degree), knots.get(n + degree))
+    else {
+        return false;
+    };
+    let period = unp - up;
+    if !(u0 < up && period > 0.0) {
+        return false;
+    }
+    let largest = knots.iter().fold(0.0_f64, |m, k| m.max(k.abs()));
+    let slack = 8.0 * f64::EPSILON * (largest + period);
+    (0..=2 * degree).all(|i| match (knots.get(i), knots.get(i + n)) {
+        (Some(&a), Some(&b)) => (b - a - period).abs() <= slack,
+        _ => false,
+    })
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn periodic_knots_repeat_their_spans_one_period_on() {
+        for (count, degree) in [(3, 1), (4, 3), (7, 2), (12, 5)] {
+            let knots = periodic_uniform(count, degree).unwrap();
+            assert!(is_periodic(&knots, degree), "{count}, {degree}");
+            // shifted and scaled, still periodic
+            let moved: Vec<f64> = knots.iter().map(|k| 3.0 * k - 7.0).collect();
+            assert!(is_periodic(&moved, degree), "{count}, {degree}");
+        }
+        // unclamped but not periodic: the spans past the domain differ from those in it
+        assert!(!is_periodic(&[-2.0, -1.0, 0.0, 1.0, 2.0, 4.0, 5.0, 6.0], 2));
+        // clamped, or too few knots for the degree, or not finite
+        assert!(!is_periodic(&[0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0], 2));
+        assert!(!is_periodic(&[0.0, 1.0, 2.0, 3.0], 2));
+        assert!(!is_periodic(
+            &[0.0, f64::NAN, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0],
+            2
+        ));
+    }
 
     #[test]
     fn the_basis_at_an_unclamped_end_is_the_general_one() {
@@ -938,7 +994,8 @@ mod tests {
         for w in knots.windows(2) {
             assert!((w[1] - w[0] - 0.25).abs() < 1e-15, "{knots:?}");
         }
-        // not a clamped vector: KnotVector::validate, upstream's clamped check, refuses it
+        // the periodic contract, which the clamped validator (rightly) refuses
+        assert!(is_periodic(&knots, 3));
         assert!(KnotVector::from_slice(&knots).unwrap().validate(3).is_err());
         for (count, degree) in [(3, 3), (5, 0), (1, 1), (usize::MAX / 2, 1), (usize::MAX, 3)] {
             assert!(

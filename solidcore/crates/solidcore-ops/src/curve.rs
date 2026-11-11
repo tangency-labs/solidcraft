@@ -65,12 +65,12 @@ pub fn move_cv(curve: &Curve, index: usize, to: [f64; 3]) -> Result<Curve> {
 }
 
 /// The index of the copy of control point `index` of a closed periodic spline: one whose knots
-/// are not clamped at the start and whose last `degree` points repeat its first `degree`.
-/// `None` for another spline, or a point that is not repeated.
+/// are periodic ([`solidcore::nurbs::knots::is_periodic`]) and whose last `degree` points
+/// repeat its first `degree`. `None` for another spline, or a point that is not repeated.
 fn periodic_twin(knots: &[f64], points: &[[f64; 3]], index: usize) -> Option<usize> {
     let degree = knots.len().checked_sub(points.len() + 1)?;
     let distinct = points.len().checked_sub(degree)?;
-    if degree == 0 || knots.first() == knots.get(degree) {
+    if !solidcore::nurbs::knots::is_periodic(knots, degree) {
         return None;
     }
     let repeats =
@@ -235,6 +235,17 @@ mod tests {
         for i in [0, 1, 2, 4, 5, 6] {
             assert_eq!(p0[i], p1[i]);
         }
+        // repeated points on unclamped knots that are not periodic move alone
+        let (a, b, c) = ([0.0; 3], [4.0, 0.0, 0.0], [4.0, 4.0, 0.0]);
+        let open = Curve::Spline {
+            knots: vec![-2.0, -1.0, 0.0, 1.0, 2.0, 4.0, 5.0, 6.0],
+            points: vec![a, b, c, a, b],
+        };
+        let moved = move_cv(&open, 0, [1.0, 1.0, 1.0]).unwrap();
+        let Curve::Spline { points, .. } = &moved else {
+            panic!()
+        };
+        assert_eq!((points[0], points[3]), ([1.0, 1.0, 1.0], a));
         // a clamped curve whose last point is its first is not periodic
         let mut ring = SQUARE.to_vec();
         ring.push(SQUARE[0]);
