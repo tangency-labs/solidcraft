@@ -146,10 +146,10 @@ async function checkPicture({ github, context, core }) {
 // Kernel source: the Rust under solidcore/ and crates/smlib/ that is not a test or a golden.
 const KERNEL_ROOT = /^(solidcore|crates\/smlib)\//;
 // Test files and golden expectations, anywhere: a tests/test/goldens/fixtures/snapshots directory
-// (or one named `*_tests`), a `tests.rs`, `test.rs`, `*_tests.rs`, `*_test.rs`, a `.snap`, an
-// `expected*.json`.
+// (or one named `*_tests`), a `tests.rs`, `test.rs`, `*_tests.rs`, `*_test.rs`, a `*.test.js`, a
+// `.snap`, an `expected*.json`.
 const TEST_DIR = /^(?:tests?|goldens?|fixtures|snapshots|testdata|[\w-]+_tests)$/;
-const TEST_FILE = /(?:^|_)tests?\.rs$|\.snap$|^expected[\w.-]*\.json$/;
+const TEST_FILE = /(?:^|_)tests?\.rs$|\.(?:test|spec)\.[cm]?[jt]s$|\.snap$|^expected[\w.-]*\.json$/;
 // Shrink-only ledgers a fix is meant to edit: a test that now passes leaves the list.
 const TEST_LEDGERS = new Set([
   'tests/KNOWN_FAILING_TESTS',
@@ -185,11 +185,22 @@ function changedTestLines(file) {
   if (file.status === 'removed') return file.deletions || 1;
   if (typeof file.patch !== 'string') return file.deletions || 0;
   const lines = file.patch.split('\n');
-  const added = new Set(lines.filter((l) => l.startsWith('+')).map((l) => l.slice(1).trim()));
+  // Each added line can account for one removed copy of itself.
+  const added = new Map();
+  for (const l of lines) {
+    if (l.startsWith('+')) added.set(l.slice(1).trim(), (added.get(l.slice(1).trim()) || 0) + 1);
+  }
+  const comment = (t) => t.startsWith('//') || t.startsWith('/*') || t.startsWith('*/') || t === '*' || t.startsWith('* ');
   return lines.filter((l) => {
     if (!l.startsWith('-')) return false;
     const t = l.slice(1).trim();
-    return t !== '' && !t.startsWith('//') && !/^(?:pub(?:\([\w:]+\))?\s+)?(?:use|mod)\s/.test(t) && !added.has(t);
+    if (t === '' || comment(t) || /^(?:pub(?:\([\w:]+\))?\s+)?(?:use|mod)\s/.test(t)) return false;
+    const n = added.get(t) || 0;
+    if (n > 0) {
+      added.set(t, n - 1);
+      return false;
+    }
+    return true;
   }).length;
 }
 

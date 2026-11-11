@@ -206,6 +206,7 @@ test('isTestFile and isKernelSource', () => {
     'tests/kernel-cases/fillets/a.json',
     'tests/oracle/85-plate-width-100/expected.json',
     'crates/ui-egui/src/snapshots/a.snap',
+    'scripts/pr-checks/pr-checks.test.js',
   ]) assert.ok(pc.isTestFile(t), t);
   for (const t of ['solidcore/crates/solidcore/src/sweep/api_brep.rs', 'crates/smlib/src/core/blend.rs', 'crates/kernel/src/attest.rs'])
     assert.ok(!pc.isTestFile(t), t);
@@ -231,6 +232,9 @@ test('changedTestLines ignores imports, comments, blank lines and moved lines', 
   assert.equal(pc.changedTestLines(f('@@ -1,3 +1,3 @@\n-use solidcore::math::Vec3;\n-\n- // old note\n+use solidcore::math::Point3;')), 0);
   assert.equal(pc.changedTestLines(f('@@ -1,2 +1,2 @@\n-    assert!(ok);\n+        assert!(ok);')), 0);
   assert.equal(pc.changedTestLines(f('@@ -1,2 +1,2 @@\n-    let r = 2.0;\n+    let r = 1.5;')), 1);
+  assert.equal(pc.changedTestLines(f('@@ -1,3 +1,0 @@\n-    /* obsolete\n-     * explanation\n-     */')), 0);
+  // one re-added copy accounts for one of two removed assertions
+  assert.equal(pc.changedTestLines(f('@@ -1,2 +1,1 @@\n-    assert!(ok);\n-    assert!(ok);\n+        assert!(ok);')), 1);
   assert.equal(pc.changedTestLines({ filename: 'x/tests/a.rs', status: 'modified', deletions: 3 }), 3);
   assert.equal(pc.changedTestLines({ filename: 'x/tests/a.rs', status: 'removed', deletions: 0 }), 1);
 });
