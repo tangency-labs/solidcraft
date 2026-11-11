@@ -2,9 +2,9 @@
 //! construction planes, plus document settings and the origin.
 //!
 //! Rows are drawn in code (icons from [`icons`]) and act through commands. A click selects
-//! (Ctrl adds, Shift extends over the visible rows), hovering a body row lights it up in the
-//! viewport, a double-click on a sketch edits it, and a right-click opens the item's menu
-//! ([`crate::context_menu`]).
+//! (Ctrl adds, Shift extends over the visible rows), a slower second click on a name starts
+//! renaming it, hovering a body row lights it up in the viewport, a double-click on a sketch
+//! edits it, and a right-click opens the item's menu ([`crate::context_menu`]).
 
 use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
@@ -784,7 +784,15 @@ fn compact_tree(ui: &egui::Ui) -> bool {
 
 /// Where tree rows put their eye this frame (Preferences › Interface, #8718).
 pub(crate) fn publish_row_prefs(app: &SolveApp, ctx: &egui::Context) {
-    ctx.data_mut(|d| d.insert_temp(egui::Id::unique("sc_tree_eye_left"), app.preferences.browser_eye_left));
+    ctx.data_mut(|d| {
+        d.insert_temp(egui::Id::unique("sc_tree_eye_left"), app.preferences.browser_eye_left);
+        d.insert_temp(egui::Id::unique("sc_tree_dialog_open"), app.dialog.is_some());
+    });
+}
+
+/// With a dialog open a second click on a row picks again, so it never waits to rename.
+fn dialog_open(ui: &egui::Ui) -> bool {
+    ui.ctx().data(|d| d.get_temp::<bool>(egui::Id::unique("sc_tree_dialog_open"))).unwrap_or(false)
 }
 
 fn eye_left(ui: &egui::Ui) -> bool {
@@ -800,7 +808,67 @@ pub(crate) fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row<'_>) -> RowRes
         let fold = row.fold.map(|_| Rect::from_min_max(pos2(x - 4.0, r.top()), pos2(x + 15.0, r.bottom())));
         crate::semantic_content::record_row(ui, (row.label.to_string(), r, fold, row.fold), &out);
     }
+    let clicked = out.resp.as_ref().is_some_and(|resp| resp.clicked());
+    // Only a plain click: Ctrl and Shift keep adding to and extending the selection.
+    let plain = !ui.input(|i| i.modifiers.command || i.modifiers.ctrl || i.modifiers.shift);
+    let name_click = row.rename && out.clicked && !out.double && plain && !dialog_open(ui);
+    out.slow_rename = slow_rename_click(ui, id, clicked, name_click, &mut out);
     out
+}
+
+/// A second click on the same name later than this is a new gesture, not a rename.
+const SLOW_RENAME_WINDOW: f64 = 3.0;
+
+/// A slower second click on a row's name renames it, once the double-click delay has passed
+/// with no further click: the click is held back until then, so the first click of a
+/// double-click never starts a rename and the double-click keeps editing or opening the row.
+/// The held click comes back as `clicked` with `slow_rename` set. A double-click, or a press
+/// anywhere else, drops it.
+fn slow_rename_click(ui: &egui::Ui, row: egui::Id, clicked: bool, name_click: bool, out: &mut RowResp) -> bool {
+    let last_key = egui::Id::unique("sc_browser_last_name_click");
+    let pending_key = egui::Id::unique("sc_browser_pending_rename");
+    let now = ui.input(|i| i.time);
+    if !now.is_finite() {
+        return false;
+    }
+    let delay = ui.ctx().options(|options| options.input_options.max_double_click_delay);
+    let pressed = ui.input(|i| i.pointer.any_pressed());
+    // (row, due, made)
+    if let Some((pending_row, due, made)) = ui.ctx().data(|data| data.get_temp::<(egui::Id, f64, f64)>(pending_key)) {
+        let stale = !(due.is_finite() && made.is_finite()) || now > due + SLOW_RENAME_WINDOW;
+        if stale || (pressed && now > made) || (pending_row == row && out.double) {
+            ui.ctx().data_mut(|data| data.remove::<(egui::Id, f64, f64)>(pending_key));
+        } else if pending_row == row {
+            if now >= due {
+                ui.ctx().data_mut(|data| data.remove::<(egui::Id, f64, f64)>(pending_key));
+                out.clicked = true;
+                return true;
+            }
+            ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64((due - now).clamp(0.0, SLOW_RENAME_WINDOW)));
+        }
+    }
+    if !clicked {
+        return false;
+    }
+    let previous = ui.ctx().data_mut(|data| {
+        let previous = data.get_persisted::<(egui::Id, f64, bool)>(last_key);
+        data.insert_persisted(last_key, (row, now, name_click));
+        previous
+    });
+    let slow = name_click
+        && previous.is_some_and(|(previous_row, previous_time, previous_was_name)| {
+            previous_row == row
+                && previous_was_name
+                && previous_time.is_finite()
+                && now - previous_time > delay
+                && now - previous_time <= SLOW_RENAME_WINDOW
+        });
+    if slow {
+        ui.ctx().data_mut(|data| data.insert_temp(pending_key, (row, now + delay, now)));
+        ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(delay.clamp(0.0, SLOW_RENAME_WINDOW)));
+        out.clicked = false;
+    }
+    false
 }
 
 /// A Ctrl/Shift-aware click on a selectable row.
@@ -1010,9 +1078,30 @@ struct Lit {
     /// The placements holding a lit body, and the components holding a lit sketch or plane.
     paths: Vec<Vec<u64>>,
     components: Vec<u64>,
+    /// The feature of what is under the pointer in the 3D view, and of the face or edge picked
+    /// there ([`Lit::features_from_view`]), once worked out this frame.
+    from_view: Option<[Option<u64>; 2]>,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How often the features lit from the 3D view were worked out (the tests count them).
+    static FROM_VIEW_WORKED_OUT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 impl Lit {
+    /// The feature that made what is under the pointer in the 3D view, and the one that made the
+    /// face or edge picked there, as the history lights them. Worked out for the first feature row
+    /// that asks in a frame: every row and folder looked them up again, the pick naming every face
+    /// of its body each time (#14850).
+    fn features_from_view(&mut self, app: &SolveApp) -> [Option<u64>; 2] {
+        *self.from_view.get_or_insert_with(|| {
+            #[cfg(test)]
+            FROM_VIEW_WORKED_OUT.with(|n| n.set(n.get() + 1));
+            [crate::timeline::hovered_feature(app), crate::timeline::picked_feature(app)]
+        })
+    }
+
     fn of(app: &mut SolveApp) -> Lit {
         use crate::viewport::Hit;
         let mut selected = std::collections::HashSet::new();
@@ -1104,7 +1193,7 @@ impl Lit {
         // A body both holding the selection and under the pointer leads to its placement once.
         paths.sort_unstable();
         paths.dedup();
-        Lit { selected, holding, hovered, paths, components }
+        Lit { selected, holding, hovered, paths, components, from_view: None }
     }
 
     fn any(&self) -> bool {
@@ -1848,6 +1937,7 @@ fn component_rows_inner(
         icon: "component",
         label: name,
         name: true,
+        rename: true,
         selected: app.tree.picked_components.contains(&id),
         dim: faded,
         radio: Some(active),
@@ -1876,7 +1966,9 @@ fn component_rows_inner(
             app.session.visibility.hidden_bodies.retain(|b| !bodies.contains(b));
         }
     }
-    if r.clicked && !r.double {
+    // With a dialog open a second click picks again: the dialog takes the component's bodies.
+    let rename_here = r.slow_rename && app.dialog.is_none();
+    if r.clicked && !r.double && !rename_here {
         let names = bodies_of_component(app, id);
         if !offer_bodies(app, &names, Take::Toggle) {
             let ctrl = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
@@ -1891,13 +1983,16 @@ fn component_rows_inner(
             }
         }
     }
-    if r.double {
+    if rename_here {
+        start_inline_rename(app, crate::context_menu::RenameWhat::Component(id), &r);
+    } else if r.double {
         if app.session.doc.parts.contains_key(&id) {
             crate::dialogs_part_size::open(app, id);
         } else {
             crate::edit_in_place::double_click_component(app, json!({ "component": id }));
         }
     }
+    inline_rename(app, ui, &r, name);
     if r.hovered {
         acts.hover(bodies.iter());
     }
@@ -2017,6 +2112,7 @@ fn occurrence_rows_inner(
             secondary: &appearance.name,
             count: &appearance.count,
             name: true,
+            rename: true,
             selected,
             dim: faded || !visible,
             cut,
@@ -2070,17 +2166,22 @@ fn occurrence_rows_inner(
     if r.double && !takes_components && app.session.doc.parts.contains_key(&placement.component) {
         crate::dialogs_part_size::open(app, placement.component);
     }
+    let rename_here = r.slow_rename && app.dialog.is_none();
     if r.clicked && (takes_components || crate::dialogs_move::picks_components(app)) {
         if let Some(mut d) = app.dialog.take() {
             d.pick(&app.session, Sel::Occurrence { path: path.to_vec() });
             app.dialog = Some(d);
         }
-    } else if r.clicked && !r.double {
+    } else if r.clicked && !r.double && !rename_here {
         let names = app.session.occurrence_bodies(path, true).unwrap_or_default();
         if !offer_bodies(app, &names, Take::Toggle) {
             click_select(app, ui, key.clone(), Some(Sel::Occurrence { path: path.to_vec() }));
         }
     }
+    if rename_here {
+        start_inline_rename(app, crate::context_menu::RenameWhat::Component(placement.component), &r);
+    }
+    inline_rename(app, ui, &r, &placement.label);
     if r.hovered {
         let bodies = placement.hover_bodies.get_or_insert_with(|| app.session.occurrence_bodies(path, true).unwrap_or_default());
         acts.hover(bodies.iter());
@@ -2360,7 +2461,7 @@ fn origin_rows_at(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mu
 pub const STANDARD_VIEWS: [(&str, &str); 4] = [("Top", "top"), ("Front", "front"), ("Right", "right"), ("Home", "home")];
 
 /// Named Views: the standard views, then the design's saved cameras. A double-click restores
-/// one (animated).
+/// one (animated); a slower second click renames a saved view.
 fn named_view_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut Actions) {
     let key = "namedviews";
     let open = is_open(app, key, false);
@@ -2388,11 +2489,14 @@ fn named_view_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &m
         let r = draw_row(
             ui,
             ui.scope_id().with(("view", &name)),
-            &Row { depth: depth + 1, icon: "perspective", label: &name, name: true, ..Default::default() },
+            &Row { depth: depth + 1, icon: "perspective", label: &name, name: true, rename: true, ..Default::default() },
         );
-        if r.double {
+        if r.slow_rename {
+            start_inline_rename(app, crate::context_menu::RenameWhat::View(name.clone()), &r);
+        } else if r.double {
             restore_view(app, &name);
         }
+        inline_rename(app, ui, &r, &name);
         if let Some(p) = r.secondary {
             acts.menu = Some((p, Target::NamedView { name }));
         }
@@ -2569,6 +2673,7 @@ fn canvas_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
                 icon: "canvas",
                 label: &name,
                 name: true,
+                rename: true,
                 selected,
                 dim: !visible || !shown,
                 badges,
@@ -2579,23 +2684,30 @@ fn canvas_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
             let _ = app.run("canvas.edit", json!({ "canvas": id, "visible": !visible }));
         }
         if r.clicked {
-            if !ui.input(|i| i.modifiers.command || i.modifiers.ctrl) {
-                app.tree.picked_canvases.clear();
-                app.tree.picked_components.clear();
-                app.tree.picked_joints.clear();
-                let _ = app.run("select.clear", json!({}));
-            }
-            if selected {
-                app.tree.picked_canvases.retain(|c| *c != id);
+            if r.slow_rename {
+                app.tree.picked_canvases = vec![id];
             } else {
-                app.tree.picked_canvases.push(id);
+                if !ui.input(|i| i.modifiers.command || i.modifiers.ctrl) {
+                    app.tree.picked_canvases.clear();
+                    app.tree.picked_components.clear();
+                    app.tree.picked_joints.clear();
+                    let _ = app.run("select.clear", json!({}));
+                }
+                if selected {
+                    app.tree.picked_canvases.retain(|c| *c != id);
+                } else {
+                    app.tree.picked_canvases.push(id);
+                }
             }
         }
-        if r.double && locked {
+        if r.slow_rename {
+            start_inline_rename(app, crate::context_menu::RenameWhat::Canvas(id), &r);
+        } else if r.double && locked {
             app.set_status(solidcraft_ui_text::tr("browser.canvas_locked"), true);
         } else if r.double {
             app.tree.canvas_panel = Some(CanvasPanel::new(app, id, false));
         }
+        inline_rename(app, ui, &r, &name);
         if let Some(p) = r.secondary {
             if !selected {
                 app.tree.picked_canvases = vec![id];
@@ -3216,13 +3328,17 @@ fn folder_level(
                 icon: if render { "" } else { "folder" },
                 label,
                 name: true,
+                rename: true,
                 dim: group_faded || (render && !gopen),
                 count: &count,
                 mark: if acts.lit.any() { acts.lit.branch(app, group.entries()) } else { Mark::None },
                 ..Default::default()
             },
         );
-        if r.fold {
+        // With a dialog open a second click picks again: the dialog takes the group's bodies.
+        if r.slow_rename && app.dialog.is_none() {
+            start_inline_rename(app, crate::context_menu::RenameWhat::Group(id), &r);
+        } else if r.fold {
             toggle(app, gkey, start_open);
         } else if r.clicked {
             let names: Vec<String> = group.entries().into_iter().flat_map(|e| e.bodies.clone()).collect();
@@ -3231,6 +3347,7 @@ fn folder_level(
                 toggle(app, gkey, start_open);
             }
         }
+        inline_rename(app, ui, &r, &group.label);
         if r.eye {
             toggle_folder(app, gkey);
         }
@@ -3299,20 +3416,25 @@ fn order_before(top: &[BrowserEntry], dragged: &[BrowserEntry], before: Option<&
     order
 }
 
-/// The body's name edited in its row (started by a double-click): Enter or leaving the box keeps
-/// the name, Escape cancels.
-fn inline_rename(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect, label_left: f32, e: &Entry) {
-    let editing = app.menu.rename.as_ref().is_some_and(|r| r.inline && matches!(&r.what, crate::context_menu::RenameWhat::Body(b) if *b == e.key));
+pub(crate) fn start_inline_rename(app: &mut SolveApp, what: crate::context_menu::RenameWhat, row: &RowResp) {
+    if let Some(row_id) = row.row_id {
+        crate::context_menu::start_inline_rename(app, what, row.rect.map(|rect| rect.left_bottom()).unwrap_or_default(), row_id);
+    }
+}
+
+/// Edit a browser name in its row: Enter or leaving the box keeps the name, Escape cancels.
+pub(crate) fn inline_rename(app: &mut SolveApp, ui: &mut egui::Ui, row: &RowResp, label: &str) {
+    let (Some(edit_rect), Some(row_id)) = (row.label_rect, row.row_id) else { return };
+    let editing = app.menu.rename.as_ref().is_some_and(|rename| rename.inline && rename.inline_id == Some(row_id));
     if !editing {
         return;
     }
     let Some(mut rename) = app.menu.rename.take() else { return };
-    let edit_rect = Rect::from_min_max(pos2(label_left, row.top() + 1.0), pos2(row.right() - 3.0, row.bottom() - 1.0));
     ui.painter().rect_filled(edit_rect, 3.0, Tokens::get().field);
-    let id = ui.scope_id().with(("browser_rename", &e.row_key));
+    let id = ui.scope_id().with(("browser_rename", row_id));
     let response = crate::ui_kit::inline_name(ui, edit_rect, id, &mut rename.text);
     crate::panel_runtime::register_content_focus(ui.ctx(), &response);
-    crate::scenario::publish_handle(&format!("rename:{}", e.key), edit_rect.center());
+    crate::scenario::publish_handle(&format!("rename:{label}"), edit_rect.center());
     let was_focused = rename.focused;
     if !rename.focused {
         if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), id) {
@@ -3406,6 +3528,7 @@ fn entry_row(
             kind_tip: e.tip,
             label: &e.label,
             name: true,
+            rename: true,
             selected,
             dim: !visible || parent_hidden,
             cut,
@@ -3447,11 +3570,19 @@ fn entry_row(
     if r.eye {
         set_visible(app, folder, &[e], !visible);
     }
-    if r.double && folder == "sketches" {
-        if let Ok(id) = e.key.parse() {
-            app.edit_sketch_in(id, path.map(|path| (comp, path)));
-        }
-    } else if r.clicked {
+    if r.double
+        && folder == "sketches"
+        && let Ok(id) = e.key.parse()
+    {
+        app.edit_sketch_in(id, path.map(|path| (comp, path)));
+    }
+    // A click a dialog takes as a pick (below) leaves the selection as it was: nothing to rename.
+    // With no dialog open, a construction row is selected like any other and renames.
+    let mut dialog_pick = r.clicked && app.dialog.is_some() && {
+        let shift = ui.input(|i| i.modifiers.shift);
+        folder == "construction" || (folder == "bodies" && !shift)
+    };
+    if r.clicked && !(r.double && folder == "sketches") {
         let shift = ui.input(|i| i.modifiers.shift);
         // A body row with a dialog open is a pick, as Combine does (#4452), unless Shift is
         // asking for the rows between this one and the anchor.
@@ -3468,26 +3599,23 @@ fn entry_row(
             && pick_sketch_into_dialog(app, id)
         {
             // Extrude, Revolve or Emboss took all the sketch's profiles (#6106).
+            dialog_pick = true;
         } else {
             click_select(app, ui, e.row_key.clone(), e.sel.clone());
         }
-        // A double-click renames the row (sketch rows open for editing instead), like F2. A body
-        // is edited in its own row.
-        if r.double {
+        // A double-click or a slower second click renames the row (sketch double-clicks edit
+        // instead), like F2.
+        if (r.double || r.slow_rename) && !dialog_pick {
             crate::context_menu::rename_selection(app, r.rect.map(|x| x.left_bottom()).unwrap_or_default());
-            if folder == "bodies"
-                && let Some(rename) = app.menu.rename.as_mut()
-                && matches!(&rename.what, crate::context_menu::RenameWhat::Body(b) if *b == e.key)
+            if let Some(rename) = app.menu.rename.as_mut()
+                && let Some(row_id) = r.row_id
             {
                 rename.inline = true;
+                rename.inline_id = Some(row_id);
             }
         }
     }
-    if folder == "bodies"
-        && let (Some(rect), Some(label_left)) = (r.rect, r.label_left)
-    {
-        inline_rename(app, ui, rect, label_left, e);
-    }
+    inline_rename(app, ui, &r, &e.label);
     if r.hovered && !e.bodies.is_empty() {
         acts.hover(e.bodies.iter());
     }
@@ -3868,11 +3996,7 @@ pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
                 DimFrame::Radial { center, .. } | DimFrame::ArcLength { center, .. } | DimFrame::HalfAxis { center, .. } => center,
                 DimFrame::Angular { vertex, .. } => vertex,
             };
-            let (Some(a), Some(b)) = (to(anchor), to(anchor + Vec2::X)) else { continue };
-            let px = 1.0 / f64::from(a.distance(b)).max(1e-9);
-            if !px.is_finite() {
-                continue;
-            }
+            let Some(px) = crate::dim_view::mm_per_pixel(to, anchor) else { continue };
             let expr = c.param.as_ref().and_then(|p| app.session.doc.param(p)).map(|p| p.expr.as_str());
             let col = if c.driven { tk.dimension_driven } else { tk.dimension };
             let galley = painter.layout_no_wrap(

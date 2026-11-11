@@ -20,8 +20,8 @@ pub use layout::*;
 pub use preferences::*;
 pub(crate) use preferences::{PanelLayoutSnapshot, panel_layout_matches, panel_layout_snapshot};
 pub(crate) use production::{
-    refresh_production, register_content_focus, report_content_composer_height, report_content_extent, shared_content_composer_height,
-    shared_content_measurement,
+    production_active, refresh_production, register_content_focus, report_content_composer_height, report_content_extent,
+    shared_content_composer_height, shared_content_measurement,
 };
 pub use runtime::*;
 pub use specimen::*;

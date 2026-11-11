@@ -278,8 +278,97 @@ fn fillet_turning(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn) ->
 pub fn fillet_removing(body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<(Body, Vec<Vec3>)> {
     let _span = solidcraft_profile::span("kernel", "fillet");
     body.require_brep("fillet")?;
-    let (b, gone) = crate::blend_smlib::fillet_removing(body, edges, radius, turn)?;
-    Ok((closed(body, b)?, gone))
+    match crate::blend_smlib::fillet_removing(body, edges, radius, turn) {
+        Ok((b, gone)) => Ok((closed(body, b)?, gone)),
+        Err(KernelError::TooLarge(why)) => match edges {
+            [pick] => match concave_overflow_round(body, *pick, radius, turn) {
+                Some(b) => Ok((b, Vec::new())),
+                None => Err(KernelError::TooLarge(why)),
+            },
+            _ => Err(KernelError::TooLarge(why)),
+        },
+        Err(e) => Err(e),
+    }
+}
+
+/// A concave round on one straight edge whose contact line runs off the flat face it rolls on
+/// (the face's outline turns away there, into a rounded corner or an opening), which SMLib
+/// refuses (solidcore#3252): the round of the edge on the body with that face carried on as a
+/// slab behind its plane, over the edge's length, the material that round adds kept within the
+/// face's outline (its sheet thickened along its normal) and joined to the body. So the round
+/// ends where the face's outline ends, on the surface of whatever the face turns into there,
+/// carried on square to the face.
+///
+/// Only where it gives the round SMLib would build on an unbounded face: the edge is straight,
+/// one of its faces is planar and it is concave (material in front of that face on the other
+/// face's side), and at each end of the edge a planar face square to it ends the round, so the
+/// slab's square ends add no material the round could run into. `None` where it does not apply
+/// or a step fails: the caller keeps SMLib's refusal. Decided on exact geometry.
+fn concave_overflow_round(body: &Body, pick: Vec3, radius: f64, turn: FilletTurn) -> Option<Body> {
+    use solidcore_record::{Loop2, Plane, Region2, Vec2};
+    if !(radius.is_finite() && radius > 0.0) {
+        return None;
+    }
+    let rec = Faces::of(body).ok()?;
+    let (picked, _) = crate::blend_smlib::picked_edges(body, &[pick]).ok()?;
+    let [e] = picked.as_slice() else { return None };
+    let e = *e;
+    if !rec.straight(e) {
+        return None;
+    }
+    let (a, b) = rec.ends(e)?;
+    let length = a.dist(b);
+    let d = (b - a).normalized()?;
+    let size = body.size();
+    if !(length > 0.0 && size.is_finite() && size > 0.0) {
+        return None;
+    }
+    let eps = (size * 1e-4).max(1e-4).min(radius * 0.1);
+    let middle = (a + b) * 0.5;
+    let [vs, ve] = rec.rec.edges.get(e)?.vertices;
+    // A planar face square to the edge, other than its own, at vertex v.
+    let squared_at = |v: u32| {
+        rec.rec.edges.iter().enumerate().filter(|(_, x)| x.vertices.contains(&v)).any(|(i, _)| {
+            rec.faces_of(i)
+                .into_iter()
+                .any(|f| !rec.faces_of(e).contains(&f) && rec.plane_normal(f as usize).is_some_and(|n| n.dot(d).abs() > 1.0 - 1e-9))
+        })
+    };
+    if !(squared_at(vs) && squared_at(ve)) {
+        return None;
+    }
+    for f in rec.faces_of(e) {
+        let f = f as usize;
+        let Some(n) = rec.plane_normal(f) else { continue };
+        if n.dot(d).abs() > 1e-9 {
+            continue;
+        }
+        let u = n.cross(d);
+        // concave: material in front of the plane beside the edge, on the other face's side
+        let inside = |p: Vec3| matches!(body.classify_point(p), Ok(crate::PointClass::Inside));
+        if !(inside(middle + n * eps + u * eps) || inside(middle + n * eps - u * eps)) {
+            continue;
+        }
+        let far = 4.0 * (size + radius);
+        let plane = Plane { origin: a, x: d, y: u };
+        let rect = Loop2::polygon(&[Vec2::new(0.0, -far), Vec2::new(length, -far), Vec2::new(length, far), Vec2::new(0.0, far)]);
+        let slab = crate::build::extrude(&plane, &[Region2 { outer: rect, holes: vec![] }], -far, 0.0).ok()?.into_iter().next()?;
+        let carried = crate::boolean(body, &slab, crate::BoolOp::Union).ok()??;
+        let rounded = crate::blend_smlib::fillet(&carried, &[pick], radius, turn);
+        let rounded = rounded.ok()?;
+        let fill = crate::boolean(&rounded, &carried, crate::BoolOp::Cut).ok()??;
+        // the face itself, by its index, for its sheet
+        let sheet = crate::surfaces::taken(body, &rec.rec, &[(f, false)]).ok()?;
+        let prism = crate::thicken(&sheet, 4.0 * (radius + size * 1e-3 + 1.0), true).ok()?;
+        let kept = crate::boolean(&fill, &prism, crate::BoolOp::Intersect).ok()??;
+        let joined = crate::boolean(body, &kept, crate::BoolOp::Union).ok()??;
+        let joined = closed(body, joined).ok()?;
+        let grew = |x: &Body| crate::measure(x).ok().map(|m| m.volume);
+        if grew(&joined)? > grew(body)? {
+            return Some(over_body_alone(joined, body, e));
+        }
+    }
+    None
 }
 
 /// What a refusal of a setback too short for its corner says before the least that builds (in
@@ -299,6 +388,61 @@ pub fn fillet_setback(body: &Body, edges: &[Vec3], radius: f64, setbacks: &[(Vec
     body.require_brep("fillet")?;
     setbacks_reach(body, edges, radius, setbacks)?;
     crate::blend_smlib::fillet_setback(body, edges, radius, setbacks).and_then(|b| closed(body, b))
+}
+
+/// `joined` (the union of `body` and the material a round of its edge `edge` adds, its history
+/// over those two) with its history over `body` alone, as a fillet reports it: a face or an
+/// edge of the body stays that; a face only the added material brought is made in place of
+/// the edge, and an edge where such a face meets a face of the body is where the edge's round
+/// meets that face. Without a history where the union reported none or the rewritten one does
+/// not describe the body: a result is never given a guessed history.
+fn over_body_alone(joined: Body, body: &Body, edge: usize) -> Body {
+    use crate::history::{Change, EdgeOrigin, EdgeProv, FaceOrigin, FaceProv, History, Side};
+    let Some(union) = joined.history().filter(|h| h.operands == 2).cloned() else { return joined.without_history() };
+    let round = FaceOrigin::Edge { operand: 0, edge };
+    // An origin in the body stays; one in the added material is the round.
+    let of_body = |o: &FaceOrigin| match *o {
+        FaceOrigin::Face { operand, .. } | FaceOrigin::Edge { operand, .. } | FaceOrigin::Offset { operand, .. } => operand == 0,
+        FaceOrigin::Profile { .. } | FaceOrigin::Cap { .. } => false,
+    };
+    let faces = union
+        .faces
+        .iter()
+        .map(|f| {
+            let origins: Vec<FaceOrigin> = f.origins.iter().filter(|o| of_body(o)).copied().collect();
+            if origins.is_empty() {
+                return FaceProv { origins: vec![round], change: Change::Generated };
+            }
+            // A face of the body the added material's face was joined to is that face, grown.
+            let change = if f.change == Change::Merged && origins.len() == 1 { Change::Modified } else { f.change };
+            FaceProv { origins, change }
+        })
+        .collect();
+    let side = |s: &Side| Side::new(s.origins().iter().map(|o| if of_body(o) { *o } else { round }));
+    let edges = union
+        .edges
+        .iter()
+        .map(|e| {
+            let origins = e
+                .origins
+                .iter()
+                .filter_map(|o| match o {
+                    EdgeOrigin::Edge { operand: 0, .. } => Some(o.clone()),
+                    EdgeOrigin::Edge { .. } => None,
+                    EdgeOrigin::Meet { a, b } => match (side(a), side(b)) {
+                        (Some(a), Some(b)) if a != b => Some(EdgeOrigin::meet(a, b)),
+                        _ => None,
+                    },
+                })
+                .collect();
+            EdgeProv { faces: e.faces.clone(), origins }
+        })
+        .collect();
+    let history = History { operands: 1, faces, edges };
+    match history.check_counts((joined.face_count(), joined.edge_count()), &crate::record::counts(&[body])) {
+        Ok(()) => joined.clone().with_history_counts(history, &crate::record::counts(&[body])).unwrap_or_else(|_| joined.without_history()),
+        Err(_) => joined.without_history(),
+    }
 }
 
 /// Refuses a setback that does not reach past where its corner's rounds meet without one
@@ -833,6 +977,24 @@ pub fn blend_edges(body: &Body, picks: &[Vec3]) -> Result<Vec<usize>> {
 /// vertex.
 /// Picks that find no edge are refused.
 pub fn tangent_chain(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
+    let (rec, chain, picked) = picked_chain(body, picks)?;
+    let mut out = picks.to_vec();
+    for e in chain.into_iter().skip(picked) {
+        out.push(edge_middle(&rec, e).ok_or_else(|| KernelError::Failed("a point on a chain edge".into()))?);
+    }
+    Ok(out)
+}
+
+/// [`tangent_chain`] as the record's edge indices (the display's edge indices,
+/// [`Body::edges`]): the edges `picks` take, each once, then the edges that continue them.
+/// For a caller that shows the chain: it needs no point looked up on a tessellated edge.
+pub fn tangent_chain_edges(body: &Body, picks: &[Vec3]) -> Result<Vec<usize>> {
+    picked_chain(body, picks).map(|(_, chain, _)| chain)
+}
+
+/// The body's record, the picked edges' tangent chain as its edge indices (the picked edges
+/// first, each once), and how many of those the picks took.
+fn picked_chain(body: &Body, picks: &[Vec3]) -> Result<(Faces, Vec<usize>, usize)> {
     if picks.is_empty() || picks.len() > 1000 || picks.iter().any(|p| !p.is_finite()) {
         return Err(KernelError::Invalid("select 1…1000 edges by finite points".into()));
     }
@@ -845,11 +1007,7 @@ pub fn tangent_chain(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
         }
     }
     let chain = chain_of(&rec, &picked, &hidden)?;
-    let mut out = picks.to_vec();
-    for e in chain.into_iter().skip(picked.len()) {
-        out.push(edge_middle(&rec, e).ok_or_else(|| KernelError::Failed("a point on a chain edge".into()))?);
-    }
-    Ok(out)
+    Ok((rec, chain, picked.len()))
 }
 
 /// Edges meeting at an angle (radians) below this continue one another; faces meeting at an
@@ -1265,6 +1423,74 @@ pub(crate) fn with_continuation(e: KernelError, next: Option<Vec3>) -> KernelErr
 mod tests {
     use super::*;
     use solidcore_record::{Loop2, Plane, Region2, Vec2};
+
+    /// The plate with its r16 corner, boss and cut (SolidCraft's filletfile.sc).
+    fn boss_on_rounded_plate() -> Body {
+        let plate = crate::box_solid(Vec3::new(0.0, -10.5, -100.0), Vec3::new(48.5, 0.0, 0.0)).unwrap();
+        let plate = fillet(&plate, &[Vec3::new(48.5, -5.25, 0.0)], 16.0).unwrap();
+        let boss = crate::cylinder(Vec3::new(14.388009991673611, -14.038301415494109, -24.0), Vec3::Z, 12.90348790056394, 24.0).unwrap();
+        let body = crate::boolean(&plate, &boss, crate::BoolOp::Union).unwrap().unwrap();
+        let cut = crate::box_solid(Vec3::new(-1.0, -11.0, -64.0), Vec3::new(26.796894836538296, 1.0, -24.0)).unwrap();
+        crate::boolean(&body, &cut, crate::BoolOp::Cut).unwrap().unwrap()
+    }
+
+    /// The boss's concave base edge on the rounded plate: rounded 5 (its contact line on the
+    /// plate's front face stays short of x 32.5, where the face's top edge turns into the r16
+    /// corner's arc) SMLib builds it; rounded 6 and 8 the line runs past there and SMLib
+    /// refuses it (solidcore#3252), and the round is built by carrying the face on: its
+    /// material is the round's section between the plane and the boss (exact, by integration
+    /// below) over the boss's 24 mm, less the sliver past the arc. At 5 the carried-on build
+    /// gives SMLib's volume. Closed, one shell, inside the plate's box.
+    #[test]
+    fn a_concave_round_runs_on_past_where_its_face_turns_into_a_round() {
+        let body = boss_on_rounded_plate();
+        let before = crate::measure(&body).unwrap();
+        let pick = Vec3::new(26.796894836538296, -10.5, -12.0);
+        // the round's section between the plate's plane, the boss's circle and the round's arc
+        let section = |r: f64| {
+            let (cx, cy, big, yp) = (14.388009991673611, -14.038301415494109, 12.90348790056394, -10.5);
+            let (bx, by) = (cx + ((big + r).powi(2) - (yp - r - cy).powi(2)).sqrt(), yp - r);
+            let k = big / (big + r);
+            let (tx, ty) = (cx + (bx - cx) * k, cy + (by - cy) * k);
+            let ex = cx + (big * big - (yp - cy).powi(2)).sqrt();
+            let mut pts = vec![(ex, yp), (bx, yp)];
+            let n = 4000;
+            let (a0, a1) = ((yp - by).atan2(0.0), (ty - by).atan2(tx - bx));
+            pts.extend((1..=n).map(|i| {
+                let t = a0 + (a1 - a0) * f64::from(i) / f64::from(n);
+                (bx + r * t.cos(), by + r * t.sin())
+            }));
+            let (c0, c1) = ((ty - cy).atan2(tx - cx), (yp - cy).atan2(ex - cx));
+            pts.extend((1..n).map(|i| {
+                let t = c0 + (c1 - c0) * f64::from(i) / f64::from(n);
+                (cx + big * t.cos(), cy + big * t.sin())
+            }));
+            let twice: f64 = pts.iter().zip(pts.iter().cycle().skip(1)).map(|(p, q)| p.0 * q.1 - q.0 * p.1).sum();
+            twice.abs() / 2.0
+        };
+        let smlib = crate::measure(&fillet(&body, &[pick], 5.0).unwrap()).unwrap().volume;
+        let (carried, _) = fillet_removing(&body, &[pick], 5.0, FilletTurn::Mitre).unwrap();
+        assert!((crate::measure(&carried).unwrap().volume - smlib).abs() < 1e-6);
+        assert!((smlib - before.volume - section(5.0) * 24.0).abs() < 1e-3, "{}", smlib - before.volume);
+        for r in [6.0, 8.0] {
+            assert!(matches!(fillet(&body, &[pick], r), Err(KernelError::TooLarge(_))), "SMLib refuses r {r}");
+            let (rounded, gone) = fillet_removing(&body, &[pick], r, FilletTurn::Mitre).unwrap_or_else(|e| panic!("r {r}: {e}"));
+            assert!(gone.is_empty());
+            // its history is a fillet's, over the body alone: a face made in place of the edge
+            let (picked, _) = crate::blend_smlib::picked_edges(&body, &[pick]).unwrap();
+            let h = rounded.history().expect("a history");
+            assert_eq!(h.operands, 1);
+            assert!(h.faces.iter().any(|f| f.origins == [crate::history::FaceOrigin::Edge { operand: 0, edge: picked[0] }]), "r {r}");
+            // and every face of the body is still there, under its own origin
+            let still = |i: usize| h.faces.iter().any(|f| f.origins.contains(&crate::history::FaceOrigin::Face { operand: 0, face: i }));
+            assert!((0..body.face_count()).all(still), "r {r}");
+            let m = crate::measure(&rounded).unwrap();
+            let added = m.volume - before.volume;
+            let full = section(r) * 24.0;
+            assert!(m.shells == 1 && (full - added).abs() < 0.05, "r {r}: added {added} of {full}");
+            assert!(m.bbox.min.dist(before.bbox.min) < 1e-9 && m.bbox.max.dist(before.bbox.max) < 1e-9, "r {r}: {:?}", m.bbox);
+        }
+    }
 
     /// A search where every candidate is refused as too large keeps the smallest size it tried
     /// and that candidate's own refusal, and builds nothing: the caller can say why nothing

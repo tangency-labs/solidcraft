@@ -2310,16 +2310,13 @@ mod tests {
         );
         // SplitFilletGeom (wired to blend.fillet_geom_p1 on main) reaches the geometry's
         // rail vertex uses, which this fixture's rails do not have: an upstream error
-        assert!(
-            matches!(
-                r,
-                Err(SolidError::Upstream {
-                    operation: "blend::fillet_geom::p1::FilletBrep::rail_vertexuse",
-                    ..
-                })
-            ),
-            "{r:?}"
+        let e = r.unwrap_err();
+        assert_eq!(
+            e.operation(),
+            "blend::fillet_geom::p1::FilletBrep::rail_vertexuse",
+            "{e:?}"
         );
+        assert!(e.upstream_status().is_some(), "{e:?}");
         assert!(fb.geom(g).unwrap().fillet_surface.is_some());
     }
 

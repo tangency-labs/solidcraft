@@ -1054,6 +1054,18 @@ fn solid(e: &SolidError) -> Run {
                 kind: FitKindName::of(fit.kind),
             },
         },
+        // a typed blend failure reads as the bare `Upstream` it replaced did
+        // ("{operation}: upstream status N[ at entity]"), so a case's expected refusal text
+        // still matches (#13790)
+        e if e.blend_failure().is_some() => match crate::output::blend_status(e) {
+            Some(code) => Run::Error(format!(
+                "{}: upstream status {code}{}",
+                e.operation(),
+                e.entity()
+                    .map_or_else(String::new, |at| format!(" at {at}"))
+            )),
+            None => Run::Error(e.to_string()),
+        },
         _ => Run::Error(e.to_string()),
     }
 }
@@ -1750,7 +1762,6 @@ fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
         "cover_wraps_across_closed_seam" => &mut k.fixes.cover_wraps_across_closed_seam,
         "fillet_refuse_non_manifold_result" => &mut k.fixes.fillet_refuse_non_manifold_result,
         "fillet_torus_rail_on_axis" => &mut k.fixes.fillet_torus_rail_on_axis,
-        "cone_parallel_line_midpoint" => &mut k.fixes.cone_parallel_line_midpoint,
         "fillet_trace_from_tangent_point_toward_next" => {
             &mut k.fixes.fillet_trace_from_tangent_point_toward_next
         }

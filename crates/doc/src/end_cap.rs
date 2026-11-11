@@ -491,7 +491,7 @@ pub(crate) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Featu
                 .ok_or_else(|| invalid("cutting the member back for an inward end cap left nothing"))?;
             let cut = crate::lineage::Traced::step(cut, &[&mb.traced(), &tool]);
             if let Some(slot) = st.bodies.get_mut(i) {
-                *slot = ModelBody::traced_new(mb.name, cut, mb.feature);
+                *slot = mb.remade(cut);
             }
         }
         let body = one(kernel::extrude(&p.plane, std::slice::from_ref(&p.region), p.cap.0, p.cap.1)?)?;

@@ -83,7 +83,7 @@ fn placed_step_body_uses_imported_opacity_until_a_design_look_overrides_it() {
     let body = kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0))
         .unwrap()
         .with_color(Some([0.2, 0.6, 0.8]))
-        .with_paint(Some(kernel::Paint { opacity: 0.4, faces: Vec::new() }));
+        .with_paint(Some(kernel::Paint { opacity: 0.4, faces: Vec::new(), name: None }));
     let step =
         kernel::step_export_bodies(&[kernel::ExportBody { name: "Imported glass".into(), body: &body, color: body.color() }], &Default::default())
             .unwrap();

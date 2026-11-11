@@ -4713,14 +4713,13 @@ mod tests {
         let mut original = Brep::new();
         let cache = BrepCache::new(crate::geom::a_object::BREP_TYPE).unwrap();
         let keys = OriginalKeys::new(&original).unwrap();
-        assert!(matches!(
-            solve_original_brep_point(&kernel, &mut original, &cache, &keys, Vec3::ZERO),
-            Err(SolidError::Upstream {
-                operation: "intersect::topology_solver::p1::TopologyObjects::brep_trees",
-                code: crate::error::SM_ERR_NULL_POINTER,
-                ..
-            })
-        ));
+        let e = solve_original_brep_point(&kernel, &mut original, &cache, &keys, Vec3::ZERO)
+            .unwrap_err();
+        assert_eq!(
+            e.operation(),
+            "intersect::topology_solver::p1::TopologyObjects::brep_trees"
+        );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
     }
 
     #[test]
