@@ -141,6 +141,7 @@ use crate::nurbs::b_spline_surface::{
     BSplineSurfaceForm, IsoCurveOptions, LocationType, SurfParamType,
 };
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
+use crate::surface::cone::checked::CheckedMemo;
 use crate::surface::surf_of_revolution::p1::gen_max_analytic_domain;
 use crate::surface::surf_of_revolution::{RevolutionIsoCurve, SurfOfRevolution};
 use crate::surface::surface::p2::{scale_step_angular_derivatives, CONE_TYPE, CYLINDER_TYPE};
@@ -228,7 +229,7 @@ pub struct Coincidence {
 /// at the semi-angle to the axis, `S(u, v) = O + R(v) (cos u X + sin u Y) + v Z` with
 /// `R(v) = base_radius + tan(semi_angle) v`, `u` in degrees and `v` the height along
 /// the axis from the origin.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Cone {
     /// The `SmSurfOfRevolution` base object.
     pub(crate) rev: SurfOfRevolution,
@@ -241,6 +242,24 @@ pub struct Cone {
     pub(crate) inside_out: bool,
     /// The object is an `SmCylinder`.
     pub(crate) cylinder: bool,
+    /// What the checked cylinder evaluation derives from the surface alone, kept with
+    /// the exact data it was derived from: a hit returns the bits a fresh derivation
+    /// would ([`super::checked`]).
+    pub(crate) checked: CheckedMemo,
+}
+
+// (the derived memo is not part of the surface's value: a cone prints as it did)
+#[allow(clippy::missing_fields_in_debug)]
+impl std::fmt::Debug for Cone {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Cone")
+            .field("rev", &self.rev)
+            .field("base_radius", &self.base_radius)
+            .field("semi_angle_deg", &self.semi_angle_deg)
+            .field("inside_out", &self.inside_out)
+            .field("cylinder", &self.cylinder)
+            .finish()
+    }
 }
 
 /// With `Kernel::fixes.cone_unbounded_parameterized_as_nurb` (WR-713, #2313), whether an
@@ -520,6 +539,7 @@ impl Cone {
             semi_angle_deg: UNDEF_DOUBLE,
             inside_out: false,
             cylinder,
+            checked: CheckedMemo::default(),
         }
     }
 
@@ -572,6 +592,7 @@ impl Cone {
             semi_angle_deg,
             inside_out,
             cylinder: false,
+            checked: CheckedMemo::default(),
         };
 
         // Create generator curve (SmLine)
@@ -711,6 +732,7 @@ impl Cone {
             semi_angle_deg: 0.0,
             inside_out,
             cylinder: false,
+            checked: CheckedMemo::default(),
         };
 
         // Specify GenCurve type
@@ -2962,6 +2984,61 @@ mod tests {
             assert_eq!(typed.is_status_answer(), before.is_status_answer());
             assert_eq!(typed.surface_failure(), Some(&failure));
         }
+    }
+
+    /// The checked data a cylinder derives once (#13891) serves only the surface value it
+    /// was derived from: before and after a trim, and on a copy, every point and every
+    /// verification is the one a cylinder deriving afresh gives.
+    #[test]
+    fn checked_cylinder_memo_answers_as_a_fresh_derivation() {
+        let k = Kernel::default();
+        let check = |cone: &Cone| {
+            let domain = cone.rev().base().natural_uv_domain();
+            for fraction in [0.0, 0.137, 0.5, 0.829, 1.0] {
+                let uv = Point2::new(
+                    domain.u_min() + fraction * (domain.u_max() - domain.u_min()),
+                    domain.v_min() + fraction * (domain.v_max() - domain.v_min()),
+                );
+                let point = cone.evaluate_point(&k, uv).unwrap();
+                let mut alone = cone.clone();
+                alone.checked = CheckedMemo::default();
+                assert_eq!(point, alone.evaluate_point(&k, uv).unwrap());
+                for candidate in [point, point + Vec3::X * 1e-9, point + Vec3::X] {
+                    assert_eq!(
+                        format!(
+                            "{:?}",
+                            cone.verify_cylinder_runtime_point(&k, uv, candidate)
+                        ),
+                        format!(
+                            "{:?}",
+                            alone.verify_cylinder_runtime_point(&k, uv, candidate)
+                        ),
+                    );
+                }
+            }
+        };
+        let mut cone = Cone::create_canonical(
+            &k,
+            &Axis2Placement::IDENTITY,
+            10.0,
+            10.0,
+            20.0,
+            false,
+            false,
+        )
+        .unwrap();
+        check(&cone);
+        let domain = cone.rev().base().natural_uv_domain();
+        let dv = domain.v_max() - domain.v_min();
+        let trimmed = Extent2d::from_bounds(
+            domain.u_min(),
+            domain.v_min() + 0.25 * dv,
+            domain.u_max(),
+            domain.v_max() - 0.25 * dv,
+        );
+        cone.trim_with_domain(&k, &trimmed).unwrap();
+        check(&cone);
+        check(&cone.clone());
     }
 
     #[test]

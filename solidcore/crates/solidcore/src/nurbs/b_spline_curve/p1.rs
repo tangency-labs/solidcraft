@@ -771,6 +771,15 @@ impl BSplineCurve {
         Ok(self.nurb_ref()?.cpts())
     }
 
+    /// The knot vector in use, every knot as stored (`N_CrvGetKnots`), borrowed.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` without a NURB.
+    pub(crate) fn knot_values(&self) -> Result<&[f64]> {
+        Ok(self.nurb_ref()?.knots())
+    }
+
     /// The Euclidean control points (a missing `z` is `0`) and, for a rational curve,
     /// the weights (empty otherwise) (`GetControlPolygon`).
     ///

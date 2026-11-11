@@ -920,6 +920,8 @@ impl Surface {
                 semi_angle_deg: s.semi_angle_deg,
                 inside_out: s.inside_out,
                 cylinder: s.cylinder,
+                // (checked against the copy's own bits before any use)
+                checked: s.checked.clone(),
             })),
             SurfaceKind::Sphere(s) => SurfaceKind::Sphere(Box::new(Sphere {
                 base: s.base().clone_for_evaluation(depth + 1)?,
