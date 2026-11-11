@@ -213,7 +213,10 @@ mod tests {
             [10.0, 10.0, 0.0],
             [0.0, 10.0, 1.0],
         ]);
-        assert_eq!(plane_of(&[twisted.clone()], 1e-6).unwrap(), None);
+        assert_eq!(
+            plane_of(std::slice::from_ref(&twisted), 1e-6).unwrap(),
+            None
+        );
         let slightly = spline(&[
             [0.0, 0.0, 0.0],
             [10.0, 0.0, 0.0],
@@ -265,7 +268,7 @@ mod tests {
             start: [0.0; 3],
             end: [1.0, 0.0, 0.0],
         };
-        assert!(plane_of(&[line.clone()], 0.0).is_err());
+        assert!(plane_of(std::slice::from_ref(&line), 0.0).is_err());
         assert!(plane_of(&[line], f64::NAN).is_err());
         let bad = Curve::RationalSpline {
             knots: vec![0.0, 0.0, 1.0, 1.0],
