@@ -1770,6 +1770,46 @@ pub fn find_side_of_curve(
     projection_direction: Vec3,
     tol: f64,
 ) -> Result<bool> {
+    match side_of_curve(k, curve, point, projection_direction, tol)? {
+        SideOfCurve::Right(right) => Ok(right),
+        SideOfCurve::Undecided(reason) => Err(SolidError::topology_failed(OP, reason)),
+        SideOfCurve::NoProjection => Err(SolidError::topology_failed(OP, NOT_ONCE)),
+    }
+}
+
+/// Why [`find_side_of_curve`] fails when the projection has no single solution.
+const NOT_ONCE: &str = "the point does not project onto the curve exactly once";
+
+/// What [`side_of_curve`] found for a point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SideOfCurve {
+    /// The point is off the curve: whether it lies on the right-hand side.
+    Right(bool),
+    /// The side is left open, as upstream's `UNSURE`: the point is on the curve (within
+    /// the tolerance), the tangent is along the projection direction, the projected
+    /// vector and the tangent are parallel, or the projection has no single solution
+    /// and the curve may be nearest at an end (a point beyond the end of the curve).
+    /// It carries the reason [`find_side_of_curve`] fails with.
+    Undecided(&'static str),
+    /// The projection gave no solution although the curve comes nearer to the point
+    /// inside its interval than at its ends: a nearest point exists there and was not
+    /// found, so nothing is known about the point (#13679).
+    NoProjection,
+}
+
+/// [`find_side_of_curve`] with its `SM_ERR` cases told apart: a caller that reads an
+/// undecided side as "on the curve" must not read a failed projection that way.
+///
+/// # Errors
+///
+/// Those of the solve and evaluation.
+pub(crate) fn side_of_curve(
+    k: &Kernel,
+    curve: &Curve,
+    point: Point3,
+    projection_direction: Vec3,
+    tol: f64,
+) -> Result<SideOfCurve> {
     // Project Point onto Curve along the Projection direction
     let vectors = [projection_direction];
     let solutions = curve.global_point_solve::<NoObject>(
@@ -1790,10 +1830,16 @@ pub fn find_side_of_curve(
 
     // Determine if point is on left or right side of the curve relative to the projection plane.
     if solutions.len() != 1 {
-        return Err(SolidError::topology_failed(
-            OP,
-            "the point does not project onto the curve exactly once",
-        ));
+        // No solution where the curve is nearest at an end is the projection's
+        // ordinary answer for a point beyond the end. Where the curve comes nearer
+        // inside, a nearest point exists that the projection did not find.
+        let missed = solutions.is_empty()
+            && nearer_inside_than_at_ends(k, curve, point, projection_direction, tol)?;
+        return Ok(if missed {
+            SideOfCurve::NoProjection
+        } else {
+            SideOfCurve::Undecided(NOT_ONCE)
+        });
     }
     let sol = solutions.get(0).ok_or_else(|| {
         SolidError::topology_failed(OP, "the curve has no projection of the point")
@@ -1811,7 +1857,7 @@ pub fn find_side_of_curve(
 
     // point is on the curve
     if vec.length() < tol {
-        return Err(SolidError::topology_failed(OP, "the point is on the curve"));
+        return Ok(SideOfCurve::Undecided("the point is on the curve"));
     }
 
     vec = vec.unitize_or_z();
@@ -1819,8 +1865,7 @@ pub fn find_side_of_curve(
 
     // projection direction is the same as the curve tangent or curve tangent is zero
     if tan.length() < tol {
-        return Err(SolidError::topology_failed(
-            OP,
+        return Ok(SideOfCurve::Undecided(
             "the curve tangent is zero or along the projection direction",
         ));
     }
@@ -1829,14 +1874,42 @@ pub fn find_side_of_curve(
     // projected vec and curve tangent are parallel
     let side = tan.cross(vec);
     if side.length() < EFF_ZERO {
-        return Err(SolidError::topology_failed(
-            OP,
+        return Ok(SideOfCurve::Undecided(
             "the point lies along the curve tangent",
         ));
     }
 
     // set output
-    Ok(side.dot(projection_direction) <= 0.0)
+    Ok(SideOfCurve::Right(side.dot(projection_direction) <= 0.0))
+}
+
+/// Whether the curve, seen along `direction`, comes nearer to `point` at one of its
+/// knots, or of the 64 equal steps of its interval, than at both of its ends, by more
+/// than `tol`. `true` proves the nearest point is not an end; `false` proves nothing.
+fn nearer_inside_than_at_ends(
+    k: &Kernel,
+    curve: &Curve,
+    point: Point3,
+    direction: Vec3,
+    tol: f64,
+) -> Result<bool> {
+    const STEPS: u32 = 64;
+    let interval = curve.natural_interval();
+    let direction = direction.unitize_or_z();
+    let distance = |t: f64| -> Result<f64> {
+        Ok(direction
+            .cross(point - curve.evaluate_point(k, t)?)
+            .length())
+    };
+    let at_ends = distance(interval.evaluate(0.0))?.min(distance(interval.evaluate(1.0))?);
+    let (knots, _) = curve.knots(k, Some(&interval))?;
+    let steps = (1..STEPS).map(|i| interval.evaluate(f64::from(i) / f64::from(STEPS)));
+    for t in knots.into_iter().chain(steps) {
+        if distance(t)? + tol < at_ends {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 // ---- face sectors (sm_FindSectorOfFace) -------------------------------------------------
