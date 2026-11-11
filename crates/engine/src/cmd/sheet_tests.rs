@@ -7063,3 +7063,150 @@ fn a_flange_on_part_of_a_stepped_outline_spans_that_part() {
     let expected = 215.8 * 403.5 + 377.8 * (allowance + 18.0);
     assert!(rel(flat_area(&flat(&mut s)), expected) < 1e-9, "{} vs {expected}", flat_area(&flat(&mut s)));
 }
+
+/// The corner of a 130 x 90 base (T 1.2, R 1.2, K 0.4, gap 0.8) with 40 high walls on its front
+/// (y = 0) and right (x = 130) edges, made by one flange so that they close the corner between
+/// them; with `notch`, the front wall cut away from x 95 to the side wall's inside face (x 128.8),
+/// from z 22 up through its top, which leaves the side wall's end edge free from z 22 up. Without
+/// the front wall (`front` false) the side wall stands alone.
+fn notched_corner(s: &mut Session, front: bool, notch: bool) {
+    run(s, "sheet.manage_rules", json!({"name": "S", "thickness": "1.2 mm", "bend_radius": "1.2 mm", "k_factor": 0.4, "gap": "0.8 mm", "active": true}));
+    run(s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [130, 90]}));
+    run(s, "sketch.finish", json!({}));
+    run(s, "sheet.flange", json!({"type": "base", "body_name": "Corner"}));
+    let walls = if front { json!([[65, 0, 1.2], [130, 45, 1.2]]) } else { json!([[130, 45, 1.2]]) };
+    run(s, "sheet.flange", json!({"edges": walls, "height": 40}));
+    if notch {
+        run(s, "sketch.create", json!({"name": "Notch", "plane": {"origin": [0, 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}}));
+        run(s, "sketch.rectangle.two_point", json!({"p0": [95, 22], "p1": [128.8, 45]}));
+        run(s, "sketch.finish", json!({}));
+        run(s, "solid.extrude", json!({"sketch": "Notch", "distance": 8, "direction": "symmetric", "operation": "cut"}));
+    }
+}
+
+/// The bends of the flat pattern as (start, end, length).
+fn bend_rows(s: &mut Session) -> Vec<([f64; 2], [f64; 2], f64)> {
+    let point = |v: &Value| [v[0].as_f64().unwrap_or(f64::NAN), v[1].as_f64().unwrap_or(f64::NAN)];
+    flat(s)["bends"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|b| (point(&b["start"]), point(&b["end"]), b["length"].as_f64().unwrap_or(f64::NAN)))
+        .collect()
+}
+
+// By hand, for the corner of `notched_corner` (T = R = 1.2, K = 0.4, gap g = 0.8). The base's
+// surface is its top (z = T), so the walls rise away from its material: each wall's surface is its
+// inside face, the side wall's at x = 130 − T = 128.8 with its material out to x = 130, and each
+// wall stands up from its inside sharp at z = T. The walls' surfaces meet on the line x = 128.8,
+// y = T, and the rip there keeps each wall's metal g/2 off the plane halving the corner: each is cut
+// back (g/2)·√2 from the line, so the side wall ends at y = T + (g/2)·√2 = 1.765685 (`WALL_END`)
+// and the front wall at x = 128.8 − (g/2)·√2 = 128.234315. The notch takes the front wall from
+// z 22 up; the side wall's end is free from z = 22 to its top at z = 40, L = 18. A flange 20 high
+// picked at (130, 2, 30), on the side wall's outside face (a thickness into its material from its
+// surface), turns toward that material, out along +x, flush with the wall's end ("inside": it
+// starts (R + T)·tan 45° = 2.4 inside the edge, its tangent line on the wall at y = WALL_END + 2.4).
+// Its height runs from its outer sharp, where the lines of the bend's outer faces meet: the side
+// wall's inside face x = 128.8 and the flange's face y = WALL_END; so its far edge is at
+// x = 128.8 + 20 = 148.8.
+//
+// In the flat: the base's tangent line is R·tan 45° = 1.2 inside the walls' inside sharp, at
+// x = 127.6; their bend allowance is BA = (π/2)(R + K·T) = (π/2)(1.68) = 2.638938 (`CORNER_BA`); so
+// the side wall lies from x = 127.6 + BA = 130.238938, its tangent line at z = T + R = 2.4, and its
+// point at z lies at x = 127.6 + BA − 2.4 + z, y as in the part. The new bend's zone runs BA from
+// its tangent line on the wall out past the wall's end, its center line at
+// y = WALL_END + 2.4 − BA/2 = 2.846217, from z = 22 to z = 40: x 149.838938 to 167.838938, on the
+// side wall's strip (x 130.238938 … 167.838938).
+//
+// The volume the flange adds: its bend, a quarter of a ring from R to R + T over L,
+// (π/4)((R + T)² − R²)·L = (π/4)(4.32)(18) = 19.44π = 61.072561 (the flat's zone, BA wide at the
+// neutral radius, holds (π/2)(R + K·T)·L·T = 57.00: the bend's metal lies about R + T/2); its leg,
+// past its tangent line, (20 − 2.4)·L·T = 380.16; less the side wall's end from its edge to its
+// tangent line, which the bend takes, 2.4·L·T = 51.84; less the rule's bend relief at the bend's end
+// at z = 22, where the side wall runs on below it: a slot T = 1.2 wide past the end, from T/2 = 0.6
+// inside that tangent line out through the wall's end, 1.2·(2.4 + 0.6)·T = 4.32. In all
+// 61.072561 + 380.16 − 51.84 − 4.32 = 385.072561.
+const CORNER_FLANGE: f64 = 19.44 * PI + 380.16 - 51.84 - 4.32;
+const CORNER_BA: f64 = FRAC_PI_2 * (1.2 + 0.4 * 1.2);
+const WALL_END: f64 = 1.2 + 0.4 * std::f64::consts::SQRT_2;
+
+/// A flange on a wall's end edge that a notch left free beside a closed corner stands on that wall:
+/// out from its end at 90°, along the free 18 mm, and in the flat on that wall's strip. Before, the
+/// pick found the edge the notch left in the front wall's outline inside its lap at the corner (no
+/// material on either side of it), hinged the flange there, and folded it back along the side
+/// wall's inside.
+#[test]
+fn a_flange_on_a_wall_end_a_notch_left_free_stands_on_that_wall() {
+    let mut s = Session::default();
+    notched_corner(&mut s, true, true);
+    let notched = volume(&mut s);
+    run(&mut s, "sheet.flange", json!({"edges": [[130, 2, 30]], "height": 20, "angle": 90}));
+    assert!(no_errors_or_warnings(&s), "{:?}", s.model.results);
+    let b = bbox(&mut s);
+    assert!((b["max"][0].as_f64().unwrap_or(f64::NAN) - 148.8).abs() < 1e-6, "{b}");
+    let rows = bend_rows(&mut s);
+    let Some(&(start, end, _)) = rows.iter().find(|r| (r.2 - 18.0).abs() < 1e-6) else { panic!("no bend 18 long: {rows:?}") };
+    let (x0, x1) = (start[0].min(end[0]), start[0].max(end[0]));
+    let at = |z: f64| 127.6 + CORNER_BA - 2.4 + z;
+    assert!((x0 - at(22.0)).abs() < 1e-6 && (x1 - at(40.0)).abs() < 1e-6, "{rows:?}");
+    let y = WALL_END + 2.4 - CORNER_BA / 2.0;
+    assert!((start[1] - y).abs() < 1e-6 && (end[1] - y).abs() < 1e-6, "{rows:?}");
+    let added = volume(&mut s) - notched;
+    assert!((added - CORNER_FLANGE).abs() < 1e-6 * notched, "{added} vs {CORNER_FLANGE}");
+}
+
+/// A further bend on that flange's far edge keeps clear of the side wall: picked on the flange's
+/// surface (its face flush with the wall's end), it turns away from the flange's material, along
+/// -y, and the part reaches no farther out than the flange. Before, the flange folded back along
+/// the side wall's inside and the second leg came out through the wall, to x 158.23.
+#[test]
+fn a_further_bend_on_a_flange_a_notch_left_free_keeps_clear_of_the_wall() {
+    let mut s = Session::default();
+    notched_corner(&mut s, true, true);
+    let notched = volume(&mut s);
+    run(&mut s, "sheet.flange", json!({"edges": [[130, 2, 30]], "height": 20, "angle": 90, "then": [{"angle": 90, "height": 30}]}));
+    assert!(no_errors_or_warnings(&s), "{:?}", s.model.results);
+    // The second bend stands on the flange's far edge, x = 148.8. Its outer sharp is where the
+    // lines of the flange's other face, y = WALL_END + T = 2.965685, and the second leg's outer
+    // face, x = 148.8, meet; 30 from there along -y the leg ends at y = -27.034315.
+    let b = bbox(&mut s);
+    let (max_x, min_y) = (b["max"][0].as_f64().unwrap_or(f64::NAN), b["min"][1].as_f64().unwrap_or(f64::NAN));
+    assert!((max_x - 148.8).abs() < 1e-6 && (min_y - (WALL_END + 1.2 - 30.0)).abs() < 1e-6, "{b}");
+    // The second bend, away from the flange's material, starts (R + T)·tan 45° = 2.4 inside the far
+    // edge too, so the flange keeps 20 − 2.4 − 2.4 = 15.2 flat between its bends, 2.4 less than its
+    // leg alone (2.4·L·T = 51.84 less); the second adds its bend, 19.44π, and its leg,
+    // (30 − 2.4)·L·T = 596.16: 990.465122 in all.
+    let want = CORNER_FLANGE - 2.4 * 18.0 * 1.2 + 19.44 * PI + 27.6 * 18.0 * 1.2;
+    let added = volume(&mut s) - notched;
+    assert!((added - want).abs() < 1e-6 * notched, "{added} vs {want}");
+}
+
+/// The same flange on the side wall's end when the wall stands alone (no front wall, no notch) is
+/// as it was: out to x 148.8, its bend on the wall's strip in the flat over the end's whole run.
+#[test]
+fn a_flange_on_a_lone_wall_end_stands_on_that_wall() {
+    let mut s = Session::default();
+    notched_corner(&mut s, false, false);
+    run(&mut s, "sheet.flange", json!({"edges": [[130, 0, 30]], "height": 20, "angle": 90}));
+    assert!(no_errors_or_warnings(&s), "{:?}", s.model.results);
+    let b = bbox(&mut s);
+    assert!((b["max"][0].as_f64().unwrap_or(f64::NAN) - 148.8).abs() < 1e-6, "{b}");
+    // The wall ends at y = 0. The new bend meets the wall's own bend at the wall's corner, and both
+    // end where their tangent lines on the wall cross: the new bend at z = T + R = 2.4. So it runs
+    // from z 2.4 to 40 (37.6), at x 130.238938 to 167.838938, its center line BA/2 short of its
+    // tangent line 2.4 in from the end: y = 2.4 − 1.319469 = 1.080531.
+    let rows = bend_rows(&mut s);
+    let Some(&(start, end, _)) = rows.iter().find(|r| (r.2 - 37.6).abs() < 1e-6) else { panic!("no bend 37.6 long: {rows:?}") };
+    let (x0, x1) = (start[0].min(end[0]), start[0].max(end[0]));
+    assert!((x0 - (127.6 + CORNER_BA)).abs() < 1e-6 && (x1 - (127.6 + CORNER_BA - 2.4 + 40.0)).abs() < 1e-6, "{rows:?}");
+    let y = 2.4 - CORNER_BA / 2.0;
+    assert!((start[1] - y).abs() < 1e-6 && (end[1] - y).abs() < 1e-6, "{rows:?}");
+    // The flat: x from 0 to the wall's top, 167.838938; y from the flange's far edge, its leg
+    // 20 − 2.4 = 17.6 past its zone, which runs BA − 2.4 = 0.238938 past the wall's end
+    // (y = -17.838938), to the base's far edge, y = 90: 107.838938.
+    let f = flat(&mut s);
+    let size = (f["flat_size_mm"][0].as_f64().unwrap_or(f64::NAN), f["flat_size_mm"][1].as_f64().unwrap_or(f64::NAN));
+    let want = (127.6 + CORNER_BA - 2.4 + 40.0, 90.0 + 17.6 + CORNER_BA - 2.4);
+    assert!((size.0 - want.0).abs() < 1e-6 && (size.1 - want.1).abs() < 1e-6, "{size:?} vs {want:?}");
+}

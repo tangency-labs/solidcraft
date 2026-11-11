@@ -42,11 +42,19 @@ fn straight(e: &FreeEdge) -> Result<(Vec2, Vec2, Vec2)> {
 impl SurfaceSheet {
     /// The free edge of the sheet nearest the point `p` (the body's coordinates), on a face of a
     /// planar panel or its rim: one no joint runs along. `None` when no such edge is within twice
-    /// the thickness of `p`; refused where a bend's edge is nearer than any free one.
+    /// the thickness of `p`; refused where a bend's edge is nearer than any free one. The edges are
+    /// the panels' material's. A panel's outline runs to its rips' edges, and each rip's lap cuts
+    /// the material back from there when the sheet is built: an edge of the outline in that band
+    /// has no material beside it and is no edge (a cut that took the material beside the band
+    /// leaves the band in the outline). A rip's edge joins its panel to the one across it; where a
+    /// cut took the other panel's material there, nothing is across it, and the panel's edge is
+    /// free along the line where its lap leaves its material (see
+    /// [`SurfaceSheet::free_rip_stretches`]).
     pub fn free_edge_at(&self, p: Vec3) -> Result<Option<FreeEdge>> {
         let dev = self.develop().map_err(|e| DocError::Invalid(e.to_string()))?;
         let folded = crate::sheet_surface_convert::fold_onto(&self.sheet, &dev, &self.places)?;
         let t = self.sheet.thickness;
+        let reach = t * 2.0 + 1e-3;
         let mut best: Option<(f64, FreeEdge)> = None;
         let mut bent = f64::INFINITY;
         for (i, (panel, place)) in self.sheet.panels.iter().zip(&folded.places).enumerate() {
@@ -56,28 +64,83 @@ impl SurfaceSheet {
                 continue;
             }
             let at = Vec2::new(q.x, q.y);
-            for l in std::iter::once(&panel.region.outer).chain(&panel.region.holes) {
-                for s in &l.segs {
-                    let Seg2::Line { a, b } = *s else { continue };
-                    let d = s.point_at(s.closest_param(at).clamp(0.0, 1.0)).dist(at);
-                    let off = (q.z.clamp(0.0, t) - q.z).abs();
-                    let dist = (d * d + off * off).sqrt();
-                    if let Some(j) = self.joint_along(i, a, b) {
-                        if matches!(j.kind, JointKind::Bend(_)) {
-                            bent = bent.min(dist);
-                        }
-                        continue;
+            let off = (q.z.clamp(0.0, t) - q.z).abs();
+            // The straight edges of its outline, then the free stretches of its rips' edges (which
+            // lie inside the outline, at the rips' laps).
+            let mut edges: Vec<(Vec2, Vec2, bool)> = std::iter::once(&panel.region.outer)
+                .chain(&panel.region.holes)
+                .flat_map(|l| &l.segs)
+                .filter_map(|s| match *s {
+                    Seg2::Line { a, b } => Some((a, b, true)),
+                    _ => None,
+                })
+                .collect();
+            edges.extend(self.free_rip_stretches(i, at, reach).into_iter().map(|(a, b)| (a, b, false)));
+            for (a, b, own) in edges {
+                let s = Seg2::Line { a, b };
+                let d = s.point_at(s.closest_param(at).clamp(0.0, 1.0)).dist(at);
+                let dist = (d * d + off * off).sqrt();
+                // A free stretch lies along its own rip, at the rip's lap: there only a bend or
+                // a seam stands on it.
+                if let Some(j) = self.joint_along(i, a, b, own) {
+                    if matches!(j.kind, JointKind::Bend(_)) {
+                        bent = bent.min(dist);
                     }
-                    if dist <= t * 2.0 + 1e-3 && best.as_ref().is_none_or(|(x, _)| dist < *x) {
-                        best = Some((dist, FreeEdge { panel: i, a, b, far_face: q.z > t / 2.0 }));
-                    }
+                    continue;
+                }
+                if own && self.in_lap_band(i, a, b) {
+                    continue;
+                }
+                if dist <= reach && best.as_ref().is_none_or(|(x, _)| dist < *x) {
+                    best = Some((dist, FreeEdge { panel: i, a, b, far_face: q.z > t / 2.0 }));
                 }
             }
         }
-        if bent <= t * 2.0 + 1e-3 && best.as_ref().is_none_or(|(x, _)| bent < *x) {
+        if bent <= reach && best.as_ref().is_none_or(|(x, _)| bent < *x) {
             return err("that is a bend line, not a free edge of the sheet: pick a free edge");
         }
         Ok(best.map(|(_, e)| e))
+    }
+
+    /// The stretches of panel `i`'s rips' edges that are free (see [`SurfaceSheet::free_edge_at`]),
+    /// of those that come within `reach` of `at` (in its chart): where the panel holds material up
+    /// to the line where the rip's lap leaves it, and the panel across the rip holds none up to
+    /// its own (a cut took it). Each runs along that line with the panel's material on its left.
+    /// Only a straight rip cut alike all along, between flat panels, is read (see [`lap_band`]);
+    /// along any other the edge stays the rip's.
+    fn free_rip_stretches(&self, i: usize, at: Vec2, reach: f64) -> Vec<(Vec2, Vec2)> {
+        let t = self.sheet.thickness;
+        let plane = |k: usize| self.sheet.panels.get(k).filter(|x| matches!(x.surface, Surface::Plane));
+        let mut out = Vec::new();
+        for joint in &self.sheet.joints {
+            let JointKind::Rip(rip) = &joint.kind else { continue };
+            for (mine, across, on_a) in [(joint.a.panel, joint.b.panel, true), (joint.b.panel, joint.a.panel, false)] {
+                if mine != i {
+                    continue;
+                }
+                let (Some(band), Some(other)) = (lap_band(rip, on_a, t), lap_band(rip, !on_a, t)) else { continue };
+                let (Some(own), Some(there)) = (plane(mine), plane(across)) else { continue };
+                if dist_to_segment(at, band.inner(0.0), band.inner(band.length)) > reach {
+                    continue;
+                }
+                for (lo, hi) in less(&reaches(&own.region, &band), &reaches(&there.region, &other)) {
+                    let (a, b) = (band.inner(lo), band.inner(hi));
+                    out.push(if band.way.perp().dot(band.into) > 0.0 { (a, b) } else { (b, a) });
+                }
+            }
+        }
+        out
+    }
+
+    /// Whether the edge `a`–`b` of panel `i` lies in the band a rip's lap takes off the panel (see
+    /// [`LapBand`]): no edge of its material. A cut leaves one there where it takes the material
+    /// beside the band (the band is the outline's, and was never material).
+    fn in_lap_band(&self, i: usize, a: Vec2, b: Vec2) -> bool {
+        let t = self.sheet.thickness;
+        self.sheet.joints.iter().any(|j| {
+            let JointKind::Rip(rip) = &j.kind else { return false };
+            [(j.a.panel, true), (j.b.panel, false)].into_iter().any(|(p, on_a)| p == i && lap_band(rip, on_a, t).is_some_and(|x| x.holds(a, b)))
+        })
     }
 
     /// Keeps the flanges of the bends `made` (a feature's, its corners closed) clear of the panel
@@ -219,12 +282,13 @@ impl SurfaceSheet {
     /// The joint that runs along the edge `a`–`b` of panel `i`: its anchor line holds both ends,
     /// or, a bend's, the edge lies beside the bend in the strip its band takes, up to a thickness
     /// past its anchor away from the panel's material (where the bend's sharp was drawn inside the
-    /// panel's edge).
-    fn joint_along(&self, i: usize, a: Vec2, b: Vec2) -> Option<&Joint> {
+    /// panel's edge). A rip counts only where `rips`.
+    fn joint_along(&self, i: usize, a: Vec2, b: Vec2, rips: bool) -> Option<&Joint> {
         let t = self.sheet.thickness;
         self.sheet.joints.iter().find(|j| {
             let (band, length) = match &j.kind {
                 JointKind::Bend(bend) => (t, Some(bend.length)),
+                JointKind::Rip(_) if !rips => return false,
                 _ => (0.0, None),
             };
             // The `a` anchor's material lies on its left, the `b` anchor's on its right.
@@ -274,20 +338,29 @@ impl SurfaceSheet {
 
     /// How far along the edge `a`–`b` (way `d`) of panel `i` the lines of the outline beside it
     /// run for each mm out from it, at its start and its end: 0 where they are square to it,
-    /// round, or run nearly along it.
+    /// round, or run nearly along it. An edge inside the outline (a free stretch of a rip's edge,
+    /// where the rip's lap leaves the material) has at each end the straight edge of the outline
+    /// that runs across it there, where one does.
     fn edge_slants(&self, i: usize, (a, b, d): (Vec2, Vec2, Vec2)) -> (f64, f64) {
         let out = Vec2::new(d.y, -d.x);
         let Some(panel) = self.sheet.panels.get(i) else { return (0.0, 0.0) };
         let segs = &panel.region.outer.segs;
         let n = segs.len();
-        let Some(k) = segs.iter().position(|s| matches!(*s, Seg2::Line { a: x, b: y } if x.dist(a) <= 1e-9 && y.dist(b) <= 1e-9)) else {
-            return (0.0, 0.0);
-        };
         let slant = |s: Option<&Seg2>| -> f64 {
             let Some(Seg2::Line { a: x, b: y }) = s.copied() else { return 0.0 };
             let Some(w) = (y - x).normalized() else { return 0.0 };
             let across = w.dot(out);
             if across.abs() < 0.1 { 0.0 } else { w.dot(d) / across }
+        };
+        let Some(k) = segs.iter().position(|s| matches!(*s, Seg2::Line { a: x, b: y } if x.dist(a) <= 1e-9 && y.dist(b) <= 1e-9)) else {
+            let through = |p: Vec2| {
+                segs.iter()
+                    .filter(|s| matches!(s, Seg2::Line { .. }) && s.point_at(s.closest_param(p).clamp(0.0, 1.0)).dist(p) <= 1e-9)
+                    .map(|s| slant(Some(s)))
+                    .find(|k| *k != 0.0)
+                    .unwrap_or(0.0)
+            };
+            return (through(a), through(b));
         };
         (slant(segs.get((k + n - 1) % n)), slant(segs.get((k + 1) % n)))
     }
@@ -1654,6 +1727,11 @@ const FOLD_INTO_NEIGHBOR: &str =
 /// How far (mm) a rip's cut may differ along it and still be one cut, as the development takes it.
 const RIP_EVEN: f64 = 1e-9;
 
+/// How near (mm) an edge's end lies to a line of a rip's lap band to be on it, and how long a
+/// stretch along the rip must be to be one: a rounding, as [`SurfaceSheet::joint_along`] takes an
+/// edge on an anchor.
+const ON_LAP: f64 = 1e-6;
+
 /// How far (mm) a fold's zone reaches along its line past a curved end of the outline: past the
 /// sag of the chords the end was measured on (1e-4 mm), so that the zone holds the curve's bulge.
 /// What lies past the curve is cut off again.
@@ -1985,6 +2063,150 @@ fn dist_to_segment(p: Vec2, a: Vec2, b: Vec2) -> f64 {
     let len2 = d.dot(d);
     let s = if len2 > 0.0 { ((p - a).dot(d) / len2).clamp(0.0, 1.0) } else { 0.0 };
     p.dist(a + d * s)
+}
+
+/// The band a straight rip's lap takes off one of its panels, in the panel's chart: the rip's edge
+/// on the panel from `start` along `way` for `length`, and the panel cut back `cut` from it toward
+/// `into`, its material (as the development cuts it, see [`Lap::cuts`]). The panel's outline runs
+/// to the rip's edge; its material starts at the band's inner line, `cut` in.
+#[derive(Clone, Copy, Debug)]
+struct LapBand {
+    start: Vec2,
+    way: Vec2,
+    length: f64,
+    into: Vec2,
+    cut: f64,
+}
+
+impl LapBand {
+    /// Where `p` lies: how far along the rip from its start, and how far in from its edge.
+    fn at(&self, p: Vec2) -> (f64, f64) {
+        let v = p - self.start;
+        (v.dot(self.way), v.dot(self.into))
+    }
+
+    /// The point of the band's inner line `s` along the rip from its start.
+    fn inner(&self, s: f64) -> Vec2 {
+        self.start + self.way * s + self.into * self.cut
+    }
+
+    /// Whether both ends of the edge `a`–`b` lie in the band, within a rounding.
+    fn holds(&self, a: Vec2, b: Vec2) -> bool {
+        [a, b].into_iter().all(|p| {
+            let (s, n) = self.at(p);
+            s >= -ON_LAP && s <= self.length + ON_LAP && n >= -ON_LAP && n <= self.cut + ON_LAP
+        })
+    }
+}
+
+/// The band the lap of `rip` takes off its `a` panel (`on_a`) or its `b` panel (see [`LapBand`]):
+/// the `a` panel's material lies on the left of the rip's way, the `b` panel's on the right. None
+/// where the rip isn't one straight edge cut alike all along (as [`part_rip`] reads it).
+fn lap_band(rip: &Rip, on_a: bool, t: f64) -> Option<LapBand> {
+    let edge = if on_a { &rip.edges.0 } else { &rip.edges.1 };
+    let ([start, end], [t0, t1]) = (edge.as_slice(), rip.turns.as_slice()) else { return None };
+    let straight = |c: &[Seg2]| c.is_empty() || matches!(c, [Seg2::Line { .. }]);
+    let cut = |turn: f64| {
+        let (a, b) = rip.lap.cuts(turn, t);
+        if on_a { a } else { b }
+    };
+    let c = cut(*t0);
+    if !(straight(&rip.curves.0) && straight(&rip.curves.1)) || (cut(*t1) - c).abs() > RIP_EVEN {
+        return None;
+    }
+    let way = (*end - *start).normalized()?;
+    Some(LapBand { start: *start, way, length: start.dist(*end), into: if on_a { way.perp() } else { -way.perp() }, cut: c })
+}
+
+/// Where along the rip of `band` the outline `region` of the band's panel holds material up to
+/// the band's inner line: the stretches, from the rip's start, in order and apart, where the line
+/// runs inside the outline, or along an edge of it with the outline beyond the line (toward the
+/// material). An edge along the line within a rounding is on it, whichever side the rounding put
+/// it: so where a cut took the material and left only the band, the band's edge lies along the
+/// line with the outline short of it, and nothing there is held. Read off the outline's own edges
+/// where they meet the line, and between those, where the line lies on no edge, by whether the
+/// outline holds it.
+fn reaches(region: &Region2, band: &LapBand) -> Vec<(f64, f64)> {
+    let on = |p: Vec2| (band.at(p).1 - band.cut).abs() <= ON_LAP;
+    // Far enough past the outline, by a box that holds each of its edges exactly.
+    let (lo, hi) = region.outer.segs.iter().map(crate::sheet_surface_cuts::seg_box).fold(
+        (Vec2::new(f64::INFINITY, f64::INFINITY), Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY)),
+        |(l, h), (a, b)| (Vec2::new(l.x.min(a.x), l.y.min(a.y)), Vec2::new(h.x.max(b.x), h.y.max(b.y))),
+    );
+    let far = (hi - lo).len() + (lo - band.start).len() + (hi - band.start).len() + band.length + 1.0;
+    let line = [Seg2::Line { a: band.inner(-far), b: band.inner(band.length + far) }];
+    // Where the outline meets the line, and its edges along the line: their stretch, and whether
+    // the outline lies beyond the line there.
+    let mut breaks = vec![0.0, band.length];
+    let mut along: Vec<(f64, f64, bool)> = Vec::new();
+    for (k, l) in std::iter::once(&region.outer).chain(&region.holes).enumerate() {
+        // The outline lies on the left of a loop that runs round it counter-clockwise (its outer
+        // loop) or round a hole clockwise.
+        let left = (k == 0) == (l.signed_area() > 0.0);
+        for s in &l.segs {
+            if let Seg2::Line { a, b } = *s
+                && on(a)
+                && on(b)
+            {
+                let (sa, sb) = (band.at(a).0, band.at(b).0);
+                let inside = if left { (b - a).perp() } else { (a - b).perp() };
+                along.push((sa.min(sb), sa.max(sb), inside.dot(band.into) > 0.0));
+                breaks.extend([sa, sb]);
+            } else {
+                breaks.extend(solidcraft_develop::crossings(&line, std::slice::from_ref(s)).iter().map(|c| band.at(c.4).0));
+            }
+        }
+    }
+    breaks.retain(|s| (0.0..=band.length).contains(s));
+    breaks.sort_by(f64::total_cmp);
+    let mut out: Vec<(f64, f64)> = Vec::new();
+    for w in breaks.windows(2) {
+        let (lo, hi) = (w[0], w[1]);
+        if !(hi - lo > ON_LAP) {
+            continue;
+        }
+        let m = (lo + hi) / 2.0;
+        let on_edges: Vec<bool> = along.iter().filter(|e| e.0 <= m && m <= e.1).map(|e| e.2).collect();
+        // Off every edge, held where the outline holds the point, exactly (no chords).
+        let inside = |p: Vec2| {
+            crate::sheet_surface_cuts::holds(&region.outer, p) && !region.holes.iter().any(|h| crate::sheet_surface_cuts::holds(h, p))
+        };
+        let held = if on_edges.is_empty() { inside(band.inner(m)) } else { on_edges.contains(&true) };
+        if !held {
+            continue;
+        }
+        if out.last().is_some_and(|last| last.1 >= lo - ON_LAP) {
+            if let Some(last) = out.last_mut() {
+                last.1 = hi;
+            }
+        } else {
+            out.push((lo, hi));
+        }
+    }
+    out
+}
+
+/// The stretches `a` less the stretches `b` (each in order and apart): what is left of them,
+/// each longer than a rounding.
+fn less(a: &[(f64, f64)], b: &[(f64, f64)]) -> Vec<(f64, f64)> {
+    let mut out = Vec::new();
+    for &(lo, hi) in a {
+        let mut from = lo;
+        for &(x, y) in b {
+            if y <= from || x >= hi {
+                continue;
+            }
+            if x > from {
+                out.push((from, x));
+            }
+            from = from.max(y);
+        }
+        if hi > from {
+            out.push((from, hi));
+        }
+    }
+    out.retain(|(x, y)| y - x > ON_LAP);
+    out
 }
 
 /// How far a region reaches from the line through `o`, along its normal `n`.
