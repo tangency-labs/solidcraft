@@ -1078,11 +1078,6 @@ mod tests {
                     let (profile, exact) =
                         OffsetProfile::build(&source, &motion, distance, domain, budget).unwrap();
                     let count = profile.control_points().unwrap().len();
-                    eprintln!(
-                        "M20_PROFILE distance={distance} domain={domain:?} budget={budget:.17e} bound={:.17e} rows={count} tensor_controls={}",
-                        exact.bound,
-                        count * angular_controls
-                    );
                     assert!(exact.bound <= budget);
                     assert!(
                         count * angular_controls <= display_limit,

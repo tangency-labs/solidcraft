@@ -803,12 +803,6 @@ fn check_matrix_fixture(shape: MatrixShape) {
         check.reports
     );
     let (flanks, lateral) = matrix_m20_selections(&k, &body);
-    eprintln!(
-        "M20_MATRIX_FIXTURE {shape:?} faces={} flanks={} lateral={}",
-        body.faces().len(),
-        flanks.len(),
-        lateral.len()
-    );
     if matches!(shape, MatrixShape::SegmentedExternal) {
         assert!(
             flanks.len() > 2,

@@ -86,6 +86,8 @@ use crate::surface::surface::p2::Surface;
 use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
 
 const OP_UV_ISO_LINE: &str = "curve::iso_curve::IsoCurve::create_uv_iso_line";
+const OP_RESTRICT: &str = "curve::iso_curve::IsoCurve::restrict";
+const OP_SCREW_BOX: &str = "curve::iso_curve::screw_patch_enclosure";
 const OP_READ: &str = "curve::iso_curve::IsoCurve::read_from_db";
 
 /// An iso-parametric curve of a surface (`SmIsoCurve`): `S(iso, s)` for a constant-`u`
@@ -367,7 +369,7 @@ impl IsoCurve {
             || interval.max() > natural.max()
         {
             return Err(SolidError::invalid_input(
-                OP_UV_ISO_LINE,
+                OP_RESTRICT,
                 "iso restriction exceeds its support",
             ));
         }
@@ -612,8 +614,23 @@ pub(crate) fn screw_patch_enclosure(
         return Ok(Some(bounds));
     }
     let domain = sweep.net().natural_uv_domain();
-    let a = patch.min();
-    let b = patch.max();
+    let (lo, hi) = (domain.min(), domain.max());
+    if ![lo.x, lo.y, hi.x, hi.y].iter().all(|x| x.is_finite()) || lo.x > hi.x || lo.y > hi.y {
+        return Err(SolidError::invalid_input(
+            OP_SCREW_BOX,
+            "retained screw net domain is not finite and ordered",
+        ));
+    }
+    // Evaluation clamps a parameter to the net, so the box of the clamped patch
+    // encloses every point of a curve over an extended interval.
+    let clamp = |p: Point2| {
+        Point2::new(
+            crate::math::clamp_between(p.x, lo.x, hi.x),
+            crate::math::clamp_between(p.y, lo.y, hi.y),
+        )
+    };
+    let a = clamp(patch.min());
+    let b = clamp(patch.max());
     if ![a.x, a.y, b.x, b.y].iter().all(|x| x.is_finite())
         || !domain.contains_point(a, 0.0)
         || !domain.contains_point(b, 0.0)
@@ -621,14 +638,14 @@ pub(crate) fn screw_patch_enclosure(
         || sweep.bound() < 0.0
     {
         return Err(SolidError::invalid_input(
-            OP_UV_ISO_LINE,
+            OP_SCREW_BOX,
             "iso box exceeds certified support",
         ));
     }
     let net = sweep
         .net()
         .gw_nurb()
-        .ok_or_else(|| SolidError::null_pointer(OP_UV_ISO_LINE))?;
+        .ok_or_else(|| SolidError::null_pointer(OP_SCREW_BOX))?;
     let u_support = net
         .u_knots()
         .iter()
@@ -652,7 +669,7 @@ pub(crate) fn screw_patch_enclosure(
                 || ![point.x, point.y, point.z].iter().all(|x| x.is_finite())
             {
                 return Err(SolidError::invalid_input(
-                    OP_UV_ISO_LINE,
+                    OP_SCREW_BOX,
                     "iso box needs finite positive-weight controls",
                 ));
             }
@@ -666,16 +683,15 @@ pub(crate) fn screw_patch_enclosure(
             }
         }
     }
-    let hull = hull.ok_or_else(|| {
-        SolidError::invalid_input(OP_UV_ISO_LINE, "iso box has no active controls")
-    })?;
+    let hull = hull
+        .ok_or_else(|| SolidError::invalid_input(OP_SCREW_BOX, "iso box has no active controls"))?;
     let [x, y, z] = hull.map(|v| v + Ivl::new(-sweep.bound(), sweep.bound()));
     if ![x.lo, x.hi, y.lo, y.hi, z.lo, z.hi]
         .iter()
         .all(|x| x.is_finite())
     {
         return Err(SolidError::invalid_input(
-            OP_UV_ISO_LINE,
+            OP_SCREW_BOX,
             "iso box is not finite",
         ));
     }
@@ -689,6 +705,38 @@ mod tests {
     use super::*;
     use crate::nurbs::math::CPoint;
     use crate::nurbs::srf_basic::Surface;
+
+    /// A box over a patch past a tapered screw's net (the fallback, which no definition box
+    /// covers) is the box of the patch clamped to the net, as evaluation clamps.
+    #[test]
+    fn a_screw_box_past_the_net_is_the_clamped_box() {
+        use crate::math::{Point3, Vec3};
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::surface::procedural_sweep::{ProceduralSweep, RadialLaw, ScrewMotion};
+        let line =
+            BSplineCurve::create_line_segment(3, Point3::X, Point3::new(2.0, 0.0, 1.0)).unwrap();
+        let law = RadialLaw::new(Vec3::X, vec![0.0, 0.6], vec![0.0, 0.1]).unwrap();
+        let motion = ScrewMotion::new(Point3::ZERO, Vec3::Z, 2.5, Some(law)).unwrap();
+        let stations = [0.0, 0.3, 0.6];
+        let definition = ProceduralSweep::create(&line, motion, &stations, 0.15).unwrap();
+        let net = crate::sweep::screw::screw_net(
+            definition.profile(),
+            definition.screw().unwrap(),
+            &stations,
+        )
+        .unwrap();
+        let d = net.natural_uv_domain();
+        let mut screw = crate::surface::surface::Surface::from(net);
+        screw.set_sweep_definition(definition);
+        let inside = Extent2d::from_points(d.min(), d.max());
+        let past = Extent2d::from_points(
+            Point2::new(d.min().x - 0.5, d.min().y),
+            Point2::new(d.max().x + 0.5, d.max().y + 0.25),
+        );
+        let clamped = screw_patch_enclosure(&screw, inside).unwrap().unwrap();
+        let extended = screw_patch_enclosure(&screw, past).unwrap().unwrap();
+        assert_eq!(format!("{clamped:?}"), format!("{extended:?}"));
+    }
 
     /// A bilinear patch over `[0, 2] x [-1, 3]`.
     fn patch() -> BSplineSurface {
