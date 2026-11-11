@@ -134,6 +134,12 @@ pub enum Error {
         /// How far apart the ends are.
         gap: f64,
     },
+    /// A change to a curve that would move it farther than the tolerance asked (a knot
+    /// removed, its degree lowered): the kernel's certified bound of how far it would move.
+    PastTolerance {
+        /// The certified bound of the move.
+        bound: f64,
+    },
     /// An extension that cannot run as far as asked (a weight of the extended surface would
     /// vanish, a pole, an apex or a full turn is reached, or its length there cannot be
     /// measured to the kernel's stop): the longest distance proved to work, when there is one.
@@ -371,6 +377,9 @@ impl std::fmt::Display for Error {
                 "the boundary curves {join} and {} do not meet: {gap} apart",
                 join.saturating_add(1)
             ),
+            Error::PastTolerance { bound } => {
+                write!(f, "the change would move the curve by up to {bound}")
+            }
             Error::TooFar { largest } => write!(f, "too far to extend (largest {largest:?})"),
             Error::Exception => write!(f, "solidcore raised an internal exception"),
             Error::ContactUndecided {
