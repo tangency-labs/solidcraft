@@ -53,10 +53,10 @@ pub struct EdgeHit {
 /// between the faces it names exactly (see [`exactly`]). A numbered name (`~k`) was one of
 /// several edges between its faces, told apart only by where they lay, so the one edge left
 /// between them is it only where the reference's point still lies on it. A name whose faces no
-/// edge's faces answer to at all, one of them renamed since, is the edge of the other face the
-/// reference's point lies inside (see [`renamed_edge`]). `Err` explains when
-/// there is none: no such edge, the named edge split into several, one of several edges whose
-/// faces now bound one edge elsewhere, or a name saved before format 14.
+/// edge's faces answer to at all, one of them gone from a feature that is still there, is the edge
+/// of the other face the reference's point lies on, clear of its ends (see [`renamed_edge`]).
+/// `Err` explains when there is none: no such edge, the named edge split into several, one of
+/// several edges whose faces now bound one edge elsewhere, or a name saved before format 14.
 pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, String> {
     if legacy_name(name).is_some() {
         return Err(format!("edge `{name}` was named by a build before format 14"));
@@ -90,8 +90,8 @@ pub fn locate_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<EdgeHit, Str
         }
     }
     let Some((_, cands)) = best else {
-        let renamed = if loose { None } else { renamed_edge(b, &m, &faces, wanted, near) };
-        return renamed
+        let picked = if loose { None } else { renamed_edge(b, &m, &faces, wanted, near) };
+        return picked
             .map(|i| EdgeHit { edge: i, point: near, verified: false, on_point: true })
             .ok_or_else(|| format!("edge `{name}` no longer exists"));
     };
@@ -169,7 +169,8 @@ fn edge_near(b: &ModelBody, m: &Mesh, i: usize, near: Vec3) -> bool {
 /// The edge of body `b` whose exact curve passes through the picked point `near`, by its index
 /// in the body's mesh `m` (the mesh's edges are the B-rep's, in its order: the edge's faces are
 /// checked too). A point at an end of the edge is on the edges that meet there as well, so it
-/// names none. `None` too for a mesh body, or a point a pick's reach from every edge.
+/// names none. `None` too for a mesh body, a point that is not finite, or a point a pick's reach
+/// from every edge but a periodic face's seam or a pole.
 fn edge_through(b: &ModelBody, m: &Mesh, near: Vec3) -> Option<usize> {
     let reach = pick_reach(b);
     let (d, i) = solidcraft_kernel::comb_edge_near(&b.body, near).ok().flatten()?;
@@ -190,18 +191,20 @@ fn edge_through(b: &ModelBody, m: &Mesh, near: Vec3) -> Option<usize> {
 
 /// The edge a stored edge name `wanted` (without its number) meant when no edge's faces answer to
 /// it at all: one of its two faces is still found exactly, the other finds no face although the
-/// feature that named it still made faces of body `b`, and the reference's point `near` lies inside
-/// an edge of the face still found (see [`edge_through`]). That feature named the face differently
-/// once (a design saved when a round wall took the name of a later join's face), so the point says
-/// which edge this is. A face whose feature made nothing on the body was removed, not renamed: its
-/// edges are gone, and so is the name.
+/// feature that named it still made faces of body `b`, and the reference's point `near` lies on an
+/// edge of the face still found, clear of its ends (see [`edge_through`]). Then the point says
+/// which edge this is: that feature may have named the face differently once (a design saved when
+/// a round wall took the name of a later join's face), and the face may also be gone while the
+/// feature stays (a shorter tab); either way the edge the pick lies on is taken. A face whose
+/// feature made nothing on the body was removed with it, and so is the name. The point must be the
+/// reference's own pick: a caller that passes a point on another edge cannot take what this finds.
 fn renamed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: Vec3) -> Option<usize> {
     let count = faces.faces.len();
     let found = |x: &str| {
         let mut hits = (0..count).filter(|f| crate::history_names::matches(faces, *f, x).is_some_and(exactly));
         hits.next().filter(|_| hits.next().is_none())
     };
-    let renamed = |y: &str| {
+    let lost = |y: &str| {
         crate::persistent_name::made_by(y).is_some_and(|id| faces.faces.iter().any(|f| crate::persistent_name::made_by(f) == Some(id)))
             && (0..count).all(|f| crate::history_names::matches(faces, f, y).is_none())
     };
@@ -211,7 +214,7 @@ fn renamed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: Vec3
     for (i, _) in wanted.match_indices('|') {
         let (Some(x), Some(y)) = (wanted.get(..i), wanted.get(i + 1..)) else { continue };
         for (x, y) in [(x, y), (y, x)] {
-            if let Some(f) = found(x).filter(|f| !kept.contains(f) && renamed(y)) {
+            if let Some(f) = found(x).filter(|f| !kept.contains(f) && lost(y)) {
                 kept.push(f);
             }
         }

@@ -5,6 +5,7 @@ use std::f64::consts::PI;
 
 use serde_json::{Value, json};
 use solidcore_record::Vec3;
+use solidcraft_geom::prelude::*;
 
 use crate::Session;
 
@@ -308,6 +309,7 @@ fn a_join_that_makes_the_body_bigger_leaves_round_walls_it_never_touched_alone()
     run(&mut s, "solid.fillet", json!({"edges": [[0, -11, 10]], "radius": 1, "name": "Round"}));
     assert!(volume(&mut s, "Body1") < volume_before);
     let filleted = volume(&mut s, "Body1");
+    let filleted_faces = faces(&mut s, "Body1");
     let round_id = s.doc.features.iter().position(|f| f.name == "Round").unwrap();
     assert!(s.doc.features[round_id].edge_names.iter().all(|name| !name.contains(&tab_name)), "{:?}", s.doc.features[round_id].edge_names);
 
@@ -318,6 +320,13 @@ fn a_join_that_makes_the_body_bigger_leaves_round_walls_it_never_touched_alone()
     let result = reopened.model.result(reopened.doc.features[round_id].id).unwrap();
     assert!(!result.skipped && result.error.is_none(), "{:?}", result.error);
     assert!((volume(&mut reopened, "Body1") - filleted).abs() < 1e-6);
+    // The same edge: the plate is symmetric, so the volume alone would take a round on a mirrored
+    // edge as well. Every face of the body filleted fresh is there, where it was.
+    let reopened_faces = faces(&mut reopened, "Body1");
+    assert_eq!(reopened_faces.len(), filleted_faces.len(), "{reopened_faces:?}");
+    for face in &filleted_faces {
+        assert!(reopened_faces.iter().any(|f| vec(&f["point"]).dist(vec(&face["point"])) < 1e-6), "{face} is not in {reopened_faces:?}");
+    }
 
     // Only the point says which edge that old name meant, and only among the edges of the face the
     // name still finds. Each of these still asks for the edge again: a point on the wall but on no

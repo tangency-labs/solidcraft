@@ -143,3 +143,29 @@ fn an_edge_origin_on_a_body_placed_by_an_offset_lands_on_that_edge() {
     let (o, z) = resolve(corner);
     assert!(near(o, at(Vec3::new(0.0, 0.0, 5.0))) && near(z, up), "{o:?} {z:?}");
 }
+
+/// A corner's other edge is found by its own name. Where no edge answers to that name any more,
+/// the corner is gone: the pick lies on the edge the corner was picked from, never on the other
+/// edge, so it cannot say which edge that name meant.
+#[test]
+fn a_corner_whose_other_edge_is_gone_asks_again() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 5, "corner": [0, 0, 0], "body_name": "Plate"}));
+    let st = s.model.state();
+    let snap = solidcraft_doc::joints::edge_snap(
+        &s.doc,
+        &st,
+        0,
+        Vec3::new(20.0, 0.0, 5.0),
+        Some(Vec3::new(20.0, 10.0, 5.0)),
+        Some(Vec3::new(1.0, 0.0, 5.0)),
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    let solidcraft_doc::joints::Snap::Edge { pick, edge, face: Some(face), corner: Some(_), axis } = snap else { panic!("{snap:?}") };
+    let made = solidcraft_doc::persistent_name::made_by(&face).unwrap_or_default();
+    // The top face, and a face of the same feature that no face answers to.
+    let corner = Some(format!("{face}|F{made}:side:l99"));
+    let stale = solidcraft_doc::joints::Snap::Edge { pick, edge, face: Some(face), corner, axis };
+    let origin = solidcraft_doc::joints::JointOrigin::new(0, stale);
+    assert!(solidcraft_doc::joints::resolve_origin(&s.doc, &st, &origin).is_err());
+}
