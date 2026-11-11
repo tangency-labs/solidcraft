@@ -666,3 +666,38 @@ fn work_offsets_go_where_the_post_writes_them() {
     }
     assert_eq!(work_offset_code(6).unwrap(), "G59");
 }
+
+/// The ways down at rapid stop 1 mm above where the material may reach (the stock's top, above
+/// the operation's own), except into what the path has already cut there; a rapid left with
+/// nowhere to go is dropped, the feed after it coming down the rest of the way.
+#[test]
+fn rapids_down_are_lifted_above_the_material_but_not_out_of_their_own_cut() {
+    let v = Vec3::new;
+    let mut path = Toolpath {
+        moves: vec![
+            Move::Rapid { to: v(0.0, 0.0, 30.0) },
+            Move::Rapid { to: v(0.0, 0.0, 1.0) },
+            Move::Feed { to: v(0.0, 0.0, -2.0), feed: 100.0 },
+            Move::Feed { to: v(5.0, 0.0, -2.0), feed: 300.0 },
+            Move::Rapid { to: v(5.0, 0.0, 3.5) },
+            Move::Rapid { to: v(0.0, 0.0, 3.5) },
+            // Down into the level just cut: left.
+            Move::Rapid { to: v(0.0, 0.0, -1.0) },
+            Move::Feed { to: v(0.0, 0.0, -4.0), feed: 100.0 },
+            Move::Rapid { to: v(0.0, 0.0, 3.5) },
+            Move::Rapid { to: v(9.0, 0.0, 3.5) },
+            // Down where nothing was cut, from below the material's top + 1: dropped.
+            Move::Rapid { to: v(9.0, 0.0, 1.0) },
+            Move::Feed { to: v(9.0, 0.0, -1.0), feed: 100.0 },
+            Move::Rapid { to: v(9.0, 0.0, 30.0) },
+        ],
+    };
+    lift_entries(&mut path, 3.0);
+    let rapids: Vec<Vec3> = path.moves.iter().filter_map(|m| if let Move::Rapid { to } = m { Some(*to) } else { None }).collect();
+    assert_eq!(rapids[1], v(0.0, 0.0, 4.0));
+    assert!(rapids.contains(&v(0.0, 0.0, -1.0)), "{rapids:?}");
+    assert!(!rapids.iter().any(|r| r.x == 9.0 && r.z < 3.5), "{rapids:?}");
+    assert_eq!(path.moves.len(), 12);
+    let h = Heights { clearance: 30.0, retract: 3.5, top: 0.0, bottom: -5.0 };
+    verify(&path, &h).unwrap();
+}

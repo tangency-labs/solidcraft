@@ -270,10 +270,19 @@ fn check_leave(leave: f64) -> Result<()> {
 /// A milling operation needs a tool that cuts with a straight side: a drill only cuts at its
 /// point, and a chamfer mill's side is tapered.
 fn mills(tool: &Tool) -> Result<()> {
+    cuts_sideways(tool)?;
+    match tool.kind {
+        ToolKind::Chamfer => invalid("a chamfer mill's side is tapered: a contour or a pocket needs a tool with a straight side"),
+        _ => Ok(()),
+    }
+}
+
+/// A tool that cuts with its side at all: not a drill (it cuts only at its point). Surface
+/// operations take any other kind; the stricter [`mills`] is for 2D operations.
+pub(crate) fn cuts_sideways(tool: &Tool) -> Result<()> {
     match tool.kind {
         ToolKind::Drill => invalid("a drill cannot mill: it cuts only at its point"),
-        ToolKind::Chamfer => invalid("a chamfer mill's side is tapered: a contour or a pocket needs a tool with a straight side"),
-        ToolKind::FlatEndmill | ToolKind::BallEndmill | ToolKind::BullNose => Ok(()),
+        _ => Ok(()),
     }
 }
 

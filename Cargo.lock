@@ -4312,6 +4312,7 @@ dependencies = [
  "serde_json",
  "solidcore-record",
  "solidcraft-geom",
+ "solidcraft-profile",
  "thiserror 2.0.21",
 ]
 

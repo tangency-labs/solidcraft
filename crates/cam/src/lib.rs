@@ -9,7 +9,9 @@
 //! Beyond 2D: [`Surface`] holds a part's triangles, and the drop-cutter ([`drop_z`],
 //! [`drop_along`]) lowers a flat, ball, bull nose or tapered (chamfer) [`Cutter`] onto them
 //! along any axis, stopping where it first touches. A tip placed there cannot cut into the
-//! surface, which is what 3D toolpaths are built on.
+//! surface, which is what the 3-axis surface operations ([`surface_ops`]) are built on: raster
+//! finishing, layered roughing of a stock box and z-level finishing of steep walls. Long
+//! planning can be stopped from another thread ([`stop`]).
 //!
 //! The region offsetting is our own: every boundary piece is offset, corners that open away
 //! from the offset side get a joining arc, the pieces are cut where they cross, and a piece is
@@ -18,6 +20,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod chamfer;
 mod check;
 mod cutter;
 mod dropcutter;
@@ -29,10 +32,12 @@ mod path;
 mod piece;
 mod post;
 mod readback;
+pub mod stop;
 mod surface;
+pub mod surface_ops;
 mod tool;
 
-pub use check::verify;
+pub use check::{lift_entries, verify};
 pub use cutter::{Cone, Cutter};
 pub use dropcutter::{drop_along, drop_triangle, drop_z};
 pub use frame::{Frame, angle_about, rotate, rotate_about};
@@ -43,6 +48,10 @@ pub use path::{Move, PathStats, Toolpath, arc_sweep};
 pub use post::{CommentStyle, LineNumbers, Post, Units};
 pub use readback::{Readback, allowed_deviation, readback};
 pub use surface::{Surface, barycentric, nearest_on_triangle, ray_triangle};
+pub use surface_ops::{
+    Boundary, DEFAULT_DESCENT_LIMIT, ENTRY_GAP, MAX_GRID_NODES, MAX_SAMPLES, ParallelParams, RoughingParams, WaterlineParams, parallel, roughing,
+    waterline,
+};
 pub use tool::{Tool, ToolKind};
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -59,6 +68,9 @@ pub enum CamError {
     Unsafe(String),
     #[error("G-code line {0}: {1}")]
     Parse(usize, String),
+    /// The work was asked to stop ([`stop`]) before it was done: nothing was planned.
+    #[error("stopped before it was done")]
+    Stopped,
 }
 
 pub type Result<T> = std::result::Result<T, CamError>;
@@ -69,5 +81,7 @@ pub(crate) fn invalid<T>(why: impl Into<String>) -> Result<T> {
 
 #[cfg(test)]
 mod foundation_tests;
+#[cfg(test)]
+mod surface_ops_tests;
 #[cfg(test)]
 mod tests;
