@@ -1809,16 +1809,17 @@ pub fn find_side_of_curve(
     // Project vectors into projection plane
     vec = projection_direction.cross(vec).cross(projection_direction);
 
-    // (not upstream, #13658) The nearest point of a curve to a point beyond its end is
-    // that end, where the line to the point is not square to the curve. The projection
-    // returned no solution there before it answered at an interval's ends, and a point
-    // beyond the end of the curve is on neither of its sides, so it stays a failure.
+    // (not upstream, #13658) The nearest point of an open curve to a point beyond its
+    // end is that end, where the line to the point is not square to the curve. The
+    // projection returned no solution there before it answered at an interval's ends,
+    // and a point beyond the end of the curve is on neither of its sides, so it stays a
+    // failure. A closed curve has no such end: its seam is a point like any other.
     let interval = curve.natural_interval();
     let parameter = sol.start.param(0)?;
     let at_end = [interval.min(), interval.max()]
         .iter()
         .any(|end| (parameter - end).abs() <= EFF_ZERO * (1.0 + end.abs()));
-    if at_end {
+    if at_end && !curve.is_closed(k, &interval, 0.0)? {
         let along = projection_direction.cross(p1).cross(projection_direction);
         let scale = vec.length() * along.length();
         if vec.length() >= EFF_ZERO
@@ -4260,6 +4261,44 @@ mod tests {
         );
         for (x, y) in [(2.0, 0.5), (2.0, -0.5), (-3.0, 1.0), (1.5, 0.0)] {
             assert_eq!(side(x, y), Err(not_once.clone()), "({x}, {y})");
+        }
+    }
+
+    /// The side of a point whose nearest point is a corner of a closed curve does not
+    /// depend on where the curve's seam is. Before #13658 the projection found the
+    /// corner when it was inside the curve and nothing when it was the seam.
+    #[test]
+    fn the_side_of_a_closed_curve_does_not_depend_on_its_seam() {
+        use crate::nurbs::b_spline_curve::p1::BSplineCurve;
+        use crate::nurbs::crv_basic::Curve as Net;
+        use crate::nurbs::math::{CPoint, NOW};
+        let k = Kernel::default();
+        let square = |points: [(f64, f64); 5]| {
+            let controls = points
+                .iter()
+                .map(|(x, y)| CPoint::new(*x, *y, 0.0, NOW))
+                .collect();
+            let knots = vec![0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 4.0];
+            Curve::from(BSplineCurve::from_nurb(
+                Net::new(controls, 1, knots).unwrap(),
+                3,
+                false,
+            ))
+        };
+        // the unit square, counter-clockwise: its seam at the corner (0, 0), then at (1, 0)
+        let seam_at_corner = square([(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.0, 0.0)]);
+        let corner_inside = square([(1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.0, 0.0), (1.0, 0.0)]);
+        // outside a counter-clockwise square is the right of the walk; (-1, -1) and
+        // (-1, -0.5) are nearest the corner (0, 0), (0.5, -1) the bottom edge
+        for (x, y) in [(-1.0, -1.0), (-1.0, -0.5), (0.5, -1.0), (2.0, 2.0)] {
+            let point = Vec3::new(x, y, 0.0);
+            for curve in [&seam_at_corner, &corner_inside] {
+                assert_eq!(
+                    find_side_of_curve(&k, curve, point, Vec3::Z, 1e-6),
+                    Ok(true),
+                    "({x}, {y})"
+                );
+            }
         }
     }
 

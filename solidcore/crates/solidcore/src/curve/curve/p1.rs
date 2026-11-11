@@ -1221,18 +1221,32 @@ impl<'t, O: SolutionObject + 't> CpGlobalSolver<'t, O> {
         // into the interval; an end where it is stationary is left to the search.
         if op == SolverOperation::ProjectedMinimize || op == SolverOperation::ProjectedMaximize {
             let normal = self.opt(0)?;
+            // (at the interval's end, continuity side, parameter, is the start)
             let ends = [
-                (at_interval_start, 0, bez_ivl.min(), start_pt),
-                (at_interval_end, 1, bez_ivl.max(), end_pt),
+                (at_interval_start, 0, bez_ivl.min(), true),
+                (at_interval_end, 1, bez_ivl.max(), false),
             ];
-            for (at_bound, side, parameter, [end, outward]) in ends {
+            for (at_bound, side, parameter, is_start) in ends {
                 let open = conts
                     .get(side)
                     .is_some_and(|c| (*c as i32) < (ContinuityType::G1 as i32));
-                let is_solution = at_bound
-                    && open
-                    && end_is_projected_extremum(end, outward, test_pnt, normal, op);
-                if !is_solution {
+                if !(at_bound && open) {
+                    continue;
+                }
+                // the tangent on the interval's side of the end: at a knot where the curve
+                // turns, the other side's tangent says nothing about the interval. At a knot
+                // the evaluation's flag picks the span that starts there (`true`) or the one
+                // that ends there (`false`).
+                let (end, tangent) = match curve.evaluate(k, parameter, 1, is_start, true) {
+                    Ok(v) => match v.as_slice() {
+                        [point, tangent, ..] => (*point, *tangent),
+                        _ => continue,
+                    },
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                    Err(_) => continue,
+                };
+                let outward = if is_start { -tangent } else { tangent };
+                if !end_is_projected_extremum(end, outward, test_pnt, normal, op) {
                     continue;
                 }
                 let value =
@@ -2599,6 +2613,59 @@ mod tests {
         let mut got = projected_answers(&line, whole, ProjectedMaximize, above, 50.0, All);
         got.sort_by(|a, b| a.0.total_cmp(&b.0));
         assert!(close(&got, &[far, near]), "{got:?}");
+    }
+
+    /// An interval that starts at a corner of the curve: the tangent that says whether the
+    /// start is the nearest point is the one inside the interval. The polyline runs
+    /// (-1, 0) to (0, 0) to (0, 1) with its corner at 0.5; the interval [0.5, 1] is the
+    /// second leg, along +y.
+    #[test]
+    fn projected_extremum_at_an_interval_starting_at_a_corner_uses_the_inside_tangent() {
+        use crate::nurbs::crv_basic::Curve as Net;
+        use crate::nurbs::math::{CPoint, NOW};
+        use SolutionRequested::{All, Single};
+        let controls = vec![
+            CPoint::new(-1.0, 0.0, 0.0, NOW),
+            CPoint::new(0.0, 0.0, 0.0, NOW),
+            CPoint::new(0.0, 1.0, 0.0, NOW),
+        ];
+        let net = Net::new(controls, 1, vec![0.0, 0.0, 0.5, 1.0, 1.0]).unwrap();
+        let corner = Curve::from(BSplineCurve::from_nurb(net, 3, false));
+        let leg = (0.5, 1.0);
+        let op = SolverOperation::ProjectedMinimize;
+        // below the leg: the corner is the nearest point, although the first leg's
+        // tangent there points towards the query point
+        let below = Vec3::new(0.3, -1.0, 0.0);
+        for requested in [Single, All] {
+            let got = projected_answers(&corner, leg, op, below, 1e-6, requested);
+            assert_eq!(got.len(), 1, "{requested:?}: {got:?}");
+            assert!((got[0].0 - 0.5).abs() < 1e-12, "{got:?}");
+            assert!((got[0].1 - 1.09_f64.sqrt()).abs() < 1e-12, "{got:?}");
+        }
+        // beside the leg: the foot (0, 0.5) is the one minimum; the corner is farther
+        // and the distance falls from it into the interval
+        let beside = Vec3::new(-0.5, 0.5, 0.0);
+        for (tolerance, requested) in [(1e-6, Single), (50.0, All)] {
+            let got = projected_answers(&corner, leg, op, beside, tolerance, requested);
+            assert_eq!(got.len(), 1, "{tolerance} {requested:?}: {got:?}");
+            assert!((got[0].0 - 0.75).abs() < 1e-9, "{got:?}");
+            assert!((got[0].1 - 0.5).abs() < 1e-9, "{got:?}");
+        }
+        // the same for an interval that ends at the corner: the first leg, along +x.
+        // Right of the corner the corner is nearest; above the leg its foot is.
+        let first = (0.0, 0.5);
+        let right = Vec3::new(1.0, 0.3, 0.0);
+        let got = projected_answers(&corner, first, op, right, 1e-6, Single);
+        assert_eq!(got.len(), 1, "{got:?}");
+        assert!((got[0].0 - 0.5).abs() < 1e-6, "{got:?}");
+        assert!((got[0].1 - 1.09_f64.sqrt()).abs() < 1e-9, "{got:?}");
+        let above = Vec3::new(-0.5, 0.5, 0.0);
+        for (tolerance, requested) in [(1e-6, Single), (50.0, All)] {
+            let got = projected_answers(&corner, first, op, above, tolerance, requested);
+            assert_eq!(got.len(), 1, "{tolerance} {requested:?}: {got:?}");
+            assert!((got[0].0 - 0.25).abs() < 1e-9, "{got:?}");
+            assert!((got[0].1 - 0.5).abs() < 1e-9, "{got:?}");
+        }
     }
 
     /// #13677's curve: a straight projected spline with a knot at 0.5, seen from the
