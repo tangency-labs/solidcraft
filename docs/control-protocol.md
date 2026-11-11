@@ -771,7 +771,7 @@ sends it a line whenever the active design changes (#6985):
 ### Slow commands and the window (#1989)
 
 With the preference **Preferences > AI > Keep the window responsive while agents run commands**
-on (`ui.prefs {"agent_off_thread": true}`; off by default), a design change in the desktop app
+on (the default; `ui.prefs {"agent_off_thread": false}` turns it off), a design change in the desktop app
 that takes longer than about 150 ms (an `engine.execute` of a
 modelling command, an `engine.batch` of them) computes off the window thread, so the window keeps
 drawing and answering while it runs:
