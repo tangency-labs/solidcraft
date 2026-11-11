@@ -71,7 +71,7 @@ pub fn is_reflection(m: &Mat) -> bool {
 /// The mirror plane of `m` in world coordinates.
 pub fn world_plane(doc: &Document, st: Option<&ModelState>, plane: &PlaneRef, frame: u64) -> Result<Plane> {
     let (vals, _) = doc.param_values();
-    let pl = doc.resolve_plane_in(&vals, plane, 0, st)?;
+    let pl = doc.resolve_plane_in(&vals, plane, 0, frame, st)?;
     let f = doc.component_transform(frame);
     Plane::new(crate::apply_point(&f, pl.origin), crate::apply_vector(&f, pl.x), crate::apply_vector(&f, pl.y))
         .ok_or_else(|| DocError::Invalid("the mirror plane is degenerate".into()))
