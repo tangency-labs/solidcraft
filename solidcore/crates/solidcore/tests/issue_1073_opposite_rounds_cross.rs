@@ -1,6 +1,8 @@
 //! tangency-labs/solidcore#1073 (WR-460): rounds on the four vertical edges of a
 //! 14 x 6 x 10 post, each 6 mm face carrying two of them. Past r = 3 the two rails on a
-//! face have crossed and SMLib builds an open body. With SolidCraft's fix list the band
+//! face have crossed and SMLib builds an open body; the default kernel refuses that result,
+//! as it does any fillet of a closed manifold solid whose result is none (WR-212), and puts
+//! the post back. With SolidCraft's fix list the band
 //! test (`fixes.fillet_refuse_overlapping_bands`, WR-542) refuses it before the post is
 //! edited, naming the largest radius that builds. (The crossing-rails refusal
 //! `fillet_refuse_crossing_rails`, which refused it with a bare 1001 after the fillet's
@@ -8,6 +10,8 @@
 #![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic)] // test helpers
 use solidcore::blend::fillet_executive::api::fillet_edges;
 use solidcore::blend::fillet_executive::{FitKind, NoRoomReason};
+use solidcore::error::blend::BlendFailure;
+use solidcore::error::ErrorKind;
 use solidcore::kernel::UpstreamFixes;
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::create_box;
@@ -60,11 +64,27 @@ fn round(fixed: bool, r: f64) -> (Brep, Result<()>, bool) {
     (b, result, solid)
 }
 
+/// The default kernel (no band test) builds the r 3.5 rounds whose rails cross on each 6 mm
+/// face, which leaves no closed manifold solid: the result is refused as a failed blend
+/// naming no entity, and the post comes back a closed manifold solid with its six faces.
 #[test]
-fn issue_1073_upstream_builds_an_open_body() {
-    let (_, result, solid) = round(false, 3.5);
-    result.unwrap();
-    assert!(!solid);
+fn issue_1073_the_default_kernels_open_body_is_refused() {
+    let (b, result, _) = round(false, 3.5);
+    let Err(error) = result else {
+        let solid = is_manifold_solid(&b);
+        panic!(
+            "built: {} faces, manifold solid {solid:?}",
+            b.face_list().len()
+        );
+    };
+    assert_eq!(error.kind(), ErrorKind::Failed, "{error:?}");
+    assert!(
+        matches!(error.blend_failure(), Some(BlendFailure::Failed(_))),
+        "{error:?}"
+    );
+    assert_eq!(error.entity(), None, "{error:?}");
+    assert!(is_manifold_solid(&b).unwrap());
+    assert_eq!(b.face_list().len(), 6);
 }
 
 #[test]
