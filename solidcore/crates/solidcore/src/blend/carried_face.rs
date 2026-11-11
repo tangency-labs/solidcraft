@@ -7,11 +7,11 @@
 //!
 //! Not upstream (solidcore's). [`carried_faces`] decides where that construction gives the
 //! round the kernel would build on an unbounded face, and measures the slab: the edge is a
-//! straight line between two vertices ([`crate::curve::curve::Curve::is_linear`]), concave ([`is_concave_edge`]), a face of it is planar,
-//! and at each end of the edge a planar face square to it (other than the edge's own) ends
-//! the round, so the slab's square ends add nothing the round could run into. The directions
-//! are evaluated at the edge's middle ([`outward`]); the squareness is compared at
-//! [`SQUARE`].
+//! straight line between two vertices ([`crate::curve::curve::Curve::is_linear`]), concave
+//! ([`is_concave_edge`]), a face of it is planar, and at each end of the edge a planar face
+//! square to it (other than the edge's own) ends the round, so the slab's square ends add
+//! nothing the round could run into. The directions are evaluated at the edge's middle
+//! ([`outward`]); the squareness is compared at [`SQUARE`].
 
 use crate::blend::chamfer_side::outward;
 use crate::blend::fillet_solver::p5::is_concave_edge;
@@ -258,9 +258,9 @@ mod tests {
         );
     }
 
-    /// A convex edge of the same L has nothing to carry on, and neither has the concave edge
-    /// of an L whose top slopes (no flat face square to the edge at its top end). A radius
-    /// that is not positive is refused.
+    /// A convex edge of the same L has nothing to carry on, and neither has a concave edge
+    /// of an L with tapered sides (the edge leans, so its flat top and bottom are not square
+    /// to it). A radius that is not finite and positive is refused.
     #[test]
     fn convex_edges_and_unsquare_ends_carry_nothing() {
         let mut k = Kernel::default();
