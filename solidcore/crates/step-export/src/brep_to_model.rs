@@ -265,6 +265,27 @@ fn step_angles(surface: &solidcore::surface::surface::Surface) -> (bool, bool) {
     }
 }
 
+/// Whether `surface`'s STEP parameterisation (ISO 10303-42, the one [`surface`] writes)
+/// turns its normal over against the kernel's, ∂S/∂u × ∂S/∂v in its NURB parameters. The
+/// written axis, radii and generator are the same either way; what differs is how the NURB
+/// parameters run: swapped (the NURB's u is STEP's v), or one of them running against
+/// STEP's (an inside-out cone's height from the top, sphere's latitude from the +90 pole,
+/// torus's minor angle backwards). Each such reversal turns the normal over once.
+fn reverses_normal(surface: &solidcore::surface::surface::Surface) -> bool {
+    use solidcore::surface::surface::p2::SurfaceKind;
+    match surface.kind() {
+        SurfaceKind::Cone(cone) => {
+            let canonical = cone.canonical();
+            canonical.swap_uv ^ canonical.inside_out
+        }
+        SurfaceKind::Sphere(sphere) => sphere.base().swap_uv() ^ sphere.inside_out(),
+        SurfaceKind::Torus(torus) => torus.base().swap_uv() ^ torus.inside_out(),
+        SurfaceKind::SurfOfRevolution(revolution) => revolution.swap_uv(),
+        SurfaceKind::SurfOfExtrusion(extrusion) => extrusion.swap_uv(),
+        _ => false,
+    }
+}
+
 /// Maps one B-rep to the neutral STEP model.
 pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
     let vertex_ids = brep.vertex_list().to_vec();
@@ -326,7 +347,12 @@ pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
     let mut face_by_id = BTreeMap::new();
     let mut pcurves = BTreeMap::new();
     let pcurve_kernel = &kernel;
-    let mut material_faceuses = BTreeMap::new();
+    // ISO 10303-42 wants each face of a solid's closed shell written from outside the
+    // material: its normal (the surface's, reversed where `same_sense` is false) pointing
+    // out of the material, and its loops anticlockwise about that normal. A faceuse in the
+    // shell of a material region faces into that region, so each face is written from its
+    // mate, the faceuse on the outer side.
+    let mut outward_faceuses = BTreeMap::new();
     for shell_id in brep.shells().ids() {
         let shell = brep.shell(shell_id).map_err(|e| err(e.to_string()))?;
         let Some(region_id) = shell.region else {
@@ -341,8 +367,12 @@ pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
             continue;
         }
         for faceuse in shell.get_faceuses().map_err(|e| err(e.to_string()))? {
-            if let Some(face) = brep.faceuse(faceuse).map_err(|e| err(e.to_string()))?.face {
-                material_faceuses.insert(face, faceuse);
+            let faceuse = brep.faceuse(faceuse).map_err(|e| err(e.to_string()))?;
+            if let Some(face) = faceuse.face {
+                let outward = faceuse
+                    .mate
+                    .ok_or_else(|| err("a material faceuse has no mate"))?;
+                outward_faceuses.insert(face, outward);
             }
         }
     }
@@ -352,7 +382,7 @@ pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
             .surface
             .as_ref()
             .ok_or_else(|| err("face has no surface"))?;
-        let faceuse = material_faceuses
+        let faceuse = outward_faceuses
             .get(id)
             .copied()
             .or(face.faceuse)
@@ -376,7 +406,7 @@ pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
                 if !planar_face {
                     // The UV trim only enriches this face's boundary: without one the
                     // edge use still contributes its oriented edge below.
-                    if let Ok((Some(uv_curve), _)) = eu::uv_trim_curve(brep, edgeuse) {
+                    if let Ok((Some(uv_curve), owner)) = eu::uv_trim_curve(brep, edgeuse) {
                         let interval = uv_curve.natural_interval();
                         let (low, high) = (interval.min(), interval.max());
                         // The UV trim curve is in the surface's NURB parameters; a STEP pcurve
@@ -401,11 +431,14 @@ pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
                             uv.clear();
                         }
                         if uv.len() >= 2 {
-                            let opposite =
-                                eu::orientation(brep, edgeuse).is_ok_and(|orientation| {
-                                    orientation
-                                != solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType::Same
-                                });
+                            // A UV trim curve runs along the edge use that holds it, which
+                            // is this use's mate when this use holds none: the pcurve runs
+                            // along the edge.
+                            let holder = owner.unwrap_or(edgeuse);
+                            let opposite = eu::orientation(brep, holder).is_ok_and(|orientation| {
+                                orientation
+                                    != solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType::Same
+                            });
                             if opposite {
                                 uv.reverse();
                             }
@@ -445,19 +478,15 @@ pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
                 bound: Bound::Edges(oriented),
             });
         }
-        let mut same_sense = brep
+        // The faceuse's side is the kernel surface's normal (its NURB parameters'), or its
+        // reverse; `same_sense` states it against the STEP surface's normal
+        // ([`reverses_normal`]). The loops stay as the faceuse directs them.
+        let same_sense = (brep
             .faceuse(faceuse)
             .map_err(|e| err(e.to_string()))?
             .orientation
-            == solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType::Same;
-        // STEP cones/cylinders use the canonical outward parameterisation. The
-        // kernel also permits swapped UV directions and inside-out cones; each
-        // reverses its normal without changing the exported axis and radius.
-        // Keep the directed boundary and express that reversal in ADVANCED_FACE.
-        if let solidcore::surface::surface::SurfaceKind::Cone(cone) = surf.kind() {
-            let canonical = cone.canonical();
-            same_sense ^= canonical.swap_uv ^ canonical.inside_out;
-        }
+            == solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType::Same)
+            ^ reverses_normal(surf);
         face_indices.push(faces.len());
         face_by_id.insert(*id, faces.len());
         faces.push(Face {
