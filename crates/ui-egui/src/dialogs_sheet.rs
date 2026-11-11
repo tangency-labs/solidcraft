@@ -776,17 +776,17 @@ fn flange_edges_segmented(inputs: &[SelInput], own: &[(Vec3, String, String)], s
                     seg["flip"] = json!(f);
                 }
                 // A relief only where the shape is not None: no key, no relief.
-                if let Some((shape, width, depth)) = &row.relief {
-                    if let Some(name) = SEGMENT_RELIEFS.get(*shape).filter(|s| !s.is_empty()) {
-                        let mut r = json!({"shape": name});
-                        if !width.trim().is_empty() {
-                            r["width"] = json!(width.trim());
-                        }
-                        if !depth.trim().is_empty() {
-                            r["depth"] = json!(depth.trim());
-                        }
-                        seg["relief"] = r;
+                if let Some((shape, width, depth)) = &row.relief
+                    && let Some(name) = SEGMENT_RELIEFS.get(*shape).filter(|s| !s.is_empty())
+                {
+                    let mut r = json!({"shape": name});
+                    if !width.trim().is_empty() {
+                        r["width"] = json!(width.trim());
                     }
+                    if !depth.trim().is_empty() {
+                        r["depth"] = json!(depth.trim());
+                    }
+                    seg["relief"] = r;
                 }
                 segs.push(seg);
             }
