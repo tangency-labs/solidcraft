@@ -139,8 +139,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<ReplaceWithLinkResult>)
         .params(
         "component or components: [ids or names] of components that are not linked; with: a linked component, or path: a .sc design \
-         (its link here, else a new linked component) → each component's history goes and its placements become placements of the linked \
-         component; refused when its bodies are not the same as the link's; returns component, name, replaced and warnings",
+         (its link here, one that holds the design in one component first, else a new linked component) → each component's history goes \
+         and its placements become placements of the linked component; refused when its bodies are not the same as the link's; returns \
+         component, name, replaced and warnings",
     ),
     CommandSpec::new("component.links", "List Links", crate::checked!("component.links", list_links))
         .icon("chain")

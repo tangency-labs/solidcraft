@@ -782,9 +782,10 @@ pub(super) fn copies(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// `component.replace_with_link`: each component given loses its history, and its placements
-/// become placements of a linked component: the one `with` names, or the link to `path`, made
-/// here when there is none. A component that does not build the same bodies as the link refuses
-/// the call.
+/// become placements of a linked component: the one `with` names, or a link to `path` (one that
+/// holds the design in one component first), made here when there is none. A component that
+/// does not build the same bodies as the link refuses the call, and so does a link that keeps
+/// its design's components (`kept_refusal`).
 pub(super) fn replace_with_link(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.replace_with_link";
     let mut targets = Vec::new();
@@ -805,7 +806,10 @@ pub(super) fn replace_with_link(s: &mut Session, p: &Value) -> Result<Value> {
     } else {
         let given = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`with` or `path` is required"))?;
         let file = absolute(Path::new(given));
-        let existing = s.doc.links.iter().find(|(_, l)| absolute(&resolve(s.path.as_deref(), &l.path)) == file).map(|(c, _)| *c);
+        // A link that keeps its design's components can't be compared with (`kept_refusal`): of
+        // the links to the file, one that holds the design in one component is taken first.
+        let to_file: Vec<u64> = s.doc.links.iter().filter(|(_, l)| absolute(&resolve(s.path.as_deref(), &l.path)) == file).map(|(c, _)| *c).collect();
+        let existing = to_file.iter().copied().min_by_key(|c| kept_refusal(s, *c).is_some());
         match existing {
             Some(c) => c,
             None => {

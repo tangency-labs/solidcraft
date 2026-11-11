@@ -752,7 +752,7 @@ fn datum_placement(s: &Session, v: &Value, occurrence: u64, key: Option<Vec<u64>
 }
 
 /// The placement path a plane or axis snap's datum names, when it names one.
-fn datum_path(snap: &mut Snap) -> Option<&mut Vec<u64>> {
+pub(super) fn datum_path(snap: &mut Snap) -> Option<&mut Vec<u64>> {
     match snap {
         Snap::Plane { plane, .. } => match plane.as_mut() {
             solidcraft_doc::PlaneRef::Datum { datum } => Some(&mut datum.path),

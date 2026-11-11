@@ -30,7 +30,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
-use solidcraft_doc::joints::{Joint, JointOrigin, MotionLink};
+use solidcraft_doc::joints::{Coupling, Joint, JointOrigin, MotionLink, Size};
 use solidcraft_doc::{Document, LinkTree, Mat, Metadata, ModelState};
 
 use crate::{EngineError, Result, Session};
@@ -458,13 +458,15 @@ fn way_down(top: u64, at: &HashMap<u64, (u64, u64)>, first: &HashMap<u64, u64>, 
 /// A component or occurrence the link already keeps for one the design still has stays the
 /// same one here, and takes the design's name, part properties and transform. An occurrence the
 /// design has moved into another of its components stays the same one too, in the component
-/// kept for that one, and a joint of this design that reaches a part through it is given the
-/// way there is to it now. One the design has gained is made, one it has lost is removed, with
-/// what referred to it; `warnings` names the joints that go that way. The record of what
-/// stands for what ([`LinkTree`]) is written to the link unless `keep` asks for no structure,
-/// which drops it. For each occurrence of the linked component that is flexible once `keep` is
-/// done, the design's joints are made, written again or removed in the same way, each keeping
-/// the values it has here; an occurrence made rigid loses its joints and its pose.
+/// kept for that one, and a joint origin of this design that reaches a part through it is given
+/// the way there is to it now: a joint's side, a named origin, the round face or the tip a gear
+/// or a cam reads, and the placement of the origin plane or axis any of them is on. One the
+/// design has gained is made, one it has lost is removed, with what referred to it; `warnings`
+/// names the joints that go that way. The record of what stands for what ([`LinkTree`]) is
+/// written to the link unless `keep` asks for no structure, which drops it. For each occurrence
+/// of the linked component that is flexible once `keep` is done, the design's joints are made,
+/// written again or removed in the same way, each keeping the values it has here; an occurrence
+/// made rigid loses its joints and its pose.
 ///
 /// `as_it_was` is the model as it stood before the link's bodies were replaced, from a caller
 /// that replaced them in the same command: a joint that stays where it is when the link starts
@@ -674,33 +676,65 @@ pub(super) fn sync(
             first.entry(o.component).or_insert(o.id);
         }
         let of_top: HashSet<u64> = d.occurrences.iter().filter(|o| o.component == top).map(|o| o.id).collect();
-        let reroute = |side: &mut JointOrigin| {
-            let Some(last) = side.inside.iter().rposition(|id| moved.contains(id)) else { return };
-            // The way starts below the occurrence of the linked component that the side is on,
-            // or that it passes through.
-            let from = if of_top.contains(&side.occurrence) {
+        // `path` with the way down to the last occurrence on it that the design has moved given
+        // anew. The way starts below the occurrence of the linked component that `path` hangs
+        // from (`on_top`), or that it passes through.
+        let reroute = |path: &mut Vec<u64>, on_top: bool| {
+            let Some(last) = path.iter().rposition(|id| moved.contains(id)) else { return };
+            let from = if on_top {
                 Some(0)
             } else {
-                side.inside.get(..last).and_then(|above| above.iter().rposition(|id| of_top.contains(id))).map(|through| through + 1)
+                path.get(..last).and_then(|above| above.iter().rposition(|id| of_top.contains(id))).map(|through| through + 1)
             };
             let Some(from) = from else { return };
             let (Some(above), Some(old_way), Some(inner), Some(below)) =
-                (side.inside.get(..from), side.inside.get(from..last), side.inside.get(last), side.inside.get(last + 1..))
+                (path.get(..from), path.get(from..last), path.get(last), path.get(last + 1..))
             else {
                 return;
             };
             let Some(way) = way_down(top, &at, &first, old_way, *inner) else { return };
-            let inside: Vec<u64> = above.iter().chain(&way).chain(below).copied().collect();
-            if inside.len() <= solidcraft_doc::MAX_PLACEMENT_DEPTH {
-                side.inside = inside;
+            let rerouted: Vec<u64> = above.iter().chain(&way).chain(below).copied().collect();
+            if rerouted.len() <= solidcraft_doc::MAX_PLACEMENT_DEPTH {
+                *path = rerouted;
+            }
+        };
+        // A side names two ways down, and either can pass through a moved occurrence whatever
+        // the other does: the occurrences inside its own occurrence, and the placement of the
+        // origin plane or axis it is on, which is named from the top of this design. A named
+        // joint origin or a coupling's is on the placement it was picked on (`origin_anchor`),
+        // which can be one inside the linked component, a later placement of its component, from
+        // which the way down no longer leads to the part: that one is named through the linked
+        // component's occurrence first, as a joint's side always is, on the design as it was.
+        let reroute_side = |side: &mut JointOrigin| {
+            if !of_top.contains(&side.occurrence) && side.inside.iter().any(|id| moved.contains(id)) {
+                *side = s.doc.through_subassembly(side);
+            }
+            reroute(&mut side.inside, of_top.contains(&side.occurrence));
+            if let Some(path) = super::super::joints::datum_path(&mut side.snap) {
+                reroute(path, false);
             }
         };
         for j in &mut d.assembly.joints {
-            reroute(&mut j.a);
-            reroute(&mut j.b);
+            reroute_side(&mut j.a);
+            reroute_side(&mut j.b);
         }
         for origin in &mut d.assembly.origins {
-            reroute(&mut origin.origin);
+            reroute_side(&mut origin.origin);
+        }
+        // A gear, a rack, a screw or a cam's roller reads its radius on a round face, and a cam
+        // its follower's tip, at joint origins of their own. A cam finds its tip and its roller
+        // where the way down leads, and keeps the travel it last worked out when it can't.
+        for coupling in d.assembly.links.iter_mut().filter_map(|l| l.coupling.as_mut()) {
+            for size in coupling.sizes_mut() {
+                if let Size::Circle(o) = size {
+                    reroute_side(o);
+                }
+            }
+            if let Coupling::Cam(cam) = coupling
+                && let Some(tip) = &mut cam.tip
+            {
+                reroute_side(tip);
+            }
         }
     }
 

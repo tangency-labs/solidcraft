@@ -1928,3 +1928,245 @@ fn replace_with_link_says_why_it_takes_no_link_that_keeps_components_and_how_to_
     assert!((volume(&mut s) - 9280.0).abs() < 1e-6, "{}", volume(&mut s));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Given a design file rather than a linked component, Replace with Link takes a link to that
+/// file that holds the design in one component, also where a link to it that keeps its
+/// components comes first. The unit is linked twice here: first keeping its components, 200 mm
+/// along Y, then in one component at the origin. A component that builds the unit's four solids,
+/// 100 mm along Y, is replaced with a link to the file: it becomes the second occurrence of the
+/// link in one component, and every body stays where it was. Named with `with`, a link that
+/// keeps components is still refused, as the test above shows.
+#[test]
+fn replace_with_link_given_a_file_takes_its_link_that_holds_the_design_in_one_component() {
+    let dir = scratch("replace-path");
+    let unit = save_unit(&dir);
+    let unit_boxes = boxes(&open(&unit));
+    let mut s = Session::default();
+    let kept =
+        run(&mut s, "component.insert_design", json!({"path": unit, "translate": [0, 200, 0], "structure": true}))["component"].as_u64().unwrap();
+    let flat = run(&mut s, "component.insert_design", json!({"path": unit}))["component"].as_u64().unwrap();
+    assert!(kept < flat, "the link that keeps components is the first link to the file");
+    // The same four solids as bodies of one component, as in the test above.
+    run(&mut s, "component.create", json!({"name": "Copy"}));
+    for (size, corner, body) in [
+        ([40, 20, 5], [0, 0, 0], "Copy plate"),
+        ([40, 2, 2], [0, 22, 0], "Copy rail"),
+        ([4, 6, 10], [5, 5, 5], "Copy pin"),
+        ([6, 4, 10], [24, 5, 5], "Copy pin 2"),
+    ] {
+        run(&mut s, "solid.box", json!({"length": size[0], "width": size[1], "height": size[2], "corner": corner, "body_name": body}));
+    }
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Copy:1", "translate": [0, 100, 0]}));
+    let all = together(together(unit_boxes.clone(), shifted(&unit_boxes, [0, 100, 0])), shifted(&unit_boxes, [0, 200, 0]));
+    assert_eq!(boxes(&s), all);
+    let replaced = run(&mut s, "component.replace_with_link", json!({"component": "Copy", "path": unit}));
+    assert_eq!((replaced["component"].as_u64(), &replaced["replaced"]), (Some(flat), &json!(["Copy"])), "{replaced}");
+    assert_eq!(placements(&s, flat, 0).len(), 2, "the copy is the second occurrence of the link in one component");
+    assert_eq!(placements(&s, kept, 0).len(), 1);
+    assert_eq!(boxes(&s), all, "and every body is where it was");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A side on the origin plane of a part inside a linked subassembly names that plane by the
+/// part's placement, from the top of this design down: here the unit's occurrence, then the
+/// first pin. When the linked design moves the pin into another of its components, Update Links
+/// gives that path the way there is to the pin now, through the component kept for the new one,
+/// as it does the side's own way down: the joint still solves, and nothing moves. The new
+/// component `Cell` sits at the unit's origin, so the pin and its plane are where they were.
+#[test]
+fn a_joint_on_the_origin_plane_of_a_part_its_design_moves_into_another_component_still_solves() {
+    let dir = scratch("moved-datum");
+    let unit = save_unit(&dir);
+    let mut s = Session::default();
+    let inserted = run(&mut s, "component.insert_design", json!({"path": unit, "translate": [100, 0, 0], "structure": true}));
+    let (top, unit_here) = (inserted["component"].as_u64().unwrap(), inserted["occurrence"].as_u64().unwrap());
+    let pin = component(&s, "pin");
+    let pins = placements(&s, pin, top);
+    run(&mut s, "component.create", json!({"name": "Block", "activate": true}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let on_pin = json!({"type": "rigid", "name": "On pin", "flip": true,
+                        "a": {"occurrence": pins[0], "plane": "XY"}, "b": {"occurrence": "Block", "plane": "XY"}});
+    run(&mut s, "joint.create", on_pin);
+    // The placement whose XY plane the joint's side is on.
+    let datum = |s: &Session| {
+        let side = &s.doc.assembly.joints.iter().find(|j| j.name == "On pin").expect("the joint is kept").a;
+        match &side.snap {
+            solidcraft_doc::joints::Snap::Plane { plane, .. } => match plane.as_ref() {
+                solidcraft_doc::PlaneRef::Datum { datum } => datum.path.clone(),
+                other => panic!("{other:?}"),
+            },
+            other => panic!("{other:?}"),
+        }
+    };
+    let solved = |s: &Session| {
+        let solution = solidcraft_doc::joints::solve(&s.doc, &s.model.state());
+        (solution.errors, solution.conflicts)
+    };
+    assert_eq!(datum(&s), vec![unit_here, pins[0]]);
+    assert_eq!(solved(&s), (Vec::new(), Vec::new()));
+    let at_rest = boxes(&s);
+
+    let mut source = open(&unit);
+    run(&mut source, "component.create", json!({"name": "Cell", "activate": false}));
+    run(&mut source, "occurrence.reparent", json!({"occurrence": "pin:1", "parent": "Cell"}));
+    run(&mut source, "file.save", json!({}));
+    let updated = run(&mut s, "component.update_links", json!({}));
+    assert_eq!(updated["updated"], json!(["unit"]), "{updated}");
+    let cell = component(&s, "Cell");
+    let cell_here = placements(&s, cell, top);
+    assert_eq!((cell_here.len(), placements(&s, pin, cell)), (1, vec![pins[0]]), "the same pin, now in the cell");
+    assert_eq!(datum(&s), vec![unit_here, cell_here[0], pins[0]]);
+    assert_eq!(solved(&s), (Vec::new(), Vec::new()));
+    assert_eq!(boxes(&s), at_rest);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A cam's tip picked on a part of a linked subassembly's second occurrence is a joint origin on
+/// that occurrence's own copy of the part. When the linked design moves the part into another of
+/// its components, Update Links gives the tip the way there is to the part now, as it does the
+/// follower joint's side: the cam's travel is still worked out, where the cam would keep the
+/// table it last worked out and say its tip can't be found. The cam is a disc of radius 30 about
+/// (10, 0), 5 mm thick, turning about Z through the origin, as in `joints_cam_tests`.
+/// `follower.sc` holds a tappet, a 20 x 4 x 5 bar along +X with its end at its origin, and is
+/// placed twice. The second time the tappet's end is where a knife edge on the line y = 6 meets
+/// the disc, x = 10 + √(30² − 6²) = 39.394 mm, and it slides along X on the grounded base, its
+/// tip at its end.
+#[test]
+fn a_cam_tip_on_a_part_its_design_moves_into_another_component_is_still_found() {
+    let dir = scratch("moved-cam");
+    let (tappet, follower) = (dir.join("tappet.sc"), dir.join("follower.sc"));
+    let mut part = Session::default();
+    run(&mut part, "solid.box", json!({"length": 20, "width": 4, "height": 5, "corner": [0, -2, 0], "body_name": "Tappet"}));
+    run(&mut part, "file.save", json!({"path": tappet}));
+    let mut design = Session::default();
+    run(&mut design, "component.insert_design", json!({"path": tappet, "structure": true}));
+    run(&mut design, "file.save", json!({"path": follower}));
+
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Base", "grounded": true}));
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [-90, -90, -20]}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "component.create", json!({"name": "Cam"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "CamSketch"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [10, 0], "radius": 30}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let (h, tip) = (6.0, 10.0 + (30.0f64 * 30.0 - 6.0 * 6.0).sqrt());
+    let top =
+        run(&mut s, "component.insert_design", json!({"path": follower, "translate": [0, 200, 0], "structure": true}))["component"].as_u64().unwrap();
+    let second =
+        run(&mut s, "component.insert_design", json!({"path": follower, "reuse": true, "translate": [tip, h, 0]}))["occurrence"].as_u64().unwrap();
+    let bar = placements(&s, component(&s, "tappet"), top)[0];
+    let turn = json!({"type": "revolute", "name": "Turn", "flip": true,
+                      "a": {"occurrence": "Base", "point": [0, 0, 0], "z": [0, 0, 1]},
+                      "b": {"occurrence": "Cam", "point": [0, 0, 0], "z": [0, 0, 1]}});
+    run(&mut s, "joint.create", turn);
+    let slide = json!({"type": "slider", "name": "Slide", "flip": true,
+                       "a": {"occurrence": "Base", "point": [0, h, 2.5], "z": [1, 0, 0]},
+                       "b": {"occurrence": bar, "path": [second, bar], "point": [0, h, 2.5], "z": [1, 0, 0]}});
+    run(&mut s, "joint.create", slide);
+    let cam = json!({"a": "Turn", "b": "Slide", "profile": {"sketch": "CamSketch"}, "tip": {"point": [tip, h, 2.5], "path": [second, bar]}});
+    run(&mut s, "joint.cam", cam);
+    let tip_side = |s: &Session| match s.doc.assembly.links.first().and_then(|l| l.coupling.clone()) {
+        Some(solidcraft_doc::joints::Coupling::Cam(cam)) => cam.tip.map(|o| (o.occurrence, o.inside)),
+        other => panic!("{other:?}"),
+    };
+    let worked_out = |s: &mut Session| {
+        let listed = run(s, "joint.list", json!({}));
+        let link = &listed["links"][0];
+        assert!(link["error"].is_null() && link["lift"].is_object(), "{listed}");
+    };
+    assert_eq!(tip_side(&s), Some((second, vec![bar])));
+    worked_out(&mut s);
+
+    let mut source = open(&follower);
+    run(&mut source, "component.create", json!({"name": "Cell", "activate": false}));
+    run(&mut source, "occurrence.reparent", json!({"occurrence": "tappet:1", "parent": "Cell"}));
+    run(&mut source, "file.save", json!({}));
+    let updated = run(&mut s, "component.update_links", json!({}));
+    assert_eq!(updated["updated"], json!(["follower"]), "{updated}");
+    let cell_here = placements(&s, component(&s, "Cell"), top);
+    assert_eq!(cell_here.len(), 1);
+    assert_eq!(tip_side(&s), Some((second, vec![cell_here[0], bar])));
+    worked_out(&mut s);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A joint origin, or the round face a gear reads, picked on a part inside the second placement
+/// of a subassembly in a linked design is on that placement, below the linked component's
+/// occurrence. When the design moves the part into another of its components, the way down from
+/// that placement leads nowhere: Update Links names the origin through the linked component's
+/// occurrence, as a joint's side is, and gives it the way there is to the part now. `rack.sc`
+/// places `Sub` twice, the second 50 mm along X, with a pin inside it: a cylinder of radius 3 and
+/// height 10 about Z at Sub's origin. The origin `Tip` (the top of the second pin, (50, 0, 10))
+/// and a gear's first radius (its wall at (53, 0, 5), radius 3) are picked on the pin in the
+/// second `Sub`. The rack then moves the pin, from the first `Sub`, into `Cell` at the rack's
+/// origin: the pin is placed once, in the cell. Both still resolve, and a joint made from the
+/// origin solves.
+#[test]
+fn a_joint_origin_picked_in_a_second_placement_inside_a_linked_subassembly_follows_its_part() {
+    let dir = scratch("moved-origin");
+    let rack = dir.join("rack.sc");
+    let mut design = Session::default();
+    let sub_one = run(&mut design, "component.create", json!({"name": "Sub"}))["occurrence"].as_u64().unwrap();
+    let pin_one = run(&mut design, "component.create", json!({"name": "Pin"}))["occurrence"].as_u64().unwrap();
+    run(&mut design, "solid.cylinder", json!({"base": [0, 0, 0], "axis": [0, 0, 1], "radius": 3, "height": 10, "body_name": "Pin"}));
+    run(&mut design, "component.activate", json!({"component": 0}));
+    run(&mut design, "occurrence.copy", json!({"occurrence": sub_one, "translate": [50, 0, 0]}));
+    run(&mut design, "file.save", json!({"path": rack}));
+
+    let mut s = Session::default();
+    let inserted = run(&mut s, "component.insert_design", json!({"path": rack, "structure": true}));
+    let (top, rack_here) = (inserted["component"].as_u64().unwrap(), inserted["occurrence"].as_u64().unwrap());
+    let (sub, pin) = (component(&s, "Sub"), component(&s, "Pin"));
+    let subs = placements(&s, sub, top);
+    let pin_here = placements(&s, pin, sub)[0];
+    let second = json!([rack_here, subs[1], pin_here]);
+    run(&mut s, "joint.origin", json!({"name": "Tip", "occurrence": pin_here, "path": second.clone(), "point": [50, 0, 10], "z": [0, 0, 1]}));
+    // A gear between two revolute joints of this design, its first radius read on the pin.
+    for name in ["A", "B"] {
+        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [-60, 0, 0]}));
+        run(&mut s, "component.activate", json!({"component": 0}));
+        let at = |occurrence: Value| json!({"occurrence": occurrence, "point": [-60, 0, 0], "z": [0, 0, 1]});
+        run(&mut s, "joint.create", json!({"type": "revolute", "name": name, "flip": true, "a": at(json!(0)), "b": at(json!(name))}));
+    }
+    run(&mut s, "joint.gear", json!({"a": "A", "b": "B", "ra": {"circle": [53, 0, 5], "path": second}, "rb": 5}));
+    let tip = |s: &Session| s.doc.assembly.origins.iter().find(|o| o.name == "Tip").map(|o| o.origin.clone()).expect("the origin is kept");
+    let radius = |s: &Session| match s.doc.assembly.links.first().and_then(|l| l.coupling.clone()) {
+        Some(solidcraft_doc::joints::Coupling::Gear { ra: solidcraft_doc::joints::Size::Circle(o), .. }) => o,
+        other => panic!("{other:?}"),
+    };
+    // Both are on the second `Sub`, and inside it on the pin.
+    for o in [tip(&s), radius(&s)] {
+        assert_eq!((o.occurrence, o.inside), (subs[1], vec![pin_here]));
+    }
+
+    let mut source = open(&rack);
+    run(&mut source, "component.create", json!({"name": "Cell", "activate": false}));
+    run(&mut source, "occurrence.reparent", json!({"occurrence": pin_one, "path": [sub_one, pin_one], "parent": "Cell"}));
+    run(&mut source, "file.save", json!({}));
+    let updated = run(&mut s, "component.update_links", json!({}));
+    assert_eq!(updated["updated"], json!(["rack"]), "{updated}");
+    let cell = component(&s, "Cell");
+    let cell_here = placements(&s, cell, top);
+    assert_eq!((cell_here.len(), placements(&s, pin, cell)), (1, vec![pin_here]), "the same pin, now in the cell");
+    let state = s.model.state();
+    for o in [tip(&s), radius(&s)] {
+        assert_eq!((o.occurrence, o.inside.clone()), (rack_here, vec![cell_here[0], pin_here]));
+        assert!(solidcraft_doc::joints::resolve_origin(&s.doc, &state, &o).is_ok(), "{o:?}");
+    }
+    // A joint made from the origin now solves: a free block goes onto the pin's top.
+    run(&mut s, "component.create", json!({"name": "Block"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 100, 0]}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let on_tip =
+        json!({"type": "rigid", "name": "On tip", "flip": true, "a": "Tip", "b": {"occurrence": "Block", "point": [0, 100, 0], "z": [0, 0, 1]}});
+    run(&mut s, "joint.create", on_tip);
+    let solved = solidcraft_doc::joints::solve(&s.doc, &s.model.state());
+    assert!(solved.errors.is_empty() && solved.conflicts.is_empty(), "{:?} {:?}", solved.errors, solved.conflicts);
+    let _ = std::fs::remove_dir_all(&dir);
+}

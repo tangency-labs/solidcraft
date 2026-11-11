@@ -501,8 +501,10 @@ save it, and use **Update Links** here. **Update Links** adds the components tha
 design has gained. It removes the components that the linked design has lost. A joint that was
 made to a removed component is removed too, and the reply names it. The other components keep
 their occurrences and the joints made to them. An occurrence that the linked design has moved
-into another of its components keeps the joints made to it too. **Break Link** keeps the
-components and makes them ordinary components of this design.
+into another of its components keeps the joints and joint origins made to it too, also those
+on one of its origin planes or axes. A gear or a cam of this design keeps the round face or
+the tip picked on it. **Break Link** keeps the components and makes them ordinary components
+of this design.
 
 Each occurrence of a linked subassembly is **rigid** or **flexible**. The menu of the
 occurrence changes this at any time. The **saved pose** is where the linked design was saved
@@ -597,6 +599,8 @@ the reply says so.
 **Replace with Link** and `component.copies` compare a component body for body with such a
 link. They refuse a link that keeps its design's components, and the message says how to go
 on: `component.link_mode` with `structure: false`, replace, then `structure: true` again.
+Given a design file (`path`), **Replace with Link** uses a link of the earlier kind to that
+file when this design has one.
 
 To edit a linked part where it sits, double-click it, in the Browser or on one of its faces in
 the view, or choose **Edit in Place** from its menu. Its design opens in a tab of its own with the
