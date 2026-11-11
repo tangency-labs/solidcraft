@@ -276,6 +276,7 @@ written as the operations it counts:
 | `blend::fillet_section::recertify::precision_floor` | G (D + γ_K M), K = 2(n + 1) + 6 | the net's rows from the stations |
 | `surface::procedural_sweep::ProceduralSweep::floor` | G γ_(2(p+3)+24) (A + (R + λ)Θ + R) | the sweep's net and evaluation |
 | `surface::implicit::lies_on` | γ_K, K = 4d(p + 1)(q + 1) + 16 | an implicit equation's Bernstein coefficient |
+| `query::tangent_edge` (`node_error`, `lebesgue`, `piece_bound`) | δ = (γ_4 π + 4u + γ_3(\|m\|/h + 1)) (1 + γ_4): the angle, its cosine (libm, 2 ulps) and the mapped node; Λ ×(1 + 16u); the atan/acos results ×(1 + 8u) | the Chebyshev nodes' rounding (the Markov term ΛδD²) and the tangency angle bound |
 | `sweep::stations` (`rail_crossing`) | γ_5 S_i, S_i = Σ_j (\|x_ij\| + \|p_j\| w_i) \|t_j\| | a rail's Bernstein distance coefficient from a station's plane; within it, taken as 0 |
 
 In `precision_floor`, D is the stations' term (a foot within L_u η_u + L_v η_v of its root,
