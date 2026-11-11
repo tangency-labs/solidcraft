@@ -114,11 +114,22 @@ fn bad(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
 }
 
-/// `c`'s NURB.
+/// `c`'s NURB, in polynomial form when its weights are all one value: a curve whose weights are
+/// equal is the polynomial curve on its points divided by that weight, exactly (a record
+/// spline's kernel curve carries a weight of 1 on every point). Only unequal weights make it
+/// rational.
 fn nurb_of(c: &BSplineCurve) -> Result<Curve> {
-    c.nurb
+    let mut nurb = c
+        .nurb
         .clone()
-        .ok_or_else(|| bad("a curve without its NURB"))
+        .ok_or_else(|| bad("a curve without its NURB"))?;
+    if nurb.is_rational() {
+        let first = nurb.cpts().first().map(|p| p.w);
+        if nurb.cpts().iter().all(|p| Some(p.w) == first) {
+            nurb.make_non_rat();
+        }
+    }
+    Ok(nurb)
 }
 
 /// `c` as the kernel's curve, for the intersector.
@@ -642,5 +653,41 @@ mod tests {
         let vs = [line(p[0], p[2]), line(p[1], p[3])];
         let g = gordon(&k, &us, &vs, 1e-6).unwrap().unwrap();
         assert!(g.bound <= 5e-10, "{}", g.bound);
+    }
+
+    #[test]
+    fn curves_weighted_one_throughout_are_polynomial() {
+        // a record spline's kernel curve carries w = 1 on every point: not rational
+        let k = Kernel::default();
+        let weighted = |a: [f64; 3], b: [f64; 3]| {
+            let pw = [a, b]
+                .iter()
+                .map(|q| CPoint::new(q[0], q[1], q[2], 1.0))
+                .collect();
+            BSplineCurve::from_gw_nurb(3, &Curve::new(pw, 1, vec![0.0, 0.0, 1.0, 1.0]).unwrap())
+        };
+        let p = [
+            [0.0, 0.0, 0.0],
+            [10.0, 0.0, 0.0],
+            [0.0, 10.0, 0.0],
+            [10.0, 10.0, 5.0],
+        ];
+        let us = [weighted(p[0], p[1]), weighted(p[2], p[3])];
+        let vs = [line(p[0], p[2]), line(p[1], p[3])];
+        let g = gordon(&k, &us, &vs, 1e-6).unwrap().unwrap();
+        assert!(g.bound <= 1e-9, "{}", g.bound);
+        // unequal weights are rational, and refused
+        let pw = vec![
+            CPoint::new(0.0, 0.0, 0.0, 1.0),
+            CPoint::new(10.0, 0.0, 0.0, 2.0),
+        ];
+        let rational =
+            BSplineCurve::from_gw_nurb(3, &Curve::new(pw, 1, vec![0.0, 0.0, 1.0, 1.0]).unwrap());
+        assert_eq!(
+            gordon(&k, &[rational, us[1].clone()], &vs, 1e-6)
+                .unwrap()
+                .unwrap_err(),
+            NetworkRefusal::Rational
+        );
     }
 }

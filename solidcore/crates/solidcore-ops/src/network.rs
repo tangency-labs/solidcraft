@@ -148,4 +148,31 @@ mod tests {
         // one curve a family
         assert_eq!(gordon(&us[..1], &us), Err(Error::Argument));
     }
+
+    #[test]
+    fn a_network_of_cubic_splines_builds() {
+        // two clamped cubic u-curves (x linear in their parameter, z bent), crossed at t = 0,
+        // 1/2 and 1 by straight v-curves: crossings at common parameters on both families
+        let zs = [[0.0, 2.0, -1.0, 0.0], [1.0, -2.0, 3.0, 1.0]];
+        let ys = [0.0, 10.0];
+        let cubic = |y: f64, z: [f64; 4]| Curve::Spline {
+            knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            points: (0..4)
+                .map(|i| [10.0 * f64::from(i) / 3.0, y, z[i as usize]])
+                .collect(),
+        };
+        // the cubic's point at t (Bernstein form)
+        let at = |y: f64, z: [f64; 4], t: f64| {
+            let s = 1.0 - t;
+            let b = [s * s * s, 3.0 * s * s * t, 3.0 * s * t * t, t * t * t];
+            [10.0 * t, y, (0..4).map(|i| b[i] * z[i]).sum::<f64>()]
+        };
+        let us: Vec<Curve> = (0..2).map(|k| cubic(ys[k], zs[k])).collect();
+        let vs: Vec<Curve> = [0.0, 0.5, 1.0]
+            .map(|t| line(at(ys[0], zs[0], t), at(ys[1], zs[1], t)))
+            .to_vec();
+        let (sheet, bound) = gordon(&us, &vs).unwrap();
+        assert_eq!(sheet.faces.len(), 1);
+        assert!(bound <= 1e-6, "{bound}");
+    }
 }
