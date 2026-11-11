@@ -29,8 +29,11 @@
 //! | [`nurbs::NurbsFailure`], [`nurbs::BSplineFailure`] | NLib error flag + `NL_ERROR.eno` (`N_ErrSet`): the `NL_*_ERR` numbers, in solidcore's terms |
 //! | [`defeature::DefeatureFailure`] | none: why a defeature keeps a feature (#3218) |
 //! | [`sweep::SweepFailure`]     | none: why a sweep or loft refuses, and the sweep routines' failures |
-//! | [`curve::CurveFailure`]     | none: why a curve query refuses (#3184)           |
+//! | [`curve::CurveFailure`]     | none: why a curve query refuses, and the curve routines' failures |
 //! | [`query::QueryFailure`]     | none: the query routines' failures               |
+//! | [`topology::TopologyFailure`] | none: the topology routines' failures          |
+//! | [`surface::SurfaceFailure`] | none: the surface routines' failures             |
+//! | [`blend::BlendFailure`]     | none: the blend routines' failures               |
 //!
 //! NLib routines (`NL_*.cpp`) report failure by returning an error flag and storing an
 //! error number in the process-wide `NL_ERROR` record; solidcore returns a
@@ -77,6 +80,7 @@
 //! `sm_status` and the status numbers here move to a comparison-only module (or to
 //! difftest and the FFI), since nothing but the comparison needs them.
 
+pub mod blend;
 pub mod boolean;
 pub mod curve;
 pub mod defeature;
@@ -88,7 +92,9 @@ pub mod nurbs;
 pub mod offset;
 pub mod primitive;
 pub mod query;
+pub mod surface;
 pub mod sweep;
+pub mod topology;
 
 use crate::topology::{
     BrepId, EdgeId, EdgeuseId, FaceId, FaceuseId, LoopId, LoopuseId, RegionId, ShellId, VertexId,
@@ -637,7 +643,12 @@ impl core::fmt::Display for Failure {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}: {}", self.operation, self.reason)?;
         // a reason that names no entity of its own is followed by the failure's
-        if let (Reason::Failed(_), Some(entity)) = (&self.reason, self.entity) {
+        let names_none = match &self.reason {
+            Reason::Failed(_) | Reason::Topology(_) | Reason::Blend(_) => true,
+            Reason::Offset(o) => o.replaces_upstream_status(),
+            _ => false,
+        };
+        if let (true, Some(entity)) = (names_none, self.entity) {
             write!(f, " ({entity})")?;
         }
         if let Some(cause) = &self.cause {
@@ -681,6 +692,27 @@ pub enum Reason {
     Curve(curve::CurveFailure),
     /// A query failed.
     Query(query::QueryFailure),
+    /// A topology routine failed.
+    Topology(topology::TopologyFailure),
+    /// A surface routine failed.
+    Surface(surface::SurfaceFailure),
+    /// A blend routine failed.
+    Blend(blend::BlendFailure),
+    /// A blend certificate's feet box runs past a support's net in a direction the
+    /// support's kind does not continue (not upstream, tangency-labs/solidcraft#14284):
+    /// support `support` (0 or 1) over the leader's piece `s`, the box `uv` against the net's
+    /// `domain` (each `[[u_lo, u_hi], [v_lo, v_hi]]`). Nothing past the net is the face
+    /// there, so the piece is refused, never assumed.
+    FootPastDomainEnd {
+        /// Which support.
+        support: usize,
+        /// The leader's piece the feet were enclosed over.
+        s: [f64; 2],
+        /// The feet's box on that support.
+        uv: [[f64; 2]; 2],
+        /// The support net's domain.
+        domain: [[f64; 2]; 2],
+    },
 }
 
 impl Reason {
@@ -698,7 +730,11 @@ impl Reason {
             | Self::Heal(_)
             | Self::Geom(_)
             | Self::Curve(_)
-            | Self::Query(_) => None,
+            | Self::Query(_)
+            | Self::Topology(_)
+            | Self::Surface(_)
+            | Self::Blend(_)
+            | Self::FootPastDomainEnd { .. } => None,
             Self::Offset(o) => o.entity(),
             Self::Boolean(b) => b.entity(),
         }
@@ -708,7 +744,7 @@ impl Reason {
     /// comparison detail).
     pub(crate) fn comparison_status(&self) -> i32 {
         match self {
-            Self::Failed(_) => SM_ERR,
+            Self::Failed(_) | Self::FootPastDomainEnd { .. } => SM_ERR,
             Self::Offset(o) => o.comparison_status(),
             Self::Nurbs(n) => n.comparison_status(),
             Self::Boolean(b) => b.comparison_status(),
@@ -721,6 +757,9 @@ impl Reason {
             Self::Geom(g) => g.comparison_status(),
             Self::Curve(c) => c.comparison_status(),
             Self::Query(q) => q.comparison_status(),
+            Self::Topology(t) => t.comparison_status(),
+            Self::Surface(s) => s.comparison_status(),
+            Self::Blend(b) => b.comparison_status(),
         }
     }
 
@@ -729,6 +768,7 @@ impl Reason {
     pub(crate) fn kind_given(&self, status: i32) -> ErrorKind {
         match self {
             Self::Failed(_) => ErrorKind::of_status(status),
+            Self::FootPastDomainEnd { .. } => ErrorKind::OutsideDomain,
             Self::Offset(o) => o.kind(),
             Self::Nurbs(n) => n.kind(),
             Self::Boolean(b) => b.kind(),
@@ -741,6 +781,9 @@ impl Reason {
             Self::Geom(g) => g.kind(),
             Self::Curve(c) => c.kind(),
             Self::Query(q) => q.kind(),
+            Self::Topology(t) => t.kind(),
+            Self::Surface(s) => s.kind(),
+            Self::Blend(b) => b.kind(),
         }
     }
 }
@@ -761,6 +804,19 @@ impl core::fmt::Display for Reason {
             Self::Geom(g) => g.fmt(f),
             Self::Curve(c) => c.fmt(f),
             Self::Query(q) => q.fmt(f),
+            Self::Topology(t) => t.fmt(f),
+            Self::Surface(s) => s.fmt(f),
+            Self::Blend(b) => b.fmt(f),
+            Self::FootPastDomainEnd {
+                support,
+                s,
+                uv,
+                domain,
+            } => write!(
+                f,
+                "a foot past its face's domain end: support {support} over the piece s in [{}, {}], its box u [{}, {}] v [{}, {}] past the net's domain u [{}, {}] v [{}, {}], in a direction its kind does not continue",
+                s[0], s[1], uv[0][0], uv[0][1], uv[1][0], uv[1][1], domain[0][0], domain[0][1], domain[1][0], domain[1][1]
+            ),
         }
     }
 }
@@ -834,6 +890,24 @@ impl From<curve::CurveFailure> for Reason {
 impl From<query::QueryFailure> for Reason {
     fn from(q: query::QueryFailure) -> Self {
         Self::Query(q)
+    }
+}
+
+impl From<topology::TopologyFailure> for Reason {
+    fn from(t: topology::TopologyFailure) -> Self {
+        Self::Topology(t)
+    }
+}
+
+impl From<surface::SurfaceFailure> for Reason {
+    fn from(s: surface::SurfaceFailure) -> Self {
+        Self::Surface(s)
+    }
+}
+
+impl From<blend::BlendFailure> for Reason {
+    fn from(b: blend::BlendFailure) -> Self {
+        Self::Blend(b)
     }
 }
 
@@ -1000,7 +1074,7 @@ impl SolidError {
     /// `if (NL_YES == N_...) SER(SM_ERR)`), letting [`SolidError::Unported`] and
     /// [`SolidError::Cancelled`] through. Being replaced by
     /// [`SolidError::nurbs_routine`], which keeps the error as the cause.
-    /// Use as `.map_err(SolidError::nl_ser(OP))`.
+    /// Pass `nl_ser(OP)` to `map_err`.
     pub(crate) fn nl_ser(operation: &'static str) -> impl Fn(Self) -> Self {
         move |e| match e {
             Self::Unported { .. } | Self::Cancelled { .. } | Self::PreparationRequired { .. } => e,
@@ -1065,9 +1139,14 @@ impl SolidError {
     /// [`SolidError::Upstream`] does: its `code`, or the status of a failure that replaced
     /// an `Upstream` site ([`nurbs::BSplineFailure`], [`intersect::IntersectFailure`],
     /// [`primitive::PrimitiveFailure`], [`mass::MassFailure`], [`heal::HealFailure`],
-    /// [`geom::GeomFailure`], [`query::QueryFailure`], a [`sweep::SweepFailure`] that
-    /// [replaced one](sweep::SweepFailure::replaces_upstream_status)). The callers that branch
-    /// on an upstream status use it so that they treat both alike; it goes with `Upstream` in
+    /// [`geom::GeomFailure`], [`query::QueryFailure`], [`topology::TopologyFailure`],
+    /// [`surface::SurfaceFailure`], a [`sweep::SweepFailure`], [`curve::CurveFailure`] or
+    /// [`offset::OffsetFailure`] or [`blend::BlendFailure`] that replaced one
+    /// ([`sweep::SweepFailure::replaces_upstream_status`],
+    /// [`curve::CurveFailure::replaces_upstream_status`],
+    /// [`offset::OffsetFailure::replaces_upstream_status`],
+    /// [`blend::BlendFailure::replaces_upstream_status`])). The callers that branch on an
+    /// upstream status use it so that they treat both alike; it goes with `Upstream` in
     /// the last PR of the typed-errors work.
     #[must_use]
     pub(crate) fn upstream_status(&self) -> Option<i32> {
@@ -1080,8 +1159,13 @@ impl SolidError {
                 | Reason::Mass(_)
                 | Reason::Heal(_)
                 | Reason::Geom(_)
-                | Reason::Query(_) => Some(f.status),
+                | Reason::Query(_)
+                | Reason::Topology(_)
+                | Reason::Surface(_) => Some(f.status),
                 Reason::Sweep(w) if w.replaces_upstream_status() => Some(f.status),
+                Reason::Curve(c) if c.replaces_upstream_status() => Some(f.status),
+                Reason::Offset(o) if o.replaces_upstream_status() => Some(f.status),
+                Reason::Blend(b) if b.replaces_upstream_status() => Some(f.status),
                 _ => None,
             },
             _ => None,
@@ -1302,8 +1386,13 @@ impl SolidError {
 /// `Upstream`'s code, or the status of a failure that replaced an `Upstream` site
 /// ([`nurbs::BSplineFailure`], [`intersect::IntersectFailure`],
 /// [`primitive::PrimitiveFailure`], [`mass::MassFailure`], [`heal::HealFailure`],
-/// [`geom::GeomFailure`], [`query::QueryFailure`], a [`sweep::SweepFailure`] that
-/// [replaced one](sweep::SweepFailure::replaces_upstream_status)).
+/// [`geom::GeomFailure`], [`query::QueryFailure`], [`topology::TopologyFailure`],
+/// [`surface::SurfaceFailure`], a [`sweep::SweepFailure`], [`curve::CurveFailure`] or
+/// [`offset::OffsetFailure`] or [`blend::BlendFailure`] that replaced one
+/// ([`sweep::SweepFailure::replaces_upstream_status`],
+/// [`curve::CurveFailure::replaces_upstream_status`],
+/// [`offset::OffsetFailure::replaces_upstream_status`],
+/// [`blend::BlendFailure::replaces_upstream_status`])).
 ///
 /// For difftest's comparison only: it is removed with `Upstream` and `sm_status` in the
 /// last PR of the typed-errors work. Callers match [`SolidError::kind`] and the
@@ -2290,5 +2379,79 @@ mod tests {
         assert_eq!(native_failure::<()>(Err(c.clone())), Err(c.clone()));
         assert_eq!(SolidError::nl_ser("native")(c.clone()), c);
         assert_eq!(SolidError::nurbs_routine("native")(c.clone()), c);
+    }
+}
+
+/// Samples for the tests of the decisions that read [`SolidError::upstream_status`] (#13790):
+/// typed failures that replaced an [`SolidError::Upstream`], and typed failures that never
+/// stood for an upstream status.
+#[cfg(test)]
+pub(crate) mod replaced_upstream_samples {
+    use super::SolidError;
+
+    /// The typed failures of five areas that replaced an `Upstream` with `code` (#13790):
+    /// an intersection's, a geometry utility's, a topology routine's, an offset routine's and
+    /// a blend routine's, at `entity` when one is given.
+    pub(crate) fn replaced_upstream(
+        operation: &'static str,
+        code: i32,
+        entity: Option<crate::error::EntityRef>,
+    ) -> [SolidError; 5] {
+        use crate::error::{
+            blend::BlendFailure, geom::GeomFailure, intersect::IntersectFailure,
+            offset::OffsetFailure, topology::TopologyFailure, Failure, Reason,
+        };
+        let typed = |reason: Reason| {
+            let f = Failure::new(operation, reason).with_status(code);
+            match entity {
+                Some(e) => f.at(e),
+                None => f,
+            }
+            .into_error()
+        };
+        [
+            typed(Reason::Intersect(IntersectFailure::Failed(
+                "replaced an upstream status",
+            ))),
+            typed(Reason::Geom(GeomFailure::Failed(
+                "replaced an upstream status",
+            ))),
+            typed(Reason::Topology(TopologyFailure::Failed(
+                "replaced an upstream status",
+            ))),
+            typed(Reason::Offset(OffsetFailure::Failed(
+                "replaced an upstream status",
+            ))),
+            typed(Reason::Blend(BlendFailure::Failed(
+                "replaced an upstream status",
+            ))),
+        ]
+    }
+
+    /// Typed failures with `code` that never stood for an upstream status (#13790): a sweep's
+    /// station cap and a curve length's floor.
+    pub(crate) fn native_failures(operation: &'static str, code: i32) -> [SolidError; 2] {
+        use crate::error::{curve::CurveFailure, sweep::SweepFailure, Failure, Reason};
+        let typed = |reason: Reason| {
+            Failure::new(operation, reason)
+                .with_status(code)
+                .into_error()
+        };
+        let natives = [
+            typed(Reason::Sweep(SweepFailure::RailPastStationCap {
+                asked: 1e-6,
+                reached: 1e-3,
+                wires: 64,
+            })),
+            typed(Reason::Curve(CurveFailure::LengthBelowFloor {
+                asked: 1e-12,
+                floor: 1e-9,
+                pieces: 8,
+            })),
+        ];
+        for e in &natives {
+            assert_eq!(e.upstream_status(), None, "{e:?}");
+        }
+        natives
     }
 }

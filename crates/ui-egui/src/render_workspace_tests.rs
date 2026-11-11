@@ -1977,7 +1977,7 @@ fn product_appearance_edits_keep_the_blocks_vertices() {
     s.execute("solid.box", &json!({"length":10,"width":10,"height":10,"body_name":"Part"})).unwrap();
     let mut cache = ProductCache::default();
     let mut build =
-        |s: &Session| gpu_scene_cached(&solidcraft_engine::product_scene::extract(s).unwrap(), MAX_GEOMETRY_BYTES as u64, &mut cache).unwrap();
+        |s: &Session| gpu_scene_cached(&solidcraft_engine::product_scene::extract(s).unwrap(), &[], MAX_GEOMETRY_BYTES as u64, &mut cache).unwrap();
     let (plain_key, plain) = build(&s);
     let vertices = plain.blocks[0].bytes.vertices.clone();
     let first_colour = |gpu: &GpuScene, class| {
@@ -2027,7 +2027,7 @@ fn reordered_face_looks_rebuild_the_block() {
         bounds: solidcraft_engine::geom::Aabb3::EMPTY,
     };
     let mut cache = ProductCache::default();
-    let build = |scene: &ProductScene, cache: &mut ProductCache| gpu_scene_cached(scene, MAX_GEOMETRY_BYTES as u64, cache).unwrap();
+    let build = |scene: &ProductScene, cache: &mut ProductCache| gpu_scene_cached(scene, &[], MAX_GEOMETRY_BYTES as u64, cache).unwrap();
     let (_, first) = build(&scene, &mut cache);
     let vertices = first.blocks[0].bytes.vertices.clone();
     scene.meshes[0].faces.swap(0, 1);
@@ -2045,7 +2045,7 @@ fn product_material_edits_keep_the_blocks_vertices() {
     s.execute("appearance.assign", &look(0.2)).unwrap();
     let mut cache = ProductCache::default();
     let mut build =
-        |s: &Session| gpu_scene_cached(&solidcraft_engine::product_scene::extract(s).unwrap(), MAX_GEOMETRY_BYTES as u64, &mut cache).unwrap();
+        |s: &Session| gpu_scene_cached(&solidcraft_engine::product_scene::extract(s).unwrap(), &[], MAX_GEOMETRY_BYTES as u64, &mut cache).unwrap();
     let (rough_key, rough) = build(&s);
     let vertices = rough.blocks[0].bytes.vertices.clone();
     assert_eq!(class_vertices(&rough, crate::gpu::TriClass::Pbr).len(), vertices.len(), "every triangle is PBR");
@@ -2057,6 +2057,184 @@ fn product_material_edits_keep_the_blocks_vertices() {
     assert_ne!(smooth_key, rough_key, "the scene is taken again");
     assert!(Arc::ptr_eq(&vertices, &smooth.blocks[0].bytes.vertices), "a material edit keeps every vertex");
     assert_eq!(material(&smooth).map(|m| m.roughness), Some(0.6));
+}
+
+/// A part placed several times is drawn as instances of its one shared mesh: its triangles are
+/// in no block, every placement has its own palette slot, a colour edit keeps the shared
+/// triangles, and the picture is the one drawn with every copy built (pixel for pixel, but for
+/// a few on edges). Skipped without a GPU adapter for the picture.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn placed_copies_are_drawn_as_instances_of_their_shared_mesh() {
+    use solidcraft_viewport::StandardView;
+    let mut s = Session::default();
+    let part = s.execute("component.create", &json!({"name":"Part","grounded":false})).unwrap();
+    s.execute("solid.cylinder", &json!({"base":[0,0,0],"diameter":10,"height":12,"body_name":"Pin"})).unwrap();
+    s.execute("component.activate", &json!({"component":0})).unwrap();
+    for x in [20, 40] {
+        s.execute("occurrence.copy", &json!({"component":part["component"],"translate":[x,0,0]})).unwrap();
+    }
+    s.execute("solid.box", &json!({"length":60,"width":20,"height":4,"corner":[-10,-10,-4],"body_name":"Base"})).unwrap();
+    let scene = solidcraft_engine::product_scene::extract(&s).unwrap();
+    let placements = solidcraft_engine::product_scene::placements(&s, &scene);
+    let mut cache = ProductCache::default();
+    let (_, instanced) = gpu_scene_cached(&scene, &placements, MAX_GEOMETRY_BYTES as u64, &mut cache).unwrap();
+    assert_eq!(instanced.instanced.len(), 1, "one shared mesh");
+    assert_eq!(instanced.instanced[0].count(), 3, "placed three times");
+    let base_triangles = scene.meshes.iter().find(|m| m.name.starts_with("Base")).unwrap().mesh.triangles.len();
+    assert_eq!(
+        class_vertices(&instanced, crate::gpu::TriClass::Opaque).len(),
+        base_triangles * 3 * crate::gpu::TRI_SIZE,
+        "only the base is in a block"
+    );
+    let shared = instanced.instanced[0].tris.clone();
+    s.execute("appearance.assign", &json!({"bodies":[scene.meshes.iter().find(|m| m.name.starts_with("Pin")).unwrap().name], "color":"#336699"}))
+        .unwrap();
+    let painted = solidcraft_engine::product_scene::extract(&s).unwrap();
+    let (_, recoloured) =
+        gpu_scene_cached(&painted, &solidcraft_engine::product_scene::placements(&s, &painted), MAX_GEOMETRY_BYTES as u64, &mut cache).unwrap();
+    assert!(Arc::ptr_eq(&shared, &recoloured.instanced[0].tris), "a colour edit keeps the shared triangles");
+    let (_, built) = gpu_scene(&scene).unwrap();
+    assert!(built.instanced.is_empty(), "without placements every copy is built");
+    const SIZE: u32 = 192;
+    let mut camera = Camera { fov: 0.0, ..Default::default() };
+    camera.set_view(StandardView::Iso);
+    camera.fit(&solidcraft_engine::render::view_bounds(&scene.bounds));
+    let radius = scene.bounds.diagonal().max(10.0) + scene.bounds.center().dist(camera.target);
+    let eye = camera.eye().to_f32();
+    let render = |gpu: GpuScene| {
+        crate::gpu::render_product_offscreen(
+            gpu,
+            None,
+            camera.view_proj(1.0, radius).to_f32(),
+            camera.back().to_f32(),
+            [eye[0], eye[1], eye[2], 0.0],
+            SIZE,
+            false,
+            None,
+        )
+    };
+    let (Some(a), Some(b)) = (render(instanced), render(built)) else {
+        eprintln!("skipping: no GPU adapter");
+        return;
+    };
+    let differ = a.chunks(4).zip(b.chunks(4)).filter(|(x, y)| x.iter().zip(*y).any(|(p, q)| p.abs_diff(*q) > 6)).count();
+    let shown = b.chunks(4).filter(|p| p[..3] != b[..3]).count();
+    assert!(shown > 1000, "the parts are in view ({shown} px)");
+    assert!(differ * 200 < shown, "{differ} of {shown} px differ between the instanced and built pictures");
+}
+
+/// A part with a PBR material placed several times is drawn as PBR instances of its shared
+/// mesh, each placement's material read through its palette slot, and the picture is the one
+/// drawn with every copy built. Skipped without a GPU adapter for the picture.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn pbr_placements_are_drawn_as_instances_with_their_material() {
+    use solidcraft_viewport::StandardView;
+    let mut s = Session::default();
+    let part = s.execute("component.create", &json!({"name":"Part","grounded":false})).unwrap();
+    s.execute("solid.sphere", &json!({"radius":6,"body_name":"Ball"})).unwrap();
+    s.execute("component.activate", &json!({"component":0})).unwrap();
+    for x in [16, 32] {
+        s.execute("occurrence.copy", &json!({"component":part["component"],"translate":[x,0,0]})).unwrap();
+    }
+    let balls: Vec<String> = crate::open_meshing::session_world(&s).bodies.iter().map(|b| b.name.clone()).collect();
+    s.execute("appearance.assign", &json!({"bodies":balls,"color":"#b47846","pbr":{"metallic":1.0,"roughness":0.3,"dielectric_ior":1.5}})).unwrap();
+    let scene = solidcraft_engine::product_scene::extract(&s).unwrap();
+    let placements = solidcraft_engine::product_scene::placements(&s, &scene);
+    let (_, instanced) = gpu_scene_cached(&scene, &placements, MAX_GEOMETRY_BYTES as u64, &mut ProductCache::default()).unwrap();
+    assert_eq!(instanced.instanced.len(), 1);
+    assert_eq!((instanced.instanced[0].look, instanced.instanced[0].count()), (crate::gpu::InstanceLook::Pbr, 3));
+    assert!(instanced.blocks.iter().all(|b| b.bytes.vertices.is_empty()), "no ball is built");
+    let (_, built) = gpu_scene(&scene).unwrap();
+    const SIZE: u32 = 192;
+    let mut camera = Camera { fov: 0.0, ..Default::default() };
+    camera.set_view(StandardView::Iso);
+    camera.fit(&solidcraft_engine::render::view_bounds(&scene.bounds));
+    let radius = scene.bounds.diagonal().max(10.0) + scene.bounds.center().dist(camera.target);
+    let eye = camera.eye().to_f32();
+    let render = |gpu: GpuScene| {
+        crate::gpu::render_product_offscreen(
+            gpu,
+            None,
+            camera.view_proj(1.0, radius).to_f32(),
+            camera.back().to_f32(),
+            [eye[0], eye[1], eye[2], 0.0],
+            SIZE,
+            false,
+            None,
+        )
+    };
+    let (Some(a), Some(b)) = (render(instanced), render(built)) else {
+        eprintln!("skipping: no GPU adapter");
+        return;
+    };
+    let differ = a.chunks(4).zip(b.chunks(4)).filter(|(x, y)| x.iter().zip(*y).any(|(p, q)| p.abs_diff(*q) > 6)).count();
+    let shown = b.chunks(4).filter(|p| p[..3] != b[..3]).count();
+    assert!(shown > 1000, "the balls are in view ({shown} px)");
+    assert!(differ * 100 < shown, "{differ} of {shown} px differ between the instanced and built PBR pictures");
+}
+
+/// The preview's reported upload bytes include the instanced shared triangles and placements, not
+/// only the streams and blocks: the refusal message and the inspector show the real payload.
+#[test]
+fn preview_upload_bytes_include_instanced_geometry() {
+    let mut s = Session::default();
+    let part = s.execute("component.create", &json!({"name":"Part","grounded":false})).unwrap();
+    s.execute("solid.cylinder", &json!({"base":[0,0,0],"diameter":10,"height":12,"body_name":"Pin"})).unwrap();
+    s.execute("component.activate", &json!({"component":0})).unwrap();
+    for x in [20, 40] {
+        s.execute("occurrence.copy", &json!({"component":part["component"],"translate":[x,0,0]})).unwrap();
+    }
+    let scene = solidcraft_engine::product_scene::extract(&s).unwrap();
+    let placements = solidcraft_engine::product_scene::placements(&s, &scene);
+    let mut cache = ProductCache::default();
+    let (_, gpu) = gpu_scene_cached(&scene, &placements, MAX_GEOMETRY_BYTES as u64, &mut cache).unwrap();
+    let mut shared = std::collections::HashSet::new();
+    let mut instanced = 0usize;
+    for m in &gpu.instanced {
+        if shared.insert(Arc::as_ptr(&m.tris) as usize) {
+            instanced = instanced.saturating_add(m.tris.vertices.len() + m.tris.indices.len() * 4);
+        }
+        instanced = instanced.saturating_add(m.instances.len());
+    }
+    assert!(instanced > 0, "the placed copies of the part are instanced");
+    let blocks = gpu.blocks.iter().map(|b| b.bytes.vertices.len()).sum::<usize>();
+    let mut state = State::default();
+    state.prepare_preview((7, 123, 99, MAX_GEOMETRY_BYTES as u64), || Ok((scene.clone(), placements.clone()))).unwrap();
+    assert_eq!(
+        state.preview_upload_bytes,
+        Some(gpu.pbr.len() + gpu.tris.len() + gpu.glass.len() + blocks + instanced),
+        "the instanced payload is part of the reported geometry bytes"
+    );
+}
+
+/// A malformed mesh shared by two or more bodies fails the preview as the built blocks' triangles
+/// do, instead of drawing partially with `SharedTris::new` silently dropping bad triangles.
+#[test]
+fn malformed_shared_mesh_fails_the_instanced_preview() {
+    use solidcraft_engine::render::{ProductMesh, ProductScene};
+    let mesh = Arc::new(solidcraft_engine::geom::Mesh {
+        positions: vec![solidcore_record::Vec3::ZERO, solidcore_record::Vec3::X, solidcore_record::Vec3::Y],
+        normals: vec![solidcore_record::Vec3::Z; 3],
+        triangles: vec![[0, 1, 99]],
+        ..Default::default()
+    });
+    let body = |name: &str| ProductMesh {
+        name: name.into(),
+        mesh: mesh.clone(),
+        color: [128; 3],
+        opacity: 1.0,
+        surface: None,
+        transmission: None,
+        faces: Vec::new(),
+    };
+    let scene = ProductScene { meshes: vec![body("Copy A"), body("Copy B")], bounds: solidcraft_engine::geom::Aabb3::EMPTY };
+    let identity = solidcraft_engine::doc::IDENTITY;
+    let placements = vec![Some((mesh.clone(), identity)), Some((mesh.clone(), identity))];
+    let mut cache = ProductCache::default();
+    let error = gpu_scene_cached(&scene, &placements, MAX_GEOMETRY_BYTES as u64, &mut cache).err().expect("the malformed shared mesh fails");
+    assert_eq!(error, solidcraft_ui_text::tr("render.error_product_triangle"));
 }
 
 #[test]
@@ -4795,7 +4973,10 @@ fn refused_product_capture_is_cached_until_identity_changes_or_explicit_retry() 
     assert!(h.app.render_workspace.scene_signature.is_none() && h.app.render_workspace.scene_error.is_none());
     let mut session = Session::default();
     session.execute("solid.box", &json!({"length":1,"width":1,"height":1})).unwrap();
-    h.app.render_workspace.prepare_preview(signature, || solidcraft_engine::product_scene::extract(&session).map_err(|e| e.to_string())).unwrap();
+    h.app
+        .render_workspace
+        .prepare_preview(signature, || solidcraft_engine::product_scene::extract(&session).map(|s| (s, Vec::new())).map_err(|e| e.to_string()))
+        .unwrap();
     assert!(h.app.render_workspace.scene_error.is_none());
     assert!(h.app.render_workspace.preview_upload_bytes.unwrap() > 0);
     assert!(h.app.render_workspace.key.is_some() && h.app.render_workspace.scene.is_some());
@@ -8270,7 +8451,7 @@ fn geometry_refusal_reports_scene_size_limit_and_recovery() {
         }],
         bounds: Aabb3::EMPTY,
     };
-    let error = gpu_scene_cached(&scene, WEB_GEOMETRY_BYTES, &mut ProductCache::default()).err().unwrap();
+    let error = gpu_scene_cached(&scene, &[], WEB_GEOMETRY_BYTES, &mut ProductCache::default()).err().unwrap();
     assert!(error.contains("168.0 MiB"), "{error}");
     assert!(error.contains("128.0 MiB"), "{error}");
     assert!(error.contains("Hide bodies in Design"), "{error}");
@@ -8299,8 +8480,8 @@ fn geometry_budget_change_retries_cached_admission_without_document_changes() {
     let scene = solidcraft_engine::product_scene::extract(&session).unwrap();
     let bytes = preview_upload_plan(&scene, usize::MAX).unwrap().bytes().unwrap() as u64;
     let mut state = State::default();
-    assert!(state.prepare_preview((7, 123, 99, bytes - 1), || Ok(scene.clone())).is_err());
-    state.prepare_preview((7, 123, 99, bytes), || Ok(scene)).unwrap();
+    assert!(state.prepare_preview((7, 123, 99, bytes - 1), || Ok((scene.clone(), Vec::new()))).is_err());
+    state.prepare_preview((7, 123, 99, bytes), || Ok((scene, Vec::new()))).unwrap();
     assert_eq!(state.preview_upload_bytes, Some(bytes as usize));
     assert!(state.scene_error.is_none());
 }

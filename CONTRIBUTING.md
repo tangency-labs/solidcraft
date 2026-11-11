@@ -43,8 +43,11 @@ contributors without write access can't push to them. To update one:
 
 ## Get it running (about 10 minutes on a fast machine)
 
-You need stable Rust 1.95 or newer (required by egui/eframe 0.36). For the web
-build you also need `rustup target add wasm32-unknown-unknown` and [`trunk`](https://github.com/trunk-rs/trunk)
+You need [rustup](https://rustup.rs/). The repository pins Rust 1.98.0 in
+`rust-toolchain.toml`, the version CI builds with, and rustup installs it with rustfmt, clippy and
+the `wasm32-unknown-unknown` target the first time you run `cargo` here. The code itself builds on
+Rust 1.95 or newer (`rust-version` in Cargo.toml, required by egui/eframe 0.36). For the web build
+you also need [`trunk`](https://github.com/trunk-rs/trunk)
 ([documentation](https://trunk-rs.github.io/trunk/)).
 
 ```sh
@@ -284,6 +287,16 @@ CI job runs `cargo xtask oracle` during full validation, and on pull requests th
 `solidcraft-cli`. A case that
 fails because of a known bug names its issue in `expected.json` (`"known_failure": "#123"`);
 never change an expected value to match SolidCraft's output.
+
+### Quarantining a flaky test
+
+A test that fails at random can fail a merge-queue batch, and every batch behind it starts over.
+Open an issue for it, then add one line to [`tests/QUARANTINED_TESTS`](tests/QUARANTINED_TESTS):
+`<test> #<issue> <YYYY-MM-DD> [why]`, with the test named as in `tests/KNOWN_FAILING_TESTS`.
+A quarantined test still runs. If it fails, the job summary says `quarantined, failed: <test>; see #<issue>`
+and the job stays green; if it passes, the summary says that too, so you can tell when it is safe to
+release. A quarantined line may be at most 14 days old: `cargo xtask lists` fails after that, so fix the
+test and delete the line. A test that fails every time belongs on `KNOWN_FAILING_TESTS` instead.
 
 ## Changing the design file format
 

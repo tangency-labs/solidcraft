@@ -1054,6 +1054,18 @@ fn solid(e: &SolidError) -> Run {
                 kind: FitKindName::of(fit.kind),
             },
         },
+        // a typed blend failure reads as the bare `Upstream` it replaced did
+        // ("{operation}: upstream status N[ at entity]"), so a case's expected refusal text
+        // still matches (#13790)
+        e if e.blend_failure().is_some() => match crate::output::blend_status(e) {
+            Some(code) => Run::Error(format!(
+                "{}: upstream status {code}{}",
+                e.operation(),
+                e.entity()
+                    .map_or_else(String::new, |at| format!(" at {at}"))
+            )),
+            None => Run::Error(e.to_string()),
+        },
         _ => Run::Error(e.to_string()),
     }
 }

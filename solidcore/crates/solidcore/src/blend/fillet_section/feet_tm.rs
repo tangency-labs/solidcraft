@@ -56,7 +56,7 @@ use super::form::binom;
 use super::interval::{cmax, round_down, round_up, Ivl};
 use super::series::{Ser, Trunc, VSer, MAX_S, V3};
 use super::station::{
-    ders_basis, gn_evaluate, gn_evaluate_vn, gn_jacobian, gn_top_jets, knot, span, GnSystem, Nurbs,
+    ders_basis, gn_evaluate, gn_jacobian, gn_top_jets, knot, span, GnIncremental, GnSystem, Nurbs,
     Partials,
 };
 use super::taylor_model::TmN;
@@ -139,7 +139,10 @@ pub fn nurbs_partials_tm(
     let um = u.c.first().map_or(f64::NAN, |c| c.mid());
     let vm = v.c.first().map_or(f64::NAN, |c| c.mid());
     if !(um.is_finite() && vm.is_finite()) {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the feet's models have no finite midpoint",
+        ));
     }
     let nu = ders_basis(&cn.u, ku, cn.p, Ivl::from(um), cn.p);
     let nv = ders_basis(&cn.v, kv, cn.q, Ivl::from(vm), cn.q);
@@ -230,7 +233,10 @@ pub fn nurbs_partials_tm(
     let w00 = hat(0, 0, 3);
     if !w00.range().is_positive() {
         // "SmGnSectionFSG: a face's weights are not positive over a box"
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "a face's weights are not positive over a box",
+        ));
     }
     let inv_w = w00.recip();
     let mut out = Partials::<Ft>::default();
@@ -285,7 +291,10 @@ pub fn curve_derivs_tm(
     let p = cn.p;
     let has_span = knot(&cn.u, piece as isize) < knot(&cn.u, piece as isize + 1);
     if !has_span || piece < p {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the piece is not a span of the curve",
+        ));
     }
     let nb = ders_basis(&cn.u, piece, p, Ivl::from(m), p);
     let mut am = vec![[IZ; 4]; p + 1];
@@ -332,7 +341,10 @@ pub fn curve_derivs_tm(
     }
     let w0 = hd.first().map_or_else(Ft::whole, |&[_, _, _, w]| w);
     if !w0.range().is_positive() {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the curve's weight is not proved positive",
+        ));
     }
     let inv_w = w0.recip();
     let mut out: Vec<V3<Ft>> = vec![zero_v(); ld + 1];
@@ -416,11 +428,16 @@ pub fn law_series_tm(law: &GnLaw<'_>, m: f64, delta: f64, order: usize) -> Resul
         if i > 0 {
             fact *= i as f64;
         }
-        let di = d.get(i).ok_or_else(|| SolidError::sm_err(OP))?;
+        let di = d.get(i).ok_or_else(|| {
+            SolidError::blend_failed(OP, "the radius law has no derivative of this order")
+        })?;
         r.set(i, 0, di.x.scale(Ivl::from(1.0) / Ivl::from(fact)));
     }
     if !r.at(0, 0).range().is_positive() {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the radius is not proved positive",
+        ));
     }
     Ok(r)
 }
@@ -661,13 +678,21 @@ pub fn gn_enclose_tm(
         return Ok(None);
     }
     let mut sx = x0.map(Ser::constant);
+    // each order's G takes the lower orders' series as the last one left them: they are
+    // kept, and only the coefficients x's new ones reach are computed (bit for bit a
+    // whole evaluation's)
+    let mut series = GnIncremental::new(&sysk);
     let eps_solved = if n >= 1 { tr.e().min(n - 1) } else { tr.e() };
     for tot in 1..=(tr.s() + tr.e()) {
         let eps = eps_solved.min(tot);
         if tot > tr.s() + eps {
             continue;
         }
-        let (sg, _) = tm_try!(gn_evaluate(&sysk, &sx, tr.computing(tot, eps)));
+        let before = series.computed();
+        let evaluated = series.evaluate(&sx, tr.computing(tot, eps));
+        k.work_counters
+            .add_feet_tm_coefficients(series.computed().saturating_sub(before));
+        let (sg, _, _, _) = tm_try!(evaluated);
         for i in 0..=tr.s().min(tot) {
             let kk = tot - i;
             // the section's jets of order n are the face curve's
@@ -712,7 +737,11 @@ pub fn gn_enclose_tm(
             }
         }
     }
-    let (_, mut f, v, nrm) = tm_try!(gn_evaluate_vn(&sysk, &sx, tr));
+    let before = series.computed();
+    let evaluated = series.evaluate(&sx, tr);
+    k.work_counters
+        .add_feet_tm_coefficients(series.computed().saturating_sub(before));
+    let (_, mut f, v, nrm) = tm_try!(evaluated);
     gn_top_jets(n, tr, &nrm, &mut f);
     let range_ser = |s: &Ser<Ft>| {
         let mut o = Ser::constant(IZ);

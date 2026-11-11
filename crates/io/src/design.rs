@@ -460,6 +460,15 @@ fn encode_cloud(cloud: &solidcraft_doc::point_cloud::PointCloud) -> Result<Vec<u
     Ok(bytes)
 }
 
+/// Each point cloud's `complex` (segments, triangles and properties), taken out of the metadata
+/// with the cloud's index.
+fn take_cloud_complexes(metadata: &mut Value) -> Vec<(usize, Value)> {
+    let Some(clouds) = metadata.get_mut("point_clouds").and_then(Value::as_array_mut) else {
+        return Vec::new();
+    };
+    clouds.iter_mut().enumerate().filter_map(|(index, cloud)| Some((index, cloud.as_object_mut()?.remove("complex")?))).collect()
+}
+
 fn decode_cloud(bytes: &[u8], cloud: &mut solidcraft_doc::point_cloud::PointCloud) -> Result<()> {
     use solidcraft_doc::point_cloud::{Colors, MAX_POINTS, Points};
     if bytes.get(..8) != Some(POINTS_MAGIC.as_slice()) {
@@ -943,8 +952,13 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
         let hdr = hydrate_hdr_resources(&mut metadata, reader)?;
         hydrate_texture_resources(&mut metadata, reader)? || hdr
     };
+    // A cloud's points are in its blob, so its segments, triangles and properties are read and
+    // checked with them below (`decode_cloud`), not against the empty points the metadata holds
+    // (#14572). The metadata keeps them for what a newer build's file holds. A newer build's file
+    // reads them as before: what doesn't read here is kept whole (`newer_file`), unknown fields too.
+    let complexes = if newer { Vec::new() } else { take_cloud_complexes(&mut metadata) };
     let hydrated_text;
-    let text = if hydrated {
+    let text = if hydrated || !complexes.is_empty() {
         hydrated_text = serde_json::to_string(&metadata).map_err(invalid)?;
         &hydrated_text
     } else {
@@ -953,6 +967,14 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
     // Migrations and all document validation run on the small parametric metadata.
     // Binary arrays have their own equivalent numeric/index validation below.
     let mut doc = Document::from_json(text)?;
+    for (index, complex) in complexes {
+        if let Some(cloud) = doc.point_clouds.get_mut(index) {
+            cloud.complex = serde::Deserialize::deserialize(&complex).map_err(invalid)?;
+        }
+        if let Some(cloud) = metadata.get_mut("point_clouds").and_then(|v| v.get_mut(index)).and_then(Value::as_object_mut) {
+            cloud.insert("complex".into(), complex);
+        }
+    }
     if newer_container && doc.newer_file.is_none() {
         let current = solidcraft_doc::format::FORMAT;
         let says = container.get("format").and_then(Value::as_str).unwrap_or("a later container").to_string();
@@ -1478,6 +1500,36 @@ mod tests {
     /// #9170: a mesh body (an imported STL) is kept in the model cache with the rest of the
     /// model, as its own triangles, colour and paint. One mesh body left the whole cache out, so
     /// opening the design evaluated every feature again.
+    /// The names a STEP file gives its colours survive saving a design with its model and opening
+    /// it from that cache: the kernel bodies' own encoding keeps no names, the records do.
+    #[test]
+    fn model_cache_keeps_the_names_of_imported_colours() {
+        use solidcore_record::Vec3;
+        let part = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
+        let faces = vec![solidcraft_kernel::FacePaint { face: 0, color: [0., 0., 1.], opacity: 1., name: Some("Accent".into()) }];
+        let named =
+            part.with_color(Some([0.5, 0.5, 0.5])).with_paint(Some(solidcraft_kernel::Paint { opacity: 1., faces, name: Some("Body grey".into()) }));
+        let step = solidcraft_kernel::step_export(&[&named], "named").unwrap();
+        let mut doc = Document::new("Named colours");
+        doc.add_feature(FeatureKind::Import { file: "named.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new() }, None)
+            .unwrap();
+        let mut model = solidcraft_doc::Model::new();
+        model.evaluate(&doc);
+        let names = |model: &solidcraft_doc::Model| {
+            let state = model.state();
+            let paint = state.bodies[0].body.paint().cloned().unwrap();
+            (paint.name, paint.faces.iter().map(|f| f.name.clone()).collect::<Vec<_>>())
+        };
+        let evaluated = names(&model);
+        assert_eq!(evaluated, (Some("Body grey".into()), vec![Some("Accent".into())]));
+        let saved = model.saved(&doc).unwrap();
+        let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&saved)).unwrap();
+        let read = DesignContainerReader::new(Cursor::new(&bytes)).unwrap().geometry().expect("the cache reads back");
+        assert!(read.bodies.iter().all(|b| b.paint().is_none_or(|p| p.name.is_none())), "the body encoding has no names");
+        let reopened = solidcraft_doc::Model::adopt(&doc, &read).unwrap();
+        assert_eq!(names(&reopened), evaluated);
+    }
+
     #[test]
     fn model_cache_keeps_mesh_bodies_with_the_rest_of_the_model() {
         use solidcore_record::Vec3;
@@ -1485,7 +1537,7 @@ mod tests {
         let tetra = solidcraft_kernel::mesh_body(&corners, &[[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]])
             .unwrap()
             .with_color(Some([0.25, 0.5, 0.75]))
-            .with_paint(Some(solidcraft_kernel::Paint { opacity: 0.5, faces: Vec::new() }));
+            .with_paint(Some(solidcraft_kernel::Paint { opacity: 0.5, faces: Vec::new(), name: None }));
         let block = solidcraft_kernel::box_solid(Vec3::new(40., 0., 0.), Vec3::new(60., 20., 20.)).unwrap();
         let model = saved_model(vec![block, tetra.clone()]);
         let doc = document();
@@ -2012,6 +2064,64 @@ mod tests {
         let said = &opened.newer_file.as_ref().unwrap().not_understood;
         assert!(said.iter().any(|what| what.contains("unsupported mesh blob version")), "{said:?}");
         assert_eq!(parts(&write_design_container(&opened).unwrap())[&renamed], encoded);
+    }
+
+    /// A newer build's point cloud with numbers, an edge and a face (#14572): a field this build
+    /// doesn't know inside them, or numbers it can't read at all, still open and save back.
+    #[test]
+    fn a_newer_builds_point_cloud_numbers_open_and_save_back_whole() {
+        use solidcraft_doc::point_cloud::{ColorBy, Colors, Column, Complex, Floats, Indices, On, PointCloud, Points};
+        let mut doc = Document::new("Scan");
+        doc.point_clouds.push(PointCloud {
+            id: 7,
+            name: "Scan".into(),
+            file: "scan.ply".into(),
+            origin: solidcore_record::Vec3::new(0.0, 0.0, 0.0),
+            points: Points::new(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0].into()),
+            colors: Colors::default(),
+            source_points: 3,
+            units: "mm".into(),
+            transform: solidcraft_doc::IDENTITY,
+            point_size: 2.0,
+            color_by: ColorBy::File,
+            color: None,
+            height_range: None,
+            visible: true,
+            complex: Complex {
+                segments: Indices(vec![0, 1].into()),
+                triangles: Indices(vec![0, 1, 2].into()),
+                columns: vec![Column { name: "nz".into(), on: On::Point, integer: false, values: Floats(vec![1.0, 1.0, 1.0].into()) }],
+                names: Vec::new(),
+            },
+            color_property: None,
+            filters: Vec::new(),
+            source: String::new(),
+            max_points: None,
+        });
+        // This build reads its own file whole.
+        let file = write_design_container(&doc).unwrap();
+        assert_eq!(crate::read_design(&file).unwrap().point_clouds, doc.point_clouds);
+
+        let newer = solidcraft_doc::format::format_string(solidcraft_doc::format::FORMAT + 1);
+        for complex in [json!("future curvature"), json!("columns this build can't read")] {
+            let mut entries = parts(&file);
+            let mut metadata: Value = serde_json::from_slice(&entries["document.json"]).unwrap();
+            metadata["format"] = json!(newer);
+            if complex == json!("future curvature") {
+                metadata["point_clouds"][0]["complex"]["curvature"] = json!([0.5, 0.25, 0.0]);
+            } else {
+                metadata["point_clouds"][0]["complex"]["columns"] = json!({"nz": "packed"});
+            }
+            let original = metadata["point_clouds"][0]["complex"].clone();
+            entries.insert("document.json".into(), serde_json::to_vec(&metadata).unwrap());
+
+            let opened = crate::read_design(&package(&entries)).unwrap_or_else(|e| panic!("{complex}: {e}"));
+            let resaved = parts(&write_design_container(&opened).unwrap());
+            let again: Value = serde_json::from_slice(&resaved["document.json"]).unwrap();
+            assert_eq!(again["point_clouds"][0]["complex"], original, "{complex}");
+            let blob = metadata["point_clouds"][0]["points_blob"].as_str().unwrap();
+            assert_eq!(resaved[blob], entries[blob], "{complex}");
+        }
     }
 
     fn parts(bytes: &[u8]) -> BTreeMap<String, Vec<u8>> {

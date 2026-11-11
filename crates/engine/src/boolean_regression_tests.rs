@@ -1667,3 +1667,62 @@ fn cut_that_leaves_a_closed_cavity_says_so() {
         .unwrap();
     assert!(!cup["warning"].as_str().unwrap_or_default().contains("closed cavity"), "{cup}");
 }
+
+/// Issue #10: fuzzer seed 73. Extrude an arc-sided profile, fillet two top edges, then join a box.
+/// The join's boolean union used to be refused by solidcore's boolean check as "Bad Gap:
+/// Edge/Vertex gap across Edgeuse start larger than tol" (offset=7.7878382e-06,
+/// tolerance=7.5978919e-06). Every failing seed of the boolean fuzzer is a reproducible bug,
+/// fixed with a regression test that fails without the fix.
+/// Root cause not yet found — grows tolerances but gap may exceed platform-specific limits.
+#[ignore = "fails until the tolerance root cause for seed 73 is found (#10)"]
+#[test]
+fn fuzz_seed_73_boolean_join_builds() {
+    let s = replay(include_str!("../../../examples/regressions/fuzz_seed_73_boolean_join.json"));
+    let state = s.model.state();
+    // Every step ran: every body is a sound solid, and the join produced one body.
+    assert_eq!(state.bodies.len(), 1, "the join must leave one body: {:?}", state.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    let b = &state.bodies[0];
+    assert!(b.body.validity().is_empty(), "the joined body must be sound: {:?}", b.body.validity());
+    let m = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure();
+    assert!(m.volume > 0.0, "the union must be a real solid: {}", m.volume);
+    println!("#10 seed 73: joined body volume {volume:.2} mm³", volume = m.volume);
+}
+
+/// Issue #10: fuzzer seed 185. Box, join cylinder, cut cylinder, then rectangular pattern on the
+/// cut cylinder. The pattern's boolean result is refused as "SMLib's result is not a closed
+/// solid". Every failing seed of the boolean fuzzer is a reproducible bug, fixed with a
+/// regression test that fails without the fix.
+/// Root cause not yet found — pattern boolean result tolerance, topologically different from
+/// seed 73's "Bad Gap" boolean tolerance issue.
+#[ignore = "fails until the pattern boolean root cause for seed 185 is found (#10)"]
+#[test]
+fn fuzz_seed_185_pattern_builds() {
+    let s = replay(include_str!("../../../examples/regressions/fuzz_seed_185_pattern.json"));
+    let state = s.model.state();
+    assert_eq!(state.bodies.len(), 1, "the pattern must leave one body: {:?}", state.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    let b = &state.bodies[0];
+    assert!(b.body.validity().is_empty(), "the pattern result must be sound: {:?}", b.body.validity());
+    let m = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure();
+    assert!(m.volume > 0.0, "the pattern result must be a real solid: {}", m.volume);
+    println!("#10 seed 185: pattern result volume {volume:.2} mm³", volume = m.volume);
+}
+
+/// Issue #10: fuzzer seed 178. Box, fillet, cut cylinder, cut box, shell, rectangular pattern,
+/// then fillet. The final fillet is refused as "SMLib fillet: SMLib's check refuses the result:
+/// Tolerance: Edge tolerance relative to brep tolerance (offset=0.083186985, tolerance=0.01)".
+/// Every failing seed of the boolean fuzzer is a reproducible bug, fixed with a regression test
+/// that fails without the fix.
+/// Root cause not yet found — fillet result tolerance, topologically different from seed 73's
+/// "Bad Gap" boolean tolerance issue.
+#[ignore = "fails until the fillet tolerance root cause for seed 178 is found (#10)"]
+#[test]
+fn fuzz_seed_178_fillet_builds() {
+    let s = replay(include_str!("../../../examples/regressions/fuzz_seed_178_fillet.json"));
+    let state = s.model.state();
+    assert_eq!(state.bodies.len(), 1, "the fillet must leave one body: {:?}", state.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
+    let b = &state.bodies[0];
+    assert!(b.body.validity().is_empty(), "the filleted body must be sound: {:?}", b.body.validity());
+    let m = b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-5)).unwrap().measure();
+    assert!(m.volume > 0.0, "the fillet result must be a real solid: {}", m.volume);
+    println!("#10 seed 178: filleted body volume {volume:.2} mm³", volume = m.volume);
+}

@@ -777,6 +777,36 @@ fn a_surface_model_of_open_shells_is_a_sheet() {
     assert_eq!(counts(&s.brep), [2, 1, 6, 12, 8]);
 }
 
+/// A solid with a void read with a face of its outer shell left out ([`read_solid_without`],
+/// as the import does where that face cannot be made): the outer shell is a sheet and the void,
+/// still closed, bounds its cavity, a region of its own. Its one region with the sheet made the
+/// record refuse it ("a closed shell bounds two regions and encloses one"), and the whole solid
+/// was lost.
+#[test]
+fn a_solid_with_a_void_and_a_face_left_out_keeps_its_cavity() {
+    struct NoTrims;
+    impl Trims for NoTrims {
+        fn trims(&self, _: &TrimFace<'_>) -> std::result::Result<Vec<Vec<Curve2>>, String> {
+            Err("no trims".into())
+        }
+    }
+    let mut w = W::default();
+    let faces = box_faces(&mut w, [0.0; 3], [10.0; 3], BoxStyle::default(), &mut |_, _| Vec::new());
+    let outer = closed_shell(&mut w, &faces);
+    let inner = box_faces(&mut w, [4.0; 3], [6.0; 3], BoxStyle { flip_faces: true, ..Default::default() }, &mut |_, _| Vec::new());
+    let inner = closed_shell(&mut w, &inner);
+    let void = w.add(format!("ORIENTED_CLOSED_SHELL('',*,#{inner},.F.)"));
+    let solid = w.add(format!("BREP_WITH_VOIDS('',#{outer},(#{void}))"));
+    let ex = w.file(&[solid]);
+    let skip: HashSet<u64> = [faces[0]].into_iter().collect();
+    let s = read_solid_without(&ex, solid, units::Context::default(), &NoTrims, &skip).unwrap();
+    solidcore_ops::record_check::validate(&s.brep).unwrap();
+    assert!(s.sheet);
+    assert_eq!(counts(&s.brep)[..3], [2, 2, 11]);
+    assert_eq!(s.brep.regions[0], Region { shells: vec![0, 1], void: false });
+    assert_eq!(s.brep.regions[1], Region { shells: vec![1], void: true });
+}
+
 #[test]
 fn a_solid_with_a_void() {
     let mut w = W::default();

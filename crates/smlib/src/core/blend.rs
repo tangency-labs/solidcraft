@@ -25,6 +25,7 @@ use std::sync::PoisonError;
 use solidcore::EntityRef;
 use solidcore::SolidError;
 use solidcore::blend::blend_corner::BlendCornerEvent;
+use solidcore::blend::blend_refusal::{BlendRefusal, SetbackTooShortWhy};
 use solidcore::blend::chamfer_side::faces_along;
 use solidcore::blend::fillet_corner::p3::MIXED_CORNER_RAILS_CROSS;
 use solidcore::blend::fillet_executive::p1::{FilletLaw, FilletLawKind};
@@ -48,6 +49,7 @@ use solidcore::topology::brep::p2 as brep_p2;
 use solidcore::topology::brep::p2::ArenaNotifyState;
 use solidcore::topology::brep::p3::{DeleteFaceOptions, delete_face};
 use solidcore::topology::brep::p5::{StitchAndOrientOptions, stitch_and_orient};
+use solidcore::topology::brep::validation::{CheckLevel, validate_and_update_tolerances};
 use solidcore::topology::edgeuse::p1 as eu_p1;
 use solidcore::topology::edgeuse::p3::{BinormalOptions, evaluate_binormal};
 use solidcore::topology::face::p2 as face_p2;
@@ -82,6 +84,11 @@ pub(super) fn status(e: SolidError) -> Error {
         e if is_mass_heal_or_geom_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
         e if is_sweep_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
         e if is_query_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
+        e if is_topology_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
+        e if is_curve_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
+        e if is_surface_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
+        e if is_offset_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
+        e if is_blend_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
         SolidError::InvalidInput { .. } => Error::Status(INVALID_INPUT),
         SolidError::Unsupported { reason, .. } if reason == MIXED_CORNER_RAILS_CROSS => Error::Unported(MIXED_CORNER_UNSUPPORTED),
         e if is_boolean_failure(&e) => boolean_status(e),
@@ -147,6 +154,39 @@ fn is_sweep_failure(e: &SolidError) -> bool {
 /// (`Upstream` before solidcore described it), and passes on as that status.
 fn is_query_failure(e: &SolidError) -> bool {
     e.query_failure().is_some()
+}
+
+/// A topology routine's failure (solidcore's `TopologyFailure`): it stands for the status the
+/// routine returned (`Upstream` before solidcore described it), and passes on as that status.
+fn is_topology_failure(e: &SolidError) -> bool {
+    e.topology_failure().is_some()
+}
+
+/// A curve routine's failure (solidcore's `CurveFailure`) that replaced a status the routine
+/// returned (`Upstream` before solidcore described it): it passes on as that status. A length
+/// bracket's refusal replaced none and passes on as solidcore's text, as before.
+fn is_curve_failure(e: &SolidError) -> bool {
+    e.curve_failure().is_some_and(|c| c.replaces_upstream_status())
+}
+
+/// A surface routine's failure (solidcore's `SurfaceFailure`): it stands for the status the
+/// routine returned (`Upstream` before solidcore described it), and passes on as that status.
+fn is_surface_failure(e: &SolidError) -> bool {
+    e.surface_failure().is_some()
+}
+
+/// An offset routine's failure (solidcore's `OffsetFailure`) that replaced a status the routine
+/// returned (`Upstream` before solidcore described it): it passes on as that status. An offset's
+/// refusals replaced none and pass on as before.
+fn is_offset_failure(e: &SolidError) -> bool {
+    e.offset_failure().is_some_and(|o| o.replaces_upstream_status())
+}
+
+/// A blend routine's failure (solidcore's `BlendFailure`) that replaced a status the routine
+/// returned (`Upstream` before solidcore described it): it passes on as that status, whether or
+/// not it names an entity.
+fn is_blend_failure(e: &SolidError) -> bool {
+    e.blend_failure().is_some_and(|b| b.replaces_upstream_status())
 }
 
 /// `size_ok`.
@@ -334,14 +374,29 @@ fn face_set(b: &Brep) -> solidcore::Result<HashSet<FaceId>> {
 /// the cliff overflow on, solidcore makes the fork's choice, and its refusals (each with its own
 /// reason) are [`Error::NoRoom`] like the fork's.
 ///
+/// A setback too short for its corner's fill, which solidcore refuses as data naming the least
+/// setback its fill takes (`BlendRefusal::SetbackTooShort`, from the fill's convex or concave
+/// test), is [`Error::SetbackTooShort`] with that setback and the corner's point; `replaced`
+/// (the session marks the corners' patches for another patch to replace) says the setback is
+/// only what solidcore's corner needs, not one shown to build. Its other reason, a setback
+/// short of where the rails cross, names a setback that passes that test only, so it stays
+/// unsized.
+///
 /// A blend too large that solidcore sizes (the session's fit, as the fork's capi reads it with
 /// `smlib_blend_fit_size`, or [`SolidError::FilletRefused`] carrying it) is
 /// [`Error::TooLarge`] with that size, its edge's point
 /// filled in by the caller from the edge returned with it ([`sized_on`]); a corner solidcore
 /// refuses as not supported (the mixed corner whose rails cross, solidcore#2256) is
 /// [`Error::Unported`] naming it.
-fn blend_failure(s: &FilletSession<'_>, e: SolidError, corner: bool) -> (Error, Option<EdgeId>) {
+fn blend_failure(s: &FilletSession<'_>, e: SolidError, corner: bool, replaced: bool) -> (Error, Option<EdgeId>) {
     let info = s.error_info();
+    if let SolidError::BlendRefused {
+        refusal: BlendRefusal::SetbackTooShort { least, why: SetbackTooShortWhy::ConvexFill | SetbackTooShortWhy::ConcaveFill, .. },
+        ..
+    } = e
+    {
+        return (Error::SetbackTooShort { least, at: info.location.map(|p| [p.x, p.y, p.z]), builds: !replaced }, None);
+    }
     let (fit, reason) = match &e {
         SolidError::FilletRefused { fit, reason, .. } => (Some(*fit), reason.or(info.no_room_reason())),
         _ if info.code == FilletErrorType::NoRoom as i32 => (s.fit_size(), info.no_room_reason()),
@@ -567,6 +622,9 @@ fn blend_edges_stopping(
             step = corners(&mut s, section, setbacks);
         }
         s.set_mark_corner_patches(patches.is_some());
+        // the corners' patches marked for another patch to replace: solidcore's fill is then
+        // not the corner ([`blend_failure`])
+        let replaced = patches.is_some();
         match step {
             // The marks go with the session: read them before it drops.
             Ok(Ok(set_back)) => match s.do_filleting(k, None) {
@@ -580,7 +638,7 @@ fn blend_edges_stopping(
                             *m = s.mitred_edges();
                         }
                     }
-                    let (why, edge) = blend_failure(&s, e, corner);
+                    let (why, edge) = blend_failure(&s, e, corner, replaced);
                     fit_edge = edge;
                     Ok(Err(Err(why)))
                 }
@@ -589,7 +647,7 @@ fn blend_edges_stopping(
             Err(e) => match refused_turn {
                 Some(why) => Ok(Err(Err(why))),
                 None => {
-                    let (why, edge) = blend_failure(&s, e, corner);
+                    let (why, edge) = blend_failure(&s, e, corner, replaced);
                     fit_edge = edge;
                     Ok(Err(Err(why)))
                 }
@@ -685,10 +743,16 @@ fn corners(
 }
 
 /// `finish`: the result must have faces, and a solid input must give a closed manifold solid.
-pub(super) fn finish(b: Brep, solid_in: bool) -> solidcore::Result<Out<Brep>> {
+/// Before refusing a non-manifold result, grows tolerances to cover marginal gaps (SolidCraft
+/// issue #10: fuzzer seeds 178 and others). Tolerances only grow.
+pub(super) fn finish(k: &mut Kernel, mut b: Brep, solid_in: bool) -> solidcore::Result<Out<Brep>> {
     if b.face_list().is_empty() {
         return Ok(Err(Error::Empty));
     }
+    // Always try growing tolerances first: covers marginal edge/vertex gaps where the gap
+    // exceeds the recorded tolerance. Tolerances only grow: a body that already passes is
+    // unchanged; a marginal failure becomes sound.
+    let _ = validate_and_update_tolerances(k, &mut b, false, None, CheckLevel::Level2 as u8);
     if solid_in && !brep_p2::is_manifold_solid(&b)? {
         return Ok(Err(Error::NotSolid));
     }
@@ -819,10 +883,15 @@ fn overflow_first(
         }
     }
     if lead.is_empty() || rest.is_empty() {
-        return Ok(match blend_edges(k, &mut fresh, &again, each, section, None, &[], None)? {
-            Ok(()) => untagged(fresh),
-            Err(e) => Err(failed(e)),
-        });
+        match blend_edges(k, &mut fresh, &again, each, section, None, &[], None)? {
+            Ok(()) => {}
+            Err(e) => return Ok(Err(failed(e))),
+        }
+        match validate_and_update_tolerances(k, &mut fresh, false, None, CheckLevel::Level2 as u8) {
+            Ok(_) => {}
+            Err(e) => return Ok(Err(Error::Internal(e.to_string()))),
+        }
+        return Ok(untagged(fresh));
     }
     if let Err(e) = blend_edges(k, &mut fresh, &lead, &lead_sizes, section, None, &[], None)? {
         return Ok(Err(failed(e)));
@@ -853,6 +922,10 @@ fn overflow_first(
         && let Err(e) = blend_edges(k, &mut fresh, &rest_edges, &rest_sizes, section, None, &[], None)?
     {
         return Ok(Err(failed(e)));
+    }
+    match validate_and_update_tolerances(k, &mut fresh, false, None, CheckLevel::Level2 as u8) {
+        Ok(_) => {}
+        Err(e) => return Ok(Err(Error::Internal(e.to_string()))),
     }
     Ok(untagged(fresh))
 }
@@ -1004,7 +1077,7 @@ fn blend_call(
                 let chamfers: Vec<ChamferSize> = each.iter().map(|&d| ChamferSize::Distances([d, d])).collect();
                 let section = Section::Chamfer { sizes: &chamfers, along: &[] };
                 return Ok(match blend_edges(k, &mut w, &picked, &[], section, None, &[], None)? {
-                    Ok(()) => finish(w, solid_in)?,
+                    Ok(()) => finish(k, w, solid_in)?,
                     Err(Ok(_)) => Err(Error::Unsupported),
                     Err(Err(e)) => Err(e),
                 });
@@ -1023,7 +1096,7 @@ fn blend_call(
         let done = blend_edges_stopping(k, &mut w, &picked, &each, section, None, &back, (open == Corners::Open).then_some(&mut patches), first)?;
         if stopped.is_some() {
             return Ok(match overflow_first(k, body, points, tolerance, section, &picked, &mitred, &each, &mut w, dropped)? {
-                Ok(fresh) => finish(fresh, solid_in)?,
+                Ok(fresh) => finish(k, fresh, solid_in)?,
                 Err(e) => Err(e),
             });
         }
@@ -1034,7 +1107,11 @@ fn blend_call(
             Err(Err(e)) => return Ok(Err(e)),
         }
         if open == Corners::Filled {
-            return finish(w, solid_in);
+            match validate_and_update_tolerances(k, &mut w, false, None, CheckLevel::Level2 as u8) {
+                Ok(_) => {}
+                Err(e) => return Ok(Err(Error::Internal(e.to_string()))),
+            }
+            return finish(k, w, solid_in);
         }
         // Each corner opened: its patch removed, the edges round its hole in the result's
         // orders, once per corner point (a vertex picked twice gives its hole twice).
@@ -1066,7 +1143,11 @@ fn blend_call(
             }
             holes.push(Hole { edges });
         }
-        finish(w, false)
+        match validate_and_update_tolerances(k, &mut w, false, None, CheckLevel::Level2 as u8) {
+            Ok(_) => {}
+            Err(e) => return Ok(Err(Error::Internal(e.to_string()))),
+        }
+        finish(k, w, false)
     })?;
     Ok((made, holes))
 }
@@ -1258,7 +1339,7 @@ pub(crate) fn chamfer_sides(body: &Body, points: &[[f64; 3]], tolerance: f64, di
         };
         let section = Section::Chamfer { sizes: std::slice::from_ref(&size), along: &along };
         Ok(match blend_edges(k, &mut w, &picked, &[], section, None, &[], None)? {
-            Ok(()) => finish(w, solid_in)?,
+            Ok(()) => finish(k, w, solid_in)?,
             Err(Ok(_)) => Err(Error::Unsupported),
             Err(Err(e)) => Err(e),
         })
@@ -1440,7 +1521,7 @@ pub(crate) fn fillet_variable(
         let solid_in = brep_p2::is_manifold_solid(&w)?;
         let (r0, r1) = (radii.first().copied().unwrap_or(0.0), radii.last().copied().unwrap_or(0.0));
         Ok(match blend_edges(k, &mut w, &[e], &[r0.max(r1)], Section::Round(Turn::Mitre), Some(law), &[], None)? {
-            Ok(()) => finish(w, solid_in)?,
+            Ok(()) => finish(k, w, solid_in)?,
             Err(Ok(_)) => Err(Error::Unsupported),
             Err(Err(e)) => Err(e),
         })
@@ -1480,6 +1561,23 @@ mod tests {
         assert!(matches!(status(sweep(cap)), Error::Solidcore(_)));
     }
 
+    /// A curve routine's failure passes on as the status it replaced, as the `Upstream` it replaced
+    /// did; a length bracket's refusal, which replaced no status, keeps passing on as solidcore's
+    /// text.
+    #[test]
+    fn curve_failures_pass_on_as_their_status() {
+        use solidcore::error::Failure;
+        use solidcore::error::curve::CurveFailure;
+        let curve = |c| Failure::new("curve::curve::p2::Curve::create_by_split_curve", c).into_error();
+        assert!(matches!(status(curve(CurveFailure::Failed("the split parameter is at the curve's end"))), Error::Status(1001)));
+        assert!(matches!(status(curve(CurveFailure::Missing("the curve's cache"))), Error::Status(1006)));
+        assert!(matches!(status(curve(CurveFailure::ZeroDirection("the auxiliary direction"))), Error::Status(1007)));
+        let floor = CurveFailure::LengthBelowFloor { asked: 1e-12, floor: 1e-10, pieces: 8 };
+        assert!(matches!(status(curve(floor)), Error::Solidcore(_)));
+        let cap = CurveFailure::LengthPastPieceCap { asked: 1e-9, reached: 1e-6, pieces: 4096 };
+        assert!(matches!(status(curve(cap)), Error::Solidcore(_)));
+    }
+
     #[test]
     fn laws_are_checked_as_the_capi_checks_them() {
         assert!(law_ok(1, &[0.0, 0.0, 1.0, 1.0], &[1.0, 2.0]));
@@ -1516,5 +1614,76 @@ mod tests {
         assert!(matches!(status(query(QueryFailure::Failed("the region has no shells"))), Error::Status(1001)));
         assert!(matches!(status(query(QueryFailure::Missing("the face's surface"))), Error::Status(1006)));
         assert!(matches!(status(query(QueryFailure::InvalidValue("a vector of zero length has no direction"))), Error::Status(1007)));
+    }
+
+    /// A topology routine's failure passes on as the status it replaced, as the `Upstream` it
+    /// replaced did, whether or not it names an entity.
+    #[test]
+    fn topology_failures_pass_on_as_their_status() {
+        use solidcore::error::Failure;
+        use solidcore::error::topology::TopologyFailure;
+        let topology = |t| Failure::new("topology::edge", t).into_error();
+        assert!(matches!(status(topology(TopologyFailure::Failed("the loop does not close"))), Error::Status(1001)));
+        assert!(matches!(status(topology(TopologyFailure::Missing("the edge's curve"))), Error::Status(1006)));
+        assert!(matches!(status(topology(TopologyFailure::InvalidValue("a zero normal"))), Error::Status(1007)));
+        assert!(matches!(status(topology(TopologyFailure::Inconsistent("two outer loops"))), Error::Status(1005)));
+        assert!(matches!(status(topology(TopologyFailure::DropFailed { status: 1010 })), Error::Status(1010)));
+        let at =
+            Failure::new("topology::vertexuse", TopologyFailure::Failed("x")).at(solidcore::EntityRef::Vertex(VertexId::from_index(2))).into_error();
+        assert!(matches!(status(at), Error::Status(1001)));
+    }
+
+    /// A surface routine's failure passes on as the status it replaced, as the `Upstream` it
+    /// replaced did.
+    #[test]
+    fn surface_failures_pass_on_as_their_status() {
+        use solidcore::error::Failure;
+        use solidcore::error::surface::SurfaceFailure;
+        let surface = |s| Failure::new("surface::surface::p2::Surface::step_inversion", s).into_error();
+        assert!(matches!(status(surface(SurfaceFailure::Failed("the point is not on the generator"))), Error::Status(1001)));
+        assert!(matches!(status(surface(SurfaceFailure::Missing("the surface's cache"))), Error::Status(1006)));
+        assert!(matches!(status(surface(SurfaceFailure::InvalidValue("the line direction is the zero vector"))), Error::Status(1007)));
+        assert!(matches!(status(surface(SurfaceFailure::OutsideDomain("the point is outside the sweep"))), Error::Status(1020)));
+        assert!(matches!(status(surface(SurfaceFailure::OffSurface("the point is off the surface"))), Error::Status(1021)));
+    }
+
+    /// An offset routine's failure passes on as the status it replaced, as the `Upstream` it
+    /// replaced did, whether or not it names a face; an offset's refusal does not pass on as a
+    /// status.
+    #[test]
+    fn offset_failures_pass_on_as_their_status() {
+        use solidcore::error::Failure;
+        use solidcore::error::offset::OffsetFailure;
+        let offset = |o| Failure::new("offset::offset_executive::crossing_loops", o).into_error();
+        assert!(matches!(status(offset(OffsetFailure::Failed("x"))), Error::Status(1001)));
+        assert!(matches!(status(offset(OffsetFailure::Missing("the face's surface"))), Error::Status(1006)));
+        assert!(matches!(status(offset(OffsetFailure::InvalidValue("x"))), Error::Status(1007)));
+        assert!(matches!(status(offset(OffsetFailure::Inconsistent("x"))), Error::Status(1005)));
+        let at = Failure::new("offset::draft", OffsetFailure::InvalidValue("the face has no surface or no outer face use"))
+            .at(solidcore::EntityRef::Face(solidcore::topology::FaceId::from_index(2)))
+            .into_error();
+        assert!(matches!(status(at), Error::Status(1007)));
+        let folds = offset(OffsetFailure::Folds { face: solidcore::topology::FaceId::from_index(1), distance: 2.0, largest: 1.0 });
+        assert!(!matches!(status(folds), Error::Status(_)));
+    }
+
+    /// A blend routine's failure passes on as the status it replaced, as the `Upstream` it
+    /// replaced did, whether or not it names an edge.
+    #[test]
+    fn blend_failures_pass_on_as_their_status() {
+        use solidcore::error::Failure;
+        use solidcore::error::blend::BlendFailure;
+        let blend = |b| Failure::new("blend::feature_executive", b).into_error();
+        assert!(matches!(status(blend(BlendFailure::Failed("x"))), Error::Status(1001)));
+        assert!(matches!(status(blend(BlendFailure::Missing("the edge use's edge"))), Error::Status(1006)));
+        assert!(matches!(status(blend(BlendFailure::InvalidValue("x"))), Error::Status(1007)));
+        assert!(matches!(status(blend(BlendFailure::Inconsistent("x"))), Error::Status(1005)));
+        assert!(matches!(status(blend(BlendFailure::BadIntersections("x"))), Error::Status(1027)));
+        assert!(matches!(status(blend(BlendFailure::NotConverged("x"))), Error::Status(1022)));
+        assert!(matches!(status(blend(BlendFailure::PassedOn { what: "x", status: 1020 })), Error::Status(1020)));
+        let at = Failure::new("blend::fillet_executive::p3", BlendFailure::Failed("x"))
+            .at(solidcore::EntityRef::Edge(solidcore::topology::EdgeId::from_index(2)))
+            .into_error();
+        assert!(matches!(status(at), Error::Status(1001)));
     }
 }

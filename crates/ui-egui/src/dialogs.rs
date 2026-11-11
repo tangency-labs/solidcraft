@@ -608,7 +608,7 @@ struct DialogComputation {
 
 impl DialogComputation {
     fn new(app: &SolveApp, d: &Dialog) -> Result<Self, String> {
-        if app.file_load.busy() || app.file_picker_busy() {
+        if app.file_load_holds() || app.file_picker_busy() {
             return Err("a file operation is in progress".into());
         }
         let cmds = apply_commands(app, d)?;
@@ -641,7 +641,7 @@ impl DialogComputation {
 }
 
 fn adopt_dialog(app: &mut SolveApp, prepared: solidcraft_engine::ComputedCommands, d: &Dialog) -> Result<(), String> {
-    if app.file_load.busy() || app.file_picker_busy() {
+    if app.file_load_holds() || app.file_picker_busy() {
         return Err("a file operation is in progress".into());
     }
     let replies = app.session.accept_commands(prepared).map_err(|e| e.to_string())?;
@@ -1062,7 +1062,7 @@ impl Dialog {
                 let [rail, rail2] = crate::dialogs_sweep::rail_inputs();
                 vec![
                     SelInput::new("Profile", PROFILES, true),
-                    SelInput::new("Path", CURVES, true),
+                    SelInput::new("Path", CURVES | EDGES, true),
                     crate::dialogs_sweep::direction_input(),
                     rail,
                     rail2,
@@ -1636,6 +1636,18 @@ impl Dialog {
         Some(FaceSnap::new(s, body, *index, &near))
     }
 
+    /// The sketch a sweep's profile is in, when the active input is the sweep's path: a
+    /// sweep's path may never be a curve of the profile's own sketch, so such a curve is
+    /// never a valid pick for the path (#2216). `None` when the dialog is not a sweep's
+    /// path input, or when the profile is not picked yet.
+    fn sweep_path_profile_sketch(&self, s: &Session) -> Option<u64> {
+        let sweep = matches!(self.kind, Kind::Sweep { .. }) || matches!(self.kind, Kind::Surface(crate::dialogs_surface::Surf::Sweep(_)));
+        if !sweep || self.active != 1 {
+            return None;
+        }
+        crate::dialogs_sweep::profile_sketch(&self.inputs.first()?.items, s.active_sketch)
+    }
+
     /// The selection a hit would add to the active input, given the face under the cursor
     /// ([`Dialog::face_snap`] of the same hits). A face place picked on or near a sketch point that
     /// lies on that face (a circle's centre) is taken at the point, as a points input picks it.
@@ -1646,6 +1658,15 @@ impl Dialog {
         // Plane, Axis and Point take whatever a method of theirs builds from.
         if self.auto.is_some() {
             return auto::candidate(s, h);
+        }
+        // A sweep's path is never a curve of the profile's own sketch: the command refuses such
+        // a path ("the path curves must be in one other sketch"), so the pick does not stop on
+        // one and falls through to the next hit, the body's edge under the cursor (#2216).
+        if let Some(sketch) = self.sweep_path_profile_sketch(s)
+            && let Hit::SketchCurve { sketch: other, .. } = h
+            && *other == sketch
+        {
+            return None;
         }
         if let Some(target) = self.extrude_target(s, h) {
             return Some(target);
@@ -2082,15 +2103,17 @@ impl Dialog {
 }
 
 /// The edges a Fillet or Chamfer pick stands for: its tangent chain when `chain` is on, else
-/// the picked edge (both halves of a split circular rim).
+/// the picked edge (both halves of a split circular rim). The chain is the kernel's exact one,
+/// the edges the feature rounds: it ends where a concave edge runs on as a convex one, which
+/// the display mesh cannot tell.
 fn fillet_edges(s: &Session, sel: &Sel, chain: bool) -> Vec<Sel> {
     let mut picked = crate::viewport::picked_selection(s, sel);
     if chain
-        && let Sel::Edge { body, index, .. } = sel
+        && let Sel::Edge { body, index, point } = sel
         && let Some(b) = crate::open_meshing::session_world(s).body(body)
     {
         let m = b.mesh();
-        for i in m.tangent_chain(*index, 2f64.to_radians()) {
+        for i in b.blend_chain(*index, *point) {
             if !picked.iter().any(|x| matches!(x, Sel::Edge { index: j, .. } if *j == i))
                 && let Some(e) = m.edges.get(i)
             {
@@ -3076,9 +3099,13 @@ pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames
         Sel::Occurrence { path } if path.is_empty() => s.doc.name.clone(),
         Sel::Occurrence { path } => s.occurrence_placement(path).map(|p| p.name).unwrap_or_else(|_| "Component".into()),
         Sel::Vertex { body, point } if body.is_empty() => {
+            // In a sketch, the point in the sketch's plane; otherwise where it is in the model
+            // (a saved point reopened by Edit Feature, #12022), not a meaningless (0, 0).
             let state = crate::open_meshing::session_world(s);
-            let p = s.active_sketch.and_then(|id| state.sketch(id)).map(|sk| sk.plane.to_local(*point)).unwrap_or_default();
-            format!("({:.2}, {:.2}) mm", p.x, p.y)
+            match s.active_sketch.and_then(|id| state.sketch(id)).map(|sk| sk.plane.to_local(*point)) {
+                Some(p) => format!("({:.2}, {:.2}) mm", p.x, p.y),
+                None => format!("({:.2}, {:.2}, {:.2}) mm", point.x, point.y, point.z),
+            }
         }
         Sel::Vertex { body, .. } => format!("{body} · vertex"),
     }
@@ -3092,7 +3119,12 @@ fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::pref
 
 /// Saved vectors/axes are real inputs even when they have no origin-axis selection chip.
 fn stored_input_reference_key(d: &Dialog, index: usize) -> Option<&'static str> {
-    if let Kind::Construct { command: "construct.plane.axis_point", keys, .. } = &d.kind {
+    if let Kind::Construct {
+        command: "construct.plane.axis_point" | "construct.plane.two_edges" | "construct.plane.three_points" | "construct.plane.perpendicular",
+        keys,
+        ..
+    } = &d.kind
+    {
         return keys.get(index).copied();
     }
     if matches!(d.kind, Kind::Section { .. }) && index == 0 {
@@ -3941,14 +3973,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // Physical materials: the library's, then the design's own (material.create).
     let t = Tokens::get();
     let vp = crate::agent_chat::tool_space(app, crate::shell::content_rect(app, app.viewport.rect.unwrap_or_else(|| ctx.content_rect())));
-    // The Sketch Palette owns the right edge for as long as a sketch is being edited. A dialog
-    // started there docks at the left instead, so neither panel hides the other.
+    // In Classic, a dialog starts on the left when the Sketch Palette occupies the right.
+    // Shared-panel workspaces keep the existing editor card floating at the right.
     let column = crate::dialog_column::place(app, ctx, &d);
-    let side = if column.is_some() || (crate::sketch_palette::editing(app) && crate::sketch_palette::fits_beside_a_dialog(app, ctx)) {
-        crate::frame::Side::Left
-    } else {
-        crate::frame::Side::Right
-    };
+    let side = crate::shell::floating_editor_side(
+        app,
+        column.is_some() || (crate::sketch_palette::editing(app) && crate::sketch_palette::fits_beside_a_dialog(app, ctx)),
+    );
     let top = crate::shell::panel_top(app, vp, vp.bottom(), side);
     // Empty/hostile viewport geometry cannot provide a safe window rectangle.
     if !vp.is_finite() || !vp.is_positive() {
@@ -5783,9 +5814,16 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             need(0, "a profile")?;
             need(1, "the path")?;
             let (sketch, idx) = profiles();
-            let path: Vec<String> = sels(d, 1).curve_ids();
-            let path_sketch = picks_sketch(app, sels(d, 1), sketch.as_u64()).ok_or("the path curves must be in one sketch")?;
-            let mut p = json!({"sketch": sketch, "profiles": idx, "path_sketch": path_sketch, "path": path, "operation": OPS.get(*operation).copied().unwrap_or("new")});
+            let mut p = json!({"sketch": sketch, "profiles": idx, "operation": OPS.get(*operation).copied().unwrap_or("new")});
+            // The path is a chain of a body's edges or the curves of a sketch (#2216).
+            if let Some((body, edges)) = crate::dialogs_sweep::edge_path(sels(d, 1))? {
+                p["path_body"] = json!(body);
+                p["path_edges"] = json!(edges);
+            } else {
+                let path: Vec<String> = sels(d, 1).curve_ids();
+                p["path_sketch"] = json!(picks_sketch(app, sels(d, 1), sketch.as_u64()).ok_or("the path curves must be in one sketch")?);
+                p["path"] = json!(path);
+            }
             crate::dialogs_sweep::params(app, opts, sels(d, 2).first(), [sels(d, 3), sels(d, 4)], &mut p)?;
             ("solid.sweep", p)
         }
@@ -6953,6 +6991,24 @@ pub(crate) fn model_axis_sel(s: &Session, g: &solidcraft_engine::doc::construct:
     }
 }
 
+/// A saved construction reference shown as the pick it stands for. Edit Feature keeps the
+/// reference itself until a new pick replaces it, so a fixed point or the origin has a pick too.
+fn saved_pick(s: &Session, reference: &solidcraft_engine::doc::construct::GeoRef) -> Option<Sel> {
+    use solidcraft_engine::doc::construct::GeoRef;
+    Some(match reference {
+        GeoRef::World { axis } => Sel::Axis { name: axis.clone() },
+        GeoRef::Axis { name } => Sel::Axis { name: name.to_string() },
+        GeoRef::ConstructPoint { name } => Sel::ConstructionPoint { name: name.to_string() },
+        GeoRef::SketchPoint { sketch, point } => Sel::SketchPoint { id: format!("{sketch}:{point}") },
+        GeoRef::SketchCurve { sketch, curve } => Sel::SketchCurve { id: curve.clone(), sketch: Some(*sketch) },
+        GeoRef::Vertex { at, .. } => Sel::Vertex { body: String::new(), point: *at },
+        GeoRef::Point { p } => Sel::Vertex { body: String::new(), point: *p },
+        GeoRef::Origin => Sel::Vertex { body: String::new(), point: Vec3::ZERO },
+        GeoRef::Plane { plane } => plane_sel(s, plane)?,
+        other => model_axis_sel(s, other)?,
+    })
+}
+
 /// A stored construction reference back into a dialog pick.
 fn geo_sel(s: &Session, g: &solidcraft_engine::doc::construct::GeoRef) -> Option<Sel> {
     match g {
@@ -7267,6 +7323,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             ease_out,
             to,
             references,
+            old_surface_start: _,
         } => {
             let mut d = start("solid.hole")?;
             let mut k = hole_defaults(s);
@@ -7710,7 +7767,22 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Sweep { sketch, profiles, path_sketch, path, operation, targets, orientation, twist, scale, rails, rail_fit, .. } => {
+        FeatureKind::Sweep {
+            sketch,
+            profiles,
+            path_sketch,
+            path,
+            path_body,
+            path_edges,
+            operation,
+            targets,
+            orientation,
+            twist,
+            scale,
+            rails,
+            rail_fit,
+            ..
+        } => {
             let mut d = start("solid.sweep")?;
             let (opts, direction) = crate::dialogs_sweep::SweepOpts::of(orientation, twist, scale, *rail_fit, &feature_frame(s, f.component));
             d.kind = Kind::Sweep { operation: op_index(operation), opts };
@@ -7725,7 +7797,12 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 inp.items = items.into_iter().map(|index| Sel::Profile { sketch: sketch.0, index }).collect();
             }
             if let Some(inp) = d.inputs.get_mut(1) {
-                inp.items = path.iter().map(|id| crate::selection::curve_pick(id, path_sketch.0, s.active_sketch)).collect();
+                // The path is a chain of a body's edges or the curves of a sketch (#2216).
+                // A body's edge is looked for on the body the path was picked on (#2216).
+                inp.items = match path_body {
+                    Some(body) => path_edges.iter().filter_map(|p| edge_sel_on(s, Some(body.0.as_str()), p.0)).collect(),
+                    None => path.iter().map(|id| crate::selection::curve_pick(id, path_sketch.0, s.active_sketch)).collect(),
+                };
             }
             if !targets.is_empty() {
                 d.extra.insert("targets".into(), json!(targets));
@@ -7769,30 +7846,27 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::ConstructionPlane { plane: PlaneRef::AxisPoint { .. } } => {
+        FeatureKind::ConstructionPlane {
+            plane: PlaneRef::AxisPoint { .. } | PlaneRef::TwoEdges { .. } | PlaneRef::ThreePoints { .. } | PlaneRef::Perpendicular { .. },
+        } => {
             let mut world = f.kind.clone();
             world.transform_geometry(&feature_frame(s, f.component));
-            let FeatureKind::ConstructionPlane { plane: PlaneRef::AxisPoint { axis, point } } = world else { return None };
-            let mut d = start("construct.plane.axis_point")?;
-            for (input, reference) in d.inputs.iter_mut().zip([&axis, &point]) {
-                // Keep the exact saved references when no new pick has replaced them.
-                // Fixed points also need a visible pick to keep the shared form complete.
-                input.items = vec![match reference.as_ref() {
-                    solidcraft_engine::doc::construct::GeoRef::World { axis } => Sel::Axis { name: axis.clone() },
-                    solidcraft_engine::doc::construct::GeoRef::Axis { name } => Sel::Axis { name: name.to_string() },
-                    solidcraft_engine::doc::construct::GeoRef::ConstructPoint { name } => Sel::ConstructionPoint { name: name.to_string() },
-                    solidcraft_engine::doc::construct::GeoRef::SketchPoint { sketch, point } => Sel::SketchPoint { id: format!("{sketch}:{point}") },
-                    solidcraft_engine::doc::construct::GeoRef::SketchCurve { sketch, curve } => {
-                        Sel::SketchCurve { id: curve.clone(), sketch: Some(*sketch) }
-                    }
-                    solidcraft_engine::doc::construct::GeoRef::Vertex { at, .. } => Sel::Vertex { body: String::new(), point: *at },
-                    solidcraft_engine::doc::construct::GeoRef::Point { p } => Sel::Vertex { body: String::new(), point: *p },
-                    solidcraft_engine::doc::construct::GeoRef::Origin => Sel::Vertex { body: String::new(), point: Vec3::ZERO },
-                    other => model_axis_sel(s, other)?,
-                }];
+            let FeatureKind::ConstructionPlane { plane } = &world else { return None };
+            let (command, refs) = solidcraft_engine::cmd::picked_plane_refs(plane)?;
+            let mut d = start(command)?;
+            let keys = match &d.kind {
+                Kind::Construct { keys, .. } => keys.clone(),
+                _ => return None,
+            };
+            for (key, reference) in refs {
+                // Keep the exact saved references when no new pick has replaced them. Fixed
+                // points also need a visible pick to keep the shared form complete; a reference
+                // that cannot be shown now leaves its row empty to pick again.
+                let Some(input) = keys.iter().position(|k| *k == key).and_then(|i| d.inputs.get_mut(i)) else { continue };
+                let (Some(pick), Ok(saved)) = (saved_pick(s, reference), serde_json::to_value(reference)) else { continue };
+                input.items = vec![pick];
+                d.extra.insert(key.into(), saved);
             }
-            d.extra.insert("axis".into(), serde_json::to_value(axis).ok()?);
-            d.extra.insert("point".into(), serde_json::to_value(point).ok()?);
             d
         }
         FeatureKind::ConstructionPlane { plane: PlaneRef::Tangent { face, reference, .. } } => {

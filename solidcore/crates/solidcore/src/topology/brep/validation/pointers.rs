@@ -1196,7 +1196,10 @@ fn edge_geometry(
     // The owner naming scheme belongs to the caller; the type and edge-owner
     // identity resolved by that caller are kept by the curve itself.
     if curve.owner() != Some(keys(EntityRef::Edge(e))) {
-        return Err(crate::SolidError::sm_err(super::OP));
+        return Err(crate::SolidError::topology_failed(
+            super::OP,
+            "the edge's curve is not owned by the edge",
+        ));
     }
     let ivl = b.edge(e)?.interval;
     let p0 = curve.evaluate_point(k, ivl.min())?;
@@ -1209,7 +1212,10 @@ fn edge_geometry(
                 let zone = crate::geom::tol::zone_tol3d(k, dist * 2.0);
                 crate::topology::vertex::set_tolerance(b, v, zone, true, true)?;
             } else {
-                return Err(crate::SolidError::sm_err(super::OP));
+                return Err(crate::SolidError::topology_failed(
+                    super::OP,
+                    "the edge's end is farther from its vertex than their tolerances",
+                ));
             }
         }
     }

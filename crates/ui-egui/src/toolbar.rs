@@ -208,7 +208,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let chrome = crate::window_chrome::TitleBar { traffic_lights: app.integrated_titlebar, caption_buttons: app.custom_titlebar };
         let action = chrome.show(ui, r, |ui, content| {
             // While a file loads the design waits: no menus or commands from the bar.
-            let idle = !app.file_load.busy();
+            let idle = !app.file_load_holds();
             // Save, Undo and Redo use the same actions as the File menu and shortcuts.
             let shown = design_shown(app) && idle;
             let tip = |id: &str, key: &str| {
@@ -370,13 +370,13 @@ impl FileAction {
             Self::AgentChat => crate::agent_chat::app_bar_button_shown(app),
             _ => true,
         };
-        !app.file_picker_busy() && !app.file_load.busy() && !behind_report && (!needs_design || design_shown(app)) && available
+        !app.file_picker_busy() && !app.file_load_holds() && !behind_report && (!needs_design || design_shown(app)) && available
     }
 
     /// Whether the native menu offers this action: while a widget has keyboard focus (a report's
     /// text field too), its Undo and Redo go to that widget instead of the design.
     pub fn menu_enabled(&self, app: &SolveApp, keyboard_focus: bool) -> bool {
-        self.enabled(app) || (matches!(self, Self::Undo | Self::Redo) && keyboard_focus && !app.file_picker_busy() && !app.file_load.busy())
+        self.enabled(app) || (matches!(self, Self::Undo | Self::Redo) && keyboard_focus && !app.file_picker_busy() && !app.file_load_holds())
     }
 
     /// Execute through the same document, save-job and preferences paths as the toolbar.
@@ -484,6 +484,7 @@ fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows.push(row("file.export_step", app.tr_label("Export STEP…"), &key("file.export_step"), "export", shown));
     rows.push(row("file.export_view_dxf", app.tr_label("Export Current View as DXF…"), "", "export", shown));
     rows.push(row("file.export_obj", app.tr_label("Export OBJ…"), &key("file.export_obj"), "export", shown));
+    rows.push(row("export_glb", &format!("{}…", app.tr("ui.export_glb")), "", "export", shown));
     rows.push(row("file.export_urdf", app.tr_label("Export URDF…"), &key("file.export_urdf"), "export", shown));
     rows.push(row("export_json", app.tr_label("Export Design as JSON…"), "", "export", true));
     rows.push(FileRow::Separator);
@@ -531,6 +532,7 @@ fn run_file_row(app: &mut SolveApp, id: &str) {
                 show();
             }
         }
+        "export_glb" => FileAction::Export("glb").run(app),
         "export_json" => FileAction::Export("json").run(app),
         "install" => {
             if let Some(offer) = crate::install::offered(app) {
@@ -2228,7 +2230,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     } else {
         app.viewport.key_hold = None;
     }
-    if app.file_load.busy() {
+    if app.file_load_holds() {
         return;
     }
     if crate::viewport_status::enabled(app)

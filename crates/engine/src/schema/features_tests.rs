@@ -383,6 +383,8 @@ fn sweep_schemas_and_the_key_check_agree() {
         "operation",
         "participants",
         "path",
+        "path_body",
+        "path_edges",
         "path_sketch",
         "profiles",
         "sketch",
@@ -392,10 +394,77 @@ fn sweep_schemas_and_the_key_check_agree() {
     solid.extend(shape);
     solid.sort_unstable();
     assert_keys(input_schema_for::<SweepParams>(), &solid);
-    let mut surface = vec!["body_name", "body_names", "curves", "exact_regions", "name", "participants", "path", "path_sketch", "profiles", "sketch"];
+    let mut surface = vec![
+        "body_name",
+        "body_names",
+        "curves",
+        "exact_regions",
+        "name",
+        "participants",
+        "path",
+        "path_body",
+        "path_edges",
+        "path_sketch",
+        "profiles",
+        "sketch",
+    ];
     surface.extend(shape);
     surface.sort_unstable();
     assert_keys(input_schema_for::<SurfaceSweepParams>(), &surface);
+}
+
+/// #2216: a sweep's path may be a chain of a body's edges (`path_body` and `path_edges`), so
+/// the contracts take those keys: a call with them is not refused, and a key that is not one
+/// of the command's still is.
+#[test]
+fn sweep_path_on_a_body_is_accepted_and_unknown_keys_are_not() {
+    let p = json!({"path_body": "Body1", "path_edges": [[0, 0, 0], [10, 0, 0]]});
+    let solid = crate::schema::TypedContract::<SweepParams>::new();
+    let surface = crate::schema::TypedContract::<SurfaceSweepParams>::new();
+    assert!(crate::schema::Contract::check(&solid, &p).is_empty(), "{p}");
+    assert!(crate::schema::Contract::check(&surface, &p).is_empty(), "{p}");
+    // A key that is not one of the command's is still refused.
+    let typo = json!({"path_body": "Body1", "path_edges": [[0, 0, 0]], "path_boddy": "Body1"});
+    for issues in [crate::schema::Contract::check(&solid, &typo), crate::schema::Contract::check(&surface, &typo)] {
+        assert_eq!(issues.len(), 1, "{typo}");
+        assert_eq!(issues[0].path, "path_boddy", "{typo}");
+        assert_eq!(issues[0].message, "unknown key `path_boddy`; did you mean `path_body`?", "{typo}");
+    }
+    // `path_body` is a body name, or `null` (which the handler reads as absent).
+    for p in [json!({"path_body": null}), json!({"path_body": "Body1", "path_edges": [[0, 0, 0]]})] {
+        assert!(crate::schema::Contract::check(&solid, &p).is_empty(), "{p}");
+        assert!(crate::schema::Contract::check(&surface, &p).is_empty(), "{p}");
+    }
+    for p in [json!({"path_body": 5}), json!({"path_body": true}), json!({"path_body": []})] {
+        for issues in [crate::schema::Contract::check(&solid, &p), crate::schema::Contract::check(&surface, &p)] {
+            assert_eq!(issues.len(), 1, "{p}");
+            assert_eq!(issues[0].path, "path_body", "{p}");
+            assert_eq!(issues[0].message, "`path_body` must be a body name", "{p}");
+        }
+    }
+    // `path_edges` is a list of 1 to 1000 points, as the handler's `path_edge_points` reads them.
+    for (p, message) in [
+        (json!({"path_edges": 5}), "`path_edges` must be a list of points"),
+        (json!({"path_edges": []}), "the path needs 1…1000 edges"),
+        (json!({"path_edges": [[0, 0, 0], [1]]}), "each `path_edges` entry must be a point [x,y,z]"),
+    ] {
+        for issues in [crate::schema::Contract::check(&solid, &p), crate::schema::Contract::check(&surface, &p)] {
+            assert_eq!(issues.len(), 1, "{p}");
+            assert_eq!(issues[0].path, "path_edges", "{p}");
+            assert_eq!(issues[0].message, message, "{p}");
+        }
+    }
+    // The schemas the commands publish list both keys.
+    for schema in [input_schema_for::<SweepParams>(), input_schema_for::<SurfaceSweepParams>()] {
+        let schema = schema.as_value();
+        assert_eq!(schema["properties"]["path_body"]["type"], json!(["string", "null"]), "{schema}");
+        // `path_edges` is published as a `$ref` to its own definition, as `path` is.
+        let name = schema["properties"]["path_edges"]["$ref"].as_str().unwrap_or_default().strip_prefix("#/$defs/").unwrap_or_default().to_string();
+        let edges = &schema["$defs"][name.clone()];
+        assert_eq!(edges["type"], "array", "{schema}");
+        assert_eq!(edges["minItems"], 1, "{schema}");
+        assert_eq!(edges["maxItems"], 1000, "{schema}");
+    }
 }
 
 /// The calls both sweeps refuse today, as `sweep` and `surface_sweep` read them, each run on

@@ -64,7 +64,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("sweep")
         .contract(&SWEEP_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("sketch: profile sketch; profiles?; path_sketch: sketch; path: [curve ids in order]; orientation?: perpendicular (default: square to the path, turning with it) | parallel (as drawn: the profile moves without turning; the path must keep crossing its plane) | [x,y,z] (square to the path, its turn about the path fixed by this direction); twist?: angle expr (the profile turns this much about the path over its length; within 4 turns); scale?: expr (the profile's scale at the end, linear along the path; 0.01…100); rails?: [{sketch?: sketch (default path_sketch), curves: [curve ids in order]}] (guide rails, one or two, each meeting every plane square to the path once along it, from the end nearest the path's start: one rail turns the profile so its point where the rail starts stays on the rail and scales it with the rail's distance from the path; two rails carry it between them, its points where they start staying on both; rails take the default orientation, no twist and no scale, and a path without sharp corners); rail_fit?: scale (default: the profile grows and shrinks evenly) | stretch (only across to the rail, between the rails); operation?, touching?, targets?, name?, body_name?"),
+        .params("sketch: profile sketch; profiles?; path_sketch: sketch; path: [curve ids in order]; path_body?: body name; path_edges?: [points on its edges] (the path is a chain of that body's edges, instead of a sketch's curves); orientation?: perpendicular (default: square to the path, turning with it) | parallel (as drawn: the profile moves without turning; the path must keep crossing its plane) | [x,y,z] (square to the path, its turn about the path fixed by this direction); twist?: angle expr (the profile turns this much about the path over its length; within 4 turns); scale?: expr (the profile's scale at the end, linear along the path; 0.01…100); rails?: [{sketch?: sketch (default path_sketch), curves: [curve ids in order]}] (guide rails, one or two, each meeting every plane square to the path once along it, from the end nearest the path's start: one rail turns the profile so its point where the rail starts stays on the rail and scales it with the rail's distance from the path; two rails carry it between them, its points where they start staying on both; rails take the default orientation, no twist and no scale, and a path without sharp corners); rail_fit?: scale (default: the profile grows and shrinks evenly) | stretch (only across to the rail, between the rails); operation?, touching?, targets?, name?, body_name?"),
     CommandSpec::new("solid.loft", "Loft", loft).at("SOLID", "CREATE").icon("loft").params("sections: [{sketch, profiles?} | {sketch, point: id} (an apex)] (2…50, in order; matching hole counts, no holes at an apex); rails?: [{sketch, curves: [ids in order]}] (one or two guide rails from the first section to the last, through every section's outline: the loft follows them between the sections; not with sections that have holes); rail_fit?: scale|stretch (default scale: with one rail the sections grow evenly with the rail's distance from their middle, with two with the distance between the rails; stretch: only that way); operation?, touching?, targets? (Join excludes hidden bodies from automatic targets; explicit targets or participants may include them), name?, body_name?"),
     CommandSpec::new("solid.box", "Box", crate::checked!("solid.box", prim_box))
         .at("SOLID", "CREATE")
@@ -134,7 +134,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CREATE")
         .icon("hole")
         .key("H")
-        .params("position: [x,y,z] on a face (numbers, or length expressions the hole follows) | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch, into the material on whichever side of the sketch plane it is) | sketch alone (every sketch point: standalone points and circle centres); flip?: bool (sketch points: drill to the other side); single?: bool (with one sketch point: a Single hole that follows the point, drilled into the face there); direction?: [x,y,z] (default: into the face, against its outward normal; where faces of several bodies meet there, the face of a body in `targets`; one that leaves the face is mirrored into it; ignored with sketch points unless single); diameter | thread (a tapped hole, drilled with the tap maker's tabulated drill: ISO metric (a custom metric size: major minus pitch), UNC/UNF, G, Rp, Rc 1/16 to 4, NPT 1/16 to 3; a `diameter` given with it chooses another drill, from the thread's minor diameter to 5% over the tap maker's) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); head?: \"ISO 4762\" (socket head) | \"ISO 7380-1\" (button head) (with clearance: a counterbore the screw's head sits in, so type defaults to counterbore; its diameter is the head's dk plus head_gap each side, its depth the head's k plus head_gap; a cb_diameter or cb_depth given keeps its value); head_gap?: length (default 0.5 mm; an expression with parameters is kept, so the recess follows them); depth? (default through all) | to?: [x,y,z] (To Object: drill to that face or point); references?: [{edge: [x,y,z] on a straight edge of the face, distance: expr}] (at most two; the centre goes that far from each edge's line, in the face's plane, and follows the edges; with a numeric position only); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?, bridge?: length (counterbore: two 3D-printing bridge layers this thick below its floor, a slot along X then a square; e.g. 0.2 mm); cs_diameter?, cs_angle?; thread?: \"M6\", \"1/4-20 UNC\", \"G 1/4\", \"Rp 1/4\", \"Rc 1/4\" or \"1/4-18 NPT\" (cosmetic unless modeled); hand?: right|left (the tapped thread's hand; default right; needs thread); thread_depth?: positive length independent of drill depth (default: full useful cylindrical wall; must fit that wall); modeled?: bool (needs thread: the tapped thread cut into the wall, the groove between its teeth, as solid.thread's modelled one; default false: listed only); ease_out?: expr|standard|short (modelled tapped threads: the inner end, towards the bottom, fades out over this length, ISO 3508's runout, standard 2.5 P, short 1.25 P; without it the groove stops square at thread_depth, or clear of a blind hole's bottom); targets?: [body] (the bodies to drill; holes at the points of a sketch on a body's face default to that body, found along the holes' direction on it alone; explicit targets or participants override, [\"*\"] every body)"),
+        .params("position: [x,y,z] on a face (numbers, or length expressions the hole follows) | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch, into the material on whichever side of the sketch plane it is) | sketch alone (every sketch point: standalone points and circle centres); flip?: bool (sketch points: drill to the other side); single?: bool (with one sketch point: a Single hole that follows the point, drilled into the face there); direction?: [x,y,z] (default: into the face, against its outward normal; where faces of several bodies meet there, the face of a body in `targets`; one that leaves the face is mirrored into it; ignored with sketch points unless single); diameter | thread (a tapped hole, drilled with the tap maker's tabulated drill: ISO metric (a custom metric size: major minus pitch), UNC/UNF, G, Rp, Rc 1/16 to 4, NPT 1/16 to 3; a `diameter` given with it chooses another drill, from the thread's minor diameter to 5% over the tap maker's) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); head?: \"ISO 4762\" (socket head) | \"ISO 7380-1\" (button head) (with clearance: a counterbore the screw's head sits in, so type defaults to counterbore; its diameter is the head's dk plus head_gap each side, its depth the head's k plus head_gap; a cb_diameter or cb_depth given keeps its value); head_gap?: length (default 0.5 mm; an expression with parameters is kept, so the recess follows them); depth? (default through all) | to?: [x,y,z] (To Object: drill to that face or point); references?: [{edge: [x,y,z] on a straight edge of the face, distance: expr}] (at most two; the centre goes that far from each edge's line, in the face's plane, and follows the edges; with a numeric position only); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?, bridge?: length (counterbore: two 3D-printing bridge layers this thick below its floor, a slot along X then a square; e.g. 0.2 mm); cs_diameter?, cs_angle?; thread?: \"M6\", \"1/4-20 UNC\", \"G 1/4\", \"Rp 1/4\", \"Rc 1/4\" or \"1/4-18 NPT\" (cosmetic unless modeled); hand?: right|left (the tapped thread's hand; default right; needs thread); thread_depth?: positive length independent of drill depth (default: full useful cylindrical wall; must fit that wall); modeled?: bool (needs thread: the tapped thread cut into the wall, the groove between its teeth, as solid.thread's modelled one; default false: listed only); ease_out?: expr|standard|short (modelled tapped threads: the inner end, towards the bottom, fades out over this length, ISO 3508's runout, standard 2.5 P, short 1.25 P; without it the groove stops square at thread_depth, or clear of a blind hole's bottom); targets?: [body] (the bodies to drill; holes at the points of a sketch on a body's face default to that body, found along the holes' direction on it alone; explicit targets or participants override, [\"*\"] every body); old_surface_start?: bool (sketch points: a point inside a body starts the hole at the body's surface whatever plane the sketch lies on, as designs saved before #11538 drilled; set on those holes, keeps them as they were when edited)"),
     CommandSpec::new("solid.pipe", "Pipe", crate::checked!("solid.pipe", pipe))
         .at("SOLID", "CREATE")
         .icon("pipe")
@@ -3205,6 +3205,7 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
         None | Some(Value::Null) => None,
         Some(_) => Some(req_expr(cmd, p, "thread_depth")?),
     };
+    let old_surface_start = p.get("old_surface_start").and_then(Value::as_bool).unwrap_or(false);
     let modeled = p.get("modeled").and_then(Value::as_bool).unwrap_or(false);
     if modeled && thread.is_none() {
         return Err(bad(cmd, "`modeled` needs `thread` (a tapped hole)"));
@@ -3429,6 +3430,7 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             ease_out,
             to: to.map(FacePick),
             references,
+            old_surface_start,
         },
     )
 }
@@ -3635,13 +3637,9 @@ pub(crate) fn sketch_key(v: Option<&Value>) -> Option<String> {
 fn sweep(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.sweep";
     let sketch = feature_sketch(s, p, cmd)?;
-    let path_sketch = sketch_id(s, p.get("path_sketch"), cmd, "path_sketch")?;
-    let path = string_list(cmd, p, "path")?;
-    if path.is_empty() {
-        return Err(bad(cmd, "`path` must list curve ids"));
-    }
+    let (path_sketch, path, path_body, path_edges) = sweep_path(s, p, cmd)?;
     let (orientation, twist, scale) = sweep_options(s, p, cmd)?;
-    let (rails, rail_fit) = sweep_rails(s, p, cmd, path_sketch)?;
+    let (rails, rail_fit) = sweep_rails(s, p, cmd, path_body.is_none().then_some(path_sketch))?;
     let operation = operation(p, cmd)?;
     let targets = face_join_targets(s, p, operation, &[sketch], cmd)?;
     add_feature(
@@ -3652,6 +3650,8 @@ fn sweep(s: &mut Session, p: &Value) -> Result<Value> {
             profiles: profiles(p, cmd)?,
             path_sketch: SketchId(path_sketch),
             path,
+            path_body,
+            path_edges,
             orientation,
             twist,
             scale,
@@ -3661,6 +3661,35 @@ fn sweep(s: &mut Session, p: &Value) -> Result<Value> {
             targets,
         },
     )
+}
+
+/// A sweep's path (#2216): a chain of a body's edges (`path_body` and `path_edges`) or the
+/// curves of a sketch (`path_sketch` and `path`). The body's edges are a point on each edge of
+/// the chain; the path runs from the end nearest the profile.
+pub(super) fn sweep_path(s: &Session, p: &Value, cmd: &str) -> Result<(u64, Vec<String>, Option<BodyName>, Vec<Position>)> {
+    if p.get("path_body").is_some_and(|b| !b.is_null()) {
+        let body = str_(p, "path_body").ok_or_else(|| bad(cmd, "`path_body` must be a body name"))?;
+        if s.model.state().body(body).is_none() {
+            return Err(bad(cmd, format!("no body `{body}`")));
+        }
+        let edges = path_edge_points(p, cmd)?;
+        return Ok((0, Vec::new(), Some(BodyName::from(body)), edges));
+    }
+    let path_sketch = sketch_id(s, p.get("path_sketch"), cmd, "path_sketch")?;
+    let path = string_list(cmd, p, "path")?;
+    if path.is_empty() {
+        return Err(bad(cmd, "`path` must list curve ids"));
+    }
+    Ok((path_sketch, path, None, Vec::new()))
+}
+
+/// The points on the edges of a sweep's path (`path_edges`), one on each edge of the chain.
+fn path_edge_points(p: &Value, cmd: &str) -> Result<Vec<Position>> {
+    let a = p.get("path_edges").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`path_edges` must be a list of points"))?;
+    if a.is_empty() || a.len() > 1000 {
+        return Err(bad(cmd, "the path needs 1…1000 edges"));
+    }
+    a.iter().map(|e| vec3(e).map(Position::from).ok_or_else(|| bad(cmd, "each `path_edges` entry must be a point [x,y,z]"))).collect()
 }
 
 /// A sweep's `orientation`, `twist` and `scale` (solid.sweep and surface.sweep), checked: an
@@ -3715,10 +3744,11 @@ pub(crate) fn sweep_orientation(v: &Value) -> std::result::Result<SweepOrientati
 }
 
 /// A sweep's guide `rails` and `rail_fit` (solid.sweep and surface.sweep), checked: one or two
-/// rails, each a sketch (default: the path's) and 1…1000 of its curves; a fit of scale or
-/// stretch; and no orientation, twist or scale besides, since the rails set those.
-pub(super) fn sweep_rails(s: &Session, p: &Value, cmd: &str, path_sketch: u64) -> Result<(Vec<SweepRail>, RailFit)> {
-    let (rails, rail_fit) = guide_rails(s, p, cmd, "sweep", Some(path_sketch))?;
+/// rails, each a sketch (default: the path's, when the path is a sketch's) and 1…1000 of its
+/// curves; a fit of scale or stretch; and no orientation, twist or scale besides, since the
+/// rails set those.
+pub(super) fn sweep_rails(s: &Session, p: &Value, cmd: &str, path_sketch: Option<u64>) -> Result<(Vec<SweepRail>, RailFit)> {
+    let (rails, rail_fit) = guide_rails(s, p, cmd, "sweep", path_sketch)?;
     if !rails.is_empty() {
         for key in ["orientation", "twist", "scale"] {
             if p.get(key).is_some_and(|v| !v.is_null()) {
@@ -4267,3 +4297,7 @@ mod corner_tests {
 #[cfg(test)]
 #[path = "fillet_connected_rounds_tests.rs"]
 mod fillet_connected_rounds_tests;
+
+#[cfg(test)]
+#[path = "offset_chain_tangent_tests.rs"]
+mod offset_chain_tangent_tests;

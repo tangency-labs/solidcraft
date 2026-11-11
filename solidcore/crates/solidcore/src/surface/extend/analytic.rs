@@ -178,7 +178,7 @@ pub(super) fn analytic_extended_sides(
     let support = AnalyticSupport::check(k, carrier)?;
     let implicit = support.implicit();
     let form = crate::blend::fillet_section::station::as_b_spline(k, carrier)?
-        .ok_or_else(|| SolidError::sm_err(OP))?
+        .ok_or_else(|| SolidError::surface_failed(OP, "the carrier has no B-spline form"))?
         .into_owned();
     let step = carrier.step_uv_domain();
     let open = TURN - step.u_interval().length().to_radians();
@@ -201,7 +201,10 @@ pub(super) fn analytic_extended_sides(
         ),
         Implicit::Sphere { centre, radius } => {
             let AnalyticSupport::Sphere { placement, .. } = support else {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::surface_failed(
+                    OP,
+                    "the support is not the sphere its implicit form says",
+                ));
             };
             (
                 Frame {
@@ -245,7 +248,9 @@ pub(super) fn analytic_extended_sides(
         ),
     };
     // the size of the net's points from the origin, for the rounding of the closed forms
-    let net0 = form.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
+    let net0 = form
+        .gw_nurb()
+        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
     let mut size = frame.size;
     for c in net0.cpts().iter().flatten() {
         let w = if c.w == NOW { 1.0 } else { c.w };
@@ -343,7 +348,10 @@ pub(super) fn analytic_extended_sides(
 fn unit(v: Vec3) -> Result<Vec3> {
     let l = v.length();
     if l.is_nan() || l <= 0.0 {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::surface_failed(
+            OP,
+            "the vector has no direction",
+        ));
     }
     Ok(v * (1.0 / l))
 }
@@ -410,7 +418,9 @@ fn extend_side(
     implicit: &Implicit,
     distance: f64,
 ) -> Result<Option<(BSplineSurface, Across, bool, f64)>> {
-    let net = cur.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
+    let net = cur
+        .gw_nurb()
+        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
     if matches!(iso, Iso::Ruling) && (if side.is_u() { net.p() } else { net.q() }) != 1 {
         return Err(SolidError::Unsupported {
             operation: OP,
@@ -519,7 +529,12 @@ fn extend_side(
         }
     }
     let e = reach(&value, target, source.range()?, least)?;
-    let (grown, bound) = made(e)?.ok_or_else(|| SolidError::sm_err(OP))?;
+    let (grown, bound) = made(e)?.ok_or_else(|| {
+        SolidError::surface_failed(
+            OP,
+            "the extension at the reached distance could not be made",
+        )
+    })?;
     let across = across_of(&grown, bound)?;
     certify_iso(&grown, side, middle, f, iso)?;
     Ok(Some((grown, across, capped, bound)))
@@ -546,19 +561,27 @@ fn joint_removed(out: &Net, side: BoxSide, joint: f64) -> Result<Net> {
     let last = knots
         .len()
         .checked_sub(1)
-        .ok_or_else(|| SolidError::sm_err(OP))?;
+        .ok_or_else(|| SolidError::surface_failed(OP, "the side's knot vector is empty"))?;
     let at: Vec<usize> = (0..knots.len())
         .filter(|&i| knots.get(i) == Some(&joint))
         .collect();
     let &[i] = at.as_slice() else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::surface_failed(
+            OP,
+            "the joint is not a single knot of the extension",
+        ));
     };
     // degree 1, clamped: an interior knot has two knots on each side, and the control
     // point at knot index i is point i - 1
     if i < 2 || i.checked_add(2).is_none_or(|j| j > last) {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::surface_failed(
+            OP,
+            "the joint is not an interior knot",
+        ));
     }
-    let row = i.checked_sub(1).ok_or_else(|| SolidError::sm_err(OP))?;
+    let row = i
+        .checked_sub(1)
+        .ok_or_else(|| SolidError::surface_failed(OP, "the joint is not an interior knot"))?;
     let kept: Vec<f64> = knots
         .iter()
         .enumerate()
@@ -568,7 +591,10 @@ fn joint_removed(out: &Net, side: BoxSide, joint: f64) -> Result<Net> {
     let mut net = out.cpts();
     if side.is_u() {
         if row >= net.len() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::surface_failed(
+                OP,
+                "the joint's control row is outside the net",
+            ));
         }
         net = net
             .into_iter()
@@ -580,7 +606,10 @@ fn joint_removed(out: &Net, side: BoxSide, joint: f64) -> Result<Net> {
     } else {
         for r in &mut net {
             if row >= r.len() {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::surface_failed(
+                    OP,
+                    "the joint's control row is outside the net",
+                ));
             }
             *r = std::mem::take(r)
                 .into_iter()
@@ -614,7 +643,9 @@ fn certify_iso(
     if matches!(iso, Iso::Ruling) {
         return Ok(());
     }
-    let net = s.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
+    let net = s
+        .gw_nurb()
+        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
     let (t, dir) = if side.is_u() {
         (middle.y, Direction::U)
     } else {
@@ -633,7 +664,10 @@ fn certify_iso(
         })
         .collect();
     let Some(&(x0, w0, _)) = points.first() else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::surface_failed(
+            OP,
+            "the iso has no control points",
+        ));
     };
     // the plane's normal and its offset from the origin, per unit weight
     let (n, height) = if matches!(iso, Iso::Parallel) {
@@ -705,8 +739,9 @@ fn on_definition(
         } else {
             deg.checked_sub(k)
         };
-        i.filter(|&i| i < n_along)
-            .ok_or_else(|| SolidError::sm_err(OP))
+        i.filter(|&i| i < n_along).ok_or_else(|| {
+            SolidError::surface_failed(OP, "the control point index is outside the net")
+        })
     };
     let is_u = side.is_u();
     let slot = |cp: &mut [Vec<CPoint>], a: usize, r: usize| -> Result<CPoint> {
@@ -765,7 +800,10 @@ fn on_definition(
                 let h = axis.dot(d);
                 let rho = at(h);
                 if !(rho.is_finite() && rho.abs() > 0.0) {
-                    return Err(SolidError::sm_err(OP));
+                    return Err(SolidError::surface_failed(
+                        OP,
+                        "the iso's radius at a joint row is zero or undefined",
+                    ));
                 }
                 let template = (d - axis * h) * (1.0 / rho);
                 rebuilt.push(
@@ -796,7 +834,10 @@ fn on_definition(
             let mut far = (0.0_f64, 0.0_f64, 1.0_f64);
             for (&(j, wj), row) in joint.iter().zip(&past) {
                 let &[_, (end, wn)] = row.as_slice() else {
-                    return Err(SolidError::sm_err(OP));
+                    return Err(SolidError::surface_failed(
+                        OP,
+                        "a row past the joint does not have two points",
+                    ));
                 };
                 let centre = origin + axis * axis.dot(j - origin);
                 let (r0, r1) = (j - centre, end - centre);
@@ -809,7 +850,10 @@ fn on_definition(
                 }
             }
             if !(far.0.is_finite() && far.0 > 0.0) {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::surface_failed(
+                    OP,
+                    "the rows' spread along the axis is zero or undefined",
+                ));
             }
             let delta = far.1;
             let half = 0.5 * delta;
@@ -863,12 +907,18 @@ fn on_definition(
             let (Some(&(j, wj)), Some(&[_, (end, wn)])) =
                 (joint.get(r_ref), past.get(r_ref).map(Vec::as_slice))
             else {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::surface_failed(
+                    OP,
+                    "the reference row is outside the net",
+                ));
             };
             let radial = flat(j);
             let rho = radial.length();
             if !(rho.is_finite() && rho > 0.0) {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::surface_failed(
+                    OP,
+                    "the reference row's radius is zero or undefined",
+                ));
             }
             let dir = radial * (1.0 / rho);
             // the profile plane's coordinates (along the radial direction, along the axis)
@@ -905,7 +955,12 @@ fn on_definition(
                 );
             }
         }
-        (_, Iso::Ruling) => return Err(SolidError::sm_err(OP)),
+        (_, Iso::Ruling) => {
+            return Err(SolidError::surface_failed(
+                OP,
+                "a ruling has no closed-form continuation",
+            ))
+        }
     }
     for (r, row) in rebuilt.into_iter().enumerate() {
         for (k, (x, w)) in row.into_iter().enumerate() {
@@ -920,7 +975,7 @@ fn slot_mut(cp: &mut [Vec<CPoint>], is_u: bool, a: usize, r: usize) -> Result<&m
     let (i, j) = if is_u { (a, r) } else { (r, a) };
     cp.get_mut(i)
         .and_then(|x| x.get_mut(j))
-        .ok_or_else(|| SolidError::sm_err(OP))
+        .ok_or_else(|| SolidError::surface_failed(OP, "the control point is outside the net"))
 }
 
 #[cfg(test)]

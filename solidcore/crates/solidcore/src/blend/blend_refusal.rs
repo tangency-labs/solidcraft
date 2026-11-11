@@ -63,14 +63,17 @@ pub enum BlendRefusal {
         /// The least radius that rounds it.
         smallest_radius: f64,
     },
-    /// A setback asked at `vertex` that stops short of where the rails of the rounds beside
-    /// one of its edges cross it: `least` from the vertex
-    /// ([`crate::blend::blend_setback::distances`]).
+    /// A setback asked at `vertex` too short for the corner: `least` is the least setback the
+    /// refusing test takes, and `why` says which test refused it and whether a setback of
+    /// `least` builds the corner by it.
     SetbackTooShort {
         /// The corner's vertex.
         vertex: VertexId,
-        /// The least setback: the farthest the rails beside an edge cross it.
+        /// The least setback the refusing test takes ([`SetbackTooShortWhy`] says which and
+        /// how).
         least: f64,
+        /// Which test refused it.
+        why: SetbackTooShortWhy,
     },
     /// A setback asked at `vertex` that does not fit on the corner's edges, or on its rounds
     /// where a far corner cuts them: one below `largest` fits. `why` says which test
@@ -95,6 +98,25 @@ pub enum BlendRefusal {
         /// The bound below which an angle meets the other face: pi less the wedge.
         largest: f64,
     },
+}
+
+/// Which test refused a setback as too short ([`BlendRefusal::SetbackTooShort`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SetbackTooShortWhy {
+    /// It stops short of where the rails of the rounds beside one of the corner's edges cross
+    /// the edge ([`crate::blend::blend_setback::distances`]). `least` is the farthest they
+    /// cross it from the vertex. A setback of `least` passes this test only: the corner's
+    /// later tests may still refuse it.
+    RailsCross,
+    /// At a Setback corner, its G1 fill is not certified convex at it. `least` is the setback
+    /// at the least scale of it, on a grid of thousandths, at which the fill is certified
+    /// convex; with its ease it lies within the corner's rooms.
+    ConvexFill,
+    /// At a Setback corner beside a curved face, its fill is not certified no more concave
+    /// than its faces at it. `least` is the setback at the least scale of it, on a grid of
+    /// thousandths, at which it is; with its ease it lies within the corner's rooms.
+    ConcaveFill,
 }
 
 /// Which test refused a setback as too long ([`BlendRefusal::SetbackTooLong`]).

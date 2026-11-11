@@ -29,6 +29,7 @@ pub mod command_help;
 pub mod context_menu;
 pub mod control;
 pub mod control_job;
+mod control_params;
 pub mod control_switch;
 pub mod crash_ui;
 pub mod deferred;
@@ -1343,7 +1344,7 @@ impl SolveApp {
         if solidcraft_engine::panels::commands::is_command(id) {
             return self.run_panel_command(id, &params).map_err(solidcraft_engine::panels::commands::error_text);
         }
-        if self.file_load.busy() || self.file_picker.is_some() || self.saving.is_some() {
+        if self.file_load_holds() || self.file_picker.is_some() || self.saving.is_some() {
             return Err("a file operation is in progress".into());
         }
         // The editor's own marker moves come through here, so only Undo, Redo and Play close it.
@@ -1678,6 +1679,9 @@ impl SolveApp {
                 if v.get("continuous").and_then(Value::as_bool) != Some(true) {
                     self.session.echo(language.format("ui.command_done", &[("command", label)]));
                 }
+                if id == "sketch.move" {
+                    released_status(self, language, v);
+                }
                 if id == "file.new" {
                     // `file.new` starts from millimetres. Units of new designs still apply (#1205).
                     prefs::apply_new_design(self);
@@ -1861,7 +1865,7 @@ impl SolveApp {
         }
         timeline::stop_playback(self);
         // A file is loading: the design waits for it.
-        if self.file_load.busy() || self.file_picker.is_some() {
+        if self.file_load_holds() || self.file_picker.is_some() {
             return;
         }
         if id != "occurrence.move" {
@@ -3701,10 +3705,11 @@ impl SolveApp {
         if render_workspace::active(self) {
             render_ui::overlays(self, ui);
         }
-        // Measure current persistent sketch chrome before the host's early
-        // confirmation pair. Its answer still precedes this frame's dialog.
+        // Refresh persistent chrome before the host's early confirmation pair.
         if self.universal_panel_host_enabled() {
-            sketch_palette::show(self, ui.ctx());
+            if !panel_runtime::production_active(self) {
+                sketch_palette::show(self, ui.ctx());
+            }
             self.viewport.host_windows = ui_kit::Container::host_window_regions(ui.ctx());
             viewport::refresh_layout(self, ui.ctx());
         }
@@ -3776,8 +3781,9 @@ impl SolveApp {
         }
         let rx = self.control_rx.take();
         for _ in 0..PER_FRAME {
-            // A file loading, a save being written, an agent's design change computing, or the
-            // agent cursor acting one out: commands that change the design wait their turn (the
+            // A file loading (also when the person can go on working: an agent's open and the
+            // edit after it go in that order), a save being written, an agent's design change
+            // computing, or the agent cursor acting one out: commands that change the design wait their turn (the
             // window, inspection and screenshots still answer, #1989). `engine.script` runs
             // directly, past `SolveApp::run`'s guard, so without the save here it changed the
             // design the save was taken up for (#6003).
@@ -3880,6 +3886,24 @@ fn finite_input(raw: &mut egui::RawInput) {
         egui::Event::Touch { pos, force, .. } => pos.is_finite() && force.is_none_or(f32::is_finite),
         _ => true,
     });
+}
+
+/// After a sketch Move that let go of constraints tying the moved geometry to what stays (a
+/// corner on the origin; #2980): the status line names them, and its Undo button undoes the move.
+fn released_status(app: &mut SolveApp, language: solidcraft_ui_text::Locale, v: &Value) {
+    let Some(released) = v.get("released").and_then(Value::as_array).filter(|r| !r.is_empty()) else { return };
+    let mut names: Vec<&str> = Vec::new();
+    for kind in released.iter().filter_map(|c| c.get("kind").and_then(Value::as_str)).take(64) {
+        let name = language.label(if kind.ends_with("Dimension") { "Dimension" } else { kind });
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    let count = released.len().to_string();
+    let id = if released.len() == 1 { "sketch.move_released_one" } else { "sketch.move_released" };
+    let msg = language.format(id, &[("count", &count), ("names", &names.join(", "))]);
+    app.set_status(msg, false);
+    app.status_undo = true;
 }
 
 /// An edit in place command's result, saying when it waits for the end of the agent's turn.

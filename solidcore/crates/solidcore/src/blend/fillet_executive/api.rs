@@ -68,7 +68,7 @@ use crate::blend::fillet_solver::p1::{
     FilletSurfaceGenerator, FilletSurfaceGeneratorType, MakeSurfaceBlendSih,
 };
 use crate::blend::fillet_standard_solver::p1::{BoundaryTrimmingType, FilletLaw};
-use crate::error::{Result, SolidError, SM_ERR_INVALID_INPUT};
+use crate::error::{Result, SolidError};
 use crate::kernel::Kernel;
 use crate::math::PI;
 use crate::surface::surface::Surface;
@@ -118,12 +118,13 @@ fn failing_as_a_whole(
     })
 }
 
+/// `SM_ERR_INVALID_INPUT`: the API refuses its arguments (an empty or mismatched list, a
+/// size or tolerance out of range), as a status.
 fn invalid_input() -> SolidError {
-    SolidError::Upstream {
-        operation: OP,
-        code: SM_ERR_INVALID_INPUT,
-        entity: None,
-    }
+    SolidError::blend_invalid_value(
+        OP,
+        "an argument of the fillet call is empty, mismatched or out of range",
+    )
 }
 
 /// `SmApiFilletEdges`: fillet `edges` of `brep` with one constant `radius` and
@@ -661,6 +662,7 @@ pub fn surface_surface_fillet(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::SM_ERR_INVALID_INPUT;
     use crate::math::Vec3;
     use crate::topology::brep::p1;
 
@@ -698,13 +700,16 @@ mod tests {
             edit(b)?;
             Err(invalid_input())
         });
+        // #13790: the API's refusal of its arguments is a typed blend failure with the
+        // status of the bare `Upstream` it replaced
+        let failed = failed.unwrap_err();
         assert!(matches!(
-            failed,
-            Err(SolidError::Upstream {
-                code: SM_ERR_INVALID_INPUT,
-                ..
-            })
+            failed.blend_failure(),
+            Some(crate::error::blend::BlendFailure::InvalidValue(_))
         ));
+        assert_eq!(failed.sm_status(), Some(SM_ERR_INVALID_INPUT));
+        assert_eq!(failed.upstream_status(), Some(SM_ERR_INVALID_INPUT));
+        assert_eq!(failed.operation(), OP);
         assert_eq!(shape(&body), before);
 
         let refusal = SolidError::Upstream {
@@ -866,8 +871,9 @@ mod tests {
         for vertex in &vertices {
             match session.set_bevel_corner(*vertex) {
                 Ok(()) => beveled += 1,
-                Err(error) => assert!(
-                    matches!(error, SolidError::Upstream { code, .. } if code == crate::error::SM_ERR_NULL_POINTER)
+                Err(error) => assert_eq!(
+                    error.upstream_status(),
+                    Some(crate::error::SM_ERR_NULL_POINTER)
                 ),
             }
         }
@@ -883,9 +889,7 @@ mod tests {
         let mut k = Kernel::default();
         let mut body = boxed(&mut k);
         let r = set_bevel_corners(&mut k, &mut body, &[], 1.0, &[]);
-        assert!(
-            matches!(r, Err(SolidError::Upstream { code, .. }) if code == SM_ERR_INVALID_INPUT)
-        );
+        assert!(matches!(r, Err(ref e) if e.upstream_status() == Some(SM_ERR_INVALID_INPUT)));
         assert_eq!(p1::faces(&body, None).unwrap().len(), 6);
     }
 
@@ -935,7 +939,7 @@ mod tests {
         let mut k = Kernel::default();
         let mut body = boxed(&mut k);
         let edges = p1::edges(&body, None).unwrap();
-        let invalid = |r: Result<()>| matches!(r, Err(SolidError::Upstream { code, .. }) if code == SM_ERR_INVALID_INPUT);
+        let invalid = |r: Result<()>| matches!(r, Err(ref e) if e.upstream_status() == Some(SM_ERR_INVALID_INPUT));
         assert!(invalid(fillet_edges(
             &mut k,
             &mut body,
@@ -1163,7 +1167,7 @@ mod tests {
         // The executive's own error, not a finalization error.
         assert!(matches!(
             result,
-            Err(SolidError::Upstream { code, .. }) if code == crate::error::SM_ERR
+            Err(ref e) if e.upstream_status() == Some(crate::error::SM_ERR)
         ));
         crate::topology::integrity::check(&body).unwrap();
         assert_eq!(p1::faces(&body, None).unwrap().len(), 2);
@@ -1178,7 +1182,7 @@ mod tests {
         let result = variable_radius_fillet(&mut k, &mut body, &[edge], 0.5, 30.0, 1, 1);
         assert!(matches!(
             result,
-            Err(SolidError::Upstream { code, .. }) if code == crate::error::SM_ERR
+            Err(ref e) if e.upstream_status() == Some(crate::error::SM_ERR)
         ));
         crate::topology::integrity::check(&body).unwrap();
         assert_eq!(p1::faces(&body, None).unwrap().len(), 6);

@@ -75,7 +75,7 @@ const OP: &str = "blend::fillet_exact::rational";
 pub const MAX_SPINE_SEGMENTS: f64 = 1.0e5;
 
 fn sm_err() -> SolidError {
-    SolidError::sm_err(OP)
+    SolidError::blend_failed(OP, "the rational fillet section could not be built")
 }
 
 /// `sm_Poly`: a polynomial by its Bernstein coefficients on `[0, 1]`.
@@ -803,18 +803,19 @@ pub fn calc_rational_spine_fillet_geom(
     let eu0 = ops
         .solver()
         .edgeuse(0)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
-    let e = eu::edge(b, eu0)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
+    let e =
+        eu::edge(b, eu0)?.ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
     let curve: Curve = edge::curve(b, e)?
         .cloned()
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
     let ivl = edge::interval(b, e)?;
     let tol = b.tolerance();
     let arc = ops
         .solver()
         .fsg
         .as_ref()
-        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the solver's surface generator"))?
         .fillet_surface_generator_type()
         == FilletSurfaceGeneratorType::Circular;
 

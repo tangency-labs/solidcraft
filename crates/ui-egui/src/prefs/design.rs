@@ -189,6 +189,15 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::scenario::publish_target("prefs:insert_lists_open_designs", response.rect);
             crate::scenario::publish_target("dialog:Insert Design lists the designs open in other tabs first", response.rect);
         });
+        ui_kit::settings_section(ui, "assemblies", app.tr("prefs.assemblies"), |ui| {
+            ui.horizontal_wrapped(|ui| {
+                let response = setting::joint_drag_trackball(app, ui).backing_on_hover_text(app.tr("prefs.joint_drag_trackball_help"));
+                crate::scenario::publish_target("prefs:joint_drag_trackball", response.rect);
+                if !crate::ui_kit::settings_search::suppress_chrome(ui) {
+                    ui_kit::help_icon(ui, app.tr("prefs.joint_drag_trackball_help"));
+                }
+            });
+        });
     });
 }
 

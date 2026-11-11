@@ -164,6 +164,10 @@ pub struct WorkCounters {
     wall_body_copies: Cell<u64>,
     proto_edge_intersections: Cell<u64>,
     face_extreme_control_points: Cell<u64>,
+    feet_tm_coefficients: Cell<u64>,
+    mass_iso_evaluations: Cell<u64>,
+    coincident_curves_classified: Cell<u64>,
+    containment_edge_drops: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -210,6 +214,41 @@ impl WorkCounters {
         self.face_extreme_control_points.get()
     }
 
+    /// Series coefficients of G the G^n certificate's feet Taylor models compute
+    /// (`blend::fillet_section::feet_tm::gn_enclose_tm`): each position `(sigma^i, eps^k)`
+    /// of the system's series that an evaluation computes, its order-by-order solve's and
+    /// its last. Not the fork's.
+    #[must_use]
+    pub fn feet_tm_coefficients(&self) -> u64 {
+        self.feet_tm_coefficients.get()
+    }
+
+    /// Integrand evaluations of the precise mass properties' iso-curve integrals
+    /// (`OdeIsoCurveLength::evaluate`): each point of a surface line the face integration
+    /// samples. A face's bands between its v knots are integrated each on its own, so the
+    /// count grows with the knot spans a face crosses, not with their square. Not the
+    /// fork's.
+    #[must_use]
+    pub fn mass_iso_evaluations(&self) -> u64 {
+        self.mass_iso_evaluations.get()
+    }
+
+    /// Edge curves of two coincident faces that `FaceIntersect` classifies on both: those
+    /// of each face within reach of the other face's box. Not upstream (the fork's counters
+    /// have none).
+    #[must_use]
+    pub fn coincident_curves_classified(&self) -> u64 {
+        self.coincident_curves_classified.get()
+    }
+
+    /// Edge curves the loop containment test (`query::loop::contains_uv_point`) drops the
+    /// test point onto: those whose box, grown by the edge's tolerance, reaches the point.
+    /// Not upstream (upstream drops it onto every edge of the loop it walks).
+    #[must_use]
+    pub fn containment_edge_drops(&self) -> u64 {
+        self.containment_edge_drops.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
@@ -217,6 +256,10 @@ impl WorkCounters {
         self.wall_body_copies.set(0);
         self.proto_edge_intersections.set(0);
         self.face_extreme_control_points.set(0);
+        self.feet_tm_coefficients.set(0);
+        self.mass_iso_evaluations.set(0);
+        self.coincident_curves_classified.set(0);
+        self.containment_edge_drops.set(0);
     }
 
     /// Counts one face pair examined for intersection.
@@ -246,6 +289,30 @@ impl WorkCounters {
     pub(crate) fn add_face_extreme_control_points(&self, n: u64) {
         self.face_extreme_control_points
             .set(self.face_extreme_control_points.get().saturating_add(n));
+    }
+
+    /// Counts one evaluation of a mass-property iso-curve integrand.
+    pub(crate) fn add_mass_iso_evaluation(&self) {
+        self.mass_iso_evaluations
+            .set(self.mass_iso_evaluations.get().saturating_add(1));
+    }
+
+    /// Counts `n` series coefficients a feet Taylor model computed.
+    pub(crate) fn add_feet_tm_coefficients(&self, n: u64) {
+        self.feet_tm_coefficients
+            .set(self.feet_tm_coefficients.get().saturating_add(n));
+    }
+
+    /// Counts one edge curve of coincident faces classified on both.
+    pub(crate) fn add_coincident_curve_classified(&self) {
+        self.coincident_curves_classified
+            .set(self.coincident_curves_classified.get().saturating_add(1));
+    }
+
+    /// Counts one drop of a containment test's point onto an edge curve.
+    pub(crate) fn add_containment_edge_drop(&self) {
+        self.containment_edge_drops
+            .set(self.containment_edge_drops.get().saturating_add(1));
     }
 }
 
@@ -467,8 +534,6 @@ pub struct UpstreamFixes {
     pub offset_swap_uv_extended_distance: bool,
     /// Thickening a sheet (`ShellBrep` with `bCreateOffsetSolid` on a non-manifold input) puts every planar side wall onto its plane (the fork's `sm_PutPlanarFaceOnItsPlane`) and deletes the old surface's seam it leaves as a slit, where upstream keeps each wall as the ruled surface between the lamina edge and its offset: a tube's end rings are `SmPlane`s with two loops, not `SmSurfOfRevolution`s (WR-564, #1599; the fork's tangency-labs/smlib#62).
     pub thicken_planar_side_walls: bool,
-    /// A volumetric Boolean removes the zero-area loops a contact curve inside a face leaves, and splits shells joined only through them (WR-360, #746).
-    pub remove_slit_loops_where_solids_touch: bool,
     /// A face a Boolean takes over from its second operand keeps that operand's exact UV trims (WR-361, #488).
     pub keep_operand_uv_trims: bool,
     /// `smgu_EvaluateCurveContinuity`'s G2 test compares the two sides' Frenet curvatures and normals (WR-380, #933/#838).
@@ -570,20 +635,6 @@ pub struct UpstreamFixes {
     pub volume_lift_third_derivative_terms: bool,
     /// `SmSurface::DropCurve` tests the drop domain's own V length for `bDegenSurfV`, not the U length again, so a surface whose natural domain is degenerate only in V reports `SM_ERR_DEGENERATE_SURFACE` (`SM_CTC_DEGENSURFACE_FAIL`) and its failure record sets `bDegenSurfV` from V; upstream copies the U test, misses the early exit and goes on to drop (WR-100, 2026-10-31 addendum). Off by default for pinned C++ parity.
     pub drop_curve_v_domain_degeneracy: bool,
-    /// `SmSurface::DropCurve` gives a curve lying on a cylinder (an `SmCylinder`, or an
-    /// `SmCone` of zero semi-angle) its exact UV curve: a plane section (the ellipse,
-    /// circle or line a plane cuts from the cylinder, as the boolean's plane/cylinder
-    /// edges and an exact round's rails are) is a rational B-spline in the cylinder's
-    /// rational parameters, built in the curve's own parameter with twice its degree,
-    /// where upstream traces and fits a cubic within the drop tolerance: the trims of
-    /// a tilted peg's rim sat 2e-6 to 1e-5 off their edge, and the cylinder face's area
-    /// and the body's volume carried that error (WR-680, #2109; see
-    /// `plan/upstream-issues/WR-680--cylinder-plane-section-uv-trims-are-fits.md`). It
-    /// is used only where the UV curve lifts onto the curve within round-off and stays
-    /// in the domain; an iso-parameter curve keeps the drop's own exact line, and a
-    /// curve that crosses the seam or is not on the cylinder is traced as upstream.
-    /// Off by default for pinned C++ parity.
-    pub cylinder_plane_section_trims_exact: bool,
     /// `SmTorus::AssertValid` tests its V (minor) interval, not the U interval twice, and reports its U and V overlap tests as 3 and 4 (and `SmSurfOfRevolution`'s U test as 13), the ids their labels give them, where upstream reports them as 2 and 3 (and 2) (WR-538, #482; the fork's tangency-labs/smlib@0cd9d08).
     pub torus_check_reads_v_interval: bool,
     /// `SmTorus::AssertValid` reports a spindle torus whose V interval runs through an apex (`V = ±(90 + asin(R/r))`) as test 5, "Self Intersection", where upstream clears its result with no report and tests the U interval against `90 + acos(R/r)`, failing every spindle torus with a whole turn of U (WR-539; the fork's tangency-labs/smlib@daba678).
@@ -801,8 +852,6 @@ pub struct UpstreamFixes {
     pub slice_coincident_faces_sheet_side: bool,
     /// After step 8, a Union, Difference or Intersection whose result is a manifold solid with more than two regions (the infinite region first) runs `SetRegionIsVoidFlagsForNestedSolids`, which puts each region's enclosing shell first (the fork's tangency-labs/smlib `abastran/void-shell-check`). It also rewrites the void flags by nesting from the infinite region, so where step 7 left flags that disagree with the nesting the result's void flags change too, not only its shell order (WR-265, #388; `plan/upstream-issues/WR-265--manifold-boolean-void-shell-first.md` and its 2026-10-26 addendum).
     pub boolean_outer_shell_first: bool,
-    /// The Boolean's temporary origin shift returns failed bounding-box and operand-transform statuses instead of continuing with differently placed bodies or reporting success after a failed restoration (WR-586, #483). If shifting the second operand fails, the first is restored; cleanup attempts every surviving operand and returns its first error. Off by default for pinned SMLib compatibility.
-    pub boolean_temporary_transform_statuses: bool,
     /// Planar path sweeps propagate mandatory operation failures and delete their
     /// owned temporary B-reps on failure (#483); the mitre's `BrepIntersect` and
     /// `GlobalCurveSolve` searches are returned too, as the fork does (tangency-labs/smlib
@@ -949,49 +998,6 @@ pub struct UpstreamFixes {
     /// `plan/upstream-issues/WR-101--addendum-2026-10-31-opt-in-upper-interval.md`). The
     /// lower child is `[old_min, dT]` either way. Off by default for pinned C++ parity.
     pub proto_edge_split_upper_keeps_the_old_max: bool,
-    /// `SmEdgeDefinition::Split` gives the new upper definition its own copies of the 3D and
-    /// UV curves and trims both definitions' curves to their intervals before
-    /// `AddEdgeDefinition` hangs the new one on the upper proto edge. Upstream copies and
-    /// trims after that call, and it reparameterizes the new definition onto the upper
-    /// proto edge whenever their intervals or directions differ: the new definition then
-    /// still holds the lower one's whole curve, so that curve is moved too (the lower
-    /// definition's trim to its interval then misses it: `SmBSplineCurve::Trim`, `SM_ERR`,
-    /// passed on with `ssi_proto_topology_statuses_pass_on`, ignored upstream), and the
-    /// whole curve, not the upper part, is mapped onto the upper proto edge. A proto edge
-    /// that both bodies split at one point has two definitions; a STEP part cut by an exact
-    /// copy of itself failed this way (solidcore-native, no fork commit).
-    pub split_edge_definition_owns_its_curves: bool,
-    /// With `simple_coincidence_crossing_is_point`, `SimpleCoincidenceChecker` decides on
-    /// which side of this curve the other lies from the end pairs' separation across this
-    /// curve (its tangent's component removed). An end of one curve that runs past the other
-    /// curve's end drops onto that end, so the raw separation there points along the
-    /// curves: forward at one end, back at the other, and two curves lying on each other
-    /// (`4.2e-14` apart, one `4.8e-6` longer at each end) were taken for curves crossing: one
-    /// point where they lie on each other, or `SM_ERR` where no crossing is found (a body cut
-    /// by an exact copy of itself) (solidcore-native, no fork commit).
-    pub simple_coincidence_side_across_the_curve: bool,
-    /// `SmTopologyIntersector::IntersectInsertRelate` keeps the proto topology's capture
-    /// distance below half the smallest distance between two vertices of either operand
-    /// (never below the intersection tolerance), so that no proto vertex captures two
-    /// distinct vertices of one operand: two points d apart are never both closer than d / 2
-    /// to a third. Upstream takes the larger of 0.01 and 2000 times the intersection
-    /// tolerance, unbounded: with a STEP file's tolerances (0.01 on every edge) that is
-    /// 20 mm, every vertex of a 30 mm rim was captured into one proto vertex, the rim's
-    /// intersection with an exact copy of itself became one closed proto edge, and the
-    /// merge failed (`SmMerge::MakeFaceuse`, `SM_ERR`) (solidcore-native, no fork commit).
-    pub boolean_capture_keeps_operand_vertices_apart: bool,
-    /// `SmEdge::RadialSectorClassify`, when stepping off the edge leaves a face before the
-    /// classification is unique, reads a coincident classify face's side against the face it
-    /// coincides with: the sector edge use's face (`CoincidentSector` or its mate) or the
-    /// radial partner's (`CoincidentRadial` or its mate), as the coincidence test of the same
-    /// loop does (with the sector face's normal, and with the classify face's normal from its
-    /// projected binormal). Upstream reads both against the radial partner's normal, which
-    /// for a classify face lying on the sector face is a different face at the sector angle:
-    /// past 90 degrees that picks the wrong face use, the coincident pair is taken for
-    /// opposite sides, and a body minus an exact copy of itself keeps the face (a cone face of a 30 mm rim,
-    /// stepped off its face at count 8, sector angle 59 degrees with a
-    /// near-antiparallel normal) and is not closed (solidcore-native, no fork commit).
-    pub radial_sector_step_off_coincidence_by_own_face: bool,
     /// `SmMerge::BooleanPostProcess` also checks the merged face's edges that a face merge left with that face on both sides (slits), not only the intersection edges (WR-304, #1120).
     pub boolean_cleanup_removes_slits: bool,
     /// `SmFace::CurveOnClassify` classifies an interval whose two ends lie on one face edge (or its vertices) and whose midpoint is within the intersection tolerance of it as on that edge (the fork's `ClassifyEdgeInterval`, WR-305, #1057).
