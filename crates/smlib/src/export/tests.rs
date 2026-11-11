@@ -589,4 +589,27 @@ mod mapped_tests {
         assert!(mapped(&trim, true, [1.0, 0.0], [0.0, end], &|_, _| false).is_err());
         assert!(mapped(&trim, true, [1.0, 0.0], [0.0, 1.5], &on_edge).is_err());
     }
+
+    /// A trim that runs past its edge's end by more than a rounding but within the edge's
+    /// tolerance has its overhang dropped, and an interior knot inside the edge's interval
+    /// nearer its end than the overhang stays where it is: the curve on the edge is unchanged.
+    #[test]
+    fn a_trim_past_its_edge_within_tolerance_keeps_its_interior_knots() {
+        let g = 1e-7;
+        // Interior knot 5 − g/2 (inside the edge, nearer its end than the overhang), end at 5 + g.
+        let trim = b::Curve2::Spline {
+            knots: vec![3.0, 3.0, 3.0, 3.0, 5.0 - 0.5 * g, 5.0 + g, 5.0 + g, 5.0 + g, 5.0 + g],
+            points: vec![[0.0, 0.0], [1.0, 2.0], [2.0, -1.0], [3.5, 1.0], [5.0, 0.5]],
+        };
+        let out = mapped(&trim, true, [1.0, 0.0], [3.0, 5.0], &|_, _| true).unwrap();
+        check_curve2(&out, &mut Budget::input()).unwrap();
+        assert_eq!(out.interval(), Some([3.0, 5.0]));
+        let b::Curve2::Spline { knots, .. } = &out else { panic!("{out:?}") };
+        assert!(knots.contains(&(5.0 - 0.5 * g)), "{knots:?}");
+        for i in 0..=8 {
+            let t = 3.0 + 2.0 * f64::from(i) / 8.0 * (1.0 - 1e-6);
+            let (p, q) = (eval(&out, t).unwrap(), eval(&trim, t).unwrap());
+            assert!((p[0] - q[0]).abs() < 1e-5 && (p[1] - q[1]).abs() < 1e-5, "at {t}: {p:?} vs {q:?}");
+        }
+    }
 }
