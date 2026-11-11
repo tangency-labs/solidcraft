@@ -32,10 +32,19 @@ neg_cmp_op_on_partial_ord = "allow"
 [dependencies]
 solidcraft-viewport-gpu = { workspace = true }
 solidcraft-viewport = { workspace = true }
+zeroize = { version = "1", features = ["alloc"] }
 solidcraft-engine = { workspace = true }
 solidcraft-control = { workspace = true }
 # The D3D12 shader compiler the window starts with (#6756).
 solidcraft-gpu = { workspace = true }
+solidcraft-cloud = { workspace = true, features = ["github"] }
+# Octocrab uses the same injected HTTP seam as the browser, backed by existing ureq.
+octocrab = { version = "0.54.5", default-features = false }
+tower = { version = "0.5", default-features = false, features = ["util"] }
+http = "1"
+http-body-util = "0.1"
+bytes = "1"
+tokio = { version = "1", features = ["rt"] }
 solidcraft-ui-egui = { workspace = true }
 # SolidCraft's look (icons, glyphs, built-in themes), installed at startup.
 solidcraft-look = { workspace = true }

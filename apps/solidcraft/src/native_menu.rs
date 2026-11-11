@@ -59,6 +59,7 @@ const FIXED: &[FileAction] = &[
     FileAction::Save,
     FileAction::SaveAs,
     FileAction::SaveJson,
+    FileAction::Command("cloud.save"),
     DESIGN_PROPERTIES,
     FileAction::Undo,
     FileAction::Redo,
@@ -172,8 +173,11 @@ fn menu_bar(app: &SolveApp, recent: &[String]) -> MenuBar {
         item(app.tr("ui.save"), &FileAction::Save),
         item(&more("ui.save_as"), &FileAction::SaveAs),
         item(app.tr_label("Save As JSON\u{2026}"), &FileAction::SaveJson),
-        Item::sep(),
     ]);
+    if app.services.cloud_host.is_some() {
+        file.push(item(app.tr("cmd.cloud.save"), &FileAction::Command("cloud.save")));
+    }
+    file.push(Item::sep());
     file.extend(EXPORTS.iter().map(|(label, action)| item(app.tr_label(label), action)));
     file.extend([Item::sep(), item(app.tr_label("Design Properties"), &DESIGN_PROPERTIES)]);
     let edit = vec![item(app.tr("ui.undo"), &FileAction::Undo), item(app.tr("ui.redo"), &FileAction::Redo)];

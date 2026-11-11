@@ -89,6 +89,20 @@ pub trait Host: Sized {
     fn apply(&mut self) -> Result<(), String> {
         Ok(())
     }
+    /// Whether Apply is available while the host completes an asynchronous operation.
+    fn apply_enabled(&self) -> bool {
+        true
+    }
+    /// Start Apply or OK. False keeps the window and its snapshot until the host acknowledges
+    /// completion. Waiting is ordinary state, not an Apply error.
+    fn request_apply(&mut self, close: bool) -> Result<bool, String> {
+        if !close {
+            self.apply()?;
+        }
+        Ok(true)
+    }
+    /// Prepare a close before the held snapshot is restored or released.
+    fn before_close(&mut self, _revert: bool) {}
     /// A control is taking the keys (a shortcut being recorded): search leaves them and Esc does
     /// not close the window.
     fn keys_captured(&self) -> bool {
@@ -146,6 +160,11 @@ impl<H> State<H> {
         self.snapshot.as_ref()
     }
 
+    /// Replace the accepted baseline after an asynchronous Apply completes.
+    pub fn set_snapshot(&mut self, snapshot: H) {
+        self.snapshot = Some(snapshot);
+    }
+
     pub fn restore_error(&self) -> Option<&str> {
         self.restore_error.as_deref()
     }
@@ -174,7 +193,7 @@ pub fn hold<S: Host>(host: &mut S) {
 /// Whether Apply has anything to do: something changed since the window opened or since the last
 /// Apply. False while the window holds no snapshot.
 pub fn apply_pending<S: Host>(host: &S) -> bool {
-    host.window_ref().snapshot.as_ref().is_some_and(|snapshot| !host.matches(snapshot))
+    host.apply_enabled() && host.window_ref().snapshot.as_ref().is_some_and(|snapshot| !host.matches(snapshot))
 }
 
 /// Do what `button` does, from the footer or from a command. Returns why [`Host::apply`] failed.
@@ -184,7 +203,9 @@ pub fn press<S: Host>(host: &mut S, pages: &[Page<S>], button: Button) -> Result
         Button::Cancel => close(host, true),
         Button::Apply => {
             if host.window_ref().restore_error.is_none() {
-                host.apply()?;
+                if !host.request_apply(false)? {
+                    return Ok(());
+                }
                 let snapshot = host.take_snapshot();
                 host.window().snapshot = Some(snapshot);
             }
@@ -203,7 +224,18 @@ pub fn press<S: Host>(host: &mut S, pages: &[Page<S>], button: Button) -> Result
 pub fn close<S: Host>(host: &mut S, revert: bool) {
     let window = host.window();
     let revert = revert || window.restore_error.is_some();
-    if let Some(snapshot) = window.snapshot.take()
+    if !revert {
+        match host.request_apply(true) {
+            Ok(true) => {}
+            Ok(false) => return,
+            Err(reason) => {
+                host.window().restore_error = Some(reason);
+                return;
+            }
+        }
+    }
+    host.before_close(revert);
+    if let Some(snapshot) = host.window().snapshot.take()
         && revert
         && let Err(reason) = host.restore(&snapshot)
     {

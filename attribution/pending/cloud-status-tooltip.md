@@ -1,0 +1,1 @@
+| docs/book/src/guide/images/cloud-saves-connection-status.png | SolidCraft contributors | actual SolidCraft 0.40.0 desktop screenshot of a connection error indicator and tooltip after a fixture remote changes; isolated profile and public-safe examples | MIT OR Apache-2.0 |

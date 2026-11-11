@@ -429,6 +429,8 @@ pub struct DocTab<'a> {
     pub list_name: &'a str,
     /// It has unsaved changes (a bullet after its name).
     pub dirty: bool,
+    /// Optional status drawn after its name in place of the unsaved-changes bullet.
+    pub status: Option<crate::FileStatus<'a>>,
     /// Its hover text (where it is saved); its full name goes above it when the tab cuts it short.
     pub place: &'a str,
 }
@@ -618,9 +620,9 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
                 Some(text) if i == strip.selected => text.clone(),
                 _ => tab.name.to_string(),
             };
-            let label = format!("{shown_name}{}", if tab.dirty { " •" } else { "" });
+            let label = format!("{shown_name}{}", if tab.dirty && tab.status.is_none() { " •" } else { "" });
             let text = ui.painter().layout_no_wrap(label, crate::type_face::semibold(t.font_button), t.app_bar_text).size().x;
-            (text + 40.0).clamp(72.0, MAX_FIT)
+            (text + 40.0 + if tab.status.is_some() { t.space_14 } else { 0.0 }).clamp(72.0, MAX_FIT)
         })
         .collect();
     let fit_all = shown == n && natural.iter().sum::<f32>() <= x1 - x0 - 34.0;
@@ -703,11 +705,18 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
         let lit = resp.hovered() || held.is_some_and(|(from, _)| from == i);
         tab_shape(ui.painter(), &t, tr, active, lit || resp.has_focus());
         let ink = if active || lit { t.app_bar_text } else { t.app_bar_text.gamma_multiply(0.7) };
-        let label = format!("{}{}", tab.name, if tab.dirty { " •" } else { "" });
+        let label = format!("{}{}", tab.name, if tab.dirty && tab.status.is_none() { " •" } else { "" });
         let font = if active { crate::type_face::semibold(t.font_button) } else { FontId::proportional(t.font_button) };
         let g = ui.painter().layout_no_wrap(label, font, ink);
-        let text_w = (tr.width() - 30.0).max(10.0);
+        let inset = if tab.status.is_some() { t.space_14 } else { 0.0 };
+        let text_w = (tr.width() - 30.0 - inset).max(10.0);
         let tip = tab_tip(tab.name, tab.place, g.size().x > text_w);
+        if let Some(status) = tab.status {
+            let dot = Rect::from_center_size(pos2(tr.left() + 10.0 + g.size().x.min(text_w) + t.space_6, tr.center().y), vec2(t.space_6, t.space_6));
+            status.paint_dot(ui, dot);
+            solidcraft_ui_registry::publish_rect(&format!("{}{i}:sync-dot", h.tab), dot);
+            resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, resp.enabled(), active, &tip));
+        }
         let clip = Rect::from_min_size(tr.min, vec2(text_w + 10.0, tr.height()));
         match strip.rename.as_mut().filter(|_| active) {
             Some(rename) => {
@@ -774,7 +783,7 @@ pub fn tabs(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rect, x0: f32, x1: f32) 
                 .show(ui.ctx(), |ui| {
                     crate::menu::menu_frame(ui, |ui| {
                         for (i, tab) in strip.tabs.iter().enumerate() {
-                            let label = format!("{}{}", tab.list_name, if tab.dirty { " •" } else { "" });
+                            let label = format!("{}{}", tab.list_name, if tab.dirty && tab.status.is_none() { " •" } else { "" });
                             if crate::list_picker(ui, &format!("{}{i}", h.more_row), &label, i == strip.selected).clicked() {
                                 listed = Some(i);
                             }

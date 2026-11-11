@@ -15,6 +15,7 @@
 - [Sheet metal](guide/sheet-metal.md)
 - [Plastic parts](guide/plastic.md)
 - [Import and export](guide/files.md)
+- [Cloud Saves](guide/cloud-saves.md)
 - [Keyboard shortcuts](guide/shortcuts.md)
 - [Updates and privacy](guide/updates.md)
 - [Troubleshooting: SolidCraft won't start](guide/troubleshooting.md)
