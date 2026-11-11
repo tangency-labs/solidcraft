@@ -341,6 +341,10 @@ pub struct BomParams {
     /// In all levels, a purchased part's contents listed under it too (default false).
     #[serde(default, deserialize_with = "show_purchased_contents")]
     pub show_purchased_contents: Option<bool>,
+    /// A part a configuration switches off (no bodies, a suppressed feature of its own) listed as
+    /// placed (default false: it counts nowhere).
+    #[serde(default, deserialize_with = "show_suppressed_parts")]
+    pub show_suppressed_parts: Option<bool>,
     #[serde(default)]
     pub group_by: Option<BomGroupBy>,
     /// A component with a part number is one row, the parts placed inside it listed under it as
@@ -409,6 +413,10 @@ fn show_purchased_contents<'de, D: Deserializer<'de>>(d: D) -> Result<Option<boo
     flag(d, "show_purchased_contents")
 }
 
+fn show_suppressed_parts<'de, D: Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    flag(d, "show_suppressed_parts")
+}
+
 /// What makes two components one row: `part_number` (the default; components without a part
 /// number get a row per definition) or `definition`, as a word or a one-item list, with the
 /// handler's messages.
@@ -460,6 +468,7 @@ pub struct Bom {
     pub group_by: Vec<String>,
     pub group_children: bool,
     pub show_purchased_contents: bool,
+    pub show_suppressed_parts: bool,
     pub mass: bool,
     /// With `path`: the file written.
     #[serde(skip_serializing_if = "Option::is_none")]
