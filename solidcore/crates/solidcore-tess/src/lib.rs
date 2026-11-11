@@ -40,6 +40,7 @@ mod tolerance;
 mod vec;
 
 pub use curve::curve_points;
+pub use iso::{MAX_ISOPARMS, isoparms};
 pub use mesh::Mesh;
 pub use mesher::{MAX_ANGLE_BOUNDARY, plan};
 pub use par::guarded;
