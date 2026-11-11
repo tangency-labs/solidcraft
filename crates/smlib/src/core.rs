@@ -83,7 +83,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_clip_right_side_out = true;
     f.revolution_offset_axis_both_sides = true;
     f.offset_extended_edges_mated = true;
-    f.remove_slit_loops_where_solids_touch = true;
     f.keep_operand_uv_trims = true;
     f.proto_vertex_miss_is_false = true;
     f.check_loop_vertex_tolerance = true;
@@ -226,7 +225,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.ssi_low_angle_start_on_probation = true;
     f.fillet_variable_span_follows_fillet = true;
     f.simple_coincidence_crossing_is_point = true;
-    f.boolean_temporary_transform_statuses = true;
     f.planar_path_sweep_statuses = true;
     f.planar_path_profile_placement_statuses = true;
     f.fillet_trim_status = true;

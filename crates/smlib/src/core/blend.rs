@@ -84,6 +84,8 @@ pub(super) fn status(e: SolidError) -> Error {
         e if is_sweep_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
         e if is_query_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
         e if is_topology_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
+        e if is_curve_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
+        e if is_surface_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
         SolidError::InvalidInput { .. } => Error::Status(INVALID_INPUT),
         SolidError::Unsupported { reason, .. } if reason == MIXED_CORNER_RAILS_CROSS => Error::Unported(MIXED_CORNER_UNSUPPORTED),
         e if is_boolean_failure(&e) => boolean_status(e),
@@ -155,6 +157,19 @@ fn is_query_failure(e: &SolidError) -> bool {
 /// routine returned (`Upstream` before solidcore described it), and passes on as that status.
 fn is_topology_failure(e: &SolidError) -> bool {
     e.topology_failure().is_some()
+}
+
+/// A curve routine's failure (solidcore's `CurveFailure`) that replaced a status the routine
+/// returned (`Upstream` before solidcore described it): it passes on as that status. A length
+/// bracket's refusal replaced none and passes on as solidcore's text, as before.
+fn is_curve_failure(e: &SolidError) -> bool {
+    e.curve_failure().is_some_and(|c| c.replaces_upstream_status())
+}
+
+/// A surface routine's failure (solidcore's `SurfaceFailure`): it stands for the status the
+/// routine returned (`Upstream` before solidcore described it), and passes on as that status.
+fn is_surface_failure(e: &SolidError) -> bool {
+    e.surface_failure().is_some()
 }
 
 /// `size_ok`.
@@ -1506,6 +1521,23 @@ mod tests {
         assert!(matches!(status(sweep(cap)), Error::Solidcore(_)));
     }
 
+    /// A curve routine's failure passes on as the status it replaced, as the `Upstream` it replaced
+    /// did; a length bracket's refusal, which replaced no status, keeps passing on as solidcore's
+    /// text.
+    #[test]
+    fn curve_failures_pass_on_as_their_status() {
+        use solidcore::error::Failure;
+        use solidcore::error::curve::CurveFailure;
+        let curve = |c| Failure::new("curve::curve::p2::Curve::create_by_split_curve", c).into_error();
+        assert!(matches!(status(curve(CurveFailure::Failed("the split parameter is at the curve's end"))), Error::Status(1001)));
+        assert!(matches!(status(curve(CurveFailure::Missing("the curve's cache"))), Error::Status(1006)));
+        assert!(matches!(status(curve(CurveFailure::ZeroDirection("the auxiliary direction"))), Error::Status(1007)));
+        let floor = CurveFailure::LengthBelowFloor { asked: 1e-12, floor: 1e-10, pieces: 8 };
+        assert!(matches!(status(curve(floor)), Error::Solidcore(_)));
+        let cap = CurveFailure::LengthPastPieceCap { asked: 1e-9, reached: 1e-6, pieces: 4096 };
+        assert!(matches!(status(curve(cap)), Error::Solidcore(_)));
+    }
+
     #[test]
     fn laws_are_checked_as_the_capi_checks_them() {
         assert!(law_ok(1, &[0.0, 0.0, 1.0, 1.0], &[1.0, 2.0]));
@@ -1559,5 +1591,19 @@ mod tests {
         let at =
             Failure::new("topology::vertexuse", TopologyFailure::Failed("x")).at(solidcore::EntityRef::Vertex(VertexId::from_index(2))).into_error();
         assert!(matches!(status(at), Error::Status(1001)));
+    }
+
+    /// A surface routine's failure passes on as the status it replaced, as the `Upstream` it
+    /// replaced did.
+    #[test]
+    fn surface_failures_pass_on_as_their_status() {
+        use solidcore::error::Failure;
+        use solidcore::error::surface::SurfaceFailure;
+        let surface = |s| Failure::new("surface::surface::p2::Surface::step_inversion", s).into_error();
+        assert!(matches!(status(surface(SurfaceFailure::Failed("the point is not on the generator"))), Error::Status(1001)));
+        assert!(matches!(status(surface(SurfaceFailure::Missing("the surface's cache"))), Error::Status(1006)));
+        assert!(matches!(status(surface(SurfaceFailure::InvalidValue("the line direction is the zero vector"))), Error::Status(1007)));
+        assert!(matches!(status(surface(SurfaceFailure::OutsideDomain("the point is outside the sweep"))), Error::Status(1020)));
+        assert!(matches!(status(surface(SurfaceFailure::OffSurface("the point is off the surface"))), Error::Status(1021)));
     }
 }
