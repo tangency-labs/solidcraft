@@ -262,6 +262,24 @@ impl ModelBody {
         }
     }
 
+    /// The display edges a Fillet or Chamfer with tangent propagation rounds from display edge
+    /// `edge`: `edge` first, then each other edge of the body's exact tangent chain through it
+    /// ([`kernel::tangent_chain_edges`], the walk the feature itself takes, which stops where a
+    /// concave edge runs on as a convex one). The kernel names the chain by the record's edge
+    /// indices, which are the display edges'. `at` is the picked point on `edge`. Just `edge`
+    /// when the kernel cannot walk the chain.
+    pub fn blend_chain(&self, edge: usize, at: Vec3) -> Vec<usize> {
+        let mut out = vec![edge];
+        if let Ok(chain) = kernel::tangent_chain_edges(&self.body, &[at]) {
+            for i in chain {
+                if !out.contains(&i) {
+                    out.push(i);
+                }
+            }
+        }
+        out
+    }
+
     /// The display plan of this body at the viewport's display quality
     /// ([`crate::display_quality::current`]; at Normal, the same tolerance and angle as
     /// [`ModelBody::mesh`]), made once per level; `None` when the body has no plan (a mesh body,
@@ -11385,6 +11403,36 @@ mod chain_tests {
             assert_eq!(crate::appearance::face_index_at(b, *point), Some(*index));
         }
         assert_eq!(tangent_face_chain(b, &[Vec3::new(20.0, 15.0, 20.0); 2]), pts);
+    }
+
+    /// A boss on a stepped plate: the boss's concave side edge at x 20 (z 20…40) runs on in a
+    /// straight line as the step's convex edge (z 0…20). A Fillet dialog's tangent chain from
+    /// the boss edge is that edge alone, as the feature's exact chain is: a round cannot pass
+    /// from one side of the faces to the other. The display mesh's walk took both.
+    #[test]
+    fn a_blend_chain_ends_where_a_concave_edge_runs_on_as_a_convex_one() {
+        let mut doc = Document::new("T");
+        let block = |corner: Vec3, [l, w, h]: [&str; 3], operation| FeatureKind::Box {
+            corner: crate::point_expr(corner),
+            length: l.into(),
+            width: w.into(),
+            height: h.into(),
+            operation,
+        };
+        doc.add_feature(block(Vec3::new(0.0, 0.0, 20.0), ["40", "20", "20"], Operation::NewBody), None).unwrap();
+        doc.add_feature(block(Vec3::new(20.0, 0.0, 0.0), ["20", "20", "20"], Operation::Join), None).unwrap();
+        doc.add_feature(block(Vec3::new(10.0, -10.0, 20.0), ["10", "10", "20"], Operation::Join), None).unwrap();
+        let mut m = Model::new();
+        m.evaluate(&doc);
+        let st = m.state();
+        let b = &st.bodies[0];
+        // The edge the kernel takes for a pick, exactly: its index is the display edge's.
+        let picked = |p: Vec3| kernel::blend_edges(&b.body, &[p]).unwrap()[0];
+        let boss = picked(Vec3::new(20.0, 0.0, 30.0));
+        let step = picked(Vec3::new(20.0, 0.0, 10.0));
+        assert_ne!(boss, step);
+        assert!(b.mesh().tangent_chain(boss, 2f64.to_radians()).contains(&step), "the mesh walk took the step");
+        assert_eq!(b.blend_chain(boss, Vec3::new(20.0, 0.0, 30.0)), vec![boss]);
     }
 
     fn fillet(at: Vec3, radius: &str, tangent_chain: bool) -> FeatureKind {
