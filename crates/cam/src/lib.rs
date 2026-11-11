@@ -19,7 +19,13 @@
 //! Machine kinematics ([`kinematics`]) turn them into the positions of a machine's linear and
 //! rotary axes, for machines with up to two rotaries on the table or the head. Indexed (3+1 and
 //! 3+2) work ([`indexed`]) runs a 3-axis toolpath in a tilted work plane, with the rotaries held
-//! still.
+//! still. [`gcode5`] writes such toolpaths, continuous and indexed, as G-code for a 3-axis
+//! machine with a rotary `A` axis.
+//!
+//! A post ([`Post`]) is data: besides its templates it holds switches for the program's
+//! layout (a tool list, comment characters, blank lines, lines at every operation, a safe
+//! retract to the machine's top, the tool length offset on the first Z move, modal motion
+//! codes), all off by default.
 //!
 //! The region offsetting is our own: every boundary piece is offset, corners that open away
 //! from the offset side get a joining arc, the pieces are cut where they cross, and a piece is
@@ -35,6 +41,7 @@ mod dropcutter;
 pub mod finish3d;
 mod frame;
 mod gcode;
+pub mod gcode5;
 pub mod indexed;
 pub mod kinematics;
 mod multiaxis;
@@ -59,11 +66,11 @@ pub use finish3d::{
 };
 pub use frame::{Frame, angle_about, rotate, rotate_about};
 pub use gcode::{Operation, Program, emit, parse, work_offset_code};
-pub use multiaxis::{Move5, PathStats5, Pose, Toolpath5, slerp, verify5};
+pub use multiaxis::{Move5, Operation5, PathStats5, Pose, Program5, Toolpath5, slerp, verify5};
 pub use offset::offset_regions;
 pub use ops::{ContourParams, Cut, Feeds, Heights, PocketParams, Side, contour, pocket};
 pub use path::{Move, PathStats, Toolpath, arc_sweep};
-pub use post::{CommentStyle, LineNumbers, Post, Units};
+pub use post::{CommentStyle, LineNumbers, Post, SafeRetract, Units};
 pub use readback::{Readback, allowed_deviation, readback};
 pub use surface::{Surface, barycentric, nearest_on_triangle, ray_triangle};
 pub use surface_ops::{
@@ -101,6 +108,8 @@ pub(crate) fn invalid<T>(why: impl Into<String>) -> Result<T> {
 mod finish3d_tests;
 #[cfg(test)]
 mod foundation_tests;
+#[cfg(test)]
+mod gcode5_tests;
 #[cfg(test)]
 mod kinematics_tests;
 #[cfg(test)]

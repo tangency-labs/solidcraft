@@ -383,8 +383,8 @@ T3 M6
 G43 H3
 S3000 M3
 M8
-G0 X10 Y10
 G0 Z10
+G0 X10 Y10
 G0 Z2
 G1 Z-10 F200
 G4 P0.25
@@ -700,4 +700,36 @@ fn rapids_down_are_lifted_above_the_material_but_not_out_of_their_own_cut() {
     assert_eq!(path.moves.len(), 12);
     let h = Heights { clearance: 30.0, retract: 3.5, top: 0.0, bottom: -5.0 };
     verify(&path, &h).unwrap();
+}
+
+#[test]
+fn a_controller_that_ignores_m6_gets_a_programmed_stop_per_tool_change() {
+    let path = pocket(
+        &[rect(0.0, 0.0, 20.0, 20.0)],
+        &tool(6.0),
+        &PocketParams { stepover: 3.0, climb: true, stock_to_leave: 0.0, tolerance: 0.01, ramp_angle: 0.0 },
+        &cut(0.0, -2.0, 2.0),
+    )
+    .unwrap();
+    let mut t2 = tool(4.0);
+    t2.number = 2;
+    let mut t3 = tool(3.0);
+    t3.number = 3;
+    let op = |name: &str, t: &Tool| Operation { name: name.into(), tool: t.clone(), spindle_rpm: 12000.0, coolant: false, path: path.clone() };
+    let program = Program { work_offset: None, name: "p".into(), operations: vec![op("a", &tool(6.0)), op("b", &t2), op("c", &t2), op("d", &t3)] };
+    let mut post = Post::rs274();
+    assert_eq!(emit(&program, &post).unwrap().matches("M0\n").count(), 0);
+    post.stop_at_tool_change = true;
+    let text = emit(&program, &post).unwrap();
+    // Two changes after the first tool, a stop and a message each.
+    assert_eq!(text.lines().filter(|l| *l == "M0").count(), 2, "{text}");
+    assert!(text.contains("(change to tool 2 diameter 4, set its length, then cycle start)"), "{text}");
+    assert!(text.contains("(change to tool 3 diameter 3, set its length, then cycle start)"), "{text}");
+    // The spindle runs again after each stop.
+    assert_eq!(text.lines().filter(|l| *l == "S12000 M3").count(), 3, "{text}");
+    // A post whose tool change already stops (at each of the three tools) gets no second stop.
+    post.tool_change = vec!["M5".into(), "T{tool} M6".into(), "M0".into()];
+    let text = emit(&program, &post).unwrap();
+    assert_eq!(text.lines().filter(|l| *l == "M0").count(), 3, "{text}");
+    assert!(!text.contains("cycle start"), "{text}");
 }

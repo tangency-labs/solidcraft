@@ -1,12 +1,14 @@
 //! Indexed (3+1 and 3+2) machining: a 3-axis operation run in a tilted work plane, the rotary
 //! axes positioned once before it.
 //!
-//! [`index`] takes a 3-axis toolpath computed in any tilted frame (its Z the tool axis) and gives
-//! the multi-axis toolpath and the machine angles, checked reachable; [`frame_for_axis`] makes
-//! such a frame whose X and Y are what the machine's X and Y become after the rotaries turn, so a
-//! 2D operation's X/Y line up with the machine's. [`frame_for_index`] goes the other way: the
-//! frame that given rotary angles bring under the tool, in which a 3-axis toolpath's coordinates
-//! are the machine's own linear positions.
+//! Two ways in. [`IndexedOperation`] holds the rotary angles and a 3-axis [`Toolpath`] given in
+//! the frame those angles bring under the tool ([`frame_for_index`]): in that frame the
+//! toolpath's coordinates are the machine's own linear positions, so it is written with the
+//! 3-axis rules, arcs kept (see [`crate::gcode5`]). [`index`] instead takes a 3-axis toolpath
+//! computed in any tilted frame (its Z the tool axis) and gives the multi-axis toolpath and the
+//! machine angles, checked reachable; [`frame_for_axis`] makes such a frame whose X and Y are
+//! what the machine's X and Y become after the rotaries turn, so a 2D operation's X/Y line up
+//! with the machine's.
 
 use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
@@ -16,12 +18,26 @@ use crate::frame::{Frame, unit};
 use crate::kinematics::{Joints, Machine, check_limits, head_dir, head_point, inverse, orient, table_dir_inv, table_point_inv, tool_axis};
 use crate::multiaxis::Toolpath5;
 use crate::path::{MAX_MOVES, Toolpath};
+use crate::tool::Tool;
 use crate::{CamError, Result, invalid};
 
 /// Chord error (mm) of arcs [`index`] turns into lines.
 pub const ARC_TOLERANCE: f64 = 0.001;
 /// Largest angle accepted for an index (radians).
 const MAX_ANGLE: f64 = 1.0e4;
+
+/// One operation of a program run with the rotaries held still at `rotary` (radians, joint
+/// order, as written): a 3-axis toolpath in the frame of [`frame_for_index`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct IndexedOperation {
+    pub name: String,
+    pub tool: Tool,
+    /// Spindle speed (rev/min), clockwise.
+    pub spindle_rpm: f64,
+    pub coolant: bool,
+    pub rotary: Vec<f64>,
+    pub path: Toolpath,
+}
 
 fn check_angles(machine: &Machine, rotary: &[f64]) -> Result<()> {
     if rotary.len() != machine.rotaries.len() {
@@ -44,6 +60,12 @@ pub fn frame_for_index(machine: &Machine, rotary: &[f64]) -> Result<Frame> {
     let frame = Frame { origin, x: back(Vec3::X), y: back(Vec3::Y), z: back(Vec3::Z) };
     frame.validate()?;
     Ok(frame)
+}
+
+/// Whether the head is upright at `rotary`, so the frame of [`frame_for_index`] has the tool
+/// along its Z and arcs in its XY plane are square to the tool.
+pub fn head_upright(machine: &Machine, rotary: &[f64]) -> bool {
+    head_dir(machine, rotary, Vec3::Z).dist(Vec3::Z) <= 1e-9
 }
 
 /// The rotary angles (radians, joint order) that point the tool along `axis` (work

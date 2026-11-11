@@ -3,7 +3,7 @@
 //! a 3-axis toolpath has the axis `+Z` throughout.
 //!
 //! These are machine-independent: [`crate::kinematics`] turns them into the positions of a
-//! particular machine's linear and rotary axes.
+//! particular machine's linear and rotary axes, and [`crate::gcode5`] writes them.
 
 use serde::{Deserialize, Serialize};
 use solidcore_record::Vec3;
@@ -11,6 +11,7 @@ use solidcraft_geom::prelude::*;
 
 use crate::frame::Frame;
 use crate::path::{MAX_MOVES, Move, Toolpath};
+use crate::tool::Tool;
 use crate::{CamError, Result, invalid};
 
 /// How far a tool axis may be from unit length.
@@ -245,4 +246,28 @@ pub fn verify5(path: &Toolpath5, max_axis_step: f64) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// One operation of a multi-axis program: a tool, how it turns, and where it goes.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Operation5 {
+    pub name: String,
+    pub tool: Tool,
+    /// Spindle speed (rev/min), clockwise.
+    pub spindle_rpm: f64,
+    pub coolant: bool,
+    pub path: Toolpath5,
+    /// The feed of its plunges (mm/min), which the way back into the cut after a rewind takes
+    /// ([`crate::gcode5::Rewind`]); left out, the tool's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plunge_feed: Option<f64>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Program5 {
+    pub name: String,
+    pub operations: Vec<Operation5>,
+    /// Work offset 1 to 6 (`G54` to `G59`); left out, the first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_offset: Option<u8>,
 }
