@@ -1499,6 +1499,22 @@ fn parallel_to_lines_a_sloped_member_side_up_with_a_line() {
     parallel_to_after(Some("30 deg"));
 }
 
+/// A member turned more than a full turn: Parallel To finds the nearest turn to the one it shows,
+/// within a quarter turn of its remainder.
+#[test]
+fn parallel_to_works_from_the_remainder_of_a_full_turn() {
+    let mut s = brace();
+    ref_line(&mut s, "XY", json!([[200, -50], [250, 0]]));
+    let face = brace_side(&s, 0.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "390 deg"}));
+    let face = brace_side(&s, 30.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "parallel_to": {"sketch": "Ref", "curve": "ref"}}));
+    let step = s.doc.features.iter().rev().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::FrameMemberTurn { .. })).unwrap();
+    let solidcraft_doc::FeatureKind::FrameMemberTurn { angle, .. } = &step.kind else { panic!("not a turn") };
+    let deg: f64 = angle.as_ref().trim_end_matches(" deg").parse().unwrap();
+    assert!(deg - 30.0 > -90.0 - 1e-9 && deg - 30.0 <= 90.0 + 1e-9, "{angle}");
+}
+
 #[test]
 fn parallel_to_null_falls_back_to_the_angle() {
     let mut s = brace();
