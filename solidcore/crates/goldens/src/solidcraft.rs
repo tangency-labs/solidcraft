@@ -989,15 +989,21 @@ pub struct Measured {
     pub validity: Option<Validity>,
 }
 
-/// What `check_brep` at Level 2 found on `result`.
+/// What `check_brep` at Level 2 found on `result`. Kept small: [`Run`] carries it and is
+/// itself an error value.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Validity {
     /// The tests it failed, its warnings not counted (a failed status or `AssertValid`
     /// without a report counts as one): 0 for a valid body.
-    pub failures: usize,
-    /// The first failed test: its reporting type, its index and its name
-    /// (`SmTrimmingTools`, 2, `UVEdge/UVEdge Gap`).
-    pub first: Option<(&'static str, u64, &'static str)>,
+    pub failures: u32,
+    /// The first failed test's index in its reporting type's table (2 in
+    /// `SmTrimmingTools::Test #2`); 0 when no test failed.
+    pub first_test: u32,
+    /// The first failed test's reporting type (`SmTrimmingTools`); empty when no test
+    /// failed.
+    pub first_kind: &'static str,
+    /// The first failed test's name (`UVEdge/UVEdge Gap`); empty when no test failed.
+    pub first_name: &'static str,
 }
 
 /// How a case's run ended.
@@ -1765,15 +1771,23 @@ fn measure(k: &Kernel, b: &mut Brep) -> Result<Measured, SolidError> {
 /// is not a warning, and one for a failed pointer status or `AssertValid` without a report.
 fn validity(k: &mut Kernel, b: &mut Brep) -> Result<Validity, SolidError> {
     let c = check_brep(k, b, CheckLevel::Level2)?;
-    let mut failures = c.failures().count();
+    let mut failures = u32::try_from(c.failures().count()).unwrap_or(u32::MAX);
     if failures == 0 && (c.pointers_status != SM_SUCCESS || c.assert_valid == Some(false)) {
         failures = 1;
     }
-    let first = c
-        .failures()
-        .next()
-        .map(|r| (obj_type_string(r.reporting_type), r.test_index, r.name));
-    Ok(Validity { failures, first })
+    let (first_kind, first_test, first_name) = c.failures().next().map_or(("", 0, ""), |r| {
+        (
+            obj_type_string(r.reporting_type),
+            u32::try_from(r.test_index).unwrap_or(u32::MAX),
+            r.name,
+        )
+    });
+    Ok(Validity {
+        failures,
+        first_test,
+        first_kind,
+        first_name,
+    })
 }
 
 /// Turns on the `UpstreamFixes` field `name` a case asks for: any field, by its name
@@ -1980,15 +1994,15 @@ pub fn checks(e: &Expect, m: &Measured) -> Vec<Check> {
             Some(v) => Check {
                 name: "valid",
                 status: pass((v.failures == 0) == want),
-                detail: match v.first {
-                    Some((kind, test, name)) => format!(
-                        "expected {want}, got {} failed test(s), the first {kind}::Test #{test} {name}",
-                        v.failures
-                    ),
-                    None if v.failures > 0 => {
-                        format!("expected {want}, got a failed status without a report")
-                    }
-                    None => format!("expected {want}, got no failed test"),
+                detail: if v.failures == 0 {
+                    format!("expected {want}, got no failed test")
+                } else if v.first_kind.is_empty() {
+                    format!("expected {want}, got a failed status without a report")
+                } else {
+                    format!(
+                        "expected {want}, got {} failed test(s), the first {}::Test #{} {}",
+                        v.failures, v.first_kind, v.first_test, v.first_name
+                    )
                 },
             },
             None => Check {
@@ -2144,8 +2158,8 @@ fn run_entry(run: &Run, verdict: &str, checks: &[Check]) -> Value {
         Run::Done(m) => {
             let first_failed = m
                 .validity
-                .and_then(|v| v.first)
-                .map(|(kind, test, name)| format!("{kind}::Test #{test} {name}"));
+                .filter(|v| !v.first_kind.is_empty())
+                .map(|v| format!("{}::Test #{} {}", v.first_kind, v.first_test, v.first_name));
             e.insert(
                 "measured".into(),
                 json!({
@@ -2754,12 +2768,16 @@ mod tests {
         };
         let clean = Validity {
             failures: 0,
-            first: None,
+            first_test: 0,
+            first_kind: "",
+            first_name: "",
         };
         assert_eq!(verdict(&e, &m(Some(clean))).0, "PASS");
         let gap = Validity {
             failures: 2,
-            first: Some(("SmTrimmingTools", 2, "UVEdge/UVEdge Gap")),
+            first_test: 2,
+            first_kind: "SmTrimmingTools",
+            first_name: "UVEdge/UVEdge Gap",
         };
         let (v, c) = verdict(&e, &m(Some(gap)));
         assert_eq!(v, "FAIL");
@@ -2875,6 +2893,7 @@ mod tests {
             sheet_corner: None,
             refused: None,
             manifold: None,
+            valid: None,
             removed: None,
         };
         let ok = Measured {
