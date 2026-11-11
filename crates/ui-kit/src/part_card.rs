@@ -54,7 +54,7 @@ impl PartCardSize {
 #[derive(Clone, Copy)]
 pub enum PartFace<'a> {
     /// A part: its picture once drawn (`None` while it is drawn), and its kind where it is not a
-    /// SolidCraft design (STEP, MESH).
+    /// SolidCraft design (a STEP or mesh file).
     Part { picture: Option<TextureId>, badge: Option<&'a str> },
     /// A folder, with "N parts".
     Folder { count: &'a str },
@@ -129,7 +129,7 @@ pub fn part_card(ui: &mut Ui, card: PartCard<'_>) -> Response {
     response.on_hover_text(card.name)
 }
 
-/// A names-only row (the List size): the kind's icon, the name and the STEP / MESH pill.
+/// A names-only row (the List size): the kind's icon, the name and the kind's pill (STEP or mesh).
 pub fn part_row(ui: &mut Ui, name: &str, icon: &str, badge: Option<&str>, selected: bool) -> Response {
     let t = Tokens::get();
     let width = crate::metrics::dimension(ui.available_width());
