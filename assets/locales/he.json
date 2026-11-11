@@ -2796,6 +2796,7 @@
   "prefs.labels": "תוויות",
   "prefs.language_system": "מערכת",
   "prefs.layout": "פריסה",
+  "prefs.layout_note": "למשטחים צפים יש פינות מעוגלות ומרווח מסביבם. משטחים קומפקטיים צמודים לשולי החלון.",
   "prefs.layout_page.active_commands": "הדגשת פקודות פעילות",
   "prefs.layout_page.always": "תמיד",
   "prefs.layout_page.hover": "מעבר עכבר",

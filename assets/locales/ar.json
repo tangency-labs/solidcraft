@@ -2796,6 +2796,7 @@
   "prefs.labels": "التسميات",
   "prefs.language_system": "لغة النظام",
   "prefs.layout": "التخطيط",
+  "prefs.layout_note": "للأسطح العائمة زوايا مستديرة ومساحة حولها. تلامس الأسطح المدمجة حواف النافذة.",
   "prefs.layout_page.active_commands": "تمييز الأوامر النشطة",
   "prefs.layout_page.always": "دائمًا",
   "prefs.layout_page.hover": "عند مرور المؤشر",

@@ -2789,6 +2789,7 @@
   "prefs.labels": "Etykiety",
   "prefs.language_system": "Systemowy",
   "prefs.layout": "Układ",
+  "prefs.layout_note": "Pływające powierzchnie mają zaokrąglone rogi i odstęp wokół nich. Kompaktowe powierzchnie przylegają do krawędzi okna.",
   "prefs.layout_page.active_commands": "Wyróżniaj aktywne polecenia",
   "prefs.layout_page.always": "Zawsze",
   "prefs.layout_page.hover": "Najechanie",

@@ -2796,6 +2796,7 @@
   "prefs.labels": "Nhãn chữ",
   "prefs.language_system": "Hệ thống",
   "prefs.layout": "Bố cục",
+  "prefs.layout_note": "Các bề mặt nổi có góc bo tròn và khoảng trống xung quanh. Các bề mặt gọn nằm sát mép cửa sổ.",
   "prefs.layout_page.active_commands": "Tô sáng lệnh đang bật",
   "prefs.layout_page.always": "Luôn luôn",
   "prefs.layout_page.hover": "Rê chuột",
