@@ -367,6 +367,10 @@ pub(crate) fn drain_production_actions(app: &mut crate::SolveApp) -> PanelResult
     Ok(())
 }
 
+pub(crate) fn production_active(app: &crate::SolveApp) -> bool {
+    app.panel_content_frame.is_some() || app.panel_runtime.as_ref().is_some_and(|integration| integration.production.is_some())
+}
+
 /// Existing view toggles update remembered placement only when their raw flag
 /// changes. Context changes and hidden bodies never reopen closed panels.
 pub(crate) fn sync_production_visibility(app: &mut crate::SolveApp) -> PanelResult<()> {
