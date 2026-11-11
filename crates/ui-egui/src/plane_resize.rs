@@ -11,9 +11,9 @@ use serde_json::json;
 use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_engine::Sel;
 use solidcraft_engine::geom::prelude::*;
+use solidcraft_theme::Tokens;
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::viewport::Proj;
 
 /// How near the pointer must be to a handle to take it (screen points).
