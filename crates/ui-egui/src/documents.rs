@@ -335,6 +335,12 @@ impl Documents {
         self.active_tab
     }
 
+    /// Whether the tab numbered `tab` is still open: the one shown, or one behind it. A file
+    /// operation bound to a tab that is gone has nothing left to land in.
+    pub(crate) fn tab_open(&self, tab: u64) -> bool {
+        self.active_tab == tab || self.slots.iter().flatten().any(|slot| slot.tab == tab)
+    }
+
     /// Number of open designs (at least the active one).
     pub fn count(&self) -> usize {
         self.slots.len().max(1)
