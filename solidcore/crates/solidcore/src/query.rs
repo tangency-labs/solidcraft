@@ -6,8 +6,11 @@
 
 pub mod api_queries;
 pub mod brep;
+pub mod contact;
+pub mod continuity;
 pub mod distance_bound;
 pub mod edge;
+pub mod edge_turn;
 #[cfg(test)]
 pub(crate) mod exact;
 pub mod face;
@@ -16,6 +19,7 @@ pub mod r#loop;
 pub mod normal;
 pub mod poly;
 pub mod poly_properties;
+pub mod tangent_edge;
 pub mod tess;
 
 pub use face_surface::face_surface_intersect;

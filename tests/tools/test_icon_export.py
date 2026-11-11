@@ -15,10 +15,10 @@ import urllib.request
 
 class IconExportTest(unittest.TestCase):
     def test_inventory_includes_nested_and_helper_icon_uses(self):
-        source = pathlib.Path(__file__).resolve().parents[2] / 'assets/icons/ui/design/tools'
+        source = pathlib.Path(__file__).resolve().parents[2] / 'crates/look/icons/design/tools'
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
-            design = root / 'assets/icons/ui/design'
+            design = root / 'crates/look/icons/design'
             tools = design / 'tools'
             tools.mkdir(parents=True)
             for name in ('icon_status.py', 'review_state.py', 'icon_palette.py'):
@@ -58,10 +58,10 @@ class IconExportTest(unittest.TestCase):
             self.assertEqual(rows['trace']['example_command'], 'motion.trace')
 
     def test_export_snapshots_only_pending_notes_for_codex(self):
-        source = pathlib.Path(__file__).resolve().parents[2] / 'assets/icons/ui/design/tools'
+        source = pathlib.Path(__file__).resolve().parents[2] / 'crates/look/icons/design/tools'
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
-            design = root / 'assets/icons/ui/design'
+            design = root / 'crates/look/icons/design'
             tools = design / 'tools'
             tools.mkdir(parents=True)
             for name in ('icon_status.py', 'review_state.py', 'icon_palette.py'):

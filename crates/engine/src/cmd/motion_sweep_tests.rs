@@ -157,7 +157,11 @@ fn a_sweep_refuses_what_it_cannot_do() {
         json!({"joint": "Hinge", "from": 0, "to": 90, "refine": 0}),
         json!({"joint": "Hinge", "from": 0, "to": 90, "refine": -1}),
         json!({"joint": "Hinge", "from": 0, "to": 90, "step": 0}),
-        json!({"joint": "Hinge", "from": 0, "to": 1e8, "step": 1e-6}),
+        json!({"joint": "Hinge", "from": 0, "to": 90, "budget_s": 0}),
+        json!({"joint": "Hinge", "from": 0, "to": 90, "budget_s": 1e6}),
+        json!({"joint": "Hinge", "from": 0, "to": 90, "exclude_pairs": [["Door"]]}),
+        json!({"joint": "Hinge", "from": 0, "to": 90, "exclude_pairs": [["Door", "Nope"]]}),
+        json!({"joint": "Hinge", "from": 0, "to": 90, "exclude_pairs": "Door"}),
         json!({"joint": "Hinge", "from": "nan", "to": 90}),
         json!({"joint": "Hinge", "from": 0, "to": 90, "occurrences": ["Door"]}),
         json!({"joint": "Hinge", "from": 0, "to": 90, "against": ["Block"]}),
@@ -166,6 +170,94 @@ fn a_sweep_refuses_what_it_cannot_do() {
     }
     run(&mut s, "joint.as_built", json!({"type": "rigid", "a": "Block", "b": "Door", "name": "Lock"}));
     assert!(s.execute("joint.sweep", &json!({"joint": "Lock", "from": 0, "to": 1})).is_err(), "a rigid joint does not move");
+}
+
+/// Past its sample cap a sweep stops at the last sample it took, clear, instead of failing
+/// (#5963): 4096 steps of 1e-6° from 0.
+#[test]
+fn a_sweep_past_its_sample_cap_stops_with_what_it_found() {
+    let mut s = door();
+    let r = run(&mut s, "joint.sweep", json!({"joint": "Hinge", "from": 0, "to": 1e8, "step": 1e-6}));
+    assert_eq!(
+        (r["stopped_by"].as_str(), r["budget_ran_out"].as_str(), &r["budget_exceeded"]),
+        (Some("budget"), Some("samples"), &json!(true)),
+        "{r}"
+    );
+    assert!((num(&r["stopped_at"]) - 4096e-6).abs() < 1e-9, "{r}");
+    assert_eq!(r["samples"].as_array().map(Vec::len), Some(4097), "from and each sample taken");
+    // Within its caps nothing ran out.
+    let r = run(&mut s, "joint.sweep", json!({"joint": "Hinge", "from": 0, "to": 90}));
+    assert_eq!((&r["budget_exceeded"], &r["budget_ran_out"], &r["budget_s"]), (&json!(false), &Value::Null, &Value::Null), "{r}");
+}
+
+/// A time budget that is spent before the first sample stops the sweep at `from`, with a
+/// result (#5963).
+#[test]
+fn a_sweep_out_of_time_stops_at_the_last_value_checked_clear() {
+    let mut s = door();
+    let r = run(&mut s, "joint.sweep", json!({"joint": "Hinge", "from": 10, "to": 90, "budget_s": 1e-9}));
+    assert_eq!((r["stopped_by"].as_str(), r["budget_ran_out"].as_str()), (Some("budget"), Some("time")), "{r}");
+    assert_eq!((num(&r["stopped_at"]), num(&r["budget_s"])), (10.0, 1e-9), "{r}");
+    // A day is plenty: the block stops it as without a budget.
+    let r = run(&mut s, "joint.sweep", json!({"joint": "Hinge", "from": 0, "to": 90, "budget_s": 86400}));
+    assert!(r["stopped_by"]["a"].is_string() && r["budget_ran_out"].is_null(), "{r}");
+}
+
+/// A pair left out with `exclude_pairs` is not checked: the door swings past the block to a post
+/// behind it, met where the door's face meets the post's first corner (as
+/// `a_door_swings_until_it_meets_the_block`). Each side of the pair met is named with its
+/// component and occurrence path (#5963).
+#[test]
+fn an_excluded_pair_is_not_checked_and_pairs_name_their_place() {
+    let mut s = door();
+    block(&mut s, "Post", [20.0, 60.0, 0.0], [10.0, 10.0, 50.0]);
+    let corner = |x: f64, y: f64| y.atan2(x) - (4.0 / x.hypot(y)).asin();
+    let expected =
+        [(20.0, 60.0), (30.0, 60.0), (20.0, 70.0), (30.0, 70.0)].iter().map(|(x, y)| corner(*x, *y)).fold(f64::INFINITY, f64::min).to_degrees();
+    let all = run(&mut s, "joint.sweep", json!({"joint": "Hinge", "from": 0, "to": 90}));
+    assert!(by_parts(&all["stopped_by"], "Door:1", "Block:1"), "{all}");
+    for pair in [json!(["Door", "Block"]), json!(["Block:1", "Door:1"])] {
+        let r = run(&mut s, "joint.sweep", json!({"joint": "Hinge", "from": 0, "to": 90, "exclude_pairs": [pair]}));
+        assert_eq!(num(&r["pairs"]), num(&all["pairs"]) - 1.0, "{r}");
+        let at = num(&r["stopped_at"]);
+        assert!((at - expected).abs() < 0.01 && at <= expected + 1e-9, "stopped at {at}°, the post is met at {expected}°: {r}");
+        let by = &r["stopped_by"];
+        assert!(by_parts(by, "Door:1", "Post:1"), "{by}");
+        for side in ["a", "b"] {
+            let name = by[side].as_str().unwrap_or_default();
+            let part = &by[format!("{side}_part")];
+            assert_eq!(part["path"], json!([name]), "{by}");
+            assert_eq!(part["component"].as_str(), name.split(':').next(), "{by}");
+            assert_eq!(part["path_ids"].as_array().map(Vec::len), Some(1), "{by}");
+        }
+    }
+}
+
+/// A contact drive past its sample budget fails, as it always has, unless the call asks it to
+/// stop: then it stops at the last placement checked clear (#5963). The door turns 5000° with a
+/// block well out of its reach in its contact set: far more than 4096 samples.
+#[test]
+fn a_contact_drive_stops_at_its_budget_only_when_asked() {
+    let mut s = Session::default();
+    block(&mut s, "Door", [0.0, 0.0, 0.0], [100.0, 4.0, 50.0]);
+    block(&mut s, "Far", [300.0, 0.0, 0.0], [20.0, 20.0, 50.0]);
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "revolute", "a": {"occurrence": 0, "point": [0, 0, 0]}, "b": {"occurrence": "Door", "point": [0, 0, 0]}, "flip": true, "name": "Hinge"}),
+    );
+    run(&mut s, "contact.create", json!({"occurrences": ["Door", "Far"]}));
+    run(&mut s, "contact.enable_sets", json!({}));
+    let before = s.doc.clone();
+    let e = s.execute("joint.drive", &json!({"joint": "Hinge", "value": 5000})).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("sampling budget"), "fails by default: {e}");
+    assert_eq!(*s.doc, *before);
+    let r = run(&mut s, "joint.drive", json!({"joint": "Hinge", "value": 5000, "stop_at_budget": true}));
+    let b = &r["stopped_by_budget"];
+    let fraction = num(&b["fraction"]);
+    assert!(b["budget"] == "samples" && fraction > 0.0 && fraction < 1.0, "{r}");
+    assert!((hinge(&s).to_degrees() - 5000.0 * fraction).abs() < 1e-6, "{}° at {fraction}", hinge(&s).to_degrees());
+    assert_eq!(r["moved"], true, "{r}");
 }
 
 /// A point turned about `c` by `a` radians in the XY plane.
@@ -468,7 +560,6 @@ fn find_limits_refuses_what_it_cannot_do() {
         json!({"joint": "Hinge", "refine": "nan"}),
         json!({"joint": "Hinge", "step": 0}),
         json!({"joint": "Hinge", "step": -1}),
-        json!({"joint": "Hinge", "step": 1e-9}),
         json!({"joint": "Hinge", "occurrences": ["Door"]}),
         json!({"joint": "Hinge", "against": ["Block"]}),
         json!({"joint": "Hinge", "occurrences": ["Door"], "against": ["Door"]}),

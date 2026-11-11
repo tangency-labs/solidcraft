@@ -2300,7 +2300,7 @@ mod tests {
         assert!(is_topological_vertex(&k_default, &mut b, v[1]).unwrap());
         assert!(matches!(
             is_topological_vertex(&k_fix, &mut b, v[1]),
-            Err(SolidError::Upstream { code: SM_ERR, .. })
+            Err(e) if crate::error::upstream_status(&e) == Some(SM_ERR)
         ));
 
         // 2. Edge 0 reversed so it starts at v[1] (at_start1 == true) at matching
@@ -2316,7 +2316,7 @@ mod tests {
         assert!(is_topological_vertex(&k_default, &mut b, v[1]).unwrap());
         assert!(matches!(
             is_topological_vertex(&k_fix, &mut b, v[1]),
-            Err(SolidError::Upstream { code: SM_ERR, .. })
+            Err(e) if crate::error::upstream_status(&e) == Some(SM_ERR)
         ));
 
         // 3. Composition with query_statuses_pass_on when GetEndTangent(false) fails

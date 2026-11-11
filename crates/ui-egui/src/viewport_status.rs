@@ -167,7 +167,7 @@ pub(crate) fn reconcile(app: &mut SolveApp, ctx: &egui::Context) {
     app.viewport_status.reconcile_summary(ctx, members);
     // The popup is a separate foreground host: the badge's Background layer cannot
     // shield it. Tools deliberately remain eligible for their existing row actions.
-    let higher_owner = app.prefs_window.open
+    let higher_owner = app.prefs_window.shell.open
         || app.dialog.is_some()
         || app.keymap.open
         || app.ui.palette_open
