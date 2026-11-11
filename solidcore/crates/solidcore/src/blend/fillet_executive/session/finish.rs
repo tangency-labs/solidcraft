@@ -39,13 +39,12 @@
 //! No recursion.
 
 use super::original_trim::OriginalSurfaceDeletion;
-use super::{invalid, FilletBody, FilletObject, FilletSession, SessionObjects, SolverObject};
+use super::{invalid, FilletBody, FilletObject, FilletSession, SessionObjects};
 use crate::blend::fillet_cliff_overflow::Refusal;
 use crate::blend::fillet_executive::p3::{
     ErrorInfo, FilletExecutive, FilletFinishAccess, StitchAttempt, StitchSettings,
 };
 use crate::blend::fillet_geom::p1::FilletErrorType;
-use crate::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::object::NotifyOperation;
 use crate::geom::tol::approx_tol3d;
@@ -537,8 +536,8 @@ impl FilletSession<'_> {
                 self.executive.error = note;
             }
         }
-        // Opt-in (`fixes.fillet_gn_section_generator`, WR-696): a refusal with a size that
-        // builds carries it on the error, its status unchanged.
+        // Not upstream (WR-696): a refusal with a size that builds carries it on the error,
+        // its status unchanged.
         if let Err(SolidError::Upstream {
             operation,
             code,
@@ -656,48 +655,6 @@ impl FilletSession<'_> {
         }
     }
 
-    /// Not the fork's (#2727): great circles have no corner of a radius law to stop at. Swept
-    /// over one, the surface's net doubles back on itself (`check_brep` #5): the 20 cube's
-    /// law 4, 2, 4 builds such a net, and 3, 2, 4, 2, 3 one over 140 mm across. A circular
-    /// variable round whose law has a corner inside its edge is built only as its balls'
-    /// union (`fixes.fillet_gn_section_generator`, WR-696), which splits it there; without
-    /// it the round is refused before the target is touched.
-    fn refuse_great_circles_over_a_law_corner(&mut self, k: &Kernel) -> Result<()> {
-        if k.fixes.fillet_gn_section_generator {
-            return Ok(());
-        }
-        let mut crossed = false;
-        for solver in self.objects.solvers.iter().flatten() {
-            let SolverObject::VariableRadius(vr) = solver else {
-                continue;
-            };
-            let circular = vr
-                .curve_based
-                .solver
-                .fillet_surface_generator()
-                .is_some_and(|fsg| {
-                    fsg.fillet_surface_generator_type() == FilletSurfaceGeneratorType::Circular
-                });
-            if circular
-                && !vr
-                    .law
-                    .corner_parameters(&vr.law_interval, vr.law_orientation)?
-                    .is_empty()
-            {
-                crossed = true;
-            }
-        }
-        if !crossed {
-            return Ok(());
-        }
-        self.note_refusal(Refusal {
-            code: FilletErrorType::CornerUnsupported,
-            reason: None,
-            comment: "Fillet Error: a variable round's radius law has a corner inside its edge, which a sweep of great circles cannot follow: its net would double back on itself",
-        });
-        Err(failure())
-    }
-
     /// `JoinBlendedVertexFans` (the fork's, tangency-labs/smlib@e418750, WR-665): the
     /// inverse of the fan split after the blends: the target's vertices still at a split
     /// point (within their own tolerance of it), joined into the first of them
@@ -769,7 +726,6 @@ impl FilletSession<'_> {
             });
             return Err(failure());
         }
-        self.refuse_great_circles_over_a_law_corner(k)?;
         // (not the fork, #2933) a corner at a vertex marked set back is classified now, where
         // the setback set on it is first read: the Setback where it is one
         self.set_back_marked_corners(k)?;
@@ -829,9 +785,6 @@ impl FilletSession<'_> {
                     output.assign(&session.executive.error);
                 }
                 return Err(failure());
-            }
-            if k.fixes.fillet_refuse_crossing_rails {
-                session.refuse_crossing_rails(k)?;
             }
             session.shrink_fillet_faces(k)?;
             // The fork's NoteRadiusCornerSurfaces (6eecf04): the fillet surfaces that turn at
@@ -1050,7 +1003,8 @@ mod stitch_identity_tests {
     }
 }
 
-/// `fixes.fillet_refuse_ball_not_fitting` (WR-462, tangency-labs/solidcore#1172): a
+/// A ball that does not fit a face it rolls on (WR-462, tangency-labs/solidcore#1172; since the
+/// retirement of `fillet_refuse_ball_not_fitting`, judged by `BallIsRegular`, WR-696): a
 /// 60 x 40 x 20 box, its top edge at x = 60 rounded r3, then the round's end arc on the face
 /// y = 40 with the two edges tangent to it (the top edge at y = 40, the vertical edge at
 /// x = 60, y = 40): the ball rolls on the r3 round, so one of radius over 3 does not fit it.
@@ -1094,9 +1048,9 @@ mod ball_fit_tests {
         nearest.1.unwrap()
     }
 
-    /// The executive's error code after the round of `radius` on the r3 round's end with the
-    /// fix on or off, and its result.
-    fn end_round(radius: f64, fix: bool) -> (i32, Result<()>) {
+    /// The executive's error code after the round of `radius` on the r3 round's end, and its
+    /// result.
+    fn end_round(radius: f64) -> (i32, Result<()>) {
         let mut k = Kernel::default();
         let mut body =
             crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 60.0, 40.0, 20.0)
@@ -1114,7 +1068,6 @@ mod ball_fit_tests {
         .into_iter()
         .map(|p| edge_near(&k, &body, p))
         .collect();
-        k.fixes.fillet_refuse_ball_not_fitting = fix;
         let mut session = FilletSession::new(&mut k, &mut body).unwrap();
         session
             .prepare_constant_radius_edges(&mut k, &edges, radius, 1, 1, 1.0)
@@ -1125,34 +1078,25 @@ mod ball_fit_tests {
 
     #[test]
     fn a_ball_that_does_not_fit_is_no_room_before_the_corners() {
-        // without the ball-fit rule: a ball of 3.1 beside the R3 round's end arc fails (the
-        // blend corner refuses it); one of 7 is refused before the corners (#2546, WR-739),
-        // its rail past the R3 round's axis (radius 3 - 7 < 0), naming 3
-        let (_, result) = end_round(3.1, false);
-        assert!(result.is_err(), "r3.1");
-        let (code, result) = end_round(7.0, false);
-        let Err(SolidError::FilletRefused { reason, fit, .. }) = result else {
-            panic!("r7: {result:?}");
-        };
-        assert_eq!(
-            reason,
-            Some(crate::blend::fillet_executive::NoRoomReason::RailPastAxis)
-        );
-        assert!((fit.size - 3.0).abs() < 1e-12, "r7: {}", fit.size);
-        assert_eq!(code, NO_ROOM);
         for radius in [3.1, 7.0] {
-            let (code, result) = end_round(radius, true);
-            assert!(matches!(
-                result,
-                Err(SolidError::Upstream { code: 1001, .. })
-            ));
+            let (code, result) = end_round(radius);
+            eprintln!("r{radius}: code {code} {result:?}");
+            let Err(SolidError::FilletRefused { reason, fit, .. }) = result else {
+                panic!("r{radius}: {result:?}");
+            };
+            assert_eq!(
+                reason,
+                Some(crate::blend::fillet_executive::NoRoomReason::BallDoesNotFit),
+                "r{radius}"
+            );
+            assert!(fit.size > 0.0 && fit.size <= 3.0, "r{radius}: {}", fit.size);
             assert_eq!(code, NO_ROOM, "r{radius}: NoRoom");
         }
     }
 
     #[test]
     fn a_ball_that_fits_is_not_refused() {
-        let (code, result) = end_round(2.0, true);
+        let (code, result) = end_round(2.0);
         result.unwrap();
         assert_ne!(code, NO_ROOM);
     }

@@ -75,31 +75,36 @@ fn quarters([a0, a1]: [f64; 2], reach: f64) -> Option<(f64, usize)> {
     if !valid_angles([a0, a1]) {
         return None;
     }
-    let on_end = |a: f64| {
-        let end = (a / FRAC_PI_2).round() * FRAC_PI_2;
-        if (a - end).abs() <= reach {
-            end
-        } else {
-            a
-        }
-    };
-    let (a0, a1) = (on_end(a0), on_end(a1));
+    let (a0, a1) = (on_quarter_line(a0, reach), on_quarter_line(a1, reach));
     let q0 = quarter_of(a0);
     let q1 = (a1 / FRAC_PI_2 - SLACK).ceil();
     let n = (q1 - q0).max(1.0) as usize;
     (n <= 5).then_some((q0, n))
 }
 
+/// An angle within `reach` of a quarter's end, on it; another as it is.
+fn on_quarter_line(a: f64, reach: f64) -> f64 {
+    let end = (a / FRAC_PI_2).round() * FRAC_PI_2;
+    if (a - end).abs() <= reach {
+        end
+    } else {
+        a
+    }
+}
+
 /// A face's quarters along an angle direction and its domain there: a whole turn is exactly
 /// four quarters from the one it starts in (the form closes on itself, so it is periodic and the
-/// face's seam uses lie a period apart), anything less the quarters it needs ([`quarters`], ends
-/// within `reach` of a quarter's end on it).
+/// face's seam uses lie a period apart), a start within `reach` of a quarter's end starting on
+/// it (a seam a rounding short of the quarter line its frame puts it on would otherwise start
+/// the form a quarter early, and the seam's second use would lie a quarter past its end);
+/// anything less the quarters it needs ([`quarters`], ends within `reach` of a quarter's end on
+/// it).
 fn face_quarters(a: [f64; 2], reach: f64) -> Option<((f64, usize), [f64; 2])> {
     if !valid_angles(a) {
         return None;
     }
     if a[1] - a[0] >= TAU * (1.0 - 1e-9) {
-        let q0 = quarter_of(a[0]);
+        let q0 = quarter_of(on_quarter_line(a[0], reach));
         return Some(((q0, 4), [q0, q0 + 4.0]));
     }
     let grid = quarters(a, reach)?;
@@ -881,19 +886,32 @@ pub fn extent(
     loops: &[Vec<(&Curve, [f64; 2], bool)>],
     reach: f64,
 ) -> Result<Option<[[f64; 2]; 2]>, EvalError> {
+    extent_by(label, loops, &|eval: &SurfaceEval, q: [f64; 2]| {
+        eval.pole_within(q, reach)
+    })
+}
+
+/// [`extent`] with the boundary points on a pole told apart by `pole` (for each direction,
+/// whether the label is collapsed there): the speed rule of [`super::pcurve::pole_by_speed`] for
+/// a reader that bounds its faces as the pcurves it then fits do.
+pub fn extent_by(
+    label: &Surface,
+    loops: &[Vec<(&Curve, [f64; 2], bool)>],
+    pole: &dyn Fn(&SurfaceEval, [f64; 2]) -> Result<[bool; 2], EvalError>,
+) -> Result<Option<[[f64; 2]; 2]>, EvalError> {
     let mut refused = None;
-    let out = extent_in(label, loops, reach, &mut refused);
+    let out = extent_in(label, loops, pole, &mut refused);
     match refused {
         Some(e) => Err(e),
         None => Ok(out),
     }
 }
 
-/// [`extent`]'s body: the classifier's refusal goes to `refused`.
+/// [`extent_by`]'s body: the classifier's refusal goes to `refused`.
 fn extent_in(
     label: &Surface,
     loops: &[Vec<(&Curve, [f64; 2], bool)>],
-    reach: f64,
+    pole_at: &dyn Fn(&SurfaceEval, [f64; 2]) -> Result<[bool; 2], EvalError>,
     refused: &mut Option<EvalError>,
 ) -> Option<[[f64; 2]; 2]> {
     let eval = SurfaceEval::new(label).ok()?;
@@ -935,7 +953,7 @@ fn extent_in(
                 };
                 let q = at(t, prev)?;
                 // At a pole the collapsed parameter is anything: it bounds nothing.
-                let pole = match eval.pole_within(q, reach) {
+                let pole = match pole_at(&eval, q) {
                     Ok(p) => p,
                     Err(e) => {
                         *refused = Some(e);

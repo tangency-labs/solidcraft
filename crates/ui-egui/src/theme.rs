@@ -308,7 +308,7 @@ mod tests {
     use solidcraft_theme::{ColorVision, apply, composite, contrast_ratio, set_dark, set_viewport_background, set_viewport_dark, set_vision};
 
     fn tabs_state(base: &str, overrides: BTreeMap<String, crate::theme_files::OptionValue>) -> TabThemeState {
-        let file = crate::theme_files::tab_fixture(base);
+        let file = crate::test_support::tab_fixture(base);
         let values = crate::theme_files::effective_values(&file, &overrides).0;
         let (enabled, fade_ms) = crate::theme_options::tab_settings(&file, &values);
         let base = FilePalette {
@@ -436,7 +436,7 @@ mod tests {
     fn tabs_cache_invalidates_for_theme_values_vision_and_viewport_overrides() {
         crate::test_support::host_data();
         let ctx = egui::Context::default();
-        let mut file = crate::theme_files::tab_fixture("dark");
+        let mut file = crate::test_support::tab_fixture("dark");
         let normalizations = Cell::new(0);
         let prepare = |file: &crate::theme_files::ThemeFile, raw: Option<&BTreeMap<String, serde_json::Value>>| {
             let custom = prepare_tabs(&ctx, Some(file), raw, || {
@@ -522,6 +522,7 @@ mod tests {
 
     #[test]
     fn built_in_selected_tab_labels_hold_wcag_small_text_contrast() {
+        crate::test_support::host_data();
         let mut themes = vec![("Dark", super::Tokens::dark()), ("Light", super::Tokens::light())];
         themes.extend(crate::theme_files::builtin().iter().map(|theme| (theme.name.as_str(), crate::theme_files::resolve(theme))));
         let mut failures = Vec::new();
@@ -558,7 +559,7 @@ mod tests {
         use crate::theme_files::{OptionValue, ThemeFile};
         for base in ["dark", "light"] {
             let ctx = crate::fonts::test_context();
-            let file = crate::theme_files::tab_fixture(base);
+            let file = crate::test_support::tab_fixture(base);
             set_dark(file.base.is_dark());
             set_vision(ColorVision::Off);
             set_viewport_dark(None);

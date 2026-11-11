@@ -23,8 +23,8 @@ solidcraft-cli mcp
 # Headless, starting from a design file or a command script.
 solidcraft-cli mcp --in part.sc
 
-# Bridged to the running app, so you can watch the agent model. The app's control channel is
-# on by default (see below), so no flag is needed on either side:
+# Bridged to the running app, so you can watch the agent model. Turn on the app's control
+# channel first (see below); then no flag is needed on either side:
 solidcraft &
 solidcraft-cli mcp          # finds the running app; headless when none runs (--headless forces that)
 
@@ -33,11 +33,11 @@ solidcraft --control 7878 &
 solidcraft-cli mcp --connect 127.0.0.1:7878
 ```
 
-### The app listens by default
+### The app listens when turned on
 
-The desktop app opens its control channel at start-up on `127.0.0.1:27878` (or the next free port
-when that one is taken), unless Preferences > Assistant > "Let AI agents connect (control
-channel / MCP)" is off; the setting takes effect at the next start. It is reachable from this
+The desktop app opens its control channel on `127.0.0.1:27878` (or the next free port when that
+one is taken) when Preferences > Assistant > Agents through MCP > "Let AI agents connect" is on. It is
+off for a new install; the setting and its port take effect at once. It is reachable from this
 computer only, and every connection must show the token made fresh for that launch, readable only
 by your user account ([control-protocol.md](control-protocol.md#token)). The app writes the port to
 `control/current.port` in the same folder as its token file; `solidcraft-cli mcp` with no
@@ -191,6 +191,8 @@ not read-only, not destructive). `new_design` replaces it (destructive). `execut
 `screenshot` (whose `path` writes a file) and `compare_picture` (which reads the reference picture) can read,
 write, overwrite or delete files: they are
 not read-only, `destructiveHint` and `openWorldHint` are true.
+
+`cancel` changes the design only by keeping a change from landing; it touches no files.
 
 ### Client configuration
 
@@ -346,7 +348,7 @@ carrying one is treated as any step with a key the batch does not know. Volume a
 say nothing about which kernel built the design, which is the point: the check holds whatever
 builds it.
 | `inspect_design` | `measure?` (default true), `sketches?` (default true), `joints?` (default true), `timeline?` (`true`: the default; `"summary"`: each feature as `id`, `name` and `type`, with `error`, `warning`, `suppressed` and `rolled_back` only when it has them; `false`: no timeline), `bodies?` (`true`: the default; `"names"`: only the body names, nothing measured; `false`: no bodies); with [compact output](#compact-output) `sketches?` (names or ids, `true`, or `false` / `"summary"`: the default) and `bodies?` also takes a list of names | On a design of hundreds of features and bodies, `timeline: "summary"` and `bodies: "names"` (or `false`) keep the reply small enough for an agent's tool output. Design properties (`metadata`: project, author… and other tools' keys; set them with `execute` `document.metadata.set`), parameters, timeline (type, suppressed, rolled back, error, warning, timing), bodies (volume, area, centre of mass, bbox, face/edge/vertex counts, visible; `removed_later: true` while a sketch is being edited on a rolled-back timeline and a later feature deletes the body, which is then not shown), sketches (curves, points, constraints, profiles, DOF, solve status, visible), joints when the design has any (as `joint.inspect` gives them: each origin's occurrence, component and path, the snap as saved, the feature, face, edge or sketch curve (`sketch: {id, name, curve}`) its persistent names refer to, `resolves` and the `error` when it is lost; kind, offset, angle, flip, values, limits, expressions, motion links; `execute` `joint.inspect {joint}` gives one joint), selection, undo depth. Hide helper sketches, bodies or construction planes with `execute` `browser.visibility` (`{items, visible}` or `{folder, visible}`), and joint glyphs with `{joints: [id or name], visible}` or `{folder: "joints", visible}` (a hidden joint still constrains and drives; `joint.list` reports each joint's `visible`). |
-| `measure` | `body?` or `items?`, `summary?` (default false) | Area (mm²), bbox, topology counts and `closed` per body. Volume (mm³), volume centre of mass, density and mass are reported only for closed, consistently oriented bodies (null or omitted for open surfaces). Volume/mass totals skip open bodies; `total.open_bodies_skipped` gives their count. Area and topology totals include all bodies. With `items` (one or two selections as `execute` takes them: `face`, `edge`, `vertex`, `sketch_curve`, `profile`), the picked geometry instead: faces and edges need only `type`, `body` and `point`; `index` is optional. See below. `summary: true` keeps one short object per body (`name`, `volume_mm3`, `bbox: {min, max}`, `faces`, `closed`; a body that could not be measured keeps its `error`), `body_count` and `total.volume_mm3`, nothing else: what a stage check against computed numbers needs, at a fraction of the size. It applies to the bodies reply, not to `items`. |
+| `measure` | `body?` or `items?`, `summary?` (default false) | Area (mm²), bbox, topology counts and `closed` per body. Volume (mm³), volume centre of mass, density and mass are reported only for closed, consistently oriented bodies (null or omitted for open surfaces). Volume/mass totals skip open bodies; `total.open_bodies_skipped` gives their count. Area and topology totals include all bodies. With `items` (one or two selections as `execute` takes them: `face`, `edge`, `vertex`, `sketch_curve`, `profile`), the picked geometry instead: faces and edges need only `type`, `body` and either `point` or `index` (from `model.faces` / `model.edges`). See below. `summary: true` keeps one short object per body (`name`, `volume_mm3`, `bbox: {min, max}`, `faces`, `closed`; a body that could not be measured keeps its `error`), `body_count` and `total.volume_mm3`, nothing else: what a stage check against computed numbers needs, at a fraction of the size. It applies to the bodies reply, not to `items`. |
 | `body_topology` | `body`, `faces?` (`all`, `cylinders`; default `all`) | Edges (index, midpoint, length, ends) and faces (index, name, area, centroid, normal, `point`, and for a cylindrical face its `cylinder`: `origin`, `axis`, `radius`). An edge midpoint is the `[x,y,z]` that picks that edge for fillet and chamfer. A face's `point` lies on it and picks it (its centroid may not: that of a face with a hole is in the hole); a face's `name` picks it for the commands that take faces (`face.delete`, `solid.shell`, `solid.draft`, `solid.offset_face`, `solid.split_face`, `solid.replace_face`, and `face` of `sheet.convert`). `faces: "cylinders"` replies `cylinders` instead of `edges` and `faces`: one entry per cylinder, `{radius, origin, axis, extent, names}`, the halves the kernel splits a cylinder into merged (same radius, same axis line; `origin` and `axis` as the first half's `cylinder` gives them), `extent` the `[min, max]` distance along `axis` from `origin` that the body's points on the cylinder span (the faces' `point`s and the ends of the edges lying on it; left out when none were found), and `names` the merged faces' names, any of which picks the face. Enough to check where every hole and boss is, in a few lines instead of the whole topology. |
 | `set_parameter` | `name`, `value` or `expression` (number or expression), `unit?`, `comment?` | Create or change a user parameter and recompute. `expression` is another name for `value` (the one `parameters.change` uses): give one of them, or both only when they agree; neither, or two that differ, is an error. Reports `recomputed` (features rebuilt), `restored` (features whose earlier result for the same inputs was reused, e.g. a value set back) and features that now fail. An expression `new_name = expression` renames the parameter as it sets it; in any other tool's expression parameter it adds the user parameter `new_name` and the input uses it (`defined`, `definitions` in the reply). |
 | `check_parameters` | `set: {name: value}` (a number or an expression each, as `set_parameter`'s `value`), `report?` (`measure`, `cylinders`, `errors`; default all three), `bodies?` (a list of body names: only those are measured and their cylinders listed; default all), `summary?` (`measure` as the `measure` tool's `summary: true`; default false) | Try parameter values without keeping them: one `edit.checkpoint`, every value set in one `parameters.change {changes}` (one rebuild; an app without `changes` gets one change per name), the reports read, then `edit.restore_checkpoint`, so the design, its parameters and its undo history are exactly as before. The reply has `values` (each parameter's value with the tried expressions in), `recomputed`, `measure` (volume, bbox, bodies and faces per body, as the `measure` tool reports them), `errors` and `warnings` (the features that fail or warn: `{feature, name, error}`) with `parameter_errors` (the parameters that don't evaluate), `cylinders` (every cylindrical face of every body as `{body, radius, origin, axis, faces, name, area}`; the halves a kernel splits one cylinder into are one entry, `origin` is the axis point closest to the world origin and `axis` points so that its first non-zero component is positive) and `restored: true`. On a large design, `bodies` with the bodies a change touches and `summary: true` keep the reply small. A name the design has no parameter of, a value that is not a number or a string, an expression that does not evaluate, an unknown report item or a `bodies` that is not a list of names is an error, and nothing changes; a body name the design does not have after the change is an error after the design is put back. If the checkpoint cannot be restored the call is an error with `restored: false`, `restore_error` and a note that the tried values are still in the design: set them back before saving. Replaces the loop `set_parameter`, `measure`, `body_topology`, `set_parameter` back, which cost every agent session three to five calls and up to 16 s of rebuilds. Not a `batch` step. |
@@ -359,6 +361,7 @@ builds it.
 | `skill_reference` | `skill`, `file?` (default `reference.md`) | Read a bundled skill document. Skills: `solidcraft-modeling`, `solidcraft-mechanisms`, `solidcraft-editing`, `solidcraft-checking`. |
 | `running` | - | What the app is running or has queued, for every client (`control.running`, see [control-protocol.md](control-protocol.md#limits)): each request's connection and id, method, command id or a batch's step count, `running_s` and `queued`, never its parameters. Answers at once while the app is busy, also while another call from this client, such as a long `batch`, is still waiting for its reply: bridged, it is then asked on a connection of its own (its `self` marks no request) and its reply comes before that call's. Ask it when a call timed out before sending a change again. Headless: always `{"running": []}`. |
 | `new_design` | `name?` | Start an empty design. |
+| `cancel` | — | Bridged: cancel this server's request that was still running in the app when its call returned (`control.cancel`, see [Cancelling a request](#cancelling-a-request)). Headless: an error, as nothing is ever left running. Not a `batch` step. |
 | `open` | `path` | Open a `.sc` design (or a `.solidcraft` one from an earlier release), a STEP file (`.step`/`.stp`) as a new design holding its bodies (an Import base feature), or a 3MF/STL file as mesh bodies. |
 | `save` | `path?` | Save the design (to its current file without `path`). |
 
@@ -399,6 +402,22 @@ To tell whether the design changed since a call, without reading all of it again
 changes, and `document_id` names the open design (another one after `new_design` or `open`).
 See [control-protocol.md](control-protocol.md#following-the-design).
 
+To compare design proposals with several parameter edits each, call `execute` with
+`inspect.parameter_variants`. It rebuilds a separate copy for each candidate. A direct call
+connected to the desktop window can run on a worker, like a long measurement. Use the
+baseline and each result's `metrics` to compare
+volume, mass and body count; check `ok` and `diagnostics` before applying any candidate.
+
+```json
+{"command": "inspect.parameter_variants", "params": {"variants": [
+  {"name": "Lighter", "set": {"width": "45 mm", "thickness": "4 mm"}},
+  {"name": "Wider", "set": {"width": "75 mm", "thickness": "6 mm"}}
+]}}
+```
+
+Apply the selected values separately with `parameters.change {changes}` if you intend to
+edit the design. Use `describe_command` for the input and output schemas.
+
 Resources: `solidcraft://design` (inspect JSON with measurements) and `solidcraft://commands`
 (the catalog).
 
@@ -417,8 +436,8 @@ how long it waits; when the request finishes, the tool call returns its real res
 runs after that, the tool call fails with an error starting `still running:` that names the
 request and says what it still does: it will still apply when it finishes, or will still write
 the file (an export or a save: the design does not change), or only reads (nothing changes). Don't
-send it again: call the `pending` tool, which waits up to 60 seconds for its result each time.
-Any other tool call first waits up to 60 seconds for it too, and is not sent while it still runs
+send it again: call the `pending` tool, which waits up to 60 seconds for its result each time, or
+`cancel` it ([Cancelling a request](#cancelling-a-request)). Any other tool call first waits up to 60 seconds for it too, and is not sent while it still runs
 (so nothing is queued to apply unseen behind it); a request that finishes in that wait keeps its
 result for `pending`. If the connection to the app is lost meanwhile, the result is lost with it,
 and `pending` says so: inspect the design before sending a change again.
@@ -446,6 +465,25 @@ of steps or `{"commands": [...]}`, the format `solidcraft-cli run` takes and `so
 writes. The server reads it (at most 32 MB), within the folders the agent may use, and runs the steps
 as if they had been sent inline: the same tool steps, rollback and reply. `path` and `commands` can't
 both be given, and a file that can't be read, isn't JSON or has no steps fails before anything is sent.
+
+### Cancelling a request
+
+A request the app is still running when its call returns (an error starting `still running:`) has
+not failed and was not cancelled. `cancel` cancels it at once, without first waiting for it as
+other calls do, on the connection it was sent on (`control.cancel`,
+[control-protocol.md](control-protocol.md#cancelling-a-request)):
+
+- still waiting its turn in the app: removed, it never runs (`outcome: "removed"`);
+- a design change or an export computing off the app's window thread (Preferences > AI > Keep the
+  window responsive while agents run commands): stopped, nothing of it applied (`outcome:
+  "stopped"`; an export's file may still be written). The work stops early in the background;
+- already applying on the window thread, or a file being opened: a tool error starting
+  `cannot be cancelled:`. It will still finish; inspect the design before sending it again;
+- already finished: `cancelled: null` with its reply.
+
+Once it is removed, stopped or finished, later calls no longer wait for it and `pending` says
+`pending: null`. With nothing running, `cancel` says `nothing to cancel`. Only this server's own request can be
+cancelled; another client's requests are out of its reach.
 
 ## Camera and close-up recipe
 

@@ -29,6 +29,7 @@ pub mod from_parameters;
 pub mod hermite_curve;
 pub mod hyperbola;
 pub mod iso_curve;
+pub mod length_bound;
 pub mod line;
 pub(crate) mod native_affine;
 pub mod offset_curve;

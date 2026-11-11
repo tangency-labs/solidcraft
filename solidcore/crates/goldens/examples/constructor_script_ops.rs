@@ -11,7 +11,7 @@ fn main() {
         .and_then(|f| std::fs::read(f).ok())
         .and_then(|b| {
             let index = args.get(1)?.parse::<usize>().ok()?;
-            step_import::import(&b, &step_import::Limits::default())
+            step_export::import(&b, &step_export::Limits::default())
                 .ok()?
                 .bodies
                 .into_iter()
@@ -21,14 +21,13 @@ fn main() {
         eprintln!("usage: constructor_script_ops <file.stp> <body> <op>...");
         std::process::exit(2);
     };
-    let script =
-        step_import::script::from_body(&body, step_import::script::FromBodyOptions::default());
+    let script = goldens::script::from_body(&body, goldens::script::FromBodyOptions::default());
     for i in args.iter().skip(2).filter_map(|x| x.parse::<usize>().ok()) {
         let Some(op) = script.ops.get(i) else {
             continue;
         };
         println!("op {i}: {op:?}");
-        if let step_import::script::Op::AdjustStepUvDomain { surface, .. } = op {
+        if let goldens::script::Op::AdjustStepUvDomain { surface, .. } = op {
             println!("    surface {:?}", script.surfaces.get(*surface));
         }
     }

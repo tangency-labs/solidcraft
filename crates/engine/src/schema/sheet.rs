@@ -78,16 +78,34 @@ impl JsonSchema for FlangeEdges {
         let point = generator.subschema_for::<Point3>();
         let angle = generator.subschema_for::<AngleExpr>();
         let height = generator.subschema_for::<LengthExpr>();
+        let segment = json_schema!({
+            "description": "One stretch of the edge: from and to are fractions 0…1 of the stretch the sheet still has there (the first from is 0, the last to is 1, and each from is the to of the one before); angle, height and flip are its own where given.",
+            "type": "object",
+            "properties": {
+                "from": {"type": "number", "minimum": 0, "maximum": 1},
+                "to": {"type": "number", "minimum": 0, "maximum": 1},
+                "angle": {"anyOf": [angle, {"type": "null"}]},
+                "height": {"anyOf": [height, {"type": "null"}]},
+                "flip": {"anyOf": [{"type": "boolean"}, {"type": "null"}]}
+            },
+            "required": ["from", "to"],
+            "additionalProperties": false
+        });
         json_schema!({
-            "description": "Points in mm on the sheet's top or bottom edges, 1 to 1000: each [x, y, z] or {\"x\", \"y\", \"z\"}, or {\"point\": [x, y, z], \"angle\"?, \"height\"?} for an edge with its own angle and height (null: the feature's).",
+            "description": "Points in mm on the sheet's top or bottom edges, 1 to 1000: each [x, y, z] or {\"x\", \"y\", \"z\"}, or {point: [x, y, z], angle?, height?, segments?} for an edge with its own angle and height (null: the feature's), or split into 1 to 64 segments that tile it.",
             "type": "array",
             "items": {
                 "anyOf": [
                     // An object with any of the edge's keys is an edge, never a bare point.
-                    {"anyOf": [point], "not": {"type": "object", "anyOf": [{"required": ["point"]}, {"required": ["angle"]}, {"required": ["height"]}]}},
+                    {"anyOf": [point], "not": {"type": "object", "anyOf": [{"required": ["point"]}, {"required": ["angle"]}, {"required": ["height"]}, {"required": ["segments"]}]}},
                     {
                         "type": "object",
-                        "properties": {"point": point, "angle": {"anyOf": [angle, {"type": "null"}]}, "height": {"anyOf": [height, {"type": "null"}]}},
+                        "properties": {
+                            "point": point,
+                            "angle": {"anyOf": [angle, {"type": "null"}]},
+                            "height": {"anyOf": [height, {"type": "null"}]},
+                            "segments": {"anyOf": [{"type": "array", "items": segment, "minItems": 1, "maxItems": 64}, {"type": "null"}]}
+                        },
                         "required": ["point"],
                         "additionalProperties": false
                     }
@@ -414,6 +432,10 @@ pub struct FlangeParams {
     /// on a base or contour flange.
     #[serde(default)]
     pub then: Option<ThenSteps>,
+    /// Edge: segments belong inside an `edges` item (`{point, segments}`), not here. A top-level
+    /// `segments` is refused, naming where it goes, rather than ignored as an unknown key.
+    #[serde(default)]
+    pub segments: Option<Value>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
 }

@@ -494,6 +494,8 @@ fn skill_reference_returns_bundled_text_without_backend_calls() {
         ("solidcraft-mechanisms", "SKILL.md", include_str!("../../../skills/solidcraft-mechanisms/SKILL.md")),
         ("solidcraft-checking", "SKILL.md", include_str!("../../../skills/solidcraft-checking/SKILL.md")),
         ("solidcraft-editing", "SKILL.md", include_str!("../../../skills/solidcraft-editing/SKILL.md")),
+        ("solidcraft-sheetmetal", "SKILL.md", include_str!("../../../skills/solidcraft-sheetmetal/SKILL.md")),
+        ("solidcraft-sheetmetal", "reference.md", include_str!("../../../skills/solidcraft-sheetmetal/reference.md")),
     ];
     for (skill, file, expected) in docs {
         let args = json!({"skill": skill, "file": file});
@@ -510,7 +512,7 @@ fn skill_reference_returns_bundled_text_without_backend_calls() {
 #[test]
 fn skill_reference_refuses_unknown_names_and_paths_with_available_choices() {
     let mut s = server();
-    let skills = ["solidcraft-checking", "solidcraft-editing", "solidcraft-mechanisms", "solidcraft-modeling"];
+    let skills = ["solidcraft-checking", "solidcraft-editing", "solidcraft-mechanisms", "solidcraft-modeling", "solidcraft-sheetmetal"];
     for skill in ["unknown", "../solidcraft-modeling", "/tmp/solidcraft-modeling"] {
         let r = raw_tool(&mut s, "skill_reference", json!({"skill": skill}));
         assert_eq!(r["result"]["isError"], true, "{r}");
@@ -2837,6 +2839,68 @@ fn instructions_recipe_builds_a_parametric_shelled_box() {
     axes(&mut s, 30.0, 20.0);
 }
 
+/// The worked example in `skills/solidcraft-sheetmetal/reference.md` is what agents copy: one
+/// request in words, one flange feature with segments, and the numbers the file states.
+#[test]
+fn sheetmetal_skill_example_builds_as_documented() {
+    let doc = include_str!("../../../skills/solidcraft-sheetmetal/reference.md");
+    let start = doc.find("{\"commands\":[").expect("the reference has a worked example");
+    let end = start + doc[start..].find("```").expect("the example's code block ends");
+    let example: Value = serde_json::from_str(&doc[start..end]).expect("the example is JSON");
+    let mut s = server();
+    tool(&mut s, "batch", example);
+    // AL2 rule (2 mm, K 0.5, R 1 mm); 200x100 base; 150 mm at 90 deg / 20 mm, 50 mm at 45 deg / 15 mm.
+    let setback45 = 3.0 * 22.5f64.to_radians().tan();
+    let want = 2.0 * (200.0 * 100.0 - 150.0 * 3.0 - 50.0 * setback45 + 150.0 * (PI + 17.0) + 50.0 * (PI / 2.0 + 15.0 - setback45));
+    let volume = tool(&mut s, "measure", json!({}))["total"]["volume_mm3"].as_f64().expect("a volume");
+    assert!((volume - want).abs() < 1e-4, "the reference states {want} mm3, the build gives {volume}");
+    // The volumes the reference publishes are the ones the arithmetic gives, so a wrong number in
+    // the reference fails here instead of passing beside a correct build.
+    let published = |text: &str, after: &str| -> f64 {
+        let mut from = 0;
+        loop {
+            let at = text[from..].find(after).map(|i| from + i).unwrap_or_else(|| panic!("the reference states `{after}`"));
+            let rest = text[at + after.len()..].trim_start();
+            let number: String = rest.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+            if number.chars().any(|c| c.is_ascii_digit()) {
+                return number.parse().expect("a volume");
+            }
+            from = at + after.len();
+        }
+    };
+    let stated = published(doc, "folded volume ");
+    assert!((stated - want).abs() < 1e-6, "the reference states {stated} mm3 for the example, the arithmetic gives {want}");
+    let leg45 = 15.0 - setback45;
+    let want_three = 2.0 * (200.0 * 100.0 - 150.0 * 3.0 - 50.0 * setback45 + 100.0 * (PI + 17.0) + 50.0 * (PI + 12.0) + 50.0 * (PI / 2.0 + leg45));
+    let stated_three = published(doc, "volume of ");
+    assert!(
+        (stated_three - want_three).abs() < 1e-6,
+        "the reference states {stated_three} mm3 for the three-stretch variant, the arithmetic gives {want_three}"
+    );
+    let reply = tool(&mut s, "execute", json!({"command":"sheet.export_bend_table","params":{"format":"json"}}));
+    let table: Value = serde_json::from_str(reply["text"].as_str().expect("a JSON bend table")).expect("the bend table is JSON");
+    let bends = table["bends"].as_array().expect("bends");
+    assert_eq!(bends.len(), 2, "{table}");
+    let num = |b: &Value, k: &str, i: usize| b[k][i].as_f64().expect("a coordinate");
+    for (bend, (length, angle, allowance)) in bends.iter().zip([(150.0, 90.0, PI), (50.0, 45.0, PI / 2.0)]) {
+        assert!((bend["length"].as_f64().expect("a length") - length).abs() < 1e-9, "{table}");
+        assert!((bend["angle_deg"].as_f64().expect("an angle") - angle).abs() < 1e-9, "{table}");
+        assert!((bend["allowance"].as_f64().expect("an allowance") - allowance).abs() < 1e-9, "{table}");
+        assert_eq!(bend["direction"], "up", "{table}");
+    }
+    // The two bends' flat centre lines meet and cover the whole 200 mm edge, so the partition
+    // tiles it and the boundary sits where the request put it.
+    let span = |b: &Value| {
+        let xs = [num(b, "start", 0), num(b, "end", 0)];
+        (xs[0].min(xs[1]), xs[0].max(xs[1]), num(b, "start", 1) - num(b, "end", 1))
+    };
+    let (a0, a1, dy0) = span(&bends[0]);
+    let (b0, b1, dy1) = span(&bends[1]);
+    assert!((a1 - b0).abs() < 1e-6, "the bends meet: {table}");
+    assert!((a0.min(b0)).abs() < 1e-6 && (a1.max(b1) - 200.0).abs() < 1e-6, "the bends cover the edge: {table}");
+    assert!(dy0.abs() < 1e-9 && dy1.abs() < 1e-9, "the bend lines run along x: {table}");
+}
+
 /// The skill reference's sketch-plane table: where sketch (10, 20) lands and which way +distance goes.
 #[test]
 fn sketch_plane_axes_match_the_skill_reference() {
@@ -2933,6 +2997,8 @@ fn skills_name_only_real_tools_and_commands() {
         include_str!("../../../skills/solidcraft-mechanisms/reference.md"),
         include_str!("../../../skills/solidcraft-reporting/SKILL.md"),
         include_str!("../../../skills/solidcraft-reporting/reference/report-template.md"),
+        include_str!("../../../skills/solidcraft-sheetmetal/SKILL.md"),
+        include_str!("../../../skills/solidcraft-sheetmetal/reference.md"),
     ];
     let mut s = server();
     let tools: Vec<String> = tool_definitions().iter().filter_map(|t| t["name"].as_str()).map(str::to_owned).collect();
@@ -3231,6 +3297,59 @@ fn a_bridge_made_before_the_app_runs_connects_once_it_does() {
     app.join().unwrap();
 }
 
+/// #1989: the `cancel` tool sends `control.cancel` on the bridge's own connection, where the
+/// request still running waits, and reports what the app did: stopped, or why it can't be
+/// cancelled (a tool error). A bridge with no connection has nothing to cancel and sends nothing;
+/// headless calls always run to their end, so it refuses there.
+#[test]
+fn cancel_forwards_to_the_app_and_reports() {
+    use std::io::{BufRead, BufReader, Write};
+
+    let text = |r: &Value| r["content"][0]["text"].as_str().unwrap_or_default().to_string();
+    let mut never = crate::Remote::new("127.0.0.1:9", Some("0123456789abcdef0123456789abcdef"));
+    let r = crate::call_tool(&mut never, "cancel", &json!({}));
+    assert!(r["isError"] != json!(true) && text(&r).contains("nothing to cancel"), "{r}");
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    let app = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut lines = BufReader::new(stream.try_clone().unwrap());
+        let mut asked = Vec::new();
+        for reply in [
+            json!({"ok": true, "result": {"cancelled": 7, "method": "engine.execute", "outcome": "stopped", "note": "stopped: request 7 (`engine.execute`) was computing off the window thread; nothing was applied"}}),
+            json!({"ok": false, "cancellable": false, "error": "cannot be cancelled: request 8 (`engine.execute`) already runs in the app"}),
+        ] {
+            let mut line = String::new();
+            lines.read_line(&mut line).unwrap();
+            let req: Value = serde_json::from_str(&line).unwrap();
+            asked.push((req["method"].clone(), req["token"].clone()));
+            let mut reply = reply;
+            reply["id"] = req["id"].clone();
+            writeln!(&stream, "{reply}").unwrap();
+        }
+        asked
+    });
+    let mut remote = crate::Remote::connect_with_token(&addr, Some("0123456789abcdef0123456789abcdef")).unwrap();
+    let r = crate::call_tool(&mut remote, "cancel", &json!({}));
+    assert!(r["isError"] != json!(true), "{r}");
+    let body: Value = serde_json::from_str(&text(&r)).unwrap();
+    assert_eq!((&body["cancelled"], &body["outcome"]), (&json!(7), &json!("stopped")), "{body}");
+    let r = crate::call_tool(&mut remote, "cancel", &json!({}));
+    assert!(r["isError"] == json!(true) && text(&r).starts_with("cannot be cancelled"), "{r}");
+    let asked = app.join().unwrap();
+    assert!(asked.iter().all(|(m, t)| m == "control.cancel" && t == "0123456789abcdef0123456789abcdef"), "{asked:?}");
+
+    let mut s = server();
+    let r = raw_tool(&mut s, "cancel", json!({}));
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    assert!(r["result"]["content"][0]["text"].as_str().is_some_and(|t| t.contains("headless")), "{r}");
+    let tools = crate::tools::tool_definitions();
+    let cancel = tools.iter().find(|t| t["name"] == "cancel").unwrap();
+    let a = &cancel["annotations"];
+    assert_eq!((&a["readOnlyHint"], &a["destructiveHint"], &a["openWorldHint"]), (&json!(false), &json!(false), &json!(false)), "{a}");
+}
+
 /// An app that quits while it runs a request may have applied it: the retry then finds nothing
 /// listening, and the error says the call may have run, not just that the app is not running.
 #[test]
@@ -3518,6 +3637,48 @@ fn running_sent_right_behind_a_batch_is_not_queued_behind_it() {
     let (order, held) = running_during_a_held_batch(true);
     assert_eq!(order, [json!(2), json!(1)], "`running` first");
     assert!(held, "the app was asked `control.running` while it held the batch");
+}
+
+/// #1989 with #1618: `cancel` goes out at once, not behind the request still running as other
+/// calls are; once the app has removed or stopped it, later calls are sent without waiting for it
+/// and `pending` has nothing. One that can't be cancelled is still waited for.
+#[test]
+fn cancel_frees_the_bridge_from_a_request_still_running() {
+    use crate::backend::{Backend, STILL_RUNNING};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let stuck = std::sync::Arc::new(AtomicBool::new(false));
+    let on_window = stuck.clone();
+    let (addr, seen) = scripted_app(move |req| match req["method"].as_str() {
+        Some("engine.execute") if req["params"]["command"] == "solid.fillet" => running(),
+        Some("control.pending") => json!({"ok": true, "result": {"pending": 1, "method": "engine.execute", "done": false}}),
+        Some("control.cancel") if on_window.load(Ordering::SeqCst) => {
+            json!({"ok": false, "cancellable": false, "error": "cannot be cancelled: request 1 already runs in the app"})
+        }
+        Some("control.cancel") => json!({"ok": true, "result": {"cancelled": 1, "method": "engine.execute", "outcome": "stopped"}}),
+        _ => json!({"ok": true, "result": "ran"}),
+    });
+    let mut remote = crate::Remote::connect(&addr).unwrap();
+    remote.set_waits(quick_waits(20, 20));
+    let methods = |seen: &std::sync::Mutex<(usize, Vec<String>)>| std::mem::take(&mut seen.lock().unwrap().1);
+    assert!(remote.call("engine.execute", json!({"command": "solid.fillet"})).unwrap_err().starts_with(STILL_RUNNING));
+    methods(&seen);
+    let r = crate::call_tool(&mut remote, "cancel", &json!({}));
+    assert_ne!(r["isError"], true, "{r}");
+    assert_eq!(methods(&seen), ["control.cancel"], "sent at once");
+    assert_eq!(remote.call("document.inspect", json!({})).unwrap(), "ran");
+    assert_eq!(methods(&seen), ["document.inspect"], "not behind the stopped request");
+    assert_eq!(remote.call("control.pending", json!({})).unwrap(), json!({"pending": null}));
+
+    // One the app can't cancel stays outstanding: the next call still waits for it.
+    stuck.store(true, Ordering::SeqCst);
+    assert!(remote.call("engine.execute", json!({"command": "solid.fillet"})).is_err());
+    methods(&seen);
+    let r = crate::call_tool(&mut remote, "cancel", &json!({}));
+    assert_eq!(r["isError"], true, "{r}");
+    let e = remote.call("document.inspect", json!({})).unwrap_err();
+    assert!(e.starts_with(STILL_RUNNING) && e.contains("earlier request"), "{e}");
+    assert!(!methods(&seen).iter().any(|m| m == "document.inspect"));
+    assert_eq!(seen.lock().unwrap().0, 1, "one connection throughout");
 }
 
 /// A request still running after the wait is left to the `pending` tool: the error says so

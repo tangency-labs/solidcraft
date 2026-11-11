@@ -1257,10 +1257,11 @@ mod tests {
         model.b.push(Brep::new());
         assert!(model.wire_edges(BrepId::from_index(2))?.is_empty());
         model.b[0].set_infinite_region(None);
-        assert!(matches!(
-            model.infinite_region(b),
-            Err(SolidError::Upstream { code: 1006, .. })
-        ));
+        let missing = model.infinite_region(b);
+        assert!(
+            matches!(&missing, Err(e) if solidcore::error::upstream_status(e) == Some(1006)),
+            "{missing:?}"
+        );
         Ok(())
     }
     #[test]
@@ -1546,16 +1547,15 @@ mod tests {
         let eu = model.b[0].add_edgeuse_record(Edgeuse::default())?;
         let mut point = Point3::new(7., 8., 9.);
         let mut normal = Point3::new(3., 2., 1.);
-        assert!(matches!(
-            model.binormal(
+        assert!(model
+            .binormal(
                 (BrepId::from_index(0), eu),
                 0.5,
                 false,
                 &mut point,
                 &mut normal
-            ),
-            Err(SolidError::Upstream { code: 1007, .. })
-        ));
+            )
+            .is_err_and(|e| solidcore::error::upstream_status(&e) == Some(1007)));
         assert_eq!(point, Point3::new(7., 8., 9.));
         assert_eq!(normal, Point3::new(3., 2., 1.));
         Ok(())

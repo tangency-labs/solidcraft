@@ -154,7 +154,7 @@ impl Marks {
 }
 
 fn required<T>(value: Option<T>) -> Result<T> {
-    value.ok_or_else(|| SolidError::null_pointer(OP))
+    value.ok_or_else(|| SolidError::topology_missing(OP, "a link of the topology"))
 }
 
 fn check_mark(mark: MarkType) -> Result<()> {
@@ -679,7 +679,7 @@ fn line_parameters(
 /// classifications create stay on the B-rep, as upstream's `const` queries leave them.
 pub fn is_inner_shell(k: &mut Kernel, b: &mut Brep, faceuses: &[FaceuseId]) -> Result<bool> {
     if faceuses.is_empty() {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(OP, "there are no face uses"));
     }
     let mut samples = 3;
     if faceuses.len() < 6 {
@@ -748,7 +748,10 @@ pub fn is_inner_shell(k: &mut Kernel, b: &mut Brep, faceuses: &[FaceuseId]) -> R
     if backward > forward && forward == 0 && backward % 2 != 0 {
         return Ok(false);
     }
-    Err(SolidError::sm_err(OP))
+    Err(SolidError::topology_failed(
+        OP,
+        "the rays do not decide whether the shell is inner",
+    ))
 }
 
 #[cfg(test)]
