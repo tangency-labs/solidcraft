@@ -423,7 +423,7 @@ fn power_basis(ctrl: &[f64]) -> Poly {
     let n = ctrl.len().saturating_sub(1);
     (0..=n)
         .map(|k| {
-            let sign = |i: usize| if (k - i) % 2 == 0 { 1.0 } else { -1.0 };
+            let sign = |i: usize| if (k - i).is_multiple_of(2) { 1.0 } else { -1.0 };
             let sum: f64 = (0..=k).map(|i| sign(i) * choose(k, i) * ctrl.get(i).copied().unwrap_or(0.0)).sum();
             choose(n, k) * sum
         })
@@ -549,15 +549,22 @@ fn curve_line_near(a: Vec2, b: Vec2, s: &Seg2, curve: &[Poly; 3], near: f64) -> 
 /// Whether point `p` lies inside loop `l`, exactly: a ray from it toward +x crosses the loop an
 /// odd number of times. Each segment is taken in pieces along which y only rises or only falls,
 /// each holding its lower end and not its upper one, so that a ray through a corner counts once.
+/// A corner is one point of the loop, read once: each segment ends where the next one starts (as
+/// a loop's segments do), never at its own end reckoned again. An arc's end is reckoned from its
+/// angle, and lies a rounding off the start it meets where the two angles differ by a turn (a
+/// whole circle's end, at 2π, and its start, at 0): read twice, a ray level with that corner
+/// would cross it on one side and not on the other.
 pub(crate) fn holds(l: &Loop2, p: Vec2) -> bool {
-    l.segs.iter().map(|s| ray_crossings(s, p)).sum::<usize>() % 2 == 1
+    let ends = l.segs.iter().skip(1).chain(l.segs.first()).map(Seg2::start);
+    l.segs.iter().zip(ends).map(|(s, end)| ray_crossings(s, end, p)).sum::<usize>() % 2 == 1
 }
 
-/// How many times a ray from `p` toward +x crosses segment `s` (see [`holds`]).
-fn ray_crossings(s: &Seg2, p: Vec2) -> usize {
+/// How many times a ray from `p` toward +x crosses segment `s`, which ends at `end`, the start of
+/// the next segment of its loop (see [`holds`]).
+fn ray_crossings(s: &Seg2, end: Vec2, p: Vec2) -> usize {
     let counts = |y0: f64, y1: f64| (y0 > p.y) != (y1 > p.y);
     match *s {
-        Seg2::Line { a, b } => usize::from(counts(a.y, b.y) && a.x + (p.y - a.y) * (b.x - a.x) / (b.y - a.y) > p.x),
+        Seg2::Line { a, .. } => usize::from(counts(a.y, end.y) && a.x + (p.y - a.y) * (end.x - a.x) / (end.y - a.y) > p.x),
         Seg2::Arc { center, radius, start, sweep } => {
             // Pieces between the arc's ends and its circle's top and bottom.
             let (lo, hi) = (start.min(start + sweep), start.max(start + sweep));
@@ -573,7 +580,7 @@ fn ray_crossings(s: &Seg2, p: Vec2) -> usize {
             stops.sort_by(f64::total_cmp);
             let y_at = |t: f64| match t {
                 t if t <= 0.0 => s.start().y,
-                t if t >= 1.0 => s.end().y,
+                t if t >= 1.0 => end.y,
                 t => center.y + radius * (start + sweep * t).sin(),
             };
             stops
@@ -596,18 +603,19 @@ fn ray_crossings(s: &Seg2, p: Vec2) -> usize {
             stops.push(1.0);
             stops.sort_by(f64::total_cmp);
             let level = plus(y, w, -p.y);
+            let at = |t: f64| if t >= 1.0 { end } else { curve_at(s, &curve, t) };
             stops
                 .windows(2)
                 .filter(|win| {
                     let &[t0, t1] = *win else { return false };
-                    let (y0, y1) = (curve_at(s, &curve, t0).y, curve_at(s, &curve, t1).y);
+                    let (y0, y1) = (at(t0).y, at(t1).y);
                     if !counts(y0, y1) {
                         return false;
                     }
                     // y only rises or only falls along the piece: one root of y − p.y w in it, at
                     // its lower end where it holds that.
                     if eval(&level, t0) == 0.0 {
-                        return curve_at(s, &curve, t0).x > p.x;
+                        return at(t0).x > p.x;
                     }
                     let (mut lo, mut hi) = (t0, t1);
                     let below = eval(&level, lo) < 0.0;
@@ -1368,7 +1376,7 @@ mod tests {
     use solidcore_record::{Loop2, Region2, Seg2, Vec2};
     use solidcraft_geom::prelude::*;
 
-    use super::reaches;
+    use super::{holds, reaches};
 
     /// How near points are one, as a body reads them.
     const NEAR: f64 = 1e-6;
@@ -1449,5 +1457,27 @@ mod tests {
         ]);
         let e = reaches(&g, &[curved], NEAR).err().unwrap_or_default();
         assert!(e.contains("not supported yet"), "{e}");
+    }
+
+    /// A circle of radius 2 round (15, 6), as one arc and as two halves, each either way round (a
+    /// hole runs clockwise): a point is held only inside it, level with its arcs' ends too. A whole
+    /// turn's end, at 2π, can read a rounding off its start, at 0; a corner read at two heights let
+    /// a ray level with it cross the circle's left side and not its right, so a point left of the
+    /// circle was inside it (a carried cut-out of the flat lost its piece, beside another in the
+    /// same row). Each corner is now read once, from the next edge's start.
+    #[test]
+    fn a_point_level_with_a_circles_ends_is_held_only_inside_it() {
+        let c = Vec2::new(15.0, 6.0);
+        let one = Loop2::circle(c, 2.0);
+        let arc = |start: f64| Seg2::Arc { center: c, radius: 2.0, start, sweep: PI };
+        let halves = Loop2 { segs: vec![arc(0.0), arc(PI)] };
+        for l in [one.clone(), one.reversed(), halves.clone(), halves.reversed()] {
+            let levels: Vec<f64> = l.segs.iter().flat_map(|s| [s.start().y, s.end().y]).chain([6.0]).collect();
+            for y in levels {
+                for (x, inside) in [(8.0, false), (15.0, true), (20.0, false)] {
+                    assert_eq!(holds(&l, Vec2::new(x, y)), inside, "({x}, {y:e}) in {l:?}");
+                }
+            }
+        }
     }
 }
