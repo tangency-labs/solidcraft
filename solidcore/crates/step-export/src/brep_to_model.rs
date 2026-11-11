@@ -773,12 +773,13 @@ mod tests {
                 api::create_torus(&mut kernel, origin, 5.0, 1.5).unwrap(),
             ),
         ];
-        // A surface of revolution of a line and an extrusion of a circle (its u an
-        // angle), each a one-face sheet: 20 mm tall at radius 10 about the z axis.
+        // A surface of revolution of a line and an extrusion of a circle (u an angle
+        // on both), each a one-face sheet: 20 mm tall at radius 10 about the z axis.
         let x = Vec3::new(1.0, 0.0, 0.0);
         let y = Vec3::new(0.0, 1.0, 0.0);
         let mut line =
             Line::from_points(Point3::new(10.0, 0.0, 0.0), Point3::new(10.0, 0.0, 20.0), 3);
+        // SurfOfRevolution::new revolves the generator's NURB form
         line.make_nurb().unwrap();
         let revolved_line = SurfOfRevolution::new(
             &kernel,
@@ -826,6 +827,7 @@ mod tests {
             let (mut brep, _) =
                 sheet_on(&mut kernel, surface, 1e-6).unwrap_or_else(|e| panic!("{name}: {e}"));
             // the sheet's sides have no UV curves yet: each edge use gets its own
+            // (no distance or deviation wanted, a UV-space curve is fine)
             for edgeuse in edgeuses(&brep, None).unwrap() {
                 get_or_create_uv_trim_curve(&kernel, &mut brep, edgeuse, false, false, true)
                     .unwrap()
