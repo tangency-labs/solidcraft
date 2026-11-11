@@ -30,6 +30,7 @@
 #![cfg_attr(not(test), deny(clippy::float_arithmetic))]
 
 pub mod blend;
+pub mod blend_definition;
 pub mod body;
 pub mod boolean;
 pub mod cancel;
