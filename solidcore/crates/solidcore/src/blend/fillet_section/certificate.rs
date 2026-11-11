@@ -37,7 +37,7 @@
 //! | `PieceRows`, `tighten_level` (private) | — (not the fork's: a level's Taylor models taken only where they can change its verdict, #14405) |
 //! | [`TightPiece`], [`PieceInputs`], `resolve_pending`, `tighten_feet`, `gate` (private) | — (not the fork's: the feet's Taylor models, [`super::feet_tm`], taken only where they can change a level's verdict, #14405) |
 //! | `gn_try!` (private)               | `SM_GN_TRY`                             |
-//! | [`EndContinuation`], [`nurbs_partials_over_box_ending`] | (not the fork's: #14284) |
+//! | [`EndContinuation`], [`ConeAxis`], [`nurbs_partials_over_box_ending`] | (not the fork's: #14284) |
 //!
 //! Deviations:
 //! - **Out-params.** Every function returns its results. `sm_GnEnclose`'s `rbProved` FALSE
@@ -50,7 +50,7 @@
 //!   bounds, `gn_certify_span` the bound it has so far. Only a truncation past the series'
 //!   fixed size (`n > SM_GN_MAXE`, which the fork leaves to its callers) is an `Err`.
 //! - **Bounds.** Every loop is the fork's, with its fixed counts (8 Krawczyk steps, 200
-//!   contraction steps, levels 0..=6); there is no recursion.
+//!   contraction steps, levels 0..=`SPAN_MAX_LEVEL` = 6); there is no recursion.
 //! - **Cancellation (#2136, #2371).** `gn_certify_span` polls the kernel's cancel token
 //!   once per level, per piece's end station and per piece's bound; a cancel passes through
 //!   `SM_GN_TRY` and the unsolved-piece fallback as `Cancelled` instead of proving
@@ -121,8 +121,10 @@
 //!   every feet's box past a face's knots, so a round ending flush with its support's end
 //!   (a foot on the net's domain edge) proves nothing on its last pieces. Here a support whose
 //!   kind is a line along one of its NURB directions continues that direction past the net:
-//!   a plane in both, a cylinder (`Cone::is_cylinder`) or an
-//!   extrusion along its line ([`EndContinuation::of`]), where the net is of degree 1 in it.
+//!   a plane in both, a cone (a cylinder among them) or an extrusion along its line
+//!   ([`EndContinuation::of`]), where the net is of degree 1 in it; a cone's continuation
+//!   may not reach its apex, the cone's one point on its axis ([`ConeAxis`], from the cone's
+//!   definition): the part's distance from the axis is proved above 0.
 //!   The part of the box past the end takes the end span's polynomial, which for a degree-1
 //!   direction is the face's edge jet continued, `P(u, v_e) + (v - v_e) P_v(u, v_e)`: the
 //!   same polynomial on both sides of the end, so the feet's system is smooth to every order
@@ -130,7 +132,7 @@
 //!   the system C^1 for Krawczyk's mean-value form) needs. That this continuation is the
 //!   support's definition (the plane's point, the cylinder's or extrusion's line at that
 //!   parameter) is the kind's, and the closed-form tests show it. Every other support, a
-//!   cone among them, and a direction of degree above 1 are refused past their end by name
+//!   cone's part reaching its apex, and a direction of degree above 1 are refused past their end by name
 //!   ([`crate::error::Reason::FootPastDomainEnd`]), the one refusal `SM_GN_TRY` passes on;
 //!   any other failed evaluation still proves nothing.
 //! - **Indices.** Knots and nets are read by checked indices (a knot or a coordinate
@@ -156,6 +158,9 @@ use crate::surface::surface::Surface;
 const OP: &str = "blend::fillet_section::certificate";
 /// The most Krawczyk steps that tighten a proved feet's box ([`gn_enclose_over`]).
 const TIGHTEN_STEPS: usize = 2;
+/// The finest level [`gn_certify_span`] cuts a span to: `2^SPAN_MAX_LEVEL` equal pieces
+/// (the fork's).
+pub(crate) const SPAN_MAX_LEVEL: u32 = 6;
 const OP_CERTIFY_SPAN: &str = "blend::fillet_section::certificate::gn_certify_span";
 
 /// `SM_GN_TRY(a)`: a failed evaluation proves nothing, the enclosing function returns
@@ -962,28 +967,59 @@ const FOOT_PAST_END: &str =
 /// (not the fork's, tangency-labs/solidcraft#14284), decided by the support's kind alone: a
 /// direction in which the kind is a line, so the net's degree-1 end span continued is the
 /// support there. See the module docs.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct EndContinuation {
     /// The NURB's u continues.
     pub u: bool,
     /// The NURB's v continues.
     pub v: bool,
+    /// A cone's axis (not a cylinder's), which a continuation may not meet: its lines meet
+    /// on it at the apex and run on onto the other nappe, not the face. `None` for a kind
+    /// with no apex.
+    pub apex: Option<ConeAxis>,
+}
+
+/// A cone's axis from its definition: the point `origin` on it and its unit direction
+/// `axis`. The cone meets its axis only at its apex.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ConeAxis {
+    /// A point of the axis (the cone's origin).
+    pub origin: [f64; 3],
+    /// The axis' unit direction.
+    pub axis: [f64; 3],
 }
 
 impl EndContinuation {
-    /// The directions `surface`'s kind is a line in: a plane both; a cylinder its axial
-    /// direction (the NURB's v, or u where its parameters are swapped); an extrusion its
-    /// extrusion direction (likewise); none for every other kind, a cone included.
+    /// The directions `surface`'s kind is a line in: a plane both; a cone (a cylinder among
+    /// them) its generator direction (the NURB's v, or u where its parameters are swapped),
+    /// with its apex where it has one; an extrusion its extrusion direction (likewise); none
+    /// for every other kind.
     #[must_use]
     pub fn of(surface: &Surface) -> Self {
         use crate::surface::surface::p2::SurfaceKind;
         let along = |swapped: bool| Self {
             u: swapped,
             v: !swapped,
+            apex: None,
         };
         match surface.kind() {
-            SurfaceKind::Plane(_) => Self { u: true, v: true },
-            SurfaceKind::Cone(c) if c.is_cylinder() => along(c.canonical().swap_uv),
+            SurfaceKind::Plane(_) => Self {
+                u: true,
+                v: true,
+                apex: None,
+            },
+            SurfaceKind::Cone(c) => {
+                let canonical = c.canonical();
+                let mut e = along(canonical.swap_uv);
+                if !c.is_cylinder() {
+                    let (o, z) = (canonical.origin.origin(), canonical.origin.z_axis());
+                    e.apex = Some(ConeAxis {
+                        origin: [o.x, o.y, o.z],
+                        axis: [z.x, z.y, z.z],
+                    });
+                }
+                e
+            }
             SurfaceKind::SurfOfExtrusion(e) => along(e.swap_uv()),
             _ => Self::default(),
         }
@@ -1049,6 +1085,24 @@ pub fn nurbs_partials_over_box_ending(
     for &(a0, a1, ku) in &us {
         for &(b0, b1, kv) in &vs {
             let p = nurbs_partials_over_piece(cn, ku, kv, a0, a1, b0, b1, lk)?;
+            // a part past an end of a cone may not reach its apex, the one point of the cone
+            // on its axis: the part's points must be proved off the axis (the part is
+            // connected and holds the end's points, so it then lies wholly on the face's
+            // nappe)
+            let past = a0 < u0 || a1 > u1 || b0 < v0 || b1 > v1;
+            if let (true, Some(cone)) = (past, ends.apex) {
+                let x = p.at(0, 0);
+                let [ox, oy, oz] = cone.origin.map(Ivl::from);
+                let [zx, zy, zz] = cone.axis.map(Ivl::from);
+                let (dx, dy, dz) = (x.x - ox, x.y - oy, x.z - oz);
+                let h = dx * zx + dy * zy + dz * zz;
+                // the radial vector, off the axis: proved nonzero where one of its coordinates
+                // is bounded away from 0 over the part
+                let radial = [dx - h * zx, dy - h * zy, dz - h * zz];
+                if !radial.iter().any(|c| c.mig() > 0.0) {
+                    return Err(refused());
+                }
+            }
             out = Some(match out {
                 None => p,
                 Some(h) => partials_hull(h, &p, lk),
@@ -3751,7 +3805,7 @@ pub fn gn_certify_span_reusing(
     // feet's Taylor models are taken only while it is at most the target (#14405)
     let mut lb = 0.0_f64;
     // a halved span's pieces over this half: its level one coarser than theirs
-    let mut start = reuse.start.min(6);
+    let mut start = reuse.start.min(SPAN_MAX_LEVEL);
     let inherit = reuse.inherit;
     if let Some(pieces) = inherit.and_then(|l| covering(l, a.s, b.s)) {
         start = inherit.map_or(1, |l| l.level.max(1));
@@ -3794,7 +3848,7 @@ pub fn gn_certify_span_reusing(
     }
     // the last level whose end stations were all solved, and those stations
     let mut solved_ends: Option<(u32, Vec<GnStation>)> = None;
-    for level in start..=6_u32 {
+    for level in start..=SPAN_MAX_LEVEL {
         k.check_cancelled(OP_CERTIFY_SPAN)?;
         let pieces = 1_usize << level;
         let coarser = match &solved_ends {
@@ -4886,7 +4940,14 @@ mod tests {
         let o = Vec3::new(1.0, 2.0, 3.0);
         let fp = plane(o, Vec3::X, Vec3::Y);
         let ends = EndContinuation::of(&fp);
-        assert_eq!(ends, EndContinuation { u: true, v: true });
+        assert_eq!(
+            ends,
+            EndContinuation {
+                u: true,
+                v: true,
+                apex: None
+            }
+        );
         let n = nurbs(&k, &fp);
         // on the domain: the same enclosure
         let inside =
@@ -4942,7 +5003,14 @@ mod tests {
         cyl.make_nurb(&k).unwrap();
         let fc = Surface::from(cyl);
         let ends = EndContinuation::of(&fc);
-        assert_eq!(ends, EndContinuation { u: false, v: true });
+        assert_eq!(
+            ends,
+            EndContinuation {
+                u: false,
+                v: true,
+                apex: None
+            }
+        );
         let n = nurbs(&k, &fc);
         assert_eq!(n.q, 1, "the cylinder's net is of degree 1 along its axis");
         let (u0, u1) = (knot(&n.u, n.p as isize), knot(&n.u, n.nu as isize));
@@ -5407,6 +5475,250 @@ mod tests {
         assert!(old_failed >= 8, "{old_failed}");
         assert!(ratios.len() >= 4 * 4, "{}", ratios.len());
         assert!(median > 100.0, "{median}");
+    }
+
+    /// A cone of `bot` radius at z = 0 to `top` at z = `height` about the z axis, a whole
+    /// turn, its NURB made.
+    fn upright_cone(k: &Kernel, bot: f64, top: f64, height: f64) -> Surface {
+        let mut c = Cone::new_bounded(
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            bot,
+            top,
+            0.0,
+            360.0,
+            height,
+            false,
+            false,
+            false,
+        );
+        c.make_nurb(k).unwrap();
+        Surface::from(c)
+    }
+
+    /// #14284's cone: a cone continues past its net's ends along its generator only, where
+    /// its feet's box holds the cone's own point `r(h) (cos t X + sin t Y) + h Z` past the
+    /// top (`r(h)` its radius at height `h`, `t` the edge point's angle), and `S_v` holds the
+    /// generator; past a u end it is refused, and so is a continued part that reaches the
+    /// apex (the cone's one point on its axis).
+    #[test]
+    fn a_cone_s_box_continues_along_its_generator() {
+        let k = Kernel::default();
+        let (bot, top, height) = (5.0, 3.0, 4.0);
+        let fc = upright_cone(&k, bot, top, height);
+        let ends = EndContinuation::of(&fc);
+        assert!(!ends.u && ends.v && ends.apex.is_some(), "{ends:?}");
+        let n = nurbs(&k, &fc);
+        assert_eq!(n.q, 1, "the cone's net is of degree 1 along its generator");
+        let (u0, u1) = (knot(&n.u, n.p as isize), knot(&n.u, n.nu as isize));
+        let (v0, v1) = (knot(&n.v, n.q as isize), knot(&n.v, n.nv as isize));
+        // the cone's own point: height along v (an affine map of the net's v, read at its ends)
+        let at = |u: f64, v: f64| fc.evaluate_point(&k, Vec2::new(u, v)).unwrap();
+        for u in [u0 + 0.3 * (u1 - u0), u0 + 0.7 * (u1 - u0)] {
+            let (h0, h1) = (at(u, v0).z, at(u, v1).z);
+            let rate = (h1 - h0) / (v1 - v0);
+            let edge = at(u, v1);
+            let t = edge.y.atan2(edge.x);
+            let radius = |h: f64| bot + (top - bot) * h / height;
+            let cone = |h: f64| Vec3::new(radius(h) * t.cos(), radius(h) * t.sin(), h);
+            let (va, vb) = (v1 - 0.5 * (v1 - v0), v1 + 0.2 * (v1 - v0));
+            let e = nurbs_partials_over_box_ending(&n, ends, u, u, va, vb, 1, FEET_BOX_CONTINUITY)
+                .unwrap();
+            for v in [va, v1, 0.5 * (v1 + vb), vb] {
+                let p = cone(h1 + (v - v1) * rate);
+                assert!(
+                    holds(e.at(0, 0), p),
+                    "({u}, {v}): {p:?} not in {:?}",
+                    e.at(0, 0)
+                );
+            }
+            let generator = cone(h1 + rate) - cone(h1);
+            assert!(
+                holds(e.at(0, 1), generator),
+                "{:?} against {generator:?}",
+                e.at(0, 1)
+            );
+        }
+        // past a u end: no continuation there
+        let past_u = nurbs_partials_over_box_ending(
+            &n,
+            ends,
+            u1 - 0.1,
+            u1 + 0.1,
+            v0,
+            v1,
+            1,
+            FEET_BOX_CONTINUITY,
+        );
+        assert!(
+            matches!(past_u, Err(SolidError::Unsupported { reason, .. }) if reason == FOOT_PAST_END),
+            "{past_u:?}"
+        );
+        // a cone whose apex lies just past its top: a continuation reaching it is refused
+        let pointed = upright_cone(&k, 5.0, 0.05, 4.0);
+        let pn = nurbs(&k, &pointed);
+        let pe = EndContinuation::of(&pointed);
+        let (w0, w1) = (knot(&pn.v, pn.q as isize), knot(&pn.v, pn.nv as isize));
+        let pu = knot(&pn.u, pn.p as isize)
+            + 0.3 * (knot(&pn.u, pn.nu as isize) - knot(&pn.u, pn.p as isize));
+        let short = nurbs_partials_over_box_ending(
+            &pn,
+            pe,
+            pu,
+            pu,
+            w1 - 0.1 * (w1 - w0),
+            w1 + 0.001 * (w1 - w0),
+            1,
+            FEET_BOX_CONTINUITY,
+        );
+        assert!(short.is_ok(), "short of the apex: {short:?}");
+        let through = nurbs_partials_over_box_ending(
+            &pn,
+            pe,
+            pu,
+            pu,
+            w1 - 0.1 * (w1 - w0),
+            w1 + 0.1 * (w1 - w0),
+            1,
+            FEET_BOX_CONTINUITY,
+        );
+        assert!(
+            matches!(through, Err(SolidError::Unsupported { reason, .. }) if reason == FOOT_PAST_END),
+            "{through:?}"
+        );
+    }
+
+    /// #14284's cone, a closed form: a ball of radius r between the plane z = 0 and an
+    /// upright cone of semi-angle a (radius `bot` at z = 0) about the z axis, rolled round
+    /// it. Its centre is the circle of radius `rho = bot + r (1 - sin a) / cos a` at height
+    /// r; its feet are `(rho, theta, 0)` on the plane and `(rho - r cos a, theta, r (1 -
+    /// sin a))` on the cone, at the height where the cone ends (its top), so the feet's box
+    /// crosses the cone net's v end. With the cone continued (its generator), the feet are
+    /// proved and hold the closed form; with the cone given as a plain B-spline (the same
+    /// net, continuing nothing), the span is refused `FootPastDomainEnd`, nothing certified.
+    /// (No procedural round of a cone ends where its cone ends: a cone standing on a plate
+    /// rounds its root round a closed circle, so this is the end's case at the certificate.)
+    #[test]
+    fn a_ball_between_a_plane_and_a_cone_is_proved_at_the_cone_s_end() {
+        let k = Kernel::default();
+        let (bot, r) = (5.0, 2.0);
+        let a = 30.0_f64.to_radians();
+        let foot_h = r * (1.0 - a.sin());
+        let top = bot - foot_h * a.tan();
+        let fp = plane(Vec3::ZERO, Vec3::X, Vec3::Y);
+        let fc = upright_cone(&k, bot, top, foot_h);
+        let rho = bot + r * (1.0 - a.sin()) / a.cos();
+        let frame = Axis2Placement::new(Vec3::new(0.0, 0.0, r), Vec3::X, Vec3::Y);
+        let leader = BSplineCurve::create_circle_segment(
+            3,
+            &frame,
+            rho,
+            10.0,
+            80.0,
+            NurbCircleParam::Quadratic,
+        )
+        .unwrap();
+        let ln = NurbsCurve::of(&leader).unwrap();
+        let (np, nc) = (nurbs(&k, &fp), nurbs(&k, &fc));
+        let faces = [&fp, &fc];
+        let lpt = |s: f64| leader.evaluate_point(s).unwrap();
+        let foot_c = |s: f64| {
+            let l = lpt(s);
+            let q = (rho - r * a.cos()) / rho;
+            Vec3::new(l.x * q, l.y * q, foot_h)
+        };
+        // the sides: the plane's normal is +z, towards the ball; the cone's by its net
+        let (cu, cv) = nearest_uv(&nc, foot_c(0.45));
+        let pc = nurbs_partials(
+            &nc,
+            span(&nc.u, nc.p, nc.nu, cu),
+            span(&nc.v, nc.q, nc.nv, cv),
+            cu,
+            cv,
+            1,
+        );
+        let nrm = vec3(pc.at(1, 0)).cross(vec3(pc.at(0, 1)));
+        let out = Vec3::new(foot_c(0.45).x, foot_c(0.45).y, 0.0);
+        let side_c = if nrm.dot(out) > 0.0 { 1.0 } else { -1.0 };
+        let (rr, side) = ([r, r], [1.0, side_c]);
+        let st = |s: f64| {
+            let l = lpt(s);
+            let (u, v) = nearest_uv(&nc, foot_c(s));
+            station(&k, faces, &leader, s, [l.x, l.y, u, v], rr, side)
+        };
+        // the span cut as `gn_certify_span` cuts it, `2^level` equal pieces, the level
+        // raised to `SPAN_MAX_LEVEL` until every piece is proved. At level 0 (0.02 long)
+        // Krawczyk's test fails (`gn_enclose` proves nothing) with the foot inside the cone
+        // (a cone twice as tall) as at its end: the span's length, not the end. Past the end
+        // the box is enclosed on the cone's own generator (`nurbs_partials_over_box_ending`,
+        // which `partials_on` takes for a definition's box too), the end span continued.
+        let (s0, s1) = (0.4, 0.42);
+        let piece = |lo: f64, hi: f64| {
+            let (sta, stb) = (st(lo), st(hi));
+            SpanAt {
+                s: Ivl::new(lo, hi),
+                xa: core::array::from_fn(|c| sta.x[c].at(0, 0)),
+                xb: core::array::from_fn(|c| stb.x[c].at(0, 0)),
+                ku: [0; 2],
+                kv: [0; 2],
+                leader: None,
+                piecewise: true,
+            }
+        };
+        let enclose = |at: &SpanAt, ends| {
+            gn_enclose_over(&k, [&np, &nc], &ln, at, rr, side, 0, 2, None, None, ends)
+        };
+        let continued = [EndContinuation::of(&fp), EndContinuation::of(&fc)];
+        let free = Surface::from(as_b_spline(&k, &fc).unwrap().unwrap().into_owned());
+        let plain = [EndContinuation::of(&fp), EndContinuation::of(&free)];
+        let mut proved = None;
+        for level in 0..=SPAN_MAX_LEVEL {
+            let pieces = 1_u32 << level;
+            let ends: Vec<f64> = (0..=pieces)
+                .map(|i| s0 + f64::from(i) / f64::from(pieces) * (s1 - s0))
+                .collect();
+            let es: Option<Vec<_>> = ends
+                .windows(2)
+                .map(|w| {
+                    let at = piece(w[0], w[1]);
+                    enclose(&at, continued).unwrap().map(|e| (at, e))
+                })
+                .collect();
+            if let Some(es) = es {
+                proved = Some((level, es));
+                break;
+            }
+        }
+        let (level, es) = proved.expect("proved by SPAN_MAX_LEVEL");
+        assert!(level >= 1, "the 0.02 span is proved at level 0");
+        for (at, e) in &es {
+            for s in [at.s.lo, at.s.hi] {
+                let (l, c) = (lpt(s), foot_c(s));
+                let fp_s = Vec3::new(l.x, l.y, 0.0);
+                for (f, want) in [(0, fp_s), (1, c)] {
+                    let x = &e.f[f];
+                    let got = V3 {
+                        x: x.a[0].c[0][0],
+                        y: x.a[1].c[0][0],
+                        z: x.a[2].c[0][0],
+                    };
+                    assert!(
+                        holds(got, want),
+                        "level {level}: foot {f} at s {s}: {want:?} not in {got:?}"
+                    );
+                }
+            }
+            // the same net continuing nothing: refused by name on every piece
+            let refused = enclose(at, plain);
+            let Err(SolidError::Failed(f)) = &refused else {
+                panic!("{refused:?}")
+            };
+            let crate::error::Reason::FootPastDomainEnd { support, .. } = &f.reason else {
+                panic!("{f:?}")
+            };
+            assert_eq!(*support, 1);
+        }
     }
 
     #[test]
