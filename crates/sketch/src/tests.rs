@@ -2183,3 +2183,25 @@ fn a_mirrored_fillet_over_three_quarters_of_a_turn_stays_the_arc_its_lines_leave
     assert!((sweep_deg(&sk, arc) - 300.0).abs() < 1e-6, "sweep {}", sweep_deg(&sk, arc));
     assert!(lines_leave_the_arc(&sk, arc, [l1, l2]));
 }
+
+/// A short piece with no other piece beside it is a gap, not a point (#14520 review): a square
+/// whose top-left ends miss by 0.00003 splits its left side where the top line ends, and the
+/// 0.00003 piece left above that stays open, as the import's tighter join tolerance asked.
+#[test]
+fn profiles_keep_a_lone_short_piece_open() {
+    let mut sk = Sketch::new();
+    let p = |sk: &mut Sketch, x: f64, y: f64| sk.add_point(v(x, y), None).unwrap();
+    let bottom_left = p(&mut sk, 0.0, 0.0);
+    let bottom_right = p(&mut sk, 10.0, 0.0);
+    let right_bottom = p(&mut sk, 10.00005, 0.0);
+    let top_right = p(&mut sk, 10.0, 10.0);
+    let top_left = p(&mut sk, 0.0, 10.0);
+    let left_top = p(&mut sk, 0.0, 10.00003);
+    let left_bottom = p(&mut sk, 0.0, 0.00004);
+    sk.add_line_pts(bottom_left, bottom_right, None).unwrap();
+    sk.add_line_pts(right_bottom, top_right, None).unwrap();
+    sk.add_line_pts(top_right, top_left, None).unwrap();
+    sk.add_line_pts(left_top, left_bottom, None).unwrap();
+    let ps = find_profiles(&sk);
+    assert!(ps.is_empty(), "{ps:?}");
+}
