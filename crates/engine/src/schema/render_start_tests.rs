@@ -22,6 +22,16 @@ fn both_commands_describe_their_parameters() {
     }
 }
 
+/// #13311: `engine.describe` gives Render Image and Check Render Request their replies too.
+#[test]
+fn both_commands_describe_their_replies() {
+    let mut s = Session::default();
+    for id in IDS {
+        let described = s.execute("engine.describe", &json!({"command": id})).unwrap_or_else(|e| panic!("{e}"));
+        assert!(described["output"].is_object(), "{id}: {described}");
+    }
+}
+
 /// The fields of the handler's reader for one form, from serde's message for an unknown key,
 /// which lists them all.
 fn handler_fields(progressive: bool) -> BTreeSet<String> {
