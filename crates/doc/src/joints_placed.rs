@@ -101,6 +101,8 @@ impl<T: Copy> ByCopy<T> {
         self.by.entry((occurrence, inner)).or_default().push((through, value));
     }
 
+    /// The value for the copy of `inner` that `occurrence` has under exactly the occurrences
+    /// `through`, if there is one.
     fn get(&self, occurrence: u64, through: &[u64], inner: u64) -> Option<T> {
         self.by.get(&(occurrence, inner))?.iter().find(|(under, _)| under.as_slice() == through).map(|(_, value)| *value)
     }
@@ -216,6 +218,8 @@ struct Index<'a> {
 }
 
 impl<'a> Index<'a> {
+    /// The lookups for `doc`. Where an id or a component comes more than once in its occurrences,
+    /// the first one is kept: the one `first_chain`'s own searches find.
     fn of(doc: &'a Document) -> Self {
         let (mut at, mut first) = (HashMap::new(), HashMap::new());
         for o in &doc.occurrences {

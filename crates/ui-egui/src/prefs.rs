@@ -6559,6 +6559,9 @@ mod tests {
         assert!(!h.app.preferences.extrude_view_isometric && !h.app.preferences.extrude_view_return);
     }
 
+    /// Each preference listed is reset by the Reset of the page that owns it and by no other
+    /// page's: set away from its default, it is back at the default only after its own page was
+    /// reset.
     #[test]
     fn moved_preferences_reset_only_on_their_new_page() {
         use super::*;

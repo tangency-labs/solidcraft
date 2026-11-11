@@ -140,6 +140,9 @@ fn world_pick(
         .ok_or_else(|| bad(cmd, format!("give `{pk}`, `{fk}` or `{pk}_plane` ([x, y, z], \"origin\", or a plane)")))
 }
 
+/// `occurrence.align`, as the module comment describes it: one rigid move in the world, from
+/// `from` to `to`, for every placement chosen. A placement that is grounded (without
+/// `move_grounded`), kept by a link or held in a rigid group refuses the whole call.
 pub(super) fn align(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "occurrence.align";
     let paths = resolve_paths(s, p, cmd)?;

@@ -54,6 +54,9 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(r)
 }
 
+/// The delete itself, on `s`: the session, or for `dry_run` a scratch copy of it, which is why
+/// it is apart from `delete`. When nothing could be deleted, the error is the first reason
+/// something was skipped.
 fn apply(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "selection.delete";
     let items: Vec<Sel> = match p.get("items") {

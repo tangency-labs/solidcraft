@@ -78,6 +78,10 @@ pub(crate) fn face_pick_form(value: &Value) -> std::result::Result<FacePickForm<
 /// that is not where the face is shown, so the sketch would not be on the face picked.
 const POSED: &str = "that face is inside a flexible occurrence of a linked subassembly that does not stand as its design has it: make the occurrence rigid (component.link_mode) first, or sketch in the linked design";
 
+/// Finds the one planar face a pick names, among the placements that show it, and gives the
+/// plane to sketch on in the active component's frame: attached to the face, which it then
+/// follows, or with `fixed` as the plane is now. `internal` lets a face that cannot keep an
+/// attachment through without one, for `capture_internal` alone.
 fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result<PlaneRef> {
     let FacePickForm { point, fixed, body: requested_body, index: requested_index, path: requested_path } =
         face_pick_form(value).map_err(|why| bad(cmd, why))?;

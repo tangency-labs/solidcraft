@@ -362,6 +362,8 @@ pub(super) fn feature_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result<u6
     }
 }
 
+/// `timeline.delete`: deletes features, and timeline folders with the features, joints and
+/// folders in them, and reports the features that worked before and fail after it.
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.delete";
     // Resolve every key against the same timeline. A cascade or a repeated key must never

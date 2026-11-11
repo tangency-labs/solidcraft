@@ -668,6 +668,8 @@ fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
     serde_json::to_value(reply).map_err(|e| bad(cmd, e.to_string()))
 }
 
+/// `component.insert_design`: links a design file in as a new component, or with `reuse` as one
+/// more occurrence of a component already linked to that file, when there is one.
 fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.insert_design";
     let given = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`path` is required"))?;
@@ -929,6 +931,9 @@ pub(super) fn flexible_inside_refusal(s: &Session, component: u64) -> Option<Str
     ))
 }
 
+/// `component.update_links`: reads the linked designs again and takes in what changed: the
+/// bodies, the names of their faces, the properties they inherit and, for a link that keeps its
+/// design's components, where the design has them and what it calls them.
 fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.update_links";
     let only = match (p.get("component"), p.get("components")) {
@@ -1470,6 +1475,8 @@ fn take_design(
     Ok((path, geometry_changed, warnings, kept))
 }
 
+/// `component.break_link`: the component keeps its bodies and forgets the design file. The
+/// joints and poses its flexible occurrences had for themselves go with the link.
 fn break_link(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.break_link";
     let comp = component_key(s, p, "component", cmd)?;
@@ -1487,6 +1494,8 @@ fn break_link(s: &mut Session, p: &Value) -> Result<Value> {
     reply(cmd, BreakLinkResult { component: comp, path, param_warnings: Vec::new() })
 }
 
+/// `component.links`: every linked component with its design file, whether the file is there and
+/// still what this design last read, and how the link keeps the design.
 fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
     let links: Vec<LinkInfo> = s
         .doc

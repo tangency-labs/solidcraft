@@ -417,6 +417,9 @@ struct WorldCache {
 pub(crate) type BodyFrames = Arc<Vec<(String, String, solidcraft_doc::Mat)>>;
 
 impl WorldCache {
+    /// Whether this placed model is still the one `session` shows for `model`: the same design and
+    /// model, by identity, with the same pending moves, pending poses and active placement.
+    /// Whatever the placed model is made from has to be compared here, or a stale one is shown.
     fn matches(&self, session: &Session, model: &Arc<solidcraft_doc::ModelState>) -> bool {
         Arc::ptr_eq(&self.doc, &session.doc)
             && Arc::ptr_eq(&self.model, model)

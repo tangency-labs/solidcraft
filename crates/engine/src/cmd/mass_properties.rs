@@ -505,6 +505,8 @@ pub fn assembly(doc: &Document, state: &ModelState, every_placement: bool) -> Re
     Ok(AssemblyMassResult { occurrences, groups: out_groups, warnings, param_warnings: Vec::new() })
 }
 
+/// `assembly.mass_properties`: reads `every_placement` and replies with what
+/// `Session::mass_properties_listing` works out.
 fn run(s: &mut Session, p: &Value) -> Result<Value> {
     let every_placement = match p.get("every_placement") {
         None | Some(Value::Null) => false,

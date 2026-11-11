@@ -297,6 +297,8 @@ impl ContactGeometry {
         Self::frame_in(body, &s.doc)
     }
 
+    /// Where `body` stands in the world of `doc`: the occurrences of its path, one after the other,
+    /// then the body's offset. It takes a design and not the session because `travel` compares two.
     fn frame_in(body: &CachedBody, doc: &Document) -> Result<Mat> {
         let mut frame = IDENTITY;
         for (k, id) in body.path.iter().enumerate() {

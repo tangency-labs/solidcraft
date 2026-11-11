@@ -105,6 +105,9 @@ pub(super) struct Cache {
 }
 
 impl Cache {
+    /// Indexes the design for the rows, once for each evaluated design: nothing is done while the
+    /// design, its model, the sketch being edited and the two theme colours are the ones the cache
+    /// was made for.
     pub fn prepare(&mut self, app: &SolveApp) {
         let state = app.session.model.state();
         let t = Tokens::get();
@@ -165,6 +168,9 @@ impl Cache {
             .collect()
     }
 
+    /// The row of the placement at `path`, taken out of the cache for the caller to put back, and
+    /// made first when the cache has not got it. `None` when `path` leads to no placement of the
+    /// design.
     pub fn take_occurrence(&mut self, app: &mut SolveApp, path: &[u64]) -> Option<(Vec<u64>, Node)> {
         if let Some(cached) = self.occurrences.remove_entry(path) {
             return Some(cached);

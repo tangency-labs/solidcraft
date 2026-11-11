@@ -138,6 +138,10 @@ fn two_flexible() -> Document {
     doc
 }
 
+/// Two flexible occurrences of one subassembly (`two_flexible`) are solved each on its own copy
+/// of what its joints move: a side on a moved part is on a copy with an id of its own, a side on
+/// the part the design holds still stays on the occurrence. The solution names no copy's id,
+/// becomes poses of the design, and a second solve moves nothing.
 #[test]
 fn each_flexible_occurrence_has_its_own_copy_in_the_solve_and_the_design_is_not_copied() {
     let doc = two_flexible();
@@ -199,6 +203,10 @@ fn a_joint_side_is_on_a_copy_on_what_carries_it_or_on_a_second_place() {
     assert_eq!(sol.placed.len(), 3, "the other joints are solved as before");
 }
 
+/// `stand_in` by the path an occurrence inside `two_flexible`'s subassembly is picked along: what
+/// a joint moves stands on its own copy, the same occurrence in a place the joint does not reach
+/// stands for itself, and what no joint moves is carried by the subassembly's occurrence, as the
+/// arm is in a design with rigid occurrences only.
 #[test]
 fn what_the_solver_moves_for_an_occurrence_inside_a_subassembly() {
     let doc = two_flexible();
@@ -289,6 +297,10 @@ fn two_hinges_in_a_unit() -> Document {
     doc
 }
 
+/// Flexibility two levels down (`two_hinges_in_a_unit`): the flexible unit has one copy of the
+/// arm under each of its two hinges, each moved by its own joint, and this design's poses come
+/// before the one the linked design was saved with. The rigid unit goes on showing the linked
+/// design as it was saved.
 #[test]
 fn a_flexible_occurrence_has_a_copy_under_each_flexible_occurrence_inside_it() {
     let doc = two_hinges_in_a_unit();

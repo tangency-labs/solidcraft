@@ -1,6 +1,8 @@
 //! New-design defaults, with inline precision specimens.
 use super::*;
 
+/// The Design page of Preferences: every section of it, from units and precision down to linked
+/// designs and assemblies. The `prefs:` targets it publishes are what scenarios click.
 pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let label_width = [

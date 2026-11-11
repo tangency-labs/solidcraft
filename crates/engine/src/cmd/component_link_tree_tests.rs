@@ -102,6 +102,10 @@ fn placements(s: &Session, component: u64, parent: u64) -> Vec<u64> {
     s.doc.occurrences.iter().filter(|o| o.component == component && o.parent == parent).map(|o| o.id).collect()
 }
 
+/// Inserted with `structure`, a linked assembly's own components are components inside the
+/// linked one, every body is where the assembly has it, and the bill of materials counts its
+/// parts as the assembly's own design does. The insert is one undo step, and a second occurrence
+/// makes nothing twice.
 #[test]
 fn a_linked_assembly_comes_in_as_a_subassembly_and_its_parts_count_in_the_bill_of_materials() {
     let dir = scratch("nested");
@@ -221,6 +225,9 @@ fn update_links_follows_the_parts_a_linked_assembly_gains_moves_renames_and_lose
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// What a link keeps is saved with the design, in both file formats: it opens again with the
+/// same components, occurrences and link record, and an Update Links that finds nothing changed
+/// leaves it without unsaved changes.
 #[test]
 fn a_saved_assembly_reopens_with_its_subassemblies() {
     let dir = scratch("reopen");
@@ -836,6 +843,10 @@ fn a_design_inserted_flexible_brings_its_joints_and_the_list_says_which_parts_a_
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The default is as it was: without `structure`, a linked assembly is one component holding
+/// all its bodies, and Update Links keeps it so. Relink Source with `structure` makes it a
+/// subassembly or one component again, and leaves the link as it is when `structure` is left
+/// out.
 #[test]
 fn a_link_keeps_the_assembly_in_one_component_unless_asked_and_relink_changes_that() {
     let dir = scratch("flat");
@@ -878,6 +889,9 @@ fn a_link_keeps_the_assembly_in_one_component_unless_asked_and_relink_changes_th
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A link told to keep components holds to that while its design has none: the part comes in as
+/// one component, and when its design gets a component of its own, Update Links brings that in
+/// as a component inside it.
 #[test]
 fn a_part_design_links_as_one_component_and_becomes_a_subassembly_when_it_gets_components() {
     let dir = scratch("grows");

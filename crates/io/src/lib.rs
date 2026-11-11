@@ -957,6 +957,9 @@ struct Posed<'d> {
 }
 
 impl<'d> Posed<'d> {
+    /// What `doc`'s poses say, looked up once: the occurrences that have poses, with the inner
+    /// occurrences they are for, and the occurrences a copy is under. The occurrences by parent are
+    /// listed only when there is a pose, so a design without one pays for no more than this.
     fn of(doc: &'d Document, index: &'d std::collections::HashMap<u64, usize>) -> Self {
         let mut poses: std::collections::HashMap<u64, std::collections::HashSet<u64>> = std::collections::HashMap::new();
         let mut under = std::collections::HashSet::new();

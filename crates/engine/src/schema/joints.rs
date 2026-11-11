@@ -2335,6 +2335,8 @@ fn reach_required(schema: &mut Schema) {
 }
 
 impl<'de> Deserialize<'de> for ReachParams {
+    /// Reads `joint.reach`'s keys as its handler reads them. `path` only has to read as a list of
+    /// occurrence ids here: whether it is a placement of `occurrence` is the handler's to say.
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let m = keys(d)?;
         // In the handler's order.

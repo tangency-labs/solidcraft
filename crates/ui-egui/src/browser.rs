@@ -1976,6 +1976,10 @@ fn occurrence_rows(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], depth: u
     cache.occurrences.insert(path, placement);
 }
 
+/// Draws the Browser row of one placement and acts on what was done to it (fold, eye, activate,
+/// select, drag, drop, menu), then, when it is open, the rows below it: its folders, features,
+/// joints and the placements inside it. `placement` is its cached row, which `occurrence_rows`
+/// holds out of the cache meanwhile.
 fn occurrence_rows_inner(
     app: &mut SolveApp,
     ui: &mut egui::Ui,

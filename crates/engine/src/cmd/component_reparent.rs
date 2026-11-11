@@ -15,6 +15,9 @@ fn rebased(path: &[u64], from: &[u64], to: &[u64]) -> Option<Vec<u64>> {
     path.strip_prefix(from).map(|rest| to.iter().chain(rest).copied().collect())
 }
 
+/// `occurrence.reparent`, as the module comment describes it. The move is made on a scratch copy
+/// of the session and taken over only when no feature that worked before fails after it, so a
+/// refusal changes nothing.
 pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "occurrence.reparent";
     let id = occurrence(s, p, cmd)?;

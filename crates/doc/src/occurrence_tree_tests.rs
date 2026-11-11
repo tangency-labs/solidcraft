@@ -111,6 +111,9 @@ fn shapes() -> Vec<(&'static str, Document)> {
     ]
 }
 
+/// For every document of `shapes`, the tree gives the placements the scan gave, in the same
+/// order, and `inside_component` answers as its scan did. That second check tries every pair of
+/// ids, so a shape of a hundred occurrences or more is left out of it.
 #[test]
 fn the_walk_is_the_scanning_walk_for_every_shape() {
     for (name, doc) in shapes() {
@@ -148,6 +151,8 @@ fn children_are_listed_in_document_order() {
     assert!(ids(2).is_empty());
 }
 
+/// `placements_with` places each occurrence by the transform its caller gives for it, not by
+/// the occurrence's own, and what is inside a moved occurrence moves with it.
 #[test]
 fn a_walk_uses_the_transform_it_is_given() {
     let doc = with(vec![occurrence(1, 1, 0), occurrence(2, 2, 1)]);

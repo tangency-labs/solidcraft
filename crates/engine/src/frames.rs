@@ -244,6 +244,9 @@ struct Mapper<'a> {
 }
 
 impl Mapper<'_> {
+    /// A picked world point as the command is to see it: in the frame of the body under it (the
+    /// body named, when one is; the active component's frame when none is there), or in the
+    /// sketch's frame for `Here`. `None` when `v` is not a point or stays as it is.
     fn pick(&mut self, v: &Value, body: Option<&str>) -> Option<Value> {
         // `[x, y, z]` or `{x, y, z}`: a direction given with it then turns with the picked body.
         let p = crate::params::vec3(v)?;

@@ -317,6 +317,8 @@ fn solution(s: &Session, held: &joints::Held, analysis: joints::Analysis) -> joi
     joints::solve_holding_with_analysis(&s.doc, &s.model.state(), held, analysis)
 }
 
+/// Solves the joints with `held` kept, with the report `analysis` asks for, and moves the design
+/// to the solution. The design and its revision change only when something moved.
 fn resolve_with_analysis(s: &mut Session, held: &joints::Held, analysis: joints::Analysis) -> joints::Solution {
     let sol = solution(s, held, analysis);
     // `placed`: the copies flexible occurrences of linked subassemblies have of their parts.
@@ -1265,6 +1267,9 @@ fn datum_sided(j: &Joint) -> bool {
     matches!(j.a.snap, Snap::Plane { .. } | Snap::Axis { .. }) || matches!(j.b.snap, Snap::Plane { .. } | Snap::Axis { .. })
 }
 
+/// Adds joint `j` to the design and solves, for `joint.create` and the other commands that make
+/// a joint. Its sides and its starting values are settled here, and the reply is
+/// `joint.create`'s whichever command made it.
 fn add_joint(s: &mut Session, mut j: Joint, p: &Value) -> Result<Value> {
     if s.doc.assembly.joints.len() >= 10_000 {
         return Err(EngineError::Other("too many joints".into()));
@@ -1738,6 +1743,10 @@ fn held_values(s: &Session, j: &Joint, requested: &[f64], driven: &[usize], r: &
 /// Joints `joint.reach` takes at most in `joints`.
 pub(crate) const MAX_REACH_JOINTS: usize = 1000;
 
+/// `joint.reach`: moves the joints on an occurrence's chain so that a point of it comes as near
+/// as it can to a point in the world, with `z` its axis turned that way too, and says how near it
+/// got and what stopped it. A reach that can move nothing is a reply with its `reason`, not an
+/// error.
 fn reach(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "joint.reach";
     let occ = occurrence_id(s, p.get("occurrence"), cmd)?;
@@ -1889,6 +1898,10 @@ fn body_centre(s: &Session, occ: u64) -> Vec3 {
         .center()
 }
 
+/// `joint.motion_link`: one value of joint `b` follows one of joint `a`, as `ratio` times it
+/// plus `offset`, both given in the units the joints show (degrees, mm). Two joints that one
+/// flexible occurrence has from its linked design are refused: that design says how they move
+/// together.
 fn motion_link(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "joint.motion_link";
     let (a, b) = (joint_id(s, p.get("a"), cmd)?, joint_id(s, p.get("b"), cmd)?);
@@ -1956,6 +1969,8 @@ fn reverse(p: &Value) -> bool {
     bool_(p, "reverse").unwrap_or(false)
 }
 
+/// `joint.gear`: joint `b` turns with joint `a` as two gears of pitch radii `ra` and `rb` would.
+/// Both joints need a value that turns.
 fn gear(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "joint.gear";
     let (a, b) = joint_pair(s, p, cmd)?;
@@ -1970,6 +1985,8 @@ fn gear(s: &mut Session, p: &Value) -> Result<Value> {
     reply(cmd, couple(s, p, cmd, MotionLink { a, ia, b, ib, ratio: 1.0, offset: 0.0, coupling: Some(c), lift: Vec::new(), carried_cam: false })?)
 }
 
+/// `joint.rack_pinion`: a joint that turns and a joint that slides, given in either order, move
+/// together as a pinion of pitch radius `radius` and its rack.
 fn rack_pinion(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "joint.rack_pinion";
     let (a, b) = joint_pair(s, p, cmd)?;
@@ -1978,6 +1995,8 @@ fn rack_pinion(s: &mut Session, p: &Value) -> Result<Value> {
     reply(cmd, couple(s, p, cmd, MotionLink { a, ia, b, ib, ratio: 1.0, offset: 0.0, coupling: Some(c), lift: Vec::new(), carried_cam: false })?)
 }
 
+/// `joint.screw`: a turn drives a travel of `pitch` for each turn, between a joint that turns
+/// and one that slides or, with `joint`, within one joint that does both.
 fn screw(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "joint.screw";
     let (a, ia, b, ib) = match p.get("joint") {
@@ -1998,6 +2017,9 @@ fn screw(s: &mut Session, p: &Value) -> Result<Value> {
     reply(cmd, couple(s, p, cmd, MotionLink { a, ia, b, ib, ratio: 1.0, offset: 0.0, coupling: Some(c), lift: Vec::new(), carried_cam: false })?)
 }
 
+/// `joint.cam`: the follower's joint `b`, a slider or a revolute, follows the outline of a cam
+/// that turns on revolute joint `a`. The follower rides the cam from the side it is on now,
+/// unless `flip` asks for the other.
 fn cam_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "joint.cam";
     let (a, b) = joint_pair(s, p, cmd)?;
@@ -2187,6 +2209,8 @@ fn ratio_scale(s: &Session, a: u64, ia: usize, b: u64, ib: usize) -> f64 {
     unit(is_angle(s, b, ib)) / unit(is_angle(s, a, ia))
 }
 
+/// `joint.limits`: sets the limits of one value of a joint, or clears them when neither is
+/// given, then brings the joint's values inside its limits and solves.
 fn limits(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "joint.limits";
     let id = joint_id(s, p.get("joint"), cmd)?;
@@ -2369,6 +2393,8 @@ pub(super) fn delete_joints(doc: &mut solidcraft_doc::Document, ids: &[u64]) {
     }
 }
 
+/// `joint.delete`: deletes a joint with the motion links on it, or with `origin` a named joint
+/// origin, or with `link` one motion link.
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "joint.delete";
     if let Some(name) = str_(p, "origin") {

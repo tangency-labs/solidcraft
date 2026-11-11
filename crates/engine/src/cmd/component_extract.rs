@@ -682,6 +682,8 @@ impl Session {
     }
 }
 
+/// `component.extract`, as the module comment describes it. The new design's file is written
+/// last, once this design is found to look as it did before.
 pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
     let comp = component_key(s, p, "component", CMD)?;
     let sc = scope(s, comp, CMD)?;
@@ -763,6 +765,9 @@ pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
     )
 }
 
+/// `component.copies`: the components, not linked themselves, whose own history builds the same
+/// bodies as linked component `component`. Refused for a link that keeps its design's components
+/// (`kept_refusal` says why).
 pub(super) fn copies(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.copies";
     let linked = component_key(s, p, "component", cmd)?;
@@ -776,6 +781,10 @@ pub(super) fn copies(s: &mut Session, p: &Value) -> Result<Value> {
     reply(cmd, CopiesResult { copies: named(s, &found), param_warnings: Vec::new() })
 }
 
+/// `component.replace_with_link`: each component given loses its history, and its placements
+/// become placements of a linked component: the one `with` names, or the link to `path`, made
+/// here when there is none. A component that does not build the same bodies as the link refuses
+/// the call.
 pub(super) fn replace_with_link(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.replace_with_link";
     let mut targets = Vec::new();

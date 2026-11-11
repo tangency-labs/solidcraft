@@ -135,6 +135,9 @@ fn property(name: &str, value: &Value, cmd: &str) -> Result<Option<String>> {
     Ok(Some(text))
 }
 
+/// `component.metadata.set`: changes a component's part properties and free properties, all or
+/// nothing, and replies with what changed. The root is refused here: the design's own properties
+/// are `document.metadata.set`'s.
 fn set(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.metadata.set";
     let id = component_id(s, p, cmd)?;

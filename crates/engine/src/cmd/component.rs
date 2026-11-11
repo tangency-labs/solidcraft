@@ -335,6 +335,9 @@ pub(super) fn valid_position(m: &Mat) -> bool {
     solidcraft_doc::is_placement(m)
 }
 
+/// `component.create`: a new, empty component placed once in `parent` (default: the active
+/// component), and made the active one unless `activate` is false. Insert Design makes its
+/// component through this too.
 pub(super) fn new_component(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.create";
     if let Some(params) = p.as_object()
@@ -424,6 +427,8 @@ fn finish_edit(_s: &mut Session, _p: &Value) -> Result<Value> {
     serde_json::to_value(FinishEditResult::default()).map_err(|e| crate::EngineError::Other(e.to_string()))
 }
 
+/// `component.activate`: makes a component the active one, which new sketches and features go
+/// into, with the exact placement to author in when `occurrence` or `path` names one.
 fn activate(s: &mut Session, p: &Value) -> Result<Value> {
     let id = component(s, p, "component", "component.activate")?;
     // What is made in the active component is that component's: one a link keeps is its linked
@@ -447,6 +452,9 @@ fn activate(s: &mut Session, p: &Value) -> Result<Value> {
     reply(ActivateResult { active: id, param_warnings: Vec::new() })
 }
 
+/// `component.list`: the design and every component with its bodies, features, sketches,
+/// construction planes, occurrences and children, and for a component a link keeps, the linked
+/// component that keeps it. `compact` gives counts in place of names, for a large assembly.
 fn list(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.model.state();
     let doc = &s.doc;
@@ -530,6 +538,8 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
     })
 }
 
+/// `component.rename`: a new name for a component, or for the design itself when the component
+/// is the root.
 fn rename(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.rename";
     let id = component(s, p, "component", cmd)?;
@@ -559,6 +569,8 @@ fn rename(s: &mut Session, p: &Value) -> Result<Value> {
     reply(RenameResult { component: id, name: name.to_string(), param_warnings: Vec::new() })
 }
 
+/// `component.delete`: removes a component with its subcomponents, occurrences and features.
+/// The design becomes the active component when the active one was among them.
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.delete";
     let id = component(s, p, "component", cmd)?;
@@ -581,6 +593,9 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     reply(DeleteResult { deleted: gone, features: removed.features, param_warnings: Vec::new() })
 }
 
+/// `component.unlock`: removes the rigid joints that hold a component's contents together, so
+/// that its parts move and take joints one by one. With none to remove it is an error, which
+/// says so when a linked design is what keeps the parts in place.
 fn unlock(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.unlock";
     let id = component(s, p, "component", cmd)?;
@@ -721,6 +736,9 @@ fn move_sketches(s: &mut Session, p: &Value) -> Result<Value> {
     reply(MoveSketchesResult { sketches: ids, component: to, param_warnings: Vec::new() })
 }
 
+/// `occurrence.copy`: one more occurrence of a component, sharing its contents, placed from the
+/// occurrence given or the component's first: at that one's transform, a pending move included,
+/// or with `in_place` where it is in the world.
 pub(super) fn copy_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "occurrence.copy";
     let selected = if p.get("occurrence").is_some() {
@@ -829,6 +847,10 @@ pub(super) fn occurrence_path(s: &Session, p: &Value, id: u64, cmd: &str) -> Res
     Ok(path)
 }
 
+/// `occurrence.move`: moves one occurrence by a translation, a rotation or a matrix, or to an
+/// absolute placement (`to`, `to_matrix`), in its parent's frame or the world's. Refused, with
+/// what to do instead, for a grounded occurrence (unless `move_grounded`) and for one that a
+/// rigid group or a linked subassembly holds in place.
 fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "occurrence.move";
     let id = occurrence(s, p, cmd)?;
@@ -1045,6 +1067,8 @@ fn after_joints(s: &mut Session, p: &Value, id: u64, moved: Mat, cmd: &str) -> M
     MoveResult { occurrence: id, transform: now, pending: false, reverted: true, warning: Some(warning), param_warnings: Vec::new() }
 }
 
+/// `occurrence.ground`: grounds or ungrounds an occurrence as `grounded` says, or the other way
+/// from how it is when that is left out.
 fn ground(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "occurrence.ground";
     let id = occurrence(s, p, cmd)?;

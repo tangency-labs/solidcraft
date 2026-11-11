@@ -918,6 +918,8 @@ impl Assembly {
         out
     }
 
+    /// Whether there is nothing here to save: `Document::assembly` is left out of a design file
+    /// then. Every field has to be asked, or a design that has only that one loses it on save.
     pub fn is_empty(&self) -> bool {
         self.joints.is_empty()
             && self.origins.is_empty()
@@ -1142,6 +1144,9 @@ pub fn resolve_origin_as_designed(doc: &Document, st: &ModelState, o: &JointOrig
     origin_frame(doc, st, o, true)
 }
 
+/// What `resolve_origin` and `resolve_origin_as_designed` share: the origin's frame on its part
+/// (`resolve_on_part`), carried up through the occurrences `inside` as `inside_transform` has
+/// them for `designed`.
 fn origin_frame(doc: &Document, st: &ModelState, o: &JointOrigin, designed: bool) -> Result<Mat> {
     let on_part = resolve_on_part(doc, st, o)?;
     if o.inside.is_empty() {

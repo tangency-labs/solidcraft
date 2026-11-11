@@ -152,6 +152,8 @@ pub(crate) fn begin(app: &mut SolveApp, occurrence: u64) -> bool {
 }
 
 impl Mode {
+    /// Reads the handles again from the design as it is now: the joint axes the part can move on
+    /// and, for each, how far the part's bodies reach from it, which its arrows are sized by.
     fn refresh(&mut self, app: &SolveApp) {
         self.axes = joints::motion_axes(&app.session.doc, &app.session.model.state(), self.occurrence, &self.path);
         let anchor = apply_point(&placed_world(&app.session.doc, self.occurrence, &self.path), self.local_anchor);
@@ -491,6 +493,9 @@ fn polar(proj: &Proj, p: Pos2, a: &joints::MotionAxis) -> Option<(f64, f64)> {
     Some((q.dot(v).atan2(q.dot(u)), q.len()))
 }
 
+/// Starts a drag when `p` is on a handle: keeps the joint's value, where the part stands and
+/// where on the handle the pointer took hold, with a checkpoint for `cancel` to go back to.
+/// False when no drag starts.
 pub(crate) fn start_drag(app: &mut SolveApp, proj: &Proj, p: Pos2) -> bool {
     let Some(axis) = hit(app, proj, p) else { return false };
     let initial = joints::joint_values(&app.session.doc.assembly).get(&axis.joint).and_then(|q| q.get(axis.index)).copied();
@@ -543,6 +548,9 @@ impl Drag {
     }
 }
 
+/// The pointer is at `p` during a drag: drives the handle's joint to the value that follows it,
+/// inside the joint's limits. The whole drag stays one undo step however often the joint is
+/// driven, and it ends when that step is no longer the last one made.
 pub(crate) fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
     let Some(mut mode) = app.viewport.joint_handles.take() else { return };
     let Some(mut d) = mode.drag.take() else {
@@ -619,6 +627,9 @@ pub(crate) fn end_drag(app: &mut SolveApp) {
     app.viewport.joint_handles = Some(mode);
 }
 
+/// Draws the Move handles: each axis with its dashed line and arrows or, during a drag, only the
+/// axis dragged, moved along with the part, with a guide and a readout at the pointer of how far
+/// the part has gone. The help panel's Done button closes the mode.
 pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj) {
     if !visible(app) {
         return;
@@ -905,6 +916,9 @@ mod tests {
         pointer(&mut h, back, false);
     }
 
+    /// The axes Move shows are the joint's own, whichever side of the joint the part is on and
+    /// however the axis is tilted: a cylindrical joint gives one to turn about and one to slide
+    /// along. Values their limits hold still give no axis, and neither does a rigid joint.
     #[test]
     fn axes_follow_reversed_and_oblique_joints_and_reject_locked_parts() {
         for reverse in [false, true] {
