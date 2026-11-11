@@ -394,7 +394,8 @@ fn the_offset_refusals_are_typed() {
 
 /// Each of the kernel's other offset refusals as [`Error::OffsetRefused`] (#14783): its reason,
 /// and its face by the index the call's lookup gives, `None` for a face it does not find or a
-/// refusal that names none. Never the bare status they were before.
+/// refusal that names none. Never the bare status they were before, and never the kernel's text
+/// in place of a reason (#15035): a routine's own failure keeps its kind and the kernel's phrase.
 #[test]
 fn every_other_offset_refusal_says_why_and_where() {
     use crate::OffsetRefusal as R;
@@ -499,6 +500,34 @@ fn every_other_offset_refusal_says_why_and_where() {
             None,
             R::Unsound {
                 what: Unsoundness::VolumeUndecided,
+            },
+        ),
+        (
+            O::Failed("the face has no surface"),
+            None,
+            R::Failed {
+                what: "the face has no surface",
+            },
+        ),
+        (
+            O::Missing("the face's surface"),
+            None,
+            R::Missing {
+                what: "the face's surface",
+            },
+        ),
+        (
+            O::InvalidValue("the face has no outer face use"),
+            None,
+            R::InvalidValue {
+                what: "the face has no outer face use",
+            },
+        ),
+        (
+            O::Inconsistent("an offset edge has no curve"),
+            None,
+            R::Inconsistent {
+                what: "an offset edge has no curve",
             },
         ),
     ];
