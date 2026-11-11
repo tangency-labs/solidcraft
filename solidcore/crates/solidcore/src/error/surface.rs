@@ -176,7 +176,7 @@ mod tests {
     /// whose conversion waits on other open work or a later part of the slice.
     #[test]
     fn the_surface_routines_build_no_bare_statuses() {
-        const WAITING: [(&str, usize); 30] = [
+        const WAITING: [(&str, usize); 29] = [
             ("surface/b_spline_volume.rs", 4),
             ("surface/b_spline_volume_n_lib.rs", 1),
             ("surface/cone/p1.rs", 10),
@@ -195,7 +195,6 @@ mod tests {
             ("surface/side.rs", 7),
             ("surface/sphere.rs", 16),
             ("surface/srf_in_volume.rs", 4),
-            ("surface/surface/exact_pieces.rs", 2),
             ("surface/surface/p10.rs", 7),
             ("surface/surface/p11.rs", 21),
             ("surface/surface/p3.rs", 3),
@@ -235,9 +234,19 @@ mod tests {
             let text = std::fs::read_to_string(&path)
                 .expect("read")
                 .replace("\r\n", "\n");
+            // The library part ends at the test module: `#[cfg(test)]`, then any attributes
+            // (such as an `#[allow(..)]` for the tests' unwraps), then `mod`.
             let library = text
-                .find("\n#[cfg(test)]\nmod ")
-                .map_or(text.as_str(), |at| &text[..at]);
+                .match_indices("\n#[cfg(test)]\n")
+                .find(|(at, _)| {
+                    let mut rest = text[at + "\n#[cfg(test)]\n".len()..].lines();
+                    rest.find(|line| {
+                        let line = line.trim_start();
+                        !(line.starts_with("#[") || line.starts_with("clippy::") || line == ")]")
+                    })
+                    .is_some_and(|line| line.starts_with("mod "))
+                })
+                .map_or(text.as_str(), |(at, _)| &text[..at]);
             let bare: usize = [
                 "SolidError::sm_err(",
                 "SolidError::null_pointer(",

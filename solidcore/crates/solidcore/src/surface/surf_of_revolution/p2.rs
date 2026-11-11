@@ -1369,7 +1369,7 @@ mod tests {
         for typed in replaced_upstream(OP_STEP_INV, crate::error::SM_ERR, None) {
             assert!(is_off_generator(&typed), "{typed:?}");
         }
-        for other in replaced_upstream(OP_STEP_INV, SM_ERR_NOT_WITHIN_TOLERANCE, None)
+        for other in replaced_upstream(OP_STEP_INV, crate::error::SM_ERR_NOT_WITHIN_TOLERANCE, None)
             .into_iter()
             .chain(replaced_upstream(OP_ADJUST, crate::error::SM_ERR, None))
             .chain(native_failures(OP_STEP_INV, crate::error::SM_ERR))
