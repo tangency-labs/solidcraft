@@ -1,0 +1,153 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/14418",
+ "test": "none: a regression between SolidCraft 0.30.1 (truck) and 0.40.0-rc.3 (solidcore); the report's script",
+ "summary": "TODO",
+ "cases": [
+  {
+   "name": "pipe_and_sweep_off_the_xy_plane",
+   "note": "The report's case: the arc on the XZ plane. The pipe is built there; the sweep, whose path the runner takes in the XY plane, is built there and turned 90 degrees about x onto the same arc.",
+   "steps": [
+    {
+     "op": "pipe",
+     "id": "pipe",
+     "radius": 3.0,
+     "path": [
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        20.0
+       ],
+       "radius": 20.0,
+       "start_deg": -90.0,
+       "end_deg": 0.0
+      }
+     ],
+     "plane": "xz"
+    },
+    {
+     "op": "sweep",
+     "id": "sweep_xy",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        0.0,
+        0.0
+       ],
+       "radius": 3.0
+      }
+     ],
+     "plane": "yz",
+     "path": {
+      "kind": "arc",
+      "center": [
+       0.0,
+       20.0
+      ],
+      "radius": 20.0,
+      "start_deg": -90.0,
+      "end_deg": 0.0
+     }
+    },
+    {
+     "op": "rotate",
+     "id": "sweep",
+     "body": "sweep_xy",
+     "point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "degrees": 90.0
+    },
+    {
+     "op": "intersection",
+     "id": "result",
+     "a": "pipe",
+     "b": "sweep"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "valid": true,
+    "volume": {
+     "value": 888.264396098,
+     "tol": 0.001,
+     "formula": "pi*3^2 * 20*pi/2 (Pappus: the circle's area times the arc's length); tol 0.001 mm^3"
+    }
+   }
+  },
+  {
+   "name": "pipe_and_sweep_on_the_xy_plane",
+   "note": "The report's ok.json: both on the XY plane.",
+   "steps": [
+    {
+     "op": "pipe",
+     "id": "pipe",
+     "radius": 3.0,
+     "path": [
+      {
+       "kind": "arc",
+       "center": [
+        0.0,
+        20.0
+       ],
+       "radius": 20.0,
+       "start_deg": -90.0,
+       "end_deg": 0.0
+      }
+     ],
+     "plane": "xy"
+    },
+    {
+     "op": "sweep",
+     "id": "sweep",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        0.0,
+        0.0
+       ],
+       "radius": 3.0
+      }
+     ],
+     "plane": "yz",
+     "path": {
+      "kind": "arc",
+      "center": [
+       0.0,
+       20.0
+      ],
+      "radius": 20.0,
+      "start_deg": -90.0,
+      "end_deg": 0.0
+     }
+    },
+    {
+     "op": "intersection",
+     "id": "result",
+     "a": "pipe",
+     "b": "sweep"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "manifold": true,
+    "valid": true,
+    "volume": {
+     "value": 888.264396098,
+     "tol": 0.001,
+     "formula": "pi*3^2 * 20*pi/2 (Pappus: the circle's area times the arc's length); tol 0.001 mm^3"
+    }
+   }
+  }
+ ]
+}

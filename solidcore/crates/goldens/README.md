@@ -345,7 +345,11 @@ nice -n 10 cargo run -p goldens -- --solidcraft-cases '3526-*'        # ids (<fi
   for a result without a closed-form volume of its own), `cylinder_faces_max`,
   `sheet_corner` (signed end distances and flat-pattern invariants), `manifold`
   (`result` must, or must not, be a closed manifold solid, `SmBrep::IsManifoldSolid`, so a
-  blend that leaves an open body cannot pass on its volume alone), and `refused`
+  blend that leaves an open body cannot pass on its volume alone), `valid` (`result` must,
+  or must not, pass solidcore's full check, `check_brep` at Level 2 with its warnings
+  allowed: SolidCraft runs that check on every boolean, blend and offset result and refuses
+  one that fails it, so a result with the right volume can still be one SolidCraft refuses;
+  the report gives the number of failed tests and the first), and `refused`
   (`step`, `error`: the kernel must refuse; the case passes when that step fails with an
   error containing `error`, fails when every step completes, and takes no other
   expectation). `refused` is the opposite of `refused_by`: there the refusal is a known
