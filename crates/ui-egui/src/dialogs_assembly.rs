@@ -243,6 +243,13 @@ impl JointForm {
         TYPES.get(self.kind).and_then(|t| JointKind::parse(t)).unwrap_or(JointKind::Rigid)
     }
 
+    /// Assembly constraints keep their reference geometry until converted to a plain joint.
+    fn lateral_offsets(&self, doc: &solidcraft_engine::doc::Document) -> bool {
+        self.editing
+            .and_then(|id| doc.assembly.joints.iter().find(|j| j.id == id))
+            .is_none_or(|j| j.constraint.is_none() || j.kind != self.joint_kind())
+    }
+
     /// Limits rows sized to the joint's values.
     fn fit_limits(&mut self, doc: &solidcraft_engine::doc::Document) {
         let k = self.joint_kind();
@@ -564,6 +571,9 @@ pub fn edit_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
     // the joint keeps following its parameters.
     f.angle = j.exprs.angle.clone().unwrap_or_else(|| num(j.angle.to_degrees(), "deg"));
     f.angle_shown = f.angle.clone();
+    for (text, value) in f.offset.iter_mut().zip(j.offset_xy) {
+        *text = crate::length_input::model(&app.session.doc, value);
+    }
     f.offset[2] = j.exprs.offset.clone().unwrap_or_else(|| crate::length_input::model(&app.session.doc, j.offset));
     f.fit_limits(&app.session.doc);
     for (i, l) in f.limits.iter_mut().enumerate() {
@@ -987,11 +997,10 @@ pub(crate) fn picked_snap(app: &SolveApp, sel: &Sel) -> Option<SnapPt> {
     snap
 }
 
-/// A snap moved across its own plane by (x, y) (the joint's offset), as an explicit frame.
-fn shifted(s: &SnapPt, x: f64, y: f64) -> Value {
+/// The frame used for lateral offsets, with the same axes as the original shifted snap.
+fn offset_frame(s: &SnapPt) -> Value {
     let ax = s.z.any_perp();
-    let ay = s.z.cross(ax);
-    let mut p = json!({"frame": {"origin": pt(s.at + ax * x + ay * y), "z": pt(s.z), "x": pt(ax)}});
+    let mut p = json!({"frame": {"origin": pt(s.at), "z": pt(s.z), "x": pt(ax)}});
     if let Some(path) = s.param.get("path") {
         p["path"] = path.clone();
     }
@@ -1057,9 +1066,10 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
             f.fit_limits(&app.session.doc);
             if !f.as_built {
                 enter |= expr_row(ui, "Angle", &mut f.angle);
+                let lateral = f.lateral_offsets(&app.session.doc);
                 crate::ui_kit::section(ui, "joint_position", "Position", false, |ui| {
                     for (l, v) in ["Offset X", "Offset Y", "Offset Z"].iter().zip(f.offset.iter_mut()) {
-                        if f.editing.is_some() && *l != "Offset Z" {
+                        if !lateral && *l != "Offset Z" {
                             continue;
                         }
                         enter |= expr_row(ui, l, v);
@@ -1744,6 +1754,10 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                 f.limits.iter().take(jk.dofs().len()).map(|(on, lo, hi)| if *on { json!([lo, hi]) } else { Value::Null }).collect();
             if let Some(id) = f.editing {
                 let mut p = json!({"joint": id, "type": kind, "flip": f.flip, "offset": f.offset[2]});
+                if f.lateral_offsets(&app.session.doc) {
+                    p["offset_x"] = json!(eval(&f.offset[0], ValueKind::Length)?);
+                    p["offset_y"] = json!(eval(&f.offset[1], ValueKind::Length)?);
+                }
                 if !custom_name.is_empty() {
                     p["name"] = json!(custom_name);
                 }
@@ -1789,11 +1803,12 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                 return Err("the two origins are on the same component".into());
             }
             let (x, y) = (eval(&f.offset[0], ValueKind::Length)?, eval(&f.offset[1], ValueKind::Length)?);
-            let a_param = if x.abs() > 1e-12 || y.abs() > 1e-12 { shifted(&a, x, y) } else { a.param };
+            let a_param = if x.abs() > 1e-12 || y.abs() > 1e-12 { offset_frame(&a) } else { a.param };
             // Picked origins mate by default (the engine's default: B's z opposite A's, faces
             // meet face to face, a pin goes into its hole); the dialog's Flip is the command's
             // `flip`, which turns B the other way.
-            let mut p = json!({"type": kind, "a": a_param, "b": b.param, "flip": f.flip, "offset": f.offset[2], "angle": f.angle, "limits": limits});
+            let mut p = json!({"type": kind, "a": a_param, "b": b.param, "flip": f.flip,
+                "offset_x": x, "offset_y": y, "offset": f.offset[2], "angle": f.angle, "limits": limits});
             if !custom_name.is_empty() {
                 p["name"] = json!(custom_name);
             }
@@ -2663,7 +2678,7 @@ pub fn joint_frames_world(s: &Session) -> Vec<(u64, solidcraft_engine::doc::Mat)
         std::borrow::Cow::Owned(d)
     };
     let st = s.model.state();
-    let v: Vec<_> = doc.assembly.joints.iter().filter_map(|j| doc.origin_world(&st, &j.a).ok().map(|m| (j.id, m))).collect();
+    let v: Vec<_> = doc.assembly.joints.iter().filter_map(|j| doc.origin_world(&st, &j.a).ok().map(|m| (j.id, j.offset_frame_a(m)))).collect();
     JOINT_FRAMES.with(|o| *o.borrow_mut() = Some((key, v.clone())));
     v
 }

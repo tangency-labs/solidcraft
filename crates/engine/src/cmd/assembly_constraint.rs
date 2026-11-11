@@ -258,6 +258,8 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
         m.remove("values");
         m.remove("value");
         m.remove("limits");
+        m.remove("offset_x");
+        m.remove("offset_y");
         m.insert("flip".into(), Value::Bool(flip));
         // No name, `null` or blank text: the rule's own name (`Mate1`), not a joint's.
         if !m.get("name").and_then(Value::as_str).is_some_and(|n| !n.trim().is_empty()) {

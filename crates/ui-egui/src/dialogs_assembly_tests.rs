@@ -45,19 +45,138 @@ fn joint_from_two_snaps() {
     // The bottom face of B snaps at its centre, z down.
     let sb = snap_of(&app.session, &d.inputs[1].items[0]).unwrap();
     assert!(sb.at.dist(Vec3::new(40.0, 10.0, 0.0)) < 1e-6 && sb.z.dist(-Vec3::Z) < 1e-9, "{sb:?}");
-    // Offset X: an explicit frame 5 mm along the face.
+    // Offset X stays separate from the explicit attachment frame.
     if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
         f.offset[0] = "5 mm".into();
     }
     let p = apply_commands(&app, &d).unwrap()[0].1.clone();
     let o = &p["a"]["frame"]["origin"];
     let at = Vec3::new(o[0].as_f64().unwrap(), o[1].as_f64().unwrap(), o[2].as_f64().unwrap());
-    assert!((at.dist(Vec3::new(10.0, 10.0, 10.0)) - 5.0).abs() < 1e-9, "{p}");
+    assert!(at.dist(Vec3::new(10.0, 10.0, 10.0)) < 1e-9, "{p}");
+    assert_eq!(p["offset_x"], 5.0);
     // OK makes it.
     for (id, p) in apply_commands(&app, &d).unwrap() {
         app.run(&id, p).unwrap();
     }
     assert_eq!(app.session.doc.assembly.joints.len(), 1);
+}
+
+#[test]
+fn editing_a_joint_keeps_all_three_offsets() {
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let mut dialog = app.dialog.take().unwrap();
+    for point in [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)] {
+        dialog.pick(&app.session, face_sel(&app.session, point).unwrap());
+    }
+    let Kind::Assembly(Asm::Joint(form)) = &mut dialog.kind else { panic!("joint form") };
+    form.offset = ["10 mm".into(), "30 mm".into(), "30 mm".into()];
+    for (id, params) in apply_commands(&app, &dialog).unwrap() {
+        app.run(&id, params).unwrap();
+    }
+    let joint = app.session.doc.assembly.joints[0].id;
+    let edited = edit_joint(&app, joint).unwrap();
+    if let Ok(path) = std::env::var("SOLIDCRAFT_JOINT_EVIDENCE") {
+        let mut evidence = SolveApp::new(app.session.scratch(), Services::default());
+        evidence.home.open = false;
+        evidence.dialog = edit_joint(&evidence, joint);
+        let ctx = crate::fonts::test_context();
+        let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 900.0));
+        let mut textures = Default::default();
+        let mut paint = |events| {
+            let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), events, ..Default::default() }, |ui| {
+                evidence.logic(ui.ctx());
+                evidence.ui(ui);
+            });
+            crate::ui_kit::test_textures_update(&mut textures, &output.textures_delta);
+            output.textures_delta.clear();
+            (output, textures.clone())
+        };
+        for _ in 0..8 {
+            paint(Vec::new());
+        }
+        let position = crate::scenario::handle_at("dialog:section:Position").expect("Position expander");
+        for pressed in [true, false] {
+            paint(vec![
+                egui::Event::PointerMoved(position),
+                egui::Event::PointerButton { pos: position, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE },
+            ]);
+        }
+        for _ in 0..8 {
+            paint(Vec::new());
+        }
+        let (output, textures) = paint(Vec::new());
+        crate::ui_kit::test_raster(&ctx, output.shapes, output.pixels_per_point, bounds, &textures).save(path).unwrap();
+    }
+    let Kind::Assembly(Asm::Joint(form)) = &edited.kind else { panic!("joint form") };
+    for (text, expected) in form.offset.iter().zip([10.0, 30.0, 30.0]) {
+        let actual = crate::length_input::eval(&app.session.doc, text, ValueKind::Length).unwrap();
+        assert!((actual - expected).abs() < 1e-9, "reopened offset {text}, expected {expected}");
+    }
+
+    let before = app.session.doc.clone();
+    let mut harness = crate::scenario::Harness::new();
+    harness.app = app;
+    harness.app.home.open = false;
+    harness.app.dialog = Some(edited);
+    harness.settle();
+    harness.step(&json!({"click":{"handle":"dialog:section:Position"}})).unwrap();
+    harness.frames(4);
+    for name in ["Offset X", "Offset Y", "Offset Z"] {
+        assert!(crate::scenario::handle_at(&format!("dialog:{name}")).is_some(), "{name} is editable");
+    }
+    harness.step(&json!({"click":{"handle":"dialog:Offset X"}})).unwrap();
+    harness.step(&json!({"key":"A","cmd":true})).unwrap();
+    harness.step(&json!({"text":"20 mm"})).unwrap();
+    harness.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
+    harness.settle();
+    assert_eq!(harness.app.session.doc, before, "Cancel preserves the joint");
+
+    harness.app.dialog = edit_joint(&harness.app, joint);
+    harness.settle();
+    for (name, value) in [("Offset X", "20 mm"), ("Offset Y", "40 mm")] {
+        harness.step(&json!({"click":{"handle":format!("dialog:{name}")}})).unwrap();
+        harness.step(&json!({"key":"A","cmd":true})).unwrap();
+        harness.step(&json!({"text":value})).unwrap();
+    }
+    harness.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    harness.settle();
+    let changed = &harness.app.session.doc.assembly.joints[0];
+    assert_eq!(changed.offset_xy, [20.0, 40.0]);
+    assert_eq!(changed.offset, 30.0);
+    harness.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(harness.app.session.doc, before, "Undo restores all offsets and the saved attachment");
+}
+
+#[test]
+fn editing_zero_offsets_uses_the_saved_rotated_attachment_axes() {
+    let mut app = two_boxes();
+    let a = occ(&app, "A");
+    app.run("occurrence.ground", json!({"occurrence":a, "grounded":false})).unwrap();
+    app.run("occurrence.move", json!({"occurrence":a, "axis":[0,0,1], "angle":"90 deg", "origin":[0,0,0]})).unwrap();
+    app.run("occurrence.ground", json!({"occurrence":a, "grounded":true})).unwrap();
+    app.start("joint.create");
+    let mut dialog = app.dialog.take().unwrap();
+    for point in [Vec3::new(-10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)] {
+        dialog.pick(&app.session, face_sel(&app.session, point).unwrap());
+    }
+    for (id, params) in apply_commands(&app, &dialog).unwrap() {
+        app.run(&id, params).unwrap();
+    }
+    let saved = app.session.doc.assembly.joints[0].clone();
+    let mut edited = edit_joint(&app, saved.id).unwrap();
+    let Kind::Assembly(Asm::Joint(form)) = &mut edited.kind else { panic!("joint form") };
+    form.offset[0] = "12 mm".into();
+    let commands = apply_commands(&app, &edited).unwrap();
+    assert!(commands[0].1.get("a").is_none(), "editing an offset retains the attachment");
+    for (id, params) in commands {
+        app.run(&id, params).unwrap();
+    }
+    assert_eq!(app.session.doc.assembly.joints[0].a, saved.a);
+    let b = app.session.doc.occurrence_of(app.session.doc.find_component("B").unwrap()).unwrap();
+    // The saved top-face frame has local X along +Y; A's 90-degree turn puts it along world -X.
+    let bottom = solidcraft_engine::doc::apply_point(&b.transform, Vec3::new(40.0, 10.0, 0.0));
+    assert!(bottom.dist(Vec3::new(-22.0, 10.0, 10.0)) < 1e-6, "{bottom:?}");
 }
 
 /// A joint origin can be the design origin or a sketch point, not just faces, edges and vertices
@@ -1305,7 +1424,8 @@ fn inch_joint_offsets_limits_and_drive_values_keep_their_units() {
     assert_eq!(p["limits"], json!([["0 in", "0.5 in"]]));
     let origin = &p["a"]["frame"]["origin"];
     let at = Vec3::new(origin[0].as_f64().unwrap(), origin[1].as_f64().unwrap(), origin[2].as_f64().unwrap());
-    assert!((at.dist(Vec3::new(10.0, 10.0, 10.0)) - 6.35).abs() < 1e-9);
+    assert!(at.dist(Vec3::new(10.0, 10.0, 10.0)) < 1e-9);
+    assert_eq!(p["offset_x"], json!(6.35));
     app.run("joint.create", p).unwrap();
     let joint = app.session.doc.assembly.joints[0].id;
     app.start("joint.drive");
@@ -1319,6 +1439,7 @@ fn inch_joint_offsets_limits_and_drive_values_keep_their_units() {
     assert!((actual - 6.35).abs() < 1e-9, "{actual}");
     let edit = edit_joint(&app, joint).unwrap();
     let Kind::Assembly(Asm::Joint(f)) = edit.kind else { panic!("no edit") };
+    assert_eq!(f.offset[0], "0.25 in");
     assert_eq!((f.limits[0].1.as_str(), f.limits[0].2.as_str()), ("0 in", "0.5 in"));
 }
 
@@ -1893,4 +2014,55 @@ fn measure_still_takes_sketch_curve_picks() {
     let sketch_sel = Sel::SketchCurve { id: "l1".into(), sketch: None };
     d.pick(&app.session, sketch_sel.clone());
     assert_eq!(d.inputs[0].items, vec![sketch_sel], "Measure takes a sketch curve");
+}
+
+/// Constraint rules keep their existing controls until explicitly converted to a plain joint.
+#[test]
+fn lateral_offset_controls_do_not_change_assembly_constraint_rules() {
+    let mut harness = crate::scenario::Harness::new();
+    harness.app = two_boxes();
+    harness.app.home.open = false;
+    harness
+        .app
+        .run(
+            "assembly.constraint.create",
+            json!({"type":"concentric",
+        "a":{"occurrence":"A","axis":"Z"},"b":{"occurrence":"B","axis":"Z"}}),
+        )
+        .unwrap();
+    let joint = harness.app.session.doc.assembly.joints[0].id;
+    harness.app.dialog = edit_joint(&harness.app, joint);
+    harness.settle();
+    harness.step(&json!({"click":{"handle":"dialog:section:Position"}})).unwrap();
+    harness.frames(4);
+    assert!(crate::scenario::handle_at("dialog:Offset Z").is_some());
+    for name in ["Offset X", "Offset Y"] {
+        assert!(crate::scenario::handle_at(&format!("dialog:{name}")).is_none());
+    }
+    let Kind::Assembly(Asm::Joint(form)) = &mut harness.app.dialog.as_mut().unwrap().kind else { panic!("joint form") };
+    let original_kind = form.kind;
+    form.kind = 0;
+    form.offset[0] = "missing_parameter".into();
+    harness.settle();
+    for name in ["Offset X", "Offset Y"] {
+        assert!(crate::scenario::handle_at(&format!("dialog:{name}")).is_some());
+    }
+    let Kind::Assembly(Asm::Joint(form)) = &mut harness.app.dialog.as_mut().unwrap().kind else { panic!("joint form") };
+    form.kind = original_kind;
+    harness.settle();
+    let commands = apply_commands(&harness.app, harness.app.dialog.as_ref().unwrap()).unwrap();
+    assert!(commands[0].1.get("offset_x").is_none() && commands[0].1.get("offset_y").is_none());
+    harness.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    harness.settle();
+    assert!(harness.app.dialog.is_none(), "hidden lateral text must not block OK");
+    assert!(harness.app.session.doc.assembly.joints[0].constraint.is_some());
+    harness.app.dialog = edit_joint(&harness.app, joint);
+    let Kind::Assembly(Asm::Joint(form)) = &mut harness.app.dialog.as_mut().unwrap().kind else { panic!("joint form") };
+    form.kind = 0;
+    form.offset[0] = "12 mm".into();
+    harness.settle();
+    harness.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    harness.settle();
+    assert_eq!(harness.app.session.doc.assembly.joints[0].constraint, None);
+    assert_eq!(harness.app.session.doc.assembly.joints[0].offset_xy, [12.0, 0.0]);
 }

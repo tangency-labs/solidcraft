@@ -552,7 +552,8 @@ pub fn urdf(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) 
     let exists = |occ: u64| occ == 0 || doc.occurrences.iter().any(|o| o.id == occ);
     let mut usable: Vec<(&Joint, Mat)> = Vec::new();
     for j in doc.assembly.joints.iter().filter(|j| !j.suppressed).take(joints::MAX_JOINTS) {
-        let fa = joints::resolve_origin(doc, st, &j.a).ok().filter(|_| joints::resolve_origin(doc, st, &j.b).is_ok());
+        let fa =
+            joints::resolve_origin(doc, st, &j.a).ok().map(|frame| j.offset_frame_a(frame)).filter(|_| joints::resolve_origin(doc, st, &j.b).is_ok());
         match fa {
             Some(fa) if exists(j.a.occurrence) && exists(j.b.occurrence) && j.a.occurrence != j.b.occurrence => usable.push((j, fa)),
             _ => tree.warnings.push(format!("joint `{}` is skipped: its origins don't resolve or it joins an occurrence to itself", j.name)),

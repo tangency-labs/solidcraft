@@ -145,13 +145,19 @@ point, its x and y running along the two edges into the face. The edge, the face
 are found again by name, so a bracket set 40 mm in from a panel's corner (a planar joint with
 values `[40, 40, 0]`) stays 40 mm in from that corner when the panel changes size.
 
-A joint's offset, angle and values can be typed as expressions over the design's parameters
+A joint's Z offset, angle and values can be typed as expressions over the design's parameters
 (`"offset": "gap + 2"`, `"values": ["travel"]`). The joint keeps them and works them out again
 whenever the design changes, so a part seated `gap` above a panel moves with `gap`. Renaming a
 parameter carries into the joints that use it, and deleting one they use is refused. If an
 expression stops working out (say a parameter becomes an angle), the joint is left out of the
 solve and `joint.solve` gives the reason, instead of placing the part from old numbers. Typing a
 plain number, or driving the value, drops that expression.
+
+**Edit Joint → Position** shows **Offset X**, **Offset Y** and **Offset Z**. X and Y move along
+the saved first attachment's axes. Their expressions are evaluated once, as during creation;
+scripts use `offset_x` and `offset_y`. Older designs keep their saved attachment positions,
+with X and Y initially zero for additional shifts from those positions. Assembly constraints
+keep their existing controls and reference geometry until changed to a plain joint.
 
 **Relations** are joints that tie only part of a placement, so a part is placed the way a
 designer describes it, one relation at a time: `parallel` (z along z, free to move and turn

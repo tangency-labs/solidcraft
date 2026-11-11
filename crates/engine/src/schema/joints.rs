@@ -72,6 +72,12 @@ pub struct EditJointParams {
     /// The distance from a's frame to b's along z: a length, or an expression the joint follows.
     #[serde(default, deserialize_with = "present")]
     pub offset: Option<LengthExpr>,
+    /// The lateral offset along a's frame x, in mm or a length expression evaluated once.
+    #[serde(default, deserialize_with = "present")]
+    pub offset_x: Option<LengthExpr>,
+    /// The lateral offset along a's frame y, in mm or a length expression evaluated once.
+    #[serde(default, deserialize_with = "present")]
+    pub offset_y: Option<LengthExpr>,
     /// The turn about that distance: an angle, or an expression the joint follows.
     #[serde(default, deserialize_with = "present")]
     pub angle: Option<AngleExpr>,
@@ -509,6 +515,14 @@ pub struct CreateJointParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "JointValue")]
     pub offset: Option<JointValue>,
+    /// The lateral offset along a's frame x, in mm or an expression evaluated once. Default: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "JointValue")]
+    pub offset_x: Option<JointValue>,
+    /// The lateral offset along a's frame y, in mm or an expression evaluated once. Default: 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "JointValue")]
+    pub offset_y: Option<JointValue>,
     /// The turn about that distance, in degrees or an expression; for an angle relation, its tilt
     /// from mated. Default: none, or a half turn where that turns b less, so faces that already
     /// meet stay as they are.
@@ -538,6 +552,8 @@ impl<'de> Deserialize<'de> for CreateJointParams {
         let a = given(&m, "a", JointOriginArg::read)?;
         let b = given(&m, "b", JointOriginArg::read)?;
         let offset = given(&m, "offset", JointValue::read)?;
+        let offset_x = given(&m, "offset_x", JointValue::read)?;
+        let offset_y = given(&m, "offset_y", JointValue::read)?;
         let angle = given(&m, "angle", JointValue::read)?;
         let values = listed(&m, "values", JointValues::read)?;
         // `value` is read only when `values` is not a list.
@@ -552,6 +568,8 @@ impl<'de> Deserialize<'de> for CreateJointParams {
             limits,
             flip: flag(&m, "flip")?,
             offset,
+            offset_x,
+            offset_y,
             angle,
             name: text(&m, "name")?,
             quiet: flag(&m, "quiet")?,
@@ -1135,6 +1153,8 @@ pub struct ListedJoint {
     pub flip: bool,
     /// The distance from a's frame to b's along z, in mm.
     pub offset: f64,
+    /// The offsets along a's frame x and y, in mm, before the joint's motion.
+    pub offset_xy: [f64; 2],
     /// Whether the joint is suppressed (it places nothing).
     pub suppressed: bool,
     /// Whether the joint is shown in the viewport.
@@ -1416,6 +1436,8 @@ pub struct InspectedJoint {
     pub flip: bool,
     /// The distance from a's frame to b's along z, in mm.
     pub offset: f64,
+    /// The offsets along a's frame x and y, in mm, before the joint's motion.
+    pub offset_xy: [f64; 2],
     /// The turn about that distance, in degrees.
     pub angle: f64,
     /// Its values as the solver places them, as joint.list gives them.
