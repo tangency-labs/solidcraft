@@ -719,6 +719,8 @@ mod tests {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut files = Vec::new();
         source_files(&root, &mut files);
+        // The UI kit and its components, which SolidCraft mounts as `crate::ui_kit`.
+        source_files(&crate::test_support::kit_src(), &mut files);
         files.sort();
         let sources: Vec<(std::path::PathBuf, String)> =
             files.into_iter().map(|path| (path.clone(), std::fs::read_to_string(&path).unwrap())).collect();
@@ -1513,7 +1515,9 @@ mod tests {
         }
 
         fn inside_kit(&self, path: &std::path::Path) -> bool {
-            module_path(path).get(1).is_some_and(|module| module == "ui_kit")
+            let module = module_path(path);
+            module.get(1).is_some_and(|module| module == "ui_kit")
+                && !module.get(2).is_some_and(|name| crate::test_support::KIT_COMPONENTS.contains(&format!("{name}.rs").as_str()))
         }
     }
 
@@ -1521,10 +1525,15 @@ mod tests {
     fn module_path(path: &std::path::Path) -> Vec<String> {
         let mut parts: Vec<String> = path.components().filter_map(|part| part.as_os_str().to_str().map(str::to_string)).collect();
         let start = parts.iter().rposition(|part| part == "src").map_or(0, |at| at + 1);
+        // The kit crate's files sit under `crate::ui_kit`, where SolidCraft mounts the crate.
+        let kit = start >= 2 && parts.get(start - 2).is_some_and(|dir| dir == "ui-kit");
         let mut relative: Vec<String> = parts.split_off(start);
         let file = relative.pop().unwrap_or_default();
         let stem = file.strip_suffix(".rs").unwrap_or(&file).to_string();
         let mut out = vec!["crate".to_string()];
+        if kit {
+            out.push("ui_kit".to_string());
+        }
         out.extend(relative);
         if !matches!(stem.as_str(), "lib" | "main" | "mod") {
             out.push(stem);
@@ -1556,7 +1565,18 @@ mod tests {
     /// module, `crate::…` unchanged.
     fn normalize(module: &[String], path: &[String]) -> Vec<String> {
         match path.first().map(String::as_str) {
+            // In the kit crate (`crate::ui_kit` here), `crate::` is the kit.
+            Some("crate") if module.get(1).is_some_and(|m| m == "ui_kit") && path.get(1).is_none_or(|p| p != "ui_kit") => {
+                let mut out = vec!["crate".to_string(), "ui_kit".to_string()];
+                out.extend_from_slice(&path[1..]);
+                out
+            }
             Some("crate") => path.to_vec(),
+            Some("solidcraft_ui_kit") => {
+                let mut out = vec!["crate".to_string(), "ui_kit".to_string()];
+                out.extend_from_slice(&path[1..]);
+                out
+            }
             Some("self") => {
                 let mut out = module.to_vec();
                 out.extend_from_slice(&path[1..]);

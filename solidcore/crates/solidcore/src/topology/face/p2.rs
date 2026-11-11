@@ -3963,10 +3963,11 @@ mod tests {
         );
         let uv = [Some(line)];
         // a face without loops: CurveOnClassify's status
-        assert!(matches!(
-            create_curves_by_trimming(&k, &mut b, f, Some(1.0), None, Some(&uv), false, true),
-            Err(SolidError::Upstream { .. })
-        ));
+        let r = create_curves_by_trimming(&k, &mut b, f, Some(1.0), None, Some(&uv), false, true);
+        assert!(
+            matches!(&r, Err(e) if e.upstream_status().is_some()),
+            "{r:?}"
+        );
         assert!(create_curves_by_trimming(&k, &mut b, f, None, None, None, true, false).is_err());
     }
 

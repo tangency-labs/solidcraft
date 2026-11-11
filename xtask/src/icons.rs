@@ -4,8 +4,8 @@ use std::process::Command;
 
 pub fn run(root: &Path) -> Result<(), String> {
     for args in [
-        vec!["-B", "assets/icons/ui/design/tools/lint_icons.py"],
-        vec!["-B", "assets/icons/ui/design/tools/icon_status.py", "--check"],
+        vec!["-B", "crates/look/icons/design/tools/lint_icons.py"],
+        vec!["-B", "crates/look/icons/design/tools/icon_status.py", "--check"],
         vec!["-B", "-m", "unittest", "discover", "-s", "tests/tools", "-p", "test_icon*.py"],
     ] {
         let mut command = Command::new("python3");

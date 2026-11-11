@@ -307,7 +307,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.fillet_refuse_rails_leaving_faces = true;
     f.fillet_refuse_face_consuming_blends = true;
     f.fillet_refuse_non_manifold_result = true;
-    f.fillet_refuse_crossing_rails = true;
     f.fillet_corner_ball_patch = true;
     f.fillet_chamfer_cone_on_arc = true;
     f.fillet_torus_center_on_axis = true;
@@ -315,20 +314,17 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.offset_clip_right_side_out = true;
     f.revolution_offset_axis_both_sides = true;
     f.offset_extended_edges_mated = true;
-    f.remove_slit_loops_where_solids_touch = true;
     f.keep_operand_uv_trims = true;
     f.geometric_g2_continuity = true;
     f.proto_vertex_miss_is_false = true;
     f.check_loop_vertex_tolerance = true;
     f.check_loop_projected_seam_ends = true;
-    f.trim_boundary_seam_wrap = true;
     f.bspline_check_min_radius = true;
     f.oscillating_skips_failed_guesses = true;
     f.refine_cc_range_ends = true;
     f.flat_corners_test_bits = true;
     f.cylinder_rebuild_mean_radius = true;
     f.revolve_analytic_profile_faces = true;
-    f.revolve_arc_centre_near_axis_is_sphere = true;
     f.revolve_nested_shells_as_cavities = true;
     f.join_touching_loops = true;
     f.uv_trim_reversal_on_surface = true;
@@ -336,7 +332,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.offset_walls_touch_refused = true;
     f.offset_analytic_mate_edges = true;
     f.nurb_cylinder_inside_out_frame = true;
-    f.shell_inner_shell_of_statuses = true;
     f.offset_collapsed_rounds_mated = true;
     f.offset_missing_surface_fails = true;
     f.fillet_nx1_end_rib_global_merge = true;
@@ -373,7 +368,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.offset_stitch_at_body_tolerance = true;
     f.curve_contacts_at_curve_ends = true;
     f.shell_empty_cavity_fails = true;
-    f.fillet_refuse_ball_not_fitting = true;
     f.boolean_lists_virtual_surface_copies = true;
     f.ssi_tangent_contact_points = true;
     f.ssi_trace_tangent_curves_once = true;

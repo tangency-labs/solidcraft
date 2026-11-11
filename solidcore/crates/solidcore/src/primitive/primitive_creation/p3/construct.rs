@@ -63,12 +63,12 @@ pub(super) fn target(primitive: &PrimitiveCreation, brep: BrepId) -> Result<Regi
         brep,
         primitive
             .region()
-            .ok_or_else(|| SolidError::null_pointer(OP))?,
+            .ok_or_else(|| SolidError::primitive_missing(OP, "the target region"))?,
     ))
 }
 fn face_surface(a: &impl PrimitiveAccess, face: FaceRef) -> Result<&Surface> {
     crate::topology::face::p2::surface(a.brep(face.0)?, face.1)?
-        .ok_or_else(|| SolidError::null_pointer(OP))
+        .ok_or_else(|| SolidError::primitive_missing(OP, "the face's surface"))
 }
 
 /// Parameters for `CreateBlendPrimitive`.
@@ -239,7 +239,10 @@ impl PrimitiveCreation {
             if i == 0 {
                 layer_count = composites.len();
             } else if layer_count != composites.len() {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::primitive_failed(
+                    OP,
+                    "the faces have different numbers of layers",
+                ));
             }
             for (j, mut composite) in composites.into_iter().enumerate() {
                 skin_curves.push(composite.make_composite_nurb()?);
@@ -429,7 +432,7 @@ impl PrimitiveCreation {
         self.init_entity_maps();
         side_faces.clear();
         if profiles.is_empty() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::primitive_failed(OP, "no profiles to sweep"));
         }
         // SolidCraft fork (5d3939e): a scaled sweep's sections are no rigid images of the
         // profile.

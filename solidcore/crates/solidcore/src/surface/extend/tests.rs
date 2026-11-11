@@ -1355,7 +1355,6 @@ fn round_blend_with(order: u32, certified: bool, thumbweight: f64) -> (Kernel, P
     use crate::nurbs::b_spline_curve::BSplineCurve;
     use crate::surface::procedural_blend::BlendDefinitionInput;
     let mut kk = k();
-    kk.fixes.fillet_gn_section_generator = true;
     kk.fixes.fillet_round_as_definition = true;
     let (l, r) = (10.0, 2.0);
     let bilinear =

@@ -164,7 +164,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.boolean_outer_shell_first = true;
     k.fixes.boolean_skips_faces_apart = true;
     k.fixes.boolean_splits_definition_across_split = true;
-    k.fixes.boolean_temporary_transform_statuses = true;
     k.fixes.boolean_vertex_by_best_crossing = true;
     k.fixes.boolean_wire_edge_keeps_faceuse_shell = true;
     k.fixes.box_face_failures_propagate = true;
@@ -215,8 +214,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.fillet_rail_end_on_continued_surface = true;
     k.fixes.fillet_rail_rim_on_face = true;
     k.fixes.fillet_rails_meet_at_one_end_point = true;
-    k.fixes.fillet_refuse_ball_not_fitting = true;
-    k.fixes.fillet_refuse_crossing_rails = true;
     k.fixes.fillet_refuse_face_consuming_blends = true;
     k.fixes.fillet_refuse_non_manifold_result = true;
     k.fixes.fillet_refuse_overlapping_bands = true;
@@ -241,7 +238,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.good_drop_result_distances_in_order = true;
     k.fixes.heal_stage3_failures_propagate = true;
     k.fixes.imprint_extends_edge_to_proto_vertex = true;
-    k.fixes.imprint_extension_keeps_analytic_curve = true;
     k.fixes.imprint_reuses_coincident_face_edge = true;
     k.fixes.imprint_trims_edge_to_proto_vertex = true;
     k.fixes.internal_pole_row_through_knot = true;
@@ -253,7 +249,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.local_operation_closes_walls_to_nothing = true;
     k.fixes.local_operation_refuses_loose_tangent_edges = true;
     k.fixes.local_operation_step_walls = true;
-    k.fixes.loop_orientation_floor_from_loop_box = true;
     k.fixes.loops_go_on_round_the_vertex = true;
     k.fixes.new_edge_vertex_tolerance_covers_gap = true;
     k.fixes.nurb_cylinder_inside_out_frame = true;
@@ -274,24 +269,19 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.planar_path_sweep_statuses = true;
     k.fixes.point_solve_keeps_triangle_guess = true;
     k.fixes.precise_properties_body_length_scale = true;
-    k.fixes.primitive_path_curve_statuses = true;
     k.fixes.proto_edge_self_loop_on_vertex_degenerate = true;
     k.fixes.proto_edge_splits_at_captured_vertices = true;
     k.fixes.proto_vertex_miss_is_false = true;
     k.fixes.refine_cc_range_ends = true;
-    k.fixes.remove_slit_loops_where_solids_touch = true;
     k.fixes.revolution_offset_axis_both_sides = true;
     k.fixes.revolution_round_offset_collapses = true;
     k.fixes.revolve_analytic_profile_faces = true;
-    k.fixes.revolve_arc_centre_near_axis_is_sphere = true;
-    k.fixes.revolve_arc_touching_axis_is_horn_torus = true;
     k.fixes.revolve_holed_profile_void = true;
     k.fixes.revolve_nested_shells_as_cavities = true;
     k.fixes.revolve_splits_curves_on_axis = true;
     k.fixes.sheet_sweep_joins_profile_wires = true;
     k.fixes.shell_edges_on_analytics_exact = true;
     k.fixes.shell_empty_cavity_fails = true;
-    k.fixes.shell_inner_shell_of_statuses = true;
     k.fixes.simple_coincidence_crossing_is_point = true;
     k.fixes.slice_coincident_faces_sheet_side = true;
     k.fixes.ssi_low_angle_start_on_probation = true;
@@ -313,7 +303,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.torus_signed_gen_curve_interval = true;
     k.fixes.transform_model_size_from_body_box = true;
     k.fixes.transform_scales_each_tolerance = true;
-    k.fixes.trim_boundary_seam_wrap = true;
     k.fixes.uv_trim_checks_on_surface = true;
     k.fixes.uv_trim_corner_end_points_only = true;
     k.fixes.uv_trim_joins_drop_pieces = true;

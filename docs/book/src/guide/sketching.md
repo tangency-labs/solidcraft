@@ -35,7 +35,8 @@ is fully constrained and its curves turn white.
 **4. Finish.** Click **Finish Sketch** to go back to the model; the shaded region is a profile
 that Extrude can use ([Solid features](features.md)).
 
-![The finished sketch, numbered 1 to 5](../media/sketching/parts.png)
+<img class="dark-ui" src="../media/sketching/parts.png" alt="The finished sketch, numbered 1 to 5">
+<img class="light-ui" src="../media/sketching/parts.light.png" alt="The finished sketch, numbered 1 to 5">
 
 **1** Sketch tools · **2** A constraint (this side is vertical) · **3** A dimension ·
 **4** The sketch's state · **5** Finish Sketch
@@ -350,6 +351,13 @@ point it lined up with, in the shape's undo step, unless the sketch already sets
 preference off, drawing lines up only with the previous point, one axis at a time.
 
 Enable **3D Sketch** in the Sketch Palette to draw lines, fit splines and points off the plane.
+
+Enable **Select 3D sketch curve points** in **Preferences > Sketch** to show and select drawn
+3D curve points as construction references after finishing the sketch. This option is off by default.
+For example, choose **Offset Plane**, select its base plane, then select a spline point in
+the **Through point** field. The plane follows that point when the curve is edited. Interior
+points work as well as endpoints, and references use their full 3D positions. Hole placement
+continues to use planar sketch points; drawn 3D curve points are not Hole targets.
 While placing these points, you can snap to points on other visible sketches. For a bridge
 line, start Line and click an endpoint on each source sketch; each endpoint uses its source
 plane, even when that plane differs from the active sketch. These snaps capture positions;

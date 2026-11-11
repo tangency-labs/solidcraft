@@ -86,6 +86,7 @@ fn classify(e: &EngineError) -> Outcome {
         | EngineError::BadParams { .. }
         | EngineError::Disabled(..)
         | EngineError::Refused { .. }
+        | EngineError::Cancelled(_)
         | EngineError::UnknownCommand(_) => Outcome::new("rejected", msg),
         // A failed boolean is a failure even when it says "not supported": those are the cases
         // to fix. Features the kernel doesn't do yet are limitations.

@@ -917,10 +917,17 @@ fn recent_entry<'a>(app: &'a SolveApp, index: usize, path: &'a str) -> start_pag
     } else {
         friendly_path(path).into()
     };
-    let mut menu =
-        vec![start_page::MenuEntry { label: app.tr_label("Remove from list").into(), icon: "delete", chosen: FileAction::ForgetRecent(index) }];
+    let mut menu = vec![start_page::MenuEntry {
+        label: app.tr_label("Remove from list").into(),
+        icon: "delete".into(),
+        chosen: FileAction::ForgetRecent(index),
+    }];
     if !cfg!(target_arch = "wasm32") {
-        menu.push(start_page::MenuEntry { label: app.tr_label("Show in folder").into(), icon: "folder", chosen: FileAction::ShowInFolder(index) });
+        menu.push(start_page::MenuEntry {
+            label: app.tr_label("Show in folder").into(),
+            icon: "folder".into(),
+            chosen: FileAction::ShowInFolder(index),
+        });
     }
     start_page::Recent {
         title,

@@ -57,15 +57,17 @@ fn matching_open(s: &str, close: usize) -> Option<usize> {
     None
 }
 
-/// `s` split at the commas outside brackets (a qualifier's list of faces).
+/// `s` split at the commas outside brackets and parentheses (a qualifier's list of faces).
 fn split_top_level(s: &str) -> Vec<&str> {
     let mut out = Vec::new();
-    let (mut depth, mut from) = (0usize, 0usize);
+    let (mut depth, mut parens, mut from) = (0usize, 0usize, 0usize);
     for (i, b) in s.bytes().enumerate() {
         match b {
             b'[' => depth += 1,
             b']' => depth = depth.saturating_sub(1),
-            b',' if depth == 0 => {
+            b'(' => parens += 1,
+            b')' => parens = parens.saturating_sub(1),
+            b',' if depth == 0 && parens == 0 => {
                 out.extend(s.get(from..i).filter(|x| !x.is_empty()));
                 from = i + 1;
             }

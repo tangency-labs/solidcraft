@@ -31,7 +31,7 @@ pub mod sphere;
 pub mod spline;
 pub mod surface;
 pub mod uv;
-mod vec;
+pub mod vec;
 
 pub use collapse::Collapse;
 pub use curve::{CurveEval, CurveJet};

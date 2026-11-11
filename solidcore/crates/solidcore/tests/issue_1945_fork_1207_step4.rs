@@ -5,7 +5,9 @@
 //! kept the unscaled point's Jacobian for a clamped-and-scaled step (fixed in the fork's
 //! tangency-labs/smlib@d2757e1, ported under WR-253's `fixes.oscillating_skips_failed_guesses`), so
 //! a near-tangent SSI's end landed 1.6e-8 off and the rail's UV trim kept a 3.1e-8 span. The fork's
-//! C++ (68fb9162) builds 11 faces / 25 edges / 16 vertices, V 49712.42808748303, check clean.
+//! C++ (68fb9162) builds 11 faces / 25 edges / 16 vertices, V 49712.42808748303, check clean. Its
+//! rounds' sections are upstream's approximated arcs; here they are the ball's exact circles (WR-708,
+//! as the fork's own from 523bc25 on), which keep 8.1e-5 more material: V 49712.42816838713.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -26,6 +28,9 @@ use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::{edge, Brep, EdgeId};
 use solidcore::{Kernel, Point3};
 
+/// The body's volume with its rounds' sections the ball's exact circles (see the header).
+const EXACT_CIRCLES_VOLUME: f64 = 49712.42816838713;
+
 fn sc_fixes(k: &mut Kernel) {
     k.fixes.temporary_radius_setup_errors = true;
     k.fixes.fillet_trim_status = true;
@@ -36,7 +41,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.fillet_refuse_face_consuming_blends = true;
     k.fixes.fillet_refuse_overlapping_bands = true;
     k.fixes.fillet_refuse_non_manifold_result = true;
-    k.fixes.fillet_refuse_crossing_rails = true;
     k.fixes.fillet_vertex_error_diagnostics = true;
     k.fixes.fillet_corner_ball_patch = true;
     k.fixes.fillet_corner_ball_center_from_axes = true;
@@ -58,18 +62,15 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.revolution_offset_axis_both_sides = true;
     k.fixes.offset_extended_edges_mated = true;
     k.fixes.thicken_planar_side_walls = true;
-    k.fixes.remove_slit_loops_where_solids_touch = true;
     k.fixes.keep_operand_uv_trims = true;
     k.fixes.geometric_g2_continuity = true;
     k.fixes.proto_vertex_miss_is_false = true;
     k.fixes.check_loop_vertex_tolerance = true;
     k.fixes.check_loop_projected_seam_ends = true;
     k.fixes.edge_check_orders_tangent_faces = true;
-    k.fixes.trim_boundary_seam_wrap = true;
     k.fixes.bspline_check_min_radius = true;
     k.fixes.ellipse_step_interval_checks = true;
     k.fixes.uv_trim_checks_on_surface = true;
-    k.fixes.loop_orientation_floor_from_loop_box = true;
     k.fixes.oscillating_skips_failed_guesses = true;
     k.fixes.refine_cc_range_ends = true;
     k.fixes.flat_corners_test_bits = true;
@@ -80,8 +81,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.cylinder_rebuild_mean_radius = true;
     k.fixes.nurb_cylinder_inside_out_frame = true;
     k.fixes.revolve_analytic_profile_faces = true;
-    k.fixes.revolve_arc_centre_near_axis_is_sphere = true;
-    k.fixes.revolve_arc_touching_axis_is_horn_torus = true;
     k.fixes.taper_tangent_corner_planes = true;
     k.fixes.revolve_nested_shells_as_cavities = true;
     k.fixes.revolve_holed_profile_void = true;
@@ -110,7 +109,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.proto_edge_self_loop_on_vertex_degenerate = true;
     k.fixes.slice_coincident_faces_sheet_side = true;
     k.fixes.boolean_outer_shell_first = true;
-    k.fixes.shell_inner_shell_of_statuses = true;
     k.fixes.edge_reversal_keeps_failed_edge = true;
     k.fixes.iso_curve_sliver_domain_is_degenerate = true;
     k.fixes.topology_failed_evaluations_propagate = true;
@@ -141,7 +139,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.fillet_corner_sphere_from_four_arcs = true;
     k.fixes.imprint_trims_edge_to_proto_vertex = true;
     k.fixes.imprint_extends_edge_to_proto_vertex = true;
-    k.fixes.imprint_extension_keeps_analytic_curve = true;
     k.fixes.imprint_reuses_coincident_face_edge = true;
     k.fixes.fillet_point_step_per_point = true;
     k.fixes.fillet_trace_from_tangent_point_toward_next = true;
@@ -162,7 +159,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.offset_stitch_at_body_tolerance = true;
     k.fixes.curve_contacts_at_curve_ends = true;
     k.fixes.shell_empty_cavity_fails = true;
-    k.fixes.fillet_refuse_ball_not_fitting = true;
     k.fixes.fillet_trace_reaches_rails = true;
     k.fixes.fillet_rail_end_on_continued_surface = true;
     k.fixes.boolean_lists_virtual_surface_copies = true;
@@ -264,7 +260,6 @@ fn run_memo(nd_fix: bool, memo: Option<bool>) -> (usize, usize, usize, f64, Vec<
     );
     {
         let mut s = FilletSession::new(&mut k, &mut b).unwrap();
-        s.set_blend_curve_at_thirds(false);
         s.prepare_per_edge_constant_radius(
             &mut k,
             &[top, section],
@@ -298,13 +293,14 @@ fn run_memo(nd_fix: bool, memo: Option<bool>) -> (usize, usize, usize, f64, Vec<
     )
 }
 
-/// With the fix: the fork's body (topology, volume to 1e-9 relative) and a clean check.
+/// With the fix: the fork's topology, the volume of its body with exact circles (to 1e-9
+/// relative; see the header) and a clean check.
 #[test]
 fn step4_round_matches_the_fork_and_checks_clean() {
     let (f, e, v, vol, lines) = run(true);
     assert_eq!((f, e, v), (11, 25, 16));
-    let fork = 49712.42808748303;
-    assert!((vol - fork).abs() <= 1e-9 * fork, "V {vol} vs fork {fork}");
+    let want = EXACT_CIRCLES_VOLUME;
+    assert!((vol - want).abs() <= 1e-9 * want, "V {vol} vs {want}");
     assert!(lines.is_empty(), "{lines:#?}");
 }
 
@@ -320,8 +316,8 @@ fn step4_round_matches_the_fork_and_checks_clean() {
 fn step4_round_without_the_nd_opt_in_builds_the_same_body() {
     let (f, e, v, vol, lines) = run(false);
     assert_eq!((f, e, v), (11, 25, 16));
-    let fork = 49712.42808748303;
-    assert!((vol - fork).abs() <= 1e-9 * fork, "V {vol} vs fork {fork}");
+    let want = EXACT_CIRCLES_VOLUME;
+    assert!((vol - want).abs() <= 1e-9 * want, "V {vol} vs {want}");
     assert!(lines.is_empty(), "{lines:#?}");
     let (_, _, _, with_opt_in, _) = run(true);
     assert_eq!(

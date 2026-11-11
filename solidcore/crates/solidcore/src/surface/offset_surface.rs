@@ -2380,6 +2380,67 @@ pub(crate) fn offset_continues_as_itself(k: &Kernel, surface: &Surface) -> bool 
         && extends_as_itself(k, surface)
 }
 
+/// One parameter direction of [`closed_turn`]: its interval, and whether it wraps there.
+pub(crate) type ClosedDirection = (Extent1d, bool);
+
+/// The parameters a surface whose offset continues as itself ([`offset_continues_as_itself`])
+/// holds each of its points at once, in `(u, v)`: each direction's interval and whether it
+/// wraps there.
+/// - Round the axis, the closed turn ([`RotTurn`]): past it the extension wraps like a
+///   periodic direction (WR-650).
+/// - Along a generator that is an arc of a circle (a torus's, or a revolved circle's), the
+///   circle closed the same way: half the gap past either end, in the quarter-turn spans the
+///   extension continues it by. The extension carries those spans on without end, so a
+///   parameter past the closure names a point the closed circle already holds; that
+///   direction is bounded there, not wrapped (its spans past the base are quarter turns, the
+///   base's need not be). A line, a sphere's generator (ending in its poles) and a whole
+///   circle keep their direction as it is (`None`).
+///
+/// `None` for a surface whose offset does not continue as itself.
+///
+/// # Errors
+///
+/// Those of reading the surface of revolution and its turn.
+pub(crate) fn closed_turn(
+    k: &Kernel,
+    surface: &Surface,
+) -> Result<Option<[Option<ClosedDirection>; 2]>> {
+    if !offset_continues_as_itself(k, surface) {
+        return Ok(None);
+    }
+    let (rev, generator) = revolution_of(k, surface)?;
+    let turn = rot_turn(rev)?;
+    let mut out = [None, None];
+    if let Some(slot) = out.get_mut(turn.rot) {
+        *slot = Some((Extent1d::from_min_max(turn.lo, turn.hi), true));
+    }
+    let gen_angle = match generator {
+        Generator::Circle { angle, .. } => Some(angle),
+        Generator::Torus { .. } => Some(rev.step_uv_domain().size().y * (PI / 180.0)),
+        Generator::Line | Generator::Sphere => None,
+    };
+    let domain = rev.base().natural_uv_domain();
+    let gen_dir = 1 - turn.rot;
+    let gen_ivl = if gen_dir == 0 {
+        domain.u_interval()
+    } else {
+        domain.v_interval()
+    };
+    if let Some(angle) = gen_angle {
+        let length = gen_ivl.max() - gen_ivl.min();
+        if gt(angle, 0.0) && gt(2.0 * PI, angle) && gt(length, 0.0) {
+            let half_gap = (2.0 * PI - angle) * 0.5 * (length / angle);
+            if let Some(slot) = out.get_mut(gen_dir) {
+                *slot = Some((
+                    Extent1d::from_min_max(gen_ivl.min() - half_gap, gen_ivl.max() + half_gap),
+                    false,
+                ));
+            }
+        }
+    }
+    Ok(Some(out))
+}
+
 /// The fork's `sm_GeneratorIsCircle` (tangency-labs/smlib@43fd6b6): whether a surface of
 /// revolution's generator is an arc of one circle, and if so that circle's centre (in the
 /// first column's meridian plane) and the arc's angle. A circle's NURB spans are rational

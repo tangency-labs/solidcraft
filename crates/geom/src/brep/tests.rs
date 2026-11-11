@@ -764,3 +764,36 @@ fn a_whole_turn_a_rounding_short_of_a_quarter_line_has_its_form_from_it() {
         assert_eq!(domain[0], [q, q + 4.0], "seam at {start}");
     }
 }
+
+/// A disc (a plane bounded by a circle) mapped by a scaling and a shear stays a plane bounded by
+/// an ellipse: the record is valid and agrees with its topology, the circle's NURBS form mapped
+/// with its parameter lies on the ellipse labelling it, and a reflection is left to the kernel.
+#[test]
+fn a_disc_scaled_and_sheared_is_a_plane_bounded_by_an_ellipse() {
+    use solidcore_record::Vec3;
+    let disc = one_face(
+        Surface::Plane { origin: [1., 2., 3.], u_axis: [1., 0., 0.], v_axis: [0., 1., 0.] },
+        [[-3., 3.], [-3., 3.]],
+        vec![(Curve::Circle { frame: a_frame(), radius: 2. }, [0., TAU], [0, 0])],
+        &[[3., 2., 3.]],
+        &[(0, true)],
+    );
+    check::validate(&disc).unwrap();
+    let m = [[2., 0., 0., 0.], [0.7, 3., 0., 0.], [0.3, 0., 0.5, 0.], [4., -1., 2., 1.]];
+    let mapped = placement::mapped(&disc, &m).unwrap();
+    check::validate(&mapped).unwrap();
+    solidcore_ops::record_check::agreement(&mapped).unwrap();
+    assert!(matches!(mapped.faces[0].surface, Surface::Plane { .. }));
+    let edge = &mapped.edges[0];
+    let Curve::Ellipse { frame, radii } = &edge.curve else { panic!("{:?}", edge.curve) };
+    let (o, x, y) = (Vec3::from(frame.origin), Vec3::from(frame.x_axis), Vec3::from(frame.y_axis));
+    let form = eval::CurveEval::new(edge.nurbs.as_ref().unwrap()).unwrap();
+    for k in 0..12 {
+        let t = edge.interval[0] + (edge.interval[1] - edge.interval[0]) * k as f64 / 12.0;
+        let d = form.jet(t).unwrap().point - o;
+        let on = (d.dot(x) / radii[0]).powi(2) + (d.dot(y) / radii[1]).powi(2);
+        assert!((on - 1.0).abs() < 1e-9 && d.dot(x.cross(y)).abs() < 1e-9, "{t}: {on}");
+    }
+    let mirror = [[-1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [0., 0., 0., 1.]];
+    assert!(placement::mapped(&disc, &mirror).is_none());
+}

@@ -234,7 +234,7 @@ pub fn left_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     let held = crate::dialog_column::holds(app);
     if held {
         // No row is under the pointer: the view lights no feature for the History.
-        app.viewport.hover_feature = None;
+        crate::semantic_content::set_timeline_feature_hover(app, None);
     }
     if Container::for_layout(app.ui.layout, Surface::Panel).floating() || stacked(app) {
         let bounds = floating_rect(app, available);
@@ -1251,7 +1251,9 @@ struct Rows<'a> {
     sketch_states: crate::sketch_state::SketchStates,
 }
 
-fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
+/// Draw the vertical history column's feature rows, folders, markers, and drag-and-drop targets,
+/// updating selection, edits, and viewport feature hover.
+pub(crate) fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
     let t = Tokens::get();
     // Show origin and bodies at the top (#6490): the browser's Bodies folder and Origin rows lead
     // the history when it is wide enough for names. They are not places in the history: nothing
@@ -1450,7 +1452,7 @@ fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
         }
         None => data.remove::<Drag>(drag_id),
     });
-    app.viewport.hover_feature = rows.hovered;
+    crate::semantic_content::set_timeline_feature_hover(app, rows.hovered);
     if let Some(feature) = rows.edit {
         app.edit_feature(feature);
     }

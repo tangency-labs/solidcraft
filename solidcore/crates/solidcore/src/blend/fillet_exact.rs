@@ -1880,7 +1880,7 @@ pub struct CollapsedOffset {
     pub partial: bool,
 }
 
-/// Not the fork's (#2401; with `fixes.fillet_gn_section_generator`): for a constant ball of
+/// Not the fork's (#2401): for a constant ball of
 /// `radius` (`None`: the solver's own) whose offset of one of its faces collapses (the face
 /// a cylinder or sphere as wide as the ball, the ball inside it: its offset is the axis or
 /// the centre, [`QuadricKind::Line`] or [`QuadricKind::Point`]), the radius of that face
