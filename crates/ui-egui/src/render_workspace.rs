@@ -46,10 +46,10 @@ mod environment;
 #[path = "render_workspace_output.rs"]
 mod inspector;
 #[path = "render_ui/inspector.rs"]
-mod inspector_panel;
+pub(crate) mod inspector_panel;
 
 #[path = "render_workspace_library.rs"]
-mod library;
+pub(crate) mod library;
 
 #[path = "render_ui/assign.rs"]
 pub(crate) mod assign;
@@ -390,7 +390,7 @@ pub enum RenderSelection {
 /// Focus a Render editor without changing the shared modelling selection.
 pub(crate) fn selection_editor(app: &mut SolveApp, selection: &RenderSelection) {
     app.render_workspace.view.selection = selection.clone();
-    app.render_workspace.view.inspector.hidden = false;
+    reveal_inspector(app);
 }
 
 pub(crate) fn object_selection(app: &SolveApp) -> RenderSelection {
@@ -443,6 +443,8 @@ pub struct ViewState {
     studio: studio::View,
     materials: materials::View,
     library: library::View,
+    pub(crate) library_focus_pending: bool,
+    pub(crate) inspector_visibility_request: Option<bool>,
     inspector: inspector::View,
     environment_ring: environment::RingView,
 
@@ -535,6 +537,8 @@ impl Default for ViewState {
             studio: studio::View::default(),
             materials: materials::View::default(),
             library: library::View::default(),
+            library_focus_pending: false,
+            inspector_visibility_request: None,
             inspector: inspector::View::default(),
             environment_ring: environment::RingView::default(),
 
@@ -968,8 +972,9 @@ pub fn enter(app: &mut SolveApp, render: bool) -> Result<(), String> {
             app.render_workspace.displayed.clear();
             app.render_workspace.design_camera = Some((app.cam, app.ui.perspective));
             app.ui.tab = "RENDER".into();
-            select_stage(app, app.render_workspace.view.stage.key());
-            if app.render_workspace.view.selection == RenderSelection::Nothing {
+            let reveal = !crate::panel_runtime::production_active(app);
+            apply_stage(app, app.render_workspace.view.stage.key(), reveal);
+            if reveal && app.render_workspace.view.selection == RenderSelection::Nothing {
                 selection_editor(app, &RenderSelection::Nothing);
             }
         }
@@ -1107,6 +1112,10 @@ pub(crate) fn settle_entry_fit(app: &mut SolveApp, source: Camera, bounds: solid
 
 /// Stage navigation is transient per-document state. It never applies a resource or starts a job.
 pub(crate) fn select_stage(app: &mut SolveApp, key: &str) {
+    apply_stage(app, key, true);
+}
+
+fn apply_stage(app: &mut SolveApp, key: &str, reveal: bool) {
     let stage = match key {
         "look" => Stage::Look,
         "light" => Stage::Light,
@@ -1115,7 +1124,9 @@ pub(crate) fn select_stage(app: &mut SolveApp, key: &str) {
         _ => return,
     };
     app.render_workspace.view.stage = stage;
-    app.render_workspace.view.inspector.hidden = false;
+    if reveal {
+        reveal_inspector(app);
+    }
     let sections: &[&str] = match stage {
         Stage::Look => &["objects"],
         Stage::Light => &["lights", "environment"],
@@ -1182,6 +1193,21 @@ pub(crate) fn job_ready(app: &SolveApp, id: &str) -> Result<(), String> {
     ribbon::action_ready(app, id)
 }
 
+pub(crate) fn reveal_inspector(app: &mut SolveApp) {
+    request_inspector_visibility(app, true);
+}
+
+pub(crate) fn request_inspector_visibility(app: &mut SolveApp, visible: bool) {
+    set_inspector_visible(app, visible);
+    if crate::panel_runtime::production_active(app) {
+        app.render_workspace.view.inspector_visibility_request = Some(visible);
+    }
+}
+
+pub(crate) fn inspector_visible(app: &SolveApp) -> bool {
+    !app.render_workspace.view.inspector.hidden
+}
+
 pub(crate) fn set_inspector_visible(app: &mut SolveApp, visible: bool) {
     app.render_workspace.view.inspector.hidden = !visible;
 }
@@ -1223,9 +1249,10 @@ pub(crate) fn browser_mode(app: &mut SolveApp, ui: &mut egui::Ui) -> bool {
     if app.render_workspace.view.search_objects {
         let mut query = app.render_workspace.view.object_query.clone();
         crate::ui_kit::scope(ui, |ui| {
-            if crate::ui_kit::search_field(ui, ui.scope_id().with("render:tree:query"), &mut query, solidcraft_ui_text::tr("render.tree_search"))
-                .changed()
-            {
+            let response =
+                crate::ui_kit::search_field(ui, ui.scope_id().with("render:tree:query"), &mut query, solidcraft_ui_text::tr("render.tree_search"));
+            crate::panel_runtime::register_content_focus(ui.ctx(), &response);
+            if response.changed() {
                 let _ = app.run("view.render_browser", json!({"query":query}));
             }
         });
