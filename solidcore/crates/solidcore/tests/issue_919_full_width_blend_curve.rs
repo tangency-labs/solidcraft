@@ -84,7 +84,11 @@ fn kinds(b: &Brep) -> Vec<&'static str> {
 fn issue_919_full_width_g2_round_is_refused() {
     let (result, b) = blended(R, 2);
     assert!(
-        matches!(result, Err(SolidError::Upstream { code, .. }) if code == SM_ERR),
+        result
+            .as_ref()
+            .err()
+            .and_then(solidcore::error::upstream_status)
+            == Some(SM_ERR),
         "{result:?}"
     );
     // the cylinder as it was: its wall and two caps
