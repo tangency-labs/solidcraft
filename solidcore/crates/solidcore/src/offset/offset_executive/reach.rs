@@ -841,7 +841,8 @@ impl Dv {
 }
 
 /// The trace of a plane in a normal section, or of two planes' line: the foot `x0` of the
-/// edge point on it, its squared distance `foot2` from the point, and its unit direction.
+/// edge point on it, its squared distance `foot2` from the point, and its direction `u`,
+/// unit only within rounding (a point `x0 + τ u` is `|τ| |u|` from the foot, not `|τ|`).
 #[derive(Debug, Clone, Copy)]
 struct Trace {
     x0: Dv,
@@ -1107,8 +1108,11 @@ fn plan_of(line: &Trace, q: &AlongLine, quadric: &Implicit, tolerance: f64) -> P
 
 /// The squared distances from the edge point of the meetings `plan` takes (each a bound on
 /// the reach: the meeting taken is the nearest), or `None` where the plan takes none or its
-/// formula is not defined on these enclosures.
+/// formula is not defined on these enclosures. A meeting at `τ` is `foot² + τ² |u|²` from
+/// the point: `|u|²` enclosed as `u·u`, since the direction is unit only within rounding,
+/// and an upper bound taken as if `|u| = 1` could sit an ulp below the distance.
 fn planned(plan: &Plan, line: &Trace, q: &AlongLine) -> Option<Vec<Di>> {
+    let unit = line.u.dot(line.u);
     match plan {
         Plan::Roots {
             positive,
@@ -1119,7 +1123,7 @@ fn planned(plan: &Plan, line: &Trace, q: &AlongLine) -> Option<Vec<Di>> {
                 .iter()
                 .map(|&i| {
                     let tau = taus.get(i).copied().flatten()?;
-                    Some(line.foot2 + tau * tau)
+                    Some(line.foot2 + tau * tau * unit)
                 })
                 .collect()
         }
@@ -1128,7 +1132,7 @@ fn planned(plan: &Plan, line: &Trace, q: &AlongLine) -> Option<Vec<Di>> {
                 return None;
             }
             let tau = (Di::constant(0.0) - q.b) / (Di::constant(2.0) * q.a);
-            Some(vec![line.foot2 + tau * tau])
+            Some(vec![line.foot2 + tau * tau * unit])
         }
         Plan::Cover => {
             if !q.a.excludes_zero() {
@@ -1146,7 +1150,7 @@ fn planned(plan: &Plan, line: &Trace, q: &AlongLine) -> Option<Vec<Di>> {
                 v: Ivl::from(tau),
                 d: Ivl::whole(),
             };
-            Some(vec![line.foot2 + tau * tau])
+            Some(vec![line.foot2 + tau * tau * unit])
         }
         Plan::Apart | Plan::Unknown => None,
     }
@@ -1688,18 +1692,14 @@ fn straight_edges_between(
 }
 
 /// Where the line of a kept straight edge ([`StraightEdge`]) meets the plane `(o, ν)`,
-/// from the vertex `p`: the line's point `x0 + τ u` (`x0` the foot of `p`, `u` the unit
-/// direction, `τ = (o − x0)·ν / (u·ν)`) at `√(|x0 − p|² + τ²)`, raised by the curve's
-/// distance from the line over the sine of their angle (`dev |ν| / |u·ν|`); nowhere near
-/// where the line is within `tangent_sine` of parallel to the plane (as two planes'
-/// line, [`planes_line`]); not decided where the enclosures do not settle it.
+/// from the vertex `p`: [`line_meets_plane`] on the line from the edge's first control
+/// point along its unit direction (unit within rounding).
 fn straight_edge_meets_plane(
     p: Vec3,
     line: StraightEdge,
     plane: Tangent,
     tangent_sine: f64,
 ) -> CornerMeeting {
-    let pv = Dv::constant(p);
     let a = Dv::constant(line.a);
     let d = Dv::constant(line.b).sub(a);
     let dd = d.dot(d);
@@ -1707,6 +1707,24 @@ fn straight_edge_meets_plane(
         return CornerMeeting::Uncertified;
     }
     let u = d.scale(Di::constant(1.0) / dd.sqrt());
+    line_meets_plane(Dv::constant(p), a, u, line.dev, plane, tangent_sine)
+}
+
+/// Where the line `a + s u` meets the plane `(o, ν)`, from `p`: its point `M = x0 + τ u`
+/// (`x0 = a + u (u·(p − a))`, the foot of `p` where `|u| = 1`, a point of the line in any
+/// case; `τ = (o − x0)·ν / (u·ν)`) at `|M − p|`, enclosed as it is, so it holds whatever
+/// `|u|` (the direction is unit only within rounding), raised by the curve's distance `dev`
+/// from the line over the sine of their angle, `|u·ν| / (|u| |ν|)`; nowhere near where the
+/// line is within `tangent_sine` of parallel to the plane (as two planes' line,
+/// [`planes_line`]); not decided where the enclosures do not settle it.
+fn line_meets_plane(
+    pv: Dv,
+    a: Dv,
+    u: Dv,
+    dev: f64,
+    plane: Tangent,
+    tangent_sine: f64,
+) -> CornerMeeting {
     let x0 = a.add(u.scale(pv.sub(a).dot(u)));
     let nu = Dv::constant(plane.raw);
     let nn = nu.dot(nu).sqrt();
@@ -1718,9 +1736,9 @@ fn straight_edge_meets_plane(
         return CornerMeeting::Nowhere;
     }
     let tau = Dv::constant(plane.point).sub(x0).dot(nu) / un;
-    let foot = x0.sub(pv);
-    let far = (foot.dot(foot) + tau * tau).v.hi.max(0.0);
-    let slack = (Ivl::from(line.dev) * nn.v / Ivl::from(un.v.mig())).hi;
+    let to = x0.add(u.scale(tau)).sub(pv);
+    let far = to.dot(to).v.hi.max(0.0);
+    let slack = (Ivl::from(dev) * nn.v * u.dot(u).v.sqrt() / Ivl::from(un.v.mig())).hi;
     let reach = round_up(round_up(sqrt(far)) + slack);
     if reach.is_finite() {
         CornerMeeting::Within(reach)
@@ -3185,5 +3203,67 @@ mod tests {
         let xs = |v: &[[f64; 4]]| v.iter().map(|p| p[0]).collect::<Vec<_>>();
         assert_eq!(xs(&left), vec![0.0, 0.5, 1.5]);
         assert_eq!(xs(&right), vec![1.5, 2.5, 4.0]);
+    }
+
+    /// A meeting's distance takes the trace direction's length: the unit sphere and the line
+    /// `x0 + τ u` through its centre with `u = (2, 0, 0)` (far from unit, to show the
+    /// factor; a trace's own `u` is unit within rounding), its edge point `f` off the centre.
+    /// The roots `τ = ±½` are the points `(±1, 0, 0)`, `√(f² + 1)` from the edge point; as
+    /// if `|u| = 1` the bound would be `√(f² + ¼)`, below it.
+    #[test]
+    fn a_meeting_is_as_far_as_its_point_whatever_the_direction_length() {
+        let sphere = Implicit::Sphere {
+            centre: Vec3::new(0.0, 0.0, 0.0),
+            radius: 1.0,
+        };
+        for f in [0.0, 0.5, 3.0] {
+            let line = Trace {
+                x0: Dv::constant(Vec3::new(0.0, 0.0, 0.0)),
+                foot2: Di::constant(f * f),
+                u: Dv::constant(Vec3::new(2.0, 0.0, 0.0)),
+            };
+            let q = along_line(&sphere, &line).unwrap();
+            let plan = plan_of(&line, &q, &sphere, 1e-5);
+            assert!(matches!(plan, Plan::Roots { .. }), "{plan:?}");
+            let found = planned(&plan, &line, &q).unwrap();
+            assert_eq!(found.len(), 2, "{found:?}");
+            let exact = f * f + 1.0;
+            for g in found {
+                assert!(g.v.lo <= exact && exact <= g.v.hi, "{f}: {g:?} {exact}");
+            }
+        }
+    }
+
+    /// A line's meeting with a plane is as far as its point, whatever the direction's
+    /// length: the line through the origin along `u = (2, 0, 0)` (far from unit, to show
+    /// it; an edge's own `u` is unit within rounding) meets the plane `x = 3` at `(3, 0, 0)`,
+    /// `√5` from `p = (1, 1, 0)`; `x0 = (4, 0, 0)` is a point of the line but not `p`'s foot.
+    /// A curve `dev` off the line, which is square to the plane, adds `dev` (the sine is
+    /// `|u·ν| / (|u| |ν|)` = 1), not `dev / 2`.
+    #[test]
+    fn a_line_meets_a_plane_as_far_as_its_point_whatever_the_direction_length() {
+        let plane = Tangent {
+            point: Vec3::new(3.0, 0.0, 0.0),
+            normal: Vec3::new(1.0, 0.0, 0.0),
+            raw: Vec3::new(1.0, 0.0, 0.0),
+        };
+        for dev in [0.0, 0.1] {
+            let met = line_meets_plane(
+                Dv::constant(Vec3::new(1.0, 1.0, 0.0)),
+                Dv::constant(Vec3::new(0.0, 0.0, 0.0)),
+                Dv::constant(Vec3::new(2.0, 0.0, 0.0)),
+                dev,
+                plane,
+                1e-3,
+            );
+            let exact = 5.0_f64.sqrt() + dev;
+            let CornerMeeting::Within(reach) = met else {
+                panic!("{dev}: {met:?}");
+            };
+            assert!(
+                reach >= exact && reach <= exact * (1.0 + 1e-12),
+                "{dev}: {reach} {exact}"
+            );
+        }
     }
 }
