@@ -1518,3 +1518,31 @@ fn parallel_to_refuses_an_end_face_a_curve_and_a_line_along_the_member() {
     let e = s.execute("frame.rotate_member", &json!({"face": side, "parallel_to": {"sketch": "Along", "curve": "al"}})).unwrap_err().to_string();
     assert!(e.contains("That line runs along the member: its sides are already parallel to it"), "{e}");
 }
+
+/// Hostile Rotate Member input is refused, never a panic; a huge finite angle builds the same
+/// member as its remainder (a full turn changes nothing).
+#[test]
+fn rotate_member_hostile_params_never_panic() {
+    let mut s = brace();
+    let face = brace_side(&s, 0.0);
+    let before = s.doc.to_json();
+    let mut path_face = face.clone();
+    path_face["path"] = json!([1, 2, 3]);
+    let mut far_face = face.clone();
+    far_face["index"] = json!(999999);
+    for p in [
+        json!({"face": face, "angle": "nan deg"}),
+        json!({"face": far_face, "angle": "30 deg"}),
+        json!({"face": path_face, "angle": "30 deg"}),
+        json!({"face": face, "parallel_to": {"edge": [1e308, 0, 0]}}),
+        json!({"face": face, "angle": "30 deg", "bogus": 1}),
+        json!({"face": face}),
+    ] {
+        assert!(s.execute("frame.rotate_member", &p).is_err(), "{p}");
+        assert_eq!(s.doc.to_json(), before, "{p}");
+    }
+    // 1e300 deg is finite: accepted, and the member still builds, as the same turn's remainder.
+    let huge = brace_turned("1e300 deg");
+    let remainder = (1e300_f64.to_radians().rem_euclid(std::f64::consts::TAU)).to_degrees();
+    assert!(same_box(huge, brace_turned(&format!("{remainder} deg"))), "{huge:?}");
+}
