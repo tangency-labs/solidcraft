@@ -38,6 +38,14 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&PALETTE_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::edit::PaletteResult>)
         .params("Open command search in the app. Headless calls are refused without changing the design"),
+    CommandSpec::new("ui.toggle_visibility", "Show/Hide Selection", crate::checked!("ui.toggle_visibility", toggle_visibility))
+        .icon("eye")
+        .key("V")
+        .noundo()
+        .doc_only()
+        .contract(&TOGGLE_VISIBILITY_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::ToggleVisibilityResult>)
+        .params("Show or hide what is selected in the app. Headless calls are refused without changing the design; browser.visibility takes explicit items"),
     CommandSpec::new("edit.undo", "Undo", crate::checked!("edit.undo", undo))
         .icon("undo")
         .key("Ctrl+Z")
@@ -271,6 +279,14 @@ const PALETTE_CONTRACT: crate::schema::TypedContract<crate::schema::edit::Palett
 /// in Preferences › Shortcuts like any other command's.
 fn palette(_s: &mut Session, _p: &Value) -> Result<Value> {
     Err(EngineError::Other("ui.palette opens command search in the app; there is no search box in a headless session".into()))
+}
+
+const TOGGLE_VISIBILITY_CONTRACT: crate::schema::TypedContract<crate::schema::edit::ToggleVisibilityParams> = crate::schema::TypedContract::new();
+
+/// Show/Hide of the selection (#13241) is the app's, which knows what is picked in the Browser:
+/// it runs in `SolveApp::start`, and its key can be moved in Preferences › Shortcuts.
+fn toggle_visibility(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Err(EngineError::Other("ui.toggle_visibility acts on the app's selection; use browser.visibility in a headless session".into()))
 }
 
 const REPEAT_CONTRACT: crate::schema::TypedContract<crate::schema::edit::RepeatParams> = crate::schema::TypedContract::new();
@@ -2067,6 +2083,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "plastic.lip"
                 | "plastic.snap_fit"
                 | "plastic.rest"
+                | "frame.end_cap"
                 | "frame.member"
         );
     if !constructor {
@@ -2092,6 +2109,12 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         parameters.entry("convention").or_insert_with(|| json!(convention));
     }
+    if let FeatureKind::Thread { continuous_flanks, .. } = &old.kind
+        && cid == "solid.thread"
+        && let Some(parameters) = params.as_object_mut()
+    {
+        parameters.entry("continuous_flanks").or_insert_with(|| json!(continuous_flanks));
+    }
     // A thread saved before holes were sized by their nominal diameter keeps the size it had
     // when it is edited without naming one.
     if let FeatureKind::Thread { old_auto_size: true, .. } = &old.kind
@@ -2100,6 +2123,14 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         && parameters.get("designation").is_none_or(|d| d.is_null() || d.as_str().is_some_and(|d| d.trim().is_empty()))
     {
         parameters.entry("old_auto_size").or_insert_with(|| json!(true));
+    }
+    // A hole saved before a sketch on a derived plane started its holes at that plane keeps
+    // starting at the surface when it is edited (#11538).
+    if let FeatureKind::Hole { old_surface_start: true, .. } = &old.kind
+        && cid == "solid.hole"
+        && let Some(parameters) = params.as_object_mut()
+    {
+        parameters.entry("old_surface_start").or_insert_with(|| json!(true));
     }
     // Members keep their names through an edit, unless it gives them another name.
     if let FeatureKind::FrameMember { names, body_name, .. } = &old.kind
@@ -2123,6 +2154,11 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     let shared = kept.clone().unwrap_or_default();
     trial.model.keep(Some(shared.clone()));
     trial.active_component = old.component;
+    if let FeatureKind::FrameEndCap { ends, .. } = &old.kind
+        && let Some(anchor) = ends.first().and_then(|e| super::sketch::face::anchor(&e.plane))
+    {
+        trial.active_occurrence_path = (!anchor.author_path.is_empty()).then(|| anchor.author_path.clone());
+    }
     if let FeatureKind::Emboss { face: Some(face), .. } = &old.kind {
         trial.active_occurrence_path = (!face.author_path.is_empty()).then(|| face.author_path.clone());
     }
@@ -2314,8 +2350,34 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     if made == s.doc.next_id && trial.doc.next_id == made.saturating_add(1) {
         trial.doc_mut().next_id = s.doc.next_id;
     }
+    // A cap's stored names go by end: each end kept keeps its own (the same member line and the
+    // same face), a new end has none yet, and a removed end's name is kept back as a renamed
+    // body's is (#4957), so no other cap is given it and what was set on it stays behind.
+    let cap_names = match (&old.kind, &new.kind) {
+        (FeatureKind::FrameEndCap { ends: before, .. }, FeatureKind::FrameEndCap { ends: after, .. }) => {
+            let key = |e: &solidcraft_doc::end_cap::End| (e.member.clone(), super::sketch::face::anchor(&e.plane).map(|a| a.target.key()));
+            let names = after
+                .iter()
+                .map(|e| before.iter().position(|b| key(b) == key(e)).and_then(|i| old.body_names.get(i)).cloned().unwrap_or_default())
+                .collect::<Vec<_>>();
+            let removed = before
+                .iter()
+                .zip(&old.body_names)
+                .filter(|(b, n)| !n.is_empty() && !after.iter().any(|e| key(e) == key(b)))
+                .map(|(_, n)| n.clone())
+                .collect::<Vec<_>>();
+            Some((names, removed))
+        }
+        _ => None,
+    };
+    if let Some((_, removed)) = &cap_names {
+        trial.doc_mut().reserved_body_names.extend(removed.iter().cloned());
+    }
     if let Some(slot) = trial.doc_mut().feature_mut(id) {
         slot.suppressed = old.suppressed;
+        if let Some((names, _)) = cap_names {
+            slot.body_names = names;
+        }
         slot.kind = new.kind;
         slot.edge_refs = new.edge_refs;
         slot.edge_names = new.edge_names;

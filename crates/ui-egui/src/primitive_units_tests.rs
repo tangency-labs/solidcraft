@@ -19,6 +19,10 @@ const PRIMITIVES: [(&str, &[(&str, &str)]); 5] = [
     ("solid.coil", &[("diameter", "40"), ("revolutions", "4"), ("pitch", "8"), ("section_size", "3")]),
 ];
 
+/// #12418: the radius a new Solid Fillet opens at, per design unit: the 2 mm the tool ships
+/// with, shown in the design's units.
+const FILLET_RADII: &[(&str, &str)] = &[("mm", "2 mm"), ("cm", "0.2 cm"), ("m", "0.002 m"), ("in", "0.07874 in"), ("ft", "0.006562 ft")];
+
 /// A design in `units`, with nothing in it.
 fn design(units: &str) -> Harness {
     let mut h = Harness::new();
@@ -431,7 +435,6 @@ fn editing_a_coil_reopens_its_dialog_filled_in_and_ok_redefines_it() {
 fn operation_length_defaults_follow_every_design_unit() {
     const CASES: &[(&str, &[&str])] = &[
         ("solid.extrude", &["10", "10", "", "", "2", "1"]),
-        ("solid.fillet", &["2", "2"]),
         ("solid.chamfer", &["1", "1"]),
         ("solid.shell", &["2"]),
         ("solid.hole", &["5", "10", "9", "3", "10", ""]),
@@ -478,7 +481,44 @@ fn operation_length_defaults_follow_every_design_unit() {
             let expected: Vec<_> = numbers.iter().map(|n| if n.is_empty() { String::new() } else { format!("{n} {units}") }).collect();
             assert_eq!(values, expected, "{command} in {units}");
         }
+        // The Solid Fillet's radius is the size the tool ships with (2 mm), shown in the
+        // design's units: a radius is bound by the faces beside its edges, and the number 2
+        // read in an inch design (50.8 mm) never fits the part (#12418).
+        let radius = FILLET_RADII.iter().find_map(|entry| (entry.0 == units).then_some(entry.1)).expect("a design unit");
+        let mut d = crate::dialogs::Dialog::for_command(&h.app, "solid.fillet").unwrap_or_else(|| panic!("no dialog for solid.fillet"));
+        let values: Vec<_> = crate::length_input::fields(&h.app.session.doc, &mut d.kind).into_iter().map(|v| v.clone()).collect();
+        assert_eq!(values, vec![radius.to_string(), radius.to_string()], "solid.fillet in {units}");
     }
+}
+
+/// #12418: a new Solid Fillet opens at the radius the tool ships with, in the design's units.
+#[test]
+fn operation_length_defaults_keep_the_fillet_radius_at_the_shipped_size() {
+    let h = design("in");
+    let mut d = crate::dialogs::Dialog::for_command(&h.app, "solid.fillet").unwrap_or_else(|| panic!("no dialog for solid.fillet"));
+    let values: Vec<_> = crate::length_input::fields(&h.app.session.doc, &mut d.kind).into_iter().map(|v| v.clone()).collect();
+    assert_eq!(values, vec!["0.07874 in".to_string(), "0.07874 in".to_string()], "a new Solid Fillet in an inch design");
+}
+
+/// #12418: only the Solid Fillet's radius changes. Every other operation keeps the number the
+/// design's unit reads, and the preference brings the old Fillet default back.
+#[test]
+fn operation_length_defaults_keep_every_other_operation_on_the_design_unit() {
+    let h = design("in");
+    let mut d = crate::dialogs::Dialog::for_command(&h.app, "solid.extrude").unwrap_or_else(|| panic!("no dialog for solid.extrude"));
+    let values: Vec<_> = crate::length_input::fields(&h.app.session.doc, &mut d.kind).into_iter().map(|v| v.clone()).collect();
+    assert_eq!(values[0], "10 in", "a new Extrude in an inch design");
+
+    let mut d = crate::dialogs::Dialog::for_command(&h.app, "solid.chamfer").unwrap_or_else(|| panic!("no dialog for solid.chamfer"));
+    let values: Vec<_> = crate::length_input::fields(&h.app.session.doc, &mut d.kind).into_iter().map(|v| v.clone()).collect();
+    assert_eq!(values[0], "1 in", "a new Chamfer in an inch design");
+
+    // The preference keeps the old default: the number 2 read in the design's units.
+    let mut h = design("in");
+    h.app.preferences.fillet_legacy_radius = true;
+    let mut d = crate::dialogs::Dialog::for_command(&h.app, "solid.fillet").unwrap_or_else(|| panic!("no dialog for solid.fillet"));
+    let values: Vec<_> = crate::length_input::fields(&h.app.session.doc, &mut d.kind).into_iter().map(|v| v.clone()).collect();
+    assert_eq!(values, vec!["2 in".to_string(), "2 in".to_string()], "the preference keeps the old Fillet default");
 }
 
 #[test]

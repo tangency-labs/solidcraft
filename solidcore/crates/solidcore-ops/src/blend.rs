@@ -343,7 +343,9 @@ fn refused(b: &Brep, refusal: &BlendRefusal) -> Option<Error> {
             tolerance,
             smallest: smallest_radius,
         },
-        BlendRefusal::SetbackTooShort { vertex: v, least } => Error::SetbackTooShort {
+        BlendRefusal::SetbackTooShort {
+            vertex: v, least, ..
+        } => Error::SetbackTooShort {
             vertex: vertex(v)?,
             least,
         },

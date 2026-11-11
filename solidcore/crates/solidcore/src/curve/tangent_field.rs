@@ -401,7 +401,10 @@ fn end_tangents(
     let dist = at(&pv, 0).distance(start_pnt);
     if dist > approx_tol_3d {
         // Ends don't match
-        return Err(SolidError::sm_err(OP_CREATE));
+        return Err(SolidError::curve_failed(
+            OP_CREATE,
+            "the start points do not match",
+        ));
     }
 
     // EndCurve position and tangent
@@ -418,7 +421,10 @@ fn end_tangents(
     let dist = at(&pv, 0).distance(end_pnt);
     if dist > approx_tol_3d {
         // Ends don't match
-        return Err(SolidError::sm_err(OP_CREATE));
+        return Err(SolidError::curve_failed(
+            OP_CREATE,
+            "the end points do not match",
+        ));
     }
 
     Ok((start_tangent, end_tangent))
@@ -492,7 +498,10 @@ fn field_evaluate(
         return Ok(vec![p0, diff / delta_t]);
     }
     // Can not go higher than 1st derivative
-    Err(SolidError::sm_err(OP_EVALUATE))
+    Err(SolidError::curve_failed(
+        OP_EVALUATE,
+        "more than one derivative was asked",
+    ))
 }
 
 // ---- the curve kind -----------------------------------------------------------------
@@ -1074,7 +1083,7 @@ mod tests {
         };
         assert!(matches!(
             TangentField::create(k, 1e-6, &base, &uv, &srf, start, bad),
-            Err(SolidError::Upstream { code: 1001, .. })
+            Err(e) if crate::error::upstream_status(&e) == Some(1001)
         ));
     }
 

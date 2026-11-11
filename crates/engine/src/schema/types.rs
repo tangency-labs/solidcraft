@@ -216,6 +216,12 @@ target_point!(
     "must be a point [x, y, z] to turn to"
 );
 
+target_point!(
+    /// Emboss's `face`: a [`Point3`], with the handler's message.
+    EmbossFacePoint,
+    "must be a finite point [x,y,z]"
+);
+
 /// Extrude's `faces`: 1 to 1024 points on coplanar faces of one body, read as the handler reads
 /// them, with its messages.
 #[derive(Clone, Debug, PartialEq)]
@@ -520,6 +526,30 @@ keyword_param!(
     &["inside", "center", "on", "on_center", "outside"],
     "inside, center or outside",
     "Where the section sits against the coil's diameter: center (the default; on and on_center are aliases) on it, inside it or outside it. Any case."
+);
+keyword_param!(
+    /// `solid.emboss`'s `mode`.
+    EmbossModeParam,
+    "mode",
+    &["emboss", "deboss"],
+    "emboss or deboss",
+    "Whether the profiles are raised from the face (emboss, the default) or sunk into it (deboss). Any case."
+);
+keyword_param!(
+    /// `surface.ruled`'s `mode`.
+    RuledModeParam,
+    "mode",
+    &["normal", "tangent", "angle", "direction"],
+    "normal, tangent, angle or direction",
+    "Which way the rulings run from each edge: normal (the default: along the normal of the face beside the edge), tangent (continuing that face), angle (`angle` from `direction`, else from the face's normal, turned away from the face) or direction (along `direction`). Matching ignores case."
+);
+keyword_param!(
+    /// `surface.ruled`'s `corners`.
+    RuledCornersParam,
+    "corners",
+    &["mitre", "miter", "round"],
+    "mitre or round",
+    "How the strip turns the chain's sharp corners: mitre (the default; miter is an alias) or round. Inside corners are always cut back. Matching ignores case."
 );
 keyword_param!(
     /// `solid.fillet`'s `type`.
@@ -1120,12 +1150,15 @@ impl JsonSchema for RailFitParam {
     }
 }
 
-/// What `features::guide_rails` says about a sweep's or a loft's (`what`) `rails`, as given (not
-/// `null`), before it looks a sketch up: its message, or `None`. `default_sketch`: a rail may
+/// What `features::guide_rails` says about a sweep's or a loft's `rails`, as given (not `null`),
+/// before it looks a sketch up: its message, or `None`. `count_for`: the command whose one or two
+/// rails to count; `None` leaves the count to the handler. `default_sketch`: a rail may
 /// leave its `sketch` out. A key a rail doesn't take, which the handler ignores, is refused too.
-fn guide_rails_problem(v: &Value, what: &str, default_sketch: bool) -> Option<String> {
+pub(super) fn guide_rails_problem(v: &Value, count_for: Option<&str>, default_sketch: bool) -> Option<String> {
     let Value::Array(given) = v else { return Some(whole("`rails` must list one or two rails: [{sketch, curves: [ids]}]")) };
-    if !(1..=2).contains(&given.len()) {
+    if let Some(what) = count_for
+        && !(1..=2).contains(&given.len())
+    {
         return Some(whole(format!("a {what} takes one or two guide rails")));
     }
     for (i, rail) in given.iter().enumerate() {
@@ -1160,7 +1193,7 @@ pub struct SweepRails(pub Value);
 impl<'de> Deserialize<'de> for SweepRails {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let v = Value::deserialize(d)?;
-        match guide_rails_problem(&v, "sweep", true) {
+        match guide_rails_problem(&v, Some("sweep"), true) {
             Some(why) => Err(D::Error::custom(why)),
             None => Ok(SweepRails(v)),
         }
@@ -1272,8 +1305,8 @@ fn geo_problem(v: &Value) -> Option<String> {
 }
 
 /// The reference types a saved reference's `type` names (`solidcraft_doc::construct::GeoRef`).
-const SAVED_REFS: [&str; 11] =
-    ["point", "origin", "vertex", "edge", "face", "plane", "world", "axis", "construct_point", "sketch_point", "sketch_curve"];
+const SAVED_REFS: [&str; 12] =
+    ["point", "datum", "origin", "vertex", "edge", "face", "plane", "world", "axis", "construct_point", "sketch_point", "sketch_curve"];
 
 /// `{key: point}`, unless it has `type` (then it is a saved reference).
 fn picked_at(key: &str, point: &Schema) -> Value {

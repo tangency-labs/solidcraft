@@ -204,7 +204,7 @@ pub(super) fn appearance(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             super::figures::status_palette_sample(ui, app.preferences.color_vision);
             // What the modes recolour, in the mode being chosen (#7152): the status chips above keep
             // their colours in every mode.
-            ui_kit::colour_vision_sample(ui, &solidcraft_theme::Tokens::get_in(app.preferences.color_vision));
+            super::figures::colour_vision_sample(ui, &solidcraft_theme::Tokens::get_in(app.preferences.color_vision));
             if app.preferences.color_vision != mode {
                 ui.ctx().request_repaint();
             }
@@ -261,6 +261,8 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 app.preferences.ribbon_icon_grid = selected == 1;
                             }
                         });
+                        let response = setting::construct_menu_groups(app, ui);
+                        crate::scenario::publish_target("prefs:construct_menu_groups", response.rect);
                         ui_kit::row(ui, app.tr("prefs.toast_place"), |ui| {
                             let places = [crate::viewport::ToastPlace::Corner, crate::viewport::ToastPlace::Centre];
                             let mut selected = places.iter().position(|p| *p == app.preferences.toast_place).unwrap_or(0);
@@ -281,6 +283,22 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                             }
                         }
                         layout_check(ui, app.tr("prefs.status_bar"), app.tr("prefs.status_bar_note"), &mut app.preferences.status_bar, "status_bar");
+                        // The operations under way, with their Cancel, in the view's corner.
+                        layout_check(
+                            ui,
+                            app.tr("prefs.operations_panel"),
+                            app.tr("prefs.operations_panel_note"),
+                            &mut app.preferences.operations_panel,
+                            "operations_panel",
+                        );
+                        // The design waits for a file being opened or inserted, as before.
+                        layout_check(
+                            ui,
+                            app.tr("prefs.file_operations_wait"),
+                            app.tr("prefs.file_operations_wait_note"),
+                            &mut app.preferences.file_operations_wait,
+                            "file_operations_wait",
+                        );
                     });
                     ui_kit::LayoutPreview {
                         compact: app.ui.layout == crate::ui_kit::LayoutMode::Docked,
@@ -427,15 +445,16 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                     &mut app.preferences.history_bar_groups,
                     "history_bar_groups",
                 );
-                ui.add_enabled_ui(app.preferences.timeline_left, |ui| {
-                    layout_check(
-                        ui,
-                        app.tr("prefs.layout_page.origin_bodies"),
-                        app.tr("prefs.history_origin_bodies_note"),
-                        &mut app.preferences.timeline_origin_bodies,
-                        "history_origin_bodies",
-                    );
-                });
+                // Greyed out unless History is on the left. The box is disabled inside its own space: a
+                // disabled area around it would start at the row's end and squeeze the label away (#14564).
+                layout_check_enabled(
+                    ui,
+                    app.preferences.timeline_left,
+                    app.tr("prefs.layout_page.origin_bodies"),
+                    app.tr("prefs.history_origin_bodies_note"),
+                    &mut app.preferences.timeline_origin_bodies,
+                    "history_origin_bodies",
+                );
                 layout_check(
                     ui,
                     app.tr("prefs.browser_components_open"),
@@ -645,19 +664,27 @@ fn history_choice(app: &SolveApp) -> usize {
 
 /// Keep native checkbox responses and one real search target; guidance stays on hover.
 fn layout_check(ui: &mut egui::Ui, label: &str, help: &str, value: &mut bool, key: &str) {
+    layout_check_enabled(ui, true, label, help, value, key);
+}
+
+/// A [`layout_check`] that may be greyed out. In a wrapped row, the box is placed (and wraps) as a whole,
+/// then disabled inside its own space.
+fn layout_check_enabled(ui: &mut egui::Ui, enabled: bool, label: &str, help: &str, value: &mut bool, key: &str) {
     let t = Tokens::get();
     let width = (ui_kit::ContentWidth::label(ui, label) + t.space_14 + t.space_6 * 2.0 + t.space_16).min(ui.max_rect().width());
     ui.allocate_ui_with_layout(egui::vec2(width.max(0.0), t.control_height), egui::Layout::top_down(egui::Align::Min), |ui| {
-        ui_kit::settings_form(ui, 0.0, |ui| {
-            ui_kit::row(ui, "", |ui| {
-                ui.spacing_mut().item_spacing.x = t.space_6;
-                let check_width = (ui.available_width() - t.space_16 - t.space_6).max(0.0);
-                let response = ui_kit::settings_control_width(ui, check_width, |ui| {
-                    ui_kit::checkbox(ui, label, value).backing_on_hover_text(help).backing_on_disabled_hover_text(help)
-                });
-                crate::scenario::publish_target(&format!("prefs:{key}"), response.rect);
-                ui_kit::help_icon(ui, help);
-            })
+        ui.add_enabled_ui(enabled, |ui| {
+            ui_kit::settings_form(ui, 0.0, |ui| {
+                ui_kit::row(ui, "", |ui| {
+                    ui.spacing_mut().item_spacing.x = t.space_6;
+                    let check_width = (ui.available_width() - t.space_16 - t.space_6).max(0.0);
+                    let response = ui_kit::settings_control_width(ui, check_width, |ui| {
+                        ui_kit::checkbox(ui, label, value).backing_on_hover_text(help).backing_on_disabled_hover_text(help)
+                    });
+                    crate::scenario::publish_target(&format!("prefs:{key}"), response.rect);
+                    ui_kit::help_icon(ui, help);
+                })
+            });
         });
     });
 }

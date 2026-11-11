@@ -740,8 +740,8 @@ fn flat_loft_sides_are_planar_faces() {
         assert!(plane.height(face.centroid).abs() < 1e-6, "face {}: its plane runs through it", face.index);
         assert!((face.centroid - centre).dot(plane.normal()) > 0.0, "face {}: its plane faces out", face.index);
     }
-    // The sides are B-spline patches, so this reaches the control-net test (were the loft to
-    // build planes here, another flat B-spline face would have to stand in).
+    // The sides are B-spline patches, so this reaches the kernel's flatness test (were the loft
+    // to build planes here, another flat B-spline face would have to stand in).
     let splines = flat
         .record()
         .faces
@@ -2244,6 +2244,27 @@ fn boolean_identity_on_tangent_primitives() {
     for (seed, c) in cases {
         assert_eq!(c.outcome, "ok", "seed {seed}: {} {:?} {:?}", c.detail, c.a, c.b);
     }
+}
+
+/// #1989: a boolean watched by someone who cancelled (an agent's request cancelled while it
+/// computes off the window thread) does not start, saying so; unwatched, or watched and not
+/// cancelled, it runs as before.
+#[test]
+fn a_cancelled_watch_stops_the_boolean() {
+    struct Cancelled(bool);
+    impl crate::watch::Watch for Cancelled {
+        fn cancelled(&self) -> bool {
+            self.0
+        }
+        fn progress(&self, _: &'static str, _: usize, _: usize) {}
+    }
+    let a = cylinder(Vec3::new(0.0, 0.0, -10.0), Vec3::Z, 3.0, 20.0).unwrap();
+    let b = cylinder(Vec3::new(-10.0, 0.0, 0.0), Vec3::X, 2.0, 20.0).unwrap();
+    let e = crate::watch::watching(std::sync::Arc::new(Cancelled(true)), || boolean(&a, &b, BoolOp::Intersect)).unwrap_err();
+    assert!(e.to_string().contains("cancelled"), "{e}");
+    let r = crate::watch::watching(std::sync::Arc::new(Cancelled(false)), || boolean(&a, &b, BoolOp::Intersect));
+    assert!(r.is_ok_and(|r| r.is_some()));
+    assert!(boolean(&a, &b, BoolOp::Intersect).unwrap().is_some());
 }
 
 /// A body in two pieces: booleans go a piece at a time.

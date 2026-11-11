@@ -14,6 +14,13 @@ pub struct Saving {
     done: std::sync::mpsc::Receiver<(Session, Result<Value, String>)>,
 }
 
+impl Saving {
+    /// The command writing: `file.save` or `file.save_as`.
+    pub(crate) fn command(&self) -> &'static str {
+        self.command
+    }
+}
+
 /// Run `file.save` or `file.save_as` with `params`. On the desktop it runs on a worker and is
 /// taken up by [`tick`] (true: it is under way); in the browser, or when no thread can start, it
 /// runs here and is finished on return (false).
@@ -25,7 +32,7 @@ pub fn start(app: &mut SolveApp, command: &'static str, params: Value) -> bool {
         return false;
     }
     #[cfg(not(target_arch = "wasm32"))]
-    if app.saving.is_none() && app.file_picker.is_none() && !app.file_load.busy() {
+    if app.saving.is_none() && app.file_picker.is_none() && !app.file_load_holds() {
         let mut copy = app.session.scratch();
         // The copy has no file: the command saves to this session's (and names the design after it).
         copy.path.clone_from(&app.session.path);

@@ -591,7 +591,9 @@ fn rust_cr_eu_body(
         Ok(fs) => fs,
         Err(e) if e.is_unported() => return Err(e),
         // the tangent-surface exits (SM_ERR only signalled upstream)
-        Err(SolidError::Upstream { code, .. }) => return Ok(vec![f64::from(code)]),
+        Err(e) if solidcore::error::upstream_status(&e).is_some() => {
+            return Ok(vec![f64::from(solidcore::error::upstream_status(&e).unwrap_or(-1))]);
+        }
         Err(e) => return Err(e),
     };
     fs.solver.surface_extension_factor = ext;
@@ -817,8 +819,7 @@ fn surface_of(s: &SrfIn) -> Result<Surface, HarnessError> {
 fn status(e: &SolidError) -> f64 {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007.0,
-        SolidError::Upstream { code, .. } => f64::from(*code),
-        _ => -1.0,
+        e => solidcore::error::upstream_status(e).map_or(-1.0, f64::from),
     }
 }
 

@@ -247,7 +247,10 @@ fn gen_circle<'a>(gen: Option<&'a Curve>, op: &'static str) -> Result<&'a Ellips
     match gen.map(Curve::kind) {
         Some(CurveKind::Ellipse(e)) => Ok(e),
         Some(_) => Err(SolidError::invalid_input(op, "generator is not a circle")),
-        None => Err(SolidError::null_pointer(op)),
+        None => Err(SolidError::surface_missing(
+            op,
+            "the sphere's generator circle",
+        )),
     }
 }
 
@@ -321,7 +324,7 @@ impl Sphere {
                 if e.is_unported_or_cancelled() {
                     e
                 } else {
-                    SolidError::null_pointer(OP_NEW)
+                    SolidError::surface_missing(OP_NEW, "the sphere's generator circle")
                 }
             })?;
             base.gen_curve = Some(Curve::from(circle));
@@ -349,7 +352,10 @@ impl Sphere {
         let inside_out = radius < 0.0;
         let abs_radius = radius.abs();
         if abs_radius.is_nan() || abs_radius <= EFF_ZERO {
-            return Err(SolidError::sm_err(OP_CANONICAL));
+            return Err(SolidError::surface_failed(
+                OP_CANONICAL,
+                "the sphere's radius is not above zero",
+            ));
         }
 
         // set analytic domain = [0 to 360, -90 to 90]
@@ -373,11 +379,19 @@ impl Sphere {
         // Build NURB; fail cleanly rather than leak a null-NURB object.
         match sphere.make_nurb(k) {
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => return Err(SolidError::sm_err(OP_CANONICAL)),
+            Err(_) => {
+                return Err(SolidError::surface_failed(
+                    OP_CANONICAL,
+                    "the sphere's NURB could not be made",
+                ))
+            }
             Ok(()) => {}
         }
         if sphere.base.base.gw_nurb().is_none() {
-            return Err(SolidError::sm_err(OP_CANONICAL));
+            return Err(SolidError::surface_failed(
+                OP_CANONICAL,
+                "the sphere has no NURB",
+            ));
         }
         Ok(sphere)
     }
@@ -627,12 +641,10 @@ impl Sphere {
         if off.base.base.nurb.is_none() {
             ignore_status(off.make_nurb(k))?;
         }
-        let off_nurb = off
-            .base
-            .base
-            .nurb
-            .as_mut()
-            .ok_or(SolidError::null_pointer(OP_OFFSET))?;
+        let off_nurb =
+            off.base.base.nurb.as_mut().ok_or_else(|| {
+                SolidError::surface_missing(OP_OFFSET, "the offset sphere's NURB")
+            })?;
         let ix = off_nurb.indices();
 
         // for every m_pNurb Control Point
@@ -744,7 +756,10 @@ impl Sphere {
     ) -> Result<()> {
         // check input
         if hu > 3 || hv > 3 {
-            return Err(SolidError::sm_err(OP_EVAL_STEP));
+            return Err(SolidError::surface_failed(
+                OP_EVAL_STEP,
+                "the STEP form evaluates derivatives up to order 3 only",
+            ));
         }
         if hu != hv {
             return Err(SolidError::invalid_input(
@@ -921,7 +936,7 @@ impl Sphere {
             .base
             .calculate_bounding_box(k, uv_domain, &req)?
             .normal
-            .ok_or(SolidError::null_pointer(OP_PLANE))
+            .ok_or_else(|| SolidError::surface_missing(OP_PLANE, "the sphere's bounding box"))
     }
 
     /// The intersection curves of this sphere over `uv_domain` with `other` over
@@ -1902,7 +1917,7 @@ impl Sphere {
             .base
             .calculate_bounding_box(k, other_uv_domain, &req)?
             .normal
-            .ok_or(SolidError::null_pointer(OP_CONE))?;
+            .ok_or_else(|| SolidError::surface_missing(OP_CONE, "the cone's bounding box"))?;
         bbox2.expand_absolute(tol);
         if bbox1.are_disjoint(&bbox2, 0.0) {
             return Ok(false);
@@ -1938,7 +1953,10 @@ impl Sphere {
         let mut circle_norm = vec.cross(cone_axis);
         let length = circle_norm.length();
         if length < EFF_ZERO {
-            return Err(SolidError::sm_err(OP_CONE)); // Should never happen.
+            return Err(SolidError::surface_failed(
+                OP_CONE,
+                "the middle of the cone's boundary is on its axis",
+            )); // Should never happen.
         }
         circle_norm /= length;
 
@@ -2281,7 +2299,7 @@ impl Sphere {
         if k.fixes.found_torus_sphere_keep_tested_nurb {
             let nurb = test
                 .gw_nurb()
-                .ok_or_else(|| SolidError::null_pointer(OP_NURB_SPHERE))?;
+                .ok_or_else(|| SolidError::surface_missing(OP_NURB_SPHERE, "the tested NURB"))?;
             sphere.base.base.nurb = Some(copy_nurb_surface(nurb)).into();
             sphere.base.base.nurb_is_borrowed = false;
             ignore_status(sphere.rebuild_step_from_nurb_parameters(k))?;
@@ -2320,7 +2338,10 @@ impl Sphere {
             || srf.degree(SurfParamType::V) != 2
             || !srf.is_rational()
         {
-            return Err(SolidError::sm_err(OP_REBUILD));
+            return Err(SolidError::surface_failed(
+                OP_REBUILD,
+                "the NURB is not a rational surface of degree 2",
+            ));
         }
 
         // evaluate min/max domain points
@@ -2371,7 +2392,10 @@ impl Sphere {
 
         // quit when not a properly oriented sphere
         if !is_sphere_with_swap_uv && !is_sphere_no_swap_uv {
-            return Err(SolidError::sm_err(OP_REBUILD));
+            return Err(SolidError::surface_failed(
+                OP_REBUILD,
+                "the NURB is not a properly oriented sphere",
+            ));
         }
 
         // locals
@@ -2467,7 +2491,10 @@ impl Sphere {
 
         // no work - GenCurve is degenerate
         if circle.is_degenerate(scaled_zero) {
-            return Err(SolidError::sm_err(OP_REBUILD));
+            return Err(SolidError::surface_failed(
+                OP_REBUILD,
+                "the generator circle is degenerate",
+            ));
         }
 
         // set m_pGenCurve
@@ -2586,7 +2613,10 @@ impl Sphere {
     ) -> Result<LocationType> {
         let inv = self.step_inversion(anal_domain, point, tol, None);
         if k.fixes.analytic_inversion_answers_apart && !inv.answered {
-            return Err(SolidError::sm_err(OP_SPHERE_STEP_INV));
+            return Err(SolidError::surface_failed(
+                OP_SPHERE_STEP_INV,
+                "the point is the centre of a sphere within the tolerance and has no parameters",
+            ));
         }
         Ok(inv.location)
     }
@@ -2745,7 +2775,10 @@ impl Sphere {
         if let Some(s) = scale {
             if !are_same(s.x, s.y) || !are_same(s.x, s.z) || s.x < EFF_ZERO {
                 // Unable to scale analytical surfaces non-uniformly
-                return Err(SolidError::sm_err(OP_TRANSFORM));
+                return Err(SolidError::surface_failed(
+                    OP_TRANSFORM,
+                    "an analytic surface cannot be scaled non-uniformly",
+                ));
             }
             d_scale = s.x;
         }
@@ -3041,6 +3074,7 @@ pub(crate) fn meridian_rounding(p: usize, q: usize, corners: f64, radius: Option
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::surface::SurfaceFailure;
 
     fn frame() -> Axis2Placement {
         Axis2Placement::new(
@@ -3149,9 +3183,57 @@ mod tests {
     fn rejects_degenerate_radii() {
         let k = Kernel::default();
         for r in [0.0, 1e-13, f64::NAN, -1e-13] {
-            let res = Sphere::create_canonical(&k, &frame(), r);
-            assert!(matches!(res, Err(SolidError::Upstream { .. })));
+            let e = Sphere::create_canonical(&k, &frame(), r).unwrap_err();
+            assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+            assert_eq!(e.operation(), OP_CANONICAL);
+            assert_eq!(
+                e.surface_failure(),
+                Some(&SurfaceFailure::Failed(
+                    "the sphere's radius is not above zero"
+                ))
+            );
         }
+    }
+
+    /// The sphere's failures carry a typed reason and keep the status, kind and operation
+    /// of the bare status each replaced.
+    #[test]
+    fn sphere_failures_keep_their_upstream_answers() {
+        let k = Kernel::default();
+        let mut s = canonical(&k, 2.0);
+        let e = s.evaluate_step(Point2::new(0.0, 0.0), 4, 4).unwrap_err();
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.operation(), OP_EVAL_STEP);
+        assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
+        assert_eq!(
+            e.surface_failure(),
+            Some(&SurfaceFailure::Failed(
+                "the STEP form evaluates derivatives up to order 3 only"
+            ))
+        );
+        let e = s
+            .transform(
+                &k,
+                &Axis2Placement::IDENTITY,
+                Some(Vec3::new(1.0, 2.0, 1.0)),
+            )
+            .unwrap_err();
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.operation(), OP_TRANSFORM);
+        assert_eq!(
+            e.surface_failure(),
+            Some(&SurfaceFailure::Failed(
+                "an analytic surface cannot be scaled non-uniformly"
+            ))
+        );
+        let e = gen_circle(None, OP_NEW).unwrap_err();
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
+        assert_eq!(e.operation(), OP_NEW);
+        assert_eq!(e.kind(), crate::error::ErrorKind::Missing);
+        assert_eq!(
+            e.to_string(),
+            format!("{OP_NEW}: the sphere's generator circle is missing")
+        );
     }
 
     #[test]
@@ -3228,16 +3310,11 @@ mod tests {
             let d = s.base.anal_uv_domain;
             let r = s.inversion_location(&k, &d, frame().origin(), 1e-3);
             if apart {
-                assert!(
-                    matches!(
-                        r,
-                        Err(SolidError::Upstream {
-                            code: crate::error::SM_ERR,
-                            ..
-                        })
-                    ),
-                    "{r:?}"
-                );
+                let e = r.unwrap_err();
+                assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+                assert_eq!(e.operation(), OP_SPHERE_STEP_INV);
+                assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
+                assert!(e.surface_failure().is_some(), "{e:?}");
             } else {
                 assert_eq!(r.unwrap(), LocationType::Exterior);
             }

@@ -365,7 +365,10 @@ impl Parabola {
     /// `SM_ERR` for more than 3 derivatives.
     pub fn evaluate_step(&self, t: f64, num_derivs: usize) -> Result<Vec<Vec3>> {
         if num_derivs > 3 {
-            return Err(SolidError::sm_err(OP_EVAL));
+            return Err(SolidError::curve_failed(
+                OP_EVAL,
+                "more than 3 derivatives were asked",
+            ));
         }
         let mut t = t;
         if !self.anal_domain.contains_value(t, 0.0) {
@@ -683,7 +686,10 @@ impl Parabola {
             let unit_scale = s.x == 1.0 && s.y == 1.0 && s.z == 1.0;
             if !unit_scale && (!are_same(s.x, s.y) || !are_same(s.x, s.z)) {
                 // Unable to scale analytical curves non-uniformly
-                return Err(SolidError::sm_err(OP_XFORM));
+                return Err(SolidError::curve_failed(
+                    OP_XFORM,
+                    "the scale is not uniform",
+                ));
             }
         }
 

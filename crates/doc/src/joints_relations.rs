@@ -27,7 +27,7 @@ pub fn relation_values(doc: &Document, st: &ModelState, j: &Joint) -> Option<Vec
     // B's joint frame in A's as it is.
     let now = mat_mul(&mat_inverse(&fa)?, &fb);
     // A turn weighs as far as it moves a point B's size away.
-    let size = component_of(doc, j.b.occurrence).map(|c| component_bodies(doc, st, c).iter().map(|b| b.body.size()).fold(0.0, f64::max));
+    let size = component_of(doc, j.b.part()).map(|c| component_bodies(doc, st, c).iter().map(|b| b.body.size()).fold(0.0, f64::max));
     let scale = size.unwrap_or(0.0).clamp(1.0, 1e5);
     let n = j.kind.dofs().len();
     let angles: Vec<usize> = (0..n).filter(|i| j.kind.is_angle(*i)).collect();
@@ -79,7 +79,7 @@ mod tests {
     use solidcore_record::Vec3;
 
     fn joint(kind: JointKind) -> Joint {
-        let at = |occurrence| JointOrigin { occurrence, snap: Snap::Point { point: Vec3::ZERO, z: None, x: None } };
+        let at = |occurrence| JointOrigin::new(occurrence, Snap::Point { point: Vec3::ZERO, z: None, x: None });
         Joint {
             id: 1,
             name: "R".into(),
@@ -93,6 +93,8 @@ mod tests {
             angle: 0.6,
             suppressed: false,
             exprs: Default::default(),
+            captured: None,
+            constraint: None,
         }
     }
 

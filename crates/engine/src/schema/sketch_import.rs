@@ -73,10 +73,20 @@ pub struct InsertDrawingKeys {
     /// then also turns and scales about). Default: origin.
     #[serde(default)]
     pub align: Option<DrawingAlign>,
+    /// What `width`, `height` and the middle of `align` "center" refer to: the bounds of the
+    /// drawn geometry ("geometry") or the SVG sheet ("viewbox": its viewBox, else its width and
+    /// height). Default: geometry. "viewbox" is for SVG drawings that have a sheet; a DXF has none.
+    #[serde(default)]
+    pub size_from: Option<DrawingSizeFrom>,
     /// The distance in mm within which ends join into one point, 1e-9 to 10 (a value outside is
     /// brought inside; one that is not above 0 reads as the default). Default: 0.0001.
     #[serde(default)]
     pub tolerance: Option<f64>,
+    /// `true` puts a Fix constraint on every point the drawing adds (as `sketch.constraint.fix`
+    /// does), so it stays where it is put; a circle's or ellipse's radius stays free, and text and
+    /// the points the sketch already had are not touched. Default: false.
+    #[serde(default)]
+    pub fixed: Option<bool>,
     /// Read only when no sketch is being edited: the plane of the new sketch, as `sketch.create`
     /// takes it. Default: XY. Ignored (and not checked) while a sketch is being edited.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -301,6 +311,39 @@ impl<'de> Deserialize<'de> for DrawingAlign {
     }
 }
 
+/// What an insert's `width` and `height` size, as `size_from` is read (the words are
+/// case-sensitive).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum DrawingSizeFrom {
+    /// The bounds of the drawn geometry.
+    Geometry,
+    /// The SVG sheet: its viewBox, else its width and height.
+    Viewbox,
+}
+
+impl JsonSchema for DrawingSizeFrom {
+    fn schema_name() -> Cow<'static, str> {
+        "DrawingSizeFrom".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "What `width` and `height` size: \"geometry\" (the bounds of the drawn geometry) or \"viewbox\" (the SVG sheet: its viewBox, else its width and height). Lower case only.",
+            "type": "string",
+            "enum": ["geometry", "viewbox"]
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for DrawingSizeFrom {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)?.as_str() {
+            Some("geometry") => Ok(DrawingSizeFrom::Geometry),
+            Some("viewbox") => Ok(DrawingSizeFrom::Viewbox),
+            _ => Err(D::Error::custom("must be \"geometry\" or \"viewbox\"")),
+        }
+    }
+}
+
 /// What `sketch.insert_dxf` and `sketch.insert_svg` return.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct DrawingInserted {
@@ -312,6 +355,9 @@ pub struct DrawingInserted {
     pub curves: usize,
     /// How many sketch texts were added.
     pub texts: usize,
+    /// With `fixed: true`: how many points got a Fix constraint. Left out otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fixed: Option<usize>,
     /// The sketch's solve afterwards; null when it was not solved.
     pub info: Option<SketchSolve>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

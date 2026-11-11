@@ -305,7 +305,7 @@ enum LCurve {
     Spline(usize, usize, usize, usize, bool, u8, bool, Option<crate::Nurbs>),
 }
 
-fn layout(geom: &[LinkGeom]) -> Result<Layout> {
+fn layout(geom: &[LinkGeom], kind: LinkKind) -> Result<Layout> {
     if geom.len() > MAX_LINK_ENTITIES {
         return Err(SketchError::TooLarge);
     }
@@ -382,8 +382,9 @@ fn layout(geom: &[LinkGeom]) -> Result<Layout> {
     let curves = l.curves.clone();
     l.lone.retain(|i| !used(*i, &curves));
     // A face seen edge-on: every edge falls on one line, and one line end to end stands for
-    // them all (its vertices can be projected one by one).
-    if l.lone.is_empty() && l.curves.len() > 1 && flat(&l.curves, &l.pts) {
+    // them all (its vertices can be projected one by one). A section is not a projection: pieces
+    // on one line with a gap between them (a ring cut through its hole) stay apart (#14282).
+    if kind != LinkKind::Intersect && l.lone.is_empty() && l.curves.len() > 1 && flat(&l.curves, &l.pts) {
         let (a, b) = extent(&l.pts);
         l = Layout { pts: vec![a, b], lone: Vec::new(), curves: vec![LCurve::Line(0, 1)] };
     }
@@ -700,8 +701,25 @@ impl Sketch {
     /// and ends; other curves, and points on their own (the origin, a vertex), never count as
     /// present.
     pub fn link_geometry_present(&self, geom: &[LinkGeom]) -> bool {
-        let Ok(lay) = layout(geom) else { return false };
-        if lay.curves.is_empty() || !lay.lone.is_empty() {
+        self.geometry_present(geom, LinkKind::Project, false)
+    }
+
+    /// [`Sketch::link_geometry_present`], where a point on its own counts too when a linked
+    /// point on its own already sits there: Intersect cuts a curve or an edge at points, and
+    /// cutting the same one again would stack a second point on the first. The end of a linked
+    /// curve (a corner of the face's border) does not count.
+    pub fn link_geometry_or_points_present(&self, geom: &[LinkGeom]) -> bool {
+        self.geometry_present(geom, LinkKind::Intersect, true)
+    }
+
+    /// `kind` lays `geom` out as a new link of that kind would be (see [`layout`]).
+    fn geometry_present(&self, geom: &[LinkGeom], kind: LinkKind, points: bool) -> bool {
+        let Ok(lay) = layout(geom, kind) else { return false };
+        if lay.curves.is_empty() && lay.lone.is_empty() {
+            return false;
+        }
+        // Without `points`, a point on its own never counts as present (see above).
+        if !points && (lay.curves.is_empty() || !lay.lone.is_empty()) {
             return false;
         }
         let at = |i: usize| self.points.get(i).map(|p| p.pos);
@@ -714,17 +732,25 @@ impl Sketch {
                 _ => false,
             })
         };
-        lay.curves.iter().all(curve_present)
+        if !lay.curves.iter().all(curve_present) {
+            return false;
+        }
+        // Only a linked point on its own counts: the end or centre of a linked curve (the border
+        // of the sketch's face, an edge projected before) is not a cut an earlier Intersect left.
+        let on_curves: std::collections::HashSet<usize> = self.curves.iter().filter(|k| k.link.is_some()).flat_map(|k| k.kind.point_ids()).collect();
+        let point_present =
+            |i: usize| self.points.iter().enumerate().any(|(pi, p)| p.link.is_some() && !on_curves.contains(&pi) && near(i, Some(p.pos)));
+        lay.lone.iter().all(|i| point_present(*i))
     }
 
     /// Add linked geometry. Returns the link id; the new curve and point ids are
     /// [`Sketch::link_curves`] / [`Sketch::link_points`] of it.
     pub fn add_link(&mut self, kind: LinkKind, source: LinkSource, geom: &[LinkGeom]) -> Result<String> {
-        let lay = layout(geom)?;
+        let lay = layout(geom, kind)?;
         if lay.curves.is_empty() && lay.lone.is_empty() {
             return Err(SketchError::Invalid("the reference projects to nothing on this sketch plane".into()));
         }
-        if self.points.len() + lay.pts.len() > crate::model::MAX_POINTS {
+        if self.points.len().saturating_add(lay.pts.len()) > crate::limits::max_points() {
             return Err(SketchError::TooLarge);
         }
         let id = self.fresh("j")?;
@@ -791,10 +817,10 @@ impl Sketch {
     /// sketch's own curves and constraints on it move to the new entities that match the old
     /// ones (`rebuild_link`). Returns `true` when it was rebuilt.
     pub fn update_link(&mut self, id: &str, geom: &[LinkGeom]) -> Result<bool> {
-        if self.link(id).is_none() {
+        let Some(kind) = self.link(id).map(|l| l.kind) else {
             return Err(SketchError::Unknown(id.into()));
-        }
-        let lay = layout(geom)?;
+        };
+        let lay = layout(geom, kind)?;
         // A projected face boundary is a closed loop: crossings and touching points make its
         // identity ambiguous, and the link keeps the geometry it had. A face taken with
         // `Intersect` is a section: an open chain, which no closed boundary describes.

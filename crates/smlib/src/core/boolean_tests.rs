@@ -549,4 +549,31 @@ fn a_boolean_failure_from_another_operation_keeps_its_status() {
     assert!(matches!(status(boolean(Some(SolidError::unported("test::callee", "test.unit")))), Error::Unsupported));
     let offset = Failure::new("offset::offset_executive::p2", Reason::Failed("the offset could not be built")).into_error();
     assert!(matches!(status(offset), Error::Solidcore(_)));
+    // an intersection or classification failure passes on as the status it replaced
+    use solidcore::error::intersect::IntersectFailure;
+    let intersect = |f| Failure::new("intersect::point_class", f).into_error();
+    assert!(matches!(status(intersect(IntersectFailure::Failed("no point"))), Error::Status(1001)));
+    assert!(matches!(status(intersect(IntersectFailure::Missing("the face's surface"))), Error::Status(1006)));
+    // a primitive, extrusion, revolution, skin or taper failure passes on as the status it replaced
+    use solidcore::error::primitive::PrimitiveFailure;
+    let primitive = |f| Failure::new("primitive::primitive_creation::p3", f).into_error();
+    assert!(matches!(status(primitive(PrimitiveFailure::Failed("no profiles to sweep"))), Error::Status(1001)));
+    assert!(matches!(status(primitive(PrimitiveFailure::Missing("the target region"))), Error::Status(1006)));
+    assert!(matches!(status(primitive(PrimitiveFailure::AxisInsideFace)), Error::Status(1025)));
+    let helix = PrimitiveFailure::HelixDeviates { deviation: 0.5, tolerance: 0.25 };
+    assert!(matches!(status(primitive(helix)), Error::Status(1021)));
+    // a mass-property, healing or geometry-utility failure passes on as the status it replaced
+    use solidcore::error::geom::GeomFailure;
+    use solidcore::error::heal::HealFailure;
+    use solidcore::error::mass::MassFailure;
+    let mass = |f| Failure::new("mass::integrator", f).into_error();
+    assert!(matches!(status(mass(MassFailure::StepControl)), Error::Status(1001)));
+    assert!(matches!(status(mass(MassFailure::Missing("the edge's curve"))), Error::Status(1006)));
+    let heal = |f| Failure::new("heal::stitch::p1", f).into_error();
+    assert!(matches!(status(heal(HealFailure::Failed("the edges could not be glued"))), Error::Status(1001)));
+    assert!(matches!(status(heal(HealFailure::NotYetHealable)), Error::Status(1040)));
+    let geom = |f| Failure::new("geom::matrix", f).into_error();
+    assert!(matches!(status(geom(GeomFailure::Failed("the matrix is singular"))), Error::Status(1001)));
+    assert!(matches!(status(geom(GeomFailure::CoincidentPoints)), Error::Status(0)));
+    assert!(matches!(status(geom(GeomFailure::ToleranceTooSmall { tolerance: 0.0 })), Error::Status(1007)));
 }

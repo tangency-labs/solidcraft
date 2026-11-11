@@ -1773,18 +1773,15 @@ fn manifold_boolean_translated(
             *primary = None;
         }
     }
-    // Not upstream (tangency-labs/solidcore#746; opt-in,
-    // `Kernel::fixes.remove_slit_loops_where_solids_touch`): a volumetric Boolean's result
+    // Not upstream (tangency-labs/solidcore#746, WR-360): a volumetric Boolean's result
     // loses the zero-area inner loops a contact curve inside a face left, and the shells
     // joined only through them are split (the fork's `RemoveSlitLoopsWhereSolidsTouch`
     // before `rpResult = m_vTI.m_pBrep`). The destroyed edge uses notify on call-local
     // records under their type code and arena index.
-    if kernels.primary.fixes.remove_slit_loops_where_solids_touch
-        && matches!(
-            operation,
-            BooleanOperation::Union | BooleanOperation::Intersection | BooleanOperation::Difference
-        )
-    {
+    if matches!(
+        operation,
+        BooleanOperation::Union | BooleanOperation::Intersection | BooleanOperation::Difference
+    ) {
         if let Some(a) = primary.as_mut() {
             let editing = a.editing_enabled();
             a.set_editing_enabled(true);
@@ -1845,18 +1842,16 @@ mod tests {
 
     #[test]
     fn paired_mark_contexts_survive_a_failing_action() {
-        for opt_in in [false, true] {
+        {
             let mut first = Kernel::default();
             let mut second = Kernel::default();
-            first.fixes.mark_lock_pair_advances_and_locks_second_context = opt_in;
             first.context.set_doing_boolean(true);
             let mut kernels = BooleanKernels {
                 primary: &mut first,
                 other: Some(&mut second),
             };
-            let fixes = kernels.primary.fixes;
             let mut lock = kernels
-                .mark_action(|contexts| MarkLock::new_pair_with_fixes(contexts, 0, 1, &fixes))
+                .mark_action(|contexts| MarkLock::new_pair(contexts, 0, 1))
                 .unwrap();
             let marks = (lock.mark_type1(), lock.mark_type2());
             let before = (

@@ -997,7 +997,12 @@ impl CompositeCurve {
                 2 if flip => OffsetDirection::LeftHandSide,
                 2 => OffsetDirection::RightHandSide,
                 3 => OffsetDirection::BothSides,
-                _ => return Err(SolidError::sm_err(OP_OFFSETS)),
+                _ => {
+                    return Err(SolidError::curve_failed(
+                        OP_OFFSETS,
+                        "the offset direction is not 1, 2 or 3",
+                    ))
+                }
             };
             let right = matches!(
                 side,
@@ -1139,7 +1144,10 @@ impl CompositeCurve {
         }
 
         if offsets.is_empty() {
-            return Err(SolidError::sm_err(OP_OFFSETS));
+            return Err(SolidError::curve_failed(
+                OP_OFFSETS,
+                "no offset curve was made",
+            ));
         }
 
         // If we are not trimming then we are done here.
@@ -1592,7 +1600,7 @@ mod tests {
         };
         assert!(matches!(
             CompositeCurve::create_offsets_of_many_curves(&k, &[&sq], &[4], &p),
-            Err(SolidError::Upstream { .. })
+            Err(e) if crate::error::upstream_status(&e).is_some()
         ));
         assert!(matches!(
             CompositeCurve::create_offsets_of_many_curves(&k, &[&sq], &[], &p),

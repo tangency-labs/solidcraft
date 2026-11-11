@@ -213,18 +213,22 @@ fn about(app: &mut SolveApp, ctx: &egui::Context) {
                     ui_kit::text(ui, solidcraft_ui_text::tr("help.font_details"), ui_kit::Text::Report("fonts", false));
                 });
                 ui_kit::section(ui, "licences", solidcraft_ui_text::tr("help.licences"), false, |ui| {
-                    for (id, title, text) in
-                        [("notice", "help.notice", NOTICE), ("mit", "help.mit", LICENSE_MIT), ("apache", "help.apache", LICENSE_APACHE)]
-                    {
-                        ui_kit::section(ui, id, solidcraft_ui_text::tr(title), false, |ui| {
-                            ui_kit::text(ui, text, ui_kit::Text::Report(id, false));
-                        });
-                    }
-                    ui_kit::section(ui, "third_party", solidcraft_ui_text::tr("help.third_party"), false, |ui| {
-                        if ui_kit::button(ui, solidcraft_ui_text::tr_label("Copy all licences"), ui_kit::Button::Normal).clicked() {
-                            ctx.copy_text(solidcraft_engine::licences::all());
+                    // Indented, so the licences read as the children of Licences (#14388).
+                    ui.spacing_mut().indent = solidcraft_theme::Tokens::get().space_14;
+                    ui.indent("licence_list", |ui| {
+                        for (id, title, text) in
+                            [("notice", "help.notice", NOTICE), ("mit", "help.mit", LICENSE_MIT), ("apache", "help.apache", LICENSE_APACHE)]
+                        {
+                            ui_kit::section(ui, id, solidcraft_ui_text::tr(title), false, |ui| {
+                                ui_kit::text(ui, text, ui_kit::Text::Report(id, false));
+                            });
                         }
-                        ui_kit::text_lines(ui, "sc_third_party", THIRD_PARTY);
+                        ui_kit::section(ui, "third_party", solidcraft_ui_text::tr("help.third_party"), false, |ui| {
+                            if ui_kit::button(ui, solidcraft_ui_text::tr_label("Copy all licences"), ui_kit::Button::Normal).clicked() {
+                                ctx.copy_text(solidcraft_engine::licences::all());
+                            }
+                            ui_kit::text_lines(ui, "sc_third_party", THIRD_PARTY);
+                        });
                     });
                 });
             });
@@ -258,6 +262,25 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    /// #14388: the licences inside Licences are indented under its heading, so they read as its
+    /// children rather than as more sections beside it.
+    #[test]
+    fn the_licences_sit_indented_under_their_heading() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.help.about = true;
+        h.frames(2);
+        let key = |id: &str| format!("dialog:section:{}", solidcraft_ui_text::tr(id));
+        h.step(&serde_json::json!({"click": {"handle": key("help.licences")}})).unwrap();
+        h.frames(2);
+        let left = |id: &str| solidcraft_ui_registry::rect_of(&key(id)).map(|r| r.left());
+        let parent = left("help.licences").expect("the Licences heading");
+        assert_eq!(left("help.fonts"), Some(parent), "Fonts stays beside Licences");
+        for child in ["help.notice", "help.mit", "help.apache", "help.third_party"] {
+            let x = left(child).unwrap_or_else(|| panic!("{child} is not shown"));
+            assert!(x >= parent + solidcraft_theme::Tokens::get().space_14 - 0.5, "{child} at {x}, Licences at {parent}");
         }
     }
 

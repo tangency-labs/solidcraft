@@ -1478,6 +1478,36 @@ mod tests {
     /// #9170: a mesh body (an imported STL) is kept in the model cache with the rest of the
     /// model, as its own triangles, colour and paint. One mesh body left the whole cache out, so
     /// opening the design evaluated every feature again.
+    /// The names a STEP file gives its colours survive saving a design with its model and opening
+    /// it from that cache: the kernel bodies' own encoding keeps no names, the records do.
+    #[test]
+    fn model_cache_keeps_the_names_of_imported_colours() {
+        use solidcore_record::Vec3;
+        let part = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
+        let faces = vec![solidcraft_kernel::FacePaint { face: 0, color: [0., 0., 1.], opacity: 1., name: Some("Accent".into()) }];
+        let named =
+            part.with_color(Some([0.5, 0.5, 0.5])).with_paint(Some(solidcraft_kernel::Paint { opacity: 1., faces, name: Some("Body grey".into()) }));
+        let step = solidcraft_kernel::step_export(&[&named], "named").unwrap();
+        let mut doc = Document::new("Named colours");
+        doc.add_feature(FeatureKind::Import { file: "named.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new() }, None)
+            .unwrap();
+        let mut model = solidcraft_doc::Model::new();
+        model.evaluate(&doc);
+        let names = |model: &solidcraft_doc::Model| {
+            let state = model.state();
+            let paint = state.bodies[0].body.paint().cloned().unwrap();
+            (paint.name, paint.faces.iter().map(|f| f.name.clone()).collect::<Vec<_>>())
+        };
+        let evaluated = names(&model);
+        assert_eq!(evaluated, (Some("Body grey".into()), vec![Some("Accent".into())]));
+        let saved = model.saved(&doc).unwrap();
+        let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&saved)).unwrap();
+        let read = DesignContainerReader::new(Cursor::new(&bytes)).unwrap().geometry().expect("the cache reads back");
+        assert!(read.bodies.iter().all(|b| b.paint().is_none_or(|p| p.name.is_none())), "the body encoding has no names");
+        let reopened = solidcraft_doc::Model::adopt(&doc, &read).unwrap();
+        assert_eq!(names(&reopened), evaluated);
+    }
+
     #[test]
     fn model_cache_keeps_mesh_bodies_with_the_rest_of_the_model() {
         use solidcore_record::Vec3;
@@ -1485,7 +1515,7 @@ mod tests {
         let tetra = solidcraft_kernel::mesh_body(&corners, &[[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]])
             .unwrap()
             .with_color(Some([0.25, 0.5, 0.75]))
-            .with_paint(Some(solidcraft_kernel::Paint { opacity: 0.5, faces: Vec::new() }));
+            .with_paint(Some(solidcraft_kernel::Paint { opacity: 0.5, faces: Vec::new(), name: None }));
         let block = solidcraft_kernel::box_solid(Vec3::new(40., 0., 0.), Vec3::new(60., 20., 20.)).unwrap();
         let model = saved_model(vec![block, tetra.clone()]);
         let doc = document();
