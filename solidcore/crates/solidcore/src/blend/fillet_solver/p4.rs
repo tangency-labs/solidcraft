@@ -3597,7 +3597,10 @@ mod tests_c5 {
         let e = f.run().unwrap_err();
         assert_eq!(
             e,
-            SolidError::null_pointer("blend::fillet_geom::p4::FilletBrep::calc_blending_geom")
+            SolidError::blend_missing(
+                "blend::fillet_geom::p4::FilletBrep::calc_blending_geom",
+                "the geometry's fillet solver"
+            )
         );
 
         // a cross-section edge of a default geometry comes first: CalcCrossSection
