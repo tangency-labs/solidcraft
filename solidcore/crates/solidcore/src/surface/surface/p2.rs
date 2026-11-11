@@ -796,7 +796,8 @@ pub(crate) fn check_geometry_nesting(
                             // Ball holds a sphere and B-spline boundary curves, nothing nested.
                             CornerDefinition::Setback(_) | CornerDefinition::Ball(_) => {}
                         },
-                        KeptDefinition::Sweep(_) => {}
+                        // a section blend's definition holds frames, no geometry
+                        KeptDefinition::Sweep(_) | KeptDefinition::SectionBlend(_) => {}
                         KeptDefinition::Draft(draft) => push(Geometry::Surface(&draft.source)),
                     }
                 }
@@ -1238,6 +1239,9 @@ impl Surface {
             Some(KeptDefinition::Draft(draft)) => {
                 return Some(BlendRef::Draft { draft, net: self })
             }
+            Some(KeptDefinition::SectionBlend(blend)) => {
+                return Some(BlendRef::SectionBlend { blend, net: self })
+            }
             Some(KeptDefinition::Sweep(_)) | None => {}
         }
         match self.kind() {
@@ -1297,6 +1301,15 @@ impl Surface {
     /// ([`crate::offset::draft`]).
     pub(crate) fn set_draft_definition(&mut self, draft: crate::offset::draft::DraftDefinition) {
         self.definition = Some(Box::new(KeptDefinition::Draft(draft)));
+    }
+
+    /// Keeps `blend` as the definition of this surface, a multi-section blend's net
+    /// ([`crate::sweep::section_blend`], #3140).
+    pub(crate) fn set_section_blend_definition(
+        &mut self,
+        blend: crate::sweep::section_blend::SectionBlendDefinition,
+    ) {
+        self.definition = Some(Box::new(KeptDefinition::SectionBlend(blend)));
     }
 
     /// Drops any definition this surface keeps.
@@ -3844,9 +3857,7 @@ impl Surface {
             STEP_SURFACE_TYPE => Ok(Self::from(StepSurface::read_from_db(k, db, version)?)),
             // the fork's SmProceduralBlend (014f66f), read only with its flag: the pinned
             // reader refuses the type
-            PROCEDURAL_BLEND_TYPE
-                if k.fixes.fillet_round_as_definition && k.fixes.fillet_gn_section_generator =>
-            {
+            PROCEDURAL_BLEND_TYPE if k.fixes.fillet_round_as_definition => {
                 Ok(Self::from(ProceduralBlend::read_from_db(k, db, version)?))
             }
             // the fork's SmBallPatch (f8e6709), which the pinned reader refuses
@@ -5497,9 +5508,7 @@ fn eval_second_derivatives_with_output(
                     Err(error) => {
                         // SmCone::Evaluate leaves the inherited NURB derivatives in
                         // the caller's buffer when zero-tangent correction fails.
-                        let values = if !step
-                            && matches!(&error, SolidError::Upstream { code, .. } if *code == SM_ERR)
-                        {
+                        let values = if !step && error.upstream_status() == Some(SM_ERR) {
                             cone.rev().base().evaluate_with_partial_output(uv, flags).1
                         } else {
                             Vec::new()

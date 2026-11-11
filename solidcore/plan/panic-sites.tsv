@@ -3,6 +3,81 @@
 # SolidError (checked arithmetic, .get(), a length check) and drop its row. `proven` marks
 # a site that cannot panic, with the reason; it is exempt from the ratchet.
 file	fn	pattern	n	status	code	reason
+crates/solidcore-step/src/eval.rs	BSplineSurface::point	with_capacity	1	proven	Vec::with_capacity(nu)	nu = points.len(), already in memory
+crates/solidcore-step/src/eval.rs	expanded	with_capacity	1	proven	Vec::with_capacity(total)	total == points + degree + 1 with degree < points, checked just above: at most twice the points, already in memory
+crates/solidcore-step/src/read.rs	Reader::bspline_surface	with_capacity	1	proven	Vec::with_capacity(rows.len().min(MAX_CTRL))	rows.len() of rows already in memory, and at most MAX_CTRL
+crates/solidcore-step/src/read.rs	Reader::read_curve	with_capacity	1	proven	Vec::with_capacity(items.len())	the length of a collection already in memory
+crates/solidcore-step/src/read.rs	implied_knots	int-div	1	proven	(n_ctrl - 1) / degree	degree == 0 is refused just above
+crates/solidcore-step/src/read.rs	knots	windows	1	proven	windows(2)	constant non-zero size
+crates/solidcore-step/src/read.rs	knots	with_capacity	1	proven	Vec::with_capacity(raw.len())	the length of a collection already in memory
+crates/solidcore-step/src/read.rs	knots	with_capacity	2	proven	Vec::with_capacity(raw.len())	the length of a collection already in memory
+crates/solidcore-step/src/topology.rs	Builder::bound	with_capacity	1	proven	Vec::with_capacity(ids.len())	the length of a collection already in memory
+crates/solidcore-step/src/topology.rs	Builder::face	with_capacity	1	proven	Vec::with_capacity(bounds.len())	the length of a collection already in memory
+crates/solidcore-step/src/topology.rs	Builder::face_extent	with_capacity	1	proven	Vec::with_capacity(face.loops.len())	the length of a collection already in memory
+crates/solidcore-step/src/topology.rs	Builder::face_extent	with_capacity	2	proven	Vec::with_capacity(es.len())	the length of a collection already in memory
+crates/solidcore-step/src/topology.rs	Builder::face_pcurves	with_capacity	1	proven	Vec::with_capacity(l.len())	the length of a collection already in memory
+crates/solidcore-step/src/topology.rs	Builder::finish	with_capacity	1	proven	Vec::with_capacity(self.faces.len())	the length of a collection already in memory
+crates/solidcore-step/src/topology.rs	Builder::finish	with_capacity	2	proven	Vec::with_capacity(self.faces.len())	the length of a collection already in memory
+crates/solidcore-step/src/topology.rs	Builder::finish	with_capacity	3	proven	Vec::with_capacity(self.faces.len())	the length of a collection already in memory
+crates/solidcore-step/src/topology.rs	Builder::finish	with_capacity	4	proven	Vec::with_capacity(nf)	nf = self.faces.len(), already in memory
+crates/solidcore-step/src/topology.rs	Builder::finish	with_capacity	5	proven	Vec::with_capacity(self.edges.len())	the length of a collection already in memory
+crates/solidcore-step/src/topology.rs	Builder::finish	with_capacity	6	proven	Vec::with_capacity(self.vertices.len())	the length of a collection already in memory
+crates/solidcore-step/src/topology.rs	Builder::finish	with_capacity	7	proven	Vec::with_capacity(flipped)	flipped counts the entries of turned, a list in memory
+crates/solidcore-step/src/topology.rs	Builder::finish	with_capacity	8	proven	Vec::with_capacity(vertex_order.len())	the length of a collection already in memory
+crates/solidcore-step/src/topology.rs	Builder::finish	with_capacity	9	proven	Vec::with_capacity(edge_order.len())	the length of a collection already in memory
+crates/solidcore-step/src/topology.rs	Builder::finish	with_capacity	10	proven	Vec::with_capacity(face_order.len())	the length of a collection already in memory
+crates/solidcore-step/src/topology.rs	Builder::finish	with_capacity	11	proven	Vec::with_capacity(face_order.len())	the length of a collection already in memory
+crates/solidcore-step/src/topology.rs	Builder::finish	with_capacity	12	proven	Vec::with_capacity(face.loops.len())	the length of a collection already in memory
+crates/solidcore-step/src/topology.rs	Builder::finish	with_capacity	13	proven	Vec::with_capacity(face.loops.len())	the length of a collection already in memory
+crates/solidcore-step/src/topology.rs	Builder::finish	with_capacity	14	proven	Vec::with_capacity(es.len())	the length of a collection already in memory
+crates/solidcore-step/src/topology.rs	Builder::finish	with_capacity	15	proven	Vec::with_capacity(shells.len())	the length of a collection already in memory
+crates/solidcore-step/src/topology.rs	Builder::finish	with_capacity	16	proven	Vec::with_capacity(s.len())	the length of a collection already in memory
+crates/solidcore-step/src/topology.rs	Builder::poly_loop	int-rem	1	proven	(k + 1) % pts.len()	pts.len() < 3 returns an Err just above, so the divisor is at least 3
+crates/solidcore-step/src/topology.rs	Builder::poly_loop	with_capacity	1	proven	Vec::with_capacity(pts.len())	the length of a collection already in memory
+crates/solidcore-step/src/topology.rs	Builder::shell	with_capacity	1	proven	Vec::with_capacity(faces.len())	the length of a collection already in memory
+crates/solidcore-step/src/topology.rs	Builder::trim_face	with_capacity	1	proven	Vec::with_capacity(edge_loops.len())	the length of a collection already in memory
+crates/solidcore-step/src/topology.rs	Builder::trim_face	with_capacity	2	proven	Vec::with_capacity(l.len())	the length of a collection already in memory
+crates/solidcore-step/src/topology.rs	face_domain	f64::clamp	1	proven	clamp(*n0, last)	n0 <= last is checked just above (crossed or NaN bounds are refused with an Err)
+crates/solidcore-step/src/topology.rs	full_knots	with_capacity	1	proven	Vec::with_capacity(total)	total == count + degree + 1 with count <= MAX_SPLINE_POINTS and degree <= MAX_SPLINE_DEGREE, all checked just above
+crates/solidcore-step/src/topology.rs	loop_area	windows	1	proven	windows(2)	constant non-zero size
+crates/solidcore-step/src/topology.rs	map_edge	windows	1	proven	windows(2)	constant non-zero size
+crates/solidcore-step/src/topology.rs	project	Ord::clamp	1	proven	clamp(1, 8)	constant bounds, min <= max
+crates/solidcore-step/src/topology.rs	project	f64::clamp	1	proven	clamp(a, b)	a < b: the only caller, open_or_closed, refuses !(a < b) (which a NaN fails too)
+crates/solidcore-step/src/topology.rs	project	int-div	1	proven	MAX_SAMPLES / spans	spans = breaks.len() + 1 >= 1
+crates/solidcore-step/src/topology.rs	project	int-div	2	proven	div_ceil(MAX_SAMPLES)	constant non-zero divisor MAX_SAMPLES (4096)
+crates/solidcore-step/src/topology.rs	project	step_by	1	proven	step_by(stride)	ts.len() > MAX_SAMPLES just above, so stride = ts.len().div_ceil(MAX_SAMPLES) >= 1
+crates/solidcore-step/src/topology.rs	project	with_capacity	1	proven	Vec::with_capacity(spans * per + 1)	spans = breaks.len() + 1 of a list in memory, per <= 8
+crates/solidcore-step/src/topology.rs	read_solids_in	with_capacity	1	proven	Vec::with_capacity(solids.len())	the length of a collection already in memory
+crates/solidcore-step/src/topology.rs	read_with	with_capacity	1	proven	Vec::with_capacity(ids.len())	the length of a collection already in memory
+crates/solidcore-step/src/topology.rs	seam_only	int-div	1	proven	uses.len() / 2	constant non-zero divisor
+crates/solidcore-step/src/topology.rs	tolerance	f64::clamp	1	proven	clamp(MIN_TOLERANCE, MAX_FIT_TOLERANCE)	constant bounds MIN_TOLERANCE (1e-7) <= MAX_FIT_TOLERANCE (1.0)
+crates/solidcore-step/src/topology.rs	uses_of	with_capacity	1	proven	Vec::with_capacity(edge_loops.len())	the length of a collection already in memory
+crates/solidcore-step/src/topology.rs	uses_of	with_capacity	2	proven	Vec::with_capacity(l.len())	the length of a collection already in memory
+crates/solidcore-step/src/topology/frames.rs	Builder::turn_about_axes	windows	1	proven	windows(2)	constant non-zero size
+crates/solidcore-step/src/topology/frames.rs	Builder::turn_about_axes	with_capacity	1	proven	Vec::with_capacity(g.len())	the length of a collection already in memory
+crates/solidcore-step/src/topology/seams.rs	Builder::meridian_slit	with_capacity	1	proven	Vec::with_capacity(2 * up.len() + 4)	twice a collection in memory plus 4
+crates/solidcore-step/src/topology/seams.rs	Builder::seated	int-div	1	proven	path.len() / 2	constant non-zero divisor
+crates/solidcore-step/src/topology/seams.rs	Builder::split_edge	with_capacity	1	proven	Vec::with_capacity(es.len() + 1)	a collection in memory plus one
+crates/solidcore-step/src/topology/seams.rs	remove_loop	Vec::remove	1	proven	remove(gone)	gone >= face.loops.len() returns just above
+crates/solidcore-step/src/topology/seams.rs	restarted	with_capacity	1	proven	Vec::with_capacity(columns)	columns = rows.first().len(), already in memory
+crates/solidcore-step/src/topology/seams.rs	slit_path	int-div	1	proven	n / 2	constant non-zero divisor
+crates/solidcore-step/src/topology/seams.rs	slit_path	int-rem	1	proven	(k + n - 1) % n	n >= 2 is checked just above
+crates/solidcore-step/src/topology/seams.rs	slit_path	split_at	1	proven	split_at(n / 2)	ring has n = es.len() entries, so n / 2 <= ring.len()
+crates/solidcore-step/src/topology/swept.rs	hyperbola_spline	Ord::clamp	1	proven	clamp(1, MAX_PIECES)	constant bounds 1 <= MAX_PIECES (64)
+crates/solidcore-step/src/topology/swept.rs	revolution	int-div	1	proven	ts.len() / 2	constant non-zero divisor
+crates/solidcore-step/src/topology/swept.rs	whole	windows	1	proven	windows(2)	constant non-zero size
+crates/solidcore-step/src/topology/swept.rs	widest_gap	windows	1	proven	windows(2)	constant non-zero size
+crates/solidcore-step/src/write/topology.rs	BrepWriter::edge_geometry	with_capacity	1	proven	Vec::with_capacity(edge.uses.len())	the length of a collection already in memory
+crates/solidcore-step/src/write/topology.rs	BrepWriter::face	with_capacity	1	proven	Vec::with_capacity(face.loops.len())	the length of a collection already in memory
+crates/solidcore-step/src/write/topology.rs	BrepWriter::face	with_capacity	2	proven	Vec::with_capacity(edges.len())	the length of a collection already in memory
+crates/solidcore-step/src/write/topology.rs	BrepWriter::shell	with_capacity	1	proven	Vec::with_capacity(faces.len())	the length of a collection already in memory
+crates/solidcore-step/src/write/topology.rs	brep	with_capacity	1	proven	Vec::with_capacity(solid.voids.len())	the length of a collection already in memory
+crates/solidcore-step/src/write/topology.rs	brep	with_capacity	2	proven	Vec::with_capacity(layout.sheets.len())	the length of a collection already in memory
+crates/solidcore-step/src/write/topology.rs	pcurve	with_capacity	1	proven	Vec::with_capacity(homogeneous.len())	the length of a collection already in memory
+crates/solidcore-step/src/write/topology.rs	pcurve	with_capacity	2	proven	Vec::with_capacity(homogeneous.len())	the length of a collection already in memory
+crates/solidcore-step/src/write/topology.rs	signed_area	int-rem	1	proven	(i + 1) % n	inside a range 0..n, so n > 0
+crates/solidcore-step/src/write/topology.rs	surface	with_capacity	1	proven	Vec::with_capacity(homogeneous.len())	the length of a collection already in memory
+crates/solidcore-step/src/write/topology.rs	surface	with_capacity	2	proven	Vec::with_capacity(homogeneous.len())	the length of a collection already in memory
 crates/solidcore/src/blend/blend_corner/ball.rs	ball_corner_edge_geom	with_capacity	1	proven	Vec::with_capacity(n)	n = contacts.len(), an in-memory collection
 crates/solidcore/src/blend/blend_corner/ball.rs	ball_inverse	int-rem	1	proven	(j + 1) % 3	constant non-zero divisor
 crates/solidcore/src/blend/blend_corner/ball.rs	ball_inverse	int-rem	2	proven	(j + 2) % 3	constant non-zero divisor
@@ -83,7 +158,6 @@ crates/solidcore/src/blend/blend_setback.rs	fill_hole_with	with_capacity	5	open	
 crates/solidcore/src/blend/blend_setback.rs	fill_hole_with	with_capacity	6	open	Vec::with_capacity(n)	
 crates/solidcore/src/blend/blend_setback.rs	fill_hole_with	with_capacity	7	open	Vec::with_capacity(n)	
 crates/solidcore/src/blend/blend_setback.rs	fill_hole_with	with_capacity	8	open	Vec::with_capacity(n)	
-crates/solidcore/src/blend/blend_setback.rs	fill_hole_with	with_capacity	9	open	Vec::with_capacity(n)	
 crates/solidcore/src/blend/blend_setback.rs	fill_hole_with	with_capacity	10	open	Vec::with_capacity(n)	
 crates/solidcore/src/blend/blend_setback.rs	fill_hole_with	with_capacity	11	open	Vec::with_capacity(n)	
 crates/solidcore/src/blend/blend_setback.rs	fill_hole_with	with_capacity	12	open	Vec::with_capacity(n)	
@@ -139,6 +213,7 @@ crates/solidcore/src/blend/blend_setback/scale.rs	model_rounds	with_capacity	1	o
 crates/solidcore/src/blend/blend_setback/scale.rs	model_rounds	with_capacity	2	proven	Vec::with_capacity(6)	constant capacity
 crates/solidcore/src/blend/blend_setback/scale.rs	model_rounds	with_capacity	3	proven	Vec::with_capacity(6)	constant capacity
 crates/solidcore/src/blend/feature_executive.rs	FeatureExecutive::restore_features	Vec::remove	1	open	remove(ii)	
+crates/solidcore/src/blend/feature_executive.rs	FeatureExecutive::take_off	Vec::remove	1	proven	remove(f.feature)	the index was just read by self.features.get_mut(f.feature), and kept is walked in descending order
 crates/solidcore/src/blend/feature_executive.rs	collect_feature_loop_edges	Vec::remove	1	open	remove(kk)	
 crates/solidcore/src/blend/feature_executive.rs	fix_edge_chain_list	Vec::remove	1	open	remove(id)	
 crates/solidcore/src/blend/feature_executive.rs	fix_edge_chain_list	Vec::remove	2	open	remove(id)	
@@ -221,7 +296,6 @@ crates/solidcore/src/blend/fillet_executive/session/band_cuts.rs	section_breaks_
 crates/solidcore/src/blend/fillet_executive/session/band_cuts.rs	section_breaks_through	with_capacity	1	open	Vec::with_capacity(meets.len() + 2)	
 crates/solidcore/src/blend/fillet_executive/session/cliff_overflow.rs	FilletSession::holds_its_law	int-rem	1	proven	c % 2	constant non-zero divisor
 crates/solidcore/src/blend/fillet_executive/session/cliff_overflow.rs	FilletSession::holds_its_law	int-rem	2	proven	c % 2	constant non-zero divisor
-crates/solidcore/src/blend/fillet_executive/session/crossing_rails.rs	FilletSession::collect_rails	with_capacity	1	proven	Vec::with_capacity(SAMPLES)	constant capacity (SAMPLES = 9)
 crates/solidcore/src/blend/fillet_executive/session/fit_size.rs	corner_takes_per_radius	int-rem	1	proven	(i + 1) % 3	constant non-zero divisor
 crates/solidcore/src/blend/fillet_executive/session/fit_size.rs	corner_takes_per_radius	int-rem	2	proven	(i + 2) % 3	constant non-zero divisor
 crates/solidcore/src/blend/fillet_executive/session/keep_features.rs	FilletSession::keep_features_on	with_capacity	1	proven	Vec::with_capacity(rim.len())	rim.len(), an in-memory collection
@@ -918,6 +992,26 @@ crates/solidcore/src/surface/trim_srf_cache.rs	TrimSrfCache::implant_vertexuse	V
 crates/solidcore/src/surface/trim_srf_cache.rs	TrimSrfCache::subdivide_node	Vec::insert	1	proven	insert(0, pe)	index 0 is never past the end
 crates/solidcore/src/surface/volume/p2.rs	Volume::is_box_in_param_domain	chunks	1	proven	chunks_exact(2)	constant non-zero size
 crates/solidcore/src/surface/volume/p2.rs	Volume::is_pseudo_box_in_in_space_domain	chunks	1	proven	chunks_exact(2)	constant non-zero size
+crates/solidcore/src/sweep/loft_rails.rs	Loft::anchor_rails	f64::clamp	1	proven	clamp(0.0, 1.0)	constant bounds, min <= max
+crates/solidcore/src/sweep/loft_rails.rs	Loft::new	windows	1	proven	windows(2)	constant non-zero size
+crates/solidcore/src/sweep/loft_rails.rs	Loft::new	windows	2	proven	windows(2)	constant non-zero size
+crates/solidcore/src/sweep/loft_rails.rs	Loft::new	with_capacity	1	proven	Vec::with_capacity(count)	count is sources.len(), checked to be 2..=MAX_SECTIONS (100) just before
+crates/solidcore/src/sweep/loft_rails.rs	Loft::new	with_capacity	2	proven	Vec::with_capacity(count)	count is sources.len(), checked to be 2..=MAX_SECTIONS (100) just before
+crates/solidcore/src/sweep/loft_rails.rs	Loft::new	with_capacity	3	proven	Vec::with_capacity(count)	count is sources.len(), checked to be 2..=MAX_SECTIONS (100) just before
+crates/solidcore/src/sweep/loft_rails.rs	Loft::plain	with_capacity	1	proven	Vec::with_capacity(lead.len())	the length of an existing Vec (the first section's curves)
+crates/solidcore/src/sweep/loft_rails.rs	Loft::plain	with_capacity	2	proven	Vec::with_capacity(per.len())	the length of an existing Vec (a control point's curves across the sections)
+crates/solidcore/src/sweep/loft_rails.rs	Plain::nurb	with_capacity	1	proven	Vec::with_capacity(self.points.len())	the length of an existing Vec (the curve's control points)
+crates/solidcore/src/sweep/loft_rails.rs	Plain::point_at	f64::clamp	1	proven	clamp(0.0, 1.0)	constant bounds, min <= max
+crates/solidcore/src/sweep/loft_rails.rs	centroid	windows	1	proven	windows(2)	constant non-zero size
+crates/solidcore/src/sweep/loft_rails.rs	certify	windows	1	proven	windows(2)	constant non-zero size
+crates/solidcore/src/sweep/loft_rails.rs	certify	with_capacity	1	proven	Vec::with_capacity(wires.len())	the length of an existing Vec (the wires made)
+crates/solidcore/src/sweep/loft_rails.rs	certify	with_capacity	2	proven	Vec::with_capacity(wires.len())	the length of an existing Vec (the wires made)
+crates/solidcore/src/sweep/loft_rails.rs	interpolate_g	f64::clamp	1	proven	clamp(0.0, n)	n is a usize cast to f64: never NaN and never below 0.0, so min <= max
+crates/solidcore/src/sweep/loft_rails.rs	loft_rails	Vec::drain	1	proven	drain(..)	a full range, never out of bounds
+crates/solidcore/src/sweep/loft_rails/certificate.rs	interval_bound	f64::clamp	1	proven	clamp(0.0, 1.0)	constant bounds, min <= max
+crates/solidcore/src/sweep/loft_rails/certificate.rs	interval_bound	with_capacity	1	proven	Vec::with_capacity(4)	constant capacity
+crates/solidcore/src/sweep/loft_rails/certificate.rs	interval_bound	with_capacity	2	proven	Vec::with_capacity(4)	constant capacity
+crates/solidcore/src/sweep/loft_rails/certificate.rs	interval_bound	with_capacity	3	proven	Vec::with_capacity(4)	constant capacity
 crates/solidcore/src/sweep/rotational_sweep_geometry.rs	RotationalSweepGeometry::edge_sweep_higher	swap	1	proven	swap(1, 3)	a3d, a_uv and a_orients lengths checked >= 4; roles is a four-element array
 crates/solidcore/src/sweep/rotational_sweep_geometry.rs	RotationalSweepGeometry::edge_sweep_higher	swap	2	proven	swap(1, 3)	a3d, a_uv and a_orients lengths checked >= 4; roles is a four-element array
 crates/solidcore/src/sweep/rotational_sweep_geometry.rs	RotationalSweepGeometry::edge_sweep_higher	swap	3	proven	swap(1, 3)	a3d, a_uv and a_orients lengths checked >= 4; roles is a four-element array
@@ -931,6 +1025,7 @@ crates/solidcore/src/sweep/screw.rs	Stations::weight	int-rem	1	proven	j % 2	cons
 crates/solidcore/src/sweep/screw.rs	axial_radius	f64::clamp	1	proven	clamp(0.0, 1.0)	constant bounds, min <= max
 crates/solidcore/src/sweep/screw.rs	path	windows	1	proven	windows(2)	constant non-zero size
 crates/solidcore/src/sweep/screw.rs	sweep	windows	1	proven	windows(2)	constant non-zero size
+crates/solidcore/src/sweep/stations.rs	fractions	Ord::clamp	1	proven	clamp(MIN_SKIN_STATIONS, MAX_SKIN_STATIONS)	constants 16 <= 2048, so min <= max always
 crates/solidcore/src/sweep/topology_sweep/store.rs	SweepStore::drop	Vec::drain	1	proven	drain(..)	full drain(..) has no invalid bounds
 crates/solidcore/src/sweep/topology_sweep/store.rs	SweepStore::unlock_mark	Vec::remove	1	proven	remove(index)	index is rposition() in the same locks Vec
 crates/solidcore/src/sweep/topology_sweep/store.rs	body_pair_mut	split_at	1	proven	split_at_mut(si.max(di))	entry() validates both base-adjusted indices against the same slots Vec
@@ -1083,17 +1178,9 @@ crates/solidcore/src/topology/trimming_tools.rs	order_curves_into_loops	int-rem	
 crates/solidcore/src/topology/trimming_tools.rs	order_curves_into_loops	int-rem	2	proven	found_index % 2	constant non-zero divisor
 crates/solidcore/src/topology/trimming_tools/curve_loops.rs	CurveLoops::insert_into_loops	Vec::insert	1	proven	insert(idx + 1, new_curve)	idx is position() in self.curves, so idx + 1 <= len()
 crates/solidcore/src/topology/trimming_tools/curve_loops.rs	CurveLoops::insert_into_loops	Vec::insert	2	proven	insert(idx + 1, o)	returns Err when idx + 1 > self.orients.len()
-crates/step-brep/src/brep_to_model.rs	brep_to_model	with_capacity	1	proven	Vec::with_capacity(65)	constant capacity
-crates/step-brep/src/brep_to_model.rs	bspline_surface	chunks	1	proven	chunks(v_count)	v_count is net.v_count.max(1)
-crates/step-brep/src/brep_to_model.rs	bspline_surface	chunks	2	proven	chunks(v_count)	v_count is net.v_count.max(1)
-crates/step-brep/src/constructor.rs	remove_face	Vec::remove	1	proven	remove(slot)	slot is enumerate() over the same shell's faces
-crates/step-brep/src/constructor.rs	skip_limit	int-div	1	proven	faces / 100	constant non-zero divisor
-crates/step-brep/src/pcurves.rs	Piece::trim_curve	windows	1	proven	windows(2)	constant non-zero size
-crates/step-brep/src/pcurves.rs	chain	int-div	1	proven	piece.samples.len() / 2	constant non-zero divisor
-crates/step-brep/src/pcurves.rs	chain	rotate	1	proven	rotate_right(anchor)	anchor < pieces.len() == shifts.len()
-crates/step-brep/src/pcurves.rs	clamp	f64::clamp	1	proven	clamp(low, low + period)	period is 360; low a periodic STEP domain low: 0, or finite from script::axis_range
-crates/step-brep/src/pcurves.rs	edge_use	windows	1	proven	windows(2)	constant non-zero size
-crates/step-brep/src/pcurves.rs	edge_use	windows	2	proven	windows(2)	constant non-zero size
+crates/step-export/src/brep_to_model.rs	brep_to_model	with_capacity	1	proven	Vec::with_capacity(65)	constant capacity
+crates/step-export/src/brep_to_model.rs	bspline_surface	chunks	1	proven	chunks(v_count)	v_count is net.v_count.max(1)
+crates/step-export/src/brep_to_model.rs	bspline_surface	chunks	2	proven	chunks(v_count)	v_count is net.v_count.max(1)
 crates/step-export/src/lib.rs	faceted_shell	int-rem	1	open	(index + 1) % len	
 crates/step-export/src/lib.rs	faceted_shell	with_capacity	1	open	Vec::with_capacity(face_indices.len())	
 crates/step-export/src/lib.rs	faceted_shell	with_capacity	2	open	Vec::with_capacity(face.loops.len())	
@@ -1111,13 +1198,8 @@ crates/step-export/src/lib.rs	write_bspline_surface	with_capacity	1	open	Vec::wi
 crates/step-export/src/lib.rs	write_bspline_surface	with_capacity	2	open	Vec::with_capacity(row.len())	
 crates/step-export/src/lib.rs	write_pcurve_edge	with_capacity	1	open	Vec::with_capacity(pcurves.len())	
 crates/step-export/src/lib.rs	write_pcurve_edge	with_capacity	2	open	Vec::with_capacity(uv.len())	
-crates/step-import/src/flat.rs	Rd::bspline_surface	int-div	1	proven	self.d.len().saturating_sub(self.i) / 3	constant non-zero divisor
-crates/step-import/src/flat.rs	Rd::count	int-div	1	proven	left / min_words.max(1)	divisor is max(.., >= 1)
-crates/step-import/src/geom.rs	bspline_point	f64::clamp	1	proven	clamp(lo, hi)	check_bspline_curve just above: n > p, knots increasing, no NaN, so lo <= hi
-crates/step-import/src/map.rs	Mapper::poly_loop	int-rem	1	proven	(k + 1) % vs.len()	vs has one entry per point, fewer than 3 refused
-crates/step-import/src/map.rs	check_knots	windows	1	proven	windows(2)	constant non-zero size
-crates/step-import/src/map.rs	implied_knots	int-div	1	proven	(n - 1) / dd	dd == 0 returns Err just above
-crates/step-import/src/map.rs	polygon_plane	int-rem	1	proven	(k + 1) % pts.len()	inside iteration over pts, so len() > 0
-crates/step-import/src/script.rs	Rd::count	int-div	1	proven	left / min_words.max(1)	divisor is max(.., >= 1)
-crates/step-import/src/script.rs	step_face_area	f64::clamp	1	proven	clamp(-1.0, 1.0)	constant bounds, min <= max
-crates/step-import/src/script.rs	step_uv_domain	f64::clamp	1	proven	clamp(-1.0, 1.0)	constant bounds, min <= max
+crates/step-export/src/geom.rs	bspline_point	f64::clamp	1	proven	clamp(lo, hi)	check_bspline_curve just above: n > p, knots increasing, no NaN, so lo <= hi
+crates/step-export/src/map.rs	Mapper::poly_loop	int-rem	1	proven	(k + 1) % vs.len()	vs has one entry per point, fewer than 3 refused
+crates/step-export/src/map.rs	check_knots	windows	1	proven	windows(2)	constant non-zero size
+crates/step-export/src/map.rs	implied_knots	int-div	1	proven	(n - 1) / dd	dd == 0 returns Err just above
+crates/step-export/src/map.rs	polygon_plane	int-rem	1	proven	(k + 1) % pts.len()	inside iteration over pts, so len() > 0

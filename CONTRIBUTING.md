@@ -17,15 +17,29 @@ Before choosing a task, check the [command inventory](docs/features.md) and
 
 Questions, ideas or want to say what you're working on? Join the [Discord](https://discord.gg/FtU4NQNVDH).
 
-## Kernel work is paused
+## Kernel work goes in solidcore/
 
-We're moving to a new geometry kernel. Until that's done, please don't open pull requests that
-change `crates/kernel/`, `crates/geom/` or the vendored kernel in `solidcore/`, or issues and discussions about kernel
-work: booleans, fillets, chamfers, shell, offsets, sweeps and lofts, threads and holes, STEP/IGES
-import and export, or tessellation. The pinned issue on the tracker explains it. New ones get the
-`kernel-paused` label (`.github/workflows/kernel-paused.yml`) and a maintainer answers them. Crashes
-and data loss are still taken as issues. Pull requests outside those directories carry on as normal,
-including the dialogs and tools for these features.
+Kernel and geometry work is welcome: booleans, fillets, chamfers, shell, offsets, sweeps and lofts,
+threads and holes, STEP/IGES import and export, tessellation. It goes in `solidcore/`, the vendored
+solidcore kernel, following [`solidcore/docs/layers.md`](solidcore/docs/layers.md) and
+`skills/solidcraft-layers/SKILL.md`. SolidCraft's own `crates/kernel`, `crates/smlib` and
+`crates/geom` only shrink toward the seam (ops, tess, record); please don't grow them.
+
+A kernel pull request targets `main` like any other; a change that touches the kernel and the app is one
+pull request. A big feature in several steps goes as stacked pull requests into `main`, each one landing in order
+on top of the one before.
+Crashes and data loss are still taken first.
+
+### Updating a PR that was moved from solidcore
+
+solidcore's open PRs were re-opened here on `moved/solidcore-N` branches in tangency-labs, so
+contributors without write access can't push to them. To update one:
+
+1. `git fetch https://github.com/tangency-labs/solidcraft moved/solidcore-N:moved/solidcore-N`, then
+   `git switch moved/solidcore-N`.
+2. Commit your changes on it and push it to your fork: `git push <your-fork> moved/solidcore-N`.
+3. Open a PR against `main` that says "Replaces #M" (M is the moved PR's number). The moved one
+   gets closed.
 
 ## Get it running (about 10 minutes on a fast machine)
 
@@ -307,7 +321,7 @@ and a fresh CI run:
 - **Growing Rust lists**: use slices (`const ITEMS: &[Item] = &[...];`) without a written
   length. `cargo xtask lists` rejects non-test const/static arrays with more than ten lines
   of entries, except fixed standard or algorithm tables listed with reasons in `xtask/src/lists.rs`.
-  Built-in themes need only a JSON file in `assets/styles/ui/themes/`, with a unique nonnegative
+  Built-in themes need only a JSON file in `crates/look/themes/`, with a unique nonnegative
   integer `order` (the picker order) and its own `provenance` line; keep existing order values.
 - **Message catalogs** (`assets/locales/*.json`): one message per line, sorted by id. Add your
   message anywhere and run `cargo xtask lists --fix`; `cargo xtask lists` (in `cargo xtask ci`
@@ -429,9 +443,13 @@ owning one area, with a human setting direction and reporting bugs. Their workin
 [AGENTS.md](AGENTS.md). Human contributors are just as welcome. Use whatever tools you like, as
 long as the change meets the rules above.
 
+If you run an agent, keep one long-running session rather than restarting it, don't `--resume` one
+whose prompt cache has gone cold (it re-reads the whole history at full price), and act on CodeRabbit
+comments only when they're about crashes, wrong results, data loss or security.
+
 Two quick checks run on every pull request (`.github/workflows/pr-checks.yml`, not required): it
 fails when a lower-numbered open PR by someone else already closes the same issue (the label
-`not-a-duplicate` skips it), or when the description lacks the `Changes a default: no` / `Changes a default: yes — <what>, old behaviour kept behind preference <name>` line (docs-only and bot PRs are exempt).
+`not-a-duplicate` skips it), or when the description lacks the `Changes a default: no` / `Changes a default: yes — <what>, old behaviour kept behind preference <name>` line (docs-only and bot PRs are exempt). A default here is a UX default only: a control, setting, preference or tool behaviour a user sees by default; a changed kernel or geometry result is `Changes a default: no`.
 
 ## Labels and triage
 
@@ -491,11 +509,15 @@ The user guide's screenshots and short clips (`docs/book/src/media/`) are captur
 app by `examples/demo/doc_shots.py`, one function per figure. Each run starts a fresh app with its
 own settings, so your preferences never show. When a change makes a figure out of date, run
 `python3 examples/demo/doc_shots.py <page or shot>` (it needs Xvfb, ffmpeg, Pillow and a release
-build) and commit the new file. A new figure is a new function there, an ATTRIBUTION row in
-`attribution/pending/`, and a `<video>` (clips) or image link on the page. Keep a still under
+build) and commit the new file. Stills come in both themes: `--light` makes `<name>.light.png`,
+and the page shows the one that matches the book's theme (an `<img class="dark-ui">` and an
+`<img class="light-ui">`). A new figure is a new function there, an ATTRIBUTION row in
+`attribution/pending/`, and a `<video>` (clips) or the image pair on the page. Keep a still under
 about 250 KB and a clip under about 1 MB.
 
 ## Licence
 
 By contributing you agree that your contribution is licensed as MIT OR Apache-2.0, like the rest
-of SolidCraft. SolidCraft isn't affiliated with any CAD vendor; product names are trademarks of their owners (see NOTICE).
+of SolidCraft. A contribution to the brand and interface (`crates/ui-kit`, `crates/look`,
+`crates/theme`, `assets/branding`, `assets/icons/app`) is licensed under
+[LICENSE-BRAND](LICENSE-BRAND), which lets the maintainers also license it as MIT OR Apache-2.0. SolidCraft isn't affiliated with any CAD vendor; product names are trademarks of their owners (see NOTICE).

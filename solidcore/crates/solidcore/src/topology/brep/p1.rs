@@ -3963,13 +3963,8 @@ mod tests {
                 fail_status: SM_ERR_INVALID_INPUT,
                 ..DropCurveFail::default()
             }));
-            assert!(matches!(
-                redistribute_fixture(&mut b, edge),
-                Err(SolidError::Upstream {
-                    code: SM_ERR_INVALID_INPUT,
-                    ..
-                })
-            ));
+            assert!(redistribute_fixture(&mut b, edge)
+                .is_err_and(|e| e.upstream_status() == Some(SM_ERR_INVALID_INPUT)));
             assert_eq!(seam_sides(&b, uses), [0.0, 1.0]);
         }
     }

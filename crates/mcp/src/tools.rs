@@ -122,7 +122,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                 json!({
                     "command": string("Command id (see list_commands)"),
                     "params": {"type": "object", "description": "The command's parameters"},
-                    "verbose": {"type": "boolean", "description": "false: omit the full feature body list and sketch ids repeated outside `created`; keep created_bodies, changed_bodies and removed_bodies (default true)"},
+                    "verbose": {"type": "boolean", "description": "false: omit the full feature body list and sketch ids repeated outside `created`; keep created_bodies, changed_bodies and removed_bodies. When a sketch command creates more points than its new curves have ends (spline poles), `created.points` becomes `created.point_count` (default true)"},
                     "expect": expect_schema(),
                 }),
                 &["command"],
@@ -160,7 +160,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                     "coalesce_parameters": {"type": "boolean", "description": "Set each run of consecutive plain parameter edits (parameters.change or set_parameter with a name and a value, or changes) together, rebuilding the design once for the run instead of once per edit; a run that is refused goes step by step, naming the refused step. Other steps still see the design up to date. Each step keeps its own result; the run is one undo step (default false)"},
                     "timings": {"type": "boolean", "description": "Add `timings`: [{index, command, ms}] for every step run (the failing one included) and `total_ms` (default false)"},
                     "profile": {"type": "boolean", "description": "Like timings, and each step's `profile`: {boolean_ms, tessellate_ms, other_ms}, its time in kernel booleans, in tessellation and the rest (default false)"},
-                    "verbose": {"type": "boolean", "description": "false: a compact reply. Feature steps leave out the full body list (created_bodies, changed_bodies and removed_bodies stay), sketch steps the ids they repeat outside `created` (default true)"},
+                    "verbose": {"type": "boolean", "description": "false: a compact reply. Feature steps leave out the full body list (created_bodies, changed_bodies and removed_bodies stay), sketch steps the ids they repeat outside `created`, and `created.points` becomes `created.point_count` when there are more points than the new curves have ends (default true)"},
                     "expect": expect_schema(),
                 }),
                 &[],
@@ -313,14 +313,14 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
         tool(
             "export",
             "Export",
-            "Export bodies to STEP (.step/.stp), 3MF (.3mf), binary STL (.stl), ASCII STL (format stla) or OBJ. The format \
+            "Export bodies to STEP (.step/.stp), IGES (.iges/.igs), 3MF (.3mf), binary STL (.stl), ASCII STL (format stla) or OBJ. The format \
              comes from the extension unless given. URDF (.urdf) exports the whole assembly for robot simulators: a link per \
              component placement with mass and inertia, joints from the assembly's joints, and STL meshes in metres written \
              next to it (docs/urdf.md); RViz needs mesh_prefix such as package://robot/meshes/.",
             object(
                 json!({
                     "path": string("Output file"),
-                    "format": {"type": "string", "enum": ["step", "3mf", "3mf-tagged", "stl", "stla", "obj", "urdf"]},
+                    "format": {"type": "string", "enum": ["step", "stp", "iges", "igs", "3mf", "3mf-tagged", "stl", "stla", "obj", "urdf"]},
                     "bodies": {"type": "array", "items": {"type": "string"}, "description": "Body names (default: all; not with urdf)"},
                     "mesh_prefix": string("urdf: put before each mesh file name (default: none, so relative to the .urdf)"),
                     "effort": {"type": "number", "description": "urdf: joint effort limit, N or N m (default 1000)"},
@@ -363,9 +363,22 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
             "Bridged to the app: the result of a request that was still running when its tool call returned (an error \
              starting \"still running:\"). Waits for it up to 60 s: then its own result (or error), or done: false while \
              it still runs (call again). pending: null when nothing is running. A request still running was not \
-             cancelled: don't send it again; other calls wait for it before they are sent.",
+             cancelled (`cancel` cancels it): don't send it again; other calls wait for it before they are sent.",
             object(json!({}), &[]),
             Effect::ReadOnly,
+        ),
+        tool(
+            "cancel",
+            "Cancel",
+            "Bridged: cancel the request that was still running in the app when its call returned (an error starting \
+             \"still running:\"), without waiting for it. One still waiting its turn will not run; a design change or \
+             export computing off the app's window thread is stopped (Preferences > AI): the design stays as it was, \
+             though a stopped export may still write its file. One already applying on the window thread can't be \
+             cancelled: the error says so, and it will still finish. Only \
+             this server's own request can be cancelled. Headless calls always run to their end, so there is nothing to \
+             cancel.",
+            object(json!({}), &[]),
+            Effect::Edits,
         ),
         tool("undo", "Undo", "Undo the last change to the design.", object(json!({}), &[]), Effect::Edits),
         tool("redo", "Redo", "Redo the last undone change.", object(json!({}), &[]), Effect::Edits),
@@ -909,6 +922,7 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
         },
         "skill_reference" => crate::skill_reference::read(a),
         "running" => b.call("control.running", json!({})),
+        "cancel" => b.call("control.cancel", json!({})),
         "undo" => exec(b, "edit.undo", json!({})),
         "redo" => exec(b, "edit.redo", json!({})),
         "new_design" => exec(b, "file.new", pick(a, &["name"])),
@@ -1125,6 +1139,7 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
         "pending" => Err("`pending` is a tool, not a command: call it on its own".into()),
         "running" => Err("`running` is a tool, not a command: call it on its own".into()),
         "skill_reference" => Err("`skill_reference` is a tool, not a command: call it on its own".into()),
+        "cancel" => Err("`cancel` is a tool, not a command: call it on its own".into()),
         // An engine command: the step goes as it is.
         _ => Ok((String::new(), Value::Null, None)),
     }
@@ -1134,6 +1149,7 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
 const TOOL_STEPS: &[&str] = &[
     "batch",
     "body_topology",
+    "cancel",
     "check_parameters",
     "compare_picture",
     "crash_reports",
@@ -1390,6 +1406,9 @@ fn atomic_layout_refusal(count: usize, rule: solidcraft_engine::panels::Rule, de
     let mut reply = commands::sequential_failure(0, None, commands::error_text(error(rule, detail)), Vec::new());
     reply["ok"] = json!(false);
     reply["applied"] = json!([]);
+    // Only an atomic batch (a rollback asked for) is refused here, and nothing ran: the design is
+    // where the batch started, as a rollback leaves it (#10749).
+    reply["rolled_back"] = json!(true);
     reply["not_run"] = if count <= MAX_BATCH { json!((0..count).collect::<Vec<_>>()) } else { json!([]) };
     reply["not_run_count"] = json!(count);
     reply["note"] = json!("nothing was run: atomic application layout requires the authoritative backend transaction");
@@ -1443,11 +1462,12 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
             Err(e) if e == "missing `command`" => mapped.push(step.clone()),
             Err(e) => {
                 let command = step.get("command").or_else(|| step.get("id")).and_then(Value::as_str);
+                // Nothing ran: the design is where the batch started, as a rollback leaves it (#10749).
                 let reply = json!({
                     "ok": false,
                     "completed": 0,
                     "failed": {"index": i, "command": command, "error": e},
-                    "rolled_back": false,
+                    "rolled_back": rollback,
                     "undone": 0,
                     "applied": [],
                     "not_run": (0..steps.len()).collect::<Vec<_>>(),
@@ -1466,7 +1486,7 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
     if b.in_process()
         && let Some(refusal) = solidcraft_engine::batch_preflight::check(steps, b.param_check(), &[])
     {
-        let mut reply = refusal.reply(steps.len());
+        let mut reply = refusal.reply(steps.len(), rollback);
         if let Some(o) = reply.as_object_mut() {
             o.insert("ok".into(), Value::Bool(false));
             o.insert("applied".into(), json!([]));
@@ -1827,6 +1847,16 @@ fn compact(mut v: Value) -> Value {
             if o.get(k).is_some_and(|x| created.get(k) == Some(x)) {
                 o.remove(k);
             }
+        }
+    }
+    // More new points than the new curves have ends (an offset's spline poles, #9180): agents
+    // refer to those curves by id, so the points only fill the context. Keep how many there were.
+    if let Some(created) = o.get_mut("created").and_then(Value::as_object_mut) {
+        let count = |k: &str| created.get(k).and_then(Value::as_array).map_or(0, Vec::len);
+        let (points, curves) = (count("points"), count("curves"));
+        if curves > 0 && points > 2 * curves {
+            created.remove("points");
+            created.insert("point_count".into(), json!(points));
         }
     }
     v
