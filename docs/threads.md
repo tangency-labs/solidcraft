@@ -27,6 +27,18 @@ modelled: a modelled thread is the maximum-material design profile below.
 | Parallel internal (ISO 7-1) | `rp` | `Rp 1/2` | 27.5° / 27.5° | h = 0.640327 P of H = 0.960491 P | (H − h) tan 27.5° = 0.1667 P, both | (internal only) | d − 2h, d |
 | Taper pipe (ISO 7-1) | `bspt` | `R 1/2`, `Rc 1/2` | 27.5° / 27.5° | h = 0.640327 P of H = 0.960237 P | (H − h) tan 27.5°, both | d − 2h at the gauge plane | d − 2h, d at the gauge plane |
 | NPT | `npt` | `1/2-14 NPT` | 30° / 30° | h = 0.8 P of H = 0.866025 P | (H − h) tan 30° = 0.038 P, both | E − h at the plane of E | E − h, E + h |
+| Trapezoidal 90° (for printing; no standard) | `print` | `PT30x3`, `PT30x6(P3)` | 45° / 45° | H1 = 7P/45 | P/2 − 2 f − H1 | d − 2 (H1 + r) | d − 2 H1, d + 2 c |
+
+**Trapezoidal 90°** (`print`) is for 3D-printed threads and follows no standard. Its 45° flanks
+print without support, and the clearance is part of the profile, set by `fit`: each flank stands
+back f along the axis, the nut's root clears the screw's crest by c and the screw's root clears the
+nut's crest by r (Tight 0.10 / 0.25 / 0.40 mm, Normal 0.20 / 0.40 / 0.55 mm, Loose 0.30 / 0.55 /
+0.70 mm, or any three values). A screw and a nut of the same designation have 4 f of axial play.
+At a fine pitch r and c stop where the groove keeps a 0.1 mm root flat, at most
+(P/2 + 2 f − H1 − 0.1) / 2, so the flanks do not meet first (Normal at 2 mm: r 0.54 mm).
+With no designation a shaft is the major diameter and a hole the nut's minor diameter, at a pitch
+from the diameter (2 mm under 20 mm, 2.5 under 30, 3 under 45, 4 under 70, else 5); a nut hole
+smaller than its minor diameter is bored out to it, with a warning.
 
 The pipe threads' crest and root rounds (ISO 228-1/7-1 r = 0.137329 P, 0.137278 P taper) are
 modelled as flats at the basic height, as the other forms' radii; NPT takes the minimum truncation

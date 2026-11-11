@@ -1416,6 +1416,7 @@ fn marking(p: Vec3) -> FeatureKind {
         steep_flank: Default::default(),
         continuous_flanks: false,
         old_auto_size: false,
+        print_fit: None,
     }
 }
 

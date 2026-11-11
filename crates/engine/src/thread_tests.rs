@@ -1649,3 +1649,109 @@ fn a_tapped_hole_across_slots_is_threaded_along_every_piece_of_its_wall() {
         assert!(cut < drilled - 1.0, "z {z0}..{z1}: {cut} vs {drilled}");
     }
 }
+
+/// A block with a hole through it, wide enough for the printed threads below.
+fn printed_block(hole: f64) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 15, "height": 8, "body_name": "Nut"}));
+    run(&mut s, "solid.hole", json!({"position": [0, 0, 8], "diameter": hole}));
+    s
+}
+
+fn print_fit_of(s: &Session) -> Option<solidcraft_doc::thread_forms::PrintFit> {
+    match &s.doc.features.last().unwrap().kind {
+        solidcraft_doc::FeatureKind::Thread { print_fit, .. } => *print_fit,
+        k => panic!("{k:?}"),
+    }
+}
+
+/// Trapezoidal 90° at its finest sizes: the smallest automatic pitch with the loosest fit, the
+/// finest pitch a designation takes, and a custom fit with a deep root. Each screw, chamfered at
+/// its start to the fit's own root, and each nut cut into its minor-diameter hole is a valid
+/// solid that lost material.
+#[test]
+fn printed_threads_cut_valid_screws_and_nuts_at_their_finest_sizes() {
+    for (d, p, fit) in [(15.0, 2.0, json!("loose")), (10.0, 1.5, json!("normal")), (12.0, 2.0, json!({"flank": 0.15, "crest": 0.3, "root": 0.8}))] {
+        let designation = format!("PT{d}x{p}");
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": d / 2.0, "height": 12, "body_name": "Shaft"}));
+        let before = volume(&mut s, "Shaft");
+        run(&mut s, "solid.thread", json!({"face": [d / 2.0, 0, 10], "designation": designation, "fit": fit, "modeled": true, "tip": "start"}));
+        let state = s.model.state();
+        let body = &state.body("Shaft").unwrap().body;
+        assert!(body.validity().is_empty(), "{designation} {fit} screw: {:?}", body.validity());
+        assert!(volume(&mut s, "Shaft") < before - 1.0, "{designation} {fit}: the screw is cut");
+
+        let minor = d - 2.0 * 7.0 * p / 45.0;
+        let mut s = printed_block(minor);
+        let before = volume(&mut s, "Nut");
+        run(&mut s, "solid.thread", json!({"face": [minor / 2.0, 0, 6], "designation": designation, "fit": fit, "modeled": true}));
+        let state = s.model.state();
+        let body = &state.body("Nut").unwrap().body;
+        assert!(body.validity().is_empty(), "{designation} {fit} nut: {:?}", body.validity());
+        assert!(volume(&mut s, "Nut") < before - 1.0, "{designation} {fit}: the nut is cut");
+    }
+}
+
+/// `fit` takes a preset's name or three clearances, is kept on the feature (the normal fit as
+/// nothing, as a thread without it always meant), and is refused on the other forms or when a
+/// clearance is not a number of millimetres.
+#[test]
+fn a_printed_threads_fit_is_saved_and_checked() {
+    use solidcraft_doc::thread_forms::PrintFit;
+    let shaft = || {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 4, "height": 10, "body_name": "Shaft"}));
+        s
+    };
+    let threaded = |fit: Value| {
+        let mut s = shaft();
+        run(&mut s, "solid.thread", json!({"face": [4, 0, 9], "designation": "PT8x2", "fit": fit}));
+        s
+    };
+    assert_eq!(print_fit_of(&threaded(json!("tight"))), Some(PrintFit::TIGHT));
+    assert_eq!(print_fit_of(&threaded(json!("normal"))), None);
+    let custom = PrintFit { flank: 0.125, crest: 0.3, root: 0.45 };
+    let s = threaded(json!({"flank": 0.125, "crest": 0.3, "root": 0.45}));
+    assert_eq!(print_fit_of(&s), Some(custom));
+    // Saved and opened again; a design from before the fit (no `print_fit`) opens with none.
+    let saved = s.doc.to_json();
+    assert_eq!(print_fit_of(&Session::new(solidcraft_doc::Document::from_json(&saved).unwrap())), Some(custom));
+    let mut older: Value = serde_json::from_str(&saved).unwrap();
+    fn strip(v: &mut Value) -> usize {
+        match v {
+            Value::Object(m) => usize::from(m.remove("print_fit").is_some()) + m.values_mut().map(strip).sum::<usize>(),
+            Value::Array(a) => a.iter_mut().map(strip).sum(),
+            _ => 0,
+        }
+    }
+    assert_eq!(strip(&mut older), 1, "the fit is in the file once: {saved}");
+    assert_eq!(print_fit_of(&Session::new(solidcraft_doc::Document::from_json(&older.to_string()).unwrap())), None);
+
+    for (p, why) in [
+        (json!({"designation": "M8", "fit": "loose"}), "`fit` is for the print form"),
+        (json!({"designation": "PT8x2", "fit": "snug"}), "unknown fit `snug`"),
+        (json!({"designation": "PT8x2", "fit": {"root": "deep"}}), "`fit.root` must be a number"),
+        (json!({"designation": "PT8x2", "fit": {"flanks": 0.3}}), "unknown fit clearance `flanks`"),
+        (json!({"designation": "PT8x2", "fit": 0.3}), "`fit` must be tight, normal, loose"),
+        (json!({"designation": "PT8x2", "fit": ["loose"]}), "`fit` must be tight, normal, loose"),
+        (json!({"designation": "PT8x2", "fit": {"flank": 0.9}}), "leaves no crest"),
+    ] {
+        let mut p = p;
+        p["face"] = json!([4, 0, 9]);
+        let e = shaft().execute("solid.thread", &p).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains(why), "{p}: {e}");
+    }
+}
+
+/// A printed nut drawn in a hole narrower than its minor diameter is bored out to it, and the
+/// reply says so.
+#[test]
+fn a_printed_nut_in_a_narrow_hole_is_bored_out_and_says_so() {
+    let mut s = printed_block(6.0);
+    let made = run(&mut s, "solid.thread", json!({"face": [3, 0, 6], "designation": "PT8x2", "modeled": true}));
+    let warning = made["warning"].as_str().unwrap_or_default().to_string();
+    assert!(warning.contains("bored the 6 mm hole out to") && warning.contains("PT8x2"), "{warning}");
+    let state = s.model.state();
+    assert!(state.body("Nut").unwrap().body.validity().is_empty());
+}
