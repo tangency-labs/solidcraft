@@ -333,7 +333,7 @@ fn fork_only_blends_are_not_supported_yet() {
 
 /// #199's bar, 14 x 6 x 10, its four upright edges rounded: past r 3 (a full round of the 6 mm
 /// ends) the two rounds on each end would cross. solidcore refuses it with the largest radius that
-/// builds and its edge (`SolidError::FilletRefused`, `fixes.fillet_gn_section_generator`): 3, and a
+/// builds and its edge (`SolidError::FilletRefused`): 3, and a
 /// point halfway up an upright edge; an equal chamfer of the 4 mm rib's top edges past 2, as its
 /// distance.
 #[test]
@@ -674,7 +674,7 @@ fn a_curvature_round_takes_its_wedges_equal_area_and_mixed_wedges_are_refused() 
     assert_eq!(blend(&chamfered, Blend::Curvature, &[[90.0; 3]], &[r], TOL, &[], &[], Corners::Filled).err(), Some(Error::NoMatch { point: 0 }));
 }
 
-/// A variable round is the union of its balls (solidcore#2262, `fillet_gn_section_generator`).
+/// A variable round is the union of its balls (solidcore#2262).
 /// Along the 30 mm top front edge: a law of one radius 2 takes the constant round's
 /// (1 - π/4) 4 · 30 = 25.752220; 1 to 3, the balls' union's 27.857434 (the great circles would take
 /// 27.898239), either way along the edge. Both come out 5.3e-5 of that over, as on the C++

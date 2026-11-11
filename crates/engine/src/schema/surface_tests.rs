@@ -1,7 +1,8 @@
 use serde_json::{Value, json};
 
 use super::{
-    FairParams, OffsetParams, ReverseNormalParams, StitchParams, SurfaceExtendParams, SurfaceTrimParams, ThickenParams, UnstitchParams, UntrimParams,
+    FairParams, OffsetParams, PatchParams, PatchResult, ReverseNormalParams, StitchParams, SurfaceExtendParams, SurfaceLoftParams, SurfaceTrimParams,
+    ThickenParams, UnstitchParams, UntrimParams,
 };
 use crate::Session;
 use crate::schema::features::FeatureResult;
@@ -77,6 +78,10 @@ fn schemas_and_the_key_check_agree() {
         keys
     };
     assert_keys(input_schema_for::<StitchParams>(), &with(&["bodies", "tolerance"]));
+    assert_keys(
+        input_schema_for::<PatchParams>(),
+        &["body", "body_name", "body_names", "continuity", "crown", "edges", "name", "participants", "points", "profiles", "profiles_3d", "sketch"],
+    );
     assert_keys(input_schema_for::<UnstitchParams>(), &with(&["body", "faces"]));
     assert_keys(input_schema_for::<ReverseNormalParams>(), &with(&["body", "faces"]));
     assert_keys(input_schema_for::<ThickenParams>(), &with(&["bodies", "operation", "symmetric", "targets", "thickness", "touching"]));
@@ -412,5 +417,195 @@ fn surface_extend_and_trim_check_their_keys() {
     for (id, p) in calls {
         let error = sheet_error(ParamCheck::Strict, id, &p).unwrap_or_default();
         assert!(error.contains("`flp`"), "{id}: {error}");
+    }
+}
+
+/// Two sketches with an open line each, `A` (`a`) at z = 0 and `B` (`b`) at z = 20, for Surface
+/// Loft.
+fn two_lines(level: ParamCheck) -> Session {
+    let plane = |z: i32| json!({"origin": [0, 0, z], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]});
+    session(
+        level,
+        &[
+            ("sketch.create", json!({"name": "A", "plane": plane(0)})),
+            ("sketch.line", json!({"points": [[-10, 0], [10, 0]], "ids": ["a"]})),
+            ("sketch.finish", json!({})),
+            ("sketch.create", json!({"name": "B", "plane": plane(20)})),
+            ("sketch.line", json!({"points": [[-10, 0], [10, 0]], "ids": ["b"]})),
+            ("sketch.finish", json!({})),
+        ],
+    )
+}
+
+/// The two lines of [`two_lines`], as sections.
+fn line_sections() -> Value {
+    json!([{"sketch": "A", "curves": ["a"]}, {"sketch": "B", "curves": ["b"]}])
+}
+
+/// [`line_sections`], as a Surface Loft call with `extra` too.
+fn loft(extra: Value) -> Value {
+    let mut p = json!({"sections": line_sections()});
+    if let (Some(p), Value::Object(extra)) = (p.as_object_mut(), extra) {
+        p.extend(extra);
+    }
+    p
+}
+
+/// A call with `section` first and a good section after it.
+fn loft_of(section: Value) -> Value {
+    json!({"sections": [section, {"sketch": "B", "curves": ["b"]}]})
+}
+
+/// #2829: Surface Loft publishes its keys, its schema takes the calls the handler reads, and it
+/// replies as a feature command does.
+#[test]
+fn surface_loft_contract_and_reply() {
+    assert_keys(
+        input_schema_for::<SurfaceLoftParams>(),
+        &["body_name", "body_names", "continuity", "crown", "name", "participants", "rail_fit", "rails", "sections"],
+    );
+    let schema = input_schema_for::<SurfaceLoftParams>();
+    let schema = schema.as_value();
+    for p in [
+        loft(json!({})),
+        loft(json!({"continuity": ["g0", "G1"], "crown": [0.5, -0.9]})),
+        loft(json!({"crown": null, "body_name": "Skin", "name": "Loft"})),
+        loft(json!({"rails": [{"sketch": "A", "curves": "a"}], "rail_fit": "stretch"})),
+        loft_of(json!({"sketch": 1, "profiles": [0]})),
+        loft_of(json!({"body": "Box", "edges": [[0, 0, 10], {"x": 1, "y": 0, "z": 10}]})),
+    ] {
+        assert!(conforms(schema, schema, &p), "{p} doesn't match {schema}");
+    }
+    let replies = output_schema_for::<FeatureResult>();
+    let replies = replies.as_value();
+    let r = two_lines(ParamCheck::Off).execute("surface.loft", &loft(json!({"body_name": "Skin"}))).unwrap_or_else(|e| panic!("{e}"));
+    assert!(conforms(replies, replies, &r), "{r} doesn't match {replies}");
+}
+
+/// #2829: calls that fail today get the same message in strict.
+#[test]
+fn surface_loft_keeps_todays_errors() {
+    let many = vec![json!({"sketch": "A", "curves": ["a"]}); 51];
+    assert_strict_keeps_errors_on(
+        two_lines,
+        &[
+            ("surface.loft", json!({})),
+            ("surface.loft", json!({"sections": null})),
+            ("surface.loft", json!({"sections": 5})),
+            ("surface.loft", json!({"sections": [{"sketch": "A", "curves": ["a"]}]})),
+            ("surface.loft", json!({"sections": many})),
+            ("surface.loft", loft_of(json!(5))),
+            ("surface.loft", loft_of(json!({"curves": ["a"]}))),
+            ("surface.loft", loft_of(json!({"sketch": true}))),
+            ("surface.loft", loft_of(json!({"sketch": "Nope"}))),
+            ("surface.loft", loft_of(json!({"sketch": "A", "curves": 5}))),
+            ("surface.loft", loft_of(json!({"sketch": "A", "curves": [5]}))),
+            ("surface.loft", loft_of(json!({"sketch": "A", "curves": vec!["a"; 1001]}))),
+            ("surface.loft", loft_of(json!({"sketch": "A", "profiles": "some"}))),
+            ("surface.loft", loft_of(json!({"body": "Box"}))),
+            ("surface.loft", loft_of(json!({"body": "Box", "edges": []}))),
+            ("surface.loft", loft_of(json!({"body": "Box", "edges": vec![[0, 0, 0]; 10_001]}))),
+            ("surface.loft", loft_of(json!({"body": "Box", "edges": [[0, 0, 0]], "sketch": "A"}))),
+            ("surface.loft", loft(json!({"continuity": null}))),
+            ("surface.loft", loft(json!({"continuity": "g1"}))),
+            ("surface.loft", loft(json!({"continuity": ["g1"]}))),
+            ("surface.loft", loft(json!({"continuity": ["g9", "g0"]}))),
+            ("surface.loft", loft(json!({"continuity": [1, "g0"]}))),
+            ("surface.loft", loft(json!({"crown": 1}))),
+            ("surface.loft", loft(json!({"crown": [1]}))),
+            ("surface.loft", loft(json!({"crown": [4, 0]}))),
+            ("surface.loft", loft(json!({"crown": ["a", 0]}))),
+            ("surface.loft", loft(json!({"rails": 5}))),
+            ("surface.loft", loft(json!({"rails": []}))),
+            ("surface.loft", loft(json!({"rails": [{"curves": ["a"]}]}))),
+            ("surface.loft", loft(json!({"rails": [{"sketch": true, "curves": ["a"]}]}))),
+            ("surface.loft", loft(json!({"rails": [{"sketch": "A", "curves": []}]}))),
+            ("surface.loft", loft(json!({"rail_fit": "wobble"}))),
+        ],
+    );
+}
+
+/// #2829: an unknown key, which the handler ignores today, is refused by the contract, and so are
+/// a section's keys of the wrong kind: in Warn the call still works, with a warning.
+#[test]
+fn surface_loft_checks_its_keys() {
+    for (p, key) in [
+        (loft(json!({"sectoins": 1})), "sectoins"),
+        (loft_of(json!({"sketch": "A", "curves": ["a"], "note": 1})), "note"),
+        (loft_of(json!({"sketch": "A", "curves": ["a"], "body": 5})), "sections.body"),
+    ] {
+        assert!(two_lines(ParamCheck::Off).execute("surface.loft", &p).is_ok(), "{p} works today");
+        let warned = two_lines(ParamCheck::Warn).execute("surface.loft", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert!(warned["param_warnings"].to_string().contains(key), "{warned}");
+        let error = two_lines(ParamCheck::Strict).execute("surface.loft", &p).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(error.contains(key), "{p}: {error}");
+    }
+    // The handler skips an edge point that isn't a point.
+    let p = loft_of(json!({"body": "Box", "edges": [[0, 0, 0], "top"]}));
+    assert!(!crate::schema::issues("surface.loft", &p).is_empty(), "{p}");
+    // How many rails a loft takes is the handler's to say.
+    let p = loft(json!({"rails": vec![json!({"sketch": "A", "curves": ["a"]}); 3]}));
+    assert!(crate::schema::issues("surface.loft", &p).is_empty(), "{p}");
+    // A good call has nothing to warn about.
+    let r = two_lines(ParamCheck::Warn).execute("surface.loft", &loft(json!({}))).unwrap_or_else(|e| panic!("{e}"));
+    assert!(r.get("param_warnings").is_none(), "{r}");
+}
+
+/// #741: `surface.patch` describes its keys, keeps today's errors, and every form's reply fits
+/// its output schema: a patch of a sketch's regions, and a fitted patch on a loop of a body's
+/// edges with continuity and crown.
+#[test]
+fn surface_patch_contract_and_reply() {
+    assert_strict_keeps_todays_errors(&[
+        ("surface.patch", json!({"crown": 5})),
+        ("surface.patch", json!({"crown": "0.5"})),
+        ("surface.patch", json!({"crown": null})),
+        ("surface.patch", json!({"points": points(65)})),
+        ("surface.patch", json!({"points": [[1, 2]]})),
+        ("surface.patch", json!({"continuity": 5})),
+        ("surface.patch", json!({"continuity": "g9"})),
+        ("surface.patch", json!({"continuity": [{"edge": [1, 2]}]})),
+        ("surface.patch", json!({"continuity": {"all": "g9"}})),
+        ("surface.patch", json!({"profiles_3d": "x"})),
+        ("surface.patch", json!({"profiles_3d": []})),
+        ("surface.patch", json!({"profiles_3d": [1.5]})),
+        ("surface.patch", json!({"sketch": null})),
+        ("surface.patch", json!({"profiles": null})),
+        ("surface.patch", json!({"edges": vec![[0, 0, 0]; 10_001]})),
+    ]);
+    let schema = output_schema_for::<PatchResult>();
+    let schema = schema.as_value();
+    let check = |s: &mut Session, p: Value| {
+        let r = s.execute("surface.patch", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+        assert!(r.get("param_warnings").is_none(), "{r}");
+        r
+    };
+    let mut s = sheet(ParamCheck::Warn);
+    let r = check(&mut s, json!({"sketch": "S", "body_name": "Sheet2"}));
+    assert_eq!(r["crown"], json!(0.0), "{r}");
+    assert_eq!(r["continuity"], json!({}), "every edge g0: {r}");
+    check(&mut s, json!({"sketch": "S", "profiles": 0, "body_name": "Sheet3"}));
+    // A fitted patch on the saddle's rim: the crown comes back in the reply.
+    let z = |x: f64| 50.0 - (1600.0 - x * x).sqrt();
+    let rim = json!([[14, 0, z(14.0)], [0, 14, z(0.0)], [-14, 0, z(-14.0)], [0, -14, z(0.0)]]);
+    let mut s = shell(ParamCheck::Warn);
+    let r = check(&mut s, json!({"edges": rim, "body": "Saddle", "body_name": "Lid", "crown": 0.5}));
+    assert_eq!(r["crown"], json!(0.5), "{r}");
+    assert_eq!(r["continuity"], json!({}), "every edge g0: {r}");
+}
+
+/// #741: keys of the wrong type that the patch handler ignores today (an `edges` that isn't a
+/// list, a `body` beside a sketch patch) are refused by the contract: in Warn the call still
+/// works, with a warning.
+#[test]
+fn surface_patch_checks_what_the_handler_ignores() {
+    for (p, key) in [(json!({"sketch": "S", "body_name": "P1", "edges": 5}), "edges"), (json!({"sketch": "S", "body_name": "P2", "body": 5}), "body")]
+    {
+        assert!(sheet(ParamCheck::Off).execute("surface.patch", &p).is_ok(), "{p} works today");
+        let warned = sheet(ParamCheck::Warn).execute("surface.patch", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert!(warned["param_warnings"].to_string().contains(key), "{warned}");
+        let error = sheet(ParamCheck::Strict).execute("surface.patch", &p).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(error.contains(&format!("`{key}`")), "{p}: {error}");
     }
 }

@@ -65,7 +65,7 @@ pub struct BoundaryParams {
 }
 
 /// The message of a handler's parameter error, for a reader the contract shares.
-fn message(e: crate::EngineError) -> String {
+pub(super) fn message(e: crate::EngineError) -> String {
     match e {
         crate::EngineError::BadParams { msg, .. } => msg,
         other => other.to_string(),

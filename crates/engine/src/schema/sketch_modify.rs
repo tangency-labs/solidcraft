@@ -1030,7 +1030,7 @@ fn pattern_id(p: &Value) -> Option<String> {
     str_(p, "pattern").map(str::to_string)
 }
 
-fn alignment_schema(_: &mut SchemaGenerator) -> Schema {
+pub(super) fn alignment_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({"type": "string", "enum": ["left", "center", "right"]})
 }
 
@@ -1482,6 +1482,9 @@ pub struct MirrorResult {
 pub struct MoveResult {
     /// The curves moved, or with `copy` the copies made, by id.
     pub curves: Vec<String>,
+    /// The constraints tying the moved geometry to what stays that the move let go, as
+    /// `{id, kind}`.
+    pub released: Vec<Value>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

@@ -34,8 +34,8 @@ use solidcore_record::brep::Brep as Record;
 
 use solidcore_ops::{
     blend, blend_ordered, chamfer_sides, edge_faces_along, fillet_variable, make_box, make_cone,
-    make_cylinder, tangent_chain, Blend, Body, ChamferSecond, CheckLevel, Corners, Error, FitKind,
-    Order, SetBack, Turn, Unblendable,
+    make_cylinder, tangent_chain, Blend, BlendOptions, Body, ChamferSecond, CheckLevel, Corners,
+    Error, FitKind, Order, SetBack, Turn, Unblendable,
 };
 
 /// The block's top front edge, 30 long, between the top (z = 10) and the front (y = 0).
@@ -199,7 +199,10 @@ fn rounds_turn_round_a_boss_edge_mitred_or_swept() {
             &[1.0],
             &[],
             Corners::Filled,
-            turn,
+            BlendOptions {
+                turn,
+                ..BlendOptions::default()
+            },
         )
         .unwrap();
         assert!(b.check(CheckLevel::All).unwrap().is_valid(), "{turn:?}");
@@ -233,7 +236,10 @@ fn rounds_turn_round_a_boss_edge_mitred_or_swept() {
             sizes,
             &[],
             Corners::Filled,
-            Turn::Swept,
+            BlendOptions {
+                turn: Turn::Swept,
+                ..BlendOptions::default()
+            },
         )
         .err()
     };
@@ -258,7 +264,10 @@ fn rounds_turn_round_a_boss_edge_mitred_or_swept() {
         &[1.0],
         &[],
         Corners::Filled,
-        Turn::Mitre,
+        BlendOptions {
+            turn: Turn::Mitre,
+            ..BlendOptions::default()
+        },
     )
     .unwrap();
     let v = p.volume(1e-10).unwrap();
@@ -345,6 +354,72 @@ fn a_variable_round_runs_from_its_start() {
     assert_eq!(off_edge, Err(Error::Argument));
     // refused: the body as it came in
     assert!(rel(volume(&b), ABC) < 1e-12);
+}
+
+/// #14405: a variable round's definition net is certified on wide pieces. Over a piece of
+/// the round the touch circle's rows are bounded by Taylor models in s as well as by
+/// interval series, which take the rails and the ball's centre (they move together) as
+/// independent ranges: with those alone the circle proved only on pieces some hundredths of
+/// the round long, and this round took 113 span certificates and 8,592 enclosures (about
+/// 10 s at opt 3), its net 23 inner knots along the round; now 3 and 66 (0.6 s), and 1.
+/// The net is the balls' envelope within its certified bound wherever sampled (its distance
+/// from the law's balls, measured without the certificate: 1.6e-14, the bound 3.2e-6), and
+/// the body is sound.
+#[test]
+fn a_variable_round_s_net_is_certified_on_wide_pieces() {
+    all_fixes();
+    let b = make_box([0.0; 3], [10.0, 20.0, 30.0]).unwrap();
+    let (from, middle) = ([10.0, 0.0, 30.0], [10.0, 10.0, 30.0]);
+    let e = edge_at(&b, middle);
+    let start = vertex_at(&b, from);
+    fillet_variable(&b, e, start, 1, &[0.0, 0.0, 1.0, 1.0], &[2.0, 5.0]).unwrap();
+    assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    let (_, made) = kernel_copy(&b);
+    // the ball of radius 2 at the start touches the faces x = 10 and z = 30
+    let balls = LawPieces::new(from, middle, [[10.0, 0.0, 28.0], [8.0, 0.0, 30.0]], 2.0);
+    let mut rounds = 0;
+    for &f in made.face_list() {
+        let s = made.face(f).unwrap().surface.as_ref().unwrap();
+        let Some(round @ BlendRef::Procedural(pb)) = s.procedural_blend() else {
+            continue;
+        };
+        rounds += 1;
+        let net = pb.net();
+        let d = net.natural_uv_domain();
+        let (_, _, swapped) = pb.definition_map();
+        let nurb = net.gw_nurb().unwrap();
+        let (knots, lo, hi) = if swapped {
+            (nurb.v_knots(), d.min().y, d.max().y)
+        } else {
+            (nurb.u_knots(), d.min().x, d.max().x)
+        };
+        let mut inner: Vec<f64> = knots
+            .iter()
+            .copied()
+            .filter(|&x| x > lo && x < hi)
+            .collect();
+        inner.dedup();
+        let bound = round.bound();
+        let mut worst = 0.0_f64;
+        for i in 0..=80 {
+            for j in 0..=8 {
+                let (a, c) = (f64::from(i) / 80.0, f64::from(j) / 8.0);
+                let uv = Point2::new(
+                    d.min().x + a * (d.max().x - d.min().x),
+                    d.min().y + c * (d.max().y - d.min().y),
+                );
+                let p = net.evaluate_point(uv).unwrap();
+                worst = worst.max(balls.off(p, |y| 2.0 + 3.0 * y));
+            }
+        }
+        eprintln!(
+            "{} inner knots, bound {bound:e}, off the balls {worst:e}",
+            inner.len()
+        );
+        assert!(inner.len() <= 2, "{} inner knots", inner.len());
+        assert!(worst <= bound, "{worst} over {bound}");
+    }
+    assert_eq!(rounds, 1);
 }
 
 /// A law with a corner rounds its edge as the union of its balls (`docs/generic-blend.md` §3.2,
@@ -1157,4 +1232,73 @@ fn a_setback_too_long_at_a_corner_is_refused_by_the_kernel() {
     )
     .unwrap();
     assert!(volume(&b) < 6000.0);
+}
+
+/// Cancel stops a long fillet promptly (solidcore#3247): a 2 mm round along one helical edge of
+/// a 20-turn square coil, with its tangent chain (the whole edge), runs for minutes. Cancelled
+/// from another thread a second in, the call returns `Cancelled` within 500 ms (about 5 ms
+/// measured on a desktop; the bound leaves room for shared CI runners). nextest runs each test
+/// in a process of its own, so no other test's call holds the session's kernel meanwhile.
+#[test]
+fn a_cancelled_long_fillet_stops_promptly() {
+    use solidcore_ops::cancel::{within, CancelToken};
+    use solidcore_ops::sweep::{screw_sweep, Curve};
+    use std::time::{Duration, Instant};
+    all_fixes();
+    let corners = [
+        [19.0, 0.0, 0.0],
+        [32.0, 0.0, 0.0],
+        [32.0, 0.0, 13.0],
+        [19.0, 0.0, 13.0],
+    ];
+    let square: Vec<Curve> = (0..4)
+        .map(|i| Curve::Line {
+            start: corners[i],
+            end: corners[(i + 1) % 4],
+        })
+        .collect();
+    let coil = screw_sweep(
+        &square,
+        [0.0; 3],
+        [0.0, 0.0, 1.0],
+        15.24,
+        20.0,
+        None,
+        15.24e-4,
+    )
+    .unwrap();
+    // the inner lower helix half a turn in, whichever way the sweep turns
+    let (k, brep) = kernel_copy(&coil);
+    let q = Vec3::new(-19.0, 0.0, 15.24 / 2.0);
+    let edge = (0..brep.edge_list().len())
+        .min_by(|&a, &b| {
+            let d = |i: usize| {
+                edge_closest_point(&k, &brep, brep.edge_list()[i], q)
+                    .unwrap()
+                    .closest
+                    .distance
+            };
+            d(a).total_cmp(&d(b))
+        })
+        .unwrap();
+    let chain = tangent_chain(&coil, &[edge], 0.1).unwrap();
+    let token = CancelToken::new();
+    let watched = token.clone();
+    let worker = std::thread::spawn(move || {
+        let r = within(&watched, || {
+            blend(&coil, Blend::Round, &chain, &[2.0], &[], Corners::Filled)
+        });
+        (r.map(|_| ()), Instant::now())
+    });
+    std::thread::sleep(Duration::from_secs(1));
+    let cancelled = Instant::now();
+    token.cancel();
+    let (r, returned) = worker.join().unwrap();
+    let took = returned.saturating_duration_since(cancelled);
+    eprintln!("the fillet returned {took:?} after Cancel");
+    assert_eq!(r, Err(Error::Cancelled));
+    assert!(
+        took < Duration::from_millis(500),
+        "returned {took:?} after Cancel"
+    );
 }

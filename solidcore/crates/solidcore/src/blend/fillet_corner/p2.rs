@@ -909,7 +909,10 @@ impl FilletCorner {
             ) => Err(e),
             // `return sErr` / `return SM_ERR_NULL_POINTER` as an SmBoolean: with the
             // opt-in fix they read as FALSE (WR-254).
-            Err(SolidError::Upstream { .. }) if env.k.fixes.analytic_corner_failure_is_false => {
+            Err(e)
+                if e.upstream_status().is_some()
+                    && env.k.fixes.analytic_corner_failure_is_false =>
+            {
                 Ok(false)
             }
             Err(_) => Ok(true),
@@ -1242,11 +1245,9 @@ impl FilletCorner {
         let mut start_rad = 0.0;
         let mut end_rad = 0.0;
         let mut fsg_type = FilletSurfaceGeneratorType::Unknown;
-        let mut blend_scale = 1.0; // For use in SmBlendCurveCrossSectionFSG cases only
         let mut max_continuity = 0u32;
-        // the fork's SmGnSectionFSG (WR-685, fixes.fillet_gn_section_generator): its
+        // a blend-curve generator is the fork's SmGnSectionFSG (WR-685): its
         // thumbweight, and its order as the continuity
-        let mut gn = false;
         let mut thumbweight = GN_DEFAULT_THUMBWEIGHT;
         let mut start_axis = Vec3::UNDEF;
         let mut end_axis = Vec3::UNDEF;
@@ -1272,15 +1273,8 @@ impl FilletCorner {
 
             if ii == 0 {
                 fsg_type = fsg.fillet_surface_generator_type();
-                gn = matches!(fsg, FilletSurfaceGenerator::GnSection(_));
-                if fsg_type == FilletSurfaceGeneratorType::BlendCurve && gn {
+                if fsg_type == FilletSurfaceGeneratorType::BlendCurve {
                     thumbweight = fsg.thumbweight().unwrap_or(thumbweight);
-                    let continuity = fsg.continuity().unwrap_or(0);
-                    if continuity > max_continuity {
-                        max_continuity = continuity;
-                    }
-                } else if fsg_type == FilletSurfaceGeneratorType::BlendCurve {
-                    blend_scale = fsg.blend_scale().unwrap_or(blend_scale);
                     let continuity = fsg.continuity().unwrap_or(0);
                     if continuity > max_continuity {
                         max_continuity = continuity;
@@ -1288,17 +1282,11 @@ impl FilletCorner {
                 }
             } else if fsg_type != fsg.fillet_surface_generator_type() {
                 return Err(sm_err()); // Unable to convert - two different types
-            } else if fsg_type == FilletSurfaceGeneratorType::BlendCurve && gn {
-                if (thumbweight - fsg.thumbweight().unwrap_or(f64::NAN)).abs() > EFF_ZERO
-                    || fsg.continuity() != Some(max_continuity)
-                {
-                    return Err(sm_err()); // Unable to convert
-                }
-            } else if fsg_type == FilletSurfaceGeneratorType::BlendCurve {
-                let other_scale = fsg.blend_scale().unwrap_or(blend_scale);
-                if (blend_scale - other_scale).abs() > EFF_ZERO {
-                    return Err(sm_err()); // Unable to convert
-                }
+            } else if fsg_type == FilletSurfaceGeneratorType::BlendCurve
+                && ((thumbweight - fsg.thumbweight().unwrap_or(f64::NAN)).abs() > EFF_ZERO
+                    || fsg.continuity() != Some(max_continuity))
+            {
+                return Err(sm_err()); // Unable to convert
             }
 
             // Drop pE's end points to center line to compute radius, axis & origin of
@@ -1565,7 +1553,7 @@ impl FilletCorner {
                 false,
             )),
             FilletSurfaceGeneratorType::Linear => Some(FilletSurfaceGenerator::Linear),
-            FilletSurfaceGeneratorType::BlendCurve if gn => {
+            FilletSurfaceGeneratorType::BlendCurve => {
                 Some(FilletSurfaceGenerator::GnSection(GnSectionFsg::new(
                     if max_continuity > 1 {
                         max_continuity as usize
@@ -1575,10 +1563,6 @@ impl FilletCorner {
                     thumbweight,
                 )))
             }
-            FilletSurfaceGeneratorType::BlendCurve => Some(FilletSurfaceGenerator::blend_curve(
-                blend_scale,
-                max_continuity,
-            )),
             FilletSurfaceGeneratorType::Unknown => None,
         };
         if fsg.is_some() {

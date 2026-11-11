@@ -576,3 +576,109 @@ fn a_hole_placed_on_another_parts_face_drills_its_own_part_behind_it() {
     assert!(hole_direction(&opened, "H").z > 0.999);
     drilled_base_only(&mut opened);
 }
+
+/// #11538: a sketch on an offset plane inside the part is where the hole starts, not the part's
+/// top face above it. A 5 mm blind hole from z 12 removes z 7..12.
+#[test]
+fn hole_from_a_sketch_on_an_offset_plane_inside_the_part_starts_at_the_plane() {
+    let mut s = Session::default();
+    box_part(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": "12 mm", "name": "Pts"}));
+    run(&mut s, "sketch.point", json!({"point": [20, 20], "id": "p1"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let base = volume(&mut s);
+    drill(&mut s, &["p1".to_string()], json!({"depth": 5}));
+    // The tool runs a hair past its start, so the walls are checked, not the volume.
+    assert!(solid_at(&s, 20.0, 20.0, 6.5) && !solid_at(&s, 20.0, 20.0, 7.5) && !solid_at(&s, 20.0, 20.0, 11.5));
+    assert!(solid_at(&s, 20.0, 20.0, 14.5) && solid_at(&s, 20.0, 20.0, 18.0) && base - volume(&mut s) < pi() * 25.0 * 6.0);
+    // Nothing above the plane goes: the tool's reach above a face is not used inside the part.
+    assert!(solid_at(&s, 20.0, 20.0, 12.05) && solid_at(&s, 20.0, 20.0, 12.3), "the material just above the plane stays");
+}
+
+/// #11538: a sketch plane just under the top face (z 19.95 in a 20 mm part) is still a start
+/// inside the part: the tool's reach above a face, wider than the 0.05 mm roof, does not open it.
+#[test]
+fn hole_from_a_sketch_plane_just_under_the_top_face_keeps_the_roof() {
+    let mut s = Session::default();
+    box_part(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": "19.95 mm", "name": "Pts"}));
+    run(&mut s, "sketch.point", json!({"point": [20, 20], "id": "p1"}));
+    run(&mut s, "sketch.finish", json!({}));
+    drill(&mut s, &["p1".to_string()], json!({"depth": 5}));
+    assert!(!solid_at(&s, 20.0, 20.0, 17.0) && !solid_at(&s, 20.0, 20.0, 19.9), "the hole is drilled below the plane");
+    assert!(solid_at(&s, 20.0, 20.0, 19.98), "the roof above the plane stays");
+}
+
+/// A sketch on a standard plane through the middle of a part keeps drilling from the part's
+/// surface, as before #11538 limited the new rule to derived planes.
+#[test]
+fn hole_from_a_sketch_on_a_standard_plane_inside_the_part_still_starts_at_the_surface() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20, "corner": [-20, -20, -10], "name": "Part"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Pts"}));
+    run(&mut s, "sketch.point", json!({"point": [0, 0], "id": "p1"}));
+    run(&mut s, "sketch.finish", json!({}));
+    drill(&mut s, &["p1".to_string()], json!({"depth": 5}));
+    // Starts at the top (z 10) going down, not at z 0.
+    assert!(!solid_at(&s, 0.0, 0.0, 7.5) && solid_at(&s, 0.0, 0.0, 3.0) && solid_at(&s, 0.0, 0.0, -3.0));
+}
+
+/// The copies of a hole from a sketch on an offset plane start at the plane too (#11538).
+#[test]
+fn patterned_copy_of_an_offset_plane_hole_starts_at_the_plane_too() {
+    let mut s = Session::default();
+    box_part(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": "12 mm", "name": "Pts"}));
+    run(&mut s, "sketch.point", json!({"point": [10, 20], "id": "p1"}));
+    run(&mut s, "sketch.finish", json!({}));
+    drill(&mut s, &["p1".to_string()], json!({"depth": 5}));
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["H"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 15, "name": "Row"}));
+    for x in [10.0, 25.0] {
+        assert!(solid_at(&s, x, 20.0, 6.5) && !solid_at(&s, x, 20.0, 7.5) && !solid_at(&s, x, 20.0, 11.5) && solid_at(&s, x, 20.0, 14.5), "x {x}");
+    }
+}
+
+/// A design saved before #11538 keeps its hole from a sketch on an offset plane inside the part
+/// where it was: starting at the top face (z 20) and 5 mm deep, also after an edit.
+#[test]
+fn a_saved_offset_plane_hole_keeps_starting_at_the_surface() {
+    let mut s = Session::default();
+    box_part(&mut s);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": "12 mm", "name": "Pts"}));
+    run(&mut s, "sketch.point", json!({"point": [20, 20], "id": "p1"}));
+    run(&mut s, "sketch.finish", json!({}));
+    drill(&mut s, &["p1".to_string()], json!({"depth": 5}));
+    // As the release before saved it: the last folded format, none of today's pending changes.
+    let mut v: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    v["format"] = json!("solidcraft/50");
+    v.as_object_mut().unwrap().remove("format_pending");
+    let mut opened = Session::new(solidcraft_doc::Document::from_json(&v.to_string()).unwrap());
+    let from_surface = |s: &Session| {
+        !solid_at(s, 20.0, 20.0, 19.0) && !solid_at(s, 20.0, 20.0, 15.5) && solid_at(s, 20.0, 20.0, 14.0) && solid_at(s, 20.0, 20.0, 11.5)
+    };
+    assert!(from_surface(&opened));
+    run(&mut opened, "timeline.edit", json!({"feature": "H", "set": {"diameter": 8}}));
+    assert!(from_surface(&opened), "an edited saved hole still starts at the surface");
+}
+
+/// #10697: a countersink's cone stops at the hole's depth. A 3.1 mm deep countersunk hole in a
+/// 3.2 mm plate leaves its 0.1 mm floor (the cone used to run on to 90 % of the hole radius and
+/// open the bottom); a hole shallower than its countersink is cut to the hole's depth only.
+#[test]
+fn a_countersink_stops_at_the_depth_of_its_hole() {
+    let plate = |s: &mut Session| run(s, "solid.box", json!({"length": 40, "width": 40, "height": 3.2, "center": [0, 0, 1.6], "body_name": "Block"}));
+    let hole = |depth: f64| json!({"position": [0, 0, 3.2], "diameter": 6, "depth": depth, "type": "countersink", "cs_diameter": 12, "cs_angle": 90, "name": "CS"});
+    let mut s = Session::default();
+    plate(&mut s);
+    run(&mut s, "solid.hole", hole(3.1));
+    assert!(solid_at(&s, 0.0, 0.0, 0.05), "the 0.1 mm floor is still there");
+    assert!(!solid_at(&s, 0.0, 0.0, 0.2), "the hole is open above its floor");
+    // Depth 2: the cone is cut at 2 mm, a frustum from radius 6 to 4: pi h / 3 (R^2 + R r + r^2).
+    let mut s = Session::default();
+    plate(&mut s);
+    run(&mut s, "solid.hole", hole(2.0));
+    let frustum = std::f64::consts::PI * 2.0 / 3.0 * (36.0 + 24.0 + 16.0);
+    let expected = 40.0 * 40.0 * 3.2 - frustum;
+    let v = volume(&mut s);
+    assert!((v - expected).abs() < 1e-3 * expected, "{v} vs {expected}");
+}

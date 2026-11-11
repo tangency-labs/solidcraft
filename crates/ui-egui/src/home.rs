@@ -633,7 +633,7 @@ enum FileAction {
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     poll(app, ui.ctx());
     let file_menu_open = ui.ctx().data(|data| data.get_temp::<bool>(egui::Id::unique("sc_file_menu"))).unwrap_or(false);
-    let interactive = !app.file_picker_busy() && !app.file_load.busy() && !file_menu_open;
+    let interactive = !app.file_picker_busy() && !app.file_load_holds() && !file_menu_open;
     // Help windows draw before Home; remember their prior visibility so one Escape closes only the window.
     let had_help_window = ui.ctx().memory(|memory| {
         ["sc_about", "sc_crash_reports"]
@@ -849,10 +849,17 @@ fn recent_entry<'a>(app: &'a SolveApp, index: usize, path: &'a str) -> start_pag
     } else {
         friendly_path(path).into()
     };
-    let mut menu =
-        vec![start_page::MenuEntry { label: app.tr_label("Remove from list").into(), icon: "delete", chosen: FileAction::ForgetRecent(index) }];
+    let mut menu = vec![start_page::MenuEntry {
+        label: app.tr_label("Remove from list").into(),
+        icon: "delete".into(),
+        chosen: FileAction::ForgetRecent(index),
+    }];
     if !cfg!(target_arch = "wasm32") {
-        menu.push(start_page::MenuEntry { label: app.tr_label("Show in folder").into(), icon: "folder", chosen: FileAction::ShowInFolder(index) });
+        menu.push(start_page::MenuEntry {
+            label: app.tr_label("Show in folder").into(),
+            icon: "folder".into(),
+            chosen: FileAction::ShowInFolder(index),
+        });
     }
     start_page::Recent {
         title,
@@ -968,6 +975,7 @@ fn export_tiles(app: &SolveApp) -> start_page::Tiles<'_, FileAction> {
         ("mesh", "Mesh", Some("home.export_mesh_hint"), FileAction::Mesh),
         ("view_dxf", "DXF", None, FileAction::ViewDxf),
         ("obj", "OBJ", None, FileAction::Export("obj")),
+        ("glb", "GLB", None, FileAction::Export("glb")),
         ("urdf", "URDF", None, FileAction::Export("urdf")),
         ("json", "JSON", Some("home.export_json_hint"), FileAction::Export("json")),
     ];
@@ -1524,6 +1532,14 @@ mod tests {
         h.settle();
         assert!(!h.app.home.open);
         assert!(h.dir.join(format!("{}.json", h.app.session.doc.name)).is_file());
+        assert_eq!(h.app.session.doc.to_json(), original, "export leaves the design unchanged");
+        // The GLB tile (#1553) writes a binary glTF file of the bodies.
+        h.app.home.show(0);
+        click_file(&mut h, "home:export");
+        click_file(&mut h, "home:export:glb");
+        h.settle();
+        let glb = std::fs::read(h.dir.join(format!("{}.glb", h.app.session.doc.name))).unwrap_or_default();
+        assert!(glb.starts_with(b"glTF"), "{} bytes", glb.len());
         assert_eq!(h.app.session.doc.to_json(), original, "export leaves the design unchanged");
     }
 

@@ -14,12 +14,14 @@ mod design_metadata;
 mod dxf;
 mod dxf_out;
 pub mod formats;
+mod glb;
 pub use design::{
     DesignCompression, DesignContainerReader, DesignPreview, FileKind, THUMBNAIL_SIZE, file_kind, is_design_container, read_design_file,
     read_design_geometry, read_design_preview, read_design_thumbnail, read_design_thumbnail_file, read_drawing, read_drawing_file,
     write_design_container, write_design_container_with_cache, write_design_container_with_compression, write_design_container_with_preview,
     write_design_container_with_thumbnail, write_drawing_container,
 };
+pub use glb::{DEFAULT_COLOR as GLB_DEFAULT_COLOR, MAX_GLB_BYTES, export_glb};
 mod legacy_dir;
 pub mod limits;
 #[cfg(test)]
@@ -47,7 +49,7 @@ pub use dxf_out::{
 pub use legacy_dir::{APP_ID, LEGACY_APP_ID, PREVIOUS_APP_IDS, adopt_legacy_dir, legacy_flatpak_paths};
 pub use safe_write::{backup_path, write_atomic};
 pub use sketch2d::{Geom2, MAX_DRAWING_BYTES};
-pub use svg::{decode_svg, read_svg, svg_nothing_to_import};
+pub use svg::{decode_svg, read_svg, svg_nothing_to_import, svg_sheet};
 mod gltf_in;
 pub use gltf_in::{GltfImport, Loader, MAX_GLTF_BYTES, MeshPlan, PlanPlace, glb_container, is_gltf_path, read_gltf};
 mod obj;
@@ -98,7 +100,7 @@ pub const MAX_DESIGN_BYTES: usize = 256 << 20;
 
 #[derive(Debug, thiserror::Error)]
 pub enum IoError {
-    #[error("unsupported format `{0}` (use stl, obj, step, 3mf, urdf or sc)")]
+    #[error("unsupported format `{0}` (use stl, obj, step, 3mf, glb, urdf or sc)")]
     Format(String),
     #[error("nothing to export: the design has no bodies")]
     Empty,
@@ -400,6 +402,9 @@ pub enum Format {
     /// A robot description of the assembly with its mesh files ([`urdf()`]); written by the
     /// engine, since it is several files.
     Urdf,
+    /// Binary glTF with the bodies' looks ([`export_glb`]); written from the document, which
+    /// holds the looks.
+    Glb,
 }
 
 impl Format {
@@ -415,6 +420,7 @@ impl Format {
             "3mf" => Format::ThreeMf,
             "3mf-tagged" => Format::ThreeMfTagged,
             "urdf" => Format::Urdf,
+            "glb" => Format::Glb,
             e if e == "json" || is_design_ext(e) => Format::Design,
             _ => return Err(IoError::Format(ext)),
         })
@@ -778,12 +784,14 @@ pub fn export_with_quality(
     quality: MeshQuality,
 ) -> Result<Vec<u8>> {
     let _span = solidcraft_profile::span("io", "export_with_quality");
-    export_with_parts(state, bodies, &[], format, name, meta, quality)
+    export_with_parts(state, bodies, &[], format, name, meta, quality, None)
 }
 
 /// [`export_with_quality`], and in 3MF each of `parts` (a name and the names of its bodies)
 /// written as one object with those bodies as its parts ([`model_xml_parts`], #8139).
 /// Bodies of a part that are not exported are left out of it. Other formats have no parts.
+/// A 3MF carries `thumbnail` (a PNG) as its package thumbnail; other formats have no place for it.
+#[allow(clippy::too_many_arguments)]
 pub fn export_with_parts(
     state: &ModelState,
     bodies: &[String],
@@ -792,6 +800,7 @@ pub fn export_with_parts(
     name: &str,
     meta: &Metadata,
     quality: MeshQuality,
+    thumbnail: Option<&[u8]>,
 ) -> Result<Vec<u8>> {
     let sel = selected(state, bodies)?;
     Ok(match format {
@@ -825,10 +834,11 @@ pub fn export_with_parts(
             let objs: Vec<MeshObject> = per_body(&sel, |b| mesh_object(b, format == Format::ThreeMfTagged, quality))?;
             let index = |n: &String| sel.iter().position(|b| &b.name == n);
             let parts: Vec<(String, Vec<usize>)> = parts.iter().map(|(p, names)| (p.clone(), names.iter().filter_map(index).collect())).collect();
-            write_3mf_parts(&objs, &parts, &threemf_metadata(meta))?
+            write_3mf_parts(&objs, &parts, &threemf_metadata(meta), thumbnail)?
         }
         Format::Design => return Err(IoError::Format("sc (save the document instead)".into())),
         Format::Urdf => return Err(IoError::Format("urdf (an assembly package; use file.export)".into())),
+        Format::Glb => return Err(IoError::Format("glb (its looks come from the design; use file.export)".into())),
     })
 }
 

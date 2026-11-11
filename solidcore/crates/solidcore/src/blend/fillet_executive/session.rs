@@ -100,7 +100,6 @@ mod classification;
 mod cliff_overflow;
 mod concave_nxn;
 mod corner_marks;
-mod crossing_rails;
 mod ease;
 mod edge_refusals;
 pub(crate) mod finish;
@@ -519,7 +518,10 @@ impl SweptSessionSolvers<'_> {
             .executive
             .and_then(|executive| executive.fillet_solver_of_edgeuse(object))
         else {
-            return Err(SolidError::null_pointer("SmBlendCorner::Classify"));
+            return Err(SolidError::blend_missing(
+                "SmBlendCorner::Classify",
+                "the edge use's fillet solver",
+            ));
         };
         self.solvers
             .get(id.0 as usize)
@@ -721,7 +723,7 @@ fn setback_refused(
 ) -> SolidError {
     match refusal.refusal {
         Some(typed) => typed.error(operation, crate::error::SM_ERR),
-        None => SolidError::sm_err(operation),
+        None => SolidError::blend_failed(operation, "the corner's setback is refused"),
     }
 }
 
@@ -1025,7 +1027,7 @@ impl SplitCorners for SessionSplitCorners<'_> {
         }
         self.corners
             .get_mut(id.0 as usize)
-            .ok_or_else(|| SolidError::null_pointer(OP))
+            .ok_or_else(|| SolidError::blend_missing(OP, "the corner"))
     }
 }
 
@@ -1039,7 +1041,7 @@ fn live_vertex_solvers<'s>(
         let id = pseudo
             .geom(geometry)?
             .solver
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the geometry's fillet solver"))?;
         if !ids.contains(&id) {
             ids.push(id);
         }
@@ -1115,7 +1117,7 @@ impl SplitCorners for SessionGeometryContext<'_> {
     fn corner_mut(&mut self, id: FilletCornerId) -> Result<&mut FilletCorner> {
         self.corners
             .get_mut(id.0 as usize)
-            .ok_or_else(|| SolidError::null_pointer(OP))
+            .ok_or_else(|| SolidError::blend_missing(OP, "the corner"))
     }
 }
 
@@ -1127,7 +1129,7 @@ impl SessionGeometryContext<'_> {
             self.executive.vertex_corner_map.get(&key)
         else {
             // upstream dereferences the NULL corner
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::blend_missing(OP, "the vertex's corner"));
         };
         self.corners
             .get(id.0 as usize)
@@ -1721,11 +1723,10 @@ impl<'target> FilletSession<'target> {
     ) -> Result<()> {
         crate::profile::profile_scope!(k, "blend::session::prepare");
         if edges.is_empty() {
-            return Err(SolidError::Upstream {
-                operation: OP,
-                code: crate::error::SM_ERR_INVALID_INPUT,
-                entity: None,
-            });
+            return Err(SolidError::blend_invalid_value(
+                OP,
+                "an empty list of edges",
+            ));
         }
         let xsect = match xsect_type {
             0 => FilletSurfaceGeneratorType::Linear,
@@ -1868,11 +1869,10 @@ impl<'target> FilletSession<'target> {
     ) -> Result<()> {
         crate::profile::profile_scope!(k, "blend::session::prepare");
         if edges.is_empty() {
-            return Err(SolidError::Upstream {
-                operation: OP,
-                code: crate::error::SM_ERR_INVALID_INPUT,
-                entity: None,
-            });
+            return Err(SolidError::blend_invalid_value(
+                OP,
+                "an empty list of edges",
+            ));
         }
         let edges = edges
             .iter()
@@ -1936,11 +1936,10 @@ impl<'target> FilletSession<'target> {
         thumbweight: f64,
     ) -> Result<()> {
         if edges.is_empty() {
-            return Err(SolidError::Upstream {
-                operation: OP,
-                code: crate::error::SM_ERR_INVALID_INPUT,
-                entity: None,
-            });
+            return Err(SolidError::blend_invalid_value(
+                OP,
+                "an empty list of edges",
+            ));
         }
         if radius_type == FilletSolverType::ConstRadius && second_radii.is_none() {
             self.refuse_rounds_too_small(k, edges, radii, xsect_types)?;
@@ -1977,8 +1976,8 @@ impl<'target> FilletSession<'target> {
     /// overload with `SM_FS_VARIABLE_RADIUS`, as `SmApiVariableRadiusFillet` does:
     /// one cross-section type for every edge, `radius` as the (unused) solver
     /// distance, `law` shared by every edge's solver and default tolerances. The
-    /// thumbweight is `SetFilletParameters`' default: upstream's `1.0`, or with
-    /// `fixes.fillet_gn_section_generator` the fork's `SM_GN_DEFAULT_THUMBWEIGHT`.
+    /// thumbweight is `SetFilletParameters`' default with the G^n section, the fork's
+    /// `SM_GN_DEFAULT_THUMBWEIGHT` (upstream's `1.0`, which the G^n section refuses).
     ///
     /// Zero selects linear, two blend-curve, every other cross-section code circular.
     ///
@@ -1995,11 +1994,10 @@ impl<'target> FilletSession<'target> {
     ) -> Result<()> {
         crate::profile::profile_scope!(k, "blend::session::prepare");
         if edges.is_empty() {
-            return Err(SolidError::Upstream {
-                operation: OP,
-                code: crate::error::SM_ERR_INVALID_INPUT,
-                entity: None,
-            });
+            return Err(SolidError::blend_invalid_value(
+                OP,
+                "an empty list of edges",
+            ));
         }
         let xsect = match xsect_type {
             0 => FilletSurfaceGeneratorType::Linear,
@@ -2029,13 +2027,10 @@ impl<'target> FilletSession<'target> {
                 tan_tol_deg: -1.0,
                 xsect_tol: -1.0,
                 continuity,
-                // SetFilletParameters' default thumbweight: upstream's 1.0, the fork's
-                // SM_GN_DEFAULT_THUMBWEIGHT with its G^n section (WR-685), which refuses 1.0
-                thumbweight: if k.fixes.fillet_gn_section_generator {
-                    crate::blend::fillet_section::section::GN_DEFAULT_THUMBWEIGHT
-                } else {
-                    1.0
-                },
+                // SetFilletParameters' default thumbweight: the fork's
+                // SM_GN_DEFAULT_THUMBWEIGHT with its G^n section (WR-685), which refuses
+                // upstream's 1.0
+                thumbweight: crate::blend::fillet_section::section::GN_DEFAULT_THUMBWEIGHT,
                 second_radii: None,
             },
         );
@@ -2813,8 +2808,7 @@ impl<'target> FilletSession<'target> {
     /// `GetFitRadius`, `GetFitEdge`, `GetFitKind` (the fork's, tangency-labs/smlib#79
     /// a3d6d81): with a refusal as too large ([`ErrorInfo::no_room_reason`]), the largest
     /// size that builds the refused blend and its edge, computed from the refusal's cause;
-    /// `None` when its cause has no size (a radius law) or no refusal noted one. Only with
-    /// `fixes.fillet_gn_section_generator`.
+    /// `None` when its cause has no size (a radius law) or no refusal noted one.
     #[must_use]
     pub fn fit_size(&self) -> Option<crate::blend::fillet_executive::FitSize<EdgeId>> {
         let fit = self.executive.fit_size()?;
@@ -3167,7 +3161,9 @@ impl CornerEdgeAccess<FilletObject> for SessionObjects<'_> {
                     FilletBody::Target,
                     EntityRef::Edgeuse(eu),
                 ))
-                .ok_or_else(|| SolidError::null_pointer(OP_NOTE_OPEN_END))?;
+                .ok_or_else(|| {
+                    SolidError::blend_missing(OP_NOTE_OPEN_END, "the edge use's fillet solver")
+                })?;
             open_ends.push(OpenEnd {
                 solver,
                 vertex: FilletObject::Topology(FilletBody::Target, EntityRef::Vertex(vertex)),
@@ -3225,7 +3221,10 @@ impl CornerEdgeAccess<FilletObject> for SessionObjects<'_> {
                         .map(|e| FilletObject::Topology(FilletBody::Target, EntityRef::Edge(e))),
                     crate::blend::fillet_executive::p3::FitKind::Radius,
                 );
-                return Err(SolidError::sm_err("SmBlendCorner::CalcEndEdgeGeom"));
+                return Err(SolidError::blend_failed(
+                    "SmBlendCorner::CalcEndEdgeGeom",
+                    "the end edges of the corner are refused",
+                ));
             }
         } else {
             // WR-674: a round's end where its edge runs on tangentially is left open too.
@@ -3616,23 +3615,6 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
         executive.process_smooth_edge_sequences_narrow(k, self)
     }
 
-    fn creation_ball_fits(&mut self, k: &mut Kernel, solver: FilletObject) -> Result<bool> {
-        let FilletObject::Solver(id) = solver else {
-            return Err(invalid("object is not a solver"));
-        };
-        let index = id.0 as usize;
-        let current = self
-            .solvers
-            .get_mut(index)
-            .and_then(Option::as_mut)
-            .ok_or_else(|| invalid("solver is not live in this session"))?;
-        crate::blend::fillet_solver::ball_fit::ball_fits_its_faces(
-            live_solver_ops(current),
-            k,
-            self.target,
-        )
-    }
-
     fn creation_extend_trace_to_its_rails(
         &mut self,
         k: &mut Kernel,
@@ -3771,8 +3753,12 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
             Some(edgeuse) => crate::topology::edgeuse::p1::edge(self.target, edgeuse)?,
             None => None,
         };
-        let edge = edge.ok_or_else(|| SolidError::null_pointer(OP))?;
-        if crate::blend::fillet_solver::p5::is_concave_edge(k, self.target, edge)? {
+        let edge = edge.ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge"))?;
+        // a sheet's edge bounds no material: there is no part for the band to cut (not the
+        // fork's, whose `sm_BlendAddsMaterial` fails there, and the fillet with it)
+        if !crate::blend::fillet_solver::p5::edge_bounds_material(self.target, edge)?
+            || crate::blend::fillet_solver::p5::is_concave_edge(k, self.target, edge)?
+        {
             return Ok(None);
         }
         let Some(cut) = band_cuts::band_cuts_the_part_cached(
@@ -3816,8 +3802,12 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
             Some(edgeuse) => crate::topology::edgeuse::p1::edge(self.target, edgeuse)?,
             None => None,
         };
-        let edge = edge.ok_or_else(|| SolidError::null_pointer(OP))?;
-        if crate::blend::fillet_solver::p5::is_concave_edge(k, self.target, edge)? {
+        let edge = edge.ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge"))?;
+        // a sheet's edge bounds no material: there is no part for the band to cut (not the
+        // fork's, whose `sm_BlendAddsMaterial` fails there, and the fillet with it)
+        if !crate::blend::fillet_solver::p5::edge_bounds_material(self.target, edge)?
+            || crate::blend::fillet_solver::p5::is_concave_edge(k, self.target, edge)?
+        {
             return Ok(None);
         }
         let Some(cut) = band_cuts::band_breaks_through_the_part_cached(
@@ -4057,7 +4047,7 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
                     continue;
                 };
                 let edge = crate::topology::edgeuse::p1::edge(self.target, ea0)?
-                    .ok_or_else(|| SolidError::null_pointer(OP))?;
+                    .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
                 for ka in 0..2 {
                     for kb in 0..2 {
                         let fa = match self.solver(ia)?.base().edgeuse(ka)? {
@@ -4642,7 +4632,7 @@ impl StitchCallback for FilletPatchStitchCallback {
 
         // How far the kept edge is from the faces of the one it replaces, measured as
         // the default choice measures it.
-        let null = || SolidError::null_pointer(OP);
+        let null = || SolidError::blend_missing(OP, "the edge's curve or a face's surface");
         let keep_curve = crate::topology::edge::curve(b, keep)?.ok_or_else(null)?;
         let keep_interval = crate::topology::edge::interval(b, keep)?;
         let mut max_distance = dist_between;
@@ -4911,7 +4901,10 @@ impl FaceConstructionAccess<FilletObject> for SessionObjects<'_> {
                             [None, None],
                             Some(crate::blend::blend_corner::end::SMOOTH_END_CAP_FAILED),
                         );
-                        return Err(SolidError::sm_err("SmBlendCorner::CreateEndPatchOfEnd"));
+                        return Err(SolidError::blend_failed(
+                            "SmBlendCorner::CreateEndPatchOfEnd",
+                            "the smooth end cap is not built",
+                        ));
                     }
                     return Ok(());
                 }
@@ -5064,7 +5057,7 @@ impl FaceConstructionAccess<FilletObject> for SessionObjects<'_> {
             .pseudo
             .geom(id)?
             .fillet_solver()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the geometry's fillet solver"))?;
         let solver = self
             .solvers
             .get(sid.0 as usize)
@@ -5690,7 +5683,7 @@ impl SolverLoadingAccess<FilletObject> for SessionObjects<'_> {
             .edge(id)?
             .curve
             .as_ref()
-            .ok_or_else(|| SolidError::null_pointer(LOADER))?;
+            .ok_or_else(|| SolidError::blend_missing(LOADER, "the edge's curve"))?;
         let knots = curve.knots(k, None)?.0;
         if let std::collections::btree_map::Entry::Vacant(entry) = self.edge_caches.entry(id) {
             // the cache is the edge curve's own: its tolerance is the edge's
@@ -5704,7 +5697,7 @@ impl SolverLoadingAccess<FilletObject> for SessionObjects<'_> {
                 if error.is_unported_or_cancelled() {
                     error
                 } else {
-                    SolidError::null_pointer(LOADER)
+                    SolidError::blend_missing(LOADER, "the edge curve's cache")
                 }
             })?;
             entry.insert(cache);
@@ -6048,7 +6041,8 @@ impl FilletParametersAccess<FilletObject> for SessionObjects<'_> {
             };
             let (start, end) = crate::topology::vertex::edge_vertex_pair(self.target, id)?;
             for v in [start, end] {
-                let v = v.ok_or_else(|| SolidError::null_pointer(OP))?;
+                let v =
+                    v.ok_or_else(|| SolidError::blend_missing(OP, "an end vertex of the edge"))?;
                 if !done.insert(v) {
                     continue;
                 }
@@ -6080,8 +6074,9 @@ impl SessionObjects<'_> {
             .ok_or_else(|| invalid("corner has no actual solver edge use"))?;
         let object = FilletObject::Topology(FilletBody::Target, EntityRef::Edgeuse(edgeuse));
         let Some(FilletObject::Solver(solver)) = executive.fillet_solver_of_edgeuse(object) else {
-            return Err(SolidError::null_pointer(
+            return Err(SolidError::blend_missing(
                 "SmFilletNx1Corner::MakeCornerTopology",
+                "the edge use's fillet solver",
             ));
         };
         let SessionObjects {
@@ -6132,7 +6127,10 @@ impl SessionObjects<'_> {
             .ok_or_else(|| invalid("corner has no actual solver edge use"))?;
         let object = FilletObject::Topology(FilletBody::Target, EntityRef::Edgeuse(edgeuse));
         let Some(FilletObject::Solver(solver)) = executive.fillet_solver_of_edgeuse(object) else {
-            return Err(SolidError::null_pointer(OP_TURN));
+            return Err(SolidError::blend_missing(
+                OP_TURN,
+                "the edge use's fillet solver",
+            ));
         };
         let SessionObjects {
             target,
@@ -6221,18 +6219,29 @@ impl SessionObjects<'_> {
         let Some(face) = gaps.extended_face else {
             return Ok(());
         };
-        let other = gaps
-            .other_side_edgeuse
-            .ok_or_else(|| SolidError::null_pointer("SmFilletNx1Corner::MakeCornerTopology"))?;
-        let other_edge = crate::topology::edgeuse::p1::edge(self.target, other)?
-            .ok_or_else(|| SolidError::null_pointer("SmFilletNx1Corner::MakeCornerTopology"))?;
-        let curve = crate::topology::edge::curve(self.target, other_edge)?
-            .ok_or_else(|| SolidError::null_pointer("SmFilletNx1Corner::MakeCornerTopology"))?;
+        let other = gaps.other_side_edgeuse.ok_or_else(|| {
+            SolidError::blend_missing(
+                "SmFilletNx1Corner::MakeCornerTopology",
+                "the edge use across the gap",
+            )
+        })?;
+        let other_edge =
+            crate::topology::edgeuse::p1::edge(self.target, other)?.ok_or_else(|| {
+                SolidError::blend_missing(
+                    "SmFilletNx1Corner::MakeCornerTopology",
+                    "the edge use's edge",
+                )
+            })?;
+        let curve = crate::topology::edge::curve(self.target, other_edge)?.ok_or_else(|| {
+            SolidError::blend_missing("SmFilletNx1Corner::MakeCornerTopology", "the edge's curve")
+        })?;
         let interval = crate::topology::edge::interval(self.target, other_edge)?;
-        let surface = self
-            .extended_surfaces
-            .get(&face)
-            .ok_or_else(|| SolidError::null_pointer("SmFilletNx1Corner::MakeCornerTopology"))?;
+        let surface = self.extended_surfaces.get(&face).ok_or_else(|| {
+            SolidError::blend_missing(
+                "SmFilletNx1Corner::MakeCornerTopology",
+                "the face's extended surface",
+            )
+        })?;
         let corner = self
             .corners
             .get(id.0 as usize)
@@ -6335,8 +6344,9 @@ impl SessionObjects<'_> {
             let object = FilletObject::Topology(FilletBody::Target, EntityRef::Edgeuse(edgeuse));
             let Some(FilletObject::Solver(solver)) = executive.fillet_solver_of_edgeuse(object)
             else {
-                return Err(SolidError::null_pointer(
+                return Err(SolidError::blend_missing(
                     "SmFilletNx2Corner::MakeCornerTopology",
+                    "the edge use's fillet solver",
                 ));
             };
             *slot = solver;
@@ -6380,13 +6390,20 @@ impl SessionObjects<'_> {
             .corners
             .get(id.0 as usize)
             .and_then(|corner| corner.all_eus.clone())
-            .ok_or_else(|| SolidError::null_pointer("SmBlendCorner::MakeBallTopology"))?;
+            .ok_or_else(|| {
+                SolidError::blend_missing(
+                    "SmBlendCorner::MakeBallTopology",
+                    "the corner's edge uses",
+                )
+            })?;
         let mut solver_ids = vec![FilletSolverId(0); all.len()];
         for (slot, index) in solver_ids.iter_mut().zip(0..) {
-            let eu = all
-                .get(index)
-                .copied()
-                .ok_or_else(|| SolidError::sm_err("SmBlendCorner::MakeBallTopology"))?;
+            let eu = all.get(index).copied().ok_or_else(|| {
+                SolidError::blend_failed(
+                    "SmBlendCorner::MakeBallTopology",
+                    "an edge use of the corner",
+                )
+            })?;
             let of = |eu: EdgeuseId| {
                 let object = FilletObject::Topology(FilletBody::Target, EntityRef::Edgeuse(eu));
                 match executive.fillet_solver_of_edgeuse(object) {
@@ -6398,8 +6415,12 @@ impl SessionObjects<'_> {
                 Some(solver) => Some(solver),
                 None => crate::topology::edgeuse::p1::mate(self.target, eu)?.and_then(of),
             };
-            *slot =
-                found.ok_or_else(|| SolidError::null_pointer("SmBlendCorner::MakeBallTopology"))?;
+            *slot = found.ok_or_else(|| {
+                SolidError::blend_missing(
+                    "SmBlendCorner::MakeBallTopology",
+                    "the edge use's fillet solver",
+                )
+            })?;
         }
         let SessionObjects {
             target,
@@ -6493,14 +6514,22 @@ impl SessionObjects<'_> {
                 .get(id.0 as usize)
                 .and_then(|c| c.solver_eus.as_deref())
                 .and_then(|eus| eus.first().copied())
-                .ok_or_else(|| SolidError::null_pointer("SmBlendCorner::MakeJoinTopology"))?;
+                .ok_or_else(|| {
+                    SolidError::blend_missing(
+                        "SmBlendCorner::MakeJoinTopology",
+                        "the corner's first solver edge use",
+                    )
+                })?;
             let edge = crate::topology::edgeuse::p1::edge(target, first)?;
             executive.note_fit_radius(
                 0.0,
                 edge.map(|e| FilletObject::Topology(FilletBody::Target, EntityRef::Edge(e))),
                 crate::blend::fillet_executive::p3::FitKind::Radius,
             );
-            return Err(SolidError::sm_err("SmBlendCorner::MakeJoinTopology"));
+            return Err(SolidError::blend_failed(
+                "SmBlendCorner::MakeJoinTopology",
+                "the blends at the corner do not join for any size",
+            ));
         }
         // (#2905) the size that builds: the other blend's offset, on the wider one's edge
         if let JoinTopology::RefusedUnequalOffsets { blend, builds } = built {
@@ -6521,14 +6550,22 @@ impl SessionObjects<'_> {
                 .get(id.0 as usize)
                 .and_then(|c| c.solver_eus.as_deref())
                 .and_then(|eus| eus.get(blend).copied())
-                .ok_or_else(|| SolidError::null_pointer("SmBlendCorner::MakeJoinTopology"))?;
+                .ok_or_else(|| {
+                    SolidError::blend_missing(
+                        "SmBlendCorner::MakeJoinTopology",
+                        "the wider blend's edge use",
+                    )
+                })?;
             let edge = crate::topology::edgeuse::p1::edge(target, wider)?;
             executive.note_fit_radius(
                 builds,
                 edge.map(|e| FilletObject::Topology(FilletBody::Target, EntityRef::Edge(e))),
                 crate::blend::fillet_executive::p3::FitKind::Radius,
             );
-            return Err(SolidError::sm_err("SmBlendCorner::MakeJoinTopology"));
+            return Err(SolidError::blend_failed(
+                "SmBlendCorner::MakeJoinTopology",
+                "the blends at the corner do not join at unequal offsets",
+            ));
         }
         Ok(())
     }
@@ -6702,8 +6739,9 @@ impl SessionObjects<'_> {
             let object = FilletObject::Topology(FilletBody::Target, EntityRef::Edgeuse(edgeuse));
             let Some(FilletObject::Solver(solver)) = executive.fillet_solver_of_edgeuse(object)
             else {
-                return Err(SolidError::null_pointer(
+                return Err(SolidError::blend_missing(
                     "SmFillet3x2MixedConvexityCorner::MakeCornerTopology",
+                    "the edge use's fillet solver",
                 ));
             };
             *slot = solver;
@@ -6765,7 +6803,10 @@ impl SessionObjects<'_> {
             .copied()
             .ok_or_else(|| invalid("corner without edge uses"))?;
         if lookup(last)?.is_none() {
-            return Err(SolidError::null_pointer(NATIVE));
+            return Err(SolidError::blend_missing(
+                NATIVE,
+                "the last edge use's fillet solver",
+            ));
         }
         let mut solver_ids = Vec::new();
         for &eu in edgeuses {
@@ -6773,8 +6814,9 @@ impl SessionObjects<'_> {
                 solver
             } else {
                 let mate = crate::topology::edgeuse::p1::mate(self.target, eu)?
-                    .ok_or_else(|| SolidError::null_pointer(NATIVE))?;
-                lookup(mate)?.ok_or_else(|| SolidError::null_pointer(NATIVE))?
+                    .ok_or_else(|| SolidError::blend_missing(NATIVE, "the edge use's mate"))?;
+                lookup(mate)?
+                    .ok_or_else(|| SolidError::blend_missing(NATIVE, "the mate's fillet solver"))?
             };
             solver_ids.push(solver);
         }
@@ -6924,16 +6966,16 @@ impl CornerVertexAccess<FilletObject> for SessionObjects<'_> {
             .into_iter()
             .map(|id| {
                 id.map(FilletObject::Solver)
-                    .ok_or_else(|| SolidError::null_pointer(OP))
+                    .ok_or_else(|| SolidError::blend_missing(OP, "an edge use's fillet solver"))
             })
             .collect()
     }
     fn vertices_solver_edge(&self, solver: FilletObject) -> Result<FilletObject> {
         let eu = self
             .load_solver_edgeuse(solver, 0)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's edge use"))?;
         self.load_edgeuse_edge(eu)?
-            .ok_or_else(|| SolidError::null_pointer(OP))
+            .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))
     }
     fn vertices_curve_ends(
         &self,
@@ -6948,7 +6990,7 @@ impl CornerVertexAccess<FilletObject> for SessionObjects<'_> {
             .edge(id)?
             .curve
             .as_ref()
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?;
         let ends = curve.ends(k)?;
         Ok((ends.start, ends.end))
     }
@@ -7124,6 +7166,38 @@ mod tests {
     use crate::topology::loopuse;
     use crate::topology::topology_traverser::Marks;
 
+    /// An empty edge list is a typed refusal of the value, with the status of the bare
+    /// `SM_ERR_INVALID_INPUT` it replaced (#13790), for every prepare that checks it.
+    #[test]
+    fn an_empty_edge_list_is_a_typed_invalid_value() {
+        let mut k = Kernel::default();
+        let mut body = pentagonal_pyramid(&mut k);
+        let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+        let errors = [
+            session
+                .prepare_constant_radius_edges(&mut k, &[], 0.5, 1, 1, 1.0)
+                .unwrap_err(),
+            session
+                .prepare_per_edge_constant_radius(&mut k, &[], &[], &[], 1, 1.0)
+                .unwrap_err(),
+        ];
+        for e in errors {
+            assert_eq!(
+                e.blend_failure(),
+                Some(&crate::error::blend::BlendFailure::InvalidValue(
+                    "an empty list of edges"
+                )),
+                "{e:?}"
+            );
+            assert_eq!(
+                e.upstream_status(),
+                Some(crate::error::SM_ERR_INVALID_INPUT)
+            );
+            assert_eq!(e.operation(), OP);
+            assert_eq!(e.entity(), None);
+        }
+    }
+
     /// A pentagonal pyramid: its apex has five edges, so filleting three of them is a
     /// corner `SmFilletCorner::Create` has no type for (three of five, not the 3x2 or
     /// 4x3 cases).
@@ -7260,10 +7334,11 @@ mod tests {
             }
             let result = session.do_fillet(&mut k);
             // The later stage's failure is the same with the fix on and off.
-            assert!(matches!(
-                result,
-                Err(SolidError::Upstream { code: 1001, .. })
-            ));
+            assert_eq!(
+                result.as_ref().err().and_then(SolidError::upstream_status),
+                Some(1001),
+                "{result:?}"
+            );
             let error = session.error_info();
             if fix {
                 assert_eq!(error.code, FilletErrorType::CornerUnsupported as i32);
