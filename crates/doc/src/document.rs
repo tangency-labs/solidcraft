@@ -3413,7 +3413,7 @@ pub struct Document {
     pub named_views: Vec<NamedView>,
     /// Construction planes drawn at a size of their own (dragged by their edges and corners):
     /// by feature id, the rectangle `[x0, y0, x1, y1]` in the plane's own coordinates, mm. A
-    /// plane not listed is drawn at a size that follows the zoom. Display only.
+    /// plane not listed is drawn at its automatic size (grown past the bodies it passes through). Display only.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub plane_extents: std::collections::BTreeMap<u64, [f64; 4]>,
     /// Notes: text anchored to points in model space, drawn as screen-facing callouts (#1631).
