@@ -7,8 +7,7 @@
 //! `BallIsRegular` (`SmFilletSolver.cpp`, `SmFilletSolver.h`) and the virtuals
 //! `GetBallLaw`, `SetBallRadius` and `RollsABall` (`SmFilletStandardSolver.h/.cpp`) in
 //! commits 410dfe1, 20ba5a9, 8c40818 and a34b5e8 (the last deletes the transversality check
-//! 410dfe1 added, so it has no port). They run only with the opt-in
-//! `Kernel::fixes.fillet_gn_section_generator`.
+//! 410dfe1 added, so it has no port).
 //!
 //! | Rust                       | Upstream (fork)                                   |
 //! |----------------------------|---------------------------------------------------|
@@ -217,7 +216,7 @@ pub fn ball_law(k: &Kernel, solver: &mut SolverObject, pnt: &TsectPnt) -> Result
 ///
 /// # Errors
 ///
-/// A missing offset surface ([`SolidError::null_pointer`]; the fork dereferences it).
+/// A missing offset surface (`BlendFailure::Missing`; the fork dereferences it).
 pub fn set_ball_radius(solver: &mut SolverObject, radius: f64) -> Result<bool> {
     let (radii, base): (&mut [f64; 2], &mut FilletSolver) = match solver {
         SolverObject::ConstantRadius(s) => (&mut s.fillet_radii, &mut s.solver),
@@ -229,7 +228,7 @@ pub fn set_ball_radius(solver: &mut SolverObject, radius: f64) -> Result<bool> {
     for (rail, orientation) in orientations.into_iter().enumerate() {
         let slot = base
             .surface_mut(rail)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
         slot.surface.set_offset_distance(radius * orientation);
     }
     Ok(true)
@@ -419,7 +418,7 @@ fn solve4(a: &[[f64; 4]; 4], b: &[f64; 4]) -> Option<[f64; 4]> {
 /// # Errors
 ///
 /// Those of the law's, the offsets' and the surfaces' evaluations; a missing offset
-/// surface ([`SolidError::null_pointer`]).
+/// surface (a `BlendFailure::Missing`).
 pub fn judge_ball_at(k: &Kernel, solver: &mut SolverObject, pnt: &TsectPnt) -> Result<BallStation> {
     let mut station = BallStation::default();
     let law = ball_law(k, solver, pnt)?;
@@ -431,7 +430,7 @@ pub fn judge_ball_at(k: &Kernel, solver: &mut SolverObject, pnt: &TsectPnt) -> R
     let approx_tol = solver.base().this_approx_tol_3d();
     let ops = ops_of(solver);
     if ops.solver().surface(0)?.is_none() || ops.solver().surface(1)?.is_none() {
-        return Err(SolidError::null_pointer(OP));
+        return Err(SolidError::blend_missing(OP, "the solver's offset surface"));
     }
     station.law = on_edge;
     station.ball = ball;
@@ -449,7 +448,7 @@ pub fn judge_ball_at(k: &Kernel, solver: &mut SolverObject, pnt: &TsectPnt) -> R
             let slot = ops
                 .solver_mut()
                 .surface_mut(rail)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
             *dst = slot.surface.surface.evaluate_point_extending(k, uv)?;
         }
         Ok(on)
@@ -468,7 +467,7 @@ pub fn judge_ball_at(k: &Kernel, solver: &mut SolverObject, pnt: &TsectPnt) -> R
         let slot = ops
             .solver()
             .surface(rail)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
         let offset: &OffsetSurface = &slot.surface.surface;
         let uv = uvs.get(rail).copied().unwrap_or(Point2::UNDEF);
         let base = offset.base_surface();
@@ -673,11 +672,11 @@ pub(crate) fn ball_section_at(
         let s0 = ops
             .solver()
             .surface(0)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
         let s1 = ops
             .solver()
             .surface(1)?
-            .ok_or_else(|| SolidError::null_pointer(OP))?;
+            .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
         [
             s0.surface.base_surface().clone(),
             s1.surface.base_surface().clone(),
@@ -826,9 +825,10 @@ pub fn ball_is_regular(
     let Some(edgeuse) = base.edgeuse(0)? else {
         return Ok(first);
     };
-    let edge_id = eu::edge(target, edgeuse)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let edge_id = eu::edge(target, edgeuse)?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the edge use's edge"))?;
     let curve = edge::evaluation_curve(target, edge_id)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?
+        .ok_or_else(|| SolidError::blend_missing(OP, "the edge's curve"))?
         .clone();
     let ivl = edge::interval(target, edge_id)?;
     let closed = edge::is_closed(target, edge_id)?;

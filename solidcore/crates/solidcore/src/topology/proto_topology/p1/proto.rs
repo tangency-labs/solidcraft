@@ -39,11 +39,7 @@ const OP_END: &str = "topology::proto_topology::p1::ProtoTopologyManager::end_po
 const OP_COMBINE: &str =
     "topology::proto_topology::p1::ProtoTopologyManager::can_combine_edge_definitions";
 
-// Upstream `SmStatus` value `SM_ERR_INVALID_INPUT`.
-use crate::error::SM_ERR_INVALID_INPUT;
-
-// Upstream `SmStatus` value `SM_ERR_ASSERT_FAILURE`.
-use crate::error::SM_ERR_ASSERT_FAILURE;
+use crate::error::topology::TopologyFailure;
 
 /// `SmProtoTopologyManager_TYPE` (`TOPO_BASE_TYPE + 680`).
 pub const MANAGER_TYPE: i64 = 16680;
@@ -250,15 +246,6 @@ impl SolutionObject for CurveHandle {
     }
 }
 
-/// An upstream status other than `SM_ERR` / `SM_ERR_NULL_POINTER`.
-const fn status(operation: &'static str, code: i32) -> SolidError {
-    SolidError::Upstream {
-        operation,
-        code,
-        entity: None,
-    }
-}
-
 /// A dereference of a null pointer or a deleted object upstream (undefined
 /// behaviour).
 const fn dangling(reason: &'static str) -> SolidError {
@@ -403,7 +390,10 @@ pub fn find_position_from_pcs<O: ClassObject>(
 
     // error - both Parameters are not Set
     if !found1 && !found2 {
-        return Err(SolidError::sm_err(OP_POSITION));
+        return Err(SolidError::topology_failed(
+            OP_POSITION,
+            "neither point classification has its parameters set",
+        ));
     }
 
     if found1 {
@@ -804,7 +794,10 @@ pub fn find_ed_on_degen_face<O: Copy + PartialEq>(
     let brep1 = topology.edge_brep(edge1)?;
     let brep2 = topology.edge_brep(edge2)?;
     if brep1 != brep2 {
-        return Err(status(OP_DEGEN, SM_ERR_ASSERT_FAILURE));
+        return Err(SolidError::topology(
+            OP_DEGEN,
+            TopologyFailure::Inconsistent("the edges are on different B-reps"),
+        ));
     }
 
     // Find shared faces (FindCommonElements: the second list's faces found in the first)
@@ -1171,7 +1164,10 @@ impl<O: ClassObject> VertexDefinition<O> {
         } else if which == 2 {
             self.pc2.set_class_object(t, topo);
         } else {
-            return Err(SolidError::sm_err(OP_SRC_TOPO));
+            return Err(SolidError::topology_failed(
+                OP_SRC_TOPO,
+                "the source B-rep is neither 1 nor 2",
+            ));
         }
         Ok(())
     }
@@ -1815,7 +1811,10 @@ impl ProtoVertex {
                 self.vertex_defs.remove(i);
                 Ok(())
             }
-            None => Err(SolidError::sm_err(OP)),
+            None => Err(SolidError::topology_failed(
+                OP,
+                "the vertex definition is not listed",
+            )),
         }
     }
 
@@ -1830,7 +1829,10 @@ impl ProtoVertex {
                 self.proto_edges.remove(i);
                 Ok(())
             }
-            None => Err(SolidError::sm_err(OP)),
+            None => Err(SolidError::topology_failed(
+                OP,
+                "the proto edge is not listed",
+            )),
         }
     }
 }
@@ -1987,7 +1989,10 @@ impl ProtoEdge {
                 self.edge_defs.remove(i);
                 Ok(())
             }
-            None => Err(SolidError::sm_err(OP)),
+            None => Err(SolidError::topology_failed(
+                OP,
+                "the edge definition is not listed",
+            )),
         }
     }
 
@@ -2009,7 +2014,10 @@ impl ProtoEdge {
         if deleted {
             Ok(())
         } else {
-            Err(SolidError::sm_err(OP))
+            Err(SolidError::topology_failed(
+                OP,
+                "the proto vertex is neither end",
+            ))
         }
     }
 }
@@ -2810,7 +2818,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         } else if which_pv == pe.end_pv {
             d.xsect_interval.max()
         } else {
-            return Err(SolidError::sm_err(OP_END));
+            return Err(SolidError::topology_failed(
+                OP_END,
+                "the proto vertex is neither end of the proto edge",
+            ));
         };
         eval_point_passed(k, curve_of(geometry, d.xsect_curve_3d)?, t)
     }
@@ -3112,7 +3123,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         } else if which_pv == e.end_pv {
             self.proto_edge_end_position(k, geometry, pe, false)
         } else {
-            Err(SolidError::sm_err(OP_END))
+            Err(SolidError::topology_failed(
+                OP_END,
+                "the proto vertex is neither end of the proto edge",
+            ))
         }
     }
 
@@ -3163,7 +3177,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let e = self.pe(Some(pe))?;
         let num_eds = e.edge_defs.len();
         if num_eds == 0 {
-            return Err(status(OP_EVALUATE, SM_ERR_INVALID_INPUT));
+            return Err(SolidError::topology_invalid_value(
+                OP_EVALUATE,
+                "the proto edge has no edge definitions",
+            ));
         }
 
         let mut sum_pts = Vec3::new(0.0, 0.0, 0.0);
@@ -3388,7 +3405,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 self.pvs.remove(i);
                 Ok(())
             }
-            None => Err(SolidError::sm_err(OP)),
+            None => Err(SolidError::topology_failed(
+                OP,
+                "the proto vertex is not listed",
+            )),
         }
     }
 
@@ -3406,7 +3426,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             Some(i) => {
                 self.pes.remove(i);
             }
-            None => return Err(SolidError::sm_err(OP)),
+            None => {
+                return Err(SolidError::topology_failed(
+                    OP,
+                    "the proto edge is not listed",
+                ))
+            }
         }
 
         // remove End PV->PE back pointers (statuses ignored, passed on with the flag)
@@ -3511,7 +3536,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     ) -> Result<u64> {
         let d1 = self.ed(ed1)?;
         let d2 = self.ed(ed2)?;
-        let null = || SolidError::null_pointer(OP_COMBINE);
+        let null =
+            || SolidError::topology_missing(OP_COMBINE, "the edge definition's source topology");
         let t11 = d1.src_topo1.ok_or_else(null)?;
         let t12 = d1.src_topo2.ok_or_else(null)?;
         let t21 = d2.src_topo1.ok_or_else(null)?;
@@ -3736,6 +3762,34 @@ mod tests {
         let b = H(100, ClassObjectKind::Other);
         let e = Brep::new();
         ProtoTopologyManager::new(k, (b, &e), (b, &e), b, 1e-5, 1e-3, -1.0).unwrap()
+    }
+
+    /// Unlisting what is not listed is an `SM_ERR` that says so.
+    #[test]
+    fn unlisting_a_missing_entry_is_a_typed_failure() {
+        let k = Kernel::default();
+        let mut m = manager(&k);
+        let pv = m.new_proto_vertex(Point3::ZERO, 1e-5).unwrap();
+        let e = m
+            .proto_vertex_mut(pv)
+            .unwrap()
+            .remove_vertex_definition(VertexDefId::from_index(7))
+            .unwrap_err();
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(
+            e.topology_failure(),
+            Some(&TopologyFailure::Failed(
+                "the vertex definition is not listed"
+            ))
+        );
+        let e = m
+            .remove_proto_vertex(ProtoVertexId::from_index(99))
+            .unwrap_err();
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(
+            e.topology_failure(),
+            Some(&TopologyFailure::Failed("the proto vertex is not listed"))
+        );
     }
 
     #[test]

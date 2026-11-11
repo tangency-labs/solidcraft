@@ -303,19 +303,19 @@ pub trait FilletSolverOps {
     /// # Errors
     ///
     /// The solver's failure.
-    fn radius_corner_parameters(&mut self, _k: &Kernel) -> Result<Vec<f64>> {
+    fn radius_corner_parameters(&mut self) -> Result<Vec<f64>> {
         Ok(Vec::new())
     }
 
     /// `IsAtRadiusCorner(crTsectPnt)` (virtual, the fork's 6eecf04): whether the point lies
     /// where the radius has a corner. `false` by default.
-    fn is_at_radius_corner(&mut self, _k: &Kernel, _point: &TsectPnt) -> bool {
+    fn is_at_radius_corner(&mut self, _point: &TsectPnt) -> bool {
         false
     }
 
     /// `GetRadiusParameter(crTsectPnt, rdParam)` (virtual, the fork's 6eecf04): the point's
     /// edge parameter, `None` where the solver has no radius corners (the default).
-    fn radius_parameter(&mut self, _k: &Kernel, _point: &TsectPnt) -> Option<f64> {
+    fn radius_parameter(&mut self, _point: &TsectPnt) -> Option<f64> {
         None
     }
 
@@ -622,12 +622,12 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
         let approx_tol_3d = self.solver.this_approx_tol_3d();
         let sur0 = Surface::from(self.surface(0)?.surface.clone());
         let sur1 = Surface::from(self.surface(1)?.surface.clone());
-        let generator =
-            self.solver
-                .fillet_surface_generator_mut()
-                .ok_or(SolidError::null_pointer(
-                    "blend::fillet_intersector::create_fillet_surface",
-                ))?;
+        let generator = self.solver.fillet_surface_generator_mut().ok_or_else(|| {
+            SolidError::blend_missing(
+                "blend::fillet_intersector::create_fillet_surface",
+                "the solver's surface generator",
+            )
+        })?;
         generator
             .create_surface_replacing_uv(
                 k,
@@ -1009,7 +1009,10 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
         ) {
             Ok(()) => Ok(()),
             Err(e) if e.is_unported_or_cancelled() => Err(e),
-            Err(_) => Err(SolidError::sm_err(OP_VALUES)),
+            Err(_) => Err(SolidError::blend_failed(
+                OP_VALUES,
+                "the section's values could not be computed",
+            )),
         }
     }
 
@@ -1044,7 +1047,10 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
 
         // skip zero length chords
         if diff.length() < EFF_ZERO {
-            return Err(SolidError::sm_err(OP_DELTA));
+            return Err(SolidError::blend_failed(
+                OP_DELTA,
+                "the chord has zero length",
+            ));
         }
 
         // unitize and save the chord
@@ -1090,7 +1096,10 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
         let step_size = next_tsp.curve_parameter - tsect.curve_parameter;
 
         if next_tsp.crv_deriv().length_squared() < EFF_ZERO_SQ {
-            return Err(SolidError::sm_err(OP_SPAN));
+            return Err(SolidError::blend_failed(
+                OP_SPAN,
+                "the next section's curve derivative is zero",
+            ));
         }
 
         let angle_found_rad = tsect.crv_deriv().angle_between(next_tsp.crv_deriv())?;
@@ -1281,16 +1290,16 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
     ) -> Result<()> {
         let si = &self.base.base;
         let (Some(from_param), Some(to_param)) = (
-            solver.radius_parameter(k, tsect),
-            solver.radius_parameter(k, next_tsp),
+            solver.radius_parameter(tsect),
+            solver.radius_parameter(next_tsp),
         ) else {
             return Ok(());
         };
-        let Ok(corners) = solver.radius_corner_parameters(k) else {
+        let Ok(corners) = solver.radius_corner_parameters() else {
             return Ok(());
         };
         for &corner in &corners {
-            if solver.is_at_radius_corner(k, tsect)
+            if solver.is_at_radius_corner(tsect)
                 || (corner - from_param) * (corner - to_param) >= 0.0
             {
                 continue;
@@ -1317,7 +1326,7 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
                     &mut on_corner,
                 )?;
                 let param = if flags.found_answer {
-                    solver.radius_parameter(k, &on_corner)
+                    solver.radius_parameter(&on_corner)
                 } else {
                     None
                 };
@@ -1328,7 +1337,7 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
                 param0 = param1;
                 step1 = d_step;
                 param1 = param;
-                landed = solver.is_at_radius_corner(k, &on_corner);
+                landed = solver.is_at_radius_corner(&on_corner);
             }
             if landed {
                 *next_tsp = on_corner;
@@ -1379,11 +1388,10 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
         // rescaled and every later use below sees the new value.
         let mut step_size = step_size;
 
-        // SolidCraft (the fork's 6eecf04; a radius corner exists only under
-        // `fillet_gn_section_generator`): where the radius has a corner the curves turn. A
+        // SolidCraft (the fork's 6eecf04): where the radius has a corner the curves turn. A
         // step from a point at a corner starts along the tangents after it
         // (ComputePointValues averages the two sides).
-        if solver.is_at_radius_corner(k, tsect) {
+        if solver.is_at_radius_corner(tsect) {
             let mut after = tsect.clone();
             if one_sided_tangents(solver, k, &si.uv_domains, 1.0, &mut after)? {
                 take_tangents(tsect, &after);
@@ -1445,7 +1453,7 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
 
         // SolidCraft (the fork's 6eecf04): a step that ends at a radius corner arrives
         // along the tangents before it
-        if solver.is_at_radius_corner(k, next_tsp) {
+        if solver.is_at_radius_corner(next_tsp) {
             let mut before = next_tsp.clone();
             if one_sided_tangents(solver, k, &si.uv_domains, -1.0, &mut before)? {
                 take_tangents(next_tsp, &before);
@@ -1457,12 +1465,9 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
             return Ok(out);
         }
 
-        // (not upstream, `fixes.fillet_trace_rejects_short_step`, WR-503) a point far short of the
+        // (not upstream, WR-503) a point far short of the
         // step is another root of the equations, not the next point of this trace
-        if k.fixes.fillet_trace_rejects_short_step
-            && !step.clipped
-            && tsect.crv_pos().distance(next_tsp.crv_pos()) < 0.5 * step_size.abs()
-        {
+        if !step.clipped && tsect.crv_pos().distance(next_tsp.crv_pos()) < 0.5 * step_size.abs() {
             demote_singularity(next_tsp);
             return Ok(out);
         }
@@ -1734,7 +1739,9 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
 
         // 2. Remember if the end of current fillet touched a boundary on
         //    either surface UVDomain
-        let last_tsect_pnt = pnts.last().ok_or(SolidError::null_pointer(OP_FLUSH))?;
+        let last_tsect_pnt = pnts
+            .last()
+            .ok_or_else(|| SolidError::blend_missing(OP_FLUSH, "the last section point"))?;
         self.curr_fillet_touch_boundary = false;
 
         // for both surfaces
@@ -1883,7 +1890,10 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
                     &mut mid_pnt,
                 )?;
                 if !found_solution {
-                    return Err(SolidError::sm_err(OP_FLUSH));
+                    return Err(SolidError::blend_failed(
+                        OP_FLUSH,
+                        "no mid-point section was found",
+                    ));
                 }
 
                 // save the rail UVCurve points for the new mid-span point
@@ -1918,7 +1928,7 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
         let count = pnts.len();
         for (kk, slot) in pnts.iter_mut().enumerate() {
             let mut point_in = None;
-            if kk > 0 && kk + 1 < count && solver.is_at_radius_corner(k, slot) {
+            if kk > 0 && kk + 1 < count && solver.is_at_radius_corner(slot) {
                 let mut point_out = slot.clone();
                 let mut before = slot.clone();
                 let b_in = one_sided_tangents(solver, k, &uv_domains, -1.0, &mut before)?;
@@ -2070,7 +2080,10 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
                 );
                 if keep_unported(smoothed)?.is_none() {
                     solver.set_status(FilStatus::SelfIntHandlingFailure)?;
-                    return Err(SolidError::sm_err(OP_FLUSH));
+                    return Err(SolidError::blend_failed(
+                        OP_FLUSH,
+                        "the self-intersecting fillet could not be smoothed",
+                    ));
                 }
             }
         }
@@ -2078,13 +2091,19 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
         // get (the potentially modified) rail curves, their UVTrimCurves, and the Centerline
         let mut uv1 = surface1_uv_curves
             .pop()
-            .ok_or(SolidError::null_pointer(OP_FLUSH))?;
+            .ok_or_else(|| SolidError::blend_missing(OP_FLUSH, "the first rail's UV curve"))?;
         let mut uv2 = surface2_uv_curves
             .pop()
-            .ok_or(SolidError::null_pointer(OP_FLUSH))?;
-        let mut curve2 = curves_3d.pop().ok_or(SolidError::null_pointer(OP_FLUSH))?;
-        let mut curve1 = curves_3d.pop().ok_or(SolidError::null_pointer(OP_FLUSH))?;
-        let mut center_line = curves_3d.pop().ok_or(SolidError::null_pointer(OP_FLUSH))?;
+            .ok_or_else(|| SolidError::blend_missing(OP_FLUSH, "the second rail's UV curve"))?;
+        let mut curve2 = curves_3d
+            .pop()
+            .ok_or_else(|| SolidError::blend_missing(OP_FLUSH, "the second rail curve"))?;
+        let mut curve1 = curves_3d
+            .pop()
+            .ok_or_else(|| SolidError::blend_missing(OP_FLUSH, "the first rail curve"))?;
+        let mut center_line = curves_3d
+            .pop()
+            .ok_or_else(|| SolidError::blend_missing(OP_FLUSH, "the center line"))?;
 
         // 10. Generate the fillet surface from the rail curves and centerline
         let mut fillet_surface = None;
@@ -2100,7 +2119,10 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
             );
             let Some(s) = keep_unported(created)? else {
                 solver.set_status(FilStatus::SurfSkinningFailure)?;
-                return Err(SolidError::sm_err(OP_FLUSH));
+                return Err(SolidError::blend_failed(
+                    OP_FLUSH,
+                    "the fillet surface could not be skinned",
+                ));
             };
             fillet_surface = s;
         }
@@ -2547,14 +2569,21 @@ mod tests {
             fi.base.base.point(n).unwrap().point_type,
             IntersectionPointType::Crossing
         );
-        // a zero next tangent is SM_ERR
+        // a zero next tangent is SM_ERR: a typed blend failure with the status of the bare
+        // `Upstream` it replaced (#13790)
         let z = fi
             .base
             .base
             .alloc_point(pnt([0.2, 0.0], [0.2, 0.0], [0.0, 0.0, 0.0], 0.1));
-        assert!(fi
+        let e = fi
             .test_span_accuracy(&mut s, &Kernel::default(), p, z, None)
-            .is_err());
+            .unwrap_err();
+        assert_eq!(
+            e,
+            SolidError::blend_failed(OP_SPAN, "the next section's curve derivative is zero")
+        );
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
         assert_eq!(s.surface(0).unwrap().offset_distance(), 1.0);
     }
 
@@ -2631,6 +2660,8 @@ mod tests {
     struct ClipSolver {
         clip: f64,
         fail: bool,
+        /// `Some(l)`: the step is not clipped, keeps its size and lands `l` along the tangent.
+        unclipped_landing: Option<f64>,
     }
 
     impl FilletSolverOps for ClipSolver {
@@ -2681,9 +2712,16 @@ mod tests {
             next: &mut TsectPnt,
         ) -> Result<()> {
             *flags = StepSolve::default();
-            flags.clipped = true;
+            flags.clipped = self.unclipped_landing.is_none();
             if self.fail {
                 return Err(SolidError::sm_err("test"));
+            }
+            if let Some(landing) = self.unclipped_landing {
+                for s in SRFS {
+                    *next.uv_pos_mut(s) = point.uv_pos(s) + point.uv_deriv(s) * landing;
+                }
+                flags.found_answer = true;
+                return Ok(());
             }
             *step_size = self.clip;
             for s in SRFS {
@@ -2822,6 +2860,7 @@ mod tests {
         let mut s = ClipSolver {
             clip: 0.2,
             fail: false,
+            unclipped_landing: None,
         };
         let r = fi
             .compute_next_point(&mut s, &Kernel::default(), p, 0.5, n)
@@ -2834,11 +2873,56 @@ mod tests {
         let mut s = ClipSolver {
             clip: 0.2,
             fail: true,
+            unclipped_landing: None,
         };
         let r = fi
             .compute_next_point(&mut s, &Kernel::default(), p, 0.5, n)
             .unwrap();
         assert!(!r.found_good_point && r.clipped);
+    }
+
+    #[test]
+    fn wr503_next_point_rejects_unclipped_short_step() {
+        let k = &Kernel::default();
+        let (a, b) = surfaces();
+        let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let mut fi: FilletIntersector<'_, '_, NoSurfaceHandle, ()> =
+            FilletIntersector::new(k, &a, &d, &b, &d, None).unwrap();
+        let p = fi
+            .base
+            .base
+            .alloc_point(pnt([0.1, 0.0], [0.1, 0.0], [1.0, 0.0, 0.0], 0.0));
+        let n = fi.base.base.alloc_point(TsectPnt::new());
+
+        // an unclipped step of 0.5 that lands a fifth of the step away is another root of the
+        // equations, not the next point of this trace
+        let mut s = ClipSolver {
+            clip: 0.2,
+            fail: false,
+            unclipped_landing: Some(0.1),
+        };
+        let r = fi.compute_next_point(&mut s, k, p, 0.5, n).unwrap();
+        assert!(!r.found_good_point && !r.clipped && !r.boundary_hit);
+
+        // an unclipped step landing at nine tenths of the step is accepted
+        let mut s = ClipSolver {
+            clip: 0.2,
+            fail: false,
+            unclipped_landing: Some(0.45),
+        };
+        let r = fi.compute_next_point(&mut s, k, p, 0.5, n).unwrap();
+        assert!(r.found_good_point && !r.clipped && !r.boundary_hit);
+        assert_eq!(fi.base.base.point(n).unwrap().curve_parameter, 0.5);
+
+        // a clipped step is accepted however short it is
+        let mut s = ClipSolver {
+            clip: 0.05,
+            fail: false,
+            unclipped_landing: None,
+        };
+        let r = fi.compute_next_point(&mut s, k, p, 0.5, n).unwrap();
+        assert!(r.found_good_point && r.clipped);
+        assert_eq!(fi.base.base.point(n).unwrap().curve_parameter, 0.05);
     }
 
     #[test]
@@ -2854,6 +2938,7 @@ mod tests {
         let mut s = ClipSolver {
             clip: 0.2,
             fail: false,
+            unclipped_landing: None,
         };
         let r = fi
             .compute_next_point(&mut s, &Kernel::default(), p, 0.5, p)

@@ -34,7 +34,7 @@ use solidcore::query::api_queries::{brep_is_manifold_solid, edge_closest_point};
 use solidcore::topology::brep::p1::regions;
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::{Brep, EdgeId};
-use solidcore::{Kernel, SolidError};
+use solidcore::Kernel;
 
 /// The plate's length, where the arc wall starts: 62 1/6 - 21.
 const PLATE: f64 = 41.0 + 1.0 / 6.0;
@@ -101,7 +101,7 @@ fn volume(k: &Kernel, b: &mut Brep) -> f64 {
 /// The arc round fails as upstream does: `SmFilletExecutive` status 1001.
 fn assert_refused(r: solidcore::Result<()>) {
     match r {
-        Err(SolidError::Upstream { code: 1001, .. }) => {}
+        Err(e) if solidcore::error::upstream_status(&e) == Some(1001) => {}
         other => panic!("expected status 1001, got {other:?}"),
     }
 }

@@ -173,7 +173,7 @@ fn mates_of(m: &MatesIn, a: [usize; 10], b: [usize; 10]) -> [Vec<i64>; 3] {
 /// [`SolidError::InvalidInput`]); `-1` for kinds without one.
 fn status(e: &SolidError) -> i64 {
     match e {
-        SolidError::Upstream { code, .. } => i64::from(*code),
+        SolidError::Upstream { .. } | SolidError::Failed(_) => e.sm_status().map_or(-1, i64::from),
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => 1007,
         _ => -1,
     }

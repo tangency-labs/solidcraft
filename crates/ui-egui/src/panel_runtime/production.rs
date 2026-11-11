@@ -26,9 +26,10 @@ enum Product {
     History,
     Assistant,
     RenderBrowser,
+    SketchOptions,
 }
 impl Product {
-    const ALL: [Self; 4] = [Self::Browser, Self::History, Self::Assistant, Self::RenderBrowser];
+    const ALL: [Self; 5] = [Self::Browser, Self::History, Self::Assistant, Self::RenderBrowser, Self::SketchOptions];
 
     fn index(self) -> usize {
         match self {
@@ -36,6 +37,7 @@ impl Product {
             Self::History => 1,
             Self::Assistant => 2,
             Self::RenderBrowser => 3,
+            Self::SketchOptions => 4,
         }
     }
     fn visible(self, app: &crate::SolveApp) -> bool {
@@ -43,6 +45,7 @@ impl Product {
             Self::Browser | Self::RenderBrowser => app.ui.show_browser,
             Self::History => app.ui.show_timeline,
             Self::Assistant => app.agent_chat.open,
+            Self::SketchOptions => true,
         }
     }
     fn set_visible(self, app: &mut crate::SolveApp, open: bool) {
@@ -50,6 +53,7 @@ impl Product {
             Self::Browser | Self::RenderBrowser => app.ui.show_browser = open,
             Self::History => app.ui.show_timeline = open,
             Self::Assistant => app.agent_chat.open = open,
+            Self::SketchOptions => {}
         }
     }
 
@@ -59,6 +63,7 @@ impl Product {
             Self::History => "history",
             Self::Assistant => "assistant",
             Self::RenderBrowser => "render-browser",
+            Self::SketchOptions => crate::sketch_palette::INSTANCE_ID,
         }
     }
     fn kind(self) -> &'static str {
@@ -67,6 +72,7 @@ impl Product {
             Self::History => "solidcraft.history",
             Self::Assistant => "solidcraft.assistant",
             Self::RenderBrowser => "solidcraft.render_browser",
+            Self::SketchOptions => "solidcraft.sketch_options",
         }
     }
     fn title_key(self) -> &'static str {
@@ -75,6 +81,7 @@ impl Product {
             Self::History => "ui.history_title",
             Self::Assistant => "ui.assistant",
             Self::RenderBrowser => "render.page_scene",
+            Self::SketchOptions => "ui.palette_sketch_options",
         }
     }
     fn from_instance(instance: &InstanceId) -> PanelResult<Self> {
@@ -87,6 +94,7 @@ impl Product {
             Self::History => !render && !app.preferences.history_in_browser,
             Self::Assistant => crate::agent_chat::shown(app) && !app.preferences.agent_chat_popped,
             Self::RenderBrowser => render && !crate::render_ui::focused(app),
+            Self::SketchOptions => !render && crate::sketch_palette::editing(app),
         }
     }
     fn header_actions(self) -> Vec<HeaderActionSpec> {
@@ -104,11 +112,14 @@ impl Product {
                 ("by-look", "render.tree_by_look", "list"),
                 ("search", "render.tree_search", "search"),
             ],
-            Self::Browser => Vec::new(),
+            Self::Browser | Self::SketchOptions => Vec::new(),
         };
         entries.into_iter().map(|(id, key, icon)| HeaderActionSpec { id: ControlId(id.into()), label_key: key.into(), icon: icon.into() }).collect()
     }
     fn presentation(self, app: &crate::SolveApp, play_button: bool) -> PanelPresentation {
+        if self == Self::SketchOptions {
+            return crate::sketch_palette::shared_presentation(app).unwrap_or_else(|| self.empty_presentation());
+        }
         let mut presentation = self.empty_presentation();
         if self == Self::Assistant {
             let waiting = app.agent_chat.waiting();
@@ -128,7 +139,7 @@ impl Product {
                     let availability = crate::timeline::transport_availability(app, *control);
                     RuntimeAction {
                         id: ControlId(control.id().into()),
-                        label: control.label(app.timeline_playback.is_some()).into(),
+                        label: control.label(app.timeline_playback.is_some(), crate::timeline::play_labels()).into(),
                         enabled: availability.is_ok(),
                         disabled_reason: availability.err(),
                         pressed: (*control == crate::ui_kit::HistoryTransport::Play).then_some(app.timeline_playback.is_some()),
@@ -156,14 +167,14 @@ impl Product {
                 pressed: Some(pressed),
             })
             .collect(),
-            Self::Browser => Vec::new(),
+            Self::Browser | Self::SketchOptions => Vec::new(),
         };
         presentation
     }
     fn empty_presentation(self) -> PanelPresentation {
         PanelPresentation {
             title: solidcraft_ui_text::tr(self.title_key()).into(),
-            icon: "list".into(),
+            icon: if self == Self::SketchOptions { "sketch" } else { "list" }.into(),
             status: None,
             attention: false,
             actions: Vec::new(),
@@ -189,9 +200,11 @@ struct ContentExtent {
 struct ProductionSnapshot {
     document: DocumentId,
     play_button: bool,
-    visible: [bool; 4],
-    visibility: [Option<VisibilityIntent>; 4],
-    panels: [PanelSnapshot; 4],
+    visible: [bool; Product::ALL.len()],
+    visibility: [Option<VisibilityIntent>; Product::ALL.len()],
+    panels: [PanelSnapshot; Product::ALL.len()],
+    sketch_owner: Option<(DocumentId, u64)>,
+    sketch_placement_attempt: Option<(u64, LogicalRect, u64)>,
     actions: VecDeque<QueuedAction>,
 }
 struct VisibilityIntent {
@@ -214,7 +227,7 @@ impl ProductionState {
             document: DocumentId::new(app.session.document_id.clone())?,
             play_button: app.preferences.history_play_button,
             visible: Product::ALL.map(|product| product.visible(app)),
-            visibility: [None, None, None, None],
+            visibility: [const { None }; Product::ALL.len()],
             panels: Product::ALL.map(|product| PanelSnapshot {
                 product,
                 available: product.available(app),
@@ -222,6 +235,8 @@ impl ProductionState {
                 extent: None,
             }),
             actions: VecDeque::new(),
+            sketch_owner: None,
+            sketch_placement_attempt: None,
         }))))
     }
 }
@@ -295,6 +310,7 @@ pub(crate) fn refresh_production(app: &crate::SolveApp) -> PanelResult<()> {
     let mut snapshot = state.0.try_borrow_mut().map_err(|_| error(Rule::Lifecycle, "application panel snapshot is borrowed"))?;
     let document = DocumentId::new(app.session.document_id.clone())?;
     if snapshot.document != document {
+        snapshot.sketch_placement_attempt = None;
         for panel in &mut snapshot.panels {
             panel.extent = None;
         }
@@ -361,10 +377,14 @@ pub(crate) fn drain_production_actions(app: &mut crate::SolveApp) -> PanelResult
                 };
                 app.run("view.render_browser", params).map_err(|reason| error(Rule::Availability, reason))?;
             }
-            Product::Browser => {}
+            Product::Browser | Product::SketchOptions => {}
         }
     }
     Ok(())
+}
+
+pub(crate) fn production_active(app: &crate::SolveApp) -> bool {
+    app.panel_content_frame.is_some() || app.panel_runtime.as_ref().is_some_and(|integration| integration.production.is_some())
 }
 
 /// Existing view toggles update remembered placement only when their raw flag
@@ -397,7 +417,76 @@ pub(crate) fn sync_production_visibility(app: &mut crate::SolveApp) -> PanelResu
         refresh_production(app)?;
         app.dispatch_panel_layout(LayoutAction::Apply { expected_revision: Some(revision), mutations })?;
     }
-    Ok(())
+    sync_sketch_options(app)
+}
+
+fn sync_sketch_options(app: &mut crate::SolveApp) -> PanelResult<()> {
+    let Some(integration) = app.panel_runtime.as_ref() else { return Ok(()) };
+    let Some(state) = integration.production.clone() else { return Ok(()) };
+    let mut snapshot = state.0.try_borrow_mut().map_err(|_| error(Rule::Lifecycle, "application panel visibility is borrowed"))?;
+    let Some(sketch) = app.session.active_sketch else {
+        snapshot.sketch_owner = None;
+        snapshot.sketch_placement_attempt = None;
+        return Ok(());
+    };
+    let owner = (snapshot.document.clone(), sketch);
+    let product = Product::SketchOptions;
+    if !product.available(app) {
+        return Ok(());
+    }
+    let layout = integration.runtime().layout().layout();
+    let instance = InstanceId::new(product.id())?;
+    let existing = layout.instance(&instance).ok();
+    if existing.is_some_and(|panel| panel.requested_open) {
+        snapshot.sketch_owner = Some(owner);
+        snapshot.sketch_placement_attempt = None;
+        return Ok(());
+    }
+    if existing.is_some() && snapshot.sketch_owner.as_ref() == Some(&owner) {
+        return Ok(());
+    }
+    let revision = integration.runtime().layout().inspect().revision;
+    let attempt = app.universal_panel_frame().map(|frame| (revision, frame.layout.capacity, sketch));
+    if attempt.is_none() || snapshot.sketch_placement_attempt == attempt {
+        return Ok(());
+    }
+    snapshot.sketch_placement_attempt = attempt;
+    drop(snapshot);
+
+    let kind = PanelKind::new(product.kind())?;
+    let destination = if existing.is_none() {
+        // Old presets lack the Sketch panel. Preserve their existing section identities and placements.
+        let zone = Zone::Right;
+        let spec = integration.runtime().layout().registry().get(&kind)?;
+        let section = next_section_id_with_reservations(layout, &integration.preference_identity_reservations()?)?;
+        let anchor = layout.sections.iter().find(|anchor| {
+            anchor.location.zone() == zone
+                && anchor.size.width >= spec.min_size.width
+                && !anchor.tabs.iter().any(|id| id.0 == Product::Assistant.id())
+        });
+        Some(match anchor {
+            Some(anchor) => Destination::Relative {
+                section: anchor.id.clone(),
+                placement: RelativePlacement::Below,
+                new_section: section,
+                new_column: None,
+                size: spec.default_size,
+            },
+            None => {
+                Destination::NewSection { section, index: layout.sections.len(), location: SectionLocation::Dock { zone }, size: spec.default_size }
+            }
+        })
+    } else {
+        None
+    };
+    match app.dispatch_panel_layout(LayoutAction::Apply {
+        expected_revision: Some(revision),
+        mutations: vec![Mutation::Open { kind, instance, destination }],
+    }) {
+        Ok(_) => Ok(()),
+        Err(reason) if reason.rule == Rule::NoSpace => Ok(()),
+        Err(reason) => Err(reason),
+    }
 }
 
 fn registry(app: &crate::SolveApp) -> PanelResult<PanelRegistry> {
@@ -409,6 +498,7 @@ fn registry(app: &crate::SolveApp) -> PanelResult<PanelRegistry> {
     for product in Product::ALL {
         let history = product == Product::History;
         let assistant = product == Product::Assistant;
+        let sketch = product == Product::SketchOptions;
         let mut allowed_zones = [Zone::Left, Zone::Right, Zone::Floating].into_iter().collect::<std::collections::BTreeSet<_>>();
         if history {
             allowed_zones.insert(Zone::Bottom);
@@ -420,19 +510,34 @@ fn registry(app: &crate::SolveApp) -> PanelResult<PanelRegistry> {
         registry.register(PanelSpec {
             kind: PanelKind::new(product.kind())?,
             title_key: product.title_key().into(),
-            icon: "list".into(),
+            icon: if sketch { "sketch" } else { "list" }.into(),
             allowed_zones,
-            default_zone: if history { Zone::Bottom } else { Zone::Left },
-            min_size: Size { width: 240.0, height: if assistant { 120.0 } else { solidcraft_theme::Tokens::get().control_height } },
+            default_zone: if history {
+                Zone::Bottom
+            } else if sketch {
+                Zone::Right
+            } else {
+                Zone::Left
+            },
+            min_size: Size {
+                width: 240.0,
+                height: if assistant {
+                    120.0
+                } else if sketch {
+                    150.0
+                } else {
+                    tokens.control_height
+                },
+            },
             default_size: Size { width: crate::prefs::DEFAULT_BROWSER_WIDTH, height: if history { bottom_height } else { 320.0 } },
             max_size: Size { width: MAX_LOGICAL, height: MAX_LOGICAL },
             edge_rule: if assistant { EdgeRule::PinOuter } else { EdgeRule::None },
             surface: PanelSurface::FollowZone,
-            features: PanelFeatures { popout: false, hot_closable: assistant, ..Default::default() },
+            features: PanelFeatures { popout: false, hot_closable: assistant, closable: !sketch, ..Default::default() },
             side_height_policy: if assistant { SideHeightPolicy::Fill } else { SideHeightPolicy::Content },
             fixed_bottom_height: history.then_some(bottom_height),
             header_actions,
-            text_heavy: assistant,
+            text_heavy: assistant || sketch,
         })?;
     }
     Ok(registry)
@@ -452,6 +557,7 @@ fn default_layout(app: &crate::SolveApp, workspace: WorkspaceId, registry: &Pane
             Product::History if !app.preferences.timeline_left => Zone::Bottom,
             Product::Assistant if app.preferences.agent_chat_side == "right" => Zone::Right,
             Product::RenderBrowser if app.preferences.render_browser_side == "right" => Zone::Right,
+            Product::SketchOptions => Zone::Right,
             _ => Zone::Left,
         };
         let width = match product {
@@ -460,6 +566,7 @@ fn default_layout(app: &crate::SolveApp, workspace: WorkspaceId, registry: &Pane
             Product::History => app.preferences.timeline_left_width,
             Product::Assistant => app.preferences.agent_chat_width,
             Product::RenderBrowser => app.preferences.render_browser_width,
+            Product::SketchOptions => spec.default_size.width,
         };
         let width = if width.is_finite() { width.clamp(spec.min_size.width, 1200.0) } else { spec.default_size.width };
         let width = if product == Product::History && stacked {
@@ -485,7 +592,7 @@ fn default_layout(app: &crate::SolveApp, workspace: WorkspaceId, registry: &Pane
                 Product::Browser => app.preferences.browser_collapsed,
                 Product::History => app.preferences.timeline_collapsed,
                 Product::Assistant => app.preferences.agent_chat_minimized,
-                Product::RenderBrowser => false,
+                Product::RenderBrowser | Product::SketchOptions => false,
             };
         let weight = match product {
             Product::Browser if stacked => share,
@@ -837,7 +944,7 @@ impl FramePanelContent for ProductionFrame<'_> {
         match product {
             Product::Browser | Product::RenderBrowser => self.app.shell.browser = Some(super::workspace::egui_rect(context.outer)),
             Product::History => self.app.shell.history = Some(super::workspace::egui_rect(context.outer)),
-            Product::Assistant => {}
+            Product::Assistant | Product::SketchOptions => {}
         }
         let previous = self
             .state
@@ -866,6 +973,7 @@ impl FramePanelContent for ProductionFrame<'_> {
             Product::History if context.flow == Flow::Wide => crate::timeline::panel_inline(self.app, ui),
             Product::History => crate::timeline_left::panel_contents(self.app, ui),
             Product::Assistant => crate::agent_chat::shared_content(self.app, ui, context.flow),
+            Product::SketchOptions => crate::sketch_palette::shared_body(self.app, ui),
         }
         let capture = ui.ctx().data_mut(|data| data.remove_temp::<Option<FocusCapture>>(focus_capture_id()).flatten());
         if context.document.as_ref().map(|document| document.0.as_str()) != Some(self.app.session.document_id.as_str()) {

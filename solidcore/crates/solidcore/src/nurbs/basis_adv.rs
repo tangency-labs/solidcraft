@@ -16,7 +16,7 @@
 //! - Out-params become return values. Knot vectors that upstream rescales in place are
 //!   `&mut [f64]` (`U[0..=m]`, `m = len - 1`); the output knot vectors that upstream
 //!   expects the caller to allocate are returned as `Vec`s sized by the callee.
-//! - Errors are [`SolidError::Nlib`] values carrying the upstream `NL_*_ERR` number. On
+//! - Errors are [`SolidError::Failed`] values (a [`NurbsFailure`] reason) carrying the upstream `NL_*_ERR` number. On
 //!   error only the error is returned (upstream may leave outputs partly written; the
 //!   in-place rescale of [`compatible_knot_array_mult`] is kept, as upstream).
 //! - Every array access is bounds checked. Where upstream would read or write outside
@@ -38,13 +38,13 @@
 //!   negative `t` inserts nothing upstream).
 //! - Degrees whose initial `p + 1` index cannot fit an `i64` return
 //!   [`SolidError::InvalidInput`]. Multiplicity sums are checked before comparison;
-//!   a sum that overflows is above `p` and returns [`NlibCode::Knot`].
+//!   a sum that overflows is above `p` and returns [`NurbsFailure::Knots`].
 //! - [`basis_derivs_array`] checks its output and temporary storage, including
 //!   nested-vector metadata, against [`MAX_DERIVS_ARRAY_BYTES`] before allocating.
 //!   This prevents overcommitting allocators from accepting hostile dimensions.
-//!   Actual buffers are reserved fallibly; allocation failure is [`NlibCode::Memory`].
+//!   Actual buffers are reserved fallibly; allocation failure is [`NurbsFailure::Memory`].
 
-use crate::error::{NlibCode, Result, SolidError};
+use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::nurbs::basis_basic::{reparam, PTOL};
 use crate::nurbs::geom::Interval;
 use crate::nurbs::knots::{KnotVector, Side};
@@ -72,10 +72,6 @@ fn endless(operation: &'static str) -> SolidError {
         operation,
         reason: "upstream would loop forever on this input",
     }
-}
-
-fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
-    SolidError::Nlib { operation, code }
 }
 
 /// `a[i]` for a signed index, or `InvalidInput` when out of range.
@@ -235,7 +231,7 @@ pub fn compatible_knot_array_mult(
 ///
 /// # Errors
 ///
-/// [`NlibCode::Knot`] when `X[0] <= U[p]` or `X[mx] >= U[m-p]`; `InvalidInput` when `x`
+/// [`NurbsFailure::Knots`] when `X[0] <= U[p]` or `X[mx] >= U[m-p]`; `InvalidInput` when `x`
 /// is empty or `r` has fewer than `p + 1` knots (upstream would read out of bounds), or
 /// where upstream would loop forever (NaN knots).
 pub fn insert_knots(r: &[f64], p: usize, x: &[f64]) -> Result<Vec<f64>> {
@@ -246,7 +242,7 @@ pub fn insert_knots(r: &[f64], p: usize, x: &[f64]) -> Result<Vec<f64>> {
     let er = mr - ps;
 
     if rdi(x, 0, OP)? <= rdi(r, ps, OP)? || rdi(x, mx, OP)? >= rdi(r, er, OP)? {
-        return Err(nlib(OP, NlibCode::Knot));
+        return Err(SolidError::nurbs(OP, NurbsFailure::Knots));
     }
 
     // Refine knot vector.
@@ -295,7 +291,7 @@ pub fn insert_knots(r: &[f64], p: usize, x: &[f64]) -> Result<Vec<f64>> {
 ///
 /// # Errors
 ///
-/// [`NlibCode::Knot`] when an inner knot would reach a multiplicity above `p`.
+/// [`NurbsFailure::Knots`] when an inner knot would reach a multiplicity above `p`.
 pub fn increase_knot_mult(u: &[f64], p: usize, t: usize) -> Result<Vec<f64>> {
     const OP: &str = OP_INC_MULT;
     let mu = last_index(u, OP)?;
@@ -318,7 +314,7 @@ pub fn increase_knot_mult(u: &[f64], p: usize, t: usize) -> Result<Vec<f64>> {
             .and_then(|mult| mult.checked_add(1))
             .is_none_or(|mult| mult > ps)
         {
-            return Err(nlib(OP, NlibCode::Knot));
+            return Err(SolidError::nurbs(OP, NurbsFailure::Knots));
         }
         let v = rdi(u, i, OP)?;
         for _ in 1..=t {
@@ -383,7 +379,7 @@ fn filled<T: Clone>(len: usize, value: T, op: &'static str) -> Result<Vec<T>> {
     let mut result = Vec::new();
     result
         .try_reserve_exact(len)
-        .map_err(|_| nlib(op, NlibCode::Memory))?;
+        .map_err(|_| SolidError::nurbs(op, NurbsFailure::Memory))?;
     result.resize(len, value);
     Ok(result)
 }
@@ -420,7 +416,7 @@ fn zeros3(rows: usize, cols: usize, cnt: usize, op: &'static str) -> Result<Vec<
 /// upstream would index out of bounds (an inner parameter at or past the domain end
 /// with [`Side::Left`], or past it with [`Side::Right`]), or overflow its `int`
 /// derivative factor, or the output and workspace exceed [`MAX_DERIVS_ARRAY_BYTES`].
-/// [`NlibCode::Memory`] if a buffer cannot be reserved.
+/// [`NurbsFailure::Memory`] if a buffer cannot be reserved.
 pub fn basis_derivs_array(
     knt: &KnotVector<'_>,
     p: usize,
@@ -479,7 +475,7 @@ pub fn basis_derivs_array(
     let mut factors = Vec::new();
     factors
         .try_reserve_exact(p.min(der))
-        .map_err(|_| nlib(OP, NlibCode::Memory))?;
+        .map_err(|_| SolidError::nurbs(OP, NurbsFailure::Memory))?;
     let mut fac = i32::try_from(p).map_err(|_| overflow())?;
     for kk in 1..=mder {
         factors.push(fac);
@@ -623,17 +619,11 @@ mod tests {
         assert_eq!(s, vec![0., 0., 0., 0.25, 0.5, 0.5, 0.75, 1., 1., 1.]);
         assert!(matches!(
             insert_knots(&r, 2, &[0.0, 0.5]),
-            Err(SolidError::Nlib {
-                code: NlibCode::Knot,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Knots))
         ));
         assert!(matches!(
             insert_knots(&r, 2, &[0.5, 1.0]),
-            Err(SolidError::Nlib {
-                code: NlibCode::Knot,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Knots))
         ));
         assert!(matches!(
             insert_knots(&r, 2, &[]),
@@ -648,10 +638,7 @@ mod tests {
         assert_eq!(increase_knot_mult(&u, 3, 1).unwrap(), vec![0.3, 0.5]);
         assert!(matches!(
             increase_knot_mult(&u, 3, 2),
-            Err(SolidError::Nlib {
-                code: NlibCode::Knot,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Knots))
         ));
         assert_eq!(
             increase_knot_mult(&[0., 0., 1., 1.], 1, 5).unwrap(),
@@ -696,10 +683,7 @@ mod tests {
             // overflows the preceding addition of t as well.
             assert!(matches!(
                 increase_knot_mult(u, p, t),
-                Err(SolidError::Nlib {
-                    code: NlibCode::Knot,
-                    ..
-                })
+                Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Knots))
             ));
         }
     }
@@ -782,10 +766,7 @@ mod tests {
     fn derivs_array_storage_allocation_fails_softly() {
         assert!(matches!(
             filled(usize::MAX, 0.0f64, OP_DERIVS_ARRAY),
-            Err(SolidError::Nlib {
-                code: NlibCode::Memory,
-                ..
-            })
+            Err(ref e) if matches!(e.nurbs_failure(), Some(NurbsFailure::Memory))
         ));
     }
 

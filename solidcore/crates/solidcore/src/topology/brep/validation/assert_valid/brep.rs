@@ -317,6 +317,10 @@ fn validate_and_update_body(
 
         // for every face->edgeuse
         for eu in edgeuses {
+            // (not upstream) cooperative cancellation once per edgeuse (solidcore#3247)
+            k.check_cancelled(
+                "topology::brep::validation::assert_valid::validate_and_update_body",
+            )?;
             let mate = eu1::mate(b, eu)?;
 
             // skip marked edgeuses
@@ -520,6 +524,9 @@ fn collect_regions(
 /// `SmBrep::AssertSubTopology(*this)`: `AssertValid(SM_NO_WALK)` of every region,
 /// shell, face, face loop, edge and vertex of the B-rep, in that order.
 fn sub_topology(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>) -> Result<bool> {
+    // (not upstream) cooperative cancellation once per entity: a check of a large body's
+    // geometry runs for seconds, the edges' curve analyses most of it (solidcore#3247)
+    const OP: &str = "topology::brep::validation::assert_valid::sub_topology";
     let regions = p1::regions(b, None)?;
     let shells = p1::shells(k, b, None)?;
     let faces = p1::faces(b, None)?;
@@ -536,18 +543,23 @@ fn sub_topology(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>) -> Result<bool> {
         rtn &= shell::region(b, cx, r)?;
     }
     for s in shells {
+        k.check_cancelled(OP)?;
         rtn &= shell::shell(k, b, cx, &shell_index, s)?;
     }
     for f in faces {
+        k.check_cancelled(OP)?;
         rtn &= face::face(k, b, cx, f)?;
     }
     for l in face_loops {
+        k.check_cancelled(OP)?;
         rtn &= loops::loop_(k, b, cx, l)?;
     }
     for e in edges {
+        k.check_cancelled(OP)?;
         rtn &= edge::edge(k, b, cx, e)?;
     }
     for v in vertices {
+        k.check_cancelled(OP)?;
         rtn &= vertex::vertex(k, b, cx, v)?;
     }
     Ok(rtn)

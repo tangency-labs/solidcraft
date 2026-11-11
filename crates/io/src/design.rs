@@ -48,6 +48,7 @@ fn max_expanded() -> usize {
     max_step_part().saturating_add(max_design())
 }
 const MESH_MAGIC: &[u8; 8] = b"SCMESH01";
+const SHADED_MESH_MAGIC: &[u8; 8] = b"SCMESH02";
 const POINTS_MAGIC: &[u8; 8] = b"SCPNTS01";
 const MAX_PREVIEW_BYTES: usize = 8 << 20;
 const MAX_PREVIEW_TRIANGLES: usize = 100_000;
@@ -236,7 +237,8 @@ fn write_container(
                     // or it could never be saved (#6600). Compact deflates every mesh.
                     let compress = compression == DesignCompression::Compact || bytes.len() > max_part();
                     let blob = writer.blob(&bytes, "mesh", compress)?;
-                    let mut value = replace(mesh, fields([("positions", json!([])), ("triangles", json!([]))])).map_err(invalid)?;
+                    let mut value = replace(mesh, fields([("positions", json!([])), ("triangles", json!([])), ("corner_normals", json!([]))]))
+                        .map_err(invalid)?;
                     value.as_object_mut().ok_or_else(|| invalid("mesh metadata"))?.insert("mesh_blob".into(), blob);
                     metadata.push(value);
                 }
@@ -345,6 +347,11 @@ fn validate_mesh(mesh: &MeshData) -> Result<()> {
         || !mesh.triangles.len().is_multiple_of(3)
         || mesh.positions.iter().any(|v| !v.is_finite() || v.abs() > 1e9)
         || mesh.triangles.iter().any(|&v| v as usize >= mesh.positions.len() / 3)
+        || (!mesh.corner_normals.is_empty() && mesh.triangles.len().checked_mul(3) != Some(mesh.corner_normals.len()))
+        || mesh.corner_normals.as_chunks::<3>().0.iter().any(|n| {
+            let length = n[0].hypot(n[1]).hypot(n[2]);
+            !length.is_finite() || length == 0.0
+        })
     {
         return Err(invalid("invalid mesh coordinates or indices"));
     }
@@ -361,24 +368,42 @@ fn mesh_encoded_len(positions: usize, triangles: usize) -> Option<usize> {
 }
 
 fn encode_mesh(mesh: &MeshData) -> Result<Vec<u8>> {
-    let size = mesh_encoded_len(mesh.positions.len(), mesh.triangles.len()).ok_or_else(|| invalid("mesh too large"))?;
+    let legacy_size = mesh_encoded_len(mesh.positions.len(), mesh.triangles.len()).ok_or_else(|| invalid("mesh too large"))?;
+    let size = if mesh.corner_normals.is_empty() {
+        legacy_size
+    } else {
+        mesh.corner_normals
+            .len()
+            .checked_mul(8)
+            .and_then(|n| n.checked_add(legacy_size))
+            .and_then(|n| n.checked_add(8))
+            .filter(|&n| n <= max_mesh_part())
+            .ok_or_else(|| invalid("mesh shading normals too large"))?
+    };
     validate_mesh(mesh)?;
     let mut bytes = Vec::new();
     bytes.try_reserve_exact(size).map_err(|_| invalid("could not reserve mesh blob"))?;
-    bytes.extend_from_slice(MESH_MAGIC);
+    bytes.extend_from_slice(if mesh.corner_normals.is_empty() { MESH_MAGIC } else { SHADED_MESH_MAGIC });
     bytes.extend_from_slice(&(mesh.positions.len() as u64).to_le_bytes());
     bytes.extend_from_slice(&(mesh.triangles.len() as u64).to_le_bytes());
+    if !mesh.corner_normals.is_empty() {
+        bytes.extend_from_slice(&(mesh.corner_normals.len() as u64).to_le_bytes());
+    }
     for value in mesh.positions.iter() {
         bytes.extend_from_slice(&value.to_le_bytes());
     }
     for value in mesh.triangles.iter() {
         bytes.extend_from_slice(&value.to_le_bytes());
     }
+    for value in mesh.corner_normals.iter() {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
     Ok(bytes)
 }
 
 fn decode_mesh(bytes: &[u8], mesh: &mut MeshData) -> Result<()> {
-    if bytes.get(..8) != Some(MESH_MAGIC.as_slice()) {
+    let shaded = bytes.get(..8) == Some(SHADED_MESH_MAGIC.as_slice());
+    if !shaded && bytes.get(..8) != Some(MESH_MAGIC.as_slice()) {
         return Err(invalid("unsupported mesh blob version"));
     }
     let count = |range: std::ops::Range<usize>| -> Result<usize> {
@@ -387,15 +412,30 @@ fn decode_mesh(bytes: &[u8], mesh: &mut MeshData) -> Result<()> {
     };
     let positions = count(8..16)?;
     let triangles = count(16..24)?;
-    let middle = positions.checked_mul(8).and_then(|n| n.checked_add(24)).ok_or_else(|| invalid("mesh size overflow"))?;
-    let total = triangles.checked_mul(4).and_then(|n| n.checked_add(middle)).ok_or_else(|| invalid("mesh size overflow"))?;
-    if total != bytes.len() || !positions.is_multiple_of(3) || !triangles.is_multiple_of(3) {
+    let normals = if shaded { count(24..32)? } else { 0 };
+    let header = if shaded { 32 } else { 24 };
+    let middle = positions.checked_mul(8).and_then(|n| n.checked_add(header)).ok_or_else(|| invalid("mesh size overflow"))?;
+    let normal_start = triangles.checked_mul(4).and_then(|n| n.checked_add(middle)).ok_or_else(|| invalid("mesh size overflow"))?;
+    let total = normals.checked_mul(8).and_then(|n| n.checked_add(normal_start)).ok_or_else(|| invalid("mesh size overflow"))?;
+    if total != bytes.len()
+        || !positions.is_multiple_of(3)
+        || !triangles.is_multiple_of(3)
+        || (normals != 0 && triangles.checked_mul(3) != Some(normals))
+    {
         return Err(invalid("invalid mesh blob lengths"));
     }
     mesh.positions =
-        bytes.get(24..middle).ok_or_else(|| invalid("truncated mesh"))?.as_chunks::<8>().0.iter().map(|&v| f64::from_le_bytes(v)).collect();
+        bytes.get(header..middle).ok_or_else(|| invalid("truncated mesh"))?.as_chunks::<8>().0.iter().map(|&v| f64::from_le_bytes(v)).collect();
     mesh.triangles =
-        bytes.get(middle..).ok_or_else(|| invalid("truncated mesh"))?.as_chunks::<4>().0.iter().map(|&v| u32::from_le_bytes(v)).collect();
+        bytes.get(middle..normal_start).ok_or_else(|| invalid("truncated mesh"))?.as_chunks::<4>().0.iter().map(|&v| u32::from_le_bytes(v)).collect();
+    mesh.corner_normals = bytes
+        .get(normal_start..)
+        .ok_or_else(|| invalid("truncated mesh normals"))?
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|&v| f64::from_le_bytes(v))
+        .collect();
     validate_mesh(mesh)
 }
 
@@ -418,6 +458,15 @@ fn encode_cloud(cloud: &solidcraft_doc::point_cloud::PointCloud) -> Result<Vec<u
         bytes.extend_from_slice(&cloud.colors.0);
     }
     Ok(bytes)
+}
+
+/// Each point cloud's `complex` (segments, triangles and properties), taken out of the metadata
+/// with the cloud's index.
+fn take_cloud_complexes(metadata: &mut Value) -> Vec<(usize, Value)> {
+    let Some(clouds) = metadata.get_mut("point_clouds").and_then(Value::as_array_mut) else {
+        return Vec::new();
+    };
+    clouds.iter_mut().enumerate().filter_map(|(index, cloud)| Some((index, cloud.as_object_mut()?.remove("complex")?))).collect()
 }
 
 fn decode_cloud(bytes: &[u8], cloud: &mut solidcraft_doc::point_cloud::PointCloud) -> Result<()> {
@@ -575,7 +624,13 @@ fn encode_preview(preview: &DesignPreview, document: &[u8]) -> Result<(Vec<u8>, 
     let mut triangles = 0usize;
     for mesh in &preview.meshes {
         triangles = triangles.saturating_add(mesh.triangles.len() / 3);
-        let size = mesh.positions.len().saturating_mul(8).saturating_add(mesh.triangles.len().saturating_mul(4)).saturating_add(24);
+        let size = mesh
+            .positions
+            .len()
+            .saturating_mul(8)
+            .saturating_add(mesh.triangles.len().saturating_mul(4))
+            .saturating_add(mesh.corner_normals.len().saturating_mul(8))
+            .saturating_add(32);
         if data.len().saturating_add(size) > MAX_PREVIEW_BYTES || triangles > MAX_PREVIEW_TRIANGLES || mesh.name.len() > 1024 {
             return Err(invalid("preview budget"));
         }
@@ -633,7 +688,13 @@ fn read_preview<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<DesignP
             return Err(invalid("overlapping preview bodies"));
         }
         end = end.checked_add(length).ok_or_else(|| invalid("preview overflow"))?;
-        let mut mesh = MeshData { name: String::new(), positions: Vec::new().into(), triangles: Vec::new().into(), color: None };
+        let mut mesh = MeshData {
+            name: String::new(),
+            positions: Vec::new().into(),
+            triangles: Vec::new().into(),
+            color: None,
+            corner_normals: Default::default(),
+        };
         decode_mesh(data.get(offset..end).ok_or_else(|| invalid("truncated preview"))?, &mut mesh)?;
         triangles = triangles.saturating_add(mesh.triangles.len() / 3);
         if triangles > MAX_PREVIEW_TRIANGLES {
@@ -891,8 +952,13 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
         let hdr = hydrate_hdr_resources(&mut metadata, reader)?;
         hydrate_texture_resources(&mut metadata, reader)? || hdr
     };
+    // A cloud's points are in its blob, so its segments, triangles and properties are read and
+    // checked with them below (`decode_cloud`), not against the empty points the metadata holds
+    // (#14572). The metadata keeps them for what a newer build's file holds. A newer build's file
+    // reads them as before: what doesn't read here is kept whole (`newer_file`), unknown fields too.
+    let complexes = if newer { Vec::new() } else { take_cloud_complexes(&mut metadata) };
     let hydrated_text;
-    let text = if hydrated {
+    let text = if hydrated || !complexes.is_empty() {
         hydrated_text = serde_json::to_string(&metadata).map_err(invalid)?;
         &hydrated_text
     } else {
@@ -901,6 +967,14 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
     // Migrations and all document validation run on the small parametric metadata.
     // Binary arrays have their own equivalent numeric/index validation below.
     let mut doc = Document::from_json(text)?;
+    for (index, complex) in complexes {
+        if let Some(cloud) = doc.point_clouds.get_mut(index) {
+            cloud.complex = serde::Deserialize::deserialize(&complex).map_err(invalid)?;
+        }
+        if let Some(cloud) = metadata.get_mut("point_clouds").and_then(|v| v.get_mut(index)).and_then(Value::as_object_mut) {
+            cloud.insert("complex".into(), complex);
+        }
+    }
     if newer_container && doc.newer_file.is_none() {
         let current = solidcraft_doc::format::FORMAT;
         let says = container.get("format").and_then(Value::as_str).unwrap_or("a later container").to_string();
@@ -1426,6 +1500,36 @@ mod tests {
     /// #9170: a mesh body (an imported STL) is kept in the model cache with the rest of the
     /// model, as its own triangles, colour and paint. One mesh body left the whole cache out, so
     /// opening the design evaluated every feature again.
+    /// The names a STEP file gives its colours survive saving a design with its model and opening
+    /// it from that cache: the kernel bodies' own encoding keeps no names, the records do.
+    #[test]
+    fn model_cache_keeps_the_names_of_imported_colours() {
+        use solidcore_record::Vec3;
+        let part = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
+        let faces = vec![solidcraft_kernel::FacePaint { face: 0, color: [0., 0., 1.], opacity: 1., name: Some("Accent".into()) }];
+        let named =
+            part.with_color(Some([0.5, 0.5, 0.5])).with_paint(Some(solidcraft_kernel::Paint { opacity: 1., faces, name: Some("Body grey".into()) }));
+        let step = solidcraft_kernel::step_export(&[&named], "named").unwrap();
+        let mut doc = Document::new("Named colours");
+        doc.add_feature(FeatureKind::Import { file: "named.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new() }, None)
+            .unwrap();
+        let mut model = solidcraft_doc::Model::new();
+        model.evaluate(&doc);
+        let names = |model: &solidcraft_doc::Model| {
+            let state = model.state();
+            let paint = state.bodies[0].body.paint().cloned().unwrap();
+            (paint.name, paint.faces.iter().map(|f| f.name.clone()).collect::<Vec<_>>())
+        };
+        let evaluated = names(&model);
+        assert_eq!(evaluated, (Some("Body grey".into()), vec![Some("Accent".into())]));
+        let saved = model.saved(&doc).unwrap();
+        let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&saved)).unwrap();
+        let read = DesignContainerReader::new(Cursor::new(&bytes)).unwrap().geometry().expect("the cache reads back");
+        assert!(read.bodies.iter().all(|b| b.paint().is_none_or(|p| p.name.is_none())), "the body encoding has no names");
+        let reopened = solidcraft_doc::Model::adopt(&doc, &read).unwrap();
+        assert_eq!(names(&reopened), evaluated);
+    }
+
     #[test]
     fn model_cache_keeps_mesh_bodies_with_the_rest_of_the_model() {
         use solidcore_record::Vec3;
@@ -1433,7 +1537,7 @@ mod tests {
         let tetra = solidcraft_kernel::mesh_body(&corners, &[[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]])
             .unwrap()
             .with_color(Some([0.25, 0.5, 0.75]))
-            .with_paint(Some(solidcraft_kernel::Paint { opacity: 0.5, faces: Vec::new() }));
+            .with_paint(Some(solidcraft_kernel::Paint { opacity: 0.5, faces: Vec::new(), name: None }));
         let block = solidcraft_kernel::box_solid(Vec3::new(40., 0., 0.), Vec3::new(60., 20., 20.)).unwrap();
         let model = saved_model(vec![block, tetra.clone()]);
         let doc = document();
@@ -1832,12 +1936,41 @@ mod tests {
         }
     }
 
+    #[test]
+    fn shaded_mesh_blob_and_json_roundtrip_keep_corner_seams() {
+        let mut m = mesh();
+        m.corner_normals = [1., 0., 1., 0., 1., 1., 0., 0., 1.].into();
+        let bytes = encode_mesh(&m).unwrap();
+        assert_eq!(bytes.get(..8), Some(SHADED_MESH_MAGIC.as_slice()));
+        let mut restored = mesh();
+        decode_mesh(&bytes, &mut restored).unwrap();
+        assert_eq!(restored, m);
+        let mut doc = Document::new("shaded source");
+        doc.add_feature(FeatureKind::MeshImport { file: "smooth.obj".into(), meshes: vec![m.clone()] }, None).unwrap();
+        for bytes in [crate::write_design(&doc), write_design_container(&doc).unwrap()] {
+            let back = crate::read_design(&bytes).unwrap();
+            assert_eq!(back, doc);
+            let mut model = solidcraft_doc::Model::new();
+            model.evaluate(&back);
+            let mesh = model.state().bodies[0].mesh();
+            assert!((mesh.normals[0].x - 2f64.sqrt().recip()).abs() < 1e-12);
+            assert_ne!(mesh.normals[0], mesh.normals[1]);
+        }
+        restored.corner_normals = [0.; 9].into();
+        assert!(encode_mesh(&restored).is_err());
+        let legacy = encode_mesh(&mesh()).unwrap();
+        decode_mesh(&legacy, &mut restored).unwrap();
+        assert!(restored.corner_normals.is_empty());
+        assert!(decode_mesh(&bytes[..bytes.len() - 1], &mut restored).is_err());
+    }
+
     fn mesh() -> MeshData {
         MeshData {
             name: "Precise mesh".into(),
             positions: vec![0.123456789012345, -0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0].into(),
             triangles: vec![0, 1, 2].into(),
             color: Some([0.25, 0.5, 0.75]),
+            corner_normals: Default::default(),
         }
     }
 
@@ -1931,6 +2064,64 @@ mod tests {
         let said = &opened.newer_file.as_ref().unwrap().not_understood;
         assert!(said.iter().any(|what| what.contains("unsupported mesh blob version")), "{said:?}");
         assert_eq!(parts(&write_design_container(&opened).unwrap())[&renamed], encoded);
+    }
+
+    /// A newer build's point cloud with numbers, an edge and a face (#14572): a field this build
+    /// doesn't know inside them, or numbers it can't read at all, still open and save back.
+    #[test]
+    fn a_newer_builds_point_cloud_numbers_open_and_save_back_whole() {
+        use solidcraft_doc::point_cloud::{ColorBy, Colors, Column, Complex, Floats, Indices, On, PointCloud, Points};
+        let mut doc = Document::new("Scan");
+        doc.point_clouds.push(PointCloud {
+            id: 7,
+            name: "Scan".into(),
+            file: "scan.ply".into(),
+            origin: solidcore_record::Vec3::new(0.0, 0.0, 0.0),
+            points: Points::new(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0].into()),
+            colors: Colors::default(),
+            source_points: 3,
+            units: "mm".into(),
+            transform: solidcraft_doc::IDENTITY,
+            point_size: 2.0,
+            color_by: ColorBy::File,
+            color: None,
+            height_range: None,
+            visible: true,
+            complex: Complex {
+                segments: Indices(vec![0, 1].into()),
+                triangles: Indices(vec![0, 1, 2].into()),
+                columns: vec![Column { name: "nz".into(), on: On::Point, integer: false, values: Floats(vec![1.0, 1.0, 1.0].into()) }],
+                names: Vec::new(),
+            },
+            color_property: None,
+            filters: Vec::new(),
+            source: String::new(),
+            max_points: None,
+        });
+        // This build reads its own file whole.
+        let file = write_design_container(&doc).unwrap();
+        assert_eq!(crate::read_design(&file).unwrap().point_clouds, doc.point_clouds);
+
+        let newer = solidcraft_doc::format::format_string(solidcraft_doc::format::FORMAT + 1);
+        for complex in [json!("future curvature"), json!("columns this build can't read")] {
+            let mut entries = parts(&file);
+            let mut metadata: Value = serde_json::from_slice(&entries["document.json"]).unwrap();
+            metadata["format"] = json!(newer);
+            if complex == json!("future curvature") {
+                metadata["point_clouds"][0]["complex"]["curvature"] = json!([0.5, 0.25, 0.0]);
+            } else {
+                metadata["point_clouds"][0]["complex"]["columns"] = json!({"nz": "packed"});
+            }
+            let original = metadata["point_clouds"][0]["complex"].clone();
+            entries.insert("document.json".into(), serde_json::to_vec(&metadata).unwrap());
+
+            let opened = crate::read_design(&package(&entries)).unwrap_or_else(|e| panic!("{complex}: {e}"));
+            let resaved = parts(&write_design_container(&opened).unwrap());
+            let again: Value = serde_json::from_slice(&resaved["document.json"]).unwrap();
+            assert_eq!(again["point_clouds"][0]["complex"], original, "{complex}");
+            let blob = metadata["point_clouds"][0]["points_blob"].as_str().unwrap();
+            assert_eq!(resaved[blob], entries[blob], "{complex}");
+        }
     }
 
     fn parts(bytes: &[u8]) -> BTreeMap<String, Vec<u8>> {
@@ -2245,6 +2436,7 @@ mod tests {
             positions: Arc::clone(&positions),
             triangles: (0..indices).map(|i| (i % 3) as u32).collect(),
             color: None,
+            corner_normals: Default::default(),
         };
         let mut doc = Document::new("Large mesh");
         doc.add_feature(FeatureKind::MeshImport { file: "large.stl".into(), meshes: vec![mesh] }, None).unwrap();

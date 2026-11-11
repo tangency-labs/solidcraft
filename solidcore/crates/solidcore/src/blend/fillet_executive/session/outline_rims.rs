@@ -65,7 +65,7 @@ impl FilletSession<'_> {
         for (offset, rail) in offsets.iter_mut().zip(0..2) {
             *offset = base
                 .surface(rail)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?
                 .surface
                 .offset_distance();
         }
@@ -90,10 +90,11 @@ impl FilletSession<'_> {
                 .map(|fu| eu1::faceuse_face(target, fu))
                 .transpose()?
                 .flatten()
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the face use's face"))?;
             faces.push(face);
         }
-        let faces = <[_; 2]>::try_from(faces).map_err(|_| SolidError::null_pointer(OP))?;
+        let faces = <[_; 2]>::try_from(faces)
+            .map_err(|_| SolidError::blend_missing(OP, "a face on each side of the edge"))?;
         let Some(supports) = outline_supports(k, target, edge, faces, offsets, tangency)? else {
             return Ok(());
         };
@@ -104,7 +105,7 @@ impl FilletSession<'_> {
             let solver = self.objects.solver_mut(id)?.base_mut();
             let old = solver
                 .surface(rail)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+                .ok_or_else(|| SolidError::blend_missing(OP, "the solver's offset surface"))?;
             // the same offset of the face (its distance, extension and face identity) on the
             // support, a new object: a fresh key, so a saved offset restores the face's own
             let (distance, base_id, extends) = (

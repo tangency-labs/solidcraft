@@ -46,13 +46,12 @@
 //! - **`bDegenSurfV`** tests the domain's `XLength`, as upstream (WR-100); with
 //!   `Kernel::fixes.drop_curve_v_domain_degeneracy` it tests `YLength` instead (WR-100
 //!   addendum 2026-10-31).
-//! - **Exact UV curve on a cylinder (opt-in).** With
-//!   `Kernel::fixes.cylinder_plane_section_trims_exact` (WR-680, #2109), a curve lying
-//!   on a cylinder (a plane section) gets its exact rational UV curve in its own
-//!   parameter (`surface_drop_lib::cylinder_section`) once the domain checks pass,
-//!   before the start point is dropped; the outputs and the record are those of a
-//!   successful drop of that one curve. A curve it does not apply to is traced as
-//!   upstream.
+//! - **Exact UV curve on a cylinder.** A curve lying on a cylinder (a plane section)
+//!   gets its exact rational UV curve in its own parameter
+//!   (`surface_drop_lib::cylinder_section`, WR-680) once the domain checks pass, before
+//!   the start point is dropped, where upstream traces and fits a cubic to it; the
+//!   outputs and the record are those of a successful drop of that one curve. A curve
+//!   it does not apply to is traced as upstream.
 //! - **Temporary state.** The out-of-bounds convergence upstream enables on the surface
 //!   for the call (`SmTemporaryChangeValue`) runs on an evaluation copy with the flag
 //!   set. The surface cache flags (`m_bPointTestEnabled` off, `m_bProcessBoundaryCurves`
@@ -154,8 +153,10 @@ pub struct DropCurveOut {
 
 /// The status upstream stores for a failed `GetNextPoint` (see the module notes).
 fn status_of(e: &SolidError) -> i32 {
+    if let Some(code) = e.upstream_status() {
+        return code;
+    }
     match e {
-        SolidError::Upstream { code, .. } => *code,
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => SM_ERR_INVALID_INPUT,
         SolidError::NotConverged { .. } => SM_ERR_NOT_CONVERGING,
         _ => SM_ERR,
@@ -176,7 +177,7 @@ fn sm_bool(b: bool) -> i32 {
 fn start_uv<O: SolutionObject>(sols: &SolutionArray<O>, i: usize) -> Result<Point2> {
     sols.get(i)
         .map(|s| Point2::new(s.start.parameters[0], s.start.parameters[1]))
-        .ok_or_else(|| SolidError::sm_err(OP))
+        .ok_or_else(|| SolidError::intersect_failed(OP, "the drop has no such solution"))
 }
 
 /// Sets parameter `p` of solution `i`'s start.
@@ -186,12 +187,12 @@ fn set_start_param<O: SolutionObject>(
     p: usize,
     value: f64,
 ) -> Result<()> {
-    let s = sols.get_mut(i).ok_or_else(|| SolidError::sm_err(OP))?;
-    let slot = s
-        .start
-        .parameters
-        .get_mut(p)
-        .ok_or_else(|| SolidError::sm_err(OP))?;
+    let s = sols
+        .get_mut(i)
+        .ok_or_else(|| SolidError::intersect_failed(OP, "the drop has no such solution"))?;
+    let slot = s.start.parameters.get_mut(p).ok_or_else(|| {
+        SolidError::intersect_failed(OP, "the drop solution has no such parameter")
+    })?;
     *slot = value;
     Ok(())
 }
@@ -688,7 +689,10 @@ impl Surface {
                 CreateUvTrimCurvePathType::DegenSurfaceFail,
                 &early,
             );
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::intersect_failed(
+                OP,
+                "the surface's uv domain is degenerate",
+            ));
         }
 
         // check state - given UVDomain must fit within the Surface's Natural UVDomain
@@ -700,7 +704,10 @@ impl Surface {
                 CreateUvTrimCurvePathType::DropDomainUncontainedFail,
                 &early,
             );
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::intersect_failed(
+                OP,
+                "the uv domain does not fit within the surface's natural domain",
+            ));
         }
 
         // UV Tolerances - proportional to surface 3d/UV mapping size
@@ -757,37 +764,35 @@ impl Surface {
         fs.singularities = u64::from(singularities);
         fs.approx_singularities = u64::from(sings.approx_singular);
 
-        // Opt-in (#2109, WR-680): a curve lying on a cylinder (a plane section) gets its
-        // exact rational UV curve in its own parameter instead of the traced fit; one
-        // that does not check out is traced below as upstream.
-        if k.fixes.cylinder_plane_section_trims_exact {
-            if let Some(uv_curve) =
-                super::cylinder_section::exact_uv_curve(k, this, &s_uv_domain, curve, &s_interval)?
-            {
-                let (drop_to_surf, approx_dev) =
-                    uv_curve_gap(k, this, &uv_curve, curve, approx_tol_3d)?;
-                out.max_drop_to_surf = drop_to_surf;
-                out.max_approx_dev = approx_dev;
-                out.uv_curves.push(uv_curve);
-                let path = path_of(record.as_ref());
-                fs.set(
-                    &mut record,
-                    4,
-                    SM_SUCCESS,
-                    path,
-                    &FailOut {
-                        rd_max_drop: out.max_drop_to_surf,
-                        rd_max_dev: out.max_approx_dev,
-                        max_drop: out.max_drop_to_surf,
-                        solutions: None,
-                        ctrl_poly: None,
-                        knots: None,
-                        uv_curves: Some(&out.uv_curves),
-                    },
-                );
-                default_path(&mut record, CreateUvTrimCurvePathType::DropCurveOkay);
-                return Ok(out);
-            }
+        // WR-680: a curve lying on a cylinder (a plane section) gets its exact rational
+        // UV curve in its own parameter instead of the traced fit; one that does not
+        // check out is traced below as upstream.
+        if let Some(uv_curve) =
+            super::cylinder_section::exact_uv_curve(k, this, &s_uv_domain, curve, &s_interval)?
+        {
+            let (drop_to_surf, approx_dev) =
+                uv_curve_gap(k, this, &uv_curve, curve, approx_tol_3d)?;
+            out.max_drop_to_surf = drop_to_surf;
+            out.max_approx_dev = approx_dev;
+            out.uv_curves.push(uv_curve);
+            let path = path_of(record.as_ref());
+            fs.set(
+                &mut record,
+                4,
+                SM_SUCCESS,
+                path,
+                &FailOut {
+                    rd_max_drop: out.max_drop_to_surf,
+                    rd_max_dev: out.max_approx_dev,
+                    max_drop: out.max_drop_to_surf,
+                    solutions: None,
+                    ctrl_poly: None,
+                    knots: None,
+                    uv_curves: Some(&out.uv_curves),
+                },
+            );
+            default_path(&mut record, CreateUvTrimCurvePathType::DropCurveOkay);
+            return Ok(out);
         }
 
         // set sStart's Curve Start Point, 1stDeriv, and 2nd Deriv
@@ -844,7 +849,10 @@ impl Surface {
 
         // there should always be at least one solution
         if solutions.is_empty() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::intersect_failed(
+                OP,
+                "dropping the curve's start onto the surface found no solution",
+            ));
         }
 
         // Classify the 1st start DropSolution point (status ignored upstream)
@@ -1142,11 +1150,11 @@ impl Surface {
                 curve_cache = Some(match make_curve_cache::<()>(k, curve, None) {
                     Ok(c) => c,
                     Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                    Err(_) => return Err(SolidError::null_pointer(OP)),
+                    Err(_) => return Err(SolidError::intersect_missing(OP, "the curve cache")),
                 });
             }
             let Some(cache) = curve_cache.as_ref() else {
-                return Err(SolidError::null_pointer(OP));
+                return Err(SolidError::intersect_missing(OP, "the curve cache"));
             };
             let span_count = cache.span_count();
 
@@ -1595,7 +1603,9 @@ mod tests {
                 curve: None,
             }),
         );
-        assert!(matches!(r, Err(SolidError::Upstream { code: SM_ERR, .. })));
+        assert!(
+            matches!(&r, Err(e) if e.intersect_failure().is_some() && e.sm_status() == Some(SM_ERR))
+        );
         assert_eq!(fail.fail_status, SM_ERR_OUTSIDE_OF_DOMAIN);
         assert_eq!(
             fail.create_path_type,
@@ -1737,7 +1747,9 @@ mod tests {
         assert!(nat.y_length() < EFF_ZERO);
 
         let (r, fail) = wr100_drop(&k, &srf, [0.0, 1.0, 1.0, 1.0]);
-        assert!(matches!(r, Err(SolidError::Upstream { code: SM_ERR, .. })));
+        assert!(
+            matches!(&r, Err(e) if e.intersect_failure().is_some() && e.sm_status() == Some(SM_ERR))
+        );
         assert_eq!(fail.fail_status, SM_ERR_DEGENERATE_SURFACE);
         assert_eq!(
             fail.create_path_type,
@@ -1760,7 +1772,9 @@ mod tests {
         assert!(nat.y_length() >= EFF_ZERO);
 
         let (r, fail) = wr100_drop(&k, &srf, [1.0, 0.0, 1.0, 1.0]);
-        assert!(matches!(r, Err(SolidError::Upstream { code: SM_ERR, .. })));
+        assert!(
+            matches!(&r, Err(e) if e.intersect_failure().is_some() && e.sm_status() == Some(SM_ERR))
+        );
         assert_eq!(fail.fail_status, SM_ERR_DEGENERATE_SURFACE);
         assert_eq!(
             fail.create_path_type,

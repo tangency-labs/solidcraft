@@ -37,7 +37,7 @@ const USAGE: &str = "\
 usage: cargo xtask <command>
 
 commands:
-  ui-containers   enforce the universal container for all UI hosts
+  ui-containers   enforce the universal container for all UI hosts and the kit's tooltips
   layers          enforce the crate dependency layering (plan/architecture.md §3)
   shared          check that each shared crate (layers' Shared class) has workspace lints, a licence,
                   a README and no includes from outside its directory, then build and test it in a
@@ -47,7 +47,7 @@ commands:
   app-icons       regenerate shared app-icon exports for Linux, FreeBSD and Windows
   icons           validate UI icon standards, discovery and review-tool behavior (Python 3.11+)
   features        list SolidCraft's commands by area in docs/features.md (from the registry)
-  i18n [--check | --add-missing]
+  i18n [--check | --add-missing] [--no-registry | --cli <solidcraft-cli>]
                   report how complete the message catalogs in assets/locales are:
                   which messages a locale has not translated and which command labels the English
                   catalog cannot translate (so they stay English everywhere). --check fails when
@@ -82,7 +82,7 @@ commands:
                   kernel operations, operand records, fix set and expected values in
                   DIR/<area>/<case>.json and DIR/manifest.json, every case not expressible as
                   kernel input listed with its reasons; with --ladder too
-  known-failing --junit PATH... [--list FILE]
+  known-failing --junit PATH... [--list FILE] [--quarantine FILE]
                   grade a nextest run's junit report (a file, or every .xml under a directory)
                   against the tests known to fail today on the default kernel,
                   tests/KNOWN_FAILING_TESTS (or FILE): fails

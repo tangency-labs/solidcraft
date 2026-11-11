@@ -40,8 +40,8 @@
 //! | `offset_vertex_image` (private)                             | not upstream: a vertex's image on its face's offset (WR-736; opt-in) |
 //!
 //! Deviations:
-//! - **Four faces at a vertex (WR-666, opt-in).** With `Kernel::fixes.offset_four_face_vertex_split`
-//!   and `offset_closes_loop_gaps`, the fork's tangency-labs/smlib@2e1bb8c: the tangency
+//! - **Four faces at a vertex (WR-666, the only path).** The fork's
+//!   tangency-labs/smlib@2e1bb8c: the tangency
 //!   tolerance is half a degree, `trim_extended_edge` keeps a near-tangent trim point where
 //!   the curve passes through the surface by more than the tolerance, and at an all-convex or all-concave vertex takes the cut
 //!   reached first from the edge's other end. That choice also skips, on an open edge's
@@ -1558,14 +1558,6 @@ fn is_arc(k: &Kernel, c: &BSplineCurve, num_samples: u64, tol: f64) -> Result<Op
 
 // ---- the geometry creation --------------------------------------------------------------------
 
-/// Whether WR-666's opt-in is in effect: `Kernel::fixes.offset_four_face_vertex_split`
-/// together with `offset_closes_loop_gaps` (the fork's `CloseLoopGaps`, which closes the
-/// loop gaps the split vertex leaves on the faces round it; without it the flag has no
-/// effect, as the split alone leaves those faces' loops open).
-pub(crate) fn four_face_vertex_split(fixes: &crate::kernel::UpstreamFixes) -> bool {
-    fixes.offset_four_face_vertex_split && fixes.offset_closes_loop_gaps
-}
-
 /// Whether `curve` at `t` passes through `surface` at `uv` (where they meet) by more than
 /// `tol`. To second order in arc length s the curve's height over the surface is
 /// `g1 s + g2 s^2 / 2`, `g1` the sine of the angle between them and `g2` the curve's
@@ -1589,7 +1581,18 @@ fn passes_through(
     let err = || sm_err("offset_geometry_creation::passes_through");
     let pv = curve.evaluate(k, t, 2, true, true)?;
     let (d1, d2) = (*pv.get(1).ok_or_else(err)?, *pv.get(2).ok_or_else(err)?);
-    let s = surface.evaluate(k, uv, 2, 2, EvaluateFlags::default())?;
+    // Only the total-order-two jet is used below. The full rectangle would also
+    // request D(2, 2), beyond an implicit offset's derivative limit.
+    let s = surface.evaluate(
+        k,
+        uv,
+        2,
+        2,
+        EvaluateFlags {
+            only_upper_half: true,
+            ..EvaluateFlags::default()
+        },
+    )?;
     let at = |i: usize, j: usize| s.get(i).and_then(|r| r.get(j)).copied().ok_or_else(err);
     let (du, dv, duu, duv, dvv) = (at(1, 0)?, at(0, 1)?, at(2, 0)?, at(1, 1)?, at(0, 2)?);
     let n = du.cross(dv).unitize().map_err(|_| err())?;
@@ -1635,17 +1638,12 @@ impl OffsetGeometryCreation {
         }
     }
 
-    /// The constructor's angular tolerance (`m_dTangencyTolRadians`): `2.0 * PI / 180.0`;
-    /// with `Kernel::fixes.offset_four_face_vertex_split` and `offset_closes_loop_gaps`
-    /// (WR-666), half a degree,
-    /// `0.5 * PI / 180.0`, as the fork's tangency-labs/smlib@2e1bb8c.
+    /// The constructor's angular tolerance (`m_dTangencyTolRadians`): half a degree,
+    /// `0.5 * PI / 180.0` (WR-666, the fork's tangency-labs/smlib@2e1bb8c), not upstream's
+    /// two degrees, on the default path since #2981.
     #[must_use]
-    pub fn default_tangency_tol_radians(fixes: &crate::kernel::UpstreamFixes) -> f64 {
-        if four_face_vertex_split(fixes) {
-            0.5 * PI / 180.0
-        } else {
-            2.0 * PI / 180.0
-        }
+    pub fn default_tangency_tol_radians() -> f64 {
+        0.5 * PI / 180.0
     }
 
     /// The same creator with the angular tolerance `tangency_tol_radians`, which an
@@ -2818,8 +2816,7 @@ impl OffsetGeometryCreation {
 
             // for every sOffAdjEU - try letting trimPoint = OffAdjEu->ExtendedSurface/3DCurve intersection
             let mut last_face: Option<O> = None;
-            // (WR-666, opt-in) each adjacent face's candidates in `solutions`
-            let four_face = four_face_vertex_split(&k.fixes);
+            // (WR-666) each adjacent face's candidates in `solutions`
             let mut face_solutions: Vec<(usize, usize)> = Vec::new();
             for &off_adj_eu in &off_adj_eus {
                 let f = brep
@@ -2857,9 +2854,7 @@ impl OffsetGeometryCreation {
 
                 // Note that the adjacent surface intersection overrides tangent intersections
                 // Test the solutions to see if they are not nearly tangent.
-                if four_face {
-                    face_solutions.push((solutions.len(), solutions.len()));
-                }
+                face_solutions.push((solutions.len(), solutions.len()));
                 for sol in sols2.as_slice() {
                     // (neither status is checked upstream: a failed evaluation leaves its
                     // output at SmPoint3d's SM_UNDEF_DOUBLE default)
@@ -2885,7 +2880,7 @@ impl OffsetGeometryCreation {
                         .unitize_or_z();
                     let angle_rad = tangent.angle_between(normal)?;
                     let angle_deg = angle_rad * 180.0 / PI;
-                    // `Kernel::fixes.offset_four_face_vertex_split` (WR-666, the fork's
+                    // Four-face vertex splitting (WR-666, the fork's
                     // tangency-labs/smlib@2e1bb8c): a curve that crosses the surface at a
                     // shallow angle crosses it all the same (a trough's floor facets falling
                     // 1 degree, whose offsets cut the offset edges along the walls 0.6
@@ -2895,8 +2890,7 @@ impl OffsetGeometryCreation {
                     // round meets the top face tangentially) crosses it twice within the
                     // tolerance, so it crosses only where it passes through by more than
                     // the tolerance ([`passes_through`]).
-                    let crosses = four_face
-                        && !(angle_deg < 85.0 || angle_deg > 95.0)
+                    let crosses = !(angle_deg < 85.0 || angle_deg > 95.0)
                         && passes_through(
                             k,
                             curve_of(brep, curve_3d)?,
@@ -2981,7 +2975,7 @@ impl OffsetGeometryCreation {
                 }
             }
 
-            // `Kernel::fixes.offset_four_face_vertex_split` (WR-666, the fork's
+            // Four-face vertex splitting (WR-666, the fork's
             // tangency-labs/smlib@2e1bb8c): where more than three faces meet at the vertex,
             // the faces on either side of the edge's ends there are different faces, and
             // their offsets cut the edge's offset at two points: four offset planes do not
@@ -2989,7 +2983,7 @@ impl OffsetGeometryCreation {
             // and where every edge at the vertex is convex (or every one concave) the edge
             // ends at the one of the two cuts its offset reaches first coming from its
             // other end. With a vertex of mixed edges the nearest point stays.
-            if four_face && found && face_solutions.len() == 2 {
+            if found && face_solutions.len() == 2 {
                 if let Some(param) = self.first_cut_from_far_end(
                     k,
                     brep,
@@ -3067,9 +3061,9 @@ impl OffsetGeometryCreation {
         }
     }
 
-    /// `TrimExtendedEdge`'s choice at a vertex of more than three faces under
-    /// `Kernel::fixes.offset_four_face_vertex_split` (WR-666, the fork's
-    /// tangency-labs/smlib@2e1bb8c): when every edge at `base_vertex` is convex (or every
+    /// `TrimExtendedEdge`'s choice at a vertex of more than three faces under WR-666
+    /// (the fork's tangency-labs/smlib@2e1bb8c; the split is the only path since
+    /// #2981): when every edge at `base_vertex` is convex (or every
     /// one concave; a lamina, tangent or shell-less edge counts as neither) and each of
     /// the two adjacent faces (`face_solutions`, ranges of `solutions`) has a cut nearest
     /// the vertex (not the start already chosen, nor, on an open edge's second end, the
@@ -6086,6 +6080,38 @@ mod tests {
         assert!(passes_through(&k, &lifted, at(1e-3), &plane, uv, tol).unwrap());
         let shallow = over_the_plane(0.6_f64.to_radians().tan(), 0.0, false);
         assert!(passes_through(&k, &shallow, 0.5, &plane, uv, tol).unwrap());
+    }
+
+    /// The crossing test uses only the second-order jet. An implicit offset keeps
+    /// its three-total-derivative limit, yet must classify the same plane's touch
+    /// and shallow crossing (the unsupported request prevented #1818's rim mating).
+    #[test]
+    fn a_curve_passes_through_an_implicit_offset_using_only_second_order() {
+        use crate::surface::offset_surface::OffsetSurface;
+        use crate::surface::plane::Plane;
+
+        let k = Kernel::default();
+        let base = Surface::from(Plane::from_normal(Vec3::new(0.0, 0.0, -0.5), Vec3::Z));
+        let surface = Surface::from(OffsetSurface::new(&k, 0.5, base, true, 0).unwrap());
+        let uv = Point2::new(0.0, 0.0);
+        assert!(surface.evaluate_point(&k, uv).unwrap().distance(Vec3::ZERO) < 1e-15);
+        let e = surface
+            .evaluate(&k, uv, 2, 2, EvaluateFlags::default())
+            .unwrap_err();
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(
+            e.operation(),
+            "surface::offset_surface::OffsetSurface::evaluate"
+        );
+
+        let tol = 1e-5;
+        let at = |e: f64| (1.0 + (6.0 * e).sqrt()) / 2.0;
+        let touching = over_the_plane(1e-6, 1.0 / 3.0, true);
+        assert!(!passes_through(&k, &touching, at(1e-6), &surface, uv, tol).unwrap());
+        let lifted = over_the_plane(1e-3, 1.0 / 3.0, true);
+        assert!(passes_through(&k, &lifted, at(1e-3), &surface, uv, tol).unwrap());
+        let shallow = over_the_plane(0.6_f64.to_radians().tan(), 0.0, false);
+        assert!(passes_through(&k, &shallow, 0.5, &surface, uv, tol).unwrap());
     }
 
     #[test]

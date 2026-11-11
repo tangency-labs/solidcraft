@@ -71,6 +71,8 @@
 //! The lamina clean-up's `DeleteFaces` runs through merge p4's arena intersector over
 //! the offset B-rep alone (both upstream operands are that B-rep); it notifies under
 //! `DELETE_FACES_NAMESPACE` rather than the caller's offset keys.
+//! `ReplaceImplicitOffsets` replaces each implicit offset by its certified net
+//! (`certified_offset`, WR-718), not by NLib's `N_SrfOffset` fit checked at samples.
 //!
 //! Cancellation: `replace_implicit_offsets` polls the kernel's cancel token (#2136, #2372) per face and inside each surface offset.
 
@@ -93,7 +95,6 @@ use crate::intersect::topology_solver::p1::TopologySolver;
 use crate::intersect::topology_solver::p2::TopologySolveOptions;
 use crate::kernel::Kernel;
 use crate::math::{Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT, PI};
-use crate::nurbs::b_spline_surface_n_lib::p1::OffsetParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
 use crate::offset::offset_geometry_creation::{OffsetGeometryCreation, SsiData};
@@ -328,17 +329,16 @@ impl OffsetExecutive {
         self.tangency_tol_radians * 180.0 / PI
     }
 
-    /// Takes the geometry creator's constructor tolerance under `kernel`'s fixes
-    /// ([`OffsetGeometryCreation::default_tangency_tol_radians`]): half a degree with
-    /// `Kernel::fixes.offset_four_face_vertex_split` and `offset_closes_loop_gaps` (WR-666),
-    /// else the 2 degrees of
-    /// [`Self::new`] unchanged. Called right after construction by the executives that
+    /// Takes the geometry creator's constructor tolerance
+    /// ([`OffsetGeometryCreation::default_tangency_tol_radians`]): half a degree (WR-666,
+    /// the fork's tangency-labs/smlib@2e1bb8c), not [`Self::new`]'s two degrees. Called
+    /// right after construction by the executives that
     /// `SmApiOffsetBrepFull`, `SmApiShellBrepFull` and `SmBrep::LocalOperation` build.
-    pub fn use_creator_tangency_tol(&mut self, kernel: &Kernel) {
-        if crate::offset::offset_geometry_creation::four_face_vertex_split(&kernel.fixes) {
-            self.tangency_tol_radians =
-                OffsetGeometryCreation::default_tangency_tol_radians(&kernel.fixes);
-        }
+    ///
+    /// On the default path since #2981: WR-666's split is the only path, so the creator
+    /// tolerance is always the fork's.
+    pub fn use_creator_tangency_tol(&mut self, _kernel: &Kernel) {
+        self.tangency_tol_radians = OffsetGeometryCreation::default_tangency_tol_radians();
     }
 
     /// Offset distance supplied by the geometry creator.
@@ -885,12 +885,15 @@ impl OffsetExecutive {
         self.extended_surfaces.insert(base_key, surface);
     }
 
-    /// Replaces implicit offset surfaces with approximations (`ReplaceImplicitOffsets`).
+    /// Replaces implicit offset surfaces with certified nets (`ReplaceImplicitOffsets`).
     /// The unconditional initial shrink is `topology.brep_p4`'s `ShrinkGeometry`.
     ///
-    /// Every face with an `SmOffsetSurface` gets a cubic approximation of the offset of
-    /// its extended (else its own) base, which must be a B-spline surface, within
-    /// `approximation_tol_3d`. All approximations are built before any face is
+    /// Every face with an `SmOffsetSurface` gets a bicubic B-spline within
+    /// `approximation_tol_3d` of the exact offset of its extended (else its own) base at
+    /// every parameter, in the base's parametrisation
+    /// ([`crate::offset::construction::sheets::certified_offset`]; not upstream, WR-718:
+    /// upstream fits NLib's `N_SrfOffset` and checks it at samples). The base must be a
+    /// B-spline surface. All nets are built before any face is
     /// changed; each face is then notified (`PRE_EDIT`), given the new surface's
     /// natural domain and the surface (`SmBrep::ReplaceSurface`, old surface to the
     /// deleted list, UV trim curves rebuilt) and notified again (`POST_EDIT`), in
@@ -898,7 +901,7 @@ impl OffsetExecutive {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` for a base that is not a B-spline surface; those of the approximation
+    /// `SM_ERR` for a base that is not a B-spline surface; those of `certified_offset`
     /// and of `ReplaceSurface` (`SER`). The notifications' statuses are not checked.
     pub fn replace_implicit_offsets(
         kernel: &mut Kernel,
@@ -933,28 +936,19 @@ impl OffsetExecutive {
             let Some(nurb) = crate::topology::brep::p3::with_nurb(kernel, base)? else {
                 return Err(SolidError::sm_err(OP));
             };
-            let approximation = if kernel.fixes.shell_one_construction {
-                // Not upstream (WR-718, #2350 S1): the offset certified within the
-                // tolerance at every parameter, in the base's parametrisation
-                let base_nurb = nurb.gw_nurb().ok_or_else(|| SolidError::null_pointer(OP))?;
-                let made = crate::offset::construction::sheets::certified_offset(
-                    kernel,
-                    base_nurb,
-                    offset.offset_distance(),
-                    approximation_tol_3d,
-                )?;
-                crate::nurbs::b_spline_surface::p1::BSplineSurface::from_nurb(made.surface, false)
-            } else {
-                // use NLIB function to build offset surface approximation
-                // (the cancel token polled inside, #2136 / #2372; none changes nothing)
-                nurb.approximate_offset_surface_cancellable(
-                    offset.offset_distance(),
-                    approximation_tol_3d,
-                    OffsetParamType::Inherited,
-                    crate::nurbs::srf_offset::OffsetOptions::default(),
-                    kernel.cancel_token(),
-                )?
-            };
+            // Not upstream (WR-718, #2350 S1): the offset certified within the tolerance
+            // at every parameter, in the base's parametrisation, where upstream fits
+            // NLib's `N_SrfOffset` and checks it at samples (the cancel token polled
+            // inside, #2136 / #2372)
+            let base_nurb = nurb.gw_nurb().ok_or_else(|| SolidError::null_pointer(OP))?;
+            let made = crate::offset::construction::sheets::certified_offset(
+                kernel,
+                base_nurb,
+                offset.offset_distance(),
+                approximation_tol_3d,
+            )?;
+            let approximation =
+                crate::nurbs::b_spline_surface::p1::BSplineSurface::from_nurb(made.surface, false);
             // remember face/surface pair
             fix.push((f, Surface::from(approximation)));
         }
@@ -4719,14 +4713,13 @@ mod tests {
         let mut original = Brep::new();
         let cache = BrepCache::new(crate::geom::a_object::BREP_TYPE).unwrap();
         let keys = OriginalKeys::new(&original).unwrap();
-        assert!(matches!(
-            solve_original_brep_point(&kernel, &mut original, &cache, &keys, Vec3::ZERO),
-            Err(SolidError::Upstream {
-                operation: "intersect::topology_solver::p1::TopologyObjects::brep_trees",
-                code: crate::error::SM_ERR_NULL_POINTER,
-                ..
-            })
-        ));
+        let e = solve_original_brep_point(&kernel, &mut original, &cache, &keys, Vec3::ZERO)
+            .unwrap_err();
+        assert_eq!(
+            e.operation(),
+            "intersect::topology_solver::p1::TopologyObjects::brep_trees"
+        );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
     }
 
     #[test]

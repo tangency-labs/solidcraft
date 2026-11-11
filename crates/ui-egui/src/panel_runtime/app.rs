@@ -560,6 +560,17 @@ impl AppPanelRuntime {
     fn show_production_host(&mut self, app: &mut crate::SolveApp, ui: &mut egui::Ui) -> PanelResult<()> {
         self.prepare_host_paint(&app.session, ui)?;
         app.panel_content_frame = self.host.as_ref().and_then(WorkspacePanelHost::frame).cloned();
+        app.viewport.palette_rect = app.panel_content_frame.as_ref().and_then(|frame| {
+            frame
+                .layout
+                .sections
+                .iter()
+                .find(|section| section.instance.0 == crate::sketch_palette::INSTANCE_ID)
+                .map(|section| super::workspace::egui_rect(section.outer))
+        });
+        if let Some(rect) = app.viewport.palette_rect {
+            crate::scenario::publish_rect("sketch_palette:outer", rect);
+        }
         let mut services = self.services.services();
         let host = self.host.as_mut().ok_or_else(|| error(Rule::Lifecycle, "universal panel host disabled"))?;
         let pending = self.preferences.as_ref().is_some_and(|state| state.pending.is_some());
@@ -1071,7 +1082,7 @@ impl crate::SolveApp {
         self.viewport.host_confirm = None;
         crate::ui_kit::Container::begin_host_windows(ui.ctx());
         self.viewport.host_windows = Some(Vec::new());
-        if self.session.active_sketch.is_none() {
+        if super::production::production_active(self) || self.session.active_sketch.is_none() {
             self.viewport.palette_rect = None;
         }
         // Clear stale Browser-owned metadata; the retained independent
