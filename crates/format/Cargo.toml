@@ -10,3 +10,6 @@ workspace = true
 
 [dependencies]
 serde_json = { workspace = true }
+# The container: content-addressed blobs (SHA-256) in a ZIP package.
+sha2 = { workspace = true }
+zip = { workspace = true }

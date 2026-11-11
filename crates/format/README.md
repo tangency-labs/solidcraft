@@ -1,8 +1,9 @@
 # solidcraft-format
 
-Versioned JSON file formats: what an app needs to read every file it ever wrote, and to open a
-file a newer build of it wrote. It holds no app types and depends only on `serde_json`; each app
-registers its own families of files and their versions.
+Versioned file formats: what an app needs to read every file it ever wrote, to open a file a
+newer build of it wrote without losing what it can't read, and to package a file with its binary
+payloads. It holds no app types; each app registers its own families of files and their versions,
+and keeps its own payload encodings.
 
 A file starts with `"format": "<prefix>N"`. A family's versions are, in order: the steps written
 out by hand for its first formats, then one folder per format (`v<N>/`, one file per change, each
@@ -28,6 +29,13 @@ knows the current format: all translation lives in the steps.
 | `Newer { format, reads_up_to, unknown_changes }` | How a file shows a newer build wrote it |
 | `FormatError` | This crate's refusals; the app's error takes it with `From` |
 | `build::lists(manifest, families)` | For a build script: the generated `FOLDED` and `PENDING` lists and a module per change file |
+| `newer::NewerFile` | What a file a newer build saved holds that this build doesn't read: `new(app, &newer)`, `notice`, `warnings`, `report`, `keep_section`, `keep_element`, `compare` (the file against what was read of it), `restore_into` (put it all back on saving), `mentions`, `needs_container`, and the container's unknown `parts` and `container` |
+| `newer::leave_out_unreadable`, `newer::read_around` | Leave out, and keep, the top-level sections a file can't be read with |
+| `newer::short`, `newer::looks_default` | A reader's error's first line; a value a writer leaves out |
+| `container::Writer` | A ZIP container being written: `part`, `blob` (content-addressed, `blobs/<sha256>.<ext>`), `room`/`space` for optional caches, `finish` |
+| `container::Reader` | One being read over a seekable source, its directory checked on opening: `document`, `limited_part`, `blob`, `limited_blob`, `has_part`, `part_names`, `hydrated` |
+| `container::Limits` | The app's budgets: entries, expanded size, per-part limits, Deflate level, file size |
+| `container::Compression`, `container::Thumbnail`, `container::digest`, `container::is_container` | Fast or compact payloads; a PNG picture keyed to its file; the SHA-256 name of bytes; the ZIP signature |
 
 ## Registering a family
 

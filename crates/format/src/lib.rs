@@ -14,7 +14,8 @@
 //!   them into the next `v<N>/`. [`build`] lists the folders for a build script.
 //!
 //! A file a newer build wrote says so by a number past this build's or a change name this build
-//! doesn't have ([`Family::newer`]); the app then reads what it can and keeps the rest.
+//! doesn't have ([`Family::newer`]); the app then reads what it can and keeps the rest
+//! ([`newer`]). A file is saved as JSON, or in a [`container`] with its binary payloads.
 //!
 //! Steps are JSON-level (the file's shape) and return the app's own error type; every error this
 //! crate makes is a [`FormatError`], which the app's error type takes `From`.
@@ -22,6 +23,8 @@
 use serde_json::Value;
 
 pub mod build;
+pub mod container;
+pub mod newer;
 
 /// Why a file is refused: its text says what is wrong, as the user reads it.
 #[derive(Clone, Debug, PartialEq, Eq)]
