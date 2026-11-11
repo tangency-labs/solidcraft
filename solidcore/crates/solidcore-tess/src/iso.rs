@@ -26,8 +26,10 @@ const MAX_COPIES: usize = 8;
 /// `[u0, u1] × [v0, v1]` (the record's `domain`), then `v_count` lines of constant v likewise.
 /// Each line is cut where it crosses the face's boundary (inside its outer loop, outside its
 /// holes: one polyline per run inside) and sampled from end to end with every chord within
-/// `tolerance` of the surface, as [`crate::curve_points`] samples a curve. The boundary is the
-/// mesher's, its edges' chords: a run ends on it, within the tolerance of the trim. A face the
+/// `tolerance` of the surface, as [`crate::curve_points`] samples a curve. `size` is the body's
+/// size (its box diagonal) as [`crate::plan`] takes it, so the tolerance is the plan's (never
+/// finer than a millionth of the body) and the boundary is the one the plan draws: its edges'
+/// chords, which a run ends on, within the tolerance of the trim. A face the
 /// mesher leaves out of its plan gets no lines.
 ///
 /// The polylines are display points, not geometry: points on the surface for drawing, each
@@ -44,6 +46,7 @@ pub fn isoparms(
     u_count: usize,
     v_count: usize,
     tolerance: MeshTolerance,
+    size: f64,
 ) -> Result<Vec<Vec<[f64; 3]>>> {
     if u_count > MAX_ISOPARMS || v_count > MAX_ISOPARMS {
         return Err(TessError::Invalid(format!(
@@ -54,7 +57,7 @@ pub fn isoparms(
     if u_count == 0 && v_count == 0 {
         return Ok(out);
     }
-    let (tol, turn) = tolerance.rules(0.0);
+    let (tol, turn) = tolerance.rules(size);
     let prepared = prepare(sheet, tol, turn)?;
     let rules = Rules {
         tol,
@@ -195,7 +198,7 @@ fn sample(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fixtures::fixture;
+    use crate::fixtures::{fixture, size_of};
     use solidcore_record::brep::Surface;
 
     fn sub(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
@@ -232,8 +235,8 @@ mod tests {
 
     #[test]
     fn a_boxs_lines_are_at_their_parameters_and_end_on_its_edges() {
-        let b = fixture("box_10x6x4");
-        let lines = isoparms(&b, 3, 0, MeshTolerance::chord(0.01)).unwrap();
+        let (b, size) = (fixture("box_10x6x4"), size_of("box_10x6x4"));
+        let lines = isoparms(&b, 3, 0, MeshTolerance::chord(0.01), size).unwrap();
         assert!(lines.len() >= 12, "{}", lines.len());
         for line in &lines {
             // a plane's lines are straight: one chord
@@ -263,12 +266,12 @@ mod tests {
         }
         // none asked, none drawn; too many refused
         assert!(
-            isoparms(&b, 0, 0, MeshTolerance::chord(0.01))
+            isoparms(&b, 0, 0, MeshTolerance::chord(0.01), size)
                 .unwrap()
                 .is_empty()
         );
         assert!(matches!(
-            isoparms(&b, MAX_ISOPARMS + 1, 0, MeshTolerance::chord(0.01)),
+            isoparms(&b, MAX_ISOPARMS + 1, 0, MeshTolerance::chord(0.01), size),
             Err(TessError::Invalid(_))
         ));
     }
@@ -285,9 +288,9 @@ mod tests {
 
     #[test]
     fn lines_stop_at_a_hole() {
-        let b = fixture("box_with_hole");
+        let (b, size) = (fixture("box_with_hole"), size_of("box_with_hole"));
         let tol = 0.01;
-        let lines = isoparms(&b, 7, 7, MeshTolerance::chord(tol)).unwrap();
+        let lines = isoparms(&b, 7, 7, MeshTolerance::chord(tol), size).unwrap();
         let hole = b
             .faces
             .iter()
@@ -323,14 +326,14 @@ mod tests {
 
     #[test]
     fn a_cylinders_lines_sag_within_the_tolerance() {
-        let b = fixture("cylinder_r10_h5");
+        let (b, size) = (fixture("cylinder_r10_h5"), size_of("cylinder_r10_h5"));
         let side = b
             .faces
             .iter()
             .find(|f| matches!(f.surface, Surface::Cylinder { .. }))
             .unwrap();
         for tol in [0.1, 0.01] {
-            let lines = isoparms(&b, 4, 4, MeshTolerance::chord(tol)).unwrap();
+            let lines = isoparms(&b, 4, 4, MeshTolerance::chord(tol), size).unwrap();
             let mut round = 0;
             for l in &lines {
                 let on_side = l.iter().all(|p| {
@@ -388,9 +391,9 @@ mod tests {
 
     #[test]
     fn a_whole_spheres_lines_are_one_run_each() {
-        let b = fixture("sphere_r12");
+        let (b, size) = (fixture("sphere_r12"), size_of("sphere_r12"));
         let tol = 0.01;
-        let lines = isoparms(&b, 5, 3, MeshTolerance::chord(tol)).unwrap();
+        let lines = isoparms(&b, 5, 3, MeshTolerance::chord(tol), size).unwrap();
         // one face, its boundary a seam from pole to pole: every line is one run
         assert_eq!(lines.len(), 8, "{}", lines.len());
         let on = sphere_lines(&b, &lines, tol);
@@ -415,9 +418,9 @@ mod tests {
 
     #[test]
     fn a_half_spheres_lines_stay_on_its_half() {
-        let b = fixture("smlib_half_sphere");
+        let (b, size) = (fixture("smlib_half_sphere"), size_of("smlib_half_sphere"));
         let tol = 0.01;
-        let lines = isoparms(&b, 4, 4, MeshTolerance::chord(tol)).unwrap();
+        let lines = isoparms(&b, 4, 4, MeshTolerance::chord(tol), size).unwrap();
         let on = sphere_lines(&b, &lines, tol);
         assert!(!on.is_empty());
         // every point of the sphere's lines on one side of the rim's plane z = 0
@@ -432,10 +435,44 @@ mod tests {
 
     #[test]
     fn a_pocketed_spheres_lines_lie_on_it() {
-        let b = fixture("sphere_r10_with_pocket");
+        let (b, size) = (
+            fixture("sphere_r10_with_pocket"),
+            size_of("sphere_r10_with_pocket"),
+        );
         let tol = 0.01;
-        let lines = isoparms(&b, 6, 6, MeshTolerance::chord(tol)).unwrap();
+        let lines = isoparms(&b, 6, 6, MeshTolerance::chord(tol), size).unwrap();
         let on = sphere_lines(&b, &lines, tol);
         assert!(on.len() >= 6, "{}", on.len());
+    }
+
+    #[test]
+    fn the_tolerance_is_the_plans_for_the_bodys_size() {
+        // a chord of 1e-9 on a body a million across is the plan's millionth of it: 1
+        let b = fixture("cylinder_r10_h5");
+        let fine = isoparms(&b, 0, 2, MeshTolerance::chord(1e-3), 0.0).unwrap();
+        let coarse = isoparms(&b, 0, 2, MeshTolerance::chord(1e-9), 1e6).unwrap();
+        let count = |ls: &[Vec<[f64; 3]>]| ls.iter().map(Vec::len).sum::<usize>();
+        assert!(
+            count(&coarse) < count(&fine),
+            "{} {}",
+            count(&coarse),
+            count(&fine)
+        );
+        let side = b
+            .faces
+            .iter()
+            .find(|f| matches!(f.surface, Surface::Cylinder { .. }))
+            .unwrap();
+        let on_side = |p: &[f64; 3]| {
+            let (r, radius) = radial(&side.surface, *p).unwrap();
+            (r - radius).abs() < 1e-6
+        };
+        for l in coarse.iter().filter(|l| l.iter().all(on_side)) {
+            for w in l.windows(2) {
+                let m = [0, 1, 2].map(|i| (w[0][i] + w[1][i]) / 2.0);
+                let (r, radius) = radial(&side.surface, m).unwrap();
+                assert!(radius - r <= 1.0001, "sag {}", radius - r);
+            }
+        }
     }
 }
