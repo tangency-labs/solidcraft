@@ -1875,8 +1875,8 @@ mod tests {
         }
         let saved = saved_geometry(&s, &s.doc).unwrap();
         let records = &saved.records;
-        // Every sheet here is made from surfaces: the flat model's list stays empty.
-        assert_eq!(records["sheets"].as_array().map(Vec::len), Some(0), "no record in the flat model's list");
+        // Every sheet is made from surfaces: the records keep no list of the flat model's sheets.
+        assert!(records.get("sheets").is_none(), "no list of the flat model's sheets");
         let sheets = records["surface_sheets"].as_array().unwrap();
         let texts: std::collections::HashSet<String> = sheets.iter().map(Value::to_string).collect();
         assert_eq!(texts.len(), sheets.len(), "each sheet once");
@@ -2211,6 +2211,30 @@ mod tests {
         let last = hostile.records["states"].as_array().unwrap().len() - 1;
         hostile.records["states"][last]["surface_sheets"] = Value::Array(vec![json!(0); 4000]);
         assert!(solidcraft_doc::Model::adopt(&s.doc, &hostile).is_err());
+    }
+
+    /// A saved model whose state holds a sheet of the flat model (one saved before every sheet was
+    /// made from surfaces) is stale: it is refused, and the design is evaluated again. Empty flat
+    /// lists, as such a model wrote for every state that held none, read back.
+    #[test]
+    fn a_saved_model_holding_a_flat_sheet_is_refused() {
+        let mut s = Session::new(Document::new("Sheet"));
+        let rule = json!({"name": "AL2", "thickness": "2 mm", "k_factor": "0.5", "bend_radius": "1 mm", "active": true});
+        s.execute("sheet.manage_rules", &rule).unwrap();
+        s.execute("sketch.create", &json!({"plane": "XY", "name": "Base"})).unwrap();
+        s.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [150, 100]})).unwrap();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        s.execute("sheet.flange", &json!({"sketch": "Base"})).unwrap();
+        let saved = saved_geometry(&s, &s.doc).unwrap();
+        let last = saved.records["states"].as_array().unwrap().len() - 1;
+        let mut empty = solidcraft_doc::SavedModel { records: saved.records.clone(), bodies: saved.bodies.clone() };
+        empty.records["sheets"] = json!([]);
+        empty.records["states"][last]["sheets"] = json!([]);
+        assert!(solidcraft_doc::Model::adopt(&s.doc, &empty).is_ok());
+        let mut flat = empty;
+        flat.records["sheets"] = json!([{}]);
+        flat.records["states"][last]["sheets"] = json!([0]);
+        assert!(solidcraft_doc::Model::adopt(&s.doc, &flat).is_err());
     }
 
     #[test]

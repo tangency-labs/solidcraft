@@ -51,7 +51,7 @@ fn state(name: &str, st: &Arc<ModelState>) -> Value {
     json!({
         "bodies": st.bodies.iter().map(|b| body(name, b)).collect::<Vec<_>>(),
         "sketches": st.sketches.iter().map(|s| json!([s.feature, s.name, s.plane, s.sketch, s.report, s.profiles.len()])).collect::<Vec<_>>(),
-        "counter": st.body_counter, "sheets": st.sheets, "threads": st.threads, "construct": format!("{:?}", st.construct),
+        "counter": st.body_counter, "sheets": st.surface_sheets, "threads": st.threads, "construct": format!("{:?}", st.construct),
     })
 }
 

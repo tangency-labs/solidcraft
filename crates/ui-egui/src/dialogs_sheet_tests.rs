@@ -1324,9 +1324,10 @@ fn flat_circles(app: &mut SolveApp, dialog: &Dialog, rect: Rect) -> Vec<egui::ep
 #[test]
 fn flat_perforations_match_export_centres_and_cutout_style() {
     let (mut app, dialog) = perforated_flat();
+    // The centres the DXF exports (`surface_dxf`): the sheet's flat as it is read.
     let state = crate::open_meshing::session_world(&app.session);
-    let sheet = state.sheets.last().unwrap();
-    let holes = sheet.perforation_holes(&sheet.perforations[0]).unwrap();
+    let sheet = state.surface_sheets.last().unwrap().shown();
+    let holes = sheet.perforation_holes(&sheet.perforations[0]);
     let rect = Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 900.0));
     let circles = flat_circles(&mut app, &dialog, rect);
     assert_eq!(circles.len(), holes.len());
@@ -1347,8 +1348,8 @@ fn flat_perforations_match_export_centres_and_cutout_style() {
     assert_eq!(app.flat_view.perforations.as_ptr(), cached, "navigation reuses the centres");
     app.run("sheet.perforate", json!({"diameter": 2, "pitch": 10})).unwrap();
     let state = crate::open_meshing::session_world(&app.session);
-    let sheet = state.sheets.last().unwrap();
-    let expected: usize = sheet.perforations.iter().map(|p| sheet.perforation_holes(p).unwrap().len()).sum();
+    let sheet = state.surface_sheets.last().unwrap().shown();
+    let expected: usize = sheet.perforations.iter().map(|p| sheet.perforation_holes(p).len()).sum();
     assert!(expected > 155);
     assert_eq!(flat_circles(&mut app, &dialog, rect).len(), expected, "model changes refresh the centres");
 }

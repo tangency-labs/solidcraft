@@ -652,7 +652,7 @@ pub fn start_export(app: &mut SolveApp, id: &str) -> bool {
         _ => return false,
     };
     let state = app.session.model.state();
-    let last = state.surface_sheets.last().map(|sheet| sheet.body.clone()).or_else(|| state.sheets.last().map(|sheet| sheet.body.clone()));
+    let last = state.surface_sheets.last().map(|sheet| sheet.body.clone());
     drop(state);
     if let Some(body) = last {
         export_flat(app, &body, extension);
@@ -1479,24 +1479,10 @@ impl FlatView {
         self.perforations.clear();
         // Bound overlay storage and drawing work, including designs with many fields.
         const MAX_HOLES: usize = 1_000_000;
-        if let Some(sk) = state.surface_sheets.iter().find(|sk| sk.body == body).map(|sk| sk.shown()) {
-            for field in sk.perforations.iter().filter(|f| f.diameter.is_finite() && f.diameter > 0.0) {
-                let remaining = MAX_HOLES.saturating_sub(self.perforations.len());
-                self.perforations.extend(sk.perforation_holes(field).into_iter().take(remaining).map(|centre| (centre, field.diameter / 2.0)));
-            }
-            return;
-        }
-        let Some(sheet) = state.sheets.iter().find(|sheet| sheet.body == body) else { return };
-        for field in &sheet.perforations {
-            if self.perforations.len() >= MAX_HOLES {
-                break;
-            }
-            if !field.diameter.is_finite() || field.diameter <= 0.0 {
-                continue;
-            }
-            let Ok(centres) = sheet.perforation_holes(field) else { continue };
+        let Some(sk) = state.surface_sheets.iter().find(|sk| sk.body == body).map(|sk| sk.shown()) else { return };
+        for field in sk.perforations.iter().filter(|f| f.diameter.is_finite() && f.diameter > 0.0) {
             let remaining = MAX_HOLES.saturating_sub(self.perforations.len());
-            self.perforations.extend(centres.into_iter().take(remaining).map(|centre| (centre, field.diameter / 2.0)));
+            self.perforations.extend(sk.perforation_holes(field).into_iter().take(remaining).map(|centre| (centre, field.diameter / 2.0)));
         }
     }
 

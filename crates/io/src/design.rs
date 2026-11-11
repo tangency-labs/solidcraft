@@ -1548,7 +1548,7 @@ mod tests {
             .map(|i| {
                 let bodies = if i == 0 { json!([[0, 16]]) } else { json!([[0, 8], [8 * (i + 1), 8]]) };
                 json!({
-                    "bodies": bodies, "sketches": [], "body_counter": 7, "sheets": [], "construct": [], "threads": [],
+                    "bodies": bodies, "sketches": [], "body_counter": 7, "construct": [], "threads": [],
                     "sketch_key_set": 0, "blend_edges": {}, "fitted": {}, "tapered": {},
                 })
             })
@@ -1561,7 +1561,7 @@ mod tests {
         solidcraft_doc::SavedModel {
             records: json!({
                 "features": features, "states": states, "model_bodies": records, "names": [{"faces": [], "info": []}], "sketches": [],
-                "sheets": [], "threads": [], "validation": "each_feature", "rounds": [], "sketch_key_sets": [{"set": [], "drop": []}],
+                "threads": [], "validation": "each_feature", "rounds": [], "sketch_key_sets": [{"set": [], "drop": []}],
             }),
             bodies,
         }
@@ -1612,7 +1612,7 @@ mod tests {
             assert_eq!(
                 one.records["states"],
                 json!([{
-                    "bodies": [[0, 16]], "sketches": [], "body_counter": 7, "sheets": [], "construct": [], "threads": [],
+                    "bodies": [[0, 16]], "sketches": [], "body_counter": 7, "construct": [], "threads": [],
                     "sketch_key_set": 0, "blend_edges": {}, "fitted": {}, "tapered": {},
                 }])
             );

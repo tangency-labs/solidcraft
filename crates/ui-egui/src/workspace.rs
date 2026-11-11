@@ -607,8 +607,7 @@ fn active_body<'a>(app: &'a crate::SolveApp, state: &'a solidcraft_engine::doc::
 pub fn sheet_body(app: &crate::SolveApp) -> Option<String> {
     let state = app.session.model.state();
     let body = active_body(app, &state)?;
-    let sheet = state.sheets.iter().any(|s| s.body == body) || state.surface_sheets.iter().any(|s| s.body == body);
-    sheet.then(|| body.to_string())
+    state.surface_sheets.iter().any(|s| s.body == body).then(|| body.to_string())
 }
 
 /// The active body when a Frame Member feature made it.

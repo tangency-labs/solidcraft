@@ -100,7 +100,6 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
         by_component.entry(doc.model_body_component(body)).or_default().push(body);
     }
     let mut chosen = None;
-    let mut sheet_face: Option<(String, Plane)> = None;
     let mut work = state.bodies.len().saturating_add(doc.occurrences.len());
     for (component, path, placement) in placements {
         let Some(bodies) = by_component.get(&component) else {
@@ -126,22 +125,9 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
             let inverse = mat_inverse(&frame).ok_or_else(|| bad(cmd, "invalid selected face frame"))?;
             let local_point = apply_point(&inverse, point);
             let tolerance = (body.body.size() * 1e-4).max(1e-5);
-            // A flat face of a flat-model sheet metal body attaches to its panel (or a panel's
-            // rim): the exact plane comes from the panel's flat region and fold, and the sketch
-            // keeps the face's name to follow it. A sheet made from surfaces attaches as every
-            // body does, by the model's name for the face, in the frame the sheet gives it (see
+            // A face of a sheet metal body attaches as every body's does, by the model's name for
+            // the face, in the frame the sheet gives it (a panel's: its flat pattern's, see
             // `ModelBody::sketch_frame`).
-            let on_sheet = || state.sheets.iter().find(|sheet| sheet.body == body.name)?.panel_face_at(local_point, tolerance * 10.0);
-            if !fixed && let Some((face, plane)) = on_sheet() {
-                if chosen.is_some() || sheet_face.is_some() {
-                    return Err(bad(cmd, "face point is ambiguous; pick an exact body and face index"));
-                }
-                let relative = mat_mul(&author_inverse, &frame);
-                let plane = Plane::new(apply_point(&relative, plane.origin), apply_vector(&relative, plane.x), apply_vector(&relative, plane.y))
-                    .ok_or_else(|| bad(cmd, "invalid sheet face plane"))?;
-                sheet_face = Some((solidcraft_doc::sheet::sheet_face_name(&body.name, &face), plane));
-                continue;
-            }
             let faces = body.body.faces(tolerance)?;
             let mesh = body.body.mesh(&solidcraft_kernel::MeshTolerance::chord(tolerance))?;
             // The triangles are grouped by face once, and a face's test reads only its own: the
@@ -185,12 +171,6 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
                 chosen = Some((body, face.index, path.clone(), picked));
             }
         }
-    }
-    if let Some((name, plane)) = sheet_face {
-        if chosen.is_some() {
-            return Err(bad(cmd, "face point is ambiguous; pick an exact body and face index"));
-        }
-        return Ok(PlaneRef::Face { plane, at: apply_point(&author_inverse, point), name: Some(name), anchor: None });
     }
     let (body, index, path, plane) =
         chosen.ok_or_else(|| bad(cmd, "the selected planar face no longer exists; choose another face or an explicit fixed plane"))?;

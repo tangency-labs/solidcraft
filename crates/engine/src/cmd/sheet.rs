@@ -4,7 +4,7 @@
 use serde_json::{Value, json};
 use solidcore_record::{Vec2, Vec3};
 use solidcraft_doc::expr::Kind;
-use solidcraft_doc::sheet::{self, SheetBody, SheetRule};
+use solidcraft_doc::sheet::{self, SheetRule};
 use solidcraft_doc::{BodyName, SketchId};
 use solidcraft_doc::{FacePick, Position};
 use solidcraft_doc::{FeatureKind, FlangeEdge};
@@ -237,23 +237,17 @@ pub(crate) fn then_list(v: Option<&Value>) -> std::result::Result<Vec<ThenStep>,
     Ok(out)
 }
 
-/// Where to pick the far edges of the flanges feature `id` made: a point on each, for the flanges
-/// of the next bend of a chain.
 /// How many panels each sheet made from surfaces has: what a feature added is past them.
 fn surface_panel_counts(s: &Session) -> std::collections::BTreeMap<String, usize> {
     s.model.state().surface_sheets.iter().map(|sk| (sk.body.clone(), sk.sheet.panels.len())).collect()
 }
 
-fn far_edge_picks(s: &Session, id: u64, before: &std::collections::BTreeMap<String, usize>, cmd: &str) -> Result<Vec<FlangeEdge>> {
-    let prefix = format!("F{id}.");
+/// Where to pick the far edges of the flanges the last feature made: a point on each, for the
+/// flanges of the next bend of a chain. They are the far edges of the flange panels it added to
+/// each sheet (#6748), past the panels `before` counts.
+fn far_edge_picks(s: &Session, before: &std::collections::BTreeMap<String, usize>, cmd: &str) -> Result<Vec<FlangeEdge>> {
     let st = s.model.state();
-    let mut picks: Vec<FlangeEdge> = st
-        .sheets
-        .iter()
-        .flat_map(|sh| sh.flanges.iter().enumerate().filter(|(_, f)| f.tag.starts_with(&prefix)).filter_map(|(i, _)| sh.far_edge_pick(i)))
-        .map(FlangeEdge::at)
-        .collect();
-    // On a sheet made from surfaces (#6748): the far edge of each flange panel the feature added.
+    let mut picks: Vec<FlangeEdge> = Vec::new();
     for sk in &st.surface_sheets {
         let from = before.get(&sk.body).copied().unwrap_or(sk.sheet.panels.len());
         picks.extend((from..sk.sheet.panels.len()).filter_map(|p| sk.far_edge_point(p)).map(FlangeEdge::at));
@@ -401,7 +395,7 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                 None => sheet::HeightFrom::Outer,
             };
             let height_from = (height_from != sheet::HeightFrom::Outer).then(|| height_from.name().to_string());
-            if s.model.state().sheets.is_empty() && s.model.state().surface_sheets.is_empty() {
+            if s.model.state().surface_sheets.is_empty() {
                 return Err(no_sheet_body(cmd));
             }
             let body = str_(p, "body").map(str::to_string);
@@ -439,8 +433,7 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
             )?;
             // Each further bend stands on the far edge of the flange before it.
             for (angle, height, own_flip) in then {
-                let id = made.get("feature").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "no feature to bend again"))?;
-                let edges = far_edge_picks(s, id, &before, cmd)?;
+                let edges = far_edge_picks(s, &before, cmd)?;
                 before = surface_panel_counts(s);
                 made = add_feature(
                     s,
@@ -920,14 +913,13 @@ fn no_sheet_body(cmd: &str) -> EngineError {
     bad(cmd, "there is no sheet metal body: start one with Flange > Base, or turn a body into sheet metal with Convert to Sheet Metal")
 }
 
-/// The flat of a converted body (#6748): the named body's, or with none named
-/// and no sheet metal body, the last one converted.
-fn surfaces_of(s: &Session, p: &Value) -> Option<solidcraft_doc::SurfaceSheet> {
+/// The sheet (#6748) whose flat a command reads: the named body's, or with none named, the last
+/// sheet metal body. A named body that is no sheet is refused, and so is a design with none.
+fn surfaces_of(s: &Session, p: &Value, cmd: &str) -> Result<solidcraft_doc::SurfaceSheet> {
     let st = s.model.state();
     match str_(p, "body") {
-        Some(b) => st.surface_sheets.iter().find(|x| x.body == b).cloned(),
-        None if st.sheets.is_empty() => st.surface_sheets.last().cloned(),
-        None => None,
+        Some(b) => st.surface_sheets.iter().find(|x| x.body == b).cloned().ok_or_else(|| bad(cmd, format!("`{b}` is not a sheet metal body"))),
+        None => st.surface_sheets.last().cloned().ok_or_else(|| no_sheet_body(cmd)),
     }
 }
 
@@ -1006,14 +998,6 @@ fn surface_flat_json(sk: &solidcraft_doc::SurfaceSheet) -> Value {
     out
 }
 
-fn sheet_of(s: &Session, p: &Value, cmd: &str) -> Result<SheetBody> {
-    let st = s.model.state();
-    match str_(p, "body") {
-        Some(b) => st.sheets.iter().find(|x| x.body == b).cloned().ok_or_else(|| bad(cmd, format!("`{b}` is not a sheet metal body"))),
-        None => st.sheets.last().cloned().ok_or_else(|| no_sheet_body(cmd)),
-    }
-}
-
 /// The centre and radius of a loop that is one whole circle (often two semicircles).
 fn loop_circle(lp: &solidcore_record::Loop2) -> Option<(Vec2, f64)> {
     use solidcore_record::Seg2;
@@ -1047,62 +1031,10 @@ fn loop_shape(lp: &solidcore_record::Loop2) -> Value {
     json!({"segments": segments})
 }
 
-fn flat_json(sh: &SheetBody) -> Result<Value> {
-    let regions = sh.flat_regions()?;
-    let loops: Vec<Ring<Vec2>> = regions.iter().map(|r| r.outer.polyline(1e-3)).collect();
-    let size = loops.iter().fold(Aabb2::EMPTY, |b, l| b.union(&l.bounds())).size();
-    let (w, h) = (size.x, size.y);
-    let pt = |v: &Vec2| json!([v.x, v.y]);
-    let outline: Vec<Value> = loops.iter().map(|l| Value::Array(l.iter().map(pt).collect())).collect();
-    let holes: Vec<Value> = regions.iter().flat_map(|r| &r.holes).map(|h| Value::Array(h.polyline(1e-3).iter().map(pt).collect())).collect();
-    let hole_shapes: Vec<Value> = regions.iter().flat_map(|r| &r.holes).map(loop_shape).collect();
-    let bends: Vec<Value> = sh
-        .bends()
-        .iter()
-        .map(|b| {
-            json!({"bend": b.index, "angle_deg": b.angle_deg, "included_angle_deg": b.included_angle_deg(), "radius": b.radius, "direction": if b.up { "up" } else { "down" },
-                "allowance": b.allowance, "length": b.length, "start": pt(&b.start), "end": pt(&b.end)})
-        })
-        .collect();
-    let pockets: Vec<Value> = sh.machining()?.iter().map(|p| pocket_json(p, sh.t)).collect();
-    // Holes drilled along a panel into its rim: drilled after cutting, not in the outline.
-    let bores: Vec<Value> = sh
-        .bores
-        .iter()
-        .map(|b| json!({"start": [b.base.x, b.base.y, b.base.z], "axis": [b.axis.x, b.axis.y, b.axis.z], "diameter": b.radius * 2.0, "length": b.height.abs()}))
-        .collect();
-    let mut perforations = Vec::new();
-    for p in &sh.perforations {
-        let n = sh.perforation_holes(p)?.len();
-        perforations.push(json!({"feature": p.feature, "diameter": p.diameter, "pitch": p.pitch, "margin": p.margin,
-            "pattern": if p.square { "square" } else { "staggered" }, "count": n,
-            "open_area_mm2": n as f64 * std::f64::consts::PI * (p.diameter / 2.0).powi(2)}));
-    }
-    let bend_zones: Vec<Value> = sh
-        .bend_zones()
-        .iter()
-        .map(|z| {
-            let pts = z.outer.polyline(1e-3);
-            let f = |g: fn(&Vec2) -> f64, m: fn(f64, f64) -> f64, s: f64| pts.iter().map(g).fold(s, m);
-            json!([f(|p| p.x, f64::min, f64::MAX), f(|p| p.x, f64::max, f64::MIN), f(|p| p.y, f64::min, f64::MAX), f(|p| p.y, f64::max, f64::MIN)])
-        })
-        .collect();
-    let mut out = json!({"body": sh.body, "rule": sh.rule, "thickness": sh.t, "k_factor": sh.k, "flat_size_mm": [w, h, sh.t], "outline": outline, "cutouts": holes, "cutout_shapes": hole_shapes, "pockets": pockets, "bends": bends, "unfolded": sh.flat,
-        "perforations": perforations, "bend_zones": bend_zones});
-    if !bores.is_empty() {
-        out["bores"] = Value::Array(bores);
-    }
-    Ok(out)
-}
-
 fn flat_pattern(s: &mut Session, p: &Value) -> Result<Value> {
-    if let Some(converted) = surfaces_of(s, p) {
-        converted.flat_matches_body()?;
-        return Ok(surface_flat_json(&converted));
-    }
-    let sh = sheet_of(s, p, "sheet.flat_pattern")?;
-    sh.flat_matches_body()?;
-    flat_json(&sh)
+    let sk = surfaces_of(s, p, "sheet.flat_pattern")?;
+    sk.flat_matches_body()?;
+    Ok(surface_flat_json(&sk))
 }
 
 /// How the flat DXF writes the curves that are neither lines nor circular arcs.
@@ -1182,34 +1114,12 @@ fn bend_note(b: &solidcraft_doc::sheet::BendInfo, height: f64, display: sheet::A
     }
 }
 
-/// A DXF (AutoCAD 2000, mm) of the flat pattern on layers by role: OUTLINE (the outer contour of
-/// each piece), CUT (what is cut out inside it, and the loose pieces of a cut), TEXT or ETCH
-/// (letters), BEND_UP and BEND_DOWN (dashed centre lines), BEND_NOTES (when asked for), one layer
-/// per pocket depth and PERFORATION. Inner contours are written before the outline, so a program
-/// that follows the file's order cuts inside-out. Free-form curves as `o.curves` says.
-pub fn flat_dxf(sh: &SheetBody, o: &DxfOptions) -> Result<String> {
-    let perforation: Vec<(Vec2, f64)> = sh
-        .perforations
-        .iter()
-        .map(|p| sh.perforation_holes(p).map(|h| h.into_iter().map(|c| (c, p.diameter / 2.0)).collect::<Vec<_>>()))
-        .collect::<std::result::Result<Vec<_>, _>>()?
-        .into_iter()
-        .flatten()
-        .collect();
-    let drawing = FlatDrawing {
-        regions: sh.flat_regions()?,
-        pockets: sh.machining()?,
-        letters: sh.letters(),
-        perforation,
-        bends: sh.bends(),
-        rolls: Vec::new(),
-        display: sh.angle_display,
-        thickness: sh.t,
-    };
-    drawing.dxf(o)
-}
-
-/// The DXF of a sheet made from surfaces (#6748): its flat and its bends.
+/// A DXF (AutoCAD 2000, mm) of a sheet's flat pattern (#6748) on layers by role: OUTLINE (the
+/// outer contour of each piece), CUT (what is cut out inside it, and the loose pieces of a cut),
+/// TEXT or ETCH (letters), BEND_UP and BEND_DOWN (dashed centre lines), BEND_NOTES (when asked
+/// for), one layer per pocket depth, PERFORATION and ROLL. Inner contours are written before the
+/// outline, so a program that follows the file's order cuts inside-out. Free-form curves as
+/// `o.curves` says.
 fn surface_dxf(s: &Session, sk: &solidcraft_doc::SurfaceSheet, o: &DxfOptions) -> Result<String> {
     let sk = &sk.shown();
     let rule = s.doc.sheet_rule(Some(&sk.rule));
@@ -1437,15 +1347,11 @@ fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, "`per_body` writes every sheet body: leave `body` out"));
         }
         let st = s.model.state();
-        if st.sheets.is_empty() && st.surface_sheets.is_empty() {
+        if st.surface_sheets.is_empty() {
             return Err(no_sheet_body(cmd));
         }
         // Every file is made before the first is written: (body, text, bends).
         let mut made: Vec<(String, String, usize)> = Vec::new();
-        for sh in &st.sheets {
-            sh.flat_matches_body()?;
-            made.push((sh.body.clone(), flat_dxf(sh, &options)?, sh.bends().len()));
-        }
         for sk in &st.surface_sheets {
             sk.flat_matches_body()?;
             made.push((sk.body.clone(), surface_dxf(s, sk, &options)?, sk.bends.len()));
@@ -1462,23 +1368,14 @@ fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
         }
         return Ok(json!({"files": files}));
     }
-    if let Some(sk) = surfaces_of(s, p) {
-        sk.flat_matches_body()?;
-        let text = surface_dxf(s, &sk, &options)?;
-        if let Some(path) = path {
-            solidcraft_io::vfs::write(path, text.as_bytes()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-            return Ok(json!({"path": path, "bends": sk.bends.len()}));
-        }
-        return Ok(json!({"dxf": text, "bends": sk.bends.len()}));
-    }
-    let sh = sheet_of(s, p, cmd)?;
-    sh.flat_matches_body()?;
-    let text = flat_dxf(&sh, &options)?;
+    let sk = surfaces_of(s, p, cmd)?;
+    sk.flat_matches_body()?;
+    let text = surface_dxf(s, &sk, &options)?;
     if let Some(path) = path {
         solidcraft_io::vfs::write(path, text.as_bytes()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-        return Ok(json!({"path": path, "bends": sh.bends().len()}));
+        return Ok(json!({"path": path, "bends": sk.bends.len()}));
     }
-    Ok(json!({"dxf": text, "bends": sh.bends().len()}))
+    Ok(json!({"dxf": text, "bends": sk.bends.len()}))
 }
 
 fn export_bend_table(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1487,19 +1384,11 @@ fn export_bend_table(s: &mut Session, p: &Value) -> Result<Value> {
     if !matches!(format.as_str(), "csv" | "json") {
         return Err(bad(cmd, "`format` must be csv or json"));
     }
-    let (body, rule, t, k, bends, table) = match surfaces_of(s, p) {
-        Some(sk) => {
-            sk.flat_matches_body()?;
-            (sk.body.clone(), sk.rule.clone(), sk.thickness, sk.k_factor, sk.shown().bend_infos(), surface_flat_json(&sk))
-        }
-        None => {
-            let sh = sheet_of(s, p, cmd)?;
-            sh.flat_matches_body()?;
-            (sh.body.clone(), sh.rule.clone(), sh.t, sh.k, sh.bends(), flat_json(&sh)?)
-        }
-    };
+    let sk = surfaces_of(s, p, cmd)?;
+    sk.flat_matches_body()?;
+    let bends = sk.shown().bend_infos();
     let text = if format == "json" {
-        serde_json::to_string_pretty(&table).map_err(|e| EngineError::Other(e.to_string()))?
+        serde_json::to_string_pretty(&surface_flat_json(&sk)).map_err(|e| EngineError::Other(e.to_string()))?
     } else {
         // Always quote text fields: body/rule names may include commas, quotes or newlines.
         let quote = |s: &str| format!("\"{}\"", s.replace('"', "\"\""));
@@ -1509,10 +1398,10 @@ fn export_bend_table(s: &mut Session, p: &Value) -> Result<Value> {
         for b in &bends {
             csv.push_str(&format!(
                 "{},{},{:.9},{:.9},{},{:.9},{},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9},{:.9}\r\n",
-                quote(&body),
-                quote(&rule),
-                t,
-                k,
+                quote(&sk.body),
+                quote(&sk.rule),
+                sk.thickness,
+                sk.k_factor,
                 b.index,
                 b.angle_deg,
                 if b.up { "up" } else { "down" },

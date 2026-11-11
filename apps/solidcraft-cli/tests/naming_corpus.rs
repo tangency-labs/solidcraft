@@ -226,16 +226,22 @@ fn record_refs(out: &mut Vec<(String, bool)>, s: &Session, f: &Feature) {
                 }
                 None => out.push((format!("{who} bends: body `{body}` gone"), false)),
             },
-            // Sheet metal edges are named by the sheet's panels, and found on its sheets.
+            // Sheet metal edges are named as every body's edges are, by the model's name
+            // (`<face A>|<face B>`, #7990). A name is found on a sheet when the edge it finds on
+            // the sheet's body is a free edge of the sheet, as the feature finds it.
             FeatureKind::SheetFlange { .. } | FeatureKind::SheetHem { .. } => {
                 let pts: Vec<Vec3> = match &f.kind {
                     FeatureKind::SheetFlange { edges, .. } => edges.iter().map(|e| e.point.0).collect(),
                     FeatureKind::SheetHem { edges, .. } => solidcraft_engine::doc::plain(edges),
                     _ => Vec::new(),
                 };
+                let finds = |sh: &solidcraft_engine::doc::SurfaceSheet, n: &str, p: Vec3| {
+                    let hit = before.body(&sh.body).and_then(|b| naming::locate_edge(b, n, p).ok());
+                    hit.is_some_and(|hit| matches!(sh.free_edge_at(hit.point), Ok(Some(_))))
+                };
                 for (k, p) in pts.iter().enumerate() {
                     let Some(n) = named(k) else { continue };
-                    let on: Vec<&str> = before.sheets.iter().filter(|sh| sh.edge_by_name(n, *p).is_some()).map(|sh| sh.body.as_str()).collect();
+                    let on: Vec<&str> = before.surface_sheets.iter().filter(|sh| finds(sh, n.as_str(), *p)).map(|sh| sh.body.as_str()).collect();
                     let found = if on.is_empty() { "gone".to_string() } else { format!("sheet edge on {}", on.join(", ")) };
                     out.push((format!("{who} sheet edge {k} `{n}` -> {found}"), !on.is_empty()));
                 }
