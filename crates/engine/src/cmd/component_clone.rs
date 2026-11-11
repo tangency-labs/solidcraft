@@ -682,6 +682,12 @@ pub(super) fn build(
                 }
             }
         }
+        // A turn rotates a member it does not copy.
+        if let FeatureKind::FrameMemberTurn { member, .. } = &feature.kind
+            && !features.contains_key(&member.feature.0)
+        {
+            notices.push(format!("{} retains external feature reference {}", feature.name, member.feature));
+        }
         for id in feature.kind.input_sketches() {
             if !features.contains_key(&id) {
                 notices.push(format!("{} retains an external sketch reference to {id}", feature.name));
