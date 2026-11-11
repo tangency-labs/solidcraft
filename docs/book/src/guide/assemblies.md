@@ -543,13 +543,16 @@ More about flexible occurrences:
   mirror, pattern or copy one of its bodies, while its pose differs from the saved pose. Other
   picks on it, such as a face for a construction plane, are read at the saved pose. Make the
   occurrence rigid before you pick there.
-- **A flexible occurrence inside the linked design.** It shows here in the pose that the
-  linked design was saved with. Its joints are not carried, so it does not move here.
+- **Levels.** A flexible occurrence also has the joints that its linked design has for the
+  flexible occurrences inside it, at every level. Each of those has its own pose here too. For
+  example, a machine with two units of two hinges each can have its four hinges at four
+  angles. A rigid occurrence on the way shows everything below it in the saved pose. To move
+  a mechanism two levels down, make each level flexible: the lower levels in their linked
+  designs, and the top level here.
 - **Not carried.** A cam of the linked design is not carried, so its follower does not move.
-- **Not shown.** The Motion Study dialog does not show the motion of a flexible occurrence's
-  components, in its slider or in its **Play**. `motion.play` and exported animations show it.
-  An exploded view moves whole occurrences only. URDF export writes the pose that is shown,
-  without the joints of the linked design.
+- **Whole occurrences.** An exploded view moves a linked subassembly as one occurrence, rigid
+  or flexible. It has no steps for the components inside it. URDF export writes the pose that
+  is shown, without the joints of the linked design.
 - **Break Link** makes every occurrence rigid first.
 
 **Keep Its Components** changes a link that puts all bodies into the one linked component. A

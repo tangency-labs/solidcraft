@@ -1272,3 +1272,190 @@ fn relinking_one_occurrence_keeps_a_joint_to_a_component_inside_it_in_place() {
     assert_eq!(s.doc.assembly.joints.iter().filter(|j| j.a.occurrence == second && j.b.occurrence == second).count(), 0);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `unit.sc`: two hinges, `hinge:1` at the origin and `hinge:2` 100 mm along Y, both flexible
+/// and both held still by the unit's design (grounded), saved with their arms at 0.
+fn save_unit_of_hinges(dir: &Path) -> PathBuf {
+    let hinge = save_hinge(dir);
+    let unit = dir.join("unit2.sc");
+    let mut s = Session::default();
+    run(&mut s, "component.insert_design", json!({"path": hinge, "flexible": true}));
+    let second = run(&mut s, "component.insert_design", json!({"path": hinge, "reuse": true, "translate": [0, 100, 0], "flexible": true}));
+    run(&mut s, "occurrence.ground", json!({"occurrence": second["occurrence"], "grounded": true}));
+    run(&mut s, "file.save", json!({"path": unit}));
+    unit
+}
+
+/// The boxes of a unit of two hinges whose arms stand at `first` and `second` quarter turns
+/// (1 up, -1 down, 0 as saved), moved by `at` mm: the base (0, 0, 0)..(40, 20, 5) and the arm
+/// (0, 8, 5)..(30, 12, 9), which a quarter turn about Z through (0, 10) puts at
+/// (-2, 10, 5)..(2, 40, 9) and a quarter turn back at (-2, -20, 5)..(2, 10, 9); the second hinge
+/// 100 mm along Y.
+fn unit_boxes(first: i64, second: i64, at: [i64; 3]) -> Vec<[i64; 6]> {
+    let arm = |turn: i64| match turn {
+        1 => [-2, 10, 5, 2, 40, 9],
+        -1 => [-2, -20, 5, 2, 10, 9],
+        _ => [0, 8, 5, 30, 12, 9],
+    };
+    let base = [0, 0, 0, 40, 20, 5];
+    let one = shifted(&mm(&[base, arm(first)]), at);
+    let two = shifted(&mm(&[base, arm(second)]), [at[0], at[1] + 100, at[2]]);
+    together(one, two)
+}
+
+/// A flexible occurrence has the joints of the flexible occurrences inside its linked design
+/// too (#1516): a machine with two units of two hinges each drives all four hinges, each to
+/// its own angle, and a rigid unit shows the unit as it was saved.
+#[test]
+fn a_flexible_occurrence_carries_the_joints_of_the_flexible_occurrences_inside_it() {
+    let dir = scratch("cascade");
+    let unit = save_unit_of_hinges(&dir);
+    let mut s = Session::default();
+    let inserted = run(&mut s, "component.insert_design", json!({"path": unit, "flexible": true}));
+    assert_eq!(inserted["joints"], 2, "the unit has a joint for each of its hinges: {inserted}");
+    let top = inserted["component"].as_u64().unwrap();
+    let again = run(&mut s, "component.insert_design", json!({"path": unit, "reuse": true, "translate": [0, 0, 100], "flexible": true}));
+    let second = again["occurrence"].as_u64().unwrap();
+    run(&mut s, "occurrence.ground", json!({"occurrence": second, "grounded": true}));
+    let names: Vec<String> = s.doc.assembly.joints.iter().map(|j| j.name.clone()).collect();
+    assert_eq!(names, ["Hinge", "hinge:2: Hinge", "unit2:2: Hinge", "unit2:2: hinge:2: Hinge"]);
+    // As saved: every arm at 0.
+    assert_eq!(boxes(&s), together(unit_boxes(0, 0, [0, 0, 0]), unit_boxes(0, 0, [0, 0, 100])));
+    // Each of the four hinges to its own angle.
+    for (joint, value) in [("Hinge", 90), ("hinge:2: Hinge", -90), ("unit2:2: Hinge", -90), ("unit2:2: hinge:2: Hinge", 90)] {
+        let driven = run(&mut s, "joint.drive", json!({"joint": joint, "value": value}));
+        assert_eq!(driven["moved"], true, "{joint}: {driven}");
+    }
+    let posed = together(unit_boxes(1, -1, [0, 0, 0]), unit_boxes(-1, 1, [0, 0, 100]));
+    assert_eq!(boxes(&s), posed);
+    // The two arms of one unit are copies of one inner occurrence, each under its own hinge.
+    // The machine's own four poses, and the two the unit was saved with (kept for a rigid unit).
+    let under = |n: usize| s.doc.assembly.poses.iter().filter(|p| p.through.len() == n).count();
+    assert_eq!((under(1), under(0)), (4, 2), "{:?}", s.doc.assembly.poses);
+    // Saved, opened again and written as a STEP assembly, it stands the same.
+    let machine = dir.join("machine.sc");
+    run(&mut s, "file.save", json!({"path": machine}));
+    let mut back = open(&machine);
+    assert_eq!(boxes(&back), posed);
+    let file = dir.join("machine.step");
+    run(&mut back, "file.export", json!({"path": file}));
+    let exported = solidcraft_kernel::step_import(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    let mut read: Vec<[i64; 6]> = exported
+        .bodies
+        .iter()
+        .map(|b| {
+            let x = b.body.exact_bounds().unwrap();
+            [x.min.x, x.min.y, x.min.z, x.max.x, x.max.y, x.max.z].map(|v| (v * 1e3).round() as i64)
+        })
+        .collect();
+    read.sort_unstable();
+    assert_eq!(read, posed, "the STEP assembly has each of the four hinges in its own pose");
+    // The second unit made rigid shows the unit as its design was saved; the first keeps its pose.
+    let rigid = run(&mut back, "component.link_mode", json!({"component": top, "occurrence": second, "flexible": false}));
+    assert_eq!(rigid["joints"], 2, "{rigid}");
+    assert_eq!(boxes(&back), together(unit_boxes(1, -1, [0, 0, 0]), unit_boxes(0, 0, [0, 0, 100])));
+    assert_eq!(back.doc.assembly.joints.len(), 2);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Three levels: a top design links the machine above, which was saved with its four hinges in
+/// four poses. Rigid, it shows them so. Made flexible, it has all four joints, and the deepest
+/// hinge moves from the top while the others stay.
+#[test]
+fn joints_three_levels_down_move_from_the_top_when_every_level_is_flexible() {
+    let dir = scratch("cascade-3");
+    let unit = save_unit_of_hinges(&dir);
+    let machine = dir.join("machine.sc");
+    let mut m = Session::default();
+    run(&mut m, "component.insert_design", json!({"path": unit, "flexible": true}));
+    let again = run(&mut m, "component.insert_design", json!({"path": unit, "reuse": true, "translate": [0, 0, 100], "flexible": true}));
+    run(&mut m, "occurrence.ground", json!({"occurrence": again["occurrence"], "grounded": true}));
+    for (joint, value) in [("Hinge", 90), ("hinge:2: Hinge", -90), ("unit2:2: Hinge", -90), ("unit2:2: hinge:2: Hinge", 90)] {
+        run(&mut m, "joint.drive", json!({"joint": joint, "value": value}));
+    }
+    run(&mut m, "file.save", json!({"path": machine}));
+    let in_machine = together(unit_boxes(1, -1, [0, 0, 0]), unit_boxes(-1, 1, [0, 0, 100]));
+    assert_eq!(boxes(&m), in_machine);
+
+    // Rigid in the top: the machine as it was saved, 300 mm along X.
+    let mut s = Session::default();
+    let inserted = run(&mut s, "component.insert_design", json!({"path": machine, "translate": [300, 0, 0]}));
+    assert!(s.doc.assembly.joints.is_empty(), "rigid: no joint of the machine is carried");
+    assert_eq!(boxes(&s), shifted(&in_machine, [300, 0, 0]));
+    // Flexible: the joints the machine has for its units' hinges are joints here.
+    let flexible = run(&mut s, "component.link_mode", json!({"component": inserted["component"], "flexible": true}));
+    assert_eq!(flexible["joints"], 4, "{flexible}");
+    assert_eq!(boxes(&s), shifted(&in_machine, [300, 0, 0]), "made flexible, it stands as it did");
+    // The deepest hinge of the second unit, from the top: back to 0. The other three stay.
+    let deepest = s.doc.assembly.joints.iter().find(|j| j.name == "unit2:2: hinge:2: Hinge").map(|j| j.id).unwrap();
+    let driven = run(&mut s, "joint.drive", json!({"joint": deepest, "value": 0}));
+    assert_eq!(driven["moved"], true, "{driven}");
+    let expected = together(unit_boxes(1, -1, [300, 0, 0]), unit_boxes(-1, 0, [300, 0, 100]));
+    assert_eq!(boxes(&s), expected);
+    // Its pose names both flexible occurrences it is under: the unit, and the hinge in it.
+    assert!(s.doc.assembly.poses.iter().any(|p| p.through.len() == 2), "{:?}", s.doc.assembly.poses);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A rigid level stops it: a unit whose hinges are rigid in it has no joints to give, so a
+/// machine cannot make that unit flexible, and says so.
+#[test]
+fn a_rigid_occurrence_on_the_way_keeps_what_is_below_it_as_saved() {
+    let dir = scratch("cascade-rigid");
+    let hinge = save_hinge(&dir);
+    let unit = dir.join("unit-rigid.sc");
+    let mut u = Session::default();
+    run(&mut u, "component.insert_design", json!({"path": hinge}));
+    run(&mut u, "file.save", json!({"path": unit}));
+    let mut s = Session::default();
+    let inserted = run(&mut s, "component.insert_design", json!({"path": unit, "flexible": true}));
+    assert!(inserted.get("joints").is_none(), "{inserted}");
+    assert!(inserted["warnings"].to_string().contains("no joints to carry"), "{inserted}");
+    assert!(s.doc.assembly.joints.is_empty() && s.doc.assembly.poses.is_empty());
+    assert_eq!(boxes(&s), mm(&[[0, 0, 0, 40, 20, 5], [0, 8, 5, 30, 12, 9]]));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A dialog previews a motion study on a copy of the design and shows the result without
+/// changing the design. An occurrence that moved is shown by a pending move; the arm of a
+/// flexible hinge is no occurrence of its own, so the copy's poses are shown in place of the
+/// design's (`Session::pending_poses`). The arm turns in the world, the design keeps its poses
+/// and its joint's value, a copy of the session shows the design, and the world is the design's
+/// again when the preview ends.
+#[test]
+fn a_previewed_study_shows_a_flexible_occurrences_parts_without_changing_the_design() {
+    let dir = scratch("preview-poses");
+    let (mut s, top, first, _) = two_hinges(&dir);
+    let (hinge, name) = joint_of(&s, top, first);
+    let saved = mm(&[[0, 0, 0, 40, 20, 5], [0, 8, 5, 30, 12, 9]]);
+    let up = mm(&[[0, 0, 0, 40, 20, 5], [-2, 10, 5, 2, 40, 9]]);
+    let at_rest = together(shifted(&saved, [0, 0, 50]), shifted(&saved, [0, 100, 50]));
+    let turned = together(shifted(&up, [0, 0, 50]), shifted(&saved, [0, 100, 50]));
+    assert_eq!(boxes(&s), at_rest);
+    let value = |s: &Session| s.doc.assembly.joints.iter().find(|j| j.id == hinge).map(|j| j.values.clone());
+    let (design, poses, stored) = (s.doc.clone(), s.doc.assembly.poses.clone(), value(&s));
+
+    // As the Motion Study dialog does: the study is made and played on a copy.
+    let mut copy = s.scratch();
+    let keys = json!([{"joint": name, "points": [[0, 0], [10, 90]]}]);
+    let study = run(&mut copy, "motion.study", json!({"name": "Swing", "steps": 10, "keys": keys}))["study"].clone();
+    run(&mut copy, "motion.play", json!({"study": study, "step": 10}));
+    assert_eq!(boxes(&copy), turned, "the copy shows the study's last step");
+    // No occurrence moved, so no pending move can show it: only the arm's pose changed.
+    assert_eq!(copy.doc.occurrences, s.doc.occurrences);
+    assert_ne!(copy.doc.assembly.poses, poses);
+
+    // Shown on the design: the arm turns, and the design is what it was.
+    s.pending_poses = Some(copy.doc.assembly.poses.clone());
+    assert_eq!(boxes(&s), turned);
+    assert!(std::sync::Arc::ptr_eq(&s.doc, &design), "the design is the same document");
+    assert_eq!((&s.doc.assembly.poses, value(&s)), (&poses, stored));
+    assert!(s.pending_moves.is_empty() && !s.moved_uncaptured(), "a shown pose is no move to capture");
+    // A copy of the session solves and shows the design, not the preview.
+    assert_eq!(boxes(&s.scratch()), at_rest);
+
+    // The preview ends: the world is the design's again.
+    s.pending_poses = None;
+    assert_eq!(boxes(&s), at_rest);
+    let _ = std::fs::remove_dir_all(&dir);
+}

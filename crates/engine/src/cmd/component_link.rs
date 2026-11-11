@@ -783,6 +783,9 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // The design's own components, as components inside the new one.
     let kept = if structure { tree::sync(s, comp, id, &source, keep, &mut warnings)? } else { tree::Synced::default() };
+    if keep.flexible == Some(true) && flexible_occurrences(s, comp).is_empty() {
+        warnings.push("the linked design has no joints to carry: the occurrence is rigid".to_string());
+    }
     inherit_properties(s, comp, &properties)?;
     s.refresh();
     let st = s.model.state();

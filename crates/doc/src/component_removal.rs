@@ -122,9 +122,13 @@ impl Document {
         for view in &mut assembly.exploded {
             view.moves.retain(|(o, _)| !occurrences.contains(o));
         }
-        self.assembly.poses.retain(|p| !occurrences.contains(&p.occurrence) && !occurrences.contains(&p.inner));
+        let gone = |p: &crate::joints::PlacedPose| {
+            occurrences.contains(&p.occurrence) || occurrences.contains(&p.inner) || p.through.iter().any(|under| occurrences.contains(under))
+        };
+        self.assembly.poses.retain(|p| !gone(p));
         for tree in self.links.values_mut().filter_map(|link| link.tree.as_mut()) {
             tree.flexible.retain(|occurrence, _| !occurrences.contains(occurrence));
+            tree.nested.retain(|occurrence| !occurrences.contains(occurrence));
         }
         self.occurrences.retain(|o| !occurrences.contains(&o.id));
         joints

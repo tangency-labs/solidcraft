@@ -870,8 +870,8 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
 ///   the linked design is on it with both sides; an inner occurrence the design holds still is
 ///   one the link keeps.
 /// - A pose is for a flexible occurrence and an occurrence its link keeps, or for two
-///   occurrences one link keeps (the linked design's own pose), and is a placement. The poses
-///   are in order, one for each pair.
+///   occurrences one link keeps (the linked design's own pose), under occurrences the same
+///   link keeps, and is a placement. The poses are in order, one for each copy.
 ///
 /// A record that is none of that is dropped, not the design refused: Update Links writes what a
 /// link keeps again, and a pose is where joints last put something, which the next solve works
@@ -913,6 +913,7 @@ fn settle_links(d: &mut Document) {
                 }
         });
         tree.fixed.retain(|o| keeper.get(o) == Some(top));
+        tree.nested.retain(|o| keeper.get(o) == Some(top));
         tree.flexible.retain(|occurrence, _| placed.get(occurrence).is_some_and(|(component, _)| component == top));
         for (occurrence, own) in &mut tree.flexible {
             own.retain(|_, joint| sides.get(joint) == Some(&(*occurrence, *occurrence)) && joints.insert(*joint));
@@ -924,6 +925,8 @@ fn settle_links(d: &mut Document) {
         let kept = keeper.get(&p.inner);
         crate::is_placement(&p.transform)
             && kept.is_some()
+            && p.through.len() <= crate::MAX_PLACEMENT_DEPTH
+            && p.through.iter().all(|under| keeper.get(under) == kept)
             && ((flexible.contains(&p.occurrence) && of(p.occurrence) == kept.copied()) || keeper.get(&p.occurrence) == kept)
     });
     d.assembly.order_poses();

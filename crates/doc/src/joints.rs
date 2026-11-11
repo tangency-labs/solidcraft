@@ -1371,7 +1371,7 @@ pub struct Solution {
     /// of the occurrences inside them: the flexible occurrence, the inner occurrence, and where
     /// the joints place that copy ([`placed`]).
     #[serde(skip)]
-    pub placed: Vec<(u64, u64, Mat)>,
+    pub placed: Vec<PlacedCopy>,
 }
 
 impl Solution {
@@ -1382,7 +1382,7 @@ impl Solution {
         occurrence == 0
             || self.world.contains_key(&occurrence)
             || self.fixed.binary_search(&occurrence).is_ok()
-            || self.placed.iter().any(|(top, _, _)| *top == occurrence)
+            || self.placed.iter().any(|copy| copy.occurrence == occurrence)
     }
 }
 
@@ -2393,7 +2393,7 @@ pub fn solve_holding_with_analysis(doc: &Document, st: &ModelState, held: &Held,
     // of their parts as occurrences ([`placed`]); any other design as it is.
     match placed::expand(doc, st) {
         Some(expanded) => expanded.fold(doc, solve_as_given(doc, &expanded.assembly, st, held, analysis, expanded.start())),
-        None => placed::kept_dof(doc, solve_as_given(doc, &doc.assembly, st, held, analysis, Start::default()), &Default::default()),
+        None => placed::kept_dof(doc, solve_as_given(doc, &doc.assembly, st, held, analysis, Start::default()), None),
     }
 }
 
@@ -2743,7 +2743,7 @@ pub mod cam;
 
 #[path = "joints_placed.rs"]
 pub(crate) mod placed;
-pub use placed::{Inside, PlacedPose, both_datums, frame_snap};
+pub use placed::{Inside, PlacedCopy, PlacedPose, both_datums, frame_snap};
 
 #[path = "joints_edge.rs"]
 mod edge;

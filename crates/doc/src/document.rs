@@ -3293,6 +3293,12 @@ pub struct LinkTree {
     /// flexible occurrence they stay with it, and its joints move the other parts from them.
     #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
     pub fixed: std::collections::BTreeSet<u64>,
+    /// The occurrences kept here for ones that are flexible in the linked design, at any depth:
+    /// a flexible occurrence of this link has their joints too, and a copy of what is inside
+    /// each of them ([`crate::joints::PlacedPose::through`]). Kept while an occurrence of the
+    /// link is flexible.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub nested: std::collections::BTreeSet<u64>,
 }
 
 impl DesignLink {

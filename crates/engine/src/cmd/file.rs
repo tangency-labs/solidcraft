@@ -1049,7 +1049,7 @@ fn saved_geometry(s: &Session, design: &Document) -> Option<solidcraft_doc::Save
 
 /// Cache only warm display geometry. A save never waits for an unevaluated mesh.
 fn saved_preview(s: &Session) -> Option<solidcraft_io::DesignPreview> {
-    if s.active_sketch.is_some() || !s.pending_moves.is_empty() || s.model.results.iter().any(|r| r.error.is_some()) {
+    if s.active_sketch.is_some() || !s.pending_moves.is_empty() || s.pending_poses.is_some() || s.model.results.iter().any(|r| r.error.is_some()) {
         return None;
     }
     let world = s.cached_world_state()?;

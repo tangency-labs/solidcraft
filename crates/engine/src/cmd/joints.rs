@@ -1197,7 +1197,7 @@ fn check_sides(s: &Session, a: &JointOrigin, b: &JointOrigin, cmd: &str) -> Resu
         // one has from its linked design can move them apart; what those joints do not move, and
         // everything inside a rigid one, moves with the occurrence as one.
         match (on_a, on_b) {
-            (Inside::Moved { inner: x, .. }, Inside::Moved { inner: y, .. }) if x != y => return Ok(()),
+            (Inside::Moved { copy: x, .. }, Inside::Moved { copy: y, .. }) if x != y => return Ok(()),
             (Inside::Moved { .. }, Inside::With { .. }) | (Inside::With { .. }, Inside::Moved { .. }) => return Ok(()),
             (Inside::Moved { .. }, Inside::Moved { .. }) => {
                 return Err(bad(

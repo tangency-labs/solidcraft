@@ -11,7 +11,7 @@ use egui::{Pos2, RichText, Sense, Stroke, pos2, vec2};
 use serde_json::{Value, json};
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::Mat;
-use solidcraft_engine::doc::joints::JointKind;
+use solidcraft_engine::doc::joints::{JointKind, PlacedPose};
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind, combo, form_row};
@@ -363,9 +363,12 @@ fn display(app: &mut SolveApp, saved: &mut Option<BTreeMap<u64, Mat>>, moves: BT
     app.session.revision += 1;
 }
 
+/// Put back what was shown before the dialog showed anything. The poses a study's preview
+/// showed for the parts of flexible subassembly occurrences go with it.
 fn restore(app: &mut SolveApp, saved: &mut Option<BTreeMap<u64, Mat>>) {
     if let Some(m) = saved.take() {
         app.session.pending_moves = m;
+        app.session.pending_poses = None;
         app.session.revision += 1;
     }
 }
@@ -395,12 +398,21 @@ fn moved(base: &BTreeMap<u64, Mat>, before: &Session, after: &Session) -> BTreeM
     out
 }
 
-/// The study's pose at `step`, computed on a scratch copy, over `base` ([`moved`]).
-fn study_pose(app: &SolveApp, params: &Value, step: u32, base: &BTreeMap<u64, Mat>) -> Result<BTreeMap<u64, Mat>, String> {
+/// What a study's preview shows: the occurrence moves, and the poses shown in place of the
+/// design's own (`None`: the design's).
+type StudyPose = (BTreeMap<u64, Mat>, Option<Vec<PlacedPose>>);
+
+/// The study's pose at `step`, computed on a scratch copy: the occurrence moves over `base`
+/// ([`moved`]), and the poses the copy ends with for the parts of flexible occurrences of linked
+/// subassemblies. Such a part is no occurrence of its own, so no move can show it; its pose can.
+/// No poses when they are the design's own, as in every design without a flexible occurrence.
+fn study_pose(app: &SolveApp, params: &Value, step: u32, base: &BTreeMap<u64, Mat>) -> Result<StudyPose, String> {
     let mut sc = app.session.scratch();
     let id = scratch_study(&mut sc, params)?;
     sc.execute("motion.play", &json!({"study": id, "step": step})).map_err(|e| e.to_string())?;
-    Ok(moved(base, &app.session, &sc))
+    let shown = &sc.doc.assembly.poses;
+    let poses = (shown != &app.session.doc.assembly.poses).then(|| shown.clone());
+    Ok((moved(base, &app.session, &sc), poses))
 }
 
 /// Save the study being edited as an animated GIF, seen from the viewport's camera. Drawn on a
@@ -745,8 +757,10 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
         // The moves from before the dialog showed anything (it keeps them in `saved`).
         let base = saved.as_ref().unwrap_or(&app.session.pending_moves);
         match params.and_then(|p| study_pose(app, &p, now, base)) {
-            Ok(m) => {
+            Ok((m, poses)) => {
                 display(app, saved, m);
+                // With the moves, under the one view revision `display` counts.
+                app.session.pending_poses = poses;
                 *error = None;
             }
             Err(e) => *error = Some(e),

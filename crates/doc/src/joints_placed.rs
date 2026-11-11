@@ -22,6 +22,13 @@
 //!
 //! A pose can also be the linked design's own: a link keeps the poses its linked design has for
 //! the flexible subassemblies inside it, so those show here as that design shows them.
+//!
+//! Flexibility goes down through every level that is flexible. A flexible occurrence also has
+//! the joints its linked design has for the flexible occurrences inside it (`LinkTree::nested`),
+//! and so on down. A copy is then one inner occurrence under the flexible occurrences on the way
+//! to it ([`PlacedPose::through`]): two hinges inside one unit, and the hinges of two units, each
+//! stand in a pose of their own. A rigid occurrence anywhere on the way shows what is below it
+//! as its linked design was saved.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -42,19 +49,74 @@ pub struct PlacedPose {
     /// occurrence a link keeps for one that is flexible in its linked design (the pose is then
     /// that design's, as it was saved).
     pub occurrence: u64,
+    /// The flexible occurrences inside `occurrence` that the copy is under, from the outermost
+    /// down: occurrences the link keeps for ones that are flexible in its linked design. Two
+    /// such occurrences of one subassembly have a copy each of what is inside them. Empty for
+    /// an inner occurrence that is under none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub through: Vec<u64>,
     /// The occurrence inside it that is posed: one the link keeps for the linked design's own.
-    /// Like its own transform, the pose holds wherever that occurrence shows below `occurrence`.
+    /// Like its own transform, the pose holds wherever that occurrence shows below `occurrence`
+    /// and the occurrences of `through`.
     pub inner: u64,
     /// The inner occurrence's transform in its parent, for `occurrence`.
     pub transform: Mat,
 }
 
+/// Where the world has one copy of an inner occurrence: the occurrence it is a copy for, the
+/// flexible occurrences inside that one which it is under ([`PlacedPose::through`]), the inner
+/// occurrence, and the copy's world transform.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlacedCopy {
+    pub occurrence: u64,
+    pub through: Vec<u64>,
+    pub inner: u64,
+    pub world: Mat,
+}
+
+/// Whether the occurrences `through` come, in their order, among `path`.
+fn follows(through: &[u64], path: &[u64]) -> bool {
+    let mut rest = path.iter();
+    through.iter().all(|id| rest.any(|on_path| on_path == id))
+}
+
+/// The occurrences of `above` that are flexible in the linked design of `tree`
+/// ([`LinkTree::nested`]): what a copy below them is under.
+fn context(tree: &LinkTree, above: &[u64]) -> Vec<u64> {
+    above.iter().copied().filter(|id| tree.nested.contains(id)).collect()
+}
+
+/// One value for each copy: by the occurrence it is a copy for and the inner occurrence, then
+/// by what the copy is under.
+pub(crate) struct ByCopy<T> {
+    by: HashMap<(u64, u64), Vec<(Vec<u64>, T)>>,
+}
+
+impl<T: Copy> ByCopy<T> {
+    fn new() -> Self {
+        ByCopy { by: HashMap::new() }
+    }
+
+    fn insert(&mut self, occurrence: u64, through: Vec<u64>, inner: u64, value: T) {
+        self.by.entry((occurrence, inner)).or_default().push((through, value));
+    }
+
+    fn get(&self, occurrence: u64, through: &[u64], inner: u64) -> Option<T> {
+        self.by.get(&(occurrence, inner))?.iter().find(|(under, _)| under.as_slice() == through).map(|(_, value)| *value)
+    }
+
+    /// Whether `occurrence` has a copy of `inner`, under anything.
+    fn any(&self, occurrence: u64, inner: u64) -> bool {
+        self.by.contains_key(&(occurrence, inner))
+    }
+}
+
 impl Assembly {
-    /// Put the poses in order, by occurrence and then inner occurrence, one for each pair:
-    /// lookups search them in that order.
+    /// Put the poses in order, by occurrence, then inner occurrence, then what the copy is
+    /// under, one for each copy: lookups search them in that order.
     pub fn order_poses(&mut self) {
-        self.poses.sort_by_key(|p| (p.occurrence, p.inner));
-        self.poses.dedup_by_key(|p| (p.occurrence, p.inner));
+        self.poses.sort_by(|a, b| (a.occurrence, a.inner, &a.through).cmp(&(b.occurrence, b.inner, &b.through)));
+        self.poses.dedup_by(|a, b| (a.occurrence, a.inner, &a.through) == (b.occurrence, b.inner, &b.through));
     }
 }
 
@@ -76,14 +138,23 @@ impl<'a> Poses<'a> {
         self.all.get(from..to).unwrap_or_default()
     }
 
-    /// The transform of `o`, the last occurrence of `path`, in its parent: the one the nearest
-    /// occurrence above it on the path has for it, else its own. `path` is occurrence ids from
-    /// any ancestor down to `o`.
+    /// The transform of `o`, the last occurrence of `path`, in its parent: the one an
+    /// occurrence above it on the path has for the copy the path shows, else its own. The
+    /// outermost such occurrence says: a design's own pose for a copy comes before the one a
+    /// linked design below was saved with. Of one occurrence's poses, the one whose copy is
+    /// under the most occurrences of the path. `path` is occurrence ids from any ancestor down
+    /// to `o`.
     pub(crate) fn local(&self, path: &[u64], o: &Occurrence) -> Mat {
         let above = path.len().saturating_sub(1);
-        for i in (0..above).rev() {
+        for i in 0..above {
             let mine = path.get(i).map(|id| self.of_occurrence(*id)).unwrap_or_default();
-            if let Some(pose) = mine.binary_search_by(|p| p.inner.cmp(&o.id)).ok().and_then(|at| mine.get(at)) {
+            if mine.is_empty() {
+                continue;
+            }
+            let from = mine.partition_point(|p| p.inner < o.id);
+            let between = path.get(i + 1..above).unwrap_or_default();
+            let of_inner = mine.get(from..).unwrap_or_default().iter().take_while(|p| p.inner == o.id);
+            if let Some(pose) = of_inner.filter(|p| follows(&p.through, between)).max_by_key(|p| p.through.len()) {
                 return pose.transform;
             }
         }
@@ -152,10 +223,11 @@ impl<'a> Index<'a> {
         chain
     }
 
-    /// The occurrences from the one placed in `top`'s component down to `inner`, through the
-    /// first occurrence of each component on the way: the way a joint of the linked design
-    /// reaches it. `None` when `inner` is not inside `top`.
-    fn way_down(&self, top: &Occurrence, inner: u64) -> Option<Vec<u64>> {
+    /// The occurrences from the one placed in `top`'s component down to the copy of `inner`
+    /// that is under the occurrences `through`: a component one of those shows is reached
+    /// through that one, any other through its first occurrence, which is the way a joint of
+    /// the linked design reaches it. `None` when `inner` is not inside `top`.
+    fn way_through(&self, top: &Occurrence, through: &[u64], inner: u64) -> Option<Vec<u64>> {
         let mut way = Vec::new();
         let mut cur = self.at.get(&inner).copied()?;
         for _ in 0..=MAX_PLACEMENT_DEPTH {
@@ -167,7 +239,11 @@ impl<'a> Index<'a> {
             if cur.parent == 0 {
                 return None;
             }
-            cur = self.first.get(&cur.parent).copied()?;
+            let named = through.iter().filter_map(|id| self.at.get(id).copied()).find(|o| o.component == cur.parent);
+            cur = match named {
+                Some(o) => o,
+                None => self.first.get(&cur.parent).copied()?,
+            };
         }
         None
     }
@@ -244,38 +320,36 @@ impl Document {
         })
     }
 
-    /// World transform of every copy that has a pose: the occurrence the pose is for, the inner
-    /// occurrence, and where the first way down to it shows that copy.
-    pub fn posed_worlds(&self) -> Vec<(u64, u64, Mat)> {
+    /// World transform of every copy that has a pose, where the world shows it.
+    pub fn posed_worlds(&self) -> Vec<PlacedCopy> {
         let Some(poses) = Poses::of(self) else { return Vec::new() };
         let index = Index::of(self);
         let mut tops: HashMap<u64, Mat> = HashMap::new();
         let mut out = Vec::with_capacity(self.assembly.poses.len());
         for pose in &self.assembly.poses {
             let Some(top) = index.at.get(&pose.occurrence).copied() else { continue };
-            let Some(down) = index.way_down(top, pose.inner).and_then(|way| index.down(Some(&poses), top, &way, 0)) else { continue };
+            let way = index.way_through(top, &pose.through, pose.inner);
+            let Some(down) = way.and_then(|way| index.down(Some(&poses), top, &way, 0)) else { continue };
             let world = *tops.entry(top.id).or_insert_with(|| index.world(Some(&poses), top.id));
-            out.push((pose.occurrence, pose.inner, mat_mul(&world, &down)));
+            out.push(PlacedCopy { occurrence: pose.occurrence, through: pose.through.clone(), inner: pose.inner, world: mat_mul(&world, &down) });
         }
         out
     }
 
     /// Keep where the solver placed flexible occurrences' own copies of the occurrences inside
     /// them ([`Solution::placed`]) as [`PlacedPose`]s. Returns true when one changed.
-    pub(crate) fn apply_placed(&mut self, placed: &[(u64, u64, Mat)]) -> bool {
+    pub(crate) fn apply_placed(&mut self, placed: &[PlacedCopy]) -> bool {
         if placed.is_empty() {
             return false;
         }
         // What each copy needs from the design, looked up once: its occurrence's world
-        // transform, and the occurrences above it inside that occurrence with where each is
-        // shown now. A copy's pose is in the frame of the copy above it, so the copies are
-        // taken from the top down, and one above is read as this loop leaves it.
+        // transform, and the occurrences above it inside that occurrence, each with what it is
+        // under and where it is shown now. A copy's pose is in the frame of the copy above it,
+        // so the copies are taken from the top down, and one above is read as this loop leaves it.
         struct Entry<'p> {
-            occurrence: u64,
-            inner: u64,
-            above: Vec<(u64, Mat)>,
+            copy: &'p PlacedCopy,
+            above: Vec<(u64, Vec<u64>, Mat)>,
             top: Mat,
-            world: &'p Mat,
         }
         let mut entries: Vec<Entry> = {
             let index = Index::of(self);
@@ -283,47 +357,49 @@ impl Document {
             let mut tops: HashMap<u64, Mat> = HashMap::new();
             placed
                 .iter()
-                .filter_map(|(occurrence, inner, world)| {
-                    let top = index.at.get(occurrence).copied()?;
-                    let way = index.way_down(top, *inner)?;
-                    let (last, above) = way.split_last()?;
-                    index.at.get(last)?;
+                .filter_map(|copy| {
+                    let top = index.at.get(&copy.occurrence).copied()?;
+                    let way = index.way_through(top, &copy.through, copy.inner)?;
+                    let (_, above) = way.split_last()?;
                     let mut path = vec![top.id];
                     let above = above
                         .iter()
                         .map(|id| {
                             let x = index.at.get(id).copied()?;
+                            let under: Vec<u64> = path.iter().skip(1).copied().filter(|on_way| copy.through.contains(on_way)).collect();
                             path.push(*id);
-                            Some((*id, poses.as_ref().map_or(x.transform, |poses| poses.local(&path, x))))
+                            Some((*id, under, poses.as_ref().map_or(x.transform, |poses| poses.local(&path, x))))
                         })
                         .collect::<Option<Vec<_>>>()?;
                     let top = *tops.entry(top.id).or_insert_with(|| index.world(poses.as_ref(), top.id));
-                    Some(Entry { occurrence: *occurrence, inner: *inner, above, top, world })
+                    Some(Entry { copy, above, top })
                 })
                 .collect()
         };
         entries.sort_by_key(|entry| entry.above.len());
         let poses = &mut self.assembly.poses;
-        let find = |poses: &[PlacedPose], occurrence: u64, inner: u64| poses.binary_search_by(|p| (p.occurrence, p.inner).cmp(&(occurrence, inner)));
+        let find = |poses: &[PlacedPose], occurrence: u64, inner: u64, through: &[u64]| {
+            poses.binary_search_by(|p| (p.occurrence, p.inner, p.through.as_slice()).cmp(&(occurrence, inner, through)))
+        };
         // New poses wait here until every copy is read: each put in its place in the list at
         // once would move the list once for each.
-        let mut fresh: BTreeMap<(u64, u64), Mat> = BTreeMap::new();
+        let mut fresh: BTreeMap<(u64, u64, Vec<u64>), Mat> = BTreeMap::new();
         let mut changed = false;
         for entry in entries {
+            let copy = entry.copy;
             let mut parent = entry.top;
-            for (id, shown) in &entry.above {
-                let kept = find(poses, entry.occurrence, *id).ok().and_then(|at| poses.get(at)).map(|p| p.transform);
-                let local = fresh.get(&(entry.occurrence, *id)).copied().or(kept).unwrap_or(*shown);
+            for (id, under, shown) in entry.above {
+                let local = fresh.get(&(copy.occurrence, id, under)).copied().unwrap_or(shown);
                 parent = mat_mul(&parent, &local);
             }
-            let Some(local) = mat_inverse(&parent).map(|inverse| mat_mul(&inverse, entry.world)) else { continue };
+            let Some(local) = mat_inverse(&parent).map(|inverse| mat_mul(&inverse, &copy.world)) else { continue };
             // A pose is saved with the design: one that is no placement would stop it opening.
             if !is_placement(&local) {
                 continue;
             }
             // A copy the joints move has a pose from the first solve on, also where that is
             // where the design has the occurrence: what lists the copies has each from the start.
-            let at = find(poses, entry.occurrence, entry.inner).ok();
+            let at = find(poses, copy.occurrence, copy.inner, &copy.through).ok();
             let now = at.and_then(|at| poses.get(at)).map(|p| p.transform);
             if let Some(now) = now {
                 let (dt, da) = mismatch(&now, &local);
@@ -334,13 +410,13 @@ impl Document {
             match at.and_then(|at| poses.get_mut(at)) {
                 Some(pose) => pose.transform = local,
                 None => {
-                    fresh.insert((entry.occurrence, entry.inner), local);
+                    fresh.insert((copy.occurrence, copy.inner, copy.through.clone()), local);
                 }
             }
             changed = true;
         }
         if !fresh.is_empty() {
-            poses.extend(fresh.into_iter().map(|((occurrence, inner), transform)| PlacedPose { occurrence, inner, transform }));
+            poses.extend(fresh.into_iter().map(|((occurrence, inner, through), transform)| PlacedPose { occurrence, through, inner, transform }));
             self.assembly.order_poses();
         }
         changed
@@ -358,13 +434,47 @@ impl Document {
                 On::Inside { top, body, inside, from } if body != top.id => {
                     // The copy itself, or an occurrence below it that it carries.
                     match from.checked_sub(1).and_then(|q| inside.get(q)) {
-                        Some(inner) => Inside::Moved { top: top.id, inner: *inner },
+                        Some(inner) => Inside::Moved { top: top.id, inner: *inner, copy: body },
                         None => Inside::With { top: top.id },
                     }
                 }
                 On::Inside { top, .. } => Inside::With { top: top.id },
             })
             .collect()
+    }
+
+    /// Each of `sides` as the joint solver takes it in this design, with its geometry read as a
+    /// frame: what a design that links this one carries a joint's side as. A side on a copy
+    /// that a flexible occurrence's joints move is a frame on that copy, named through the
+    /// occurrence (`{occurrence, inside}`, the copy last); a side on anything else inside a
+    /// linked subassembly is a frame on the subassembly's occurrence; any other is a frame on
+    /// its own occurrence. `None` for a side whose geometry is gone, and for one on a second
+    /// place of what a flexible occurrence's joints move, which no solve can follow.
+    pub fn sides_as_solved(&self, st: &ModelState, sides: &[&JointOrigin]) -> Vec<Option<JointOrigin>> {
+        let own = |side: &JointOrigin| Some(JointOrigin::new(side.occurrence, frame_snap(&super::resolve_origin(self, st, side).ok()?)));
+        let Some(copies) = Copies::of(self, true) else { return sides.iter().map(|side| own(side)).collect() };
+        sides
+            .iter()
+            .map(|side| match copies.on(side) {
+                On::Outside => own(side),
+                On::Elsewhere(_) => None,
+                On::Inside { top, body, inside, from } => {
+                    let on_part = resolve_on_part(self, st, side).ok()?;
+                    let from = if body == top.id { 0 } else { from };
+                    let carried = copies.index.down(copies.poses.as_ref(), top, &inside, from)?;
+                    let snap = frame_snap(&mat_mul(&carried, &on_part));
+                    Some(JointOrigin { occurrence: top.id, inside: inside.get(..from)?.to_vec(), snap })
+                }
+            })
+            .collect()
+    }
+
+    /// The occurrences links keep for ones that are flexible in their linked designs, at any
+    /// depth, and the flexible occurrences of this design's own linked subassemblies: what a
+    /// design that links this one records as [`LinkTree::nested`].
+    pub fn flexible_at_any_depth(&self) -> BTreeSet<u64> {
+        let trees = self.links.values().filter_map(|link| link.tree.as_ref());
+        trees.flat_map(|tree| tree.flexible.keys().chain(tree.nested.iter()).copied()).collect()
     }
 }
 
@@ -378,8 +488,9 @@ pub enum Inside {
     /// move.
     With { top: u64 },
     /// On the copy that flexible occurrence `top` has of `inner`, or on an occurrence that copy
-    /// carries: the joints `top` has from its linked design move it.
-    Moved { top: u64, inner: u64 },
+    /// carries: the joints `top` has from its linked design move it. `copy` tells this copy
+    /// from the others `top` has: two sides with the same one are moved together.
+    Moved { top: u64, inner: u64, copy: u64 },
     /// On a place other than the first of an occurrence that flexible occurrence `top`'s joints
     /// move. The solver has one copy of such an occurrence, at its first place, so a joint to
     /// another place of it cannot follow those joints.
@@ -390,6 +501,7 @@ pub enum Inside {
 struct Body {
     id: u64,
     occurrence: u64,
+    through: Vec<u64>,
     inner: u64,
 }
 
@@ -414,12 +526,13 @@ struct Copies<'a> {
     tops: HashMap<u64, &'a LinkTree>,
     /// Every occurrence a link keeps.
     kept: HashSet<u64>,
-    /// The first way down from a subassembly's component to an occurrence inside it, by those
-    /// two: found once, however many sides and copies ask.
-    ways: RefCell<HashMap<(u64, u64), Option<Rc<[u64]>>>>,
+    /// The way down from a subassembly's component to a copy of an occurrence inside it, by
+    /// the component, the occurrence and what the copy is under: found once, however many sides
+    /// and copies ask.
+    ways: RefCell<HashMap<(u64, u64, Vec<u64>), Option<Rc<[u64]>>>>,
     bodies: Vec<Body>,
-    /// The copy for a flexible occurrence and an inner occurrence.
-    ids: BTreeMap<(u64, u64), u64>,
+    /// The solver's id for each copy.
+    ids: ByCopy<u64>,
 }
 
 impl<'a> Copies<'a> {
@@ -443,16 +556,25 @@ impl<'a> Copies<'a> {
         }
         let tops: HashMap<u64, &LinkTree> = doc.occurrences.iter().filter_map(|o| Some((o.id, *trees.get(&o.component)?))).collect();
         let mut copies =
-            Copies { index: Index::of(doc), poses: Poses::of(doc), tops, kept, ways: RefCell::default(), bodies: Vec::new(), ids: BTreeMap::new() };
+            Copies { index: Index::of(doc), poses: Poses::of(doc), tops, kept, ways: RefCell::default(), bodies: Vec::new(), ids: ByCopy::new() };
         if flexible {
             copies.find_bodies(doc)?;
         }
         Some(copies)
     }
 
-    /// [`Index::way_down`], found once for a subassembly's component and an occurrence.
-    fn way(&self, top: &Occurrence, inner: u64) -> Option<Rc<[u64]>> {
-        self.ways.borrow_mut().entry((top.component, inner)).or_insert_with(|| self.index.way_down(top, inner).map(Rc::from)).clone()
+    /// [`Index::way_through`], found once for a subassembly's component and a copy.
+    fn way(&self, top: &Occurrence, through: &[u64], inner: u64) -> Option<Rc<[u64]>> {
+        let key = (top.component, inner, through.to_vec());
+        self.ways.borrow_mut().entry(key).or_insert_with(|| self.index.way_through(top, through, inner).map(Rc::from)).clone()
+    }
+
+    /// The copy a way down from `top` ends at, when it is the way the solver has that copy by:
+    /// what the copy is under, and the inner occurrence.
+    fn copy_at(&self, top: &Occurrence, tree: &LinkTree, way: &[u64]) -> Option<(Vec<u64>, u64)> {
+        let (last, above) = way.split_last()?;
+        let through = context(tree, above);
+        (self.way(top, &through, *last).as_deref() == Some(way)).then_some((through, *last))
     }
 
     /// The copies that get a place of their own in the solve: for each flexible occurrence, the
@@ -480,15 +602,15 @@ impl<'a> Copies<'a> {
         let mut next = doc.occurrences.iter().map(|o| o.id).max()?.checked_add(1)?;
         for top in &doc.occurrences {
             let (Some(tree), Some(mine)) = (self.tops.get(&top.id).copied(), own.get(&top.id)) else { continue };
-            // A side of one of its joints is an inner occurrence by the first way down to it.
+            // A side of one of its joints is a copy of an inner occurrence, by the way down to it.
             let end = |side: &JointOrigin| {
-                let last = *side.inside.last()?;
-                (!tree.fixed.contains(&last) && self.way(top, last).as_deref() == Some(side.inside.as_slice())).then_some(last)
+                let last = side.inside.last()?;
+                if tree.fixed.contains(last) { None } else { self.copy_at(top, tree, &side.inside) }
             };
-            let sides: Vec<[Option<u64>; 2]> = mine.iter().map(|j| [end(&j.a), end(&j.b)]).collect();
-            for inner in moving(&sides) {
-                self.ids.insert((top.id, inner), next);
-                self.bodies.push(Body { id: next, occurrence: top.id, inner });
+            let sides: Vec<[Option<(Vec<u64>, u64)>; 2]> = mine.iter().map(|j| [end(&j.a), end(&j.b)]).collect();
+            for (through, inner) in moving(&sides) {
+                self.ids.insert(top.id, through.clone(), inner, next);
+                self.bodies.push(Body { id: next, occurrence: top.id, through, inner });
                 next = next.checked_add(1)?;
             }
         }
@@ -514,7 +636,7 @@ impl<'a> Copies<'a> {
             // first place of what the flexible occurrence's joints move.
             let through = side.inside.iter().position(|id| self.tops.contains_key(id));
             let Some((top, below)) = through.and_then(|i| Some((side.inside.get(i)?, side.inside.get(i + 1..)?))) else { return On::Outside };
-            if below.iter().any(|inner| self.ids.contains_key(&(*top, *inner)))
+            if below.iter().any(|inner| self.ids.any(*top, *inner))
                 && let Some(top) = self.index.at.get(top).copied()
             {
                 return On::Elsewhere(top);
@@ -524,12 +646,18 @@ impl<'a> Copies<'a> {
         if inside.is_empty() || inside.len() > MAX_PLACEMENT_DEPTH {
             return On::Outside;
         }
-        // The lowest occurrence on the way that is a copy of its own.
-        let hit = (0..inside.len()).rev().find_map(|q| Some((q, *self.ids.get(&(top.id, *inside.get(q)?))?)));
+        let Some(tree) = self.tops.get(&top.id).copied() else { return On::Outside };
+        // The lowest occurrence on the way that is a copy of its own: by the way the solver has
+        // that copy, or it is another place of it.
+        let hit = (0..inside.len()).rev().find_map(|q| {
+            let (inner, above) = (*inside.get(q)?, inside.get(..q)?);
+            let body = self.ids.get(top.id, &context(tree, above), inner)?;
+            Some((q, body))
+        });
         match hit {
             Some((q, body)) => {
-                let first = inside.get(q).and_then(|inner| self.way(top, *inner));
-                if first.as_deref() == inside.get(..=q) { On::Inside { top, body, inside, from: q + 1 } } else { On::Elsewhere(top) }
+                let same = inside.get(..=q).is_some_and(|way| self.copy_at(top, tree, way).is_some());
+                if same { On::Inside { top, body, inside, from: q + 1 } } else { On::Elsewhere(top) }
             }
             None => On::Inside { top, body: top.id, inside, from: 0 },
         }
@@ -545,7 +673,7 @@ pub(crate) struct Expanded {
     pub(crate) assembly: Assembly,
     /// The copies, by their ids.
     bodies: Vec<Body>,
-    ids: BTreeMap<(u64, u64), u64>,
+    ids: ByCopy<u64>,
     start: Start,
     /// Joints the solver cannot take: (joint id, name, why).
     refused: Vec<(u64, String, String)>,
@@ -564,13 +692,13 @@ impl Expanded {
     /// [`Solution::placed`], and what the solve says of a copy said of the occurrences the
     /// design has.
     pub(crate) fn fold(&self, doc: &Document, mut sol: Solution) -> Solution {
-        let mut dof: HashMap<(u64, u64), usize> = HashMap::new();
+        let mut dof: ByCopy<usize> = ByCopy::new();
         for body in &self.bodies {
             if let Some(world) = sol.world.remove(&body.id) {
-                sol.placed.push((body.occurrence, body.inner, world));
+                sol.placed.push(PlacedCopy { occurrence: body.occurrence, through: body.through.clone(), inner: body.inner, world });
             }
             if let Some(d) = sol.dof.remove(&body.id) {
-                dof.insert((body.occurrence, body.inner), d);
+                dof.insert(body.occurrence, body.through.clone(), body.inner, d);
             }
         }
         if let Some(first) = self.bodies.first() {
@@ -585,32 +713,31 @@ impl Expanded {
             }
         }
         sol.errors.extend(self.refused.iter().cloned());
-        kept_dof(doc, sol, &dof)
+        kept_dof(doc, sol, Some(&dof))
     }
 }
 
 /// The degrees of freedom of the occurrences links keep. An occurrence inside a subassembly is
 /// not placed by a joint of its own: it has those of what carries it, which is the copy a
-/// flexible occurrence's joints move (`copies`, by that occurrence and the inner one) or the
-/// subassembly's occurrence. An inner occurrence's id stands for the one its component's first
-/// occurrence shows.
-pub(crate) fn kept_dof(doc: &Document, mut sol: Solution, copies: &HashMap<(u64, u64), usize>) -> Solution {
+/// flexible occurrence's joints move (`copies`) or the subassembly's occurrence. An inner
+/// occurrence's id stands for the one its component's first occurrence shows.
+pub(crate) fn kept_dof(doc: &Document, mut sol: Solution, copies: Option<&ByCopy<usize>>) -> Solution {
     if sol.dof.is_empty() {
         return sol;
     }
-    let trees: Vec<&LinkTree> = doc.links.values().filter_map(|link| link.tree.as_ref()).filter(|tree| !tree.occurrences.is_empty()).collect();
+    let trees: HashMap<u64, &LinkTree> =
+        doc.links.iter().filter_map(|(top, link)| link.tree.as_ref().filter(|tree| !tree.occurrences.is_empty()).map(|tree| (*top, tree))).collect();
     if trees.is_empty() {
         return sol;
     }
-    let tops: HashSet<u64> =
-        doc.links.iter().filter(|(_, link)| link.tree.as_ref().is_some_and(|tree| !tree.occurrences.is_empty())).map(|(top, _)| *top).collect();
     let index = Index::of(doc);
-    for kept in trees.iter().flat_map(|tree| tree.occurrences.values()) {
+    for kept in trees.values().flat_map(|tree| tree.occurrences.values()) {
         let chain = index.chain(*kept);
-        let Some(i) = chain.iter().position(|o| tops.contains(&o.component)) else { continue };
+        let Some((i, tree)) = chain.iter().enumerate().find_map(|(i, o)| Some((i, *trees.get(&o.component)?))) else { continue };
         let (Some(top), Some(below)) = (chain.get(i), chain.get(i + 1..)) else { continue };
-        let carried = below.iter().rev().find_map(|o| copies.get(&(top.id, o.id))).or_else(|| sol.dof.get(&top.id)).copied();
-        if let Some(carried) = carried {
+        let below: Vec<u64> = below.iter().map(|o| o.id).collect();
+        let copy = copies.and_then(|copies| (0..below.len()).rev().find_map(|q| copies.get(top.id, &context(tree, below.get(..q)?), *below.get(q)?)));
+        if let Some(carried) = copy.or_else(|| sol.dof.get(&top.id).copied()) {
             sol.dof.insert(*kept, carried);
         }
     }
@@ -644,11 +771,19 @@ pub(crate) fn stand_in(doc: &Document, expanded: Option<&Expanded>, occurrence: 
         return same;
     }
     let inside: Vec<u64> = below.iter().map(|o| o.id).collect();
-    let hit = expanded.and_then(|x| (0..inside.len()).rev().find_map(|q| Some((q, *x.ids.get(&(top.id, *inside.get(q)?))?))));
+    let tree = doc.links.get(&top.component).and_then(|link| link.tree.as_ref());
+    let hit = expanded.zip(tree).and_then(|(x, tree)| {
+        (0..inside.len()).rev().find_map(|q| {
+            let (inner, through) = (*inside.get(q)?, context(tree, inside.get(..q)?));
+            let body = x.ids.get(top.id, &through, inner)?;
+            Some((q, through, body))
+        })
+    });
     let (body, from) = match hit {
-        Some((q, body)) => {
-            let first = inside.get(q).and_then(|inner| index.way_down(top, *inner));
-            if first.as_deref() != inside.get(..=q) {
+        Some((q, through, body)) => {
+            // The way the solver has that copy by, or this is another place of it.
+            let way = inside.get(q).and_then(|inner| index.way_through(top, &through, *inner));
+            if way.as_deref() != inside.get(..=q) {
                 return same;
             }
             (body, q + 1)
@@ -678,44 +813,44 @@ pub fn both_datums(a: &Snap, b: &Snap) -> bool {
     datum(a) && datum(b)
 }
 
-/// The inner occurrences of a flexible occurrence that its design's joints move: `sides` is
-/// what each of those joints is between, an inner occurrence, or `None` for the occurrence
-/// itself and for an inner occurrence its design holds still. The ones joined, through any
+/// The copies of a flexible occurrence that its design's joints move: `sides` is what each of
+/// those joints is between, a copy of an inner occurrence, or `None` for the occurrence itself
+/// and for an inner occurrence its design holds still. The ones joined, through any
 /// number of joints, to something that stays with the occurrence move. When nothing of it stays
 /// (the design grounds none of them), the first side of the first joint does, and what is
 /// joined to that moves, as the solver starts a design that grounds nothing from its first
 /// joint. Inner occurrences joined only to each other otherwise stay where the design has
 /// them, as its own solve leaves them.
-fn moving(sides: &[[Option<u64>; 2]]) -> BTreeSet<u64> {
-    let mut next: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
-    let mut todo: Vec<u64> = Vec::new();
+fn moving<K: Ord + Clone>(sides: &[[Option<K>; 2]]) -> BTreeSet<K> {
+    let mut next: BTreeMap<&K, Vec<&K>> = BTreeMap::new();
+    let mut todo: Vec<&K> = Vec::new();
     for side in sides {
         match side {
             [Some(a), Some(b)] if a != b => {
-                next.entry(*a).or_default().push(*b);
-                next.entry(*b).or_default().push(*a);
+                next.entry(a).or_default().push(b);
+                next.entry(b).or_default().push(a);
             }
-            [Some(inner), None] | [None, Some(inner)] => todo.push(*inner),
+            [Some(inner), None] | [None, Some(inner)] => todo.push(inner),
             _ => {}
         }
     }
     let mut still = None;
     if todo.is_empty() {
         let first = sides.iter().find_map(|side| match side {
-            [Some(a), Some(b)] if a != b => Some(*a),
+            [Some(a), Some(b)] if a != b => Some(a),
             _ => None,
         });
         let Some(first) = first else { return BTreeSet::new() };
         still = Some(first);
-        todo.extend(next.get(&first).into_iter().flatten().copied());
+        todo.extend(next.get(first).into_iter().flatten().copied());
     }
-    let mut reached = BTreeSet::new();
+    let mut reached: BTreeSet<&K> = BTreeSet::new();
     while let Some(inner) = todo.pop() {
         if Some(inner) != still && reached.insert(inner) {
-            todo.extend(next.get(&inner).into_iter().flatten().copied());
+            todo.extend(next.get(inner).into_iter().flatten().copied());
         }
     }
-    reached
+    reached.into_iter().cloned().collect()
 }
 
 /// The design as the solver takes it: every copy of an inner occurrence that a flexible

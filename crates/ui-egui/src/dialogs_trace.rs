@@ -64,6 +64,14 @@ fn path(s: &Session, sel: &Sel) -> Option<Vec<u64>> {
 pub(super) fn placement(s: &Session, inputs: &[SelInput]) -> Option<(Vec<u64>, Vec3, Mat, Mat)> {
     let pick = sel_items(inputs, 0).first()?;
     let (snap, path) = (snap_of(s, pick)?, path(s, pick)?);
+    // A previewed motion study shows the parts of a flexible subassembly occurrence in poses that
+    // are not the design's own: there the part's frame as shown and as placed differ by the pose
+    // too, and the documents say both.
+    if s.pending_poses.is_some() {
+        let (_, shown) = s.placed_document().path_placement(&path)?;
+        let (_, placed) = s.doc.path_placement(&path)?;
+        return Some((path, snap.at, shown, placed));
+    }
     let world = |shown: bool| {
         path.iter().try_fold(IDENTITY, |m, id| {
             let o = s.doc.occurrences.iter().find(|o| o.id == *id)?;

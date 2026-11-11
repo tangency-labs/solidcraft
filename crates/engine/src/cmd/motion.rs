@@ -1043,12 +1043,16 @@ fn keyed(m: &MotionStudy) -> BTreeSet<(u64, usize)> {
 pub(super) fn positions(s: &Session) -> Vec<(String, Mat)> {
     let mut all: Vec<(String, Mat)> = s.doc.occurrences.iter().map(|o| (o.name.clone(), joints::occurrence_world(&s.doc, o.id))).collect();
     // And the copies that flexible occurrences of linked subassemblies have of the occurrences
-    // inside them, each named with its occurrence in front (`hinge:2/arm:1`).
+    // inside them, each named with its occurrence in front (`hinge:2/arm:1`), and the flexible
+    // occurrences inside that one which it is under between them (`unit:2/hinge:1/arm:1`).
     let posed = s.doc.posed_worlds();
     if !posed.is_empty() {
         let names: std::collections::HashMap<u64, &str> = s.doc.occurrences.iter().map(|o| (o.id, o.name.as_str())).collect();
         let name = |id: u64| names.get(&id).copied().unwrap_or_default();
-        all.extend(posed.into_iter().map(|(occurrence, inner, world)| (format!("{}/{}", name(occurrence), name(inner)), world)));
+        all.extend(posed.into_iter().map(|copy| {
+            let way: Vec<&str> = std::iter::once(copy.occurrence).chain(copy.through.iter().copied()).chain([copy.inner]).map(name).collect();
+            (way.join("/"), copy.world)
+        }));
     }
     all
 }

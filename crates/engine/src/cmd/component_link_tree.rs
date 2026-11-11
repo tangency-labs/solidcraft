@@ -19,7 +19,9 @@
 //! linked design's own joints are then joints here too, once for each flexible occurrence, on
 //! that occurrence's own copy of the occurrences inside it (#1516), so two occurrences of one
 //! subassembly can stand in different poses. The joints stay the linked design's (Update Links
-//! writes them again); where they stand is this design's. The occurrences kept for the design
+//! writes them again); where they stand is this design's. The joints the linked design has for
+//! the flexible occurrences inside it come with its own, level after level: a mechanism any
+//! number of levels down moves from here when every occurrence on the way to it is flexible. The occurrences kept for the design
 //! stay where it was saved with them, which is what a rigid occurrence shows.
 //!
 //! [`sync`] makes that tree, and makes it follow the linked design again on Update Links and
@@ -75,8 +77,12 @@ pub(super) struct SourceTree {
     /// The placements the design's own solve holds still (its grounded ones).
     pub fixed: Vec<u64>,
     /// The poses the design has for the flexible subassemblies inside it, by its own occurrence
-    /// ids: the occurrence a pose is for, the occurrence inside it, and that one's transform.
-    pub poses: Vec<(u64, u64, Mat)>,
+    /// ids: the occurrence a pose is for, the flexible occurrences inside that one which the
+    /// copy is under, the occurrence inside, and that one's transform.
+    pub poses: Vec<(u64, Vec<u64>, u64, Mat)>,
+    /// The design's occurrences that are flexible in it, at any depth ([`Self::with_joints`]):
+    /// a link's flexible occurrence has a copy of what is inside each of them.
+    pub nested: Vec<u64>,
     /// What of the design's joints a flexible link cannot carry, in words.
     pub notes: Vec<String>,
 }
@@ -174,8 +180,10 @@ impl SourceTree {
             .assembly
             .poses
             .iter()
-            .filter(|p| occurrences.contains(&p.occurrence) && occurrences.contains(&p.inner))
-            .map(|p| (p.occurrence, p.inner, p.transform))
+            .filter(|p| {
+                occurrences.contains(&p.occurrence) && occurrences.contains(&p.inner) && p.through.iter().all(|under| occurrences.contains(under))
+            })
+            .map(|p| (p.occurrence, p.through.clone(), p.inner, p.transform))
             .collect();
         tree
     }
@@ -186,46 +194,45 @@ impl SourceTree {
         self.components.is_empty()
     }
 
-    /// With the design's joints, for a link that has a flexible occurrence. Each side is the
-    /// frame the design resolves it to in its occurrence's component, and each number what its
-    /// expression comes to, so the joint needs none of the design's faces, sketches or
-    /// parameters where it is carried to. A motion link between two of them keeps the ratio
-    /// last worked out; a cam, whose table follows a sketch of the design, is not carried.
+    /// With the design's joints, for a link that has a flexible occurrence. Each side is a
+    /// frame on what the design's own solve moves for it ([`Document::sides_as_solved`]), and
+    /// each number what its expression comes to, so the joint needs none of the design's faces,
+    /// sketches or parameters where it is carried to. The joints the design has for the
+    /// flexible occurrences inside it are carried with its own: their sides are on those
+    /// occurrences' copies (`{occurrence, inside}`). A motion link between two of them keeps
+    /// the ratio last worked out; a cam, whose table follows a sketch of the design, is not
+    /// carried.
     pub(super) fn with_joints(mut self, doc: &Document, st: &ModelState) -> SourceTree {
         let placed: BTreeSet<u64> = self.occurrences.iter().map(|o| o.id).collect();
-        let side = |o: &JointOrigin| -> Option<JointOrigin> {
-            if o.occurrence != 0 && !placed.contains(&o.occurrence) {
-                return None;
-            }
-            let frame = solidcraft_doc::joints::resolve_origin(doc, st, o).ok()?;
-            // An origin on occurrences inside its occurrence (`inside`) is a frame on that
-            // occurrence too, where the design shows them.
-            Some(JointOrigin::new(o.occurrence, solidcraft_doc::joints::frame_snap(&frame)))
-        };
+        let known = |o: &JointOrigin| (o.occurrence == 0 || placed.contains(&o.occurrence)) && o.inside.iter().all(|id| placed.contains(id));
         // A design file is not trusted: an id used twice stands for one joint.
         let mut seen = BTreeSet::new();
+        let joints: Vec<&Joint> = doc.assembly.joints.iter().take(solidcraft_doc::joints::MAX_JOINTS).filter(|j| seen.insert(j.id)).collect();
+        let sides: Vec<&JointOrigin> = joints.iter().flat_map(|j| [&j.a, &j.b]).collect();
+        let solved = doc.sides_as_solved(st, &sides);
         let mut left = 0usize;
-        for j in doc.assembly.joints.iter().take(solidcraft_doc::joints::MAX_JOINTS).filter(|j| seen.insert(j.id)) {
-            match (side(&j.a), side(&j.b)) {
-                // A joint of a flexible subassembly inside the design is between two copies of
-                // that subassembly's occurrences, which an occurrence here does not have.
-                (Some(a), Some(b)) if a.occurrence == b.occurrence => left += 1,
+        for (k, j) in joints.iter().enumerate() {
+            let side = |at: usize| solved.get(at).cloned().flatten().filter(|o| known(o));
+            match (side(2 * k), side(2 * k + 1)) {
+                // Both sides on what moves as one: nothing for the joint to move here.
+                (Some(a), Some(b)) if a.occurrence == b.occurrence && a.inside == b.inside => left += 1,
                 (Some(a), Some(b)) => {
                     // A side read as a frame is no datum plane or axis any more, which is what
                     // `flip` counts from: it turns with that, so the joint does what it did.
                     let flip = j.flip != solidcraft_doc::joints::both_datums(&j.a.snap, &j.b.snap);
                     // What Capture Position saved in the linked design is that design's: here
                     // a joint has none until this design captures its own.
-                    self.joints.push(Joint { a, b, flip, exprs: Default::default(), captured: None, ..j.clone() });
+                    self.joints.push(Joint { a, b, flip, exprs: Default::default(), captured: None, ..(*j).clone() });
                 }
                 _ => left += 1,
             }
         }
         if left > 0 {
             self.notes.push(format!(
-                "{left} of the linked design's joints are not carried: a side can't be found, or the joint is one that a flexible occurrence inside that design has from its own linked design"
+                "{left} of the linked design's joints are not carried: a side can't be found, both sides are on what moves as one, or a side is on a second place of what a flexible occurrence's joints move"
             ));
         }
+        self.nested = doc.flexible_at_any_depth().into_iter().filter(|o| placed.contains(o)).collect();
         let carried: BTreeMap<u64, &str> = self.joints.iter().map(|j| (j.id, j.name.as_str())).collect();
         for l in &doc.assembly.links {
             let (Some(a), Some(b)) = (carried.get(&l.a), carried.get(&l.b)) else { continue };
@@ -669,20 +676,28 @@ pub(super) fn sync(s: &mut Session, top: u64, feature: u64, source: &SourceTree,
         }
         None
     };
+    // A side on a copy inside a flexible occurrence of the design (`inside` there) goes on down
+    // through the occurrences kept for those.
     let side = |occurrence: u64, o: &JointOrigin| -> Option<JointOrigin> {
-        let inside = if o.occurrence == 0 { Vec::new() } else { way_down(*occurrences.get(&o.occurrence)?)? };
-        Some(JointOrigin { occurrence, inside, snap: o.snap.clone() })
+        let mut inside = if o.occurrence == 0 { Vec::new() } else { way_down(*occurrences.get(&o.occurrence)?)? };
+        for id in &o.inside {
+            inside.push(*occurrences.get(id)?);
+        }
+        (inside.len() <= solidcraft_doc::MAX_PLACEMENT_DEPTH).then_some(JointOrigin { occurrence, inside, snap: o.snap.clone() })
     };
     let fixed: BTreeSet<u64> =
         if flexible.is_empty() { BTreeSet::new() } else { source.fixed.iter().filter_map(|o| occurrences.get(o).copied()).collect() };
+    // The occurrences kept for ones that are flexible in the design: what a copy can be under.
+    let nested: BTreeSet<u64> =
+        if flexible.is_empty() { BTreeSet::new() } else { source.nested.iter().filter_map(|o| occurrences.get(o).copied()).collect() };
     let tops: BTreeMap<u64, String> = d.occurrences.iter().filter(|o| o.component == top).map(|o| (o.id, o.name.clone())).collect();
     let mut joint_names = JointNames::of(&d);
     let mut joints: BTreeMap<u64, BTreeMap<u64, u64>> = BTreeMap::new();
     let mut carried: BTreeSet<u64> = BTreeSet::new();
     // Where each joint is in the list, which only grows from here on.
     let mut joint_at: HashMap<u64, usize> = d.assembly.joints.iter().enumerate().map(|(at, j)| (j.id, at)).collect();
-    // The inner occurrences each flexible occurrence's joints move: the ones that keep a pose.
-    let mut posed: HashSet<(u64, u64)> = HashSet::new();
+    // The copies each flexible occurrence's joints move: the ones that keep a pose.
+    let mut posed: HashSet<(u64, Vec<u64>, u64)> = HashSet::new();
     let mut full = false;
     for occurrence in &flexible {
         if full {
@@ -692,11 +707,11 @@ pub(super) fn sync(s: &mut Session, top: u64, feature: u64, source: &SourceTree,
         let mut mine: BTreeMap<u64, u64> = BTreeMap::new();
         for j in &source.joints {
             let (Some(a), Some(b)) = (side(*occurrence, &j.a), side(*occurrence, &j.b)) else { continue };
-            let moved: Vec<(u64, u64)> = [&a, &b]
+            let moved: Vec<(u64, Vec<u64>, u64)> = [&a, &b]
                 .into_iter()
-                .filter_map(|x| x.inside.last())
-                .filter(|inner| !fixed.contains(inner))
-                .map(|inner| (*occurrence, *inner))
+                .filter_map(|x| x.inside.split_last())
+                .filter(|(inner, _)| !fixed.contains(inner))
+                .map(|(inner, above)| (*occurrence, above.iter().copied().filter(|id| nested.contains(id)).collect(), *inner))
                 .collect();
             // A recorded joint is this occurrence's only when its sides are on it: a record
             // that names another joint does not get that one rewritten.
@@ -767,17 +782,20 @@ pub(super) fn sync(s: &mut Session, top: u64, feature: u64, source: &SourceTree,
     // for the flexible subassemblies inside it are kept as it has them now, for the occurrences
     // that stand for its own, so those show here as it shows them.
     let ours: HashSet<u64> = occurrences.values().copied().collect();
-    d.assembly.poses.retain(|p| !ours.contains(&p.occurrence) && (!tops.contains_key(&p.occurrence) || posed.contains(&(p.occurrence, p.inner))));
-    for (occurrence, inner, transform) in &source.poses {
-        if let (Some(&occurrence), Some(&inner)) = (occurrences.get(occurrence), occurrences.get(inner))
+    d.assembly.poses.retain(|p| {
+        !ours.contains(&p.occurrence) && (!tops.contains_key(&p.occurrence) || posed.contains(&(p.occurrence, p.through.clone(), p.inner)))
+    });
+    for (occurrence, through, inner, transform) in &source.poses {
+        let through: Option<Vec<u64>> = through.iter().map(|under| occurrences.get(under).copied()).collect();
+        if let (Some(&occurrence), Some(through), Some(&inner)) = (occurrences.get(occurrence), through, occurrences.get(inner))
             && solidcraft_doc::is_placement(transform)
         {
-            d.assembly.poses.push(solidcraft_doc::joints::PlacedPose { occurrence, inner, transform: *transform });
+            d.assembly.poses.push(solidcraft_doc::joints::PlacedPose { occurrence, through, inner, transform: *transform });
         }
     }
     d.assembly.order_poses();
     let carried_joints = joints.values().map(BTreeMap::len).max().unwrap_or(0);
-    let tree = keep.structure().then(|| LinkTree { components: components.clone(), occurrences, flexible: joints, fixed });
+    let tree = keep.structure().then(|| LinkTree { components: components.clone(), occurrences, flexible: joints, fixed, nested });
     if let Some(link) = d.links.get_mut(&top) {
         link.tree = tree;
     }

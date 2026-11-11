@@ -368,9 +368,11 @@ impl Session {
         }
     }
 
-    /// Document with uncaptured occurrence positions applied, without changing saved geometry.
+    /// The document as it is shown, without changing the design: with the occurrence positions
+    /// not captured yet, and with the poses a previewed motion shows in place of the design's
+    /// own ([`Session::pending_poses`]).
     pub fn placed_document(&self) -> std::borrow::Cow<'_, solidcraft_doc::Document> {
-        if self.pending_moves.is_empty() {
+        if self.pending_moves.is_empty() && self.pending_poses.is_none() {
             return std::borrow::Cow::Borrowed(&self.doc);
         }
         let mut doc = (*self.doc).clone();
@@ -378,6 +380,11 @@ impl Session {
             if let Some(transform) = self.pending_moves.get(&o.id) {
                 o.transform = *transform;
             }
+        }
+        if let Some(poses) = &self.pending_poses {
+            doc.assembly.poses.clone_from(poses);
+            // Lookups search the poses in their order, whoever listed them.
+            doc.assembly.order_poses();
         }
         std::borrow::Cow::Owned(doc)
     }
