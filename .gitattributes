@@ -1,6 +1,6 @@
 # Preserve canonical source receipts and the runtime icon-discovery snapshot.
 .gitattributes text eol=lf
-/assets/icons/ui/design/requested_icons.txt text eol=lf
+/crates/look/icons/design/requested_icons.txt text eol=lf
 # Shaders reach the code through include_str!, and tests match multi-line WGSL excerpts
 # written as Rust strings (always LF), so a CRLF checkout must not change them (#13138).
 *.wgsl text eol=lf

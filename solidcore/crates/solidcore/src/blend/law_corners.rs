@@ -4,8 +4,7 @@
 //! between rail points at a peak.
 //!
 //! Not in the pinned upstream: the SolidCraft fork's law corners (tangency-labs/smlib#79,
-//! 7babe17, 58d03ef and 62fcc82), for `fixes.fillet_gn_section_generator` (WR-685's
-//! law-corner addendum, #2273). The round is the union of its balls: each side of a law
+//! 7babe17, 58d03ef and 62fcc82; WR-685's law-corner addendum, #2273). The round is the union of its balls: each side of a law
 //! corner is skinned on its own and ends on the corner ball's touch circle of its own
 //! side, through the same two rail points. Where the law dips the circle after lies ahead
 //! of the one before and the ball's own sphere fills the zone between them; where it
@@ -22,7 +21,7 @@
 //! | [`sphere_zone`]              | `sm_SphereZone` (`SmFilletExecutive.cpp`)                |
 //! | [`curve_between`]            | `sm_CurveBetween` (`SmFilletExecutive.cpp`)              |
 //!
-//! What is in, under `fixes.fillet_gn_section_generator`: 6eecf04's trace (the law's
+//! What is in: 6eecf04's trace (the law's
 //! corners, [`FilletLaw::corner_parameters`](crate::blend::fillet_standard_solver::p1::FilletLaw::corner_parameters),
 //! are through points, and the fillet intersector steps onto them and flushes each span
 //! with its own side's tangents, so the round's curves turn there), and its piecewise skin

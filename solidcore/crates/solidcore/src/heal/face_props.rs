@@ -55,7 +55,7 @@
 //!   with depth [`MAX_LOOPTREE_DEPTH`]; deeper trees are [`SolidError::InvalidInput`].
 //! - **Statuses.** `SetProps` keeps upstream's "last status wins" over the three stage
 //!   calls; [`SolidError::Unported`] returns at once. `SM_ERR_NOTYET_HEAL_FACE` is
-//!   [`SolidError::Upstream`] with code [`SM_ERR_NOTYET_HEAL_FACE`], and the face props
+//!   [`HealFailure::NotYetHealable`] (status [`SM_ERR_NOTYET_HEAL_FACE`]), and the face props
 //!   keep the not-yet type it recorded. The optional label argument (debug dumps only)
 //!   and the `SM_DEBUG_CODE` graphics and asserts are dropped (asserts are compiled out
 //!   of the reference build). The unreachable `SmCurveClassification::ReSet` branch of
@@ -77,6 +77,7 @@
 //!   edge/face gap caches produced by seam queries, even on errors. Read-only props
 //!   queries still leave the B-rep unchanged; no geometry or topology is copied back.
 
+use crate::error::heal::HealFailure;
 use crate::error::{ignored, EntityRef, Result, SolidError};
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::tol::{calc_face_zone_tol_3d, xsect_tol_3d_from_zones, zone_tol3d};
@@ -1952,7 +1953,10 @@ impl<O: LoopObject> FaceProps<O> {
 
         // no work - called before SmHealData::Fix_TolSizes() has run on this Brep
         if exe_heal_op < HealerOpType::FixTolsizes {
-            return Err(SolidError::sm_err(OP_STAGE2));
+            return Err(SolidError::heal_failed(
+                OP_STAGE2,
+                "the tolerance sizes are not fixed yet",
+            ));
         }
 
         // extra work - get props that need to be built before these props
@@ -2318,7 +2322,10 @@ impl<O: LoopObject> FaceProps<O> {
 
         // no work - called before SmHealData::Fix_SplitEdgesAtSeam() has run
         if exe_heal_op < HealerOpType::FixSplitedgeAtseam {
-            return Err(SolidError::sm_err(OP_STAGE3));
+            return Err(SolidError::heal_failed(
+                OP_STAGE3,
+                "the edges are not split at the seams yet",
+            ));
         }
 
         // extra work - get props that need to be built before these props
@@ -2792,13 +2799,9 @@ impl<O: LoopObject> FaceProps<O> {
     }
 }
 
-/// `SM_ERR_NOTYET_HEAL_FACE` as an error.
+/// `SM_ERR_NOTYET_HEAL_FACE` as an error ([`HealFailure::NotYetHealable`]).
 fn not_yet_heal_face(operation: &'static str) -> SolidError {
-    SolidError::Upstream {
-        operation,
-        code: SM_ERR_NOTYET_HEAL_FACE,
-        entity: None,
-    }
+    SolidError::heal(operation, HealFailure::NotYetHealable)
 }
 
 /// Returns `r`'s error when it is [`SolidError::Unported`] (a status upstream
@@ -3067,10 +3070,10 @@ mod tests {
         let mut p: FaceProps<H> = FaceProps::new();
         // before Fix_TolSizes: SM_ERR, nothing is touched
         let e = p.set_props_stage2(&k, &b, f, 0, HealerOpType::None);
-        assert!(matches!(e, Err(SolidError::Upstream { code: 1001, .. })));
+        assert!(matches!(e, Err(e) if e.upstream_status() == Some(1001)));
         assert_eq!(p.prop_stage, PropStage::Stage0);
         let e = p.set_props_stage3(&k, &b, f, 0, HealerOpType::FixTolsizes);
-        assert!(matches!(e, Err(SolidError::Upstream { code: 1001, .. })));
+        assert!(matches!(e, Err(e) if e.upstream_status() == Some(1001)));
     }
 
     #[test]

@@ -319,7 +319,7 @@ impl CacheFace<EntityRef> for BrepCacheFace<'_> {
     fn natural_uv_domain(&self) -> Result<Option<Extent2d>> {
         Ok(Some(
             fp2::surface(self.b, self.f)?
-                .ok_or(SolidError::null_pointer(OP_CACHE_FACE))?
+                .ok_or_else(|| SolidError::query_missing(OP_CACHE_FACE, "the face's surface"))?
                 // (kernel-free: a lazy analytic answers its NURB-less base's empty domain)
                 .natural_uv_domain_if_built(),
         ))
@@ -415,7 +415,7 @@ pub fn face_surface_cache(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<FaceSur
         .face(f)?
         .surface
         .as_ref()
-        .ok_or(SolidError::null_pointer(OP_CACHE_FACE))?
+        .ok_or_else(|| SolidError::query_missing(OP_CACHE_FACE, "the face's surface"))?
         .clone_for_evaluation()?;
     // `GetFace()` is NULL while the owner is cleared
     let cleared = b.is_surface_owner_cleared(f);
@@ -1139,7 +1139,7 @@ fn point_classify_with_topology(
         .face(f)?
         .surface
         .as_ref()
-        .ok_or(SolidError::null_pointer(OP_CLASSIFY))?;
+        .ok_or_else(|| SolidError::query_missing(OP_CLASSIFY, "the face's surface"))?;
     // (an owned surface: the loop classification edits the B-rep while it walks)
     let surface: Surface = if let Some(copy) = with_out_of_bounds_enabled(surface)? {
         copy
@@ -1662,7 +1662,7 @@ fn boundary_edge<O: ClassObject>(
     };
     let record = objects.brep().edge(edge)?;
     if record.curve.is_none() {
-        return Err(SolidError::null_pointer(OP_CURVE));
+        return Err(SolidError::query_missing(OP_CURVE, "the edge's curve"));
     }
     Ok(BoundaryEdge {
         edge: objects.edge(edge),
@@ -1977,19 +1977,20 @@ fn boundary_loops<O: ClassObject>(
     face: FaceId,
     cached: bool,
 ) -> Result<Vec<BoundaryLoop<O>>> {
-    let fu =
-        fp2::upward_faceuse(objects.brep(), face)?.ok_or(SolidError::null_pointer(OP_CURVE))?;
+    let fu = fp2::upward_faceuse(objects.brep(), face)?
+        .ok_or_else(|| SolidError::query_missing(OP_CURVE, "the face's upward face use"))?;
     let loopuses = objects.brep().faceuse(fu)?.loopuses.clone();
     let mut loops = Vec::new();
     for lu in loopuses {
         let mut vertices = Vec::new();
         for vu in loopuse::vertexuses(objects.brep(), lu, None)? {
-            let vu = vu.ok_or(SolidError::null_pointer(OP_CURVE))?;
+            let vu =
+                vu.ok_or_else(|| SolidError::query_missing(OP_CURVE, "a loop use's vertex use"))?;
             let b = objects.brep();
             let vertex = b
                 .vertexuse(vu)?
                 .vertex
-                .ok_or(SolidError::null_pointer(OP_CURVE))?;
+                .ok_or_else(|| SolidError::query_missing(OP_CURVE, "a vertex use's vertex"))?;
             let record = b.vertex(vertex)?;
             let (point, zone_tol_3d) = (record.point, record.tolerance);
             // Cached traversal supplies its own UV only for visited vertices.
@@ -2018,7 +2019,7 @@ fn boundary_loops<O: ClassObject>(
                 .brep()
                 .edgeuse(eu)?
                 .edge
-                .ok_or(SolidError::null_pointer(OP_CURVE))?;
+                .ok_or_else(|| SolidError::query_missing(OP_CURVE, "an edge use's edge"))?;
             // the trim curve as of now: ComputeUVPoint above may have made it
             let (trim, owner) = eu1::uv_trim_curve(objects.brep(), eu)?;
             let trim_curve = match (trim, owner) {
@@ -2160,7 +2161,12 @@ pub fn curve_on_classify_mut<O: ClassObject>(
             match intersect_ts_bound(k, objects, &mut made_trims, cc, f, do_check_3d) {
                 Ok(()) => {}
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                Err(_) => return Err(SolidError::sm_err(OP_CURVE)),
+                Err(_) => {
+                    return Err(SolidError::query_failed(
+                        OP_CURVE,
+                        "the UV curve of an edge use could not be made",
+                    ))
+                }
             }
         } else {
             // 3D Curve Branch
@@ -2307,14 +2313,17 @@ fn intersect_ts_bound<O: ClassObject>(
     do_check_3d: bool,
 ) -> Result<()> {
     if objects.classify_surface(face)?.is_none() {
-        return Err(SolidError::null_pointer(OP_CURVE));
+        return Err(SolidError::query_missing(OP_CURVE, "the face's surface"));
     }
     // Face->surface and TrimCache: smsurf_GetSurfaceCache(pSurface) (made on the
     // face's B-rep); NER of a surface cache that is not a trimmed one
     let lease = face_surface_cache(k, objects.brep_mut(), face)?;
     if !lease.trimmed {
         lease.release();
-        return Err(SolidError::null_pointer(OP_CURVE));
+        return Err(SolidError::query_missing(
+            OP_CURVE,
+            "the face's trim curves",
+        ));
     }
     // the cached branch reads the vertex uses' UV points from the cache
     let base = lease.cache.base();
@@ -2325,7 +2334,7 @@ fn intersect_ts_bound<O: ClassObject>(
         let visits = {
             let surface = objects
                 .classify_surface(face)?
-                .ok_or(SolidError::null_pointer(OP_CURVE))?;
+                .ok_or_else(|| SolidError::query_missing(OP_CURVE, "the face's surface"))?;
             let objects_r = &*objects;
             let cache_handle = |h: EntityRef| match h {
                 EntityRef::Vertexuse(vu) => Some(objects_r.vertexuse(vu)),
@@ -2371,14 +2380,15 @@ fn cached_ts_bound<O: ClassObject>(
 ) -> Result<()> {
     // the face's edge uses behind the handles
     let b = objects.brep();
-    let fu = fp2::upward_faceuse(b, face)?.ok_or(SolidError::null_pointer(OP_CURVE))?;
+    let fu = fp2::upward_faceuse(b, face)?
+        .ok_or_else(|| SolidError::query_missing(OP_CURVE, "the face's upward face use"))?;
     let mut ids = Vec::new();
     for &lu in &b.faceuse(fu)?.loopuses {
         for eu in loopuse::edgeuses(b, lu, None, None)? {
             let edge = b
                 .edgeuse(eu)?
                 .edge
-                .ok_or(SolidError::null_pointer(OP_CURVE))?;
+                .ok_or_else(|| SolidError::query_missing(OP_CURVE, "an edge use's edge"))?;
             ids.push((objects.edgeuse(eu), eu, edge));
         }
     }
@@ -2388,7 +2398,7 @@ fn cached_ts_bound<O: ClassObject>(
     for vertex in visits.vertices {
         let surface = objects
             .classify_surface(face)?
-            .ok_or(SolidError::null_pointer(OP_CURVE))?;
+            .ok_or_else(|| SolidError::query_missing(OP_CURVE, "the face's surface"))?;
         cc.ts_bound_vertex(
             k,
             &WithMadeTrimCurves {
@@ -2404,7 +2414,7 @@ fn cached_ts_bound<O: ClassObject>(
         let &(_, eu, edge) = ids
             .iter()
             .find(|(h, _, _)| *h == edgeuse.edgeuse)
-            .ok_or(SolidError::null_pointer(OP_CURVE))?;
+            .ok_or_else(|| SolidError::query_missing(OP_CURVE, "the classification's edge use"))?;
         // get/create the UVCurve for this Edgeuse
         if edgeuse.trim_curve.is_none() {
             let fetch = crate::topology::edgeuse::p3::get_or_create_uv_trim_curve(
@@ -2429,7 +2439,7 @@ fn cached_ts_bound<O: ClassObject>(
         edgeuse.edge = boundary_edge(k, objects, face, edge, false)?;
         let surface = objects
             .classify_surface(face)?
-            .ok_or(SolidError::null_pointer(OP_CURVE))?;
+            .ok_or_else(|| SolidError::query_missing(OP_CURVE, "the face's surface"))?;
         cc.ts_bound_edgeuse(
             k,
             &WithMadeTrimCurves {
@@ -2464,7 +2474,7 @@ fn intersect_edges<O: ClassObject>(
     has_big_gaps: bool,
 ) -> Result<()> {
     if objects.classify_surface(face)?.is_none() {
-        return Err(SolidError::null_pointer(OP_CURVE));
+        return Err(SolidError::query_missing(OP_CURVE, "the face's surface"));
     }
     // IntersectEdges reads the edge/face gaps with the surface's owner cleared
     // (SmTemporaryChangeValue on m_pOwner)
@@ -2908,13 +2918,10 @@ pub(crate) mod tests {
         let f = square(&mut b);
         b.face_mut(f).unwrap().surface = None;
         let (r, _) = classify(&mut b, f, Point2::new(0.5, 0.5));
-        assert!(matches!(
-            r,
-            Err(SolidError::Upstream {
-                code: crate::error::SM_ERR_NULL_POINTER,
-                ..
-            })
-        ));
+        assert!(
+            matches!(&r, Err(e) if e.upstream_status() == Some(crate::error::SM_ERR_NULL_POINTER)),
+            "{r:?}"
+        );
     }
 
     #[test]

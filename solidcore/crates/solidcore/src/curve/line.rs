@@ -1101,7 +1101,10 @@ impl Line {
     ) -> Result<Vec<Solution<O>>> {
         // only good for MINIMIZE and INTERSECT operations
         if operation != SolverOperation::Minimize && operation != SolverOperation::Intersect {
-            return Err(SolidError::sm_err(OP_DROP));
+            return Err(SolidError::curve_failed(
+                OP_DROP,
+                "the operation is neither minimize nor intersect",
+            ));
         }
 
         // init output
@@ -1315,6 +1318,32 @@ impl Line {
         Ok(r)
     }
 
+    /// Whether [`Line::intersect_with_line`] of these segments stops at its first test,
+    /// with no solution: the box of this segment grown by `tol` misses the other
+    /// segment's box. A caller that intersects many pairs of lines can skip those
+    /// pairs up front (#14329).
+    #[must_use]
+    pub fn segments_apart(
+        &self,
+        interval: &Extent1d,
+        other: &Self,
+        other_interval: &Extent1d,
+        tol: f64,
+    ) -> bool {
+        !core::ptr::eq(self, other)
+            && segment_boxes_apart(
+                [
+                    self.evaluate_point(interval.min()),
+                    self.evaluate_point(interval.max()),
+                ],
+                [
+                    other.evaluate_point(other_interval.min()),
+                    other.evaluate_point(other_interval.max()),
+                ],
+                tol,
+            )
+    }
+
     /// Intersections of this line over `interval` with `other` over `other_interval`
     /// (both NURB domains) within `tol` (`IntersectWithLine`): no solution for
     /// disjoint boxes or a degenerate segment, a single value for crossing segments, a
@@ -1351,12 +1380,7 @@ impl Line {
         let vec1 = end1 - start1;
 
         // check for disjoint solution
-        let mut bbox1 = Extent3d::from_point(start1);
-        bbox1.add_point(end1);
-        bbox1.expand_absolute(tol);
-        let mut bbox2 = Extent3d::from_point(start2);
-        bbox2.add_point(end2);
-        if bbox1.are_disjoint(&bbox2, 0.0) {
+        if segment_boxes_apart([start1, end1], [start2, end2], tol) {
             return Ok(out);
         }
 
@@ -1734,19 +1758,28 @@ impl Line {
 
         // Check join-point distance.
         if this_common.distance(other_common) > tol {
-            return Err(SolidError::sm_err(OP_JOIN));
+            return Err(SolidError::curve_failed(
+                OP_JOIN,
+                "the join points are farther apart than the tolerance",
+            ));
         }
 
         // Other curve must be linear.
         if !other_is_line(other, 5, tol)? {
-            return Err(SolidError::sm_err(OP_JOIN));
+            return Err(SolidError::curve_failed(
+                OP_JOIN,
+                "the other curve is not linear",
+            ));
         }
 
         // And it must be collinear with us.
         let whole_line_vec = other_end - this_end;
         let (dist, _) = line_point_distance(this_end, whole_line_vec, this_common);
         if dist > tol {
-            return Err(SolidError::sm_err(OP_JOIN));
+            return Err(SolidError::curve_failed(
+                OP_JOIN,
+                "the other curve is not collinear",
+            ));
         }
 
         // Length of other curve's param range will be ours, scaled by the 3d lengths.
@@ -2270,9 +2303,65 @@ fn value_report(
     Ok(false)
 }
 
+/// The disjoint test of `IntersectWithLine`: the box of segment `a` grown by `tol`
+/// misses the box of segment `b`.
+fn segment_boxes_apart(a: [Point3; 2], b: [Point3; 2], tol: f64) -> bool {
+    let mut bbox1 = Extent3d::from_point(a[0]);
+    bbox1.add_point(a[1]);
+    bbox1.expand_absolute(tol);
+    let mut bbox2 = Extent3d::from_point(b[0]);
+    bbox2.add_point(b[1]);
+    bbox1.are_disjoint(&bbox2, 0.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `segments_apart` says "apart" only where `intersect_with_line` finds nothing, on
+    /// segments of every relative placement: crossing, touching, overlapping, within
+    /// and beyond the tolerance, parallel and skew (#14329).
+    #[test]
+    fn segments_apart_only_where_line_line_finds_nothing() {
+        let tol = 1e-3;
+        let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let (mut apart, mut near) = (0, 0);
+        for _ in 0..20_000 {
+            let mut point =
+                |scale: f64| Vec3::new(next() * scale, next() * scale, (next() - 0.5) * 4.0 * tol);
+            let (a, b) = (point(4.0), point(4.0));
+            let (c, d) = (point(4.0), point(4.0));
+            let line = |p: Vec3, q: Vec3| {
+                let domain = Extent1d::from_min_max(0.0, (q - p).length());
+                Line::bounded(p, q - p, &domain, &BoundedLineOptions::default())
+            };
+            let (l1, l2) = (line(a, b), line(c, d));
+            let i1 = l1.natural_interval();
+            let i2 = l2.natural_interval();
+            let found = l1
+                .intersect_with_line::<u8>(&i1, &l2, &i2, tol, None, None)
+                .unwrap();
+            if l1.segments_apart(&i1, &l2, &i2, tol) {
+                apart += 1;
+                assert!(found.solutions.is_empty(), "{a:?} {b:?} / {c:?} {d:?}");
+                assert!(!found.needs_more_intersections);
+            } else {
+                near += 1;
+            }
+        }
+        // both answers occur
+        assert!(apart > 1_000 && near > 1_000, "{apart} apart, {near} near");
+        // a line is never apart from itself
+        let l = seg();
+        let ivl = l.natural_interval();
+        assert!(!l.segments_apart(&ivl, &l, &ivl, tol));
+    }
 
     fn seg() -> Line {
         Line::bounded(

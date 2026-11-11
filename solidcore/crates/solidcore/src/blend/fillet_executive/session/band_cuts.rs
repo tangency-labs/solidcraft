@@ -5,8 +5,7 @@
 //! merged at 5e8c9c1) adds `SmFilletSolver::BandCutsThePart` with `sm_EdgesCrossingPlane`
 //! and `sm_KeepsMaterialBehind` (`SmFilletSolver.cpp`, `SmFilletSolver.h`) in commits
 //! 862971f, e568e45 (the section intersected with every face, not sampled) and aac4288 (a
-//! run of cutting sections reaching an end of the edge is no cut). They run only with the
-//! opt-in `Kernel::fixes.fillet_gn_section_generator`.
+//! run of cutting sections reaching an end of the edge is no cut).
 //!
 //! | Rust                          | Upstream (fork)                          |
 //! |-------------------------------|------------------------------------------|
@@ -1030,8 +1029,7 @@ pub(crate) fn band_cuts_the_part_cached(
     Ok(cut)
 }
 
-/// Not the fork's (WR-707, #2299; `fixes.fillet_refuse_rounds_breaking_through` with
-/// `fixes.fillet_gn_section_generator`): whether this convex blend's section breaks
+/// Not the fork's (WR-707, #2299; `fixes.fillet_refuse_rounds_breaking_through`): whether this convex blend's section breaks
 /// through the part somewhere along its edge (it leaves the part and comes back into it
 /// through an inner face, one sharing no edge with the blended faces: a hollow behind a
 /// wall, `section_breaks_through`), and where it would, the largest size that keeps every

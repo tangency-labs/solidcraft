@@ -9,6 +9,11 @@ are marked `SolidCraft:` in the source.
 Original package sources from https://github.com/emilk/egui/tree/0.37.0/crates/egui-wgpu,
 with both original licence texts retained. No images or bundled documentation are copied.
 
+The shared viewport crate `solidcraft-viewport-egui` draws through it and relies on these fixes
+(above all, the drawable acquired before paint callbacks are prepared: without it the cached
+offscreen picture is never drawn). Another workspace that uses that crate patches egui-wgpu to
+this copy the same way, with `[patch.crates-io] egui-wgpu = { path = ".../vendor/egui-wgpu" }`.
+
 SolidCraft changes:
 - `src/setup.rs`, `src/lib.rs`: let a named adapter selector defer to the normal wgpu
   request when the requested card is unavailable or incompatible with the window surface.

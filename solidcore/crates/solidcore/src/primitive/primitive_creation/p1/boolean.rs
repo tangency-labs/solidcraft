@@ -152,9 +152,7 @@ fn finish_with(
         b,
         session.attributes,
     )?;
-    let fixes = k.fixes;
-    let mut lock =
-        MarkLock::new_pair_with_fixes(core::slice::from_mut(&mut k.context), 0, 0, &fixes)?;
+    let mut lock = MarkLock::new_pair(core::slice::from_mut(&mut k.context), 0, 0)?;
     let mark_a = lock.mark_type1();
     let mark_b = lock.mark_type2();
     let (marks_a, marks_b) = marks;
@@ -177,7 +175,8 @@ fn finish_with(
                 .into_iter()
                 .step_by(2)
             {
-                let face = eu::face(a, edgeuse)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+                let face = eu::face(a, edgeuse)?
+                    .ok_or_else(|| SolidError::primitive_missing(OP, "the edgeuse's face"))?;
                 if marks_a.is_marked(k, Entity::Face(face), mark_a) {
                     continue;
                 }
@@ -193,15 +192,17 @@ fn finish_with(
                     None,
                 )?;
                 if let Some(faceuse) = sector.coincident_faceuse {
-                    let mate = eu::faceuse_face(b, faceuse)?
-                        .ok_or_else(|| SolidError::null_pointer(OP))?;
+                    let mate = eu::faceuse_face(b, faceuse)?.ok_or_else(|| {
+                        SolidError::primitive_missing(OP, "the coincident faceuse's face")
+                    })?;
                     marks_b.mark(k, Entity::Face(mate), mark_b);
                     // sTI.Relate(pF,pOFace), its status unchecked
                     ignore_or_pass_on(session.ti.relate_faces(a, face, b, mate), p)?;
                 }
             }
             for edgeuse in edge::edgeuses(b, other, None, None)?.into_iter().step_by(2) {
-                let face = eu::face(b, edgeuse)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+                let face = eu::face(b, edgeuse)?
+                    .ok_or_else(|| SolidError::primitive_missing(OP, "the edgeuse's face"))?;
                 if marks_b.is_marked(k, Entity::Face(face), mark_b) {
                     continue;
                 }
@@ -221,8 +222,9 @@ fn finish_with(
                     Err(_) => continue,
                 };
                 if let Some(faceuse) = sector.coincident_faceuse {
-                    let mate = eu::faceuse_face(a, faceuse)?
-                        .ok_or_else(|| SolidError::null_pointer(OP))?;
+                    let mate = eu::faceuse_face(a, faceuse)?.ok_or_else(|| {
+                        SolidError::primitive_missing(OP, "the coincident faceuse's face")
+                    })?;
                     marks_a.mark(k, Entity::Face(mate), mark_a);
                     session.ti.relate_faces(a, mate, b, face)?;
                 }
@@ -256,11 +258,9 @@ fn finish_with(
                     true,
                     false,
                 )?;
-                let original = a
-                    .face(covering)?
-                    .surface
-                    .as_ref()
-                    .ok_or_else(|| SolidError::null_pointer(OP))?;
+                let original = a.face(covering)?.surface.as_ref().ok_or_else(|| {
+                    SolidError::primitive_missing(OP, "the covering face's surface")
+                })?;
                 let surface = if original.owner().is_some() {
                     original.copy(k)?
                 } else {

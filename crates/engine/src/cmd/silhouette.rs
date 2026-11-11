@@ -6,10 +6,10 @@ use solidcraft_geom::prelude::*;
 
 use super::CommandSpec;
 use crate::params::bad;
-use crate::render::{Camera, StandardView};
 use crate::schema::silhouette::{SilhouetteParams, SilhouetteProjection, SilhouetteResult};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
+use solidcraft_viewport::{Camera, StandardView};
 
 const CMD: &str = "inspect.silhouette";
 const CONTRACT: TypedContract<SilhouetteParams> = TypedContract::new();

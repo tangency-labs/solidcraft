@@ -62,14 +62,14 @@ impl PrimitiveCreation {
         self.init_entity_maps();
 
         if height < EFF_ZERO {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::primitive_failed(OP, "the height is zero"));
         }
 
         // Check for special cases: a full 360 degree sweep is analytic, a zero
         // sweep fails
         let rotation = end_deg - start_deg;
         if rotation.abs() < EFF_ZERO {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::primitive_failed(OP, "the sweep angle is zero"));
         }
         let full = full_rotation(rotation);
         if full {
@@ -80,7 +80,7 @@ impl PrimitiveCreation {
 
         // Construct partial cone
         if self.region().is_none() {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::primitive_missing(OP, "the target region"));
         }
         a.set_editing(brep, true)?;
 
@@ -105,7 +105,10 @@ impl PrimitiveCreation {
             )?)));
         } else {
             // Zero length side of a cone is not legal
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::primitive_failed(
+                OP,
+                "a cone side has zero length",
+            ));
         }
         if origin.distance(start) > tol {
             curves.push(Some(Curve::from(BSplineCurve::create_line_segment(
@@ -118,7 +121,10 @@ impl PrimitiveCreation {
             )?)));
         } else {
             // Zero length side of a cone is not legal
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::primitive_failed(
+                OP,
+                "a cone side has zero length",
+            ));
         }
         if end.distance(top_base) > tol {
             curves.push(Some(Curve::from(BSplineCurve::create_line_segment(
@@ -127,7 +133,10 @@ impl PrimitiveCreation {
         }
         if curves.len() < 3 {
             // Some problem here with not enough curves
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::primitive_failed(
+                OP,
+                "the cone profile has fewer than three curves",
+            ));
         }
 
         self.create_partial_rotational_sweep(
@@ -170,7 +179,7 @@ impl PrimitiveCreation {
 
         // Construct partial sphere
         if self.region().is_none() {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::primitive_missing(OP, "the target region"));
         }
         a.set_editing(brep, true)?;
 
@@ -192,7 +201,10 @@ impl PrimitiveCreation {
             .set_canonical(origin, -axis, y_rf1.cross(axis))
             .is_err()
         {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::primitive_failed(
+                OP,
+                "the sphere's profile frame is degenerate",
+            ));
         }
 
         // The circle generator can cope all angles.
@@ -250,7 +262,7 @@ impl PrimitiveCreation {
 
         // Construct partial torus
         if self.region().is_none() {
-            return Err(SolidError::null_pointer(OP));
+            return Err(SolidError::primitive_missing(OP, "the target region"));
         }
         a.set_editing(brep, true)?;
 
@@ -270,7 +282,10 @@ impl PrimitiveCreation {
             .set_canonical(center, -axis, (-y_rf1).cross(axis))
             .is_err()
         {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::primitive_failed(
+                OP,
+                "the torus's profile frame is degenerate",
+            ));
         }
 
         // if minor radius = major radius, adjust start and end angle -180 to 180
