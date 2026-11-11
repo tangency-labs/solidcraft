@@ -340,7 +340,10 @@ pub fn evaluate_directional_derivs<S: SurfaceEvaluate + ?Sized>(
     const OP: &str = "surface::surface::p1::evaluate_directional_derivs";
     // check state
     if highest_deriv > 3 {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::surface_failed(
+            OP,
+            "a derivative order above three was asked",
+        ));
     }
 
     // make the surface evaluation
@@ -984,7 +987,10 @@ pub fn validate_surface_cache(
         }
         // low work - use OldCache when its given
         ObjectCacheType::Surface => Ok(old),
-        _ => Err(SolidError::sm_err(OP_CACHE)),
+        _ => Err(SolidError::surface_failed(
+            OP_CACHE,
+            "the cache type has no surface cache",
+        )),
     }
 }
 
@@ -2435,7 +2441,7 @@ impl Surface {
         // get or create SurfaceCache with Subdivision Tree containing Bounding boxes
         // (smsurf_GetSurfaceCache returns NULL when no cache can be made: NER)
         let mut cache = ignored_surface_result(get_surface_cache::<()>(k, self, None))?
-            .ok_or(SolidError::null_pointer(OP_BOX))?;
+            .ok_or_else(|| SolidError::surface_missing(OP_BOX, "the surface's cache"))?;
         let top = cache
             .get_tree(k)?
             .top_node()
@@ -2845,7 +2851,10 @@ impl Surface {
             for (ii, curve) in curves_3d.iter_mut().enumerate() {
                 // SM_CAST_PTR(SmBSplineCurve, ..): NULL (then dereferenced) otherwise
                 if !matches!(curve.kind(), CurveKind::BSpline(_)) {
-                    return Err(SolidError::null_pointer(OP));
+                    return Err(SolidError::surface_missing(
+                        OP,
+                        "the B-spline form of the 3D curve",
+                    ));
                 }
 
                 // To add color attribute for curve from color of surface: not modelled
@@ -2895,9 +2904,14 @@ impl Surface {
                         pass,
                     )?)?;
 
-                    let uv_curve = curves_uv.get_mut(ii).ok_or(SolidError::null_pointer(OP))?;
+                    let uv_curve = curves_uv
+                        .get_mut(ii)
+                        .ok_or_else(|| SolidError::surface_missing(OP, "the UV curve"))?;
                     if !matches!(uv_curve.kind(), CurveKind::BSpline(_)) {
-                        return Err(SolidError::null_pointer(OP));
+                        return Err(SolidError::surface_missing(
+                            OP,
+                            "the B-spline form of the UV curve",
+                        ));
                     }
                     let mut new_uv_bsc = uv_curve.clone();
                     // may snap sIvl by tol to existing knots
@@ -3711,7 +3725,10 @@ pub fn find_uv_curve_ivl_in_domain<O: SolutionObject>(
     }
 
     // error: arrive here when no segments contain the input dParamInside value
-    Err(SolidError::sm_err(OP_IVL))
+    Err(SolidError::surface_failed(
+        OP_IVL,
+        "no segment contains the parameter",
+    ))
 }
 
 /// The normal section of a surface evaluation in `direction`
@@ -4155,8 +4172,9 @@ impl<'s> FindSingularParamWithGivenTangentDir<'s> {
         let derivs =
             at(&m, w.0, w.1).unitized_derivative2(at(&m, ws.0, ws.1), at(&m, wss.0, wss.1));
         if derivs.is_err() && k.fixes.query_statuses_pass_on {
-            return Err(SolidError::sm_err(
+            return Err(SolidError::surface_failed(
                 "surface::surface::p1::FindSingularParamWithGivenTangentDir::evaluate",
+                "the unit derivatives of the singular direction are undefined",
             ));
         }
         let [unit_t, unit_tt] = derivs.unwrap_or_else(|d| d);

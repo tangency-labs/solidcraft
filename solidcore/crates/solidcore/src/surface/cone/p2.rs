@@ -416,7 +416,12 @@ impl Cone {
     /// `SM_ERR` unless this is a cylinder with a NURB whose radius stays positive; those of
     /// the control point edits and of the rebuild.
     pub fn lean_cylinder(&self, k: &Kernel, slope: f64, neutral_height: f64) -> Result<Cone> {
-        let err = || SolidError::sm_err("surface::cone::p2::Cone::lean_cylinder");
+        let err = || {
+            SolidError::surface_failed(
+                "surface::cone::p2::Cone::lean_cylinder",
+                "the surface is not a cylinder with a NURB whose radius stays positive",
+            )
+        };
         let canonical = self.canonical();
         if !self.is_cylinder()
             || canonical.radius.partial_cmp(&EFF_ZERO) != Some(core::cmp::Ordering::Greater)
@@ -486,7 +491,7 @@ impl Cone {
             ignore_status(self.make_nurb(k))?;
         }
         if self.rev.base.gw_nurb().is_none() {
-            return Err(SolidError::null_pointer(OP_REPARAM));
+            return Err(SolidError::surface_missing(OP_REPARAM, "the cone's NURB"));
         }
         let inside_out = self.inside_out;
         self.rev
@@ -659,11 +664,9 @@ impl Cone {
             } else {
                 tgt_nurb_domain.v_interval()
             };
-            let gen = off_cone
-                .rev
-                .gen_curve
-                .as_mut()
-                .ok_or(SolidError::null_pointer(OP_OFFSET))?;
+            let gen = off_cone.rev.gen_curve.as_mut().ok_or_else(|| {
+                SolidError::surface_missing(OP_OFFSET, "the offset cone's generator curve")
+            })?;
             ignore_status(gen.edit_parameterization(k, &tgt_gen_nurb_ivl))?;
 
             // rebuild the PolarCurve to make sure all is coordinated (status ignored)
@@ -760,11 +763,9 @@ impl Cone {
         // translate the NewCone->GenCurve from current center line (status ignored)
         let mut mv = Axis2Placement::IDENTITY;
         mv.translate(off_vec);
-        let gen = off_cone
-            .rev
-            .gen_curve
-            .as_mut()
-            .ok_or(SolidError::null_pointer(OP_OFFSET))?;
+        let gen = off_cone.rev.gen_curve.as_mut().ok_or_else(|| {
+            SolidError::surface_missing(OP_OFFSET, "the offset cone's generator curve")
+        })?;
         ignore_status(gen.transform(k, &mv, None))?;
 
         Ok(Some(off_cone))
@@ -1126,9 +1127,9 @@ impl Cone {
         // (error recovery: the constructor always makes its generator)
 
         // the cylinder's NURB is a copy of the tested one
-        let nurb = test_surface
-            .gw_nurb()
-            .ok_or_else(|| SolidError::null_pointer(OP_NURB_CYLINDER))?;
+        let nurb = test_surface.gw_nurb().ok_or_else(|| {
+            SolidError::surface_missing(OP_NURB_CYLINDER, "the tested surface's NURB")
+        })?;
         cylinder.rev.base.nurb = Some(copy_nurb_surface(nurb)).into();
         cylinder.rev.base.nurb_is_borrowed = false;
 
@@ -1183,7 +1184,10 @@ impl Cone {
             || linear_iso_param == SurfParamType::Neither
         {
             // Modified Nurb SmCone: no longer has degree 1 and 2 basis functions
-            return Err(SolidError::sm_err(OP_REBUILD));
+            return Err(SolidError::surface_failed(
+                OP_REBUILD,
+                "the NURB is no longer of degree 1 by 2 and rational",
+            ));
         }
 
         // evaluate Nurb min/max domain points (the cone's EvaluatePoint; statuses
@@ -1229,13 +1233,19 @@ impl Cone {
         )?
         else {
             // Modified Nurb SmCone: no longer has circular top and bottom IsoParamCurves
-            return Err(SolidError::sm_err(OP_REBUILD));
+            return Err(SolidError::surface_failed(
+                OP_REBUILD,
+                "the NURB's top and bottom iso curves are not circular",
+            ));
         };
 
         // not a cone - top/bot start angles or top/bot end angles vary by more than
         // tolerance
         if twisted(&top, &bot, ang_tol)? {
-            return Err(SolidError::sm_err(OP_REBUILD));
+            return Err(SolidError::surface_failed(
+                OP_REBUILD,
+                "the top and bottom arcs' angles differ by more than the tolerance",
+            ));
         }
 
         // get the cone height = length of axis vector from botCurve Center to TopCurve
@@ -1247,13 +1257,19 @@ impl Cone {
 
         // not a cone - height of cone is degenerate (cone is a disk)
         if height < EFF_ZERO_SQRT {
-            return Err(SolidError::sm_err(OP_REBUILD));
+            return Err(SolidError::surface_failed(
+                OP_REBUILD,
+                "the cone's height is degenerate",
+            ));
         }
         nurb_z_axis = nurb_z_axis.unitize_or_z();
 
         // not a cone - bottom arc's plane is not perpendicular to cone axis
         if !nurb_z_axis.is_parallel_to(bot.frame.z_axis(), ang_tol) {
-            return Err(SolidError::sm_err(OP_REBUILD));
+            return Err(SolidError::surface_failed(
+                OP_REBUILD,
+                "the bottom arc's plane is not perpendicular to the axis",
+            ));
         }
 
         // when the CenterBot to CenterTop vector opposes the circle Z axis, bInsideOut
@@ -1275,7 +1291,10 @@ impl Cone {
                 bot.radius = mean;
                 top.radius = mean;
             } else {
-                return Err(SolidError::sm_err(OP_REBUILD));
+                return Err(SolidError::surface_failed(
+                    OP_REBUILD,
+                    "the cylinder's top and bottom radii differ",
+                ));
             }
         }
 
