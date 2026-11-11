@@ -1,0 +1,42 @@
+{
+  "en": {
+    "cmd.sketch_pattern_limit": "Sketch Pattern Limit",
+    "prefs.sketch.pattern_limit": "Most instances per pattern",
+    "prefs.sketch.pattern_limit_note": "Counts the original. Larger patterns take longer to solve, and very large ones may not solve."
+  },
+  "de": {
+    "cmd.sketch_pattern_limit": "Grenze für Skizzenmuster",
+    "prefs.sketch.pattern_limit": "Max. Exemplare pro Muster",
+    "prefs.sketch.pattern_limit_note": "Das Original zählt mit. Größere Muster brauchen länger zum Lösen, sehr große lassen sich eventuell nicht lösen."
+  },
+  "ja": {
+    "cmd.sketch_pattern_limit": "スケッチパターンの上限",
+    "prefs.sketch.pattern_limit": "パターンの最大インスタンス数",
+    "prefs.sketch.pattern_limit_note": "元の図形も数えます。大きなパターンほど解くのに時間がかかり、非常に大きなパターンは解けないことがあります。"
+  },
+  "ko": {
+    "cmd.sketch_pattern_limit": "스케치 패턴 한도",
+    "prefs.sketch.pattern_limit": "패턴당 최대 인스턴스 수",
+    "prefs.sketch.pattern_limit_note": "원본도 포함합니다. 패턴이 클수록 해석에 시간이 더 걸리며, 매우 큰 패턴은 해석되지 않을 수 있습니다."
+  },
+  "zh": {
+    "cmd.sketch_pattern_limit": "草图阵列上限",
+    "prefs.sketch.pattern_limit": "每个阵列的最多实例数",
+    "prefs.sketch.pattern_limit_note": "包括原始对象。阵列越大求解越慢，过大的阵列可能无法求解。"
+  },
+  "ar": {
+    "cmd.sketch_pattern_limit": "حد نمط الرسم التخطيطي",
+    "prefs.sketch.pattern_limit": "أقصى عدد من النسخ لكل نمط",
+    "prefs.sketch.pattern_limit_note": "يشمل العدد الأصل. تستغرق الأنماط الأكبر وقتًا أطول للحل، وقد لا تُحل الأنماط الكبيرة جدًا."
+  },
+  "he": {
+    "cmd.sketch_pattern_limit": "מגבלת מערך סקיצה",
+    "prefs.sketch.pattern_limit": "מספר מופעים מרבי לכל מערך",
+    "prefs.sketch.pattern_limit_note": "כולל את המקור. פתרון של מערכים גדולים יותר אורך זמן רב יותר, וייתכן שמערכים גדולים מאוד לא ייפתרו."
+  },
+  "vi": {
+    "cmd.sketch_pattern_limit": "Giới hạn mảng phác thảo",
+    "prefs.sketch.pattern_limit": "Số phiên bản tối đa mỗi mảng",
+    "prefs.sketch.pattern_limit_note": "Tính cả bản gốc. Mảng càng lớn thì giải càng lâu, và mảng rất lớn có thể không giải được."
+  }
+}

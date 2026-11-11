@@ -1,14 +1,15 @@
 //! Contracts and result types for the commands in `cmd/sketch_modify.rs`: `sketch.trim`,
 //! `sketch.trim.path`, `sketch.break`, `sketch.extend`, `sketch.fillet`, the three
 //! `sketch.chamfer.*`, `sketch.offset`, `sketch.offset.break`, `sketch.mirror`, `sketch.move`,
-//! `sketch.scale` and the two `sketch.pattern.*` (#12551).
+//! `sketch.scale`, the two `sketch.pattern.*` (#12551) and `sketch.pattern_limit` (#7824).
 //!
 //! The handlers read their parameters from the raw JSON, so each type here reads its keys by
 //! calling the helpers the handlers call (`params::req_vec2`, `params::vec2_list`,
 //! `params::string_list`, `alignment_param`…) on the same JSON, and a value they refuse fails
 //! with the handler's own message. Whether a curve, a point or a sketch exists stays the
 //! handler's to check, and so does whatever needs the design (an expression that has to
-//! evaluate, a pattern being edited).
+//! evaluate, a pattern being edited) or the session (how many copies the user's pattern limit,
+//! `sketch.pattern_limit`, allows).
 //!
 //! A key the handler refuses when it is left out is optional in the type and required in the
 //! schema, so that the handler's message, not the check's "is required", is what a caller sees.
@@ -45,8 +46,6 @@ use super::sketch_ends::SketchTarget;
 use super::types::{LengthExpr, Point2, StringList};
 use crate::params::{self, expr, num, str_};
 
-/// The most copies a pattern makes, as `sketch.pattern.*` and the handlers' limits have it.
-pub(crate) const MAX_COPIES: usize = 500;
 /// The most offsets `sketch.offset` stacks one behind the other in a single run. Each instance
 /// is its own association, so this stays below the sketch's own caps on analytic offset groups
 /// and free-form associations (both 128).
@@ -980,16 +979,11 @@ fn quantity(p: &Value, key: &str, not_a_number: &str) -> Read<Option<Value>> {
     }
 }
 
-/// A pattern's count (`count` or `count2`), as `count` reads it, but for the design.
+/// A pattern's count (`count` or `count2`), as `count` reads it, but for the design and the
+/// session: how many copies are allowed is the user's pattern limit, or the edited pattern's own
+/// size when that is larger (#7824), so the handler checks the range with its own message.
 fn pattern_count(p: &Value, key: &str) -> Read<Option<Value>> {
-    let value = quantity(p, key, &format!("`{key}` must be a number or expression"))?;
-    if let Some(Value::Number(n)) = &value {
-        let n = n.as_f64().unwrap_or(f64::NAN);
-        if !(1.0..=MAX_COPIES as f64).contains(&n) || n.fract() != 0.0 {
-            return Err(format!("`{key}` must be a positive integer from 1 to {MAX_COPIES}"));
-        }
-    }
-    Ok(value)
+    quantity(p, key, &format!("`{key}` must be a number or expression"))
 }
 
 fn alignment(p: &Value, key: &str) -> Read<Option<PatternAlignment>> {
@@ -1056,8 +1050,9 @@ pub struct CircularPatternParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "PointOrId")]
     pub center: Option<PointOrId>,
-    /// How many, the original included: a whole number from 2 to 500 or a unitless expression
-    /// (kept as an expression). Left out only with `pattern`.
+    /// How many, the original included: a whole number from 2 to the pattern limit
+    /// (`sketch.pattern_limit`, default 500) or a unitless expression (kept as an expression).
+    /// Left out only with `pattern`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "count_schema")]
     pub count: Option<Value>,
@@ -1085,7 +1080,9 @@ pub struct CircularPatternParams {
 }
 
 fn count_schema(_: &mut SchemaGenerator) -> Schema {
-    number_or_expression("A whole number from 1 to 500 (a circular pattern needs at least 2 to make a copy), or an expression for one.")
+    number_or_expression(
+        "A whole number from 1 to the pattern limit (sketch.pattern_limit, default 500; a circular pattern needs at least 2 to make a copy), or an expression for one.",
+    )
 }
 
 fn pattern_angle_schema(_: &mut SchemaGenerator) -> Schema {
@@ -1122,7 +1119,8 @@ impl CircularPatternParams {
 /// Make copies of sketch curves and points in a grid, as an associative pattern: one row along
 /// `direction` (or `dir`) and, with `count2`, more rows along `direction2` (or `dir2`). The
 /// copies follow the originals, and the pattern keeps its own constraints. Quantities include the
-/// original, at most 500 copies in all; a negative spacing reverses its direction. With
+/// original, at most the pattern limit in all (`sketch.pattern_limit`, default 500; an edited
+/// pattern keeps its own size if larger); a negative spacing reverses its direction. With
 /// `pattern`, edit the pattern that id names instead of making a new one: keys left out keep
 /// their values, surviving instance ids are kept, and the pattern's type cannot change. A changed
 /// `entities` list rebuilds every copy with fresh ids. One undo step.
@@ -1134,8 +1132,8 @@ pub struct RectangularPatternParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "StringList")]
     pub entities: Option<Vec<String>>,
-    /// How many along the first direction, the original included: a whole number from 1 to 500
-    /// or a unitless expression. Left out only with `pattern`.
+    /// How many along the first direction, the original included: a whole number from 1 to the
+    /// pattern limit or a unitless expression. Left out only with `pattern`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "count_schema")]
     pub count: Option<Value>,
@@ -1144,8 +1142,8 @@ pub struct RectangularPatternParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "spacing_schema")]
     pub spacing: Option<Value>,
-    /// How many along the second direction, a whole number from 1 to 500 or a unitless
-    /// expression. Default: 1.
+    /// How many along the second direction, a whole number from 1 to the pattern limit or a
+    /// unitless expression. Default: 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "count_schema")]
     pub count2: Option<Value>,
@@ -1517,6 +1515,58 @@ pub struct PatternResult {
     pub constraints: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+// ---------------------------------------------------------------------------------------------
+// Pattern limit
+
+/// A pattern limit as the `sketch.pattern_limit` handler reads one: a whole number from 2 to
+/// `MAX_PATTERN_COPIES`, with its message for anything else.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PatternLimitValue(pub usize);
+
+impl<'de> Deserialize<'de> for PatternLimitValue {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        crate::cmd::pattern_limit_value(&v).map(PatternLimitValue).ok_or_else(|| D::Error::custom(crate::cmd::pattern_limit_problem()))
+    }
+}
+
+impl JsonSchema for PatternLimitValue {
+    fn schema_name() -> Cow<'static, str> {
+        "PatternLimitValue".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "The most instances, the original included, one sketch pattern may make: a whole number from 2 to 20000.",
+            "type": "number",
+            "multipleOf": 1,
+            "minimum": 2,
+            "maximum": solidcraft_sketch::MAX_PATTERN_COPIES
+        })
+    }
+}
+
+/// Set or report the most instances, the original included, a sketch pattern command makes
+/// (default 500). The user's setting: kept across opened and new designs, not saved in a
+/// design, not an undo step. A pattern made before under a higher limit keeps its own size
+/// when it is edited. Never opens a dialog.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct PatternLimitParams {
+    /// The new limit, a whole number from 2 to 20000. Default: leave it as it is and report it.
+    #[serde(default)]
+    pub value: Option<PatternLimitValue>,
+}
+
+/// What `sketch.pattern_limit` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PatternLimitResult {
+    /// The limit now in force.
+    pub pattern_limit: usize,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

@@ -3,8 +3,8 @@ use serde_json::{Value, json};
 use super::{
     BreakParams, BreakResult, ChamferDistanceAngleParams, ChamferEqualParams, ChamferResult, ChamferTwoParams, CircularPatternParams, ExtendParams,
     ExtendResult, FilletParams, FilletResult, MirrorParams, MirrorResult, MoveParams, MoveResult, OffsetBreakParams, OffsetBreakResult, OffsetParams,
-    OffsetResult, OffsetSide, PatternResult, RectangularPatternParams, ScaleParams, ScaleResult, TrimOutcome, TrimParams, TrimPathParams,
-    TrimPathResult, TrimResult,
+    OffsetResult, OffsetSide, PatternLimitParams, PatternLimitResult, PatternResult, RectangularPatternParams, ScaleParams, ScaleResult, TrimOutcome,
+    TrimParams, TrimPathParams, TrimPathResult, TrimResult,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, conforms};
@@ -62,6 +62,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<MirrorParams>(), &["entities", "line", "sketch"]);
     assert_keys(input_schema_for::<MoveParams>(), &["angle", "center", "copy", "entities", "rotate_constraints", "sketch", "translate"]);
     assert_keys(input_schema_for::<ScaleParams>(), &["base", "entities", "factor", "sketch"]);
+    assert_keys(input_schema_for::<PatternLimitParams>(), &["value"]);
     assert_keys(input_schema_for::<CircularPatternParams>(), &["alignment", "angle", "center", "count", "entities", "pattern", "reversed", "sketch"]);
     assert_keys(
         input_schema_for::<RectangularPatternParams>(),
@@ -250,6 +251,13 @@ fn strict_keeps_todays_errors() {
         ("sketch.pattern.rectangular", json!({"entities": ["l1"], "count": 3, "spacing": 5, "reversed": 1})),
         ("sketch.pattern.rectangular", json!({"entities": ["l1"], "count": 3, "spacing": 5, "reversed2": "no"})),
         ("sketch.pattern.rectangular", json!({"count": 3, "spacing": 5})),
+        // A limit outside 2 to 20 000, a fraction or anything but a number.
+        ("sketch.pattern_limit", json!({"value": 1})),
+        ("sketch.pattern_limit", json!({"value": 20_001})),
+        ("sketch.pattern_limit", json!({"value": 2.5})),
+        ("sketch.pattern_limit", json!({"value": -3})),
+        ("sketch.pattern_limit", json!({"value": "many"})),
+        ("sketch.pattern_limit", json!({"value": true})),
     ]);
 }
 
@@ -741,4 +749,47 @@ fn replies_keep_their_shape() {
     );
     let trimmed = TrimOutcome::Trimmed { trimmed: "l1".into(), offset_released: Vec::new() }.released(vec!["l9".into()]);
     assert_eq!(serde_json::to_value(&trimmed).unwrap_or_default(), json!({"trimmed": "l1", "offset_released": ["l9"]}));
+}
+
+#[test]
+fn pattern_limit_replies_match_the_output_schema() {
+    let schema = output_schema_for::<PatternLimitResult>();
+    let schema = schema.as_value();
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let reply = |s: &mut Session, p: Value| s.execute("sketch.pattern_limit", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+    let r = reply(&mut s, json!({}));
+    assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+    assert_eq!(r.get("param_warnings"), None, "{r}");
+    assert_eq!(r["pattern_limit"], json!(500));
+    for (p, limit) in [(json!({"value": 800}), 800), (json!({}), 800), (json!({"value": null}), 800), (json!({"value": 2.0}), 2)] {
+        let r = reply(&mut s, p.clone());
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+        assert_eq!(r.get("param_warnings"), None, "{p}: {r}");
+        assert_eq!(r["pattern_limit"], json!(limit), "{p}");
+    }
+    assert!(!conforms(schema, schema, &json!({})));
+}
+
+/// The pattern limit is the user's, so the check leaves a count's range to the handler (#7824):
+/// with the limit raised, counts past the old 500 pass in strict and get no warning in warn, and a
+/// count past the raised limit gets the handler's message in strict, naming that limit.
+#[test]
+fn a_raised_pattern_limit_is_the_handlers_to_check() {
+    let raised = |level: ParamCheck| {
+        let (mut s, sides) = editing(level);
+        run(&mut s, "sketch.pattern_limit", json!({"value": 600}));
+        (s, sides)
+    };
+    let (mut s, sides) = raised(ParamCheck::Strict);
+    run(&mut s, "sketch.pattern.circular", json!({"entities": [sides[0]], "center": [40, 0], "count": 501}));
+    let (mut s, sides) = raised(ParamCheck::Strict);
+    run(&mut s, "sketch.pattern.rectangular", json!({"entities": [sides[0]], "count": 3, "spacing": 25, "count2": 167, "spacing2": 25}));
+    let (mut s, sides) = raised(ParamCheck::Warn);
+    let r = run(&mut s, "sketch.pattern.circular", json!({"entities": [sides[0]], "center": [40, 0], "count": 501}));
+    assert_eq!(r.get("param_warnings"), None, "{r}");
+    let too_many = json!({"entities": ["l1"], "center": [20, 0], "count": 601});
+    let [off, strict] =
+        [ParamCheck::Off, ParamCheck::Strict].map(|level| raised(level).0.execute("sketch.pattern.circular", &too_many).err().map(|e| e.to_string()));
+    assert!(off.as_deref().is_some_and(|e| e.contains("from 1 to 600")), "{off:?}");
+    assert_eq!(strict, off);
 }
