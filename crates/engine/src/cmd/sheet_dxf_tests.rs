@@ -1489,8 +1489,30 @@ fn a_junction_relief_deeper_than_the_parent_panel_refuses_naming_the_segment() {
         .unwrap_err()
         .to_string();
     assert!(
-        error.contains("edges[0].segments[0].relief: a depth of 15.000 mm is deeper than the material inboard of the junction (14.000 mm)"),
+        error.contains("edges[0].segments[0].relief: a depth of 15.000 mm must stay inside the material inboard of the junction (14.000 mm); reaching that edge parts the blank"),
         "{error}"
     );
+    assert_eq!(s.doc.to_json(), before, "the refused feature changed the design");
+}
+
+/// A tear that reaches the parent panel's edge inboard of the junction runs boundary to boundary,
+/// so the blank would come apart: it refuses, naming the segment (judge round 2, #5942).
+#[test]
+fn a_tear_reaching_the_edge_inboard_of_the_junction_refuses_naming_the_segment() {
+    let mut s = plate_in(sheet_of_2mm(), &[]);
+    run(&mut s, "sheet.flange", json!({"type":"edge","edges":[{"point":[50,0,2]}],"height":"20 mm","angle":"90 deg"}));
+    let before = s.doc.to_json();
+    let error = s
+        .execute(
+            "sheet.flange",
+            &json!({"type":"edge","edges":[{"point":[50.0, 2.0, 20.0],"segments":[
+                {"from":0,"to":0.5,"angle":"90 deg","height":"20 mm","relief":{"shape":"tear","depth":"57 mm"}},
+                {"from":0.5,"to":1,"angle":"90 deg","height":"15 mm"}]}],
+                "height":"20 mm","angle":"90 deg"}),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("edges[0].segments[0].relief"), "{error}");
+    assert!(error.contains("reaching that edge parts the blank"), "{error}");
     assert_eq!(s.doc.to_json(), before, "the refused feature changed the design");
 }

@@ -4541,8 +4541,14 @@ impl SheetBody {
             },
         };
         let room = inner - parent_panel.outer.polyline(1e-3).iter().map(|q| q.dot(n)).fold(f64::MAX, f64::min);
-        if depth > room + 1e-9 {
-            return Err(fail(format!("a depth of {depth:.3} mm is deeper than the material inboard of the junction ({room:.3} mm)")));
+        // The deep end must stay strictly inside the parent panel. A relief that reaches that
+        // panel's edge inboard of the junction runs boundary to boundary and parts the blank into
+        // two pieces, which no single flat pattern can be; a depth that only touches the edge is
+        // refused for the same reason (the judge's 57 mm tear on a 100 x 60 plate).
+        if depth >= room - 1e-9 {
+            return Err(fail(format!(
+                "a depth of {depth:.3} mm must stay inside the material inboard of the junction ({room:.3} mm); reaching that edge parts the blank"
+            )));
         }
         if r.shape == ReliefShape::Obround && depth < w / 2.0 - 1e-9 {
             return Err(fail(format!("an obround relief needs a depth of at least half its width ({:.3} mm)", w / 2.0)));
