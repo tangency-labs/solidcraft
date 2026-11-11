@@ -654,6 +654,13 @@ fn opened_design(
     s.replace_design(opened);
     s.disk = disk;
     s.read_only = read_only;
+    // A design saved with print faces (by an older version, or with them kept) opens without
+    // them when they are not kept (#11512). The rest of it opens as saved, and dropping them is
+    // neither an unsaved change nor a step to undo.
+    if !s.keep_print_faces && !s.doc.print_faces.is_empty() {
+        s.doc_mut().print_faces.clear();
+        s.mark_saved();
+    }
     let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
     let now = solidcraft_io::design_lock::now_secs();
     let open_elsewhere = solidcraft_io::design_lock::held_elsewhere(std::path::Path::new(path), now).map(|lock| OpenElsewhere {
@@ -973,6 +980,10 @@ impl Session {
         }
         if !self.visibility.is_empty() {
             design.to_mut().visibility = self.visibility.clone();
+        }
+        // Print faces not kept stay with this session: the file is saved without them (#11512).
+        if !self.keep_print_faces && !design.print_faces.is_empty() {
+            design.to_mut().print_faces.clear();
         }
         // A sketch edited with the timeline rolled to it: the file holds the position the edit
         // returns to, not the temporary rollback (#14010).
