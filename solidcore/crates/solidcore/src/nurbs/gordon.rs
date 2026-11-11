@@ -40,6 +40,7 @@ use crate::error::intersect::IntersectFailure;
 use crate::error::{Result, SolidError};
 use crate::intersect::api_intersectors::intersect_curves;
 use crate::kernel::Kernel;
+use crate::limits::try_reserve_total;
 use crate::math::Vec3;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::BSplineSurface;
@@ -211,6 +212,19 @@ fn largest<'a>(points: impl Iterator<Item = &'a CPoint>) -> f64 {
         .fold(0.0_f64, f64::max)
 }
 
+/// An empty `Vec` with room for `count + 1` values, reserved fallibly: a count past the
+/// addressable or the allocation bound ([`try_reserve_total`]) is refused.
+fn room<T>(count: usize) -> Result<Vec<T>> {
+    let len = count
+        .checked_add(1)
+        .ok_or_else(|| bad("a count past the addressable"))?;
+    let mut v = Vec::new();
+    if !try_reserve_total(&mut v, len) {
+        return Err(bad("an allocation past the bound"));
+    }
+    Ok(v)
+}
+
 /// Whether `x` is at most `tol`; a NaN is not.
 fn within(x: f64, tol: f64) -> bool {
     matches!(x.partial_cmp(&tol), Some(Ordering::Less | Ordering::Equal))
@@ -315,9 +329,9 @@ pub fn gordon(
 
     // the crossing points at the common parameters, each proved within tol of both curves:
     // |C(u) - D(v)| <= |C(u) - q| + |D(v) - q| for any q, both bounded in the network's frame
-    let mut grid: Vec<Vec<Vec3>> = Vec::with_capacity(r + 1);
+    let mut grid: Vec<Vec<Vec3>> = room(r)?;
     for (kk, ((c, c_local), &v)) in cu.iter().zip(&cu_local).zip(&v_at).enumerate() {
-        let mut row = Vec::with_capacity(s + 1);
+        let mut row = room(s)?;
         for (l, (d_local, &u)) in dv_local.iter().zip(&u_at).enumerate() {
             let q = c.eval(u, Side::Left)?;
             let q_local = c_local.eval(u, Side::Left)?;
@@ -339,7 +353,7 @@ pub fn gordon(
     // L1: the u-curves skinned in v, column by column of their (common) control points
     let (p, cu_knots) = (c0.degree(), c0.knots().to_vec());
     let n = c0.n();
-    let mut l1 = Vec::with_capacity(n + 1);
+    let mut l1 = room(n)?;
     for i in 0..=n {
         let column: Vec<Vec3> = cu
             .iter()
@@ -354,7 +368,7 @@ pub fn gordon(
     // L2: the v-curves skinned in u, row by row of their control points
     let (q, dv_knots) = (d0.degree(), d0.knots().to_vec());
     let m = d0.n();
-    let mut by_j: Vec<Vec<Vec3>> = Vec::with_capacity(m + 1);
+    let mut by_j: Vec<Vec<Vec3>> = room(m)?;
     for j in 0..=m {
         let column: Vec<Vec3> = dv
             .iter()
@@ -370,12 +384,12 @@ pub fn gordon(
     let l2 = surface(l2_net, pu, q, &u_knots, &dv_knots)?;
 
     // T: the crossing points interpolated, along u then along v
-    let mut along_u: Vec<Vec<Vec3>> = Vec::with_capacity(r + 1);
+    let mut along_u: Vec<Vec<Vec3>> = room(r)?;
     for row in &grid {
         let c = through(row, &u_at, &u_knots, pu)?;
         along_u.push(c.cpts().iter().copied().map(point).collect());
     }
-    let mut t_net: Vec<Vec<Vec3>> = Vec::with_capacity(s + 1);
+    let mut t_net: Vec<Vec<Vec3>> = room(s)?;
     for i in 0..=s {
         let column: Vec<Vec3> = along_u
             .iter()
@@ -391,9 +405,9 @@ pub fn gordon(
     make_compatible_uv(&mut three)?;
     let [l1, l2, t] = &three;
     let (nn, mm) = (l1.n(), l1.m());
-    let mut net = Vec::with_capacity(nn + 1);
+    let mut net = room(nn)?;
     for i in 0..=nn {
-        let mut row = Vec::with_capacity(mm + 1);
+        let mut row = room(mm)?;
         for j in 0..=mm {
             let (a, b, c) = (
                 point(l1.cpt(i, j)?),
