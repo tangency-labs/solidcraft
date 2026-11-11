@@ -165,6 +165,7 @@ pub struct WorkCounters {
     proto_edge_intersections: Cell<u64>,
     shell_traversal_faces: Cell<u64>,
     proto_vertex_point_solves: Cell<u64>,
+    merge_record_visits: Cell<u64>,
     face_extreme_control_points: Cell<u64>,
     feet_tm_coefficients: Cell<u64>,
     mass_iso_evaluations: Cell<u64>,
@@ -226,6 +227,18 @@ impl WorkCounters {
     #[must_use]
     pub fn proto_vertex_point_solves(&self) -> u64 {
         self.proto_vertex_point_solves.get()
+    }
+
+    /// The work done on the notification records of the B-reps merged into one list operand
+    /// (`BooleanLists`' `MergeBrep` of each B-rep after the first,
+    /// `boolean::merge::p3::combine_brep`): one for each arena slot, key or record a pass
+    /// touches in the reserved-key check, the seeding of default records and the reset of a
+    /// kept store, for the operand and for the B-rep merged into it
+    /// (`NotifyRecords::note_visits` says what a pass is and what is outside the count). Not
+    /// the fork's.
+    #[must_use]
+    pub fn merge_record_visits(&self) -> u64 {
+        self.merge_record_visits.get()
     }
 
     /// Control points of the B-spline nets the trimmed-face tight box's directed solves
@@ -324,6 +337,7 @@ impl WorkCounters {
         self.proto_edge_intersections.set(0);
         self.shell_traversal_faces.set(0);
         self.proto_vertex_point_solves.set(0);
+        self.merge_record_visits.set(0);
         self.face_extreme_control_points.set(0);
         self.feet_tm_coefficients.set(0);
         self.mass_iso_evaluations.set(0);
@@ -369,6 +383,12 @@ impl WorkCounters {
     pub(crate) fn add_proto_vertex_point_solve(&self) {
         self.proto_vertex_point_solves
             .set(self.proto_vertex_point_solves.get().saturating_add(1));
+    }
+
+    /// Counts `visits` slots and keys visited for a list operand merge's records.
+    pub(crate) fn add_merge_record_visits(&self, visits: u64) {
+        self.merge_record_visits
+            .set(self.merge_record_visits.get().saturating_add(visits));
     }
 
     /// Counts the control points of the net one trimmed-face extreme solve ran on.
@@ -1642,9 +1662,10 @@ mod tests {
                 w.ball_certified_roots(),
                 w.shell_traversal_faces(),
                 w.proto_vertex_point_solves(),
+                w.merge_record_visits(),
             )
         };
-        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0, 0, 0));
+        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0, 0, 0, 0));
         w.add_face_pair();
         w.add_face_pair();
         w.add_loop_classified();
@@ -1656,11 +1677,12 @@ mod tests {
         w.add_ball_certified_root();
         w.add_shell_traversal_face();
         w.add_proto_vertex_point_solve();
-        assert_eq!(counts(w), (2, 1, 1, 1, 3, 1, 1, 1));
+        w.add_merge_record_visits(3);
+        assert_eq!(counts(w), (2, 1, 1, 1, 3, 1, 1, 1, 3));
         // each kernel counts its own work
         assert_eq!(Kernel::default().work_counters.face_pairs(), 0);
         w.reset();
-        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0, 0, 0));
+        assert_eq!(counts(w), (0, 0, 0, 0, 0, 0, 0, 0, 0));
     }
 
     #[test]

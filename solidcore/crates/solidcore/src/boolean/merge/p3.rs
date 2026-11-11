@@ -828,6 +828,8 @@ pub(crate) fn combine_brep(
         )
     });
     let restored = state.restore_attributes(target);
+    k.work_counters
+        .add_merge_record_visits(state.records.take_visits());
     r?;
     restored
 }
