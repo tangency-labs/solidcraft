@@ -290,7 +290,10 @@ pub fn curvature_of(k: &Kernel, curve: &Curve, t: f64) -> Result<Option<Curvatur
     }
     let d = curve.evaluate(k, t, 2, true, false)?;
     let (Some(&point), Some(&d1), Some(&d2)) = (d.first(), d.get(1), d.get(2)) else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::query_failed(
+            OP,
+            "the curve evaluation has no second derivative",
+        ));
     };
     let s2 = d1.dot(d1);
     if !(s2 > 0.0) {
