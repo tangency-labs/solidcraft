@@ -195,17 +195,18 @@ fn narrow_toolbar_reaches_collapsed_commands() {
     use serde_json::json;
     let mut h = Harness::new();
     h.run(&json!([
-        // The compact ribbon still fits every button at 640 wide.
+        // At 640 wide the ribbon still needs no » menu: Construct's three buttons (Plane, Axis
+        // and Point) fold into the panel's own button.
         {"call":"ui.resize","params":{"width":640,"height":800}},
-        {"expect":{"shown_handles":["button:construct.plane.offset"],"hidden_handles":["toolbar:overflow"]}},
+        {"expect":{"shown_handles":["collapsed:MODEL:CONSTRUCT"],"hidden_handles":["toolbar:overflow","button:construct.plane"]}},
         // Too narrow for every button: the panels go into the » menu.
         {"call":"ui.resize","params":{"width":440,"height":800}},
-        {"expect":{"shown_handles":["toolbar:overflow"],"hidden_handles":["button:construct.plane.offset"]}},
+        {"expect":{"shown_handles":["toolbar:overflow"],"hidden_handles":["button:construct.plane","collapsed:MODEL:CONSTRUCT"]}},
         {"click":{"handle":"toolbar:overflow"}},
         {"widget":"CONSTRUCT"},
-        {"expect":{"shown_handles":["toolbar:construct.plane.offset"]}},
-        {"click":{"handle":"toolbar:construct.plane.offset"}},
-        {"expect":{"dialog":"OffsetPlane"}}
+        {"expect":{"shown_handles":["toolbar:construct.plane"]}},
+        {"click":{"handle":"toolbar:construct.plane"}},
+        {"expect":{"dialog":"ConstructAuto"}}
     ]))
     .unwrap();
 }

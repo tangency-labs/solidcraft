@@ -32,10 +32,10 @@ pub(super) struct Task {
     point: usize,
     medium: usize,
     winding: i32,
-    bits: [u8; 2],
+    bits: [u128; 2],
     stage: Stage,
-    ordered: [usize; 8],
-    occupied: u8,
+    ordered: [usize; job::MAX_NESTED_MEDIA],
+    occupied: u16,
     len: usize,
     cursor: Option<PrimitiveScan>,
 }
@@ -70,7 +70,7 @@ impl Task {
             winding: 0,
             bits: [0; 2],
             stage: Stage::Bounds,
-            ordered: [0; 8],
+            ordered: [0; job::MAX_NESTED_MEDIA],
             occupied: 0,
             len: 0,
             cursor: None,
@@ -79,7 +79,7 @@ impl Task {
     pub(super) fn ready(&self) -> bool {
         matches!(self.stage, Stage::Done)
     }
-    pub(super) fn result(&self) -> job::Result<([usize; 8], usize, Vec3)> {
+    pub(super) fn result(&self) -> job::Result<([usize; job::MAX_NESTED_MEDIA], usize, Vec3)> {
         if !self.ready() {
             return Err(invalid("CPU camera medium certificate is incomplete"));
         }
@@ -128,8 +128,8 @@ impl Task {
             return Ok(());
         }
         work.tick(cancel).map_err(super::image::error)?;
-        if inputs.len() > 8 {
-            return Err(invalid("CPU camera classification exceeds eight media"));
+        if inputs.len() > job::MAX_OPTICAL_TARGETS {
+            return Err(invalid("CPU camera classification exceeds 128 media"));
         }
         match self.stage {
             Stage::Bounds => {
@@ -165,7 +165,7 @@ impl Task {
                 }
                 if self.winding == 1 {
                     let bits = self.bits.get_mut(self.point).ok_or_else(|| invalid("CPU camera point cursor"))?;
-                    *bits |= 1_u8 << self.medium;
+                    *bits |= 1_u128 << self.medium;
                 }
                 self.medium += 1;
                 self.stage = Stage::Bounds;
@@ -182,23 +182,23 @@ impl Task {
                     self.stage = Stage::Done;
                     return Ok(());
                 };
-                if self.bits[0] & (1_u8 << self.medium) != 0 {
+                if self.bits[0] & (1_u128 << self.medium) != 0 {
                     let mut parent = certificate.region(self.medium)?.parent;
                     let mut depth = 0;
-                    for _ in 0..8 {
+                    for _ in 0..job::MAX_NESTED_MEDIA {
                         let Some(p) = parent else {
                             break;
                         };
-                        if p >= inputs.len() || self.bits[0] & (1_u8 << p) == 0 {
+                        if p >= inputs.len() || self.bits[0] & (1_u128 << p) == 0 {
                             return Err(invalid("CPU camera origin is not inside its certified medium parent"));
                         }
                         depth += 1;
                         parent = certificate.region(p)?.parent;
                     }
-                    if parent.is_some() || depth >= 8 {
-                        return Err(invalid("CPU camera medium hierarchy exceeds eight layers"));
+                    if parent.is_some() || depth >= job::MAX_NESTED_MEDIA {
+                        return Err(invalid("CPU camera medium hierarchy exceeds 16 layers"));
                     }
-                    let occupied = 1_u8 << depth;
+                    let occupied = 1_u16 << depth;
                     if self.occupied & occupied != 0 {
                         return Err(invalid("CPU camera origin is inside unrelated optical regions"));
                     }

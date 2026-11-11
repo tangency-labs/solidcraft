@@ -1,5 +1,6 @@
 use crate::scenario::Harness;
 use serde_json::json;
+use solidcore_record::Vec3;
 use solidcraft_engine::doc::{FeatureKind, PlaneRef};
 use solidcraft_engine::geom::prelude::*;
 
@@ -93,4 +94,33 @@ fn create_sketch_still_picks_a_face_beside_the_origin_planes() {
     h.settle();
     let plane = sketch_plane(&h);
     assert!(matches!(plane, PlaneRef::Face { .. }), "sketched on the top face, not {plane:?}");
+}
+
+/// A construction plane through a part is drawn past the part's edges at any zoom, so the body
+/// cannot hide all of it; one clear of the part keeps the small square round its origin (#13318).
+#[test]
+fn a_midplane_shows_round_the_part_when_zoomed_in() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":60,"width":40,"height":20,"body_name":"Box"})).unwrap();
+    h.app.run("construct.plane.midplane", json!({"a":{"face":[30,0,10]},"b":{"face":[30,40,10]},"name":"Mid"})).unwrap();
+    h.app.run("construct.plane.offset", json!({"base":"XY","offset":50,"name":"Above"})).unwrap();
+    h.call("ui.view", json!({"view":"iso"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.settle();
+    for distance in [h.app.cam.distance, 25.0, 5.0] {
+        h.app.cam.distance = distance;
+        h.settle();
+        let quads = crate::viewport::construction_quads(&h.app);
+        let quad = |name: &str| quads.iter().find(|q| q.0 == name).map(|q| q.2).unwrap_or_else(|| panic!("{name} is drawn: {quads:?}"));
+        let mid = quad("Mid");
+        let lo = mid.iter().fold(Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY), |a, p| Vec3::new(a.x.min(p.x), a.y.min(p.y), a.z.min(p.z)));
+        let hi = mid
+            .iter()
+            .fold(Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY), |a, p| Vec3::new(a.x.max(p.x), a.y.max(p.y), a.z.max(p.z)));
+        assert!(lo.x < 0.0 && hi.x > 60.0 && lo.z < 0.0 && hi.z > 20.0, "distance {distance}: the midplane reaches past the box: {mid:?}");
+        let h_side = crate::selection::origin_size(h.app.cam.half_height()) * 1.2;
+        let above = quad("Above");
+        let side = above[0].dist(above[1]);
+        assert!((side - 2.0 * h_side).abs() < 1e-6 * h_side.max(1.0), "distance {distance}: a plane clear of the box keeps its square: {above:?}");
+    }
 }

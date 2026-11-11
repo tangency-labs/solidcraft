@@ -39,6 +39,7 @@ use solidcore::blend::fillet_corner::p3::{
     CornerEnv, FilletCorner, FilletCornerKind, FilletExecutiveData,
 };
 use solidcore::blend::fillet_geom::p1::{FilStatus, FilletEdgeType, FilletSolverId};
+use solidcore::blend::fillet_section::section::{GnSectionFsg, GN_THUMBWEIGHT_EQUAL_AREA};
 use solidcore::blend::fillet_solver::p1::{FilletSolver, FilletSurfaceGenerator};
 use solidcore::curve::curve::Curve;
 use solidcore::geom::extent2d::Extent2d;
@@ -321,7 +322,8 @@ struct SolverRegIn {
 }
 
 /// The fillet solver of a model geometry in a `const_rad` case: `kind` -1 none, 0
-/// `SmCircularCrossSectionFSG()`, 1 `SmBlendCurveCrossSectionFSG(scale, continuity)`, 2
+/// `SmCircularCrossSectionFSG()`, 1 a blend curve: the G^n section of order `continuity`
+/// (at least 2; `scale` was the retired `SmBlendCurveCrossSectionFSG`'s, WR-685), 2
 /// `SmLinearCrossSectionFSG`, 3 the base `SmFilletSurfaceGenerator`, 4 no generator.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct FsgIn {
@@ -2086,7 +2088,12 @@ fn corner_rust(i: &Inputs) -> Result<Output, HarnessError> {
                 let mut fs = FilletSolver::new(1e-3, EFF_ZERO_RAD, 1e-2);
                 fs.set_fillet_surface_generator(match f.kind {
                     0 => Some(FilletSurfaceGenerator::circular_default()),
-                    1 => Some(FilletSurfaceGenerator::blend_curve(f.scale, f.continuity)),
+                    // a blend-curve request is the G^n section (the old generator is
+                    // retired, WR-685): its order the continuity, at least 2
+                    1 => Some(FilletSurfaceGenerator::GnSection(GnSectionFsg::new(
+                        (f.continuity as usize).max(2),
+                        GN_THUMBWEIGHT_EQUAL_AREA,
+                    ))),
                     2 => Some(FilletSurfaceGenerator::Linear),
                     3 => Some(FilletSurfaceGenerator::Base),
                     _ => None,

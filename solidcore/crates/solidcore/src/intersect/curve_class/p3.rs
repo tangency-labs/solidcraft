@@ -107,8 +107,7 @@ const OP_SQUEEZE: &str = "intersect::curve_class::p3::fix_problems_by_squeezing"
 const OP_EDGE_INTERVAL: &str =
     "intersect::curve_class::p3::CurveClassification::classify_edge_interval";
 
-// `SM_ERR_OUTSIDE_OF_DOMAIN` (`SmMessages.h`).
-use crate::error::SM_ERR_OUTSIDE_OF_DOMAIN;
+use crate::error::intersect::IntersectFailure;
 
 /// The index `FindInterval` leaves in `rlIndex` until it finds an interval.
 pub const NO_INTERVAL: usize = 999_999;
@@ -159,7 +158,8 @@ pub(super) fn edge_vertices<O: ClassObject>(
     let v1 = topo_edge::vertex(b, e)?;
     let v2 = topo_edge::other_vertex(b, e, v1)?;
     let handle = |v: Option<VertexId>| {
-        let v = v.ok_or_else(|| SolidError::null_pointer(OP_NEAR_VERTEX))?;
+        let v =
+            v.ok_or_else(|| SolidError::intersect_missing(OP_NEAR_VERTEX, "the edge's vertex"))?;
         geometry
             .topology_handle_in(b, EntityRef::Vertex(v))
             .ok_or_else(|| SolidError::invalid_input(OP_NEAR_VERTEX, "vertex without handle"))
@@ -449,7 +449,8 @@ impl<O: ClassObject> CurveClassification<O> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR_OUTSIDE_OF_DOMAIN` for a parameter off either end that does not snap;
+    /// [`IntersectFailure::OutsideDomain`] (status `SM_ERR_OUTSIDE_OF_DOMAIN`) for a
+    /// parameter off either end that does not snap;
     /// `SM_ERR` when no interval is found; the errors of the curve evaluations;
     /// [`SolidError::InvalidInput`] without intervals or curve (upstream reads past them);
     /// [`SolidError::Unported`] from the zone tolerances of topology objects and the
@@ -529,11 +530,12 @@ impl<O: ClassObject> CurveClassification<O> {
                 // But check vs. where it is on the curve. If off the curve at the
                 // beginning, dLineDist3d will be negative.
                 if line_dist_3d < -tol_2d_or_3d {
-                    return Err(SolidError::Upstream {
-                        operation: OP_FIND,
-                        code: SM_ERR_OUTSIDE_OF_DOMAIN,
-                        entity: None,
-                    });
+                    return Err(SolidError::intersect(
+                        OP_FIND,
+                        IntersectFailure::OutsideDomain(
+                            "the parameter is before the start of the classified curve",
+                        ),
+                    ));
                 }
                 // snap to the beginning of the 1st interval
                 out.position = IntervalPosition::Start;
@@ -572,11 +574,12 @@ impl<O: ClassObject> CurveClassification<O> {
 
                 // But check vs. where it is on the curve.
                 if line_dist_3d > tol_2d_or_3d {
-                    return Err(SolidError::Upstream {
-                        operation: OP_FIND,
-                        code: SM_ERR_OUTSIDE_OF_DOMAIN,
-                        entity: None,
-                    });
+                    return Err(SolidError::intersect(
+                        OP_FIND,
+                        IntersectFailure::OutsideDomain(
+                            "the parameter is past the end of the classified curve",
+                        ),
+                    ));
                 }
                 // snap to the end of the last interval
                 out.position = IntervalPosition::End;
@@ -704,7 +707,10 @@ impl<O: ClassObject> CurveClassification<O> {
         }
 
         // If make it here interval not found - have an error of some sort
-        Err(SolidError::sm_err(OP_FIND))
+        Err(SolidError::intersect_failed(
+            OP_FIND,
+            "no interval holds the parameter",
+        ))
     }
 
     /// The point classification at curve parameter `param`
@@ -1005,14 +1011,19 @@ impl<O: ClassObject> CurveClassification<O> {
                 // Gather CurvePtClass and IvlEndPt_PtClass local information
                 let ivl_end_pt_point = vertex_point(
                     geometry,
-                    ivl_end_pt_object.ok_or_else(|| SolidError::null_pointer(OP_INSERT))?,
+                    ivl_end_pt_object.ok_or_else(|| {
+                        SolidError::intersect_missing(OP_INSERT, "the interval end's vertex")
+                    })?,
                 )?;
                 // (the second vertex's point is only read by the SE_MSG test below)
                 let _pt_class_point = vertex_point(
                     geometry,
-                    point_class
-                        .object()
-                        .ok_or_else(|| SolidError::null_pointer(OP_INSERT))?,
+                    point_class.object().ok_or_else(|| {
+                        SolidError::intersect_missing(
+                            OP_INSERT,
+                            "the point classification's vertex",
+                        )
+                    })?,
                 )?;
 
                 let scaled_zero = ivl_end_pt_point.scaled_zero();
@@ -1197,7 +1208,9 @@ impl<O: ClassObject> CurveClassification<O> {
 
             // when an EDGE/VERTEX conflict exists
             if let Some((vertex, edge)) = adjacency {
-                let edge = edge.ok_or_else(|| SolidError::null_pointer(OP_INSERT))?;
+                let edge = edge.ok_or_else(|| {
+                    SolidError::intersect_missing(OP_INSERT, "the conflicting edge")
+                })?;
                 let (test_v, other_test_v) = edge_vertices(geometry, edge)?;
 
                 // when the edge is not connected to the vertex and parameters are not
@@ -1328,12 +1341,18 @@ impl<O: ClassObject> CurveClassification<O> {
     pub fn remove_point_class(&mut self, index: usize, position: IntervalPosition) -> Result<()> {
         // check input - eIPos an allowed value
         if position != IntervalPosition::Start && position != IntervalPosition::End {
-            return Err(SolidError::sm_err(OP_REMOVE));
+            return Err(SolidError::intersect_failed(
+                OP_REMOVE,
+                "the position is neither the start nor the end of an interval",
+            ));
         }
 
         // check input - valid lIndex
         if index >= self.size() {
-            return Err(SolidError::sm_err(OP_REMOVE));
+            return Err(SolidError::intersect_failed(
+                OP_REMOVE,
+                "the interval index is past the end of the classification",
+            ));
         }
 
         // locals
@@ -1499,7 +1518,10 @@ impl<O: ClassObject> CurveClassification<O> {
                             .start
                             .set_class_object(PointClassType::Edge, Some(new_e2));
                     } else {
-                        return Err(SolidError::sm_err(OP_MERGE));
+                        return Err(SolidError::intersect_failed(
+                            OP_MERGE,
+                            "the interval start lies on neither of the edges the split made",
+                        ));
                     }
                 }
 
@@ -1515,7 +1537,10 @@ impl<O: ClassObject> CurveClassification<O> {
                             .end
                             .set_class_object(PointClassType::Edge, Some(new_e2));
                     } else {
-                        return Err(SolidError::sm_err(OP_MERGE));
+                        return Err(SolidError::intersect_failed(
+                            OP_MERGE,
+                            "the interval end lies on neither of the edges the split made",
+                        ));
                     }
                 }
 
@@ -1539,7 +1564,12 @@ impl<O: ClassObject> CurveClassification<O> {
                         // when Ivl MidPt drops to NewE1 to tight tol - using normalize to
                         // stop short Ivls classifying to neighbor Ivl EndPts
                         let drop1 = edge_curve(geometry, new_e1)?
-                            .ok_or_else(|| SolidError::null_pointer(OP_MERGE))?
+                            .ok_or_else(|| {
+                                SolidError::intersect_missing(
+                                    OP_MERGE,
+                                    "the first split edge's curve",
+                                )
+                            })?
                             .drop_point(
                                 k,
                                 &edge_interval(geometry, new_e1)?,
@@ -1560,7 +1590,12 @@ impl<O: ClassObject> CurveClassification<O> {
 
                         // drop interval midPoint to NewE2
                         let drop2 = edge_curve(geometry, new_e2)?
-                            .ok_or_else(|| SolidError::null_pointer(OP_MERGE))?
+                            .ok_or_else(|| {
+                                SolidError::intersect_missing(
+                                    OP_MERGE,
+                                    "the second split edge's curve",
+                                )
+                            })?
                             .drop_point(
                                 k,
                                 &edge_interval(geometry, new_e2)?,
@@ -1634,7 +1669,10 @@ impl<O: ClassObject> CurveClassification<O> {
                 let (mut coin, mut end_of_cm) = are_coincident_maybe(k, geometry, self, other, ii)?;
                 if coin == Coincident::Unsure {
                     // This signals an unrecoverable error.
-                    return Err(SolidError::sm_err(OP_CLEANUP));
+                    return Err(SolidError::intersect_failed(
+                        OP_CLEANUP,
+                        "whether the intervals coincide could not be decided",
+                    ));
                 }
 
                 // Another check: degenerate intervals.
@@ -1722,9 +1760,9 @@ pub fn change_edge_point_class_to_near_vertex<O: ClassObject>(
 
     // more locals
     let pc = *cc.pc_at(loc)?;
-    let edge = pc
-        .object()
-        .ok_or_else(|| SolidError::null_pointer(OP_NEAR_VERTEX))?;
+    let edge = pc.object().ok_or_else(|| {
+        SolidError::intersect_missing(OP_NEAR_VERTEX, "the point classification's edge")
+    })?;
     let (edge_vertex1, edge_vertex2) = edge_vertices(geometry, edge)?;
     let dist1 = vertex_point(geometry, edge_vertex1)?.distance(classify_point);
     let dist2 = vertex_point(geometry, edge_vertex2)?.distance(classify_point);
@@ -1972,9 +2010,12 @@ pub fn fix_problems_by_squeezing<O: ClassObject>(
                 connect_intervals(cc, ii, squeeze_pos, true)?;
 
                 // after modifying ThisCurve - start over
-                restarts_left = restarts_left
-                    .checked_sub(1)
-                    .ok_or_else(|| SolidError::sm_err(OP_SQUEEZE))?;
+                restarts_left = restarts_left.checked_sub(1).ok_or_else(|| {
+                    SolidError::intersect_failed(
+                        OP_SQUEEZE,
+                        "squeezing out zero-length intervals did not settle",
+                    )
+                })?;
                 continue 'restart;
             } // end thisCurveInterval is equivalent to zero length
         } // end iter every CurveClass interval
@@ -2050,7 +2091,7 @@ impl<O: ClassObject> CurveClassification<O> {
         let mid_pt =
             cc_curve(self, geometry, OP_EDGE_INTERVAL)?.evaluate_point(k, ivl.interval.mid())?;
         let dropped = edge_curve(geometry, edge)?
-            .ok_or_else(|| SolidError::null_pointer(OP_EDGE_INTERVAL))?
+            .ok_or_else(|| SolidError::intersect_missing(OP_EDGE_INTERVAL, "the edge's curve"))?
             .drop_point(
                 k,
                 &edge_interval(geometry, edge)?,

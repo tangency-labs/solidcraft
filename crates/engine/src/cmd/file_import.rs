@@ -415,11 +415,8 @@ fn add_rigid_joints(s: &mut Session, pairs: &[(u64, u64, Mat)]) -> Result<Vec<u6
                 id,
                 name: format!("Rigid Group {a}:{b}"),
                 kind: JointKind::Rigid,
-                a: JointOrigin {
-                    occurrence: *a,
-                    snap: Snap::Frame { origin: point(m, Vec3::ZERO), z: vector(m, Vec3::Z), x: Some(vector(m, Vec3::X)) },
-                },
-                b: JointOrigin { occurrence: *b, snap: Snap::Frame { origin: Vec3::ZERO, z: Vec3::Z, x: Some(Vec3::X) } },
+                a: JointOrigin::new(*a, Snap::Frame { origin: point(m, Vec3::ZERO), z: vector(m, Vec3::Z), x: Some(vector(m, Vec3::X)) }),
+                b: JointOrigin::new(*b, Snap::Frame { origin: Vec3::ZERO, z: Vec3::Z, x: Some(Vec3::X) }),
                 values: Vec::new(),
                 limits: Vec::new(),
                 flip: true,
@@ -427,6 +424,8 @@ fn add_rigid_joints(s: &mut Session, pairs: &[(u64, u64, Mat)]) -> Result<Vec<u6
                 angle: 0.0,
                 suppressed: false,
                 exprs: Default::default(),
+                captured: None,
+                constraint: None,
             })
         })
         .collect::<Result<_>>()?;

@@ -184,6 +184,8 @@ fn folder_visibility_shortcut_does_not_take_dialog_body_picks_or_chevrons() {
     h.step(&json!({"click":{"chevron":"Bodies"}})).unwrap();
     h.step(&json!({"key":"V"})).unwrap();
     assert!(!h.app.session.folder_hidden("c0/bodies"), "the fold arrow does not pick a visibility target");
+    // The click below picks the body, so Bodies must start empty (#13098 fills in an only body).
+    h.app.preferences.export_selects_only_body = false;
     h.app.start("file.save_mesh");
     h.settle();
     h.step(&json!({"click":{"handle":"row:Bodies"}})).unwrap();
@@ -267,6 +269,22 @@ fn browser_body_clicks_respect_the_active_dialog_input() {
 }
 
 #[test]
+fn browser_sketches_after_history_marker_are_not_listed() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Earlier"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Later"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("timeline.roll_to", json!({"position":1})).unwrap();
+    h.app.tree.expanded.insert("c0/sketches".into());
+    h.settle();
+
+    let labels: Vec<_> = drawn_rows().into_iter().map(|(label, ..)| label).collect();
+    assert!(labels.contains(&"Earlier".to_owned()), "{labels:?}");
+    assert!(!labels.contains(&"Later".to_owned()), "{labels:?}");
+}
+
+#[test]
 fn browser_card_shrinks_and_scrolls_without_covering_history() {
     let mut h = Harness::new();
     h.call("ui.resize", json!({"width":1400,"height":900}));
@@ -319,7 +337,7 @@ fn selected_row_paints_tab_soft_fill_and_accent_text_in_both_layouts() {
                 app.ui.layout = mode;
                 app.ui.tab = tab.into();
                 app.publish_tab_accent(&ctx);
-                let accent = solidcraft_theme::TabAccent::for_tab(&Tokens::get(), tab);
+                let accent = crate::workspace::tab_accent(&Tokens::get(), tab);
                 let mut row_rect = Rect::NOTHING;
                 let out = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
                     let row = Row { selected: true, label: "Selected body", dim: true, color: Some(Tokens::get().error), ..Default::default() };
@@ -393,16 +411,16 @@ fn a_second_click_on_a_document_settings_entry_closes_its_window() {
 
         h.step(&row("Precision")).unwrap();
         h.frames(2);
-        assert!(h.app.prefs_window.open, "{mode:?}: the first click opens Preferences");
+        assert!(h.app.prefs_window.shell.open, "{mode:?}: the first click opens Preferences");
         let decimals = h.app.preferences.angle_decimals;
         h.app.preferences.angle_decimals = decimals + 2;
         h.step(&row("Precision")).unwrap();
         h.frames(2);
-        assert!(!h.app.prefs_window.open, "{mode:?}: the second click closes it");
+        assert!(!h.app.prefs_window.shell.open, "{mode:?}: the second click closes it");
         assert_eq!(h.app.preferences.angle_decimals, decimals, "{mode:?}: and puts back what changed there, as × does");
         h.step(&row("Precision")).unwrap();
         h.frames(2);
-        assert!(h.app.prefs_window.open, "{mode:?}: a third opens it again");
+        assert!(h.app.prefs_window.shell.open, "{mode:?}: a third opens it again");
         h.step(&json!({"key":"Escape"})).unwrap();
 
         h.step(&row("Parameters")).unwrap();
@@ -605,7 +623,7 @@ fn browser_title_uses_a_single_semibold_run() {
         })
         .collect();
     assert_eq!(titles.len(), 1);
-    assert_eq!(titles[0].galley.job.sections[0].format.font_id, crate::fonts::semibold(Tokens::get().font_heading));
+    assert_eq!(titles[0].galley.job.sections[0].format.font_id, crate::ui_kit::type_face::semibold(Tokens::get().font_heading));
 }
 
 #[test]
@@ -738,6 +756,7 @@ fn mesh_and_solid_body_rows_have_different_icons_and_tooltips() {
                 positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
                 triangles: mesh.triangles.iter().flatten().copied().collect(),
                 color: None,
+                corner_normals: Default::default(),
             }],
         },
         Some("Imported mesh"),
@@ -2199,4 +2218,22 @@ fn parked_reveals_are_pruned_against_their_own_document_when_the_target_is_remov
     assert_eq!(h.app.tree.timeline_reveal, Some(feature), "the request returns to A before ordinary target pruning");
     semantic_frame(&mut h, &[], Vec::new(), egui::Modifiers::NONE);
     assert_no_pending_reveals(&h);
+}
+
+/// A component's body placed twice is two body rows in the Browser; the header's count agrees
+/// with the rows it lists instead of counting the model's bodies ("1 body" over two rows).
+#[test]
+fn the_browser_header_counts_one_body_per_placement() {
+    let (mut h, _, _) = crate::test_support::component_box();
+    h.app.preferences.browser_components_open = true;
+    h.settle();
+    assert_eq!(listed_bodies(&h.app.session), 1);
+    h.app.run("occurrence.copy", json!({"component": "Block", "translate": [0, 40, 0]})).unwrap();
+    h.settle();
+    assert_eq!(crate::open_meshing::session_world(&h.app.session).bodies.len(), 2);
+    // One body row under each placement's row, both labelled with the body's own name.
+    let rows = drawn_rows();
+    let body_rows = rows.iter().filter(|(label, ..)| label == "Body1").count();
+    assert_eq!(body_rows, 2, "a body row per placement: {rows:?}");
+    assert_eq!(listed_bodies(&h.app.session), body_rows, "the header counts the rows it lists");
 }

@@ -232,10 +232,9 @@ What the port does today:
 - **Touch points.** A degenerate SSI curve is classified at its point on both faces and kept as a
   point when it is on or inside both (`face_intersect`); `intersect_topology` imprints it only where
   it classifies to imprintable topology in both faces (`topology_intersector/p2.rs`).
-- **Contact curves inside a face.** With `remove_slit_loops_where_solids_touch`, a union,
-  intersection or difference removes the zero-area inner loops a contact curve leaves and splits
-  shells joined only through them (`merge/p4.rs`; `topology/brep/p3.rs`,
-  `remove_slit_loops_where_solids_touch`).
+- **Contact curves inside a face.** A union, intersection or difference removes the zero-area
+  inner loops a contact curve leaves and splits shells joined only through them (`merge/p4.rs`;
+  `topology/brep/p3.rs`, `remove_slit_loops_where_solids_touch`).
 - **Solids touching along an edge or at a vertex** are a valid result: ops checks the result with
   `is_outward_touching_solids` (§3).
 - **The sector test near tangency** steps off the edge and compares binormals until they separate
@@ -272,8 +271,8 @@ bare net and there is no definition to keep.
   trims are made by dropping the 3D curve onto each surface (`Surface::drop_curve`,
   `intersect/surface_drop_lib`), which traces and fits a cubic within the drop tolerance. So an exact
   edge can carry fitted trims. The exact pcurve of a plane section on a cylinder
-  (`cylinder_plane_section_trims_exact`) replaces one class of them; sphere, cone and torus sections
-  are open.
+  (`surface_drop_lib/cylinder_section.rs`) replaces one class of them; sphere, cone and torus
+  sections are open.
 - A traced SSI curve's UV curves are cubic Hermite interpolants, checked at samples and not certified
   ([ssi.md](ssi.md) §6.1); the imprint passes a copy of them to `MakeEdgeInFace`
   (`topology_intersector/p1.rs`, "Intersection trims").
@@ -345,10 +344,9 @@ A reviewer can check each of these on a change to the boolean.
 - The rig: 124 boolean cases in `solidcore/tests/kernel_cases/booleans/`, none listed in
   `known_failing.json`.
 - Opt-in fixes for the cases in §5, §6 and §8: `boolean_coincident_strip_drops_crossing`,
-  `remove_slit_loops_where_solids_touch`, `boolean_union_refuses_solid_leak`,
-  `boolean_outer_shell_first`, `boolean_cleanup_removes_slits`, `keep_operand_uv_trims`,
-  `boolean_vertex_by_best_crossing`, `boolean_splits_definition_across_split`,
-  `boolean_skips_faces_apart` (`solidcore/src/kernel.rs`).
+  `boolean_union_refuses_solid_leak`, `boolean_outer_shell_first`, `boolean_cleanup_removes_slits`,
+  `keep_operand_uv_trims`, `boolean_vertex_by_best_crossing`,
+  `boolean_splits_definition_across_split`, `boolean_skips_faces_apart` (`solidcore/src/kernel.rs`).
 
 **Open.**
 - Retiring those flags: each fix on by default with its old path deleted (AGENTS.md §4b).

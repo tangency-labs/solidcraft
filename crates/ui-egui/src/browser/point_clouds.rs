@@ -24,7 +24,7 @@ use point_cloud_tracks::{Ask, Paint, Tracks};
 use range_track::{Part, Track, range_track};
 
 /// Filters the GPU applies; the others are kept but not drawn.
-pub const DRAWN_FILTERS: usize = solidcraft_gpu::view::FILTERS;
+pub const DRAWN_FILTERS: usize = solidcraft_viewport_gpu::view::FILTERS;
 
 /// The Edit Point Cloud card: the cloud, the undo depth when it opened, what it worked out once
 /// for the cloud's data (the automatic height range, the number of dots), its tracks' bars, and

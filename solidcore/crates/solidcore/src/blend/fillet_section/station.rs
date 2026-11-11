@@ -11,7 +11,7 @@
 
 use std::borrow::Cow;
 
-use super::series::{GnScalar, Ser, Trunc, VSer, MAX_E, MAX_K, MAX_S, V3};
+use super::series::{GnScalar, InvSqrtSeries, Ser, Trunc, VSer, MAX_E, MAX_K, MAX_S, STORE_E, V3};
 use crate::error::{Result, SolidError};
 use crate::kernel::Kernel;
 use crate::math::{Point2, Vec3};
@@ -491,6 +491,28 @@ pub fn surface_partials_sided(
     lk: usize,
     sides: [i32; 2],
 ) -> Result<Partials<f64>> {
+    surface_partials_pinned(k, s, uv, uv, lk, sides)
+}
+
+/// [`surface_partials_sided`] with the pieces a side names chosen at `pin`, not at `uv`
+/// (not the fork's): a sided station solve keeps, for every iterate, the pieces its sides
+/// name at its seed, which its callers place on the knot line. Chosen at each iterate,
+/// an iterate as far from the line as the margin of [`sided_span`] took the other piece,
+/// and Newton cycled between the two (feet 2e-9 off the old boundary of a face's
+/// extension, which is only G1 there: the station failed). A coordinate without a side
+/// takes the span of `uv`, as [`surface_partials_sided`].
+///
+/// # Errors
+///
+/// As [`surface_partials`].
+pub fn surface_partials_pinned(
+    k: &Kernel,
+    s: &Surface,
+    uv: Point2,
+    pin: Point2,
+    lk: usize,
+    sides: [i32; 2],
+) -> Result<Partials<f64>> {
     if lk > MAX_K {
         return Err(SolidError::sm_err(OP));
     }
@@ -498,8 +520,9 @@ pub fn surface_partials_sided(
     let bs = if definition { None } else { as_b_spline(k, s)? };
     if let Some(bs) = bs {
         let n = Nurbs::of(&bs)?;
-        let ku = sided_span(&n.u, n.p, n.nu, uv.x, sides[0]);
-        let kv = sided_span(&n.v, n.q, n.nv, uv.y, sides[1]);
+        let at = |x: f64, p: f64, side: i32| if side == 0 { x } else { p };
+        let ku = sided_span(&n.u, n.p, n.nu, at(uv.x, pin.x, sides[0]), sides[0]);
+        let kv = sided_span(&n.v, n.q, n.nv, at(uv.y, pin.y, sides[1]), sides[1]);
         return Ok(nurbs_partials(&n, ku, kv, uv.x, uv.y, lk));
     }
     // Evaluate(crUV, lK, lK, lSideU >= 0, lSideV >= 0, TRUE, sD, FALSE): a side, the upper
@@ -620,14 +643,17 @@ pub fn gn_evaluate_vn<T: GnScalar>(
         let mut dv = *xv;
         du.set(0, 0, T::of(0.0));
         dv.set(0, 0, T::of(0.0));
+        // du^a and dv^b are 0 below degree a and b (du, dv have no constant term): the
+        // powers and monomials past the degree computed are 0 there and left out
+        let top = lm.min(tr.degree());
         let mut pu = vec![Ser::constant(T::of(1.0))];
         let mut pv = vec![Ser::constant(T::of(1.0))];
-        for _ in 1..=lm {
+        for a in 1..=top {
             let (Some(lu), Some(lv)) = (pu.last().copied(), pv.last().copied()) else {
                 return Err(SolidError::sm_err(OP));
             };
-            pu.push(lu.mul(&du, tr));
-            pv.push(lv.mul(&dv, tr));
+            pu.push(lu.mul_valued(&du, a - 1, 1, tr));
+            pv.push(lv.mul_valued(&dv, a - 1, 1, tr));
         }
         let mut s = VSer::constant(zero);
         let mut su = s;
@@ -638,11 +664,11 @@ pub fn gn_evaluate_vn<T: GnScalar>(
                 fa *= a as f64;
             }
             let mut fb = 1.0_f64;
-            for (b, pvb) in pv.iter().enumerate().take(lm - a + 1) {
+            for (b, pvb) in pv.iter().enumerate().take(top - a + 1) {
                 if b > 0 {
                     fb *= b as f64;
                 }
-                let mono = pua.mul(pvb, tr);
+                let mono = pua.mul_valued(pvb, a, b, tr);
                 // a! b! is exact, 1 / (a! b!) is rounded in T (#2559)
                 let sf = T::of(1.0) / T::of(fa * fb);
                 let cs = [pf.at(a, b), pf.at(a + 1, b), pf.at(a, b + 1)];
@@ -650,7 +676,8 @@ pub fn gn_evaluate_vn<T: GnScalar>(
                 for (c, out) in cs.iter().zip(outs) {
                     let cv = [c.x, c.y, c.z];
                     for (o, &cj) in out.a.iter_mut().zip(&cv) {
-                        *o = o.add(&mono.scale(cj * sf, tr), tr);
+                        // o + mono (cj sf), each coefficient rounded as `add` of `scale`
+                        o.add_scaled_from(&mono, cj * sf, a + b, tr);
                     }
                 }
             }
@@ -684,6 +711,247 @@ pub fn gn_evaluate_vn<T: GnScalar>(
     let [g0, g1, g2] = diff.a;
     let g3 = v0.sub(&sys.leader, tr).dot(&sys.tangent, tr);
     Ok(([g0, g1, g2, g3], f_out, *v0, n_out))
+}
+
+/// [`gn_evaluate_vn`]'s values: G, the feet, V and the faces' unit normals.
+pub type GnValuesVN<T> = ([Ser<T>; 4], [VSer<T>; 2], VSer<T>, [VSer<T>; 2]);
+
+/// One face's series that [`GnIncremental`] keeps between evaluations.
+#[derive(Clone, Debug)]
+struct GnFaceSeries<T> {
+    /// `du^a`, `dv^a`: index 0 is 1.
+    pu: Vec<Ser<T>>,
+    pv: Vec<Ser<T>>,
+    s: VSer<T>,
+    su: VSer<T>,
+    sv: VSer<T>,
+    nrm: VSer<T>,
+    nn: Ser<T>,
+    inv: InvSqrtSeries<T>,
+    w: Ser<T>,
+    v: VSer<T>,
+    n: VSer<T>,
+}
+
+impl<T: GnScalar> GnFaceSeries<T> {
+    fn new() -> Self {
+        let z = Ser::constant(T::of(0.0));
+        let vz = VSer { a: [z; 3] };
+        let one = vec![Ser::constant(T::of(1.0))];
+        Self {
+            pu: one.clone(),
+            pv: one,
+            s: vz,
+            su: vz,
+            sv: vz,
+            nrm: vz,
+            nn: z,
+            inv: InvSqrtSeries::default(),
+            w: z,
+            v: vz,
+            n: vz,
+        }
+    }
+}
+
+/// `v.a[j]` merged from `src.a[j]` where `tr` computes.
+fn merge_v<T: GnScalar>(v: &mut VSer<T>, src: &VSer<T>, tr: Trunc) {
+    for (a, b) in v.a.iter_mut().zip(&src.a) {
+        a.merge_computed(b, tr);
+    }
+}
+
+/// [`gn_evaluate_vn`] evaluated incrementally, for a caller that evaluates the same system
+/// again and again as it fills in the feet's series (the certificate's Taylor models
+/// solve them order by order, [`super::feet_tm::gn_enclose_tm`]): every series
+/// [`gn_evaluate_vn`] takes is kept, and an evaluation computes only the coefficients its
+/// truncation computes that no earlier one has computed from the same coefficients of x.
+/// Each coefficient depends only on x's coefficients at the same or lower powers of both
+/// sigma and eps (see [`Trunc`]), so a kept one stays valid until x changes in that
+/// quadrant, and the evaluation's operations, their order and so every value are
+/// [`gn_evaluate_vn`]'s, bit for bit: the two must change together (a test compares them).
+#[derive(Clone, Debug)]
+pub struct GnIncremental<'s, 'a, T> {
+    sys: &'s GnSystem<'a, T>,
+    /// The orders of the kept series (`Trunc::s`, `Trunc::e`), none before the first.
+    orders: Option<(usize, usize)>,
+    /// The x the kept series were computed from.
+    x: [Ser<T>; 4],
+    /// The kept coefficients still valid ([`Trunc::bit`]s, the same for every series).
+    valid: u64,
+    faces: [GnFaceSeries<T>; 2],
+    g: [Ser<T>; 4],
+    /// `V - leader` (its dot product with the tangent reads all its lower coefficients).
+    t: VSer<T>,
+    /// The coefficients computed so far (each evaluation adds those of its series' it
+    /// computes, counted once per position).
+    computed: u64,
+}
+
+impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
+    /// An evaluator of `sys` with nothing kept.
+    #[must_use]
+    pub fn new(sys: &'s GnSystem<'a, T>) -> Self {
+        let z = Ser::constant(T::of(0.0));
+        Self {
+            sys,
+            orders: None,
+            x: [z; 4],
+            valid: 0,
+            faces: [GnFaceSeries::new(), GnFaceSeries::new()],
+            g: [z; 4],
+            t: VSer { a: [z; 3] },
+            computed: 0,
+        }
+    }
+
+    /// The positions `(i, k)` computed so far, summed over the evaluations: the work
+    /// counter of the certificate's feet Taylor models. A [`gn_evaluate_vn`] call computes
+    /// every position its truncation computes.
+    #[must_use]
+    pub const fn computed(&self) -> u64 {
+        self.computed
+    }
+
+    /// [`gn_evaluate_vn`]`(sys, x, tr)`, bit for bit.
+    ///
+    /// # Errors
+    ///
+    /// As [`gn_evaluate_vn`].
+    pub fn evaluate(&mut self, x: &[Ser<T>; 4], tr: Trunc) -> Result<GnValuesVN<T>> {
+        let out = self.evaluate_kept(x, tr);
+        if out.is_err() {
+            // the kept series are part way through an update
+            self.valid = 0;
+            self.orders = None;
+        }
+        out
+    }
+
+    fn evaluate_kept(&mut self, x: &[Ser<T>; 4], tr: Trunc) -> Result<GnValuesVN<T>> {
+        if self.orders != Some((tr.s(), tr.e())) {
+            let computed = self.computed;
+            *self = Self::new(self.sys);
+            self.computed = computed;
+            self.orders = Some((tr.s(), tr.e()));
+        }
+        // a coefficient of x that changed invalidates every kept one at or above both its
+        // powers
+        for (xn, xo) in x.iter().zip(&self.x) {
+            for i in 0..=MAX_S {
+                for k in 0..=STORE_E {
+                    if xn.at(i, k) != xo.at(i, k) {
+                        for i2 in i..=MAX_S {
+                            for k2 in k..=STORE_E {
+                                self.valid &= !Trunc::bit(i2, k2);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        self.x = *x;
+        let all = tr.computed_mask();
+        let btr = tr.skipping(self.valid);
+        self.computed = self
+            .computed
+            .saturating_add(u64::from(btr.computed_mask().count_ones()));
+        let lm = tr.s() + tr.e();
+        let top = lm.min(tr.degree());
+        let zero = Ser::constant(T::of(0.0));
+        let vzero = VSer { a: [zero; 3] };
+        let sys = self.sys;
+        let rows = x.chunks_exact(2).zip(sys.p).zip(sys.r.iter().zip(sys.side));
+        for (fs, ((xf, pf), (&rf, sidef))) in self.faces.iter_mut().zip(rows) {
+            let (Some(xu), Some(xv)) = (xf.first(), xf.get(1)) else {
+                return Err(SolidError::sm_err(OP));
+            };
+            let mut du = *xu;
+            let mut dv = *xv;
+            du.set(0, 0, T::of(0.0));
+            dv.set(0, 0, T::of(0.0));
+            for a in 1..=top {
+                let (Some(lu), Some(lv)) = (fs.pu.get(a - 1), fs.pv.get(a - 1)) else {
+                    return Err(SolidError::sm_err(OP));
+                };
+                let (nu, nv) = (
+                    lu.mul_valued(&du, a - 1, 1, btr),
+                    lv.mul_valued(&dv, a - 1, 1, btr),
+                );
+                if fs.pu.len() <= a {
+                    fs.pu.push(zero);
+                    fs.pv.push(zero);
+                }
+                let (Some(pua), Some(pva)) = (fs.pu.get_mut(a), fs.pv.get_mut(a)) else {
+                    return Err(SolidError::sm_err(OP));
+                };
+                pua.merge_computed(&nu, btr);
+                pva.merge_computed(&nv, btr);
+            }
+            merge_v(&mut fs.s, &vzero, btr);
+            merge_v(&mut fs.su, &vzero, btr);
+            merge_v(&mut fs.sv, &vzero, btr);
+            let mut fa = 1.0_f64;
+            for (a, pua) in fs.pu.iter().enumerate().take(top + 1) {
+                if a > 0 {
+                    fa *= a as f64;
+                }
+                let mut fb = 1.0_f64;
+                for (b, pvb) in fs.pv.iter().enumerate().take(top - a + 1) {
+                    if b > 0 {
+                        fb *= b as f64;
+                    }
+                    let mono = pua.mul_valued(pvb, a, b, btr);
+                    let sf = T::of(1.0) / T::of(fa * fb);
+                    let cs = [pf.at(a, b), pf.at(a + 1, b), pf.at(a, b + 1)];
+                    let outs: [&mut VSer<T>; 3] = [&mut fs.s, &mut fs.su, &mut fs.sv];
+                    for (c, out) in cs.iter().zip(outs) {
+                        let cv = [c.x, c.y, c.z];
+                        for (o, &cj) in out.a.iter_mut().zip(&cv) {
+                            o.add_scaled_from(&mono, cj * sf, a + b, btr);
+                        }
+                    }
+                }
+            }
+            merge_v(&mut fs.nrm, &fs.su.cross(&fs.sv, btr), btr);
+            fs.nn.merge_computed(&fs.nrm.dot(&fs.nrm, btr), btr);
+            let inv_len = *fs.inv.update(&fs.nn, btr)?;
+            let mut d = Ser::constant(T::of(rf * sidef));
+            if let Some(law) = sys.law {
+                for i in 0..=tr.s() {
+                    d.set(i, 0, law.at(i, 0) * T::of(sidef));
+                }
+            }
+            if !sys.hold && tr.e() >= 1 {
+                for i in 0..=tr.s() {
+                    d.set(i, 1, d.at(i, 0));
+                }
+            }
+            fs.w.merge_computed(&inv_len.mul(&d, btr), btr);
+            merge_v(&mut fs.v, &fs.s.add(&fs.nrm.times(&fs.w, btr), btr), btr);
+            merge_v(&mut fs.n, &fs.nrm.times(&inv_len, btr), btr);
+        }
+        let [f0, f1] = &self.faces;
+        let diff = f0.v.sub(&f1.v, btr);
+        for (g, d) in self.g.iter_mut().zip(&diff.a) {
+            g.merge_computed(d, btr);
+        }
+        merge_v(&mut self.t, &f0.v.sub(&sys.leader, btr), btr);
+        if let Some(g3) = self.g.get_mut(3) {
+            g3.merge_computed(&self.t.dot(&sys.tangent, btr), btr);
+        }
+        self.valid |= all;
+        let mv = |v: &VSer<T>| VSer {
+            a: v.a.each_ref().map(|c| c.masked(tr)),
+        };
+        let [f0, f1] = &self.faces;
+        Ok((
+            self.g.each_ref().map(|c| c.masked(tr)),
+            [mv(&f0.s), mv(&f1.s)],
+            mv(&f0.v),
+            [mv(&f0.n), mv(&f1.n)],
+        ))
+    }
 }
 
 /// `sm_GnTopJets` (3bc54a4): the section's jets of order `top` (its order n) and up, from
@@ -1064,10 +1332,25 @@ fn solve_station_body(
     let lk = tr.s() + tr.e() + 1;
     let (l, t) = leader_series_sided(leader, s, tr, opts.before)?;
     let [f0, f1] = faces;
+    // (a side names a piece at the seed, on the knot line: every iterate keeps it)
     let partials_at = |x: &[f64; 4], order: usize| -> Result<[Partials<f64>; 2]> {
         Ok([
-            surface_partials_sided(k, f0, Point2::new(x[0], x[1]), order, [sides[0], sides[1]])?,
-            surface_partials_sided(k, f1, Point2::new(x[2], x[3]), order, [sides[2], sides[3]])?,
+            surface_partials_pinned(
+                k,
+                f0,
+                Point2::new(x[0], x[1]),
+                Point2::new(seed[0], seed[1]),
+                order,
+                [sides[0], sides[1]],
+            )?,
+            surface_partials_pinned(
+                k,
+                f1,
+                Point2::new(x[2], x[3]),
+                Point2::new(seed[2], seed[3]),
+                order,
+                [sides[2], sides[3]],
+            )?,
         ])
     };
 
@@ -1129,9 +1412,20 @@ fn solve_station_body(
     let mut sx = x.map(Ser::constant);
     let jac = gn_jacobian(&sys, &sx)?;
     // (the coefficients of one total degree do not enter each other's: one evaluation
-    // solves them all)
+    // solves them all; G is computed only at that degree and below, and at the powers of
+    // eps solved for, bit for bit the whole truncation's there (`Trunc::computing`), and
+    // not at all at an order with none to solve)
+    let eps_solved = if opts.top >= 1 {
+        tr.e().min(opts.top - 1)
+    } else {
+        tr.e()
+    };
     for tot in 1..=(tr.s() + tr.e()) {
-        let (g, _) = gn_evaluate(&sys, &sx, tr)?;
+        let eps = eps_solved.min(tot);
+        if tot > tr.s() + eps {
+            continue;
+        }
+        let (g, _) = gn_evaluate(&sys, &sx, tr.computing(tot, eps))?;
         for i in 0..=tr.s().min(tot) {
             let kk = tot - i;
             // (to order lTop - 1 in eps with lTop: gn_top_jets)
@@ -1666,5 +1960,142 @@ mod tests {
         }
         // 554 of the 2001 differences are not doubles: the case the construction is for
         assert_eq!(inexact, 554);
+    }
+
+    /// [`GnIncremental`] fed as the feet's Taylor models feed it (x filled in order by
+    /// order, each order evaluated with the lower ones' coefficients set and its own 0,
+    /// then one whole evaluation), against [`gn_evaluate_vn`] at each call: equal bit for
+    /// bit. Returns the positions it computed and those the whole evaluations compute.
+    fn incremental_matches_whole<T: GnScalar + PartialEq + core::fmt::Debug>(
+        mk: impl Fn(f64) -> T,
+        s: usize,
+        e: usize,
+        n: usize,
+        law: bool,
+        hold: bool,
+    ) -> (u64, u64) {
+        let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut next = move || {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (seed >> 11) as f64 / (1_u64 << 53) as f64 - 0.5
+        };
+        let mut v3 = |base: [f64; 3]| V3 {
+            x: mk(base[0] + 0.3 * next()),
+            y: mk(base[1] + 0.3 * next()),
+            z: mk(base[2] + 0.3 * next()),
+        };
+        let mut faces = [Partials::default(), Partials::default()];
+        for (f, pf) in faces.iter_mut().enumerate() {
+            let sgn = if f == 0 { 1.0 } else { -1.0 };
+            for a in 0..=MAX_K {
+                for b in 0..=(MAX_K - a) {
+                    let base = match (a, b) {
+                        (1, 0) => [1.0, 0.0, 0.0],
+                        (0, 1) => [0.0, sgn, 0.2],
+                        _ => [0.0; 3],
+                    };
+                    pf.set(a, b, v3(base));
+                }
+            }
+        }
+        let mut ser = |c0: f64| {
+            let mut x = Ser::constant(mk(c0));
+            for i in 0..=MAX_S {
+                for k in 0..=MAX_E {
+                    if i + k > 0 {
+                        x.set(i, k, mk(next()));
+                    }
+                }
+            }
+            x
+        };
+        let leader = VSer {
+            a: [ser(0.1), ser(0.2), ser(0.3)],
+        };
+        let tangent = VSer {
+            a: [ser(0.0), ser(0.6), ser(0.8)],
+        };
+        let law_ser = ser(0.7);
+        let [p0, p1] = &faces;
+        let sys = GnSystem {
+            p: [p0, p1],
+            leader,
+            tangent,
+            r: [0.5, 0.75],
+            side: [1.0, -1.0],
+            hold,
+            law: law.then_some(&law_ser),
+        };
+        let tr = Trunc::new(s, e).unwrap();
+        let mut sx = [0.3, -0.2, 0.1, 0.4].map(|c| Ser::constant(mk(c)));
+        let mut inc = GnIncremental::new(&sys);
+        let mut whole = 0_u64;
+        let eps_solved = if n >= 1 { e.min(n - 1) } else { e };
+        for tot in 1..=(s + e) {
+            let eps = eps_solved.min(tot);
+            if tot > s + eps {
+                continue;
+            }
+            let at = tr.computing(tot, eps);
+            let want = gn_evaluate_vn(&sys, &sx, at).unwrap();
+            whole += u64::from(at.computed_mask().count_ones());
+            assert_eq!(inc.evaluate(&sx, at).unwrap(), want, "order {tot}");
+            for i in 0..=s.min(tot) {
+                let kk = tot - i;
+                if kk > e || (n >= 1 && kk >= n) {
+                    continue;
+                }
+                for xc in &mut sx {
+                    xc.set(i, kk, mk(0.2 * next()));
+                }
+            }
+        }
+        let want = gn_evaluate_vn(&sys, &sx, tr).unwrap();
+        whole += u64::from(tr.computed_mask().count_ones());
+        assert_eq!(inc.evaluate(&sx, tr).unwrap(), want, "whole");
+        // nothing changed: nothing to compute, the same values
+        let before = inc.computed();
+        assert_eq!(inc.evaluate(&sx, tr).unwrap(), want, "again");
+        assert_eq!(inc.computed(), before);
+        // a changed lower coefficient: computed again from it
+        sx[1].set(1, 0, mk(0.05));
+        assert_eq!(
+            inc.evaluate(&sx, tr).unwrap(),
+            gn_evaluate_vn(&sys, &sx, tr).unwrap()
+        );
+        (before, whole)
+    }
+
+    #[test]
+    fn incremental_evaluation_is_the_whole_one_bit_for_bit() {
+        let tm = |v: f64| {
+            crate::blend::fillet_section::feet_tm::Ft::from_points(&[v, 0.01 * v, -0.005 * v])
+        };
+        for (s, e, n) in [(3, 2, 2), (2, 3, 2), (3, 0, 0), (2, 2, 0), (4, 1, 1)] {
+            for (law, hold) in [(false, false), (true, false), (false, true)] {
+                incremental_matches_whole(|v| v, s, e, n, law, hold);
+                incremental_matches_whole(Ivl::from, s, e, n, law, hold);
+                incremental_matches_whole(tm, s, e, n, law, hold);
+            }
+        }
+    }
+
+    /// The work counter of the feet's Taylor models: their order-by-order evaluations
+    /// compute each coefficient of G at most twice (at its order with its own 0, and once
+    /// it is set), not again at every later order.
+    #[test]
+    fn incremental_evaluation_computes_each_order_once() {
+        // the certificate's orders: order 3 in sigma, 2 in eps, the jets of order 2 the
+        // faces'
+        let (inc, whole) = incremental_matches_whole(|v| v, 3, 2, 2, false, false);
+        let full = u64::from(Trunc::new(3, 2).unwrap().computed_mask().count_ones());
+        assert_eq!(full, 12);
+        assert!(
+            inc <= 2 * full,
+            "{inc} computed, at most twice each of {full}"
+        );
+        assert_eq!((inc, whole), (19, 35));
     }
 }
