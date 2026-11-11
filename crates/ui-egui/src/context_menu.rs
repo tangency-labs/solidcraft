@@ -96,6 +96,8 @@ pub enum Target {
     Toolbar,
     /// The History controls (first, previous, next, last, and Play when shown).
     HistoryControls,
+    /// The History folder, with History in the browser: the History controls as menu entries.
+    HistoryFolder,
     /// A feature in the History bar.
     Timeline {
         feature: u64,
@@ -141,7 +143,7 @@ pub(crate) fn cmd(app: &SolveApp, id: &str, label: &str) -> Item {
         label: label.into(),
         shortcut,
         enabled: info.as_ref().is_some_and(|i| i.enabled),
-        icon: info.map(|i| i.icon.to_string()).unwrap_or_default(),
+        icon: info.map(|i| i.icon).unwrap_or_default().into(),
         params: None,
         children: Vec::new(),
         swatch: None,
@@ -364,6 +366,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::ToolbarCommand { id } => crate::toolbar_custom::command_items(app, id),
         Target::Toolbar => crate::toolbar_custom::toolbar_items(app),
         Target::HistoryControls => crate::timeline::transport_items(app),
+        Target::HistoryFolder => crate::timeline::history_folder_items(app),
         Target::Timeline { feature } => crate::timeline::feature_items(app, *feature),
         Target::Workspace => {
             let rendering = crate::render_workspace::active(app);
@@ -524,12 +527,13 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                 params["appearance"] = json!(look.name);
                 params["color"] = json!(crate::dialogs_appearance::hex(look.color));
                 params["opacity"] = json!(look.opacity);
-                let mut child = cmd(app, "appearance.assign", &look.name).with(params);
+                // The A key opens the editor, so only the editor's row shows it.
+                let mut child = cmd(app, "appearance.assign", &look.name).key("").with(params);
                 child.swatch = Some(look.color);
                 item.children.push(child);
             }
             item.children.push(Item::sep());
-            item.children.push(cmd(app, "appearance.assign", "Remove override").with(targets));
+            item.children.push(cmd(app, "appearance.assign", "Remove override").key("").with(targets));
         }
     });
     v
@@ -941,6 +945,8 @@ fn joint_items(app: &SolveApp, id: u64) -> Vec<Item> {
     ]
 }
 
+/// The menu of the placement at `path`: its component's menu, with the rows aimed at this
+/// placement, and "Relink Source…" for it alone when the component is placed more than once.
 fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
     let Ok(placement) = app.session.occurrence_placement(path) else { return Vec::new() };
     let mut entries = component_items(app, placement.component);
@@ -993,6 +999,18 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
         }
         _ => {}
     });
+    // One placement of several can show another design on its own, above the row for all of them.
+    if app.session.doc.links.contains_key(&placement.component)
+        && app.session.doc.occurrences.iter().filter(|o| o.component == placement.component).count() > 1
+    {
+        let one =
+            act("ui.relinkPlacement", "Relink Source…", "update").with(json!({"component": placement.component, "occurrence": placement.occurrence}));
+        each_item(&mut entries, &mut |item: &mut Item| {
+            if let Some(i) = item.children.iter().position(|c| c.id == "ui.relinkSource") {
+                item.children.insert(i, one.clone());
+            }
+        });
+    }
     entries
 }
 
@@ -1072,11 +1090,16 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         let oid = occ.map(|o| o.id).unwrap_or(0);
         let movable = !grounded && occ.is_some() && app.session.held_by_rigid_group(oid).is_none();
         v.push(act("ui.moveOccurrence", "Move/Copy", "move").key("M").with(json!({ "occurrence": oid })).on(movable));
+        let moved = !app.session.pending_moves.is_empty();
+        let joints = &app.session.doc.assembly.joints;
         let mut placement = vec![
             cmd(app, "occurrence.ground", if grounded { "Unground" } else { "Ground" }).with(json!({ "occurrence": oid, "grounded": !grounded })),
             turn_up_axis(oid, movable),
-            cmd(app, "component.capture_position", "Capture Position").on(!app.session.pending_moves.is_empty()),
-            cmd(app, "component.revert_position", "Revert Position").on(!app.session.pending_moves.is_empty()),
+            // Capture Position also saves the joints' values, and Revert Position puts them back.
+            cmd(app, "component.capture_position", "Capture Position")
+                .on(moved || joints.iter().any(|j| j.kind != solidcraft_engine::doc::joints::JointKind::Rigid)),
+            cmd(app, "component.revert_position", "Revert Position")
+                .on(moved || joints.iter().any(|j| j.captured.is_some() && j.kind != solidcraft_engine::doc::joints::JointKind::Rigid)),
         ];
         // An imported assembly moves as one until its rigid group is released.
         if !app.session.contents_joints(id).is_empty() {
@@ -1523,9 +1546,9 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         "ui.finishSketch" => app.finish_sketch(),
         "ui.cancelSketch" => app.cancel_sketch(),
-        "ui.relinkSource" => {
+        "ui.relinkSource" | "ui.relinkPlacement" => {
             if let Some(component) = id_of(&p, "component") {
-                crate::linked_source::start(app, component);
+                crate::linked_source::start(app, component, id_of(&p, "occurrence"));
             }
         }
         "ui.extractComponent" => {
@@ -1647,7 +1670,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         "ui.insertBrowse" => app.pick_design_to_insert(),
         "ui.export" => {
-            let name = bodies.first().cloned().unwrap_or_else(|| app.session.doc.name.clone());
+            let body = bodies.first().map(String::as_str);
+            let name = crate::export_name::offered(app, body, body.unwrap_or(&app.session.doc.name));
             app.pick_save_command(&format!("{name}.step"), &["step", "stp", "igs", "stl", "3mf", "obj"], "file.export", json!({"bodies": bodies}));
         }
         "ui.findBrowser" => {
@@ -1820,6 +1844,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 app.set_status(e, true);
             }
         }
+        "ui.historyTransport" => {
+            if let Some(control) = crate::ui_kit::HistoryTransport::WITH_PLAY.into_iter().find(|c| Some(c.id()) == p["control"].as_str()) {
+                crate::timeline::run_transport(app, control);
+            }
+        }
         "ui.historyShowHidden" => app.tree.history_show_hidden = p["show"].as_bool().unwrap_or(false),
         "ui.workspace" | "ui.workspace.design" | "ui.workspace.render" => {
             if let Some(workspace) = p.get("workspace").and_then(Value::as_str)
@@ -1959,6 +1988,12 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 }
             }
         }
+        "ui.straightenCanvas" => {
+            if let Some(c) = id_of(&p, "canvas") {
+                app.tree.canvas_panel = Some(crate::browser::CanvasPanel::straighten(app, c));
+                app.set_status(solidcraft_ui_text::tr("browser.straighten_click_a"), false);
+            }
+        }
         "ui.newGroup" | "ui.ungroup" | "ui.groupSelected" => crate::browser::group_action(app, &item.id, &p),
         // A plane's Create Sketch is the toolbar's with that plane picked first: it replaces a
         // dialog in progress, and the dialog starts the sketch at once, facing the plane.
@@ -2018,12 +2053,33 @@ pub fn delete(app: &mut SolveApp) {
 pub fn press_shortcut(app: &mut SolveApp, key: &str) -> bool {
     let Some(at) = app.viewport.context_menu else { return false };
     let target = app.menu.target.clone();
-    let Some(item) = entries(app, &target).into_iter().find(|i| i.shortcut == key && i.children.is_empty()) else { return false };
+    // "V" is the tag of Show/Hide rows, which run on Show/Hide's own key: a command row showing V
+    // has V bound to it and is not what that key means (#13241).
+    let Some(item) = entries(app, &target).into_iter().find(|i| i.shortcut == key && i.children.is_empty() && (key != "V" || i.label == "Show/Hide"))
+    else {
+        return false;
+    };
     if item.enabled {
         close(app);
         run_item(app, &item, at);
     }
     true
+}
+
+/// The key a menu row shows for its `shortcut` tag: Show/Hide rows are tagged "V" and show the
+/// key Show/Hide has now (#13241), or none.
+pub fn shortcut_shown(app: &SolveApp, tag: &str) -> String {
+    if tag == "V" { crate::keymap::display_for(app, "ui.toggle_visibility").unwrap_or_default() } else { tag.to_string() }
+}
+
+/// Only Show/Hide rows carry the `V` tag for that command: another row showing V has V bound to it.
+pub(crate) fn show_current_keys(app: &SolveApp, list: &mut [Item]) {
+    for item in list {
+        if item.label == "Show/Hide" {
+            item.shortcut = shortcut_shown(app, &item.shortcut);
+        }
+        show_current_keys(app, &mut item.children);
+    }
 }
 
 /// Show/Hide (the V key): what is selected in the viewport or picked in the browser flips its
@@ -2335,6 +2391,8 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
             matches!(f.kind, FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. })
         }),
         Target::Feature { id } => feature(*id),
+        // The browser lists History while it is docked there and the design has features.
+        Target::HistoryFolder => app.preferences.history_in_browser && !doc.features.is_empty(),
         Target::Timeline { feature: id } => feature(*id),
         Target::OriginPlane { name } => crate::prefs::OriginPlaneNames::PLANES.contains(&name.as_str()),
         Target::OriginAxis { name } => ["X", "Y", "Z"].contains(&name.as_str()),
@@ -2385,7 +2443,10 @@ pub fn describe(app: &SolveApp) -> Value {
     let Some(at) = app.viewport.context_menu else {
         return json!({ "open": false, "pending": app.menu.pending.is_some() });
     };
-    let radial = if app.menu.radial { radial_items(app) } else { Vec::new() };
+    let mut radial = if app.menu.radial { radial_items(app) } else { Vec::new() };
+    show_current_keys(app, &mut radial);
+    let mut rows = items(app, &app.menu.target);
+    show_current_keys(app, &mut rows);
     /// A row with its `placeholder` flag, and a flyout's rows likewise.
     fn describe_items(items: Vec<Item>) -> Vec<Value> {
         items
@@ -2407,7 +2468,7 @@ pub fn describe(app: &SolveApp) -> Value {
         "at": [at.x, at.y],
         "target": app.menu.target,
         "radial": describe_items(radial),
-        "items": describe_items(items(app, &app.menu.target)),
+        "items": describe_items(rows),
         "rename": app.menu.rename.as_ref().map(|r| r.text.clone()),
     })
 }
@@ -2577,7 +2638,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(at) = app.viewport.context_menu else { return };
     let screen = ctx.content_rect();
     let target = app.menu.target.clone();
-    let list = items(app, &target);
+    let mut list = items(app, &target);
+    show_current_keys(app, &mut list);
     let mut picked: Option<Item> = None;
     let pointer = ctx.input(|i| i.pointer.latest_pos());
     let mut inside = app.menu.opener.is_some_and(|r| pointer.is_some_and(|p| r.contains(p)));

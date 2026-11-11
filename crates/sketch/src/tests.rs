@@ -573,6 +573,77 @@ fn profiles_ignore_near_zero_arcs_left_by_a_split_at_a_touching_line() {
     assert!((ps[0].area - (0.75 * PI * r * r + polygon)).abs() < 1e-6, "{}", ps[0].area);
 }
 
+/// The end plate of #14256: an outline whose 25 mm arc meets a horizontal and a vertical line
+/// tangentially, each joint held by two "point on curve" constraints instead of one shared point.
+/// The solver leaves the arc's ends on the lines only to its 1e-9 mm residual, which along the
+/// tangent puts them 5e-5 mm and 2.25e-4 mm from the lines' ends. The horizontal line is raised
+/// by `lift`.
+fn tangent_joint_end_plate(lift: f64) -> Sketch {
+    let mut sk = Sketch::new();
+    let knee = (50.0_f64.powi(2) - 11.125_f64.powi(2)).sqrt();
+    let mut point = |x: f64, y: f64| sk.add_point(v(x, y), None).unwrap();
+    let top_left = point(-14.0, 90.0);
+    let top_right = point(14.0, 90.0);
+    let shoulder = point(14.0, 48.0);
+    let knee = point(knee, 11.125);
+    let right_top = point(90.0, 11.125);
+    let right_bottom = point(90.0, -11.125);
+    let step_bottom = point(25.0, -11.125);
+    let step_top = point(25.0, 0.0);
+    let arc_start = point(24.999999999949498, 5.025035674136865e-5);
+    let arc_end = point(0.0002252128472149822, 24.999999999324313);
+    let ledge_right = point(0.0, 25.0 + lift);
+    let ledge_left = point(-14.0, 25.0 + lift);
+    let big_centre = point(0.0, 0.0);
+    let small_centre = point(0.0, 0.0);
+    sk.add_line_pts(top_left, top_right, None).unwrap();
+    sk.add_line_pts(top_right, shoulder, None).unwrap();
+    sk.add_arc(v(0.0, 0.0), sk.points[knee].pos, sk.points[shoulder].pos, [Some(big_centre), Some(knee), Some(shoulder)], None).unwrap();
+    sk.add_line_pts(right_top, knee, None).unwrap();
+    sk.add_line_pts(right_bottom, right_top, None).unwrap();
+    sk.add_line_pts(step_bottom, right_bottom, None).unwrap();
+    sk.add_line_pts(step_top, step_bottom, None).unwrap();
+    sk.add_arc(v(0.0, 0.0), sk.points[arc_start].pos, sk.points[arc_end].pos, [Some(small_centre), Some(arc_start), Some(arc_end)], None).unwrap();
+    sk.add_line_pts(ledge_left, ledge_right, None).unwrap();
+    sk.add_line_pts(top_left, ledge_left, None).unwrap();
+    sk
+}
+
+#[test]
+fn profiles_join_line_and_arc_ends_that_lie_on_each_other_at_a_tangent_joint() {
+    let profiles = find_profiles(&tangent_joint_end_plate(0.0));
+    assert_eq!(profiles.len(), 1, "{profiles:?}");
+    assert!(profiles[0].region.outer.is_closed(1e-9), "{:?}", profiles[0].region.outer.segs);
+    assert_eq!(profiles[0].outer_curves.len(), 10, "{:?}", profiles[0].outer_curves);
+    // The polygon through the corners, plus the segment the 50 mm arc adds, less the quarter
+    // disc's segment the 25 mm arc takes away.
+    let knee = (50.0_f64.powi(2) - 11.125_f64.powi(2)).sqrt();
+    let corners = [
+        (25.0, -11.125),
+        (90.0, -11.125),
+        (90.0, 11.125),
+        (knee, 11.125),
+        (14.0, 48.0),
+        (14.0, 90.0),
+        (-14.0, 90.0),
+        (-14.0, 25.0),
+        (0.0, 25.0),
+        (25.0, 0.0),
+    ];
+    let polygon = (0..corners.len()).map(|i| {
+        let ((x0, y0), (x1, y1)) = (corners[i], corners[(i + 1) % corners.len()]);
+        x0 * y1 - x1 * y0
+    });
+    let segment = |r: f64, sweep: f64| r * r / 2.0 * (sweep - sweep.sin());
+    let area = polygon.sum::<f64>() / 2.0 + segment(50.0, 48.0_f64.atan2(14.0) - 11.125_f64.atan2(knee)) - segment(25.0, FRAC_PI_2);
+    assert!((profiles[0].area - area).abs() < 1e-6, "{} vs {area}", profiles[0].area);
+
+    // Raised 1e-5 mm, the line's end is off the arc's circle and the arc's end off the line:
+    // the 2.5e-4 mm gap is a real one and the outline stays open.
+    let open = find_profiles(&tangent_joint_end_plate(1e-5));
+    assert!(open.is_empty(), "{open:?}");
+}
+
 #[test]
 fn removal_and_references() {
     let mut sk = Sketch::new();

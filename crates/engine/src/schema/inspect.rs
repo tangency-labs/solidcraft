@@ -962,6 +962,10 @@ pub struct SketchInspected {
     pub points: Vec<SketchPoint>,
     pub constraints: Vec<SketchConstraint>,
     pub profiles: Vec<SketchProfile>,
+    /// Planar closed loops the 3D sketch curves take part in, in planes of their own (#741):
+    /// each has `index`, `area_mm2`, `plane` (origin and unit normal), `centroid`, `curves`, `holes`.
+    #[schemars(with = "Vec<Map<String, Value>>")]
+    pub profiles_3d: Vec<Value>,
     /// Links to geometry outside the sketch (projections, intersections, includes), as saved.
     #[schemars(with = "Vec<Map<String, Value>>")]
     pub links: Value,

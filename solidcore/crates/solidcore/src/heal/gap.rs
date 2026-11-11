@@ -83,8 +83,7 @@ use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, VertexId, VertexuseId};
 const OP: &str = "heal::gap";
 const OP_GF: &str = "heal::gap::GapFunction";
 
-// `SM_ERR_ASSERT_FAILURE`.
-use crate::error::SM_ERR_ASSERT_FAILURE;
+use crate::error::heal::HealFailure;
 
 /// `SM_XSECT_TOL_3D` (`2 * SM_ZONE_TOL_3D`): the default gap tolerance.
 pub const XSECT_TOL_3D: f64 = 2.0 * 1.0e-5;
@@ -1170,7 +1169,10 @@ impl Gap {
         if e.count == 2 {
             Ok((e.point1, e.point2))
         } else {
-            Err(SolidError::sm_err(OP))
+            Err(SolidError::heal_failed(
+                OP,
+                "the gap does not have two end points",
+            ))
         }
     }
 
@@ -2272,11 +2274,10 @@ impl<'a> GapFunction<'a> {
 
         // There should always be 1 or more intervals
         if !(end_u > start_u && (this_surface.is_none() || end_v > start_v)) {
-            return Err(SolidError::Upstream {
-                operation: OP_GF,
-                code: SM_ERR_ASSERT_FAILURE,
-                entity: None,
-            });
+            return Err(SolidError::heal(
+                OP_GF,
+                HealFailure::Inconsistent("the sample domain has no intervals"),
+            ));
         }
         let ivl_cnt_u = end_u - start_u;
         let ivl_cnt_v = end_v - start_v;

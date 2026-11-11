@@ -630,7 +630,13 @@ fn hole_pattern(count1: usize, count2: usize) -> (f64, std::time::Duration) {
 /// time and the ratio is taken of those: a retry cannot pass a regression on a small run that a
 /// spike happened to slow, once an earlier small run was fast. (A spike on the very first small
 /// run can still hide one, as it could before the retries.)
-fn scales_linearly(mut pair: impl FnMut() -> (std::time::Duration, std::time::Duration)) -> Result<(), String> {
+fn scales_linearly(pair: impl FnMut() -> (std::time::Duration, std::time::Duration)) -> Result<(), String> {
+    scales_within(8.0, pair)
+}
+
+/// `scales_linearly` with the allowed multiple of the small time given: at most `factor` times the
+/// fastest small run plus 2 s.
+fn scales_within(factor: f64, mut pair: impl FnMut() -> (std::time::Duration, std::time::Duration)) -> Result<(), String> {
     let (mut small, mut big) = (f64::INFINITY, f64::INFINITY);
     let mut runs = Vec::new();
     for _ in 0..3 {
@@ -638,11 +644,11 @@ fn scales_linearly(mut pair: impl FnMut() -> (std::time::Duration, std::time::Du
         small = small.min(s.as_secs_f64());
         big = big.min(b.as_secs_f64());
         runs.push(format!("{s:?} then {b:?}"));
-        if big < 8.0 * small + 2.0 {
+        if big < factor * small + 2.0 {
             return Ok(());
         }
     }
-    Err(format!("{}; fastest {small:.2} s and {big:.2} s, limit {:.2} s", runs.join(", "), 8.0 * small + 2.0))
+    Err(format!("{}; fastest {small:.2} s and {big:.2} s, limit {:.2} s", runs.join(", "), factor * small + 2.0))
 }
 
 #[test]
@@ -666,7 +672,10 @@ fn scales_linearly_keeps_each_sizes_fastest_run() {
 /// times slower than a machine running this alone (about 6 s for 512 holes there).
 #[test]
 fn pattern_of_512_hole_cuts_finishes_in_reasonable_time() {
-    if let Err(missed) = scales_linearly(|| (hole_pattern(16, 8).1, hole_pattern(32, 16).1)) {
+    // #14515: on the merge-queue runner, with every test binary running at once, the small run keeps
+    // its parallel speed-up while the big one does not, and three pairs in a row took 10.7x to 11.1x
+    // (2.9 s then 31 s) though the cost is linear. The old quadratic cost is 16x or more, so allow 13x.
+    if let Err(missed) = scales_within(13.0, || (hole_pattern(16, 8).1, hole_pattern(32, 16).1)) {
         panic!("128 holes, then 512, took {missed}");
     }
 }

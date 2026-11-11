@@ -808,7 +808,7 @@ impl<'a> EdgeCurve<'a> {
 
     /// The parameters strictly between `from` and `to` where u or v is stationary (or
     /// the curve meets the axis), and the edge's middle, in loop order.
-    fn stationary(&self, k: &Kernel, map: &Map<'_>) -> Result<Vec<f64>> {
+    fn stationary(&self, map: &Map<'_>) -> Result<Vec<f64>> {
         let (lo, hi) = (self.from.min(self.to), self.from.max(self.to));
         let mut ts = Vec::new();
         for d in 0..2 {
@@ -825,7 +825,7 @@ impl<'a> EdgeCurve<'a> {
                         ts.push(t);
                     }
                 }
-                None => ts.extend(self.certified(k, map, d, lo, hi)?),
+                None => ts.extend(self.certified(map, d, lo, hi)?),
             }
         }
         // the edge's middle too: an edge from pole to pole has an angle there only
@@ -844,7 +844,7 @@ impl<'a> EdgeCurve<'a> {
     /// stationary (every one where it is), without a closed form: the certified roots
     /// ([`roots`]) of [`candidates`] on each exact Bezier piece of the curve, and the
     /// pieces' ends.
-    fn certified(&self, k: &Kernel, map: &Map<'_>, d: usize, lo: f64, hi: f64) -> Result<Vec<f64>> {
+    fn certified(&self, map: &Map<'_>, d: usize, lo: f64, hi: f64) -> Result<Vec<f64>> {
         let step = matches!(
             self.curve.kind(),
             CurveKind::Line(_) | CurveKind::Ellipse(_)
@@ -856,7 +856,7 @@ impl<'a> EdgeCurve<'a> {
                 reason: "stationary points on this kind of surface (no polynomial for them)",
             })?;
             // the piece's ends too: a root on a knot is no piece's interior root
-            for s in [0.0, 1.0].into_iter().chain(roots(k, &c)?) {
+            for s in [0.0, 1.0].into_iter().chain(roots(&c)?) {
                 let t = piece.param(s);
                 if t > lo && t < hi {
                     ts.push(t);
@@ -1202,7 +1202,7 @@ fn variations(c: &[f64], zero: f64) -> usize {
 /// [`MAX_ISOLATION_DEPTH`] times (below the parameter's rounding), gives its middle,
 /// which stands for its roots. More than [`MAX_ISOLATION_BRACKETS`] brackets is an
 /// error. A polynomial zero to rounding everywhere has no roots (it is constant).
-fn roots(k: &Kernel, c: &[f64]) -> Result<Vec<f64>> {
+fn roots(c: &[f64]) -> Result<Vec<f64>> {
     let scale = size(c);
     if !scale.is_finite() {
         return Err(SolidError::invalid_input(OP, "a rate not finite"));
@@ -1241,8 +1241,8 @@ fn roots(k: &Kernel, c: &[f64]) -> Result<Vec<f64>> {
                 sign: if first < 0.0 { 1.0 } else { -1.0 },
             };
             let (fl, fu) = (f.sign * first, f.sign * last);
-            let (s, _) = LocalSolve1d::new_with_kernel(k)
-                .solve_by_bisection(&mut f, ROOT_STEPS, s0, s1, fl, fu)?;
+            let (s, _) =
+                LocalSolve1d::new().solve_by_bisection(&mut f, ROOT_STEPS, s0, s1, fl, fu)?;
             out.push(s);
             continue;
         }
@@ -1488,7 +1488,7 @@ fn loop_box(k: &Kernel, map: &Map<'_>, edges: &[BoundaryEdge<'_>]) -> Result<Loo
     for (i, e) in edges.iter().enumerate() {
         let c = EdgeCurve::new(k, e)?;
         let mut ts = vec![c.from];
-        ts.extend(c.stationary(k, map)?);
+        ts.extend(c.stationary(map)?);
         ts.push(c.to);
         for t in ts {
             let (p, _) = c.at(k, t, false)?;

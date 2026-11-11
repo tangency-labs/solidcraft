@@ -440,7 +440,7 @@ pub fn calculate_bounding_box_base(
     if req.polar {
         polar.reset();
         let mid = tangents.len() / 2;
-        polar.add_vector_with_kernel(k, tangent(mid)?, None);
+        polar.add_vector(tangent(mid)?, None);
     }
 
     // for every sample point - accumulate bounding boxes
@@ -452,7 +452,7 @@ pub fn calculate_bounding_box_base(
             pseudo.add_point(p);
         }
         if req.polar {
-            polar.add_vector_with_kernel(k, tangent(i)?, None);
+            polar.add_vector(tangent(i)?, None);
         }
     }
 
@@ -1523,8 +1523,17 @@ impl Curve {
             let this_b = self.evaluate_point(k, last.0)?;
             let other_a = other.evaluate_point(k, first.1)?;
             let other_b = other.evaluate_point(k, last.1)?;
-            let separation_a = other_a - this_a;
-            let separation_b = other_b - this_b;
+            let mut separation_a = other_a - this_a;
+            let mut separation_b = other_b - this_b;
+            // `fixes.simple_coincidence_side_across_the_curve`: the side is taken across
+            // this curve, its tangent's component removed. An end of one curve that runs
+            // past the other's end drops onto that end, and the pair's difference then
+            // points along the curves, forward at one end and back at the other, for two
+            // curves that lie on each other.
+            if k.fixes.simple_coincidence_side_across_the_curve {
+                separation_a = self.across_tangent(k, first.0, separation_a)?;
+                separation_b = self.across_tangent(k, last.0, separation_b)?;
+            }
             let scaled_zero =
                 EFF_ZERO * (1.0 + max2(this_a.max_dimension(), this_b.max_dimension()));
             if separation_a.length() > scaled_zero
@@ -1591,6 +1600,22 @@ impl Curve {
 
         // add 1 coincident intersection to solution array
         Ok(vec![pair_solution(objects, first, Some(last))])
+    }
+
+    /// `v` without its component along this curve's tangent at `t`; `v` itself where the
+    /// tangent vanishes.
+    fn across_tangent(&self, k: &Kernel, t: f64, v: Vec3) -> Result<Vec3> {
+        let d = self.evaluate(k, t, 1, false, true)?;
+        let Some(&tangent) = d.get(1) else {
+            return Ok(v);
+        };
+        let len = tangent.length();
+        // (a NaN length, from an undefined tangent, also keeps `v`)
+        if len.is_nan() || len <= EFF_ZERO {
+            return Ok(v);
+        }
+        let u = tangent * (1.0 / len);
+        Ok(v - u * v.dot(u))
     }
 
     /// `GlobalCoincidenceChecker` (the pre `SM_TOLERANT_XSECT` version): the coincident

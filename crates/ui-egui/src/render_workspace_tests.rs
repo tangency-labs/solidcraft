@@ -1323,7 +1323,7 @@ fn opaque_pbr_product_gpu_and_cpu_share_color_and_material_semantics() {
         .unwrap();
         let scene = solidcraft_engine::product_scene::extract(&s).unwrap();
         let (key, gpu) = gpu_scene(&scene).unwrap();
-        assert!(!gpu.pbr.is_empty() && class_vertices(&gpu, crate::gpu::TriClass::Opaque).is_empty());
+        assert!(!class_vertices(&gpu, crate::gpu::TriClass::Pbr).is_empty() && class_vertices(&gpu, crate::gpu::TriClass::Opaque).is_empty());
         assert_ne!(previous, Some(key));
         previous = Some(key);
         let mut camera = Camera { fov: 0.0, ..Default::default() };
@@ -1862,7 +1862,9 @@ fn progressive_image_controls_route_to_the_registered_host() {
     assert_eq!(image_params(&h.app).unwrap(), checked);
     let started = h.app.run("render.start", checked).unwrap();
     let job = serde_json::from_value(started["job"].clone()).unwrap();
-    let status = h.app.session.render_job_handle(job).unwrap().wait_timeout(Duration::from_secs(30)).unwrap();
+    // A wait that returns the moment the job ends; the budget only matters on a loaded runner, where a
+    // software-GPU render of even this small image can take over a minute.
+    let status = h.app.session.render_job_handle(job).unwrap().wait_timeout(Duration::from_secs(180)).unwrap();
     assert_eq!(status.progress.phase, Phase::Completed, "{:?}", status.error);
     assert!(Arc::ptr_eq(&doc, &h.app.session.doc));
     assert_eq!(h.app.session.undo.len(), undo);
@@ -2033,6 +2035,30 @@ fn reordered_face_looks_rebuild_the_block() {
     assert!(!Arc::ptr_eq(&vertices, &reordered.blocks[0].bytes.vertices), "the reordered face looks build the block again");
 }
 
+/// A PBR material edit (metallic, roughness, IOR) rewrites the palette's material table and
+/// keeps every vertex; the PBR triangles are the block's PBR runs, 28 bytes a vertex.
+#[test]
+fn product_material_edits_keep_the_blocks_vertices() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"length":10,"width":10,"height":10,"body_name":"Part"})).unwrap();
+    let look = |roughness: f64| json!({"bodies":["Part"],"color":"#b47846","pbr":{"metallic":1.0,"roughness":roughness,"dielectric_ior":1.5}});
+    s.execute("appearance.assign", &look(0.2)).unwrap();
+    let mut cache = ProductCache::default();
+    let mut build =
+        |s: &Session| gpu_scene_cached(&solidcraft_engine::product_scene::extract(s).unwrap(), MAX_GEOMETRY_BYTES as u64, &mut cache).unwrap();
+    let (rough_key, rough) = build(&s);
+    let vertices = rough.blocks[0].bytes.vertices.clone();
+    assert_eq!(class_vertices(&rough, crate::gpu::TriClass::Pbr).len(), vertices.len(), "every triangle is PBR");
+    assert!(rough.pbr.is_empty(), "no separate PBR stream");
+    let material = |gpu: &GpuScene| gpu.palette.materials().iter().copied().find(|m| m.pbr);
+    assert_eq!(material(&rough).map(|m| (m.metallic, m.roughness)), Some((1.0, 0.2)));
+    s.execute("appearance.assign", &look(0.6)).unwrap();
+    let (smooth_key, smooth) = build(&s);
+    assert_ne!(smooth_key, rough_key, "the scene is taken again");
+    assert!(Arc::ptr_eq(&vertices, &smooth.blocks[0].bytes.vertices), "a material edit keeps every vertex");
+    assert_eq!(material(&smooth).map(|m| m.roughness), Some(0.6));
+}
+
 #[test]
 fn transmission_uses_legacy_preview_buffers_and_invalidates_the_opaque_cache() {
     let mut s = Session::default();
@@ -2041,16 +2067,16 @@ fn transmission_uses_legacy_preview_buffers_and_invalidates_the_opaque_cache() {
         "pbr":{"metallic":0,"roughness":0.1,"dielectric_ior":1.5}});
     s.execute("appearance.assign", &appearance).unwrap();
     let (opaque_key, opaque) = gpu_scene(&solidcraft_engine::product_scene::extract(&s).unwrap()).unwrap();
-    assert!(!opaque.pbr.is_empty());
+    assert!(!class_vertices(&opaque, crate::gpu::TriClass::Pbr).is_empty());
     let mut scene = solidcraft_engine::product_scene::extract(&s).unwrap();
     scene.meshes[0].transmission = Some(solidcraft_engine::render::transmission::Transmission::new(solidcore_record::Vec3::ZERO, None).unwrap());
     let (glass_key, glass) = gpu_scene(&scene).unwrap();
     assert_ne!(opaque_key, glass_key);
-    assert!(glass.pbr.is_empty());
+    assert!(class_vertices(&glass, crate::gpu::TriClass::Pbr).is_empty());
     assert!(!class_vertices(&glass, crate::gpu::TriClass::Opaque).is_empty());
     scene.meshes[0].opacity = 0.4;
     let (_, transparent) = gpu_scene(&scene).unwrap();
-    assert!(transparent.pbr.is_empty());
+    assert!(class_vertices(&transparent, crate::gpu::TriClass::Pbr).is_empty());
     assert!(!class_vertices(&transparent, crate::gpu::TriClass::Glass).is_empty());
 }
 
@@ -2930,7 +2956,7 @@ fn native_cpu_controls_check_and_start_the_same_capture_and_keep_it_exportable()
     let handle = h.app.session.render_job_handle(id).unwrap();
     // The job owns the source bytes captured by Start, even if the file changes.
     std::fs::write(&hdr_path, b"changed after capture").unwrap();
-    let status = handle.wait_timeout(std::time::Duration::from_secs(30)).unwrap();
+    let status = handle.wait_timeout(std::time::Duration::from_secs(180)).unwrap();
     assert_eq!(json!(status.environment), preflight["environment"]);
     assert_eq!(status.progress.phase, Phase::Completed);
     assert_eq!(status.request.integrator, Integrator::Raytrace);
@@ -3902,6 +3928,7 @@ fn clicked_setup_save_reload_and_switch_keep_gpu_numeric_intent_without_a_host()
                 seed: 1977,
                 tone_map: ToneMap::AcesFitted,
                 denoise: true,
+                clamp_indirect: Some(8.0),
                 denoise_settings: Default::default(),
                 denoise_diagnostics: false,
                 supersampling: 1,
@@ -4655,7 +4682,11 @@ fn product_preview_exact_payload_preserves_mixed_surfaces_and_refuses_overflow()
     let (_, gpu) = gpu_scene(&scene).unwrap();
     assert_eq!(
         (plan.pbr, plan.tris, plan.glass),
-        (gpu.pbr.len(), class_vertices(&gpu, crate::gpu::TriClass::Opaque).len(), class_vertices(&gpu, crate::gpu::TriClass::Glass).len())
+        (
+            class_vertices(&gpu, crate::gpu::TriClass::Pbr).len(),
+            class_vertices(&gpu, crate::gpu::TriClass::Opaque).len(),
+            class_vertices(&gpu, crate::gpu::TriClass::Glass).len()
+        )
     );
     assert!(plan.pbr > 0 && plan.tris > 0 && plan.glass > 0);
     assert_eq!(plan.source_triangles, scene.meshes.iter().map(|b| b.mesh.triangles.len()).sum::<usize>());
@@ -4679,7 +4710,7 @@ fn full_detail_preview_source_can_exceed_legacy_128_mib_without_mesh_reduction()
     use solidcraft_viewport::surface::OpaqueSurface;
     // One immutable original triangle repeated in the index list; this tests
     // payload admission only. Actual SELENE upload is separate native evidence.
-    let count = (128 * 1024 * 1024) / (3 * crate::gpu::PBR_SIZE) + 1;
+    let count = (128 * 1024 * 1024) / (3 * crate::gpu::TRI_SIZE) + 1;
     let mesh = Arc::new(Mesh {
         positions: vec![Vec3::ZERO, Vec3::X, Vec3::Y],
         normals: vec![Vec3::Z; 3],
@@ -4699,10 +4730,10 @@ fn full_detail_preview_source_can_exceed_legacy_128_mib_without_mesh_reduction()
     assert!(preview_upload_plan(&scene, 128 * 1024 * 1024).is_err());
     let plan = preview_upload_plan(&scene, MAX_GEOMETRY_BYTES).unwrap();
     assert_eq!(plan.source_triangles, count);
-    assert_eq!(plan.bytes().unwrap(), count * 3 * crate::gpu::PBR_SIZE);
+    assert_eq!(plan.bytes().unwrap(), count * 3 * crate::gpu::TRI_SIZE);
     assert!(Arc::ptr_eq(&scene.meshes[0].mesh, &mesh));
     let mut maximum = PreviewUploadPlan::default();
-    assert!(maximum.add(true, false, MAX_GEOMETRY_BYTES / (3 * crate::gpu::PBR_SIZE) + 1, MAX_GEOMETRY_BYTES).is_err());
+    assert!(maximum.add(true, false, MAX_GEOMETRY_BYTES / (3 * crate::gpu::TRI_SIZE) + 1, MAX_GEOMETRY_BYTES).is_err());
 }
 
 /// The product scene is extracted again only when what it shows can change: a selection or a
@@ -8229,7 +8260,8 @@ fn geometry_refusal_reports_scene_size_limit_and_recovery() {
     let scene = ProductScene {
         meshes: vec![ProductMesh {
             name: "Synthetic assembly".into(),
-            mesh: Arc::new(Mesh { triangles: vec![[0; 3]; 1 << 20], ..Default::default() }),
+            // 2^21 PBR triangles in the blocks, 28 bytes a vertex: 168 MiB.
+            mesh: Arc::new(Mesh { triangles: vec![[0; 3]; 1 << 21], ..Default::default() }),
             color: [128; 3],
             opacity: 1.0,
             surface: Some(solidcraft_viewport::surface::OpaqueSurface::new(solidcore_record::Vec3::new(0.5, 0.5, 0.5), 0.0, 0.5, 1.5).unwrap()),
@@ -8239,7 +8271,7 @@ fn geometry_refusal_reports_scene_size_limit_and_recovery() {
         bounds: Aabb3::EMPTY,
     };
     let error = gpu_scene_cached(&scene, WEB_GEOMETRY_BYTES, &mut ProductCache::default()).err().unwrap();
-    assert!(error.contains("144.0 MiB"), "{error}");
+    assert!(error.contains("168.0 MiB"), "{error}");
     assert!(error.contains("128.0 MiB"), "{error}");
     assert!(error.contains("Hide bodies in Design"), "{error}");
     let refused = upload_refusal(144 << 20, "Out of Memory");
@@ -9574,7 +9606,7 @@ fn native_cpu_output_ui_capture_keeps_common_effects_and_exports_its_actual_raw_
     h.step(&json!({"click":{"handle":"render:stage:render.start"}})).unwrap();
     let job: JobId = h.app.render_workspace.view.job.expect("the real UI Render action must capture the CPU setup");
     let handle = h.app.session.render_job_handle(job).unwrap();
-    let status = handle.wait_timeout(std::time::Duration::from_secs(30)).unwrap();
+    let status = handle.wait_timeout(std::time::Duration::from_secs(180)).unwrap();
     assert_eq!(status.progress.phase, Phase::Completed, "{:?}", status.error);
     assert!(status.request.raytrace.as_ref().unwrap().output.as_ref().unwrap().linear_exr);
     assert_eq!(json!(status.request.raytrace.as_ref().unwrap().output), checked["settings"]["job"]["options"]["output"]);
@@ -12572,7 +12604,7 @@ fn clicked_cpu_atmosphere_start_captures_saved_box_and_reopens_identical_png_and
     assert_eq!(checked["request"]["raytrace"]["volume"]["extinction_per_mm"], 0.001);
     h.step(&json!({"click":{"handle":"render:stage:render.start"}})).unwrap();
     let handle = h.app.session.render_job_handle(h.app.render_workspace.view.job.unwrap()).unwrap();
-    let terminal = handle.wait_timeout(std::time::Duration::from_secs(30)).unwrap();
+    let terminal = handle.wait_timeout(std::time::Duration::from_secs(180)).unwrap();
     assert_eq!(terminal.progress.phase, Phase::Completed, "{:?}", terminal.error);
     let image = handle.frame().unwrap().unwrap();
     let png = image.png().to_vec();
@@ -12593,7 +12625,7 @@ fn clicked_cpu_atmosphere_start_captures_saved_box_and_reopens_identical_png_and
     let capture = h.app.session.execute("render.start", &request).unwrap();
     let id = serde_json::from_value(capture["job"].clone()).unwrap();
     let again = h.app.session.render_job_handle(id).unwrap();
-    assert_eq!(again.wait_timeout(std::time::Duration::from_secs(30)).unwrap().progress.phase, Phase::Completed);
+    assert_eq!(again.wait_timeout(std::time::Duration::from_secs(180)).unwrap().progress.phase, Phase::Completed);
     let image = again.frame().unwrap().unwrap();
     assert_eq!(image.png(), png);
     assert_eq!(image.linear_exr().unwrap(), exr);
@@ -16440,4 +16472,73 @@ fn render_quality_denoise_mask_displays_categorical_receipt_exports_and_returns_
     reset_document(&mut h.app);
     assert!(!quality::mask_active(&h.app));
     assert!(h.app.render_workspace.denoise_mask_image.is_none());
+}
+
+#[test]
+#[cfg(not(target_os = "macos"))]
+fn dx12_render_recovery_saves_vulkan_before_requesting_a_normal_restart() {
+    let mut h = Harness::new();
+    let path = h.dir.join("graphics.json");
+    std::fs::write(&path, json!({"backend":"auto","adapter":"Selected GPU","msaa":4}).to_string()).unwrap();
+    h.app.services.graphics_path = Some(path.to_string_lossy().into_owned());
+    h.app.services.graphics_backend = Some("dx12");
+    h.app.services.graphics_restart = Some((std::env::current_exe().unwrap(), Vec::new()));
+    h.app.preferences.save_prompt_one_at_a_time = true;
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+    assert!(can_restart_with_vulkan(&h.app));
+    restart_with_vulkan(&mut h.app).unwrap();
+    let saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    assert_eq!(saved["backend"], "vulkan");
+    assert_eq!(saved["backend_trial"], json!({"previous":"auto","requested":"vulkan","started":false}));
+    assert_eq!(saved["adapter"], "Selected GPU");
+    assert_eq!(h.app.preferences.graphics_backend, "vulkan");
+    assert!(!h.app.quit_requested && h.app.docs.quitting.is_some(), "unsaved work still asks");
+    crate::documents::control(&mut h.app, &json!({"answer":"cancel"}));
+    h.frames(1);
+    assert!(!h.app.quit_requested);
+    assert!(crate::update::take_launch(&mut h.app).is_none());
+}
+
+#[test]
+fn render_backend_recovery_is_not_offered_for_an_active_vulkan_or_overridden_session() {
+    let mut h = Harness::new();
+    h.app.services.graphics_path = Some(h.dir.join("graphics.json").to_string_lossy().into_owned());
+    h.app.services.graphics_restart = Some((std::env::current_exe().unwrap(), Vec::new()));
+    for backend in [None, Some("vulkan"), Some("metal")] {
+        h.app.services.graphics_backend = backend;
+        assert!(!can_restart_with_vulkan(&h.app));
+    }
+    h.app.services.graphics_backend = Some("dx12");
+    h.app.services.graphics_backend_override = true;
+    assert!(!can_restart_with_vulkan(&h.app));
+    h.app.services.graphics_backend_override = false;
+    h.app.cpu_meshing = true;
+    assert!(!can_restart_with_vulkan(&h.app));
+}
+
+#[test]
+fn render_backend_save_failure_does_not_schedule_a_restart() {
+    let mut h = Harness::new();
+    h.app.services.graphics_path = Some(h.dir.to_string_lossy().into_owned());
+    h.app.services.graphics_restart = Some((std::env::current_exe().unwrap(), Vec::new()));
+    assert!(restart_with_vulkan(&mut h.app).is_err());
+    assert_eq!(h.app.preferences.graphics_backend, "auto");
+    assert!(!h.app.quit_requested && h.app.docs.quitting.is_none());
+    assert!(crate::update::take_launch(&mut h.app).is_none());
+
+    let path = h.dir.join("graphics.json");
+    let original = br#"{"backend":"auto","msaa":4}"#;
+    std::fs::write(&path, original).unwrap();
+    h.app.services.graphics_path = Some(path.to_string_lossy().into_owned());
+    h.app.services.graphics_backend_override = true;
+    assert!(restart_with_vulkan(&mut h.app).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), original, "an override refuses before saving");
+    assert_eq!(h.app.preferences.graphics_backend, "auto");
+    h.app.services.graphics_backend_override = false;
+    h.app.services.graphics_restart = None;
+    assert!(restart_with_vulkan(&mut h.app).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), original, "missing restart support refuses before saving");
+    assert_eq!(h.app.preferences.graphics_backend, "auto");
+    assert!(!h.app.quit_requested && h.app.docs.quitting.is_none());
+    assert!(crate::update::take_launch(&mut h.app).is_none());
 }

@@ -97,7 +97,7 @@ fn every_axis_is_drawn_in_one_set_of_colours() {
         for (name, d, want) in [("x", Vec3::X, t.axis_x), ("y", Vec3::Y, t.axis_y), ("z", Vec3::Z, t.axis_z)] {
             let at = c + vec2(32.0, 0.0);
             let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
-                crate::icons::navigation::axis_tip_scaled(ui.painter(), c, name, d.into(), at, 0.5, false, t, 1.0)
+                solidcraft_look::compass::axis_tip_scaled(ui.painter(), c, name, d.into(), at, 0.5, false, t, 1.0)
             });
             out.textures_delta.clear();
             let end = out.shapes.iter().find_map(|s| match &s.shape {
@@ -134,8 +134,8 @@ fn analysis_colours_reach_the_shader_in_its_order() {
 }
 
 // Icons no longer take their colours from the caller or from `IconColors`: the SVG masters name
-// palette roles (`assets/icons/ui/design/palette.toml`, light and dark, plus accents) that the
-// kit's renderer (`ui_kit::icons`) resolves in SolidCraft's set (`icon_svg::SET`). `icon_svg`'s
+// palette roles (`crates/look/icons/design/palette.toml`, light and dark, plus accents) that the
+// kit's renderer (`ui_kit::icons`) resolves in SolidCraft's set (`solidcraft_look::icons::SET`). The look crate's
 // own tests hold that every master parses and that only the palette's colours exist, including
 // its colour-vision variants.
 
@@ -146,7 +146,7 @@ fn analysis_colours_reach_the_shader_in_its_order() {
 /// hold none at all.
 const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("gpu.rs", 1, "the white tint that shows the background picture as it is"),
-    ("navigation.rs", 1, "the navigation cube's face shading, made from a token"),
+    ("icons/navigation.rs", 1, "the navigation cube's face shading, made from a token"),
     ("canvas.rs", 3, "white rings around manipulator handles"),
     (
         "body_gizmo.rs",
@@ -205,7 +205,7 @@ const COLOUR_LITERALS: &[&str] = &[
 #[test]
 fn colours_outside_the_theme_are_only_the_listed_neutral_ones() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let dirs = [root.join("src"), root.join("../../assets/icons/ui/source")];
+    let dirs = [(root.join("src"), ""), (root.join("../look/src"), "look/")];
     let mut found = Vec::new();
     fn scan(dir: &std::path::Path, prefix: &str, found: &mut Vec<String>) {
         for entry in std::fs::read_dir(dir).unwrap() {
@@ -237,8 +237,8 @@ fn colours_outside_the_theme_are_only_the_listed_neutral_ones() {
             found.push(format!("{relative}: {n} colour literal(s), at most {allowed} allowed"));
         }
     }
-    for dir in &dirs {
-        scan(dir, "", &mut found);
+    for (dir, prefix) in &dirs {
+        scan(dir, prefix, &mut found);
     }
     // The UI kit and its components, under the names they had here.
     for (path, name) in crate::test_support::kit_files() {

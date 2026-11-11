@@ -13,7 +13,6 @@ render.scene
 render.start
 sheet.export_dxf
 solid.draft
-solid.emboss
 solid.hole
 solid.loft
 solid.mirror
@@ -24,7 +23,4 @@ solid.pattern.rectangular
 solid.shell
 solid.thread
 surface.extrude
-surface.loft
-surface.patch
 surface.revolve
-surface.ruled

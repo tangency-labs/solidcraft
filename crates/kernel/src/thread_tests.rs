@@ -48,22 +48,58 @@ fn faceted_cut_into_a_bore() {
     assert!((removed - want).abs() < 0.03 * want, "{removed} vs {want}");
 }
 
-/// #1250: a long thread (48 turns of an M8 groove on a 60 mm shaft). The groove's facets come in
-/// sweep order; taken as BSP splitters in that order they made the tree as deep as the facet
-/// list ("planar boolean: tree too deep", after minutes and gigabytes). It cuts now, closed.
+/// A thread of many turns of an M8 groove: the groove's facets come in sweep order, thousands of
+/// them, and the cut is one valid solid that has lost exactly the groove inside the shaft.
+///
+/// The groove runs a turn past each end of the shaft, so the shaft keeps whole turns of it: its
+/// section's 2π∫r dA (r 3.3…4, inside the shaft) per turn. The groove is faceted at 48 steps a
+/// turn: at a station it is the section itself, and between two it lies on the chords, no closer
+/// in than the section scaled towards the axis by cos(π/48). So the volume removed
+/// lies between that of the exact helix and of the scaled section's, each analytic. The two are
+/// 1.8 % apart; the window this test held before (0.6…0.95 of the shaft's volume) was over a
+/// hundred times as wide.
 #[test]
-fn a_long_thread_cuts_without_a_deep_tree() {
-    let (r, len, p) = (4.0, 60.0, 1.25);
+fn a_long_thread_cuts_to_its_groove_volume() {
+    long_thread(TURNS);
+}
+
+/// The test above at a real M8 × 60 bolt's length: 48 turns, about 19,000 groove triangles.
+/// Ignored because the boolean's time grows about as the square of the turns (750 s of a 945 s
+/// test on CI at this size, #14453); run it with `--ignored` when working on that.
+#[test]
+#[ignore = "48 turns: about 15 minutes, the boolean grows about as the square of the turns (#14453)"]
+fn a_bolt_length_thread_cuts_to_its_groove_volume() {
+    long_thread(48);
+}
+
+/// Turns of the shaft in `a_long_thread_cuts_to_its_groove_volume`.
+const TURNS: u32 = 6;
+
+fn long_thread(turns: u32) {
+    let (r, p) = (4.0, 1.25);
+    let len = p * f64::from(turns);
     let shaft = cylinder(Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0), r, len).unwrap();
     let k = Vec3::new(0.0, 0.0, 1.0);
     let base = Vec3::new(0.0, 0.0, -p);
     let plane = Plane { origin: base, x: Vec3::new(1.0, 0.0, 0.0), y: k };
+    // The section: 0.16 tall at r 3.3, 1 tall at r 4.1 (past the shaft's wall).
     let section = [Vec2::new(3.3, -0.08), Vec2::new(4.1, -0.5), Vec2::new(4.1, 0.5), Vec2::new(3.3, 0.08)];
-    let groove = sweep_helix_mesh(&plane, &section, base, k, p, len / p + 2.0, 48).unwrap();
+    let steps = 48u32;
+    let groove = sweep_helix_mesh(&plane, &section, base, k, p, len / p + 2.0, steps as usize).unwrap();
     let cut = faceted_boolean(&shaft, &groove, BoolOp::Cut, p * 0.005).unwrap().unwrap();
-    let v = cut.mesh(&crate::MeshTolerance::chord(0.01)).unwrap().measure().volume;
-    let v0 = PI * r * r * len;
-    assert!(v < v0 * 0.95 && v > v0 * 0.6, "{v} of {v0}");
+    assert!(cut.validity().is_empty(), "{:?}", cut.validity());
+    // The cut's own volume (SMLib's, of its exact faces).
+    let removed = PI * r * r * len - crate::measure(&cut).unwrap().volume;
+    // The section scaled by s towards the axis, inside the shaft: height h(ρ) = 0.16 + 1.05 (ρ/s − 3.3)
+    // for ρ from 3.3 s to r; turns × 2π∫ρ h(ρ) dρ.
+    let groove_volume = |s: f64| {
+        let (a, b) = (3.3 * s, r);
+        let (c0, c1) = (0.16 - 1.05 * 3.3, 1.05 / s);
+        f64::from(turns) * 2.0 * PI * (c0 * (b * b - a * a) / 2.0 + c1 * (b.powi(3) - a.powi(3)) / 3.0)
+    };
+    let (exact, chords) = (groove_volume(1.0), groove_volume((PI / f64::from(steps)).cos()));
+    // 1e-4 of slack for the facets' own triangulation (a side's quads are not quite flat).
+    assert!(removed > exact * (1.0 - 1e-4) && removed < chords * (1.0 + 1e-4), "{removed} not in {exact}…{chords}");
 }
 
 /// What lies past each end of a shaft's face: the d16 collar under it, the air over its cap.

@@ -19,5 +19,5 @@ pub mod vec;
 
 pub use analysis::{AnalysisMode, SceneAnalysis};
 pub use camera::{Camera, CameraAnim, Mat4, Quat, StandardView, UpAxis, ViewAngles, ease_in_out};
-pub use raster::{Canvas, render, render_png, render_transparent, shade};
+pub use raster::{Canvas, render, render_png, render_transparent, shade, unblend};
 pub use scene::{MIN_ALPHA, Rgb, SECTION_CAP, SECTION_HATCH, SEE_THROUGH, Scene, SceneLine, SceneMesh, png};
