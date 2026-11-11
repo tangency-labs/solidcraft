@@ -92,13 +92,98 @@ fn offset_chain_resolves_transitive_coincidence_and_stops_at_branches() {
     let b = sk.add_line_pts(2, 3, None).unwrap();
     let c = sk.add_line_pts(4, 5, None).unwrap();
     // Equal coordinates do not connect curves without shared points or constraints.
-    assert_eq!(super::chain(&sk, a, &[a, b]), (vec![(a, true)], false));
+    assert_eq!(super::chain(&sk, a, &[a, b], &[a]), (vec![(a, true)], false, vec![]));
     sk.add_constraint(ConstraintKind::Coincident { p: 1, q: 6 }, None).unwrap();
     sk.add_constraint(ConstraintKind::Coincident { p: 2, q: 6 }, None).unwrap();
-    assert_eq!(super::chain(&sk, a, &[a, b]), (vec![(a, true), (b, true)], false));
+    assert_eq!(super::chain(&sk, a, &[a, b], &[a]), (vec![(a, true), (b, true)], false, vec![]));
     sk.add_constraint(ConstraintKind::Coincident { p: 4, q: 6 }, None).unwrap();
-    assert_eq!(super::chain(&sk, a, &[a, b, c]), (vec![(a, true)], false));
-    assert_eq!(super::chain(&sk, a, &[a, b]), (vec![(a, true), (b, true)], false));
+    // Three curves meet and none of the others is picked: the chain stops there.
+    assert_eq!(super::chain(&sk, a, &[a, b, c], &[a]), (vec![(a, true)], false, vec![]));
+    assert_eq!(super::chain(&sk, a, &[a, b], &[a]), (vec![(a, true), (b, true)], false, vec![]));
+}
+
+/// An arch: a 20 × 20 mm rectangle with an arc across its top line, the arc's ends on the
+/// rectangle's top corners, where three curves meet. The ids of the arc and of the top, right,
+/// bottom and left lines.
+fn arch() -> (Session, [String; 5]) {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-10, -20], "p1": [10, 0]}));
+    let arc = ids(&run(&mut s, "sketch.arc.three_point", json!({"start": [10, 0], "end": [-10, 0], "through": [0, 6.2]}))["curves"])[0].clone();
+    let sk = sketch(&s);
+    let line = |at: fn(Vec2) -> bool| {
+        sk.curves.iter().find(|c| matches!(c.kind, CurveKind::Line { a, b } if at(sk.points[a].pos) && at(sk.points[b].pos))).unwrap().id.clone()
+    };
+    let lines = [line(|p| close(p.y, 0.0)), line(|p| close(p.x, 10.0)), line(|p| close(p.y, -20.0)), line(|p| close(p.x, -10.0))];
+    let [top, right, bottom, left] = lines;
+    (s, [arc, top, right, bottom, left])
+}
+
+/// The sources of the one chain an offset of `picks` follows, sorted, and whether it is closed.
+fn arch_offset(picks: &[&String]) -> (Vec<String>, bool) {
+    let (mut s, _) = arch();
+    let r = run(&mut s, "sketch.offset", json!({"curves": picks, "distance": 1}));
+    assert_eq!(r["sides"].as_array().unwrap().len(), 1, "{picks:?}: {r}");
+    let made = ids(&r["curves"]);
+    let sk = sketch(&s);
+    let chain = sk.offsets.iter().find(|o| o.owns_output(&made[0])).unwrap_or_else(|| panic!("{picks:?}: no association: {r}"));
+    assert_eq!(made.len(), chain.sources.len(), "{picks:?}: {r}");
+    if chain.closed {
+        assert_closed_offset(&sk, &made);
+    }
+    let mut sources: Vec<String> = chain.sources.iter().map(|(id, _)| id.clone()).collect();
+    sources.sort();
+    (sources, chain.closed)
+}
+
+#[test]
+fn offset_chain_through_a_corner_of_three_curves_follows_the_picked_one_and_closes_the_picked_shape() {
+    let (_, [arc, top, right, bottom, left]) = arch();
+    let sorted = |v: &[&String]| {
+        let mut v: Vec<String> = v.iter().map(|s| s.to_string()).collect();
+        v.sort();
+        v
+    };
+    let rectangle = sorted(&[&top, &right, &bottom, &left]);
+    let outline = sorted(&[&arc, &right, &bottom, &left]);
+    // Nothing else picked where three curves meet: the chain stops there.
+    assert_eq!(arch_offset(&[&arc]), (sorted(&[&arc]), false));
+    assert_eq!(arch_offset(&[&top]), (sorted(&[&top]), false));
+    assert_eq!(arch_offset(&[&left]), (sorted(&[&left, &bottom, &right]), false));
+    // Picks that close a shape offset that shape, every corner joined (#14788).
+    assert_eq!(arch_offset(&[&left, &top]), (rectangle.clone(), true));
+    assert_eq!(arch_offset(&[&arc, &right]), (outline.clone(), true));
+    assert_eq!(arch_offset(&[&arc, &right, &bottom, &left]), (outline.clone(), true));
+    // A curve picked after the shape closed, touching it, is left alone: not offset on its own
+    // and not a second way on at the corner that would break the chain open.
+    assert_eq!(arch_offset(&[&left, &top, &arc]), (rectangle, true));
+    assert_eq!(arch_offset(&[&arc, &right, &bottom, &left, &top]), (outline, true));
+}
+
+#[test]
+fn offset_closed_shape_names_the_shape_the_picks_close() {
+    let (s, [arc, top, right, bottom, left]) = arch();
+    let sk = sketch(&s);
+    let shape = |picks: &[&String]| {
+        let picks: Vec<String> = picks.iter().map(|s| s.to_string()).collect();
+        let mut shape = super::offset_closed_shape(&sk, &picks, true);
+        shape.sort();
+        shape
+    };
+    let sorted = |v: [&String; 4]| {
+        let mut v: Vec<String> = v.iter().map(|s| s.to_string()).collect();
+        v.sort();
+        v
+    };
+    assert!(shape(&[]).is_empty());
+    assert!(shape(&[&arc]).is_empty(), "the arc alone closes nothing");
+    assert!(shape(&[&left]).is_empty(), "one side stops at the arc's feet");
+    assert_eq!(shape(&[&left, &top]), sorted([&top, &right, &bottom, &left]));
+    // The shape's unpicked curves belong to it: the Offset window still takes them.
+    assert_eq!(shape(&[&arc, &right]), sorted([&arc, &right, &bottom, &left]));
+    // Without Chain only the picks make the shape.
+    assert!(super::offset_closed_shape(&sk, &[arc.clone(), right.clone()], false).is_empty());
+    // Hostile picks: unknown ids are ignored.
+    assert!(super::offset_closed_shape(&sk, &["nope".into()], true).is_empty());
 }
 
 #[test]
