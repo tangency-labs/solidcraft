@@ -2314,13 +2314,13 @@ mod tests {
                 h.app.logic(ui.ctx());
                 h.app.ui(ui);
             });
-            let mut textures = std::collections::HashMap::from([(egui::TextureId::Managed(0), h.ctx.fonts(|fonts| fonts.image()))]);
+            let mut textures = std::collections::HashMap::from([(egui::TextureId::default(), h.ctx.fonts(|fonts| fonts.image()))]);
             crate::ui_kit::update_test_textures(&mut textures, &output.textures_delta);
             let dialog = crate::scenario::rect_of("dialog:header").unwrap().union(crate::scenario::rect_of("dialog:footer").unwrap());
             let dialog = crate::scenario::rect_of("param:comment:width:popup").map_or(dialog, |popup| dialog.union(popup));
             for (suffix, bounds) in [("", h.ctx.content_rect()), ("-dialog", dialog)] {
                 let mut image = crate::ui_kit::test_raster(&h.ctx, output.shapes.clone(), h.ctx.pixels_per_point(), bounds, &textures);
-                let background = crate::theme::Tokens::get().dialog_body.to_array();
+                let background = solidcraft_theme::Tokens::get().dialog_body.to_array();
                 for pixel in image.pixels_mut() {
                     let remaining = 1.0 - f32::from(pixel.0[3]) / 255.0;
                     for (dest, back) in pixel.0.iter_mut().zip(background) {
@@ -2338,7 +2338,7 @@ mod tests {
         h.step(&json!({"click":{"handle":"param:comment:width:expand"}})).unwrap();
         h.frames(3);
         let popup = crate::scenario::rect_of("param:comment:width:popup").unwrap();
-        let tokens = crate::theme::Tokens::get();
+        let tokens = solidcraft_theme::Tokens::get();
         let font = egui::FontId::monospace(tokens.font_label);
         let width = h.ctx.fonts_mut(|fonts| fonts.layout_no_wrap("M".repeat(30), font.clone(), tokens.form_ink)).size().x;
         let line_height = h.ctx.fonts_mut(|fonts| fonts.row_height(&font));

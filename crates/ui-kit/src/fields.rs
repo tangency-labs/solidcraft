@@ -1408,7 +1408,7 @@ impl egui::TextBuffer for SingleLineBuffer<'_> {
 /// The returned editor response retains the caller's change and focus-loss commit handling.
 /// Its rectangle includes the overlay frame and scrollbar while expanded.
 /// Tokens: cell_editor, form_close_size, popup frame and font_label.
-pub(crate) fn expandable_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, handle: &str) -> Response {
+pub fn expandable_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, handle: &str) -> Response {
     let t = Tokens::get();
     let open_id = id.with("expanded");
     let focused = ui.memory(|m| m.has_focus(id) || m.had_focus_last_frame(id));
@@ -1435,11 +1435,11 @@ pub(crate) fn expandable_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut Stri
     let button = ui
         .scope_builder(egui::UiBuilder::new().id_salt(id.with("expand_button")).max_rect(button_rect), |ui| {
             ui.set_clip_rect(ui.clip_rect().intersect(response.rect.shrink(t.control_border_stroke(t.control_border).width.max(1.0))));
-            super::compact_button(ui, "…", crate::i18n::tr("ui.expand_text_editor"), true, open)
+            super::compact_button(ui, "…", solidcraft_ui_text::tr("ui.expand_text_editor"), true, open)
         })
         .inner;
-    button.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), crate::i18n::tr("ui.expand_text_editor")));
-    scenario::publish_target(&format!("{handle}:expand"), button.rect);
+    button.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, ui.is_enabled(), solidcraft_ui_text::tr("ui.expand_text_editor")));
+    solidcraft_ui_registry::publish_target(&format!("{handle}:expand"), button.rect);
     // Focus leaves a field on pointer press, before the button reports a released click.
     let opening = (button.clicked() || button.is_pointer_button_down_on()) && !open;
     open |= opening;
@@ -1467,8 +1467,8 @@ pub(crate) fn expandable_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut Stri
                                     text_input(egui::TextEdit::multiline(&mut buffer))
                                         .id(id)
                                         .font(font)
-                                        .hint_text(crate::i18n::tr_label(hint))
-                                        .vertical_align(egui::Align::Min)
+                                        .hint_text(solidcraft_ui_text::tr_label(hint))
+                                        .align(egui::Align2::LEFT_TOP)
                                         .desired_width(width)
                                         .desired_rows(5)
                                         .return_key(None)
@@ -1486,7 +1486,7 @@ pub(crate) fn expandable_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut Stri
                                 if response.has_focus() && enter {
                                     response.surrender_focus();
                                 }
-                                publish(ui, &response, egui::WidgetType::TextEdit);
+                                publish(ui, &response, egui::Role::TextInput);
                                 response
                             })
                             .inner
@@ -1499,18 +1499,18 @@ pub(crate) fn expandable_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut Stri
         {
             response.request_focus();
         }
-        scenario::publish_target(&format!("{handle}:popup"), response.rect.intersect(shown.response.rect));
+        solidcraft_ui_registry::publish_target(&format!("{handle}:popup"), response.rect.intersect(shown.response.rect));
         open = opening || ctx.memory(|m| m.has_focus(id));
     } else {
         open = false;
     }
     ui.data_mut(|d| d.insert_temp(open_id, open));
     response.widget_info(|| {
-        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), crate::i18n::tr_label(hint));
+        let mut info = egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), solidcraft_ui_text::tr_label(hint));
         info.current_text_value = Some(value.clone());
         info
     });
-    scenario::publish_target(handle, response.rect);
+    solidcraft_ui_registry::publish_target(handle, response.rect);
     response
 }
 
