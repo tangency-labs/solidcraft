@@ -117,7 +117,7 @@ pub fn isoparms(
                 let mesh = Triangles {
                     uvs: &fp.uv,
                     at: &nodes.positions,
-                    triangles: &triangles,
+                    corners: &triangles,
                 };
                 for c in copies(&fp.uv, d, comp(&a, d), per) {
                     out.extend(mesh.line(d, c, &pole));
@@ -180,7 +180,8 @@ struct Piece {
 struct Triangles<'a> {
     uvs: &'a [[f64; 2]],
     at: &'a [Vec3],
-    triangles: &'a [[u32; 3]],
+    /// Each triangle's three nodes.
+    corners: &'a [[u32; 3]],
 }
 
 impl Triangles<'_> {
@@ -197,7 +198,7 @@ impl Triangles<'_> {
         let o = usize::from(d == 0);
         let corner = |i: u32| Some((*self.uvs.get(i as usize)?, *self.at.get(i as usize)?));
         let mut pieces: Vec<Piece> = Vec::new();
-        for &[i0, i1, i2] in self.triangles {
+        for &[i0, i1, i2] in self.corners {
             let (Some(a), Some(b), Some(e)) = (corner(i0), corner(i1), corner(i2)) else {
                 continue;
             };
@@ -261,8 +262,7 @@ impl Triangles<'_> {
             }
             line.push(xyz(first.points[0]));
             let mut k = head;
-            loop {
-                let Some(piece) = pieces.get(k) else { break };
+            while let Some(piece) = pieces.get(k) {
                 if let Some(u) = used.get_mut(k) {
                     *u = true;
                 }
@@ -270,14 +270,13 @@ impl Triangles<'_> {
                 let next = starting
                     .get(&piece.at[1])
                     .and_then(|ks| ks.iter().find(|&&j| !used.get(j).copied().unwrap_or(true)));
-                match next {
-                    Some(&j) => k = j,
-                    None => {
-                        if let Some(p) = self.to_pole(piece.at[1], piece.x[1], o, true, pole) {
-                            line.push(xyz(p));
-                        }
-                        break;
+                if let Some(&j) = next {
+                    k = j;
+                } else {
+                    if let Some(p) = self.to_pole(piece.at[1], piece.x[1], o, true, pole) {
+                        line.push(xyz(p));
                     }
+                    break;
                 }
             }
             line.dedup();
