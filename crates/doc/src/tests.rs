@@ -818,6 +818,62 @@ fn an_edit_in_one_component_recomputes_only_what_reads_it() {
     }
 }
 
+/// A component deleted, or another added before the rest, changes the bodies before the other
+/// components' features and the design's components, none of which they read: each keeps its
+/// result, made again on the model as it is now, and the bodies match an evaluation from scratch.
+#[test]
+fn a_component_deleted_or_added_keeps_the_others_results() {
+    let doc = three_parts(true);
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    let mut without = doc.clone();
+    without.remove_component_tree(without.find_component("A").unwrap()).unwrap();
+    m.evaluate(&without);
+    no_errors(&m);
+    assert_eq!(m.last_recomputed, 0, "B's and C's features after A's are kept");
+    assert_eq!(summary(&m.state()), from_scratch(&without));
+    // A new component first in the timeline: only its own features are computed.
+    let mut with = without.clone();
+    let d = with.add_component(Some("D"), 0).unwrap();
+    circle_extrude(&mut with, d, "D post", PlaneRef::Origin { name: "XY".into() }, Vec2::new(-40.0, 0.0), 4.0, "9", "new_body");
+    with.features.rotate_right(2);
+    m.evaluate(&with);
+    no_errors(&m);
+    assert_eq!(m.last_recomputed, 2, "D's sketch and extrude");
+    assert_eq!(summary(&m.state()), from_scratch(&with));
+    // And back (an undo): every result is kept.
+    m.evaluate(&doc);
+    no_errors(&m);
+    assert_eq!(m.last_recomputed, 0);
+    assert_eq!(summary(&m.state()), from_scratch(&doc));
+}
+
+/// A body made under the name its feature stores is not reused under another body of that name:
+/// a component added before it that takes the name makes the feature name its body otherwise.
+#[test]
+fn a_stored_name_taken_by_a_body_before_it_is_not_reused() {
+    let doc = three_parts(false);
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    let mut taken = doc.clone();
+    let d = taken.add_component(Some("D"), 0).unwrap();
+    // A feature of its own name (feature names are unique) whose body takes C's post's name.
+    circle_extrude(&mut taken, d, "D post", PlaneRef::Origin { name: "XY".into() }, Vec2::new(-40.0, 0.0), 4.0, "9", "new_body");
+    let post = taken.find_feature("D post").unwrap().id;
+    taken.feature_mut(post).unwrap().body_names = vec!["C post".into()];
+    taken.features.rotate_right(2);
+    m.evaluate(&taken);
+    let mut fresh = Model::new();
+    fresh.no_cache = true;
+    fresh.evaluate(&taken);
+    let errors = |m: &Model| m.results.iter().map(|r| r.error.clone()).collect::<Vec<_>>();
+    assert_eq!(errors(&m), errors(&fresh));
+    assert_eq!(summary(&m.state()), summary(&fresh.state()));
+    assert!(fresh.state().bodies.iter().any(|b| b.name == "C post" && b.component == d), "D's body has the name C's post stores");
+}
+
 /// A construction plane's edit recomputes only the features that use it: a sketch on it and what
 /// is made from that sketch, wherever they are in the timeline, and nothing else.
 #[test]

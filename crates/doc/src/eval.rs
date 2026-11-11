@@ -2473,11 +2473,20 @@ fn construct_digest(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature,
 /// them: each feature reads only the constructions it names ([`construct_digest`]).
 fn context_digest(doc: &Document, vals: &BTreeMap<String, Value>) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
+    shared_context_digest(doc, vals).hash(&mut h);
+    serde_json::to_string(&doc.components).unwrap_or_default().hash(&mut h);
+    serde_json::to_string(&doc.body_components).unwrap_or_default().hash(&mut h);
+    h.finish()
+}
+
+/// [`context_digest`] without the design's components: units and the sheet metal and plastic
+/// rules. A change told by what a feature read ([`Relative`]) takes the feature's own components
+/// instead ([`EvalKey`]), and is placed in the components as they are when it is reused.
+fn shared_context_digest(doc: &Document, vals: &BTreeMap<String, Value>) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
     doc.units.hash(&mut h);
     serde_json::to_string(&doc.sheet).unwrap_or_default().hash(&mut h);
     serde_json::to_string(&doc.plastic).unwrap_or_default().hash(&mut h);
-    serde_json::to_string(&doc.components).unwrap_or_default().hash(&mut h);
-    serde_json::to_string(&doc.body_components).unwrap_or_default().hash(&mut h);
     for e in doc.sheet.rules.iter().flat_map(|r| r.fields().map(|(_, e, _)| e)) {
         for n in expr::references(e) {
             vals.get(&n).map(|v| v.v.to_bits()).hash(&mut h);
@@ -2751,15 +2760,20 @@ struct EvalKey {
     /// From what it reads alone, with that ([`Feature::reads`]); `None` when it may read
     /// anything.
     reads: Option<(u64, Reads)>,
+    /// From what it reads alone, without the names of the bodies it does not read: the key of a
+    /// change that holds whatever those bodies are ([`Relative`]). Set with `reads`.
+    relative: Option<u64>,
 }
 
 impl EvalKey {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         doc: &Document,
         vals: &BTreeMap<String, Value>,
         f: &Feature,
         fp: u64,
         ctx: u64,
+        shared: u64,
         st: &ModelState,
         steps: &ImportDigests,
         geo: u64,
@@ -2773,30 +2787,7 @@ impl EvalKey {
         let reads = f.reads(doc, st).map(|read| {
             let mut h = std::collections::hash_map::DefaultHasher::new();
             "reads".hash(&mut h);
-            local.hash(&mut h);
-            ctx.hash(&mut h);
-            f.id.hash(&mut h);
-            // An import reads the file it names and nothing of the model, so it keeps its result
-            // while the features before it are the same: a part that moves leaves the file
-            // unread (#17310). The features' own inputs, without where they are placed, are in
-            // the key: a change to them (a new length) reads the file again.
-            if matches!(f.kind, FeatureKind::Import { .. }) {
-                geo.hash(&mut h);
-            }
-            // A pattern replays its features' definitions.
-            if let FeatureKind::Pattern { features, .. } = &f.kind {
-                for id in features {
-                    source_feature(doc, *id).ok().map(|src| fingerprint(doc, 0, src, vals, false, steps)).hash(&mut h);
-                }
-            }
-            // A sketch's stored solve exactly: its fingerprint rounds it to a grid, and a sketch
-            // that rounds alike gives back the solve it was taken from, which an edit compares
-            // exactly (deleting a dimension that changed its points by less than the grid).
-            if let FeatureKind::Sketch { sketch, .. } = &f.kind {
-                for p in &sketch.points {
-                    (p.pos.x.to_bits(), p.pos.y.to_bits()).hash(&mut h);
-                }
-            }
+            own_inputs(doc, vals, f, local, ctx, geo, steps, &mut h);
             // Every body's name and component: new names avoid the names, a cut's pieces are
             // numbered past them, a tool's default targets are its component's bodies.
             for b in &st.bodies {
@@ -2817,7 +2808,83 @@ impl EvalKey {
             serde_json::to_string(&st.threads).unwrap_or_default().hash(&mut h);
             (h.finish(), read)
         });
-        EvalKey { whole, reads }
+        let relative = reads.as_ref().map(|(_, read)| {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            "relative".hash(&mut h);
+            own_inputs(doc, vals, f, local, shared, geo, steps, &mut h);
+            // Its own component and those it lies in, not every component of the design: a
+            // component deleted or added elsewhere changes nothing it reads.
+            let mut c = f.component;
+            for _ in 0..=crate::MAX_PLACEMENT_DEPTH {
+                let comp = doc.components.iter().find(|x| x.id == c);
+                serde_json::to_string(&comp).unwrap_or_default().hash(&mut h);
+                match comp {
+                    Some(comp) if comp.id != 0 && comp.parent != comp.id => c = comp.parent,
+                    _ => break,
+                }
+            }
+            // The bodies it reads by name, not by where they stand: bodies before them come and go.
+            let mut names = Vec::with_capacity(read.bodies.len());
+            for &i in &read.bodies {
+                let b = st.bodies.get(i);
+                b.map(|b| (&b.name, b.key, b.feature, b.component, b.transferred)).hash(&mut h);
+                names.extend(b.map(|b| b.name.as_str()));
+            }
+            for id in &read.sketches {
+                id.hash(&mut h);
+                st.sketch_keys.get(id).hash(&mut h);
+            }
+            // A body takes the name the feature stores for it only while no other body has it.
+            for n in &f.body_names {
+                (n, st.body(n).is_some()).hash(&mut h);
+            }
+            // A cut drops the threads of bodies it removes.
+            for t in st.threads.iter().filter(|t| names.contains(&t.body.as_str())) {
+                serde_json::to_string(t).unwrap_or_default().hash(&mut h);
+            }
+            h.finish()
+        });
+        EvalKey { whole, reads, relative }
+    }
+}
+
+/// A feature's own inputs, for the keys of what it reads ([`EvalKey`]): its definition and
+/// placement (`local`), the document context, its id, the definitions a pattern replays and a
+/// sketch's stored solve.
+#[allow(clippy::too_many_arguments)]
+fn own_inputs(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    local: u64,
+    ctx: u64,
+    geo: u64,
+    steps: &ImportDigests,
+    h: &mut impl Hasher,
+) {
+    local.hash(h);
+    ctx.hash(h);
+    f.id.hash(h);
+    // An import reads the file it names and nothing of the model, so it keeps its result
+    // while the features before it are the same: a part that moves leaves the file
+    // unread (#17310). The features' own inputs, without where they are placed, are in
+    // the key: a change to them (a new length) reads the file again.
+    if matches!(f.kind, FeatureKind::Import { .. }) {
+        geo.hash(h);
+    }
+    // A pattern replays its features' definitions.
+    if let FeatureKind::Pattern { features, .. } = &f.kind {
+        for id in features {
+            source_feature(doc, *id).ok().map(|src| fingerprint(doc, 0, src, vals, false, steps)).hash(h);
+        }
+    }
+    // A sketch's stored solve exactly: its fingerprint rounds it to a grid, and a sketch
+    // that rounds alike gives back the solve it was taken from, which an edit compares
+    // exactly (deleting a dimension that changed its points by less than the grid).
+    if let FeatureKind::Sketch { sketch, .. } = &f.kind {
+        for p in &sketch.points {
+            (p.pos.x.to_bits(), p.pos.y.to_bits()).hash(h);
+        }
     }
 }
 
@@ -3058,6 +3125,28 @@ struct Change {
     pattern_left_out: Option<Vec<usize>>,
     /// Where the feature found its named faces.
     named_faces: Option<Vec<Vec3>>,
+    /// The same change whatever the bodies the feature did not read, when it can be told so.
+    relative: Option<Arc<Relative>>,
+}
+
+/// A change told by the bodies a feature read, by name, and the bodies it made after every
+/// other: it holds on any model whose bodies it read are the same, whatever other bodies come
+/// before, between or after them (see [`ModelState::with_relative`]).
+#[derive(Debug)]
+struct Relative {
+    /// Each body it read, in order: what it became.
+    read: Vec<(String, Fate)>,
+    /// Bodies it made under names the feature stores, after all others.
+    made: Vec<ModelBody>,
+    /// The body counter a stored `BodyN` name among them counted up to (0: none).
+    counter: usize,
+}
+
+#[derive(Debug)]
+enum Fate {
+    Kept,
+    Changed(Box<ModelBody>),
+    Removed,
 }
 
 #[derive(Clone, Debug)]
@@ -3083,11 +3172,61 @@ impl Change {
     }
 }
 
+impl Relative {
+    /// `after`'s bodies as a change of `before`'s by feature `f`, which read the bodies `read`:
+    /// every body it did not read stands where it stood, each body it read is kept, changed under
+    /// its own name or removed in place, and the bodies it made under the names it stores come
+    /// after all of them (only when it changed none: pieces of a split stand by their body).
+    /// `None` when the change is not of that form.
+    fn of(before: &ModelState, after: &ModelState, f: &Feature, read: &Reads) -> Option<Relative> {
+        let mut is_read = vec![false; before.bodies.len()];
+        for &i in &read.bodies {
+            *is_read.get_mut(i)? = true;
+        }
+        let mut names = std::collections::HashSet::with_capacity(before.bodies.len());
+        let mut next = after.bodies.iter().peekable();
+        let mut fates = Vec::with_capacity(read.bodies.len());
+        let mut changed = false;
+        for (x, read) in before.bodies.iter().zip(is_read) {
+            // A name twice (a damaged state) does not say which body a read meant.
+            if !names.insert(x.name.as_str()) {
+                return None;
+            }
+            let same = |b: &ModelBody| b.key == x.key && b.body.same(&x.body);
+            if !read {
+                next.next().filter(|b| b.name == x.name && same(b))?;
+                continue;
+            }
+            let fate = match next.next_if(|b| b.name == x.name) {
+                Some(b) if same(b) => Fate::Kept,
+                Some(b) => Fate::Changed(Box::new(b.clone())),
+                None => Fate::Removed,
+            };
+            changed |= !matches!(fate, Fate::Kept);
+            fates.push((x.name.clone(), fate));
+        }
+        let made: Vec<ModelBody> = next.cloned().collect();
+        let stored = |b: &ModelBody| f.body_names.contains(&b.name) && !names.contains(b.name.as_str());
+        if !made.is_empty() && (changed || !made.iter().all(stored)) {
+            return None;
+        }
+        // Counted only by a stored `BodyN` name: a body numbered from the counter is named by
+        // every body before it.
+        let counter = match after.body_counter {
+            c if c == before.body_counter => 0,
+            c if made.iter().any(|b| b.name == format!("Body{c}")) => c,
+            _ => return None,
+        };
+        Some(Relative { read: fates, made, counter })
+    }
+}
+
 impl ModelState {
     /// How feature `feature`, which read the bodies `read` of `before`, took it to this state
     /// (not stamped yet); `None` when it changed anything else: a body it did not read, a sketch
     /// other than its own, the construction, threads or blend records.
-    fn change_from(&self, before: &ModelState, feature: u64, read: &Reads) -> Option<Change> {
+    fn change_from(&self, before: &ModelState, f: &Feature, read: &Reads) -> Option<Change> {
+        let feature = f.id;
         let (kept, sketch) = match self.sketches.split_last() {
             Some((last, rest)) if last.feature == feature => (rest, Some(last.clone())),
             _ => (self.sketches.as_slice(), None),
@@ -3137,6 +3276,7 @@ impl ModelState {
             kept_separate: self.kept_separate.get(&feature).copied(),
             pattern_left_out: self.pattern_left_out.get(&feature).cloned(),
             named_faces: self.named_faces.get(&feature).cloned(),
+            relative: Relative::of(before, self, f, read).map(Arc::new),
         })
     }
 
@@ -3151,12 +3291,48 @@ impl ModelState {
                 Changed::Made(b) => Some((**b).clone()),
             })
             .collect::<Option<Vec<_>>>()?;
+        Some(self.with_changed_bodies(change, feature, bodies, change.body_counter))
+    }
+
+    /// This state with `change`'s relative form ([`Relative`]) made to it: the bodies it read,
+    /// found by name, as it left them, every other body where it stands, and the bodies it made
+    /// after them; `None` when it has none, or this state lacks a body it read or holds a name it
+    /// made.
+    fn with_relative(&self, change: &Change, feature: u64) -> Option<ModelState> {
+        let relative = change.relative.as_deref()?;
+        let fates: std::collections::HashMap<&str, &Fate> = relative.read.iter().map(|(n, fate)| (n.as_str(), fate)).collect();
+        let mut found = 0;
+        let mut bodies = Vec::with_capacity(self.bodies.len() + relative.made.len());
+        for b in &self.bodies {
+            let before = || ModelBody { made: crate::lineage::Made::Before, ..b.clone() };
+            match fates.get(b.name.as_str()) {
+                None => bodies.push(before()),
+                Some(fate) => {
+                    found += 1;
+                    match fate {
+                        Fate::Kept => bodies.push(before()),
+                        Fate::Changed(c) => bodies.push((**c).clone()),
+                        Fate::Removed => {}
+                    }
+                }
+            }
+        }
+        // Each body it read once, and no body under a name it made.
+        if found != relative.read.len() || relative.made.iter().any(|m| self.body(&m.name).is_some()) {
+            return None;
+        }
+        bodies.extend(relative.made.iter().cloned());
+        Some(self.with_changed_bodies(change, feature, bodies, self.body_counter.max(relative.counter)))
+    }
+
+    /// This state with `bodies` and the rest of `change` (feature `feature`'s) made to it.
+    fn with_changed_bodies(&self, change: &Change, feature: u64, bodies: Vec<ModelBody>, body_counter: usize) -> ModelState {
         let mut sketches = self.sketches.clone();
         if let Some(s) = &change.sketch {
             sketches.retain(|s| s.feature != feature);
             sketches.push(s.clone());
         }
-        let mut next = ModelState { bodies, sketches, body_counter: change.body_counter, ..self.clone() };
+        let mut next = ModelState { bodies, sketches, body_counter, ..self.clone() };
         next.blend_edges.remove(&feature);
         next.fitted.remove(&feature);
         next.tapered.remove(&feature);
@@ -3181,7 +3357,7 @@ impl ModelState {
         if let Some(p) = &change.named_faces {
             next.named_faces.insert(feature, p.clone());
         }
-        Some(next)
+        next
     }
 }
 
@@ -4241,6 +4417,7 @@ impl Model {
         let with_import = doc.features.iter().any(|f| matches!(f.kind, FeatureKind::Import { .. }));
         let mut geo = 0u64;
         let ctx = context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
+        let shared_ctx = shared_context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
         let previous_context = self.context;
         let mut rolled_results = std::mem::take(&mut self.rolled_results);
         self.context = ctx;
@@ -4421,7 +4598,7 @@ impl Model {
                     continue;
                 }
                 // The same feature on the same inputs: its earlier result.
-                let key = EvalKey::new(doc, &vals, f, fp, ctx, &state, &self.import_digests, geo_in);
+                let key = EvalKey::new(doc, &vals, f, fp, ctx, shared_ctx, &state, &self.import_digests, geo_in);
                 let kept = self.kept.0.as_ref().filter(|_| !self.no_cache);
                 if !self.no_cache
                     && let Some(c) = self
@@ -4499,9 +4676,12 @@ impl Model {
                 let reads = key.reads.as_ref().filter(|_| {
                     !self.no_cache && checks.refused_at(i).is_none() && param_names(f).iter().all(|n| !self.param_errors.contains_key(n))
                 });
-                let reused = reads
-                    .and_then(|(k, _)| self.cache.lock().ok().and_then(|mut m| m.change(*k)))
-                    .and_then(|c| state.with_change(&c.state, f.id).map(|next| (next, c)));
+                let relative = reads.and(key.relative);
+                let change_at = |k: u64| self.cache.lock().ok().and_then(|mut m| m.change(k));
+                let by_relative = relative.and_then(change_at).and_then(|c| state.with_relative(&c.state, f.id).map(|next| (next, c)));
+                let hit_relative = by_relative.is_some();
+                let reused = by_relative
+                    .or_else(|| reads.and_then(|(k, _)| change_at(*k)).and_then(|c| state.with_change(&c.state, f.id).map(|next| (next, c))));
                 // Each feature computed is a profiler span named after its kind.
                 let _feature_span = solidcraft_profile::span("feature", f.kind.type_name());
                 let before = state.clone();
@@ -4661,11 +4841,15 @@ impl Model {
                 // What it changed, when that is only what it read: kept for whatever the rest of the
                 // model holds, and its bodies are known by what it read.
                 let change = match (&cached, reads) {
-                    (None, Some((_, read))) if r.is_ok() => next.change_from(&state, f.id, read),
+                    (None, Some((_, read))) if r.is_ok() => next.change_from(&state, f, read),
                     _ => None,
                 };
-                let stamp_key = match reads {
-                    Some((k, _)) if cached.is_some() || change.is_some() => *k,
+                // A change that holds whatever the bodies it did not read is known by the key
+                // without them, and so are the bodies it made.
+                let relative = relative.filter(|_| hit_relative || change.as_ref().is_some_and(|c| c.relative.is_some()));
+                let stamp_key = match (reads, relative) {
+                    (Some(_), Some(k)) => k,
+                    (Some((k, _)), None) if cached.is_some() || change.is_some() => *k,
                     _ => key.whole,
                 };
                 let error = match r {
@@ -4734,7 +4918,7 @@ impl Model {
                         ms,
                         state: state.clone(),
                     };
-                    let change = reads.zip(change).map(|((k, _), change)| (*k, whole.with(change)));
+                    let change = reads.zip(change).map(|((k, _), change)| (relative.unwrap_or(*k), whole.with(change)));
                     let entry = CacheEntry { key: key.whole, bytes: state.added_bytes(&before), whole, change };
                     // Held while a check before it, or its own, runs.
                     checks.store(i, entry, &self.cache, &self.kept);
