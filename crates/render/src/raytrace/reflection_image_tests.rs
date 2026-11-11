@@ -180,14 +180,15 @@ fn scene() -> ProductScene {
     ProductScene { meshes, bounds }
 }
 fn request(reflections: Option<ReflectionOptions>) -> ImageRequest {
-    let mut camera = crate::Camera { distance: 50.0, ..Default::default() };
-    camera.set_view(crate::StandardView::Front);
+    let mut camera = solidcraft_viewport::Camera { distance: 50.0, ..Default::default() };
+    camera.set_view(solidcraft_viewport::StandardView::Front);
     ImageRequest {
         studio_weights: None,
         environment: None,
         textures: None,
         integrator: job::Integrator::Raytrace,
         raytrace: Some(RaytraceOptions {
+            threads: 1,
             reflections,
             shadows: false,
             lights: Some(vec![job::DirectionalLightOptions { direction: [0.0, 0.0, -1.0], color: [1.0; 3], intensity: 2.0 }]),

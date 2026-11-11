@@ -31,9 +31,9 @@ use solidcraft_engine::sketch::CurveKind;
 use std::hash::{Hash, Hasher};
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::tool_modifiers::Held;
 use crate::viewport::{Hit, Proj};
+use solidcraft_theme::Tokens;
 
 /// How long the left button stays down, without moving, before the list opens.
 pub const HOLD_SECS: f64 = 0.5;
@@ -341,7 +341,9 @@ pub fn label(app: &SolveApp, sel: &Sel) -> String {
         Sel::Profile { sketch, index } => format!("Profile {} · {}", index + 1, sketch_name(app, *sketch)),
         Sel::Plane { name } if matches!(name.as_str(), "XY" | "XZ" | "YZ") => format!("{} Plane", app.preferences.origin_plane_names.label(name)),
         Sel::Axis { name } if matches!(name.as_str(), "X" | "Y" | "Z") => format!("{name} Axis"),
-        Sel::Plane { name } | Sel::Axis { name } | Sel::ConstructionPoint { name } => name.clone(),
+        Sel::Plane { name } | Sel::Axis { name } | Sel::ConstructionPoint { name } => {
+            crate::dialogs::component_origin_label(&app.session, app.preferences.origin_plane_names, name).unwrap_or_else(|| name.clone())
+        }
     }
 }
 
@@ -655,7 +657,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     pos2(r.left() + 8.0, r.center().y),
                     Align2::LEFT_CENTER,
                     title,
-                    FontId::proportional(crate::theme::Tokens::get().font_panel),
+                    FontId::proportional(solidcraft_theme::Tokens::get().font_panel),
                     t.text_dim,
                 );
                 egui::ScrollArea::vertical().min_scrolled_height(0.0).max_height(scroll_height).show(ui, |ui| {

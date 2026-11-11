@@ -44,7 +44,7 @@ fn every_dialog_opens_docked_within_its_width_limits() {
             // Wide cards use the kit's bounded table/timeline width.
             let w = rect_of("dialog:outer").map_or(0.0, |r| r.width());
             let limits = if matches!(spec.id, "config.table" | "config.configure" | "motion.study") {
-                let width = solidcraft_ui_egui::theme::Tokens::get().form_card_width * 3.0;
+                let width = solidcraft_theme::Tokens::get().form_card_width * 3.0;
                 json!({"min":width - 4.0,"max":width + 2.0})
             } else if w > 400.0 {
                 json!({"min":480,"max":562})
@@ -143,7 +143,7 @@ fn docked_ribbon_geometry_and_search() {
             assert_eq!(search.top(), ribbon.top() + 4.0);
             assert_eq!(search.right(), ribbon.right() - 4.0);
             assert_eq!(search.center().y, ribbon.top() + 15.0);
-            let t = solidcraft_ui_egui::theme::Tokens::get();
+            let t = solidcraft_theme::Tokens::get();
             let (hint_width, key_width) = h.ctx.fonts_mut(|fonts| {
                 (
                     fonts
@@ -172,7 +172,7 @@ fn docked_ribbon_geometry_and_search() {
             assert_eq!(Some(field), rect_of("shortcut:search"));
             assert_eq!(Some(field), rect_of("palette:search"));
             let popup = rect_of("ribbon:search_popup").unwrap();
-            assert_eq!(popup.top(), field.bottom() + solidcraft_ui_egui::theme::Tokens::get().space_6);
+            assert_eq!(popup.top(), field.bottom() + solidcraft_theme::Tokens::get().space_6);
             assert_eq!(popup.x_range(), field.x_range());
             assert!(popup.top() >= search.bottom());
             assert!(popup.left() <= search.left());

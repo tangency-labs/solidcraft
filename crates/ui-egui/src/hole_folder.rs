@@ -130,6 +130,6 @@ pub(crate) fn commands(app: &SolveApp, d: &Dialog, edited: Vec<(String, Value)>)
 pub(crate) fn note(app: &SolveApp, d: &Dialog, ui: &mut egui::Ui) {
     if let Some((count, name)) = summary(app, d) {
         let text = solidcraft_ui_text::format("hole_folder.applies_to", &[("count", &count.to_string()), ("folder", &name)]);
-        ui.add(egui::Label::new(egui::RichText::new(text).color(crate::theme::Tokens::get().text_dim)).wrap());
+        ui.add(egui::Label::new(egui::RichText::new(text).color(solidcraft_theme::Tokens::get().text_dim)).wrap());
     }
 }

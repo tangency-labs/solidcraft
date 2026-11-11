@@ -74,8 +74,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     )
     .wide();
     let panel = if side == crate::frame::Side::Left {
-        let available = palette.map_or(viewport.width(), |r| (r.left() - viewport.left() - crate::theme::Tokens::get().space_8).max(0.0));
-        panel.width((crate::theme::Tokens::get().form_card_width * 3.0).min(available))
+        let available = palette.map_or(viewport.width(), |r| (r.left() - viewport.left() - solidcraft_theme::Tokens::get().space_8).max(0.0));
+        panel.width((solidcraft_theme::Tokens::get().form_card_width * 3.0).min(available))
     } else {
         panel
     };

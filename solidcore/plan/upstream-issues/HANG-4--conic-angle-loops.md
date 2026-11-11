@@ -1,0 +1,11 @@
+#### HANG-4. Conic angle loops
+- **Severity:** Hang
+- **Area:**
+- **Location:** `NL_CrvBasic.cpp:1863` `N_CrvGetConicData`; `NL_CrvCommon.cpp:1090` `N_CreateEllipticalArcAngTypeTol`.
+- **What happens:** These loop forever for non-finite angles, or where `ae + 360 == ae`.
+- **Trigger:** `ae = inf`; `ae = 1e17`.
+- **How found:** read during porting.
+- **Confirmed:** no.
+- **Severity:** hang.
+- **Rust port:** Returns `InvalidInput` for non-finite angles and after 2^20 turns.
+- **Fuzz sweep trigger (2026-10-20):** `N_CreateEllipticalArcAngTypeTol` with a conic domain end of `-1e300` (`topology.proto_topology_p1` `fuzz-out/n2000/topology.proto_topology_p1/fuzz00000.json`; C++ timed out, Confirmed becomes yes). Guard: domain ends within `MAX_CONIC_ANGLE = 1e6` (`crates/solidcore-ffi/src/units/topology_proto_topology_p1.rs:539`).

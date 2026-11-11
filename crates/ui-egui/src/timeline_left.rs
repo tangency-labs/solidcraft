@@ -6,11 +6,11 @@ use egui::{Rect, Sense, Stroke, pos2, vec2};
 use serde_json::json;
 
 use crate::history_rows::{HistoryFeature, HistoryRows};
-use crate::theme::Tokens;
 use crate::timeline::{
     TimelineKind, clipboard_buttons, delete_after_marker_button, delete_button, delete_features, message_button, selected_feature_ids,
 };
 use crate::{SolveApp, icons};
+use solidcraft_theme::Tokens;
 
 mod plan;
 
@@ -234,7 +234,7 @@ pub fn left_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     let held = crate::dialog_column::holds(app);
     if held {
         // No row is under the pointer: the view lights no feature for the History.
-        app.viewport.hover_feature = None;
+        crate::semantic_content::set_timeline_feature_hover(app, None);
     }
     if Container::for_layout(app.ui.layout, Surface::Panel).floating() || stacked(app) {
         let bounds = floating_rect(app, available);
@@ -385,7 +385,7 @@ fn timeline_transport(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
         }
         let controls_width = crate::ui_kit::history_controls_width(controls.len());
         let title = solidcraft_ui_text::tr("ui.history_title");
-        let galley = ui.painter().layout_no_wrap(title.to_owned(), crate::fonts::semibold(t.font_heading), t.text);
+        let galley = ui.painter().layout_no_wrap(title.to_owned(), crate::ui_kit::type_face::semibold(t.font_heading), t.text);
         let text_left = handle.right() + t.space_8;
         let text_right = controls_right - controls_width - t.space_8;
         let drag_rect = if text_right - text_left >= galley.size().x {
@@ -413,7 +413,7 @@ fn timeline_transport(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
         } else {
             Rect::from_min_size(pos2(header.center().x - side / 2.0, header.top() + i as f32 * (side + t.space_2)), vec2(side, side))
         };
-        let response = control.show(ui, rect, app.timeline_playback.is_some());
+        let response = control.show(ui, rect, app.timeline_playback.is_some(), crate::timeline::play_labels());
         crate::timeline::transport_response(app, control, &response);
     }
 }
@@ -489,7 +489,7 @@ pub(crate) fn dock_drag(app: &mut SolveApp, ui: &egui::Ui, drag: &egui::Response
                 Dock::Left => "ui.timeline_left_sidebar",
                 Dock::UnderBrowser => "ui.history_below_browser",
             });
-            painter.text(zone.center(), egui::Align2::CENTER_CENTER, label, crate::fonts::semibold(t.font_heading), t.text);
+            painter.text(zone.center(), egui::Align2::CENTER_CENTER, label, crate::ui_kit::type_face::semibold(t.font_heading), t.text);
         }
     }
     if drag.drag_stopped()
@@ -571,7 +571,7 @@ fn vertical_drop_bar_left(panel_left: f32, target: Option<u64>, groups: &[solidc
 fn vertical_marker(app: &mut SolveApp, ui: &mut egui::Ui, drag: &mut Option<Drag>) -> f32 {
     let t = Tokens::get();
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), t.space_12), Sense::drag());
-    crate::ui_kit::history_marker(ui.painter(), rect, true, crate::theme::TabAccent::for_tab(&t, &app.ui.tab));
+    crate::ui_kit::history_marker(ui.painter(), rect, true, crate::workspace::tab_accent(&t, &app.ui.tab));
     crate::scenario::publish_handle("timeline:rollback", rect.center());
     crate::scenario::publish_rect("history:marker", rect);
     if response.drag_started() {
@@ -730,7 +730,7 @@ fn selection_actions(app: &mut SolveApp, ui: &mut egui::Ui, groups: &[solidcraft
     let selected_groups = app.tree.picked_timeline_groups.clone();
     let has_selection = !features.is_empty() || !selected_groups.is_empty();
     if has_selection {
-        if crate::context_menu::button(ui, "Add to New Folder", "feature_group").clicked() {
+        if crate::ui_kit::menu::button(ui, "Add to New Folder", "feature_group").clicked() {
             let result = app.run("timeline.group", json!({"features": features, "groups": selected_groups}));
             if let Ok(result) = result
                 && let Some(group) = result.get("group").and_then(serde_json::Value::as_u64)
@@ -741,7 +741,7 @@ fn selection_actions(app: &mut SolveApp, ui: &mut egui::Ui, groups: &[solidcraft
             ui.close();
         }
         let grouped = features.iter().any(|feature| group_for(groups, *feature).is_some()) || !selected_groups.is_empty();
-        if grouped && crate::context_menu::button(ui, "Remove from Folder", "feature_group").clicked() {
+        if grouped && crate::ui_kit::menu::button(ui, "Remove from Folder", "feature_group").clicked() {
             let mut params = json!({"group": null});
             if !features.is_empty() {
                 params["features"] = json!(features);
@@ -757,7 +757,7 @@ fn selection_actions(app: &mut SolveApp, ui: &mut egui::Ui, groups: &[solidcraft
         if !features.is_empty() || !selected_groups.is_empty() {
             ui.separator();
         }
-        if crate::context_menu::button(ui, "Delete Selected Folders", "delete")
+        if crate::ui_kit::menu::button(ui, "Delete Selected Folders", "delete")
             .backing_on_hover_text(solidcraft_ui_text::tr("timeline.delete_folders_tip"))
             .clicked()
         {
@@ -775,14 +775,14 @@ fn selection_actions(app: &mut SolveApp, ui: &mut egui::Ui, groups: &[solidcraft
             && contents.iter().all(|id| app.session.doc.feature(*id).is_some_and(|f| f.suppressed))
             && joints.iter().all(|id| app.session.doc.assembly.joints.iter().any(|joint| joint.id == *id && joint.suppressed));
         let label = if all_suppressed { "Unsuppress Selected Folders" } else { "Suppress Selected Folders" };
-        if crate::context_menu::button_enabled(ui, label, "suppress", has_contents)
+        if crate::ui_kit::menu::button_enabled(ui, label, "suppress", has_contents)
             .backing_on_hover_text(solidcraft_ui_text::tr("timeline.suppress_folders_tip"))
             .clicked()
         {
             let _ = app.run_heavy("timeline.suppress", json!({"groups": selected_groups, "suppressed": !all_suppressed}));
             ui.close();
         }
-        if crate::context_menu::button(ui, "Delete Folders and Features…", "delete")
+        if crate::ui_kit::menu::button(ui, "Delete Folders and Features…", "delete")
             .backing_on_hover_text(solidcraft_ui_text::tr("timeline.delete_folders_with_features_tip"))
             .clicked()
         {
@@ -795,7 +795,7 @@ fn selection_actions(app: &mut SolveApp, ui: &mut egui::Ui, groups: &[solidcraft
     // right-click on a feature outside the selection selects that feature first.
     if !features.is_empty() && !feature_menu {
         ui.separator();
-        if crate::context_menu::button(ui, "Delete Selected Features…", "delete").clicked() {
+        if crate::ui_kit::menu::button(ui, "Delete Selected Features…", "delete").clicked() {
             delete_features(app, features);
             ui.close();
         }
@@ -1055,7 +1055,7 @@ fn timeline_group_name(
             pos2(rect.left() + 40.0 + offset, rect.center().y),
             egui::Align2::LEFT_CENTER,
             &group.name,
-            egui::FontId::proportional(crate::theme::Tokens::get().font_body),
+            egui::FontId::proportional(solidcraft_theme::Tokens::get().font_body),
             if faint { t.text.gamma_multiply(0.42) } else { t.text },
         );
         return false;
@@ -1122,7 +1122,7 @@ fn vertical_group_row(
         ui.painter().rect_filled(
             rect,
             t.radius_sm.saturating_sub(1),
-            if selected { crate::theme::TabAccent::current(ui.ctx()).soft } else { t.hover },
+            if selected { solidcraft_theme::TabAccent::current(ui.ctx()).soft } else { t.hover },
         );
     }
     let offset = if names { depth as f32 * 14.0 } else { 0.0 };
@@ -1180,7 +1180,7 @@ fn vertical_group_row(
         select_only(app, TimelineItem::Group(group.id));
     }
     crate::ui_kit::Menu::context(&response, |ui| {
-        if crate::context_menu::button(ui, "Rename Folder", "rename").clicked() {
+        if crate::ui_kit::menu::button(ui, "Rename Folder", "rename").clicked() {
             crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::TimelineGroup(group.id), rect.center());
             ui.close();
         }
@@ -1251,7 +1251,9 @@ struct Rows<'a> {
     sketch_states: crate::sketch_state::SketchStates,
 }
 
-fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
+/// Draw the vertical history column's feature rows, folders, markers, and drag-and-drop targets,
+/// updating selection, edits, and viewport feature hover.
+pub(crate) fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
     let t = Tokens::get();
     // Show origin and bodies at the top (#6490): the browser's Bodies folder and Origin rows lead
     // the history when it is wide enough for names. They are not places in the history: nothing
@@ -1420,7 +1422,7 @@ fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
                 ui.painter(),
                 Rect::from_min_max(pos2(left, slot.y), pos2(ui.max_rect().right() - 5.0, slot.y)),
                 true,
-                if matches!(active, Drag::Marker) { crate::theme::TabAccent::current(ui.ctx()).color } else { t.sketch_accent },
+                if matches!(active, Drag::Marker) { solidcraft_theme::TabAccent::current(ui.ctx()).color } else { t.sketch_accent },
             );
         }
     }
@@ -1450,7 +1452,7 @@ fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
         }
         None => data.remove::<Drag>(drag_id),
     });
-    app.viewport.hover_feature = rows.hovered;
+    crate::semantic_content::set_timeline_feature_hover(app, rows.hovered);
     if let Some(feature) = rows.edit {
         app.edit_feature(feature);
     }
@@ -1604,7 +1606,7 @@ fn feature_row_body(
     crate::ui_kit::HistoryChip {
         icon,
         name,
-        kind: ty,
+        icon_accent: crate::workspace::feature_icon_accent(ty, icon),
         selected,
         hovered: response.hovered() || rows.from_view.contains(&Some(id)) || rows.linked_hover == Some(id),
         dim: rolled,
@@ -1613,7 +1615,7 @@ fn feature_row_body(
         warning: warning.is_some(),
         reference,
         ink: sketch_state.and_then(|state| state.ink(&t)),
-        accent: crate::theme::TabAccent::for_tab(&t, if dragged { "SKETCH" } else { &app.ui.tab }),
+        accent: crate::workspace::tab_accent(&t, if dragged { "SKETCH" } else { &app.ui.tab }),
     }
     .paint(ui.painter(), chip, style);
     if fold.is_some() {
@@ -1673,26 +1675,26 @@ fn feature_row_body(
     }
     let mut edit = false;
     crate::ui_kit::Menu::context(&response, |ui| {
-        if crate::context_menu::button(ui, "Edit Feature", "edit").clicked() {
+        if crate::ui_kit::menu::button(ui, "Edit Feature", "edit").clicked() {
             edit = true;
             ui.close();
         }
         crate::timeline::sketch_plane_button(app, ui, id);
         if let Some(sketch) = sketch
-            && crate::context_menu::button(ui, "Edit Profile Sketch", "sketch").clicked()
+            && crate::ui_kit::menu::button(ui, "Edit Profile Sketch", "sketch").clicked()
         {
             app.edit_sketch(sketch.0);
             ui.close();
         }
-        if crate::context_menu::button(ui, "Rename Feature", "rename").clicked() {
+        if crate::ui_kit::menu::button(ui, "Rename Feature", "rename").clicked() {
             crate::context_menu::start_rename(app, crate::context_menu::RenameWhat::Feature(id), rect.center());
             ui.close();
         }
-        if crate::context_menu::button(ui, if *suppressed { "Unsuppress Feature" } else { "Suppress Feature" }, "suppress").clicked() {
+        if crate::ui_kit::menu::button(ui, if *suppressed { "Unsuppress Feature" } else { "Suppress Feature" }, "suppress").clicked() {
             let _ = app.run_heavy("timeline.suppress", json!({"feature": id}));
             ui.close();
         }
-        if crate::context_menu::button(ui, "Roll Back Here", "rollback").clicked() {
+        if crate::ui_kit::menu::button(ui, "Roll Back Here", "rollback").clicked() {
             let _ = app.run_heavy("timeline.roll_to", json!({"feature": id}));
             ui.close();
         }
@@ -1958,9 +1960,9 @@ mod tests {
 
     #[test]
     fn transport_to_first_item_gap_is_at_most_twelve_points() {
-        let previous = crate::theme::is_dark();
+        let previous = solidcraft_theme::is_dark();
         for dark in [false, true] {
-            crate::theme::set_dark(dark);
+            solidcraft_theme::set_dark(dark);
             for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
                 for names in [false, true] {
                     let mut h = Harness::new();
@@ -1976,7 +1978,7 @@ mod tests {
                             h.app.run("select.set", json!({"items":[{"type":"feature","id":id}]})).unwrap();
                         }
                         h.settle();
-                        assert_eq!(crate::theme::is_dark(), dark);
+                        assert_eq!(solidcraft_theme::is_dark(), dark);
                         let transport = crate::scenario::rect_of("history:transport").unwrap();
                         let first = crate::scenario::rect_of("history:feature:First").unwrap();
                         let gap = first.top() - transport.bottom();
@@ -1985,7 +1987,7 @@ mod tests {
                 }
             }
         }
-        crate::theme::set_dark(previous);
+        solidcraft_theme::set_dark(previous);
     }
 
     #[test]

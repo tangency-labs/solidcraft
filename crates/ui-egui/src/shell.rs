@@ -2,7 +2,8 @@
 use crate::ui_kit::{Container, LayoutMode, SHELL_GAP, Surface, within};
 use egui::{Rect, pos2};
 
-use crate::{SolveApp, theme::Tokens};
+use crate::SolveApp;
+use solidcraft_theme::Tokens;
 
 /// The viewport's top corners are rounded concentrically with the cards: the card margin plus the
 /// card radius.
@@ -65,6 +66,10 @@ pub(crate) struct State {
     pub left_space: Option<Rect>,
     /// The left column an open dialog holds this frame (`dialog_column`).
     pub dialog_column: Option<Rect>,
+    /// The design tree over the view while a dialog holds the left column (`dialog_tree`), and
+    /// whether it is open (folded otherwise; each dialog starts with it folded).
+    pub dialog_tree: Option<Rect>,
+    pub dialog_tree_open: bool,
     /// The status bar along the window's bottom edge, while it is shown (#7243).
     pub status_bar: Option<Rect>,
 }
@@ -164,6 +169,7 @@ fn occluding_rects(app: &SolveApp, fitting: bool, input: bool, include_confirm: 
     if include_confirm {
         rects.extend(crate::view_confirm::rect(app));
     }
+    rects.extend(app.shell.dialog_tree.filter(|_| app.dialog.is_some()));
     rects.extend(app.shell.status_bar.filter(|_| crate::status_bar::shown(app)));
     rects.retain(|r| r.is_finite() && r.is_positive());
     rects

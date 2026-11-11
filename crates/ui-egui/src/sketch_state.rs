@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use egui::Color32;
 
 use crate::SolveApp;
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 /// A sketch's state as its last solve reports it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
