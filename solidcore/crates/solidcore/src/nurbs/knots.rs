@@ -49,11 +49,6 @@
 //!   degenerate `(p + 1)`-knot vectors with no span, `WR-24`);
 //!   [`KnotVector::validate_with_kernel`] and [`KnotVector::validate_opt_in`] add the
 //!   opt-in span check ([`crate::kernel::UpstreamFixes::knot_vector_valid_requires_span`]).
-//! - `N_BasisEval` sets the first (last) basis function to 1 at `u == U[p]` (`U[m - p]`)
-//!   whatever the knots; that is right only at a clamped end. [`KnotVector::basis_eval`]
-//!   takes the shortcut at a clamped end only (`U[0] == U[p]`, `U[m - p] == U[m]`), the same
-//!   bits as upstream there, and evaluates an unclamped end (a periodic curve's domain end)
-//!   by the general recurrence, where upstream answers the end control point.
 
 use crate::error::{nurbs::NurbsFailure, Result, SolidError};
 use crate::kernel::Kernel;
@@ -508,15 +503,13 @@ impl<'a> KnotVector<'a> {
         }
         n.get_mut(..=p).ok_or_else(|| out_of_range(OP))?.fill(0.0);
 
-        // Special cases for end values, of a clamped end only: there the end basis
-        // function is 1. An unclamped end (a periodic curve's) takes the general recurrence
-        // below, which is right for any knots.
-        if u == rd(uk, p, OP)? && rd(uk, 0, OP)? == rd(uk, p, OP)? {
+        // Special cases for end values.
+        if u == rd(uk, p, OP)? {
             wr(n, 0, 1.0, OP)?;
             return Ok(p);
         }
         let end = sub(m, p, OP)?;
-        if u == rd(uk, end, OP)? && rd(uk, end, OP)? == rd(uk, m, OP)? {
+        if u == rd(uk, end, OP)? {
             wr(n, p, 1.0, OP)?;
             return sub(end, 1, OP);
         }
@@ -861,8 +854,10 @@ pub fn clamped_uniform(count: usize, degree: usize) -> Result<Vec<f64>> {
 /// a periodic, uniform knot vector, unclamped).
 ///
 /// Not a clamped vector, so not one for the routines that take only those:
-/// [`KnotVector::validate`] (upstream's clamped check) refuses it; [`is_periodic`] is its
-/// check.
+/// [`KnotVector::validate`] (upstream's clamped check) refuses it ([`is_periodic`] is its
+/// check), and [`KnotVector::basis_eval`] (upstream's `N_BasisEval`, kept for parity) reads the
+/// domain's ends as clamped ones, so the NLib curve's `eval` is wrong at them: evaluate such a
+/// curve with the general basis ([`crate::eval`]'s evaluator, or the NLib curve's `derivs`).
 ///
 /// Not upstream: the knots of a closed curve made from control points alone.
 ///
@@ -952,35 +947,6 @@ mod tests {
             &[0.0, f64::NAN, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0],
             2
         ));
-    }
-
-    #[test]
-    fn the_basis_at_an_unclamped_end_is_the_general_one() {
-        // a periodic uniform cubic: at either end of its domain the basis is 1/6, 4/6, 1/6
-        let knots = periodic_uniform(4, 3).unwrap();
-        let k = kv(&knots);
-        let start = k.basis_eval(3, 0.0, Side::Right).unwrap();
-        assert_eq!(start.span, 3);
-        let end = k.basis_eval(3, 1.0, Side::Left).unwrap();
-        assert_eq!(end.span, 6);
-        for (got, want) in [
-            (&start.values, [1.0 / 6.0, 4.0 / 6.0, 1.0 / 6.0, 0.0]),
-            (&end.values, [0.0, 1.0 / 6.0, 4.0 / 6.0, 1.0 / 6.0]),
-        ] {
-            for (g, w) in got.iter().zip(want) {
-                assert!((g - w).abs() < 1e-15, "{got:?}");
-            }
-        }
-        // a clamped end keeps its shortcut: the end function is exactly 1
-        let clamped = kv(&EX23);
-        assert_eq!(
-            clamped.basis_eval(2, 0.0, Side::Right).unwrap().values,
-            vec![1.0, 0.0, 0.0]
-        );
-        assert_eq!(
-            clamped.basis_eval(2, 5.0, Side::Left).unwrap().values,
-            vec![0.0, 0.0, 1.0]
-        );
     }
 
     #[test]
