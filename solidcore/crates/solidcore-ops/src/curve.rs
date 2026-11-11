@@ -553,6 +553,108 @@ mod tests {
         );
     }
 
+    /// A side view in y = 0 (seen along y) and a plan view in z = 0 (seen along z) at model
+    /// scale, about 170 mm across: quadratic Bézier curves, both increasing in x.
+    const SIDE_Q: [[f64; 3]; 3] = [
+        [-92.06693847750134, 0.0, -39.76423812596792],
+        [0.0, 0.0, 18.451591211372346],
+        [73.55298836314594, 0.0, 15.024361734430357],
+    ];
+    const PLAN_Q: [[f64; 3]; 3] = [
+        [-16.758544054811637, -82.27159357644084, 0.0],
+        [42.459806193714414, -83.42331426400659, 0.0],
+        [76.37870944288886, -34.86770213654586, 0.0],
+    ];
+
+    /// The point of the quadratic Bézier curve `q` at `t` and its derivative, in Bernstein's
+    /// form (none of the kernel's evaluators).
+    fn bernstein(q: &[[f64; 3]; 3], t: f64) -> ([f64; 3], [f64; 3]) {
+        let (b0, b1, b2) = ((1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t), t * t);
+        (
+            [0, 1, 2].map(|i| b0 * q[0][i] + b1 * q[1][i] + b2 * q[2][i]),
+            [0, 1, 2]
+                .map(|i| 2.0 * (1.0 - t) * (q[1][i] - q[0][i]) + 2.0 * t * (q[2][i] - q[1][i])),
+        )
+    }
+
+    /// The parameter of `q` (increasing in x) where its x is `x`, by bisection on [0, 1].
+    fn at_x(q: &[[f64; 3]; 3], x: f64) -> f64 {
+        let (mut lo, mut hi) = (0.0, 1.0);
+        for _ in 0..100 {
+            let m = 0.5 * (lo + hi);
+            if bernstein(q, m).0[0] < x {
+                lo = m;
+            } else {
+                hi = m;
+            }
+        }
+        0.5 * (lo + hi)
+    }
+
+    /// The point at `t` of the record spline with `knots` and homogeneous points `pw`, by
+    /// de Boor's algorithm (none of the kernel's evaluators).
+    fn de_boor(knots: &[f64], pw: &[[f64; 4]], t: f64) -> [f64; 3] {
+        let n = pw.len();
+        let p = knots.len() - n - 1;
+        let k = (p..n).rev().find(|&k| knots[k] <= t).unwrap_or(p);
+        let mut d: Vec<[f64; 4]> = (0..=p).map(|j| pw[j + k - p]).collect();
+        for r in 1..=p {
+            for j in (r..=p).rev() {
+                let (lo, hi) = (knots[j + k - p], knots[j + 1 + k - r]);
+                let alpha = (t - lo) / (hi - lo);
+                d[j] = [0, 1, 2, 3].map(|i| (1.0 - alpha) * d[j - 1][i] + alpha * d[j][i]);
+            }
+        }
+        let h = d[p];
+        [h[0] / h[3], h[1] / h[3], h[2] / h[3]]
+    }
+
+    #[test]
+    fn views_at_model_scale_give_the_curve_within_the_tolerance() {
+        let side = cv_curve(&SIDE_Q, 2).unwrap();
+        let plan = cv_curve(&PLAN_Q, 2).unwrap();
+        let curves = two_view(&side, [0.0, 1.0, 0.0], &plan, [0.0, 0.0, 1.0]).unwrap();
+        assert!(!curves.is_empty());
+        let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+        for c in &curves {
+            let (knots, pw): (&[f64], Vec<[f64; 4]>) = match c {
+                Curve::Spline { knots, points } => (
+                    knots,
+                    points.iter().map(|&[x, y, z]| [x, y, z, 1.0]).collect(),
+                ),
+                Curve::RationalSpline { knots, homogeneous } => (knots, homogeneous.clone()),
+                _ => panic!("a spline: {c:?}"),
+            };
+            let p = knots.len() - pw.len() - 1;
+            let (t0, t1) = (knots[p], knots[pw.len()]);
+            for i in 0..=512 {
+                let x = de_boor(knots, &pw, t0 + (t1 - t0) * f64::from(i) / 512.0);
+                (lo, hi) = (lo.min(x[0]), hi.max(x[0]));
+                // A gap along the view's other axis is at most the distance times
+                // sqrt(1 + slope²), below 1 + slope; twice the tolerance, as the intersector
+                // checks its spans at interior samples.
+                let (q, d) = bernstein(&SIDE_Q, at_x(&SIDE_Q, x[0]));
+                let allowed = 2.0 * APPROX_TOL * (1.0 + (d[2] / d[0]).abs());
+                assert!(
+                    (q[2] - x[2]).abs() <= allowed,
+                    "off the side view: {x:?} against {q:?}"
+                );
+                let (q, d) = bernstein(&PLAN_Q, at_x(&PLAN_Q, x[0]));
+                let allowed = 2.0 * APPROX_TOL * (1.0 + (d[1] / d[0]).abs());
+                assert!(
+                    (q[1] - x[1]).abs() <= allowed,
+                    "off the plan view: {x:?} against {q:?}"
+                );
+            }
+        }
+        // The overlap of the two runs is seen: from the plan view's start to the side view's end.
+        assert!(
+            (lo - PLAN_Q[0][0]).abs() <= 2.0 * APPROX_TOL
+                && (hi - SIDE_Q[2][0]).abs() <= 2.0 * APPROX_TOL,
+            "from {lo} to {hi}"
+        );
+    }
+
     #[test]
     fn parallel_directions_are_refused_and_views_apart_are_empty() {
         let (a, b) = (side(), plan(0.0));
