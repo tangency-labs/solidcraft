@@ -553,7 +553,10 @@ impl Cone {
     ///   [`Self::create_canonical`] (same `swap_uv` and `inside_out`), its NURB
     ///   reparameterised to the matching part of this NURB domain (upstream scales the
     ///   domain maximum, not its span), the generator's NURB interval set to match and
-    ///   the polar converter rebuilt;
+    ///   the polar converter rebuilt; the matching part is anchored at the end that
+    ///   survives (the top's when the bot radius passes zero, the bot's when the top
+    ///   radius does), so every point of the kept cone keeps its parameter and the
+    ///   face's UV trims lift onto the offset unchanged;
     /// * else a copy with the new base radius and origin, every NURB control point
     ///   moved by the offset of its generator row (computed from the next control
     ///   point at the apex) and the generator translated by the offset vector.
@@ -607,19 +610,20 @@ impl Cone {
         // only the BotRadius or TopRadius has gone negative
         if new_bot_radius < approx_tol_3d || new_top_radius < approx_tol_3d {
             // compute BotOrigin, Height, Bot and Top radii for new truncated cone
-            let (new_height, bot_origin) = if new_bot_radius < approx_tol_3d {
+            let (new_height, bot_origin, collapsed_at_base) = if new_bot_radius < approx_tol_3d {
                 let tan_ang = height / old_top_radius;
                 let new_height = new_top_radius * tan_ang;
                 new_bot_radius = 0.0;
                 (
                     new_height,
                     origin + (height + off_z_dist - new_height) * z_axis,
+                    true,
                 )
             } else {
                 let tan_ang = height / old_bot_radius;
                 let new_height = new_bot_radius * tan_ang;
                 new_top_radius = 0.0;
-                (new_height, origin + off_z_dist * z_axis)
+                (new_height, origin + off_z_dist * z_axis, false)
             };
 
             // New Cone Position - truncated at new apex position
@@ -637,21 +641,35 @@ impl Cone {
             )?;
 
             // compute the offsetSurf Nurb domain to be a properly trimmed subset of the
-            // input Nurb domain
-            let tgt_nurb_domain = if self.rev.swap_uv {
-                Extent2d::from_bounds(
-                    nurb_domain.min().x,
-                    nurb_domain.min().y,
-                    nurb_domain.min().x + new_height / height * nurb_domain.max().x,
-                    nurb_domain.max().y,
-                )
-            } else {
-                Extent2d::from_bounds(
-                    nurb_domain.min().x,
-                    nurb_domain.min().y,
-                    nurb_domain.max().x,
-                    nurb_domain.min().y + new_height / height * nurb_domain.max().y,
-                )
+            // input Nurb domain: the part the truncated cone stands for. Its span is the
+            // kept height's share of this domain's, anchored at the end that survives
+            // (the top's when the bot radius passed zero, the bot's when the top radius
+            // did), so a point of the kept cone keeps its parameter: the offset's rim
+            // stays at the rim's parameter and the face's UV trims lift onto it
+            // unchanged (the offset of S is S + d n at the same parameters).
+            let tgt_nurb_domain = {
+                let ratio = new_height / height;
+                if self.rev.swap_uv {
+                    let lo = nurb_domain.min().x;
+                    let hi = nurb_domain.max().x;
+                    let span = hi - lo;
+                    let (min_x, max_x) = if collapsed_at_base {
+                        (hi - ratio * span, hi)
+                    } else {
+                        (lo, lo + ratio * span)
+                    };
+                    Extent2d::from_bounds(min_x, nurb_domain.min().y, max_x, nurb_domain.max().y)
+                } else {
+                    let lo = nurb_domain.min().y;
+                    let hi = nurb_domain.max().y;
+                    let span = hi - lo;
+                    let (min_y, max_y) = if collapsed_at_base {
+                        (hi - ratio * span, hi)
+                    } else {
+                        (lo, lo + ratio * span)
+                    };
+                    Extent2d::from_bounds(nurb_domain.min().x, min_y, nurb_domain.max().x, max_y)
+                }
             };
 
             // update the pOffCone NurbDomain (status ignored)
@@ -2087,6 +2105,38 @@ mod tests {
         // one radius below the tolerance: truncated at the new apex
         let trunc = cone.create_offset_surface(&k, -1.2, 1e-6).unwrap().unwrap();
         assert!(trunc.top_radius().abs() < 1e-12);
+    }
+
+    /// The offset of a cone truncated at its new apex is reparameterised to the matching
+    /// part of this NURB domain, anchored at the end that survives, so a point of the kept
+    /// cone keeps its parameter and the face's UV trims lift onto the offset unchanged
+    /// (tangency-labs/solidcraft#11774: the part sat at the domain's other end, the rim's
+    /// UV moved, and a shell's edge-use mapping could not pair the rim, so the shell
+    /// refused a cone with an apex).
+    #[test]
+    fn offset_truncation_keeps_the_surviving_ends_parameters() {
+        let k = kernel();
+        // (bot, top) = (1, 2): the bot radius passes zero under the offset, (2, 1): the top
+        for (bot, top) in [(1.0, 2.0), (2.0, 1.0)] {
+            let cone = canonical(&k, bot, top, 3.0, false, false);
+            let off = cone.create_offset_surface(&k, -1.2, 1e-6).unwrap().unwrap();
+            let kept = off.height(&k).unwrap() / cone.height(&k).unwrap();
+            let dom0 = cone.rev().base().natural_uv_domain();
+            let dom = off.rev().base().natural_uv_domain();
+            let (lo, hi) = (dom0.min().y, dom0.max().y);
+            let span = hi - lo;
+            let (want_min, want_max) = if off.bot_radius().abs() < 1e-12 {
+                // the bot end collapsed: the kept cone sits at the top's end
+                (hi - kept * span, hi)
+            } else {
+                // the top end collapsed: the kept cone sits at the bot's end
+                (lo, lo + kept * span)
+            };
+            assert!(
+                (dom.min().y - want_min).abs() < 1e-9 && (dom.max().y - want_max).abs() < 1e-9,
+                "bot {bot} top {top}: domain {dom:?}, matching part [{want_min}, {want_max}]"
+            );
+        }
     }
 
     #[test]
