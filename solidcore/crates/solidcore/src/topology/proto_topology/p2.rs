@@ -850,7 +850,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 let vertex = v.brep_point_classif(which).vertex_object();
                 v.set_final_vertex(which, vertex);
             } else {
-                return Err(SolidError::sm_err(OP_IMPRINT_VD));
+                return Err(SolidError::topology_failed(
+                    OP_IMPRINT_VD,
+                    "merging the point gave no single new vertex and it is not on a vertex",
+                ));
             }
 
             if which == 1 {
@@ -1002,7 +1005,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let start_pv = self.pv_live(start_pv)?;
         let end_pv = self.pv_live(end_pv)?;
 
-        let null = || SolidError::null_pointer(OP_IMPRINT_ED);
+        let null =
+            || SolidError::topology_missing(OP_IMPRINT_ED, "the proto vertex's final vertex");
         let start_vtx1 = self
             .proto_vertex_final_vertex(k, brep, start_pv, 1, ed, true)?
             .ok_or_else(null)?;
@@ -1355,8 +1359,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         pc1: &mut PointClassification<O>,
         pc2: &mut PointClassification<O>,
     ) -> Result<(VertexDefId, bool)> {
-        let topo1 = as_topology(pc1.object()).ok_or(SolidError::null_pointer(OP_ADD_VD))?;
-        let topo2 = as_topology(pc2.object()).ok_or(SolidError::null_pointer(OP_ADD_VD))?;
+        let topo1 = as_topology(pc1.object()).ok_or_else(|| {
+            SolidError::topology_missing(OP_ADD_VD, "the first classification's topology")
+        })?;
+        let topo2 = as_topology(pc2.object()).ok_or_else(|| {
+            SolidError::topology_missing(OP_ADD_VD, "the second classification's topology")
+        })?;
 
         // no work - VertexDefintion with input Tgt SrcTopos already exists
         if let Some(vd) = self.find_matching_vertex_definition(pv, Some(topo1), Some(topo2))? {
@@ -2274,8 +2282,12 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         }
 
         // Make an EdgeDefinition for the new ProtoEdge.
-        let topo1 = as_topology(ci1.mid.object()).ok_or(SolidError::null_pointer(OP_CREATE_PE))?;
-        let topo2 = as_topology(ci2.mid.object()).ok_or(SolidError::null_pointer(OP_CREATE_PE))?;
+        let topo1 = as_topology(ci1.mid.object()).ok_or_else(|| {
+            SolidError::topology_missing(OP_CREATE_PE, "the first intersection's topology")
+        })?;
+        let topo2 = as_topology(ci2.mid.object()).ok_or_else(|| {
+            SolidError::topology_missing(OP_CREATE_PE, "the second intersection's topology")
+        })?;
         let start_pv = self.pv_live(start)?;
         let end_pv = self.pv_live(end)?;
 
@@ -2388,11 +2400,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         } else if e1 == old_edge {
             e0
         } else {
-            return Err(SolidError::Upstream {
-                operation: OP_UPDATE_EDGES,
-                code: SM_ERR_NULL_POINTER,
-                entity: None,
-            });
+            return Err(SolidError::topology_missing(
+                OP_UPDATE_EDGES,
+                "the old edge among the two new edges",
+            ));
         };
         let unknown = || dangling("edge handle is unknown");
         let old_ivl = brep.edge_interval(old_edge).ok_or_else(unknown)?;
@@ -2958,7 +2969,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     ) -> Result<u64> {
         let v1 = self.vd_ref(vd1)?;
         let v2 = self.vd_ref(vd2)?;
-        let null = || SolidError::null_pointer(OP_COMBINE_VD);
+        let null = || {
+            SolidError::topology_missing(OP_COMBINE_VD, "the vertex definition's source topology")
+        };
         let t11 = v1.src_topo(1).ok_or_else(null)?;
         let t12 = v1.src_topo(2).ok_or_else(null)?;
         let t21 = v2.src_topo(1).ok_or_else(null)?;
@@ -3782,13 +3795,16 @@ mod tests {
         // nothing to do without a split
         m.update_edges(&k, &mut geo, 1, Some(e_old), &[e_old], Some(calling))
             .unwrap();
-        assert!(matches!(
-            m.update_edges(&k, &mut geo, 1, Some(e_old), &[e_new, e_new], Some(calling)),
-            Err(SolidError::Upstream {
-                code: SM_ERR_NULL_POINTER,
-                ..
-            })
-        ));
+        let e = m
+            .update_edges(&k, &mut geo, 1, Some(e_old), &[e_new, e_new], Some(calling))
+            .unwrap_err();
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(
+            e.topology_failure(),
+            Some(&crate::error::topology::TopologyFailure::Missing(
+                "the old edge among the two new edges"
+            ))
+        );
         m.update_edges(&k, &mut geo, 1, Some(e_old), &[e_old, e_new], Some(calling))
             .unwrap();
         assert_eq!(m.vertex_def(moved).unwrap().src_topo(1), Some(e_new));
