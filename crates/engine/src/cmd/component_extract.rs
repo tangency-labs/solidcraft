@@ -299,6 +299,9 @@ fn scope(s: &Session, comp: u64, cmd: &str) -> Result<Scope> {
     if source.links.contains_key(&comp) {
         return Err(bad(cmd, format!("{name} is linked to a design file already")));
     }
+    if let Some(why) = super::kept_component_refusal(s, comp).or_else(|| super::flexible_inside_refusal(s, comp)) {
+        return Err(bad(cmd, why));
+    }
     if source.parts.contains_key(&comp) {
         return Err(bad(cmd, format!("{name} is a standard part")));
     }
@@ -615,6 +618,23 @@ impl Before {
     }
 }
 
+/// Why linked component `linked` can't be what a component is compared with (Replace with Link,
+/// Find Identical Copies): its link keeps its design's components. Its Import feature then has
+/// one body for a part that design places several times, where a component that builds the same
+/// assembly has a body at each place, and a joint to a face of a replaced component would have
+/// to go to a component kept inside the link. `None` for a link that holds its design in one
+/// component, which is compared body for body.
+fn kept_refusal(s: &Session, linked: u64) -> Option<String> {
+    let tree = s.doc.links.get(&linked)?.tree.as_ref()?;
+    if tree.occurrences.is_empty() {
+        return None;
+    }
+    let name = s.doc.components.iter().find(|c| c.id == linked).map(|c| c.name.clone()).unwrap_or_default();
+    Some(format!(
+        "{name} keeps its linked design's components (a linked subassembly). Replace with Link and Find Identical Copies compare a component body for body with a link that holds its design in one component: use component.link_mode with `structure: false` on {name} first, and `structure: true` again afterwards"
+    ))
+}
+
 /// The components other than `linked`, a linked component, whose design on its own builds the
 /// same bodies as its link.
 fn copies_of(s: &Session, linked: u64) -> Result<Vec<u64>> {
@@ -662,6 +682,8 @@ impl Session {
     }
 }
 
+/// `component.extract`, as the module comment describes it. The new design's file is written
+/// last, once this design is found to look as it did before.
 pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
     let comp = component_key(s, p, "component", CMD)?;
     let sc = scope(s, comp, CMD)?;
@@ -678,7 +700,9 @@ pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
 
     // This design: the component's history becomes an Import feature of the new design's bodies
     let shown = file.display().to_string();
-    let (_, sf, faces, _, properties) = session_bodies(&part, &shown)?;
+    // Every body in the component itself, as it is here: the link keeps no structure of the
+    // new design (Relink Source with `structure` makes it keep it).
+    let ((_, sf, faces, _, properties), _) = session_bodies(&part, &shown, false, false)?;
     // The link has a body per piece: a body in pieces keeps its name on the first
     let mut solids: Vec<String> = Vec::new();
     for b in part.world_state()?.bodies.iter().filter(|b| !b.body.is_mesh()) {
@@ -741,16 +765,27 @@ pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
     )
 }
 
+/// `component.copies`: the components, not linked themselves, whose own history builds the same
+/// bodies as linked component `component`. Refused for a link that keeps its design's components
+/// (`kept_refusal` says why).
 pub(super) fn copies(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.copies";
     let linked = component_key(s, p, "component", cmd)?;
     if !s.doc.links.contains_key(&linked) {
         return Err(bad(cmd, "that component is not linked to a design"));
     }
+    if let Some(why) = kept_refusal(s, linked) {
+        return Err(bad(cmd, why));
+    }
     let found = copies_of(s, linked)?;
     reply(cmd, CopiesResult { copies: named(s, &found), param_warnings: Vec::new() })
 }
 
+/// `component.replace_with_link`: each component given loses its history, and its placements
+/// become placements of a linked component: the one `with` names, or a link to `path` (one that
+/// holds the design in one component first), made here when there is none. A component that
+/// does not build the same bodies as the link refuses the call, and so does a link that keeps
+/// its design's components (`kept_refusal`).
 pub(super) fn replace_with_link(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.replace_with_link";
     let mut targets = Vec::new();
@@ -771,12 +806,17 @@ pub(super) fn replace_with_link(s: &mut Session, p: &Value) -> Result<Value> {
     } else {
         let given = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`with` or `path` is required"))?;
         let file = absolute(Path::new(given));
-        let existing = s.doc.links.iter().find(|(_, l)| absolute(&resolve(s.path.as_deref(), &l.path)) == file).map(|(c, _)| *c);
+        // A link that keeps its design's components can't be compared with (`kept_refusal`): of
+        // the links to the file, one that holds the design in one component is taken first.
+        let to_file: Vec<u64> = s.doc.links.iter().filter(|(_, l)| absolute(&resolve(s.path.as_deref(), &l.path)) == file).map(|(c, _)| *c).collect();
+        let existing = to_file.iter().copied().min_by_key(|c| kept_refusal(s, *c).is_some());
         match existing {
             Some(c) => c,
             None => {
                 let parent = targets.first().and_then(|t| s.doc.components.iter().find(|c| c.id == *t)).map(|c| c.parent).unwrap_or(0);
-                let made = super::insert_design(s, &json!({"path": given, "parent": parent}))?;
+                // Every body in the one component, as Extract to File leaves a link: the
+                // components replaced are compared with it body for body.
+                let made = super::insert_design(s, &json!({"path": given, "parent": parent, "structure": false}))?;
                 inserted = made["occurrence"].as_u64();
                 made["component"].as_u64().ok_or_else(|| bad(cmd, "the linked component was not created"))?
             }
@@ -784,6 +824,9 @@ pub(super) fn replace_with_link(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let link = s.doc.links.get(&linked).cloned().ok_or_else(|| bad(cmd, "the replacement is not linked to a design"))?;
     let lname = s.doc.components.iter().find(|c| c.id == linked).map(|c| c.name.clone()).unwrap_or_default();
+    if let Some(why) = kept_refusal(s, linked) {
+        return Err(bad(cmd, why));
+    }
     let mut warnings = Vec::new();
     let mut replaced = Vec::new();
     for t in targets {

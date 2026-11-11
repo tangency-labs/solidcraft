@@ -44,6 +44,7 @@ component.delete                  removes a component: no geometry built
 component.edit_in_place           component links
 component.finish_edit             component links
 component.hide_history            the History bar: which features it lists
+component.link_mode               component links
 component.links                   component links
 component.list                    a listing
 component.metadata                component metadata

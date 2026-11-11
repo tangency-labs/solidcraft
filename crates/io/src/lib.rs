@@ -929,13 +929,131 @@ pub fn step_assembly(doc: &Document, local: &ModelState, name: &str) -> Result<V
         let Some(p) = index.get(&comp).and_then(|i| products.get_mut(*i)) else { continue };
         p.bodies.push(ExportBody { name: b.name.clone(), body: framed.as_ref().unwrap_or(&b.body), color: b.body.color() });
     }
+    // An occurrence that has poses (`Assembly::poses`: a flexible occurrence of a linked
+    // subassembly, or an occurrence kept for one that is flexible in its linked design) shows
+    // the occurrences inside it where the poses say, and a product is one arrangement of its
+    // children: such an occurrence gets products of its own.
+    let mut posed = Posed::of(doc, &index);
     for o in &doc.occurrences {
         let (Some(&parent), Some(&child)) = (index.get(&o.parent), index.get(&o.component)) else { continue };
+        let child = if posed.poses.contains_key(&o.id) { posed.product(&mut products, o.component, &[o.id], 0)? } else { child };
         if let Some(p) = products.get_mut(parent) {
             p.children.push((child, o.transform, o.name.clone()));
         }
     }
     Ok(solidcraft_kernel::step_export_products(&products, 0, &step_header(format!("{name}.step"), &doc.metadata))?.into_bytes())
+}
+
+/// The products that the posed occurrences of a design need for themselves in a STEP assembly.
+struct Posed<'d> {
+    doc: &'d Document,
+    /// The product every occurrence of a component shares, by component.
+    index: &'d std::collections::HashMap<u64, usize>,
+    /// The occurrences placed in each component.
+    children: std::collections::HashMap<u64, Vec<&'d solidcraft_doc::Occurrence>>,
+    /// The occurrences that have poses, each with the inner occurrences it has them for.
+    poses: std::collections::HashMap<u64, std::collections::HashSet<u64>>,
+    /// The occurrences a pose says its copy is under (`PlacedPose::through`).
+    under: std::collections::HashSet<u64>,
+    /// Whether a component holds, at any depth, an occurrence a posed occurrence has a pose
+    /// for: found once for each pair.
+    holds: std::collections::HashMap<(u64, u64), bool>,
+    /// The product made for a component below the occurrences of a path that decide how it
+    /// is arranged there.
+    made: std::collections::HashMap<(u64, Vec<u64>), usize>,
+}
+
+impl<'d> Posed<'d> {
+    /// What `doc`'s poses say, looked up once: the occurrences that have poses, with the inner
+    /// occurrences they are for, and the occurrences a copy is under. The occurrences by parent are
+    /// listed only when there is a pose, so a design without one pays for no more than this.
+    fn of(doc: &'d Document, index: &'d std::collections::HashMap<u64, usize>) -> Self {
+        let mut poses: std::collections::HashMap<u64, std::collections::HashSet<u64>> = std::collections::HashMap::new();
+        let mut under = std::collections::HashSet::new();
+        for pose in &doc.assembly.poses {
+            poses.entry(pose.occurrence).or_default().insert(pose.inner);
+            under.extend(pose.through.iter().copied());
+        }
+        let mut children: std::collections::HashMap<u64, Vec<&solidcraft_doc::Occurrence>> = std::collections::HashMap::new();
+        if !poses.is_empty() {
+            for o in &doc.occurrences {
+                children.entry(o.parent).or_default().push(o);
+            }
+        }
+        Posed { doc, index, children, poses, under, holds: Default::default(), made: Default::default() }
+    }
+
+    /// Whether `component` holds, at any depth, an occurrence that `posed` has a pose for.
+    /// `depth` ends a walk of occurrences that lead back to themselves, and is no part of what
+    /// is remembered. It cuts an answer short only where a component lies `MAX_PLACEMENT_DEPTH`
+    /// levels below `component`, so deeper than that below the design, and
+    /// `step_export_products` refuses an assembly that deep: no file is written from a cut
+    /// answer. Remembered for each depth, what one level of [`Self::product`] found below it
+    /// would be looked for again at the next level.
+    fn holds(&mut self, component: u64, posed: u64, depth: usize) -> bool {
+        if let Some(known) = self.holds.get(&(component, posed)) {
+            return *known;
+        }
+        let inner: Vec<(u64, u64)> = self.children.get(&component).into_iter().flatten().map(|x| (x.id, x.component)).collect();
+        let has = |poses: &Self, id: u64| poses.poses.get(&posed).is_some_and(|mine| mine.contains(&id));
+        let found =
+            depth < solidcraft_doc::MAX_PLACEMENT_DEPTH && inner.iter().any(|(id, below)| has(self, *id) || self.holds(*below, posed, depth + 1));
+        self.holds.insert((component, posed), found);
+        found
+    }
+
+    /// The product for `component` at the end of `path`: occurrence ids from the outermost
+    /// posed occurrence above it down to the occurrence that shows it. The product every
+    /// occurrence shares when no occurrence of the path has a pose inside it, else one of its
+    /// own with its children where the world shows them along that path
+    /// ([`Document::posed_local`]), made once for the occurrences of the path that decide that.
+    fn product<'a>(&mut self, products: &mut Vec<solidcraft_kernel::ExportProduct<'a>>, component: u64, path: &[u64], depth: usize) -> Result<usize> {
+        let lost = || IoError::Invalid("the design's occurrences do not lead from one to the next".into());
+        let shared = *self.index.get(&component).ok_or_else(lost)?;
+        if depth > solidcraft_doc::MAX_PLACEMENT_DEPTH {
+            return Ok(shared);
+        }
+        let posed: Vec<u64> = path.iter().copied().filter(|id| self.poses.contains_key(id)).collect();
+        let matter: Vec<u64> = posed.into_iter().filter(|id| self.holds(component, *id, 0)).collect();
+        if matter.is_empty() {
+            return Ok(shared);
+        }
+        // What of the path decides the arrangement: the occurrences with poses inside this
+        // component, and the ones a pose says its copy is under.
+        let key: Vec<u64> = path.iter().copied().filter(|id| matter.contains(id) || self.under.contains(id)).collect();
+        if let Some(made) = self.made.get(&(component, key.clone())) {
+            return Ok(*made);
+        }
+        if products.len() >= solidcraft_doc::MAX_PLACEMENTS {
+            return Err(IoError::Invalid(
+                "the design has more posed arrangements than a STEP assembly can hold: make fewer occurrences flexible".into(),
+            ));
+        }
+        let (name, bodies) = {
+            let plain = products.get(shared).ok_or_else(lost)?;
+            let of =
+                matter.first().and_then(|posed| self.doc.occurrences.iter().find(|o| o.id == *posed)).map(|o| o.name.as_str()).unwrap_or_default();
+            let bodies = plain.bodies.iter().map(|b| solidcraft_kernel::ExportBody { name: b.name.clone(), body: b.body, color: b.color }).collect();
+            (format!("{} ({of})", plain.name), bodies)
+        };
+        let at = products.len();
+        products.push(solidcraft_kernel::ExportProduct { name, bodies, children: Vec::new() });
+        self.made.insert((component, key), at);
+        let inner: Vec<&'d solidcraft_doc::Occurrence> = self.children.get(&component).cloned().unwrap_or_default();
+        let mut children = Vec::with_capacity(inner.len());
+        let mut below = path.to_vec();
+        for x in inner {
+            below.push(x.id);
+            let local = self.doc.posed_local(&below, x);
+            let child = self.product(products, x.component, &below, depth + 1)?;
+            below.pop();
+            children.push((child, local, x.name.clone()));
+        }
+        if let Some(product) = products.get_mut(at) {
+            product.children = children;
+        }
+        Ok(at)
+    }
 }
 
 /// Read a design file's bytes.

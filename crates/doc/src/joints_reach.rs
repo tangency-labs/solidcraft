@@ -33,6 +33,10 @@ pub struct Reach {
     /// The joints whose values move toward the target (`None`: every joint on its chain). The
     /// other joints of a closed loop they are in follow.
     pub joints: Option<BTreeSet<u64>>,
+    /// The occurrences from the root down to `occurrence`, when it is one of several places its
+    /// component shows in: an occurrence inside a linked subassembly is the same in every
+    /// occurrence of that subassembly. Empty: the first occurrence of each component above it.
+    pub path: Vec<u64>,
 }
 
 /// How a reach ended.
@@ -63,9 +67,23 @@ const STEP_SHARE: f64 = 0.1;
 /// through the start of their link chain; the other values of the loops they are in follow. An
 /// error says why nothing can move.
 pub fn reach(doc: &Document, st: &ModelState, r: &Reach) -> Result<Reached, String> {
-    let asm = &doc.assembly;
+    // In a design with linked subassemblies the joints as the solver takes them, and what it
+    // moves for an occurrence inside a subassembly: the copy a flexible occurrence's joints
+    // move, or the subassembly's occurrence, with the point carried to that one's frame.
+    let expanded = super::placed::expand(doc, st);
+    let (occurrence, carry) = super::placed::stand_in(doc, expanded.as_ref(), r.occurrence, &r.path);
+    let stood;
+    let r = if occurrence == r.occurrence {
+        r
+    } else {
+        let axis = r.axis.map(|(own, to)| (crate::apply_vector(&carry, own), to));
+        stood = Reach { occurrence, point: crate::apply_point(&carry, r.point), axis, path: Vec::new(), ..r.clone() };
+        &stood
+    };
+    let asm = expanded.as_ref().map_or(&doc.assembly, |x| &x.assembly);
+    let start = expanded.as_ref().map(|x| x.start()).unwrap_or_default();
     let vals = joint_values(asm);
-    let built = build(doc, st, &vals, &mut Solution::default());
+    let built = build(doc, asm, st, &vals, &mut Solution::default(), start);
     let tree = &built.tree;
     if tree.fixed.contains_key(&r.occurrence) {
         return Err("it is fixed in place (grounded, or the part its joints are placed from)".into());
@@ -664,7 +682,7 @@ mod tests {
         let mut workspace = super::super::PlacementWorkspace::new(&tree);
         let mut cold = true;
         for axis in [None, Some((Vec3::Y, Vec3::Z))] {
-            let r = Reach { occurrence: 3, point: Vec3::new(1.0, 2.0, 3.0), to: Vec3::new(7.0, 11.0, 13.0), axis, joints: None };
+            let r = Reach { occurrence: 3, point: Vec3::new(1.0, 2.0, 3.0), to: Vec3::new(7.0, 11.0, 13.0), axis, joints: None, path: Vec::new() };
             for x in [0.2, 0.2 + 1e-6, 0.2 - 1e-6, 1.3] {
                 let mut reference = base.clone();
                 reference.get_mut(&1).unwrap()[0] = x;

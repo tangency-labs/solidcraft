@@ -135,11 +135,18 @@ fn property(name: &str, value: &Value, cmd: &str) -> Result<Option<String>> {
     Ok(Some(text))
 }
 
+/// `component.metadata.set`: changes a component's part properties and free properties, all or
+/// nothing, and replies with what changed. The root is refused here: the design's own properties
+/// are `document.metadata.set`'s.
 fn set(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.metadata.set";
     let id = component_id(s, p, cmd)?;
     if id == 0 {
         return Err(bad(cmd, "the root is the design: its properties are document.metadata.set's"));
+    }
+    // Its part properties are the linked design's, which Update Links writes again.
+    if let Some(why) = super::component_link::kept_component_refusal(s, id) {
+        return Err(bad(cmd, why));
     }
     let c = s.doc.components.iter().find(|c| c.id == id).ok_or_else(|| bad(cmd, format!("no component `{id}`")))?;
     let (mut metadata, mut properties) = (c.metadata.clone(), c.properties.clone());

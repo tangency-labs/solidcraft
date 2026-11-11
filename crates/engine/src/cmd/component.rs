@@ -335,6 +335,9 @@ pub(super) fn valid_position(m: &Mat) -> bool {
     solidcraft_doc::is_placement(m)
 }
 
+/// `component.create`: a new, empty component placed once in `parent` (default: the active
+/// component), and made the active one unless `activate` is false. Insert Design makes its
+/// component through this too.
 pub(super) fn new_component(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.create";
     if let Some(params) = p.as_object()
@@ -344,6 +347,9 @@ pub(super) fn new_component(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, format!("unknown parameter `{key}`; accepted parameters: name, parent, parent_path, activate, grounded{hint}")));
     }
     let parent = if p.get("parent").is_some() { component(s, p, "parent", cmd)? } else { s.active_component };
+    if let Some(why) = super::component_link::kept_component_refusal(s, parent) {
+        return Err(bad(cmd, why));
+    }
     let parent_path = if let Some(value) = p.get("parent_path") {
         let path = value
             .as_array()
@@ -421,8 +427,15 @@ fn finish_edit(_s: &mut Session, _p: &Value) -> Result<Value> {
     serde_json::to_value(FinishEditResult::default()).map_err(|e| crate::EngineError::Other(e.to_string()))
 }
 
+/// `component.activate`: makes a component the active one, which new sketches and features go
+/// into, with the exact placement to author in when `occurrence` or `path` names one.
 fn activate(s: &mut Session, p: &Value) -> Result<Value> {
     let id = component(s, p, "component", "component.activate")?;
+    // What is made in the active component is that component's: one a link keeps is its linked
+    // design's, and Update Links would take what was made here with it.
+    if let Some(why) = super::component_link::kept_component_refusal(s, id) {
+        return Err(bad("component.activate", why));
+    }
     let path = if p.get("path").is_some() || p.get("occurrence").is_some() {
         let occurrence = occurrence(s, p, "component.activate")?;
         let path = occurrence_path(s, p, occurrence, "component.activate")?;
@@ -439,6 +452,9 @@ fn activate(s: &mut Session, p: &Value) -> Result<Value> {
     reply(ActivateResult { active: id, param_warnings: Vec::new() })
 }
 
+/// `component.list`: the design and every component with its bodies, features, sketches,
+/// construction planes, occurrences and children, and for a component a link keeps, the linked
+/// component that keeps it. `compact` gives counts in place of names, for a large assembly.
 fn list(s: &mut Session, p: &Value) -> Result<Value> {
     let st = s.model.state();
     let doc = &s.doc;
@@ -474,6 +490,13 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
         occurrences_of.entry(o.component).or_default().push(o);
         children_of.entry(o.parent).or_default().push(o);
     }
+    // The components linked assemblies keep for their designs' own, by the linked component.
+    let kept_by: HashMap<u64, u64> = doc
+        .links
+        .iter()
+        .filter_map(|(top, link)| Some((*top, link.tree.as_ref()?)))
+        .flat_map(|(top, tree)| tree.components.values().map(move |kept| (*kept, top)))
+        .collect();
     let node = |id: u64, name: &str, parent: Option<u64>| {
         let bodies = bodies_of.get(&id).cloned().unwrap_or_default();
         let features = features_of.get(&id).map(Vec::as_slice).unwrap_or_default();
@@ -500,6 +523,7 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
             construction: names(construction),
             occurrences,
             children,
+            link: kept_by.get(&id).copied(),
         }
     };
     let mut out = vec![node(0, &doc.name, None)];
@@ -514,9 +538,15 @@ fn list(s: &mut Session, p: &Value) -> Result<Value> {
     })
 }
 
+/// `component.rename`: a new name for a component, or for the design itself when the component
+/// is the root.
 fn rename(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.rename";
     let id = component(s, p, "component", cmd)?;
+    // Its name is the linked design's, which Update Links writes again.
+    if let Some(why) = super::component_link::kept_component_refusal(s, id) {
+        return Err(bad(cmd, why));
+    }
     let name =
         str_(p, "name").map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128).ok_or_else(|| bad(cmd, "`name` must be 1…128 characters"))?;
     let st = s.model.state();
@@ -539,11 +569,18 @@ fn rename(s: &mut Session, p: &Value) -> Result<Value> {
     reply(RenameResult { component: id, name: name.to_string(), param_warnings: Vec::new() })
 }
 
+/// `component.delete`: removes a component with its subcomponents, occurrences and features.
+/// The design becomes the active component when the active one was among them.
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.delete";
     let id = component(s, p, "component", cmd)?;
     if id == 0 {
         return Err(bad(cmd, "the design itself can't be deleted"));
+    }
+    // A linked design's own component is that design's to remove: deleted here, its bodies
+    // would stay behind and Update Links would bring it back.
+    if let Some(why) = super::component_link::kept_component_refusal(s, id) {
+        return Err(bad(cmd, why));
     }
     let removed = s.doc_mut().remove_component_tree(id).map_err(|e| match e {
         solidcraft_doc::DocError::Invalid(msg) => bad(cmd, msg),
@@ -556,15 +593,37 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     reply(DeleteResult { deleted: gone, features: removed.features, param_warnings: Vec::new() })
 }
 
+/// `component.unlock`: removes the rigid joints that hold a component's contents together, so
+/// that its parts move and take joints one by one. With none to remove it is an error, which
+/// says so when a linked design is what keeps the parts in place.
 fn unlock(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.unlock";
     let id = component(s, p, "component", cmd)?;
     if id == 0 {
         return Err(bad(cmd, "pick a component, not the design"));
     }
-    let gone = s.contents_joints(id);
+    let mut gone = s.contents_joints(id);
+    // A linked assembly's parts stay where its design has them, joints or no joints: the ones
+    // that hold them are the link's to keep, and there is nothing to unlock.
+    let kept: std::collections::BTreeSet<u64> =
+        s.doc.links.values().filter_map(|link| link.tree.as_ref()).flat_map(|tree| tree.occurrences.values().copied()).collect();
+    if !kept.is_empty() {
+        let held: std::collections::BTreeSet<u64> = s.doc.assembly.joints.iter().filter(|j| kept.contains(&j.b.occurrence)).map(|j| j.id).collect();
+        gone.retain(|id| !held.contains(id));
+    }
     if gone.is_empty() {
-        return Err(bad(cmd, "nothing holds this component's contents together"));
+        // The component is a linked assembly, a part of one, or has one inside it.
+        let linked = s.doc.link_keeping_component(id).is_some()
+            || s.doc
+                .links
+                .iter()
+                .any(|(top, link)| link.tree.as_ref().is_some_and(|tree| !tree.occurrences.is_empty()) && s.doc.component_within(*top, id));
+        let why = if linked {
+            "its components are where a linked design has them: Break Link (component.break_link) first"
+        } else {
+            "nothing holds this component's contents together"
+        };
+        return Err(bad(cmd, why));
     }
     let doc = s.doc_mut();
     doc.assembly.joints.retain(|j| !gone.contains(&j.id));
@@ -677,6 +736,9 @@ fn move_sketches(s: &mut Session, p: &Value) -> Result<Value> {
     reply(MoveSketchesResult { sketches: ids, component: to, param_warnings: Vec::new() })
 }
 
+/// `occurrence.copy`: one more occurrence of a component, sharing its contents, placed from the
+/// occurrence given or the component's first: at that one's transform, a pending move included,
+/// or with `in_place` where it is in the world.
 pub(super) fn copy_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "occurrence.copy";
     let selected = if p.get("occurrence").is_some() {
@@ -697,6 +759,11 @@ pub(super) fn copy_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
         occurrence_path(s, p, src.id, cmd)?;
     }
     let parent = if p.get("parent").is_some() { component(s, p, "parent", cmd)? } else { src.parent };
+    // An occurrence a link keeps is its linked design's, and so is what a kept component holds.
+    if let Some(why) = super::component_link::kept_occurrence_refusal(s, src.id).or_else(|| super::component_link::kept_component_refusal(s, parent))
+    {
+        return Err(bad(cmd, why));
+    }
     let t = move_vector(p, "translate", Vec3::ZERO, true, cmd)?;
     let m = if bool_(p, "in_place") == Some(true) {
         placing::in_place(s, &occurrence_path(s, p, src.id, cmd)?, parent, placing::parent_path(p, cmd)?.as_deref(), t, cmd)?
@@ -708,6 +775,8 @@ pub(super) fn copy_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "copy transform exceeds supported numeric range"));
     }
     let id = s.doc_mut().add_occurrence(comp, parent, m)?;
+    // A copy of a flexible occurrence of a linked subassembly is flexible too, in the same pose.
+    super::component_link::copied_occurrence(s, src.id, id)?;
     reply(CopyResult { occurrence: id, component: comp, param_warnings: Vec::new() })
 }
 
@@ -778,6 +847,10 @@ pub(super) fn occurrence_path(s: &Session, p: &Value, id: u64, cmd: &str) -> Res
     Ok(path)
 }
 
+/// `occurrence.move`: moves one occurrence by a translation, a rotation or a matrix, or to an
+/// absolute placement (`to`, `to_matrix`), in its parent's frame or the world's. Refused, with
+/// what to do instead, for a grounded occurrence (unless `move_grounded`) and for one that a
+/// rigid group or a linked subassembly holds in place.
 fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "occurrence.move";
     let id = occurrence(s, p, cmd)?;
@@ -797,6 +870,16 @@ fn move_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
             }
         }
         let name = s.doc.components.iter().find(|c| c.id == group).map(|c| c.name.clone()).unwrap_or_default();
+        // Inside a linked subassembly there is nothing to unlock: the linked design places it.
+        if s.doc.link_keeping_occurrence(id).is_some() {
+            return Err(bad(
+                cmd,
+                format!(
+                    "{} is inside the linked subassembly {name}, which places it: move {name}, or drive the joints of a flexible occurrence of it (joint.drive)",
+                    o.name
+                ),
+            ));
+        }
         return Err(bad(cmd, format!("{} is held in {name} by a rigid group: move {name}, or Unlock Contents (component.unlock) first", o.name)));
     }
     let target = absolute_target(s, p, cmd)?;
@@ -984,6 +1067,8 @@ fn after_joints(s: &mut Session, p: &Value, id: u64, moved: Mat, cmd: &str) -> M
     MoveResult { occurrence: id, transform: now, pending: false, reverted: true, warning: Some(warning), param_warnings: Vec::new() }
 }
 
+/// `occurrence.ground`: grounds or ungrounds an occurrence as `grounded` says, or the other way
+/// from how it is when that is left out.
 fn ground(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "occurrence.ground";
     let id = occurrence(s, p, cmd)?;
@@ -991,6 +1076,10 @@ fn ground(s: &mut Session, p: &Value) -> Result<Value> {
         occurrence_path(s, p, id, cmd)?;
     }
     let want = bool_(p, "grounded");
+    // Grounded, it would hold its whole subassembly to the world: ground that instead.
+    if let Some(why) = super::component_link::kept_occurrence_refusal(s, id) {
+        return Err(bad(cmd, why));
+    }
     let o = s.doc_mut().occurrences.iter_mut().find(|o| o.id == id).ok_or_else(|| bad(cmd, "occurrence"))?;
     o.grounded = want.unwrap_or(!o.grounded);
     let g = o.grounded;

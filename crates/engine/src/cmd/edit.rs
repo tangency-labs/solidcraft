@@ -362,6 +362,8 @@ pub(super) fn feature_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result<u6
     }
 }
 
+/// `timeline.delete`: deletes features, and timeline folders with the features, joints and
+/// folders in them, and reports the features that worked before and fail after it.
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.delete";
     // Resolve every key against the same timeline. A cascade or a repeated key must never
@@ -375,6 +377,9 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     // A folder goes with its features and nested folders, its features in timeline order.
     let (folders, contents) = group_tree(&s.doc, &groups);
     let joints = group_joint_ids(&s.doc, &groups);
+    if let Some(why) = joints.iter().find_map(|joint| super::component_link::linked_joint_refusal(s, *joint)) {
+        return Err(bad(cmd, why));
+    }
     ids.extend(s.doc.features.iter().filter(|f| contents.contains(&f.id)).map(|f| f.id));
     // Features that work now; any of them failing after the delete is reported (a later
     // feature that names a deleted body, #267).

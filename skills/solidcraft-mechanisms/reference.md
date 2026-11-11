@@ -59,6 +59,8 @@ A slider's value grows as b moves along +z of its origin. Give its two origins t
 {"command":"motion.play","params":{"study":"Open","step":5}}
 {"command":"motion.export","params":{"study":"Open","samples":3}}
 {"command":"occurrence.properties","params":{"occurrence":"Wing:1"}}
+{"command":"component.insert_design","params":{"path":"parts/hinge.sc","translate":[0,0,50]}}
+{"command":"component.link_mode","params":{"component":"hinge","occurrence":"hinge:2","flexible":true}}
 ```
 
 - `joint.create` and `joint.as_built` start the joint at its `values` (default 0). A value outside the limits starts at the nearer limit, and the reply's `warnings` say so: the part turned as it was joined.
@@ -109,6 +111,64 @@ A frame holds a panel on a hinge along X at the origin. An actuator runs from a 
 - **Actuator length:** the tip pin turns to `(0, 30 cos θ, 30 sin θ)`, so `L(θ)² = 2500 + 2400 sin θ` and `L(0) = 50`. The stroke is `L(θ) - 50`.
 - `joint.drive {"joint":"Hinge","value":20}`: the stroke is `L(20°) - 50 = 7.6268` mm, and Hinge 2 is -20. `occurrence.properties {"occurrence":"Wing:1"}` puts the panel's centre of mass at (0, 18.281, 8.250), and Wing 2's at (0, -18.281, 8.250).
 - `joint.drive {"joint":"Hinge","value":45}` stops at 27.28 degrees with `stopped_by_loop: {"joint":"Stroke", ...}`: the rod reaches +10 mm where `L(θ) = 60`, at `sin θ = 11/24`, θ = 27.280 degrees.
+
+## Linked subassemblies
+
+`component.insert_design {path, translate?, reuse?, structure?, flexible?}` links a saved design as a component; `"reuse":true` places one already linked again.
+
+- **`"structure":true` links a design with components of its own as a linked subassembly.** Without it, all its bodies go into the one linked component, and `assembly.bom` counts it as one part. With it, its components are components inside the linked component, each with its part properties. `assembly.bom` counts them in every occurrence, and so does `assembly.mass_properties {"every_placement":true}` (without that, the components inside are listed at the first occurrence only, and `warnings` says so; with it, a design of 100000 placements or more is refused). `"flexible":true` keeps the components too. `component.list` gives each of them a `link`: the linked component that keeps it. `component.links` lists the linked components, with `structure` and the `flexible` occurrences.
+- **A linked subassembly's occurrence is rigid by default.** A rigid occurrence shows the saved pose: where the linked design was saved with its components. It moves as one body. None of the linked design's joints are in `joint.list`. A joint made here to one of its components moves the whole occurrence. No joint is added for that.
+- **Flexible is per occurrence.** `component.link_mode {"component":..., "occurrence":..., "flexible":true}` gives that occurrence the linked design's joints. A joint has the name that it has in the linked design, or `<occurrence>: <name>` (such as `hinge:2: Hinge`) when a joint here has that name. `joint.drive` and motion studies then move its components. Without `occurrence`, the command changes every occurrence. A linked design without joints stays rigid, and the reply says so.
+- **Rigid again.** `"flexible":false` removes the occurrence's joints and shows the saved pose. It does not read the linked design's file.
+- **Insert flexible.** `"flexible":true` on `component.insert_design` makes the new occurrence flexible. With `reuse`, the reply has `joints` too.
+- **Each flexible occurrence has its own pose.** Two occurrences of one linked subassembly can have different poses. `occurrence.copy` of a flexible occurrence makes a flexible copy with the same pose.
+- **A joint to a component of a flexible occurrence** is on that component when the linked design's joints move it. A loop through the subassembly then closes with those joints. The joint is on the whole occurrence when they do not move the component: the component that the linked design grounds, or a component with no joint.
+- **A side inside a subassembly** is stored as `{"occurrence": <the subassembly's occurrence>, "inside": [<occurrence ids down to the component>]}`. `joint.list` gives it as `a` and `a_inside` (or `b` and `b_inside`).
+- **Which occurrence.** An inner occurrence's id or name alone means the first occurrence of the subassembly. For another occurrence, give `path` in the joint origin: the occurrence ids from the top of the assembly down to the component. `joint.reach` takes `path` in the same way. `joint.as_built` takes an id or a name only, so it reaches the first occurrence.
+- **Refused joints.** Two components of one rigid occurrence. Two components that a flexible occurrence's joints do not move. A second place of a component that those joints move, when the linked design places it more than once.
+- **Ground it to drive it.** Joints move only what is joined to something grounded. For a flexible occurrence that is not grounded and not joined, `joint.drive` answers `moved: false` and `unconnected` names the occurrence. Run `occurrence.ground` on it, or join it to a grounded component.
+- **The linked design decides.** Here you cannot move, copy, ground, delete or rename a component of a linked subassembly, or change its part properties. You cannot make something inside one, or move a body or a sketch into or out of one. You cannot delete or edit a joint that a flexible occurrence has from the linked design, or change a motion link between two of them. Edit the linked design, save it, and run `component.update_links`.
+- **Break Link.** `component.break_link` keeps the components as ordinary components. It makes every occurrence rigid first.
+- **Features read the saved pose.** A sketch on a face of a flexible occurrence is refused while its pose differs from the saved pose. So is a mirror, pattern or copy of one of its bodies, and any other pick that a feature keeps on a component standing in a pose: a `construct.*` reference, a `sketch.project` edge, an extrude's `to` or `from`. The error says so. Make the occurrence rigid before you pick.
+- **Gears and cams.** The linked design's motion links between carried joints come with them. A gear, rack and pinion or screw keeps its ratio. A cam keeps the follower travel that the linked design worked out: `joint.list` gives that link `carried_cam: true` and a `lift`, with no `coupling`. Change them in the linked design, then run `component.update_links`.
+- **Levels.** A flexible occurrence also carries the joints that its linked design has for the flexible occurrences inside it, level after level. Their names carry the way down, such as `unit:2: hinge:2: Hinge`, and `joint.list` gives it in `a_inside` and `b_inside`. Each has its own pose here. A rigid occurrence on the way keeps everything below it at the saved pose: make each level flexible, the lower ones in their linked designs.
+- **Old links** keep the linked design in one component. `component.link_mode {"component":..., "structure":true}` makes a link keep the linked design's components. A joint that was picked on a face of the component then stays as a fixed frame, and `warnings` names it. When the linked design has no components of its own, `subcomponents` is 0 and `warnings` says so: the link keeps them once the design has some and `component.update_links` reads it again.
+- **Large designs.** A link keeps at most 5,000 components and 20,000 occurrences. With `"structure":true` a larger design is refused. With `"flexible":true` alone it goes into one component, and `warnings` says so.
+
+## Worked example: a hinge as a linked subassembly
+
+A base and an arm, each a design of its own, make a hinge design; a machine places the hinge twice, as a linked subassembly (`"structure":true`). `DIR` stands for a folder the server may write to.
+
+```json
+{"commands":[
+ {"command":"file.new","params":{"name":"base"}},
+ {"command":"solid.box","params":{"length":40,"width":20,"height":5,"body_name":"Base"}},
+ {"command":"document.metadata.set","params":{"values":{"part_number":"BS-1"}}},
+ {"command":"file.save","params":{"path":"DIR/base.sc"}},
+ {"command":"file.new","params":{"name":"arm"}},
+ {"command":"solid.box","params":{"length":30,"width":4,"height":4,"body_name":"Arm"}},
+ {"command":"document.metadata.set","params":{"values":{"part_number":"AR-1"}}},
+ {"command":"file.save","params":{"path":"DIR/arm.sc"}},
+ {"command":"file.new","params":{"name":"hinge"}},
+ {"command":"component.insert_design","params":{"path":"DIR/base.sc"}},
+ {"command":"component.insert_design","params":{"path":"DIR/arm.sc","translate":[0,8,5]}},
+ {"command":"joint.create","params":{"type":"revolute","name":"Hinge","flip":true,"limits":[[-90,90]],"a":{"occurrence":"base","point":[0,10,7],"z":[0,0,1]},"b":{"occurrence":"arm","point":[0,10,7],"z":[0,0,1]}}},
+ {"command":"file.save","params":{"path":"DIR/hinge.sc"}},
+ {"command":"file.new","params":{"name":"machine"}},
+ {"command":"component.insert_design","params":{"path":"DIR/hinge.sc","translate":[0,0,50],"structure":true}},
+ {"command":"component.insert_design","params":{"path":"DIR/hinge.sc","reuse":true,"translate":[0,100,50]}}
+]}
+```
+
+**Expected:**
+- `assembly.bom {}` lists `AR-1` and `BS-1` with `count` 2 each: the machine's two hinges, counted through.
+- `joint.list` has no joints: both hinges are rigid. `joint.drive {"joint":"Hinge","value":90}` is refused, as there is no such joint here.
+- `occurrence.properties {"occurrence":"hinge:1"}` puts the hinge's centre of mass at (19.464, 10, 52.982): the base, 4000 mm3 at (20, 10, 52.5), and the arm, 480 mm3 at (15, 10, 57).
+- `component.link_mode {"component":"hinge","occurrence":"hinge:1","flexible":true}` answers `joints: 1` and `flexible` with the id of `hinge:1`. `joint.list` then has the one joint `Hinge`. Its `a` and `b` are both `hinge:1`, and `a_inside` and `b_inside` name the two components inside it.
+- `joint.drive {"joint":"Hinge","value":90}` answers `moved: true` (`hinge:1` is the design's first occurrence, so it is grounded). The arm turns a quarter turn about Z through (0, 10) of the hinge, its centre to (0, 25, 57), so the centre of mass of `hinge:1` moves to (17.857, 11.607, 52.982). `hinge:2` is rigid and stays as its design was saved: (19.464, 110, 52.982).
+- `component.link_mode {"component":"hinge","occurrence":"hinge:2","flexible":true}` gives `hinge:2` the joint `hinge:2: Hinge`. After `occurrence.ground {"occurrence":"hinge:2","grounded":true}`, `joint.drive {"joint":"hinge:2: Hinge","value":-90}` turns its arm the other way: its centre of mass moves to (17.857, 108.393, 52.982), and `hinge:1` stays where it is. The machine's 4 bodies still measure 2 x (4000 + 480) = 8960 mm3.
+- `arm:1` is in both hinges, so `occurrence.properties {"occurrence":"arm:1"}` is refused: it needs `path`, the occurrence ids from `hinge:1` or `hinge:2` down to it (`component.list` gives them).
+- `component.link_mode {"component":"hinge","flexible":false}` makes both rigid: both are back as the design was saved, and `joint.list` has no joints.
 
 ## At scale: SELENE
 

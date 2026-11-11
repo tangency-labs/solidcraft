@@ -368,9 +368,11 @@ impl Session {
         }
     }
 
-    /// Document with uncaptured occurrence positions applied, without changing saved geometry.
+    /// The document as it is shown, without changing the design: with the occurrence positions
+    /// not captured yet, and with the poses a previewed motion shows in place of the design's
+    /// own ([`Session::pending_poses`]).
     pub fn placed_document(&self) -> std::borrow::Cow<'_, solidcraft_doc::Document> {
-        if self.pending_moves.is_empty() {
+        if self.pending_moves.is_empty() && self.pending_poses.is_none() {
             return std::borrow::Cow::Borrowed(&self.doc);
         }
         let mut doc = (*self.doc).clone();
@@ -379,8 +381,23 @@ impl Session {
                 o.transform = *transform;
             }
         }
+        if self.pending_poses.is_some() {
+            doc.assembly.poses = self.shown_poses().into_owned();
+        }
         std::borrow::Cow::Owned(doc)
     }
+
+    /// The poses the world shows for the copies that flexible occurrences of linked
+    /// subassemblies have of their parts: a previewed motion's ([`Session::pending_poses`]) in
+    /// place of the design's own, in the order lookups search them, whoever listed them. What
+    /// [`Self::placed_document`] has, for a lookup that needs no copy of the design.
+    fn shown_poses(&self) -> std::borrow::Cow<'_, [solidcraft_doc::joints::PlacedPose]> {
+        match &self.pending_poses {
+            Some(poses) => solidcraft_doc::joints::Assembly::poses_in_order(poses),
+            None => std::borrow::Cow::Borrowed(self.doc.assembly.poses.as_slice()),
+        }
+    }
+
     /// The occurrence moves of the design not captured yet: `pending_moves` without the
     /// placements the exploded view shows ([`Session::exploded`]), which are display only. An
     /// entry the exploded view put there and nothing has moved since is left out; one moved since
@@ -410,7 +427,8 @@ impl Session {
     }
 
     /// Resolve only the supplied path, never an exponentially expanded assembly: placed where
-    /// it is shown (uncaptured moves and the exploded view included).
+    /// it is shown (uncaptured moves, the exploded view and the poses a previewed motion shows
+    /// included, as [`Self::placed_document`] has them).
     /// The placement index answers from lookups; the plain walk stays as the fallback and the error reporter.
     pub fn occurrence_placement(&self, path: &[u64]) -> Result<OccurrencePlacement> {
         if !path.is_empty()
@@ -432,14 +450,18 @@ impl Session {
         let mut world = IDENTITY;
         let mut parent_world = IDENTITY;
         let mut leaf = None;
-        for id in path {
+        // Where the world shows a copy: a previewed motion's poses in place of the design's own.
+        let poses = self.shown_poses();
+        for (k, id) in path.iter().enumerate() {
             let i = *index.by_parent_id.get(&(component, *id))?;
             let o = &index.doc.occurrences[i];
             if !index.components.contains(&o.component) {
                 return None;
             }
             parent_world = world;
-            world = mat_mul(&world, self.pending_moves.get(id).unwrap_or(&o.transform));
+            // Inside a flexible occurrence of a linked subassembly: where that occurrence has it.
+            let own = solidcraft_doc::Document::posed_local_among(&poses, path.get(..=k).unwrap_or_default(), o);
+            world = mat_mul(&world, self.pending_moves.get(id).unwrap_or(&own));
             if world.iter().flatten().any(|x| !x.is_finite()) {
                 return None;
             }
@@ -455,7 +477,7 @@ impl Session {
             path: path.to_vec(),
             name: leaf.name.clone(),
             world,
-            local: self.pending_moves.get(&leaf.id).copied().unwrap_or(leaf.transform),
+            local: self.pending_moves.get(&leaf.id).copied().unwrap_or_else(|| solidcraft_doc::Document::posed_local_among(&poses, path, leaf)),
             parent_world,
             grounded: leaf.grounded,
             bodies,
@@ -476,13 +498,26 @@ impl Session {
     /// The plain walk over `doc.occurrences`, kept as the fallback for paths the index can't
     /// answer and as the reference the indexed answers are checked against (#7502).
     pub(crate) fn occurrence_placement_walk(&self, path: &[u64]) -> Result<OccurrencePlacement> {
-        self.occurrence_placement_with(path, &self.pending_moves)
+        self.occurrence_placement_among(path, &self.pending_moves, &self.shown_poses())
     }
 
     /// [`Session::occurrence_placement`] with the occurrences moved by `moves` instead of
     /// `pending_moves` (the design's own, [`Session::uncaptured_moves`], for what reports the
-    /// design's placements). The placement index holds `pending_moves`, so this walks the path.
+    /// design's placements), and in the design's own poses whatever a previewed motion shows.
+    /// The placement index holds `pending_moves`, so this walks the path.
     pub fn occurrence_placement_with(&self, path: &[u64], moves: &std::collections::BTreeMap<u64, Mat>) -> Result<OccurrencePlacement> {
+        self.occurrence_placement_among(path, moves, &self.doc.assembly.poses)
+    }
+
+    /// The walk of `path` with the occurrences moved by `moves`, and with the copies that
+    /// flexible occurrences of linked subassemblies have of their parts in `poses`: the ones
+    /// shown, or the design's own.
+    fn occurrence_placement_among(
+        &self,
+        path: &[u64],
+        moves: &std::collections::BTreeMap<u64, Mat>,
+        poses: &[solidcraft_doc::joints::PlacedPose],
+    ) -> Result<OccurrencePlacement> {
         if path.is_empty() || path.len() > 64 {
             return Err(invalid("occurrence path must contain 1..64 ids"));
         }
@@ -490,7 +525,7 @@ impl Session {
         let mut world = IDENTITY;
         let mut parent_world = IDENTITY;
         let mut seen = std::collections::BTreeSet::new();
-        for id in path {
+        for (k, id) in path.iter().enumerate() {
             if !seen.insert(*id) {
                 return Err(invalid("occurrence path repeats an id"));
             }
@@ -504,7 +539,9 @@ impl Session {
                 return Err(invalid("occurrence path has a missing component"));
             }
             parent_world = world;
-            world = mat_mul(&world, moves.get(id).unwrap_or(&o.transform));
+            // Inside a flexible occurrence of a linked subassembly: where that occurrence has it.
+            let own = solidcraft_doc::Document::posed_local_among(poses, path.get(..=k).unwrap_or_default(), o);
+            world = mat_mul(&world, moves.get(id).unwrap_or(&own));
             if world.iter().flatten().any(|x| !x.is_finite()) {
                 return Err(invalid("occurrence path has a non-finite transform"));
             }
@@ -525,7 +562,7 @@ impl Session {
             path: path.to_vec(),
             name: leaf.name.clone(),
             world,
-            local: moves.get(&leaf.id).copied().unwrap_or(leaf.transform),
+            local: moves.get(&leaf.id).copied().unwrap_or_else(|| solidcraft_doc::Document::posed_local_among(poses, path, leaf)),
             parent_world,
             grounded: leaf.grounded,
             bodies,

@@ -812,7 +812,7 @@ fn a_second_planar_joint_turns_its_part_a_half_turn_to_meet() {
             assert_eq!(r["conflicts"].as_array().map(Vec::len), Some(0), "{label}: {r}");
             assert!(place(&s, "Red", Vec3::ZERO).dist(expected) < 1e-6, "{label}: {:?}", place(&s, "Red", Vec3::ZERO));
             assert_eq!(dof_of(&mut s, "Red"), 1, "{label}");
-            let axes = solidcraft_doc::joints::motion_axes(&s.doc, &s.model.state(), occ(&s, "Red"));
+            let axes = solidcraft_doc::joints::motion_axes(&s.doc, &s.model.state(), occ(&s, "Red"), &[]);
             assert!(axes.len() == 1 && !axes.iter().any(|a| a.angular), "{label}: {axes:?}");
         }
     }

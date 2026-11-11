@@ -438,12 +438,16 @@ fn add_rigid_joints(s: &mut Session, pairs: &[(u64, u64, Mat)]) -> Result<Vec<u6
 
 impl Session {
     /// The component whose contents hold occurrence `occ` where it is: a rigid joint ties it to
-    /// a placement of the component it sits in (an imported assembly's part). `None` when it is
+    /// a placement of the component it sits in (an imported assembly's part), or it is a part
+    /// of a linked assembly, which sits where that assembly's design has it. `None` when it is
     /// free to move on its own.
     pub fn held_by_rigid_group(&self, occ: u64) -> Option<u64> {
         let parent = self.doc.occurrences.iter().find(|o| o.id == occ)?.parent;
         if parent == 0 {
             return None;
+        }
+        if self.doc.link_keeping_occurrence(occ).is_some() {
+            return Some(parent);
         }
         let of_parent = |o: u64| self.doc.occurrences.iter().any(|x| x.id == o && x.component == parent);
         self.doc
@@ -472,11 +476,21 @@ impl Session {
                 .find(|o| o.id == occ)
                 .is_some_and(|o| o.component == component || self.doc.component_within(o.parent, component))
         };
+        // A rigid joint a flexible occurrence of a linked subassembly has from its design is
+        // that design's, not what holds an imported assembly together.
+        let linked: std::collections::BTreeSet<u64> = self
+            .doc
+            .links
+            .values()
+            .filter_map(|link| link.tree.as_ref())
+            .flat_map(|tree| tree.flexible.values())
+            .flat_map(|joints| joints.values().copied())
+            .collect();
         self.doc
             .assembly
             .joints
             .iter()
-            .filter(|j| j.kind == JointKind::Rigid && inside(j.a.occurrence) && inside(j.b.occurrence))
+            .filter(|j| j.kind == JointKind::Rigid && !linked.contains(&j.id) && inside(j.a.occurrence) && inside(j.b.occurrence))
             .map(|j| j.id)
             .collect()
     }

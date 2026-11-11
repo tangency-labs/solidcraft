@@ -1,0 +1,56 @@
+{
+  "ar": {
+    "browser.kept_by_link": "تابع للتصميم المرتبط {name}: غيّره في ذلك التصميم.",
+    "cmd.component_link_mode": "تغيير وضع الارتباط",
+    "settings.insert_keeps_components": "إدراج تصميم يُبقي مكوّنات التصميم المرتبط",
+    "ui.link_keep_components": "الإبقاء على مكوّناته"
+  },
+  "de": {
+    "browser.kept_by_link": "Gehört zum verknüpften Design {name}: dort ändern.",
+    "cmd.component_link_mode": "Verknüpfungsmodus ändern",
+    "settings.insert_keeps_components": "Konstruktion einfügen behält die Komponenten des verknüpften Designs",
+    "ui.link_keep_components": "Komponenten beibehalten"
+  },
+  "en": {
+    "browser.kept_by_link": "Kept by the linked design {name}: change it in that design.",
+    "cmd.component_link_mode": "Change Link Mode",
+    "settings.insert_keeps_components": "Insert Design keeps a linked design's components",
+    "ui.link_keep_components": "Keep Its Components"
+  },
+  "es": {
+    "browser.kept_by_link": "Pertenece al diseño vinculado {name}: cámbielo en ese diseño.",
+    "cmd.component_link_mode": "Cambiar modo de vínculo",
+    "settings.insert_keeps_components": "Insertar Diseño conserva los componentes del diseño vinculado",
+    "ui.link_keep_components": "Conservar sus componentes"
+  },
+  "he": {
+    "browser.kept_by_link": "שייך לתכן המקושר {name}: יש לשנות אותו בתכן הזה.",
+    "cmd.component_link_mode": "שינוי מצב הקישור",
+    "settings.insert_keeps_components": "הוספת תכנון שומרת את רכיבי התכן המקושר",
+    "ui.link_keep_components": "שמירת הרכיבים שלו"
+  },
+  "ja": {
+    "browser.kept_by_link": "リンクされたデザイン {name} の一部です。変更はそのデザインで行ってください。",
+    "cmd.component_link_mode": "リンクモードを変更",
+    "settings.insert_keeps_components": "デザインを挿入でリンクされたデザインのコンポーネントを保持",
+    "ui.link_keep_components": "コンポーネントを保持"
+  },
+  "ko": {
+    "browser.kept_by_link": "연결된 디자인 {name}에 속합니다. 해당 디자인에서 변경하세요.",
+    "cmd.component_link_mode": "링크 모드 변경",
+    "settings.insert_keeps_components": "디자인 삽입에서 연결된 디자인의 구성 요소 유지",
+    "ui.link_keep_components": "구성 요소 유지"
+  },
+  "vi": {
+    "browser.kept_by_link": "Thuộc thiết kế liên kết {name}: hãy thay đổi trong thiết kế đó.",
+    "cmd.component_link_mode": "Đổi chế độ liên kết",
+    "settings.insert_keeps_components": "Chèn thiết kế giữ các cụm chi tiết của thiết kế liên kết",
+    "ui.link_keep_components": "Giữ các cụm chi tiết của nó"
+  },
+  "zh": {
+    "browser.kept_by_link": "属于链接设计 {name}：请在该设计中修改。",
+    "cmd.component_link_mode": "更改链接模式",
+    "settings.insert_keeps_components": "插入设计时保留链接设计的组件",
+    "ui.link_keep_components": "保留其组件"
+  }
+}

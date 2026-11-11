@@ -2071,6 +2071,10 @@ fn occurrence_rows(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], depth: u
     cache.occurrences.insert(path, placement);
 }
 
+/// Draws the Browser row of one placement and acts on what was done to it (fold, eye, activate,
+/// select, drag, drop, menu), then, when it is open, the rows below it: its folders, features,
+/// joints and the placements inside it. `placement` is its cached row, which `occurrence_rows`
+/// holds out of the cache meanwhile.
 fn occurrence_rows_inner(
     app: &mut SolveApp,
     ui: &mut egui::Ui,
@@ -2091,7 +2095,13 @@ fn occurrence_rows_inner(
     let faded = app.session.active_occurrence_path.as_ref().is_some_and(|p| !path.starts_with(p) && !p.starts_with(path));
     // A cut component has a dashed outline until Paste moves it.
     let cut = app.cut.placements.iter().any(|p| p.as_slice() == path);
-    let badges: &[&str] = if placement.grounded { &["pin"] } else { &[] };
+    // A placement a linked design made is locked where that design has it.
+    let badges: &[&str] = match (placement.grounded, placement.kept) {
+        (true, true) => &["pin", "lock"],
+        (true, false) => &["pin"],
+        (false, true) => &["lock"],
+        (false, false) => &[],
+    };
     app.tree.remember(key);
     let appearance = if crate::render_workspace::active(app) {
         let bodies = placement.hover_bodies.get_or_insert_with(|| app.session.occurrence_bodies(path, true).unwrap_or_default());

@@ -472,6 +472,136 @@ the assembly last read them (`changed`). When a file can't be reached it also gi
 the part's bodies only: its timeline, parameters and sheet-metal data (flat pattern, bend
 table) stay in the part's own design.
 
+A linked design that has components of its own can come in as a **linked subassembly**. As
+shipped, **Insert Design** puts all its bodies into the one linked component. Turn on
+Preferences › Design › Linked designs › **Insert Design keeps a linked design's components**
+to link it as a subassembly, or choose **Keep Its Components** in the linked component's menu.
+The components of the linked design then become components inside the linked
+component. Each keeps its name and its part properties. A component that the linked design
+places several times is one component here, with one occurrence for each place. The Browser
+shows these components under the linked component and marks them with a lock. The bill of
+materials counts them at any depth. An assembly with two occurrences of a linked subassembly
+lists each of its components twice. `assembly.mass_properties` lists the components inside a
+subassembly at its first occurrence only, with a warning, as it does for any subassembly that
+is placed more than once. With `every_placement: true` it lists and weighs them in each
+occurrence. A further occurrence is in the rigid groups as the first one is: what a joint moves
+there is a group of its own. A design with 100,000 placements or more is refused with
+`every_placement: true`, because its list would not be complete.
+
+The linked design decides what is inside a linked subassembly. In this design you cannot do
+these things to one of its components:
+
+- move, copy, ground, delete or unlock it on its own;
+- rename it or change its part properties;
+- make a component, a sketch or a feature inside it;
+- move a body or a sketch into it or out of it.
+
+To change something, open the linked design (**Open Linked Design** in the component's menu),
+save it, and use **Update Links** here. **Update Links** adds the components that the linked
+design has gained. It removes the components that the linked design has lost. A joint that was
+made to a removed component is removed too, and the reply names it. The other components keep
+their occurrences and the joints made to them. An occurrence that the linked design has moved
+into another of its components keeps the joints and joint origins made to it too, also those
+on one of its origin planes or axes. A gear or a cam of this design keeps the round face or
+the tip picked on it. **Break Link** keeps the components and makes them ordinary components
+of this design.
+
+Each occurrence of a linked subassembly is **rigid** or **flexible**. The menu of the
+occurrence changes this at any time. The **saved pose** is where the linked design was saved
+with its components.
+
+- A **rigid** occurrence shows the saved pose and moves as one body. The joints of the linked
+  design are not joints of this design. A joint from this design to one of its components
+  moves the whole occurrence. You cannot join two components of one rigid occurrence.
+- A **flexible** occurrence (**Make Flexible**, `component.link_mode {component, occurrence,
+  flexible: true}`) has the joints of the linked design as joints of this design. **Drive
+  Joints** and motion studies then move its components. Each flexible occurrence has its own
+  pose. For example, two occurrences of one gas strut can have different lengths. **Make
+  Rigid** removes the joints and shows the saved pose again. It does not need the file of the
+  linked design.
+
+A new occurrence is rigid. It is flexible when you ask for that (`flexible: true`), or when
+the preference **A new occurrence of a linked design with joints is flexible** is on. A linked
+design without joints always gives rigid occurrences.
+
+The joints of a flexible occurrence:
+
+- **Names.** A joint has the name that it has in the linked design. When a joint here already
+  has that name, the name of the occurrence comes first (`hinge:2: Hinge`).
+- **Owner.** The joints belong to the linked design. You cannot delete them or edit them here,
+  and you cannot add or remove a motion link between two of them. **Update Links** writes them
+  again and keeps their values.
+- **Joints from this design.** A joint to a component that the linked design's joints move is
+  on that component. A joint to any other component of the occurrence moves the whole
+  occurrence. You cannot join two components that those joints do not move.
+- **A component in several places.** When the linked design places a moved component in more
+  than one place, a joint from this design can go to its first place only.
+- **Move.** **Move** and a drag in the view act on the occurrence that you picked. The
+  **Move** handles go when you pick the component in another occurrence: start **Move** again
+  there. `joint.reach` takes `path` for that: the occurrence ids from the top of the assembly
+  down.
+
+More about flexible occurrences:
+
+- **Copies.** **Copy** and **Paste** of a flexible occurrence make a flexible copy in the same
+  pose, with its own joints. **Paste New** makes ordinary components at the saved pose. A
+  pattern makes rigid occurrences.
+- **Ground.** Joints move only what is grounded or joined to something grounded. Ground the
+  occurrence, or join it to a grounded component, before you drive its joints. **Drive Joints**
+  names the occurrence when it is not connected.
+- **Repeated parent.** When the occurrence is inside a component that has several occurrences,
+  it shows the same pose in each of them.
+- **Features read the saved pose.** A feature that reads another component reads a flexible
+  occurrence at the saved pose. You cannot put a sketch on a face of a flexible occurrence, or
+  mirror, pattern or copy one of its bodies, while its pose differs from the saved pose. The
+  same holds for the other picks that a feature keeps on a component standing in a pose: an
+  edge for a construction axis, an edge projected into a sketch, the face an extrude runs to.
+  The command says so. Make the occurrence rigid before you pick there.
+- **Levels.** A flexible occurrence also has the joints that its linked design has for the
+  flexible occurrences inside it, at every level. Each of those has its own pose here too. For
+  example, a machine with two units of two hinges each can have its four hinges at four
+  angles. A rigid occurrence on the way shows everything below it in the saved pose. To move
+  a mechanism two levels down, make each level flexible: the lower levels in their linked
+  designs, and the top level here.
+- **Gears and cams.** The motion links between the joints of the linked design come with
+  them. A gear, a rack and pinion or a screw keeps its ratio, and a cam keeps the follower
+  travel that the linked design worked out. You change them in the linked design. **Update
+  Links** then reads the new ratio or travel.
+- **Whole occurrences.** An exploded view moves a linked subassembly as one occurrence, rigid
+  or flexible. It has no steps for the components inside it. URDF export writes the pose that
+  is shown, without the joints of the linked design.
+- **Break Link** makes every occurrence rigid first.
+
+**Keep Its Components** changes a link that puts all bodies into the one linked component. The
+menu offers it on every such link. A
+joint that was picked on a face of that component then stays where it is, as a fixed frame, and
+the reply names it. Pick its face again to make it follow the face.
+
+When the linked design has no components of its own, **Keep Its Components** says so in the
+status line. Nothing else changes until the design has some: **Update Links** keeps them from
+then on.
+
+Preferences › Design › Linked designs set how **Insert Design** links a design.
+**Insert Design keeps a linked design's components** makes a linked subassembly. It is off as
+shipped: all bodies go into the one linked component, as in earlier versions. **A new
+occurrence of a linked design with joints is flexible** is off as shipped too. It needs the
+first one, and the page greys it until that one is on. In scripts, use `structure` and
+`flexible` on `component.insert_design` (both
+default to `false`, and `flexible` keeps the components as `structure` does),
+`component.relink` and `component.link_mode`. `component.link_mode` takes
+`occurrence` for one occurrence. Without `occurrence`, the command changes every occurrence.
+`component.links` reports `structure` and the flexible occurrences of each link. A linked
+design with more than 5,000 components or 20,000 occurrences is too large for a link to keep.
+With `structure: true` it is refused. With `flexible` alone it goes into one component, and
+the reply says so.
+
+**Extract to File** and **Replace with Link** still make links of the earlier kind.
+**Replace with Link** and `component.copies` compare a component body for body with such a
+link. They refuse a link that keeps its design's components, and the message says how to go
+on: `component.link_mode` with `structure: false`, replace, then `structure: true` again.
+Given a design file (`path`), **Replace with Link** uses a link of the earlier kind to that
+file when this design has one.
+
 To edit a linked part where it sits, double-click it, in the Browser or on one of its faces in
 the view, or choose **Edit in Place** from its menu. Its design opens in a tab of its own with the
 rest of the assembly drawn faded around it, at the placement you picked, and the part's own

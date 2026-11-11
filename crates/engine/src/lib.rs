@@ -400,6 +400,7 @@ struct WorldCache {
     doc: Arc<Document>,
     model: Arc<solidcraft_doc::ModelState>,
     pending_moves: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
+    pending_poses: Option<Vec<solidcraft_doc::joints::PlacedPose>>,
     active_component: u64,
     active_occurrence_path: Option<Vec<u64>>,
     /// The placed model, or why it could not be placed (kept too, so a model that cannot be
@@ -416,10 +417,14 @@ struct WorldCache {
 pub(crate) type BodyFrames = Arc<Vec<(String, String, solidcraft_doc::Mat)>>;
 
 impl WorldCache {
+    /// Whether this placed model is still the one `session` shows for `model`: the same design and
+    /// model, by identity, with the same pending moves, pending poses and active placement.
+    /// Whatever the placed model is made from has to be compared here, or a stale one is shown.
     fn matches(&self, session: &Session, model: &Arc<solidcraft_doc::ModelState>) -> bool {
         Arc::ptr_eq(&self.doc, &session.doc)
             && Arc::ptr_eq(&self.model, model)
             && self.pending_moves == session.pending_moves
+            && self.pending_poses == session.pending_poses
             && self.active_component == session.active_component
             && self.active_occurrence_path == session.active_occurrence_path
     }
@@ -553,6 +558,14 @@ pub struct Session {
     /// not a move of the design's, so the placements the design reports and Capture Position
     /// keeps leave it out ([`Session::uncaptured_moves`]).
     pub exploded: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
+    /// The poses shown in place of the design's own (`Assembly::poses`) for the copies that
+    /// flexible occurrences of linked subassemblies have of their parts: display only, as an
+    /// entry of `pending_moves` is for an occurrence. Such a copy is no occurrence, so no move
+    /// can show it. A dialog that previews a motion takes them from the copy of the design it
+    /// solved on, and puts `None` back when it closes. `None` shows the design's own and costs
+    /// nothing. Not saved, no undo step, and not handed to a [`Session::scratch`] copy, which
+    /// solves and shows its own design.
+    pub pending_poses: Option<Vec<solidcraft_doc::joints::PlacedPose>>,
     /// Stops the work computing off the window thread for this design, shared with its copies.
     stop: solidcraft_kernel::Stop,
     /// A copy of a design ([`Session::scratch`]), sharing its token.
@@ -848,6 +861,7 @@ impl Session {
             active_occurrence_path: None,
             pending_moves: Default::default(),
             exploded: Default::default(),
+            pending_poses: None,
             world_cache: Default::default(),
             joints_settled: None,
             occurrence_visibility_cache: Default::default(),
@@ -1186,19 +1200,9 @@ impl Session {
         let placed = self.world_cache.lock().ok().and_then(|c| c.as_ref().map(|c| c.placed.clone())).unwrap_or_default();
         // Taken out while placing, so a scratch copy of the session sharing it never waits.
         let mut reuse = placed.lock().map(|mut p| std::mem::take(&mut *p)).unwrap_or_default();
-        let w = {
-            if self.pending_moves.is_empty() {
-                solidcraft_doc::world_state_reusing(&self.doc, &st, &mut reuse)
-            } else {
-                let mut d = (*self.doc).clone();
-                for o in &mut d.occurrences {
-                    if let Some(m) = self.pending_moves.get(&o.id) {
-                        o.transform = *m;
-                    }
-                }
-                solidcraft_doc::world_state_reusing(&d, &st, &mut reuse)
-            }
-        };
+        // The design as it is shown: with the positions not captured yet and the poses a
+        // previewed motion shows (`placed_document`; the design itself when there is neither).
+        let w = solidcraft_doc::world_state_reusing(&self.placed_document(), &st, &mut reuse);
         if let Ok(mut p) = placed.lock() {
             *p = reuse;
         }
@@ -1208,6 +1212,7 @@ impl Session {
                 doc: self.doc.clone(),
                 model: st,
                 pending_moves: self.pending_moves.clone(),
+                pending_poses: self.pending_poses.clone(),
                 active_component: self.active_component,
                 active_occurrence_path: self.active_occurrence_path.clone(),
                 world: w.as_ref().map(Arc::clone).map_err(ToString::to_string),
@@ -1713,6 +1718,8 @@ impl Session {
         }
         let mapped = if outermost {
             frames::forget_picks();
+            // A pick a feature would keep must be on a body that stands as its design has it.
+            frames::refuse_posed_picks(self, spec.id, params)?;
             frames::to_local(self, spec.id, params)?
         } else {
             None
@@ -1763,6 +1770,22 @@ impl Session {
             Ok(r) => Ok(r),
             Err(EngineError::BadParams { cmd, msg }) if cmd.is_empty() => Err(EngineError::BadParams { cmd: spec.id.to_string(), msg }),
             Err(e) => Err(e),
+        };
+        // What a link keeps for its linked design's own is that design's to change. A command
+        // that put something of this design into it is refused, whichever command it was: the
+        // design goes back to what it was, as after any other error.
+        let r = match r {
+            Ok(done) if outermost && spec.undoable && self.replacements == replacements && !Arc::ptr_eq(&self.doc, &before.doc) => {
+                match cmd::kept_changed(&before.doc, &self.doc) {
+                    Some(why) => {
+                        // Where new geometry goes is not in the design: it goes back here.
+                        (self.active_component, self.active_occurrence_path) = active_before.clone();
+                        Err(EngineError::BadParams { cmd: spec.id.to_string(), msg: why })
+                    }
+                    None => Ok(done),
+                }
+            }
+            r => r,
         };
         // New/open/recover can replace the Session. Device ownership belongs to the host,
         // so its capability metadata survives those document lifecycle commands.
@@ -1999,6 +2022,8 @@ impl Session {
             active_occurrence_path: self.active_occurrence_path.clone(),
             pending_moves: self.pending_moves.clone(),
             exploded: self.exploded.clone(),
+            // A copy solves and shows its own design, not the poses this one only shows.
+            pending_poses: None,
             world_cache: std::sync::Mutex::new(self.world_cache.lock().ok().and_then(|cache| cache.clone())),
             joints_settled: self.joints_settled.clone(),
             // Read again by the copy: handing it these references measured more peak memory on a

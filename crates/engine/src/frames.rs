@@ -161,14 +161,28 @@ fn pt(p: Vec3) -> Value {
 
 /// The frame of the body a world point lies on (the nearest), or of the named body, with the
 /// bodies whose faces meet there: the first is the body under the point, and more than one
-/// means the pick is ambiguous.
-fn frame_at(s: &Session, world: &solidcraft_doc::ModelState, f: &Frames, p: Vec3, body: Option<&str>) -> Option<(Mat, Vec<String>)> {
+/// means the pick is ambiguous. `shown`, when asked for, takes the same bodies by the names the
+/// world gives their placements (`Arm (hinge:2)`): a body placed twice is one body, and two
+/// placements.
+fn frame_at(
+    s: &Session,
+    world: &solidcraft_doc::ModelState,
+    f: &Frames,
+    p: Vec3,
+    body: Option<&str>,
+    shown: Option<&mut Vec<String>>,
+) -> Option<(Mat, Vec<String>)> {
     if let Some(b) = body
-        && let Some((_, own, m)) = f.bodies(s).iter().find(|(w, _, _)| w == b)
+        && let Some((name, own, m)) = f.bodies(s).iter().find(|(w, _, _)| w == b)
     {
+        if let Some(shown) = shown {
+            shown.push(name.clone());
+        }
         return Some((*m, vec![own.clone()]));
     }
     let mut best: Option<(f64, Mat, Vec<String>)> = None;
+    // The placements as near the point as the nearest one, kept when `shown` asks for them.
+    let mut placements: Vec<String> = Vec::new();
     for wb in &world.bodies {
         let Some((_, own, m)) = f.bodies(s).iter().find(|(w, _, _)| *w == wb.name) else { continue };
         let mesh = wb.mesh();
@@ -191,14 +205,23 @@ fn frame_at(s: &Session, world: &solidcraft_doc::ModelState, f: &Frames, p: Vec3
         // make the pick ambiguous. The same body placed twice is one body, not a tie.
         let as_near = best.as_ref().is_some_and(|(bd, _, _)| (d - *bd).abs() <= 1e-8);
         if as_near {
+            if shown.is_some() {
+                placements.push(wb.name.clone());
+            }
             if let Some((_, _, names)) = &mut best
                 && !names.contains(own)
             {
                 names.push(own.clone());
             }
         } else if best.as_ref().is_none_or(|(bd, _, _)| d < *bd) {
+            if shown.is_some() {
+                placements = vec![wb.name.clone()];
+            }
             best = Some((d, *m, vec![own.clone()]));
         }
+    }
+    if let Some(shown) = shown {
+        *shown = placements;
     }
     best.map(|(_, m, names)| (m, names))
 }
@@ -226,10 +249,13 @@ struct Mapper<'a> {
 }
 
 impl Mapper<'_> {
+    /// A picked world point as the command is to see it: in the frame of the body under it (the
+    /// body named, when one is; the active component's frame when none is there), or in the
+    /// sketch's frame for `Here`. `None` when `v` is not a point or stays as it is.
     fn pick(&mut self, v: &Value, body: Option<&str>) -> Option<Value> {
         // `[x, y, z]` or `{x, y, z}`: a direction given with it then turns with the picked body.
         let p = crate::params::vec3(v)?;
-        let under = if self.here { None } else { frame_at(self.s, self.world, &self.f, p, body) };
+        let under = if self.here { None } else { frame_at(self.s, self.world, &self.f, p, body, None) };
         let m = if self.here { self.f.sketch } else { under.as_ref().map(|(m, _)| *m).unwrap_or(self.f.active) };
         self.first.get_or_insert(m);
         let out = self.local_point(&m, p);
@@ -490,6 +516,150 @@ impl Drop for Nested {
     fn drop(&mut self) {
         DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
     }
+}
+
+/// What a command is told when a pick it would keep as a reference is on a body that the world
+/// shows in a pose.
+pub(crate) const POSED_PICK: &str = "that pick is on a component inside a flexible occurrence of a linked subassembly that does not stand as its design has it: make the occurrence rigid (component.link_mode) first";
+
+/// A pick a feature keeps as a reference, as the command gives it in the world: the point and
+/// the body named with it.
+type KeptPick<'a> = (Vec3, Option<&'a str>);
+
+/// The keys a reference to the model is wrapped in: `{face: [x, y, z]}` and so on.
+const WRAPPED: [&str; 4] = ["face", "edge", "vertex", "on_edge"];
+
+/// The commands whose wrapped picks become references of a feature: construction geometry,
+/// sketches, solids and surfaces. Joints, measurements and appearances take wrapped picks too,
+/// and are right to find a posed part where it is shown.
+const KEEPING: [&str; 4] = ["construct.", "sketch.", "solid.", "surface."];
+
+/// How deep a command's parameters are searched for picks (a reference is a few levels down).
+const MAX_PICK_DEPTH: usize = 8;
+
+/// The parameters that are a bare point on the object a feature runs to or from (To Object,
+/// From Object).
+fn object_points(id: &str) -> &'static [&'static str] {
+    match id {
+        "solid.extrude" => &["to", "from"],
+        "solid.revolve" => &["to"],
+        _ => &[],
+    }
+}
+
+/// The wrapped picks in `value`, at any depth: an object's `face`, `edge`, `vertex` or `on_edge`
+/// that holds a point, with the `body` the object names. A reference given back as it was saved
+/// (`{type, at, name}`) is not a new pick.
+fn wrapped<'a>(value: &'a Value, depth: usize, out: &mut Vec<KeptPick<'a>>) {
+    if depth > MAX_PICK_DEPTH || out.len() >= MAX_PICKS {
+        return;
+    }
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                wrapped(item, depth + 1, out);
+            }
+        }
+        Value::Object(fields) => {
+            let body = fields.get("body").and_then(Value::as_str);
+            for (key, inner) in fields {
+                match vec3(inner) {
+                    Some(p) if WRAPPED.contains(&key.as_str()) => out.push((p, body)),
+                    _ => wrapped(inner, depth + 1, out),
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The picks of command `id` that a feature keeps and reads where the design has the body
+/// (`Document::placements_as_designed`), from its parameters as given, in the world:
+/// - what a sketch projects, intersects or includes (the table's `Here`), read in the sketch's
+///   frame against the model as the design places it;
+/// - the object an extrude or a revolve runs to or from ([`object_points`]);
+/// - every wrapped reference of a command that makes construction geometry, sketches, solids or
+///   surfaces ([`KEEPING`]): construction references, model axes, reference edges.
+///
+/// Not the picks the table sends into the frame of the body picked (`Pick`, `Picks`, `Plane`):
+/// those go through the placement shown and are found on the body itself, wherever it stands.
+/// Nor the face a sketch or a canvas goes on (`HerePlane`), which is captured exactly and
+/// refuses for itself (`cmd::sketch::face::capture`).
+fn kept_picks<'a>(id: &str, params: &'a Value, out: &mut Vec<KeptPick<'a>>) {
+    let Some(given) = params.as_object() else { return };
+    let keys = table(id);
+    let keeping = KEEPING.iter().any(|family| id.starts_with(family));
+    let body = given.get("body").and_then(Value::as_str);
+    for (key, value) in given {
+        match keys.iter().find(|(k, _)| *k == key.as_str()).map(|(_, kind)| *kind) {
+            Some(Pick | Picks | Plane | Body | HerePlane) => {}
+            Some(Here) if id.starts_with("sketch.") => match vec3(value) {
+                // A bare point is the pick itself, on the body the command names beside it.
+                Some(p) => out.push((p, body)),
+                None => wrapped(value, 0, out),
+            },
+            _ if object_points(id).contains(&key.as_str()) => out.extend(vec3(value).map(|p| (p, None))),
+            _ if keeping => wrapped(value, 0, out),
+            _ => {}
+        }
+    }
+}
+
+/// Refuse a command that would keep, as a reference, a pick on a body the world shows in a
+/// pose. A flexible occurrence of a linked subassembly shows its own copy of the occurrences
+/// inside it where its joints stand (`Assembly::poses`), while a feature reads every body where
+/// the design has it: the reference would be looked for where the body is not shown, and miss
+/// it or find another. Asked once, for the outermost command, before its picks are mapped:
+/// every one of them is still where it was picked.
+///
+/// A pick is refused when every placement that has a face there is posed
+/// (`Document::path_is_posed`): one that also lies on a body standing as designed means that
+/// body to the feature. A model that cannot be placed is the error.
+pub fn refuse_posed_picks(s: &Session, id: &str, params: &Value) -> crate::Result<()> {
+    // Most designs have no pose: they pay nothing.
+    if s.doc.assembly.poses.is_empty() && s.pending_poses.is_none() {
+        return Ok(());
+    }
+    // Edit Feature hands the feature's own command its parameters: those hold the picks. For a
+    // feature of the design itself they are in the world; inside a component they are in that
+    // component's frame, and are left alone.
+    let (edited, given) = if id == "timeline.redefine" {
+        let key = params.get("feature").and_then(|v| v.as_str().map(str::to_string).or_else(|| v.as_u64().map(|id| id.to_string())));
+        let in_root = key.and_then(|key| s.doc.find_feature(&key)).is_some_and(|feature| feature.component == 0);
+        match (params.get("command").and_then(Value::as_str), params.get("params")) {
+            (Some(command), Some(inner)) if in_root => (command, inner),
+            _ => return Ok(()),
+        }
+    } else {
+        (id, params)
+    };
+    let mut kept = Vec::new();
+    kept_picks(edited, given, &mut kept);
+    if kept.is_empty() {
+        return Ok(());
+    }
+    let world = s.world_state()?;
+    let f = frames(s);
+    // The design as it is shown, and every placed body with its occurrence path, worked out for
+    // the first pick that is on a body.
+    let shown_design = s.placed_document();
+    let mut placed = None;
+    for (point, body) in kept {
+        let mut shown = Vec::new();
+        frame_at(s, &world, &f, point, body, Some(&mut shown));
+        if shown.is_empty() {
+            continue;
+        }
+        let placed = placed.get_or_insert_with(|| shown_design.body_frames_with_source(&s.model.state()));
+        let posed = |name: &String| {
+            let path = placed.iter().find(|(shown_as, ..)| shown_as == name).map(|(_, _, _, path, _)| path);
+            path.is_some_and(|path| shown_design.path_is_posed(path))
+        };
+        if shown.iter().all(posed) {
+            return Err(crate::params::bad(id, POSED_PICK));
+        }
+    }
+    Ok(())
 }
 
 /// `params` with world picks mapped into component frames (`None`: nothing to change). A model

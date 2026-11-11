@@ -1152,6 +1152,14 @@ preference_settings! {
     /// Insert Design lists the designs open in other tabs, each inserted with one click, then
     /// Browse… for a file (#8570). Off: it opens the file picker at once, as before.
     insert_lists_open_designs: bool = true, PAGE_DESIGN => check_id("settings.insert_lists_open_designs");
+    /// Insert Design keeps a linked design's own components as components inside the linked
+    /// one, so a linked assembly is a subassembly whose components the bill of materials counts
+    /// (#5526). Off, as shipped: every body goes into the one linked component, as before.
+    insert_keeps_components: bool = false, PAGE_DESIGN => check_id("settings.insert_keeps_components");
+    /// A new occurrence of a linked design that has joints is flexible: its joints are joints of this design
+    /// too, so its components move by them. Off: rigid, it moves as one. Either can be changed
+    /// afterwards from the linked component's menu.
+    insert_flexible: bool = false, PAGE_DESIGN => check_id("settings.insert_flexible");
     /// Dragging a part a ball joint holds to a part fixed in place turns it like a trackball: by
     /// the smallest turn about the joint, on a sphere at least the part's size (`joint_drag`,
     /// #13262). Off: the grabbed point goes to the pointer and the part may spin about it, as
@@ -6459,6 +6467,30 @@ mod tests {
         assert_eq!(h.app.preferences.stand_up_unknown, StandUpUnknown::Note);
     }
 
+    /// Insert Design brings a linked design's joints only with its components
+    /// (`linked_source::insert_design_options`), so the second of the two preferences waits for
+    /// the first: greyed, a click on it changes nothing until the first is on.
+    #[test]
+    fn design_flexible_insert_waits_for_the_linked_designs_components() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"language":"en","open":"Design"}));
+        let click = |h: &mut crate::scenario::Harness, label: &str, handle: &str| {
+            h.app.prefs_window.shell.filter = label.into();
+            h.frames(5);
+            super::reveal_preference(h, handle);
+            h.step(&json!({"click":{"handle":handle}})).unwrap();
+        };
+        let (keeps, flexible) = ("Insert Design keeps a linked design's components", "A new occurrence of a linked design with joints is flexible");
+        assert!(!h.app.preferences.insert_keeps_components && !h.app.preferences.insert_flexible, "both are off as shipped");
+        click(&mut h, flexible, "prefs:insert_flexible");
+        assert!(!h.app.preferences.insert_flexible, "greyed while a linked design comes in as one component");
+        click(&mut h, keeps, "prefs:insert_keeps_components");
+        assert!(h.app.preferences.insert_keeps_components);
+        click(&mut h, flexible, "prefs:insert_flexible");
+        assert!(h.app.preferences.insert_flexible, "offered once the components are kept");
+    }
+
     #[test]
     fn tools_ghost_and_pointer_tiles_edit_only_their_state_and_preserve_transactions() {
         for theme in ["light", "dark"] {
@@ -6531,6 +6563,9 @@ mod tests {
         assert!(!h.app.preferences.extrude_view_isometric && !h.app.preferences.extrude_view_return);
     }
 
+    /// Each preference listed is reset by the Reset of the page that owns it and by no other
+    /// page's: set away from its default, it is back at the default only after its own page was
+    /// reset.
     #[test]
     fn moved_preferences_reset_only_on_their_new_page() {
         use super::*;
@@ -6548,6 +6583,8 @@ mod tests {
             ("update_changed_links", json!(false), PAGE_DESIGN),
             ("double_click_components", json!(false), PAGE_DESIGN),
             ("insert_lists_open_designs", json!(false), PAGE_DESIGN),
+            ("insert_keeps_components", json!(true), PAGE_DESIGN),
+            ("insert_flexible", json!(true), PAGE_DESIGN),
             ("theme", json!("light"), PAGE_APPEARANCE),
             ("ui_scale", json!(1.25), PAGE_APPEARANCE),
             ("ui_font", json!("test font"), PAGE_APPEARANCE),

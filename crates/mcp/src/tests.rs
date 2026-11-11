@@ -3015,6 +3015,74 @@ fn mechanisms_skill_example_moves_as_documented() {
     assert!(value(&list, "Stroke") <= 10.0 + 1e-6 && (value(&list, "Stroke") - stroke(hinge)).abs() < 1e-6, "{list}");
 }
 
+/// The second worked example in `skills/solidcraft-mechanisms/reference.md`: a hinge design
+/// placed twice in a machine comes in as two rigid occurrences whose components the bill of
+/// materials counts; each made flexible, it has the hinge's joint for itself and its own pose.
+#[test]
+fn mechanisms_skill_linked_subassembly_example_moves_as_documented() {
+    let doc = include_str!("../../../skills/solidcraft-mechanisms/reference.md");
+    let section = doc.find("## Worked example: a hinge as a linked subassembly").expect("the reference has the linked subassembly example");
+    let start = section + doc[section..].find("{\"commands\":[").expect("the example's commands");
+    let end = start + doc[start..].find("```").expect("the example's code block ends");
+    let dir = solidcraft_engine::io::vfs::temp_dir().join(format!("solidcraft-mcp-linked-example-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let folder = dir.to_string_lossy().replace('\\', "/");
+    let example: Value = serde_json::from_str(&doc[start..end].replace("DIR", &folder)).expect("the example is JSON");
+    let mut s = server();
+    tool(&mut s, "batch", example);
+    let exec = |s: &mut Server, command: &str, params: Value| tool(s, "execute", json!({"command": command, "params": params}));
+    let centre = |p: &Value| -> Vec<f64> { p["total"]["center_of_mass"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect() };
+    let hinge = |s: &mut Server, occurrence: &str| centre(&exec(s, "occurrence.properties", json!({"occurrence": occurrence})));
+    // What the reference states, to its three decimals.
+    let stated = |got: &[f64], want: [f64; 3]| got.iter().zip(want).all(|(g, w)| (g - w).abs() < 5e-4);
+    let volume = |s: &mut Server| exec(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
+    let names = |s: &mut Server| -> Vec<String> {
+        exec(s, "joint.list", json!({}))["joints"].as_array().unwrap().iter().map(|j| j["name"].as_str().unwrap().to_string()).collect()
+    };
+    const SAVED: [f64; 3] = [19.464, 10.0, 52.982];
+
+    // The machine's two hinges, counted through; both rigid, as the design was saved.
+    let bom = exec(&mut s, "assembly.bom", json!({}));
+    let rows: Vec<(&str, u64)> =
+        bom["rows"].as_array().unwrap().iter().map(|r| (r["part_number"].as_str().unwrap(), r["count"].as_u64().unwrap())).collect();
+    assert_eq!(rows, [("AR-1", 2), ("BS-1", 2)], "{bom}");
+    assert!((volume(&mut s) - 8960.0).abs() < 1e-6);
+    assert!(names(&mut s).is_empty());
+    let saved = hinge(&mut s, "hinge:1");
+    assert!(stated(&saved, SAVED), "{saved:?}");
+    let refused = raw_tool(&mut s, "execute", json!({"command": "occurrence.properties", "params": {"occurrence": "arm:1"}}));
+    assert!(refused["result"]["content"][0]["text"].as_str().is_some_and(|t| t.contains("`path`")), "the arm is in both hinges: {refused}");
+
+    // The first flexible: the hinge's own joint, for that occurrence, and nothing else.
+    let mode = exec(&mut s, "component.link_mode", json!({"component": "hinge", "occurrence": "hinge:1", "flexible": true}));
+    assert_eq!((mode["joints"].clone(), mode["flexible"].as_array().map(Vec::len)), (json!(1), Some(1)), "{mode}");
+    assert_eq!(names(&mut s), ["Hinge"]);
+    let driven = exec(&mut s, "joint.drive", json!({"joint": "Hinge", "value": 90}));
+    assert_eq!(driven["moved"], true, "{driven}");
+    let (one, two) = (hinge(&mut s, "hinge:1"), hinge(&mut s, "hinge:2"));
+    assert!(stated(&one, [17.857, 11.607, 52.982]), "{one:?}");
+    assert!(stated(&two, [19.464, 110.0, 52.982]), "the rigid one stays as saved: {two:?}");
+
+    // The second flexible too, in a pose of its own.
+    exec(&mut s, "component.link_mode", json!({"component": "hinge", "occurrence": "hinge:2", "flexible": true}));
+    assert_eq!(names(&mut s), ["Hinge", "hinge:2: Hinge"]);
+    exec(&mut s, "occurrence.ground", json!({"occurrence": "hinge:2", "grounded": true}));
+    let driven = exec(&mut s, "joint.drive", json!({"joint": "hinge:2: Hinge", "value": -90}));
+    assert_eq!(driven["moved"], true, "{driven}");
+    let (one, two) = (hinge(&mut s, "hinge:1"), hinge(&mut s, "hinge:2"));
+    assert!(stated(&one, [17.857, 11.607, 52.982]), "{one:?}");
+    assert!(stated(&two, [17.857, 108.393, 52.982]), "{two:?}");
+    assert!((volume(&mut s) - 8960.0).abs() < 1e-6);
+
+    // Rigid again: both as the hinge design was saved, and its joints are gone from here.
+    exec(&mut s, "component.link_mode", json!({"component": "hinge", "flexible": false}));
+    assert!(names(&mut s).is_empty());
+    let (one, two) = (hinge(&mut s, "hinge:1"), hinge(&mut s, "hinge:2"));
+    assert!(stated(&one, SAVED) && stated(&two, [19.464, 110.0, 52.982]), "{one:?} {two:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Every tool and command the agent skills call exists, so a rename or removal can't leave the
 /// skills sending agents to names the server no longer has.
 #[test]

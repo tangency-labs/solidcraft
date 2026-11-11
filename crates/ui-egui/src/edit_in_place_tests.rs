@@ -293,6 +293,25 @@ fn a_turned_placement_draws_the_assembly_turned_the_other_way() {
     assert!((b.min.x - 0.0).abs() < 1e-6 && (b.max.x - 10.0).abs() < 1e-6, "{b:?}");
 }
 
+/// A linked assembly's parts are components of their own here (#5526): edited in place, they
+/// are the assembly being edited, not what stands around it.
+#[test]
+fn the_parts_of_a_linked_assembly_are_not_context_around_it() {
+    let mut f = assembly("subassembly");
+    // A unit that links the plate, linked into the assembly beside the plate and the post.
+    let unit_file = f.folder.join("unit.solidcraft");
+    let mut unit = Session::default();
+    unit.execute("component.insert_design", &json!({"path": f.plate_file, "translate": [0, 0, 40]})).unwrap();
+    unit.execute("file.save", &json!({"path": unit_file})).unwrap();
+    let made = f.app.run("component.insert_design", json!({"path": unit_file, "translate": [0, 200, 0], "structure": true})).unwrap();
+    assert_eq!(made["subcomponents"], 1, "{made}");
+    f.app.run("file.save", json!({})).unwrap();
+    double_click_component(&mut f.app, json!({"component": made["component"]}));
+    settle(&mut f.app);
+    assert!(showing(&f.app, &unit_file));
+    assert_eq!(context(&f.app).bodies, 2, "the assembly's own plate and the post, not the unit's plate");
+}
+
 #[test]
 fn a_second_placement_is_the_frame_and_no_copy_of_the_part_is_context() {
     let mut f = assembly("second");

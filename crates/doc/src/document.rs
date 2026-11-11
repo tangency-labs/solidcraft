@@ -724,7 +724,7 @@ impl AlignFrame {
         let sketch = |id: &SketchId| st.sketch(id.0).ok_or_else(|| DocError::Unknown(format!("sketch {id}")));
         let (o, z) = match self {
             AlignFrame::Origin { origin } => {
-                let m = crate::joints::resolve_origin(doc, st, origin)?;
+                let m = crate::joints::resolve_origin_as_designed(doc, st, origin)?;
                 (Vec3::new(m[3][0], m[3][1], m[3][2]), Vec3::new(m[2][0], m[2][1], m[2][2]))
             }
             AlignFrame::SketchPoint { sketch: id, point } => {
@@ -3266,6 +3266,45 @@ pub struct DesignLink {
     /// before it was kept have none and are taken as up to date.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_sha256: Option<String>,
+    /// The linked design's own components, kept as components inside the linked one (a linked
+    /// assembly is a subassembly here). `None`: the link keeps no structure and every body of
+    /// the linked design is in the linked component itself, as in a link made before structure
+    /// was kept, or one asked to stay flat.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tree: Option<LinkTree>,
+}
+
+/// The components and placements a link keeps for the linked design's own, by the ids they have
+/// in that design. Update Links follows the linked design through it: a part that is still
+/// there keeps its component and its placements here, and so what refers to them (a joint, a
+/// hidden placement, a look).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct LinkTree {
+    /// The component here, by the linked design's component id.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub components: std::collections::BTreeMap<u64, u64>,
+    /// The occurrence here, by the linked design's occurrence id.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub occurrences: std::collections::BTreeMap<u64, u64>,
+    /// The occurrences of the linked component that are flexible, each with its joints: the
+    /// joint here, by the linked design's joint id. A flexible occurrence moves by the linked
+    /// design's own joints, which are joints of this design too, on that occurrence's own copy
+    /// of the design's parts ([`crate::joints::PlacedPose`]), so two occurrences can stand in
+    /// different poses. The joints are the linked design's (Update Links writes them again);
+    /// their values are this design's. An occurrence that is not here is rigid: its parts are
+    /// where the linked design was saved with them, and it moves as one.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub flexible: std::collections::BTreeMap<u64, std::collections::BTreeMap<u64, u64>>,
+    /// The occurrences kept here that the linked design holds still (grounded there): in a
+    /// flexible occurrence they stay with it, and its joints move the other parts from them.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub fixed: std::collections::BTreeSet<u64>,
+    /// The occurrences kept here for ones that are flexible in the linked design, at any depth:
+    /// a flexible occurrence of this link has their joints too, and a copy of what is inside
+    /// each of them ([`crate::joints::PlacedPose::through`]). Kept while an occurrence of the
+    /// link is flexible.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub nested: std::collections::BTreeSet<u64>,
 }
 
 impl DesignLink {
@@ -3273,6 +3312,28 @@ impl DesignLink {
     pub fn file_digest(bytes: &[u8]) -> String {
         use sha2::{Digest, Sha256};
         format!("{:x}", Sha256::digest(bytes))
+    }
+}
+
+impl Document {
+    /// The linked component that keeps component `component` for one of its linked design's own
+    /// components ([`LinkTree`]): the linked design decides what it is and where it sits.
+    /// `None` for any other component, a linked one included.
+    pub fn link_keeping_component(&self, component: u64) -> Option<u64> {
+        self.links
+            .iter()
+            .find(|(_, link)| link.tree.as_ref().is_some_and(|tree| tree.components.values().any(|c| *c == component)))
+            .map(|(top, _)| *top)
+    }
+
+    /// The linked component that keeps occurrence `occurrence` for one of its linked design's
+    /// own placements ([`LinkTree`]). `None` for any other occurrence, a linked component's own
+    /// placements included.
+    pub fn link_keeping_occurrence(&self, occurrence: u64) -> Option<u64> {
+        self.links
+            .iter()
+            .find(|(_, link)| link.tree.as_ref().is_some_and(|tree| tree.occurrences.values().any(|o| *o == occurrence)))
+            .map(|(top, _)| *top)
     }
 }
 
@@ -4063,6 +4124,24 @@ impl Document {
 
     /// Add a component under `parent` and return its id.
     pub fn add_component(&mut self, name: Option<&str>, parent: u64) -> Result<u64> {
+        let id = self.add_component_unplaced(name, parent)?;
+        let occurrence = self.add_occurrence(id, parent, crate::IDENTITY)?;
+        // The design's first part is grounded, so joints and drags have something fixed to work
+        // from (#2804); later parts and copies start free. Only creation decides this: opening a
+        // design never grounds anything.
+        if parent == 0
+            && !self.occurrences.iter().any(|o| o.parent == 0 && o.id != occurrence)
+            && let Some(o) = self.occurrences.iter_mut().find(|o| o.id == occurrence)
+        {
+            o.grounded = true;
+        }
+        Ok(id)
+    }
+
+    /// [`Self::add_component`] without an occurrence of the component: for a caller that places
+    /// it itself, where the design it follows has it (a link that keeps its linked design's
+    /// components).
+    pub fn add_component_unplaced(&mut self, name: Option<&str>, parent: u64) -> Result<u64> {
         if parent != 0 && !self.components.iter().any(|c| c.id == parent) {
             return Err(DocError::Unknown(format!("component {parent}")));
         }
@@ -4086,16 +4165,6 @@ impl Document {
         };
         self.components.push(Component { id, name, parent, identification_color_index: Some(color_index), ..Default::default() });
         self.next_component_color_index = next_color_index;
-        let occurrence = self.add_occurrence(id, parent, crate::IDENTITY)?;
-        // The design's first part is grounded, so joints and drags have something fixed to work
-        // from (#2804); later parts and copies start free. Only creation decides this: opening a
-        // design never grounds anything.
-        if parent == 0
-            && !self.occurrences.iter().any(|o| o.parent == 0 && o.id != occurrence)
-            && let Some(o) = self.occurrences.iter_mut().find(|o| o.id == occurrence)
-        {
-            o.grounded = true;
-        }
         Ok(id)
     }
 

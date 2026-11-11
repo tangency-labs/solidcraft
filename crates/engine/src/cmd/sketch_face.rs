@@ -73,6 +73,15 @@ pub(crate) fn face_pick_form(value: &Value) -> std::result::Result<FacePickForm<
     Ok(FacePickForm { point, fixed, body, index, path })
 }
 
+/// A sketch on a face is built where the design has the face. On the copy that a flexible
+/// occurrence of a linked subassembly has in another pose than its linked design was saved in,
+/// that is not where the face is shown, so the sketch would not be on the face picked.
+const POSED: &str = "that face is inside a flexible occurrence of a linked subassembly that does not stand as its design has it: make the occurrence rigid (component.link_mode) first, or sketch in the linked design";
+
+/// Finds the one planar face a pick names, among the placements that show it, and gives the
+/// plane to sketch on in the active component's frame: attached to the face, which it then
+/// follows, or with `fixed` as the plane is now. `internal` lets a face that cannot keep an
+/// attachment through without one, for `capture_internal` alone.
 fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result<PlaneRef> {
     let FacePickForm { point, fixed, body: requested_body, index: requested_index, path: requested_path } =
         face_pick_form(value).map_err(|why| bad(cmd, why))?;
@@ -91,8 +100,12 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
             .map(|occurrence| occurrence.component)
             .unwrap_or(0);
         let frame = EmbossFace::component_frame(&doc, component, &path)?;
+        if doc.path_is_posed(&path) {
+            return Err(bad(cmd, POSED));
+        }
         vec![(component, path, frame)]
     } else {
+        // Every placement, where the world shows it: the pick is a point on what is seen.
         crate::cmd::component::properties::placements(&doc, cmd)?
     };
     let mut by_component: std::collections::BTreeMap<u64, Vec<_>> = std::collections::BTreeMap::new();
@@ -136,6 +149,9 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
                 if chosen.is_some() || sheet_face.is_some() {
                     return Err(bad(cmd, "face point is ambiguous; pick an exact body and face index"));
                 }
+                if doc.path_is_posed(&path) {
+                    return Err(bad(cmd, POSED));
+                }
                 let relative = mat_mul(&author_inverse, &frame);
                 let plane = Plane::new(apply_point(&relative, plane.origin), apply_vector(&relative, plane.x), apply_vector(&relative, plane.y))
                     .ok_or_else(|| bad(cmd, "invalid sheet face plane"))?;
@@ -171,6 +187,9 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
                 }
                 if chosen.is_some() {
                     return Err(bad(cmd, "face point is ambiguous; pick an exact body and face index"));
+                }
+                if doc.path_is_posed(&path) {
+                    return Err(bad(cmd, POSED));
                 }
                 let relative = mat_mul(&author_inverse, &frame);
                 let normal = apply_vector(&relative, normal).normalized().ok_or_else(|| bad(cmd, "invalid planar face normal"))?;

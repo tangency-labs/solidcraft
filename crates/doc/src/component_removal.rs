@@ -43,8 +43,33 @@ impl Document {
         if !self.components.iter().any(|c| c.id == root) {
             return Err(DocError::Unknown(format!("component {root}")));
         }
-        let components: Vec<u64> = self.components.iter().filter(|c| self.component_within(c.id, root)).map(|c| c.id).collect();
-        let inside: BTreeSet<u64> = components.iter().copied().collect();
+        self.remove_component_trees(&BTreeSet::from([root]))
+    }
+
+    /// The components inside any of `roots`, those included: found in one walk down from them,
+    /// where asking each component of the design whether it is inside would search the design
+    /// for each.
+    pub fn components_within(&self, roots: &BTreeSet<u64>) -> BTreeSet<u64> {
+        let mut children: std::collections::BTreeMap<u64, Vec<u64>> = std::collections::BTreeMap::new();
+        for c in &self.components {
+            children.entry(c.parent).or_default().push(c.id);
+        }
+        let mut inside: BTreeSet<u64> = BTreeSet::new();
+        let mut todo: Vec<u64> = roots.iter().copied().filter(|root| *root != 0 && self.components.iter().any(|c| c.id == *root)).collect();
+        while let Some(id) = todo.pop() {
+            if inside.insert(id) {
+                todo.extend(children.get(&id).into_iter().flatten().copied());
+            }
+        }
+        inside
+    }
+
+    /// [`Self::remove_component_tree`] for every one of `roots` at once: one pass over the
+    /// design, however many they are. The design itself and unknown components among them are
+    /// passed over.
+    pub fn remove_component_trees(&mut self, roots: &BTreeSet<u64>) -> Result<RemovedTree> {
+        let inside = self.components_within(roots);
+        let components: Vec<u64> = self.components.iter().filter(|c| inside.contains(&c.id)).map(|c| c.id).collect();
         if self.features.iter().any(|feature| {
             !inside.contains(&feature.component)
                 && matches!(&feature.kind, FeatureKind::BodyTransfer { from, to, .. } if inside.contains(from) || inside.contains(to))
@@ -96,6 +121,14 @@ impl Document {
         }
         for view in &mut assembly.exploded {
             view.moves.retain(|(o, _)| !occurrences.contains(o));
+        }
+        let gone = |p: &crate::joints::PlacedPose| {
+            occurrences.contains(&p.occurrence) || occurrences.contains(&p.inner) || p.through.iter().any(|under| occurrences.contains(under))
+        };
+        self.assembly.poses.retain(|p| !gone(p));
+        for tree in self.links.values_mut().filter_map(|link| link.tree.as_mut()) {
+            tree.flexible.retain(|occurrence, _| !occurrences.contains(occurrence));
+            tree.nested.retain(|occurrence| !occurrences.contains(occurrence));
         }
         self.occurrences.retain(|o| !occurrences.contains(&o.id));
         joints

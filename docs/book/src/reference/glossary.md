@@ -136,7 +136,8 @@ of it.
 
 - **In SolidCraft:** `component.create`, `component.activate`, and the other `component.*`
   commands; the `components` design-file key.
-- **Don't use:** part, assembly, sub-assembly (for the component itself).
+- **Don't use:** part, assembly, sub-assembly (for the component itself; see *subassembly* and
+  *linked subassembly* for a component that holds components).
 - **Elsewhere:** component, part, sub-assembly.
 - **For translators:** not an occurrence.
 
@@ -265,6 +266,20 @@ construction plane.
 - **For translators:** French uses *fonction* for a timeline feature, so "AI features" had to
   become *fonctionnalités IA*. Translate "feature" only in the timeline sense.
 
+### flexible occurrence
+
+An occurrence of a linked subassembly that has the joints of the linked design, so that its components move.
+
+Each occurrence of a linked subassembly is flexible or rigid on its own. A flexible occurrence
+has its own *pose*.
+
+- **In SolidCraft:** `flexible` on `component.insert_design`, `component.relink` and
+  `component.link_mode` (with `occurrence`); **Make Flexible** in the occurrence's menu; the
+  `flexible` key of a link's `tree` in the design file.
+- **Don't use:** adaptive, unlocked.
+- **Elsewhere:** flexible sub-assembly.
+- **For translators:** the occurrence is flexible, not the bodies in it.
+
 ### folder
 
 One of the browser's fixed sections of a component: Bodies, Sketches, Construction, Joints.
@@ -298,6 +313,19 @@ features are computed.
 - **Don't use:** feature folder, folder (for a group).
 - **Elsewhere:** folder, group.
 - **For translators:** not a rigid group (a joint) and not a fixed browser *folder*.
+
+### linked subassembly
+
+A linked component whose link keeps the components of the linked design as components inside it.
+
+Each occurrence of a linked subassembly is a *rigid occurrence* or a *flexible occurrence*.
+
+- **In SolidCraft:** `structure` on `component.insert_design`, `component.relink` and
+  `component.link_mode`; `subcomponents` in their replies; **Keep Its Components** in a linked
+  component's menu; the `tree` key of a link in the design file.
+- **Don't use:** nested assembly, child assembly, linked assembly.
+- **Elsewhere:** sub-assembly, nested assembly.
+- **For translators:** see *subassembly*; this entry is the linked kind.
 
 ### material
 
@@ -406,6 +434,18 @@ design, which then keeps a copy of its own. It is an app setting, not part of a 
 - **Elsewhere:** rule library, sheet metal style library.
 - **For translators:** "personal" as in the user's own, not private or confidential.
 
+### pose (of a flexible occurrence)
+
+The arrangement of the components inside one flexible occurrence of a linked subassembly.
+
+Two flexible occurrences of one linked subassembly can have different poses. A rigid occurrence
+shows the *saved pose*: the arrangement that the linked design was saved with.
+
+- **In SolidCraft:** the `assembly.poses` key of the design file.
+- **Don't use:** position, configuration, state.
+- **Elsewhere:** position, positional representation.
+- **For translators:** not the position of the occurrence itself.
+
 ### print face
 
 The flat face of a body that lies on the print bed when the body is sent to a slicer.
@@ -434,6 +474,20 @@ feature follows its edges when the part changes.
 - **Elsewhere:** reference edge, edge offset, distance from edge.
 - **For translators:** an edge of a body, not a construction axis or a reference plane; the
   distance is a length, not a reference value for light or material.
+
+### rigid occurrence
+
+An occurrence of a linked subassembly that moves as one body and shows the saved pose.
+
+A new occurrence is rigid. The joints of the linked design are not joints of the design that
+uses a rigid occurrence. See *flexible occurrence*.
+
+- **In SolidCraft:** `flexible: false` on `component.link_mode` (with `occurrence`); **Make
+  Rigid** in the occurrence's menu.
+- **Don't use:** fixed (`joint.list` gives the occurrences that are held still as `fixed`),
+  locked.
+- **Elsewhere:** rigid sub-assembly.
+- **For translators:** see *Words with more than one meaning*, "rigid".
 
 ### rollback marker
 
@@ -497,6 +551,18 @@ a standard size.
 - **Don't use:** library part, part (on its own), content.
 - **Elsewhere:** standard part, library part, fastener, catalogue part.
 - **For translators:** see *Words with more than one meaning*, "part".
+
+### subassembly
+
+A component that holds components.
+
+The bill of materials counts the parts of a subassembly through it. A *linked subassembly* is
+a subassembly whose components come from a linked design.
+
+- **In SolidCraft:** `assembly.bom` (`levels: "top"` lists a subassembly as one row).
+- **Don't use:** sub-assembly, nested assembly.
+- **Elsewhere:** sub-assembly.
+- **For translators:** one word, without a hyphen.
 
 ### thin-film interference
 
@@ -591,6 +657,15 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 Some translations show the clash today: Japanese and Chinese show a hole's flat bottom with the
 word for "unfold" or "plane", Chinese shows "Round" as "fillet", and Chinese and Russian show the
 Normal line type as "normal vector".
+
+**rigid** is used for four things:
+
+- a *rigid joint*, which holds two occurrences together;
+- a *rigid group*, the Rigid Group command, which joins several occurrences with rigid joints;
+- an imported assembly, whose components are held together by rigid joints until Unlock
+  Contents;
+- a *rigid occurrence* of a linked subassembly, which has no joints at all and moves as one
+  body because the linked design places its components.
 
 ## Two commands, one label
 

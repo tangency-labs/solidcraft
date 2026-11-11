@@ -352,7 +352,17 @@ pub(super) fn clone_assembly_with_joint_ids(
     let mut joint_names = a.joints.iter().map(|j| j.name.clone()).collect();
     let mut joints = BTreeMap::new();
     let mut touched_joints = BTreeSet::new();
-    for old in &source.assembly.joints {
+    // The joints a flexible occurrence of a linked subassembly has from its linked design, and
+    // its pose, are that link's: a copy that is no occurrence of the link is rigid, as the
+    // linked design was saved.
+    let linked: BTreeSet<u64> = source
+        .links
+        .values()
+        .filter_map(|link| link.tree.as_ref())
+        .flat_map(|tree| tree.flexible.values())
+        .flat_map(|joints| joints.values().copied())
+        .collect();
+    for old in source.assembly.joints.iter().filter(|old| !linked.contains(&old.id)) {
         if !occurrences.contains_key(&old.a.occurrence) && !occurrences.contains_key(&old.b.occurrence) {
             continue;
         }

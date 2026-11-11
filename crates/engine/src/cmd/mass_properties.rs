@@ -13,7 +13,13 @@
 //! (the joint solver leaves it where its parent puts it). A group holding the design itself or
 //! a grounded occurrence is fixed. Occurrences are taken where the joint solver places them, so
 //! an occurrence inside a subassembly placed more than once is listed at the subassembly's first
-//! placement (a warning says so).
+//! placement (a warning says so). With `every_placement`, it is listed again for each further
+//! placement, by its `path`, so the subassembly weighs what it holds wherever it is placed. A
+//! further placement stands in the groups as the first one does: what a joint is on there is
+//! not taken as one body with what it is inside. A design with more placements than the walk
+//! of them takes is refused then, not weighed in part.
+//! Inside a linked subassembly, the copy that a flexible occurrence's joints move is a group of
+//! its own, and what they do not move belongs to the occurrence's group.
 
 use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -21,7 +27,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use serde_json::Value;
 use solidcore_record::Vec3;
 use solidcraft_doc::joints::{self, JointKind, MAX_JOINTS};
-use solidcraft_doc::{Document, IDENTITY, MAX_PLACEMENTS, Mat, ModelState, apply_point, mat_inverse, mat_mul};
+use solidcraft_doc::{Document, IDENTITY, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, ModelState, apply_point, mat_inverse, mat_mul};
 use solidcraft_geom::inertia::{self, Tensor3};
 
 use super::CommandSpec;
@@ -39,7 +45,10 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Mass Properties",
     .contract(&CONTRACT)
     .output(output_schema_for::<AssemblyMassResult>)
     .params(
-        "no parameters → occurrences: [{occurrence (0: the design's own bodies), name, component, path, group, fixed, frame \
+        "every_placement?: bool (default false: an occurrence inside a subassembly placed more than once is listed at the \
+         subassembly's first placement only, with a warning; true: at each of its placements, by its path, in the \
+         groups as at the first; refused for a design of 100000 placements or more) → occurrences: \
+         [{occurrence (0: the design's own bodies), name, component, path, group, fixed, frame \
          {origin, x, y, z}, bodies: [{name, material, density_g_cm3, closed, volume_mm3, mass_kg}], open_bodies_skipped, mass}], \
          groups: [{group, occurrences, fixed, frame_occurrence, frame, mass}] (occurrences an unsuppressed rigid joint ties \
          together, and a nested occurrence no joint places with its parent; fixed: holds the design or a grounded occurrence), \
@@ -175,6 +184,12 @@ impl Session {
     /// Mass, centre of mass and inertia of every occurrence and rigid group of the design, as
     /// `assembly.mass_properties` returns them (kg, mm, kg·mm²), pending moves included.
     pub fn mass_properties(&self) -> Result<AssemblyMassResult> {
+        self.mass_properties_listing(false)
+    }
+
+    /// [`Self::mass_properties`]. With `every_placement`, an occurrence inside a subassembly
+    /// placed more than once is listed at each of its placements, not at the first one only.
+    pub fn mass_properties_listing(&self, every_placement: bool) -> Result<AssemblyMassResult> {
         let mut doc = (*self.doc).clone();
         for occurrence in &mut doc.occurrences {
             if let Some(transform) = self.pending_moves.get(&occurrence.id) {
@@ -182,7 +197,7 @@ impl Session {
             }
         }
         let state = self.model.state();
-        assembly(&doc, &state)
+        assembly(&doc, &state, every_placement)
     }
 }
 
@@ -195,39 +210,165 @@ struct Shape {
     gyration: Option<Tensor3>,
 }
 
-/// [`Session::mass_properties`] of a document and its evaluated state.
-pub fn assembly(doc: &Document, state: &ModelState) -> Result<AssemblyMassResult> {
+/// Every placement of the design ([`Document::placements`]), for a listing that must have them
+/// all. That walk gives up past [`MAX_PLACEMENTS`] placements and goes no deeper than
+/// [`MAX_PLACEMENT_DEPTH`] levels, without a word, and what is listed from part of a design
+/// weighs part of it: an error when the walk stopped at either.
+fn all_placements(doc: &Document) -> Result<Vec<(u64, Vec<u64>, Mat)>> {
+    let all = doc.placements();
+    // The design itself is the first entry, so more entries than the limit is where the walk
+    // gives up. A branch is left at the depth limit when what stands there places something.
+    let cut_short = all.len() > MAX_PLACEMENTS
+        || all.iter().any(|(component, path, _)| path.len() > MAX_PLACEMENT_DEPTH && doc.occurrences.iter().any(|o| o.parent == *component));
+    if cut_short {
+        return Err(bad(
+            CMD,
+            format!(
+                "the design has more placements than `every_placement` lists ({MAX_PLACEMENTS} or more, or more than {} levels deep): leave it out to list each occurrence at its first placement",
+                MAX_PLACEMENT_DEPTH + 1
+            ),
+        ));
+    }
+    Ok(all)
+}
+
+/// [`Session::mass_properties_listing`] of a document and its evaluated state.
+pub fn assembly(doc: &Document, state: &ModelState, every_placement: bool) -> Result<AssemblyMassResult> {
     if doc.occurrences.len() >= MAX_PLACEMENTS {
         return Err(bad(CMD, format!("assembly exceeds {MAX_PLACEMENTS} occurrences")));
     }
     let mut warnings = Vec::new();
-    // Index 0 is the design itself; then the occurrences by id.
+    // Index 0 is the design itself; then the occurrences by id, each at its first placement
+    // (through the first occurrence of each component above it, where joints place it); then,
+    // when asked for, the further placements of the occurrences inside a component that is
+    // placed more than once, so that such a component weighs what it holds wherever it is placed.
     let mut ids: Vec<u64> = doc.occurrences.iter().map(|o| o.id).filter(|id| *id != 0).collect();
     ids.sort_unstable();
     ids.dedup();
     ids.insert(0, 0);
     let index: HashMap<u64, usize> = ids.iter().enumerate().map(|(i, id)| (*id, i)).collect();
+    let mut paths: Vec<Vec<u64>> = ids.iter().map(|id| if *id == 0 { Vec::new() } else { canonical_path(doc, *id) }).collect();
+    let mut worlds: Vec<Mat> = ids.iter().map(|id| if *id == 0 { IDENTITY } else { joints::occurrence_world(doc, *id) }).collect();
+    let mut further: HashMap<Vec<u64>, usize> = HashMap::new();
+    if every_placement && doc.occurrences.iter().any(|o| o.parent != 0) {
+        for (_, path, world) in all_placements(doc)? {
+            let Some(first) = path.last().and_then(|last| index.get(last)).copied() else { continue };
+            if paths.get(first) == Some(&path) {
+                continue;
+            }
+            further.insert(path.clone(), ids.len());
+            ids.push(path.last().copied().unwrap_or(0));
+            paths.push(path);
+            worlds.push(world);
+        }
+    }
+    if !every_placement {
+        for c in doc.components.iter().filter(|c| doc.occurrences.iter().any(|o| o.parent == c.id)) {
+            let copies = doc.occurrences.iter().filter(|o| o.component == c.id).count();
+            if copies > 1 {
+                warnings.push(format!(
+                    "`{}` is placed {copies} times: the occurrences inside it are listed at its first placement only, where joints place them",
+                    c.name
+                ));
+            }
+        }
+    }
+    // The entry of the placement at `path`.
+    let entry = |paths: &[Vec<u64>], path: &[u64]| -> Option<usize> {
+        let first = path.last().and_then(|last| index.get(last)).copied().filter(|at| paths.get(*at).is_some_and(|own| own.as_slice() == path));
+        first.or_else(|| further.get(path).copied())
+    };
 
     let mut groups = Groups((0..ids.len()).collect());
     let live: Vec<_> = doc.assembly.joints.iter().filter(|j| !j.suppressed).take(MAX_JOINTS).collect();
-    let jointed: HashSet<u64> = live.iter().flat_map(|j| [j.a.occurrence, j.b.occurrence]).collect();
-    for j in live.iter().filter(|j| j.kind == JointKind::Rigid) {
-        if let (Some(&a), Some(&b)) = (index.get(&j.a.occurrence), index.get(&j.b.occurrence)) {
+    // What each joint side moves with: its occurrence; inside a linked subassembly, the copy
+    // that a flexible occurrence's joints move, or the subassembly's occurrence.
+    let inside = if doc.links.is_empty() { Vec::new() } else { doc.sides_inside(&live.iter().flat_map(|j| [&j.a, &j.b]).collect::<Vec<_>>()) };
+    let anchor = |k: usize, side: &joints::JointOrigin| -> Option<usize> {
+        match inside.get(k).copied().unwrap_or(joints::Inside::Outside) {
+            joints::Inside::Outside => index.get(&side.occurrence).copied(),
+            joints::Inside::With { top } => index.get(&top).copied(),
+            joints::Inside::Moved { inner, .. } => {
+                let mut full = canonical_path(doc, side.occurrence);
+                full.extend(&side.inside);
+                let cut = full.iter().position(|id| *id == inner)?;
+                entry(&paths, full.get(..=cut)?)
+            }
+            joints::Inside::Elsewhere { .. } => None,
+        }
+    };
+    let anchors: Vec<(Option<usize>, Option<usize>)> = live.iter().enumerate().map(|(k, j)| (anchor(2 * k, &j.a), anchor(2 * k + 1, &j.b))).collect();
+    let mut jointed: HashSet<usize> = anchors.iter().flat_map(|(a, b)| [*a, *b]).flatten().collect();
+    for (j, (a, b)) in live.iter().zip(&anchors) {
+        if j.kind == JointKind::Rigid
+            && let (Some(a), Some(b)) = (*a, *b)
+        {
             groups.join(a, b);
         }
     }
-    for o in doc.occurrences.iter().filter(|o| o.parent != 0 && !jointed.contains(&o.id)) {
-        if let (Some(&child), Some(&parent)) = (index.get(&o.id), doc.occurrence_of(o.parent).and_then(|p| index.get(&p.id))) {
-            groups.join(child, parent);
+    // Listed at every placement, what a joint is on at one placement is on that joint wherever
+    // it is placed again: the joint solver places a component's occurrences once, and every
+    // placement of the component shows them so. A joint side names the last occurrences of
+    // its placement (the occurrence it is on; inside a flexible occurrence, that one down to the
+    // copy its joints move), and the further placements of the same thing end in those too.
+    // Without this a further placement would be one rigid body with what it is inside, whatever
+    // joints move its parts.
+    if !further.is_empty() {
+        let mut ending: HashMap<u64, Vec<usize>> = HashMap::new();
+        for (at, path) in paths.iter().enumerate() {
+            if let Some(last) = path.last() {
+                ending.entry(*last).or_default().push(at);
+            }
+        }
+        // How many occurrences at the end of entry `at`'s placement joint side `k` names.
+        let named = |k: usize, at: usize| -> usize {
+            let path = paths.get(at).map_or(&[][..], Vec::as_slice);
+            match inside.get(k).copied().unwrap_or(joints::Inside::Outside) {
+                joints::Inside::Moved { top, .. } => path.iter().rposition(|id| *id == top).map_or(path.len(), |from| path.len() - from),
+                _ => 1,
+            }
+        };
+        // The entries whose placements end as entry `at`'s does in its last `tail` occurrences:
+        // that entry, and the same thing wherever it is placed again.
+        let placed_as = |at: usize, tail: usize| -> Vec<usize> {
+            let Some(end) = paths.get(at).and_then(|path| path.get(path.len().saturating_sub(tail)..)) else { return Vec::new() };
+            let Some(last) = end.last() else { return Vec::new() };
+            ending.get(last).into_iter().flatten().copied().filter(|other| paths.get(*other).is_some_and(|path| path.ends_with(end))).collect()
+        };
+        for (k, (j, (a, b))) in live.iter().zip(&anchors).enumerate() {
+            let sides = [(2 * k, *a), (2 * k + 1, *b)].map(|(side, at)| at.map(|at| (at, named(side, at))));
+            for (at, tail) in sides.iter().flatten() {
+                jointed.extend(placed_as(*at, *tail));
+            }
+            // A rigid joint ties its sides together at each placement of what holds them both.
+            if j.kind == JointKind::Rigid
+                && let [Some((a, tail_a)), Some((b, tail_b))] = sides
+                && let (Some(first_a), Some(first_b)) = (paths.get(a), paths.get(b))
+            {
+                let shared = first_a.iter().zip(first_b).take_while(|(x, y)| x == y).count();
+                let (Some(below_a), Some(below_b), Some(end_b)) =
+                    (first_a.get(shared..), first_b.get(shared..), first_b.get(first_b.len().saturating_sub(tail_b)..))
+                else {
+                    continue;
+                };
+                for again in placed_as(a, tail_a) {
+                    // The placement of what holds both sides that this one is under.
+                    let Some(holder) = paths.get(again).and_then(|path| path.strip_suffix(below_a)) else { continue };
+                    let there: Vec<u64> = holder.iter().chain(below_b).copied().collect();
+                    if let Some(mate) = entry(&paths, &there).filter(|mate| paths.get(*mate).is_some_and(|path| path.ends_with(end_b))) {
+                        groups.join(again, mate);
+                    }
+                }
+            }
         }
     }
-    for c in doc.components.iter().filter(|c| doc.occurrences.iter().any(|o| o.parent == c.id)) {
-        let copies = doc.occurrences.iter().filter(|o| o.component == c.id).count();
-        if copies > 1 {
-            warnings.push(format!(
-                "`{}` is placed {copies} times: the occurrences inside it are listed at its first placement only, where joints place them",
-                c.name
-            ));
+    // A placement no joint is on moves with the placement it is inside.
+    for (child, path) in paths.iter().enumerate().skip(1) {
+        if path.len() < 2 || jointed.contains(&child) {
+            continue;
+        }
+        if let Some(parent) = path.get(..path.len() - 1).and_then(|above| entry(&paths, above)) {
+            groups.join(child, parent);
         }
     }
 
@@ -265,13 +406,13 @@ pub fn assembly(doc: &Document, state: &ModelState) -> Result<AssemblyMassResult
     let mut occurrences = Vec::with_capacity(ids.len());
     let mut totals: Vec<Option<MassBody>> = Vec::with_capacity(ids.len());
     for (i, &id) in ids.iter().enumerate() {
-        let (component, name, world, path, fixed) = if id == 0 {
-            (0, doc.name.clone(), IDENTITY, Vec::new(), true)
+        let (world, path) = (worlds.get(i).copied().unwrap_or(IDENTITY), paths.get(i).cloned().unwrap_or_default());
+        let (component, name, fixed) = if id == 0 {
+            (0, doc.name.clone(), true)
         } else {
             // Every id came from `doc.occurrences`, so the occurrence is there.
             let o = doc.occurrences.iter().find(|o| o.id == id);
-            let (component, name, grounded) = o.map_or((u64::MAX, String::new(), false), |o| (o.component, o.name.clone(), o.grounded));
-            (component, name, joints::occurrence_world(doc, id), canonical_path(doc, id), grounded)
+            o.map_or((u64::MAX, String::new(), false), |o| (o.component, o.name.clone(), o.grounded))
         };
         if world.iter().flatten().any(|x| !x.is_finite()) {
             return Err(out_of_range());
@@ -341,7 +482,7 @@ pub fn assembly(doc: &Document, state: &ModelState) -> Result<AssemblyMassResult
     for (g, members) in by_root.values().enumerate() {
         let fixed = members.iter().any(|&m| occurrences.get(m).is_some_and(|o| o.fixed));
         let frame_occurrence = members.first().and_then(|&m| ids.get(m)).copied().unwrap_or(0);
-        let world = if frame_occurrence == 0 { IDENTITY } else { joints::occurrence_world(doc, frame_occurrence) };
+        let world = members.first().and_then(|&m| worlds.get(m)).copied().unwrap_or(IDENTITY);
         let parts: Vec<MassBody> = members.iter().filter_map(|&m| totals.get(m).copied().flatten()).collect();
         let total = MassBody::combine(&parts);
         if total.is_none() && !parts.is_empty() {
@@ -354,7 +495,7 @@ pub fn assembly(doc: &Document, state: &ModelState) -> Result<AssemblyMassResult
         }
         out_groups.push(RigidGroupMass {
             group: g,
-            occurrences: members.iter().filter_map(|&m| ids.get(m).copied()).collect(),
+            occurrences: members.iter().filter_map(|&m| ids.get(m).copied()).collect::<std::collections::BTreeSet<u64>>().into_iter().collect(),
             fixed,
             frame_occurrence,
             frame: frame_of(&world),
@@ -364,8 +505,15 @@ pub fn assembly(doc: &Document, state: &ModelState) -> Result<AssemblyMassResult
     Ok(AssemblyMassResult { occurrences, groups: out_groups, warnings, param_warnings: Vec::new() })
 }
 
-fn run(s: &mut Session, _p: &Value) -> Result<Value> {
-    let r = s.mass_properties()?;
+/// `assembly.mass_properties`: reads `every_placement` and replies with what
+/// `Session::mass_properties_listing` works out.
+fn run(s: &mut Session, p: &Value) -> Result<Value> {
+    let every_placement = match p.get("every_placement") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(every)) => *every,
+        Some(_) => return Err(bad(CMD, "`every_placement` must be true or false")),
+    };
+    let r = s.mass_properties_listing(every_placement)?;
     serde_json::to_value(r).map_err(|e| EngineError::Other(e.to_string()))
 }
 

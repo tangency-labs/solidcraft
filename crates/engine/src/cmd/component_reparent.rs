@@ -15,6 +15,9 @@ fn rebased(path: &[u64], from: &[u64], to: &[u64]) -> Option<Vec<u64>> {
     path.strip_prefix(from).map(|rest| to.iter().chain(rest).copied().collect())
 }
 
+/// `occurrence.reparent`, as the module comment describes it. The move is made on a scratch copy
+/// of the session and taken over only when no feature that worked before fails after it, so a
+/// refusal changes nothing.
 pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "occurrence.reparent";
     let id = occurrence(s, p, cmd)?;
@@ -26,8 +29,14 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
     if s.doc.inside_component(to, o.component) {
         return Err(bad(cmd, format!("{} can't go inside itself or a component within it", o.name)));
     }
+    if let Some(why) = crate::cmd::component_link::kept_component_refusal(s, to) {
+        return Err(bad(cmd, why));
+    }
     if s.doc.marker.is_some() {
         return Err(bad(cmd, "finish timeline rollback before moving placements"));
+    }
+    if let Some(why) = crate::cmd::component_link::kept_occurrence_refusal(s, id) {
+        return Err(bad(cmd, why));
     }
     if s.held_by_rigid_group(id).is_some() {
         return Err(bad(cmd, format!("{} is held by a rigid group: Unlock Contents (component.unlock) first", o.name)));

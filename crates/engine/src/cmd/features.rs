@@ -2612,6 +2612,9 @@ fn finish_pattern(
             .filter(|id| *id != 0)
             .ok_or_else(|| bad(cmd, format!("no component `{c}`")))?;
         let src = s.doc.occurrence_of(id).cloned().ok_or_else(|| bad(cmd, format!("component `{c}` has no occurrence")))?;
+        if let Some(why) = super::component_link::kept_occurrence_refusal(s, src.id) {
+            return Err(bad(cmd, why));
+        }
         for m in &mats {
             made.push(s.doc_mut().add_occurrence(id, src.parent, solidcraft_doc::mat_mul(m, &src.transform))?);
         }
@@ -2769,6 +2772,14 @@ fn placed_bodies(s: &Session, names: Vec<String>, cmd: &str) -> Result<(Vec<Stri
     }
     if let Some((name, ..)) = picked.iter().find(|(_, _, path)| path.iter().any(|id| s.pending_moves.contains_key(id))) {
         return Err(bad(cmd, format!("`{name}` is shown in an exploded view: show it assembled (explode.show with no view) first")));
+    }
+    if let Some((name, ..)) = picked.iter().find(|(_, _, path)| s.doc.path_is_posed(path)) {
+        return Err(bad(
+            cmd,
+            format!(
+                "`{name}` is inside a flexible occurrence of a linked subassembly that does not stand as its design has it: make the occurrence rigid (component.link_mode) first"
+            ),
+        ));
     }
     Ok(picked.into_iter().map(|(own, _, path)| (own, path)).unzip())
 }

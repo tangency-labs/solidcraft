@@ -160,7 +160,13 @@ impl JsonSchema for Translation {
 /// Insert a design file as a new component linked to it: its solid bodies as placed in that
 /// design, and a copy of its design properties. The link remembers the file, so
 /// `component.update_links` can read it again. One undo step. With `reuse`, a design already
-/// linked gets another placement instead of another link.
+/// linked gets another occurrence instead of another link.
+///
+/// A design that has components of its own (an assembly) comes in as a subassembly: its
+/// components and their occurrences are kept as components inside the new one, each with its
+/// part properties, so a bill of materials counts them. They stay where that design has them
+/// and the subassembly moves as one, also by a joint made to one of its components. With
+/// `flexible`, the design's own joints are joints here too, for the occurrence made.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = path_only_required)]
 pub struct InsertDesignParams {
@@ -183,6 +189,18 @@ pub struct InsertDesignParams {
     /// it. Default: false.
     #[serde(default)]
     pub reuse: Option<bool>,
+    /// Keep the design's own components as components inside the new one (a linked
+    /// subassembly). Default: false: every body goes into the one new component, whatever
+    /// components the design has. `flexible` keeps them too.
+    #[serde(default)]
+    pub structure: Option<bool>,
+    /// Flexible: the design's own joints are joints here too, on this occurrence's own copy of
+    /// its components, so they move by them. Default: false, which is rigid: they stay as the
+    /// design was saved and it moves as one. Each occurrence is one or the other on its own
+    /// (also with `reuse`). It keeps the design's components as `structure` does, and can't go
+    /// with `structure: false`.
+    #[serde(default)]
+    pub flexible: Option<bool>,
 }
 
 /// What `component.insert_design` returns.
@@ -205,6 +223,13 @@ pub enum DesignInserted {
         occurrence: u64,
         /// The linked component, by id.
         component: u64,
+        /// The design's joints made here for the new occurrence, when it was asked for flexible
+        /// and the design has any.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        joints: Option<usize>,
+        /// What of the call the link did not take, and what did not come across.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        warnings: Vec<String>,
     },
     /// A new component, linked to the file.
     New {
@@ -224,6 +249,13 @@ pub enum DesignInserted {
         created_bodies: Vec<String>,
         /// What the design file gave that did not come in (such as mesh bodies).
         warnings: Vec<String>,
+        /// The components made inside the new one for the design's own components, when it
+        /// has any.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subcomponents: Option<usize>,
+        /// The design's joints made here, when the link is flexible and the design has any.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        joints: Option<usize>,
     },
 }
 
@@ -355,6 +387,62 @@ pub struct RelinkParams {
     #[serde(default, deserialize_with = "placement", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "u64")]
     pub occurrence: Option<u64>,
+    /// Whether the link keeps the design's own components as components inside the linked one
+    /// (see `component.insert_design`). Default: as the link is.
+    #[serde(default)]
+    pub structure: Option<bool>,
+    /// Whether its occurrences are flexible (see `component.insert_design`). Default: each as
+    /// it is.
+    #[serde(default)]
+    pub flexible: Option<bool>,
+}
+
+/// Change how a link keeps its linked design, reading that design again: as one component
+/// (`structure: false`), or as a subassembly (its components kept) whose occurrences are each
+/// rigid (moving as one, as the design was saved) or flexible (the design's joints are joints
+/// here too, on that occurrence's own copy of its components). Making an occurrence rigid needs
+/// no reading of the linked design; anything else reads it again. One undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = component_required)]
+pub struct LinkModeParams {
+    // Optional in the type and required in the schema (`component_required`).
+    /// The linked component, by id or name.
+    #[serde(default, deserialize_with = "component", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ComponentRef")]
+    pub component: Option<ComponentRef>,
+    /// One of its occurrences, by id or name: `flexible` is then for that occurrence only.
+    /// Default: every occurrence.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "super::component::OccurrenceRef")]
+    pub occurrence: Option<super::component::OccurrenceRef>,
+    /// Keep the linked design's own components as components inside the linked one. Default:
+    /// as the link is.
+    #[serde(default)]
+    pub structure: Option<bool>,
+    /// Flexible (true) or rigid (false). Default: each occurrence as it is. Flexible needs
+    /// `structure`.
+    #[serde(default)]
+    pub flexible: Option<bool>,
+}
+
+/// What `component.link_mode` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct LinkModeResult {
+    /// The linked component, by id.
+    pub component: u64,
+    /// Whether the link now keeps the design's components.
+    pub structure: bool,
+    /// Its occurrences that are flexible now, by id. The others are rigid.
+    pub flexible: Vec<u64>,
+    /// The components it keeps inside the linked one.
+    pub subcomponents: usize,
+    /// The linked design's joints that each flexible occurrence has: 0 when none is flexible.
+    pub joints: usize,
+    /// What did not come across, and joints that no longer solve.
+    pub warnings: Vec<String>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 /// What `component.relink` returns.
@@ -453,6 +541,11 @@ pub enum LinkInfo {
         /// Whether the file is no longer what this design last read (`component.update_links`
         /// reads it again); null when it is not found or the link is older than this record.
         changed: Option<bool>,
+        /// Whether the link keeps the design's own components as components inside this one.
+        structure: bool,
+        /// Its occurrences that are flexible, by id: each moves by the design's joints, which
+        /// are joints here too, on its own copy of the design's components. The others are rigid.
+        flexible: Vec<u64>,
         /// Why the file can't be reached: `missing`, `unreadable` or `not_allowed`. Left out
         /// when it can be read.
         #[serde(default, skip_serializing_if = "Option::is_none")]
