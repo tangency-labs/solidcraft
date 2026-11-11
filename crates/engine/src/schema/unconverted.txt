@@ -3,7 +3,6 @@
 # type, remove its line. Never add one: a new command comes with both schemas. Sorted, one id
 # per line.
 face.delete
-file.insert_step
 render.aging.describe
 render.backends
 render.effects.describe

@@ -9,7 +9,6 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
-use serde_json::{Value, json};
 use solidcore_record::Vec3;
 use solidcraft_doc::joints::{Joint, JointKind, JointOrigin, Snap};
 use solidcraft_doc::kernel::{StepImport, StepNode};
@@ -187,7 +186,8 @@ fn node_key(imp: &StepImport, node: &StepNode, depth: usize) -> u64 {
     h.finish()
 }
 
-/// The import's component, as the command reports it.
+/// The import's component, as the command reports it. The reply types in `schema/insert_mesh.rs`
+/// and `schema/insert_step.rs` are what the commands answer with these fields.
 pub(crate) struct Placed {
     pub component: u64,
     pub occurrence: Option<u64>,
@@ -196,18 +196,6 @@ pub(crate) struct Placed {
     pub components: usize,
     /// Rigid joints holding its contents together.
     pub joints: Vec<u64>,
-}
-
-impl Placed {
-    pub fn report(&self, out: &mut Value) {
-        out["component"] = json!(self.component);
-        out["component_name"] = json!(self.name);
-        out["occurrence"] = json!(self.occurrence);
-        if self.components > 0 {
-            out["subcomponents"] = json!(self.components);
-            out["rigid_joints"] = json!(self.joints.len());
-        }
-    }
 }
 
 /// The component an import makes: named `name`, in the active component at its origin.
