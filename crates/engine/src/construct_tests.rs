@@ -1006,7 +1006,8 @@ fn plane_tangent_on_a_converted_mesh_facet() {
     let mut s = Session::default();
     run(&mut s, "file.insert_mesh", json!({"path": stl.to_string_lossy()}));
     let _ = std::fs::remove_dir_all(&dir);
-    let (name, mesh) = s.world_state().unwrap().bodies.iter().find(|b| b.body.is_mesh()).map(|b| (b.name.clone(), b.body.clone())).expect("a mesh body");
+    let (name, mesh) =
+        s.world_state().unwrap().bodies.iter().find(|b| b.body.is_mesh()).map(|b| (b.name.clone(), b.body.clone())).expect("a mesh body");
     // A side facet's centroid and normal, read from the mesh before it is converted.
     let (pos, tris) = mesh.triangle_mesh().unwrap();
     let (c, n) = tris
