@@ -1118,3 +1118,10 @@ fn validate_studio_weights(weights: Option<[f64; 3]>, command: &str) -> Result<O
     }
     Ok(weights)
 }
+
+/// Read `params` as `prepare` reads a request: as a `ProgressiveStart` when `progressive`, else as
+/// a `Start`, with serde's message. The contract of `render.start` and `render.preflight`
+/// (`schema::render_start`) calls it, so it accepts what these readers accept.
+pub(crate) fn read_request(params: Value, progressive: bool) -> serde_json::Result<()> {
+    if progressive { serde_json::from_value::<ProgressiveStart>(params).map(drop) } else { serde_json::from_value::<Start>(params).map(drop) }
+}

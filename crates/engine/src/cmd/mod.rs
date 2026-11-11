@@ -109,7 +109,7 @@ mod parameters;
 mod plastic;
 mod print_face;
 mod render;
-pub(crate) use render::{PreparedCapture, prepare_capture_with_metadata, render_cancel_params};
+pub(crate) use render::{PreparedCapture, prepare_capture_with_metadata, read_render_request, render_cancel_params};
 pub(crate) use render_ui::batch_request;
 mod render_ui;
 #[cfg(test)]
