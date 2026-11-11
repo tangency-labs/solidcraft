@@ -10,8 +10,10 @@
 //! [`drop_along`]) lowers a flat, ball, bull nose or tapered (chamfer) [`Cutter`] onto them
 //! along any axis, stopping where it first touches. A tip placed there cannot cut into the
 //! surface, which is what the 3-axis surface operations ([`surface_ops`]) are built on: raster
-//! finishing, layered roughing of a stock box and z-level finishing of steep walls. Long
-//! planning can be stopped from another thread ([`stop`]).
+//! finishing, layered roughing of a stock box and z-level finishing of steep walls. The 3D
+//! finishing strategies ([`finish3d`]) place their passes by the shape of the part: constant
+//! scallop, steep and shallow, pencil and rest finishing. Long planning can be stopped from
+//! another thread ([`stop`]).
 //!
 //! The region offsetting is our own: every boundary piece is offset, corners that open away
 //! from the offset side get a joining arc, the pieces are cut where they cross, and a piece is
@@ -24,10 +26,12 @@ mod chamfer;
 mod check;
 mod cutter;
 mod dropcutter;
+pub mod finish3d;
 mod frame;
 mod gcode;
 mod offset;
 mod ops;
+mod par;
 mod path;
 mod piece;
 mod post;
@@ -40,6 +44,10 @@ mod tool;
 pub use check::{lift_entries, verify};
 pub use cutter::{Cone, Cutter};
 pub use dropcutter::{drop_along, drop_triangle, drop_z};
+pub use finish3d::{
+    OffsetDirection, PencilParams, RestParams, ScallopParams, ShallowPattern, Spacing, SteepShallowParams, pencil, rest_finish, scallop,
+    steep_shallow,
+};
 pub use frame::{Frame, angle_about, rotate, rotate_about};
 pub use gcode::{Operation, Program, emit, parse, work_offset_code};
 pub use offset::offset_regions;
@@ -79,6 +87,8 @@ pub(crate) fn invalid<T>(why: impl Into<String>) -> Result<T> {
     Err(CamError::Invalid(why.into()))
 }
 
+#[cfg(test)]
+mod finish3d_tests;
 #[cfg(test)]
 mod foundation_tests;
 #[cfg(test)]
