@@ -216,15 +216,15 @@ impl RingFilletRemoval {
     }
 
     fn rail(&self, i: usize) -> Result<EdgeId> {
-        ner(self.rails.get(i).copied().flatten())
+        ner(self.rails.get(i).copied().flatten(), "the rail")
     }
 
     fn tan_face(&self, i: usize) -> Result<FaceId> {
-        ner(self.tan_faces.get(i).copied().flatten())
+        ner(self.tan_faces.get(i).copied().flatten(), "the tangent face")
     }
 
     fn vertex(&self, i: usize) -> Result<VertexId> {
-        ner(self.vertices.get(i).copied().flatten())
+        ner(self.vertices.get(i).copied().flatten(), "the rail's vertex")
     }
 
     fn side_edge(&self, i: usize) -> Option<EdgeId> {
@@ -242,9 +242,9 @@ impl RingFilletRemoval {
     /// fillet's seam and the tangent faces' seams at the vertices.
     fn collect_ring_topology(&mut self, k: &Kernel, b: &mut Brep) -> Result<()> {
         let tangency_tol_deg = 2.0; // as SmFilletRemoval::CollectFilletTopology
-        let fil_face = ner(self.face_to_delete)?;
+        let fil_face = ner(self.face_to_delete, "the face to delete")?;
         if !Self::is_ring(k, b, Some(fil_face), tangency_tol_deg)? {
-            return Err(sm_err());
+            return Err(sm_err("the face is not a ring fillet"));
         }
 
         let edges = crate::topology::face::p4::edges(b, fil_face, None, false, None)?;
@@ -256,10 +256,12 @@ impl RingFilletRemoval {
                 continue;
             }
             let [f0, f1] = faces.as_slice() else {
-                return Err(sm_err());
+                return Err(sm_err(
+                    "an edge of the ring fillet does not border exactly two faces",
+                ));
             };
             if rail > 1 {
-                return Err(sm_err());
+                return Err(sm_err("the ring fillet has more than two rails"));
             }
             let other = if *f0 == fil_face { *f1 } else { *f0 };
             *self.rails.get_mut(rail).ok_or_else(|| null("rail index"))? = Some(e);
@@ -274,15 +276,20 @@ impl RingFilletRemoval {
             || self.tan_faces[0] == Some(fil_face)
             || self.tan_faces[1] == Some(fil_face)
         {
-            return Err(sm_err());
+            return Err(sm_err(
+                "the ring fillet does not have two rails between two other faces",
+            ));
         }
         for ii in 0..2 {
             let surface = crate::topology::face::p2::surface(b, self.tan_face(ii)?)?;
             match surface {
                 Some(s) if s.is_kind_of(BSplineSurface::TYPE)? => {}
-                _ => return Err(sm_err()),
+                _ => return Err(sm_err("a tangent face's surface is not a B-spline surface")),
             }
-            let v = ner(edge::start_vertex(b, self.rail(ii)?)?)?;
+            let v = ner(
+                edge::start_vertex(b, self.rail(ii)?)?,
+                "the rail's start vertex",
+            )?;
             *self
                 .vertices
                 .get_mut(ii)
@@ -296,7 +303,9 @@ impl RingFilletRemoval {
             if !((v0 == self.vertices[0] && v1 == self.vertices[1])
                 || (v0 == self.vertices[1] && v1 == self.vertices[0]))
             {
-                return Err(sm_err());
+                return Err(sm_err(
+                    "the fillet's seam does not join the two rails' vertices",
+                ));
             }
         }
 
@@ -315,7 +324,9 @@ impl RingFilletRemoval {
                     || faces.first() != Some(&tan_face)
                     || edge::is_closed(b, e)?
                 {
-                    return Err(sm_err());
+                    return Err(sm_err(
+                        "a rail's vertex has an edge other than one open seam of its tangent face",
+                    ));
                 }
                 let at_high = edge::start_vertex(b, e)? != Some(v);
                 *self
@@ -340,8 +351,14 @@ impl RingFilletRemoval {
     fn intersect_tangent_surfaces(&mut self, k: &Kernel, b: &mut Brep) -> Result<()> {
         let tol = self.tol_3d;
         let ssi = {
-            let surf0 = ner(crate::topology::face::p2::surface(b, self.tan_face(0)?)?)?;
-            let surf1 = ner(crate::topology::face::p2::surface(b, self.tan_face(1)?)?)?;
+            let surf0 = ner(
+                crate::topology::face::p2::surface(b, self.tan_face(0)?)?,
+                "the first tangent face's surface",
+            )?;
+            let surf1 = ner(
+                crate::topology::face::p2::surface(b, self.tan_face(1)?)?,
+                "the second tangent face's surface",
+            )?;
             surf0.global_surface_intersect(
                 k,
                 &surf0.natural_uv_domain_with_nurb(k)?,
@@ -359,7 +376,10 @@ impl RingFilletRemoval {
         // 2 r sin(phi/2), for faces turning by phi < 170 degrees: within 6 chords).
         let mut rail_pts: [Vec<Point3>; 2] = [Vec::new(), Vec::new()];
         for (ii, pts) in rail_pts.iter_mut().enumerate() {
-            let prim = ner(eu1::primary_edgeuse(b, self.rail(ii)?)?)?;
+            let prim = ner(
+                eu1::primary_edgeuse(b, self.rail(ii)?)?,
+                "the rail's primary edge use",
+            )?;
             for kk in 0..NUM_SAMPLES {
                 let t = (f64::from(kk) + 0.5) / f64::from(NUM_SAMPLES);
                 pts.push(normalized_evaluate(k, b, prim, t, false, false, true)?.point);
@@ -369,7 +389,7 @@ impl RingFilletRemoval {
         {
             let rail1 = self.rail(1)?;
             let rail1_ivl = edge::interval(b, rail1)?;
-            let rail1_curve = ner(edge::curve(b, rail1)?)?;
+            let rail1_curve = ner(edge::curve(b, rail1)?, "the second rail's curve")?;
             for &p in &rail_pts[0] {
                 let d = rail1_curve.drop_point(
                     k,
@@ -381,7 +401,9 @@ impl RingFilletRemoval {
                     SolverOperation::Minimize,
                 )?;
                 if !d.success {
-                    return Err(sm_err());
+                    return Err(sm_err(
+                        "a point of the first rail could not be dropped onto the second rail",
+                    ));
                 }
                 chord = max2(chord, d.distance);
             }
@@ -429,7 +451,9 @@ impl RingFilletRemoval {
             // The surfaces don't meet near the fillet within their domains: the sharp
             // edge would lie on a continuation of one of them.
             self.not_exact = true;
-            return Err(sm_err());
+            return Err(sm_err(
+                "the tangent surfaces do not meet in a closed curve near the fillet's rails",
+            ));
         };
         if bspline_part(&sharp).is_none() {
             return Err(SolidError::blend_missing(
@@ -441,7 +465,7 @@ impl RingFilletRemoval {
         // Run as rail 0.
         {
             let rail0 = self.rail(0)?;
-            let rail0_curve = ner(edge::curve(b, rail0)?)?;
+            let rail0_curve = ner(edge::curve(b, rail0)?, "the first rail's curve")?;
             let mid = edge::interval(b, rail0)?.evaluate(0.5);
             // (SmCurve's default: non-zero tangents)
             let pv = rail0_curve.evaluate(k, mid, 1, true, true)?;
@@ -458,7 +482,9 @@ impl RingFilletRemoval {
                 SolverOperation::Minimize,
             )?;
             if !d.success {
-                return Err(sm_err());
+                return Err(sm_err(
+                    "the first rail's midpoint could not be dropped onto the sharp curve",
+                ));
             }
             // (SmBSplineCurve's default: exact tangents)
             let qv = sharp.evaluate(k, d.parameter, 1, true, false)?;
@@ -481,7 +507,8 @@ impl RingFilletRemoval {
             let Some(side) = self.side_edge(ii) else {
                 continue;
             };
-            let mut side_curve = ner(edge::curve(b, side)?)?.clone();
+            let mut side_curve =
+                ner(edge::curve(b, side)?, "the tangent face's seam curve")?.clone();
             if bspline_part(&side_curve).is_none() {
                 return Err(SolidError::blend_missing(
                     OP,
@@ -503,7 +530,7 @@ impl RingFilletRemoval {
                 // anything else would have to be continued past its curve.
                 if !side_curve.is_linear(k, tol, false)?.linear {
                     self.not_exact = true;
-                    return Err(sm_err());
+                    return Err(sm_err("the seam stops short of the sharp edge and is not a line, so it cannot run on exactly"));
                 }
                 let side_ivl = side_curve.natural_interval();
                 let at_high = self.side_at_high(ii)?;
@@ -520,7 +547,7 @@ impl RingFilletRemoval {
                 let speed = d1.length();
                 // (`!(dSpeed > SM_EFF_ZERO)`: a NaN speed fails too)
                 if speed.is_nan() || speed <= EFF_ZERO {
-                    return Err(sm_err());
+                    return Err(sm_err("the seam's curve has no speed at its end"));
                 }
                 let reach_param = (reach + 10.0 * tol) / speed;
                 let far = if at_high {
@@ -528,12 +555,11 @@ impl RingFilletRemoval {
                 } else {
                     end - reach_param
                 };
-                let part = ner(bspline_part_with_nurb(&side_curve)?)?;
-                let longer = Curve::from(ner(part.create_extended_curve(
-                    far,
-                    ContinuityType::CInfinity,
-                    true,
-                )?)?);
+                let part = ner(bspline_part_with_nurb(&side_curve)?, "the seam curve's B-spline form")?;
+                let longer = Curve::from(ner(
+                    part.create_extended_curve(far, ContinuityType::CInfinity, true)?,
+                    "the seam's extended curve",
+                )?);
                 *self
                     .side_curves
                     .get_mut(ii)
@@ -548,25 +574,33 @@ impl RingFilletRemoval {
                     &none,
                 )?;
                 if solutions.is_empty() {
-                    return Err(sm_err());
+                    return Err(sm_err("the seam's line does not reach the sharp edge"));
                 }
             }
             // One crossing (a closed curve starting there meets it at both its ends).
-            let first = solutions.get(0).ok_or_else(sm_err)?;
+            let first = solutions
+                .get(0)
+                .ok_or_else(|| sm_err("the seam has no crossing with the sharp edge"))?;
             let (first_t, first_side_t) = (first.start.parameters[0], first.start.parameters[1]);
             let at = sharp.evaluate_point(k, first_t)?;
             for kk in 1..solutions.len() {
-                let s = solutions.get(kk).ok_or_else(sm_err)?;
+                let s = solutions
+                    .get(kk)
+                    .ok_or_else(|| sm_err("the seam's crossing with the sharp edge"))?;
                 let other = sharp.evaluate_point(k, s.start.parameters[0])?;
                 if other.distance(at) > tol {
-                    return Err(sm_err());
+                    return Err(sm_err(
+                        "the seam crosses the sharp edge at more than one place",
+                    ));
                 }
             }
             if have_vertex {
                 // Both tangent faces have a seam there: they must cross the sharp edge
                 // together.
                 if at.distance(self.new_vertex) > tol {
-                    return Err(sm_err());
+                    return Err(sm_err(
+                        "the two tangent faces' seams cross the sharp edge at different places",
+                    ));
                 }
             } else {
                 self.new_vertex = at;
@@ -619,10 +653,10 @@ impl RingFilletRemoval {
             return Ok(());
         };
         let tol = self.tol_3d;
-        let surf = ner(crate::topology::face::p2::surface(
-            b,
-            self.tan_face(which_side)?,
-        )?)?;
+        let surf = ner(
+            crate::topology::face::p2::surface(b, self.tan_face(which_side)?)?,
+            "the tangent face's surface",
+        )?;
         let new_t = *self
             .side_params
             .get(which_side)
@@ -639,7 +673,9 @@ impl RingFilletRemoval {
                 continue;
             }
             if pair > 1 {
-                return Err(sm_err());
+                return Err(sm_err(
+                    "the seam has more than two edge uses with their own UV trim curves",
+                ));
             }
             let extended = if uv.natural_interval().contains_value(new_t, 0.0) {
                 if bspline_part(uv).is_none() {
@@ -650,12 +686,11 @@ impl RingFilletRemoval {
                 }
                 uv.clone()
             } else {
-                let part = ner(bspline_part_with_nurb(uv)?)?;
-                Curve::from(ner(part.create_extended_curve(
-                    new_t,
-                    ContinuityType::CInfinity,
-                    true,
-                )?)?)
+                let part = ner(bspline_part_with_nurb(uv)?, "the UV trim curve's B-spline form")?;
+                Curve::from(ner(
+                    part.create_extended_curve(new_t, ContinuityType::CInfinity, true)?,
+                    "the seam's extended UV trim curve",
+                )?)
             };
 
             // It must reach the face's surface at the new vertex.
@@ -675,11 +710,15 @@ impl RingFilletRemoval {
 
             let at = surf.evaluate_point(k, Point2::new(uv_at.x, uv_at.y))?;
             if at.distance(self.new_vertex) > tol {
-                return Err(sm_err());
+                return Err(sm_err(
+                    "a seam's UV trim does not reach the new vertex on its face's surface",
+                ));
             }
         }
         if pair == 0 {
-            return Err(sm_err());
+            return Err(sm_err(
+                "the seam has no edge use with its own UV trim curve",
+            ));
         }
         Ok(())
     }
@@ -688,14 +727,14 @@ impl RingFilletRemoval {
     #[allow(clippy::too_many_lines)]
     fn do_removal(&mut self, k: &mut Kernel, b: &mut Brep) -> Result<()> {
         let every_region = k.fixes.glue_vertices_joins_every_region;
-        let new_edge_curve = ner(self.new_edge_curve.take())?;
+        let new_edge_curve = ner(self.new_edge_curve.take(), "the sharp edge's curve")?;
         with_kernel_callbacks(k, b, |_k, b, env| {
             let this = Some(NotifyArg::Object(brep_p2::brep_ref(b)));
             brep_p2::notify(b, env, None, NotifyOperation::PreEdit, [this, None, None])
         })?;
 
         // The fillet goes; its seam (a wire edge then) with it.
-        let face_to_delete = ner(self.face_to_delete.take())?;
+        let face_to_delete = ner(self.face_to_delete.take(), "the face to delete")?;
         with_kernel_callbacks(k, b, |k, b, env| {
             brep_p3::delete_face(
                 k,
@@ -764,7 +803,7 @@ impl RingFilletRemoval {
         let survive_edge = self.rail(0)?;
         let delete_edge = self.rail(1)?;
         let tangent = |b: &Brep, e: EdgeId| -> Result<crate::math::Vec3> {
-            let c = ner(edge::curve(b, e)?)?;
+            let c = ner(edge::curve(b, e)?, "the rail's curve")?;
             // (SmCurve's default: non-zero tangents)
             let pv = c.evaluate(k, edge::interval(b, e)?.evaluate(0.5), 1, true, true)?;
             pv.get(1).copied().ok_or_else(|| null("short evaluation"))
@@ -820,8 +859,14 @@ impl RingFilletRemoval {
         }
         for ii in 0..2 {
             let face = self.tan_face(ii)?;
-            let eu = ner(edge::edgeuse_of_face(b, survive_edge, Some(face))?)?;
-            let uv = ner(eu1::uv_trim_curve(b, eu)?.0)?;
+            let eu = ner(
+                edge::edgeuse_of_face(b, survive_edge, Some(face))?,
+                "the sharp edge's edge use on the tangent face",
+            )?;
+            let uv = ner(
+                eu1::uv_trim_curve(b, eu)?.0,
+                "the sharp edge's UV trim curve on the tangent face",
+            )?;
             let mut face_domain: Extent2d = crate::topology::face::p2::uv_domain(b, face)?;
             let uv_ivl = uv.natural_interval();
             for kk in 0..=16u32 {
@@ -832,8 +877,11 @@ impl RingFilletRemoval {
                 crate::topology::face::p2::set_uv_domain(b, face, &face_domain)?;
             } else {
                 // The face lies within its surface's domain (nothing was continued).
-                let surf_domain = ner(crate::topology::face::p2::surface(b, face)?)?
-                    .natural_uv_domain_with_nurb(k)?;
+                let surf_domain = ner(
+                    crate::topology::face::p2::surface(b, face)?,
+                    "the tangent face's surface",
+                )?
+                .natural_uv_domain_with_nurb(k)?;
                 let in_surface = face_domain.intersect(&surf_domain)?;
                 crate::topology::face::p2::set_uv_domain(b, face, &in_surface)?;
             }
@@ -865,9 +913,9 @@ fn install_curve(k: &mut Kernel, b: &mut Brep, e: EdgeId, curve: Option<Curve>) 
 /// `SM_ERR_NULL_POINTER` without a vertex or for a shell without region; `SM_ERR` when
 /// editing is disabled; those of the shell edits.
 pub fn join_shells_at_vertex(k: &mut Kernel, b: &mut Brep, v: Option<VertexId>) -> Result<()> {
-    let v = ner(v)?;
+    let v = ner(v, "the vertex whose shells are joined")?;
     if !b.editing_enabled() {
-        return Err(sm_err());
+        return Err(sm_err("editing is not enabled on the B-rep"));
     }
 
     let mut shells: Vec<Option<crate::topology::ShellId>> =
@@ -888,7 +936,7 @@ pub fn join_shells_at_vertex(k: &mut Kernel, b: &mut Brep, v: Option<VertexId>) 
                 .map(Some)
                 .collect();
             shell::transfer_children(k, b, join, keep, Some(&wires))?;
-            let region = ner(b.shell(join)?.region)?;
+            let region = ner(b.shell(join)?.region, "the shell's region")?;
             shell::region_remove_shell(b, region, join)?;
             with_kernel_callbacks(k, b, |k, b, env| shell::destroy(k, b, join, env))?;
             if let Some(slot) = shells.get_mut(jj) {
