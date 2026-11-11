@@ -10,8 +10,8 @@ use std::collections::BTreeMap;
 
 use crate::dialogs::{Dialog, Kind};
 use crate::dialogs_sheet::{ANGLE_DISPLAYS, RELIEF_SHAPES, RULE_FIELDS, Sm, design_rules};
-use crate::i18n::tr;
 use crate::ui_kit::{self, Text};
+use solidcraft_ui_text::tr;
 
 const MAX_RULES: usize = 64;
 /// The longest rule name `sheet.manage_rules` takes.
@@ -443,7 +443,7 @@ pub(crate) fn name_prompt(ctx: &egui::Context, d: &mut Dialog, library: &mut Lib
     let Some(mut prompt) = state.prompt.take() else { return false };
     let title = tr(if prompt.renaming { "sheet.personal_rules.rename" } else { "sheet.personal_rules.save" });
     let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("personal_sheet_rule_name"), "save", title)
-        .actions(if prompt.renaming { tr("sheet.personal_rules.rename") } else { crate::i18n::tr_label("Save") }, "Cancel", None)
+        .actions(if prompt.renaming { tr("sheet.personal_rules.rename") } else { solidcraft_ui_text::tr_label("Save") }, "Cancel", None)
         .show(ctx, true, |ui| {
             ui_kit::row(ui, "sheet.personal_rules.name", |ui| ui_kit::focused_text_field(ui, &mut prompt.name, tr("sheet.personal_rules.name_hint")));
             // Keep an over-long name for a clear error, but bound what the prompt holds.

@@ -235,14 +235,14 @@ fn shown_mode(t: &Tool) -> Option<(&'static str, &'static str)> {
 
 /// The words next to the cursor, in the interface language.
 pub(crate) fn shown_label(t: &Tool) -> Option<&'static str> {
-    shown_mode(t).map(|(command, _)| crate::i18n::tr_label(crate::command_label(command)))
+    shown_mode(t).map(|(command, _)| solidcraft_ui_text::tr_label(crate::command_label(command)))
 }
 
 /// The label next to the cursor (below the point's coordinates).
 pub fn paint_mode(app: &SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &Proj) {
     let Some((command, icon)) = app.tool.as_ref().and_then(shown_mode) else { return };
     let Some(pointer) = ui.input(|i| i.pointer.hover_pos()).filter(|p| proj.rect.contains(*p)) else { return };
-    let tk = crate::theme::Tokens::view();
+    let tk = solidcraft_theme::Tokens::view();
     let Some(label) = app.tool.as_ref().and_then(shown_label) else { return };
     let galley = painter.layout_no_wrap(label.to_string(), egui::FontId::proportional(tk.font_small), tk.text);
     let side = galley.size().y.max(14.0);

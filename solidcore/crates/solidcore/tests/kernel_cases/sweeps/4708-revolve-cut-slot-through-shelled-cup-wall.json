@@ -1,0 +1,155 @@
+{
+  "area": "sweeps",
+  "bodies": {
+    "b8": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b9": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b9"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b10"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b10"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b11"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b12"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b11"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b14"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b14",
+        "b15"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "4708-revolve-cut-slot-through-shelled-cup-wall",
+  "expected": {
+    "body_count": 1,
+    "method": "cup pi 22.5^2 10 - pi 20.5^2 8; the slot's section (r 19..24, z 5..8) crosses the wall r 20.5..22.5: it removes (30/360) pi (22.5^2 - 20.5^2) 3",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#4708"
+    ],
+    "volume_mm3": 5274.7341,
+    "what": "a slot revolve-cut through the wall of a shelled cup (r 22.5, 2 mm walls) over 30 deg: the revolve cut (and the same cut as a combine) did nothing (synthetic: the report's cup also had a chamfer and a fillet)"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 18,
+      "faces": 9,
+      "vertices": 12
+    }
+  },
+  "records": "4708-revolve-cut-slot-through-shelled-cup-wall.bodies.json.gz",
+  "result": [
+    {
+      "body": "Cup",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 5614.506898926308,
+      "body_count": 1,
+      "edges": 18,
+      "faces": 9,
+      "vertices": 12,
+      "volume_mm3": 5274.734065531545
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#4708"
+  ],
+  "traced_ops": [
+    "extrude",
+    "copy",
+    "copy",
+    "tagged",
+    "shell",
+    "revolve",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a slot revolve-cut through the wall of a shelled cup (r 22.5, 2 mm walls) over 30 deg: the revolve cut (and the same cut as a combine) did nothing (synthetic: the report's cup also had a chamfer and a fillet)",
+  "why_not": []
+}

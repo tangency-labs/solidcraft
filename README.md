@@ -28,7 +28,7 @@
   <a href="https://docs.solidcraft.io/">Documentation</a> ·
   <a href="https://www.blacksmith.sh"><img src="https://img.shields.io/badge/CI-Blacksmith-000000?logo=githubactions&logoColor=white" alt="CI powered by Blacksmith" /></a>
   <a href="https://discord.gg/FtU4NQNVDH">Discord</a> ·
-  <a href="https://github.com/bherbruck/solidcore">SolidCore</a>
+  <a href="https://github.com/tangency-labs/solidcore">SolidCore</a>
 </p>
 
 <p align="center">
@@ -132,6 +132,12 @@ them: read [DISCLAIMER.md](DISCLAIMER.md).
 MIT OR Apache-2.0, at your option. Developed under the
 [clean-room contribution rules](AGENTS.md); third-party code and assets retain their
 documented licences and attribution.
+
+SolidCraft's brand and interface are licensed separately, under
+[LICENSE-BRAND](LICENSE-BRAND): the UI kit, the look (interface icons, glyphs, built-in themes),
+the theme's design tokens and palettes, and the SolidCraft name, logo and app icon. Use them freely
+as part of SolidCraft. Using them in another program or product needs the maintainers' written
+permission first.
 
 SolidCraft is independent. Behaviour is designed from public documentation, general CAD
 conventions and user feedback. Reference tests use analytic values and open-source tools.

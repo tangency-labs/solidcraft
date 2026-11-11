@@ -75,15 +75,19 @@ fn git(args: &[&str]) -> String {
         .unwrap_or_default()
 }
 
-/// The solidcore rev SolidCraft is pinned to (the workspace `Cargo.toml`).
+/// The SolidCore commit the vendored tree came from: the second parent of the latest subtree
+/// merge under `solidcore`. `git subtree add`/`pull` make that merge, and its second
+/// parent is the SolidCore commit whose tree the prefix holds. Empty outside a git checkout
+/// (a source tarball), where the manifest names no provenance instead of a wrong one.
 fn solidcore_pin() -> String {
-    let text = std::fs::read_to_string(root().join("Cargo.toml")).unwrap_or_default();
-    text.lines()
-        .find(|l| l.starts_with("solidcore ="))
-        .and_then(|l| l.split("rev = \"").nth(1))
-        .and_then(|r| r.split('"').next())
-        .unwrap_or_default()
-        .to_string()
+    solidcore_commit(&git(&["log", "--merges", "-1", "--format=%P", "--", "solidcore"])).unwrap_or_default().to_string()
+}
+
+/// The SolidCore commit in a `%P` parent list of a subtree merge, when the merge is one.
+fn solidcore_commit(parents: &str) -> Option<&str> {
+    let mut parents = parents.split_whitespace();
+    let _mainline = parents.next()?;
+    parents.next()
 }
 
 /// Completes the corpus in `dir` after a run with `results` (each with its `path` under
@@ -187,6 +191,21 @@ pub(crate) fn manifest(dir: &Path, results: &[Value], golden: Option<&Value>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_vendored_commit_is_a_subtree_merges_second_parent() {
+        assert_eq!(solidcore_commit("mainline solidcore"), Some("solidcore"));
+        assert_eq!(solidcore_commit("mainline"), None);
+        assert_eq!(solidcore_commit(""), None);
+    }
+
+    #[test]
+    fn the_export_names_the_commit_the_vendored_tree_came_from() {
+        // A source tarball has no git history, so it names nothing (the manifest says so);
+        // otherwise the vendored commit is a full object id.
+        let pin = solidcore_pin();
+        assert!(pin.is_empty() || (pin.len() == 40 && pin.bytes().all(|b| b.is_ascii_hexdigit())), "{pin}");
+    }
 
     #[test]
     fn every_reason_the_export_gives_has_its_kind() {

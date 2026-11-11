@@ -340,6 +340,125 @@ fn tangent_moves_only_the_second_pick() {
     check_order(line_and_circle(), "sketch.constraint.tangent", "c1", "l1");
 }
 
+/// #12092: Tangent with a line's end point and a circle puts that end on the circle and makes the
+/// line tangent there, in one step. In either pick order only the picked end moves: the line turns
+/// about its other end and gets longer or shorter, and the circle stays.
+#[test]
+fn tangent_at_a_lines_end_puts_the_end_on_the_circle() {
+    // Where the line ends up: its end's distance from the centre, and the line's.
+    let touch = |s: &Session| {
+        let sk = sketch(s);
+        let (a, b) = (pt(s, "l1.start"), pt(s, "l1.end"));
+        let c = sk.point(sk.resolve_point("c1.center").unwrap()).unwrap();
+        let line = (b - a).cross(c - a).abs() / a.dist(b);
+        (b.dist(c), line, sk.radius(sk.curve_index("c1").unwrap()).unwrap())
+    };
+    for (a, b) in [("c1", "l1.end"), ("l1.end", "c1")] {
+        let mut s = line_and_circle();
+        let circle = snap(&s, "c1");
+        let undo = s.undo.len();
+        let r = run(&mut s, "sketch.constraint.tangent", json!({"a": a, "b": b}));
+        assert_eq!(r["constraints"].as_array().map(Vec::len), Some(2), "{a}, {b}: {r}");
+        let (end, line, radius) = touch(&s);
+        assert!((radius - 5.0).abs() < 1e-9, "{a}, {b}: the circle keeps its size: {radius}");
+        assert!((end - 5.0).abs() < 1e-6 && (line - 5.0).abs() < 1e-6, "{a}, {b}: end {end}, line {line} from the centre");
+        assert!(same(&snap(&s, "c1"), &circle), "{a}, {b}: the circle moved");
+        let start = pt(&s, "l1.start");
+        assert!(start.dist(solidcore_record::Vec2::new(5.0, 3.0)) < 1e-9, "{a}, {b}: the line's other end moved to {start:?}");
+        assert_eq!(s.undo.len(), undo + 1, "{a}, {b}: one undo step");
+    }
+    // A point that ends no curve names no curve to be tangent: the refusal says what to pick.
+    let mut s = line_and_circle();
+    let e = s.execute("sketch.constraint.tangent", &json!({"a": "l1", "b": "c1.center"})).unwrap_err().to_string();
+    assert!(e.contains("end"), "{e}");
+}
+
+/// A line whose end is already joined to an arc's end (the coincident a click there adds): Tangent
+/// on that end and the arc, or on the two ends in either order, adds only the tangent, since the
+/// end already lies on the arc. The joint holds. With the end and the arc the line stays and the
+/// arc moves; with two ends the first pick stays.
+#[test]
+fn tangent_at_a_joint_adds_only_the_tangent() {
+    for (a, b, stays) in [("l1.end", "a1", "l1"), ("a1", "l1.end", "l1"), ("l1.end", "a1.start", "l1"), ("a1.start", "l1.end", "a1")] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.line", json!({"points": [[2, 3], [12, 3]]}));
+        run(&mut s, "sketch.arc.center_point", json!({"center": [16, 9], "start": [12, 3], "sweep": 90}));
+        let joints = sketch(&s).constraints.len();
+        let kept = snap(&s, stays);
+        let r = run(&mut s, "sketch.constraint.tangent", json!({"a": a, "b": b}));
+        assert!(same(&snap(&s, stays), &kept), "{a}, {b}: {stays} moved");
+        assert_eq!(r["constraints"].as_array().map(Vec::len), Some(1), "{a}, {b}: {r}");
+        assert_eq!(sketch(&s).constraints.len(), joints + 1, "{a}, {b}: only the tangent is new");
+        let sk = sketch(&s);
+        let arc = sk.curve_index("a1").unwrap();
+        let (p, q, c) = (pt(&s, "l1.start"), pt(&s, "l1.end"), sk.center(arc).unwrap());
+        assert!(q.dist(pt(&s, "a1.start")) < 1e-6, "{a}, {b}: the joint came apart");
+        assert!(((q - p).cross(c - p).abs() / p.dist(q) - sk.radius(arc).unwrap()).abs() < 1e-6, "{a}, {b}: not tangent");
+    }
+}
+
+/// Tangent on a line's end and a circle the end already touches tangentially, as for two curves
+/// (`constrain`): what already holds moves nothing. With both fixed the tangent removes no degree
+/// of freedom, so it is kept and reported as redundant, or refused with `if_redundant: "refuse"`,
+/// leaving the sketch as it was.
+#[test]
+fn tangent_at_an_end_that_already_holds_is_redundant() {
+    let touching = |fixed: bool| {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.line", json!({"points": [[5, 3], [20, 3]]}));
+        run(&mut s, "sketch.circle.center", json!({"center": [20, 8], "radius": 5}));
+        if fixed {
+            run(&mut s, "sketch.constraint.fix", json!({"entities": ["l1", "c1"], "fixed": true}));
+        }
+        s
+    };
+    for (a, b) in [("l1.end", "c1"), ("c1", "l1.end")] {
+        let mut s = touching(false);
+        let (line, circle) = (snap(&s, "l1"), snap(&s, "c1"));
+        let r = run(&mut s, "sketch.constraint.tangent", json!({"a": a, "b": b}));
+        assert!(same(&snap(&s, "l1"), &line) && same(&snap(&s, "c1"), &circle), "{a}, {b}: something moved");
+        assert!(r.get("redundant").is_none(), "{a}, {b}: free, so not redundant: {r}");
+
+        let mut s = touching(true);
+        let r = run(&mut s, "sketch.constraint.tangent", json!({"a": a, "b": b}));
+        assert_eq!(r["redundant"], true, "{a}, {b}: {r}");
+        // Fixed entities are held, not constrained, so no constraint is listed.
+        assert!(r["determined_by"].is_array(), "{a}, {b}: {r}");
+        assert_eq!(r["constraints"].as_array().map(Vec::len), Some(2), "{a}, {b}: {r}");
+
+        let mut s = touching(true);
+        let count = sketch(&s).constraints.len();
+        let e = s.execute("sketch.constraint.tangent", &json!({"a": a, "b": b, "if_redundant": "refuse"})).unwrap_err().to_string();
+        assert!(e.contains("already determined by"), "{a}, {b}: {e}");
+        assert_eq!(sketch(&s).constraints.len(), count, "{a}, {b}: nothing added");
+    }
+}
+
+/// The same with free curves whose own constraints already decide it: circle c2 is concentric
+/// with c1 and equal to it, the line is tangent to c2 and its end lies on c2. Tangent on that end
+/// and c1 adds the end on c1 and the tangent, and names what determines the tangent: at the end
+/// it says the line is square to the radius there, so the shared centre and the tangent on c2
+/// decide it, and the equal radius does not.
+#[test]
+fn tangent_at_an_end_names_the_constraints_that_determine_it() {
+    for (a, b) in [("l1.end", "c1"), ("c1", "l1.end")] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.line", json!({"points": [[5, 3], [20, 3]]}));
+        run(&mut s, "sketch.circle.center", json!({"center": [20, 8], "radius": 5}));
+        run(&mut s, "sketch.circle.center", json!({"center": [40, 30], "radius": 2}));
+        let mut id = |cmd: &str, p: Value| run(&mut s, cmd, p)["constraint"].as_str().unwrap_or_default().to_string();
+        let concentric = id("sketch.constraint.concentric", json!({"a": "c1", "b": "c2"}));
+        id("sketch.constraint.equal", json!({"a": "c1", "b": "c2"}));
+        let tangent = id("sketch.constraint.tangent", json!({"a": "l1", "b": "c2"}));
+        id("sketch.constraint.coincident", json!({"a": "l1.end", "b": "c2"}));
+        let r = run(&mut s, "sketch.constraint.tangent", json!({"a": a, "b": b}));
+        assert_eq!(r["redundant"], true, "{a}, {b}: {r}");
+        assert_eq!(r["constraints"].as_array().map(Vec::len), Some(2), "{a}, {b}: {r}");
+        let by = json!([format!("{concentric} (Concentric)"), format!("{tangent} (Tangent)")]);
+        assert_eq!(r["determined_by"], by, "{a}, {b}: {r}");
+    }
+}
+
 #[test]
 fn a_fixed_second_pick_makes_the_first_move() {
     let mut s = line_and_circle();
@@ -2070,6 +2189,28 @@ fn the_first_dimension_measuring_to_a_sketch_axis_endpoint_uses_its_fixed_positi
     assert_eq!(pt(&s, &end), end_pos);
 }
 
+/// #11043: a centre rectangle drawn away from the origin, with nothing tying it there, keeps
+/// its centre when its first dimension scales it; it does not run off along the line from the
+/// origin. `scale_about_origin` keeps the scaling about the origin, as before.
+#[test]
+fn the_first_dimension_scales_a_free_shape_about_its_own_centre() {
+    for about_origin in [false, true] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.rectangle.center", json!({"center": [100, 100], "corner": [105, 105]}));
+        let before = sketch(&s);
+        let out =
+            run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": "500 mm", "scale_sketch": true, "scale_about_origin": about_origin}));
+        assert_eq!(out["scaled"], 50.0, "{out}");
+        assert_eq!(out["measured"], 500.0, "{out}");
+        let after = sketch(&s);
+        let anchor = if about_origin { v(0.0, 0.0) } else { v(100.0, 100.0) };
+        for (p, q) in before.points.iter().zip(&after.points) {
+            let want = if p.fixed { p.pos } else { anchor + (p.pos - anchor) * 50.0 };
+            assert!(q.pos.dist(want) < 1e-6, "about origin {about_origin}, {}: {:?} -> {:?}, expected {want:?}", p.id, p.pos, q.pos);
+        }
+    }
+}
+
 #[test]
 fn the_first_dimension_does_not_scale_a_sketch_that_has_a_size() {
     // A sketch with projected or fixed geometry, or another length dimension, already has a
@@ -2101,6 +2242,61 @@ fn the_first_dimension_leaves_a_separate_shape_alone() {
     for (p, q) in other.points.iter().zip(&after.points).skip(5) {
         assert!(q.pos.dist(p.pos) < 1e-6, "{} {:?} -> {:?}", p.id, p.pos, q.pos);
     }
+}
+
+/// #11438: a lone circle has no proportions to keep, so its first dimension sizes it in place.
+/// Scaling the sketch about its origin would only move the circle's centre.
+#[test]
+fn the_first_dimension_of_a_lone_circle_keeps_its_centre() {
+    for ty in ["diameter", "radius"] {
+        let mut s = new_sketch();
+        let out = run(&mut s, "sketch.circle.center", json!({"center": [-9, 40.5], "radius": 5.852349955359813}));
+        let circle = out["curves"][0].as_str().unwrap().to_string();
+        let out = run(&mut s, "sketch.dimension", json!({"entities": [circle], "type": ty, "value": "6.5 mm", "scale_sketch": true}));
+        assert!(out.get("scaled").is_none(), "{ty}: {out}");
+        let sk = sketch(&s);
+        let c = sk.curves.iter().position(|c| c.id == circle).unwrap();
+        let centre = sk.center(c).unwrap();
+        assert!(centre.dist(solidcore_record::Vec2::new(-9.0, 40.5)) < 1e-6, "{ty}: the centre moved to {centre:?}");
+        let want = if ty == "diameter" { 3.25 } else { 6.5 };
+        assert!((sk.radius(c).unwrap() - want).abs() < 1e-6, "{ty}: radius {:?}", sk.radius(c));
+    }
+    // A size far below the drawn one is taken too, and the centre still stays where it is.
+    for (ty, value, want) in [("radius", "0.000003 mm", 0.000003), ("diameter", "0.000006 mm", 0.000003)] {
+        let mut s = new_sketch();
+        let out = run(&mut s, "sketch.circle.center", json!({"center": [12, -7], "radius": 2}));
+        let circle = out["curves"][0].as_str().unwrap().to_string();
+        let out = run(&mut s, "sketch.dimension", json!({"entities": [circle], "type": ty, "value": value, "scale_sketch": true}));
+        assert!(out.get("scaled").is_none(), "{ty}: {out}");
+        let sk = sketch(&s);
+        let c = sk.curves.iter().position(|c| c.id == circle).unwrap();
+        let centre = sk.center(c).unwrap();
+        assert!(centre.dist(solidcore_record::Vec2::new(12.0, -7.0)) < 1e-9, "{ty}: the centre moved to {centre:?}");
+        assert!((sk.radius(c).unwrap() - want).abs() < 1e-12, "{ty}: radius {:?}", sk.radius(c));
+    }
+    // A first distance from the origin to the centre still scales the lone circle (#1365).
+    let mut s = new_sketch();
+    let out = run(&mut s, "sketch.circle.center", json!({"center": [30, 40], "radius": 5}));
+    let circle = out["curves"][0].as_str().unwrap().to_string();
+    let out = run(&mut s, "sketch.dimension", json!({"entities": ["origin", format!("{circle}.center")], "value": "100 mm", "scale_sketch": true}));
+    assert!((out["scaled"].as_f64().unwrap() - 2.0).abs() < 1e-6, "{out}");
+    let sk = sketch(&s);
+    let c = sk.curves.iter().position(|c| c.id == circle).unwrap();
+    let centre = sk.center(c).unwrap();
+    assert!(centre.dist(solidcore_record::Vec2::new(60.0, 80.0)) < 1e-6, "the centre is at {centre:?}");
+    assert!((sk.radius(c).unwrap() - 10.0).abs() < 1e-6, "radius {:?}", sk.radius(c));
+    // A sketch axis the centre is held on is not a second curve: the diameter sizes the circle in place.
+    let mut s = new_sketch();
+    let out = run(&mut s, "sketch.circle.center", json!({"center": [0, 40], "radius": 5}));
+    let circle = out["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.constraint.coincident", json!({"a": format!("{circle}.center"), "b": "y"}));
+    let out = run(&mut s, "sketch.dimension", json!({"entities": [circle], "type": "diameter", "value": "20 mm", "scale_sketch": true}));
+    assert!(out.get("scaled").is_none(), "{out}");
+    let sk = sketch(&s);
+    let c = sk.curves.iter().position(|c| c.id == circle).unwrap();
+    let centre = sk.center(c).unwrap();
+    assert!(centre.dist(solidcore_record::Vec2::new(0.0, 40.0)) < 1e-6, "the centre moved to {centre:?}");
+    assert!((sk.radius(c).unwrap() - 10.0).abs() < 1e-6, "radius {:?}", sk.radius(c));
 }
 
 /// #1365 still holds for one drawing: shapes joined by a constraint scale together.
@@ -2249,6 +2445,71 @@ fn undoing_cancel_then_finishing_restores_the_temporary_sketch_marker() {
     assert_eq!(s.active_sketch, None);
     assert_eq!(s.doc.sketch(id).unwrap().curves.len(), 5);
     assert_eq!(s.model.state().bodies.len(), 1);
+}
+
+/// #14010: a sketch with features after it, opened by `sketch.edit` without `restore_marker`
+/// (as MCP calls it), is edited with the timeline rolled to it: each sketch command evaluates up
+/// to the sketch only, and the later features are rebuilt once, at Finish. A save made during the
+/// edit (which names an unnamed design after its file) holds the whole timeline and leaves Finish
+/// and Cancel working, Cancel puts the design back, and `restore_marker: false` keeps the old
+/// in-place edit that rebuilds the later features after every command.
+#[test]
+fn editing_a_mid_timeline_sketch_rebuilds_later_features_once_at_finish() {
+    let (mut s, id) = sketch_below_a_solid();
+    for x in [40, 60, 80] {
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [x, 0, 0]}));
+    }
+    let bodies = s.model.state().bodies.len();
+    let before = (*s.doc).clone();
+    // The design as it was, under the name the last save gave it.
+    let unchanged = |s: &Session| {
+        let mut doc = (*s.doc).clone();
+        doc.name.clone_from(&before.name);
+        doc == before
+    };
+    let dir = std::env::temp_dir().join(format!("solidcraft-mid-edit-save-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    run(&mut s, "sketch.edit", json!({"sketch": id}));
+    for y in [20, 30] {
+        run(&mut s, "sketch.line", json!({"points": [[0, y], [10, y]]}));
+        assert!(s.model.last_recomputed <= 1, "only the sketch is evaluated, not the 4 features after it: {}", s.model.last_recomputed);
+        let shown = s.model.result(id).and_then(|r| r.state.sketch(id)).map(|k| k.sketch.curves.len());
+        assert_eq!(shown, Some(s.doc.sketch(id).unwrap().curves.len()), "the sketch's own solve is shown");
+    }
+    // A save during the edit holds the whole timeline, not the temporary rollback.
+    let path = dir.join("Mid edit.solidcraft");
+    run(&mut s, "file.save_as", json!({"path": path.to_string_lossy()}));
+    let saved = solidcraft_io::read_design(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!((saved.name.as_str(), saved.marker), ("Mid edit", None));
+    assert_eq!(saved.sketch(id).unwrap().curves.len(), 6);
+    run(&mut s, "sketch.finish", json!({}));
+    assert_eq!(s.doc.marker, None);
+    assert_eq!(s.model.state().bodies.len(), bodies);
+    assert!(s.model.results.iter().all(|r| !r.stale && !r.skipped));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(unchanged(&s), "the edit is one Undo step");
+    assert_eq!(s.active_sketch, None);
+    assert_eq!(s.model.state().bodies.len(), bodies);
+
+    // Cancel puts the timeline back as well, a save during the edit included.
+    run(&mut s, "sketch.edit", json!({"sketch": id}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 20], [10, 20]]}));
+    run(&mut s, "file.save_as", json!({"path": dir.join("Renamed.solidcraft").to_string_lossy()}));
+    run(&mut s, "sketch.cancel", json!({}));
+    assert!(unchanged(&s));
+    assert_eq!(s.model.state().bodies.len(), bodies);
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // The old in-place edit, kept behind `restore_marker: false`.
+    run(&mut s, "sketch.edit", json!({"sketch": id, "restore_marker": false}));
+    assert_eq!(s.doc.marker, None);
+    run(&mut s, "sketch.line", json!({"points": [[0, 20], [10, 20]]}));
+    // Rebuilt, or made again from what they changed when what they read is as it was (#6183).
+    let evaluated = s.model.last_recomputed + s.model.last_restored;
+    assert!(evaluated > 1, "in place, the later features are evaluated: {evaluated}");
+    run(&mut s, "sketch.finish", json!({}));
+    assert_eq!(s.doc.marker, None);
+    assert!(s.execute("sketch.edit", &json!({"sketch": id, "restore_marker": true})).is_err());
 }
 
 #[test]

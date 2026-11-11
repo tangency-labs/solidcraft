@@ -3,17 +3,15 @@
 //! selection), camera, agent conversation and per-design view state, and are swapped in when
 //! their tab is picked.
 //! Closing a design with unsaved changes asks first, and so does quitting: one "save changes?"
-//! per design with unsaved changes ([`request_quit`]).
+//! for the unsaved designs in this window ([`request_quit`]).
 
-use crate::ui_kit::BackingTooltipExt as _;
-use crate::ui_kit::{Container, Surface};
-use egui::{FontId, Rect, Sense, pos2, vec2};
+use crate::i18n::LocaleNames as _;
+use egui::Rect;
 use serde_json::{Value, json};
 use solidcraft_engine::Session;
-use solidcraft_engine::render::Camera;
+use solidcraft_viewport::Camera;
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::ui_kit;
 
 /// Continue transient shot queues without adopting their document or view into the active tab.
@@ -45,6 +43,7 @@ pub struct DocSlot {
     pub(crate) pending_feature_edit: Option<crate::feature_edit::PendingFeatureEdit>,
     pre_sketch_cam: Option<crate::PreSketchView>,
     pre_sketch_component: Option<crate::PreSketchComponent>,
+    pre_edit_component: Option<crate::PreEditComponent>,
     view: DocView,
     occurrence_move: Option<crate::browser::OccMove>,
     reveals: crate::browser::PendingReveals,
@@ -146,6 +145,7 @@ impl DocSlot {
             pending_feature_edit: None,
             pre_sketch_cam: None,
             pre_sketch_component: None,
+            pre_edit_component: None,
             view: DocView::default(),
             occurrence_move: None,
             reveals: Default::default(),
@@ -169,6 +169,8 @@ pub struct Documents {
     pub quitting: Option<Vec<usize>>,
     /// The "save changes?" button the arrow keys have picked; Enter gives it.
     pub choice: Answer,
+    /// A grouped prompt and its save queue; row actions update the remaining tab indices.
+    group: Option<SaveGroup>,
     /// Save As is answering a Close/Quit prompt.
     saving: bool,
     /// Close Other Tabs / Close All Tabs: the tabs still to close, in increasing order (the last
@@ -180,6 +182,111 @@ pub struct Documents {
     /// the link (opened, adopted in place, the link just made).
     /// Coming back to its tab reads again those that differ (`linked_source::update_changed`).
     pub(crate) link_stamps: Vec<(u64, crate::linked_source::Stamp)>,
+}
+
+struct SaveGroup {
+    rows: Vec<(usize, bool)>,
+    pending: Vec<usize>,
+    /// A row save restores the shown tab and prompt on cancellation or failure.
+    saving_row: Option<(usize, usize)>,
+}
+
+/// Start one confirmation before any tab (including clean tabs) is removed.
+fn start_group(app: &mut SolveApp, tabs: &[usize]) -> bool {
+    if app.preferences.save_prompt_one_at_a_time {
+        return false;
+    }
+    let rows: Vec<_> = tabs.iter().copied().filter(|i| *i < app.docs.count() && dirty(app, *i)).map(|i| (i, true)).collect();
+    if rows.len() < 2 {
+        return false;
+    }
+    app.docs.closing = rows.first().map(|(i, _)| *i);
+    app.docs.choice = Answer::Save;
+    app.docs.group = Some(SaveGroup { rows, pending: Vec::new(), saving_row: None });
+    true
+}
+
+/// Finish only after all selected writes succeed. Unselected designs are discarded together.
+fn finish_group(app: &mut SolveApp) {
+    let Some(group) = app.docs.group.take() else { return };
+    app.docs.closing = None;
+    if let Some(skip) = app.docs.quitting.as_mut() {
+        skip.extend(group.rows.into_iter().map(|(i, _)| i));
+        quit_step(app);
+    } else if let Some(tabs) = app.docs.batch.clone() {
+        for i in tabs.into_iter().rev() {
+            close(app, i, true);
+        }
+        app.docs.batch = None;
+        crate::linked_source::update_changed(app);
+    }
+}
+
+fn save_group_next(app: &mut SolveApp) {
+    let next = app.docs.group.as_mut().and_then(|g| g.pending.pop());
+    let Some(i) = next else {
+        finish_group(app);
+        return;
+    };
+    switch(app, i);
+    app.docs.closing = Some(i);
+    app.docs.saving = true;
+    crate::toolbar::save(app);
+    if !app.file_picker_busy() {
+        saved_for_close(app);
+    }
+}
+
+/// Answer one grouped row through the same save flow as Save Selected.
+fn answer_row(app: &mut SolveApp, i: usize, save: bool) {
+    if app.file_picker_busy() || app.docs.saving || !app.docs.group.as_ref().is_some_and(|g| g.rows.iter().any(|(row, _)| *row == i)) {
+        return;
+    }
+    if !save {
+        close_group_row(app, i);
+        return;
+    }
+    let previous = (app.docs.active, app.docs.closing.unwrap_or(i));
+    if let Some(group) = app.docs.group.as_mut() {
+        group.saving_row = Some(previous);
+    }
+    switch(app, i);
+    app.docs.closing = Some(i);
+    app.docs.saving = true;
+    crate::toolbar::save(app);
+    if !app.file_picker_busy() {
+        saved_for_close(app);
+    }
+}
+
+/// Remove an answered tab and adjust every remaining target after the tab strip shifts.
+fn close_group_row(app: &mut SolveApp, i: usize) {
+    let Some(mut group) = app.docs.group.take() else { return };
+    let mut batch = app.docs.batch.clone();
+    let mut quitting = app.docs.quitting.clone();
+    close(app, i, true);
+    group.rows.retain(|(row, _)| *row != i);
+    for (row, _) in &mut group.rows {
+        if *row > i {
+            *row -= 1;
+        }
+    }
+    for indices in [&mut batch, &mut quitting].into_iter().flatten() {
+        indices.retain(|row| *row != i);
+        for row in indices {
+            if *row > i {
+                *row -= 1;
+            }
+        }
+    }
+    app.docs.batch = batch;
+    app.docs.quitting = quitting;
+    app.docs.closing = group.rows.first().map(|(row, _)| *row);
+    let done = group.rows.is_empty();
+    app.docs.group = Some(group);
+    if done {
+        finish_group(app);
+    }
 }
 
 impl Documents {
@@ -288,6 +395,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
         pending_feature_edit: std::mem::replace(&mut app.pending_feature_edit, slot.pending_feature_edit),
         pre_sketch_cam: std::mem::replace(&mut app.pre_sketch_cam, slot.pre_sketch_cam),
         pre_sketch_component: std::mem::replace(&mut app.pre_sketch_component, slot.pre_sketch_component),
+        pre_edit_component: std::mem::replace(&mut app.pre_edit_component, slot.pre_edit_component),
         view: take_view(app),
         occurrence_move: std::mem::replace(&mut app.tree.occurrence_move, slot.occurrence_move),
         reveals,
@@ -306,6 +414,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     app.tree.picked_components.clear();
     // Preferences the session holds go with the user, not the tab (#680).
     app.session.auto_project = out.session.auto_project;
+    app.session.project_construction = out.session.project_construction;
     app.session.set_validation(out.session.validation());
     // So does the host's pre-command check: every tab is held to it.
     app.session.set_command_check(out.session.command_check());
@@ -482,6 +591,9 @@ pub(crate) fn same_path(a: &str, b: &str) -> bool {
 
 /// Open `session` in a new tab after the active one and switch to it (`fit`: frame its model).
 pub fn open_tab(app: &mut SolveApp, session: Session) -> Result<(), String> {
+    if app.docs.group.is_some() {
+        return Err(app.tr("document.finish_save_prompt").to_owned());
+    }
     if app.docs.slots.is_empty() {
         app.docs.slots.push(None);
         app.docs.active = 0;
@@ -633,7 +745,7 @@ pub fn prepare_open(app: &mut SolveApp) {
 
 /// Close tab `i`: asks first when it has unsaved changes (`force`: close anyway).
 pub fn close(app: &mut SolveApp, i: usize, force: bool) {
-    if app.file_picker_busy() {
+    if app.docs.group.is_some() || app.file_picker_busy() {
         return;
     }
     let n = app.docs.count();
@@ -722,16 +834,19 @@ pub(crate) fn disconnect_background_endpoint(app: &mut SolveApp, id: &str) {
     }
 }
 
-/// Close several tabs (Close Other Tabs, Close All Tabs; #3055): each with unsaved changes asks
-/// "save changes?" in turn, the others close; Cancel keeps the tabs not closed yet.
+/// Close several tabs: group unsaved designs before closing anything, unless the preference
+/// requests the original one-at-a-time prompts (#3055).
 pub fn close_many(app: &mut SolveApp, mut tabs: Vec<usize>) {
     if app.file_picker_busy() || app.docs.quitting.is_some() || app.docs.closing.is_some() {
         return;
     }
     tabs.sort_unstable();
     tabs.dedup();
-    app.docs.batch = Some(tabs);
-    batch_step(app);
+    tabs.retain(|i| *i < app.docs.count());
+    app.docs.batch = Some(tabs.clone());
+    if !start_group(app, &tabs) {
+        batch_step(app);
+    }
 }
 
 /// Close the next tab of [`close_many`]'s batch, or ask about it when it has unsaved changes.
@@ -758,15 +873,24 @@ fn batch_step(app: &mut SolveApp) {
     crate::linked_source::update_changed(app);
 }
 
-/// Quit (the title bar's ×, File ▸ Quit, the window being closed): asks "save changes?" for each
-/// design with unsaved changes, then sets `app.quit_requested` for the host to close the window.
+/// Quit this window: confirm its unsaved designs, then set `app.quit_requested` for the host.
 /// Cancel, or a Save that didn't save, stays open.
 pub fn request_quit(app: &mut SolveApp) {
     if app.file_picker_busy() {
         return;
     }
     if app.docs.quitting.is_none() {
+        // Quit replaces a pending tab-close group with this window's complete set. The
+        // legacy preference keeps an existing individual question before moving on.
+        if app.docs.group.take().is_some() || !app.preferences.save_prompt_one_at_a_time {
+            app.docs.closing = None;
+            app.docs.choice = Answer::Save;
+        }
         app.docs.quitting = Some(Vec::new());
+        app.docs.batch = None;
+        if app.docs.closing.is_none() && start_group(app, &(0..app.docs.count()).collect::<Vec<_>>()) {
+            return;
+        }
     }
     quit_step(app);
 }
@@ -866,13 +990,12 @@ fn tab_paths(app: &SolveApp) -> Vec<Option<String>> {
     app.docs.slots.iter().map(|s| s.as_ref().map_or(&app.session, |d| &d.session).path.clone()).collect()
 }
 
-/// A tab's tooltip: where its design is saved (home shortened to `~`), or that it isn't yet; with
-/// the full name above when the tab cut it short (#5868), and below, that a saved design has
-/// changes not saved yet (`dirty`), which the bullet after a cut name no longer shows (#11408).
-fn tab_tooltip(name: &str, path: Option<&str>, cut: bool, dirty: bool) -> String {
-    let place = path.map_or_else(|| crate::i18n::tr_label("Not saved yet").to_string(), crate::home::friendly_path);
-    let place = if dirty && path.is_some() { format!("{place}\n{}", crate::i18n::tr("document.tab_unsaved_changes")) } else { place };
-    if cut { format!("{name}\n{place}") } else { place }
+/// Where a tab's design is saved (home shortened to `~`), or that it isn't yet; below, that a
+/// saved design has changes not saved yet (`dirty`), which the bullet after a cut name no longer
+/// shows (#11408). The tab puts its full name above when it cuts it short (#5868).
+fn tab_place(path: Option<&str>, dirty: bool) -> String {
+    let place = path.map_or_else(|| solidcraft_ui_text::tr_label("Not saved yet").to_string(), crate::home::friendly_path);
+    if dirty && path.is_some() { format!("{place}\n{}", solidcraft_ui_text::tr("document.tab_unsaved_changes")) } else { place }
 }
 
 /// The designs a launch with no file to open reopens: those open at the last quit that still
@@ -905,7 +1028,9 @@ pub fn reopen_plan(app: &SolveApp, dir: Option<&std::path::Path>) -> (Vec<String
 
 /// The control channel's `ui.documents`: list, `new`, `switch`, `close` (by index; `force`
 /// closes without asking), `close_others` (all but `index`), `close_all`, `move` (`from`, `to`)
-/// or `quit`; `answer`: save | dont_save | cancel answers "save changes?"; `open_elsewhere`:
+/// or `quit`; `answer`: save | dont_save | cancel answers "save changes?". `save_indices`
+/// sets every tick in a grouped prompt; `save_row` / `discard_row` answer one tab index;
+/// `save_prompt` lists the remaining rows and their current tab indices. `open_elsewhere`:
 /// read_only | anyway | cancel and `changed_on_disk`: save_copy | overwrite | cancel answer those
 /// questions (#5467).
 pub fn control(app: &mut SolveApp, p: &Value) -> Value {
@@ -927,6 +1052,27 @@ pub fn control(app: &mut SolveApp, p: &Value) -> Value {
         }
         Some("quit") => request_quit(app),
         _ => {}
+    }
+    if let Some(selected) = p.get("save_indices") {
+        let Some(indices) = selected.as_array() else { return json!({"error": "save_indices must be an array of tab indices"}) };
+        let Some(group) = app.docs.group.as_mut().filter(|_| !app.docs.saving) else { return json!({"error": "no grouped prompt waiting"}) };
+        if indices.len() > MAX_OPEN
+            || indices.iter().any(|v| v.as_u64().is_none_or(|i| !group.rows.iter().any(|(row, _)| u64::try_from(*row).ok() == Some(i))))
+        {
+            return json!({"error": "save_indices must identify designs in the prompt"});
+        }
+        for (i, checked) in &mut group.rows {
+            *checked = indices.iter().any(|v| v.as_u64() == u64::try_from(*i).ok());
+        }
+    }
+    for (key, save) in [("save_row", true), ("discard_row", false)] {
+        if let Some(value) = p.get(key) {
+            let index = value.as_u64().and_then(|i| usize::try_from(i).ok());
+            let Some(index) = index.filter(|i| app.docs.group.as_ref().is_some_and(|g| g.rows.iter().any(|(row, _)| row == i))) else {
+                return json!({"error": "row must identify a design in the grouped prompt"});
+            };
+            answer_row(app, index, save);
+        }
     }
     let answer = match p.get("answer").and_then(Value::as_str) {
         Some("save") => Some(Answer::Save),
@@ -951,7 +1097,22 @@ pub fn control(app: &mut SolveApp, p: &Value) -> Value {
         _ => {}
     }
     let tabs: Vec<Value> = tabs_info(app).into_iter().map(|(name, dirty)| json!({"name": name, "dirty": dirty})).collect();
+    let save_prompt = app.docs.group.as_ref().map(|group| {
+        group
+            .rows
+            .iter()
+            .map(|(index, selected)| {
+                let session = if *index == app.docs.active {
+                    Some(&app.session)
+                } else {
+                    app.docs.slots.get(*index).and_then(Option::as_ref).map(|s| &s.session)
+                };
+                json!({"index": index, "name": session.map(|s| &s.doc.name), "path": session.and_then(|s| s.path.as_ref()), "selected": selected})
+            })
+            .collect::<Vec<_>>()
+    });
     json!({
+        "save_prompt": save_prompt,
         "documents": tabs,
         "active": app.docs.active,
         "closing": app.docs.closing,
@@ -963,278 +1124,110 @@ pub fn control(app: &mut SolveApp, p: &Value) -> Value {
     })
 }
 
-/// A design tab being dragged along the strip to a new place: its index, and where the pointer
-/// grabbed it (from the tab's left edge).
-#[derive(Clone, Copy, Debug)]
-struct TabDrag {
-    from: usize,
-    grab: f32,
-}
+/// Where SolidCraft's tab strip publishes its parts (scripts and scenarios use these names).
+const TAB_HANDLES: crate::app_bar::TabHandles<'static> = crate::app_bar::TabHandles {
+    tab: "tab:design:",
+    close: "tab:close:",
+    more: "tab:overflow",
+    new: "tab:new",
+    rename: "tab:rename",
+    menu_row: "tab_menu:",
+    more_row: "document:",
+};
 
-/// The document tabs in the application bar, from `x0` to `x1`: click to switch, × to close,
-/// drag to reorder, + for a new design.
+/// A tab's menu: close it, the others, or all of them.
+const TAB_MENU: [crate::app_bar::TabMenuRow<'static>; 3] = [
+    crate::app_bar::TabMenuRow { id: "ui.closeTab", label: "Close", key_on_selected: "Ctrl+W", needs_others: false },
+    crate::app_bar::TabMenuRow { id: "ui.closeOtherTabs", label: "Close Other Tabs", key_on_selected: "", needs_others: true },
+    crate::app_bar::TabMenuRow { id: "ui.closeAllTabs", label: "Close All Tabs", key_on_selected: "", needs_others: false },
+];
+
+/// The document tabs in the application bar, from `x0` to `x1` ([`crate::app_bar::tabs`]): click
+/// to switch, × to close, drag to reorder, + for the start page.
 pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
-    let t = Tokens::get();
     let info = tabs_info(app);
     let paths = tab_paths(app);
     let n = info.len();
-    let (first, shown, w) = layout(n, app.docs.active, x1 - x0);
-    let mut pick: Option<usize> = None;
-    let mut shut: Option<usize> = None;
-    // Each tab fits its name (up to MAX_FIT) while all of them fit; otherwise they share the room.
-    const MAX_FIT: f32 = 200.0;
-    // The selected tab grows with a name being typed into it.
-    let typed = app.menu.rename.as_ref().filter(|_| renaming_tab(app)).map(|r| r.text.clone());
+    let locale = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
+    let names: Vec<String> = info.iter().map(|(name, _)| locale.given_name(name)).collect();
+    let places: Vec<String> = info.iter().zip(&paths).map(|((_, dirty), path)| tab_place(path.as_deref(), *dirty)).collect();
     let selected = if app.docs.slots.is_empty() { 0 } else { app.docs.active };
-    let natural: Vec<f32> = info
-        .iter()
-        .enumerate()
-        .map(|(i, (name, dirty))| {
-            let shown_name = match &typed {
-                Some(text) if i == selected => text.clone(),
-                _ => crate::i18n::Locale::for_language(&app.preferences.language).given_name(name),
-            };
-            let label = format!("{shown_name}{}", if *dirty { " •" } else { "" });
-            let text = ui.painter().layout_no_wrap(label, crate::fonts::semibold(crate::theme::Tokens::get().font_button), t.app_bar_text).size().x;
-            (text + 40.0).clamp(72.0, MAX_FIT)
-        })
-        .collect();
-    let fit_all = shown == n && natural.iter().sum::<f32>() <= x1 - x0 - 34.0;
-    // A right-click on a tab opens its menu (#3055): the tab and where the menu opens.
-    let menu_id = egui::Id::unique("sc_doc_tab_menu");
-    let mut menu: Option<(usize, egui::Pos2)> = ui.ctx().data(|d| d.get_temp(menu_id));
-    // The shown tabs' widths, in strip order.
-    let widths: Vec<f32> = (first..first + shown).map(|i| if fit_all { natural.get(i).copied().unwrap_or(w) } else { w }).collect();
-    let width = |i: usize| i.checked_sub(first).and_then(|k| widths.get(k)).copied().unwrap_or(w);
-    let strip_end = x0 + widths.iter().sum::<f32>();
-    let title_bar = app.custom_titlebar || app.integrated_titlebar;
-    // A tab being dragged to a new place follows the pointer and the others make room for it;
-    // Escape puts it back.
-    let drag_id = egui::Id::unique("sc_doc_tab_drag");
-    let (held_down, released, escape) = ui.input(|i| (i.pointer.primary_down(), i.pointer.primary_released(), i.key_pressed(egui::Key::Escape)));
-    let mut drag =
-        ui.ctx().data(|d| d.get_temp::<TabDrag>(drag_id)).filter(|d| (held_down || released) && !escape && (first..first + shown).contains(&d.from));
-    let pointer = ui.ctx().pointer_latest_pos();
-    let held = drag.zip(pointer).map(|(d, p)| (d.from, (p.x - d.grab).clamp(x0, (strip_end - width(d.from)).max(x0))));
-    let to = held.map(|(from, left)| (from, drop_slot(left, x0, &widths, first, from)));
-    // Where each shown tab sits: in strip order, or with the dragged tab moved to its slot.
-    let mut slots: Vec<usize> = (first..first + shown).filter(|&i| to.is_none_or(|(from, _)| from != i)).collect();
-    if let Some((from, to)) = to {
-        slots.insert(to.saturating_sub(first).min(slots.len()), from);
-    }
-    let mut lefts = vec![x0; shown];
-    let mut at = x0;
-    for &i in &slots {
-        if let Some(l) = i.checked_sub(first).and_then(|k| lefts.get_mut(k)) {
-            *l = at;
-        }
-        at += width(i);
-    }
-    // The dragged tab is drawn last, over the others.
-    let mut order: Vec<usize> = (first..first + shown).filter(|&i| held.is_none_or(|(from, _)| from != i)).collect();
-    order.extend(held.map(|(from, _)| from));
-    let mut dropped: Option<(usize, usize)> = None;
-    for i in order {
-        let Some((name, dirty)) = info.get(i) else {
-            continue;
+    let mut rename = app.menu.rename.take();
+    let renaming = renaming_tab_state(rename.as_ref());
+    let new_tip = app.tr("ui.start_page").to_string();
+    let actions = {
+        let mut strip = crate::app_bar::TabStrip {
+            tabs: info
+                .iter()
+                .zip(&names)
+                .zip(&places)
+                .map(|(((list_name, dirty), name), place)| crate::app_bar::DocTab { name, list_name, dirty: *dirty, place })
+                .collect(),
+            selected,
+            shown_selected: (!app.home.open).then_some(selected),
+            title_bar: app.custom_titlebar || app.integrated_titlebar,
+            double_click_renames: app.preferences.tab_double_click_renames,
+            rename: rename.as_mut().filter(|_| renaming).map(|r| crate::app_bar::TabRename {
+                text: &mut r.text,
+                focused: &mut r.focused,
+                max: MAX_DESIGN_NAME,
+            }),
+            menu: &TAB_MENU,
+            close_name: solidcraft_ui_text::tr("ui.close_tab"),
+            close_tip: "Close",
+            more_tip: solidcraft_ui_text::tr_label("All open designs"),
+            new_tip: &new_tip,
+            id: tab_strip_id(),
+            handles: TAB_HANDLES,
         };
-        let w = width(i);
-        let left = match held {
-            Some((from, left)) if from == i => left,
-            _ => i.checked_sub(first).and_then(|k| lefts.get(k)).copied().unwrap_or(x0),
-        };
-        let tr = Rect::from_min_size(pos2(left, r.top() + 4.0), vec2(w - 2.0, r.height() - 8.0));
-        let active = !app.home.open && (i == app.docs.active || app.docs.slots.is_empty());
-        let resp = ui.interact(tr, ui.scope_id().with(("doc_tab", i)), Sense::click_and_drag());
-        crate::scenario::publish_target(&format!("tab:design:{i}"), tr);
-        // Dragging a tab along the strip moves it. The tabs are also part of the title bar:
-        // dragging the only tab, or one mostly up or down, moves the window. A double click
-        // renames the design in its tab (the first click selected it), or with the preference
-        // off maximizes the window as the bar's empty space does.
-        if resp.drag_started_by(egui::PointerButton::Primary) {
-            let origin = ui.input(|i| i.pointer.press_origin()).unwrap_or(tr.center());
-            let moved = pointer.unwrap_or(origin) - origin;
-            if n > 1 && (!title_bar || moved.x.abs() >= moved.y.abs()) {
-                drag = Some(TabDrag { from: i, grab: origin.x - tr.left() });
-            } else if title_bar {
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
-            }
-        } else if resp.double_clicked() {
-            if app.preferences.tab_double_click_renames {
-                if active {
-                    start_tab_rename(app, name, tr);
-                }
-            } else if title_bar {
-                crate::titlebar::toggle_maximize(ui.ctx());
-            }
-        }
-        if resp.drag_stopped() && drag.is_some_and(|d| d.from == i) {
-            // Released over the bar (not dropped somewhere down the window): the tab lands there.
-            if let Some((from, to)) = to
-                && pointer.is_some_and(|p| p.y < r.bottom() + r.height())
-            {
-                dropped = Some((from, to));
-            }
-            drag = None;
-        }
-        let lit = resp.hovered() || held.is_some_and(|(from, _)| from == i);
-        tab_shape(ui.painter(), &t, tr, active, lit || resp.has_focus());
-        let ink = if active || lit { t.app_bar_text } else { t.app_bar_text.gamma_multiply(0.7) };
-        let name_display = crate::i18n::Locale::for_language(&app.preferences.language).given_name(name);
-        let label = format!("{name_display}{}", if *dirty { " •" } else { "" });
-        let font = if active {
-            crate::fonts::semibold(crate::theme::Tokens::get().font_button)
-        } else {
-            FontId::proportional(crate::theme::Tokens::get().font_button)
-        };
-        let g = ui.painter().layout_no_wrap(label, font, ink);
-        let text_w = (tr.width() - 30.0).max(10.0);
-        let tip = tab_tooltip(&name_display, paths.get(i).cloned().flatten().as_deref(), g.size().x > text_w, *dirty);
-        let clip = Rect::from_min_size(tr.min, vec2(text_w + 10.0, tr.height()));
-        if active && renaming_tab(app) {
-            tab_rename_field(
-                app,
-                ui,
-                Rect::from_min_max(pos2(tr.left() + 6.0, tr.top() + 3.0), pos2(tr.left() + 10.0 + text_w, tr.bottom() - 3.0)),
-                &name_display,
-            );
-        } else {
-            ui.painter().with_clip_rect(clip).galley(pos2(tr.left() + 10.0, tr.center().y - g.size().y / 2.0), g, ink);
-        }
-        // ×
-        let xr = Rect::from_center_size(pos2(tr.right() - 13.0, tr.center().y), vec2(16.0, 16.0));
-        let show_close = active || resp.hovered() || ui.rect_contains_pointer(tr);
-        let xresp = ui.interact(xr, ui.scope_id().with(("doc_close", i)), if show_close { Sense::click() } else { Sense::hover() });
-        crate::scenario::publish_target(&format!("tab:close:{i}"), xr);
-        if show_close && (xresp.hovered() || xresp.has_focus()) {
-            ui.painter().rect_filled(xr, t.radius_sm.saturating_sub(1), t.app_bar_hover_strong);
-        }
-        if show_close {
-            crate::icons::paint_app_bar(
-                ui.painter(),
-                Rect::from_center_size(xr.center(), vec2(14.0, 14.0)),
-                "close",
-                if xresp.hovered() || xresp.has_focus() { 1.0 } else { 0.55 },
-            );
-        }
-        if resp.secondary_clicked() {
-            menu = Some((i, ui.ctx().pointer_interact_pos().unwrap_or(tr.left_bottom())));
-        }
-        // Named apart from a dialog's Close: egui 0.37 names an unnamed widget after its tooltip.
-        xresp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, show_close, crate::i18n::tr("ui.close_tab")));
-        if xresp.backing_on_hover_text("Close").clicked() {
-            shut = Some(i);
-        } else if (if held.is_some() { resp } else { resp.backing_on_hover_text(tip) }).clicked() {
-            pick = Some(i);
-        }
-    }
-    ui.ctx().data_mut(|d| match drag {
-        Some(v) => {
-            d.insert_temp(drag_id, v);
-        }
-        None => d.remove::<TabDrag>(drag_id),
-    });
-    let mut x = strip_end;
-    // More tabs than fit: a chevron lists them all.
-    if shown < n {
-        let mr = Rect::from_center_size(pos2(x + 12.0, r.center().y), vec2(20.0, 22.0));
-        let mresp = ui.interact(mr, ui.scope_id().with("doc_more"), Sense::click());
-        crate::scenario::publish_handle("tab:overflow", mr.center());
-        if mresp.hovered() {
-            ui.painter().rect_filled(mr, t.radius_sm, t.app_bar_hover_button);
-        }
-        ui.painter().text(
-            mr.center(),
-            egui::Align2::CENTER_CENTER,
-            format!("»{}", n - shown),
-            FontId::proportional(crate::theme::Tokens::get().font_body),
-            t.app_bar_text,
-        );
-        let id = egui::Id::unique("sc_doc_more");
-        if mresp.clone().backing_on_hover_text(crate::i18n::tr_label("All open designs")).clicked() {
-            ui.ctx().data_mut(|d| d.insert_temp(id, !d.get_temp::<bool>(id).unwrap_or(false)));
-        }
-        if ui.ctx().data(|d| d.get_temp::<bool>(id).unwrap_or(false)) {
-            let resp = Container::new(ui.ctx(), Surface::Popup)
-                .area(id.with("area"))
-                .fixed_pos(pos2(mr.left(), r.bottom()))
-                .order(egui::Order::Foreground)
-                .show(ui.ctx(), |ui| {
-                    crate::context_menu::menu_frame(ui, |ui| {
-                        for (i, (name, dirty)) in info.iter().enumerate() {
-                            let label = format!("{name}{}", if *dirty { " •" } else { "" });
-                            if ui_kit::list_picker(ui, &format!("document:{i}"), &label, i == app.docs.active).clicked() {
-                                pick = Some(i);
-                            }
-                        }
-                    })
-                });
-            let pressed_outside = ui.ctx().input(|i| i.pointer.any_pressed()) && !resp.response.contains_pointer() && !mresp.contains_pointer();
-            if pick.is_some() || pressed_outside {
-                ui.ctx().data_mut(|d| d.insert_temp(id, false));
-            }
-        }
-        x += 26.0;
-    }
-    // The tab's menu: close it, the others, or all of them.
-    let mut many: Option<Vec<usize>> = None;
-    if let Some((i, at)) = menu.filter(|(i, _)| *i < n) {
-        let items = [("ui.closeTab", "Close"), ("ui.closeOtherTabs", "Close Other Tabs"), ("ui.closeAllTabs", "Close All Tabs")];
-        let resp =
-            Container::new(ui.ctx(), Surface::Popup).area(menu_id.with("area")).fixed_pos(at).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
-                crate::context_menu::menu_frame(ui, |ui| {
-                    let mut chosen = None;
-                    for (id, label) in items {
-                        let mut item = crate::context_menu::Item::action(id, label, "");
-                        if id == "ui.closeTab" && i == app.docs.active {
-                            item = item.key("Ctrl+W");
-                        }
-                        item.enabled = id != "ui.closeOtherTabs" || n > 1;
-                        let top = ui.cursor().top();
-                        let row = crate::context_menu::list_row(ui, &item);
-                        let rect = Rect::from_min_max(pos2(ui.min_rect().left(), top), pos2(ui.min_rect().right(), ui.cursor().top()));
-                        crate::scenario::publish_handle(&format!("tab_menu:{id}"), rect.center());
-                        if row.is_some() {
-                            chosen = Some(id);
-                        }
-                    }
-                    chosen
-                })
-            });
-        match resp.inner {
-            Some("ui.closeTab") => shut = Some(i),
-            Some("ui.closeOtherTabs") => many = Some((0..n).filter(|k| *k != i).collect()),
-            Some("ui.closeAllTabs") => many = Some((0..n).collect()),
+        crate::app_bar::tabs(ui, &mut strip, r, x0, x1)
+    };
+    // The name typed into the selected tab: kept when it changed and isn't blank, given up on
+    // Escape, still being edited otherwise.
+    let mut kept = None;
+    for action in &actions {
+        match action {
+            crate::app_bar::TabAction::RenameDone => kept = Some(true),
+            crate::app_bar::TabAction::RenameCancelled => kept = Some(false),
             _ => {}
         }
-        let pressed_outside = ui.ctx().input(|x| x.pointer.any_pressed()) && !resp.response.contains_pointer();
-        menu = if resp.inner.is_some() || pressed_outside || ui.ctx().input(|x| x.key_pressed(egui::Key::Escape)) { None } else { Some((i, at)) };
     }
-    ui.ctx().data_mut(|d| match menu {
-        Some(m) => {
-            d.insert_temp(menu_id, m);
+    match (kept, rename) {
+        (Some(true), Some(done)) => {
+            if names.get(selected).is_some_and(|shown| done.text.trim() != shown.trim()) {
+                let _ = crate::context_menu::commit_rename(app, &done);
+            }
         }
-        None => {
-            d.remove::<(usize, egui::Pos2)>(menu_id);
-        }
-    });
-    // Choose a new design, open or sample from the File view before creating a tab.
-    let pr = Rect::from_center_size(pos2(x + 14.0, r.center().y), vec2(22.0, 22.0));
-    let presp = ui.interact(pr, ui.scope_id().with("doc_new"), Sense::click());
-    if presp.hovered() {
-        ui.painter().rect_filled(pr, t.radius_sm, t.app_bar_hover_button);
+        (Some(false), _) | (_, None) => {}
+        (None, Some(editing)) => app.menu.rename = Some(editing),
     }
-    crate::icons::paint_app_bar(
-        ui.painter(),
-        Rect::from_center_size(pr.center(), vec2(16.0, 16.0)),
-        "plus",
-        if presp.hovered() { 1.0 } else { 0.55 },
-    );
     // A file loading into the window keeps the tabs as they are (dragging still moves it).
     let idle = !app.file_load.busy();
-    crate::scenario::publish_handle("tab:new", pr.center());
-    if presp.backing_on_hover_text(app.tr("ui.start_page")).clicked() && idle {
-        app.home.show(app.session.revision);
+    let (mut shut, mut pick, mut many, mut dropped) = (None, None, None, None);
+    for action in actions {
+        match action {
+            crate::app_bar::TabAction::Select(i) => pick = Some(i),
+            crate::app_bar::TabAction::Close(i) => shut = Some(i),
+            crate::app_bar::TabAction::Menu { tab, id } => match id.as_str() {
+                "ui.closeTab" => shut = Some(tab),
+                "ui.closeOtherTabs" => many = Some((0..n).filter(|k| *k != tab).collect::<Vec<_>>()),
+                "ui.closeAllTabs" => many = Some((0..n).collect()),
+                _ => {}
+            },
+            crate::app_bar::TabAction::Reorder { from, to } => dropped = Some((from, to)),
+            crate::app_bar::TabAction::StartRename { tab, rect } => {
+                if let Some((name, _)) = info.get(tab) {
+                    start_tab_rename(app, name, rect);
+                }
+            }
+            crate::app_bar::TabAction::Maximize => crate::titlebar::toggle_maximize(ui.ctx()),
+            crate::app_bar::TabAction::New => {
+                if idle {
+                    app.home.show(app.session.revision);
+                }
+            }
+            crate::app_bar::TabAction::RenameDone | crate::app_bar::TabAction::RenameCancelled => {}
+        }
     }
     match (shut, pick) {
         _ if !idle => {}
@@ -1249,44 +1242,16 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     }
 }
 
-/// The place among the shown tabs (`first..`, `widths` wide in strip order from `x0`) for
-/// tab `from` whose left edge is dragged to `left`: the slot whose place for it is nearest.
-pub fn drop_slot(left: f32, x0: f32, widths: &[f32], first: usize, from: usize) -> usize {
-    let mut best = (0, f32::INFINITY);
-    let mut at = x0;
-    let others = widths.iter().enumerate().filter(|(k, _)| first + k != from).map(|(_, w)| *w);
-    for (k, w) in others.map(Some).chain([None]).enumerate() {
-        if (left - at).abs() < best.1 {
-            best = (k, (left - at).abs());
-        }
-        at += w.unwrap_or(0.0);
-    }
-    first + best.0
-}
-
-/// Tabs are rounded chips on the bar; the active design has the stronger fill.
-fn tab_shape(painter: &egui::Painter, t: &Tokens, r: Rect, active: bool, hovered: bool) {
-    let fill = if active {
-        t.app_bar_tab_active
-    } else if hovered {
-        t.app_bar_hover
-    } else {
-        egui::Color32::TRANSPARENT
-    };
-    painter.rect_filled(r, t.radius_md, fill);
-}
-
 /// The longest name a design takes (as `component.rename` accepts).
 const MAX_DESIGN_NAME: usize = 128;
 
-/// Whether the selected tab's design name is being edited in the tab.
-fn renaming_tab(app: &SolveApp) -> bool {
-    app.menu.rename.as_ref().is_some_and(|r| r.inline && matches!(r.what, crate::context_menu::RenameWhat::Component(0)))
+fn renaming_tab_state(rename: Option<&crate::context_menu::Rename>) -> bool {
+    rename.is_some_and(|r| r.inline && matches!(r.what, crate::context_menu::RenameWhat::Component(0)))
 }
 
 /// Starts editing the selected design's name in its tab, with the name as shown selected.
 fn start_tab_rename(app: &mut SolveApp, name: &str, tab: Rect) {
-    let text = crate::i18n::Locale::for_language(&app.preferences.language).given_name(name);
+    let text = solidcraft_ui_text::Locale::for_language(&app.preferences.language).given_name(name);
     app.menu.rename = Some(crate::context_menu::Rename {
         what: crate::context_menu::RenameWhat::Component(0),
         text,
@@ -1294,58 +1259,6 @@ fn start_tab_rename(app: &mut SolveApp, name: &str, tab: Rect) {
         focused: false,
         inline: true,
     });
-}
-
-/// The selected tab's name field: Enter or leaving the field (a click anywhere else) keeps the
-/// name, Escape keeps the old one. A name left as it was, or left blank, changes nothing.
-fn tab_rename_field(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, shown: &str) {
-    let Some(mut rename) = app.menu.rename.take() else { return };
-    let t = Tokens::get();
-    ui.painter().rect_filled(rect, t.radius_sm, t.field);
-    let id = ui.scope_id().with("doc_tab_rename");
-    let response = crate::ui_kit::inline_name(ui, rect.shrink2(vec2(4.0, 0.0)), id, &mut rename.text);
-    if rename.text.chars().count() > MAX_DESIGN_NAME {
-        rename.text = rename.text.chars().take(MAX_DESIGN_NAME).collect();
-    }
-    crate::scenario::publish_target("tab:rename", rect);
-    let was_focused = rename.focused;
-    if !rename.focused {
-        // The whole name selected, so typing replaces it.
-        if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), id) {
-            let end = rename.text.chars().count();
-            state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(end))));
-            state.store(ui.ctx(), id);
-        }
-        response.request_focus();
-        rename.focused = true;
-    }
-    let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
-    let commit = ui.input(|i| i.key_pressed(egui::Key::Enter)) || (was_focused && response.lost_focus());
-    if escape {
-        // Dropping the edit keeps the old name.
-    } else if commit {
-        if rename.text.trim() != shown.trim() {
-            let _ = crate::context_menu::commit_rename(app, &rename);
-        }
-    } else {
-        app.menu.rename = Some(rename);
-    }
-}
-
-/// Which tabs the strip shows in `room` points: (first, how many, tab width). Tabs shrink to
-/// `MIN_TAB`; past that a window of tabs around the active one is shown and the rest go in the »
-/// list.
-pub fn layout(n: usize, active: usize, room: f32) -> (usize, usize, f32) {
-    const MIN_TAB: f32 = 90.0;
-    let n = n.max(1);
-    let avail = (room - 34.0).max(MIN_TAB);
-    if avail / n as f32 >= MIN_TAB {
-        return (0, n, (avail / n as f32).min(220.0));
-    }
-    // Leave room for the » button.
-    let fit = (((avail - 26.0) / MIN_TAB).floor() as usize).max(1);
-    let first = active.saturating_sub(fit - 1).min(n - fit);
-    (first, fit, MIN_TAB)
 }
 
 /// What "save changes?" was answered.
@@ -1359,7 +1272,7 @@ pub enum Answer {
 
 /// The "save changes?" prompt for a tab being closed, or for each unsaved design when quitting.
 pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
-    let _language = crate::i18n::scope(&app.preferences.language);
+    let _language = solidcraft_ui_text::scope(&app.preferences.language);
     quit_step(app);
     // Saved, it asks the Capture Position question first (#9736): that question is the one to
     // answer meanwhile, not this one again.
@@ -1370,8 +1283,8 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
     let name = tabs_info(app).get(i).map(|x| x.0.clone()).unwrap_or_default();
     let name_display = crate::i18n::tr_name(&name);
     let mut answer: Option<Answer> = None;
-    // Left and Right move between the buttons as they are laid out (Save is picked first, at the
-    // right); Enter gives the picked one.
+    // The original single-design prompt keeps its arrow-key choice. The grouped prompt
+    // always gives Save Selected on Enter.
     let order = [Answer::DontSave, Answer::Cancel, Answer::Save];
     let (left, right, enter) = ctx.input_mut(|x| {
         (
@@ -1388,15 +1301,23 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
     } else {
         at
     };
-    let choice = order.get(at).copied().unwrap_or_default();
+    let choice = if app.docs.group.is_some() { Answer::Save } else { order.get(at).copied().unwrap_or_default() };
     app.docs.choice = choice;
     if enter {
         answer = Some(choice);
     }
-    let title = crate::i18n::format("document.save_changes", &[("name", &name_display)]);
+    let grouped = app.docs.group.is_some();
+    let title = if let Some(group) = &app.docs.group {
+        solidcraft_ui_text::format("document.save_many", &[("n", &group.rows.len().to_string())])
+    } else {
+        solidcraft_ui_text::format("document.save_changes", &[("name", &name_display)])
+    };
+    let save_label = solidcraft_ui_text::tr(if grouped { "document.save_selected" } else { "ui.save" });
+    let mut show_tab = None;
+    let mut row_action = None;
     let (closed, action) = ui_kit::Confirm::new(egui::Id::unique("sc_close_prompt"), "status_warning", &title)
         .tone(ui_kit::Tone::Warning)
-        .actions(crate::i18n::tr("ui.save"), crate::i18n::tr("ui.cancel"), Some(crate::i18n::tr("ui.don_t_save")))
+        .actions(save_label, solidcraft_ui_text::tr("ui.cancel"), Some(solidcraft_ui_text::tr("ui.don_t_save")))
         .secondary_left()
         .selected(match choice {
             Answer::Save => ui_kit::Action::Ok,
@@ -1404,8 +1325,81 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
             Answer::Cancel => ui_kit::Action::Cancel,
         })
         .show(ctx, true, |ui| {
-            ui_kit::text(ui, &crate::i18n::format("document.unsaved_changes", &[("name", &name_display)]), ui_kit::Text::Report("unsaved", false));
+            if let Some(group) = app.docs.group.as_mut() {
+                let t = solidcraft_theme::Tokens::get();
+                let row_height = t.control_height + t.font_small + t.space_8 + t.space_8;
+                let chrome = t.form_close_size + t.form_footer_height + t.space_24 * 3.0;
+                let height = (row_height * 8.0).min((ctx.content_rect().height() - chrome).max(t.control_height));
+                let list = egui::ScrollArea::vertical().max_height(height).show(ui, |ui| {
+                    for (index, checked) in &mut group.rows {
+                        let session = if *index == app.docs.active {
+                            Some(&app.session)
+                        } else {
+                            app.docs.slots.get(*index).and_then(Option::as_ref).map(|s| &s.session)
+                        };
+                        if let Some(session) = session {
+                            ui.push_id(*index, |ui| {
+                                ui.horizontal_top(|ui| {
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                                        ui.spacing_mut().item_spacing.x = t.space_8;
+                                        for (key, save) in [("document.discard_row", false), ("document.save_row", true)] {
+                                            let button = ui_kit::button(ui, solidcraft_ui_text::tr(key), ui_kit::Button::Small);
+                                            let action = if save { "save" } else { "discard" };
+                                            crate::scenario::publish_target(&format!("save_many:{action}:{index}"), button.rect);
+                                            if button.clicked() {
+                                                row_action = Some((*index, save));
+                                            }
+                                        }
+                                        ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                                            let tick = ui_kit::checkbox(ui, "", checked);
+                                            tick.widget_info(|| {
+                                                egui::WidgetInfo::selected(
+                                                    egui::Role::CheckBox,
+                                                    ui.is_enabled(),
+                                                    *checked,
+                                                    crate::i18n::tr_name(&session.doc.name),
+                                                )
+                                            });
+                                            crate::scenario::publish_target(&format!("save_many:tick:{index}"), tick.rect);
+                                            ui.vertical(|ui| {
+                                                ui.spacing_mut().item_spacing.y = 0.0;
+                                                ui.spacing_mut().button_padding.x = 0.0;
+                                                let name = ui_kit::button(ui, crate::i18n::tr_name(&session.doc.name), ui_kit::Button::Ghost);
+                                                crate::scenario::publish_target(&format!("save_many:name:{index}"), name.rect);
+                                                if name.clicked() {
+                                                    show_tab = Some(*index);
+                                                }
+                                                let path = ui_kit::text(
+                                                    ui,
+                                                    session.path.as_deref().unwrap_or(solidcraft_ui_text::tr("document.not_saved_yet")),
+                                                    ui_kit::Text::Note("save_path"),
+                                                );
+                                                crate::scenario::publish_rect(&format!("save_many:path:{index}"), path.rect);
+                                            });
+                                        });
+                                    });
+                                });
+                            });
+                            ui.add_space(t.space_8);
+                        }
+                    }
+                });
+                crate::scenario::publish_rect("save_many:list", list.inner_rect);
+            } else {
+                ui_kit::text(
+                    ui,
+                    &solidcraft_ui_text::format("document.unsaved_changes", &[("name", &name_display)]),
+                    ui_kit::Text::Report("unsaved", false),
+                );
+            }
         });
+    if let Some((index, save)) = row_action {
+        answer_row(app, index, save);
+        return;
+    }
+    if let Some(index) = show_tab {
+        switch(app, index);
+    }
     answer = match action {
         ui_kit::Action::Ok => Some(Answer::Save),
         ui_kit::Action::Apply => Some(Answer::DontSave),
@@ -1429,6 +1423,24 @@ pub fn answer_prompt(app: &mut SolveApp, answer: Answer) {
     }
     let Some(i) = app.docs.closing else { return };
     app.docs.choice = Answer::Save;
+    if app.docs.group.is_some() {
+        match answer {
+            Answer::Save => {
+                if let Some(group) = app.docs.group.as_mut() {
+                    group.pending = group.rows.iter().rev().filter(|(_, checked)| *checked).map(|(i, _)| *i).collect();
+                }
+                save_group_next(app);
+                return;
+            }
+            Answer::DontSave => {
+                finish_group(app);
+                return;
+            }
+            Answer::Cancel => {
+                app.docs.group = None;
+            }
+        }
+    }
     match answer {
         Answer::Save => {
             switch(app, i);
@@ -1469,6 +1481,24 @@ pub(crate) fn saved_for_close(app: &mut SolveApp) {
         return;
     }
     let saved = !app.session.is_dirty();
+    let row_save = app.docs.group.as_mut().and_then(|g| g.saving_row.take());
+    if let Some((previous, closing)) = row_save {
+        if saved {
+            close_group_row(app, app.docs.active);
+        } else {
+            switch(app, previous);
+            app.docs.closing = Some(closing);
+        }
+        return;
+    }
+    if app.docs.group.is_some() {
+        if saved {
+            save_group_next(app);
+        } else {
+            answer_prompt(app, Answer::Cancel);
+        }
+        return;
+    }
     app.docs.closing = None;
     if app.docs.quitting.is_some() {
         if !saved {
@@ -1484,6 +1514,35 @@ pub(crate) fn saved_for_close(app: &mut SolveApp) {
     }
     quit_step(app);
     batch_step(app);
+}
+
+/// Where SolidCraft's document tab strip keeps its state.
+fn tab_strip_id() -> egui::Id {
+    egui::Id::unique("sc_doc_tabs")
+}
+
+/// Whether the document tab strip's list of every open design is open.
+pub fn tab_list_open(ctx: &egui::Context) -> bool {
+    crate::app_bar::tab_list_open(ctx, tab_strip_id())
+}
+
+/// A tab's tooltip ([`crate::app_bar::tab_tip`] over [`tab_place`]).
+#[cfg(test)]
+fn tab_tooltip(name: &str, path: Option<&str>, cut: bool, dirty: bool) -> String {
+    crate::app_bar::tab_tip(name, &tab_place(path, dirty), cut)
+}
+
+#[cfg(test)]
+use crate::app_bar::{drop_slot, tab_layout as layout, tab_shape};
+#[cfg(test)]
+use egui::{pos2, vec2};
+#[cfg(test)]
+use solidcraft_theme::Tokens;
+
+/// Whether the selected tab's design name is being edited in the tab.
+#[cfg(test)]
+fn renaming_tab(app: &SolveApp) -> bool {
+    renaming_tab_state(app.menu.rename.as_ref())
 }
 
 #[cfg(test)]
@@ -1705,6 +1764,7 @@ mod tests {
     /// changes not saved yet says so below, since a cut name hides the tab's bullet.
     #[test]
     fn tab_tooltip_says_where_the_design_is_saved() {
+        crate::i18n::install();
         assert_eq!(tab_tooltip("plate", Some("/srv/designs/plate.solidcraft"), false, false), "/srv/designs/plate.solidcraft");
         assert_eq!(tab_tooltip("a-long-name", Some("/srv/a-long-name.solidcraft"), true, false), "a-long-name\n/srv/a-long-name.solidcraft");
         assert_eq!(tab_tooltip("Untitled", None, false, false), "Not saved yet");
@@ -1824,6 +1884,7 @@ mod tests {
     #[test]
     fn close_all_tabs_stops_at_cancel_and_ends_on_a_blank_design() {
         let mut a = four_tabs();
+        a.preferences.save_prompt_one_at_a_time = true;
         control(&mut a, &json!({"action": "close_all"}));
         assert_eq!((a.docs.count(), a.docs.closing), (3, Some(2)));
         control(&mut a, &json!({"answer": "cancel"}));
@@ -1833,6 +1894,351 @@ mod tests {
         control(&mut a, &json!({"answer": "dont_save"}));
         assert_eq!(a.docs.count(), 1);
         assert!(active_is_blank(&a), "all closed: a blank design");
+    }
+
+    #[test]
+    fn grouped_close_lists_only_targets_and_cancel_keeps_every_tab() {
+        let mut a = four_tabs();
+        let v = control(&mut a, &json!({"action": "close_all"}));
+        assert_eq!(a.docs.count(), 4, "even clean tabs wait for the answer");
+        assert_eq!(
+            v["save_prompt"],
+            json!([
+                {"index":0,"name":"Untitled","path":null,"selected":true},
+                {"index":2,"name":"Untitled","path":null,"selected":true}
+            ])
+        );
+        control(&mut a, &json!({"save_indices":[2]}));
+        assert_eq!(control(&mut a, &json!({}))["save_prompt"][0]["selected"], false);
+        control(&mut a, &json!({"answer":"cancel"}));
+        assert_eq!(a.docs.count(), 4);
+        assert!(dirty(&a, 0) && dirty(&a, 2));
+        assert!(a.docs.group.is_none() && a.docs.batch.is_none());
+        let v = control(&mut a, &json!({"action":"close_others", "index":0}));
+        assert!(v["save_prompt"].is_null(), "one dirty target keeps the original prompt");
+        assert_eq!(a.docs.closing, Some(2));
+    }
+
+    #[test]
+    fn grouped_dont_save_closes_all_and_quit_uses_the_same_prompt() {
+        let mut a = four_tabs();
+        control(&mut a, &json!({"action":"close_all"}));
+        control(&mut a, &json!({"answer":"dont_save"}));
+        assert!(active_is_blank(&a) && a.home.open);
+        let mut a = four_tabs();
+        let v = control(&mut a, &json!({"action":"quit"}));
+        assert_eq!(v["save_prompt"].as_array().unwrap().len(), 2);
+        control(&mut a, &json!({"answer":"cancel"}));
+        assert!(!a.quit_requested && a.docs.count() == 4);
+        control(&mut a, &json!({"action":"quit"}));
+        control(&mut a, &json!({"answer":"dont_save"}));
+        assert!(a.quit_requested && !any_dirty(&a));
+    }
+
+    #[test]
+    fn grouped_quit_replaces_a_pending_tab_close_with_all_window_designs() {
+        for targets in [vec![2], vec![0, 2]] {
+            let mut a = four_tabs();
+            a.run("solid.box", json!({"length":3,"width":3,"height":3})).unwrap();
+            close_many(&mut a, targets);
+            assert!(a.docs.closing.is_some());
+            let v = control(&mut a, &json!({"action":"quit"}));
+            let indices: Vec<_> = v["save_prompt"].as_array().unwrap().iter().map(|row| row["index"].clone()).collect();
+            assert_eq!(indices, [json!(0), json!(2), json!(3)]);
+            assert_eq!(a.docs.count(), 4, "quitting closes nothing before its answer");
+            control(&mut a, &json!({"answer":"dont_save"}));
+            assert!(a.quit_requested && !any_dirty(&a));
+        }
+    }
+
+    #[test]
+    fn grouped_row_save_closes_only_its_tab_and_keeps_the_last_row_grouped() {
+        let mut h = crate::scenario::Harness::new();
+        h.app = four_tabs();
+        let file = h.dir.join("row.solidcraft");
+        let to = file.to_string_lossy().into_owned();
+        h.app.services.pick_save = Some(Box::new(move |_: &str, _: &[&str]| Box::pin(std::future::ready(Some(to.clone())))));
+        control(&mut h.app, &json!({"action":"close_all", "save_indices":[2]}));
+        control(&mut h.app, &json!({"save_row":0}));
+        assert_eq!(h.app.docs.count(), 4, "wait for the write");
+        crate::file_picker::tick(&mut h.app, &h.ctx);
+        crate::save_job::tick(&mut h.app, true);
+        assert_eq!(h.app.docs.count(), 3);
+        let rows = control(&mut h.app, &json!({}))["save_prompt"].clone();
+        assert_eq!(rows.as_array().unwrap().len(), 1);
+        assert_eq!((rows[0]["index"].clone(), rows[0]["selected"].clone()), (json!(1), json!(true)));
+        assert!(dirty(&h.app, 1));
+        let design = solidcraft_engine::io::read_design(&std::fs::read(file).unwrap()).unwrap();
+        assert_eq!(design.features.len(), 1);
+        control(&mut h.app, &json!({"answer":"cancel"}));
+        assert_eq!(h.app.docs.count(), 3, "Cancel keeps the remaining tabs");
+    }
+
+    #[test]
+    fn grouped_row_discard_closes_only_its_tab_without_saving() {
+        let mut h = crate::scenario::Harness::new();
+        h.app = four_tabs();
+        let file = h.dir.join("discard.solidcraft");
+        switch(&mut h.app, 0);
+        h.app.run("file.save_as", json!({"path":file.to_string_lossy()})).unwrap();
+        let before = std::fs::read(&file).unwrap();
+        h.app.run("solid.sphere", json!({"diameter":4})).unwrap();
+        control(&mut h.app, &json!({"action":"close_all", "discard_row":0}));
+        assert_eq!(h.app.docs.count(), 3);
+        assert_eq!(std::fs::read(file).unwrap(), before);
+        assert!(dirty(&h.app, 1));
+        assert_eq!(control(&mut h.app, &json!({}))["save_prompt"][0]["index"], 1);
+    }
+
+    #[test]
+    fn grouped_last_row_finishes_close_or_quit() {
+        for quit in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            h.app = four_tabs();
+            let file = h.dir.join("last.solidcraft");
+            let to = file.to_string_lossy().into_owned();
+            h.app.services.pick_save = Some(Box::new(move |_: &str, _: &[&str]| Box::pin(std::future::ready(Some(to.clone())))));
+            control(&mut h.app, &json!({"action":if quit { "quit" } else { "close_all" }}));
+            control(&mut h.app, &json!({"discard_row":2}));
+            assert_eq!(h.app.docs.count(), 3);
+            control(&mut h.app, &json!({"save_row":0}));
+            crate::file_picker::tick(&mut h.app, &h.ctx);
+            crate::save_job::tick(&mut h.app, true);
+            assert!(h.app.docs.group.is_none() && h.app.docs.closing.is_none());
+            assert_eq!(h.app.quit_requested, quit);
+            if !quit {
+                assert!(active_is_blank(&h.app) && h.app.home.open);
+            }
+        }
+        for quit in [false, true] {
+            let mut a = four_tabs();
+            close(&mut a, 3, true);
+            close(&mut a, 1, true);
+            control(&mut a, &json!({"action":if quit { "quit" } else { "close_all" }}));
+            control(&mut a, &json!({"discard_row":0}));
+            control(&mut a, &json!({"discard_row":0}));
+            assert!(a.docs.group.is_none() && a.docs.closing.is_none());
+            assert!(active_is_blank(&a));
+            assert_eq!(a.quit_requested, quit, "last real tab closes too");
+        }
+        let mut a = four_tabs();
+        close_many(&mut a, vec![0, 2]);
+        control(&mut a, &json!({"discard_row":0}));
+        control(&mut a, &json!({"discard_row":1}));
+        assert_eq!(a.docs.count(), 2, "only the targeted tabs close");
+        assert!(a.docs.group.is_none() && a.docs.batch.is_none());
+    }
+
+    #[test]
+    fn grouped_row_cancelled_picker_or_failed_save_keeps_the_row() {
+        for fail in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            h.app = four_tabs();
+            let bad = h.dir.join("missing").join("row.solidcraft").to_string_lossy().into_owned();
+            h.app.services.pick_save = Some(Box::new(move |_: &str, _: &[&str]| Box::pin(std::future::ready(fail.then(|| bad.clone())))));
+            let before = control(&mut h.app, &json!({"action":"quit", "save_indices":[2]}));
+            control(&mut h.app, &json!({"save_row":0}));
+            crate::file_picker::tick(&mut h.app, &h.ctx);
+            crate::save_job::tick(&mut h.app, true);
+            let after = control(&mut h.app, &json!({}));
+            for key in ["save_prompt", "documents", "active", "closing", "quitting", "batch"] {
+                assert_eq!(after[key], before[key], "{key}, failed write: {fail}");
+            }
+            assert!(!h.app.quit_requested);
+        }
+    }
+
+    #[test]
+    fn grouped_save_selected_writes_only_checked_designs() {
+        let mut h = crate::scenario::Harness::new();
+        h.app = four_tabs();
+        let file = h.dir.join("selected.solidcraft");
+        let to = file.to_string_lossy().into_owned();
+        h.app.services.pick_save = Some(Box::new(move |_: &str, _: &[&str]| Box::pin(std::future::ready(Some(to.clone())))));
+        control(&mut h.app, &json!({"action":"close_all"}));
+        control(&mut h.app, &json!({"save_indices":[2], "answer":"save"}));
+        assert_eq!(h.app.docs.count(), 4);
+        crate::file_picker::tick(&mut h.app, &h.ctx);
+        crate::save_job::tick(&mut h.app, true);
+        assert!(active_is_blank(&h.app));
+        let design = solidcraft_engine::io::read_design(&std::fs::read(file).unwrap()).unwrap();
+        assert_eq!(design.features.len(), 1);
+        assert_eq!(std::fs::read_dir(&h.dir).unwrap().count(), 1, "only the selected design was saved");
+    }
+
+    #[test]
+    fn grouped_existing_paths_save_only_selected_and_failure_keeps_tabs() {
+        let mut h = crate::scenario::Harness::new();
+        h.app = four_tabs();
+        let first = h.dir.join("first.solidcraft");
+        let second = h.dir.join("second.solidcraft");
+        for (i, file) in [(0, &first), (2, &second)] {
+            switch(&mut h.app, i);
+            h.app.run("file.save_as", json!({"path":file.to_string_lossy()})).unwrap();
+            h.app.run("solid.sphere", json!({"diameter":4})).unwrap();
+        }
+        h.app.services.pick_save = None;
+        control(&mut h.app, &json!({"action":"quit"}));
+        control(&mut h.app, &json!({"save_indices":[2],"answer":"save"}));
+        crate::save_job::tick(&mut h.app, true);
+        assert!(h.app.quit_requested);
+        for (file, features) in [(&first, 1), (&second, 2)] {
+            let design = solidcraft_engine::io::read_design(&std::fs::read(file).unwrap()).unwrap();
+            assert_eq!(design.features.len(), features);
+        }
+        h.app = four_tabs();
+        let bad = h.dir.join("missing").join("bad.solidcraft").to_string_lossy().into_owned();
+        h.app.services.pick_save = Some(Box::new(move |_: &str, _: &[&str]| Box::pin(std::future::ready(Some(bad.clone())))));
+        control(&mut h.app, &json!({"action":"quit"}));
+        control(&mut h.app, &json!({"answer":"save"}));
+        crate::file_picker::tick(&mut h.app, &h.ctx);
+        crate::save_job::tick(&mut h.app, true);
+        assert!(!h.app.quit_requested && h.app.docs.quitting.is_none());
+        assert_eq!(h.app.docs.count(), 4);
+        assert!(dirty(&h.app, 0) && dirty(&h.app, 2));
+    }
+
+    #[test]
+    fn grouped_later_save_as_cancel_keeps_all_tabs_and_saves_in_order() {
+        let mut h = crate::scenario::Harness::new();
+        h.app = four_tabs();
+        let file = h.dir.join("first.solidcraft");
+        let to = file.to_string_lossy().into_owned();
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let picked = calls.clone();
+        h.app.services.pick_save = Some(Box::new(move |_: &str, _: &[&str]| {
+            let answer = (picked.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0).then(|| to.clone());
+            Box::pin(std::future::ready(answer))
+        }));
+        control(&mut h.app, &json!({"action":"close_all"}));
+        control(&mut h.app, &json!({"answer":"save"}));
+        assert_eq!(h.app.docs.active, 0);
+        crate::file_picker::tick(&mut h.app, &h.ctx);
+        crate::save_job::tick(&mut h.app, true);
+        assert_eq!(h.app.docs.active, 2, "second unsaved tab is next");
+        crate::file_picker::tick(&mut h.app, &h.ctx);
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert!(file.exists() && !dirty(&h.app, 0));
+        assert!(dirty(&h.app, 2));
+        assert_eq!(h.app.docs.count(), 4, "no tabs closed despite the successful first save");
+        assert!(h.app.docs.group.is_none() && h.app.docs.batch.is_none() && h.app.docs.closing.is_none());
+    }
+
+    #[test]
+    fn grouped_prompt_names_select_tabs_and_keyboard_answers() {
+        let mut h = crate::scenario::Harness::new();
+        h.app = four_tabs();
+        h.app.home.open = false;
+        h.app.preferences.language = "en".into();
+        switch(&mut h.app, 0);
+        let file = h.dir.join("Bracket.sc");
+        h.app.run("file.save_as", json!({"path":file.to_string_lossy()})).unwrap();
+        h.app.run("solid.sphere", json!({"diameter":4})).unwrap();
+        switch(&mut h.app, 1);
+        h.app.run("solid.box", json!({"length":8,"width":8,"height":8})).unwrap();
+        let second_file = h.dir.join("Housing.sc");
+        h.app.run("file.save_as", json!({"path":second_file.to_string_lossy()})).unwrap();
+        h.app.run("solid.sphere", json!({"diameter":4})).unwrap();
+        switch(&mut h.app, 3);
+        control(&mut h.app, &json!({"action":"close_all"}));
+        // Capture the actual confirmation and its font atlas, without needing a window server.
+        h.ctx = crate::fonts::test_context();
+        h.ctx.enable_accesskit();
+        let mut textures = std::collections::HashMap::new();
+        let mut output = egui::FullOutput::default();
+        for _ in 0..3 {
+            output = h.ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0))),
+                    focused: true,
+                    ..Default::default()
+                },
+                |ui| {
+                    h.app.logic(ui.ctx());
+                    h.app.ui(ui);
+                },
+            );
+            ui_kit::textures_update(&mut textures, &output.textures_delta);
+            output.textures_delta.clear();
+        }
+        h.output = output.platform_output.clone();
+        assert!(h.widget("Save changes to 3 designs?").is_some());
+        assert!(h.widget("Save Selected").is_some());
+        assert!(h.widget("Not saved yet").is_some());
+        assert!(h.widget(&file.to_string_lossy()).is_some());
+        assert!(h.widget(&second_file.to_string_lossy()).is_some());
+        let mut previous_path: Option<Rect> = None;
+        for index in 0..3 {
+            let name = crate::scenario::rect_of(&format!("save_many:name:{index}")).unwrap();
+            let path = crate::scenario::rect_of(&format!("save_many:path:{index}")).unwrap();
+            assert!((name.left() - path.left()).abs() < 1.0, "path aligns with the name");
+            assert!(path.top() >= name.bottom(), "path is below its own name");
+            let save = crate::scenario::rect_of(&format!("save_many:save:{index}")).unwrap();
+            let discard = crate::scenario::rect_of(&format!("save_many:discard:{index}")).unwrap();
+            assert!(save.left() >= name.right(), "row actions follow the name");
+            assert!(discard.left() >= save.right(), "Discard follows Save");
+            assert!(crate::scenario::rect_of("dialog:window").unwrap().contains_rect(discard), "row actions stay inside the window");
+            if let Some(previous) = previous_path {
+                assert!(name.top() - previous.bottom() >= Tokens::get().space_8, "designs have breathing room");
+            }
+            previous_path = Some(path);
+        }
+        if let Ok(dir) = std::env::var("SOLIDCRAFT_SAVE_MANY_EVIDENCE") {
+            let bounds = crate::scenario::rect_of("dialog:window").unwrap().expand(Tokens::get().space_24);
+            let image = ui_kit::raster_test_shapes(&h.ctx, output.shapes, output.pixels_per_point, bounds, &textures);
+            std::fs::create_dir_all(&dir).unwrap();
+            image.save(std::path::Path::new(&dir).join("save-many.png")).unwrap();
+        }
+        h.step(&json!({"click":{"handle":"save_many:name:0"}})).unwrap();
+        assert_eq!(h.app.docs.active, 0);
+        h.step(&json!({"click":{"handle":"save_many:tick:0"}})).unwrap();
+        assert!(!h.app.docs.group.as_ref().unwrap().rows[0].1);
+        h.step(&json!({"key":"Escape"})).unwrap();
+        assert_eq!(h.app.docs.count(), 4);
+        assert!(h.app.docs.group.is_none());
+        control(&mut h.app, &json!({"action":"close_all"}));
+        control(&mut h.app, &json!({"save_indices":[]}));
+        h.step(&json!({"key":"ArrowLeft"})).unwrap();
+        h.step(&json!({"key":"Enter"})).unwrap();
+        assert!(active_is_blank(&h.app), "Enter gives Save Selected");
+    }
+
+    #[test]
+    fn grouped_prompt_twelve_unsaved_designs_stay_on_screen() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        for index in 0..12 {
+            if index > 0 {
+                new_design(&mut h.app);
+            }
+            h.app.run("solid.box", json!({"length":1,"width":1,"height":1})).unwrap();
+        }
+        request_quit(&mut h.app);
+        for (width, height) in [(1600, 1000), (1024, 600)] {
+            h.call("ui.resize", json!({"width":width,"height":height}));
+            h.frames(4);
+            let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(width as f32, height as f32));
+            let window = crate::scenario::rect_of("dialog:window").unwrap();
+            assert!(screen.contains_rect(window), "confirmation stays on screen: {window:?} in {screen:?}");
+            let list = crate::scenario::rect_of("save_many:list").unwrap();
+            let last = crate::scenario::rect_of("save_many:path:11").unwrap();
+            assert!(last.bottom() > list.bottom(), "long lists scroll inside the window");
+            assert!(window.contains(crate::scenario::handle_at("dialog:ok").unwrap()), "save remains reachable");
+        }
+    }
+
+    #[test]
+    fn grouped_empty_selection_discards_targets_and_keeps_other_tabs() {
+        let mut a = four_tabs();
+        close_many(&mut a, vec![0, 2, usize::MAX]);
+        let bad = control(&mut a, &json!({"save_indices":[1],"answer":"save"}));
+        assert!(bad.get("error").is_some());
+        let oversized = control(&mut a, &json!({"save_indices":vec![0; MAX_OPEN + 1],"answer":"save"}));
+        assert!(oversized.get("error").is_some());
+        assert_eq!(a.docs.count(), 4);
+        control(&mut a, &json!({"save_indices":[],"answer":"save"}));
+        assert_eq!(a.docs.count(), 2);
+        assert!(!any_dirty(&a));
     }
 
     /// #3055: a right-click on a tab opens its menu; Close Other Tabs from it keeps that tab.
@@ -1849,6 +2255,39 @@ mod tests {
         h.step(&json!({"click": {"handle": "tab:design:1"}, "button": "right"})).unwrap();
         h.frames(2);
         h.step(&json!({"click": {"handle": "tab_menu:ui.closeOtherTabs"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.docs.count(), 1);
+    }
+
+    /// A middle click on a tab closes it as its × does: at once when it has nothing to save,
+    /// after asking when it has.
+    #[test]
+    fn a_tab_middle_clicked_closes() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.custom_titlebar = true;
+        h.call("ui.resize", json!({"width": 1400, "height": 720}));
+        open_tab(&mut h.app, Session::default()).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        open_tab(&mut h.app, Session::default()).unwrap();
+        assert_eq!(h.app.docs.count(), 3);
+        h.frames(3);
+        // The second tab holds unsaved changes: closing it asks first
+        h.step(&json!({"click": {"handle": "tab:design:1"}, "button": "middle"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.docs.count(), 3);
+        assert!(h.app.docs.closing.is_some(), "a design with changes asks before it closes");
+        h.call("ui.documents", json!({"answer": "dont_save"}));
+        h.frames(2);
+        assert_eq!(h.app.docs.count(), 2);
+        // The first has nothing to save: it closes at once
+        h.step(&json!({"click": {"handle": "tab:design:0"}, "button": "middle"})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.docs.count(), 1);
+        // A middle click on the ×, which lies over the tab and takes its clicks, closes it too
+        open_tab(&mut h.app, Session::default()).unwrap();
+        h.frames(3);
+        h.step(&json!({"click": {"handle": "tab:close:0"}, "button": "middle"})).unwrap();
         h.frames(2);
         assert_eq!(h.app.docs.count(), 1);
     }
@@ -2066,6 +2505,7 @@ mod tests {
         assert!(a.quit_requested, "nothing unsaved: quits at once");
 
         let mut a = app();
+        a.preferences.save_prompt_one_at_a_time = true;
         let file = std::env::temp_dir().join(format!("solidcraft-quit-save-{}.solidcraft", std::process::id()));
         let _ = std::fs::remove_file(&file);
         a.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
@@ -2190,6 +2630,28 @@ mod tests {
         adopt(&mut a, Session::default());
         assert_eq!(a.docs.count(), 1);
         assert!(!a.session.auto_project, "a design adopted over a blank one");
+    }
+
+    /// Projecting references as construction geometry is the user's too (#13142), like
+    /// auto-projection: it holds in new tabs, the tab switched to, after the last tab closes and
+    /// in a design adopted over a blank one, and the preferences file keeps it.
+    #[test]
+    fn project_construction_follows_the_user_across_tabs() {
+        let mut a = app();
+        a.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        a.session.project_construction = true;
+        new_design(&mut a);
+        assert!(a.session.project_construction, "a new tab");
+        a.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).unwrap();
+        switch(&mut a, 0);
+        assert!(a.session.project_construction, "the tab switched to");
+        let prefs: Value = serde_json::from_str(&a.prefs()).unwrap();
+        assert_eq!(prefs["project_construction"], true);
+        close(&mut a, 1, true);
+        close(&mut a, 0, true);
+        assert!(active_is_blank(&a) && a.session.project_construction, "after the last tab closes");
+        adopt(&mut a, Session::default());
+        assert!(a.session.project_construction, "a design adopted over a blank one");
     }
 
     /// The host's pre-command check holds in every tab: new ones, the one switched to, a design

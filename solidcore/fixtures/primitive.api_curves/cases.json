@@ -1,0 +1,2330 @@
+{
+ "cases": [
+  {
+   "name": "line_segment_basic",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:53",
+   "inputs": {
+    "op": "line_segment",
+    "start": [
+     0,
+     0,
+     0
+    ],
+    "end": [
+     10,
+     10,
+     0
+    ]
+   }
+  },
+  {
+   "name": "line_zero_direction",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:60",
+   "inputs": {
+    "op": "line",
+    "start": [
+     0,
+     0,
+     0
+    ],
+    "direction": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "line_direction",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:60",
+   "inputs": {
+    "op": "line",
+    "start": [
+     1,
+     2,
+     3
+    ],
+    "direction": [
+     0,
+     3,
+     4
+    ]
+   }
+  },
+  {
+   "name": "line_segment_coincident",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:53",
+   "inputs": {
+    "op": "line_segment",
+    "start": [
+     1,
+     1,
+     1
+    ],
+    "end": [
+     1,
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "ellipse_negative_radius",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:65",
+   "inputs": {
+    "op": "ellipse",
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "radius1": -2.0,
+    "radius2": 1.0
+   }
+  },
+  {
+   "name": "ellipse_far_ok",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:72",
+   "inputs": {
+    "op": "ellipse",
+    "origin": [
+     0,
+     1e+16,
+     0
+    ],
+    "radius1": 0.5,
+    "radius2": 10000000000.0
+   }
+  },
+  {
+   "name": "ellipse_far_collapse",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:76",
+   "inputs": {
+    "op": "ellipse",
+    "origin": [
+     0,
+     1e+16,
+     0
+    ],
+    "radius1": 10000000000.0,
+    "radius2": 0.5
+   }
+  },
+  {
+   "name": "ellipse_basic",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:310",
+   "inputs": {
+    "op": "ellipse",
+    "origin": [
+     1,
+     2,
+     3
+    ],
+    "radius1": 5.0,
+    "radius2": 2.0
+   }
+  },
+  {
+   "name": "circle_bspline_basic",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:97",
+   "inputs": {
+    "op": "circle",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "radius": 10.0
+   }
+  },
+  {
+   "name": "circle_analytic_basic",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:97",
+   "inputs": {
+    "op": "analytic_circle",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "radius": 10.0
+   }
+  },
+  {
+   "name": "arc_0_135",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:117",
+   "inputs": {
+    "op": "arc",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "radius": 10.0,
+    "start_deg": 0.0,
+    "end_deg": 135.0
+   }
+  },
+  {
+   "name": "arc_bad_angle",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:364",
+   "inputs": {
+    "op": "arc",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "radius": 10.0,
+    "start_deg": 0.0,
+    "end_deg": 400.0
+   }
+  },
+  {
+   "name": "arc_zero_radius",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:364",
+   "inputs": {
+    "op": "arc",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "radius": 0.0,
+    "start_deg": 0.0,
+    "end_deg": 90.0
+   }
+  },
+  {
+   "name": "arc_nan_center",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:364",
+   "inputs": {
+    "op": "arc",
+    "center": [
+     "NaN",
+     0,
+     0
+    ],
+    "radius": 1.0,
+    "start_deg": 0.0,
+    "end_deg": 90.0
+   }
+  },
+  {
+   "name": "curve_4pts",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:159",
+   "inputs": {
+    "op": "curve",
+    "points": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      10,
+      -3,
+      0
+     ],
+     [
+      20,
+      3,
+      0
+     ],
+     [
+      30,
+      -6,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "curve_0pts",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:174",
+   "inputs": {
+    "op": "curve",
+    "points": []
+   }
+  },
+  {
+   "name": "curve_1pts",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:174",
+   "inputs": {
+    "op": "curve",
+    "points": [
+     [
+      0,
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "curve_2pts",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:174",
+   "inputs": {
+    "op": "curve",
+    "points": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      10,
+      -3,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "curve_3pts",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:174",
+   "inputs": {
+    "op": "curve",
+    "points": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      10,
+      -3,
+      0
+     ],
+     [
+      20,
+      3,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "curve_line_pts",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:280",
+   "inputs": {
+    "op": "curve",
+    "points": [
+     [
+      0.0,
+      0,
+      0
+     ],
+     [
+      10.0,
+      0,
+      0
+     ],
+     [
+      20.0,
+      0,
+      0
+     ],
+     [
+      30.0,
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "curve_vert_pts",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:299",
+   "inputs": {
+    "op": "curve",
+    "points": [
+     [
+      0,
+      0,
+      0.0
+     ],
+     [
+      0,
+      0,
+      10.0
+     ],
+     [
+      0,
+      0,
+      20.0
+     ],
+     [
+      0,
+      0,
+      30.0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "curve_drop_pts",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:334",
+   "inputs": {
+    "op": "curve",
+    "points": [
+     [
+      -40,
+      0,
+      0
+     ],
+     [
+      -30,
+      -3,
+      0
+     ],
+     [
+      -20,
+      3,
+      0
+     ],
+     [
+      -10,
+      -6,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "name": "curve_9pts",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:743",
+   "inputs": {
+    "op": "curve",
+    "points": [
+     [
+      0,
+      0.0,
+      0.0
+     ],
+     [
+      1,
+      0.8414709848078965,
+      0.1
+     ],
+     [
+      2,
+      0.9092974268256817,
+      0.4
+     ],
+     [
+      3,
+      0.1411200080598672,
+      0.9000000000000001
+     ],
+     [
+      4,
+      -0.7568024953079282,
+      1.6
+     ],
+     [
+      5,
+      -0.9589242746631385,
+      2.5
+     ],
+     [
+      6,
+      -0.27941549819892586,
+      3.6000000000000005
+     ],
+     [
+      7,
+      0.6569865987187891,
+      4.9
+     ],
+     [
+      8,
+      0.9893582466233818,
+      6.4
+     ]
+    ]
+   }
+  },
+  {
+   "name": "canonical_weighted",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:222",
+   "inputs": {
+    "op": "canonical",
+    "points": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      0.2,
+      0
+     ],
+     [
+      0,
+      0.4,
+      0.2
+     ],
+     [
+      0.2,
+      0.6,
+      -0.3
+     ],
+     [
+      0,
+      0.8,
+      0
+     ],
+     [
+      0,
+      0.9,
+      0.2
+     ],
+     [
+      0,
+      1.0,
+      0.5
+     ]
+    ],
+    "knots": [
+     0.0,
+     0.3,
+     0.6,
+     0.8,
+     1.0
+    ],
+    "mults": [
+     4,
+     1,
+     1,
+     1,
+     4
+    ],
+    "weights": [
+     1.5,
+     0.5,
+     1.5,
+     0.5,
+     1.5,
+     0.5,
+     1.5
+    ],
+    "degree": 3,
+    "form": 6
+   }
+  },
+  {
+   "name": "canonical_too_few",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:242",
+   "inputs": {
+    "op": "canonical",
+    "points": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      0,
+      0
+     ]
+    ],
+    "knots": [
+     0.0,
+     1.0
+    ],
+    "mults": [
+     4,
+     4
+    ],
+    "degree": 3,
+    "form": 6
+   }
+  },
+  {
+   "name": "canonical_degree1",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:1047",
+   "inputs": {
+    "op": "canonical",
+    "points": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      0,
+      0
+     ],
+     [
+      2,
+      0,
+      0
+     ]
+    ],
+    "knots": [
+     0.0,
+     0.5,
+     1.0
+    ],
+    "mults": [
+     2,
+     1,
+     2
+    ],
+    "degree": 1,
+    "form": 6
+   }
+  },
+  {
+   "name": "canonical_degree0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:808",
+   "inputs": {
+    "op": "canonical",
+    "points": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      0,
+      0
+     ]
+    ],
+    "knots": [
+     0.0,
+     1.0
+    ],
+    "mults": [
+     1,
+     1
+    ],
+    "degree": 0,
+    "form": 6
+   }
+  },
+  {
+   "name": "canonical_bad_weight_count",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:808",
+   "inputs": {
+    "op": "canonical",
+    "points": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      0.2,
+      0
+     ],
+     [
+      0,
+      0.4,
+      0.2
+     ],
+     [
+      0.2,
+      0.6,
+      -0.3
+     ],
+     [
+      0,
+      0.8,
+      0
+     ],
+     [
+      0,
+      0.9,
+      0.2
+     ],
+     [
+      0,
+      1.0,
+      0.5
+     ]
+    ],
+    "knots": [
+     0.0,
+     0.3,
+     0.6,
+     0.8,
+     1.0
+    ],
+    "mults": [
+     4,
+     1,
+     1,
+     1,
+     4
+    ],
+    "weights": [
+     1.0,
+     1.0
+    ],
+    "degree": 3,
+    "form": 6
+   }
+  },
+  {
+   "name": "canonical_neg_weight",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:808",
+   "inputs": {
+    "op": "canonical",
+    "points": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      0.2,
+      0
+     ],
+     [
+      0,
+      0.4,
+      0.2
+     ],
+     [
+      0.2,
+      0.6,
+      -0.3
+     ],
+     [
+      0,
+      0.8,
+      0
+     ],
+     [
+      0,
+      0.9,
+      0.2
+     ],
+     [
+      0,
+      1.0,
+      0.5
+     ]
+    ],
+    "knots": [
+     0.0,
+     0.3,
+     0.6,
+     0.8,
+     1.0
+    ],
+    "mults": [
+     4,
+     1,
+     1,
+     1,
+     4
+    ],
+    "weights": [
+     1.5,
+     -0.5,
+     1.5,
+     0.5,
+     1.5,
+     0.5,
+     1.5
+    ],
+    "degree": 3,
+    "form": 2
+   }
+  },
+  {
+   "name": "canonical_decreasing_knots",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:808",
+   "inputs": {
+    "op": "canonical",
+    "points": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      0.2,
+      0
+     ],
+     [
+      0,
+      0.4,
+      0.2
+     ],
+     [
+      0.2,
+      0.6,
+      -0.3
+     ],
+     [
+      0,
+      0.8,
+      0
+     ],
+     [
+      0,
+      0.9,
+      0.2
+     ],
+     [
+      0,
+      1.0,
+      0.5
+     ]
+    ],
+    "knots": [
+     0.0,
+     0.6,
+     0.3,
+     0.8,
+     1.0
+    ],
+    "mults": [
+     4,
+     1,
+     1,
+     1,
+     4
+    ],
+    "degree": 3,
+    "form": 6
+   }
+  },
+  {
+   "name": "rect_basic",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:430",
+   "inputs": {
+    "op": "rectangle",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "length": 10.0,
+    "width": 6.0
+   }
+  },
+  {
+   "name": "rect_far_collapse",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:440",
+   "inputs": {
+    "op": "rectangle",
+    "center": [
+     0,
+     10000000000.0,
+     0
+    ],
+    "length": 10.0,
+    "width": 1e-09
+   }
+  },
+  {
+   "name": "rect_nan",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:448",
+   "inputs": {
+    "op": "rectangle",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "length": "NaN",
+    "width": 6.0
+   }
+  },
+  {
+   "name": "rect_inf",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:449",
+   "inputs": {
+    "op": "rectangle",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "length": 10.0,
+    "width": "inf"
+   }
+  },
+  {
+   "name": "rect_zero",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:596",
+   "inputs": {
+    "op": "rectangle",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "length": 0.0,
+    "width": 6.0
+   }
+  },
+  {
+   "name": "rect_huge",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:596",
+   "inputs": {
+    "op": "rectangle",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "length": 3e+18,
+    "width": 6.0
+   }
+  },
+  {
+   "name": "polygon_hex",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:468",
+   "inputs": {
+    "op": "polygon",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "sides": 6,
+    "radius": 5.0
+   }
+  },
+  {
+   "name": "polygon_far_collapse",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:478",
+   "inputs": {
+    "op": "polygon",
+    "center": [
+     10000000000.0,
+     10000000000.0,
+     0
+    ],
+    "sides": 5,
+    "radius": 1.5e-06
+   }
+  },
+  {
+   "name": "polygon_nan",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:484",
+   "inputs": {
+    "op": "polygon",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "sides": 6,
+    "radius": "NaN"
+   }
+  },
+  {
+   "name": "polygon_inf",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:485",
+   "inputs": {
+    "op": "polygon",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "sides": 6,
+    "radius": "inf"
+   }
+  },
+  {
+   "name": "polygon_two_sides",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:690",
+   "inputs": {
+    "op": "polygon",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "sides": 2,
+    "radius": 1.0
+   }
+  },
+  {
+   "name": "polygon_tri_offset",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:690",
+   "inputs": {
+    "op": "polygon",
+    "center": [
+     3,
+     -4,
+     7
+    ],
+    "sides": 3,
+    "radius": 2.5
+   }
+  },
+  {
+   "name": "polygon_many",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:690",
+   "inputs": {
+    "op": "polygon",
+    "center": [
+     1,
+     1,
+     1
+    ],
+    "sides": 257,
+    "radius": 10.0
+   }
+  },
+  {
+   "name": "circle_invalid_00",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:859",
+   "inputs": {
+    "op": "circle",
+    "center": [
+     "NaN",
+     0,
+     0
+    ],
+    "radius": 5
+   }
+  },
+  {
+   "name": "analytic_circle_invalid_00",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:859",
+   "inputs": {
+    "op": "analytic_circle",
+    "center": [
+     "NaN",
+     0,
+     0
+    ],
+    "radius": 5
+   }
+  },
+  {
+   "name": "circle_invalid_01",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:859",
+   "inputs": {
+    "op": "circle",
+    "center": [
+     "inf",
+     0,
+     0
+    ],
+    "radius": 5
+   }
+  },
+  {
+   "name": "analytic_circle_invalid_01",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:859",
+   "inputs": {
+    "op": "analytic_circle",
+    "center": [
+     "inf",
+     0,
+     0
+    ],
+    "radius": 5
+   }
+  },
+  {
+   "name": "circle_invalid_02",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:859",
+   "inputs": {
+    "op": "circle",
+    "center": [
+     0,
+     "NaN",
+     0
+    ],
+    "radius": 5
+   }
+  },
+  {
+   "name": "analytic_circle_invalid_02",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:859",
+   "inputs": {
+    "op": "analytic_circle",
+    "center": [
+     0,
+     "NaN",
+     0
+    ],
+    "radius": 5
+   }
+  },
+  {
+   "name": "circle_invalid_03",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:859",
+   "inputs": {
+    "op": "circle",
+    "center": [
+     0,
+     0,
+     "inf"
+    ],
+    "radius": 5
+   }
+  },
+  {
+   "name": "analytic_circle_invalid_03",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:859",
+   "inputs": {
+    "op": "analytic_circle",
+    "center": [
+     0,
+     0,
+     "inf"
+    ],
+    "radius": 5
+   }
+  },
+  {
+   "name": "circle_invalid_04",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:859",
+   "inputs": {
+    "op": "circle",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "radius": 0
+   }
+  },
+  {
+   "name": "analytic_circle_invalid_04",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:859",
+   "inputs": {
+    "op": "analytic_circle",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "radius": 0
+   }
+  },
+  {
+   "name": "circle_invalid_05",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:859",
+   "inputs": {
+    "op": "circle",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "radius": -5
+   }
+  },
+  {
+   "name": "analytic_circle_invalid_05",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:859",
+   "inputs": {
+    "op": "analytic_circle",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "radius": -5
+   }
+  },
+  {
+   "name": "circle_invalid_06",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:859",
+   "inputs": {
+    "op": "circle",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "radius": "NaN"
+   }
+  },
+  {
+   "name": "analytic_circle_invalid_06",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:859",
+   "inputs": {
+    "op": "analytic_circle",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "radius": "NaN"
+   }
+  },
+  {
+   "name": "circle_invalid_07",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:859",
+   "inputs": {
+    "op": "circle",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "radius": "inf"
+   }
+  },
+  {
+   "name": "analytic_circle_invalid_07",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:859",
+   "inputs": {
+    "op": "analytic_circle",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "radius": "inf"
+   }
+  },
+  {
+   "name": "circle_invalid_08",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:859",
+   "inputs": {
+    "op": "circle",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "radius": 1e-12
+   }
+  },
+  {
+   "name": "analytic_circle_invalid_08",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:859",
+   "inputs": {
+    "op": "analytic_circle",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "radius": 1e-12
+   }
+  },
+  {
+   "name": "circle_invalid_09",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:859",
+   "inputs": {
+    "op": "circle",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "radius": 5e-13
+   }
+  },
+  {
+   "name": "analytic_circle_invalid_09",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:859",
+   "inputs": {
+    "op": "analytic_circle",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "radius": 5e-13
+   }
+  },
+  {
+   "name": "circle_invalid_10",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:859",
+   "inputs": {
+    "op": "circle",
+    "center": [
+     1e+18,
+     0,
+     0
+    ],
+    "radius": 1
+   }
+  },
+  {
+   "name": "analytic_circle_invalid_10",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:859",
+   "inputs": {
+    "op": "analytic_circle",
+    "center": [
+     1e+18,
+     0,
+     0
+    ],
+    "radius": 1
+   }
+  },
+  {
+   "name": "circle_invalid_11",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:859",
+   "inputs": {
+    "op": "circle",
+    "center": [
+     1e+18,
+     0,
+     0
+    ],
+    "radius": 1e-06
+   }
+  },
+  {
+   "name": "analytic_circle_invalid_11",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:859",
+   "inputs": {
+    "op": "analytic_circle",
+    "center": [
+     1e+18,
+     0,
+     0
+    ],
+    "radius": 1e-06
+   }
+  },
+  {
+   "name": "circle_invalid_12",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:859",
+   "inputs": {
+    "op": "circle",
+    "center": [
+     0,
+     1e+18,
+     0
+    ],
+    "radius": 1
+   }
+  },
+  {
+   "name": "analytic_circle_invalid_12",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:859",
+   "inputs": {
+    "op": "analytic_circle",
+    "center": [
+     0,
+     1e+18,
+     0
+    ],
+    "radius": 1
+   }
+  },
+  {
+   "name": "circle_invalid_13",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:859",
+   "inputs": {
+    "op": "circle",
+    "center": [
+     2e+18,
+     0,
+     0
+    ],
+    "radius": 5
+   }
+  },
+  {
+   "name": "analytic_circle_invalid_13",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:859",
+   "inputs": {
+    "op": "analytic_circle",
+    "center": [
+     2e+18,
+     0,
+     0
+    ],
+    "radius": 5
+   }
+  },
+  {
+   "name": "circle_invalid_14",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:859",
+   "inputs": {
+    "op": "circle",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "radius": 2e-12
+   }
+  },
+  {
+   "name": "analytic_circle_invalid_14",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:859",
+   "inputs": {
+    "op": "analytic_circle",
+    "center": [
+     0,
+     0,
+     0
+    ],
+    "radius": 2e-12
+   }
+  },
+  {
+   "name": "helix_ox+inf",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     "inf",
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_ox-inf",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     "-inf",
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_ox_nan",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     "NaN",
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_oy+inf",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     "inf",
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_oz_nan",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     "NaN"
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_h+inf",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": "inf",
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_h-inf",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": "-inf",
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_h_nan",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": "NaN",
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_r0+inf",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": "inf",
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_r0_nan",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": "NaN",
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_r1-inf",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": "-inf",
+    "num_turns": 5.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_r1_nan",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": "NaN",
+    "num_turns": 5.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_turns+inf",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": "inf",
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_turns_nan",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": "NaN",
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_tol+inf",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": "inf",
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_tol_nan",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": "NaN",
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_tol-inf",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": "-inf",
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_h0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 0.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_hneg",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": -1.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_turns0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 0.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_turnsneg",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": -1.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_r0_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 0.0,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_r1_0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 0.0,
+    "num_turns": 5.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_both_r0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 0.0,
+    "radius_end": 0.0,
+    "num_turns": 5.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_r0neg",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": -1.0,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_r1neg",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": -1.0,
+    "num_turns": 5.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_h_sub",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 5e-324,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_r0_sub",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 5e-324,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_turns_sub",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 5e-324,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_tol_sub",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 5e-324,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_tol0",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 0.0,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_tolneg",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": -1.0,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_tol_below_min",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 9.999999999999997e-07,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_tol1e-9",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 1e-09,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_turns_below_min",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 9.999999999999998e-08,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_turns_above_max",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 124.25000000000001,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_turns125",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 125.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_turns1e6",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 1000000.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_turns_dblmax",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 1.7976931348623157e+308,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_h_above_max",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 1.0000000000000001e+18,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_h1e19",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 1e+19,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_h_dblmax",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 1.7976931348623157e+308,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_r0_1e19",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 1e+19,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_r0_dblmax",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 1.7976931348623157e+308,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_tol_dblmax",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 1.7976931348623157e+308,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_ox1e19",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     1e+19,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_ox_dblmax",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:765",
+   "inputs": {
+    "origin": [
+     1.7976931348623157e+308,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_valid_base",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:446",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_valid_left",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:446",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 0.001,
+    "right_handed": false,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_valid_conical",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:446",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 1.0,
+    "radius_end": 4.0,
+    "num_turns": 5.0,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_valid_turns_min",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:446",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 1e-07,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_valid_turns_max",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:446",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 124.25,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_valid_tol_min",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:446",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 1e-06,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_valid_offset",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:446",
+   "inputs": {
+    "origin": [
+     5,
+     -3,
+     2
+    ],
+    "height": 3.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 0.5,
+    "tolerance": 0.001,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_valid_loose",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:446",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 10.0,
+    "radius_start": 2.0,
+    "radius_end": 2.0,
+    "num_turns": 5.0,
+    "tolerance": 1.0,
+    "op": "helix"
+   }
+  },
+  {
+   "name": "helix_valid_small",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:446",
+   "inputs": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "height": 1e-07,
+    "radius_start": 1e-07,
+    "radius_end": 1e-07,
+    "num_turns": 1.0,
+    "tolerance": 1e-06,
+    "op": "helix"
+   }
+  }
+ ]
+}
