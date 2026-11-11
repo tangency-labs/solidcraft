@@ -152,14 +152,14 @@ pub fn tip_length(tool: &Tool) -> f64 {
 /// its tip must go for the hole to be its full diameter all the way down: a drill's point
 /// ([`tip_length`]), a bull nose's or face mill's corner radius, a ball's radius, nothing for a
 /// flat end mill. `None` for a tool that never cuts a round wall to its full diameter (a chamfer
-/// mill).
+/// mill, a thread mill).
 pub fn full_diameter_rise(tool: &Tool) -> Option<f64> {
     match tool.kind {
         ToolKind::Drill => Some(tip_length(tool)),
         ToolKind::FlatEndmill => Some(0.0),
         ToolKind::BullNose | ToolKind::FaceMill => Some(tool.corner_radius.unwrap_or(0.0).max(0.0)),
         ToolKind::BallEndmill => Some(tool.radius()),
-        ToolKind::Chamfer => None,
+        ToolKind::Chamfer | ToolKind::ThreadMill => None,
     }
 }
 

@@ -268,23 +268,26 @@ fn check_leave(leave: f64) -> Result<()> {
 }
 
 /// A milling operation needs a tool that cuts with a straight side: a drill only cuts at its
-/// point, and a chamfer mill's tapered side cuts chamfers (see [`crate::chamfer`]). A face mill
-/// goes into the material only along a ramp (`ramp_angle`).
-fn mills(tool: &Tool, ramp_angle: f64) -> Result<()> {
+/// point, a thread mill's teeth only cut threads, and a chamfer mill's tapered side cuts
+/// chamfers (see [`crate::chamfer`]). A face mill goes into the material only along a ramp
+/// (`ramp_angle`).
+pub(crate) fn mills(tool: &Tool, ramp_angle: f64) -> Result<()> {
     cuts_sideways(tool)?;
     match tool.kind {
         ToolKind::Chamfer => invalid(
-            "a chamfer mill's side is tapered: it cuts chamfers (the chamfer operation) and spots holes (drill), but a contour or a pocket needs a tool with a straight side",
+            "a chamfer mill's side is tapered: it cuts chamfers (the chamfer operation) and spots holes (drill), but a contour, a pocket or a bore needs a tool with a straight side",
         ),
         _ => crate::chamfer::enters(tool, ramp_angle),
     }
 }
 
-/// A tool that cuts with its side at all: not a drill (it cuts only at its point). Surface
-/// operations take any other kind; the stricter [`mills`] is for 2D operations.
+/// A tool that cuts with its side at all: not a drill (it cuts only at its point) and not a
+/// thread mill (its teeth only cut threads). Surface operations take any other kind; the
+/// stricter [`mills`] is for 2D operations.
 pub(crate) fn cuts_sideways(tool: &Tool) -> Result<()> {
     match tool.kind {
         ToolKind::Drill => invalid("a drill cannot mill: it cuts only at its point"),
+        ToolKind::ThreadMill => invalid("a thread mill cuts threads only: use it in a thread milling operation"),
         _ => Ok(()),
     }
 }
