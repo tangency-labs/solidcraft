@@ -801,6 +801,15 @@ impl ui_kit::GridSource for ParamGrid<'_> {
                 let (shown, error) = self.shown(r);
                 Some(ui_kit::text(ui, &shown, ui_kit::Text::Value(&format!("value:{}", r.name), error)).backing_on_hover_text(&shown))
             }
+            COMMENT => {
+                let request = egui::Id::unique(("sc_parameter_comment_expand", self.d.opening, self.salt, &r.name));
+                let text = self.d.comments.get(&r.name).unwrap_or(&r.comment);
+                let response = ui_kit::expandable_cell_preview(ui, request, text, &format!("param:comment:{}", r.name));
+                if response.clicked() && !ui.input(|input| input.modifiers.shift) {
+                    ui.data_mut(|data| data.insert_temp(request, true));
+                }
+                Some(response)
+            }
             ACTIONS if r.source == "user" => {
                 let response = ui_kit::bin_button(ui, "Delete");
                 if response.clicked() {
@@ -834,10 +843,17 @@ impl ui_kit::GridSource for ParamGrid<'_> {
                 ui_kit::CellEditor { response, taken }
             }
             NAME => ui_kit::CellEditor { response: ui_kit::cell_editor(ui, id, text, "Name", false), taken: false },
-            _ => ui_kit::CellEditor {
-                response: ui_kit::expandable_cell_editor(ui, id, text, "Comment", &format!("param:comment:{}", r.name)),
-                taken: false,
-            },
+            _ => {
+                let request = egui::Id::unique(("sc_parameter_comment_expand", self.d.opening, self.salt, &r.name));
+                if ui.data_mut(|data| data.remove_temp::<bool>(request)).unwrap_or(false) {
+                    ui.memory_mut(|memory| memory.request_focus(id));
+                    ui.data_mut(|data| data.insert_temp(id.with("expanded"), true));
+                }
+                ui_kit::CellEditor {
+                    response: ui_kit::expandable_cell_editor(ui, id, text, "Comment", &format!("param:comment:{}", r.name)),
+                    taken: false,
+                }
+            }
         }
     }
 
@@ -2706,13 +2722,13 @@ mod tests {
                 h.app.logic(ui.ctx());
                 h.app.ui(ui);
             });
-            let mut textures = std::collections::HashMap::from([(egui::TextureId::Managed(0), h.ctx.fonts(|fonts| fonts.image()))]);
+            let mut textures = std::collections::HashMap::from([(egui::TextureId::default(), h.ctx.fonts(|fonts| fonts.image()))]);
             crate::ui_kit::update_test_textures(&mut textures, &output.textures_delta);
             let dialog = crate::scenario::rect_of("dialog:header").unwrap().union(crate::scenario::rect_of("dialog:footer").unwrap());
             let dialog = crate::scenario::rect_of("param:comment:width:popup").map_or(dialog, |popup| dialog.union(popup));
             for (suffix, bounds) in [("", h.ctx.content_rect()), ("-dialog", dialog)] {
                 let mut image = crate::ui_kit::test_raster(&h.ctx, output.shapes.clone(), h.ctx.pixels_per_point(), bounds, &textures);
-                let background = crate::theme::Tokens::get().dialog_body.to_array();
+                let background = solidcraft_theme::Tokens::get().dialog_body.to_array();
                 for pixel in image.pixels_mut() {
                     let remaining = 1.0 - f32::from(pixel.0[3]) / 255.0;
                     for (dest, back) in pixel.0.iter_mut().zip(background) {
@@ -2724,13 +2740,16 @@ mod tests {
         };
         let mut h = escape_dialog();
         evidence(&mut h, "before");
+        h.step(&json!({"click":{"handle":"param:comment:width:expand"}, "shift":true})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("param:comment:width:popup").is_none(), "Shift keeps the grid's selection gesture");
         h.step(&json!({"click":{"handle":"param:comment:width"}})).unwrap();
         assert!(crate::scenario::rect_of("param:comment:width:popup").is_none(), "ordinary editing stays compact");
         h.run(&json!([{"key":"A","cmd":true}, {"text":"Pending inline comment"}])).unwrap();
         h.step(&json!({"click":{"handle":"param:comment:width:expand"}})).unwrap();
         h.frames(3);
         let popup = crate::scenario::rect_of("param:comment:width:popup").unwrap();
-        let tokens = crate::theme::Tokens::get();
+        let tokens = solidcraft_theme::Tokens::get();
         let font = egui::FontId::monospace(tokens.font_label);
         let width = h.ctx.fonts_mut(|fonts| fonts.layout_no_wrap("M".repeat(30), font.clone(), tokens.form_ink)).size().x;
         let line_height = h.ctx.fonts_mut(|fonts| fonts.row_height(&font));
