@@ -288,6 +288,16 @@ CI job runs `cargo xtask oracle` during full validation, and on pull requests th
 fails because of a known bug names its issue in `expected.json` (`"known_failure": "#123"`);
 never change an expected value to match SolidCraft's output.
 
+### Quarantining a flaky test
+
+A test that fails at random can fail a merge-queue batch, and every batch behind it starts over.
+Open an issue for it, then add one line to [`tests/QUARANTINED_TESTS`](tests/QUARANTINED_TESTS):
+`<test> #<issue> <YYYY-MM-DD> [why]`, with the test named as in `tests/KNOWN_FAILING_TESTS`.
+A quarantined test still runs. If it fails, the job summary says `quarantined, failed: <test>; see #<issue>`
+and the job stays green; if it passes, the summary says that too, so you can tell when it is safe to
+release. A quarantined line may be at most 14 days old: `cargo xtask lists` fails after that, so fix the
+test and delete the line. A test that fails every time belongs on `KNOWN_FAILING_TESTS` instead.
+
 ## Changing the design file format
 
 A design file says which format it is in (`"format": "solidcraft/N"`). If your change saves

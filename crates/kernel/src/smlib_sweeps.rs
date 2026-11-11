@@ -82,6 +82,34 @@ pub(crate) use imp::{
     revolve, screw, screw_radial, sphere, sweep, sweep_controlled,
 };
 
+/// `parts` joined in order in a balanced tree: each part with its neighbour, then each pair with
+/// the next pair, and so on, a part left over at the end of a level carried up as it is. Every
+/// join is of two neighbouring stretches, the left one first, and every part takes part in about
+/// log2(n) joins; joining each part onto all those before it instead hands the growing whole to
+/// every join, n²/2 parts' worth of work in all. None for no parts.
+fn union_tree<T>(parts: Vec<T>, mut join: impl FnMut(T, T) -> Result<T>) -> Result<Option<T>> {
+    let mut level = parts;
+    while level.len() > 1 {
+        let mut next = Vec::with_capacity(level.len().div_ceil(2));
+        let mut it = level.into_iter();
+        while let Some(a) = it.next() {
+            next.push(match it.next() {
+                Some(b) => join(a, b)?,
+                None => a,
+            });
+        }
+        level = next;
+    }
+    Ok(level.pop())
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The runs' pieces the unions joining a cornered sweep's runs have taken in on this thread,
+    /// both operands counted: how the joining's work grows with the number of corners.
+    pub(crate) static UNION_LOAD: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Refuses what no SMLib sweep does, before any work.
 pub(crate) fn refuse(what: &str) -> KernelError {
     not_supported(&format!("SMLib {what}"))
@@ -951,6 +979,17 @@ mod imp {
         a.boolean(b, op).map_err(|e| failed(what, e))?.ok_or_else(|| failed(what, "nothing is left"))
     }
 
+    /// The union of the runs' pieces, in a balanced tree ([`union_tree`]) of the plain union.
+    fn joined_runs(parts: Vec<Brep>) -> Result<Brep> {
+        let held: Vec<(Brep, usize)> = parts.into_iter().map(|b| (b, 1)).collect();
+        let joined = union_tree(held, |(a, m), (b, n)| {
+            #[cfg(test)]
+            UNION_LOAD.with(|l| l.set(l.get() + m + n));
+            Ok((combined(&a, &b, solidcraft_smlib::BooleanOp::Union, "sweep corner")?, m + n))
+        })?;
+        joined.map(|(b, _)| b).ok_or_else(|| KernelError::Invalid("empty path".into()))
+    }
+
     /// A sweep along a path with corners: each smooth run of it swept on its own, and the runs
     /// joined at each corner. Turning with the path, the profile turns at a corner about the
     /// line square to both directions, and the runs meet in a mitre: each run is swept on
@@ -992,7 +1031,7 @@ mod imp {
         let closed = end.dist(start) <= 1e-6;
         let closing = (closed && last_t.dot(first_t) < (1e-3f64).cos()).then_some(first_t);
         let mut pose = *plane;
-        let mut body: Option<Brep> = None;
+        let mut parts: Vec<Brep> = Vec::with_capacity(runs.len());
         let mut inside = Vec::new();
         // The mitre the next run starts from: its point, its normal (along the run) and the turn.
         let mut entry: Option<(Vec3, Vec3, f64)> = match closing {
@@ -1057,10 +1096,7 @@ mod imp {
                 }
                 (piece, moved_plane(&placed(&from, &last), t1 * -post))
             };
-            body = Some(match body {
-                None => piece,
-                Some(b) => combined(&b, &piece, solidcraft_smlib::BooleanOp::Union, "sweep corner")?,
-            });
+            parts.push(piece);
             // The profile at the run's end, then turned through the corner onto the next run.
             pose = at_end;
             entry = None;
@@ -1070,7 +1106,7 @@ mod imp {
                 entry = Some((b1, m, turn));
             }
         }
-        let brep = body.ok_or_else(|| KernelError::Invalid("empty path".into()))?;
+        let brep = joined_runs(parts)?;
         let body = body_of(brep, "sweep")?;
         let roles = roles(&body, plane, (!closed).then_some(&pose), &seeds(plane, pieces, |q| q), &inside, false)?;
         with_history(body, &roles, pieces)
@@ -1615,7 +1651,7 @@ mod imp {
             _ => None,
         };
         let mut before = 0.0f64;
-        let mut body: Option<Brep> = None;
+        let mut parts: Vec<Brep> = Vec::with_capacity(runs.len());
         let mut inside = Vec::new();
         for (ri, run) in runs.iter().enumerate() {
             let segs = path.get(run.clone()).ok_or_else(|| KernelError::Invalid("path run".into()))?;
@@ -1689,10 +1725,7 @@ mod imp {
                     piece = combined(&piece, &half_space(b1, m, size)?, solidcraft_smlib::BooleanOp::Subtract, "sweep mitre")?;
                 }
             }
-            body = Some(match body {
-                None => piece,
-                Some(b) => combined(&b, &piece, solidcraft_smlib::BooleanOp::Union, "sweep corner")?,
-            });
+            parts.push(piece);
             // The section at the run's end, turned through the corner onto the next run.
             at_start = end_map;
             entry = None;
@@ -1703,7 +1736,7 @@ mod imp {
             }
             before += length;
         }
-        let brep = body.ok_or_else(|| KernelError::Invalid("empty path".into()))?;
+        let brep = joined_runs(parts)?;
         if closed {
             // Back at the start, the section has to be the profile again (a whole number of its
             // symmetries of twist).
@@ -1966,5 +1999,31 @@ mod imp {
         let body = body_of(brep, "screw sweep")?;
         let roles = roles(&body, plane, None, &seeds(plane, pieces, |q| q), &[], true)?;
         with_history(body, &roles, pieces)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::panic)]
+mod tests {
+    /// The corner pieces of a sweep along a path are joined in a balanced tree (#14451): every join
+    /// is of two neighbouring stretches, left first, and for 180 runs (a 181-point polyline) the
+    /// joins take in 180 · 8 = 1440 pieces' worth of operands at most, where joining each piece onto
+    /// the body so far takes in 2 + 3 + … + 180 = 16,289.
+    #[test]
+    fn corner_pieces_are_joined_neighbours_first_in_a_balanced_tree() {
+        let mut load = 0;
+        let mut joins = 0;
+        let whole = super::union_tree((0..180).map(|i| i..i + 1).collect(), |a: std::ops::Range<usize>, b: std::ops::Range<usize>| {
+            assert_eq!(a.end, b.start, "joined {a:?} with {b:?}, not its neighbour");
+            load += a.len() + b.len();
+            joins += 1;
+            Ok(a.start..b.end)
+        })
+        .unwrap();
+        assert_eq!(whole, Some(0..180));
+        assert_eq!(joins, 179);
+        assert!(load <= 180 * 8, "{load}");
+        assert_eq!(super::union_tree(Vec::<usize>::new(), |a, _| Ok(a)).unwrap(), None);
+        assert_eq!(super::union_tree(vec![7], |a, _| Ok(a)).unwrap(), Some(7));
     }
 }

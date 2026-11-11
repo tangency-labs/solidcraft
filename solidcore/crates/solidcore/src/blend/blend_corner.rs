@@ -263,12 +263,16 @@ pub fn classify(
     tangency_tol_deg: f64,
 ) -> Result<BlendCorner> {
     let mut out = BlendCorner::default();
-    let vertex = vertex.ok_or_else(|| SolidError::null_pointer(OP_CLASSIFY))?;
+    let vertex =
+        vertex.ok_or_else(|| SolidError::blend_missing(OP_CLASSIFY, "the corner's vertex"))?;
     if solver_eus.len() != 2 || (all_eus.len() != 3 && all_eus.len() != 4) {
         return Ok(out);
     }
     let (Some(&eu1_), Some(&eu2_)) = (solver_eus.first(), solver_eus.get(1)) else {
-        return Err(SolidError::null_pointer(OP_CLASSIFY));
+        return Err(SolidError::blend_missing(
+            OP_CLASSIFY,
+            "the corner's two blended edge uses",
+        ));
     };
     // a Join: the blends continue each other, or, at a face corner of the other
     // convexity, meet at 5 degrees or less (they blend there: no mitre so thin)
@@ -316,7 +320,9 @@ fn side_edges_tangent(
         if blended.contains(&e) {
             continue;
         }
-        let e = e.ok_or_else(|| SolidError::null_pointer(OP_CLASSIFY))?;
+        let e = e.ok_or_else(|| {
+            SolidError::blend_missing(OP_CLASSIFY, "an unblended edge use's edge")
+        })?;
         if !edge::is_tangent_edge(k, b, e, tol_deg, false)? {
             return Ok(false);
         }
@@ -353,10 +359,9 @@ fn foot_on_surface(
     for _ in 0..40 {
         let d = surface.evaluate(k, uv, 1, 1, flags)?;
         let at = |i: usize, j: usize| {
-            d.get(i)
-                .and_then(|row| row.get(j))
-                .copied()
-                .ok_or_else(|| SolidError::null_pointer(OP_EXACT))
+            d.get(i).and_then(|row| row.get(j)).copied().ok_or_else(|| {
+                SolidError::blend_missing(OP_EXACT, "a derivative of the surface's evaluation")
+            })
         };
         let r = point - at(0, 0)?;
         let su = at(1, 0)?;
@@ -449,7 +454,12 @@ pub fn exact_mitre_curve(
     mitre: EdgeId,
     solvers: &mut dyn MitreSolvers,
 ) -> Result<bool> {
-    let nul = || SolidError::null_pointer(OP_EXACT);
+    let nul = || {
+        SolidError::blend_missing(
+            OP_EXACT,
+            "topology or geometry the mitre curve is built from",
+        )
+    };
     let start = edge::vertex(pseudo.brep(), mitre)?.ok_or_else(nul)?;
     let end = edge::other_vertex(pseudo.brep(), mitre, Some(start))?.ok_or_else(nul)?;
     let from_s = pseudo.fillet_vertex(start)?.vertex_type == FilletVertexType::RailXEdgeuse;
@@ -830,6 +840,26 @@ pub fn exact_mitre_curve(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A classification without a vertex is a typed `Missing` failure, with the null-pointer
+    /// status the bare status had.
+    #[test]
+    fn a_corner_without_a_vertex_is_a_typed_missing_failure() {
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_box(&mut k, Vec3::ZERO, 1.0, 1.0, 1.0)
+            .unwrap();
+        let err = classify(&k, &mut b, None, &[], &[], 1.0).unwrap_err();
+        assert_eq!(
+            err.blend_failure(),
+            Some(&crate::error::blend::BlendFailure::Missing(
+                "the corner's vertex"
+            ))
+        );
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR_NULL_POINTER)
+        );
+    }
 
     #[test]
     fn bernstein_product_is_the_cubic() {

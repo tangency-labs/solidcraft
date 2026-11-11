@@ -370,7 +370,7 @@ pub const SEAM_LIST: &str = "xtask/solidcore-seam.txt";
 pub const SEAM_PUBLIC: &[&str] = &["solidcore/public-crates.txt", "xtask/solidcore-public.txt"];
 
 /// The crate names in a public-crates file (`#` comments, blank lines skipped).
-fn parse_public(text: &str) -> Vec<String> {
+pub fn parse_public(text: &str) -> Vec<String> {
     text.lines()
         .map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with('#'))

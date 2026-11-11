@@ -166,6 +166,8 @@ pub struct WorkCounters {
     face_extreme_control_points: Cell<u64>,
     feet_tm_coefficients: Cell<u64>,
     mass_iso_evaluations: Cell<u64>,
+    coincident_curves_classified: Cell<u64>,
+    containment_edge_drops: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -231,6 +233,22 @@ impl WorkCounters {
         self.mass_iso_evaluations.get()
     }
 
+    /// Edge curves of two coincident faces that `FaceIntersect` classifies on both: those
+    /// of each face within reach of the other face's box. Not upstream (the fork's counters
+    /// have none).
+    #[must_use]
+    pub fn coincident_curves_classified(&self) -> u64 {
+        self.coincident_curves_classified.get()
+    }
+
+    /// Edge curves the loop containment test (`query::loop::contains_uv_point`) drops the
+    /// test point onto: those whose box, grown by the edge's tolerance, reaches the point.
+    /// Not upstream (upstream drops it onto every edge of the loop it walks).
+    #[must_use]
+    pub fn containment_edge_drops(&self) -> u64 {
+        self.containment_edge_drops.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
@@ -240,6 +258,8 @@ impl WorkCounters {
         self.face_extreme_control_points.set(0);
         self.feet_tm_coefficients.set(0);
         self.mass_iso_evaluations.set(0);
+        self.coincident_curves_classified.set(0);
+        self.containment_edge_drops.set(0);
     }
 
     /// Counts one face pair examined for intersection.
@@ -281,6 +301,18 @@ impl WorkCounters {
     pub(crate) fn add_feet_tm_coefficients(&self, n: u64) {
         self.feet_tm_coefficients
             .set(self.feet_tm_coefficients.get().saturating_add(n));
+    }
+
+    /// Counts one edge curve of coincident faces classified on both.
+    pub(crate) fn add_coincident_curve_classified(&self) {
+        self.coincident_curves_classified
+            .set(self.coincident_curves_classified.get().saturating_add(1));
+    }
+
+    /// Counts one drop of a containment test's point onto an edge curve.
+    pub(crate) fn add_containment_edge_drop(&self) {
+        self.containment_edge_drops
+            .set(self.containment_edge_drops.get().saturating_add(1));
     }
 }
 
@@ -808,10 +840,6 @@ pub struct UpstreamFixes {
     /// `plan/upstream-issues/WR-24--addendum-2026-10-31-knot-vector-requires-span.md`).
     /// Off by default for pinned C++ parity.
     pub knot_vector_valid_requires_span: bool,
-    /// `SmCone::IntersectWithCone` tests the line of two parallel cylinders against both face domains at its middle, not its bottom end (WR-259, #711).
-    pub cone_parallel_line_midpoint: bool,
-    /// `SmCone::IntersectWithCone` clips parallel-cylinder lines to both requested face domains, including overlaps away from the full line's middle (WR-259, #711). Independent of `cone_parallel_line_midpoint`; off by default for pinned SMLib compatibility.
-    pub cone_parallel_line_domains: bool,
     /// `SmCone::IntersectWithPlane` takes a plane parallel to a cylinder's axis as tangent also when it lies within the zone tolerance of a bounded face's wall along a line (`|d| > R - zone_tol`, the larger of the cone's and the plane's face tolerances, 0 for a surface with no face), besides upstream's two-crossing-lines test, so a plane turned a hair off a face's wall it touches does not cut it in two lines microns apart; bare surfaces are unchanged (WR-510, #1525; tangency-labs/smlib#55, merged as b22bfbc (was bd20f6e)).
     pub cylinder_plane_tangent_within_tolerance: bool,
     /// The Boolean's topology intersector treats a self-loop proto edge whose ends a vertex definition on a vertex combined (`CanCombineVertexDefinitions`) as degenerate, instead of `SmProtoEdge::Resolve` splitting it onto that one vertex, after which `SmMerge::MakeFaceuse` returns `SM_ERR` (WR-214, #480; `plan/upstream-issues/WR-214--smprotoedge-resolve-splits-a-self-loop-proto-edge-onto-one.md`).
@@ -1075,8 +1103,6 @@ pub struct UpstreamFixes {
     pub corner_blend_stays_inside_neighbours: bool,
     /// `DoFilleting`'s `BooleanPostProcess` removes none of the target's own edges, nor an edge between two of its faces (the fork's `m_sPostProcessKeptEdges`/`Faces`), so the patches of a sphere imported in six faces are not merged into a face no patch's parameterization can carry (WR-459, #423; the fork's tangency-labs/smlib@b7d7b96 (was 9ddf4a8)).
     pub fillet_cleanup_keeps_target_faces: bool,
-    /// With `fillet_cleanup_keeps_target_faces` on, `DoFilleting`'s `BooleanPostProcess` still checks a kept edge (one of the target's, or one between two of its faces) that has one face on both sides: removing that slit merges no faces, and the test of an edge between two kept faces needs two faces. Upstream (with the fork's keep) leaves the slit where a round took the face on one side of a target edge away (WR-602; the fork's tangency-labs/smlib@cac11ea).
-    pub fillet_cleanup_removes_input_slits: bool,
     /// `SmFilletNx1Corner::MakeCornerTopology` skips a side edge whose faces meet tangentially at the corner's vertex (a flat top running smoothly onto a round) round the vertex to the edge past it, so the end face is the one beyond the tangent seam (the slot wall), not the round the fillet never meets, and `SmFilletEdge::CalcEdgeOnExtendedEdge` intersects the side face with the end face's extension when the side face is not one of the edge's own faces (WR-457, #418; the fork's tangency-labs/smlib@ba7f68e (was d5ebcb3)).
     pub fillet_nx1_tangent_side_edge: bool,
     /// `SmFilletNx1Corner::MakeCornerTopology`'s tangent side-edge skip (`fillet_nx1_tangent_side_edge`, which must be on too) also passes, once, the filleted edge's G1 continuation across the vertex of the opposite convexity (past any tangent edges): the overhang's rim continuing the base circle of a cylinder standing over a block's edge. The edge past it, of the filleted edge's convexity, is the side edge extended and the face beyond it the end face, so the round ends there instead of failing with status 1001 (WR-499, #1474; the fork's tangency-labs/smlib@420e47d).

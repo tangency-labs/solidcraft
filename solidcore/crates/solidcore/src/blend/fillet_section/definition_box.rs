@@ -161,10 +161,14 @@ pub fn gn_def_face_of<'a>(k: &Kernel, surface: &'a Surface) -> Result<GnDefFace<
         }
     };
     let (Some(s0), Some(s1)) = (def.support(0), def.support(1)) else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the definition does not have two supports",
+        ));
     };
     let nurbs_of = |s: &Surface| -> Result<Nurbs> {
-        let bs = as_b_spline(k, s)?.ok_or_else(|| SolidError::sm_err(OP))?;
+        let bs = as_b_spline(k, s)?
+            .ok_or_else(|| SolidError::blend_failed(OP, "a support is not a NURBS surface"))?;
         Nurbs::of(&bs)
     };
     let sup_n = [nurbs_of(s0)?, nurbs_of(s1)?];
@@ -211,11 +215,17 @@ impl GnDefFace<'_> {
 fn def_piece_at(k: &Kernel, d: &mut GnDefFace<'_>, net: &Nurbs, kk: usize) -> Result<DefPiece> {
     let knots = if d.swapped { &net.v } else { &net.u };
     let (Some(&k0), Some(&k1)) = (knots.get(kk), knots.get(kk + 1)) else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the piece's knots are outside the net",
+        ));
     };
     let piece = k1 > k0;
     if !piece {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the piece has no span (its two knots are equal)",
+        ));
     }
     if d.pieces.len() < knots.len() {
         d.pieces.resize(knots.len(), DefPiece::NONE);
@@ -233,7 +243,9 @@ fn def_piece_at(k: &Kernel, d: &mut GnDefFace<'_>, net: &Nurbs, kk: usize) -> Re
         for f in 0..2 {
             let w = def
                 .seed(f)
-                .ok_or_else(|| SolidError::sm_err(OP))?
+                .ok_or_else(|| {
+                    SolidError::blend_failed(OP, "the definition has no seed for the face")
+                })?
                 .evaluate_point(p.s)?;
             if let Some(x) = seed.get_mut(2 * f) {
                 *x = w.x;
@@ -259,7 +271,10 @@ fn def_piece_at(k: &Kernel, d: &mut GnDefFace<'_>, net: &Nurbs, kk: usize) -> Re
     }
     match d.pieces.get(kk) {
         Some(p) if p.state == 1 => Ok(*p),
-        _ => Err(SolidError::sm_err(OP)),
+        _ => Err(SolidError::blend_failed(
+            OP,
+            "the piece's station did not solve",
+        )),
     }
 }
 
@@ -318,7 +333,10 @@ fn box_st(d: &GnDefFace<'_>, ua: f64, ub: f64, va: f64, vb: f64) -> Result<(Ivl,
     let t = Ivl::from(d.a[1]) + Ivl::from(d.b[1]) * pt;
     let finite = s.lo.is_finite() && s.hi.is_finite() && t.lo.is_finite() && t.hi.is_finite();
     if !finite {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the piece's box is not finite",
+        ));
     }
     Ok((s, t))
 }
@@ -372,7 +390,7 @@ pub fn definition_partials_naive(
             Some(h) => partials_hull(h, &p, lk),
         });
     }
-    out.ok_or_else(|| SolidError::sm_err(OP))
+    out.ok_or_else(|| SolidError::blend_failed(OP, "no piece encloses the box"))
 }
 
 /// The definition's partials over `s x t` (`s` on the leader's piece `leader`), to total
@@ -400,7 +418,10 @@ fn partials_on(
     lk: usize,
 ) -> Result<(Partials<Ivl>, bool)> {
     if lk > MAX_S {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::blend_failed(
+            OP,
+            "the order is past the most the series hold",
+        ));
     }
     let piece = def_piece_at(k, d, net, kk)?;
     // the feet over s, guessed at its ends from the piece's middle
@@ -443,7 +464,7 @@ fn partials_on(
         Ok(Some(e)) => e,
         // a foot past its support's domain end, refused by name (#14284)
         Err(e) if is_foot_past_domain_end(&e) => return Err(e),
-        _ => return Err(SolidError::sm_err(OP)),
+        _ => return Err(SolidError::blend_failed(OP, "the enclosure is not proved")),
     };
     let mut crossed = false;
     for (f, n) in d.sup_n.iter().enumerate() {
@@ -581,7 +602,7 @@ pub fn definition_partials_over_box(
             Some(h) => partials_hull(h, &p, lk),
         });
     }
-    out.ok_or_else(|| SolidError::sm_err(OP))
+    out.ok_or_else(|| SolidError::blend_failed(OP, "no piece encloses the box"))
 }
 
 /// [`definition_partials_over_box`] on one part `s x t` (`s` on the leader's piece
@@ -627,7 +648,10 @@ fn centred_on(
                 let x = Ivl::new(cmax(c.lo, w.lo), cmin(c.hi, w.hi));
                 let meet = x.lo <= x.hi;
                 if !meet {
-                    return Err(SolidError::sm_err(OP));
+                    return Err(SolidError::blend_failed(
+                        OP,
+                        "the two enclosures do not meet",
+                    ));
                 }
                 *g = x;
             }

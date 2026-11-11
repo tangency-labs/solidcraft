@@ -1048,6 +1048,80 @@ fn mirror_of_a_boss_and_a_cut_from_its_face_makes_both_copies() {
     assert!(rel(both, want) < 1e-6, "ring {ring} mm³, lid {lid} mm³, mirrored {both} mm³ (expected {want})");
 }
 
+/// #14305: in a component, a pattern or mirror of two cuts makes the copies of both. The first
+/// cut's copies used to hand the plate back outside its component, so the second cut's copies
+/// found no body there ("there is no body to cut or intersect").
+#[test]
+fn copies_of_two_cuts_in_a_component_cut_its_body() {
+    for (command, params, copies) in [
+        ("solid.pattern.circular", json!({"features": ["CutA", "CutB"], "axis": "Z", "count": 4, "angle": 360}), 3.0),
+        ("solid.mirror", json!({"features": ["CutA", "CutB"], "plane": "YZ"}), 1.0),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "Plate"}));
+        run(&mut s, "solid.box", json!({"length": 100, "width": 100, "height": 5, "corner": [-50, -50, 0]}));
+        for (name, x, r) in [("A", 30, 3), ("B", 40, 2)] {
+            run(&mut s, "sketch.create", json!({"plane": "XY", "name": name}));
+            run(&mut s, "sketch.circle.center", json!({"center": [x, 0], "radius": r}));
+            run(&mut s, "sketch.finish", json!({}));
+            run(&mut s, "solid.extrude", json!({"sketch": name, "through_all": true, "operation": "cut", "name": format!("Cut{name}")}));
+        }
+        run(&mut s, command, params);
+        // The plate and each instance's two bores, radius 3 and 2, through its 5 mm.
+        let want = 100.0 * 100.0 * 5.0 - (1.0 + copies) * PI * (9.0 + 4.0) * 5.0;
+        let v = volume(&mut s);
+        assert!(rel(v, want) < 1e-6, "{command}: {v} mm³, expected {want}");
+    }
+}
+
+/// #14305: a copied cut that splits the plate leaves its pieces in the component, so the copies of
+/// holes after it still find the piece each falls on. The slot's copy splits the left part of the
+/// plate in two, and one hole's copy lands on each piece.
+#[test]
+fn copies_of_a_cut_that_splits_the_body_in_a_component_leave_its_pieces_there() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Plate"}));
+    run(&mut s, "solid.box", json!({"length": 100, "width": 100, "height": 5, "corner": [-50, -50, 0]}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Slot"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [20, -60], "p1": [24, 60]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Slot", "through_all": true, "operation": "cut", "name": "CutSlot"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "B"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [40, 0], "radius": 2}));
+    run(&mut s, "sketch.circle.center", json!({"center": [10, 0], "radius": 2}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "B", "through_all": true, "operation": "cut", "name": "CutB"}));
+    run(&mut s, "solid.mirror", json!({"features": ["CutSlot", "CutB"], "plane": "YZ"}));
+    // The plate less two 4 × 100 slots across it and four bores of radius 2, through its 5 mm.
+    let want = 100.0 * 100.0 * 5.0 - 2.0 * 4.0 * 100.0 * 5.0 - 4.0 * PI * 4.0 * 5.0;
+    let v = volume(&mut s);
+    assert!(rel(v, want) < 1e-6, "{v} mm³, expected {want}");
+}
+
+/// #14305: a chamfer among the copied features hands the disc back in its component, so a hole
+/// copied after it still finds the disc there, as it does at the design's root.
+#[test]
+fn copies_of_a_chamfer_and_a_later_hole_in_a_component_cut_its_body() {
+    let pi = std::f64::consts::PI;
+    // Per instance: the bore, π·3²·10, one ring of the chamfer's triangle (Pappus, as below) and
+    // the pin hole, π·2²·10. The six instances do not meet.
+    let instance = pi * 9.0 * 10.0 + 2.0 * pi * (3.0 + 0.5 / 3.0) * 0.125 + pi * 4.0 * 10.0;
+    let want = pi * 900.0 * 10.0 - 6.0 * instance;
+    for in_component in [false, true] {
+        let mut s = Session::default();
+        if in_component {
+            run(&mut s, "component.create", json!({"name": "Part"}));
+        }
+        run(&mut s, "solid.cylinder", json!({"radius": 30, "height": 10, "name": "Disc"}));
+        run(&mut s, "solid.hole", json!({"position": [20, 0, 10], "diameter": 6, "name": "Bore"}));
+        run(&mut s, "solid.chamfer", json!({"edges": [[23, 0, 10]], "distance": 0.5, "name": "TopChamfer"}));
+        run(&mut s, "solid.hole", json!({"position": [0, 10, 10], "diameter": 4, "name": "Pin"}));
+        run(&mut s, "solid.pattern.circular", json!({"features": ["Bore", "TopChamfer", "Pin"], "axis": "Z", "count": 6, "angle": 360}));
+        let v = volume(&mut s);
+        assert!((v - want).abs() < 4e-7 * want, "component {in_component}: {v} mm³, expected {want}");
+    }
+}
+
 /// A disc with an off-centre hole whose top and bottom edges are chamfered.
 fn disc_with_chamfered_hole() -> Session {
     let mut s = Session::default();

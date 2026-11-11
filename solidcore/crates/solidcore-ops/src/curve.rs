@@ -37,7 +37,10 @@ pub fn cv_curve(points: &[[f64; 3]], degree: usize) -> Result<Curve> {
 }
 
 /// `curve` with its control point `index` at `to`: its knots, degree and every other point as
-/// they were. A spline's or a polyline's point.
+/// they were. A spline's or a polyline's point. On a closed periodic spline (unclamped knots, its
+/// polygon repeating its first `degree` points after its last, as
+/// [`crate::curve_fit::closed_cv_curve`] makes it) a repeated point moves with its copy, so the
+/// curve stays closed and smooth.
 ///
 /// # Errors
 /// [`Error::Argument`] for another kind of curve (a rational spline's point carries its weight),
@@ -46,12 +49,40 @@ pub fn move_cv(curve: &Curve, index: usize, to: [f64; 3]) -> Result<Curve> {
     if !coord_ok(&to) {
         return Err(Error::Argument);
     }
+    let twin = match curve {
+        Curve::Spline { knots, points } => periodic_twin(knots, points, index),
+        _ => None,
+    };
     let mut moved = curve.clone();
     let (Curve::Spline { points, .. } | Curve::Polyline { points }) = &mut moved else {
         return Err(Error::Argument);
     };
     *points.get_mut(index).ok_or(Error::Argument)? = to;
+    if let Some(copy) = twin {
+        *points.get_mut(copy).ok_or(Error::Argument)? = to;
+    }
     Ok(moved)
+}
+
+/// The index of the copy of control point `index` of a closed periodic spline: one whose knots
+/// are periodic ([`solidcore::nurbs::knots::is_periodic`]) and whose last `degree` points
+/// repeat its first `degree`. `None` for another spline, or a point that is not repeated.
+fn periodic_twin(knots: &[f64], points: &[[f64; 3]], index: usize) -> Option<usize> {
+    let degree = knots.len().checked_sub(points.len() + 1)?;
+    let distinct = points.len().checked_sub(degree)?;
+    if !solidcore::nurbs::knots::is_periodic(knots, degree) {
+        return None;
+    }
+    let repeats =
+        (0..degree).all(|i| points.get(i).is_some() && points.get(i) == points.get(i + distinct));
+    if !repeats {
+        return None;
+    }
+    if index < degree {
+        Some(index + distinct)
+    } else {
+        index.checked_sub(distinct).filter(|i| *i < degree)
+    }
 }
 
 /// The curvature comb of `curve` over `interval` of its parameter: the kernel's curvature vector
@@ -177,6 +208,53 @@ mod tests {
             ),
             Err(Error::Argument)
         );
+    }
+
+    #[test]
+    fn moving_a_repeated_cv_of_a_closed_curve_moves_its_copy() {
+        let c = crate::curve_fit::closed_cv_curve(&SQUARE, 3).unwrap();
+        // points 0, 1 and 2 are repeated as 4, 5 and 6
+        for (index, copy) in [(1, 5), (5, 1), (0, 4), (6, 2)] {
+            let moved = move_cv(&c, index, [5.0, -3.0, 2.0]).unwrap();
+            let Curve::Spline { points, knots } = &moved else {
+                panic!()
+            };
+            assert_eq!(points[index], [5.0, -3.0, 2.0]);
+            assert_eq!(points[copy], [5.0, -3.0, 2.0]);
+            let Curve::Spline { knots: k0, .. } = &c else {
+                panic!()
+            };
+            assert_eq!(knots, k0);
+        }
+        // the one point not repeated moves alone
+        let moved = move_cv(&c, 3, [5.0, -3.0, 2.0]).unwrap();
+        let (Curve::Spline { points: p0, .. }, Curve::Spline { points: p1, .. }) = (&c, &moved)
+        else {
+            panic!()
+        };
+        for i in [0, 1, 2, 4, 5, 6] {
+            assert_eq!(p0[i], p1[i]);
+        }
+        // repeated points on unclamped knots that are not periodic move alone
+        let (a, b, c) = ([0.0; 3], [4.0, 0.0, 0.0], [4.0, 4.0, 0.0]);
+        let open = Curve::Spline {
+            knots: vec![-2.0, -1.0, 0.0, 1.0, 2.0, 4.0, 5.0, 6.0],
+            points: vec![a, b, c, a, b],
+        };
+        let moved = move_cv(&open, 0, [1.0, 1.0, 1.0]).unwrap();
+        let Curve::Spline { points, .. } = &moved else {
+            panic!()
+        };
+        assert_eq!((points[0], points[3]), ([1.0, 1.0, 1.0], a));
+        // a clamped curve whose last point is its first is not periodic
+        let mut ring = SQUARE.to_vec();
+        ring.push(SQUARE[0]);
+        let open = cv_curve(&ring, 3).unwrap();
+        let moved = move_cv(&open, 0, [1.0, 1.0, 1.0]).unwrap();
+        let Curve::Spline { points, .. } = &moved else {
+            panic!()
+        };
+        assert_eq!(points[4], SQUARE[0]);
     }
 
     #[test]

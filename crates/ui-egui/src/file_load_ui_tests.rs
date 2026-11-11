@@ -1204,6 +1204,39 @@ fn an_insert_runs_again_for_a_design_edited_meanwhile_and_lands_after_the_edit()
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A result waiting to land does not hold the file worker: another open runs meanwhile. Closing
+/// the tab the waiting design belongs to answers its request instead of leaving it waiting.
+#[test]
+fn a_waiting_result_does_not_hold_the_queue_and_a_closed_tab_releases_it() {
+    let dir = scratch("waiting-queue");
+    let step = step_box(&dir);
+    let other = large_design(&dir, 2);
+    let mut w = Win::new();
+    w.app.home.open = false;
+    w.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).unwrap();
+    // An insert for the design in tab 0, with another tab shown when its result comes in.
+    let (started, release) = hold_next(&mut w);
+    crate::file_load::begin(&mut w.app, &step, true);
+    started.recv_timeout(std::time::Duration::from_secs(60)).unwrap();
+    crate::documents::open_tab(&mut w.app, Session::default()).unwrap();
+    release.send(()).unwrap();
+    frames_until(&mut w, "the insert is ready", |app| crate::operations::current(app).iter().any(|r| r.waiting));
+    // An open runs while that result waits: the waiting one is out of the worker's way.
+    let (started, release) = hold_next(&mut w);
+    crate::file_load::begin(&mut w.app, &other, false);
+    started.recv_timeout(std::time::Duration::from_secs(60)).unwrap();
+    release.send(()).unwrap();
+    frames_until(&mut w, "the open runs while the insert waits", |app| {
+        app.session.path.as_deref().is_some_and(|p| crate::documents::same_path(p, &other))
+            && crate::operations::current(app).iter().any(|r| r.waiting)
+    });
+    // Closing the waiting design's tab answers its request: nothing waits for it any more.
+    crate::documents::close(&mut w.app, 0, true);
+    frames_until(&mut w, "the waiting result is answered", |app| !crate::operations::current(app).iter().any(|r| r.waiting) && app.file_load.idle());
+    assert_eq!(w.app.docs.count(), 1, "the closed tab released its request");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// An insert for a design whose tab is no longer shown waits, ready, for it: the design shown
 /// gets nothing; showing the tab again lands it there.
 #[test]

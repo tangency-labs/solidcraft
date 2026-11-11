@@ -71,7 +71,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("box")
         .contract(&BOX_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("length, width, height: expr; corner?: [x,y,z] | center?: [x,y,z] (numbers in mm or length expressions; default: the origin); operation?, touching?, targets?: [body], name?, body_name?"),
+        .params("length, width, height: expr; corner?: [x,y,z] | center?: [x,y,z] (numbers in mm or length expressions; default: the origin; a box placed by its center stays centred there when its size changes); operation?, touching?, targets?: [body], name?, body_name?"),
     CommandSpec::new("solid.cylinder", "Cylinder", crate::checked!("solid.cylinder", prim_cylinder))
         .at("SOLID", "CREATE")
         .icon("cylinder")
@@ -1534,27 +1534,14 @@ fn prim_box(s: &mut Session, p: &Value) -> Result<Value> {
     for (e, n) in [(&l, "length"), (&w, "width"), (&h, "height")] {
         check_expr(s, e, Kind::Length, cmd, n)?;
     }
-    let corner = match (point_param(s, p, "corner", cmd)?, point_param(s, p, "center", cmd)?) {
-        (Some(c), _) => c,
-        // The corner half a size back from the centre (numbers stay numbers, in mm). The centre's
-        // bare numbers are millimetres, the sizes' the design's units.
-        (None, Some([cx, cy, cz])) => {
-            let unit = typed_length_unit(s);
-            let mm_per_unit = solidcraft_doc::expr::unit_info(&unit).map_or(1.0, |(_, k)| k);
-            let back = |c: Expr, size: &Expr| -> Expr {
-                match (c.parse::<f64>(), size.parse::<f64>()) {
-                    (Ok(a), Ok(b)) => format!("{}", a - b * mm_per_unit / 2.0).into(),
-                    _ => {
-                        let [c, size] = length_operands(s, [(&c, "mm"), (size, &unit)]);
-                        format!("({c}) - ({size}) / 2").into()
-                    }
-                }
-            };
-            [back(cx, &l), back(cy, &w), back(cz, &h)]
-        }
-        _ => point_expr(Vec3::ZERO),
+    // A box placed by its centre keeps that centre, so a later length, width or height grows it on
+    // both sides (#14487).
+    let (corner, centred) = match (point_param(s, p, "corner", cmd)?, point_param(s, p, "center", cmd)?) {
+        (Some(c), _) => (c, false),
+        (None, Some(c)) => (c, true),
+        _ => (point_expr(Vec3::ZERO), false),
     };
-    add_feature(s, p, FeatureKind::Box { corner, length: l, width: w, height: h, operation: operation(p, cmd)? })
+    add_feature(s, p, FeatureKind::Box { corner, length: l, width: w, height: h, operation: operation(p, cmd)?, centred })
 }
 
 fn prim_cylinder(s: &mut Session, p: &Value) -> Result<Value> {
