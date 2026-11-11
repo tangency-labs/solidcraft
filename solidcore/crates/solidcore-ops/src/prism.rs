@@ -397,17 +397,49 @@ pub fn loop_holds(lp: &Loop2, p: Vec2) -> Option<bool> {
     convert::loop2(lp).holds(convert::vec2(p))
 }
 
-/// `figure` scaled by `scale` about its own origin and moved to `origin`
-/// ([`kp::place_figure_2d`]): a drawing symbol, a table of segments in units of its size, placed
-/// on its sheet. An arc keeps its start and sweep; a mirror is refused.
+/// A figure placed on its sheet ([`place_figure`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlacedFigure {
+    /// The figure's segments, in its order.
+    pub segments: Vec<Seg2>,
+    /// The points asked for (a text's anchor, say), in their order.
+    pub points: Vec<Vec2>,
+    /// The unit direction the figure's `+x` now points along (a text's baseline).
+    pub direction: Vec2,
+}
+
+/// `figure` and `points` scaled by `scale`, turned counter-clockwise by `angle` (radians) about
+/// their own origin and moved to `origin` ([`kp::place_figure_2d`]): a drawing symbol, a table of
+/// segments and text anchors in units of its size, placed on its sheet. An arc's start turns by
+/// the angle and its sweep stays; a mirror is refused.
 ///
 /// # Errors
 /// The kernel's refusal ([`Error::Status`]): a scale not above 0 or not finite, a value not
-/// finite, or more than [`kp::MAX_SEGMENTS`] segments.
-pub fn place_figure(figure: &[Seg2], scale: f64, origin: Vec2) -> Result<Vec<Seg2>> {
+/// finite, or more than [`kp::MAX_SEGMENTS`] segments or points.
+pub fn place_figure(
+    figure: &[Seg2],
+    points: &[Vec2],
+    scale: f64,
+    angle: f64,
+    origin: Vec2,
+) -> Result<PlacedFigure> {
     let figure: Vec<kp::Seg2> = figure.iter().map(convert::seg2).collect();
-    let placed = kp::place_figure_2d(&figure, scale, convert::vec2(origin)).map_err(status)?;
-    Ok(placed.iter().map(convert::record_seg2).collect())
+    let points: Vec<_> = points.iter().copied().map(convert::vec2).collect();
+    let at = kp::FigurePlacement {
+        scale,
+        angle,
+        origin: convert::vec2(origin),
+    };
+    let placed = kp::place_figure_2d(&figure, &points, at).map_err(status)?;
+    Ok(PlacedFigure {
+        segments: placed.segments.iter().map(convert::record_seg2).collect(),
+        points: placed
+            .points
+            .into_iter()
+            .map(convert::record_vec2)
+            .collect(),
+        direction: convert::record_vec2(placed.direction),
+    })
 }
 
 /// The corners of the regular outline with `sides` sides, each `side` long, about `centre`,

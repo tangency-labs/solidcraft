@@ -14,7 +14,8 @@ use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, FRAC_PI_4, PI, TAU};
 
 use solidcore_ops::prism::{
     extrude_planar_regions, label_in_outline, loop_holds, place_figure, planar_regions_boolean,
-    prism_equivalent, prism_section, region_area, regular_outline, LabelFit, PrismSection,
+    prism_equivalent, prism_section, region_area, regular_outline, LabelFit, PlacedFigure,
+    PrismSection,
 };
 use solidcore_ops::{make_box, make_cylinder, session, Body, BooleanOp, Error};
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
@@ -879,7 +880,7 @@ fn sheet_figures_reach_the_kernel_through_the_record() {
             sweep: PI,
         },
     ];
-    let placed = place_figure(&figure, 3.5, v(100.0, 50.0)).unwrap();
+    let placed = place_figure(&figure, &[v(0.0, 1.0)], 3.5, 0.0, v(100.0, 50.0)).unwrap();
     let line = Seg2::Line {
         a: v(100.0, 50.0),
         b: v(103.5, 50.0),
@@ -890,7 +891,22 @@ fn sheet_figures_reach_the_kernel_through_the_record() {
         start: 0.0,
         sweep: PI,
     };
-    assert_eq!(placed, vec![line, arc]);
+    let want = PlacedFigure {
+        segments: vec![line, arc],
+        points: vec![v(100.0, 53.5)],
+        direction: v(1.0, 0.0),
+    };
+    assert_eq!(placed, want, "no turn: exactly the scaled and moved figure");
+    // A quarter turn through the record: the line points up, and the arc starts a quarter on.
+    let turned = place_figure(&figure, &[], 1.0, FRAC_PI_2, v(0.0, 0.0)).unwrap();
+    let Seg2::Line { b, .. } = turned.segments[0] else {
+        panic!("a line stays a line")
+    };
+    assert!(b.x.abs() < 1e-15 && (b.y - 1.0).abs() < 1e-15, "{b:?}");
+    let Seg2::Arc { start, sweep, .. } = turned.segments[1] else {
+        panic!("an arc stays an arc")
+    };
+    assert_eq!((start, sweep), (FRAC_PI_2, PI));
     // A revision tag's triangle: side 6 about (100, 50), point up, counter-clockwise.
     let r3 = 3.0_f64.sqrt();
     let tri = regular_outline(v(100.0, 50.0), 3, 6.0, FRAC_PI_2).unwrap();
@@ -928,7 +944,11 @@ fn sheet_figures_refuse_hostile_values_through_the_record() {
         b: v(1.0, 0.0),
     }];
     assert!(matches!(
-        place_figure(&line, -1.0, v(0.0, 0.0)),
+        place_figure(&line, &[], -1.0, 0.0, v(0.0, 0.0)),
+        Err(Error::Status(_))
+    ));
+    assert!(matches!(
+        place_figure(&line, &[], 1.0, f64::NAN, v(0.0, 0.0)),
         Err(Error::Status(_))
     ));
     assert!(matches!(
