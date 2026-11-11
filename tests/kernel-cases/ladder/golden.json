@@ -1632,9 +1632,9 @@
       "measured": {
         "area_mm2": 20922.655884707412,
         "body_count": 1,
-        "edges": 140,
-        "faces": 55,
-        "vertices": 92,
+        "edges": 138,
+        "faces": 54,
+        "vertices": 91,
         "volume_mm3": 15397.700273469829
       },
       "seconds": 2.090895064,
@@ -1776,9 +1776,9 @@
       "measured": {
         "area_mm2": 20922.655884695778,
         "body_count": 1,
-        "edges": 152,
-        "faces": 59,
-        "vertices": 100,
+        "edges": 150,
+        "faces": 58,
+        "vertices": 99,
         "volume_mm3": 15355.288772644028
       },
       "seconds": 3.009687756,
@@ -1824,9 +1824,9 @@
       "measured": {
         "area_mm2": 21156.778656747345,
         "body_count": 1,
-        "edges": 164,
-        "faces": 63,
-        "vertices": 108,
+        "edges": 162,
+        "faces": 62,
+        "vertices": 107,
         "volume_mm3": 15111.54509757647
       },
       "seconds": 3.651175791,
