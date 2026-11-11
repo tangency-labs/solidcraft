@@ -579,6 +579,35 @@ fn the_first_dimension_scales_the_drawing_unless_the_preference_is_off() {
     }
 }
 
+/// #11043: a rectangle drawn away from the origin keeps its middle when the first dimension
+/// scales it; the Sketch preference scales it about the origin, as before.
+#[test]
+fn the_first_dimension_scales_a_free_drawing_about_its_middle_unless_the_preference_says_origin() {
+    for about_origin in [false, true] {
+        let mut h = Harness::new();
+        crate::dim_view::cancel();
+        assert!(!h.app.preferences.first_dimension_scales_about_origin, "off by default (#11043)");
+        h.app.preferences.first_dimension_scales_about_origin = about_origin;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[20,10],"p1":[40,20]})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.app.cam.distance = 80.;
+        h.app.cam.target = solidcore_record::Vec3::new(30., 15., 0.);
+        h.settle();
+        place(&mut h, &[[30., 10.]], [30., 5.]);
+        type_value(&mut h, "40 mm");
+        h.step(&json!({"key":"Enter"})).unwrap();
+        let state = h.app.session.world_state().unwrap();
+        let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        let corners: Vec<_> = sketch.points.iter().filter(|p| !p.fixed).map(|p| p.pos).collect();
+        assert_eq!(corners.len(), 4);
+        let middle = corners.iter().fold(solidcore_record::Vec2::ZERO, |m, &p| m + p * 0.25);
+        // Scaled 2×: about (30, 15) the middle stays; about the origin it doubles.
+        let want = if about_origin { solidcore_record::Vec2::new(60., 30.) } else { solidcore_record::Vec2::new(30., 15.) };
+        assert!(middle.dist(want) < 1e-6, "about origin {about_origin}: middle {middle:?}");
+    }
+}
+
 #[test]
 fn pending_second_nested_plane_uses_world_picks_but_one_local_dimension() {
     use solidcore_record::Vec2;
@@ -2136,4 +2165,22 @@ fn a_line_is_dimensioned_against_the_sketch_x_axis() {
             assert!((b.y - 12.0).abs() < 1e-6, "the end is 12 from x: {b:?}");
         }
     }
+}
+
+/// #14231: while a dimension is placed its value follows the pointer, and the pointer ring,
+/// drawn after it, sat on the number. The ring is left out on the value and kept elsewhere.
+#[test]
+fn the_pointer_ring_stays_off_the_value_being_placed() {
+    let mut h = line([20., 0.]);
+    h.step(&json!({"start":"sketch.dimension"})).unwrap();
+    h.step(&json!({"click":{"world":[10,0,0]}})).unwrap();
+    h.step(&json!({"move":{"world":[10,6,0]}})).unwrap();
+    h.settle();
+    let value = crate::dim_view::draft_text().expect("the value being placed is drawn");
+    let pointer = h.ctx.input(|i| i.pointer.hover_pos()).expect("the pointer is over the view");
+    assert!(value.contains(pointer), "the value follows the pointer: {value:?} {pointer:?}");
+    let tool = h.app.tool.as_ref().expect("the Dimension tool");
+    assert!(!crate::tools::pointer_ring_shown(tool, pointer), "no ring on the value");
+    assert!(!crate::tools::pointer_ring_shown(tool, value.right_center() + egui::vec2(4.0, 0.0)), "nor one that would touch it");
+    assert!(crate::tools::pointer_ring_shown(tool, value.right_center() + egui::vec2(20.0, 0.0)), "the ring elsewhere");
 }

@@ -38,7 +38,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("fastener")
         .contract(&INSERT_CONTRACT)
         .output(output_schema_for::<InsertedPart>)
-        .params("the Insert Part dialog's command (same as parts.insert): family, size, length?, at?|point?+direction? (from the shank's tip toward the head), name?"),
+        .params("the Insert Part dialog's command (same as parts.insert): family, size, length?, at?|point?+direction? (from the shank's tip toward the head), flip?, name?"),
     CommandSpec::new("parts.insert", "Insert Part", crate::checked!("parts.insert", insert_atomic))
         .icon("fastener")
         .contract(&INSERT_CONTRACT)
@@ -47,11 +47,13 @@ pub static COMMANDS: &[CommandSpec] = &[
             "family (socket_head_cap_screw | button_head_cap_screw | countersunk_socket_screw | hex_bolt | hex_nut | washer | set_screw | dowel_pin | bearing | \
          hex_cap_screw_inch | hex_nut_inch | washer_sae | washer_uss); size (\"M6\", \"608\" for bearings, \"1/2-13 UNC\" for inch screws and nuts, \
          \"1/2\" for inch washers); length? (mm, inch parts too; screws, bolts, set screws, pins; default a standard length near 2.5 d); \
-         at?: [x,y,z] on a hole's rim or wall (the part seats on the hole's face with a rigid joint), or a list of them (one component, \
-         placed and seated once per hole) | point?: [x,y,z] with direction?: [x,y,z] (no joint: the part's seating plane, under a head or \
+         at?: [x,y,z] on a hole's rim or wall (the part seats on the hole's face with a rigid joint, head on the picked face and \
+         shank into the hole, whichever way the face points) or on a flat face (seated at that point, head out of the face), or a list of \
+         them (one component, placed and seated once per pick) | point?: [x,y,z] with direction?: [x,y,z] (no joint: the part's seating plane, under a head or \
          the bottom of a nut, washer or bearing, the top of a set screw, pin or countersunk head, goes to point, and direction is its +z, from the shank's tip toward the head; default [0,0,1], \
-         head up, shank down -z); name? → component, occurrence, joint?, \
-         and with at: occurrences, joints (one per hole, in pick order)",
+         head up, shank down -z); flip?: bool (default false: turned over, head into the material with at, +z against direction \
+         with point); name? → component, occurrence, joint?, directions (each placement's head direction in the world, the one \
+         chosen), and with at: occurrences, joints (one per pick, in pick order)",
         ),
     CommandSpec::new("parts.resize", "Change Part Size", crate::checked!("parts.resize", resize_atomic))
         .icon("scale")
@@ -836,10 +838,15 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     // A pick on a hole's rim also touches its end face: step onto the wall just inside the rim.
     // Each hole's occurrence is found before the part exists, so a pick off every body fails the
     // insert before anything is made.
+    let flip = p.get("flip").and_then(Value::as_bool).unwrap_or(false);
     let mut holes: Vec<(Vec3, u64)> = Vec::new();
     let mut seats: Vec<(u64, HoleWall)> = Vec::new();
+    // Picks on a flat face, off every hole: the point and the face's outward normal (world).
+    let mut faces: Vec<Option<Vec3>> = Vec::new();
     for a in hole_picks(p, cmd)? {
-        let wall = hole_wall(s, a).unwrap_or(HoleWall { at: a, seat: a, axis: None, ends: None, open: true, radius: 0.0 });
+        let found = hole_wall(s, a);
+        let face = if found.is_none() { outward_normal(s, a) } else { None };
+        let wall = found.unwrap_or(HoleWall { at: a, seat: a, axis: None, ends: None, open: true, radius: 0.0 });
         let host = super::joints::occurrence_at(s, wall.at).ok_or_else(|| bad(cmd, "no body at `at` (pick a hole's rim or wall)"))?;
         // A rim is drawn as more than one edge, and one click on it picks them all; a hole can
         // also be picked at both its ends (#12191). The picks of one hole seat one part, at an
@@ -857,6 +864,7 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
             None => {
                 holes.push((wall.at, host));
                 seats.push((host, wall));
+                faces.push(face);
             }
         }
     }
@@ -876,8 +884,11 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
         joint: None,
         occurrences: None,
         joints: None,
+        directions: Vec::new(),
         param_warnings: Vec::new(),
     };
+    // The part's −z (its shank) mates with the seat's outward z; flipped, its +z does.
+    let part_z = if flip { [0.0, 0.0, 1.0] } else { [0.0, 0.0, -1.0] };
     if !holes.is_empty() {
         // The first hole has the placement the component came with; each further hole places the
         // same part again. All are made before any is seated, while each is still at the part's
@@ -891,7 +902,7 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
             );
         }
         let mut joints = Vec::new();
-        for (i, ((a, h), o)) in holes.into_iter().zip(&occurrences).enumerate() {
+        for (i, (((a, h), o), face)) in holes.into_iter().zip(&occurrences).zip(faces).enumerate() {
             // Seat it: its axis on the hole's, its seating plane on the hole's face, the shank
             // going into the hole (the joint mates the part's −z with the face's outward z).
             let seat = if i == 0 { format!("{name} seat") } else { format!("{name} seat {}", i + 1) };
@@ -908,19 +919,22 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
                 }
                 _ => [0.0, 0.0, 0.0],
             };
-            let j = run(
-                s,
-                "joint.create",
-                json!({"type": "rigid", "a": {"occurrence": h, "circle": a}, "b": {"occurrence": o, "point": at_rim, "z": [0, 0, -1]}, "name": seat}),
-            )?;
+            // On a flat face: seated at the picked point, its z the face's outward normal.
+            let host = match face {
+                Some(n) => json!({"occurrence": h, "point": [a.x, a.y, a.z], "z": [n.x, n.y, n.z]}),
+                None => json!({"occurrence": h, "circle": a}),
+            };
+            let j = run(s, "joint.create", json!({"type": "rigid", "a": host, "b": {"occurrence": o, "point": at_rim, "z": part_z}, "name": seat}))?;
             joints.push(j["joint"].as_u64().ok_or_else(|| bad(cmd, "the joint has no id"))?);
         }
         out.joint = joints.first().copied();
+        out.directions = occurrences.iter().map(|o| head_direction(s, *o)).collect();
         out.occurrences = Some(occurrences);
         out.joints = Some(joints);
     } else if let Some(pt) = p.get("point").and_then(vec3) {
         // Placed at a point, its +z along `direction`.
         let dir = p.get("direction").and_then(vec3).and_then(|d| d.normalized()).unwrap_or(Vec3::Z);
+        let dir = if flip { dir * -1.0 } else { dir };
         let m = solidcraft_doc::rigid(
             Vec3::ZERO,
             Vec3::ZERO,
@@ -936,7 +950,42 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
             o.transform = m;
         }
     }
+    if out.directions.is_empty() {
+        out.directions = vec![head_direction(s, occ)];
+    }
     reply(cmd, out)
+}
+
+/// The way a placed part's head points in the world: its +z.
+fn head_direction(s: &Session, occ: u64) -> [f64; 3] {
+    let z = solidcraft_doc::apply_vector(&world_of(s, occ), Vec3::Z);
+    let z = z.normalized().unwrap_or(z);
+    // Rounding noise reads as zero.
+    let tidy = |v: f64| if v.abs() < 1e-12 { 0.0 } else { v };
+    [tidy(z.x), tidy(z.y), tidy(z.z)]
+}
+
+/// An occurrence's placement in the world (the design itself: none).
+fn world_of(s: &Session, occ: u64) -> solidcraft_doc::Mat {
+    if occ == 0 { solidcraft_doc::IDENTITY } else { solidcraft_doc::joints::occurrence_world(&s.doc, occ) }
+}
+
+/// The outward normal (world) of the flat face at `a`, on the body the pick is on.
+fn outward_normal(s: &Session, a: Vec3) -> Option<Vec3> {
+    use solidcraft_doc::joints::{JointOrigin, Snap};
+    let occurrence = super::joints::occurrence_at(s, a)?;
+    let t = world_of(s, occurrence);
+    let inv = solidcraft_doc::mat_inverse(&t)?;
+    let pick = solidcraft_doc::apply_point(&inv, a);
+    let st = s.model.state();
+    let o = JointOrigin::new(occurrence, Snap::FaceCenter { pick, face: None, x: None });
+    let m = solidcraft_doc::joints::resolve_origin(&s.doc, &st, &o).ok()?;
+    let (c, n) = (Vec3::new(m[3][0], m[3][1], m[3][2]), Vec3::new(m[2][0], m[2][1], m[2][2]));
+    // The nearest plane must be the one picked: the point lies on it.
+    if (pick - c).dot(n).abs() > 1e-6 {
+        return None;
+    }
+    solidcraft_doc::apply_vector(&t, n).normalized()
 }
 
 /// The most holes one insert seats a part in.
@@ -1420,6 +1469,32 @@ mod tests {
         assert!(s.model.state().threads.iter().any(|t| t.designation == "M8" && (t.pitch - 1.25).abs() < 1e-9));
     }
 
+    /// #12393: a command that runs other commands is one undo step, and a failed one leaves the
+    /// undo and redo lists as they were.
+    #[test]
+    fn a_command_built_from_commands_is_one_undo_step() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length":40,"width":40,"height":10,"body_name":"Plate"}));
+        let (undo, before) = (s.undo.len(), s.doc.clone());
+        run(&mut s, "parts.insert", json!({"family":"socket_head_cap_screw","size":"M6","length":20}));
+        assert_eq!(s.undo.len(), undo + 1, "parts.insert");
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(s.doc, before, "one undo removes the whole screw");
+        // A combine into a new component is "Combine" alone.
+        run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"corner":[50,0,0],"operation":"new","body_name":"Block"}));
+        let undo = s.undo.len();
+        run(&mut s, "solid.combine", json!({"target":"Plate","tools":["Block"],"operation":"join","new_component":true}));
+        assert_eq!(s.undo.len(), undo + 1, "solid.combine new_component");
+        // A failed command (a pick off every body): no inner step stays, and redo is kept.
+        run(&mut s, "edit.undo", json!({}));
+        let (undo, redo, doc) = (s.undo.len(), s.redo.len(), s.doc.clone());
+        assert!(redo > 0);
+        let failed = s.execute("parts.insert", &json!({"family":"socket_head_cap_screw","size":"M6","length":20,"at":[200,200,200]}));
+        assert!(failed.is_err());
+        assert_eq!((s.undo.len(), s.redo.len()), (undo, redo), "a failed insert leaves the history alone");
+        assert_eq!(s.doc, doc);
+    }
+
     #[test]
     fn a_screw_seats_on_a_translated_washer() {
         for z in [11.6, 11.2] {
@@ -1475,6 +1550,72 @@ mod tests {
             let (head, shank) = if head_up { (hi.z - 10.0, 10.0 - lo.z) } else { (10.0 - lo.z, hi.z - 10.0) };
             assert!((head - 6.0).abs() < 1e-6 && (shank - 20.0).abs() < 1e-6, "{direction:?}: {lo:?} {hi:?}");
         }
+    }
+
+    /// #12150: a fastener picked on a flat face, off any hole, seats there with its head out of
+    /// the face, whichever way the face points, also on a component that is turned over; the
+    /// reply says which way each head points.
+    #[test]
+    fn a_fastener_picked_on_a_flat_face_seats_head_out_of_it() {
+        let screw = |at: Value| json!({"family": "socket_head_cap_screw", "size": "M3", "length": 8, "at": at});
+        // (pick, the face normal's axis, the part's extent on it: the 3 mm head outside the face,
+        // the 8 mm shank inside, the head's direction)
+        let cases: [(Value, usize, (f64, f64), [f64; 3]); 3] = [
+            (json!([10, 10, 10]), 2, (2.0, 13.0), [0.0, 0.0, 1.0]),
+            (json!([10, 10, 0]), 2, (-3.0, 8.0), [0.0, 0.0, -1.0]),
+            (json!([40, 10, 5]), 0, (32.0, 43.0), [1.0, 0.0, 0.0]),
+        ];
+        for (at, axis, span, direction) in cases {
+            let mut s = Session::default();
+            run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Plate"}));
+            let r = run(&mut s, "parts.insert", screw(at.clone()));
+            assert!(r["joint"].is_number(), "{at}: {r}");
+            assert_eq!(r["directions"], json!([direction]), "{at}: {r}");
+            let (lo, hi) = bbox(&s, "SHCS M3x8");
+            let (lo, hi) = ([lo.x, lo.y, lo.z][axis], [hi.x, hi.y, hi.z][axis]);
+            assert!((lo - span.0).abs() < 1e-6 && (hi - span.1).abs() < 1e-6, "{at}: {lo} {hi}");
+        }
+        // A plate component turned over: its top face now faces down, and the head goes below it.
+        let mut s = Session::default();
+        let plate = run(&mut s, "component.create", json!({"name": "P"}))["occurrence"].clone();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10}));
+        run(&mut s, "component.activate", json!({"component": 0}));
+        run(
+            &mut s,
+            "occurrence.move",
+            json!({"occurrence": plate, "axis": [1, 0, 0], "angle": "180 deg", "origin": [0, 0, 0], "move_grounded": true}),
+        );
+        let r = run(&mut s, "parts.insert", screw(json!([10, -10, -10])));
+        assert_eq!(r["directions"], json!([[0.0, 0.0, -1.0]]), "{r}");
+        let (lo, hi) = bbox(&s, "SHCS M3x8");
+        assert!((lo.z + 13.0).abs() < 1e-6 && (hi.z + 2.0).abs() < 1e-6, "{lo:?} {hi:?}");
+    }
+
+    /// #12150: `flip` turns a seated part over (head into the hole, shank out of the face) and a
+    /// part placed at a point against `direction`; the reply reports the direction chosen.
+    #[test]
+    fn flip_turns_an_inserted_part_over() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Plate"}));
+        run(&mut s, "solid.hole", json!({"position": [20, 15, 10], "diameter": 6.4}));
+        let seat = |flip: bool| json!({"family": "socket_head_cap_screw", "size": "M6", "length": 20, "at": [23.2, 15, 10], "flip": flip});
+        let r = run(&mut s, "parts.insert", seat(false));
+        assert_eq!(r["directions"], json!([[0.0, 0.0, 1.0]]), "{r}");
+        run(&mut s, "edit.undo", json!({}));
+        let r = run(&mut s, "parts.insert", seat(true));
+        assert_eq!(r["directions"], json!([[0.0, 0.0, -1.0]]), "{r}");
+        // The 6 mm head down in the hole under the top face, the 20 mm shank standing out of it.
+        let (lo, hi) = bbox(&s, "SHCS M6x20");
+        assert!((lo.z - 4.0).abs() < 1e-6 && (hi.z - 30.0).abs() < 1e-6, "{lo:?} {hi:?}");
+        let mut s = Session::default();
+        let r = run(
+            &mut s,
+            "parts.insert",
+            json!({"family": "socket_head_cap_screw", "size": "M6", "length": 20, "point": [5, 5, 10], "direction": [0, 0, 1], "flip": true}),
+        );
+        assert_eq!(r["directions"], json!([[0.0, 0.0, -1.0]]), "{r}");
+        let (lo, hi) = bbox(&s, "SHCS M6x20");
+        assert!((lo.z - 4.0).abs() < 1e-6 && (hi.z - 30.0).abs() < 1e-6, "{lo:?} {hi:?}");
     }
 
     /// Several holes in one insert: one component placed and seated once per hole, in one undo

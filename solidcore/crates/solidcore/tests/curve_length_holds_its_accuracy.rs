@@ -18,7 +18,9 @@
 //!   (`OdeOptions::rate`), shares that add up to at most twice the length.
 #![allow(clippy::unwrap_used, clippy::indexing_slicing, clippy::panic)]
 use solidcore::curve::curve::Curve;
+use solidcore::curve::ellipse::{Ellipse, EllipseOptions};
 use solidcore::geom::extent1d::Extent1d;
+use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::math::{CPoint, NOW};
 use solidcore::Kernel;
@@ -34,6 +36,11 @@ fn arcs(arcs_deg: &[f64]) -> Curve {
 
 /// [`arcs`] with the knot `k` at `start + k * step`.
 fn arcs_on_knots(arcs_deg: &[f64], first: f64, step: f64) -> Curve {
+    Curve::from(arcs_nurb(arcs_deg, first, step))
+}
+
+/// The B-spline of [`arcs_on_knots`].
+fn arcs_nurb(arcs_deg: &[f64], first: f64, step: f64) -> BSplineCurve {
     let mut start = 0.0_f64;
     let mut cpw = vec![CPoint::new(RADIUS, 0.0, 0.0, 1.0)];
     let mut knots = vec![first; 3];
@@ -55,9 +62,7 @@ fn arcs_on_knots(arcs_deg: &[f64], first: f64, step: f64) -> Curve {
         start = end;
     }
     knots.push(first + arcs_deg.len() as f64 * step);
-    Curve::from(
-        BSplineCurve::from_data(3, cpw.len() - 1, knots.len() - 1, 2, &cpw, &knots).unwrap(),
-    )
+    BSplineCurve::from_data(3, cpw.len() - 1, knots.len() - 1, 2, &cpw, &knots).unwrap()
 }
 
 fn holds(curve: &Curve, exact: f64) {
@@ -67,8 +72,7 @@ fn holds(curve: &Curve, exact: f64) {
 /// The length at 1e-3 .. `10^-tightest`, failures propagated, within the accuracy of
 /// `exact`.
 fn holds_down_to(curve: &Curve, exact: f64, tightest: i32) {
-    let mut k = Kernel::default();
-    k.fixes.integrator_propagates_failure = true;
+    let k = Kernel::default();
     let interval = curve.natural_interval();
     for e in 3..=tightest {
         let accuracy = 10f64.powi(-e);
@@ -241,38 +245,31 @@ fn cubic(points: &[[f64; 3]; 5], w: Option<[f64; 5]>) -> Curve {
     Curve::from(BSplineCurve::from_data(3, 4, 8, 3, &cpw, &CUBIC_KNOTS).unwrap())
 }
 
-/// Lengths at 1e-3 .. 1e-12, by default and with failures propagated.
-fn lengths(curve: &Curve) -> Vec<(f64, bool, f64)> {
+/// Lengths at 1e-3 .. 1e-12 (failures propagate).
+fn lengths(curve: &Curve) -> Vec<(f64, f64)> {
+    let k = Kernel::default();
     let mut out = Vec::new();
-    for propagate in [false, true] {
-        let mut k = Kernel::default();
-        k.fixes.integrator_propagates_failure = propagate;
-        for e in 3..=12 {
-            let accuracy = 10f64.powi(-e);
-            let length = curve
-                .length(&k, &curve.natural_interval(), accuracy)
-                .unwrap_or_else(|err| panic!("at {accuracy:e}, propagate {propagate}: {err:?}"));
-            out.push((accuracy, propagate, length));
-        }
+    for e in 3..=12 {
+        let accuracy = 10f64.powi(-e);
+        let length = curve
+            .length(&k, &curve.natural_interval(), accuracy)
+            .unwrap_or_else(|err| panic!("at {accuracy:e}: {err:?}"));
+        out.push((accuracy, length));
     }
     out
 }
 
 /// A curve whose control points are all one point has length 0, exactly, at every
-/// accuracy and whether failures propagate or not. Its computed speed is rounding noise
-/// around zero, which the steps used to refuse at 1e-9 (step control 1001: 0 by
-/// default, an error with failures propagated). Weights that are powers of two keep the
+/// accuracy. Its computed speed is rounding noise around zero, which the steps used to
+/// refuse at 1e-9 (step control 1001). Weights that are powers of two keep the
 /// rational points exactly equal.
 #[test]
 fn a_point_curve_has_length_zero() {
     for m in [1e-3, 1.0, 1e6] {
         let p = [0.3 * m, -0.7 * m, 0.11 * m];
         for w in [None, Some([1.0, 0.5, 2.0, 0.25, 1.0])] {
-            for (accuracy, propagate, length) in lengths(&cubic(&[p; 5], w)) {
-                assert_eq!(
-                    length, 0.0,
-                    "|P| ~ {m:e}, weights {w:?}, at {accuracy:e} (propagate {propagate})"
-                );
+            for (accuracy, length) in lengths(&cubic(&[p; 5], w)) {
+                assert_eq!(length, 0.0, "|P| ~ {m:e}, weights {w:?}, at {accuracy:e}");
             }
         }
     }
@@ -332,10 +329,10 @@ fn a_near_point_curve_has_length_within_its_rounding() {
                         * (b - a)
                 })
                 .sum();
-            for (accuracy, propagate, length) in lengths(&curve) {
+            for (accuracy, length) in lengths(&curve) {
                 assert!(
                     (0.0..=polygon + rounding).contains(&length),
-                    "|P| ~ {m:e}, weights {w:?}, at {accuracy:e} (propagate {propagate}): \
+                    "|P| ~ {m:e}, weights {w:?}, at {accuracy:e}: \
                      length {length:e} beyond polygon {polygon:e} + rounding {rounding:e}"
                 );
             }
@@ -367,4 +364,218 @@ fn a_rationally_parametrised_parabola_holds_every_requested_accuracy() {
             holds_down_to(&rational_parabola(a, w), exact, 12);
         }
     }
+}
+
+/// The ulps a circle's length may be off by, of `size` plus its length. The angle of
+/// each piece between knots is the `atan2` of its end points about the centre, each the
+/// span's first control point about the centre plus the point about that control point in
+/// difference form: the latter a few ulps of the radius off, so the radius times the
+/// angle a few ulps of the radius, and the sum a few ulps of the length; at most six
+/// pieces here. `size` is the radius where the control points and the centre are exact
+/// and their differences too, and `|centre| + radius` where they are the kernel's own,
+/// each rounded to ulps of its coordinates (the circle stored is that far off the exact
+/// one).
+const ARC_ULPS: f64 = 64.0;
+
+/// `length` within [`ARC_ULPS`] of `size + exact` of `exact`, at every accuracy from 1e-3
+/// to 1e-10.
+fn is_radius_times_angle(curve: &Curve, interval: &Extent1d, exact: f64, size: f64, what: &str) {
+    let k = Kernel::default();
+    let bound = ARC_ULPS * f64::EPSILON * (size + exact);
+    for e in 3..=10 {
+        let accuracy = 10f64.powi(-e);
+        let length = curve
+            .length(&k, interval, accuracy)
+            .unwrap_or_else(|err| panic!("{what} at accuracy {accuracy:e}: {err:?}"));
+        assert!(
+            (length - exact).abs() <= bound,
+            "{what} at accuracy {accuracy:e}: length {length} is off {exact} by {:e} (bound {bound:e})",
+            length - exact
+        );
+    }
+}
+
+/// A circle's arc is its radius times its angle, to rounding, whatever accuracy is asked:
+/// full circles and arcs across the angle 0, small and large, with the B-spline running
+/// along or against the angle (`inside_out`), in a tilted plane away from the origin.
+/// The quadrature's estimate was only within the accuracy asked. (The B-spline is made
+/// here, its control points rounded at their distance from the origin.)
+#[test]
+fn a_circular_arc_is_its_radius_times_its_angle() {
+    let k = Kernel::default();
+    let center = Point3::new(3.0, -7.0, 11.0);
+    let x = Vec3::new(1.0, 2.0, 2.0) / 3.0;
+    let y = Vec3::new(2.0, 1.0, -2.0) / 3.0;
+    for radius in [5.0, 1e-3, 1e4] {
+        for (lo, hi) in [
+            (0.0, 360.0),
+            (30.0, 250.0),
+            (-90.0, 45.0),
+            (0.0, 1.0),
+            (10.0, 359.0),
+        ] {
+            for inside_out in [false, true] {
+                let opts = EllipseOptions {
+                    inside_out,
+                    ..EllipseOptions::default()
+                };
+                let domain = Extent1d::from_min_max(lo, hi);
+                let circle = Ellipse::new_circle(&k, center, x, y, domain, radius, &opts).unwrap();
+                let curve = Curve::from(circle);
+                let exact = radius * (hi - lo).to_radians();
+                let what = format!("r {radius}, [{lo}, {hi}] deg, inside out {inside_out}");
+                let size = center.length() + radius;
+                is_radius_times_angle(&curve, &curve.natural_interval(), exact, size, &what);
+            }
+        }
+    }
+}
+
+/// A piece of a circle is its radius times the angle of that piece: on a circle whose
+/// B-spline is six unequal arcs, one per knot span (each span's middle parameter is
+/// the middle of its arc, the arc being symmetric in its weights), every interval from
+/// a knot to a later knot or to a span's middle.
+#[test]
+fn a_piece_of_a_circle_is_its_radius_times_its_angle() {
+    let k = Kernel::default();
+    let six = [30.0, 50.0, 70.0, 40.0, 80.0, 90.0];
+    let (first, step) = (-0.37, 0.13);
+    let nurb = arcs_nurb(&six, first, step);
+    let opts = EllipseOptions {
+        nurb: Some(&nurb),
+        ..EllipseOptions::default()
+    };
+    let domain = Extent1d::from_min_max(0.0, 360.0);
+    let circle = Ellipse::new_circle(
+        &k,
+        Point3::new(0.0, 0.0, 0.0),
+        Vec3::new(1.0, 0.0, 0.0),
+        Vec3::new(0.0, 1.0, 0.0),
+        domain,
+        RADIUS,
+        &opts,
+    )
+    .unwrap();
+    let curve = Curve::from(circle);
+    // the circle keeps the B-spline given, so its knots are those of the arcs
+    assert_eq!(curve.natural_interval(), nurb.natural_interval());
+    let knot = |i: usize| first + i as f64 * step;
+    let angle_to = |i: usize| six.iter().take(i).sum::<f64>();
+    for i in 0..six.len() {
+        for j in i + 1..=six.len() {
+            let interval = Extent1d::from_min_max(knot(i), knot(j));
+            let exact = RADIUS * (angle_to(j) - angle_to(i)).to_radians();
+            let what = format!("knots {i} to {j}");
+            is_radius_times_angle(&curve, &interval, exact, 0.0, &what);
+            let middle = (knot(j - 1) + knot(j)) / 2.0;
+            let interval = Extent1d::from_min_max(knot(i), middle);
+            let exact = RADIUS * (angle_to(j - 1) + six[j - 1] / 2.0 - angle_to(i)).to_radians();
+            let what = format!("knot {i} to span {j}'s middle");
+            is_radius_times_angle(&curve, &interval, exact, 0.0, &what);
+        }
+    }
+}
+
+/// A circle of radius `radius` about `center` in the XY plane, three 120 degree arcs on
+/// the knots `-0.37 + 0.13 k`, middle weights 1/2. Its control points are on a grid of
+/// `2^-40`, so that with a centre of whole numbers below `2^10` every coordinate, and its
+/// product by the weight, is exact: the circle moved is the same B-spline, moved.
+fn grid_circle(radius: f64, center: [f64; 3]) -> (Curve, Vec<f64>) {
+    let k = Kernel::default();
+    let grid = |v: f64| (v * 2f64.powi(40)).round() / 2f64.powi(40);
+    let mut cpw = Vec::new();
+    for i in 0..7 {
+        let angle = (60.0 * f64::from(i)).to_radians();
+        // the middle points at twice the radius, weighted 1/2
+        let (r, w) = if i % 2 == 1 {
+            (2.0 * radius, 0.5)
+        } else {
+            (radius, 1.0)
+        };
+        let p = [
+            center[0] + grid(r * angle.cos()),
+            center[1] + grid(r * angle.sin()),
+            center[2],
+        ];
+        cpw.push(CPoint::new(p[0] * w, p[1] * w, p[2] * w, w));
+    }
+    let knots: Vec<f64> = [0, 0, 0, 1, 1, 2, 2, 3, 3, 3]
+        .iter()
+        .map(|&i| -0.37 + 0.13 * f64::from(i))
+        .collect();
+    let nurb = BSplineCurve::from_data(3, 6, 9, 2, &cpw, &knots).unwrap();
+    let opts = EllipseOptions {
+        nurb: Some(&nurb),
+        ..EllipseOptions::default()
+    };
+    let circle = Ellipse::new_circle(
+        &k,
+        Point3::new(center[0], center[1], center[2]),
+        Vec3::new(1.0, 0.0, 0.0),
+        Vec3::new(0.0, 1.0, 0.0),
+        Extent1d::from_min_max(0.0, 360.0),
+        radius,
+        &opts,
+    )
+    .unwrap();
+    let curve = Curve::from(circle);
+    // the circle keeps the B-spline given
+    assert_eq!(curve.natural_interval(), nurb.natural_interval());
+    let mut breaks: Vec<f64> = knots[2..8].to_vec();
+    breaks.dedup();
+    (curve, breaks)
+}
+
+/// A small circle far from the origin has the length of the same circle at the origin,
+/// to rounding of its own size: the points come in difference form from the span's first
+/// control point, not evaluated whole, whose rounding would be that of their distance
+/// from the origin (here `2^20` times the radius).
+#[test]
+fn a_small_circle_far_from_the_origin_has_the_length_it_has_at_the_origin() {
+    let radius = 2f64.powi(-10);
+    let (near, breaks) = grid_circle(radius, [0.0, 0.0, 0.0]);
+    let (far, _) = grid_circle(radius, [1000.0, -1000.0, 1000.0]);
+    let k = Kernel::default();
+    for (i, &a) in breaks.iter().enumerate() {
+        for &b in &breaks[i + 1..] {
+            for interval in [
+                Extent1d::from_min_max(a, b),
+                Extent1d::from_min_max(a, (a + b) / 2.0),
+            ] {
+                let near_length = near.length(&k, &interval, 1e-3).unwrap();
+                let what = format!("[{}, {}]", interval.min(), interval.max());
+                is_radius_times_angle(&far, &interval, near_length, radius, &what);
+            }
+        }
+    }
+}
+
+/// An ellipse that is not a circle still integrates, and holds every requested accuracy:
+/// its perimeter, by the trapezoidal rule on the periodic `sqrt(a^2 sin^2 + b^2 cos^2)`,
+/// which converges geometrically (2000 points: exact to rounding).
+#[test]
+fn an_ellipse_holds_every_requested_accuracy() {
+    let k = Kernel::default();
+    let (a, b) = (5.0_f64, 3.0_f64);
+    let ellipse = Ellipse::new(
+        &k,
+        Point3::new(3.0, -7.0, 11.0),
+        Vec3::new(1.0, 2.0, 2.0) / 3.0,
+        Vec3::new(2.0, 1.0, -2.0) / 3.0,
+        Extent1d::from_min_max(0.0, 360.0),
+        a,
+        b,
+        &EllipseOptions::default(),
+    )
+    .unwrap();
+    let n = 2000;
+    let h = 2.0 * std::f64::consts::PI / f64::from(n);
+    let exact: f64 = (0..n)
+        .map(|i| {
+            let s = f64::from(i) * h;
+            (a * a * s.sin().powi(2) + b * b * s.cos().powi(2)).sqrt()
+        })
+        .sum::<f64>()
+        * h;
+    holds(&Curve::from(ellipse), exact);
 }

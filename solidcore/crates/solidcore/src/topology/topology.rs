@@ -331,6 +331,60 @@ pub struct NotifyRecords {
     /// Whether any record may have changed without its key in `changed` (a bulk
     /// mutable access, or records given at construction).
     all_changed: bool,
+    /// The B-rep value and key scheme the store was last made exact for, if no record
+    /// has been removed other than by a reset since ([`Self::changed_since`]).
+    mark: Option<ReseedMark>,
+}
+
+/// What a [`NotifyRecords`] was last made exact for (not upstream): a default record for
+/// every live object of one B-rep value under one key scheme, and for the B-rep, and no
+/// other (`topology::brep::p3::reseed_records`). Arenas only append and empty slots for
+/// good, and the value logs each emptied slot ([`RemovalLog`]), so the objects added and
+/// removed since are those past `slots` and past `removed` in the log.
+#[derive(Debug, Clone)]
+pub(crate) struct ReseedMark {
+    /// The key scheme: the B-rep's key, its serial and the key of each kind's first index
+    /// (`topology::brep::p3`'s progress id).
+    pub(crate) scheme: Vec<u64>,
+    /// The B-rep value ([`RemovalLog`]'s tag), held so its allocation names no other.
+    pub(crate) value: Arc<()>,
+    /// The slot count of each kind then.
+    pub(crate) slots: [usize; 10],
+    /// The length of the value's removal log then.
+    pub(crate) removed: usize,
+}
+
+/// The objects removed from one B-rep value, in removal order, under a tag naming that
+/// value (not upstream). `Clone` gives an empty log under a new tag: a copy, a snapshot or
+/// a value put back is another value, whose log does not continue this one.
+#[derive(Debug, Default)]
+pub(crate) struct RemovalLog {
+    tag: ProgressTag,
+    removed: Vec<EntityRef>,
+}
+
+impl Clone for RemovalLog {
+    /// An empty log: the copy is another B-rep value.
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl RemovalLog {
+    /// Logs the removal of `e`.
+    pub(crate) fn push(&mut self, e: EntityRef) {
+        self.removed.push(e);
+    }
+
+    /// The value's tag, made on first use.
+    pub(crate) fn tag(&mut self) -> Arc<()> {
+        self.tag.get()
+    }
+
+    /// The objects removed so far, in removal order.
+    pub(crate) fn removed(&self) -> &[EntityRef] {
+        &self.removed
+    }
 }
 
 /// How far a [`NotifyRecords`] has checked and seeded the objects of one B-rep value,
@@ -398,6 +452,7 @@ impl From<BTreeMap<ObjectKey, Topology>> for NotifyRecords {
             progress: Vec::new(),
             changed: Vec::new(),
             all_changed,
+            mark: None,
         }
     }
 }
@@ -458,6 +513,7 @@ impl NotifyRecords {
     /// Removes the record of `key`.
     pub fn remove(&mut self, key: &ObjectKey) -> Option<Topology> {
         self.progress.clear();
+        self.mark = None;
         self.map.remove(key)
     }
 
@@ -465,6 +521,7 @@ impl NotifyRecords {
     pub fn retain(&mut self, keep: impl FnMut(&ObjectKey, &mut Topology) -> bool) {
         self.progress.clear();
         self.all_changed = true;
+        self.mark = None;
         self.map.retain(keep);
     }
 
@@ -473,17 +530,19 @@ impl NotifyRecords {
         self.progress.clear();
         self.changed.clear();
         self.all_changed = false;
+        self.mark = None;
         self.map.clear();
     }
 
     /// Makes the store hold a default record for exactly the keys `keys` (ascending,
     /// without repeats) and no other, as clearing it and adding a default record for
-    /// each key would, and forgets the seeding progress, as [`Self::retain`] does. Only
+    /// each key would, and forgets which objects were seeded (which keys passed the
+    /// reserved-key check does not depend on the records, so that is kept). Only
     /// the records handed out mutably since the last reset (or all, after a bulk
     /// access) are reset; the others are default already. The key sets are matched in
     /// one ascending walk of both.
     pub(crate) fn reset_to_keys(&mut self, keys: &[ObjectKey]) {
-        self.progress.clear();
+        self.forget_seeding();
         if self.all_changed {
             for record in self.map.values_mut() {
                 *record = Topology::default();
@@ -513,6 +572,53 @@ impl NotifyRecords {
         }
         for key in new {
             self.map.insert(key, Topology::default());
+        }
+    }
+
+    /// The mark the store was last made exact under ([`Self::made_exact`]), if `same`
+    /// accepts it, and the keys of the records handed out mutably since: what a reset to
+    /// that mark's B-rep must look at besides the objects added and removed since. Both
+    /// are taken from the store. `None` when there is no such mark or a record may have
+    /// changed in bulk since.
+    pub(crate) fn changed_since(
+        &mut self,
+        same: impl FnOnce(&ReseedMark) -> bool,
+    ) -> Option<(ReseedMark, Vec<ObjectKey>)> {
+        if self.all_changed {
+            return None;
+        }
+        let mark = self.mark.take_if(|mark| same(mark))?;
+        Some((mark, std::mem::take(&mut self.changed)))
+    }
+
+    /// Gives `key` a default record when `live`, else none: a step of a reset after
+    /// [`Self::changed_since`], so nothing is noted and the mark is kept.
+    pub(crate) fn settle(&mut self, key: ObjectKey, live: bool) {
+        if live {
+            self.map.insert(key, Topology::default());
+        } else {
+            self.map.remove(&key);
+        }
+    }
+
+    /// Records that the store is now exact under `mark`: a default record for every live
+    /// object of the B-rep value `instance` under the key scheme `mark.scheme`, and for the
+    /// B-rep, and no other. So that value's objects below `mark.slots` are seeded under
+    /// that progress id, and those of any other id or value are not.
+    pub(crate) fn made_exact(&mut self, mark: ReseedMark, instance: Arc<()>) {
+        self.changed.clear();
+        self.all_changed = false;
+        self.forget_seeding();
+        if let Some((_, progress)) = self.progress_for(mark.scheme.clone(), instance) {
+            progress.seeded_to = mark.slots;
+        }
+        self.mark = Some(mark);
+    }
+
+    /// Forgets which objects were seeded, keeping which keys passed the check.
+    fn forget_seeding(&mut self) {
+        for progress in &mut self.progress {
+            progress.seeded_to = [0; 10];
         }
     }
 

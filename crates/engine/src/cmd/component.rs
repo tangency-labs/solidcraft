@@ -11,7 +11,7 @@ use solidcore_record::Vec3;
 use solidcraft_doc::{Feature, FeatureKind, Mat, Occurrence};
 
 use super::CommandSpec;
-use crate::params::{bad, bool_, str_, string_list, vec3};
+use crate::params::{bad, bool_, name_or_id_values, str_, string_list, vec3};
 use crate::schema::component::{
     ActivateParams, ActivateResult, CapturePositionParams, CapturePositionResult, ChildEntry, CompactPlacement, ComponentNode, CopyParams,
     CopyResult, CreateParams, CreateResult, DeleteParams, DeleteResult, DragParams, DragResult, EditInPlaceParams, EditInPlaceResult,
@@ -195,7 +195,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("move")
         .contract(&MOVE_SKETCHES_CONTRACT)
         .output(output_schema_for::<MoveSketchesResult>)
-        .params("sketches: [ids or names], component; the sketches keep their own coordinates (component.move_features keeps them where they are in the world), except that a sketch on an exactly attached face stays where it is on the face"),
+        .params("sketches: [ids or names] (a number is an id; a string is an exact name, then an id), component; the sketches keep their own coordinates (component.move_features keeps them where they are in the world), except that a sketch on an exactly attached face stays where it is on the face"),
     CommandSpec::new(
         "component.move_sketches.to_parts",
         "Move Sketches to Their Parts",
@@ -279,14 +279,16 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("capture")
         .contract(&CAPTURE_POSITION_CONTRACT)
         .output(output_schema_for::<CapturePositionResult>)
-        .params("keeps pending occurrence moves"),
+        .params("keeps pending occurrence moves and saves every moving joint's values → captured, joints"),
     CommandSpec::new("component.revert_position", "Revert Position", crate::checked!("component.revert_position", revert))
         .at("SOLID", "POSITION")
         .icon("revert")
-        .noundo()
         .contract(&REVERT_POSITION_CONTRACT)
         .output(output_schema_for::<RevertPositionResult>)
-        .params("occurrences?: [ids] (default all); drops selected pending occurrence moves"),
+        .params(
+            "occurrences?: [ids] (default all); drops selected pending occurrence moves; with no occurrences the joints also go back to \
+             the values Capture Position saved (clamped to limits) → reverted, joints",
+        ),
 ];
 
 const ALIGN_CONTRACT: TypedContract<OccurrenceAlignParams> = TypedContract::new();
@@ -653,12 +655,14 @@ pub(crate) fn transfer_constructor_result(s: &mut Session, p: &Value) -> Result<
 fn move_sketches(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.move_sketches";
     let to = component(s, p, "component", cmd)?;
-    let keys = string_list(cmd, p, "sketches")?;
+    // Named or numbered: an exact name wins over an id it looks like, as in the timeline (#9748).
+    let keys = name_or_id_values(cmd, p, "sketches")?;
     let mut ids = Vec::new();
-    for k in &keys {
-        match s.doc.find_feature(k) {
+    for k in keys {
+        let id = crate::cmd::edit::feature_id(s, Some(k), cmd)?;
+        match s.doc.feature(id) {
             Some(f) if matches!(f.kind, FeatureKind::Sketch { .. }) => ids.push(f.id),
-            _ => return Err(bad(cmd, format!("no sketch `{k}`"))),
+            _ => return Err(bad(cmd, format!("no sketch `{}`", k.as_str().map_or_else(|| k.to_string(), str::to_owned)))),
         }
     }
     if ids.is_empty() {
@@ -1003,8 +1007,9 @@ fn capture(s: &mut Session, _p: &Value) -> Result<Value> {
             o.transform = m;
         }
     }
+    let joints = super::joints::capture_values(s);
     s.revision += 1;
-    reply(CapturePositionResult { captured: n, param_warnings: Vec::new() })
+    reply(CapturePositionResult { captured: n, joints, param_warnings: Vec::new() })
 }
 
 fn revert(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1025,8 +1030,11 @@ fn revert(s: &mut Session, p: &Value) -> Result<Value> {
         s.pending_moves.clear();
     }
     let n = before - s.pending_moves.len();
+    // Every occurrence going back takes the joints back too; a revert of some occurrences
+    // leaves the joints alone.
+    let joints = if p.get("occurrences").is_none() { super::joints::revert_values(s) } else { 0 };
     s.revision += 1;
-    reply(RevertPositionResult { reverted: n, param_warnings: Vec::new() })
+    reply(RevertPositionResult { reverted: n, joints, param_warnings: Vec::new() })
 }
 
 /// The active component's frame from world coordinates (for new features' geometry).

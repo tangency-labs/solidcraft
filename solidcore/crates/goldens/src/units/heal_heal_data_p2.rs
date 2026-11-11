@@ -1199,7 +1199,7 @@ fn classify(e: SolidError) -> Fail {
     }
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Fail::NullDeref,
-        SolidError::Upstream { code, .. } => Fail::Status(code),
+        err if solidcore::error::upstream_status(&err).is_some() => Fail::Status(solidcore::error::upstream_status(&err).unwrap_or(-1)),
         e => Fail::Other(e.to_string()),
     }
 }

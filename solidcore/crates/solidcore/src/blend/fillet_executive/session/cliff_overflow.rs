@@ -94,19 +94,18 @@ impl FilletSession<'_> {
     /// The fork's `sm_HoldsItsLaw`: whether a variable round on planar faces holds its
     /// radius law between the filleted edge's ends.
     ///
-    /// A rolling ball of radius r between two planes meeting at the interior angle a stands
-    /// off the edge by `r (1 / sin(a/2) - 1)` where its section crosses the wedge's
-    /// bisector. That point must lie on the fillet surface, at seven points along the edge,
-    /// to twenty times the solver's tolerance and a ten-thousandth of the radius; of the two
-    /// angles the planes make, and the bisector either way, the one that fits. Rounds of
-    /// other solvers, with other than a circular section, on faces that are not both
-    /// planes, with other than one fillet geometry, or along an edge that is not straight,
-    /// pass.
+    /// The round's point on the touch circle of the ball at each of seven points along the
+    /// edge, in the wedge's bisector plane, must lie on the fillet surface, to twenty times
+    /// the solver's tolerance and a ten-thousandth of the radius; of the two angles the
+    /// planes make, and the bisector either way, the one that fits. Rounds of other solvers,
+    /// with other than a circular section, on faces that are not both planes, with other
+    /// than one fillet geometry, or along an edge that is not straight, pass.
     ///
-    /// With `fixes.fillet_gn_section_generator` (the fork's tangency-labs/smlib@8bedf89 =
-    /// d01d7b0's 6007a3d, WR-685) the point is on the round's touch circle, not the great
-    /// circle: the ball's centre `r / sin(a/2)` off the edge on the bisector, the circle
-    /// square to the centres' line, its centre moved along that line by `-r dr/ds` (`s` the
+    /// The point is on the round's touch circle, not the great circle (the fork's
+    /// tangency-labs/smlib@8bedf89 = d01d7b0's 6007a3d, WR-685; its first `sm_HoldsItsLaw`
+    /// took the great circle's point `r (1 / sin(a/2) - 1)` off the edge): the ball's
+    /// centre `r / sin(a/2)` off the edge on the bisector, the circle square to the
+    /// centres' line, its centre moved along that line by `-r dr/ds` (`s` the
     /// centres' arc length) and its radius `r sqrt(1 - (dr/ds)^2)`, its point in the
     /// bisector plane on the edge's side; the law's value and slope are read with `SER`.
     pub(super) fn holds_its_law(&self, k: &Kernel, solver: FilletObject) -> Result<bool> {
@@ -160,78 +159,22 @@ impl FilletSession<'_> {
         let mut law = vr.law.clone();
         // the fork's tangency-labs/smlib@8bedf89 (= d01d7b0's 6007a3d; WR-685): the round
         // touches each ball along its touch circle, not its great circle
-        let touch_circle = k.fixes.fillet_gn_section_generator;
         let mut holds = true;
         let mut i = 1;
         while i < 8 && holds {
             let t = interval.evaluate(f64::from(i) / 8.0);
             i += 1;
-            if touch_circle {
-                let edge_pv = curve.evaluate(k, t, 1, true, false)?;
-                let [pnt, edge_d, ..] = *edge_pv.as_slice() else {
-                    return Err(SolidError::sm_err(OP));
-                };
-                let [r, dr, _] = law.evaluate(t, &vr.law_interval, vr.law_orientation)?;
-                let radius = r.abs();
-                let slope = if r < 0.0 { -dr } else { dr }; // d|r|/dT
-                                                            // The ball's centre on the wedge's bisector, r / sin(a/2) off the edge, and
-                                                            // the touch circle's point on the bisector plane toward the edge. The planes'
-                                                            // normals are both outward (or inward), the bisector along their sum and the
-                                                            // angle pi less theirs, or one of each, the bisector along their difference.
-                let mut fits = false;
-                let mut c = 0;
-                while c < 4 && !fits {
-                    let bisector = if c < 2 { n0 + n1 } else { n0 - n1 };
-                    let angle = if c < 2 { PI - phi } else { phi };
-                    let sign = if c % 2 == 1 { -1.0 } else { 1.0 };
-                    c += 1;
-                    let len = bisector.length();
-                    if len <= EFF_ZERO_SQRT || angle <= EFF_ZERO_SQRT {
-                        continue;
-                    }
-                    let out = bisector * (sign / len); // edge to centre
-                    let off = 1.0 / (angle / 2.0).sin();
-                    let centre = pnt + out * (radius * off);
-                    let along = edge_d + out * (slope * off); // dC/dT
-                    let speed = along.length();
-                    if speed <= EFF_ZERO {
-                        continue;
-                    }
-                    let along = along / speed;
-                    let rate = slope / speed; // dr/ds
-                    if rate.abs() >= 1.0 {
-                        continue;
-                    }
-                    let to_edge = -out - along * (-out).dot(along);
-                    let to_edge_len = to_edge.length();
-                    if to_edge_len <= EFF_ZERO {
-                        continue;
-                    }
-                    let middle = centre
-                        + along * (-radius * rate)
-                        + to_edge * (radius * (1.0 - rate * rate).sqrt() / to_edge_len);
-                    let dropped = fillet.drop_point::<NoObject>(
-                        k,
-                        middle,
-                        &domain,
-                        &DropPointOptions::default(),
-                    )?;
-                    fits = dropped.success && dropped.gap <= tol + 1.0e-4 * radius;
-                }
-                holds = fits;
-                continue;
-            }
-            let pnt = curve.evaluate_point(k, t)?;
-            // SmVariableRadiusFS::GetFilletRadius: SER inside a `double` function, but a law
-            // continued past its curve to an unusable radius stays refused (a corner may
-            // have narrowed the law to its setback, putting this station past its curve)
-            let radius = law
-                .fillet_radius(t, &vr.law_interval, vr.law_orientation)?
-                .abs();
-            // The section's middle: along the wedge's bisector, r (1 / sin(a/2) - 1) off the
-            // edge. The planes' normals are both outward (or inward), the bisector along
-            // their sum and the angle pi less theirs, or one of each, the bisector along
-            // their difference.
+            let edge_pv = curve.evaluate(k, t, 1, true, false)?;
+            let [pnt, edge_d, ..] = *edge_pv.as_slice() else {
+                return Err(SolidError::sm_err(OP));
+            };
+            let [r, dr, _] = law.evaluate(t, &vr.law_interval, vr.law_orientation)?;
+            let radius = r.abs();
+            let slope = if r < 0.0 { -dr } else { dr }; // d|r|/dT
+                                                        // The ball's centre on the wedge's bisector, r / sin(a/2) off the edge, and the
+                                                        // touch circle's point on the bisector plane toward the edge. The planes' normals
+                                                        // are both outward (or inward), the bisector along their sum and the angle pi
+                                                        // less theirs, or one of each, the bisector along their difference.
             let mut fits = false;
             let mut c = 0;
             while c < 4 && !fits {
@@ -243,16 +186,33 @@ impl FilletSession<'_> {
                 if len <= EFF_ZERO_SQRT || angle <= EFF_ZERO_SQRT {
                     continue;
                 }
-                let stand_off = radius * (1.0 / (angle / 2.0).sin() - 1.0);
-                let middle = pnt + bisector * (sign * stand_off / len);
+                let out = bisector * (sign / len); // edge to centre
+                let off = 1.0 / (angle / 2.0).sin();
+                let centre = pnt + out * (radius * off);
+                let along = edge_d + out * (slope * off); // dC/dT
+                let speed = along.length();
+                if speed <= EFF_ZERO {
+                    continue;
+                }
+                let along = along / speed;
+                let rate = slope / speed; // dr/ds
+                if rate.abs() >= 1.0 {
+                    continue;
+                }
+                let to_edge = -out - along * (-out).dot(along);
+                let to_edge_len = to_edge.length();
+                if to_edge_len <= EFF_ZERO {
+                    continue;
+                }
+                let middle = centre
+                    + along * (-radius * rate)
+                    + to_edge * (radius * (1.0 - rate * rate).sqrt() / to_edge_len);
                 let dropped = fillet.drop_point::<NoObject>(
                     k,
                     middle,
                     &domain,
                     &DropPointOptions::default(),
                 )?;
-                // the solver's tolerance, and its circular sections' relative accuracy (a
-                // non-rational cubic across the round, within about 2e-5 of the radius)
                 fits = dropped.success && dropped.gap <= tol + 1.0e-4 * radius;
             }
             holds = fits;

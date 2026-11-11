@@ -130,6 +130,23 @@ fn view_dxf_cylinders_have_side_silhouettes_and_perspective_is_supported() {
 }
 
 #[test]
+fn view_dxf_camera_without_fov_is_orthographic() {
+    // docs/mcp.md: `{target, yaw, pitch, distance, fov?}`; no `fov` is an orthographic view (#13112).
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":20,"width":10,"height":5}));
+    let v = run(&mut s, CMD, json!({"camera":{"target":[0,0,0],"yaw":0,"pitch":0,"distance":100}}));
+    assert_eq!(v["projection"], "orthographic", "{v}");
+    assert!(v["visible"].as_u64().unwrap() > 0, "{v}");
+    // The input schema takes it too.
+    let mut strict = Session { param_check: crate::schema::ParamCheck::Strict, ..Session::default() };
+    run(&mut strict, "solid.box", json!({"length":20,"width":10,"height":5}));
+    assert_eq!(run(&mut strict, CMD, json!({"camera":{"target":[0,0,0],"yaw":0,"pitch":0,"distance":100}}))["projection"], "orthographic");
+    // `distance` stays required.
+    let err = s.execute(CMD, &json!({"camera":{"target":[0,0,0],"yaw":0,"pitch":0}})).unwrap_err().to_string();
+    assert!(err.contains("invalid camera"), "{err}");
+}
+
+#[test]
 fn view_dxf_rejects_invalid_options_and_near_eye_geometry_without_panicking() {
     let mut s = sample();
     for extra in [json!({"hidden":"all"}), json!({"hidden":true}), json!({"tolerance":0}), json!({"tolerance":"x"}), json!({"path":false})] {
@@ -159,7 +176,7 @@ fn view_dxf_keeps_every_occurrence_while_sharing_geometry() {
     let result = export(&mut s, camera(StandardView::Top), "dashed");
     assert_eq!(result["stats"]["bodies"], 3);
     assert_eq!(result["stats"]["shared_meshes"], 1);
-    assert_eq!(result["stats"]["worker_limit"], meshes::WORKERS);
+    assert_eq!(result["stats"]["worker_limit"], mesh_lines::WORKERS);
     assert!(result["hidden"].as_u64().unwrap() > 0);
     let lines = solidcraft_io::read_dxf(result["dxf"].as_str().unwrap()).unwrap();
     let mut centers = std::collections::BTreeSet::new();
@@ -234,4 +251,37 @@ fn view_dxf_hides_finished_sketches_behind_bodies_but_draws_the_active_sketch_on
     let dashed = export(&mut s, camera(StandardView::Top), "dashed");
     assert_eq!(dashed["sketch"], 2);
     assert!((length(&dashed) - 80.).abs() < 1e-3, "{}", length(&dashed));
+}
+
+#[test]
+fn view_dxf_zero_origin_puts_the_model_origin_at_the_drawing_zero() {
+    let mut s = sample();
+    let bounds = |v: &Value| {
+        let (mut lo, mut hi) = (Vec2::new(f64::MAX, f64::MAX), Vec2::new(f64::MIN, f64::MIN));
+        for g in solidcraft_io::read_dxf(v["dxf"].as_str().unwrap()).unwrap() {
+            let solidcraft_io::Geom2::Line(a, b) = g else { panic!("{g:?}") };
+            for p in [a, b] {
+                (lo, hi) = (Vec2::new(lo.x.min(p.x), lo.y.min(p.y)), Vec2::new(hi.x.max(p.x), hi.y.max(p.y)));
+            }
+        }
+        (lo, hi)
+    };
+    let near = |a: Vec2, x: f64, y: f64| (a.x - x).abs() < 1e-3 && (a.y - y).abs() < 1e-3;
+    // By default the drawing is centred on the camera target (20, 15), whatever the model origin.
+    let (lo, hi) = bounds(&export(&mut s, camera(StandardView::Top), "omit"));
+    assert!(near(lo, -20., -15.) && near(hi, 20., 15.), "{lo:?} {hi:?}");
+    // `zero: origin` is the same drawing with the model origin, the plate's corner, at 0,0.
+    for zero in [None, Some("target")] {
+        let mut p = json!({"camera": camera(StandardView::Top)});
+        if let Some(z) = zero {
+            p["zero"] = json!(z);
+        }
+        let (lo, _) = bounds(&run(&mut s, CMD, p));
+        assert!(near(lo, -20., -15.), "{zero:?}");
+    }
+    let v = run(&mut s, CMD, json!({"camera": camera(StandardView::Top), "zero": "origin"}));
+    let (lo, hi) = bounds(&v);
+    assert!(near(lo, 0., 0.) && near(hi, 40., 30.), "{lo:?} {hi:?}");
+    let err = s.execute(CMD, &json!({"camera": camera(StandardView::Top), "zero": "corner"})).unwrap_err().to_string();
+    assert!(err.contains("zero must be target or origin"), "{err}");
 }
