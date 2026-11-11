@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>End Cap Inward</title>
+  <path d="M12.14 36.00L26.00 44.00L26.00 62.00L12.14 54.00Z" fill="#b8c3cf"/>
+  <path d="M39.86 36.00L26.00 44.00L26.00 62.00L39.86 54.00Z" fill="#8e9faf"/>
+  <path d="M26.00 28.00L39.86 36.00L26.00 44.00L12.14 36.00ZM26.00 30.50L35.53 36.00L26.00 41.50L16.47 36.00Z" fill="#e2e8ef" fill-rule="evenodd"/>
+  <path d="M26.00 30.50L35.53 36.00L26.00 41.50L16.47 36.00Z" fill="#34465b" opacity="0.55"/>
+  <path d="M26.00 28.00L39.86 36.00L39.86 54.00L26.00 62.00L12.14 54.00L12.14 36.00Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M12.14 36.00L26.00 44.00L39.86 36.00M26.00 44.00L26.00 62.00" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M12.14 26.00L26.00 18.00L39.86 26.00M12.14 26.00L12.14 36.00M39.86 26.00L39.86 36.00M12.14 26.00L26.00 34.00L39.86 26.00M26.00 34.00L26.00 44.00" fill="none" stroke="#236ead" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="3 4.5"/>
+  <path d="M17.68 26.00L26.00 30.80L26.00 40.80L17.68 36.00Z" fill="#328bd3"/>
+  <path d="M34.32 26.00L26.00 30.80L26.00 40.80L34.32 36.00Z" fill="#236ead"/>
+  <path d="M26.00 21.20L34.32 26.00L26.00 30.80L17.68 26.00Z" fill="#b9ddf8"/>
+  <path d="M26.00 21.20L34.32 26.00L34.32 36.00L26.00 40.80L17.68 36.00L17.68 26.00Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M17.68 26.00L26.00 30.80L34.32 26.00M26.00 30.80L26.00 40.80" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M53.0 9.0L53.0 28.0" fill="none" stroke="#236ead" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M47.5 26.0L53.0 33.0L58.5 26.0Z" fill="#236ead" stroke="#236ead" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

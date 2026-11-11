@@ -682,7 +682,9 @@ impl AppPanelRuntime {
                 if (self.runtime.environment() != &before || self.runtime.layout().inspect().revision != revision)
                     && let Some(host) = &mut self.host
                 {
-                    host.invalidate_context();
+                    // Presentation metadata can revise an unrelated panel.
+                    // Scope and focused-owner checks decide input ownership.
+                    host.invalidate_geometry();
                     host.reconcile_scope(&self.runtime);
                 }
             }
@@ -963,7 +965,7 @@ pub(crate) fn sync_production_setting(app: &mut crate::SolveApp) -> PanelResult<
 pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
     // Switching placement systems waits until Preferences Apply/Cancel settles
     // its snapshot. Content state itself always remains owned by the app.
-    if !app.prefs_window.open
+    if !app.prefs_window.shell.open
         && let Err(reason) = sync_production_setting(app)
     {
         app.set_status(solidcraft_ui_text::tr(super::workspace::rule_key(reason.rule)).to_owned(), true);

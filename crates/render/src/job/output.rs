@@ -1,7 +1,7 @@
 //! Bounded presentation of an owned scene-linear CPU pass. Transport and film remain separate.
 //! The caller supplies the cumulative work debit; every mutating stage checks it first.
 use super::denoise::{DenoiseTask, Guide};
-use super::{CancelToken, ErrorCode, JobError, Phase, Progress, Result, TaskPoll};
+use super::{CancelToken, DenoiseDiagnostics, DenoiseGuideClass, DenoiseSettings, ErrorCode, JobError, Phase, Progress, Result, TaskPoll};
 use super::{bloom::BloomTask, encoding::PngEncoding, linear_exr::ExrTask, photographic::PhotographicTask, presentation::Presentation};
 use crate::film::adaptive::CountsPlane;
 
@@ -9,23 +9,32 @@ fn invalid(message: &str) -> JobError {
     JobError::new(ErrorCode::InvalidRequest, message)
 }
 
-fn coverage_alpha(coverage: f32, samples: u16) -> Result<u8> {
-    if samples == 0 || !coverage.is_finite() || !(0.0..=1.0).contains(&coverage) {
+fn coverage_alpha(coverage: f32, samples: u32) -> Result<u8> {
+    if samples == 0 || samples > super::MAX_SAMPLES_PER_PIXEL || !coverage.is_finite() || !(0.0..=1.0).contains(&coverage) {
         return Err(invalid("invalid CPU display coverage count"));
     }
-    // Every CPU pass has one known denominator. Even at u16::MAX, float32
+    // Every CPU pass has one known denominator. At the admitted 65536 samples, float32
     // quantisation is far below half a hit, so the original count is unique.
     // Keep the raw FLOAT32 plane unchanged and round only the final byte from
     // the integer ratio: 5/6 rounds to 213; float32 alpha alone gives 212.
     let covered = (f64::from(coverage) * f64::from(samples)).round() as u32;
-    if covered > u32::from(samples) || (f64::from(covered) / f64::from(samples)) as f32 != coverage {
+    if covered > samples || (f64::from(covered) / f64::from(samples)) as f32 != coverage {
         return Err(invalid("CPU display coverage disagrees with its sample count"));
     }
-    let denominator = u32::from(samples);
+    let denominator = samples;
     u8::try_from((covered * 510 + denominator) / (denominator * 2)).map_err(|_| invalid("CPU display alpha exceeds one byte"))
 }
 
+struct Resolve {
+    source: Vec<[f32; 4]>,
+    pixels: Vec<[f32; 4]>,
+    raw: bool,
+}
+
 enum Stage {
+    Diagnostics(usize),
+    MaskPng,
+    Resolve(Resolve),
     Exr(ExrTask),
     Denoise(DenoiseTask),
     Bloom(BloomTask),
@@ -38,6 +47,16 @@ enum Stage {
 pub(crate) struct OutputTask {
     width: u32,
     height: u32,
+    trace_width: u32,
+    trace_height: u32,
+    supersampling: u32,
+    denoise_settings: DenoiseSettings,
+    retain_exr: bool,
+    original: Option<Vec<[f32; 4]>>,
+    resolved_alpha: Vec<u8>,
+    diagnostics: Option<DenoiseDiagnostics>,
+    mask_rgba: Vec<u8>,
+    mask_png: Option<Vec<u8>>,
     encoded_limit: u64,
     presentation: Presentation,
     cancel: CancelToken,
@@ -48,12 +67,12 @@ pub(crate) struct OutputTask {
     rgba: Vec<u8>,
     preserve_display: bool,
     denoise: bool,
-    coverage_samples: u16,
+    coverage_samples: u32,
     exr: Option<Vec<u8>>,
 }
 impl OutputTask {
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(
+    pub(crate) fn new_with_quality(
         width: u32,
         height: u32,
         encoded_limit: u64,
@@ -63,26 +82,41 @@ impl OutputTask {
         preserve_display: bool,
         retain_exr: bool,
         denoise: bool,
-        coverage_samples: u16,
+        denoise_settings: DenoiseSettings,
+        supersampling: u32,
+        diagnostics: bool,
+        coverage_samples: u32,
         cancel: CancelToken,
         charge: &mut impl FnMut(u64) -> Result<()>,
     ) -> Result<Self> {
         presentation.validate()?;
         cancel.check()?;
-        if denoise && preserve_display {
+        denoise_settings.validate()?;
+        if (denoise || supersampling != 1) && preserve_display {
             return Err(invalid("CPU denoising cannot preserve an unfiltered display buffer"));
         }
         if coverage_samples == 0 {
             return Err(invalid("CPU output requires a complete coverage sample count"));
         }
-        let count = u64::from(width) * u64::from(height);
         super::linear_exr::encoded_limit(width, height)?;
+        let (trace_width, trace_height) = super::supersampled_dimensions(width, height, supersampling)?;
+        let count = u64::from(trace_width) * u64::from(trace_height);
         if linear.len() as u64 != count || (preserve_display && rgba.len() as u64 != count * 4) || (!preserve_display && !rgba.is_empty()) {
             return Err(invalid("CPU output storage does not match its complete pass"));
         }
         let mut task = Self {
             width,
             height,
+            trace_width,
+            trace_height,
+            supersampling,
+            denoise_settings,
+            retain_exr,
+            original: None,
+            resolved_alpha: Vec::new(),
+            diagnostics: diagnostics.then(|| DenoiseDiagnostics::new(trace_width, trace_height)),
+            mask_rgba: Vec::new(),
+            mask_png: None,
             encoded_limit,
             presentation,
             cancel,
@@ -96,13 +130,37 @@ impl OutputTask {
             coverage_samples,
             exr: None,
         };
-        if retain_exr {
-            charge(u64::from(height))?; // bounded offset-table construction
-            task.stage = Some(Stage::Exr(ExrTask::new_cpu(width, height, linear, task.cancel.clone())?));
+        if diagnostics {
+            task.linear = Some(linear);
+            task.stage = Some(Stage::Diagnostics(0));
         } else {
-            task.prepare_display(linear, charge)?;
+            task.prepare_raw(linear, charge)?;
         }
         Ok(task)
+    }
+    pub(crate) fn denoise_diagnostics(&self) -> Option<DenoiseDiagnostics> {
+        self.diagnostics
+    }
+    pub(crate) fn take_denoise_mask(&mut self) -> Option<Vec<u8>> {
+        self.mask_png.take()
+    }
+
+    fn prepare_raw(&mut self, linear: Vec<[f32; 4]>, charge: &mut impl FnMut(u64) -> Result<()>) -> Result<()> {
+        if self.retain_exr {
+            if self.supersampling == 2 {
+                self.stage = Some(Stage::Resolve(Resolve { source: linear, pixels: Vec::new(), raw: true }));
+            } else {
+                self.start_exr(linear, charge)?;
+            }
+        } else {
+            self.prepare_display(linear, charge)?;
+        }
+        Ok(())
+    }
+    fn start_exr(&mut self, linear: Vec<[f32; 4]>, charge: &mut impl FnMut(u64) -> Result<()>) -> Result<()> {
+        charge(u64::from(self.height))?;
+        self.stage = Some(Stage::Exr(ExrTask::new_cpu(self.width, self.height, linear, self.cancel.clone())?));
+        Ok(())
     }
     fn pending(&self) -> TaskPoll {
         TaskPoll::Pending(Progress { phase: Phase::Encoding, done: 0, total: u64::from(self.width) * u64::from(self.height) })
@@ -123,7 +181,20 @@ impl OutputTask {
     fn prepare_display(&mut self, linear: Vec<[f32; 4]>, charge: &mut impl FnMut(u64) -> Result<()>) -> Result<()> {
         if self.denoise {
             charge(1)?; // one fallible, prepaid colour scratch reservation
-            self.stage = Some(Stage::Denoise(DenoiseTask::new(self.width, self.height, linear)?));
+            let task = if self.denoise_settings.is_default() {
+                DenoiseTask::new(self.trace_width, self.trace_height, linear)?
+            } else {
+                DenoiseTask::new_with_settings(self.trace_width, self.trace_height, linear, self.denoise_settings)?
+            };
+            self.stage = Some(Stage::Denoise(task));
+            Ok(())
+        } else {
+            self.prepare_resolve(linear, charge)
+        }
+    }
+    fn prepare_resolve(&mut self, linear: Vec<[f32; 4]>, charge: &mut impl FnMut(u64) -> Result<()>) -> Result<()> {
+        if self.supersampling == 2 {
+            self.stage = Some(Stage::Resolve(Resolve { source: linear, pixels: Vec::new(), raw: false }));
             Ok(())
         } else {
             self.prepare_finishing(linear, charge)
@@ -150,15 +221,106 @@ impl OutputTask {
         counts: Option<&CountsPlane>,
         charge: &mut impl FnMut(u64) -> Result<()>,
     ) -> Result<TaskPoll> {
+        self.step_with_diagnostics(guides, None, counts, charge)
+    }
+    pub(crate) fn step_with_diagnostics(
+        &mut self,
+        guides: Option<&[Guide]>,
+        classes: Option<&[DenoiseGuideClass]>,
+        counts: Option<&CountsPlane>,
+        charge: &mut impl FnMut(u64) -> Result<()>,
+    ) -> Result<TaskPoll> {
         self.cancel.check()?;
         let stage = self.stage.take().ok_or_else(|| invalid("CPU output stage disappeared"))?;
         match stage {
+            Stage::Diagnostics(at) => {
+                let count = self.width as usize * self.height as usize;
+                let end = at.saturating_add(256).min(count);
+                charge(((end - at) as u64) * u64::from(self.supersampling).pow(2))?;
+                reserve_exact(&mut self.mask_rgba, count * 4)?;
+                let classes = classes.ok_or_else(|| invalid("CPU diagnostic guide classes disappeared"))?;
+                let linear = self.linear.as_deref().ok_or_else(|| invalid("CPU diagnostic radiance disappeared"))?;
+                let report = self.diagnostics.as_mut().ok_or_else(|| invalid("CPU diagnostic report disappeared"))?;
+                for pixel in at..end {
+                    let (indices, samples) = super::quality::supersample_indices(self.width, self.supersampling, pixel)?;
+                    let mut resolved = [DenoiseGuideClass::Unavailable; 4];
+                    for (slot, index) in resolved.iter_mut().zip(&indices[..samples]) {
+                        let mut class = *classes.get(*index).ok_or_else(|| invalid("CPU diagnostic guide index outside grid"))?;
+                        let alpha = linear.get(*index).ok_or_else(|| invalid("CPU diagnostic coverage outside grid"))?[3];
+                        if class.eligible() && alpha < 0.999 {
+                            class = DenoiseGuideClass::PartialCoverage;
+                        }
+                        report.record(class);
+                        *slot = class;
+                    }
+                    let class = super::resolve_denoise_class(resolved[..samples].iter().copied());
+                    self.mask_rgba.extend_from_slice(&class.color());
+                }
+                if end == count {
+                    self.png = Some(PngEncoding::new(self.width, self.height, self.encoded_limit, self.cancel.clone())?);
+                    self.stage = Some(Stage::MaskPng);
+                } else {
+                    self.stage = Some(Stage::Diagnostics(end));
+                }
+            }
+            Stage::MaskPng => {
+                let task = self.png.as_mut().ok_or_else(|| invalid("CPU diagnostic PNG encoder disappeared"))?;
+                charge(if task.row() < self.height as usize { u64::from(self.width) } else { 1 })?;
+                if let Some(png) = task.step(&self.mask_rgba)? {
+                    charge(png.len() as u64)?;
+                    self.mask_png = Some(png);
+                    self.png = None;
+                    self.mask_rgba = Vec::new();
+                    let linear = self.linear.take().ok_or_else(|| invalid("CPU diagnostic raw pass disappeared"))?;
+                    self.prepare_raw(linear, charge)?;
+                } else {
+                    self.stage = Some(Stage::MaskPng);
+                }
+            }
+            Stage::Resolve(mut task) => {
+                let count = self.width as usize * self.height as usize;
+                let at = task.pixels.len();
+                let end = at.saturating_add(256).min(count);
+                charge(((end - at) * 4) as u64)?;
+                reserve_exact(&mut task.pixels, count)?;
+                if !task.raw && self.presentation.transparent_background {
+                    reserve_exact(&mut self.resolved_alpha, count)?;
+                }
+                for pixel in at..end {
+                    task.pixels.push(super::quality::resolve_pixel(self.width, self.supersampling, &task.source, pixel)?);
+                    if !task.raw && self.presentation.transparent_background {
+                        self.resolved_alpha.push(resolved_coverage_alpha(
+                            self.width,
+                            self.supersampling,
+                            pixel,
+                            &task.source,
+                            counts,
+                            self.coverage_samples,
+                        )?);
+                    }
+                }
+                if end == count {
+                    if task.raw {
+                        self.original = Some(task.source);
+                        self.start_exr(task.pixels, charge)?;
+                    } else {
+                        drop(task.source);
+                        self.prepare_finishing(task.pixels, charge)?;
+                    }
+                } else {
+                    self.stage = Some(Stage::Resolve(task));
+                }
+            }
             Stage::Exr(mut task) => {
                 charge(u64::from(self.width))?;
                 if task.step(1)? {
                     let (bytes, pixels) = task.finish()?;
                     charge(bytes.len() as u64)?; // host's later digest scan
                     self.exr = Some(bytes);
+                    let pixels = match self.original.take() {
+                        Some(original) => original,
+                        None => pixels,
+                    };
                     self.prepare_display(pixels, charge)?;
                 } else {
                     self.stage = Some(Stage::Exr(task));
@@ -168,7 +330,7 @@ impl OutputTask {
                 charge(task.next_pixels() as u64)?;
                 let guides = guides.ok_or_else(|| invalid("CPU output is missing its admitted geometry guides"))?;
                 if task.step(guides, &self.cancel)? {
-                    self.prepare_finishing(task.finish()?, charge)?;
+                    self.prepare_resolve(task.finish()?, charge)?;
                 } else {
                     self.stage = Some(Stage::Denoise(task));
                 }
@@ -206,15 +368,19 @@ impl OutputTask {
                     // Canonical fully clear pixels cannot carry lifted-black RGB into
                     // edge filtering. Raw linear coverage/radiance remains unchanged.
                     for (offset, (pixel, rgba)) in input.iter().zip(output.as_chunks_mut::<4>().0).enumerate() {
-                        rgba[3] = match counts {
-                            Some(counts) => {
-                                let exact = counts.pixel(at + offset)?;
-                                if exact.samples() == 0 || (f64::from(exact.covered()) / f64::from(exact.samples())) as f32 != pixel[3] {
-                                    return Err(invalid("CPU adaptive coverage disagrees with its complete count plane"));
+                        rgba[3] = if self.supersampling == 2 {
+                            *self.resolved_alpha.get(at + offset).ok_or_else(|| invalid("CPU resolved coverage disappeared"))?
+                        } else {
+                            match counts {
+                                Some(counts) => {
+                                    let exact = counts.pixel(at + offset)?;
+                                    if exact.samples() == 0 || (f64::from(exact.covered()) / f64::from(exact.samples())) as f32 != pixel[3] {
+                                        return Err(invalid("CPU adaptive coverage disagrees with its complete count plane"));
+                                    }
+                                    exact.alpha8()?
                                 }
-                                exact.alpha8()?
+                                None => coverage_alpha(pixel[3], self.coverage_samples)?,
                             }
-                            None => coverage_alpha(pixel[3], self.coverage_samples)?,
                         };
                         if rgba[3] == 0 {
                             *rgba = [0; 4];
@@ -223,6 +389,7 @@ impl OutputTask {
                 }
                 if end == count {
                     self.glow = None;
+                    self.resolved_alpha = Vec::new();
                     if self.presentation.finishing.photographic.active() {
                         let pixels = self.linear.take().ok_or_else(|| invalid("CPU photographic source disappeared"))?;
                         self.stage = Some(Stage::Photographic(PhotographicTask::new(
@@ -269,6 +436,9 @@ impl OutputTask {
     #[cfg(test)]
     pub(crate) fn stage_name(&self) -> &'static str {
         match &self.stage {
+            Some(Stage::Diagnostics(_)) => "diagnostics",
+            Some(Stage::MaskPng) => "denoise_mask",
+            Some(Stage::Resolve(_)) => "resolve",
             Some(Stage::Exr(_)) => "exr",
             Some(Stage::Denoise(_)) => "denoise",
             Some(Stage::Bloom(_)) => "bloom",
@@ -286,4 +456,43 @@ impl OutputTask {
         }
         Ok((self.rgba, self.exr))
     }
+}
+
+fn reserve_exact<T>(values: &mut Vec<T>, count: usize) -> Result<()> {
+    if values.capacity() == 0 {
+        values.try_reserve_exact(count).map_err(|_| JobError::new(ErrorCode::AllocationFailed, "CPU output scratch allocation failed"))?;
+    }
+    if values.capacity() != count {
+        return Err(invalid("CPU output scratch capacity exceeds admission"));
+    }
+    Ok(())
+}
+
+/// Reconstruct alpha from exact subpixel coverage ratios, including adaptive
+/// denominators. Four admitted u32 sample counts fit the u128 rational sum.
+fn resolved_coverage_alpha(width: u32, scale: u32, pixel: usize, linear: &[[f32; 4]], counts: Option<&CountsPlane>, samples: u32) -> Result<u8> {
+    let (indices, count) = super::quality::supersample_indices(width, scale, pixel)?;
+    let (mut numerator, mut denominator) = (0_u128, 1_u128);
+    for index in &indices[..count] {
+        let alpha = linear.get(*index).ok_or_else(|| invalid("CPU resolved coverage source disappeared"))?[3];
+        let (covered, samples) = match counts {
+            Some(counts) => {
+                let exact = counts.pixel(*index)?;
+                (exact.covered(), exact.samples())
+            }
+            None => {
+                if samples == 0 || samples > super::MAX_SAMPLES_PER_PIXEL || !alpha.is_finite() || !(0.0..=1.0).contains(&alpha) {
+                    return Err(invalid("CPU resolved coverage sample count invalid"));
+                }
+                ((f64::from(alpha) * f64::from(samples)).round() as u32, samples)
+            }
+        };
+        if samples == 0 || samples > super::MAX_SAMPLES_PER_PIXEL || covered > samples || (f64::from(covered) / f64::from(samples)) as f32 != alpha {
+            return Err(invalid("CPU resolved coverage disagrees with its complete count plane"));
+        }
+        numerator = numerator * u128::from(samples) + u128::from(covered) * denominator;
+        denominator *= u128::from(samples);
+    }
+    denominator *= count as u128;
+    u8::try_from((numerator * 510 + denominator) / (denominator * 2)).map_err(|_| invalid("CPU resolved alpha exceeds one byte"))
 }

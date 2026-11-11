@@ -107,6 +107,10 @@
 //!   `Kernel::fixes.imprint_extends_edge_to_proto_vertex`, [`ProtoTopologyManager::imprint_edge_definition`]
 //!   first fits each end of the definition's interval to its proto vertex (`imprint_ends`: the SMLib
 //!   fork's thread-groove fixes, tangency-labs/smlib b43876f, a8caccd).
+//! - **Not upstream: one trim interval** (WR-767, tangency-labs/solidcore#3214).
+//!   [`ProtoTopologyManager::create_proto_edge`] trims the 3D curve and its uv curves to the
+//!   one interval none of their trims snaps (`exact_pieces::common_trim_interval`); upstream
+//!   trims them in turn with one interval, and the edge can end past its 3D curve.
 //! - `UpdateEdges` trims a definition at the split point; its alternative of splitting
 //!   the proto edge (`SmProtoEdge::Split`) sits behind `static constexpr SmBoolean
 //!   cbiDoSplit = FALSE` and is not ported.
@@ -140,6 +144,7 @@ use crate::math::{max2, max3, max4, min2, Point2, Point3, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::face::p2::proto_vertex_containment_radius;
+use crate::surface::surface::exact_pieces::{common_trim_interval, trim_unsnapped};
 use crate::topology::brep::p5::{make_edge_in_face_in, EdgeInFace};
 use crate::topology::VertexId;
 
@@ -2211,26 +2216,60 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let p3d_curve = cc1.curve();
         let _ = cc2.curve() == p3d_curve;
 
-        // Create a copy of the input curve and trim it to this CurveInterval.
+        // Create a copy of the input curve and of its uv curves (copy statuses ignored), and
+        // trim them to this CurveInterval.
         let mut copy = curve_of(brep, p3d_curve)?.copy(k)?;
-        let mut domain = ci1.interval;
-        copy.trim(k, &mut domain, TrimMode::Notify)?;
-
-        // See about uv curves (copy statuses ignored; the trims' passed on with
-        // `ssi_proto_topology_statuses_pass_on`, fork bcc6f01).
-        let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
         let mut uv1 = None;
         if let Some(c) = cc1.uv_curve1() {
             uv1 = ignore_soft(curve_of(brep, Some(c))?.copy(k))?;
-            if let Some(u) = uv1.as_mut() {
-                ignore_soft(passed_on(u.trim(k, &mut domain, TrimMode::Notify), pass)?)?;
-            }
         }
         let mut uv2 = None;
         if let Some(c) = cc2.uv_curve1() {
             uv2 = ignore_soft(curve_of(brep, Some(c))?.copy(k))?;
-            if let Some(u) = uv2.as_mut() {
-                ignore_soft(passed_on(u.trim(k, &mut domain, TrimMode::Notify), pass)?)?;
+        }
+
+        // The uv curves' trim statuses are ignored, and passed on with
+        // `ssi_proto_topology_statuses_pass_on` (fork bcc6f01). Not upstream (WR-767): the
+        // 3D curve and the uv curves whose trims accept the interval are trimmed to the one
+        // interval none of their trims snaps ([`common_trim_interval`]). Upstream trims them
+        // in turn with one interval, each trim snapping it onto a knot of its own curve, and
+        // the edge takes the interval the last trim left: a uv curve's knot a few ulps from
+        // the 3D curve's trim parameter leaves the edge's interval outside its 3D curve's
+        // (`SmEdge` test 2). A uv curve whose trim refuses the interval is trimmed alone, as
+        // upstream.
+        let pass = k.fixes.ssi_proto_topology_statuses_pass_on;
+        let mut joins = [false; 2];
+        for (u, join) in [&uv1, &uv2].into_iter().zip(&mut joins) {
+            if let Some(u) = u {
+                let mut probe = ci1.interval;
+                let trimmed = u.copy(k)?.trim(k, &mut probe, TrimMode::IntervalOnly);
+                *join = ignore_soft(passed_on(trimmed, pass)?)?.is_some();
+            }
+        }
+        let joined: Vec<&Curve> = std::iter::once(&copy)
+            .chain(
+                [&uv1, &uv2]
+                    .into_iter()
+                    .zip(joins)
+                    .filter_map(|(u, join)| u.as_ref().filter(|_| join)),
+            )
+            .collect();
+        let domain = common_trim_interval(k, &joined, ci1.interval, OP_CREATE_PE)?;
+        // Not upstream: a joined curve the common interval cannot hold refuses the edge. Its own
+        // trim snaps an end further than 100 scaled zeros from `domain`, or it would have to be
+        // reparametrised onto `domain` and is no B-spline (`trim_unsnapped`'s port invariant,
+        // which `ignore_soft` passes on for a uv curve too). The curves then end at no one
+        // parameter, where upstream builds an edge that runs past its 3D curve: the refusal
+        // replaces an invalid result, as in the offset's `mate_edges`.
+        trim_unsnapped(k, &mut copy, domain, OP_CREATE_PE)?;
+        for (u, join) in [&mut uv1, &mut uv2].into_iter().zip(joins) {
+            if let Some(u) = u.as_mut() {
+                let trimmed = if join {
+                    trim_unsnapped(k, u, domain, OP_CREATE_PE)
+                } else {
+                    u.trim(k, &mut domain.clone(), TrimMode::Notify)
+                };
+                ignore_soft(passed_on(trimmed, pass)?)?;
             }
         }
 
@@ -3796,6 +3835,66 @@ mod tests {
         // receives the new split edge definition without error.
         assert_eq!(m.proto_edge(pe).unwrap().num_edge_definitions(), 1);
         assert_eq!(m.proto_edge(new_pe).unwrap().num_edge_definitions(), 1);
+    }
+
+    /// `SmEdgeDefinition::Split` hangs the new upper definition on the upper proto edge
+    /// (`AddEdgeDefinition`), which reparameterizes it when that edge's interval is not the
+    /// definition's. Upstream's new definition still holds the lower one's whole curve
+    /// then, untrimmed: the whole line is mapped onto the upper proto edge, so the upper
+    /// definition runs from x = 0, not from the split point (and where the lower
+    /// definition's curve was the one moved, its trim missed it: `SM_ERR`). With
+    /// `split_edge_definition_owns_its_curves` each definition has its own curve, trimmed
+    /// before it is added: x = 0 to 0.5 below the split, 0.5 to 2 above it.
+    #[test]
+    fn edge_definition_split_moves_only_its_own_curve() {
+        for owns in [false, true] {
+            let mut k = Kernel::default();
+            k.fixes.ssi_proto_topology_statuses_pass_on = true;
+            k.fixes.split_edge_definition_owns_its_curves = owns;
+            let mut geo = Geo::default();
+            geo.curves.push(line([0.0, 0.0, 0.0], [2.0, 0.0, 0.0]));
+            geo.curves.push(line([0.5, 0.0, 0.0], [2.0, 0.0, 0.0]));
+            let mut m = manager();
+            let mut pv = |x: f64| {
+                let v = m.new_proto_vertex(Point3::new(x, 0.0, 0.0), 1e-5).unwrap();
+                m.add_proto_vertex(v);
+                v
+            };
+            let (v0, v_mid, v1) = (pv(0.0), pv(0.5), pv(2.0));
+            let mut edge = |c: usize, from, to| {
+                let mut cc = CurveClassification::new(&k);
+                cc.set_curve(Some(H(c, ClassObjectKind::Curve)), false);
+                let ivl = geo.curves[c].natural_interval();
+                let mut ci1 = CurveInterval::with_interval(&k, &ivl, Some(&cc));
+                ci1.mid = region_pc(R0);
+                let mut ci2 = CurveInterval::with_interval(&k, &ivl, Some(&cc));
+                ci2.mid = region_pc(R1);
+                m.create_proto_edge(&k, &mut geo, Some(from), Some(to), &cc, &ci1, &cc, &ci2)
+                    .unwrap()
+            };
+            // the whole line over [0, 1], and the upper proto edge over [0, 1] on its own
+            // line from the split point: the split's upper part, [0.25, 1], is not its interval
+            let lower = edge(0, v0, v1);
+            let upper = edge(1, v_mid, v1);
+            let ed = m.proto_edge(lower).unwrap().edge_definitions()[0];
+
+            let split = m.edge_definition_split(&k, &mut geo, ed, 0.25, Some(v_mid), Some(upper));
+            let new_ed = split.unwrap().1.expect("the definition was split");
+            let ends = |ed| {
+                let d = m.edge_def(ed).unwrap();
+                let c = geo.curve(d.xsect_curve_3d().unwrap()).unwrap();
+                let (ivl, nat) = (d.xsect_interval(), c.natural_interval());
+                assert!(nat.min() <= ivl.min() + 1e-12 && ivl.max() <= nat.max() + 1e-12);
+                [ivl.min(), ivl.max()].map(|t| c.evaluate_point(&k, t).unwrap().x)
+            };
+            let near = |a: [f64; 2], b: [f64; 2]| {
+                (a[0] - b[0]).abs() < 1e-12 && (a[1] - b[1]).abs() < 1e-12
+            };
+            assert!(near(ends(ed), [0.0, 0.5]), "{:?}", ends(ed));
+            // upstream maps the whole untrimmed line onto the upper proto edge
+            let upper = if owns { [0.5, 2.0] } else { [0.0, 2.0] };
+            assert!(near(ends(new_ed), upper), "{:?}", ends(new_ed));
+        }
     }
 
     /// WR-101: the upper split child's interval. Pinned (default) it is `[dT, dT]`;

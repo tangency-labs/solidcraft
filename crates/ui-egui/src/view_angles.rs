@@ -13,10 +13,10 @@
 use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Align2, FontId, Rect, Sense, pos2, vec2};
 use serde_json::json;
-use solidcraft_engine::render::{Camera, ViewAngles};
+use solidcraft_viewport::{Camera, ViewAngles};
 
 use crate::SolveApp;
-use crate::fonts::RichTextExt as _;
+use crate::ui_kit::type_face::RichTextExt as _;
 use crate::ui_kit::{self, Container, Surface};
 use solidcraft_theme::Tokens;
 

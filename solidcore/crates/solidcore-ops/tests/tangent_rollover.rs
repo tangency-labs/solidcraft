@@ -1,0 +1,338 @@
+//! Tangent rollover: a concave round whose contact line reaches a smooth edge of the face it
+//! rolls on, and rolls on across it onto the face beyond.
+//!
+//! The body is an L step swept 10 along z, its section in the xy plane: a wall x = 0 standing on
+//! a strip y = 0 that is `w` wide, then a cliff x = w down to y = -5. The cliff's rim (w, 0) is
+//! rounded `r1` first, which leaves the strip flat for `a = w - r1` and runs it on tangentially
+//! into the rim's round. The wall's foot (0, 0) is then rounded `r`: past `a`, the ball rolls off
+//! the flat onto the rim's round, the whole length of the edge, and the strip is consumed.
+
+#![allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test
+
+mod common;
+
+use std::f64::consts::PI;
+
+use common::edge_at;
+use solidcore_ops::blend::{blend, Blend, Corners};
+use solidcore_ops::boolean::boolean;
+use solidcore_ops::{make_box, session, Body, BooleanOp, CheckLevel, Error};
+
+const LENGTH: f64 = 10.0;
+
+/// The corpus's fix set (`kernel_cases/fixes.json`, the set SolidCraft runs).
+fn fixes() {
+    let fixes: Vec<String> = serde_json::from_str(include_str!(
+        "../../solidcore/tests/kernel_cases/fixes.json"
+    ))
+    .unwrap();
+    session::set_thread_fixes(fixes.iter().map(String::as_str)).unwrap();
+}
+
+/// The L step with a strip `w` wide.
+fn step(w: f64) -> Body {
+    let base = make_box([-10.0, -5.0, 0.0], [10.0 + w, 5.0, LENGTH]).unwrap();
+    let wall = make_box([-10.0, 0.0, 0.0], [10.0, 10.0, LENGTH]).unwrap();
+    boolean(base, wall, BooleanOp::Union).unwrap().unwrap()
+}
+
+/// The section area a concave round `r` at the wall's foot adds, the strip flat for `a` and then
+/// a convex round of radius `r1` (centre (a, -r1)): the ball's quarter-square spandrel while it
+/// stays on the flat; past it, the region bounded by the wall, the flat, the rim's round up to the
+/// ball's contact and the ball (its centre (r, c), (r - a)^2 + (c + r1)^2 = (r + r1)^2), by
+/// Green's theorem over its arcs.
+fn added_area(a: f64, r1: f64, r: f64) -> f64 {
+    if r <= a {
+        return r * r * (1.0 - PI / 4.0);
+    }
+    let c = ((r + r1).powi(2) - (r - a).powi(2)).sqrt() - r1;
+    // the contact on the rim's round, at angle t1 about its centre
+    let t1 = (c + r1).atan2(r - a);
+    // the ball's contact with the round, at angle s0 about the ball's centre
+    let s0 = t1 - PI;
+    // ∮ (x dy - y dx) / 2: segments wall (0,c)->(0,0) and flat (0,0)->(a,0) give nothing (x = 0,
+    // y = 0); the arcs give r^2 dt/2 + (centre x sin-ish terms)
+    let arc = |cx: f64, cy: f64, rad: f64, from: f64, to: f64| {
+        // ∫ (x y' - y x') / 2 dt for x = cx + rad cos t, y = cy + rad sin t
+        0.5 * (rad * rad * (to - from) + cx * rad * (to.sin() - from.sin())
+            - cy * rad * (to.cos() - from.cos()))
+    };
+    // the boundary runs clockwise: wall down, flat out, round from pi/2 down to t1, ball from s0 to -pi
+    let total = arc(a, -r1, r1, PI / 2.0, t1) + arc(r, c, r, s0, -PI);
+    total.abs()
+}
+
+/// The volume after rounding the rim `r1` and the foot `r` of the step `w` wide, checked.
+fn rounded(w: f64, r1: f64, r: f64) -> f64 {
+    let b = step(w);
+    if r1 > 0.0 {
+        let e = edge_at(&b, [w, 0.0, LENGTH / 2.0]);
+        blend(&b, Blend::Round, &[e], &[r1], &[], Corners::Filled).unwrap();
+    }
+    let e = edge_at(&b, [0.0, 0.0, LENGTH / 2.0]);
+    blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled).unwrap();
+    let report = b.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "w {w} r1 {r1} r {r}: {report}");
+    b.volume(1e-9).unwrap()
+}
+
+fn expected(w: f64, r1: f64, r: f64) -> f64 {
+    let step = (10.0 + w) * 5.0 * LENGTH + 10.0 * 10.0 * LENGTH;
+    step - LENGTH * r1 * r1 * (1.0 - PI / 4.0) + LENGTH * added_area(w - r1, r1, r)
+}
+
+#[test]
+fn the_area_oracle_agrees_with_a_polygon() {
+    // the closed form against a fine polygon of the same boundary
+    for &(a, r1, r) in &[
+        (1.0_f64, 2.0_f64, 1.5_f64),
+        (1.0, 2.0, 2.0),
+        (1.0, 2.0, 3.0),
+        (0.5, 1.0, 2.0),
+    ] {
+        let c = ((r + r1).powi(2) - (r - a).powi(2)).sqrt() - r1;
+        let t1 = (c + r1).atan2(r - a);
+        let mut pts = vec![(0.0, c), (0.0, 0.0), (a, 0.0)];
+        let n = 20000;
+        for i in 1..=n {
+            let t = PI / 2.0 + (t1 - PI / 2.0) * f64::from(i) / f64::from(n);
+            pts.push((a + r1 * t.cos(), -r1 + r1 * t.sin()));
+        }
+        for i in 1..=n {
+            let t = (t1 - PI) + (-PI - (t1 - PI)) * f64::from(i) / f64::from(n);
+            pts.push((r + r * t.cos(), c + r * t.sin()));
+        }
+        let mut twice = 0.0;
+        for (i, p) in pts.iter().enumerate() {
+            let q = pts[(i + 1) % pts.len()];
+            twice += p.0 * q.1 - q.0 * p.1;
+        }
+        let polygon = twice.abs() / 2.0;
+        let closed = added_area(a, r1, r);
+        assert!(
+            (polygon - closed).abs() < 1e-6,
+            "{a} {r1} {r}: {polygon} vs {closed}"
+        );
+    }
+}
+
+/// Controls: the round within the flat, and the round with no rim round, build exactly today.
+#[test]
+fn controls_build_exactly() {
+    fixes();
+    for &(w, r1, r) in &[(3.0, 2.0, 1.0), (3.0, 2.0, 0.5), (3.0, 0.0, 2.0)] {
+        let v = rounded(w, r1, r);
+        let e = expected(w, r1, r);
+        assert!(
+            (v - e).abs() < 1e-6,
+            "w {w} r1 {r1} r {r}: {v}, expected {e}"
+        );
+    }
+}
+
+/// The rollover cases: strip width, rim radius, foot radius (flat left `w - r1` below `r`).
+const ROLLOVERS: &[(f64, f64, f64)] = &[
+    (3.0, 2.0, 1.1),
+    (3.0, 2.0, 1.5),
+    (3.0, 2.0, 2.0),
+    (3.0, 2.0, 3.0),
+    (2.0, 1.0, 2.0),
+];
+
+/// The ball rolls off the flat onto the rim's round along the whole edge: built, its volume the
+/// closed form, across the threshold r = a and past the strip's whole width.
+#[test]
+fn full_length_rollover_builds() {
+    fixes();
+    for &(w, r1, r) in ROLLOVERS {
+        let v = rounded(w, r1, r);
+        let e = expected(w, r1, r);
+        assert!(
+            (v - e).abs() < 1e-6,
+            "w {w} r1 {r1} r {r}: {v}, expected {e}"
+        );
+    }
+}
+
+/// A convex round on a block `w` deep along z: its top y = 0 runs from the back face x = 0 to
+/// the front face x = w, whose rim (w, 0) is rounded `r1` first, so the top is flat for
+/// `a = w - r1` and then runs on tangentially into the rim's round.
+fn block(w: f64) -> Body {
+    make_box([0.0, -10.0, 0.0], [w, 10.0, LENGTH]).unwrap()
+}
+
+/// The section area a convex round `r` on the back edge (0, 0) removes, the top flat for `a`
+/// and then the rim's round of radius `r1` (centre (a, -r1)): the quarter-square spandrel while
+/// the ball stays on the flat; past it, the region bounded by the back face, the flat, the rim's
+/// round up to the ball's contact and the ball, which touches the rim's round from inside (its
+/// centre (r, c), (r - a)^2 + (c + r1)^2 = (r1 - r)^2), by Green's theorem over its arcs.
+fn removed_area(a: f64, r1: f64, r: f64) -> f64 {
+    if r <= a {
+        return r * r * (1.0 - PI / 4.0);
+    }
+    let c = ((r1 - r).powi(2) - (r - a).powi(2)).sqrt() - r1;
+    // the contact, at angle t about both centres (an inside tangency)
+    let t = (c + r1).atan2(r - a);
+    let arc = |cx: f64, cy: f64, rad: f64, from: f64, to: f64| {
+        0.5 * (rad * rad * (to - from) + cx * rad * (to.sin() - from.sin())
+            - cy * rad * (to.cos() - from.cos()))
+    };
+    // back face and flat give nothing (x = 0, y = 0); the rim's round from pi/2 down to t, then
+    // the ball from t up over its top to pi
+    (arc(a, -r1, r1, PI / 2.0, t) + arc(r, c, r, t, PI)).abs()
+}
+
+/// The convex cases: block depth, rim radius, back-edge radius (flat `w - r1` below `r`, and the
+/// ball inside the rim's round: `r <= (r1 + w - r1) / 2`).
+const CONVEX_ROLLOVERS: &[(f64, f64, f64)] = &[
+    (3.0, 2.0, 1.1),
+    (3.0, 2.0, 1.3),
+    (3.0, 2.0, 1.4),
+    (4.0, 3.0, 1.5),
+    (4.0, 3.0, 1.8),
+];
+
+#[test]
+fn the_removed_area_oracle_agrees_with_a_polygon() {
+    for &(w, r1, r) in CONVEX_ROLLOVERS {
+        let a = w - r1;
+        let c = ((r1 - r).powi(2) - (r - a).powi(2)).sqrt() - r1;
+        let t = (c + r1).atan2(r - a);
+        let mut pts = vec![(0.0, 0.0), (a, 0.0)];
+        let n = 20000;
+        for i in 1..n {
+            let u = PI / 2.0 + (t - PI / 2.0) * f64::from(i) / f64::from(n);
+            pts.push((a + r1 * u.cos(), -r1 + r1 * u.sin()));
+        }
+        for i in 0..=n {
+            let u = t + (PI - t) * f64::from(i) / f64::from(n);
+            pts.push((r + r * u.cos(), c + r * u.sin()));
+        }
+        let mut twice = 0.0;
+        for (i, p) in pts.iter().enumerate() {
+            let q = pts[(i + 1) % pts.len()];
+            twice += p.0 * q.1 - q.0 * p.1;
+        }
+        let polygon = twice.abs() / 2.0;
+        let closed = removed_area(a, r1, r);
+        assert!(
+            (polygon - closed).abs() < 1e-6,
+            "{w} {r1} {r}: {polygon} vs {closed}"
+        );
+    }
+}
+
+/// The convex round's ball rolls off the top's flat onto the rim's round along the whole edge:
+/// built and valid at the full check. Its faces are the closed form: the round is the ball's
+/// cylinder from the contact over its top to the back face (area and centroid), the rim's round
+/// keeps its band below the contact, and the back face ends at the ball's centre height. The
+/// volume is the closed form within the end faces' trims: the integrator reads them, and they lie
+/// within the body's tolerance of their edges (the edges themselves are exact), so it is graded
+/// to that tolerance times the length and the end face's perimeter. The control within the flat
+/// builds as today.
+#[test]
+fn full_length_convex_rollover_builds() {
+    fixes();
+    let tol = 1e-5;
+    for &(w, r1, r) in CONVEX_ROLLOVERS {
+        let a = w - r1;
+        let b = block(w);
+        let e = edge_at(&b, [w, 0.0, LENGTH / 2.0]);
+        blend(&b, Blend::Round, &[e], &[r1], &[], Corners::Filled).unwrap();
+        let e = edge_at(&b, [0.0, 0.0, LENGTH / 2.0]);
+        blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled)
+            .unwrap_or_else(|err| panic!("w {w} r1 {r1} r {r}: {err:?}"));
+        let report = b.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "w {w} r1 {r1} r {r}: {report}");
+        let c = ((r1 - r).powi(2) - (r - a).powi(2)).sqrt() - r1;
+        let t = (c + r1).atan2(r - a);
+        let order = b.to_record().unwrap().1;
+        let faces: Vec<_> = (0..order.faces.len())
+            .map(|i| {
+                let fc = b.face_centroid(&order, i, 1e-10).unwrap();
+                (fc, b.face_plane_normal(&order, i).unwrap())
+            })
+            .collect();
+        let curved: Vec<_> = faces
+            .iter()
+            .filter(|f| f.1.is_none())
+            .map(|f| &f.0)
+            .collect();
+        assert_eq!(
+            curved.len(),
+            2,
+            "w {w} r1 {r1} r {r}: the rim's round and the new round"
+        );
+        let (round, rim) = if curved[0].centroid[0] < curved[1].centroid[0] {
+            (curved[0], curved[1])
+        } else {
+            (curved[1], curved[0])
+        };
+        let close = |x: f64, y: f64, what: &str| {
+            assert!(
+                (x - y).abs() < 1e-9,
+                "w {w} r1 {r1} r {r}: {what} {x}, expected {y}"
+            );
+        };
+        close(round.area, r * (PI - t) * LENGTH, "round's area");
+        close(
+            round.centroid[0],
+            r - r * t.sin() / (PI - t),
+            "round's centroid x",
+        );
+        close(
+            round.centroid[1],
+            c + r * (t.cos() + 1.0) / (PI - t),
+            "round's centroid y",
+        );
+        close(rim.area, r1 * t * LENGTH, "rim round's area");
+        let back = faces
+            .iter()
+            .find(|f| f.1.is_some_and(|n| n.value[0] < -0.5))
+            .unwrap();
+        close(back.0.area, (10.0 + c) * LENGTH, "back face's area");
+        let v = b.volume(1e-9).unwrap();
+        let e = w * 10.0 * LENGTH
+            - LENGTH * r1 * r1 * (1.0 - PI / 4.0)
+            - LENGTH * removed_area(a, r1, r);
+        let perimeter = w + (10.0 - r1) + r1 * t + r * (PI - t) + (10.0 + c);
+        assert!(
+            (v - e).abs() < tol * LENGTH * perimeter,
+            "w {w} r1 {r1} r {r}: {v}, expected {e}"
+        );
+    }
+    let (w, r1, r) = (3.0, 2.0, 0.8);
+    let b = block(w);
+    let e = edge_at(&b, [w, 0.0, LENGTH / 2.0]);
+    blend(&b, Blend::Round, &[e], &[r1], &[], Corners::Filled).unwrap();
+    let e = edge_at(&b, [0.0, 0.0, LENGTH / 2.0]);
+    blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled).unwrap();
+    let v = b.volume(1e-9).unwrap();
+    let e = w * 10.0 * LENGTH
+        - LENGTH * r1 * r1 * (1.0 - PI / 4.0)
+        - LENGTH * removed_area(w - r1, r1, r);
+    assert!((v - e).abs() < 1e-6, "control: {v}, expected {e}");
+}
+/// A convex round larger than the convex round beyond the top's flat cannot roll onto it: its
+/// ball, inside the material, would have to fit inside that round, and it does not (that round's
+/// offset by the ball folds). The rollover declines it, and it is refused as without the
+/// rollover: too large, fitting the flat the rim's round leaves (less the fit margin).
+#[test]
+fn a_convex_round_larger_than_the_round_beyond_is_not_rolled_over() {
+    fixes();
+    for &(w, r1, r) in &[(3.0, 1.0, 2.5), (3.0, 2.0, 2.4)] {
+        let b = block(w);
+        let e = edge_at(&b, [w, 0.0, LENGTH / 2.0]);
+        blend(&b, Blend::Round, &[e], &[r1], &[], Corners::Filled).unwrap();
+        let e = edge_at(&b, [0.0, 0.0, LENGTH / 2.0]);
+        let flat = w - r1;
+        match blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled) {
+            Err(Error::TooLarge { size, .. }) => assert!(
+                size < flat && size > flat - 0.02,
+                "w {w} r1 {r1} r {r}: fit {size}, the flat {flat}"
+            ),
+            other => panic!("w {w} r1 {r1} r {r}: {other:?}"),
+        }
+    }
+}
