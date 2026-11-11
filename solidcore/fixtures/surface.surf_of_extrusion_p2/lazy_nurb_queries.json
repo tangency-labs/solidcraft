@@ -1,0 +1,7418 @@
+{
+ "cases": [
+  {
+   "name": "lazy_cubic_num_cpts_u",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "num_cpts",
+     "dir": 0
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_num_cpts_v",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "num_cpts",
+     "dir": 1
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_num_cpts_both",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "num_cpts",
+     "dir": 3
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_bilinear",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "bilinear"
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_parallel_sweep",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "parallel",
+     "v": [
+      0,
+      0,
+      2
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_parallel_other",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "parallel",
+     "v": [
+      1,
+      -2,
+      0.5
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_parallel_zero",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "parallel",
+     "v": [
+      0,
+      0,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_knots_u",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "knots",
+     "dir": 0
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_knots_v",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "knots",
+     "dir": 1
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_knots_u_ivl",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "knots",
+     "dir": 0,
+     "ivl": [
+      0.25,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_knots_v_inner",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "knots",
+     "dir": 1,
+     "ivl": [
+      0.25,
+      0.75
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_seam_small",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "seam",
+     "prev": [
+      0.3,
+      0.3
+     ],
+     "curr": [
+      0.35,
+      0.32
+     ],
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_seam_jump",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "seam",
+     "prev": [
+      0.1,
+      0.2
+     ],
+     "curr": [
+      0.8,
+      0.3
+     ],
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_tess_u",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "tess_splits",
+     "dir": 0,
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "chord": 0.01,
+     "angle": 15.0,
+     "max_side": 0.0
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_tess_v_sub_diag",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "tess_splits",
+     "dir": 1,
+     "dom": [
+      0.1,
+      0.1,
+      0.9,
+      0.9
+     ],
+     "chord": 0.01,
+     "angle": 15.0,
+     "max_side": 0.0,
+     "diagonals": true
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_tess_u_side",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "tess_splits",
+     "dir": 0,
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "chord": 0.01,
+     "angle": 0.0,
+     "max_side": 1.0
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_tess_v_side",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "tess_splits",
+     "dir": 1,
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "chord": 0.0,
+     "angle": 15.0,
+     "max_side": 1.0
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_num_cpts_u",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "num_cpts",
+     "dir": 0
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_num_cpts_v",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "num_cpts",
+     "dir": 1
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_num_cpts_both",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "num_cpts",
+     "dir": 3
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_bilinear",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "bilinear"
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_parallel_sweep",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "parallel",
+     "v": [
+      0.3,
+      0.2,
+      1.5
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_parallel_other",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "parallel",
+     "v": [
+      1,
+      -2,
+      0.5
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_parallel_zero",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "parallel",
+     "v": [
+      0,
+      0,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_knots_u",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "knots",
+     "dir": 0
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_knots_v",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "knots",
+     "dir": 1
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_knots_u_ivl",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "knots",
+     "dir": 0,
+     "ivl": [
+      0.25,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_knots_v_inner",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "knots",
+     "dir": 1,
+     "ivl": [
+      0.5,
+      1.5
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_seam_small",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "seam",
+     "prev": [
+      0.3,
+      0.6
+     ],
+     "curr": [
+      0.35,
+      0.64
+     ],
+     "dom": [
+      0,
+      0,
+      1,
+      2
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_seam_jump",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "seam",
+     "prev": [
+      0.1,
+      0.4
+     ],
+     "curr": [
+      0.8,
+      0.6
+     ],
+     "dom": [
+      0,
+      0,
+      1,
+      2
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_tess_u",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "tess_splits",
+     "dir": 0,
+     "dom": [
+      0,
+      0,
+      1,
+      2
+     ],
+     "chord": 0.01,
+     "angle": 15.0,
+     "max_side": 0.0
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_tess_v_sub_diag",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "tess_splits",
+     "dir": 1,
+     "dom": [
+      0.1,
+      0.2,
+      0.9,
+      1.8
+     ],
+     "chord": 0.01,
+     "angle": 15.0,
+     "max_side": 0.0,
+     "diagonals": true
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_tess_u_side",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "tess_splits",
+     "dir": 0,
+     "dom": [
+      0,
+      0,
+      1,
+      2
+     ],
+     "chord": 0.01,
+     "angle": 0.0,
+     "max_side": 1.0
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_tess_v_side",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "tess_splits",
+     "dir": 1,
+     "dom": [
+      0,
+      0,
+      1,
+      2
+     ],
+     "chord": 0.0,
+     "angle": 15.0,
+     "max_side": 1.0
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_num_cpts_u",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "num_cpts",
+     "dir": 0
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_num_cpts_v",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "num_cpts",
+     "dir": 1
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_num_cpts_both",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "num_cpts",
+     "dir": 3
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_bilinear",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "bilinear"
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_parallel_sweep",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "parallel",
+     "v": [
+      0,
+      0,
+      2
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_parallel_other",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "parallel",
+     "v": [
+      1,
+      -2,
+      0.5
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_parallel_zero",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "parallel",
+     "v": [
+      0,
+      0,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_knots_u",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "knots",
+     "dir": 0
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_knots_v",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "knots",
+     "dir": 1
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_knots_u_ivl",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "knots",
+     "dir": 0,
+     "ivl": [
+      0.25,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_knots_v_inner",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "knots",
+     "dir": 1,
+     "ivl": [
+      0.25,
+      0.75
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_seam_small",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "seam",
+     "prev": [
+      0.3,
+      0.3
+     ],
+     "curr": [
+      0.35,
+      0.32
+     ],
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_seam_jump",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "seam",
+     "prev": [
+      0.1,
+      0.2
+     ],
+     "curr": [
+      0.8,
+      0.3
+     ],
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_tess_u",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "tess_splits",
+     "dir": 0,
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "chord": 0.01,
+     "angle": 15.0,
+     "max_side": 0.0
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_tess_v_sub_diag",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "tess_splits",
+     "dir": 1,
+     "dom": [
+      0.1,
+      0.1,
+      0.9,
+      0.9
+     ],
+     "chord": 0.01,
+     "angle": 15.0,
+     "max_side": 0.0,
+     "diagonals": true
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_tess_u_side",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "tess_splits",
+     "dir": 0,
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "chord": 0.01,
+     "angle": 0.0,
+     "max_side": 1.0
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_tess_v_side",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "tess_splits",
+     "dir": 1,
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "chord": 0.0,
+     "angle": 15.0,
+     "max_side": 1.0
+    }
+   }
+  },
+  {
+   "name": "lazy_big_num_cpts_u",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "num_cpts",
+     "dir": 0
+    }
+   }
+  },
+  {
+   "name": "lazy_big_num_cpts_v",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "num_cpts",
+     "dir": 1
+    }
+   }
+  },
+  {
+   "name": "lazy_big_num_cpts_both",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "num_cpts",
+     "dir": 3
+    }
+   }
+  },
+  {
+   "name": "lazy_big_bilinear",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "bilinear"
+    }
+   }
+  },
+  {
+   "name": "lazy_big_parallel_sweep",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "parallel",
+     "v": [
+      5,
+      7,
+      900
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_big_parallel_other",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "parallel",
+     "v": [
+      1,
+      -2,
+      0.5
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_big_parallel_zero",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "parallel",
+     "v": [
+      0,
+      0,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_big_knots_u",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "knots",
+     "dir": 0
+    }
+   }
+  },
+  {
+   "name": "lazy_big_knots_v",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "knots",
+     "dir": 1
+    }
+   }
+  },
+  {
+   "name": "lazy_big_knots_u_ivl",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "knots",
+     "dir": 0,
+     "ivl": [
+      2.75,
+      5
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_big_knots_v_inner",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "knots",
+     "dir": 1,
+     "ivl": [
+      0.0,
+      2.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_big_seam_small",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "seam",
+     "prev": [
+      2.9,
+      0.19999999999999996
+     ],
+     "curr": [
+      3.05,
+      0.28
+     ],
+     "dom": [
+      2,
+      -1,
+      5,
+      3
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_big_seam_jump",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "seam",
+     "prev": [
+      2.3,
+      -0.19999999999999996
+     ],
+     "curr": [
+      4.4,
+      0.19999999999999996
+     ],
+     "dom": [
+      2,
+      -1,
+      5,
+      3
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_big_tess_u",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "tess_splits",
+     "dir": 0,
+     "dom": [
+      2,
+      -1,
+      5,
+      3
+     ],
+     "chord": 0.01,
+     "angle": 15.0,
+     "max_side": 0.0
+    }
+   }
+  },
+  {
+   "name": "lazy_big_tess_v_sub_diag",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "tess_splits",
+     "dir": 1,
+     "dom": [
+      2.3,
+      -0.6,
+      4.7,
+      2.6
+     ],
+     "chord": 0.01,
+     "angle": 15.0,
+     "max_side": 0.0,
+     "diagonals": true
+    }
+   }
+  },
+  {
+   "name": "lazy_big_tess_u_side",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "tess_splits",
+     "dir": 0,
+     "dom": [
+      2,
+      -1,
+      5,
+      3
+     ],
+     "chord": 0.01,
+     "angle": 0.0,
+     "max_side": 100.0
+    }
+   }
+  },
+  {
+   "name": "lazy_big_tess_v_side",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "tess_splits",
+     "dir": 1,
+     "dom": [
+      2,
+      -1,
+      5,
+      3
+     ],
+     "chord": 0.0,
+     "angle": 15.0,
+     "max_side": 100.0
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_num_cpts_u",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "num_cpts",
+     "dir": 0
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_num_cpts_v",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "num_cpts",
+     "dir": 1
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_num_cpts_both",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "num_cpts",
+     "dir": 3
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_bilinear",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "bilinear"
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_parallel_sweep",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "parallel",
+     "v": [
+      0.5,
+      0.5,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_parallel_other",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "parallel",
+     "v": [
+      1,
+      -2,
+      0.5
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_parallel_zero",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "parallel",
+     "v": [
+      0,
+      0,
+      0
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_knots_u",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "knots",
+     "dir": 0
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_knots_v",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "knots",
+     "dir": 1
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_knots_u_ivl",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "knots",
+     "dir": 0,
+     "ivl": [
+      0.25,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_knots_v_inner",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "knots",
+     "dir": 1,
+     "ivl": [
+      0.25,
+      0.75
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_seam_small",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "seam",
+     "prev": [
+      0.3,
+      0.3
+     ],
+     "curr": [
+      0.35,
+      0.32
+     ],
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_seam_jump",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "seam",
+     "prev": [
+      0.1,
+      0.2
+     ],
+     "curr": [
+      0.8,
+      0.3
+     ],
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_tess_u",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "tess_splits",
+     "dir": 0,
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "chord": 0.01,
+     "angle": 15.0,
+     "max_side": 0.0
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_tess_v_sub_diag",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "tess_splits",
+     "dir": 1,
+     "dom": [
+      0.1,
+      0.1,
+      0.9,
+      0.9
+     ],
+     "chord": 0.01,
+     "angle": 15.0,
+     "max_side": 0.0,
+     "diagonals": true
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_tess_u_side",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "tess_splits",
+     "dir": 0,
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "chord": 0.01,
+     "angle": 0.0,
+     "max_side": 1.0
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_tess_v_side",
+   "upstream_ref": "SmBSplineSurface members (GetNumberControlPoints, IsBilinear, IsParallelToVector, GetKnots), sm_CrossedSeamOrPole and SmSurface::FindTessellationSplits through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "tess_splits",
+     "dir": 1,
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "chord": 0.0,
+     "angle": 15.0,
+     "max_side": 1.0
+    }
+   }
+  }
+ ]
+}

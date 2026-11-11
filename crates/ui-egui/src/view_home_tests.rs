@@ -4,7 +4,7 @@ use serde_json::json;
 use solidcore_record::Vec3;
 use solidcraft_engine::geom::Aabb3;
 use solidcraft_engine::geom::prelude::*;
-use solidcraft_engine::render::StandardView;
+use solidcraft_viewport::StandardView;
 
 /// A block drawn at the origin and extruded, then moved 500 mm along X: its sketch stays at the
 /// origin, used by the extrude (so not drawn).
@@ -25,7 +25,7 @@ fn near_box(a: Aabb3, lo: [f64; 3], hi: [f64; 3]) {
 }
 
 /// The camera Home gives: the iso view framing what is shown.
-fn home(h: &Harness) -> solidcraft_engine::render::Camera {
+fn home(h: &Harness) -> solidcraft_viewport::Camera {
     let mut cam = h.app.cam;
     cam.set_view(StandardView::Iso);
     h.app.fitted(cam)
@@ -37,7 +37,7 @@ fn spot(h: &Harness) -> egui::Pos2 {
     d.left_top() + egui::vec2(d.width() * 0.3, d.height() * 0.7)
 }
 
-fn same_cam(a: &solidcraft_engine::render::Camera, b: &solidcraft_engine::render::Camera) -> bool {
+fn same_cam(a: &solidcraft_viewport::Camera, b: &solidcraft_viewport::Camera) -> bool {
     a.target.dist(b.target) < 1e-6 && (a.distance - b.distance).abs() < 1e-6 && (a.yaw - b.yaw).abs() < 1e-9 && (a.pitch - b.pitch).abs() < 1e-9
 }
 
@@ -302,7 +302,7 @@ fn navigation_bar_buttons_run_registered_commands() {
         let log = h.app.session.log.len();
         h.call("ui.click", json!({"x":at.x,"y":at.y}));
         let label = solidcraft_engine::find_command(id).unwrap().label;
-        let echo = crate::i18n::Locale::for_language(&h.app.preferences.language).format("ui.command_done", &[("command", label)]);
+        let echo = solidcraft_ui_text::Locale::for_language(&h.app.preferences.language).format("ui.command_done", &[("command", label)]);
         assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo), "{id} was not run");
         if slot == "orbit" {
             orbit_on = !orbit_on;
@@ -316,7 +316,7 @@ fn navigation_bar_buttons_run_registered_commands() {
     h.step(&json!({"click":{"handle":"nav:slot:visual_style"}})).unwrap();
     h.step(&json!({"click":{"handle":"nav:style:shaded"}})).unwrap();
     let label = solidcraft_engine::find_command("view.visual_style").unwrap().label;
-    let echo = crate::i18n::Locale::for_language(&h.app.preferences.language).format("ui.command_done", &[("command", label)]);
+    let echo = solidcraft_ui_text::Locale::for_language(&h.app.preferences.language).format("ui.command_done", &[("command", label)]);
     assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo));
     assert_eq!(h.app.ui.visual_style, 1);
     assert_eq!(h.app.session.undo.len(), undo);
@@ -409,7 +409,7 @@ fn navigation_bar_display_menu_runs_grid_and_shadow_commands() {
         h.step(&json!({"widget":label})).unwrap();
         let after = if id == "view.grid" { h.app.ui.show_grid } else { h.app.ui.ground_shadow };
         assert_eq!(after, !before);
-        let language = crate::i18n::Locale::for_language(&h.app.preferences.language);
+        let language = solidcraft_ui_text::Locale::for_language(&h.app.preferences.language);
         let echo = language.format("ui.command_done", &[("command", language.label(crate::command_label(id)))]);
         assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo), "{id} was not run");
     }
@@ -435,7 +435,7 @@ fn navigation_bar_toggle_slots_apply_commands_and_projection_compatibility() {
         assert_eq!(value(&h.app), !before, "{slot}");
         if slot != "projection" {
             let command = solidcraft_engine::find_command(&format!("view.{slot}")).unwrap();
-            let echo = crate::i18n::Locale::for_language(&h.app.preferences.language).format("ui.command_done", &[("command", command.label)]);
+            let echo = solidcraft_ui_text::Locale::for_language(&h.app.preferences.language).format("ui.command_done", &[("command", command.label)]);
             assert!(h.app.session.log.iter().skip(log).any(|line| line == &echo), "{slot}");
         }
     }
@@ -461,8 +461,8 @@ fn navigation_bar_tool_radio_group_and_overflow_execute_in_list_order() {
     h.settle();
     let bar = crate::scenario::rect_of("nav:outer").unwrap();
     assert_eq!(bar, h.app.viewport.layout.as_ref().unwrap().navigation);
-    let metrics = crate::ui_kit::NavigationMetrics::for_size(crate::navigation_bar::Size::Regular);
-    assert_eq!(h.app.preferences.navigation_bar.size, crate::navigation_bar::Size::Regular);
+    let metrics = crate::ui_kit::NavigationMetrics::for_size(crate::ui_kit::NavigationSize::Regular);
+    assert_eq!(h.app.preferences.navigation_bar.size, crate::ui_kit::NavigationSize::Regular);
     assert_eq!(bar.height(), metrics.height());
     let more = crate::scenario::rect_of("nav:more").unwrap();
     assert_eq!(more.size(), egui::vec2(metrics.button, metrics.button));

@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "name": "real_ellipse_plane_classify_upper_arc_with_comb",
+      "upstream_ref": "source/SMLib/src/SmCurve.cpp: SmCurve::GlobalPropertyAnalysis (SM_CP_PLANE_CLASSIFY and geometric comb); source/SMLib/src/SmEllipse.cpp: SmEllipse constructor",
+      "inputs": {
+        "op": "property",
+        "curve": { "ellipse": {} },
+        "xf": [],
+        "ivl": [0.0, 1.0],
+        "prop": 15,
+        "val": -1.0,
+        "vecs": [[0.0, 1.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+        "tol": 0.000001,
+        "comb": true
+      }
+    }
+  ]
+}

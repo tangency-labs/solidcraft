@@ -9,8 +9,12 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+solidcraft-viewport-gpu = { workspace = true }
+solidcraft-viewport = { workspace = true }
 solidcore-record = { workspace = true }
+solidcore-tess = { workspace = true }
 robust = "1.2"
+solidcraft-color = { workspace = true }
 solidcraft-geom = { workspace = true }
 solidcraft-render = { workspace = true }
 wgpu = { workspace = true }

@@ -1,0 +1,1066 @@
+{
+ "cases": [
+  {
+   "name": "offset_test_curve",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:273",
+   "inputs": {
+    "op": "offset",
+    "curve": {
+     "kind": "curve",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       10,
+       -3,
+       0
+      ],
+      [
+       20,
+       3,
+       0
+      ],
+      [
+       30,
+       -6,
+       0
+      ]
+     ]
+    },
+    "distance": 3.0
+   }
+  },
+  {
+   "name": "offset_test_line_xy",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:284",
+   "inputs": {
+    "op": "offset",
+    "curve": {
+     "kind": "curve",
+     "points": [
+      [
+       0.0,
+       0,
+       0
+      ],
+      [
+       10.0,
+       0,
+       0
+      ],
+      [
+       20.0,
+       0,
+       0
+      ],
+      [
+       30.0,
+       0,
+       0
+      ]
+     ]
+    },
+    "distance": 2.0
+   }
+  },
+  {
+   "name": "offset_test_line_z",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:303",
+   "inputs": {
+    "op": "offset",
+    "curve": {
+     "kind": "curve",
+     "points": [
+      [
+       0,
+       0,
+       0.0
+      ],
+      [
+       0,
+       0,
+       10.0
+      ],
+      [
+       0,
+       0,
+       20.0
+      ],
+      [
+       0,
+       0,
+       30.0
+      ]
+     ]
+    },
+    "distance": 2.0
+   }
+  },
+  {
+   "name": "offset_segment",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:979",
+   "inputs": {
+    "op": "offset",
+    "curve": {
+     "kind": "segment",
+     "start": [
+      0,
+      0,
+      0
+     ],
+     "end": [
+      10,
+      0,
+      0
+     ]
+    },
+    "distance": 1.5
+   }
+  },
+  {
+   "name": "offset_circle_out",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:979",
+   "inputs": {
+    "op": "offset",
+    "curve": {
+     "kind": "circle",
+     "center": [
+      1,
+      2,
+      0
+     ],
+     "radius": 5.0
+    },
+    "distance": 2.0
+   }
+  },
+  {
+   "name": "offset_circle_in",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:979",
+   "inputs": {
+    "op": "offset",
+    "curve": {
+     "kind": "circle",
+     "center": [
+      1,
+      2,
+      0
+     ],
+     "radius": 5.0
+    },
+    "distance": -2.0
+   }
+  },
+  {
+   "name": "offset_analytic_circle",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:979",
+   "inputs": {
+    "op": "offset",
+    "curve": {
+     "kind": "analytic_circle",
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "radius": 4.0
+    },
+    "distance": 1.0
+   }
+  },
+  {
+   "name": "offset_arc",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:979",
+   "inputs": {
+    "op": "offset",
+    "curve": {
+     "kind": "arc",
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "radius": 10.0,
+     "start_deg": 0.0,
+     "end_deg": 90.0
+    },
+    "distance": -3.0
+   }
+  },
+  {
+   "name": "interp_too_few",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:993",
+   "inputs": {
+    "op": "interp",
+    "points": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      1,
+      0
+     ],
+     [
+      2,
+      0,
+      0
+     ]
+    ],
+    "parameterization": 0
+   }
+  },
+  {
+   "name": "interp_nan_point",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:1005",
+   "inputs": {
+    "op": "interp",
+    "points": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      1,
+      0
+     ],
+     [
+      "NaN",
+      0,
+      0
+     ],
+     [
+      3,
+      1,
+      0
+     ]
+    ],
+    "parameterization": 2
+   }
+  },
+  {
+   "name": "interp_uniform",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:908",
+   "inputs": {
+    "op": "interp",
+    "points": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      1,
+      0
+     ],
+     [
+      2,
+      0,
+      0
+     ],
+     [
+      3,
+      1,
+      0
+     ]
+    ],
+    "parameterization": 0
+   }
+  },
+  {
+   "name": "interp_six_uniform",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:908",
+   "inputs": {
+    "op": "interp",
+    "points": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      2,
+      3,
+      1
+     ],
+     [
+      5,
+      4,
+      0
+     ],
+     [
+      7,
+      1,
+      -1
+     ],
+     [
+      9,
+      -2,
+      0
+     ],
+     [
+      12,
+      0,
+      2
+     ]
+    ],
+    "parameterization": 0
+   }
+  },
+  {
+   "name": "interp_chordlength",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:908",
+   "inputs": {
+    "op": "interp",
+    "points": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      1,
+      0
+     ],
+     [
+      2,
+      0,
+      0
+     ],
+     [
+      3,
+      1,
+      0
+     ]
+    ],
+    "parameterization": 1
+   }
+  },
+  {
+   "name": "interp_six_chordlength",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:908",
+   "inputs": {
+    "op": "interp",
+    "points": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      2,
+      3,
+      1
+     ],
+     [
+      5,
+      4,
+      0
+     ],
+     [
+      7,
+      1,
+      -1
+     ],
+     [
+      9,
+      -2,
+      0
+     ],
+     [
+      12,
+      0,
+      2
+     ]
+    ],
+    "parameterization": 1
+   }
+  },
+  {
+   "name": "interp_centripetal",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:908",
+   "inputs": {
+    "op": "interp",
+    "points": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      1,
+      0
+     ],
+     [
+      2,
+      0,
+      0
+     ],
+     [
+      3,
+      1,
+      0
+     ]
+    ],
+    "parameterization": 2
+   }
+  },
+  {
+   "name": "interp_six_centripetal",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:908",
+   "inputs": {
+    "op": "interp",
+    "points": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      2,
+      3,
+      1
+     ],
+     [
+      5,
+      4,
+      0
+     ],
+     [
+      7,
+      1,
+      -1
+     ],
+     [
+      9,
+      -2,
+      0
+     ],
+     [
+      12,
+      0,
+      2
+     ]
+    ],
+    "parameterization": 2
+   }
+  },
+  {
+   "name": "interp_dup_chordlength",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:1072",
+   "inputs": {
+    "op": "interp",
+    "points": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      1,
+      0
+     ],
+     [
+      1,
+      1,
+      0
+     ],
+     [
+      3,
+      1,
+      0
+     ]
+    ],
+    "parameterization": 1
+   }
+  },
+  {
+   "name": "interp_near_dup_chordlength",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:1072",
+   "inputs": {
+    "op": "interp",
+    "points": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      1,
+      0
+     ],
+     [
+      1,
+      1,
+      5e-13
+     ],
+     [
+      3,
+      1,
+      0
+     ]
+    ],
+    "parameterization": 1
+   }
+  },
+  {
+   "name": "interp_all_same_chordlength",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:1072",
+   "inputs": {
+    "op": "interp",
+    "points": [
+     [
+      2,
+      2,
+      2
+     ],
+     [
+      2,
+      2,
+      2
+     ],
+     [
+      2,
+      2,
+      2
+     ],
+     [
+      2,
+      2,
+      2
+     ]
+    ],
+    "parameterization": 1
+   }
+  },
+  {
+   "name": "interp_dup_centripetal",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:1072",
+   "inputs": {
+    "op": "interp",
+    "points": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      1,
+      0
+     ],
+     [
+      1,
+      1,
+      0
+     ],
+     [
+      3,
+      1,
+      0
+     ]
+    ],
+    "parameterization": 2
+   }
+  },
+  {
+   "name": "interp_near_dup_centripetal",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:1072",
+   "inputs": {
+    "op": "interp",
+    "points": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      1,
+      0
+     ],
+     [
+      1,
+      1,
+      5e-13
+     ],
+     [
+      3,
+      1,
+      0
+     ]
+    ],
+    "parameterization": 2
+   }
+  },
+  {
+   "name": "interp_all_same_centripetal",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:1072",
+   "inputs": {
+    "op": "interp",
+    "points": [
+     [
+      2,
+      2,
+      2
+     ],
+     [
+      2,
+      2,
+      2
+     ],
+     [
+      2,
+      2,
+      2
+     ],
+     [
+      2,
+      2,
+      2
+     ]
+    ],
+    "parameterization": 2
+   }
+  },
+  {
+   "name": "interp_dup_uniform",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:1072",
+   "inputs": {
+    "op": "interp",
+    "points": [
+     [
+      0,
+      0,
+      0
+     ],
+     [
+      1,
+      1,
+      0
+     ],
+     [
+      1,
+      1,
+      0
+     ],
+     [
+      3,
+      1,
+      0
+     ]
+    ],
+    "parameterization": 0
+   }
+  },
+  {
+   "name": "continuity_segment_mid",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:1097",
+   "inputs": {
+    "op": "continuity",
+    "curve": {
+     "kind": "segment",
+     "start": [
+      0,
+      0,
+      0
+     ],
+     "end": [
+      10,
+      0,
+      0
+     ]
+    },
+    "parameter": 0.5
+   }
+  },
+  {
+   "name": "continuity_segment_nan",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:1098",
+   "inputs": {
+    "op": "continuity",
+    "curve": {
+     "kind": "segment",
+     "start": [
+      0,
+      0,
+      0
+     ],
+     "end": [
+      10,
+      0,
+      0
+     ]
+    },
+    "parameter": "NaN"
+   }
+  },
+  {
+   "name": "continuity_segment_past",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:1100",
+   "inputs": {
+    "op": "continuity",
+    "curve": {
+     "kind": "segment",
+     "start": [
+      0,
+      0,
+      0
+     ],
+     "end": [
+      10,
+      0,
+      0
+     ]
+    },
+    "parameter": 2.0,
+    "relative": true
+   }
+  },
+  {
+   "name": "continuity_curve_knot",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:1083",
+   "inputs": {
+    "op": "continuity",
+    "curve": {
+     "kind": "curve",
+     "points": [
+      [
+       0,
+       0,
+       0
+      ],
+      [
+       10,
+       -3,
+       0
+      ],
+      [
+       20,
+       3,
+       0
+      ],
+      [
+       30,
+       -6,
+       0
+      ],
+      [
+       40,
+       0,
+       0
+      ],
+      [
+       50,
+       5,
+       0
+      ]
+     ]
+    },
+    "parameter": 0.5,
+    "relative": true
+   }
+  },
+  {
+   "name": "continuity_circle_seam",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:1083",
+   "inputs": {
+    "op": "continuity",
+    "curve": {
+     "kind": "circle",
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "radius": 5.0
+    },
+    "parameter": 0.25,
+    "relative": true
+   }
+  },
+  {
+   "name": "continuity_analytic_circle",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:1083",
+   "inputs": {
+    "op": "continuity",
+    "curve": {
+     "kind": "analytic_circle",
+     "center": [
+      0,
+      0,
+      0
+     ],
+     "radius": 5.0
+    },
+    "parameter": 0.5,
+    "relative": true
+   }
+  },
+  {
+   "name": "compatible_two_circles",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:683",
+   "inputs": {
+    "op": "compatible",
+    "curves": [
+     {
+      "kind": "circle",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 5.0
+     },
+     {
+      "kind": "circle",
+      "center": [
+       0,
+       0,
+       5
+      ],
+      "radius": 3.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "compatible_none",
+   "upstream_ref": "tests/SM_API_test/src/TestSmErrorCodes.cpp:247",
+   "inputs": {
+    "op": "compatible",
+    "curves": []
+   }
+  },
+  {
+   "name": "compatible_one",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:1302",
+   "inputs": {
+    "op": "compatible",
+    "curves": [
+     {
+      "kind": "circle",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 5.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "compatible_curve_and_arc",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:1302",
+   "inputs": {
+    "op": "compatible",
+    "curves": [
+     {
+      "kind": "curve",
+      "points": [
+       [
+        0,
+        0,
+        0
+       ],
+       [
+        10,
+        -3,
+        0
+       ],
+       [
+        20,
+        3,
+        0
+       ],
+       [
+        30,
+        -6,
+        0
+       ],
+       [
+        40,
+        0,
+        0
+       ]
+      ]
+     },
+     {
+      "kind": "arc",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 10.0,
+      "start_deg": 0.0,
+      "end_deg": 120.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "order_rectangle",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:700",
+   "inputs": {
+    "op": "order",
+    "curves": [
+     {
+      "kind": "rectangle",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "length": 10.0,
+      "width": 6.0
+     }
+    ]
+   }
+  },
+  {
+   "name": "order_none",
+   "upstream_ref": "tests/SM_API_test/src/TestSmErrorCodes.cpp:248",
+   "inputs": {
+    "op": "order",
+    "curves": []
+   }
+  },
+  {
+   "name": "order_shuffled_square",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:1323",
+   "inputs": {
+    "op": "order",
+    "curves": [
+     {
+      "kind": "segment",
+      "start": [
+       10,
+       0,
+       0
+      ],
+      "end": [
+       10,
+       10,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       0,
+       10,
+       0
+      ],
+      "end": [
+       0,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       10,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       10,
+       10,
+       0
+      ],
+      "end": [
+       0,
+       10,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "order_open_chain",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:1323",
+   "inputs": {
+    "op": "order",
+    "curves": [
+     {
+      "kind": "segment",
+      "start": [
+       0,
+       0,
+       0
+      ],
+      "end": [
+       10,
+       0,
+       0
+      ]
+     },
+     {
+      "kind": "segment",
+      "start": [
+       10,
+       0,
+       0
+      ],
+      "end": [
+       10,
+       10,
+       0
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "order_two_circles",
+   "upstream_ref": "tests/SM_API_test/src/TestSmCurves.cpp:1323",
+   "inputs": {
+    "op": "order",
+    "curves": [
+     {
+      "kind": "circle",
+      "center": [
+       0,
+       0,
+       0
+      ],
+      "radius": 5.0
+     },
+     {
+      "kind": "circle",
+      "center": [
+       20,
+       0,
+       0
+      ],
+      "radius": 3.0
+     }
+    ]
+   }
+  }
+ ]
+}

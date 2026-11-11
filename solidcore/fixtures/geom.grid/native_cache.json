@@ -1,0 +1,101 @@
+{
+  "cases": [
+    {
+      "name": "native_affine_hierarchy_single",
+      "upstream_ref": "source/SMLib/src/SmGrid.cpp:40,252 (real standalone affine surface/cache; new input, not the legacy opaque fixture)",
+      "inputs": {
+        "grid": {"bbox": [-1, -1, -1, 2, 2, 2], "size": [4, 4, 4]},
+        "ops": [
+          {"op": "define_surface", "id": 7, "origin": [0, 0, 0], "u": [1, 0, 0], "v": [0, 1, 0], "domain": [0, 0, 1, 1], "spans": [1, 1]},
+          {"op": "add_cached_hier", "surface": 7, "tol": 0.03125, "bbox": [-0.125, -0.125, -0.125, 1.125, 1.125, 0.125]},
+          {"op": "dump"},
+          {"op": "observe_cached"},
+          {"op": "expand_cached", "h": 0},
+          {"op": "dump"},
+          {"op": "observe_cached"}
+        ]
+      }
+    },
+    {
+      "name": "native_affine_multispan_hierarchy_oblique",
+      "upstream_ref": "source/SMLib/src/SmGrid.cpp:64-119 (actual cache node order and tolerance-expanded voxel registration)",
+      "inputs": {
+        "grid": {"bbox": [-2, -2, -2, 2, 2, 2], "size": [6, 5, 4]},
+        "ops": [
+          {"op": "define_surface", "id": 41, "origin": [0.25, -0.5, 0.125], "u": [1, 0, 0.5], "v": [0, 1, 0.25], "domain": [-1, -1, 1, 1], "spans": [2, 2]},
+          {"op": "add", "kind": "user", "obj": 5, "bbox": [-0.5, -0.5, -0.5, 0.5, 0.5, 0.5]},
+          {"op": "add_cached_hier", "surface": 41, "tol": 0.015625, "bbox": [-0.875, -1.625, -0.75, 1.375, 0.625, 1]},
+          {"op": "expand_cached", "h": 0},
+          {"op": "dump"},
+          {"op": "observe_cached"},
+          {"op": "setup", "p": [-3, 0, 0], "v": [1, 0, 0]},
+          {"op": "step", "t": 1e20},
+          {"op": "step", "t": 1e20},
+          {"op": "dump"},
+          {"op": "observe_cached"}
+        ]
+      }
+    },
+    {
+      "name": "native_affine_cache_leaf_ordinal",
+      "upstream_ref": "source/SMLib/src/SmGrid.cpp:252,525 (AddElement of validated nodes from one real multispan cache, reverse ordinal order)",
+      "inputs": {
+        "grid": {"bbox": [-1, -1, -1, 3, 2, 1], "size": [8, 3, 2]},
+        "ops": [
+          {"op": "define_surface", "id": 19, "origin": [0, 0, 0], "u": [1, 0, 0], "v": [0, 1, 0], "domain": [0, 0, 2, 1], "spans": [2, 1]},
+          {"op": "add_cached_leaf", "surface": 19, "leaf": 1, "bbox": [1, -0.125, -0.125, 2, 1.125, 0.125]},
+          {"op": "add_cached_leaf", "surface": 19, "leaf": 0, "bbox": [0, 0, 0, 1, 1, 0]},
+          {"op": "dump"},
+          {"op": "observe_cached"}
+        ]
+      }
+    },
+    {
+      "name": "native_affine_identity_twins",
+      "upstream_ref": "source/SMLib/src/SmGrid.cpp:40,252 (equal geometry, distinct stable surface identities, reverse hierarchy expansion)",
+      "inputs": {
+        "grid": {"bbox": [-1, -1, -1, 3, 2, 1], "size": [4, 3, 2]},
+        "ops": [
+          {"op": "define_surface", "id": 7, "origin": [0.25, 0.25, 0.25], "u": [2, 0, 0], "v": [0, 1, 0], "domain": [0, 0, 1, 1], "spans": [1, 1]},
+          {"op": "define_surface", "id": 19, "origin": [0.25, 0.25, 0.25], "u": [2, 0, 0], "v": [0, 1, 0], "domain": [0, 0, 1, 1], "spans": [1, 1]},
+          {"op": "add_cached_hier", "surface": 7, "tol": 0, "bbox": [0, 0, 0, 2.5, 1.5, 0.5]},
+          {"op": "add_cached_hier", "surface": 19, "tol": 0.03125, "bbox": [0, 0, 0, 2.5, 1.5, 0.5]},
+          {"op": "expand_cached", "h": 1},
+          {"op": "expand_cached", "h": 0},
+          {"op": "dump"},
+          {"op": "observe_cached"}
+        ]
+      }
+    },
+    {
+      "name": "native_affine_repeated_expansion",
+      "upstream_ref": "source/SMLib/src/SmGrid.cpp:40 (repeated real expansion retains distinct pool entries and ordered voxel references)",
+      "inputs": {
+        "grid": {"bbox": [-1, -2, -2, 1, 2, 2], "size": [2, 4, 4]},
+        "ops": [
+          {"op": "define_surface", "id": 73, "origin": [0.25, 0, 0], "u": [0, 0, 1], "v": [0, 1, 0], "domain": [-1, -1, 1, 1], "spans": [1, 1]},
+          {"op": "add_cached_hier", "surface": 73, "tol": 0, "bbox": [-0.125, -1, -1, 0.625, 1, 1]},
+          {"op": "expand_cached", "h": 0},
+          {"op": "expand_cached", "h": 0},
+          {"op": "dump"},
+          {"op": "observe_cached"}
+        ]
+      }
+    },
+    {
+      "name": "native_affine_leaf_registration_boundaries",
+      "upstream_ref": "source/SMLib/src/SmGrid.cpp:407,525 (zero-thickness, touching and outside registration boxes; surface itself stays nondegenerate)",
+      "inputs": {
+        "grid": {"bbox": [0, 0, 0, 1, 1, 1], "size": [4, 4, 4]},
+        "ops": [
+          {"op": "define_surface", "id": 3, "origin": [0, 0, 0.5], "u": [1, 0, 0], "v": [0, 1, 0], "domain": [0, 0, 1, 1], "spans": [1, 1]},
+          {"op": "add_cached_leaf", "surface": 3, "leaf": 0, "bbox": [0.25, 0.25, 0.5, 0.5, 0.5, 0.5]},
+          {"op": "add_cached_leaf", "surface": 3, "leaf": 0, "bbox": [1, 0, 0.5, 1, 1, 0.5]},
+          {"op": "add_cached_leaf", "surface": 3, "leaf": 0, "bbox": [-2, -2, -2, -1, -1, -1]},
+          {"op": "dump"},
+          {"op": "observe_cached"}
+        ]
+      }
+    }
+  ]
+}

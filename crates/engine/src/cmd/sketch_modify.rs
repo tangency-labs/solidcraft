@@ -509,29 +509,40 @@ fn bracket(sk: &Sketch, ci: usize, tq: f64) -> (Vec<(f64, Vec2, usize)>, bool) {
 /// each mouse move.
 #[derive(Clone, Debug)]
 pub struct TrimHover {
-    sh: Shape,
-    cuts: TrimCuts,
+    how: TrimHoverOf,
 }
 
-/// The [`TrimHover`] of `curve`. `None` where trim works otherwise (a free-form or infinite
-/// curve) or the curve isn't in the sketch: the tool shows the curve.
+#[derive(Clone, Debug)]
+enum TrimHoverOf {
+    Analytic { sh: Shape, cuts: TrimCuts },
+    Freeform(super::sketch_freeform::FreeformTrim),
+}
+
+/// The [`TrimHover`] of `curve`. `None` where trim refuses (an infinite curve) or the curve isn't
+/// in the sketch: the tool shows the curve.
 pub fn trim_hover(sk: &Sketch, curve: &str) -> Option<TrimHover> {
     let ci = sk.curve_index(curve)?;
     let c = sk.curves.get(ci)?;
-    if c.infinite || c.kind.is_freeform() {
+    if c.infinite {
         return None;
     }
+    if c.kind.is_freeform() {
+        return Some(TrimHover { how: TrimHoverOf::Freeform(super::sketch_freeform::FreeformTrim::new(sk, ci)?) });
+    }
     let sh = sk.shape(ci)?;
-    Some(TrimHover { sh, cuts: trim_cuts(sk, ci) })
+    Some(TrimHover { how: TrimHoverOf::Analytic { sh, cuts: trim_cuts(sk, ci) } })
 }
 
 impl TrimHover {
     /// The piece a trim at `at` takes away, as [`trim_piece`] answers it.
     pub fn piece(&self, at: Vec2) -> Option<Vec<Vec2>> {
-        let sh = &self.sh;
+        let (sh, cuts) = match &self.how {
+            TrimHoverOf::Analytic { sh, cuts } => (sh, cuts),
+            TrimHoverOf::Freeform(curve) => return curve.piece(at),
+        };
         let tq = sh.param(sh.project(at));
         let (t0, t1) = sh.range();
-        let (cuts, full) = self.cuts.around(tq);
+        let (cuts, full) = cuts.around(tq);
         let (a, b) = match (cuts.as_slice(), full) {
             ([], _) => (t0, t1),
             // A whole circle: the arc between the two crossings round `at`.
@@ -552,8 +563,8 @@ impl TrimHover {
 
 /// The piece of `curve` a trim at `at` takes away, as points along it, for the Trim tool to show
 /// under the cursor (#3052): the part between the crossings either side of `at`, as `sketch.trim`
-/// cuts it, or the whole curve where nothing crosses it. `None` where trim works otherwise (a
-/// free-form or infinite curve) or the curve isn't in the sketch: the tool shows the curve.
+/// cuts it, or the whole curve where nothing crosses it. `None` where trim refuses (an infinite
+/// curve) or the curve isn't in the sketch: the tool shows the curve.
 pub fn trim_piece(sk: &Sketch, curve: &str, at: Vec2) -> Option<Vec<Vec2>> {
     trim_hover(sk, curve)?.piece(at)
 }
@@ -3161,6 +3172,10 @@ fn offset_ladder(
     Ok((sides, sources))
 }
 
+/// What the offset reply says when a distance names a parameter that drives nothing (#12294).
+const UNLINKED_OFFSET: &str =
+    "the offset is trimmed and not linked to its source, so its distance expression does not drive it: changing the parameter will not move it";
+
 fn offset(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.offset";
     let ids = string_list(cmd, p, "curves")?;
@@ -3192,6 +3207,19 @@ fn offset(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "`symmetric` offsets both sides, so `side` has no side left to pick: drop one of them"));
     }
     let instances = offset_instances(s, p, cmd)?;
+    for key in ["param", "param2"] {
+        if p.get(key).is_some_and(|value| !value.is_null() && !value.is_string()) {
+            return Err(bad(cmd, format!("`{key}` must be a parameter name (a string)")));
+        }
+    }
+    let name = str_(p, "param");
+    let name2 = str_(p, "param2");
+    if name2.is_some() && expression2.is_none() {
+        return Err(bad(cmd, "`param2` names the dimension of the second side: give `distance2` too"));
+    }
+    if name.is_some() && name == name2 {
+        return Err(bad(cmd, "`param` and `param2` must be different names"));
+    }
     let ((sides, param, param2), info) = edit(s, p, cmd, true, |sk, doc| {
         sk.refresh_offsets()?;
         let rep = solve_current(sk, doc)?;
@@ -3200,8 +3228,19 @@ fn offset(s: &mut Session, p: &Value) -> Result<Value> {
         }
         sk.refresh_offsets()?;
         let eligible = sk.curves.iter().map(|c| c.id.clone()).collect::<std::collections::HashSet<_>>();
-        let param = doc.new_model_param(&expression, "mm");
-        let param2 = expression2.as_ref().map(|e| doc.new_model_param(e, "mm"));
+        let mut make = |name: Option<&str>, e: &str| match name {
+            Some(name) => doc.new_named_model_param(name, e, "mm").map_err(|error| bad(cmd, format!("param: {error}"))),
+            None => Ok(doc.new_model_param(e, "mm")),
+        };
+        // A chosen name is made before a generated one, so `param2: "d1"` is not taken by the
+        // `d1` generated for an unnamed first side.
+        let (param, param2) = if name.is_none() && name2.is_some() {
+            let param2 = expression2.as_ref().map(|e| make(name2, e)).transpose()?;
+            (make(name, &expression)?, param2)
+        } else {
+            let param = make(name, &expression)?;
+            (param, expression2.as_ref().map(|e| make(name2, e)).transpose()?)
+        };
         let made: Vec<String> = std::iter::once(param.clone()).chain(param2.clone()).collect();
         let mut pending = ids.clone();
         let mut sides = Vec::new();
@@ -3240,7 +3279,14 @@ fn offset(s: &mut Session, p: &Value) -> Result<Value> {
         [(_, only)] => only.association.clone(),
         _ => None,
     };
-    reply(cmd, OffsetResult { curves, constraints, sketch: info, sides: each, param, instances, param2, association, param_warnings: Vec::new() })
+    // A trimmed offset (a spline with another curve) is not linked to its source, so a distance
+    // that names a parameter drives nothing: say so instead of leaving `param` null unexplained (#12294).
+    let ignored = |expression: &str, param: &Option<String>| param.is_none() && !solidcraft_doc::expr::references(expression).is_empty();
+    let warning = (ignored(&expression, &param) || expression2.as_deref().is_some_and(|e| ignored(e, &param2))).then(|| UNLINKED_OFFSET.to_string());
+    reply(
+        cmd,
+        OffsetResult { curves, constraints, sketch: info, sides: each, param, instances, param2, association, warning, param_warnings: Vec::new() },
+    )
 }
 
 fn break_offset(s: &mut Session, p: &Value) -> Result<Value> {
@@ -3469,7 +3515,7 @@ fn copy_through(
     keep: &dyn Fn(Vec2) -> bool,
     scale_r: f64,
 ) -> Result<(Vec<usize>, Vec<(usize, usize)>)> {
-    if sk.curves.len().saturating_add(cs.len()) > solidcraft_sketch::MAX_CURVES {
+    if sk.curves.len().saturating_add(cs.len()) > solidcraft_sketch::limits::max_curves() {
         return Err(solidcraft_sketch::SketchError::TooLarge.into());
     }
     let pts = involved_points(sk, cs, ps);
@@ -3902,3 +3948,7 @@ mod corner_tests;
 #[cfg(test)]
 #[path = "sketch_trim_path_tests.rs"]
 mod trim_path_tests;
+
+#[cfg(test)]
+#[path = "offset_param_name_tests.rs"]
+mod offset_param_name_tests;
