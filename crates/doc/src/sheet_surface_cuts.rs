@@ -288,7 +288,7 @@ pub(crate) fn seg_box(s: &Seg2) -> (Vec2, Vec2) {
 /// Whether segments `x` and `y` come within `near` of each other, exactly: a line with any curve
 /// (see [`line_near`]), two arcs (see [`arcs_near`]). Two curves of other kinds whose boxes meet
 /// are refused: no exact form is known for them here.
-fn near_each_other(x: &Seg2, y: &Seg2, near: f64) -> std::result::Result<bool, String> {
+pub(crate) fn near_each_other(x: &Seg2, y: &Seg2, near: f64) -> std::result::Result<bool, String> {
     let ((xl, xh), (yl, yh)) = (seg_box(x), seg_box(y));
     if xl.x - yh.x > near || yl.x - xh.x > near || xl.y - yh.y > near || yl.y - xh.y > near {
         return Ok(false);

@@ -935,3 +935,42 @@ fn a_round_hole_just_short_of_a_walls_end_at_a_closed_corner_is_a_hole_of_the_wa
     assert!((before.1 - after.1).abs() < 1e-9 * before.1, "the outline changed by {}", before.1 - after.1);
     assert_eq!(after.2, before.2 + 1, "one more cut-out");
 }
+
+/// #1095: a 100 x 60 base flange on XY (T 2, R 2, K 0.5) with a 20 high flange on its edge
+/// y = 60, unfolded, and a triangle cut through the flat whose corner lies on the flat's edge
+/// x = 0 at the middle of the bend's zone: it touches the sheet's outline at that point only, so
+/// it bounds the material with the outline there, never a hole clear inside it. It failed at the
+/// cut ("a cut-out of the flat lost its piece"). By hand: the bend's setback is R + T = 4, so the
+/// base keeps x 0..100, y 0..56 and the flange its 20 less 4, 16; the zone is the allowance
+/// (π/2)(R + K T) = 3π/2 = 4.7123890 wide, y 56..60.7123890, its middle at y = 56 + 3π/4 =
+/// 58.3561945. The flat holds 100 · (56 + 3π/2 + 16) = 7200 + 150π = 7671.2389 mm². The triangle
+/// (0, yc), (3, yc − 1), (3, yc + 1) is 2 across and 3 deep, 3 mm², all in the zone (x 0..3,
+/// y yc ± 1); the flat keeps 7668.2389 mm². At K 0.5 a bend keeps what its zone does flat: across
+/// it, (π/4)((R + T)² − R²) = 3π = T · 3π/2 mm², and so does what is cut from it. Flat or folded,
+/// the sheet holds T times its flat, 2 · 7668.2389 = 15336.4778 mm³.
+#[test]
+fn a_cut_out_with_a_corner_on_the_sheets_edge_at_a_bend_folds_with_the_sheet() {
+    let mut s = session();
+    rule(&mut s, "Rule", T, 0.5, 2.0, 0.5);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"type": "base", "sketch": "Base", "body_name": "Plate"}));
+    run(&mut s, "sheet.flange", json!({"type": "edge", "edges": [[50, 60, T]], "height": 20, "angle": 90}));
+    run(&mut s, "sheet.unfold", json!({}));
+    let whole = 7200.0 + 150.0 * PI;
+    let check = |s: &Session, want: f64, what: &str| {
+        let (v, area) = (exact_volume(s), flat_exact(s).0);
+        assert!((area - want).abs() < 1e-6 * want, "{what}: the flat holds {area} of {want}");
+        assert!((v - T * want).abs() < 1e-6 * T * want, "{what}: {v} vs {}", T * want);
+    };
+    check(&s, whole, "unfolded");
+    let yc = 56.0 + 0.75 * PI;
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Cutout"}));
+    run(&mut s, "sketch.line", json!({"points": [[0.0, yc], [3.0, yc - 1.0], [3.0, yc + 1.0]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Cutout", "through_all": true, "direction": "symmetric", "operation": "cut"}));
+    check(&s, whole - 3.0, "cut on the flat");
+    run(&mut s, "sheet.refold", json!({}));
+    check(&s, whole - 3.0, "folded again");
+}
