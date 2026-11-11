@@ -24,6 +24,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
+use solidcore::blend::fillet_exact::{class_surface, classify_supports};
 use solidcore::curve::curve::p1::ApproximateCurveOptions;
 use solidcore::curve::curve::{Curve, CurveKind};
 use solidcore::curve::ellipse::{Ellipse, EllipseOptions};
@@ -42,7 +43,10 @@ use solidcore::nurbs::srf_basic::Surface as NurbSurface;
 use solidcore::query::brep::{BoundingBoxOptions, calculate_bounding_box};
 use solidcore::surface::ball_patch::BallPatch;
 use solidcore::surface::cone::Cone;
+use solidcore::surface::implicit::{ClassSurface, Implicit};
 use solidcore::surface::plane::Plane;
+use solidcore::surface::procedural_blend::BlendRef;
+use solidcore::surface::procedural_blend::exact::ExactClass;
 use solidcore::surface::sphere::Sphere;
 use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::surface::torus::{Torus, TorusOptions};
@@ -286,6 +290,58 @@ fn bspline_surface_part<'s>(k: &Kernel, s: &'s Surface) -> Result<Option<&'s BSp
         SurfaceKind::SurfOfExtrusion(e) => Some(e.base()),
         _ => None,
     })
+}
+
+/// The torus a round of the exact circle class lies on (solidcore#2485): its centre, unit axis,
+/// a unit reference direction square to the axis, and its major and minor radii.
+#[derive(Clone, Copy, Debug)]
+struct RoundTorus {
+    centre: Point3,
+    axis: Vec3,
+    x_axis: Vec3,
+    major: f64,
+    minor: f64,
+}
+
+/// The torus of a face's surface when it is a round of the exact circle class (a plane square to
+/// a cylinder's axis, a coaxial cone, ...): the torus its definition gives, its supports classified
+/// again (`ClassifyExactBlend`, the class's surface), with the net certified on it within the
+/// tolerance the class was read in (`ExactRound::supports_distance`). The face then goes out as
+/// that torus with its net as its NURBS form, as an SMLib torus does; it does so only where the
+/// import reads the net back as that torus (`analytic_of_nurbs` at the arrays' tolerance `xsect`),
+/// so a body written is a body read. `None` for every other surface (a round whose net is an SMLib
+/// torus already goes out as that), and for a round whose net the import would not read as a torus
+/// (it goes out as its NURBS, as before).
+///
+/// # Errors
+///
+/// A circle-class round whose supports give no torus, or whose net the definition does not
+/// certify: the definition and its net disagree.
+fn round_torus(k: &Kernel, surface: &Surface, xsect: f64) -> Result<Option<RoundTorus>> {
+    // (a round whose net is already an SMLib torus goes out as one)
+    if !matches!(surface.kind(), SurfaceKind::SurfOfRevolution(_)) {
+        return Ok(None);
+    }
+    let Some(BlendRef::Exact { round, net }) = surface.procedural_blend() else { return Ok(None) };
+    if round.class() != ExactClass::Circle {
+        return Ok(None);
+    }
+    let (Some(a), Some(b)) = (round.support(0), round.support(1)) else {
+        return Err(bad("an exact round without its two supports"));
+    };
+    let blend = classify_supports(k, [a, b], round.inputs()).map_err(sc("ClassifyExactBlend"))?;
+    let Some(ClassSurface::Implicit(Implicit::Torus { centre, axis, major, minor })) = class_surface(&blend, round.leader(), round.leader_map())
+    else {
+        return Err(bad("a round of the circle class whose supports give no torus"));
+    };
+    round.supports_distance(k, net).map_err(sc("ExactRound::SupportsDistance"))?;
+    let Some(form) = bspline_surface_part(k, net)? else { return Ok(None) };
+    if analytic_of_nurbs(k, form, SURFACE_TORUS_I, xsect)?.is_none() {
+        return Ok(None);
+    }
+    // `[axis, y, z]`: y and z square to the axis, z = axis x y, so (y, z) is a frame about it.
+    let [axis, x_axis, _] = axis.make_unit_ortho_vectors(None).map_err(sc("MakeUnitOrthoVectors"))?;
+    Ok(Some(RoundTorus { centre, axis, x_axis, major, minor }))
 }
 
 // ---- export: FlatFromBrep ----------------------------------------------------------------------
@@ -882,6 +938,7 @@ fn flat_from_brep(k: &mut Kernel, b: &mut Brep) -> Result<Arrays> {
             return Err(bad("a face whose surface its B-rep does not hold"));
         }
         let trim_type = i64::from(fd.rectangular_trim == 1);
+        let round_torus = round_torus(k, surface, xsect)?;
         let ty = match surface.kind() {
             SurfaceKind::Sphere(_) => SURFACE_SPHERE_I,
             SurfaceKind::Plane(_) => SURFACE_PLANE_I,
@@ -889,6 +946,8 @@ fn flat_from_brep(k: &mut Kernel, b: &mut Brep) -> Result<Arrays> {
             SurfaceKind::Cone(_) => SURFACE_CONE_I,
             SurfaceKind::Torus(_) => SURFACE_TORUS_I,
             SurfaceKind::BallPatch(_) => SURFACE_BALL_PATCH_I,
+            // A round of the exact circle class: the torus of its definition, its net the form.
+            _ if round_torus.is_some() => SURFACE_TORUS_I,
             _ => SURFACE_NURBS_I,
         };
         // A ball patch is a NURBS face (its net, range and trims) with its sphere as its
@@ -991,7 +1050,15 @@ fn flat_from_brep(k: &mut Kernel, b: &mut Brep) -> Result<Arrays> {
                 o.r3(FACE_DEFINITION_REALS, bp.centre());
                 o.r(FACE_DEFINITION_REALS).push(bp.radius());
             }
-            _ => {}
+            _ => {
+                if let Some(t) = round_torus {
+                    o.r3(FACE_TORUS_ORIGIN, t.centre);
+                    o.r3(FACE_TORUS_AXIS, t.axis);
+                    o.r3(FACE_TORUS_REF_DIRECTION, t.x_axis);
+                    o.r(FACE_TORUS_MAJOR_RADIUS).push(t.major);
+                    o.r(FACE_TORUS_MINOR_RADIUS).push(t.minor);
+                }
+            }
         }
         if nurbs_form || nurbs_kind {
             // Every analytic class is an SmBSplineSurface: its own NURBS, in face order with the
