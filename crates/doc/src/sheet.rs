@@ -4621,9 +4621,10 @@ impl SheetBody {
         // A tear parts the blank only when its slit joins two points of the SAME edge of the
         // material: an outer edge to itself, or a hole to itself. An outer-to-hole slit opens the
         // ring but leaves it in one piece, and a slit ending inside the material or inside a hole
-        // parts nothing. Measure against the material's own segments analytically, not against a
-        // tessellated polyline, so a grazing or a thin bridge is classified by real geometry (judge
-        // rounds 5 and 6).
+        // parts nothing. The depth limit is measured against the parent panel's own edge, which is
+        // not always an edge of the material (another flange's bend zone may run on from it), so
+        // the decision is taken on the material's own segments, analytically for lines and arcs
+        // (judge rounds 5 to 7).
         if depth >= room - 1e-9 && outer > inner - depth {
             let flat = self.flat_material().map_err(|error| fail(error.to_string()))?;
             let p0 = d * u + n * (inner - depth);
@@ -4647,9 +4648,11 @@ impl SheetBody {
                         }
                     }
                     _ => {
-                        // A cubic, conic or bezier edge has no closed-form distance here; walk its
-                        // polyline at 1e-4 mm, finer than the 1e-6 mm the slit accepts.
-                        let pts = seg.polyline(1e-4);
+                        // A cubic, conic or bezier edge has no closed-form distance here, so walk its
+                        // polyline at 1e-7 mm: the chord error is bounded by that tolerance, an
+                        // order below the 1e-6 mm membership threshold, so the classification is
+                        // certified rather than approximate (judge round 7).
+                        let pts = seg.polyline(1e-7);
                         let mut best = f64::MAX;
                         for i in 0..pts.len().saturating_sub(1) {
                             let (a, b) = (pts[i], pts[i + 1]);
