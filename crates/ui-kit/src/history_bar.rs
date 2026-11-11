@@ -47,6 +47,9 @@ pub struct Bar<'a> {
     pub steps: usize,
     /// The floating card, which also dots the last step before the marker.
     pub floating: bool,
+    /// Steps can be dragged to a new place ([`Action::Reorder`]). Off for a history whose steps
+    /// have no order to change: a step then senses clicks only, with no drag and no drop.
+    pub reorder: bool,
     pub handles: Handles<'a>,
 }
 
@@ -401,7 +404,8 @@ impl Strip<'_, '_> {
         if !ui.clip_rect().intersects(br) && !dragged && !ui.memory(|m| m.has_focus(chip_id)) && !egui::Popup::is_any_open(ui.ctx()) {
             return br;
         }
-        let resp = ui.interact(br, chip_id, Sense::click_and_drag());
+        let sense = if self.bar.reorder { Sense::click_and_drag() } else { Sense::click() };
+        let resp = ui.interact(br, chip_id, sense);
         if resp.hovered() {
             self.hovered = Some(step.id);
         }
@@ -423,7 +427,7 @@ impl Strip<'_, '_> {
         if self.bar.floating && step.state.last_done {
             self.painter.circle_filled(pos2(br.center().x, br.bottom() + t.space_3), t.space_2, self.bar.accent.color);
         }
-        if resp.drag_started() {
+        if self.bar.reorder && resp.drag_started() {
             self.drag = Some(Drag::Step(step.id));
         }
         let resp = resp.backing_on_hover_ui(|ui| {
