@@ -102,6 +102,7 @@ use crate::curve::curve::Curve;
 use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent2d::{Extent2d, SS_UMAX, SS_UMIN, SS_VMAX, SS_VMIN};
+use crate::geom::extent3d::Extent3d;
 use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::geom::solution_array::{ObjectKind, Solution, SolutionObject, MAX_TREES};
 use crate::geom::tol::xsect_tol_3d_from_zones;
@@ -2530,8 +2531,26 @@ pub fn face_intersect_breps_cached(
     let mut have_curves = false;
     if are_coincident && coinc_dist < approx_tol_3d {
         have_curves = true;
-        'faces: for (fb, face) in [(b, f), (ob, other)] {
+        // (not upstream) an edge whose box lies apart from the other face's box lies inside
+        // no part of it, and its classification on both faces keeps nothing: it is left out.
+        // Upstream classifies every edge of each face on both, the other face's edges again
+        // for each face it is paired with, so a 2D boolean of one face of n edges against m
+        // small faces classified n·m curves, each against all n edges. A box that cannot be
+        // computed, or holds nothing, rules nothing out.
+        let reach = smos_max(approx_tol_3d, zone_tol);
+        let face_box = |fb: &Brep, face: FaceId| {
+            crate::query::face::p1::calculate_bounding_box(k, fb, face, false)
+                .ok()
+                .filter(|x| !x.has_negative_volume())
+        };
+        let boxes = [face_box(ob, other), face_box(b, f)];
+        'faces: for ((fb, face), apart_from) in [(b, f), (ob, other)].into_iter().zip(boxes) {
             for e in face_edges(fb, face)? {
+                if let Some(far) = &apart_from {
+                    if edge_box(k, fb, e).is_some_and(|x| x.are_disjoint(far, reach)) {
+                        continue;
+                    }
+                }
                 let edge_crv = edge_curve(fb, e)?;
                 if edge_crv.is_degenerate(k, EFF_ZERO, None)? {
                     continue;
@@ -2551,6 +2570,7 @@ pub fn face_intersect_breps_cached(
                 uv_curves1.push(None);
                 uv_curves2.push(None);
                 curve_types.push(TsectCurveType::RegionBoundary);
+                k.work_counters.add_coincident_curve_classified();
             }
         }
     }
@@ -2781,6 +2801,22 @@ pub fn face_intersect_breps_cached(
         out.cc_other_uv_curves = Some(uv_curves2);
     }
     Ok(out)
+}
+
+/// The axis aligned box of edge `e`'s curve over its interval, grown by the edge's tolerance;
+/// `None` when it cannot be computed or holds nothing.
+fn edge_box(k: &Kernel, b: &Brep, e: EdgeId) -> Option<Extent3d> {
+    let request = crate::nurbs::b_spline_curve::p2::BoundingBoxRequest {
+        normal: true,
+        pseudo: false,
+        polar: false,
+    };
+    let mut x = crate::query::edge::calculate_bounding_box(k, b, e, request, false)
+        .ok()?
+        .normal
+        .filter(|x| !x.has_negative_volume())?;
+    x.expand_absolute(edge::tolerance(b, e).ok()?);
+    Some(x)
 }
 
 #[cfg(test)]
