@@ -1514,46 +1514,78 @@ fn a_tear_reaching_the_edge_inboard_of_the_junction_refuses_naming_the_segment()
         .unwrap_err()
         .to_string();
     assert!(error.contains("edges[0].segments[0].relief"), "{error}");
-    assert!(error.contains("that would part it"), "{error}");
+    assert!(error.contains("the tear would part it"), "{error}");
     assert_eq!(s.doc.to_json(), before, "the refused feature changed the design");
 }
 
 /// A tear that reaches a bend zone inboard of the junction is cut: the material runs on through
-/// that bend, so the blank is not parted (judge round 4, #5942). The plate is 60 mm deep and the
-/// bend line 3 mm in, so 57 mm of base material lies inboard and a 57 mm tear reaches the far edge,
-/// where the flange on that edge bends.
+/// that bend, so the blank is not parted (judge rounds 4 and 5, #5942). The plate is 60 mm deep and
+/// a flange on its far edge trims the base to 54 mm inboard of the junction, so a 54 mm tear reaches
+/// that bend line exactly and the slit runs from it out to the nearer far edge.
 #[test]
 fn a_tear_reaching_a_bend_zone_inboard_of_the_junction_is_cut() {
-    let mut s = plate_in(sheet_of_2mm(), &[]);
-    run(&mut s, "sheet.flange", json!({"type":"edge","edges":[{"point":[50,60,2]}],"height":"20 mm","angle":"90 deg"}));
-    run(
-        &mut s,
-        "sheet.flange",
-        json!({"type":"edge","edges":[{"point":[50.0, 0.0, 2.0],"segments":[
-            {"from":0,"to":0.5,"angle":"90 deg","height":"20 mm","relief":{"shape":"tear","depth":"54 mm"}},
-            {"from":0.5,"to":1,"angle":"90 deg","height":"15 mm"}]}],
-            "height":"20 mm","angle":"90 deg"}),
-    );
-    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let build = |tear: bool| {
+        let mut s = plate_in(sheet_of_2mm(), &[]);
+        run(&mut s, "sheet.flange", json!({"type":"edge","edges":[{"point":[50,60,2]}],"height":"20 mm","angle":"90 deg"}));
+        let mut first = json!({"from":0,"to":0.5,"angle":"90 deg","height":"20 mm"});
+        first["relief"] = if tear { json!({"shape":"tear","depth":"54 mm"}) } else { json!({"shape":"notch"}) };
+        run(
+            &mut s,
+            "sheet.flange",
+            json!({"type":"edge","edges":[{"point":[50.0, 0.0, 2.0],"segments":[
+                first,
+                {"from":0.5,"to":1,"angle":"90 deg","height":"15 mm"}]}],
+                "height":"20 mm","angle":"90 deg"}),
+        );
+        s
+    };
+    let mut with = build(true);
+    let mut plain = build(false);
+    let regions = with.model.state().sheets[0].flat_regions().unwrap_or_default();
     assert_eq!(regions.len(), 1, "the tear parted the blank at a bend zone: {regions:?}");
+    // The slit: the junction at x = 50, from 54 mm inboard of the bend line out to the nearer far
+    // edge (the 15 mm stretch's, 3 - (pi + 12)).
+    let (from, to) = (Vec2::new(50.0, 57.0), Vec2::new(50.0, 3.0 - (PI + 12.0)));
+    let cut = |lp: &solidcore_record::Loop2, a: Vec2, b: Vec2| {
+        lp.segs.iter().any(|s| matches!(s, Seg2::Line { a: p, b: q } if p.dist(a) < 1e-6 && q.dist(b) < 1e-6))
+    };
+    assert!(
+        regions.iter().any(|r| cut(&r.outer, from, to) && cut(&r.outer, to, from)),
+        "no slit from {from:?} to {to:?}: {:?}",
+        regions.iter().map(|r| r.outer.segs.len()).collect::<Vec<_>>()
+    );
+    // A tear cuts nothing out: the flat area is the build that asks for none.
+    let area = |s: &mut Session| -> f64 { s.model.state().sheets[0].flat_regions().unwrap_or_default().iter().map(|r| r.area()).sum() };
+    let (with_tear, without) = (area(&mut with), area(&mut plain));
+    assert!((with_tear - without).abs() < 1e-9, "the tear changed the flat area: {with_tear} vs {without}");
 }
 
 /// A tear on a stretch that hangs off a flange reaches that flange panel's edge, where the
 /// material runs on through the parent's own bend zone, so the tear cuts and the blank stays one
-/// piece (judge round 4, #5942). The panel holds 14 mm inboard of the junction and the tear is
-/// exactly that deep.
+/// piece (judge rounds 4 and 5, #5942). The panel holds 14 mm inboard of the junction and the tear
+/// is exactly that deep; it cuts nothing out, so the flat area is the build that asks for none.
 #[test]
 fn a_tear_reaching_a_flange_panels_edge_is_cut() {
-    let mut s = plate_in(sheet_of_2mm(), &[]);
-    run(&mut s, "sheet.flange", json!({"type":"edge","edges":[{"point":[50,0,2]}],"height":"20 mm","angle":"90 deg"}));
-    run(
-        &mut s,
-        "sheet.flange",
-        json!({"type":"edge","edges":[{"point":[50.0, 2.0, 20.0],"segments":[
-            {"from":0,"to":0.5,"angle":"90 deg","height":"20 mm","relief":{"shape":"tear","depth":"14 mm"}},
-            {"from":0.5,"to":1,"angle":"90 deg","height":"15 mm"}]}],
-            "height":"20 mm","angle":"90 deg"}),
-    );
-    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let build = |tear: bool| {
+        let mut s = plate_in(sheet_of_2mm(), &[]);
+        run(&mut s, "sheet.flange", json!({"type":"edge","edges":[{"point":[50,0,2]}],"height":"20 mm","angle":"90 deg"}));
+        let mut first = json!({"from":0,"to":0.5,"angle":"90 deg","height":"20 mm"});
+        first["relief"] = if tear { json!({"shape":"tear","depth":"14 mm"}) } else { json!({"shape":"notch"}) };
+        run(
+            &mut s,
+            "sheet.flange",
+            json!({"type":"edge","edges":[{"point":[50.0, 2.0, 20.0],"segments":[
+                first,
+                {"from":0.5,"to":1,"angle":"90 deg","height":"15 mm"}]}],
+                "height":"20 mm","angle":"90 deg"}),
+        );
+        s
+    };
+    let mut with = build(true);
+    let mut plain = build(false);
+    let regions = with.model.state().sheets[0].flat_regions().unwrap_or_default();
     assert_eq!(regions.len(), 1, "the tear parted the blank at the parent panel's edge: {regions:?}");
+    let area = |s: &mut Session| -> f64 { s.model.state().sheets[0].flat_regions().unwrap_or_default().iter().map(|r| r.area()).sum() };
+    let (with_tear, without) = (area(&mut with), area(&mut plain));
+    assert!((with_tear - without).abs() < 1e-9, "the tear changed the flat area: {with_tear} vs {without}");
 }

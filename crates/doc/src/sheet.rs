@@ -4618,18 +4618,30 @@ impl SheetBody {
                 return Err(fail("would cut the sheet apart; reduce its depth".into()));
             }
         }
-        // A tear whose deep end lands on an exposed edge of the blank runs boundary to boundary and
-        // parts the material in two. Whether that edge is exposed is a question about the material
-        // itself, not about the flange tree: if the flat sheet has material just beyond the deep
-        // end, the edge is a bend zone or an inner line and the tear cuts nothing away; if it has
-        // none, the tear would part the blank.
+        // A tear whose deep end lands on an edge of the blank runs boundary to boundary and parts
+        // the material in two. "Edge" here means any edge of the flat material, holes included:
+        // measure the deep end against the material's own outlines rather than sample a point, so a
+        // thin surviving bridge or a hole cannot be missed (judge round 5).
         if depth >= room - 1e-9 {
             let flat = self.flat_material().map_err(|error| fail(error.to_string()))?;
-            let beyond = d * u + n * (inner - depth - 1e-3);
-            let continues = flat.iter().any(|region| region.outer.polyline(1e-3).contains(beyond));
-            if !continues {
+            let p0 = d * u + n * (inner - depth);
+            let gap = |pts: &[Vec2]| -> f64 {
+                let n = pts.len();
+                let mut best = f64::MAX;
+                for i in 0..n {
+                    let (a, b) = (pts[i], pts[(i + 1) % n]);
+                    let ab = b - a;
+                    let t = if ab.dot(ab) > 0.0 { ((p0 - a).dot(ab) / ab.dot(ab)).clamp(0.0, 1.0) } else { 0.0 };
+                    best = best.min((a + ab * t).dist(p0));
+                }
+                best
+            };
+            let on_edge = flat
+                .iter()
+                .any(|region| gap(&region.outer.polyline(1e-3)) < 1e-6 || region.holes.iter().any(|hole| gap(&hole.polyline(1e-3)) < 1e-6));
+            if on_edge {
                 return Err(fail(format!(
-                    "a depth of {depth:.3} mm reaches an exposed edge of the blank inboard of the junction ({room:.3} mm of material); that would part it"
+                    "a depth of {depth:.3} mm reaches an edge of the blank inboard of the junction ({room:.3} mm of material); the tear would part it"
                 )));
             }
         }
