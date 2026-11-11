@@ -443,7 +443,7 @@ pub fn brep(g: &mut GeomWriter<'_>, b: &Brep, name: &str) -> R<Written> {
 pub fn outer_loop(b: &Brep, face: &Face) -> Option<usize> {
     let mut ccw = face.loops.iter().enumerate().filter_map(|(li, l)| match l {
         Loop::Edges { edges } => {
-            let mut ring = Vec::with_capacity(edges.len() * AREA_SAMPLES);
+            let mut ring = Vec::new();
             for u in edges {
                 let [t0, t1] = edge_of(b, u.edge).ok()?.interval;
                 for k in 0..AREA_SAMPLES {

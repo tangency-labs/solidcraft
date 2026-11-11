@@ -142,6 +142,7 @@ fn joint_face_measurements_are_shared_across_motion_samples_and_snap_kinds() {
         suppressed: false,
         exprs: Default::default(),
         captured: None,
+        constraint: None,
     });
     // One body supplies both old nearest-face snaps and persistent named-face snaps.
     // A scratch model shares its measurements, even though each sample changes the pose.

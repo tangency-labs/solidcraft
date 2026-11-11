@@ -215,7 +215,10 @@ pub fn find_infinite_region(
                     let face = required(use_.face, "shell faceuse without face")?;
                     let edges = crate::topology::topology_traverser::face_edges(b, face)?;
                     if edges.is_empty() {
-                        return Err(SolidError::sm_err(OP));
+                        return Err(SolidError::topology_failed(
+                            OP,
+                            "a face of the shell has no edges to aim a ray at",
+                        ));
                     }
                     for edge_id in edges {
                         required(
@@ -269,7 +272,8 @@ pub fn find_infinite_region(
             let success = ray_success(&attempt.status)?;
             state = attempt.state;
             if !success {
-                let edge_id = best_edge.ok_or_else(|| SolidError::null_pointer(OP))?;
+                let edge_id = best_edge
+                    .ok_or_else(|| SolidError::topology_missing(OP, "the shell's nearest edge"))?;
                 let record = b.edge(edge_id)?;
                 // (a copy: the ray fires may add UV trim curves to the B-rep)
                 let curve =
@@ -321,7 +325,10 @@ pub fn find_infinite_region(
         } else {
             let edges = brep_edges(b)?;
             if edges.is_empty() {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::topology_failed(
+                    OP,
+                    "the B-rep has no edges to aim a ray at",
+                ));
             }
             let mut distance = crate::math::BIG_DOUBLE;
             for pass in 0..6 {
@@ -329,6 +336,8 @@ pub fn find_infinite_region(
                     break;
                 }
                 for edge_id in &edges {
+                    // (not upstream) cooperative cancellation once per edge (solidcore#3247)
+                    k.check_cancelled(OP)?;
                     let record = b.edge(*edge_id)?;
                     let curve = required(record.curve.as_ref(), "ray target edge without curve")?;
                     let big_tolerance = record.tolerance > 1.01 * b.tolerance();
@@ -384,7 +393,10 @@ pub fn find_infinite_region(
                     let point = curve.evaluate_point(k, interval.evaluate(0.189))?;
                     let start = bounds.min() - (bounds.max() - bounds.min()) * 0.5;
                     if !fire(b, start, point - start)? {
-                        return Err(SolidError::sm_err(OP));
+                        return Err(SolidError::topology_failed(
+                            OP,
+                            "no ray toward the edge found the region",
+                        ));
                     }
                 }
             }
@@ -430,11 +442,9 @@ fn brep_ray_fire<O>(
 }
 
 fn ray_direction(direction: Vec3) -> Result<Vec3> {
-    direction.unitize().map_err(|_| SolidError::Upstream {
-        operation: OP,
-        code: 1007,
-        entity: None,
-    })
+    direction
+        .unitize()
+        .map_err(|_| SolidError::topology_invalid_value(OP, "the ray direction has zero length"))
 }
 
 /// Whether a `SmShell::RayFire` call succeeded. Upstream retries on any failed status;
@@ -474,10 +484,13 @@ pub fn orient_sheet_surfaces(
 ) -> Result<()> {
     let faces = brep_faces(b)?;
     let Some(face) = face.filter(|face| faces.contains(face)) else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "the face is not in the B-rep",
+        ));
     };
     if !is_sheet(k, b)? {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(OP, "the B-rep is not a sheet"));
     }
     if is_oriented_sheet(k, b)? {
         if !same {
@@ -718,11 +731,11 @@ pub fn make_vertex_loop(
     }
     ignore_status(set_vertex_point(b, vertex, point, env))?;
     let fu1 = crate::topology::face::p2::upward_faceuse(b, face)?
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::topology_missing(OP, "the face's upward face use"))?;
     let fu2 = b
         .faceuse(fu1)?
         .mate
-        .ok_or_else(|| SolidError::null_pointer(OP))?;
+        .ok_or_else(|| SolidError::topology_missing(OP, "the face use's mate"))?;
     b.loop_mut(loop_)?.loopuse = Some(lu1);
     for (lu, mate, fu, vu) in [(lu1, lu2, fu1, vu1), (lu2, lu1, fu2, vu2)] {
         *b.loopuse_mut(lu)? = Loopuse {
@@ -1476,25 +1489,41 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
         face::{p1 as fp1, p2 as fp2},
         loopuse as lu,
     };
-    let face = input.face.ok_or_else(|| SolidError::null_pointer(OP))?;
-    let mut curve = input.curve.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let face = input
+        .face
+        .ok_or_else(|| SolidError::topology_missing(OP, "the face"))?;
+    let mut curve = input
+        .curve
+        .ok_or_else(|| SolidError::topology_missing(OP, "the edge's curve"))?;
     if !b.editing_enabled() {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "editing is disabled on the B-rep",
+        ));
     }
     let [Some(start), Some(mut end)] = input.vertices else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "both vertex uses are needed",
+        ));
     };
     for vu in [start, end] {
         if !matches!(
             b.vertexuse(vu)?.owner,
             VertexuseOwner::Edgeuse(_) | VertexuseOwner::Loopuse(_)
         ) {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::topology_failed(
+                OP,
+                "a vertex use is on neither an edge use nor a loop use",
+            ));
         }
     }
     let start_faceuse = vertexuse::faceuse(b, start)?;
     if start_faceuse != vertexuse::faceuse(b, end)? {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "the vertex uses are on different face uses",
+        ));
     }
     let fu = required(start_faceuse, "VU pair has no faceuse")?;
     let actual_face = required(b.faceuse(fu)?.face, "VU faceuse has no face")?;
@@ -2099,11 +2128,17 @@ fn faceuse_remove_loopuse(
     lu: crate::topology::LoopuseId,
 ) -> Result<()> {
     if b.loopuse(lu)?.faceuse != Some(fu) {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "the loop use is not on the face use",
+        ));
     }
     let list = &mut b.faceuse_mut(fu)?.loopuses;
     let Some(at) = list.iter().position(|&x| x == lu) else {
-        return Err(SolidError::sm_err(OP));
+        return Err(SolidError::topology_failed(
+            OP,
+            "the loop use is not in the face use's list",
+        ));
     };
     list.remove(at);
     b.loopuse_mut(lu)?.faceuse = None;
@@ -3292,10 +3327,10 @@ mod tests {
 
     #[test]
     fn zero_ray_direction_retains_the_defined_native_status() {
-        assert!(matches!(
-            ray_direction(Vec3::ZERO),
-            Err(SolidError::Upstream { code: 1007, .. })
-        ));
+        assert_eq!(
+            ray_direction(Vec3::ZERO).unwrap_err().upstream_status(),
+            Some(1007)
+        );
         assert_eq!(ray_direction(Vec3::Z).unwrap(), Vec3::Z);
     }
 

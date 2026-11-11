@@ -26,7 +26,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Export Current Vi
     .noundo()
     .contract(&CONTRACT)
     .output(output_schema_for::<ViewDxfResult>)
-    .params("camera: Camera (current view); hidden?: omit|dashed (default omit); tolerance?: 0.0001..1 mm (curve chord tolerance, default 0.01); path?: .dxf file (else returns dxf text). Visible placed bodies and shown sketches' profile curves (no construction geometry, points, dimensions or constraints); 2D LINE/LWPOLYLINE entities on VISIBLE/HIDDEN layers (sketch curves on SKETCH), mm; finished sketches are hidden behind bodies, the active sketch is drawn on top; perspective projected onto the camera target plane; no viewport crop or overlays.")];
+    .params("camera: Camera (current view); hidden?: omit|dashed (default omit); tolerance?: 0.0001..1 mm (curve chord tolerance, default 0.01); zero?: target|origin (where the drawing's 0,0 is: the camera target, default, or the model origin as seen from the camera); path?: .dxf file (else returns dxf text). Visible placed bodies and shown sketches' profile curves (no construction geometry, points, dimensions or constraints); 2D LINE/LWPOLYLINE entities on VISIBLE/HIDDEN layers (sketch curves on SKETCH), mm; finished sketches are hidden behind bodies, the active sketch is drawn on top; perspective projected onto the camera target plane; no viewport crop or overlays.")];
 
 fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let cam: Camera =
@@ -48,6 +48,12 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     if !sketch::exportable(s) {
         return Err(bad(CMD, "no visible bodies or sketches to export"));
     }
+    let at_origin = match p.get("zero") {
+        None => false,
+        Some(Value::String(v)) if v == "target" => false,
+        Some(Value::String(v)) if v == "origin" => true,
+        _ => return Err(bad(CMD, "zero must be target or origin")),
+    };
     let tolerance = match p.get("tolerance") {
         None => 0.01,
         Some(v) => v.as_f64().filter(|t| (0.0001..=1.0).contains(t)).ok_or_else(|| bad(CMD, "tolerance must be 0.0001..1 mm"))?,
@@ -64,7 +70,21 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     let meshes = mesh_lines::prepare(s, CMD, tolerance, |b| s.body_visible(&b.name))?;
     let prepare_ms = started.elapsed().as_secs_f64() * 1000.;
     let sketch = sketch::parts(s, tolerance).map_err(|e| bad(CMD, e))?;
-    let drawing = mesh_lines::drawing(&meshes, &sketch, &View::from_camera(&cam)).map_err(|e| bad(CMD, e))?;
+    let view = View::from_camera(&cam);
+    let mut drawing = mesh_lines::drawing(&meshes, &sketch, &view).map_err(|e| bad(CMD, e))?;
+    if at_origin {
+        // The drawing is centred on the camera target; move it so the model origin is 0,0.
+        let zero = view.world_origin().map_err(|e| bad(CMD, e))?;
+        for l in &mut drawing.lines {
+            l.a -= zero;
+            l.b -= zero;
+        }
+        for path in &mut drawing.sketch {
+            for pt in &mut path.points {
+                *pt -= zero;
+            }
+        }
+    }
     let writing = Stage::new("dxf_write", 1);
     writing.check().map_err(|e| bad(CMD, e))?;
     let mut visible = 0usize;

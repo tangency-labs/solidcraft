@@ -1101,7 +1101,10 @@ impl Line {
     ) -> Result<Vec<Solution<O>>> {
         // only good for MINIMIZE and INTERSECT operations
         if operation != SolverOperation::Minimize && operation != SolverOperation::Intersect {
-            return Err(SolidError::sm_err(OP_DROP));
+            return Err(SolidError::curve_failed(
+                OP_DROP,
+                "the operation is neither minimize nor intersect",
+            ));
         }
 
         // init output
@@ -1755,19 +1758,28 @@ impl Line {
 
         // Check join-point distance.
         if this_common.distance(other_common) > tol {
-            return Err(SolidError::sm_err(OP_JOIN));
+            return Err(SolidError::curve_failed(
+                OP_JOIN,
+                "the join points are farther apart than the tolerance",
+            ));
         }
 
         // Other curve must be linear.
         if !other_is_line(other, 5, tol)? {
-            return Err(SolidError::sm_err(OP_JOIN));
+            return Err(SolidError::curve_failed(
+                OP_JOIN,
+                "the other curve is not linear",
+            ));
         }
 
         // And it must be collinear with us.
         let whole_line_vec = other_end - this_end;
         let (dist, _) = line_point_distance(this_end, whole_line_vec, this_common);
         if dist > tol {
-            return Err(SolidError::sm_err(OP_JOIN));
+            return Err(SolidError::curve_failed(
+                OP_JOIN,
+                "the other curve is not collinear",
+            ));
         }
 
         // Length of other curve's param range will be ours, scaled by the 3d lengths.

@@ -945,6 +945,7 @@ mod tests {
             suppressed: false,
             exprs: Default::default(),
             captured: None,
+            constraint: None,
         };
         let occ = |id: u64, grounded: bool| crate::Occurrence { id, component: id, parent: 0, name: format!("O{id}"), transform: IDENTITY, grounded };
         // 1 frame (grounded), 2 cam, 3-6 a rigid chain to the guide 7, 8 the piston, 9 crank, 10 rod.

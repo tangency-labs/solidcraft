@@ -24,6 +24,7 @@ fn joint(id: u64, a: u64, b: u64) -> Joint {
         suppressed: false,
         exprs: Default::default(),
         captured: None,
+        constraint: None,
     }
 }
 

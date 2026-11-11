@@ -144,6 +144,9 @@ impl Hub {
                     shared.lock().retain(|(i, _)| *i != id);
                 });
             }
+            // A captured value drops after the body's locals, so without this `_closed` would tell
+            // `Stop::stop` the port is free while the listener still holds it (#14752).
+            drop(listener);
         });
         Ok(stop)
     }
@@ -797,7 +800,7 @@ impl Hub {
                 }
             };
             // Subscribed once the window named the design (not when it refused or timed out).
-            let sent = match joining.and_then(|counted| document_of(&reply).map(|seen| (counted, seen))) {
+            let sent = match joining.zip(document_of(&reply)) {
                 Some((counted, seen)) => match Subscription::start(documents, self.protocol.change_event(), counted, &out, seen, &reply) {
                     Some((subscription, sent)) => {
                         events = Some(subscription);

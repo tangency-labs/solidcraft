@@ -56,7 +56,7 @@ use super::form::binom;
 use super::interval::{cmax, round_down, round_up, Ivl};
 use super::series::{Ser, Trunc, VSer, MAX_S, V3};
 use super::station::{
-    ders_basis, gn_evaluate, gn_evaluate_vn, gn_jacobian, gn_top_jets, knot, span, GnSystem, Nurbs,
+    ders_basis, gn_evaluate, gn_jacobian, gn_top_jets, knot, span, GnIncremental, GnSystem, Nurbs,
     Partials,
 };
 use super::taylor_model::TmN;
@@ -661,13 +661,21 @@ pub fn gn_enclose_tm(
         return Ok(None);
     }
     let mut sx = x0.map(Ser::constant);
+    // each order's G takes the lower orders' series as the last one left them: they are
+    // kept, and only the coefficients x's new ones reach are computed (bit for bit a
+    // whole evaluation's)
+    let mut series = GnIncremental::new(&sysk);
     let eps_solved = if n >= 1 { tr.e().min(n - 1) } else { tr.e() };
     for tot in 1..=(tr.s() + tr.e()) {
         let eps = eps_solved.min(tot);
         if tot > tr.s() + eps {
             continue;
         }
-        let (sg, _) = tm_try!(gn_evaluate(&sysk, &sx, tr.computing(tot, eps)));
+        let before = series.computed();
+        let evaluated = series.evaluate(&sx, tr.computing(tot, eps));
+        k.work_counters
+            .add_feet_tm_coefficients(series.computed().saturating_sub(before));
+        let (sg, _, _, _) = tm_try!(evaluated);
         for i in 0..=tr.s().min(tot) {
             let kk = tot - i;
             // the section's jets of order n are the face curve's
@@ -712,7 +720,11 @@ pub fn gn_enclose_tm(
             }
         }
     }
-    let (_, mut f, v, nrm) = tm_try!(gn_evaluate_vn(&sysk, &sx, tr));
+    let before = series.computed();
+    let evaluated = series.evaluate(&sx, tr);
+    k.work_counters
+        .add_feet_tm_coefficients(series.computed().saturating_sub(before));
+    let (_, mut f, v, nrm) = tm_try!(evaluated);
     gn_top_jets(n, tr, &nrm, &mut f);
     let range_ser = |s: &Ser<Ft>| {
         let mut o = Ser::constant(IZ);

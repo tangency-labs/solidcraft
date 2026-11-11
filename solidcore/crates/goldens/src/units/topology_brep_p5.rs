@@ -85,7 +85,9 @@ fn status(r: SolidResult<()>) -> SolidResult<f64> {
     match r {
         Ok(()) => Ok(0.),
         Err(e) if e.is_unported() => Err(e),
-        Err(SolidError::Upstream { code, .. }) => Ok(f64::from(code)),
+        Err(e) if solidcore::error::upstream_status(&e).is_some() => {
+            Ok(f64::from(solidcore::error::upstream_status(&e).unwrap_or(-1)))
+        }
         Err(SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }) => Ok(1007.),
         Err(e) => Err(e),
     }
