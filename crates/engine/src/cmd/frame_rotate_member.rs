@@ -50,11 +50,12 @@ fn rotate_member_cmd(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     let member = end_cap::member(&s.doc, &s.model.state(), &plane).map_err(|_| bad(cmd, "Select a face of a frame member"))?;
-    if s.doc.feature(member.feature.0).is_none_or(|f| f.component != s.active_component) {
-        return Err(bad(cmd, "Activate the member's component"));
-    }
+    // First: activating the member's component can't help a member inside a component.
     if super::sketch::face::anchor(&plane).is_some_and(|anchor| !anchor.path.is_empty()) {
         return Err(bad(cmd, "not supported yet: rotating a member inside a component"));
+    }
+    if s.doc.feature(member.feature.0).is_none_or(|f| f.component != s.active_component) {
+        return Err(bad(cmd, "Activate the member's component"));
     }
     let angle = match p.get("parallel_to").filter(|v| !v.is_null()) {
         Some(target) => parallel_angle(s, &plane, &member, target, cmd)?,
