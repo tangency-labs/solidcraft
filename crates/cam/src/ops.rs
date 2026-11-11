@@ -268,12 +268,15 @@ fn check_leave(leave: f64) -> Result<()> {
 }
 
 /// A milling operation needs a tool that cuts with a straight side: a drill only cuts at its
-/// point, and a chamfer mill's side is tapered.
-fn mills(tool: &Tool) -> Result<()> {
+/// point, and a chamfer mill's tapered side cuts chamfers (see [`crate::chamfer`]). A face mill
+/// goes into the material only along a ramp (`ramp_angle`).
+fn mills(tool: &Tool, ramp_angle: f64) -> Result<()> {
     cuts_sideways(tool)?;
     match tool.kind {
-        ToolKind::Chamfer => invalid("a chamfer mill's side is tapered: a contour or a pocket needs a tool with a straight side"),
-        _ => Ok(()),
+        ToolKind::Chamfer => invalid(
+            "a chamfer mill's side is tapered: it cuts chamfers (the chamfer operation) and spots holes (drill), but a contour or a pocket needs a tool with a straight side",
+        ),
+        _ => crate::chamfer::enters(tool, ramp_angle),
     }
 }
 
@@ -296,7 +299,7 @@ fn start_near(lp: &[Piece], p: Vec2) -> Vec<Piece> {
 /// down through every depth pass before the next.
 pub fn contour(regions: &[Region2], tool: &Tool, params: &ContourParams, cut: &Cut) -> Result<Toolpath> {
     tool.validate()?;
-    mills(tool)?;
+    mills(tool, params.ramp_angle)?;
     cut.validate()?;
     check_leave(params.stock_to_leave)?;
     check_ramp(params.ramp_angle)?;
@@ -334,7 +337,7 @@ pub fn contour(regions: &[Region2], tool: &Tool, params: &ContourParams, cut: &C
 /// Clears `regions` (holes are islands) with rings parallel to the boundary, from the inside out.
 pub fn pocket(regions: &[Region2], tool: &Tool, params: &PocketParams, cut: &Cut) -> Result<Toolpath> {
     tool.validate()?;
-    mills(tool)?;
+    mills(tool, params.ramp_angle)?;
     cut.validate()?;
     check_leave(params.stock_to_leave)?;
     check_ramp(params.ramp_angle)?;

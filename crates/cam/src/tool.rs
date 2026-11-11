@@ -18,6 +18,9 @@ pub enum ToolKind {
     /// A flat end mill with rounded corners (a torus at the end): see [`Tool::corner_radius`].
     BullNose,
     Drill,
+    /// A face mill: a flat end, its inserts' corners rounded by [`Tool::corner_radius`] when it
+    /// is given.
+    FaceMill,
     /// A chamfer mill: a flat tip of [`Tool::tip_diameter`], then a cone of
     /// [`Tool::angle_deg`] (the included angle) up to the cutting diameter.
     Chamfer,
@@ -30,6 +33,7 @@ impl ToolKind {
             ToolKind::BallEndmill => "ball end mill",
             ToolKind::BullNose => "bull nose end mill",
             ToolKind::Drill => "drill",
+            ToolKind::FaceMill => "face mill",
             ToolKind::Chamfer => "chamfer mill",
         }
     }
@@ -61,8 +65,9 @@ pub struct Tool {
     pub stepdown: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stepover: Option<f64>,
-    /// Radius of a bull nose's corners (mm), above 0 and below the tool radius. Ignored by
-    /// other kinds: a flat end mill and a chamfer mill have none and a ball's is its radius.
+    /// Radius of a bull nose's corners (mm), above 0 and below the tool radius; for a face
+    /// mill, its inserts' corner radius, 0 to below the tool radius (left out: square). Ignored
+    /// by other kinds: a flat end mill and a chamfer mill have none and a ball's is its radius.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub corner_radius: Option<f64>,
     /// A chamfer mill's tip diameter (mm), from 0 (pointed) to below the cutting diameter;
@@ -83,6 +88,10 @@ pub struct Tool {
     /// The holder from its face up, as stacked cylinders; empty: no holder is checked.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub holder: Vec<HolderSection>,
+    /// A drill's point angle (degrees, the included angle of its tip); left out, 118. Other
+    /// kinds ignore it. See [`crate::drill::tip_length`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub point_angle_deg: Option<f64>,
 }
 
 /// One cylinder of a tool holder.
@@ -124,6 +133,7 @@ impl Tool {
             shank_diameter: None,
             stickout: None,
             holder: Vec::new(),
+            point_angle_deg: None,
         }
     }
 
@@ -136,6 +146,10 @@ impl Tool {
             ToolKind::BallEndmill => Cutter::ball(r),
             ToolKind::BullNose => Cutter::bull(r, self.corner_radius.unwrap_or(0.0)),
             ToolKind::Drill => invalid("a drill cannot mill: it cuts only at its point"),
+            ToolKind::FaceMill => match self.corner_radius.filter(|c| *c > 0.0) {
+                Some(c) => Cutter::bull(r, c),
+                None => Cutter::flat(r),
+            },
             ToolKind::Chamfer => {
                 let Some(angle) = self.angle_deg else { return invalid("a chamfer mill needs its included angle (`angle_deg`)") };
                 Cutter::tapered(r, self.tip_diameter.unwrap_or(0.0) * 0.5, angle.to_radians() * 0.5)
@@ -179,6 +193,9 @@ impl Tool {
         if self.kind == ToolKind::BullNose && !self.corner_radius.is_some_and(|c| c > 0.0 && c < self.radius()) {
             return invalid("a bull nose's corner radius must be above 0 and below the tool radius");
         }
+        if self.kind == ToolKind::FaceMill && self.corner_radius.is_some_and(|c| !(c >= 0.0) || !(c < self.radius())) {
+            return invalid("a face mill's corner radius must be from 0 to below the tool radius");
+        }
         if self.kind == ToolKind::Chamfer {
             if !self.angle_deg.is_some_and(|a| (1.0..=179.0).contains(&a)) {
                 return invalid("a chamfer mill's included angle (`angle_deg`) must be given, from 1 to 179 degrees");
@@ -200,6 +217,9 @@ impl Tool {
         }
         if self.holder.iter().any(|s| !(s.diameter > 0.0) || !(s.diameter <= 10_000.0) || !(s.length > 0.0) || !(s.length <= 10_000.0)) {
             return invalid("a holder section's diameter and length must be above 0 and at most 10 m");
+        }
+        if self.point_angle_deg.is_some_and(|a| !(a >= 1.0) || !(a <= 180.0)) {
+            return invalid("a drill's point angle must be from 1 to 180 degrees");
         }
         if [self.spindle_rpm, self.feed, self.plunge_feed, self.stepdown, self.stepover].iter().flatten().any(|v| !(*v > 0.0) || !(*v <= 1.0e6)) {
             return invalid("a tool's spindle speed, feeds, stepdown and stepover must be above 0");

@@ -87,6 +87,45 @@ pub(crate) enum Moves {
     All,
 }
 
+/// Calls `f` with the move index and pose of every sample along the moves `moves` selects,
+/// each from the pose before it. The start of a run of such moves is sampled too, as the first
+/// move's.
+pub(crate) fn for_each_sample(path: &Toolpath5, reach: f64, step: f64, moves: Moves, mut f: impl FnMut(usize, Pose) -> Result<()>) -> Result<()> {
+    let mut prev: Option<Pose> = None;
+    // Whether the move to `prev` was sampled.
+    let mut sampled = false;
+    let mut total = 0usize;
+    for (i, m) in path.moves.iter().enumerate() {
+        let (to, rapid) = match *m {
+            Move5::Feed { to, .. } => (to, false),
+            Move5::Rapid { to } => (to, true),
+            Move5::Dwell { .. } => continue,
+        };
+        let checked = match moves {
+            Moves::Cutting => !rapid,
+            Moves::All => true,
+        };
+        if checked {
+            match prev {
+                Some(from) => {
+                    let n = samples_along(&from, &to, reach, step)?;
+                    total = total.saturating_add(n + 1);
+                    if total > MAX_SAMPLES {
+                        return Err(CamError::TooLarge(format!("more than {MAX_SAMPLES} samples along the toolpath")));
+                    }
+                    for k in usize::from(sampled)..=n {
+                        let t = k as f64 / n as f64;
+                        f(i, Pose::new(from.tip.lerp(to.tip, t), slerp(from.axis, to.axis, t)))?;
+                    }
+                }
+                None => f(i, to)?,
+            }
+        }
+        (sampled, prev) = (checked, Some(to));
+    }
+    Ok(())
+}
+
 /// What a gouge is: the cutter shrunk by the tolerance, which the surface meets only where the
 /// cutter is deeper in it than that.
 #[derive(Clone, Copy, Debug)]

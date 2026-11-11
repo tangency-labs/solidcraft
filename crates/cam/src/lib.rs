@@ -33,6 +33,11 @@
 //! finished ([`rotary_finish`]) or roughed from round stock ([`rotary_roughing`]), and 2D
 //! pockets and contours can be cut into a cylinder in depth levels ([`wrapped`]).
 //!
+//! Holes are drilled ([`drill`]) in four cycles written as plain moves, and checked against
+//! the part with the drill's real point. A chamfer mill cuts chamfers and deburrs the top
+//! edges of profiles ([`chamfer()`]), and the gouge check allows it the chamfer it is told to
+//! cut ([`band_gouges`]).
+//!
 //! A post ([`Post`]) is data: besides its templates it holds switches for the program's
 //! layout (a tool list, comment characters, blank lines, lines at every operation, a safe
 //! retract to the machine's top, the tool length offset on the first Z move, modal motion
@@ -49,6 +54,7 @@ mod chamfer;
 mod check;
 pub mod collision;
 mod cutter;
+pub mod drill;
 mod dropcutter;
 pub mod finish3d;
 mod frame;
@@ -73,6 +79,7 @@ pub mod surface_ops;
 mod tool;
 pub mod wrapped;
 
+pub use chamfer::{ChamferGeometry, ChamferParams, DEFAULT_TIP_OFFSET, band_gouges, chamfer, chamfer_geometry};
 pub use check::{lift_entries, verify};
 pub use cutter::{Cone, Cutter};
 pub use dropcutter::{drop_along, drop_triangle, drop_z};
@@ -125,7 +132,11 @@ pub(crate) fn invalid<T>(why: impl Into<String>) -> Result<T> {
 }
 
 #[cfg(test)]
+mod chamfer_tests;
+#[cfg(test)]
 mod collision_tests;
+#[cfg(test)]
+mod drill_tests;
 #[cfg(test)]
 mod finish3d_tests;
 #[cfg(test)]
