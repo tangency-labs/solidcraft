@@ -60,7 +60,7 @@ Source: `Settings_Interface.dc.html` (section "Scale and text").
 
 | Label | Control | Edits | Default | Hover | Notes |
 |---|---|---|---|---|---|
-| Show design in window title | Checkbox | `Prefs.design_window_title` | `true` | "Shows the active design's name and marks unsaved changes in the operating system's window title. Turn off to restore the fixed SolidCraft title." | Applies immediately; Appearance (also accessible as Interface) Restore Defaults enables it. Cancel restores the opening or last applied value. Does not change the custom title bar. |
+| Show design in window title | Checkbox | `Prefs.design_window_title` | `false` | "Shows the active design's name and marks unsaved changes in the operating system's window title. Turn off to restore the fixed SolidCraft title." | Applies immediately; Appearance (also accessible as Interface) Restore Defaults disables it. Cancel restores the opening or last applied value. Does not change the custom title bar. |
 
 ## Colour vision
 

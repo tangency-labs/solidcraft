@@ -1610,6 +1610,7 @@ mod tests {
     #[test]
     fn window_title_tracks_live_design_save_rename_switch_and_open() {
         let mut a = app();
+        a.preferences.design_window_title = true;
         a.home.open = false;
         let initial = a.session.doc.name.clone();
         assert_eq!(title_commands(&mut a), [format!("{initial} — SolidCraft")]);
@@ -1653,7 +1654,6 @@ mod tests {
         assert_eq!(title_commands(&mut a), ["SolidCraft"]);
         assert!(title_commands(&mut a).is_empty());
         a.home.open = false;
-        a.preferences.design_window_title = false;
         assert!(title_commands(&mut a).is_empty(), "legacy title stays fixed");
         a.preferences.design_window_title = true;
         let name = a.session.doc.name.clone();
@@ -1662,6 +1662,7 @@ mod tests {
         assert_eq!(title_commands(&mut a), ["SolidCraft"]);
         for editor in [false, true] {
             let mut embedded = app();
+            embedded.preferences.design_window_title = true;
             embedded.home.open = false;
             embedded.embedded = !editor;
             embedded.embed_editor = editor;
@@ -1672,6 +1673,7 @@ mod tests {
     #[test]
     fn window_title_keeps_existing_design_when_start_page_is_shown() {
         let mut a = app();
+        a.preferences.design_window_title = true;
         a.home.open = false;
         a.session.execute("component.rename", &json!({"component": 0, "name": "Bracket"})).unwrap();
         assert_eq!(title_commands(&mut a), ["Bracket * — SolidCraft"]);
