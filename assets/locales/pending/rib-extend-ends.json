@@ -1,26 +1,26 @@
 {
   "en": {
-    "ui.rib_extend_ends": "Extend to the body"
+    "ui.rib_extend_ends": "Extend ends"
   },
   "ar": {
-    "ui.rib_extend_ends": "التمديد حتى الجسم"
+    "ui.rib_extend_ends": "تمديد الطرفين"
   },
   "de": {
-    "ui.rib_extend_ends": "Bis zum Körper verlängern"
+    "ui.rib_extend_ends": "Enden verlängern"
   },
   "he": {
-    "ui.rib_extend_ends": "הארכה עד הגוף"
+    "ui.rib_extend_ends": "הארכת קצוות"
   },
   "ja": {
-    "ui.rib_extend_ends": "ボディまで延長"
+    "ui.rib_extend_ends": "端を延長"
   },
   "ko": {
-    "ui.rib_extend_ends": "바디까지 연장"
+    "ui.rib_extend_ends": "끝 연장"
   },
   "vi": {
-    "ui.rib_extend_ends": "Kéo dài đến thân khối"
+    "ui.rib_extend_ends": "Kéo dài đầu"
   },
   "zh": {
-    "ui.rib_extend_ends": "延伸至实体"
+    "ui.rib_extend_ends": "延伸端部"
   }
 }

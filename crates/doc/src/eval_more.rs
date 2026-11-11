@@ -373,7 +373,8 @@ fn rib_tool(st: &ModelState, ss: &SolvedSketch, ids: &[String], t: f64, depth: O
             let (mut lo, mut hi, mut h_lo, mut h_hi) = (0.0, 1.0, h0, h);
             for _ in 0..12 {
                 let m = 0.5 * (lo + hi);
-                let hm = across(q0.lerp(*q, m))?;
+                // A probe that faces no body (a gap between the samples) keeps the bracket.
+                let Ok(hm) = across(q0.lerp(*q, m)) else { break };
                 if (hm - h0).abs() < (hm - h).abs() {
                     (lo, h_lo) = (m, hm);
                 } else {

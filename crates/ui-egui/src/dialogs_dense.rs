@@ -1009,8 +1009,13 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             });
             enter |= expr_row(ui, "Thickness", thickness);
             enter |= hint_row(ui, "Depth", depth, tr("to the next face"));
-            let extend_label = solidcraft_ui_text::tr("ui.rib_extend_ends");
-            ui_kit::options(ui, "feature_options", &mut [("Flip", flip), (extend_label, extend)]);
+            // A rib along the sketch normal has no ends to run on, so it has no Extend option.
+            if *normal {
+                ui_kit::options(ui, "feature_options", &mut [("Flip", flip)]);
+            } else {
+                let extend_label = solidcraft_ui_text::tr("ui.rib_extend_ends");
+                ui_kit::options(ui, "feature_options", &mut [("Flip", flip), (extend_label, extend)]);
+            }
         }
         Kind::Emboss { depth, deboss } => {
             enter |= expr_row(ui, "Depth", depth);
