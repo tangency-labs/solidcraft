@@ -1126,19 +1126,16 @@ fn rollover_recalc_uses_the_real_solver_and_reports_missing_edge_curve() {
     let err = Missing
         .recalc(&mut f.context(), id, false, Some(Vec3::Y))
         .unwrap_err();
-    assert!(
-        matches!(
-            err,
-            SolidError::Upstream {
-                code: crate::error::SM_ERR_NULL_POINTER,
-                ..
-            }
+    assert_eq!(
+        (err.operation(), err.blend_failure(), err.upstream_status()),
+        (
+            "blend::fillet_geom::p3::FilletBrep::re_calc_fillet_geom",
+            Some(&crate::error::blend::BlendFailure::Missing(
+                "the solver edge's curve"
+            )),
+            Some(crate::error::SM_ERR_NULL_POINTER)
         ),
         "{err:?}"
-    );
-    assert_eq!(
-        err.operation(),
-        "blend::fillet_geom::p3::FilletBrep::re_calc_fillet_geom"
     );
 }
 
