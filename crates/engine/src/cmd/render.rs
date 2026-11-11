@@ -19,8 +19,8 @@ mod effects;
 mod environment;
 mod jobs;
 pub(crate) use jobs::{
-    Prepared as PreparedCapture, cancel_params as render_cancel_params, prepare_with_metadata as prepare_capture_with_metadata,
-    read_request as read_render_request,
+    Prepared as PreparedCapture, cancel_params as render_cancel_params, form_refusal as render_form_refusal,
+    prepare_with_metadata as prepare_capture_with_metadata, read_request as read_render_request, saved_job_refusal as render_saved_job_refusal,
 };
 mod library;
 mod library_data;

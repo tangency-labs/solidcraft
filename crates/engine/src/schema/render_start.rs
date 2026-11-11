@@ -3,12 +3,20 @@
 //!
 //! The handler reads a request in one of two forms. With `progressive: true` it is the GPU form
 //! (`ProgressiveStart`); otherwise it is the runtime form (`Start`), for the raster and CPU
-//! raytrace image executors. Before parsing, the handler refuses the keys and values of the other
-//! form with its own messages. The contract makes the same checks with the same messages, then
-//! parses the request with the handler's own serde types ([`crate::cmd::read_render_request`]),
-//! passing serde's message on whole. So strict refuses what the handler refuses, with today's
-//! message, and only an unknown key is worded by the check. What the handler checks after parsing
-//! (ranges, combinations of keys, the saved setup, the host) stays the handler's.
+//! raytrace image executors. Before parsing, the handler refuses `setup` with `settings`, an
+//! inline job with runtime keys beside it, and the keys and values of the other form. The contract
+//! calls the handler's own functions for these ([`crate::cmd::render_saved_job_refusal`],
+//! [`crate::cmd::render_form_refusal`]), then parses the request with the handler's serde types
+//! ([`crate::cmd::read_render_request`]), passing serde's message on whole. So strict refuses what
+//! the handler refuses before it looks at the design, with today's message, and only an unknown
+//! key is worded by the check. What the handler checks later (ranges, the saved setup, the host)
+//! stays the handler's.
+//!
+//! Strict words two kinds of call differently from the handler, which still refuses them: a named
+//! `setup` whose saved job is in the design, with a runtime key beside it (the handler names the
+//! key, strict the key's own problem, such as sampling without `progressive`), and a request
+//! wrong in two ways where one is an optics or clear coat binding in `settings` (the handler
+//! names the binding first).
 //!
 //! The render crate has no `JsonSchema`. The schema types each top-level key and publishes the
 //! render crate's option sections (`raytrace`, `settings`, `lens` and the others) as JSON objects.
@@ -45,16 +53,11 @@ pub(crate) const GPU_ONLY: &[&str] = &[
 /// The keys only the runtime form takes. The GPU form refuses them.
 pub(crate) const RUNTIME_ONLY: &[&str] = &["led_samples", "led_strip"];
 
-/// The GPU form's `raytrace` keys.
-const GPU_RAYTRACE: &[&str] = &["dielectrics", "clear_coats", "textures"];
+/// An HDR's SHA-256 as the handler reads one (`HdrId`): 64 lowercase hex digits.
+pub(crate) const DIGEST_PATTERN: &str = "^[0-9a-f]{64}$";
 
-/// The keys the handler refuses in the runtime form before parsing it, whatever their value.
-const GPU_CONTROLS: &[&str] = &["lens", "lighting", "tone_map", "supersampling", "denoise_settings", "denoise_diagnostics"];
-
-const RUNTIME_GPU_MESSAGE: &str =
-    "runtime GPU transmission, texture, lens, environment, lighting, tone-map, denoise and clamp_indirect controls require progressive rendering";
-const PROGRESSIVE_CPU_MESSAGE: &str = "progressive rendering does not accept CPU raytrace, environment or LED options";
 const WEIGHTS_MESSAGE: &str = "studio visibility weights must be finite in 0..1";
+const RAYTRACE_WEIGHTS_MESSAGE: &str = "studio_weights apply to raster or the implicit GPU studio; use explicit CPU light intensities";
 const SAMPLING_MESSAGE: &str = "sampling controls require progressive rendering";
 
 /// Render Image (`render.start`) and Check Render Request (`render.preflight`): an image request.
@@ -73,34 +76,28 @@ impl<'de> Deserialize<'de> for RenderRequest {
 /// What `prepare` in `cmd/render/jobs.rs` refuses in `params` before it looks at the design, in its
 /// order and with its messages.
 fn read(params: &Value) -> Result<(), String> {
+    if let Some(message) = crate::cmd::render_saved_job_refusal(params) {
+        return Err(message);
+    }
     let progressive = params.get("progressive").and_then(Value::as_bool) == Some(true);
-    let present = |key: &str| params.get(key).is_some();
-    let raytrace = params.get("raytrace").and_then(Value::as_object);
-    let environment = params.get("environment");
-    if progressive {
-        if params.get("integrator").is_some_and(|v| v.as_str() != Some("raster"))
-            || raytrace.is_some_and(|o| o.keys().any(|key| !GPU_RAYTRACE.contains(&key.as_str())))
-            || RUNTIME_ONLY.iter().any(|key| present(key))
-            || environment.is_some_and(|e| e.is_object() && e.get("kind").is_none())
-        {
-            return Err(PROGRESSIVE_CPU_MESSAGE.into());
-        }
-    } else if raytrace.is_some_and(|o| ["clear_coats", "textures"].iter().any(|key| o.contains_key(*key)))
-        || environment.is_some_and(|e| e.get("kind").is_some())
-        || GPU_CONTROLS.iter().any(|key| present(key))
-        || params.get("denoise").is_some_and(|v| v != &json!(false))
-        || params.get("clamp_indirect").is_some_and(|v| !v.is_null())
-    {
-        return Err(RUNTIME_GPU_MESSAGE.into());
+    if let Some(message) = crate::cmd::render_form_refusal(params, progressive) {
+        return Err(message.into());
     }
     crate::cmd::read_render_request(params.clone(), progressive).map_err(|e| e.to_string())?;
-    // Parsed: `studio_weights` is three numbers or null, and `samples`, `max_depth` and `seed`
-    // are whole numbers or null.
+    // Parsed: `studio_weights` is three numbers or null, `integrator` is raster or raytrace, and
+    // `samples`, `max_depth` and `seed` are whole numbers or null.
+    let set = |key: &str| params.get(key).is_some_and(|v| !v.is_null());
     let weights = params.get("studio_weights").and_then(Value::as_array).into_iter().flatten();
     if weights.filter_map(Value::as_f64).any(|w| !(0.0..=1.0).contains(&w)) {
         return Err(WEIGHTS_MESSAGE.into());
     }
-    if !progressive && ["samples", "max_depth", "seed"].iter().any(|key| params.get(*key).is_some_and(|v| !v.is_null())) {
+    if progressive {
+        return Ok(());
+    }
+    if params.get("integrator").and_then(Value::as_str) == Some("raytrace") && set("studio_weights") {
+        return Err(RAYTRACE_WEIGHTS_MESSAGE.into());
+    }
+    if ["samples", "max_depth", "seed"].into_iter().any(set) {
         return Err(SAMPLING_MESSAGE.into());
     }
     Ok(())
@@ -137,7 +134,8 @@ impl JsonSchema for RenderRequest {
         put(
             "setup",
             json!({"description": "A saved render setup, by name. A setup with a saved `job` decides the method and its \
-            options, and only `replace` and `studio_weights` may come with it. Not with `settings`.", "type": ["string", "null"]}),
+            options, and only `replace` and `studio_weights` may come with it (`studio_weights` only where its method takes \
+            them). Not with `settings`.", "type": ["string", "null"]}),
         );
         put(
             "settings",
@@ -147,7 +145,13 @@ impl JsonSchema for RenderRequest {
             to the product.",
             ),
         );
-        put("replace", switch("Cancel the design's active and waiting render jobs before this one starts. Default: false."));
+        put(
+            "replace",
+            switch(
+                "Render Image: cancel the design's active and waiting render jobs before this one starts. Check Render \
+            Request ignores it. Default: false.",
+            ),
+        );
         put("transparent_background", switch("Leave the background transparent. Default: false."));
         put(
             "studio_weights",
@@ -179,14 +183,18 @@ impl JsonSchema for RenderRequest {
             section(
                 "Without `progressive`: a CPU HDR environment, with `integrator: raytrace`: `{path, \
             expected_sha256?, rotation_radians?, intensity?, samples?}` for a file or `{resource, rotation_radians?, intensity?, \
-            samples?}` for an HDR saved in the design. With `progressive: true`: a GPU environment, by `kind`: `builtin_hdr`, \
-            `hdr`, `embedded_hdr` or `sky`. Default: none.",
+            samples?}` for an HDR saved in the design. With `progressive: true`: a GPU environment, by `kind`: \
+            `{kind: builtin_hdr, id, rotation_rad?, intensity?}`, `{kind: hdr, path, expected_sha256?, rotation_rad?, \
+            intensity?, assume_linear_srgb?}`, `{kind: embedded_hdr, resource, rotation_rad?, intensity?, assume_linear_srgb?}` \
+            or `{kind: sky, gradient?, rotation_rad?, intensity?}`. An HDR's `resource` and `expected_sha256` are its SHA-256, \
+            64 lowercase hex digits. Default: none.",
             ),
         );
         put(
             "aging",
-            json!({"description": "Aging layers for the bodies, at most 8. CPU only with `integrator: raytrace`. \
-            Default: none.", "type": "array", "items": {"type": "object"}, "maxItems": 8}),
+            json!({"description": "Aging layers for the bodies, at most 8: with `integrator: raytrace` on the CPU, or on \
+            the GPU with `progressive: true`; the raster executor refuses them. Default: none.",
+            "type": "array", "items": {"type": "object"}, "maxItems": 8}),
         );
         put(
             "led_strip",
@@ -261,6 +269,8 @@ impl JsonSchema for RenderRequest {
         );
 
         let null_only = json!({"type": "null"});
+        let digest = json!({"type": "string", "pattern": DIGEST_PATTERN});
+        let digest_or_null = json!({"type": ["string", "null"], "pattern": DIGEST_PATTERN});
         let runtime = json!({
             "properties": {
                 "progressive": {"enum": [false]},
@@ -269,8 +279,8 @@ impl JsonSchema for RenderRequest {
                     "type": ["object", "null"],
                     "properties": {
                         "path": {"type": "string"},
-                        "resource": {"type": ["string", "null"]},
-                        "expected_sha256": {"type": ["string", "null"]},
+                        "resource": digest_or_null,
+                        "expected_sha256": digest_or_null,
                         "rotation_radians": {"type": "number"},
                         "intensity": {"type": "number"},
                         "samples": {"type": "integer", "minimum": 0, "maximum": u32::MAX},
@@ -286,6 +296,29 @@ impl JsonSchema for RenderRequest {
             "not": any_of_keys(GPU_ONLY),
         });
         let array = json!({"type": "array"});
+        // The GPU environment, as `cmd/render/environment.rs` reads one: by `kind`, each with its keys.
+        let gpu_environment = |kind: &str, required: &[&str], keys: Value| {
+            let mut properties =
+                json!({"kind": {"type": "string", "enum": [kind]}, "rotation_rad": {"type": "number"}, "intensity": {"type": "number"}});
+            if let (Some(all), Some(keys)) = (properties.as_object_mut(), keys.as_object()) {
+                all.extend(keys.clone());
+            }
+            let required: Vec<&str> = std::iter::once("kind").chain(required.iter().copied()).collect();
+            json!({"type": "object", "required": required, "properties": properties, "additionalProperties": false})
+        };
+        let linear = json!({"type": "boolean"});
+        let rgb = json!({"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3});
+        let gpu_environments = json!([
+            {"type": "null"},
+            gpu_environment("builtin_hdr", &["id"], json!({"id": {"type": "string"}})),
+            gpu_environment("hdr", &["path"], json!({"path": {"type": "string"}, "expected_sha256": digest_or_null, "assume_linear_srgb": linear})),
+            gpu_environment("embedded_hdr", &["resource"], json!({"resource": digest, "assume_linear_srgb": linear})),
+            gpu_environment(
+                "sky",
+                &[],
+                json!({"gradient": {"type": "object", "properties": {"zenith": rgb, "horizon": rgb, "ground": rgb}, "additionalProperties": false}}),
+            ),
+        ]);
         let gpu = json!({
             "required": ["progressive"],
             "properties": {
@@ -296,10 +329,7 @@ impl JsonSchema for RenderRequest {
                     "properties": {"dielectrics": array, "clear_coats": array, "textures": array},
                     "additionalProperties": false,
                 },
-                "environment": {
-                    "required": ["kind"],
-                    "properties": {"kind": {"type": "string", "enum": ["builtin_hdr", "hdr", "embedded_hdr", "sky"]}},
-                },
+                "environment": {"anyOf": gpu_environments},
             },
             "not": any_of_keys(RUNTIME_ONLY),
         });
@@ -311,6 +341,7 @@ impl JsonSchema for RenderRequest {
             "properties": properties,
             "additionalProperties": false,
             "anyOf": [runtime, gpu],
+            "not": {"required": ["setup", "settings"], "properties": {"setup": {"not": null_only}, "settings": {"not": null_only}}},
         })
     }
 }

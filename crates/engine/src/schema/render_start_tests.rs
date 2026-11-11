@@ -144,9 +144,56 @@ fn strict_keeps_todays_errors() {
             (id, json!({"progressive": true, "denoise_settings": 3})),
             (id, json!({"progressive": true, "lens": [1, 2]})),
             (id, json!({"progressive": true, "settings": 5})),
+            (id, json!({"progressive": true, "environment": {"kind": "builtin_hdr"}})),
+            (id, json!({"progressive": true, "environment": {"kind": "sky", "assume_linear_srgb": true}})),
+            (id, json!({"integrator": "raytrace", "environment": {"resource": "ABC"}})),
         ]);
     }
     assert_strict_keeps_todays_errors(&cases);
+}
+
+/// #13311: a call wrong in two ways gets the handler's first message in strict: `setup` with
+/// `settings`, and a runtime key beside an inline job, come before the form's own checks, and
+/// studio weights with the CPU ray tracer before sampling controls.
+#[test]
+fn strict_keeps_the_handlers_order() {
+    let mut cases = Vec::new();
+    for id in IDS {
+        cases.extend([
+            (id, json!({"setup": "Studio", "settings": {}, "samples": 4})),
+            (id, json!({"setup": "Studio", "settings": {}, "progressive": true, "led_samples": 4})),
+            (id, json!({"settings": {"job": {"method": "raster"}}, "samples": 4})),
+            (id, json!({"settings": {"job": {"method": "raster"}}, "lens": null})),
+            (id, json!({"settings": {"job": {"method": "raster"}}, "progressive": true})),
+            (id, json!({"settings": {"job": {"method": "moon"}}, "samples": 4})),
+            (id, json!({"integrator": "raytrace", "studio_weights": [1, 1, 1], "samples": 4})),
+        ]);
+    }
+    assert_strict_keeps_todays_errors(&cases);
+}
+
+/// #13311: an HDR's `resource` and `expected_sha256` are 64 lowercase hex digits, as the
+/// handler's `HdrId` reads them. `conforms` doesn't read patterns, so the pattern's text is
+/// pinned here, in both forms' environments.
+#[test]
+fn an_hdr_digest_is_64_lowercase_hex_digits() {
+    assert_eq!(super::DIGEST_PATTERN, "^[0-9a-f]{64}$");
+    for (digest, takes) in [("0a".repeat(32), true), ("0A".repeat(32), false), ("0a".repeat(31), false), ("0g".repeat(32), false)] {
+        let runtime = json!({"integrator": "raytrace", "environment": {"resource": digest}});
+        let gpu = json!({"progressive": true, "environment": {"kind": "embedded_hdr", "resource": digest}});
+        for (p, progressive) in [(runtime, false), (gpu, true)] {
+            assert_eq!(crate::cmd::read_render_request(p.clone(), progressive).is_ok(), takes, "{p}");
+            assert_eq!(crate::schema::issues("render.start", &p).is_empty(), takes, "{p}");
+        }
+    }
+    let schema = input_schema_for::<RenderRequest>();
+    let schema = schema.as_value();
+    let runtime = &schema["anyOf"][0]["properties"]["environment"]["properties"];
+    assert_eq!(runtime["resource"]["pattern"], super::DIGEST_PATTERN);
+    assert_eq!(runtime["expected_sha256"]["pattern"], super::DIGEST_PATTERN);
+    let gpu = schema["anyOf"][1]["properties"]["environment"]["anyOf"].as_array().cloned().unwrap_or_default();
+    let patterns: Vec<&Value> = gpu.iter().flat_map(|form| [&form["properties"]["resource"], &form["properties"]["expected_sha256"]]).collect();
+    assert_eq!(patterns.iter().filter(|key| key["pattern"] == super::DIGEST_PATTERN).count(), 2, "{gpu:?}");
 }
 
 /// #13311: an unknown key fails in every mode, as the handler's serde structs refuse it: with
@@ -201,7 +248,18 @@ fn the_check_takes_what_the_schema_allows() {
                 "volume": null, "adaptive": null, "backdrop": null, "aging": [], "studio_weights": [0, 0, 1]}),
             true,
         ),
+        (json!({"setup": "Studio", "settings": {"width": 16}}), false),
+        (json!({"setup": "Studio", "settings": null}), true),
         (json!({"progressive": true, "environment": {"kind": "sky"}}), true),
+        (json!({"progressive": true, "environment": {"kind": "sky", "gradient": {"zenith": [0, 0, 1]}, "intensity": 2}}), true),
+        (json!({"progressive": true, "environment": {"kind": "sky", "assume_linear_srgb": true}}), false),
+        (json!({"progressive": true, "environment": {"kind": "builtin_hdr", "id": "studio", "rotation_rad": 0.5}}), true),
+        (json!({"progressive": true, "environment": {"kind": "builtin_hdr"}}), false),
+        (json!({"progressive": true, "environment": {"kind": "hdr", "path": "a.hdr", "expected_sha256": null, "assume_linear_srgb": true}}), true),
+        (json!({"progressive": true, "environment": {"kind": "hdr"}}), false),
+        (json!({"progressive": true, "environment": {"kind": "embedded_hdr", "resource": "0a".repeat(32)}}), true),
+        (json!({"progressive": true, "environment": {"kind": "embedded_hdr", "path": "a.hdr"}}), false),
+        (json!({"progressive": true, "environment": null}), true),
         (json!({"progressive": true, "samples": 0, "max_depth": 0}), true),
         (json!({"progressive": true, "tone_map": null, "settings": {"width": 16}}), true),
         (json!({"progressive": true, "integrator": "raytrace"}), false),
@@ -228,19 +286,24 @@ fn the_check_takes_what_the_schema_allows() {
 }
 
 /// #13311: in Warn, a request the contract takes runs as it did with the check off and gets no
-/// warnings: Check Render Request's reply is the same, and Render Image queues a job.
+/// warnings: Check Render Request's reply is the same, and Render Image queues a job. Among them
+/// a saved setup with a job and an inline one, which the handler lowers itself.
 #[test]
 fn requests_the_contract_takes_run_as_before() {
     let session = |level: ParamCheck| {
         let mut s = Session { param_check: level, ..Session::default() };
         s.set_render_job_host(Some(CpuHost::cooperative())).unwrap_or_else(|e| panic!("{e}"));
         s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 5})).unwrap_or_else(|e| panic!("{e}"));
+        let raster = json!({"name": "Raster", "set": {"width": 16, "height": 16, "job": {"method": "raster"}}});
+        s.execute("render.settings.set", &raster).unwrap_or_else(|e| panic!("{e}"));
         s
     };
     for p in [
         json!({}),
         json!({"settings": {"width": 16, "height": 16}, "replace": false, "transparent_background": true}),
         json!({"settings": {"width": 16, "height": 16}, "studio_weights": [1, 0.5, 0.25], "integrator": "raster"}),
+        json!({"setup": "Raster", "replace": true}),
+        json!({"settings": {"width": 16, "height": 16, "job": {"method": "raster", "transparent_background": true}}, "studio_weights": [1, 1, 1]}),
     ] {
         let off = session(ParamCheck::Off).execute("render.preflight", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
         let warned = session(ParamCheck::Warn).execute("render.preflight", &p).unwrap_or_else(|e| panic!("{p}: {e}"));

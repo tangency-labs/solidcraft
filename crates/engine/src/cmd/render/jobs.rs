@@ -153,15 +153,65 @@ struct Normalized {
     optics: solidcraft_doc::render_optics::OpticalBindings,
 }
 
+/// The runtime key beside a saved job, refused: the job already decides the method and its options.
+fn job_companion_refusal(object: &serde_json::Map<String, Value>) -> Option<String> {
+    let key = object.keys().find(|key| !matches!(key.as_str(), "setup" | "settings" | "replace" | "studio_weights"))?;
+    Some(format!(
+        "saved job already defines the active method and its options; runtime `{key}` cannot override it (use job: null for a runtime request)"
+    ))
+}
+
+/// What `normalize_saved_job` refuses from the JSON alone, in its order: both `setup` and
+/// `settings`, then inline `settings` with a `job` that doesn't parse or has a runtime key beside
+/// it. A named setup's job is in the design, so its companions are checked there. The contract of
+/// `render.start` and `render.preflight` (`schema::render_start`) calls it too.
+pub(crate) fn saved_job_refusal(params: &Value) -> Option<String> {
+    let object = params.as_object()?;
+    let inline = object.get("settings").filter(|value| !value.is_null());
+    if object.get("setup").is_some_and(|value| !value.is_null()) && inline.is_some() {
+        return Some("choose either setup or settings".into());
+    }
+    let inline = inline.filter(|value| value.get("job").is_some_and(|job| !job.is_null()))?;
+    if let Err(e) = serde_json::from_value::<RenderSetup>(inline.clone()) {
+        return Some(e.to_string());
+    }
+    job_companion_refusal(object)
+}
+
+/// What `prepare` and `prepare_progressive` refuse from the JSON alone before parsing: the runtime
+/// form (`progressive` not true) refuses the GPU controls, the GPU form the CPU and LED options.
+/// The contract of `render.start` and `render.preflight` (`schema::render_start`) calls it too.
+pub(crate) fn form_refusal(params: &Value, progressive: bool) -> Option<&'static str> {
+    let raytrace = params.get("raytrace").and_then(Value::as_object);
+    let environment = params.get("environment");
+    if progressive {
+        let cpu_raytrace = raytrace.is_some_and(|o| o.keys().any(|key| !matches!(key.as_str(), "dielectrics" | "clear_coats" | "textures")));
+        let refused = params.get("integrator").is_some_and(|v| v.as_str() != Some("raster"))
+            || cpu_raytrace
+            || params.get("led_strip").is_some()
+            || params.get("led_samples").is_some()
+            || environment.is_some_and(|e| e.is_object() && e.get("kind").is_none());
+        return refused.then_some("progressive rendering does not accept CPU raytrace, environment or LED options");
+    }
+    let refused = raytrace.is_some_and(|o| ["clear_coats", "textures"].iter().any(|key| o.contains_key(*key)))
+        || environment.is_some_and(|e| e.get("kind").is_some())
+        || ["lens", "lighting", "tone_map", "supersampling", "denoise_settings", "denoise_diagnostics"].iter().any(|key| params.get(*key).is_some())
+        || params.get("denoise").is_some_and(|value| value != &json!(false))
+        || params.get("clamp_indirect").is_some_and(|value| !value.is_null());
+    refused.then_some(
+        "runtime GPU transmission, texture, lens, environment, lighting, tone-map, denoise and clamp_indirect controls require progressive rendering",
+    )
+}
+
 fn normalize_saved_job(s: &Session, params: &Value, command: &str) -> Result<Option<Normalized>> {
     let Some(object) = params.as_object() else {
         return Ok(None);
     };
+    if let Some(message) = saved_job_refusal(params) {
+        return Err(bad(command, message));
+    }
     let named = object.get("setup").filter(|value| !value.is_null());
     let inline = object.get("settings").filter(|value| !value.is_null());
-    if named.is_some() && inline.is_some() {
-        return Err(bad(command, "choose either setup or settings"));
-    }
     let mut settings = if let Some(value) = inline {
         if value.get("job").is_none_or(Value::is_null) {
             return Ok(None);
@@ -175,13 +225,8 @@ fn normalize_saved_job(s: &Session, params: &Value, command: &str) -> Result<Opt
     } else {
         return Ok(None);
     };
-    if let Some(key) = object.keys().find(|key| !matches!(key.as_str(), "setup" | "settings" | "replace" | "studio_weights")) {
-        return Err(bad(
-            command,
-            format!(
-                "saved job already defines the active method and its options; runtime `{key}` cannot override it (use job: null for a runtime request)"
-            ),
-        ));
+    if let Some(message) = job_companion_refusal(object) {
+        return Err(bad(command, message));
     }
     settings.validate().map_err(|e| bad(command, e.to_string()))?;
     s.doc.render.validate_resources(&settings).map_err(|e| bad(command, e.to_string()))?;
@@ -259,18 +304,8 @@ pub(crate) fn prepare_with_metadata(
             retained,
         );
     }
-    let gpu_raytrace =
-        params.get("raytrace").and_then(Value::as_object).is_some_and(|o| ["clear_coats", "textures"].iter().any(|key| o.contains_key(*key)));
-    if gpu_raytrace
-        || params.get("environment").is_some_and(|e| e.get("kind").is_some())
-        || ["lens", "lighting", "tone_map", "supersampling", "denoise_settings", "denoise_diagnostics"].iter().any(|key| params.get(*key).is_some())
-        || params.get("denoise").is_some_and(|value| value != &json!(false))
-        || params.get("clamp_indirect").is_some_and(|value| !value.is_null())
-    {
-        return Err(bad(
-            command,
-            "runtime GPU transmission, texture, lens, environment, lighting, tone-map, denoise and clamp_indirect controls require progressive rendering",
-        ));
+    if let Some(message) = form_refusal(params, false) {
+        return Err(bad(command, message));
     }
     let mut input: Start = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
     let coats = input.settings.as_mut().map_or_else(Default::default, |settings| std::mem::take(&mut settings.coats));
@@ -660,17 +695,8 @@ fn prepare_progressive(
     cancel: &solidcraft_render::job::CancelToken,
     retained: Option<&solidcraft_render::job::RetainedMetadata>,
 ) -> Result<Prepared> {
-    let cpu_raytrace = params
-        .get("raytrace")
-        .and_then(Value::as_object)
-        .is_some_and(|o| o.keys().any(|key| !matches!(key.as_str(), "dielectrics" | "clear_coats" | "textures")));
-    if params.get("integrator").is_some_and(|v| v.as_str() != Some("raster"))
-        || cpu_raytrace
-        || params.get("led_strip").is_some()
-        || params.get("led_samples").is_some()
-        || params.get("environment").is_some_and(|e| e.is_object() && e.get("kind").is_none())
-    {
-        return Err(bad(command, "progressive rendering does not accept CPU raytrace, environment or LED options"));
+    if let Some(message) = form_refusal(params, true) {
+        return Err(bad(command, message));
     }
     let mut input: ProgressiveStart = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
     let coats = input.settings.as_mut().map_or_else(Default::default, |settings| std::mem::take(&mut settings.coats));
