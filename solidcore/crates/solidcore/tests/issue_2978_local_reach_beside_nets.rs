@@ -27,7 +27,7 @@ mod offset_fixture;
 use offset_fixture::Notifications;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::object::ObjectRef;
-use solidcore::mass::integrator::properties::{face_area, face_centroid};
+use solidcore::mass::integrator::properties::{brep_volume_default, face_area, face_centroid};
 use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::knots::Side;
 use solidcore::surface::plane::Plane;
@@ -36,7 +36,6 @@ use solidcore::topology::brep::local_operation::local_operation;
 use solidcore::topology::brep::p1 as bp1;
 use solidcore::topology::brep::p10::TopologyEnv;
 use solidcore::topology::brep::p7::read_from_file;
-use solidcore::topology::brep::validation::volume;
 use solidcore::topology::database_io::FileType;
 use solidcore::topology::face::p2 as face_ops;
 use solidcore::topology::topology::NotifyRecords;
@@ -139,6 +138,11 @@ fn cap_at(k: &Kernel, b: &Brep, z: f64) -> FaceId {
 /// The integrators' accuracy, and the agreement asked of two integrals at it.
 const ACCURACY: f64 = 1e-6;
 const AGREE: f64 = 1e-5;
+
+/// The volume of the manifold solid `b`, integrated at [`ACCURACY`].
+fn volume(k: &mut Kernel, b: &mut Brep) -> solidcore::Result<f64> {
+    brep_volume_default(k, b, ACCURACY)
+}
 
 /// Walls of the extrusion (z from 0 to 10) moved onto planes, the caps kept: the result
 /// is the prism over its bottom cap, ten times the cap's area, and sound, and each new wall
