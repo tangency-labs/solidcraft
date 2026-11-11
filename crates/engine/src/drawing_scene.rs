@@ -431,7 +431,7 @@ pub(crate) fn held(s: &Session, d: &Drawing) -> bool {
 /// A view's lines for a sheet scene, centred on the view, or why it has none.
 #[derive(Clone, Debug)]
 struct Drawn {
-    group: Option<Group>,
+    group: Option<Arc<Group>>,
     status: Status,
     stats: Option<Stats>,
     /// Its boundary, centred on the view as its lines are.
@@ -460,7 +460,7 @@ struct DrawnDimension {
     /// A dimension or a note.
     kind: ObjectKind,
     status: dimension::Status,
-    group: Option<Group>,
+    group: Option<Arc<Group>>,
     /// The fonts its group's text uses.
     fonts: Vec<Font>,
     why: Option<String>,
@@ -577,7 +577,7 @@ fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64,
                 return none(Status::Failed(format!("its lines are more than a paper scene's {MAX_RECORDS} records: choose a smaller scale")));
             }
             let owners = Some(Arc::new(Owners { bodies: set.into_owned().bodies, items }));
-            Drawn { group: Some(group), status: Status::Drawn, stats: Some(lines.stats), boundary, frame: Some(frame), owners, why }
+            Drawn { group: Some(Arc::new(group)), status: Status::Drawn, stats: Some(lines.stats), boundary, frame: Some(frame), owners, why }
         }
         Err(e) => none(Status::Failed(reason(e))),
     }
@@ -613,7 +613,7 @@ fn draw_dimensions(
                 pending,
             };
             match paper {
-                Some(paper) => drawn(Some(paper.group), paper.fonts, paper.why, paper.pending),
+                Some(paper) => drawn(Some(Arc::new(paper.group)), paper.fonts, paper.why, paper.pending),
                 None => {
                     let nothing = !resolved.points.is_empty() && frame(record.view).is_some();
                     drawn(None, Vec::new(), nothing.then(|| "what it measures has no place to draw on its view".to_string()), false)
@@ -687,7 +687,7 @@ fn drawn_notes(
             std::iter::once(&resolved.anchor).chain(&resolved.branches).filter_map(|end| end.point).map(|p| frame.to_paper(p)).collect();
         // Centred on the view, as its frame is: the scene moves it to the view's centre.
         let paper = crate::drawing_note_paper::note_group(note, &text, &tips, LineKind::Thin.width_mm(group), lettering);
-        DrawnDimension { group: Some(paper.group), fonts: paper.fonts, why: paper.why, pending: paper.pending, ..base }
+        DrawnDimension { group: Some(Arc::new(paper.group)), fonts: paper.fonts, why: paper.why, pending: paper.pending, ..base }
     };
     notes.iter().enumerate().map(|(at, note)| one(at, note, &mut tree)).collect()
 }
