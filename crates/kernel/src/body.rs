@@ -998,21 +998,24 @@ impl Body {
         self.paint.as_deref()
     }
 
-    /// The same body with opacity and face colours for export (`None` or opaque with no face
-    /// colours clears them).
+    /// The same body with opacity, face colours and colour names for export (`None`, or opaque
+    /// with no face colours and no name, clears them).
     pub fn with_paint(mut self, p: Option<Paint>) -> Body {
         let clean = |x: f32| if x.is_finite() { x.clamp(0.0, 1.0) } else { 1.0 };
         self.paint = p
             .map(|mut p| {
                 p.opacity = clean(p.opacity);
+                p.name = p.name.as_deref().and_then(colour_name);
                 p.faces.retain(|f| f.color.iter().all(|x| x.is_finite()));
                 for f in &mut p.faces {
                     f.color = f.color.map(|x| x.clamp(0.0, 1.0));
                     f.opacity = clean(f.opacity);
+                    f.name = f.name.as_deref().and_then(colour_name);
                 }
                 p
             })
-            .filter(|p| p.opacity < 1.0 || !p.faces.is_empty())
+            // An opaque body colour's name is kept with it: the paint holds it.
+            .filter(|p| p.opacity < 1.0 || !p.faces.is_empty() || p.name.is_some())
             .map(std::sync::Arc::new);
         self.regularization_protected |= self.paint().is_some_and(|paint| !paint.faces.is_empty());
         self
