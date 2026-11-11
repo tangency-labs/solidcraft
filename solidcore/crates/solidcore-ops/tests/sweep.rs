@@ -892,16 +892,7 @@ fn a_thread_grooves_screw_sweep_crosses_the_record_and_back() {
         (&m10, [0.0, 0.0, -1.5], 1.5, 10.230000000000002),
     ] {
         let tolerance = pitch * 1e-4;
-        let made = screw_sweep(
-            profile,
-            origin,
-            Z,
-            pitch,
-            turns,
-            None,
-            tolerance
-        )
-        .unwrap();
+        let made = screw_sweep(profile, origin, Z, pitch, turns, None, tolerance).unwrap();
         let (record, _) = made.to_record().unwrap();
         solidcore_ops::record_check::validate_built(&record).unwrap();
         solidcore_ops::record_check::agreement(&record).unwrap();
@@ -912,4 +903,82 @@ fn a_thread_grooves_screw_sweep_crosses_the_record_and_back() {
             "{turns} turns: {a} made, {b} read back"
         );
     }
+}
+
+/// The two grooves of a two-start M10 thread (lead 3 mm, each a turn's half further round)
+/// start and end in one axial plane, on opposite sides of the axis: their caps' bounding planes
+/// coincide, so the boolean intersects the walls' exact boundary curves there. The grooves do
+/// not meet, and their union is both of them: each copy of a boundary curve on a screw-swept
+/// wall is that curve, not refused for being no B-spline.
+#[test]
+fn the_grooves_of_a_two_start_thread_unite_as_both() {
+    let groove = |side: f64| {
+        let p = |y: f64, z: f64| [0.0, side * y, z];
+        polygon(&[
+            p(4.188101183952089, -1.6875),
+            p(5.075, -2.199551270189222),
+            p(5.075, -0.800448729810778),
+            p(4.188101183952089, -1.3125),
+        ])
+    };
+    let made =
+        |side| screw_sweep(&groove(side), [0.0, 0.0, -1.5], Z, 3.0, 3.0, None, 3e-4).unwrap();
+    let (a, b) = (made(1.0), made(-1.0));
+    let (va, vb) = (a.volume(1e-8).unwrap(), b.volume(1e-8).unwrap());
+    let both = solidcore_ops::boolean::union_all(vec![a, b]).unwrap();
+    let v = both.volume(1e-8).unwrap();
+    assert!(
+        (v - (va + vb)).abs() <= 1e-6 * v,
+        "{v}, the grooves {va} + {vb}"
+    );
+}
+
+/// A thread cut both ways (SolidCraft's `hand: both`): the right-handed groove and the
+/// left-handed one (the same turn about the reversed axis, rising by a negative pitch, its
+/// profile wound the other way so its walls face out) cross each other twice a turn. The
+/// boolean copies and trims the walls' exact boundary curves where they cross, and the union
+/// and the intersection hold their volumes: V(a ∪ b) + V(a ∩ b) = V(a) + V(b).
+#[test]
+fn the_grooves_of_a_thread_cut_both_ways_unite() {
+    use solidcore_ops::boolean::{boolean, union_all, BooleanOp};
+    let p = |y: f64, z: f64| [0.0, y, z];
+    let mut pts = vec![
+        p(4.188101183952089, -1.6875),
+        p(5.075, -2.199551270189222),
+        p(5.075, -0.800448729810778),
+        p(4.188101183952089, -1.3125),
+    ];
+    let made = |pts: &[[f64; 3]], axis, pitch| {
+        screw_sweep(
+            &polygon(pts),
+            [0.0, 0.0, -1.5],
+            axis,
+            pitch,
+            2.0,
+            None,
+            1.5e-4,
+        )
+        .unwrap()
+    };
+    let right = made(&pts, Z, 1.5);
+    pts.reverse();
+    let left = made(&pts, [0.0, 0.0, -1.0], -1.5);
+    let (vr, vl) = (right.volume(1e-8).unwrap(), left.volume(1e-8).unwrap());
+    let both = boolean(
+        right.copy().unwrap(),
+        left.copy().unwrap(),
+        BooleanOp::Intersect,
+    )
+    .unwrap()
+    .unwrap();
+    let either = union_all(vec![right, left]).unwrap();
+    let (vu, vi) = (either.volume(1e-8).unwrap(), both.volume(1e-8).unwrap());
+    assert!(
+        vi > 0.0 && vu < vr + vl,
+        "they cross: {vu} of {vr} + {vl}, {vi} in both"
+    );
+    assert!(
+        (vu + vi - (vr + vl)).abs() <= 1e-6 * (vr + vl),
+        "{vu} + {vi} vs {vr} + {vl}"
+    );
 }
