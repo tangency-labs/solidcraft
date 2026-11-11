@@ -484,8 +484,6 @@ pub struct UpstreamFixes {
     pub offset_swap_uv_extended_distance: bool,
     /// Thickening a sheet (`ShellBrep` with `bCreateOffsetSolid` on a non-manifold input) puts every planar side wall onto its plane (the fork's `sm_PutPlanarFaceOnItsPlane`) and deletes the old surface's seam it leaves as a slit, where upstream keeps each wall as the ruled surface between the lamina edge and its offset: a tube's end rings are `SmPlane`s with two loops, not `SmSurfOfRevolution`s (WR-564, #1599; the fork's tangency-labs/smlib#62).
     pub thicken_planar_side_walls: bool,
-    /// A volumetric Boolean removes the zero-area loops a contact curve inside a face leaves, and splits shells joined only through them (WR-360, #746).
-    pub remove_slit_loops_where_solids_touch: bool,
     /// A face a Boolean takes over from its second operand keeps that operand's exact UV trims (WR-361, #488).
     pub keep_operand_uv_trims: bool,
     /// `smgu_EvaluateCurveContinuity`'s G2 test compares the two sides' Frenet curvatures and normals (WR-380, #933/#838).
@@ -587,20 +585,6 @@ pub struct UpstreamFixes {
     pub volume_lift_third_derivative_terms: bool,
     /// `SmSurface::DropCurve` tests the drop domain's own V length for `bDegenSurfV`, not the U length again, so a surface whose natural domain is degenerate only in V reports `SM_ERR_DEGENERATE_SURFACE` (`SM_CTC_DEGENSURFACE_FAIL`) and its failure record sets `bDegenSurfV` from V; upstream copies the U test, misses the early exit and goes on to drop (WR-100, 2026-10-31 addendum). Off by default for pinned C++ parity.
     pub drop_curve_v_domain_degeneracy: bool,
-    /// `SmSurface::DropCurve` gives a curve lying on a cylinder (an `SmCylinder`, or an
-    /// `SmCone` of zero semi-angle) its exact UV curve: a plane section (the ellipse,
-    /// circle or line a plane cuts from the cylinder, as the boolean's plane/cylinder
-    /// edges and an exact round's rails are) is a rational B-spline in the cylinder's
-    /// rational parameters, built in the curve's own parameter with twice its degree,
-    /// where upstream traces and fits a cubic within the drop tolerance: the trims of
-    /// a tilted peg's rim sat 2e-6 to 1e-5 off their edge, and the cylinder face's area
-    /// and the body's volume carried that error (WR-680, #2109; see
-    /// `plan/upstream-issues/WR-680--cylinder-plane-section-uv-trims-are-fits.md`). It
-    /// is used only where the UV curve lifts onto the curve within round-off and stays
-    /// in the domain; an iso-parameter curve keeps the drop's own exact line, and a
-    /// curve that crosses the seam or is not on the cylinder is traced as upstream.
-    /// Off by default for pinned C++ parity.
-    pub cylinder_plane_section_trims_exact: bool,
     /// `SmTorus::AssertValid` tests its V (minor) interval, not the U interval twice, and reports its U and V overlap tests as 3 and 4 (and `SmSurfOfRevolution`'s U test as 13), the ids their labels give them, where upstream reports them as 2 and 3 (and 2) (WR-538, #482; the fork's tangency-labs/smlib@0cd9d08).
     pub torus_check_reads_v_interval: bool,
     /// `SmTorus::AssertValid` reports a spindle torus whose V interval runs through an apex (`V = ±(90 + asin(R/r))`) as test 5, "Self Intersection", where upstream clears its result with no report and tests the U interval against `90 + acos(R/r)`, failing every spindle torus with a whole turn of U (WR-539; the fork's tangency-labs/smlib@daba678).
@@ -818,8 +802,6 @@ pub struct UpstreamFixes {
     pub slice_coincident_faces_sheet_side: bool,
     /// After step 8, a Union, Difference or Intersection whose result is a manifold solid with more than two regions (the infinite region first) runs `SetRegionIsVoidFlagsForNestedSolids`, which puts each region's enclosing shell first (the fork's tangency-labs/smlib `abastran/void-shell-check`). It also rewrites the void flags by nesting from the infinite region, so where step 7 left flags that disagree with the nesting the result's void flags change too, not only its shell order (WR-265, #388; `plan/upstream-issues/WR-265--manifold-boolean-void-shell-first.md` and its 2026-10-26 addendum).
     pub boolean_outer_shell_first: bool,
-    /// The Boolean's temporary origin shift returns failed bounding-box and operand-transform statuses instead of continuing with differently placed bodies or reporting success after a failed restoration (WR-586, #483). If shifting the second operand fails, the first is restored; cleanup attempts every surviving operand and returns its first error. Off by default for pinned SMLib compatibility.
-    pub boolean_temporary_transform_statuses: bool,
     /// Planar path sweeps propagate mandatory operation failures and delete their
     /// owned temporary B-reps on failure (#483); the mitre's `BrepIntersect` and
     /// `GlobalCurveSolve` searches are returned too, as the fork does (tangency-labs/smlib

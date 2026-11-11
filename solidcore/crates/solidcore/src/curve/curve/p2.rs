@@ -327,8 +327,8 @@ const OP_GS: &str = "curve::curve::p2::CurvePropertyGs";
 const OP_EVAL: &str = "curve::curve::p2::Curve::evaluate";
 
 /// `SM_ERR` of a base-class default.
-const fn base_err() -> SolidError {
-    SolidError::sm_err(OP_BASE)
+fn base_err() -> SolidError {
+    SolidError::curve_failed(OP_BASE, "the curve kind does not implement the method")
 }
 
 // ---- the evaluation interface ---------------------------------------------------------
@@ -1450,10 +1450,9 @@ impl Curve {
         if let Some(b) = base {
             return b.evaluate_into(t, from_left, non_zero_tangents, out);
         }
-        let num_derivs = out
-            .len()
-            .checked_sub(1)
-            .ok_or_else(|| SolidError::sm_err(OP_EVAL))?;
+        let num_derivs = out.len().checked_sub(1).ok_or_else(|| {
+            SolidError::curve_failed(OP_EVAL, "there is no slot to evaluate into")
+        })?;
         let pv = self.evaluate(k, t, num_derivs, from_left, non_zero_tangents)?;
         for (i, slot) in out.iter_mut().enumerate() {
             *slot = at(&pv, i);
@@ -2128,7 +2127,10 @@ impl Curve {
         // make sure splitParam is within the parameter range
         let mut ivl = self.natural_interval();
         if !ivl.contains_value(split_param, 0.0) {
-            return Err(SolidError::sm_err(OP_SPLIT));
+            return Err(SolidError::curve_failed(
+                OP_SPLIT,
+                "the split parameter is outside the curve's interval",
+            ));
         }
 
         // limit a valid splitParam so that it can't be on the end or very close to the end
@@ -2137,10 +2139,16 @@ impl Curve {
         let tol_min = EFF_ZERO * 100.0 * (1.0 + min.abs());
         let tol_max = EFF_ZERO * 100.0 * (1.0 + max.abs());
         if split_param < min + tol_min {
-            return Err(SolidError::sm_err(OP_SPLIT));
+            return Err(SolidError::curve_failed(
+                OP_SPLIT,
+                "the split parameter is at the curve's start",
+            ));
         }
         if split_param > max - tol_max {
-            return Err(SolidError::sm_err(OP_SPLIT));
+            return Err(SolidError::curve_failed(
+                OP_SPLIT,
+                "the split parameter is at the curve's end",
+            ));
         }
 
         let mut copy = self.copy(k)?;
@@ -2313,7 +2321,10 @@ impl Curve {
             ISO_CURVE_TYPE => IsoCurve::read_from_db(k, db, version).map(Self::from),
             OFFSET_CURVE_TYPE => OffsetCurve::read_from_db(k, db, version).map(Self::from),
             PROJECTED_CURVE_TYPE => ProjectedCurve::read_from_db(k, db, version).map(Self::from),
-            _ => Err(SolidError::sm_err(OP_READ)),
+            _ => Err(SolidError::curve_failed(
+                OP_READ,
+                "the curve type read is not known",
+            )),
         };
         db.leave_nested();
         result
@@ -2812,7 +2823,10 @@ pub fn pop_stack(stack: &mut Vec<f64>) -> Result<(f64, [Vec3; 2])> {
 /// `SM_ERR` when the stack holds fewer than 7 values.
 pub fn stack_look(stack: &[f64]) -> Result<(f64, [Vec3; 2])> {
     let Some(&[t, x0, y0, z0, x1, y1, z1]) = stack.last_chunk() else {
-        return Err(SolidError::sm_err(OP_STACK));
+        return Err(SolidError::curve_failed(
+            OP_STACK,
+            "the stack holds fewer than 7 values",
+        ));
     };
     Ok((t, [Vec3::new(x0, y0, z0), Vec3::new(x1, y1, z1)]))
 }
@@ -2853,7 +2867,10 @@ pub fn add_to_curve(
             || p1.distance(last_pt) > pnt_scale * EFF_ZERO
         {
             // signal an error for now
-            return Err(SolidError::sm_err(OP_ADD));
+            return Err(SolidError::curve_failed(
+                OP_ADD,
+                "the added piece does not start where the curve ends",
+            ));
         }
     } else if !knots.is_empty() {
         // knots without control points: upstream reads past the polygon
@@ -4007,7 +4024,7 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
         let mut swap = false;
         let curve_node = self.base.branch_node(branch, 0)?;
         let tree = self.base.tree(0)?;
-        let null = || SolidError::null_pointer(OP_GS);
+        let null = || SolidError::curve_missing(OP_GS, "a curve node's child");
         let node1 = tree.node(curve_node.child1.ok_or_else(null)?)?;
         let node2 = tree.node(curve_node.child2.ok_or_else(null)?)?;
         let sph1 = node1.bbox.sphere_bound();

@@ -314,7 +314,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.offset_clip_right_side_out = true;
     f.revolution_offset_axis_both_sides = true;
     f.offset_extended_edges_mated = true;
-    f.remove_slit_loops_where_solids_touch = true;
     f.keep_operand_uv_trims = true;
     f.geometric_g2_continuity = true;
     f.proto_vertex_miss_is_false = true;
