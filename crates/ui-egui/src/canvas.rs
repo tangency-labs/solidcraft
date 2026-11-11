@@ -231,7 +231,7 @@ fn edge_sides(m: &Mesh, index: usize, p: Vec3) -> Option<Vec<(Vec3, Vec3)>> {
 }
 
 /// The outward direction between the two faces at an edge: the mean of their normals.
-fn edge_bisector(m: &Mesh, index: usize, p: Vec3) -> Option<Vec3> {
+pub(crate) fn edge_bisector(m: &Mesh, index: usize, p: Vec3) -> Option<Vec3> {
     edge_sides(m, index, p)?.iter().fold(Vec3::ZERO, |sum, (n, _)| sum + *n).normalized()
 }
 

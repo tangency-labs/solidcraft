@@ -69,6 +69,13 @@ pub fn started(app: &SolveApp) -> bool {
     app.viewport.drag_extrude.gesture.as_ref().is_some_and(|g| g.started)
 }
 
+/// Drop a press that has not turned into a pull yet, as when an edge drag claims it.
+pub fn forget(app: &mut SolveApp) {
+    if !started(app) {
+        app.viewport.drag_extrude.gesture = None;
+    }
+}
+
 /// Note a press at `at` when it is on a planar face or a profile.
 pub fn press(app: &mut SolveApp, proj: &Proj, at: Pos2) {
     app.viewport.drag_extrude.gesture = None;
