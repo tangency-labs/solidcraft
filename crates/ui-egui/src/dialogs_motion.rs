@@ -597,11 +597,7 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
         choice_row(ui, "Study", "ms_study", &mut pick, &labels);
         if pick != was {
             match pick.checked_sub(1).and_then(|i| studies.get(i)).map(|(id, _)| study_tracks(&app.session, id, true)) {
-                Some(Ok((id, n, st, t))) => {
-                    (*study, *name, *steps, *tracks, *shown, *playing) = (Some(id.to_string()), n, st, t, None, false);
-                    // The last collision check was for the study shown before.
-                    analysis.forget_collisions();
-                }
+                Some(Ok((id, n, st, t))) => (*study, *name, *steps, *tracks, *shown, *playing) = (Some(id.to_string()), n, st, t, None, false),
                 Some(Err(e)) => app.set_status(e, true),
                 None => *study = None,
             }
@@ -836,7 +832,8 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
                 });
             }
         });
-        plot::compact_collisions(ui, analysis, step, playing, &t);
+        let study_now = study_params(&app.session, name, study.as_deref(), steps, tracks);
+        plot::compact_collisions(app, ui, analysis, &study_now, inputs, step, playing, &t);
     }
     if let Some(e) = error {
         ui.vertical(|ui| {
