@@ -179,7 +179,7 @@ pub(in crate::render_workspace) fn dialog(app: &mut SolveApp, ctx: &egui::Contex
     let subtitle = if draft.variant == "rig" {
         let emitters = draft.plan["lighting"]["area_lights"].as_array().map_or(0, Vec::len) + usize::from(!draft.plan["lighting"]["sun"].is_null());
         let cards = draft.plan["stage"].as_array().map_or(0, Vec::len);
-        crate::i18n::format("render.stage_panels.rig_summary", &[("emitters", &emitters.to_string()), ("cards", &cards.to_string())])
+        solidcraft_ui_text::format("render.stage_panels.rig_summary", &[("emitters", &emitters.to_string()), ("cards", &cards.to_string())])
     } else {
         app.tr(&format!("render.stage_panels.subtitle_{}", draft.variant)).to_string()
     };
@@ -214,11 +214,14 @@ pub(in crate::render_workspace) fn dialog(app: &mut SolveApp, ctx: &egui::Contex
         title: &title,
         name: &draft.name,
         subtitle: &subtitle,
+        replaces_label: solidcraft_ui_text::tr("render.stage_panels.replaces"),
         replaces: &replaces,
+        kept_label: solidcraft_ui_text::tr("render.stage_panels.kept"),
         kept: &kept,
         acknowledgement: &acknowledgement,
+        acknowledge_handle: "render:review:acknowledge",
         apply: &apply_label,
-        copy: draft.variant == "physical",
+        secondary: (draft.variant == "physical").then(|| solidcraft_ui_text::tr("render.physical_copy_plan")),
         notice: (draft.variant == "physical").then_some(physical_notice.as_str()),
     };
     let can_apply = current && (!needs_indirect || draft.enable_indirect);
@@ -293,7 +296,7 @@ pub(in crate::render_workspace) fn dialog(app: &mut SolveApp, ctx: &egui::Contex
                     ui_kit::text(ui, &draft.name, ui_kit::Text::Inline);
                 });
                 let count = draft.plan["extended_profile"]["properties"].as_array().map_or(0, Vec::len);
-                let candidates = crate::i18n::format("render.stage_panels.candidate_summary", &[("count", &count.to_string())]);
+                let candidates = solidcraft_ui_text::format("render.stage_panels.candidate_summary", &[("count", &count.to_string())]);
                 ui_kit::text(ui, &candidates, ui_kit::Text::Note("review:candidates"));
                 ui_kit::text(ui, app.tr("render.stage_panels.partial_reference"), ui_kit::Text::Note("review:partial"));
             }

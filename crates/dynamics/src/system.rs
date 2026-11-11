@@ -12,13 +12,20 @@
 //!
 //! through the Schur complement `(J M⁻¹ Jᵀ) λ = J M⁻¹ F − γ` (`linalg::solve_psd`, which takes
 //! repeated joint equations), and `λ` gives the joints' reactions.
+//!
+//! Joint springs and motors act along joint values (generalized forces `Jᵀ Q` along a value's
+//! row); drives add a rheonomic equation `value − f(t) = 0` (so `J u = ḟ`, `J u̇ = f̈ − J̇ u`),
+//! and motion links a linear one between two values. The values they use are also kept in the
+//! state, so an angle counts whole turns.
+
+use std::f64::consts::TAU;
 
 use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
 
 use crate::linalg::{Sym, solve_psd};
 use crate::math::{Mat3, Quat, cross2};
-use crate::model::{Force, JointKind, MAX_MAGNITUDE, MAX_PROJECTION_ITERATIONS, Model, marker_axes};
+use crate::model::{Coord, Force, JointKind, MAX_MAGNITUDE, MAX_PROJECTION_ITERATIONS, Model, Profile, marker_axes};
 use crate::{BodyState, DynamicsError, Energy, JointResult, Result};
 
 /// Numbers per body in the flat state: x (3), q (4), v (3), ω (3).
@@ -97,18 +104,32 @@ struct MarkerWorld {
 /// A body's part of one Jacobian row: (linear, angular).
 type Block = (usize, Vec3, Vec3);
 
-/// One constraint equation at a state.
+/// One constraint equation at a state: `Φ = 0`, `J u = rate_target`.
 pub(crate) struct Row {
+    /// A's and B's parts (for a joint's own equations, its two sides).
     a: Option<Block>,
     b: Option<Block>,
+    /// A motion link's driver's parts.
+    c: Option<Block>,
+    d: Option<Block>,
     pub(crate) phi: f64,
-    /// `J̇ u`: the equation's second derivative at zero accelerations.
+    /// `J̇ u` less the imposed acceleration: the equation's second derivative at zero
+    /// accelerations.
     jdot_u: f64,
+    /// The rate a drive imposes (`ḟ`); 0 for the others.
+    rate_target: f64,
+}
+
+fn scaled(b: Option<Block>, k: f64) -> Option<Block> {
+    b.map(|(i, l, a)| (i, l * k, a * k))
 }
 
 impl Row {
+    fn new(a: Option<Block>, b: Option<Block>, phi: f64, jdot_u: f64) -> Row {
+        Row { a, b, c: None, d: None, phi, jdot_u, rate_target: 0.0 }
+    }
     fn blocks(&self) -> impl Iterator<Item = &Block> {
-        self.a.iter().chain(self.b.iter())
+        self.a.iter().chain(self.b.iter()).chain(self.c.iter()).chain(self.d.iter())
     }
     /// `J u`.
     fn rate(&self, kin: &[Kin]) -> f64 {
@@ -116,13 +137,58 @@ impl Row {
     }
 }
 
+/// How a joint value is measured.
+#[derive(Clone, Copy, PartialEq)]
+enum CoordKind {
+    /// B's turn about A's z (from A's x towards A's y).
+    Angle,
+    /// B's origin along one of A's axes (0, 1, 2 = x, y, z).
+    Along(usize),
+}
+
+/// A joint value springs, motors, drives or links act on. Its value is kept in the state too,
+/// so an angle counts whole turns.
+#[derive(Clone, Copy)]
+struct CoordConst {
+    joint: usize,
+    kind: CoordKind,
+}
+
+struct LinkConst {
+    driver: usize,
+    follower: usize,
+    ratio: f64,
+    offset: f64,
+}
+
 /// A model ready to integrate.
+///
+/// The flat state holds every body (`STRIDE` numbers each), then the tracked joint values,
+/// then the work put in (motors, drives, loads) and the energy dissipated (dampers).
 pub(crate) struct System {
     bodies: Vec<BodyConst>,
     joints: Vec<JointConst>,
+    /// Point springs and loads.
     forces: Vec<Force>,
     gravity: Vec3,
     baumgarte: Option<(f64, f64)>,
+    coords: Vec<CoordConst>,
+    /// (value, stiffness, damping, rest).
+    springs: Vec<(usize, f64, f64, f64)>,
+    /// (value, effort).
+    motors: Vec<(usize, Profile)>,
+    /// (value, motion).
+    drives: Vec<(usize, Profile)>,
+    links: Vec<LinkConst>,
+}
+
+/// `θ` turned by whole turns to lie nearest `near`.
+fn unwrap_angle(theta: f64, near: f64) -> f64 {
+    if !near.is_finite() {
+        return theta;
+    }
+    let turns = ((near - theta) / TAU).round();
+    if turns.is_finite() { theta + TAU * turns } else { theta }
 }
 
 /// Accelerations and multipliers at one state.
@@ -164,12 +230,81 @@ impl System {
             .iter()
             .map(|j| Ok(JointConst { kind: j.kind, a: marker_const(&j.a)?, b: marker_const(&j.b)? }))
             .collect::<Result<Vec<_>>>()?;
-        Ok(System { bodies, joints, forces: model.forces.clone(), gravity: model.gravity, baumgarte })
+        let mut sys = System {
+            bodies,
+            joints,
+            forces: model.forces.iter().filter(|f| matches!(f, Force::Spring { .. } | Force::Load { .. })).cloned().collect(),
+            gravity: model.gravity,
+            baumgarte,
+            coords: Vec::new(),
+            springs: Vec::new(),
+            motors: Vec::new(),
+            drives: Vec::new(),
+            links: Vec::new(),
+        };
+        let mut found: Vec<Coord> = Vec::new();
+        let mut index = |c: Coord, sys: &mut System| -> Result<usize> {
+            if let Some(i) = found.iter().position(|f| *f == c) {
+                return Ok(i);
+            }
+            let kind = model.joints.get(c.joint).map(|j| j.kind);
+            let kind = match (kind, c.dof) {
+                (Some(JointKind::Revolute | JointKind::Cylindrical), 0) | (Some(JointKind::Planar), 2) => CoordKind::Angle,
+                (Some(JointKind::Slider), 0) | (Some(JointKind::Cylindrical), 1) => CoordKind::Along(2),
+                (Some(JointKind::Planar), d @ (0 | 1)) => CoordKind::Along(d),
+                _ => return Err(DynamicsError::InvalidModel(format!("joint {} has no value {} to act on", c.joint, c.dof))),
+            };
+            found.push(c);
+            sys.coords.push(CoordConst { joint: c.joint, kind });
+            Ok(found.len() - 1)
+        };
+        for f in &model.forces {
+            match f {
+                Force::JointSpring { at, stiffness, damping, rest } => {
+                    let i = index(*at, &mut sys)?;
+                    sys.springs.push((i, *stiffness, *damping, *rest));
+                }
+                Force::Motor { at, effort } => {
+                    let i = index(*at, &mut sys)?;
+                    sys.motors.push((i, effort.clone()));
+                }
+                Force::Spring { .. } | Force::Load { .. } => {}
+            }
+        }
+        for d in &model.drives {
+            let i = index(d.at, &mut sys)?;
+            sys.drives.push((i, d.motion.clone()));
+        }
+        let mut pending = Vec::new();
+        for l in &model.links {
+            pending.push((index(l.driver, &mut sys)?, index(l.follower, &mut sys)?, l.ratio, l.offset));
+        }
+        // A link without an offset keeps the one that holds at the start.
+        let y = sys.initial_state(model)?;
+        let kin = sys.kinematics(&y);
+        let value = |i: usize| sys.coord_row(&kin, &y, i).phi;
+        let links = pending
+            .into_iter()
+            .map(|(d, f, ratio, offset)| LinkConst { driver: d, follower: f, ratio, offset: offset.unwrap_or_else(|| value(f) - ratio * value(d)) })
+            .collect();
+        sys.links = links;
+        Ok(sys)
+    }
+
+    fn coord_base(&self) -> usize {
+        self.bodies.len() * STRIDE
+    }
+    fn work_base(&self) -> usize {
+        self.coord_base() + self.coords.len()
+    }
+    /// Numbers in the flat state.
+    pub(crate) fn state_len(&self) -> usize {
+        self.work_base() + 2
     }
 
     /// The flat state of the model's starting conditions.
-    pub(crate) fn initial_state(model: &Model) -> Result<Vec<f64>> {
-        let mut y = vec![0.0; model.bodies.len() * STRIDE];
+    pub(crate) fn initial_state(&self, model: &Model) -> Result<Vec<f64>> {
+        let mut y = vec![0.0; self.state_len()];
         for (i, b) in model.bodies.iter().enumerate() {
             let at = i * STRIDE;
             let q = b.orientation.normalized().ok_or_else(|| DynamicsError::InvalidModel(format!("body {i}: orientation is not a rotation")))?;
@@ -178,7 +313,46 @@ impl System {
             put3(&mut y, at + 7, b.velocity);
             put3(&mut y, at + 10, b.angular_velocity);
         }
+        // A driven angle counts its turns from where its motion starts.
+        for (i, motion) in &self.drives {
+            if let Some(s) = y.get_mut(self.coord_base() + i) {
+                *s = motion.eval(0.0).0;
+            }
+        }
+        self.resync(&mut y);
         Ok(y)
+    }
+
+    /// Sets each tracked joint value to the one the bodies show (an angle: the turn nearest
+    /// the tracked one).
+    pub(crate) fn resync(&self, y: &mut [f64]) {
+        let kin = self.kinematics(y);
+        let values: Vec<f64> = (0..self.coords.len()).map(|i| self.coord_row(&kin, y, i).phi).collect();
+        for (i, v) in values.into_iter().enumerate() {
+            if let Some(s) = y.get_mut(self.coord_base() + i) {
+                *s = v;
+            }
+        }
+    }
+
+    /// A tracked joint value's equation row: `Φ` is the value itself, `J u` its rate.
+    fn coord_row(&self, kin: &[Kin], y: &[f64], i: usize) -> Row {
+        let (Some(c), tracked) = (self.coords.get(i), y.get(self.coord_base() + i).copied().unwrap_or(f64::NAN)) else {
+            return Row::new(None, None, 0.0, 0.0);
+        };
+        let Some(j) = self.joints.get(c.joint) else { return Row::new(None, None, 0.0, 0.0) };
+        let a = Self::marker_world(kin, &j.a);
+        let b = Self::marker_world(kin, &j.b);
+        let [ax, ay, az] = a.axes;
+        match c.kind {
+            CoordKind::Angle => {
+                let bx = b.axes[0];
+                let theta = unwrap_angle(bx.dot(ay).atan2(bx.dot(ax)), tracked);
+                // θ̇ = (ω_B − ω_A)·z_A; at zero accelerations its rate is (ω_B − ω_A)·(ω_A × z_A).
+                Row::new(a.body.map(|k| (k, Vec3::ZERO, -az)), b.body.map(|k| (k, Vec3::ZERO, az)), theta, (b.w - a.w).dot(a.w.cross(az)))
+            }
+            CoordKind::Along(k) => dot2_row(&a, a.axes.get(k).copied().unwrap_or(az), &b),
+        }
     }
 
     /// Unit quaternions again after a step.
@@ -210,15 +384,40 @@ impl System {
         MarkerWorld { body: m.body, r, p: k.x + r, pdot: k.v + k.w.cross(r), axes, w: k.w }
     }
 
-    /// The constraint equations of every joint at `kin`, in joint order.
-    fn rows(&self, kin: &[Kin]) -> Vec<Row> {
+    /// The constraint equations at time `t`: every joint's in joint order, then one per drive
+    /// (`value − f(t) = 0`), then one per link (`follower − ratio·driver − offset = 0`).
+    fn rows(&self, kin: &[Kin], t: f64, y: &[f64]) -> Vec<Row> {
         let mut rows = Vec::new();
         for j in &self.joints {
             let a = Self::marker_world(kin, &j.a);
             let b = Self::marker_world(kin, &j.b);
             joint_rows(j.kind, &a, &b, &mut rows);
         }
+        for (i, motion) in &self.drives {
+            let (f, fd, fdd) = motion.eval(t);
+            let mut r = self.coord_row(kin, y, *i);
+            r.phi -= f;
+            r.jdot_u -= fdd;
+            r.rate_target = fd;
+            rows.push(r);
+        }
+        for l in &self.links {
+            let (f, d) = (self.coord_row(kin, y, l.follower), self.coord_row(kin, y, l.driver));
+            rows.push(Row {
+                a: f.a,
+                b: f.b,
+                c: scaled(d.a, -l.ratio),
+                d: scaled(d.b, -l.ratio),
+                phi: f.phi - l.ratio * d.phi - l.offset,
+                jdot_u: f.jdot_u - l.ratio * d.jdot_u,
+                rate_target: 0.0,
+            });
+        }
         rows
+    }
+
+    fn joint_row_count(&self) -> usize {
+        self.joints.iter().map(|j| j.kind.equations()).sum()
     }
 
     /// `M⁻¹` applied to one body's (force, torque).
@@ -264,8 +463,38 @@ impl System {
         (s, w)
     }
 
-    /// Applied forces and torques (about each centre of mass, world), gyroscopic terms included.
-    fn applied(&self, kin: &[Kin]) -> Vec<(Vec3, Vec3)> {
+    /// Applied forces and torques (about each centre of mass, world), gyroscopic terms included,
+    /// and the power they put in and the power dampers take out.
+    fn applied(&self, kin: &[Kin], t: f64, y: &[f64]) -> (Vec<(Vec3, Vec3)>, f64, f64) {
+        let mut input = 0.0;
+        let mut dissipated = 0.0;
+        let mut out = self.point_forces(kin, &mut input, &mut dissipated);
+        // A generalized force Q along a joint value is Jᵀ Q on the bodies.
+        let mut along = |row: &Row, q: f64| {
+            for (i, l, a) in row.blocks() {
+                if let Some(slot) = out.get_mut(*i) {
+                    slot.0 += *l * q;
+                    slot.1 += *a * q;
+                }
+            }
+        };
+        for (i, k, c, rest) in &self.springs {
+            let row = self.coord_row(kin, y, *i);
+            let rate = row.rate(kin);
+            along(&row, -k * (row.phi - rest) - c * rate);
+            dissipated += c * rate * rate;
+        }
+        for (i, effort) in &self.motors {
+            let row = self.coord_row(kin, y, *i);
+            let q = effort.eval(t).0;
+            along(&row, q);
+            input += q * row.rate(kin);
+        }
+        (out, input, dissipated)
+    }
+
+    /// Gravity, gyroscopic terms, point springs and loads.
+    fn point_forces(&self, kin: &[Kin], input: &mut f64, dissipated: &mut f64) -> Vec<(Vec3, Vec3)> {
         let mut out: Vec<(Vec3, Vec3)> = self
             .bodies
             .iter()
@@ -293,21 +522,25 @@ impl System {
                     let tension = stiffness * (len - free_length) + damping * rate + preload;
                     add(a.body, ra, n * tension, Vec3::ZERO);
                     add(b.body, rb, n * -tension, Vec3::ZERO);
+                    *dissipated += damping * rate * rate;
                 }
                 Force::Load { body, point, force, torque } => {
-                    let r = kin.get(body).map_or(Vec3::ZERO, |k| k.rot.mul_vec(point));
+                    let k = kin.get(body).copied().unwrap_or(GROUND);
+                    let r = k.rot.mul_vec(point);
                     add(Some(body), r, force, torque);
+                    *input += force.dot(k.v + k.w.cross(r)) + torque.dot(k.w);
                 }
+                Force::JointSpring { .. } | Force::Motor { .. } => {}
             }
         }
         out
     }
 
     /// The state's derivative and the joints' multipliers.
-    pub(crate) fn accelerations(&self, y: &[f64]) -> Result<Accel> {
+    pub(crate) fn accelerations(&self, t: f64, y: &[f64]) -> Result<Accel> {
         let kin = self.kinematics(y);
-        let applied = self.applied(&kin);
-        let rows = self.rows(&kin);
+        let (applied, mut input, dissipated) = self.applied(&kin, t, y);
+        let rows = self.rows(&kin, t, y);
         let (s, w) = self.schur(&kin, &rows);
         // Unconstrained accelerations M⁻¹F.
         let free: Vec<(Vec3, Vec3)> = applied.iter().enumerate().map(|(i, (f, t))| self.minv(&kin, i, *f, *t)).collect();
@@ -315,7 +548,7 @@ impl System {
             .iter()
             .map(|r| {
                 let jmf: f64 = r.blocks().map(|(i, l, a)| free.get(*i).map_or(0.0, |(fl, fa)| l.dot(*fl) + a.dot(*fa))).sum();
-                let stab = self.baumgarte.map_or(0.0, |(alpha, beta)| 2.0 * alpha * r.rate(&kin) + beta * beta * r.phi);
+                let stab = self.baumgarte.map_or(0.0, |(alpha, beta)| 2.0 * alpha * (r.rate(&kin) - r.rate_target) + beta * beta * r.phi);
                 jmf + r.jdot_u + stab
             })
             .collect();
@@ -338,25 +571,50 @@ impl System {
             put3(&mut ydot, at + 7, a.0);
             put3(&mut ydot, at + 10, a.1);
         }
+        for i in 0..self.coords.len() {
+            let rate = self.coord_row(&kin, y, i).rate(&kin);
+            if let Some(s) = ydot.get_mut(self.coord_base() + i) {
+                *s = rate;
+            }
+        }
+        // A drive's generalized force is −λ along its value: its power is −λ·(value rate).
+        let first_drive = self.joint_row_count();
+        for k in 0..self.drives.len() {
+            if let (Some(r), Some(l)) = (rows.get(first_drive + k), lambda.get(first_drive + k)) {
+                input -= l * r.rate(&kin);
+            }
+        }
+        let wb = self.work_base();
+        for (k, p) in [input, dissipated].into_iter().enumerate() {
+            if let Some(s) = ydot.get_mut(wb + k) {
+                *s = p;
+            }
+        }
         if !ydot.iter().all(|x| x.is_finite()) {
             return Err(DynamicsError::Diverged { time: f64::NAN });
         }
         Ok(Accel { ydot, lambda, rows, rank })
     }
 
-    /// The largest joint equation error at `y`.
-    pub(crate) fn constraint_error(&self, y: &[f64]) -> f64 {
-        self.rows(&self.kinematics(y)).iter().map(|r| r.phi.abs()).fold(0.0, f64::max)
+    /// What each drive applies along its value (mN·mm or mN), from the multipliers.
+    pub(crate) fn drive_efforts(&self, acc: &Accel) -> Vec<f64> {
+        let first = self.joint_row_count();
+        (0..self.drives.len()).map(|k| -acc.lambda.get(first + k).copied().unwrap_or(0.0)).collect()
+    }
+
+    /// The largest constraint equation error at `y` and time `t`.
+    pub(crate) fn constraint_error(&self, t: f64, y: &[f64]) -> f64 {
+        self.rows(&self.kinematics(y), t, y).iter().map(|r| r.phi.abs()).fold(0.0, f64::max)
     }
 
     /// Moves the bodies the least (mass-weighted) onto the joints: Gauss–Newton on `Φ = 0`.
     /// Returns the error left.
-    pub(crate) fn project_positions(&self, y: &mut [f64], tol: f64) -> Result<f64> {
+    pub(crate) fn project_positions(&self, t: f64, y: &mut [f64], tol: f64) -> Result<f64> {
         let mut err;
         let mut iteration = 0;
         loop {
             let kin = self.kinematics(y);
-            let rows = self.rows(&kin);
+            let rows = self.rows(&kin, t, y);
             err = rows.iter().map(|r| r.phi.abs()).fold(0.0, f64::max);
             if !(err > tol) || iteration >= MAX_PROJECTION_ITERATIONS {
                 break;
@@ -387,15 +645,16 @@ impl System {
         Ok(err)
     }
 
-    /// Removes the velocities the joints don't allow (mass-weighted): `J u = 0`.
-    pub(crate) fn project_velocities(&self, y: &mut [f64]) -> Result<()> {
+    /// Removes the velocities the joints don't allow (mass-weighted): `J u = ḟ` (0 but for
+    /// drives).
+    pub(crate) fn project_velocities(&self, t: f64, y: &mut [f64]) -> Result<()> {
         let kin = self.kinematics(y);
-        let rows = self.rows(&kin);
+        let rows = self.rows(&kin, t, y);
         if rows.is_empty() {
             return Ok(());
         }
         let (s, w) = self.schur(&kin, &rows);
-        let ju: Vec<f64> = rows.iter().map(|r| r.rate(&kin)).collect();
+        let ju: Vec<f64> = rows.iter().map(|r| r.rate(&kin) - r.rate_target).collect();
         let (mu, _) = solve_psd(s, &ju, RANK_TOL).ok_or(DynamicsError::Singular { time: f64::NAN })?;
         for (wr, m) in w.iter().zip(&mu) {
             for (i, ml, ma) in wr {
@@ -417,7 +676,7 @@ impl System {
             .collect()
     }
 
-    /// Kinetic, gravity and spring energy.
+    /// Kinetic, gravity and spring energy, and the work put in and dissipated so far.
     pub(crate) fn energy(&self, y: &[f64]) -> Energy {
         let kin = self.kinematics(y);
         let mut e = Energy::default();
@@ -433,6 +692,13 @@ impl System {
                 e.spring += 0.5 * stiffness * stretch * stretch + preload * stretch;
             }
         }
+        for (i, k, _, rest) in &self.springs {
+            let stretch = self.coord_row(&kin, y, *i).phi - rest;
+            e.spring += 0.5 * k * stretch * stretch;
+        }
+        let wb = self.work_base();
+        e.input = y.get(wb).copied().unwrap_or(0.0);
+        e.dissipated = y.get(wb + 1).copied().unwrap_or(0.0);
         e
     }
 
@@ -477,19 +743,19 @@ impl System {
 /// `(Φ, J, J̇u)` for one body point's world component along `e`: `e·(p_B − p_A)`.
 fn point_row(a: &MarkerWorld, b: &MarkerWorld, e: Vec3) -> Row {
     let acc = |m: &MarkerWorld| cross2(m.w, m.r);
-    Row { a: a.body.map(|i| (i, -e, -a.r.cross(e))), b: b.body.map(|i| (i, e, b.r.cross(e))), phi: e.dot(b.p - a.p), jdot_u: e.dot(acc(b) - acc(a)) }
+    Row::new(a.body.map(|i| (i, -e, -a.r.cross(e))), b.body.map(|i| (i, e, b.r.cross(e))), e.dot(b.p - a.p), e.dot(acc(b) - acc(a)))
 }
 
 /// `u·v = 0` for a direction `u` of A and `v` of B.
 fn dot1_row(a: &MarkerWorld, u: Vec3, b: &MarkerWorld, v: Vec3) -> Row {
     let (ud, vd) = (a.w.cross(u), b.w.cross(v));
     let (udd, vdd) = (cross2(a.w, u), cross2(b.w, v));
-    Row {
-        a: a.body.map(|i| (i, Vec3::ZERO, u.cross(v))),
-        b: b.body.map(|i| (i, Vec3::ZERO, v.cross(u))),
-        phi: u.dot(v),
-        jdot_u: udd.dot(v) + 2.0 * ud.dot(vd) + u.dot(vdd),
-    }
+    Row::new(
+        a.body.map(|i| (i, Vec3::ZERO, u.cross(v))),
+        b.body.map(|i| (i, Vec3::ZERO, v.cross(u))),
+        u.dot(v),
+        udd.dot(v) + 2.0 * ud.dot(vd) + u.dot(vdd),
+    )
 }
 
 /// `d·u = 0` for `d = p_B − p_A` and a direction `u` of A.
@@ -498,12 +764,12 @@ fn dot2_row(a: &MarkerWorld, u: Vec3, b: &MarkerWorld) -> Row {
     let dd = b.pdot - a.pdot;
     let ddd = cross2(b.w, b.r) - cross2(a.w, a.r);
     let (ud, udd) = (a.w.cross(u), cross2(a.w, u));
-    Row {
-        a: a.body.map(|i| (i, -u, u.cross(d) - a.r.cross(u))),
-        b: b.body.map(|i| (i, u, b.r.cross(u))),
-        phi: d.dot(u),
-        jdot_u: ddd.dot(u) + 2.0 * dd.dot(ud) + d.dot(udd),
-    }
+    Row::new(
+        a.body.map(|i| (i, -u, u.cross(d) - a.r.cross(u))),
+        b.body.map(|i| (i, u, b.r.cross(u))),
+        d.dot(u),
+        ddd.dot(u) + 2.0 * dd.dot(ud) + d.dot(udd),
+    )
 }
 
 fn joint_rows(kind: JointKind, a: &MarkerWorld, b: &MarkerWorld, rows: &mut Vec<Row>) {
@@ -576,7 +842,7 @@ pub(crate) mod testing {
     /// `(Φ, J u, J̇ u)` of every row at `y`.
     pub(crate) fn rows_at(sys: &System, y: &[f64]) -> Vec<(f64, f64, f64)> {
         let kin = sys.kinematics(y);
-        sys.rows(&kin).iter().map(|r| (r.phi, r.rate(&kin), r.jdot_u)).collect()
+        sys.rows(&kin, 0.0, y).iter().map(|r| (r.phi, r.rate(&kin), r.jdot_u)).collect()
     }
 
     /// The state moved along its velocities for `h` (positions and orientations only).

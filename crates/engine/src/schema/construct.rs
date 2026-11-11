@@ -6,7 +6,7 @@
 //! is refused when the feature is evaluated, which fails the command.
 
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::types::{AngleExpr, ConstructionCommon, GeoRefParam, NumberExpr, PlaneCommon, Point3, feature_common, present};
 
@@ -252,6 +252,31 @@ pub struct PlanePerpendicularParams {
     pub line: GeoRefParam,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: PlaneCommon,
+}
+
+/// Add a construction plane, axis or point (`construct.plane`, `construct.axis`,
+/// `construct.point`) with the first of the family's methods (`construct.plane.*`…, in the order
+/// the commands are listed) that takes the references in its reference parameters, with `with`.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ConstructAutoParams {
+    /// What to build it from, one to three references in any order.
+    #[schemars(length(min = 1, max = 3))]
+    pub refs: Vec<GeoRefParam>,
+    /// The method's other parameters (`offset`, `angle`, `t`, `name`…): only a method that takes
+    /// them all is used.
+    #[serde(default)]
+    pub with: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+/// What `construct.plane`, `construct.axis` and `construct.point` return: the feature, and the
+/// method they chose.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ConstructAutoResult {
+    /// The id of the CONSTRUCT command whose method was used (`construct.plane.midplane`…).
+    pub method: String,
+    #[serde(flatten)]
+    pub feature: super::features::FeatureResult,
 }
 
 #[cfg(test)]

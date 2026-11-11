@@ -1,0 +1,107 @@
+{
+  "area": "ladder/03-analytic-profiles",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 20.0,
+        "draft": 0.08726646259971647,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "center": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "end": 6.283185307179586,
+              "radius": 10.0,
+              "reference": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "start": 0.0
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "003-extrude-tapered-circle",
+  "expected": {
+    "body_count": 1,
+    "faces": 3,
+    "method": "positive taper grows outward (tests/oracle/05): top radius 10 - 20 tan5 = 8.250226729; V = pi h/3 (R^2 + R r + r^2)",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 5247.894567706,
+    "what": "a circle r10 extruded 20 with a -5 deg taper (inward): a cone frustum"
+  },
+  "expressible": true,
+  "golden": {
+    "measured": {
+      "area_mm2": 1679.0714234836435,
+      "body_count": 1,
+      "edges": 3,
+      "faces": 3,
+      "vertices": 2,
+      "volume_mm3": 5247.894567674975
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 3,
+      "faces": 3,
+      "vertices": 2
+    }
+  },
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b1"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 1679.0714234836435,
+      "body_count": 1,
+      "edges": 3,
+      "faces": 3,
+      "vertices": 2,
+      "volume_mm3": 5247.894567674975
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude"
+  ],
+  "ungraded": [],
+  "what": "a circle r10 extruded 20 with a -5 deg taper (inward): a cone frustum",
+  "why_not": []
+}

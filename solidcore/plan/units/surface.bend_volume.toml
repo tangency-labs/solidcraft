@@ -1,0 +1,12 @@
+id = "surface.bend_volume"
+upstream = ["source/SMLib/inc/SmBendVolume.h", "source/SMLib/src/SmBendVolume.cpp"]
+rust_module = "surface::bend_volume"
+depends_on = ["geom.extent3d", "geom.object", "geom.solution_array", "geom.tol", "geom.vector3d", "surface.volume_p1", "topology.database_io"]
+soft_depends_on = ["curve.curve_p9", "geom.extent1d", "geom.pseudo_box"]
+est_lines = 945
+layer = 24
+tests = ["prog_test:my_test_extent3d", "prog_test:my_test_vector2d", "prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join"]
+status = "green"
+claimed_by = ""
+claimed_at = ""
+notes = "GREEN after curve.curve_p9 (PR #13): IsCurveInParamDomainSimple now calls Curve::is_on_positive_side_of_planes (takes &Kernel); difftest 2347 cases, 2347 pass bit-identical (max_rel_err 0), 0 deferred (the 74 curve.curve_p9 deferrals are gone), --perturb SENSITIVE 2347/2347. The older PARTIAL text below is superseded. PARTIAL: difftest 2347 cases (847 fixture + 1500 generated), 2273 pass bit-identical, 74 deferred (curve.curve_p9 74: IsCurveInParamDomainSimple -> SmCurve::IsOnPositiveSideOfPlanes), max_rel_err 0 (ReadFromDB base read wired by surface.volume_p2); 30k-seed run clean (30847 cases); --perturb SENSITIVE; wired into surface.volume_p1 dispatch (VolumeKind::Bend now carries BendVolume; no UNPORTED(surface.bend_volume) stubs remain); component constructor ported as BendVolume::create; 27 fns; largest: SmBendVolume::EvaluateBoundingBoxSimple, SmBendVolume::Evaluate, SmBendVolume::EvaluateSimple, SmBendVolume::ReadFromDB; cycle back-edges (call into later units; stub or co-port): surface.volume_p2(1); unit-SCC #22 (220 units); 319 upstream test entry points reach this unit"
