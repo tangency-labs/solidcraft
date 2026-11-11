@@ -73,6 +73,31 @@ pub struct Tool {
     /// chamfer mills, and only for them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub angle_deg: Option<f64>,
+    /// Diameter of the plain shank above the flutes (mm); left out, the cutting diameter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shank_diameter: Option<f64>,
+    /// How far the tool stands out of its holder, tip to holder face (mm); left out, the
+    /// flute length. Collision checks use it with [`Tool::holder`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stickout: Option<f64>,
+    /// The holder from its face up, as stacked cylinders; empty: no holder is checked.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub holder: Vec<HolderSection>,
+}
+
+/// One cylinder of a tool holder.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct HolderSection {
+    pub diameter: f64,
+    pub length: f64,
+}
+
+/// A solid of revolution about the tool axis: a cylinder from `bottom` to `top` above the tip.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Envelope {
+    pub bottom: f64,
+    pub top: f64,
+    pub radius: f64,
 }
 
 fn two() -> u32 {
@@ -96,6 +121,9 @@ impl Tool {
             corner_radius: None,
             tip_diameter: None,
             angle_deg: None,
+            shank_diameter: None,
+            stickout: None,
+            holder: Vec::new(),
         }
     }
 
@@ -115,6 +143,23 @@ impl Tool {
         }
     }
 
+    /// The parts of the tool above the flutes that must not touch the part: the shank from the
+    /// flutes to the holder face, then the holder's sections. Heights are above the tip (mm).
+    pub fn envelopes(&self) -> Vec<Envelope> {
+        let stickout = self.stickout.unwrap_or(self.flute_length).max(self.flute_length);
+        let shank = self.shank_diameter.unwrap_or(self.diameter) * 0.5;
+        let mut out = Vec::new();
+        if stickout > self.flute_length {
+            out.push(Envelope { bottom: self.flute_length, top: stickout, radius: shank });
+        }
+        let mut z = stickout;
+        for s in &self.holder {
+            out.push(Envelope { bottom: z, top: z + s.length, radius: s.diameter * 0.5 });
+            z += s.length;
+        }
+        out
+    }
+
     pub fn radius(&self) -> f64 {
         self.diameter * 0.5
     }
@@ -125,8 +170,8 @@ impl Tool {
         if !(self.diameter > 0.0) || !(self.diameter <= MAX_TOOL_DIAMETER) {
             return invalid("the tool diameter must be above 0 and at most 1000 mm");
         }
-        if !(self.flute_length > 0.0) || !self.flute_length.is_finite() {
-            return invalid("the tool's flute length must be above 0");
+        if !(self.flute_length > 0.0) || !(self.flute_length <= 10_000.0) {
+            return invalid("the tool's flute length must be above 0 and at most 10 m");
         }
         if !(1..=100).contains(&self.flutes) {
             return invalid("a tool has 1 to 100 flutes");
@@ -143,6 +188,18 @@ impl Tool {
             }
         } else if self.tip_diameter.is_some() || self.angle_deg.is_some() {
             return invalid("`tip_diameter` and `angle_deg` are for chamfer mills");
+        }
+        if self.shank_diameter.is_some_and(|d| !(d > 0.0) || !(d <= MAX_TOOL_DIAMETER)) {
+            return invalid("the shank diameter must be above 0 and at most 1000 mm");
+        }
+        if self.stickout.is_some_and(|s| !(s >= self.flute_length) || !(s <= 10_000.0)) {
+            return invalid("the stickout must be at least the flute length and at most 10 m");
+        }
+        if self.holder.len() > 64 {
+            return invalid("a holder has at most 64 sections");
+        }
+        if self.holder.iter().any(|s| !(s.diameter > 0.0) || !(s.diameter <= 10_000.0) || !(s.length > 0.0) || !(s.length <= 10_000.0)) {
+            return invalid("a holder section's diameter and length must be above 0 and at most 10 m");
         }
         if [self.spindle_rpm, self.feed, self.plunge_feed, self.stepdown, self.stepover].iter().flatten().any(|v| !(*v > 0.0) || !(*v <= 1.0e6)) {
             return invalid("a tool's spindle speed, feeds, stepdown and stepover must be above 0");

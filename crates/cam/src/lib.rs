@@ -23,6 +23,11 @@
 //! machine with a rotary `A` axis, and [`readback5`] reads such a program back through the
 //! machine's kinematics and holds it against the toolpaths it was written from.
 //!
+//! Collision checks ([`collision`]) work on any multi-axis toolpath: where the cutter cuts
+//! into the part deeper than a tolerance (a gouge, measured square to the surface), and where
+//! the tool's shank or holder ([`Tool::envelopes`]) comes closer to it than a clearance. A
+//! toolpath whose holder would touch can be tilted clear ([`collision::tilt_away`]).
+//!
 //! A post ([`Post`]) is data: besides its templates it holds switches for the program's
 //! layout (a tool list, comment characters, blank lines, lines at every operation, a safe
 //! retract to the machine's top, the tool length offset on the first Z move, modal motion
@@ -37,6 +42,7 @@
 
 mod chamfer;
 mod check;
+pub mod collision;
 mod cutter;
 mod dropcutter;
 pub mod finish3d;
@@ -75,12 +81,12 @@ pub use ops::{ContourParams, Cut, Feeds, Heights, PocketParams, Side, contour, p
 pub use path::{Move, PathStats, Toolpath, arc_sweep};
 pub use post::{CommentStyle, LineNumbers, Post, SafeRetract, Units};
 pub use readback::{Readback, allowed_deviation, readback};
-pub use surface::{Surface, barycentric, nearest_on_triangle, ray_triangle};
+pub use surface::{Surface, barycentric, nearest_on_triangle, nearest_segments, ray_triangle, segment_triangle_distance};
 pub use surface_ops::{
     Boundary, DEFAULT_DESCENT_LIMIT, ENTRY_GAP, MAX_GRID_NODES, MAX_SAMPLES, ParallelParams, RoughingParams, WaterlineParams, parallel, roughing,
     waterline,
 };
-pub use tool::{Tool, ToolKind};
+pub use tool::{Envelope, HolderSection, Tool, ToolKind};
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum CamError {
@@ -107,6 +113,8 @@ pub(crate) fn invalid<T>(why: impl Into<String>) -> Result<T> {
     Err(CamError::Invalid(why.into()))
 }
 
+#[cfg(test)]
+mod collision_tests;
 #[cfg(test)]
 mod finish3d_tests;
 #[cfg(test)]

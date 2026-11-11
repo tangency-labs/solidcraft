@@ -235,6 +235,52 @@ pub fn nearest_on_triangle(p: Vec3, t: &[Vec3; 3]) -> Vec3 {
     a + ab * v + ac * w
 }
 
+/// The nearest points of the segments `p0–p1` and `q0–q1`.
+pub fn nearest_segments(p0: Vec3, p1: Vec3, q0: Vec3, q1: Vec3) -> (Vec3, Vec3) {
+    let (d1, d2, r) = (p1 - p0, q1 - q0, p0 - q0);
+    let (a, e, f) = (d1.dot(d1), d2.dot(d2), d2.dot(r));
+    if a <= 1e-300 && e <= 1e-300 {
+        return (p0, q0);
+    }
+    let (s, t) = if a <= 1e-300 {
+        (0.0, (f / e).clamp(0.0, 1.0))
+    } else {
+        let c = d1.dot(r);
+        if e <= 1e-300 {
+            ((-c / a).clamp(0.0, 1.0), 0.0)
+        } else {
+            let b = d1.dot(d2);
+            let den = a * e - b * b;
+            let mut s = if den > 1e-300 { ((b * f - c * e) / den).clamp(0.0, 1.0) } else { 0.0 };
+            let mut t = (b * s + f) / e;
+            if t < 0.0 {
+                t = 0.0;
+                s = (-c / a).clamp(0.0, 1.0);
+            } else if t > 1.0 {
+                t = 1.0;
+                s = ((b - c) / a).clamp(0.0, 1.0);
+            }
+            (s, t)
+        }
+    };
+    (p0 + d1 * s, q0 + d2 * t)
+}
+
+/// The shortest distance between the segment `a–b` and the triangle.
+pub fn segment_triangle_distance(a: Vec3, b: Vec3, t: &[Vec3; 3]) -> f64 {
+    if let Some(at) = ray_triangle(a, b - a, t)
+        && at <= 1.0
+    {
+        return 0.0;
+    }
+    let mut best = nearest_on_triangle(a, t).dist(a).min(nearest_on_triangle(b, t).dist(b));
+    for (p, q) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] {
+        let (x, y) = nearest_segments(a, b, p, q);
+        best = best.min(x.dist(y));
+    }
+    best
+}
+
 /// Whether the segment `a–b`, grown by `r` all round, can meet the box.
 pub fn capsule_meets_box(a: Vec3, b: Vec3, r: f64, bx: &Aabb3) -> bool {
     let bx = bx.inflated(r);

@@ -111,6 +111,12 @@ impl Cutter {
         Some(self.corner - (self.corner * self.corner - e * e).max(0.0).sqrt())
     }
 
+    /// Height of the end's top edge above the tip, where it meets the cylinder above: the
+    /// corner radius of a rounded cutter, the cone's height of a tapered one.
+    pub fn rim_height(&self) -> f64 {
+        self.height(self.radius).unwrap_or(self.corner)
+    }
+
     /// The cutter grown by `by` all round (its tip `by` lower): the shape that keeps the real
     /// cutter `by` away from a surface, used to leave stock. A tapered cutter grows to the
     /// cone `by` out from its side and the plane `by` below its tip, which holds the rounded
@@ -126,5 +132,34 @@ impl Cutter {
             }
             None => Cutter { radius: self.radius + by, corner: self.corner + by, cone: None }.checked(),
         }
+    }
+
+    /// The cutter shrunk by `by` (sideways by at most half its radius) and how far up its axis
+    /// the shrunk cutter's tip is from this one's: a shape inside this cutter that a surface
+    /// meets only where it is more than `by` inside this cutter (the gouge test). A rounded
+    /// cutter shrinks by `side` sideways and is raised by `by`; a tapered one keeps its angle,
+    /// its side moved `by` in and its tip raised `by`.
+    pub(crate) fn shrunk(&self, by: f64) -> Result<(Cutter, f64)> {
+        if !(by >= 0.0) || !by.is_finite() {
+            return invalid("the amount to shrink a cutter by must be 0 or more");
+        }
+        let side = by.min(self.radius * 0.5);
+        let Some(c) = self.cone else {
+            return Ok((Cutter::bull(self.radius - side, (self.corner - side).max(0.0))?, by));
+        };
+        let radius = self.radius - side;
+        let (s, co) = c.half_angle.sin_cos();
+        // The side moved `by` in along its normal is the cone `by / sin` higher; it meets the
+        // tip raised by `by` at this radius.
+        let tip = c.tip_radius - by * (1.0 - s) / co;
+        if tip >= radius {
+            // Flat as far out as the shrunk cutter reaches.
+            return Ok((Cutter::flat(radius)?, by));
+        }
+        if tip >= 0.0 {
+            return Ok((Cutter::tapered(radius, tip, c.half_angle)?, by));
+        }
+        // The side moved in comes to a point above the raised tip.
+        Ok((Cutter::tapered(radius, 0.0, c.half_angle)?, by / s - c.tip_radius * co / s))
     }
 }

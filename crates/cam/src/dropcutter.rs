@@ -319,6 +319,12 @@ pub fn drop_along(surface: &Surface, cutter: &Cutter, point: Vec3, axis: Vec3) -
     drop_along_above(surface, cutter, point, axis, f64::NEG_INFINITY)
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Triangles [`drop_along_above`] tested on this thread: the work a check does.
+    pub(crate) static DROP_TRIANGLES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// [`drop_along`] where only a stop above `floor` (along the axis from `point`) is wanted:
 /// the same stop when it is above `floor`, else `None`. What lies wholly at or below `floor`
 /// is not looked at: whether a cutter is in the surface (a stop above its tip, `floor` 0)
@@ -349,6 +355,8 @@ pub(crate) fn drop_along_above(surface: &Surface, cutter: &Cutter, point: Vec3, 
             top > best.get() && capsule_meets_box(a, b, r, bx)
         },
         |_, t| {
+            #[cfg(test)]
+            DROP_TRIANGLES.with(|n| n.set(n.get() + 1));
             let local = t.map(|p| frame.to_local(p));
             if local.iter().all(|p| p.z <= best.get()) {
                 return;
