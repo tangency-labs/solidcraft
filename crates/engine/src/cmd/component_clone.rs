@@ -486,7 +486,7 @@ pub(super) fn build(
         } else if f.body_names.is_empty() {
             f.body_names = outputs.get(&old.id).cloned().unwrap_or_default();
         }
-        f.remap_clone(&features, &names, &bodies, &parameters)?;
+        f.remap_clone(&features, &names, &bodies, &parameters, &occurrences, &scratch.doc)?;
         transfer_into_copy(&mut f.kind, &components)?;
         if let FeatureKind::Emboss { face: Some(face), .. } = &mut f.kind
             && !face.path.is_empty()

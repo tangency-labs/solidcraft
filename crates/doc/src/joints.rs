@@ -429,6 +429,75 @@ impl JointKind {
     }
 }
 
+/// The assembly constraint a joint was made as (`assembly.constraint.create`): the rule in the
+/// words of the Constrain dialog. The joint itself is an ordinary joint of the kind the rule needs
+/// (a mate is planar, a concentric constraint cylindrical); the solver never reads this.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Constraint {
+    /// Two planes against each other (planar), `offset` apart.
+    Mate,
+    /// Two planes facing the same way (planar, flipped), `offset` apart.
+    Flush,
+    /// A plane `offset` from a plane (planar) or a point `offset` from a plane (point on plane).
+    Distance,
+    /// Two axes on one line (cylindrical): B slides and turns along it.
+    Concentric,
+    /// Two round edges at one centre on one axis (revolute): B only turns.
+    Insert,
+    /// Two planes or axes parallel.
+    Parallel,
+    /// Two planes or axes square to each other.
+    Perpendicular,
+    /// Two planes or axes at `angle`.
+    Angle,
+    /// A cylinder resting on a plane (line on plane, `offset` its radius).
+    Tangent,
+    /// A point on an axis (point on line).
+    PointOnAxis,
+}
+
+impl Constraint {
+    pub const ALL: [Constraint; 10] = [
+        Constraint::Mate,
+        Constraint::Flush,
+        Constraint::Distance,
+        Constraint::Concentric,
+        Constraint::Insert,
+        Constraint::Parallel,
+        Constraint::Perpendicular,
+        Constraint::Angle,
+        Constraint::Tangent,
+        Constraint::PointOnAxis,
+    ];
+
+    /// The rule's command name (`mate`, `point_on_axis`).
+    pub fn name(self) -> &'static str {
+        match self {
+            Constraint::Mate => "mate",
+            Constraint::Flush => "flush",
+            Constraint::Distance => "distance",
+            Constraint::Concentric => "concentric",
+            Constraint::Insert => "insert",
+            Constraint::Parallel => "parallel",
+            Constraint::Perpendicular => "perpendicular",
+            Constraint::Angle => "angle",
+            Constraint::Tangent => "tangent",
+            Constraint::PointOnAxis => "point_on_axis",
+        }
+    }
+
+    /// Case, spaces, `_` and `-` are ignored; `coincident` and `axis` are also taken.
+    pub fn parse(s: &str) -> Option<Constraint> {
+        let key = s.to_ascii_lowercase().replace([' ', '_', '-'], "");
+        match key.as_str() {
+            "coincident" => Some(Constraint::Mate),
+            "axis" => Some(Constraint::Concentric),
+            _ => Constraint::ALL.into_iter().find(|c| c.name().replace('_', "") == key),
+        }
+    }
+}
+
 /// A joint between two occurrences.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Joint {
@@ -462,6 +531,17 @@ pub struct Joint {
     /// files from before captured joint values: such a joint keeps its values on Revert Position.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub captured: Option<Vec<f64>>,
+    /// The assembly constraint it was made as; `None` for a joint made as a joint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constraint: Option<Constraint>,
+}
+
+impl Joint {
+    /// Whether its values start where its parts are when it is made or changed, so B moves no
+    /// further than the joint needs: a relation, or any joint made as an assembly constraint.
+    pub fn starts_where_it_is(&self) -> bool {
+        self.kind.is_relation() || self.constraint.is_some()
+    }
 }
 
 /// Expressions a joint's numbers follow (over the design's parameters): the offset (a length),
@@ -2527,6 +2607,11 @@ impl Document {
         let t = if o.occurrence == 0 { IDENTITY } else { occurrence_world(self, o.occurrence) };
         Ok(mat_mul(&t, &f))
     }
+
+    /// The radius of the round face a circle origin is on (mm; an error when it is on none).
+    pub fn origin_radius(&self, st: &ModelState, o: &JointOrigin) -> Result<f64> {
+        circle_at(self, st, o).map(|c| c.radius)
+    }
 }
 
 #[path = "joints_cam.rs"]
@@ -2756,6 +2841,7 @@ mod tests {
                 suppressed: false,
                 exprs: Default::default(),
                 captured: None,
+                constraint: None,
             })
             .collect();
         let links =

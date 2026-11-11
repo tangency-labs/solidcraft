@@ -29,6 +29,7 @@ pub mod command_help;
 pub mod context_menu;
 pub mod control;
 pub mod control_job;
+mod control_params;
 pub mod control_switch;
 pub mod crash_ui;
 pub mod deferred;
@@ -1677,6 +1678,9 @@ impl SolveApp {
                 // not echoed one by one.
                 if v.get("continuous").and_then(Value::as_bool) != Some(true) {
                     self.session.echo(language.format("ui.command_done", &[("command", label)]));
+                }
+                if id == "sketch.move" {
+                    released_status(self, language, v);
                 }
                 if id == "file.new" {
                     // `file.new` starts from millimetres. Units of new designs still apply (#1205).
@@ -3487,6 +3491,9 @@ impl SolveApp {
         let _blur_scope = self.blur.begin(ui.ctx(), blur_source);
         value_step::set_enabled(ui.ctx(), self.preferences.step_values);
         canvas::set_boxes_shown(ui.ctx(), self.preferences.value_boxes_in_view);
+        // #9841: dialog buttons answer their first letter only when the preference says so;
+        // off is the old behaviour, so the kit default and this preference default agree.
+        ui_kit::set_dialog_mnemonics(self.preferences.dialog_first_letter_buttons);
         recent_colors::share(ui.ctx(), &mut self.ui.recent_colors);
         let t0 = now_ms();
         // The first frames draw with the bundled faces while the system's CJK, Hangul and Thai
@@ -3877,6 +3884,24 @@ fn finite_input(raw: &mut egui::RawInput) {
         egui::Event::Touch { pos, force, .. } => pos.is_finite() && force.is_none_or(f32::is_finite),
         _ => true,
     });
+}
+
+/// After a sketch Move that let go of constraints tying the moved geometry to what stays (a
+/// corner on the origin; #2980): the status line names them, and its Undo button undoes the move.
+fn released_status(app: &mut SolveApp, language: solidcraft_ui_text::Locale, v: &Value) {
+    let Some(released) = v.get("released").and_then(Value::as_array).filter(|r| !r.is_empty()) else { return };
+    let mut names: Vec<&str> = Vec::new();
+    for kind in released.iter().filter_map(|c| c.get("kind").and_then(Value::as_str)).take(64) {
+        let name = language.label(if kind.ends_with("Dimension") { "Dimension" } else { kind });
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    let count = released.len().to_string();
+    let id = if released.len() == 1 { "sketch.move_released_one" } else { "sketch.move_released" };
+    let msg = language.format(id, &[("count", &count), ("names", &names.join(", "))]);
+    app.set_status(msg, false);
+    app.status_undo = true;
 }
 
 /// An edit in place command's result, saying when it waits for the end of the agent's turn.

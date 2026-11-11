@@ -1087,13 +1087,19 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "RailFit::is_scale")]
         rail_fit: RailFit,
     },
-    /// Sweep profiles along a chain of sketch curves.
+    /// Sweep profiles along a chain of sketch curves, or along a chain of a body's edges.
     Sweep {
         sketch: SketchId,
         #[walk(profiles_of = sketch)]
         profiles: ProfileSel,
         path_sketch: SketchId,
         path: Vec<String>,
+        /// The path on a body's edges, instead of the curves of `path_sketch` (#2216): the body
+        /// and a point on each edge of the chain.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path_body: Option<BodyName>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        path_edges: Vec<Position>,
         /// How the profile turns along the path (default: perpendicular to it).
         #[serde(default, skip_serializing_if = "SweepOrientation::is_perpendicular")]
         orientation: SweepOrientation,
@@ -1704,6 +1710,10 @@ pub enum FeatureKind {
         #[serde(default = "all_profiles")]
         #[walk(profiles_of = sketch)]
         profiles: ProfileSel,
+        /// Indices into the sketch's planar 3D loops (`sketch.inspect`'s `profiles_3d`): each is
+        /// patched in the plane it lies in (#741).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        profiles_3d: Vec<usize>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<BodyName>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1811,6 +1821,12 @@ pub enum FeatureKind {
         curves: Vec<String>,
         path_sketch: SketchId,
         path: Vec<String>,
+        /// The path on a body's edges, instead of the curves of `path_sketch` (#2216): the body
+        /// and a point on each edge of the chain.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        path_body: Option<BodyName>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        path_edges: Vec<Position>,
         /// How the profile turns along the path (default: perpendicular to it).
         #[serde(default, skip_serializing_if = "SweepOrientation::is_perpendicular")]
         orientation: SweepOrientation,
@@ -3395,6 +3411,9 @@ pub struct Document {
     /// Named views: saved cameras.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub named_views: Vec<NamedView>,
+    /// Notes: text anchored to points in model space, drawn as screen-facing callouts (#1631).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<crate::notes::Note>,
     /// What was hidden when the design was saved. A session takes it from here when the design
     /// opens and keeps the live state itself (`browser.visibility`: saved, and undone like any
     /// other change), so a document in a session leaves this empty; the session puts it back when
@@ -3424,6 +3443,9 @@ pub struct Visibility {
     /// The browser's Origin folder is hidden (`None`: the app's preference decides).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub origin_hidden: Option<bool>,
+    /// Component Origin folders explicitly shown, by complete occurrence path. Hidden by default.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub shown_component_origins: Vec<Vec<u64>>,
     /// Finished sketches whose closed profiles are not shaded, by feature id.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub hidden_profiles: Vec<u64>,
@@ -3451,6 +3473,7 @@ impl Visibility {
             && self.shown_sketches.is_empty()
             && self.hidden_joints.is_empty()
             && self.origin_hidden.is_none()
+            && self.shown_component_origins.is_empty()
             && self.hidden_profiles.is_empty()
             && self.shown_dimensions.is_empty()
             && self.locked_bodies.is_empty()
@@ -3633,6 +3656,7 @@ impl Document {
             .chain(self.timeline_groups.iter().map(|g| g.id))
             .chain(self.canvases.iter().map(|c| c.id))
             .chain(self.point_clouds.iter().map(|c| c.id))
+            .chain(self.notes.iter().map(|n| n.id))
             .chain(a.joints.iter().map(|j| j.id))
             .chain(a.contact_sets.iter().map(|c| c.id))
             .chain(a.studies.iter().map(|s| s.id))
@@ -3688,6 +3712,7 @@ impl Document {
             timeline_groups: Vec::new(),
             browser_order: Default::default(),
             named_views: Vec::new(),
+            notes: Vec::new(),
             visibility: Visibility::default(),
         }
     }

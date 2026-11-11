@@ -1482,6 +1482,9 @@ pub struct MirrorResult {
 pub struct MoveResult {
     /// The curves moved, or with `copy` the copies made, by id.
     pub curves: Vec<String>,
+    /// The constraints tying the moved geometry to what stays that the move let go, as
+    /// `{id, kind}`.
+    pub released: Vec<Value>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

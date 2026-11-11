@@ -219,7 +219,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.boolean_outer_shell_first = true;
     k.fixes.boolean_skips_faces_apart = true;
     k.fixes.boolean_splits_definition_across_split = true;
-    k.fixes.boolean_temporary_transform_statuses = true;
     k.fixes.boolean_vertex_by_best_crossing = true;
     k.fixes.boolean_wire_edge_keeps_faceuse_shell = true;
     k.fixes.box_face_failures_propagate = true;
@@ -330,7 +329,6 @@ fn solidcraft_flags(k: &mut Kernel) {
     k.fixes.proto_edge_splits_at_captured_vertices = true;
     k.fixes.proto_vertex_miss_is_false = true;
     k.fixes.refine_cc_range_ends = true;
-    k.fixes.remove_slit_loops_where_solids_touch = true;
     k.fixes.revolution_offset_axis_both_sides = true;
     k.fixes.revolution_round_offset_collapses = true;
     k.fixes.revolve_analytic_profile_faces = true;

@@ -2475,7 +2475,7 @@ mod tests {
         k.fixes.curve_loop_normal_from_area = true;
         assert!(matches!(
             compute_crvs_normal(&k, &curves),
-            Err(SolidError::Upstream { code: SM_ERR, .. })
+            Err(e) if crate::error::upstream_status(&e) == Some(SM_ERR)
         ));
     }
 

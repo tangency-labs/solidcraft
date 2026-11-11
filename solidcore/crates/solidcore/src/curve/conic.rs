@@ -450,7 +450,10 @@ impl Conic {
             return Ok(out);
         }
 
-        Err(SolidError::sm_err(OP_EVALUATE))
+        Err(SolidError::curve_failed(
+            OP_EVALUATE,
+            "more than 2 derivatives were asked",
+        ))
     }
 
     /// The point at `param` (`EvaluatePoint`); `z` is 0.

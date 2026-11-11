@@ -93,7 +93,7 @@ pub use checks::*;
 pub use choice::*;
 pub use color::*;
 pub use compare::*;
-pub use confirm::{Confirm, Tone};
+pub use confirm::{Confirm, Tone, dialog_mnemonics, set_dialog_mnemonics};
 pub use container::{BackingTooltipExt, Container, DockEdges, Edge, LayoutMode, Surface};
 pub use container::{SHELL_GAP, input_blocked, set_input_blocked};
 pub use dash::dashed_line;

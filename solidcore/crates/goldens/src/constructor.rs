@@ -79,7 +79,9 @@ fn outcome(e: &SolidError, notes: &mut Vec<String>) -> Result<Outcome, Deferred>
         SolidError::InvalidInput { .. } => {
             Outcome::Code(f64::from(solidcore::error::SM_ERR_INVALID_INPUT))
         }
-        SolidError::Upstream { code, .. } => Outcome::Code(f64::from(*code)),
+        up_err if solidcore::error::upstream_status(up_err).is_some() => Outcome::Code(f64::from(
+            solidcore::error::upstream_status(up_err).unwrap_or(-1),
+        )),
         other => {
             if notes.len() < 20 {
                 notes.push(other.to_string());

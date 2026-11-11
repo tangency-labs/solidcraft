@@ -198,8 +198,9 @@ pub enum Error {
         /// The least radius that rounds it.
         smallest: f64,
     },
-    /// A corner's setback that stops short of where the rails of the rounds beside an edge
-    /// cross it (the kernel's `BlendRefusal::SetbackTooShort`).
+    /// A corner's setback too short for the corner: it stops short of where the rails of the
+    /// rounds beside an edge cross it, or its fill is not certified at it (the kernel's
+    /// `BlendRefusal::SetbackTooShort`, whose `why` says which).
     SetbackTooShort {
         /// The corner's vertex index.
         vertex: usize,
@@ -432,7 +433,7 @@ pub(crate) fn status(e: SolidError) -> Error {
         SolidError::PortInvariant { .. } | SolidError::PreparationRequired { .. } => {
             Error::Exception
         }
-        // the kernel's statuses (Upstream, Nlib, the refusals the families map further), and any
+        // the kernel's statuses (Upstream, Failed, the refusals the families map further), and any
         // kind the kernel adds by the status it stands for
         e => Error::Status(e.sm_status().unwrap_or(SM_ERR)),
     }
