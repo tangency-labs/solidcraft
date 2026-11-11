@@ -36,6 +36,7 @@ pub mod cancel;
 pub mod check;
 pub mod contact;
 pub mod continuity;
+pub mod curve;
 pub mod error;
 pub mod extend;
 pub mod file;
