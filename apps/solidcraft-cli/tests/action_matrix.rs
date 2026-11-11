@@ -1774,6 +1774,7 @@ fn a_circle_cut_from_a_slanted_plane_through_a_step_edge_beside_a_hole() {
     s.execute("sketch.create", &json!({"plane": plane, "name": "Slant"})).unwrap();
     s.execute("sketch.circle.center", &json!({"center": [20.4216146277246, 12.527083680740917], "radius": 4.716990566008734})).unwrap();
     s.execute("sketch.finish", &json!({})).unwrap();
-    s.execute("solid.extrude", &json!({"sketch": "Slant", "through_all": true, "direction": "negative", "operation": "cut", "targets": ["Body1"]})).unwrap();
+    s.execute("solid.extrude", &json!({"sketch": "Slant", "through_all": true, "direction": "negative", "operation": "cut", "targets": ["Body1"]}))
+        .unwrap();
     check(&s, start, &BTreeMap::new()).unwrap_or_else(|(kind, e)| panic!("{kind}: {e}"));
 }
