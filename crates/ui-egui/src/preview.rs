@@ -414,6 +414,10 @@ pub fn update(app: &mut SolveApp, ctx: &egui::Context) {
     }
     colors.tint_new = app.preferences.preview_tint_new_faces;
     colors.cut_tint = app.preferences.cut_preview_tint;
+    // Arrange: where a laid-out part stands now is the light red of a picked part.
+    if app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Arrange { .. })) {
+        colors.removed = crate::arrange_sheet::picked(&Tokens::get()).to_srgba_unmultiplied();
+    }
     let key = job_key(&cmds, app.session.revision, colors);
     let stream_key = stream_key(&cmds, app.session.revision, colors);
     let tool = as_new_body(&cmds).is_some();

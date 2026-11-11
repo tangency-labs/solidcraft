@@ -14,6 +14,48 @@ const MAX_POINTS: usize = 4_096;
 /// Rings with at most this many corners get the taped corner marks.
 const TAPED_CORNERS: usize = 64;
 
+/// Which picked parts have no place on the sheet, while the Arrange dialog is open.
+pub(crate) enum Unplaced<'a> {
+    /// The dialog is not open.
+    None,
+    /// The preview laid nothing out (no sheet picked yet, say): every picked part.
+    All,
+    /// The parts the preview found no place for, by name.
+    Named(std::collections::HashSet<&'a str>),
+}
+
+impl Unplaced<'_> {
+    pub(crate) fn contains(&self, name: &str) -> bool {
+        match self {
+            Unplaced::None => false,
+            Unplaced::All => true,
+            Unplaced::Named(names) => names.contains(name),
+        }
+    }
+}
+
+/// The picked parts with no place on the sheet ([`Unplaced`]).
+pub(crate) fn unplaced(app: &crate::SolveApp) -> Unplaced<'_> {
+    if !app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Arrange { .. })) {
+        return Unplaced::None;
+    }
+    let Some(reply) = app.preview.reply.as_ref().filter(|r| r.get("placed").is_some()) else { return Unplaced::All };
+    Unplaced::Named(reply.get("unplaced").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).collect())
+}
+
+/// The colour of a picked part with no place on the sheet: the warning colour, apart from the
+/// light red of the parts that are laid out ([`picked`]).
+pub(crate) fn no_place(t: &Tokens) -> egui::Color32 {
+    t.warning
+}
+
+/// The colour a part that is laid out is shown in where it stands now: the error colour, a
+/// little see-through.
+pub(crate) fn picked(t: &Tokens) -> egui::Color32 {
+    let [r, g, b, _] = t.error.to_srgba_unmultiplied();
+    egui::Color32::from_rgba_unmultiplied(r, g, b, 215)
+}
+
 /// Draws the sheets of the Arrange preview, when the Arrange dialog is open and its preview
 /// has a reply.
 pub(crate) fn paint(app: &crate::SolveApp, painter: &egui::Painter, proj: &Proj) {
