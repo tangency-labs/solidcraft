@@ -57,10 +57,10 @@ fn nearest_edge(k: &Kernel, b: &Brep, p: Point3) -> EdgeId {
         .unwrap()
 }
 
-/// The volume the arc round adds, with every fix but `geometric_g2_continuity`: the blend
-/// corner's ends and corners on the peg are built with their companion fixes (on the
-/// default kernel the arc's chain fails at a corner, #2400).
-fn peg() -> f64 {
+/// The volume the arc round adds, and the face count after it, with every fix but
+/// `geometric_g2_continuity`: the blend corner's ends and corners on the peg are built with
+/// their companion fixes (on the default kernel the arc's chain fails at a corner, #2400).
+fn peg() -> (f64, usize) {
     let mut k = Kernel {
         fixes: UpstreamFixes::all(),
         ..Kernel::default()
@@ -75,12 +75,13 @@ fn peg() -> f64 {
     let arc = nearest_edge(&k, &b, Point3::new(32.0, 8.0, 10.0));
     let chain = nearest_edge(&k, &b, Point3::new(38.0, 0.3, 9.5));
     fillet_edges(&mut k, &mut b, &[arc, chain], 1.0, 1, 1, 1.0).unwrap();
-    volume(&k, &mut b) - before
+    (volume(&k, &mut b) - before, b.faces().ids().count())
 }
 
 #[test]
 fn arc_round_from_a_tangent_point_adds_the_concave_material() {
-    // the concave round adds about 4.2996 (r 1)
-    let added = peg();
-    assert!((added - 4.2996).abs() < 1e-3, "{added}");
+    // the concave round adds 4.29958 (r 1), as without WR-603's start direction
+    let (added, faces) = peg();
+    assert_eq!(faces, 10);
+    assert!((added - 4.29958).abs() < 1e-5, "{added}");
 }

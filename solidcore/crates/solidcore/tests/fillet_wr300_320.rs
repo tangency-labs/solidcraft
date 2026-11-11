@@ -1,6 +1,7 @@
-//! Opt-in fixes of the fork's fillet defects (`Kernel::fixes`): WR-300 (#1023, #421), WR-301
-//! (#485), WR-302 (#841, #1024), WR-303 (#841) and WR-320 (#879). Each case runs with the
-//! field off (SMLib's behaviour) and on.
+//! Fixes of the fork's fillet defects. WR-300 (#1023, #421), WR-302 (#841, #1024), WR-303
+//! (#841) and WR-320 (#879) are opt-in (`Kernel::fixes`): their cases run with the field off
+//! (SMLib's behaviour) and on. WR-301 (#485) is the default: its cases run on the default
+//! kernel.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -289,9 +290,9 @@ fn no_room_refusals_are_named() {
         Some(NoRoomReason::FaceConsumed)
     );
 
-    // the rim-rollover failure of the holed cube's blend of 5 (SM_FILERR_EDGE_PROBLEM)
+    // a chamfer of 25 on the cube of 20 (SM_FILERR_BAD_INT)
     let mut k = Kernel::default();
     let mut b = holed_cube(&mut k);
     let e = edge_between(&k, &b, [0.0, 0.0, 20.0], [20.0, 0.0, 20.0]);
-    assert_eq!(no_room_reason(&mut k, &mut b, &[e], 5.0), None);
+    assert_eq!(no_room_reason(&mut k, &mut b, &[e], 25.0), None);
 }

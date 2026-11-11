@@ -2132,18 +2132,16 @@ fn c3_trace_start(
     // toward the next through point (the chord between their points on the first offset
     // surface): the offsets touch there and the edge's end tangent can be the line along
     // which they touch to second order.
-    if st.tsect_pnts.len() > 1 {
-        if let (Some(&first), Some(&next)) = (st.tsect_pnts.first(), st.tsect_pnts.get(1)) {
-            let first = st.store.get(cx.fillets, first)?;
-            if first.point_type == IntersectionPointType::TangentPoint {
-                let uv_from = first.uv_pos(SrfIndex::First);
-                let uv_to = st.store.get(cx.fillets, next)?.uv_pos(SrfIndex::First);
-                let from = offset_evaluate_point(cx.k, ops, 0, uv_from)?;
-                let to = offset_evaluate_point(cx.k, ops, 0, uv_to)?;
-                let chord = to - from;
-                if chord.length() > st.trace.approx_tol_3d {
-                    st.trace.dir = chord;
-                }
+    if let (Some(&first), Some(&next)) = (st.tsect_pnts.first(), st.tsect_pnts.get(1)) {
+        let first = st.store.get(cx.fillets, first)?;
+        if first.point_type == IntersectionPointType::TangentPoint {
+            let uv_from = first.uv_pos(SrfIndex::First);
+            let uv_to = st.store.get(cx.fillets, next)?.uv_pos(SrfIndex::First);
+            let from = offset_evaluate_point(cx.k, ops, 0, uv_from)?;
+            let to = offset_evaluate_point(cx.k, ops, 0, uv_to)?;
+            let chord = to - from;
+            if chord.length() > st.trace.approx_tol_3d {
+                st.trace.dir = chord;
             }
         }
     }

@@ -392,12 +392,11 @@ fn revolution_round_crease_is_unchanged() {
     assert_eq!(on.volume.to_bits(), off.unwrap().volume.to_bits());
 }
 
-/// The blend corner alone (with the fillet fix the issue's preset needs to reach the
-/// crease round): the r 1
-/// round's End on the cylinder is a tangent end, its rail on the torus ending on the
-/// torus/cylinder seam where the round touches the cylinder. Without the tangent end
-/// (#2500) the rail end was taken as the rail's crossing of the cylinder, which has none
-/// there, and the cap edge was marched into the tangency: fillet code 5.
+/// The blend corner alone (with the SSI fix the issue's preset needs to reach the crease
+/// round): the r 1 round's End on the cylinder is a tangent end, its rail on the torus
+/// ending on the torus/cylinder seam where the round touches the cylinder. Without the
+/// tangent end (#2500) the rail end was taken as the rail's crossing of the cylinder, which
+/// has none there, and the cap edge was marched into the tangency: fillet code 5.
 #[test]
 fn the_blend_corner_alone_rounds_the_crease_to_its_tangent_end() {
     let mut k = Kernel::default();

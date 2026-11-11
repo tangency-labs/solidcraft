@@ -1,8 +1,8 @@
 //! tangency-labs/solidcore#417 (WR-422): a round as wide as the corner round it runs round
 //! is centred on that round's axis, where the offset faces collapse, so the rail points
 //! carry no angle and the torus could turn the long way round. The solver turns them into
-//! the half-planes through the edge's ends. The case is the fork's capi test: a 297 x 100 x 60 block with its vertical edges
-//! rounded R5, then its top rim R5.
+//! the half-planes through the edge's ends. The case is the fork's capi test: a
+//! 297 x 100 x 60 block with its vertical edges rounded R5, then its top rim R5.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

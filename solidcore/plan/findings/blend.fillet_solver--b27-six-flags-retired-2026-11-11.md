@@ -26,7 +26,7 @@
   also moved by WR-422) and 7 (WR-595 with WR-603). WR-301 moves no row; its tests
   (`tests/fillet_wr300_320.rs`) and fixtures 1080 and 4055 show it.
 - Blessing rewrote three more rows within the goldens' tolerance
-  (`attributed-box-cylinder-arc-round-seam-quarter-r2`, relative 7e-11; `gen0132` and
+  (`attributed-box-cylinder-arc-round-seam-quarter-r2`, relative 6.4e-12; `gen0132` and
   `gen0139` of `fillet_solver_p4`, relative 1e-12). They keep their old values, so the diff
   holds only the rows that move.
 
@@ -44,22 +44,24 @@ out short and the round failed.
 | seam-three-quarter | 1001, 10 v, 15 e, 8 f | 0, 12 v, 18 e, 9 f |
 
 Why right: the same box at 90 degrees (`seam-quarter-r2`), which main already built, gives
-12, 18 and 9 too, and the first two numbers of the attributes digest agree to 1e-10
-(459392.61597 at 90 degrees; 459392.61592 and 459392.61603 at 180 and 270). The digest's
+12, 18 and 9 too, and the first two numbers of the attributes digest agree to 1.3e-10
+relative (459392.61597 at 90 degrees; 459392.61592 and 459392.61603 at 180 and 270). The digest's
 third number depends on where the faces lie, so it differs between the three directions.
 
 ## WR-422 and WR-592: a rail point on the arc's axis (5 rows)
 
 - `big-rad-filleted_box-r1.0-top-edges` (WR-422 and WR-592 each): status 0 and 20, 36, 18
-  before and after; volume 564.2389452228 and every mass property equal to 1e-15. The
-  topology digest's blocks trade 8 between them (281291 + 285980 = 281283 + 285988) and the
-  first geometry block's third number grows by exactly 224: the same solid with its edges
+  before and after; volume 564.2389452228 and every mass property agree to 1.2e-15
+  relative. The topology digest's blocks trade 8 between them (281291 + 285980 = 281283 +
+  285988) and the first geometry block's third number grows by exactly 224, while every
+  other geometry number agrees to 1e-14: by the digests, the same solid with its entities
   in another order.
 - `issue920-cylinder-rim-edge1/edge2-constant/variable-constant-law-r10.0` (WR-592): a
   cylinder's rim rounded at its own radius, so the rail runs on the axis. Status, counts,
   topology digest and the mass check unchanged; the volume, 1570.796, moves by under 5e-13
-  and every other mass property by under 3e-10: the rail point now lies on the axis
-  instead of up to the solver's tolerance from it.
+  and every other mass property by under 3e-10 (absolute; 5.4e-9 relative at most),
+  the edge2 rows' geometry digest by 1.2e-16 relative: the rail point now lies on the
+  axis instead of up to the solver's tolerance from it.
 
 ## WR-595 and WR-603: a trace from a tangent point (7 rows)
 

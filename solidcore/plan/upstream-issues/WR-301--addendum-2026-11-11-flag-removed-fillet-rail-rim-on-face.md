@@ -2,7 +2,7 @@ Updates: WR-301
 
 #### WR-301 (update, 2026-11-11). `fillet_rail_rim_on_face` is removed
 
-The fix is the default and its flag is gone (tangency-labs/solidcraft#14246, batch B27, with
+The fix is the default and its flag is gone (tangency-labs/solidcraft#14246, batch B27, which retires the six flags
 `fillet_rail_rim_on_face`, `fillet_tangent_point_one_sided_step`, `fillet_torus_center_on_axis`,
 `fillet_torus_rail_on_axis`, `fillet_torus_span_from_start_section` and
 `fillet_trace_from_tangent_point_toward_next`). `TestRollOver` (`blend/fillet_solver/p5.rs`) always joins a rail's neighbouring intervals on its face or the face's boundary before the rollover.
