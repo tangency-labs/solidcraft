@@ -654,64 +654,25 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
 
         let top = top_pe.ok_or(dangling("top proto edge is null"))?;
 
-        // `fixes.split_edge_definition_owns_its_curves`: the new definition (a copy holding
-        // `ed`'s curves) gets copies of its own, and both are trimmed to their intervals,
-        // before `AddEdgeDefinition`: it reparameterizes the definition onto the upper proto
-        // edge where their intervals or directions differ, which would otherwise move
-        // `ed`'s curves too and map the whole curve, not the upper part, onto that edge.
-        if k.fixes.split_edge_definition_owns_its_curves {
-            self.copy_ed_curves(k, geometry, ed, new_ed)?;
-            for which in [0, 1, 2] {
-                for d in [ed, new_ed] {
-                    let curve = self.ed_curve(d, which)?;
-                    if curve.is_some() {
-                        self.trim_ed_curve(k, geometry, d, curve)?;
-                    }
+        // The new definition (a copy holding `ed`'s curves) gets copies of its own, and both
+        // are trimmed to their intervals, before `AddEdgeDefinition`: it reparameterizes the
+        // definition onto the upper proto edge where their intervals or directions differ.
+        // Upstream copies and trims after that call, so the shared curve was moved too, the
+        // lower definition's trim missed it, and the whole curve, not the upper part, was
+        // mapped onto the upper proto edge.
+        self.copy_ed_curves(k, geometry, ed, new_ed)?;
+        for which in [0, 1, 2] {
+            for d in [ed, new_ed] {
+                let curve = self.ed_curve(d, which)?;
+                if curve.is_some() {
+                    self.trim_ed_curve(k, geometry, d, curve)?;
                 }
             }
-            ignore_soft(passed_on(
-                self.add_edge_definition(k, &mut *geometry, top, new_ed),
-                k.fixes.ssi_proto_topology_statuses_pass_on,
-            )?)?;
-            return Ok((Some(new_vd), Some(new_ed)));
         }
-
         ignore_soft(passed_on(
             self.add_edge_definition(k, &mut *geometry, top, new_ed),
             k.fixes.ssi_proto_topology_statuses_pass_on,
         )?)?;
-
-        // Copy the three curves; trim the copies and the originals.
-        let this_crv3d = self
-            .edge_def(ed)
-            .ok_or(dangling("edge definition is deleted"))?
-            .xsect_curve_3d();
-        let new_crv = curve_of(&*geometry, this_crv3d)?.copy(k)?;
-        let new_handle = geometry
-            .insert_curve(new_crv)
-            .ok_or(SolidError::null_pointer(OP_ED_SPLIT))?;
-        self.set_ed_curve_3d(new_ed, Some(new_handle))?;
-        self.trim_ed_curve(k, geometry, ed, this_crv3d)?;
-        self.trim_ed_curve(k, geometry, new_ed, Some(new_handle))?;
-
-        for which in [1, 2] {
-            let uv = self
-                .edge_def(ed)
-                .ok_or(dangling("edge definition is deleted"))?
-                .xsect_uv_curve(which);
-            if uv.is_some() {
-                let copy = curve_of(&*geometry, uv)?.copy(k)?;
-                let handle = geometry
-                    .insert_curve(copy)
-                    .ok_or(SolidError::null_pointer(OP_ED_SPLIT))?;
-                self.edge_def_mut(new_ed)
-                    .ok_or(dangling("edge definition is deleted"))?
-                    .set_xsect_curve_uv(which, Some(handle));
-                self.trim_ed_curve(k, geometry, new_ed, Some(handle))?;
-                self.trim_ed_curve(k, geometry, ed, uv)?;
-            }
-        }
-
         Ok((Some(new_vd), Some(new_ed)))
     }
 

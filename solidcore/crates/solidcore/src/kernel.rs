@@ -949,49 +949,6 @@ pub struct UpstreamFixes {
     /// `plan/upstream-issues/WR-101--addendum-2026-10-31-opt-in-upper-interval.md`). The
     /// lower child is `[old_min, dT]` either way. Off by default for pinned C++ parity.
     pub proto_edge_split_upper_keeps_the_old_max: bool,
-    /// `SmEdgeDefinition::Split` gives the new upper definition its own copies of the 3D and
-    /// UV curves and trims both definitions' curves to their intervals before
-    /// `AddEdgeDefinition` hangs the new one on the upper proto edge. Upstream copies and
-    /// trims after that call, and it reparameterizes the new definition onto the upper
-    /// proto edge whenever their intervals or directions differ: the new definition then
-    /// still holds the lower one's whole curve, so that curve is moved too (the lower
-    /// definition's trim to its interval then misses it: `SmBSplineCurve::Trim`, `SM_ERR`,
-    /// passed on with `ssi_proto_topology_statuses_pass_on`, ignored upstream), and the
-    /// whole curve, not the upper part, is mapped onto the upper proto edge. A proto edge
-    /// that both bodies split at one point has two definitions; a STEP part cut by an exact
-    /// copy of itself failed this way (solidcore-native, no fork commit).
-    pub split_edge_definition_owns_its_curves: bool,
-    /// With `simple_coincidence_crossing_is_point`, `SimpleCoincidenceChecker` decides on
-    /// which side of this curve the other lies from the end pairs' separation across this
-    /// curve (its tangent's component removed). An end of one curve that runs past the other
-    /// curve's end drops onto that end, so the raw separation there points along the
-    /// curves: forward at one end, back at the other, and two curves lying on each other
-    /// (`4.2e-14` apart, one `4.8e-6` longer at each end) were taken for curves crossing: one
-    /// point where they lie on each other, or `SM_ERR` where no crossing is found (a body cut
-    /// by an exact copy of itself) (solidcore-native, no fork commit).
-    pub simple_coincidence_side_across_the_curve: bool,
-    /// `SmTopologyIntersector::IntersectInsertRelate` keeps the proto topology's capture
-    /// distance below half the smallest distance between two vertices of either operand
-    /// (never below the intersection tolerance), so that no proto vertex captures two
-    /// distinct vertices of one operand: two points d apart are never both closer than d / 2
-    /// to a third. Upstream takes the larger of 0.01 and 2000 times the intersection
-    /// tolerance, unbounded: with a STEP file's tolerances (0.01 on every edge) that is
-    /// 20 mm, every vertex of a 30 mm rim was captured into one proto vertex, the rim's
-    /// intersection with an exact copy of itself became one closed proto edge, and the
-    /// merge failed (`SmMerge::MakeFaceuse`, `SM_ERR`) (solidcore-native, no fork commit).
-    pub boolean_capture_keeps_operand_vertices_apart: bool,
-    /// `SmEdge::RadialSectorClassify`, when stepping off the edge leaves a face before the
-    /// classification is unique, reads a coincident classify face's side against the face it
-    /// coincides with: the sector edge use's face (`CoincidentSector` or its mate) or the
-    /// radial partner's (`CoincidentRadial` or its mate), as the coincidence test of the same
-    /// loop does (with the sector face's normal, and with the classify face's normal from its
-    /// projected binormal). Upstream reads both against the radial partner's normal, which
-    /// for a classify face lying on the sector face is a different face at the sector angle:
-    /// past 90 degrees that picks the wrong face use, the coincident pair is taken for
-    /// opposite sides, and a body minus an exact copy of itself keeps the face (a cone face of a 30 mm rim,
-    /// stepped off its face at count 8, sector angle 59 degrees with a
-    /// near-antiparallel normal) and is not closed (solidcore-native, no fork commit).
-    pub radial_sector_step_off_coincidence_by_own_face: bool,
     /// `SmMerge::BooleanPostProcess` also checks the merged face's edges that a face merge left with that face on both sides (slits), not only the intersection edges (WR-304, #1120).
     pub boolean_cleanup_removes_slits: bool,
     /// `SmFace::CurveOnClassify` classifies an interval whose two ends lie on one face edge (or its vertices) and whose midpoint is within the intersection tolerance of it as on that edge (the fork's `ClassifyEdgeInterval`, WR-305, #1057).

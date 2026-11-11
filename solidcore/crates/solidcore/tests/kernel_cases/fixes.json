@@ -244,9 +244,5 @@
   "fillet_section_end_trim_at_creases",
   "fillet_overflow_crease_along_edge",
   "plane_first_torus_section_exact",
-  "keep_exact_pcurves",
-  "split_edge_definition_owns_its_curves",
-  "simple_coincidence_side_across_the_curve",
-  "boolean_capture_keeps_operand_vertices_apart",
-  "radial_sector_step_off_coincidence_by_own_face"
+  "keep_exact_pcurves"
 ]
