@@ -145,13 +145,8 @@ pub const NO_VERTEX_SECTOR_OP: &str = "topology::brep::p5::make_edge_in_face";
 /// a failure that edited nothing.
 #[must_use]
 pub fn is_no_vertex_sector(error: &SolidError) -> bool {
-    matches!(
-        error,
-        SolidError::Upstream {
-            operation: NO_VERTEX_SECTOR_OP,
-            ..
-        }
-    )
+    // the status, not the variant: a typed failure that replaced the `Upstream` (#13790)
+    error.upstream_status().is_some() && error.operation() == NO_VERTEX_SECTOR_OP
 }
 
 /// Runs `f` with the caller's notification environment, or, for a plain entry point
@@ -3950,5 +3945,23 @@ mod tests {
         glue_vertices(&mut k, &mut b, stale, stale, None).unwrap();
         glue_vertices(&mut k, &mut b, None, None, None).unwrap();
         assert!(b.vertices().is_empty());
+    }
+
+    /// #13790: a typed failure that replaced the no-sector `Upstream` is the same
+    /// unedited failure.
+    #[test]
+    fn no_vertex_sector_reads_the_status_of_a_typed_failure() {
+        use crate::error::replaced_upstream_samples::{native_failures, replaced_upstream};
+        let upstream = SolidError::null_pointer(NO_VERTEX_SECTOR_OP);
+        assert!(is_no_vertex_sector(&upstream));
+        for typed in replaced_upstream(NO_VERTEX_SECTOR_OP, 1006, None) {
+            assert!(is_no_vertex_sector(&typed), "{typed:?}");
+        }
+        for other in replaced_upstream("topology::brep::p5::other", 1006, None)
+            .into_iter()
+            .chain(native_failures(NO_VERTEX_SECTOR_OP, 1006))
+        {
+            assert!(!is_no_vertex_sector(&other), "{other:?}");
+        }
     }
 }

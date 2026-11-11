@@ -910,11 +910,8 @@ fn intersection_inversion(
 ) -> Result<Option<ConeStepInversion>> {
     match cone.step_inversion(k, point, tol, None) {
         Ok(inversion) => Ok(Some(inversion)),
-        Err(SolidError::Upstream {
-            operation: "surface::surf_of_revolution::p2::SurfOfRevolution::step_inversion",
-            code: crate::error::SM_ERR,
-            ..
-        }) => Ok(None),
+        // by its status, so also a typed failure that replaced the `Upstream` (#13790)
+        Err(e) if crate::surface::surf_of_revolution::p2::is_off_generator(&e) => Ok(None),
         Err(e) => Err(e),
     }
 }
