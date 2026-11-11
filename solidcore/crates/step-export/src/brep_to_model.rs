@@ -816,13 +816,15 @@ mod tests {
             ("revolved line", Surface::from(revolved_line), |surface| {
                 matches!(surface, ModelSurface::Revolution { .. })
             }),
-            ("extruded circle", Surface::from(extruded_circle), |surface| {
-                matches!(surface, ModelSurface::Extrusion { .. })
-            }),
+            (
+                "extruded circle",
+                Surface::from(extruded_circle),
+                |surface| matches!(surface, ModelSurface::Extrusion { .. }),
+            ),
         ];
         for (name, surface, exported_as) in sheets {
-            let (mut brep, _) = sheet_on(&mut kernel, surface, 1e-6)
-                .unwrap_or_else(|e| panic!("{name}: {e}"));
+            let (mut brep, _) =
+                sheet_on(&mut kernel, surface, 1e-6).unwrap_or_else(|e| panic!("{name}: {e}"));
             // the sheet's sides have no UV curves yet: each edge use gets its own
             for edgeuse in edgeuses(&brep, None).unwrap() {
                 get_or_create_uv_trim_curve(&kernel, &mut brep, edgeuse, false, false, true)
