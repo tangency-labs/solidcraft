@@ -14,6 +14,7 @@ use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, PI, TAU};
 use super::extrude::extrude_region;
 use super::measure::{equivalent, section};
 use super::profile::rational_curve;
+use super::profile::FigurePlacement;
 use super::profile::{box_fit_in_convex_polygon, place_figure_2d, regular_polygon_2d, BoxFit};
 use super::profile::{check_regions, curve_on_frame, Loop2, ProfileRefusal, Region2, Seg2};
 use super::profile::{MAX_BEZIER_CTRL, MAX_PROFILE_COORD, MAX_SEGMENTS};
@@ -733,6 +734,15 @@ fn close(a: Point2, b: Point2) -> bool {
     a.distance(b) <= 1e-12 * (1.0 + b.length())
 }
 
+/// A placement with no turn.
+fn sized(scale: f64, origin: Point2) -> FigurePlacement {
+    FigurePlacement {
+        scale,
+        angle: 0.0,
+        origin,
+    }
+}
+
 #[test]
 fn sheet_figures_place_lines_arcs_and_curves_at_their_size() {
     let (s, at) = (3.5, p(100.0, 50.0));
@@ -766,7 +776,9 @@ fn sheet_figures_place_lines_arcs_and_curves_at_their_size() {
         },
         Seg2::Bezier { n: 2, p: ctrl },
     ];
-    let placed = place_figure_2d(&figure, s, at).unwrap();
+    let placed = place_figure_2d(&figure, &[], sized(s, at))
+        .unwrap()
+        .segments;
     assert_eq!(placed.len(), 5);
     let Seg2::Line { a, b } = placed[0] else {
         panic!("a line stays a line")
@@ -803,7 +815,118 @@ fn sheet_figures_place_lines_arcs_and_curves_at_their_size() {
     assert!(close(q[0], p(100.0, 53.5)) && close(q[1], p(103.5, 57.0)));
     assert!(close(q[2], p(107.0, 53.5)));
     assert_eq!(q[3], p(9.0, 9.0), "the unused tail is not moved");
-    assert!(place_figure_2d(&[], s, at).unwrap().is_empty());
+    assert!(place_figure_2d(&[], &[], sized(s, at))
+        .unwrap()
+        .segments
+        .is_empty());
+}
+
+#[test]
+fn sheet_figures_turn_about_their_origin() {
+    let line = Seg2::Line {
+        a: p(0.0, 0.0),
+        b: p(1.0, 0.0),
+    };
+    let quarter = FigurePlacement {
+        scale: 2.0,
+        angle: FRAC_PI_2,
+        origin: p(10.0, 20.0),
+    };
+    // A quarter turn: +x goes to +y, and (1, 1) to (-1, 1), twice as long, about (10, 20).
+    let placed = place_figure_2d(&[line], &[p(1.0, 1.0)], quarter).unwrap();
+    let Seg2::Line { a, b } = placed.segments[0] else {
+        panic!("a line stays a line")
+    };
+    assert!(
+        close(a, p(10.0, 20.0)) && close(b, p(10.0, 22.0)),
+        "{a:?} {b:?}"
+    );
+    assert!(close(placed.points[0], p(8.0, 22.0)), "{:?}", placed.points);
+    assert!(
+        close(placed.direction, p(0.0, 1.0)),
+        "{:?}",
+        placed.direction
+    );
+    // A half turn: an arc's start turns by π, its radius scales and its sweep stays.
+    let arc = Seg2::Arc {
+        center: p(1.0, 0.0),
+        radius: 1.0,
+        start: 0.0,
+        sweep: FRAC_PI_2,
+    };
+    let half = FigurePlacement {
+        angle: PI,
+        ..quarter
+    };
+    let placed = place_figure_2d(&[arc], &[p(0.0, 1.0)], half).unwrap();
+    let Seg2::Arc {
+        center,
+        radius,
+        start,
+        sweep,
+    } = placed.segments[0]
+    else {
+        panic!("an arc stays an arc")
+    };
+    assert!(close(center, p(8.0, 20.0)), "{center:?}");
+    assert_eq!((radius, start, sweep), (2.0, PI, FRAC_PI_2));
+    assert!(
+        close(placed.points[0], p(10.0, 18.0)),
+        "{:?}",
+        placed.points
+    );
+    assert!(
+        close(placed.direction, p(-1.0, 0.0)),
+        "{:?}",
+        placed.direction
+    );
+    // π/6 with a clockwise arc: the centre (2, 0) goes to (√3, 1), and the arc's placed start
+    // point is the original start point placed.
+    let r3 = 3.0_f64.sqrt();
+    let arc = Seg2::Arc {
+        center: p(2.0, 0.0),
+        radius: 0.5,
+        start: PI / 4.0,
+        sweep: -PI,
+    };
+    let sixth = FigurePlacement {
+        scale: 1.0,
+        angle: PI / 6.0,
+        origin: p(0.0, 0.0),
+    };
+    let from = p(2.0 + 0.5 * (PI / 4.0).cos(), 0.5 * (PI / 4.0).sin());
+    let placed = place_figure_2d(&[arc], &[from], sixth).unwrap();
+    let Seg2::Arc {
+        center,
+        radius,
+        start,
+        sweep,
+    } = placed.segments[0]
+    else {
+        panic!("an arc stays an arc")
+    };
+    assert!(close(center, p(r3, 1.0)), "{center:?}");
+    assert_eq!((radius, sweep), (0.5, -PI));
+    assert!((start - (PI / 4.0 + PI / 6.0)).abs() <= 1e-15, "{start}");
+    let start_point = center + p(start.cos(), start.sin()) * radius;
+    assert!(
+        close(start_point, placed.points[0]),
+        "{start_point:?} {:?}",
+        placed.points
+    );
+    assert!(
+        close(placed.direction, p(r3 / 2.0, 0.5)),
+        "{:?}",
+        placed.direction
+    );
+    // A full turn is no turn, and no figure still places its points.
+    let full = FigurePlacement {
+        angle: TAU,
+        ..sixth
+    };
+    let placed = place_figure_2d(&[], &[p(1.0, 2.0)], full).unwrap();
+    assert!(placed.segments.is_empty());
+    assert!(close(placed.points[0], p(1.0, 2.0)) && close(placed.direction, p(1.0, 0.0)));
 }
 
 #[test]
@@ -815,24 +938,39 @@ fn sheet_figures_refuse_a_hostile_placing() {
     }];
     for scale in [0.0, -1.0, f64::NAN, f64::INFINITY] {
         assert!(
-            place_figure_2d(&line, scale, o).is_err(),
+            place_figure_2d(&line, &[], sized(scale, o)).is_err(),
             "scale {scale}: no mirror, no collapse"
         );
     }
-    assert!(place_figure_2d(&line, 1.0, p(f64::NAN, 0.0)).is_err());
+    assert!(place_figure_2d(&line, &[], sized(1.0, p(f64::NAN, 0.0))).is_err());
+    for angle in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let turned = FigurePlacement {
+            angle,
+            ..sized(1.0, o)
+        };
+        assert!(
+            place_figure_2d(&line, &[], turned).is_err(),
+            "angle {angle}"
+        );
+        let nothing = place_figure_2d(&[], &[], turned);
+        assert!(nothing.is_err(), "angle {angle}: no direction from it");
+    }
+    assert!(place_figure_2d(&[], &[p(f64::NAN, 0.0)], sized(1.0, o)).is_err());
+    let far = place_figure_2d(&[], &[p(1e308, 0.0)], sized(10.0, o));
+    assert!(far.is_err(), "a point that overflows");
     let nan = [Seg2::Arc {
         center: o,
         radius: f64::NAN,
         start: 0.0,
         sweep: 1.0,
     }];
-    assert!(place_figure_2d(&nan, 1.0, o).is_err());
+    assert!(place_figure_2d(&nan, &[], sized(1.0, o)).is_err());
     let big = [Seg2::Line {
         a: o,
         b: p(1e308, 0.0),
     }];
     assert!(
-        place_figure_2d(&big, 10.0, o).is_err(),
+        place_figure_2d(&big, &[], sized(10.0, o)).is_err(),
         "a point that overflows"
     );
     for n in [0, 10] {
@@ -840,12 +978,27 @@ fn sheet_figures_refuse_a_hostile_placing() {
             n,
             p: [o; MAX_BEZIER_CTRL],
         }];
-        assert!(place_figure_2d(&bezier, 1.0, o).is_err(), "degree {n}");
+        assert!(
+            place_figure_2d(&bezier, &[], sized(1.0, o)).is_err(),
+            "degree {n}"
+        );
     }
     let many = vec![line[0]; MAX_SEGMENTS + 1];
-    assert!(place_figure_2d(&many, 1.0, o).is_err());
+    assert!(place_figure_2d(&many, &[], sized(1.0, o)).is_err());
+    let points = vec![o; MAX_SEGMENTS + 1];
+    assert!(place_figure_2d(&[], &points, sized(1.0, o)).is_err());
     assert_eq!(
-        place_figure_2d(&many[1..], 1.0, o).unwrap().len(),
+        place_figure_2d(&[], &points[1..], sized(1.0, o))
+            .unwrap()
+            .points
+            .len(),
+        MAX_SEGMENTS
+    );
+    assert_eq!(
+        place_figure_2d(&many[1..], &[], sized(1.0, o))
+            .unwrap()
+            .segments
+            .len(),
         MAX_SEGMENTS
     );
 }

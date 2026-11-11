@@ -1070,33 +1070,67 @@ pub fn rational_curve(knots: &[f64], homogeneous: &[[f64; 4]]) -> Result<Curve> 
 // Figures on a drawing sheet: a figure placed at its size, a regular outline's corners, and the
 // tallest label box inside a convex outline.
 
-/// `figure` scaled by `scale` about its own origin and moved to `origin`: each point `p` goes to
-/// `origin + scale p`; an arc's centre moves, its radius scales and its start and sweep stay; a
-/// conic keeps its weight. A drawing symbol is a table of segments in units of its size, placed
-/// by this one call.
+/// Where a figure goes on its sheet ([`place_figure_2d`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FigurePlacement {
+    /// Its size: the figure's units are `scale` long on the sheet.
+    pub scale: f64,
+    /// Its turn about its own origin, counter-clockwise, in radians.
+    pub angle: f64,
+    /// Where the figure's own origin goes.
+    pub origin: Point2,
+}
+
+/// A figure placed on its sheet ([`place_figure_2d`]).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlacedFigure {
+    /// The figure's segments, in its order.
+    pub segments: Vec<Seg2>,
+    /// The points asked for (a text's anchor, say), in their order.
+    pub points: Vec<Point2>,
+    /// The unit direction the figure's `+x` now points along (a text's baseline).
+    pub direction: Vec2,
+}
+
+/// `figure` and `points` scaled by `placement.scale`, turned by `placement.angle` about their own
+/// origin and moved to `placement.origin`: each point `p` goes to `origin + scale R p`, where `R`
+/// is the turn (counter-clockwise about `+z`). An arc's centre moves, its radius scales, its start
+/// turns by the angle and its sweep stays; a conic keeps its weight. A drawing symbol is a table
+/// of segments and text anchors in units of its size, placed by this one call.
 ///
 /// A mirror is out of scope: a negative scale would also turn each arc's sweep, so it is refused.
 ///
 /// # Errors
 ///
-/// `InvalidInput` for a scale not above 0 or not finite, an origin not finite, more than
-/// [`MAX_SEGMENTS`] segments, a Bézier degree outside `1 ..=` [`MAX_BEZIER_DEGREE`], or a segment
-/// not finite before or after it is placed.
-pub fn place_figure_2d(figure: &[Seg2], scale: f64, origin: Point2) -> Result<Vec<Seg2>> {
+/// `InvalidInput` for a scale not above 0 or not finite, an angle or an origin not finite, more
+/// than [`MAX_SEGMENTS`] segments or points, a Bézier degree outside `1 ..=`
+/// [`MAX_BEZIER_DEGREE`], or a segment or point not finite before or after it is placed.
+pub fn place_figure_2d(
+    figure: &[Seg2],
+    points: &[Point2],
+    placement: FigurePlacement,
+) -> Result<PlacedFigure> {
     let bad = |reason| SolidError::invalid_input(OP_FIGURE, reason);
-    if !(scale > 0.0 && scale.is_finite() && finite2(origin)) {
+    let FigurePlacement {
+        scale,
+        angle,
+        origin,
+    } = placement;
+    if !(scale > 0.0 && scale.is_finite() && angle.is_finite() && finite2(origin)) {
         return Err(bad(
-            "a scale not above 0 or not finite, or an origin not finite",
+            "a scale not above 0 or not finite, or an angle or an origin not finite",
         ));
     }
-    if figure.len() > MAX_SEGMENTS {
-        return Err(bad("more segments than MAX_SEGMENTS"));
+    if figure.len() > MAX_SEGMENTS || points.len() > MAX_SEGMENTS {
+        return Err(bad("more segments or points than MAX_SEGMENTS"));
     }
-    // The kernel's affine map, a uniform scale and a move in the plane.
+    // The turned axes are `x` and `x` turned a quarter more: one rounding per entry, so no turn is
+    // exact. The kernel's affine map then scales them and adds the move.
+    let x = unit(angle);
     let map = Transform::from_axes(
-        Vec3::new(scale, 0.0, 0.0),
-        Vec3::new(0.0, scale, 0.0),
-        Vec3::new(0.0, 0.0, 1.0),
+        Vec3::new(x.x, x.y, 0.0) * scale,
+        Vec3::new(-x.y, x.x, 0.0) * scale,
+        Vec3::Z,
         Point3::new(origin.x, origin.y, 0.0),
     );
     let at = |p: Point2| Vec2::from_xy(map.transform_point(Point3::new(p.x, p.y, 0.0)));
@@ -1112,7 +1146,7 @@ pub fn place_figure_2d(figure: &[Seg2], scale: f64, origin: Point2) -> Result<Ve
             } => Seg2::Arc {
                 center: at(center),
                 radius: radius * scale,
-                start,
+                start: start + angle,
                 sweep,
             },
             Seg2::Cubic { p0, p1, p2, p3 } => Seg2::Cubic {
@@ -1142,7 +1176,15 @@ pub fn place_figure_2d(figure: &[Seg2], scale: f64, origin: Point2) -> Result<Ve
         }
         placed.push(moved);
     }
-    Ok(placed)
+    let points = points.iter().map(|&p| at(p)).collect::<Vec<_>>();
+    if !points.iter().copied().all(finite2) {
+        return Err(bad("a point not finite"));
+    }
+    Ok(PlacedFigure {
+        segments: placed,
+        points,
+        direction: x,
+    })
 }
 
 /// Every number `seg` uses is finite (a Bézier's tail past its degree is not used).
