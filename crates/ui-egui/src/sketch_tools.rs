@@ -942,6 +942,7 @@ pub fn tool_for(id: &str) -> Option<Tool> {
         dim_history: Vec::new(),
         dims_stage: usize::MAX,
         dims_focus: false,
+        spline_degree: 3,
         arc_turn: 0.0,
         lined: Vec::new(),
         chain: Default::default(),
@@ -1472,6 +1473,10 @@ fn run_points(app: &mut SolveApp, t: &Tool) -> bool {
         ("sketch.slot.arc_center", [c, a, b, w]) => {
             let r = c.0.dist(a.0);
             json!({"center": xy(c.0), "start": xy(a.0), "end": xy(b.0), "width": slot_width(2.0 * (w.0.dist(c.0) - r).abs())})
+        }
+        // A degree other than the cubic comes from the palette's Degree row (#12323).
+        ("sketch.spline.control_point", pts) if pts.len() >= 2 && t.spline_degree != 3 => {
+            json!({"points": pts.iter().map(arg).collect::<Vec<_>>(), "degree": t.spline_degree})
         }
         ("sketch.spline.fit_point" | "sketch.spline.control_point" | "sketch.spline.control_point_5", pts) if pts.len() >= 2 => {
             json!({"points": pts.iter().map(arg).collect::<Vec<_>>()})

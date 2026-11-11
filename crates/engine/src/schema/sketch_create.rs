@@ -1007,8 +1007,67 @@ pub struct FitPointSplineParams {
     pub sketch: Option<SketchTarget>,
 }
 
-/// Draw a control point spline: a cubic one (`sketch.spline.control_point`) or one of degree 5
-/// (`sketch.spline.control_point_5`), shaped by its control points.
+/// The degree `sketch.spline.control_point` draws at (#12323), as the handler reads `degree`: a
+/// whole number from 1 to [`solidcore_record::MAX_BEZIER_DEGREE`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SplineDegree(pub u8);
+
+impl<'de> Deserialize<'de> for SplineDegree {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let max = solidcore_record::MAX_BEZIER_DEGREE;
+        match Value::deserialize(d)? {
+            Value::Number(n) => n
+                .as_u64()
+                .filter(|d| (1..=max as u64).contains(d))
+                .and_then(|d| u8::try_from(d).ok())
+                .map(SplineDegree)
+                .ok_or_else(|| D::Error::custom(whole(format!("degree must be an integer from 1 to {max}")))),
+            _ => Err(D::Error::custom(whole(format!("degree must be an integer from 1 to {max}")))),
+        }
+    }
+}
+
+impl JsonSchema for SplineDegree {
+    fn schema_name() -> Cow<'static, str> {
+        "SplineDegree".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "The degree of the spline: 3 is a cubic. A spline with fewer than degree + 1 control points takes the highest degree they allow. Default: 3.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": solidcore_record::MAX_BEZIER_DEGREE,
+            "default": 3
+        })
+    }
+}
+
+/// Draw a control point spline (`sketch.spline.control_point`) at a degree from 1 to 9 (#12323),
+/// a cubic by default, shaped by its control points.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = points_required)]
+pub struct ControlPointSplineDegreeParams {
+    /// The control points.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SplinePoints")]
+    pub points: Option<SplinePoints>,
+    /// The degree, from 1 to 9. Default: 3, a cubic.
+    #[serde(default)]
+    pub degree: Option<SplineDegree>,
+    /// Refused as true: only a cubic fit point spline can be periodic. Default: false.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Periodic<false>")]
+    pub periodic: Option<Periodic<false>>,
+    /// Make it construction geometry. Default: false.
+    #[serde(default)]
+    pub construction: Option<bool>,
+    /// The sketch (default: the one being edited).
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+}
+
+/// Draw a control point spline of degree 5 (`sketch.spline.control_point_5`), shaped by its
+/// control points.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = points_required)]
 pub struct ControlPointSplineParams {

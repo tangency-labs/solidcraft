@@ -384,6 +384,10 @@ pub struct UiState {
     /// a tab click opens them, and a command starting or the pointer leaving closes them.
     #[serde(skip)]
     pub ribbon_open: bool,
+    /// The Degree row of the sketch palette while Control Point Spline runs (#12323): the text
+    /// typed there, kept for the next spline. Not saved: each session starts with the cubic.
+    #[serde(skip)]
+    pub spline_degree: String,
     /// Last contextual body/sketch, only used to select on entry.
     #[serde(skip)]
     pub ribbon_context: Option<String>,
@@ -447,6 +451,7 @@ impl Default for UiState {
             ribbon_context: None,
             sketch_return_tab: None,
             ribbon_open: false,
+            spline_degree: "3".into(),
             show_browser: true,
             show_timeline: true,
             show_grid: true,
@@ -2369,6 +2374,7 @@ impl SolveApp {
                     .collect();
                 let _ = self.session.execute("select.clear", &json!({}));
             }
+            t.spline_degree = sketch_palette::spline_degree(self);
             self.tool = Some(t);
             self.set_status(tools::hint(id), false);
             return;
