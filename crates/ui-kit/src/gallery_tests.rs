@@ -668,13 +668,7 @@ pub const ELEMENTS: &[Element] = &[
                 |ui| {
                     text(ui, "Controls", Text::Inline);
                 },
-                |ui, ()| {
-                    layout_preview(
-                        ui,
-                        LayoutPreview { compact: true, labels: false, history: 2, translucent: false, dialog_left: true },
-                        "Where the panels go",
-                    )
-                },
+                |ui, ()| layout_preview(ui, LayoutPreview { compact: true, labels: false, history_in_browser: false }, "Where the panels go"),
             )
         });
     }),
@@ -1085,9 +1079,6 @@ pub const ELEMENTS: &[Element] = &[
             history_marker(ui.painter(), rect, false, accent);
         });
     }),
-    element!("history_seam_rest", |ui, _| history_seam_example(ui, HistoryHandleState::Rest)),
-    element!("history_seam_hover", |ui, _| history_seam_example(ui, HistoryHandleState::Hover)),
-    element!("history_seam_drag", |ui, _| history_seam_example(ui, HistoryHandleState::Drag)),
     element!("file_navigation", |ui, _| {
         FileView::navigation(ui, |ui| {
             FileView::back_to(ui, "gallery:file:back", "Back to {name}", "Sample Plate", "Esc");
@@ -2524,19 +2515,6 @@ fn gallery_covers_every_inline_element() {
                 }
             }
         }
-    }
-}
-
-#[cfg(any(test, feature = "test-support"))]
-fn history_seam_example(ui: &mut Ui, state: HistoryHandleState) {
-    let t = Tokens::get();
-    let allocation = ui.allocate_space(vec2(280.0, 250.0)).1;
-    for (names, offset) in [(false, 0.0), (true, 125.0)] {
-        let width = if state == HistoryHandleState::Drag { 112.0 } else { history_width(names) };
-        // Separate samples vertically so the guide/chip fits within the gallery allocation.
-        let card = egui::Rect::from_min_size(allocation.min + vec2(t.space_8, offset + t.space_8), vec2(width, 104.0));
-        ui.painter().rect(card, t.radius_lg, t.panel, egui::Stroke::new(1.0, t.border), egui::StrokeKind::Inside);
-        HistorySeam::new(card).paint(ui.painter(), card, names, state);
     }
 }
 

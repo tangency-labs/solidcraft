@@ -55,8 +55,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         app.material_card_review = Some(window);
         return;
     }
-    let palette = app.viewport.palette_rect.filter(|r| r.is_finite() && r.is_positive());
-    let side = crate::shell::floating_editor_side(app, palette.is_some() && crate::sketch_palette::fits_beside_a_dialog(app, ctx));
+    let side = crate::frame::Side::Right;
     let top = crate::shell::panel_top(app, viewport, viewport.bottom(), side);
     let docked = egui::pos2(side.anchor_x(viewport), top);
     let title = tr("ui.material_review.title");
@@ -72,12 +71,6 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         ui_kit::Panel::feature_frame(ctx, app.ui.layout, side),
     )
     .wide();
-    let panel = if side == crate::frame::Side::Left {
-        let available = palette.map_or(viewport.width(), |r| (r.left() - viewport.left() - solidcraft_theme::Tokens::get().space_8).max(0.0));
-        panel.width((solidcraft_theme::Tokens::get().form_card_width * 3.0).min(available))
-    } else {
-        panel
-    };
     let mut close = false;
     panel.window(ctx).show(ctx, |ui| {
         let (closed, action) = panel.feature(

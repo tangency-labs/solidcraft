@@ -4,7 +4,7 @@ use std::sync::mpsc::channel;
 fn transcript_clipboard_harness(layout: crate::ui_kit::LayoutMode) -> crate::scenario::Harness {
     let mut h = narrow_chat();
     h.app.ui.layout = layout;
-    h.app.preferences.agent_chat_width = 500.0;
+    resize_chat(&mut h, 500.0);
     h.app.agent_chat.items.push(Item::Agent { thought: false, text: "Transcript clipboard sentinel".into() });
     h.app.run("solid.box", json!({"length": 2, "width": 2, "height": 2, "body_name": "Cube"})).unwrap();
     h.app.run("select.set", json!({"items": [{"type": "body", "name": "Cube"}]})).unwrap();
@@ -113,7 +113,9 @@ fn transcript_shortcut_ownership_ends_when_the_panel_is_hidden() {
         transcript_click(&mut h, at);
         match hidden {
             "closed" => h.app.agent_chat.open = false,
-            "minimized" => h.app.preferences.agent_chat_minimized = true,
+            "minimized" => {
+                h.app.run_panel_command("panel.collapse", &json!({"target":{"type":"instance","id":"assistant"},"collapsed":true})).unwrap();
+            }
             _ => h.app.preferences.ai_features = false,
         }
         h.frame_with(vec![egui::Event::Paste("SolidCraft bodies".into())]);
@@ -655,8 +657,7 @@ fn the_chat_pops_out_into_its_own_window_and_docks_back() {
     h.frames(3);
     assert!(rect_of("agent_chat:panel").is_some() && rect_of("agent_chat:window").is_none(), "docked by default");
     assert!(!h.app.preferences.agent_chat_popped);
-    let pop = handle_at("agent_chat:pop_out").expect("a pop-out button in the header");
-    h.call("ui.click", json!({"x": pop.x, "y": pop.y}));
+    h.call("ui.agent_chat", json!({"popped": true}));
     h.frames(3);
     assert!(h.app.preferences.agent_chat_popped);
     assert!(rect_of("agent_chat:panel").is_none(), "the side panel is gone");
@@ -3197,12 +3198,24 @@ fn new_chat_clears_the_files_waiting_and_asks_first() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
+fn resize_chat(h: &mut crate::scenario::Harness, width: f32) {
+    h.frames(2);
+    h.app
+        .run_panel_command(
+            "panel.resize",
+            &json!({
+                "target":{"type":"instance","id":"assistant"},"size":{"width":width,"height":400},"thickness_only":true
+            }),
+        )
+        .unwrap();
+}
+
 /// A harness with the chat open at its narrowest and nothing to look for.
 fn narrow_chat() -> crate::scenario::Harness {
     let mut h = crate::scenario::Harness::new();
-    h.app.preferences.agent_chat_width = panel::MIN_WIDTH;
     h.app.agent_chat.open = true;
     h.app.agent_chat.detection = Some(Default::default());
+    resize_chat(&mut h, 280.0);
     h
 }
 
@@ -3616,19 +3629,13 @@ fn files_dropped_on_the_chat_attach_and_the_app_does_not_open_them() {
     assert!(!h.app.file_load.busy(), "the app doesn't open them as well");
     drop_files(&mut h, egui::pos2(300.0, 500.0), &[d.join("brief.md")]);
     assert_eq!(status(&h.app)["attachments"].as_array().map(Vec::len), Some(2), "over the 3D view: not the chat's");
-    // Folded to its strip, a drop on the strip is the chat's too.
-    h.call("ui.agent_chat", json!({"minimized": true}));
+    // Collapsing and closing release the body as an attachment drop target.
+    h.app.run_panel_command("panel.collapse", &json!({"target":{"type":"instance","id":"assistant"},"collapsed":true})).unwrap();
     h.frames(3);
-    let strip = h.app.agent_chat.drop_rect.expect("the strip takes drops");
-    assert!(strip.width() < 60.0, "{strip:?}");
-    drop_files(&mut h, strip.center(), &[d.join("brief.md")]);
-    assert_eq!(status(&h.app)["attachments"].as_array().map(Vec::len), Some(3));
-    // Closed: nothing is the chat's, wherever the pointer was.
+    assert!(h.app.agent_chat.drop_rect.is_none());
     h.app.agent_chat.open = false;
     h.frames(2);
     assert!(h.app.agent_chat.drop_rect.is_none());
-    drop_files(&mut h, strip.center(), &[d.join("brief.md")]);
-    assert_eq!(status(&h.app)["attachments"].as_array().map(Vec::len), Some(3));
     let _ = std::fs::remove_dir_all(&d);
 }
 
@@ -4690,7 +4697,7 @@ fn a_split_wall_clicked_once_is_one_item() {
 /// boxes' feature ids and names, in order.
 fn picker_over_boxes(boxes: usize, timeline_left: bool) -> (crate::scenario::Harness, Vec<(u64, String)>) {
     let mut h = crate::scenario::Harness::new();
-    h.app.preferences.timeline_left = timeline_left;
+    h.app.run("view.history_layout", json!({"dock":if timeline_left { "left" } else { "bottom" }})).unwrap();
     h.call("ui.agent_chat", json!({"open": true}));
     for i in 0..boxes {
         h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": format!("Body{}", i + 1)})).expect("a box");
@@ -5535,7 +5542,6 @@ fn shared_assistant_harness() -> (crate::scenario::Harness, Script) {
     h.app.run("sketch.finish", json!({})).unwrap();
     let feature = h.app.session.doc.features[0].id;
     h.app.run("select.set", json!({"items":[solidcraft_engine::Sel::Feature { id: feature }]})).unwrap();
-    h.app.preferences.shared_panel_layout = true;
     h.frames(6);
     assert!(h.app.panel_runtime().is_some());
     assert!(h.app.agent_chat.detecting.is_none(), "the deterministic discovery fixture starts no worker");
@@ -5967,7 +5973,7 @@ fn drawn(h: &crate::scenario::Harness, text: &str) -> usize {
 fn timed_chat() -> (crate::scenario::Harness, Script) {
     let mut h = crate::scenario::Harness::new();
     h.call("ui.agent_chat", json!({"open": true}));
-    h.app.preferences.agent_chat_width = 520.0;
+    resize_chat(&mut h, 520.0);
     let script = Script::default();
     h.app.agent_chat.backend = Some(Box::new(script.clone()));
     h.app.agent_chat.state = Some(State::Ready);

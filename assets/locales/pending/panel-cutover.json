@@ -1,0 +1,22 @@
+{
+  "de": {
+    "prefs.history_in_browser": "Verlauf im Browser anzeigen",
+    "prefs.history_in_browser_note": "Zeigt die Vorgänge jeder Komponente im Browser und blendet das separate Verlaufsfenster aus."
+  },
+  "en": {
+    "prefs.history_in_browser": "Show History in the Browser",
+    "prefs.history_in_browser_note": "List each component’s features in the Browser and hide the separate History panel."
+  },
+  "ja": {
+    "prefs.history_in_browser": "履歴をブラウザーに表示",
+    "prefs.history_in_browser_note": "各コンポーネントのフィーチャーをブラウザーに表示し、個別の履歴パネルを非表示にします。"
+  },
+  "ko": {
+    "prefs.history_in_browser": "브라우저에 이력 표시",
+    "prefs.history_in_browser_note": "각 구성요소의 피처를 브라우저에 표시하고 별도의 이력 패널을 숨깁니다."
+  },
+  "zh": {
+    "prefs.history_in_browser": "在浏览器中显示历史记录",
+    "prefs.history_in_browser_note": "在浏览器中列出各组件的特征，并隐藏独立的历史记录面板。"
+  }
+}

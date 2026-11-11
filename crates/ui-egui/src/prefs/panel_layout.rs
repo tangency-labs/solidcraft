@@ -67,7 +67,6 @@ pub(super) fn closed(ctx: &egui::Context) {
 
 pub(super) fn show(app: &mut SolveApp, ui: &mut Ui) {
     if !crate::panel_runtime::preferences_enabled(app) {
-        ui_kit::settings_section(ui, "panel_layout", app.tr("ui.panel_layout.panel_layout"), |ui| panel_system(app, ui));
         return;
     }
     let key = Id::unique(STATE);
@@ -90,7 +89,6 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut Ui) {
     }
     ui_kit::settings_section(ui, "panel_layout", app.tr("ui.panel_layout.panel_layout"), |ui| {
         ui.spacing_mut().item_spacing.y = Tokens::get().space_16;
-        panel_system(app, ui);
         workspace_selector(app, ui, &view);
         tiles(app, ui, &view, &mut state);
     });
@@ -98,11 +96,6 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut Ui) {
         popover(app, ui, &view, &mut state);
         ui.ctx().data_mut(|data| data.insert_temp(key, state));
     }
-}
-
-fn panel_system(app: &mut SolveApp, ui: &mut Ui) {
-    ui_kit::checkbox(ui, solidcraft_ui_text::tr("prefs.shared_panel_layout"), &mut app.preferences.shared_panel_layout)
-        .backing_on_hover_text(solidcraft_ui_text::tr("prefs.shared_panel_layout_help"));
 }
 
 fn workspace_selector(app: &mut SolveApp, ui: &mut Ui, view: &LayoutPreferencesView) {

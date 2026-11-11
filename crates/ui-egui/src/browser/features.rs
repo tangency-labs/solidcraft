@@ -35,7 +35,7 @@ pub(crate) fn reveal(app: &mut SolveApp, id: u64, body: &str) {
     };
     let Some(path) = super::placement_named(app, &source, component, body) else { return };
     app.ui.show_browser = true;
-    app.preferences.timeline_left_browser_collapsed = false;
+    reveal_shared_panel(app, "browser");
     app.tree.reveal = None;
     super::open_path(app, &path);
     let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(&path) };
@@ -58,6 +58,7 @@ pub(crate) fn reveal_in_history(app: &mut SolveApp, id: u64) {
             .unwrap_or_else(|| app.session.doc.first_path(component))
     };
     app.ui.show_browser = true;
+    reveal_shared_panel(app, "browser");
     // Opened whichever way each row starts (Preferences › Layout can start rows closed).
     let start_open = rows_start_open(app);
     set_open(app, "c0", true, true);

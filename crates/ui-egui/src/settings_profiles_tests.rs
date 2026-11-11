@@ -795,19 +795,13 @@ fn general_profile_row_rename_keeps_validation_and_unchanged_name_noop() {
 }
 
 #[test]
-fn profile_keys_preserve_the_baseline_and_explicit_additions() {
+fn profile_keys_cover_the_current_portable_preferences() {
     let expected = [
         "browser_bodies_folders",
-        "browser_collapsed",
         "browser_eye_left",
-        "browser_float",
-        "browser_share",
-        "browser_show",
-        "browser_width",
         "center_arc_follows_cursor",
         "color_vision",
         "dialog_buttons",
-        "dialog_place",
         "direct_interaction",
         "escape_twice_finishes_sketch",
         "free_orbit",
@@ -881,12 +875,7 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
         "theme_follow",
         "theme_night",
         "theme_options",
-        "timeline_collapsed",
-        "timeline_left",
-        "timeline_left_browser_collapsed",
-        "timeline_left_width",
         "timeline_origin_bodies",
-        "timeline_under_browser",
         "toast_place",
         "trackpad_pan",
         "trackpad_twist_turns",

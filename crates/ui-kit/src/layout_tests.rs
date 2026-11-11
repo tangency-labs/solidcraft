@@ -365,10 +365,10 @@ fn layout_picture_choices_wrap_inside_the_indexed_row_and_keep_real_targets() {
         for width in [140.0, 280.0, 646.0] {
             let ctx = crate::test_support::context();
             let options = [
-                PictureChoice { key: "bottom", label: "Bottom", figure: paint_history_bottom },
-                PictureChoice { key: "left", label: "Left", figure: paint_history_left },
-                PictureChoice { key: "under_browser", label: "Under browser", figure: paint_history_under_browser },
-                PictureChoice { key: "browser", label: "In browser", figure: paint_history_in_browser },
+                PictureChoice { key: "bottom", label: "Bottom", figure: super::preferences_figure_data::paint_history_bottom },
+                PictureChoice { key: "left", label: "Left", figure: super::preferences_figure_data::paint_history_left },
+                PictureChoice { key: "under_browser", label: "Under browser", figure: super::preferences_figure_data::paint_history_under_browser },
+                PictureChoice { key: "browser", label: "In browser", figure: super::preferences_figure_data::paint_history_in_browser },
             ];
             frame(&ctx, vec![], |ui| {
                 ui.set_width(width);

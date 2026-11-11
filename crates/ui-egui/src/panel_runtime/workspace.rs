@@ -306,6 +306,19 @@ impl WorkspacePanelHost {
         Ok(())
     }
 
+    pub(crate) fn set_header_action_visible(&mut self, instance: InstanceId, action: ControlId, visible: bool) {
+        let hidden = &mut self.options.geometry.hidden_header_actions;
+        let changed = if visible {
+            hidden.get_mut(&instance).is_some_and(|actions| actions.remove(&action))
+        } else {
+            hidden.entry(instance).or_default().insert(action)
+        };
+        hidden.retain(|_, actions| !actions.is_empty());
+        if changed {
+            self.invalidate_geometry();
+        }
+    }
+
     pub(crate) fn set_gap(&mut self, gap: f32) -> PanelResult<()> {
         let metrics = HostMetrics { gap, ..self.options.metrics };
         metrics.validate()?;

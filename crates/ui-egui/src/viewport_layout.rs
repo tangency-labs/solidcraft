@@ -213,47 +213,6 @@ impl Layout {
         corner: egui::Vec2,
         navigation: Rect,
     ) -> Self {
-        Self::build(viewport, content, docks, scale, style, corner, navigation, None)
-    }
-
-    /// Render fits stay between the docked panels, including beneath a short Browser card.
-    pub fn product(
-        viewport: Rect,
-        content: Rect,
-        docks: &[Rect],
-        scale: f32,
-        style: crate::prefs::NavigatorStyle,
-        corner: egui::Vec2,
-        navigation: Rect,
-    ) -> Self {
-        Self::build(viewport, content, docks, scale, style, corner, navigation, Some(crate::frame::Side::Right))
-    }
-
-    /// Render compass at the free canvas edge beside a left-hand Inspector.
-    pub fn product_left(
-        viewport: Rect,
-        content: Rect,
-        docks: &[Rect],
-        scale: f32,
-        style: crate::prefs::NavigatorStyle,
-        corner: egui::Vec2,
-        navigation: Rect,
-    ) -> Self {
-        Self::build(viewport, content, docks, scale, style, corner, navigation, Some(crate::frame::Side::Left))
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn build(
-        viewport: Rect,
-        content: Rect,
-        docks: &[Rect],
-        scale: f32,
-        style: crate::prefs::NavigatorStyle,
-        corner: egui::Vec2,
-        navigation: Rect,
-        inspector_side: Option<crate::frame::Side>,
-    ) -> Self {
-        let fit_in_content = inspector_side.is_some();
         let scale = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
         let mut obstacles: Vec<_> = docks.iter().copied().filter(|r| r.is_finite()).map(|r| r.expand(4.0)).collect();
         // Navigation is anchored to the viewport, never to transient dialog space.
@@ -280,29 +239,14 @@ impl Layout {
         let confirm = below_bar(confirm);
         // The axis view starts below the pair while it is shown.
         let top = if confirm.is_positive() { confirm.bottom() + CORNER_GAP } else { available.top() };
-        let cube_size = if fit_in_content { 110.0 } else { super::viewport::axis_view_size(style) };
-        let axis_left = |size| {
-            if inspector_side == Some(crate::frame::Side::Left) { available.left() } else { available.right() - size }
-        };
+        let cube_size = super::viewport::axis_view_size(style);
+        let axis_left = |size| available.right() - size;
         let top = below_bar(Rect::from_min_size(pos2(axis_left(cube_size), top), vec2(cube_size, cube_size))).top();
         let mut axis_view = if available.width() >= cube_size && available.bottom() - top >= cube_size {
             Rect::from_min_size(pos2(axis_left(cube_size), top), vec2(cube_size, cube_size))
         } else {
             Rect::NOTHING
         };
-        // Preserve legacy control anchors. Product controls retain their existing
-        // vertical relocation policy; the universal host uses the full contour.
-        if fit_in_content {
-            for _ in 0..obstacles.len() {
-                let bottom = obstacles.iter().filter(|dock| axis_view.intersect(**dock).is_positive()).map(Rect::bottom).max_by(f32::total_cmp);
-                let Some(bottom) = bottom else { break };
-                axis_view = if available.bottom() - bottom >= cube_size {
-                    Rect::from_min_size(pos2(axis_view.left(), bottom), vec2(cube_size, cube_size))
-                } else {
-                    Rect::NOTHING
-                };
-            }
-        }
         // On tiny viewports keep the bottom controls usable rather than overlapping them.
         // This decision depends only on viewport size, never on an overlay.
         if axis_view.intersect(navigation).is_positive() {
@@ -313,7 +257,7 @@ impl Layout {
                 Rect::NOTHING
             };
         }
-        let within = if fit_in_content { content } else { viewport };
+        let within = viewport;
         // Only the panels decide where the middle of the view is; the controls below are drawn
         // over the view and would otherwise push the model into a corner of it.
         let middle = free_rect(within, &obstacles);
