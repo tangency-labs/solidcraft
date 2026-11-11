@@ -398,7 +398,15 @@ impl<'a> NearHoles<'a> {
     }
 }
 
+// The planar booleans this thread ran, for the tests that count them.
+#[cfg(test)]
+thread_local! {
+    static MATERIAL_BOOLEANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 pub(crate) fn material_boolean(a: &[Region2], b: &[Region2], op: kernel::BoolOp, work: &mut FlatWork) -> Result<Vec<Region2>> {
+    #[cfg(test)]
+    MATERIAL_BOOLEANS.with(|n| n.set(n.get() + 1));
     let (ae, ap) = region_complexity(a)?;
     let (be, bp) = region_complexity(b)?;
     let edges = ae.saturating_add(be);
@@ -7230,6 +7238,27 @@ mod tests {
         assert_eq!(regions[0].holes.len(), 240);
         let area = 250.0 * 130.0 - 240.0 * std::f64::consts::PI * 2.0 * 2.0;
         assert!((regions[0].area() - area).abs() < 1e-6);
+    }
+
+    /// #13493: a flat with many cut-outs takes them all from the material in one planar boolean,
+    /// not after uniting them one pair at a time (63 more for 64 holes, each rebuilding both
+    /// operands in the kernel). Its holes are the same 64 circles.
+    #[test]
+    fn a_flat_with_many_cutouts_cuts_them_in_one_planar_boolean() {
+        let mut s = plate(250.0, 130.0);
+        for i in 0..8 {
+            for j in 0..8 {
+                s.holes.push(Region2 { outer: Loop2::circle(Vec2::new(15.0 + 30.0 * i as f64, 15.0 + 14.0 * j as f64), 2.0), holes: vec![] });
+            }
+        }
+        MATERIAL_BOOLEANS.with(|n| n.set(0));
+        let regions = s.flat_regions().unwrap();
+        let calls = MATERIAL_BOOLEANS.with(std::cell::Cell::get);
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].holes.len(), 64);
+        let area = 250.0 * 130.0 - 64.0 * std::f64::consts::PI * 4.0;
+        assert!((regions[0].area() - area).abs() < 1e-6, "{}", regions[0].area());
+        assert_eq!(calls, 1, "planar booleans for one plate and 64 holes");
     }
 
     #[test]
