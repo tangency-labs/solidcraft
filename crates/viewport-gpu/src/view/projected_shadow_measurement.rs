@@ -1,5 +1,5 @@
 //! Explicit manual measurement against the original ellipse; ignored by normal CI.
-//! Set WGPU_BACKEND, VIEWPORT_TEST_GPU=hardware|software and SOLIDCRAFT_BENCH_OUTPUT_DIR.
+//! Set WGPU_BACKEND, VIEWPORT_TEST_GPU=hardware|software and VIEWPORT_BENCH_OUTPUT_DIR.
 //! The split viewport uses procedural boxes and a torus with fixed subdivisions.
 //! Earlier timings used CAD-generated meshes and remain historical.
 use super::super::{BlockBytes, Frame, GpuScene, GpuTarget, Renderer, SceneBlock};
@@ -100,7 +100,7 @@ fn measure_projected_shadow_large_mesh() -> Result<(), Box<dyn std::error::Error
     if let Some(error) = pollster::block_on(scope.pop()) {
         return Err(error.to_string().into());
     }
-    let output = std::env::var_os("SOLIDCRAFT_BENCH_OUTPUT_DIR").map(std::path::PathBuf::from).ok_or("set SOLIDCRAFT_BENCH_OUTPUT_DIR")?;
+    let output = std::env::var_os("VIEWPORT_BENCH_OUTPUT_DIR").map(std::path::PathBuf::from).ok_or("set VIEWPORT_BENCH_OUTPUT_DIR")?;
     std::fs::create_dir_all(&output)?;
     let info = adapter.get_info();
     std::fs::write(
@@ -385,7 +385,7 @@ fn measure_projected_shadow_cost() -> Result<(), Box<dyn std::error::Error>> {
         "renderer_init_cpu":pipeline_rows,
         "fixture":"Two procedural boxes and a procedural torus with 64 major by 32 minor subdivisions. Earlier timings used CAD-generated meshes.",
         "notes":"Cached shadow uses the production Renderer after the shared opaque model in the same MSAA4 pass; full pass includes model and clears. Stored MSAA4 attachments prevent unused-output elimination; presentation, MSAA resolve and final downsample are excluded. 3340x1676 is SSAA2 working resolution."});
-    let output = std::env::var_os("SOLIDCRAFT_BENCH_OUTPUT_DIR").map(std::path::PathBuf::from).ok_or("set SOLIDCRAFT_BENCH_OUTPUT_DIR")?;
+    let output = std::env::var_os("VIEWPORT_BENCH_OUTPUT_DIR").map(std::path::PathBuf::from).ok_or("set VIEWPORT_BENCH_OUTPUT_DIR")?;
     std::fs::create_dir_all(&output)?;
     let path = output.join("projected-shadow-comparison.json");
     std::fs::write(path, serde_json::to_vec_pretty(&result)?)?;
