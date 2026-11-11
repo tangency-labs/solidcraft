@@ -1915,6 +1915,8 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
             c == "joint.drive" && (r["stopped_by_loop"].is_object() || r["stopped_by_contact"].is_object() || r["unconnected"].is_string())
         })
         .map(|(_, r)| r.clone());
+    // The last command's reply: what the view draws beside the preview (Arrange's sheets).
+    let reply = preview.replies.last().cloned();
     let (before, after) = (preview.before, preview.after);
     // A moved component looks like itself (no new surface), with its old place as the ghost.
     let colors = Colors { added: colors.body, new_body: colors.body, ..colors };
@@ -1926,6 +1928,7 @@ pub fn world_preview(s: &Session, cmds: &[(String, Value)], colors: Colors) -> O
             }
             b.bounds = after.bodies.iter().fold(Aabb3::EMPTY, |acc, x| acc.union(&x.mesh().bounds()));
             b.stopped = stopped;
+            b.reply = reply;
             Ok(b)
         }
         Err(_) => Err("the preview failed".into()),

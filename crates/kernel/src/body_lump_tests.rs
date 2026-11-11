@@ -308,3 +308,26 @@ fn points_classify_against_a_mesh_body() {
     assert_eq!(m.classify_point(Vec3::new(1.0, 1.0, 0.0)).unwrap(), OnBoundary);
     assert_eq!(m.classify_point(Vec3::X * 10.0).unwrap(), OnBoundary);
 }
+
+#[test]
+fn bounds_measured_turned_match_the_turned_body() {
+    // A box with a sphere stuck on one corner, so no turn leaves its box the same.
+    let lumpy = boolean(
+        &box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(40.0, 20.0, 6.0)).unwrap(),
+        &sphere(Vec3::new(40.0, 20.0, 6.0), 5.0).unwrap(),
+        BoolOp::Union,
+    )
+    .unwrap()
+    .unwrap();
+    let (c, s) = (0.3_f64.cos(), 0.3_f64.sin());
+    let turns = [
+        [[1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, -1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]],
+        [[c, s, 0.0, 0.0], [-s, c, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [5.0, -3.0, 2.0, 1.0]],
+        [[c, 0.0, -s, 0.0], [0.0, 1.0, 0.0, 0.0], [s, 0.0, c, 0.0], [0.0, 0.0, 0.0, 1.0]],
+    ];
+    for m in turns {
+        let want = crate::transform_matrix(&lumpy, m).unwrap().exact_bounds().unwrap();
+        let got = lumpy.exact_bounds_moved(&m).unwrap();
+        assert!((got.min - want.min).len() < 1e-6 && (got.max - want.max).len() < 1e-6, "{m:?}: {got:?} vs {want:?}");
+    }
+}

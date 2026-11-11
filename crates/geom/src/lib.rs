@@ -11,6 +11,7 @@
 
 mod aabb2;
 mod arcfit;
+pub mod arrange;
 mod ball;
 pub mod blend;
 pub mod brep;
@@ -27,6 +28,7 @@ pub mod fill;
 pub mod fill_general;
 pub mod fill_iso;
 pub mod fill_matched;
+pub mod footprint;
 mod grid;
 pub mod hlr;
 pub mod inertia;
@@ -38,6 +40,7 @@ pub mod paper;
 pub mod pixel_grid;
 mod plane;
 mod profile;
+pub mod rest;
 pub mod section;
 pub mod simplify;
 pub mod spline_space;

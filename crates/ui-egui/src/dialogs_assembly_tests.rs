@@ -245,6 +245,10 @@ fn joint_and_drive_preview_on_the_placed_model() {
     // placed model once something is (B moved by its joint).
     assert!(world_preview(&two_boxes().session, &[("solid.extrude".into(), json!({}))], colors).is_none());
     assert!(world_preview(&app.session, &[("solid.extrude".into(), json!({}))], colors).is_some());
+    // Arrange on the placed model: the preview keeps its reply, the sheets the view draws.
+    let arrange = [("solid.arrange".to_string(), json!({"bodies": ["Body2"], "width": 200, "length": 200}))];
+    let b = world_preview(&app.session, &arrange, colors).unwrap().unwrap();
+    assert!(b.reply.as_ref().is_some_and(|r| r["sheet_outlines"].as_array().is_some_and(|s| !s.is_empty())), "{:?}", b.reply);
 }
 
 /// Edit Joint changes type, alignment and limits of the joint in place.

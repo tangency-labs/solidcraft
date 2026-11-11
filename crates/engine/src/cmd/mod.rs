@@ -20,6 +20,7 @@ macro_rules! planned {
     };
 }
 
+mod arrange;
 mod bom;
 pub(crate) mod browser;
 pub(crate) mod clearance;
@@ -350,6 +351,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(sketch_project::COMMANDS.iter());
     v.extend(features::COMMANDS.iter());
     v.extend(features_more::COMMANDS.iter());
+    v.extend(arrange::COMMANDS.iter());
     v.extend(mesh::COMMANDS.iter());
     v.extend(construct_auto::COMMANDS.iter());
     v.extend(construct::COMMANDS.iter());
