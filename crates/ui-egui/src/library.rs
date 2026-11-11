@@ -53,6 +53,41 @@ impl Highlight {
     }
 }
 
+/// Document panel and thumbnail size; Large preserves the original layout.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThumbnailSize {
+    Small,
+    Medium,
+    #[default]
+    Large,
+}
+
+impl ThumbnailSize {
+    pub(crate) const ALL: [Self; 3] = [Self::Small, Self::Medium, Self::Large];
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Small => "library.thumbnail_small",
+            Self::Medium => "library.thumbnail_medium",
+            Self::Large => "library.thumbnail_large",
+        }
+    }
+
+    fn panel_width(self) -> f32 {
+        match self {
+            Self::Small => 200.0,
+            Self::Medium => 250.0,
+            Self::Large => 300.0,
+        }
+    }
+
+    fn grid(self, available: f32, gap: f32) -> (usize, f32, f32) {
+        let width = ((available - gap) / 2.0).max(1.0);
+        (2, width, width * 0.75 + 32.0)
+    }
+}
+
 #[derive(Default)]
 struct CardStatus {
     active: bool,
@@ -505,14 +540,13 @@ fn thumbnail_card(
 /// Reuse Home's background jobs and cached sample sessions; never create files for examples.
 fn sample_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
     let samples = solidcraft_engine::sample::samples();
-    let width = (ui.available_width() - ui.spacing().item_spacing.x) / 2.0;
-    let height = width * 0.75 + 32.0;
+    let (columns, width, height) = app.preferences.library_thumbnail_size.grid(ui.available_width(), ui.spacing().item_spacing.x);
     let mut chosen = None;
-    egui::ScrollArea::vertical().id_salt("library_samples").show_rows(ui, height, samples.len().div_ceil(2), |ui, range| {
+    egui::ScrollArea::vertical().id_salt("library_samples").show_rows(ui, height, samples.len().div_ceil(columns), |ui, range| {
         for row in range {
             ui.horizontal(|ui| {
-                for column in 0..2 {
-                    let index = row * 2 + column;
+                for column in 0..columns {
+                    let index = row * columns + column;
                     let Some(sample) = samples.get(index) else { continue };
                     let texture = crate::home::document_thumbnail(app, ui.ctx(), &format!("sample:{index}"));
                     let response = thumbnail_card(ui, width, height, app.tr_label(sample.name), texture, "box", CardStatus::default());
@@ -531,14 +565,12 @@ fn sample_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 fn rows(app: &mut SolveApp, ui: &mut egui::Ui) -> Option<Entry> {
     let mut chosen = None;
-    let gap = ui.spacing().item_spacing.x;
-    let width = (ui.available_width() - gap) / 2.0;
-    let height = width * 0.75 + 32.0;
-    egui::ScrollArea::vertical().id_salt("library_list").show_rows(ui, height, app.library.filtered.len().div_ceil(2), |ui, range| {
+    let (columns, width, height) = app.preferences.library_thumbnail_size.grid(ui.available_width(), ui.spacing().item_spacing.x);
+    egui::ScrollArea::vertical().id_salt("library_list").show_rows(ui, height, app.library.filtered.len().div_ceil(columns), |ui, range| {
         for row in range {
             ui.horizontal(|ui| {
-                for column in 0..2 {
-                    let index = row * 2 + column;
+                for column in 0..columns {
+                    let index = row * columns + column;
                     let Some(entry) = app.library.filtered.get(index).and_then(|i| app.library.listing.entries.get(*i)).cloned() else { continue };
                     let texture =
                         if entry.folder { None } else { entry.path.to_str().and_then(|path| crate::home::document_thumbnail(app, ui.ctx(), path)) };
@@ -857,7 +889,7 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
         actions::dialog(app, ui.ctx());
         return;
     }
-    let width = 300.0;
+    let width = app.preferences.library_thumbnail_size.panel_width();
     let mut chosen = None;
     Container::new(ui.ctx(), Surface::Panel)
         .edge("sc_document_library", Edge::Left)
@@ -884,6 +916,49 @@ pub fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
 mod tests {
     use super::*;
     use crate::scenario::Harness;
+
+    #[test]
+    fn thumbnail_sizes_fit_grid_and_preserve_large_layout() {
+        for available in [180.0, 230.0, 280.0] {
+            for size in ThumbnailSize::ALL {
+                let (columns, width, height) = size.grid(available, 8.0);
+                assert!((width * columns as f32 + 8.0 * (columns - 1) as f32 - available).abs() < 0.001);
+                assert!(height > 32.0 && width > 36.0);
+            }
+            let (columns, width, height) = ThumbnailSize::Large.grid(available, 8.0);
+            assert_eq!(columns, 2);
+            assert_eq!(width, (available - 8.0) / 2.0);
+            assert_eq!(height, width * 0.75 + 32.0);
+        }
+    }
+
+    #[test]
+    fn thumbnail_sizes_shrink_panel_and_keep_controls_inside() {
+        for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
+            let mut h = Harness::new();
+            h.call("ui.set", json!({"layout": mode}));
+            folder_picker(&mut h, None);
+            h.app.library.root = Some(h.dir.clone());
+            h.app.library.current = h.dir.clone();
+            h.call("ui.resize", json!({"width": 1280, "height": 720}));
+            let mut previous_width = 0.0;
+            for size in ThumbnailSize::ALL {
+                h.app.preferences.library_thumbnail_size = size;
+                h.frames(3);
+                let panel = crate::scenario::rect_of("library:panel").unwrap();
+                assert!(panel.width() > previous_width, "{mode:?} {size:?}: {panel:?}");
+                previous_width = panel.width();
+                let card = crate::scenario::rect_of("library:import_card").unwrap();
+                for key in ["library:insert_step", "library:insert_iges", "library:insert_mesh"] {
+                    assert!(card.contains(crate::scenario::handle_at(key).unwrap()));
+                }
+                let search = crate::scenario::rect_of("library:search_card").unwrap();
+                let refresh = crate::scenario::rect_of("library:refresh").unwrap();
+                assert!(search.right() < refresh.left());
+                assert!(panel.contains(search.center()) && panel.contains(refresh.center()));
+            }
+        }
+    }
 
     fn wait(app: &mut SolveApp) {
         for _ in 0..200 {
