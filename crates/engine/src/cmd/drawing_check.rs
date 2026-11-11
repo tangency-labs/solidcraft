@@ -96,11 +96,12 @@ fn on_sheet(d: &Drawing, sheet: u64, shown: SheetScene) -> Result<Vec<Finding>> 
     let dimensions =
         shown.dimensions.into_iter().filter_map(|state| status_finding(sheet, object(CheckedKind::Dimension, state.dimension), state.status));
     out.extend(dimensions);
-    // Out of date as a deferred drawing shows it as it last was, or held back by a view that draws an
-    // exploded view, which no update draws.
-    let held = crate::drawing_scene::held_by_exploded(d, d.views.iter().filter(|v| v.sheet == sheet).map(|v| v.id));
+    // Out of date as a deferred drawing shows it as it last was, or held back by a view that draws its
+    // parts apart, which no update draws.
+    let held = crate::drawing_scene::held_apart(d, d.views.iter().filter(|v| v.sheet == sheet).map(|v| v.id));
     let last = "the sheet shows it as it last was: drawing.update draws it from the model as it is now";
-    let exploded = "its view draws an exploded view: not supported yet, so it isn't drawn";
+    let view_of = |id: u64| d.dimension(id).map(|r| r.view).or_else(|| d.notes.iter().find(|n| n.id == id)?.anchor.view());
+    let apart = |id: u64| view_of(id).and_then(|view| crate::drawing_view::draws_apart(d, view));
     for id in shown.out_of_date {
         let kind = if d.view(id).is_some() {
             CheckedKind::View
@@ -109,7 +110,7 @@ fn on_sheet(d: &Drawing, sheet: u64, shown: SheetScene) -> Result<Vec<Finding>> 
         } else {
             CheckedKind::Note
         };
-        let why = if held.contains(&id) { exploded } else { last };
+        let why = apart(id).filter(|_| held.contains(&id)).map_or(last, crate::drawing_view::Apart::held);
         out.push(finding(FindingKind::OutOfDate, sheet, object(kind, id), why.into()));
     }
     // A view belongs where its sheet's Room says, by its boundary as the sheet shows it. Anything
@@ -235,11 +236,11 @@ fn fields_and_rows(s: &Session, d: &Drawing, sheets: &[u64]) -> Vec<Finding> {
 
 /// Each feature of the design, in timeline order, and whether the dimensions and notes on `sheets`
 /// point at a face it made ([`coverage::of`]), with what the views on them draw (`drawn`). One that a
-/// view drawing an exploded view holds back covers nothing: it isn't on paper, and the findings name it
+/// view drawing its parts apart holds back covers nothing: it isn't on paper, and the findings name it
 /// out of date.
 fn feature_coverage(s: &Session, d: &Drawing, sheets: &[u64], drawn: &coverage::Drawn) -> Vec<Coverage> {
     let on = |view: u64| d.view(view).is_some_and(|v| sheets.contains(&v.sheet));
-    let held = crate::drawing_scene::held_by_exploded(d, d.views.iter().filter(|v| sheets.contains(&v.sheet)).map(|v| v.id));
+    let held = crate::drawing_scene::held_apart(d, d.views.iter().filter(|v| sheets.contains(&v.sheet)).map(|v| v.id));
     let dimensions = d.dimensions.iter().filter(|dim| on(dim.view) && !held.contains(&dim.id));
     let dimensions = dimensions.map(|dim| (object(CheckedKind::Dimension, dim.id), dim.kind.references()));
     let notes = d.notes.iter().filter(|n| n.anchor.view().is_some_and(on) && !held.contains(&n.id));

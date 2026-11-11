@@ -429,3 +429,22 @@ fn an_exploded_view_takes_no_model_dimensions() {
     assert!(e.contains("not supported yet: dimensions on an exploded view"), "{e}");
     assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
 }
+
+/// A view in a position of its own takes no model dimensions either, by the same rule: they would
+/// measure its parts where the design places them. The plate, with its sketch's two dimensions to bring
+/// in, and a bolt on revolute joint Turn turned 30°. The drawing and the undo steps are left as they were.
+#[test]
+fn a_posed_view_takes_no_model_dimensions() {
+    let (mut s, _) = plate();
+    run(&mut s, "component.create", json!({"name": "Bolt", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 40, "corner": [0, 0, 20], "body_name": "Shank"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let at = json!({"occurrence": 0, "point": [0, 0, 20], "z": [0, 0, 1]});
+    run(&mut s, "joint.as_built", json!({"type": "revolute", "name": "Turn", "a": 0, "b": "Bolt", "at": at}));
+    let view = view(&mut s, json!("top"), [150.0, 150.0]);
+    run(&mut s, "drawing.view.edit", json!({"view": view, "set": {"pose": [{"joint": "Turn", "values": [30]}]}}));
+    let (record, steps) = (s.drawing("test").unwrap().clone(), s.undo.len());
+    let e = refused(&mut s, json!({"view": view}));
+    assert!(e.contains("not supported yet: dimensions on a view in a position of its own"), "{e}");
+    assert_eq!((s.drawing("test").unwrap().clone(), s.undo.len()), (record, steps));
+}

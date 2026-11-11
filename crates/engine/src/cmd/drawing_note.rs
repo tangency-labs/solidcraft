@@ -103,7 +103,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     let mut note = Note { id: 0, anchor, at: request.at, content: request.content.0, cap_mm: request.cap_mm, branches };
     if let Some(view) = note.anchor.view() {
         if note.on_model() {
-            crate::drawing_view::refuse_on_exploded(&record, view, "notes on its model", ADD)?;
+            crate::drawing_view::refuse_apart(&record, view, "notes on its model", ADD)?;
         }
         check_drawn(&record, view, note.paths(), ADD)?;
     }
@@ -182,7 +182,7 @@ fn new_branches(s: &Session, id: u64, set: BranchesSet) -> Result<Vec<Branch>> {
         return Err(bad(EDIT, why));
     }
     if let Some(view) = note.anchor.view() {
-        crate::drawing_view::refuse_on_exploded(record, view, "notes on its model", EDIT)?;
+        crate::drawing_view::refuse_apart(record, view, "notes on its model", EDIT)?;
     }
     let added = set.add.iter().map(|pick| branch(s, pick, EDIT)).collect::<Result<Vec<_>>>()?;
     if let Some(view) = note.anchor.view() {

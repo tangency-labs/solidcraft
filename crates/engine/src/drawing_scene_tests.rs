@@ -71,6 +71,34 @@ pub(crate) fn two_cubes() -> (Session, [u64; 2]) {
     (s, [first, second])
 }
 
+/// A hinge: the design's own plate, 40 x 20 x 2 mm from the origin, and a leaf the same size in
+/// component Leaf beyond it along Y, on revolute joint Hinge about their shared edge (along X at y 20,
+/// z 0), at 0 as the design places it; and a drawing, open, with a top view of both at 1:1 on
+/// (150, 150). The session, the view and the joint's id.
+pub(crate) fn hinge_pair() -> (Session, u64, u64) {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 2, "body_name": "Plate"}));
+    run(&mut s, "component.create", json!({"name": "Leaf", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 2, "corner": [0, 20, 0], "body_name": "Leaf", "operation": "new"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let at = json!({"occurrence": 0, "point": [0, 20, 0], "z": [1, 0, 0]});
+    run(&mut s, "joint.as_built", json!({"type": "revolute", "name": "Hinge", "a": 0, "b": "Leaf", "at": at}));
+    let hinge = s.doc.assembly.joints.iter().find(|j| j.name == "Hinge").map(|j| j.id).unwrap();
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let p = json!({"sheet": sheet, "view": "top", "scale": "1:1", "position_mm": [150, 150]});
+    let view = ids::decode(run(&mut s, "drawing.view.base", p)["view"].as_str().unwrap()).unwrap();
+    (s, view, hinge)
+}
+
+/// A second component, so Exploded View can be made (it needs two): a 4 x 4 x 2 mm pin in component
+/// Pin on the hinge's plate, inside the plate's outline from above, which no explode here moves.
+pub(crate) fn add_a_pin(s: &mut Session) {
+    run(s, "component.create", json!({"name": "Pin"}));
+    run(s, "solid.box", json!({"length": 4, "width": 4, "height": 2, "corner": [18, 8, 2], "body_name": "Pin", "operation": "new"}));
+    run(s, "component.activate", json!({"component": "root"}));
+}
+
 /// Sheet `sheet` of the drawing open, built at once.
 fn built(s: &Session, sheet: u64) -> SheetScene {
     let d = s.drawing("test").unwrap().clone();
@@ -822,6 +850,74 @@ fn a_sheet_makes_one_copy_for_each_exploded_view_it_draws() {
     built(&s, sheet);
 }
 
+/// A sheet read makes one copy of the session for each state of the assembly its views draw: two views
+/// of the hinge turned up share one, a third turned up and exploded has its own, and the view of the
+/// design's placement needs none.
+#[test]
+fn a_sheet_makes_one_copy_for_each_choice_it_draws() {
+    let (mut s, designed, _) = hinge_pair();
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    run(&mut s, "drawing.close", json!({}));
+    add_a_pin(&mut s);
+    let leaf = s.doc.occurrences.iter().find(|o| o.name.starts_with("Leaf")).map(|o| o.id).unwrap();
+    run(&mut s, "explode.create", json!({"name": "Apart", "moves": [{"occurrence": leaf, "translate": [0, 30, 0]}]}));
+    run(&mut s, "drawing.open", drawing);
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let view = |s: &mut Session, at: [f64; 2], exploded: &str| {
+        let p = json!({"sheet": ids::encode(sheet), "view": "top", "scale": "1:1", "position_mm": at, "exploded": exploded,
+                       "pose": [{"joint": "Hinge", "values": [90]}]});
+        ids::decode(run(s, "drawing.view.base", p)["view"].as_str().unwrap()).unwrap()
+    };
+    let posed = [view(&mut s, [60.0, 250.0], "assembled"), view(&mut s, [150.0, 250.0], "assembled"), view(&mut s, [250.0, 250.0], "Apart")];
+    let d = s.drawing("test").unwrap().clone();
+    let mut sessions = crate::drawing_view::ViewSessions::new(&s);
+    for view in [designed].into_iter().chain(posed) {
+        sessions.of(&d.resolve_view(view).unwrap()).unwrap();
+    }
+    assert_eq!(sessions.copies(), 2);
+    built(&s, sheet);
+}
+
+/// A view in a position of its own is up to date by what it draws: driving the hinge in the design
+/// draws the view of the design's placement again and leaves the posed view as it was, and editing the
+/// posed view's values draws it again and only it.
+#[test]
+fn a_driven_joint_redraws_a_designed_view_but_not_a_posed_one() {
+    let (mut s, designed, _) = hinge_pair();
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let pose = json!([{"joint": "Hinge", "values": [90]}]);
+    let p = json!({"sheet": ids::encode(sheet), "view": "top", "scale": "1:1", "position_mm": [150, 250], "pose": pose});
+    let posed = ids::decode(run(&mut s, "drawing.view.base", p)["view"].as_str().unwrap()).unwrap();
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    settled(&mut s, sheet);
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "joint.drive", json!({"joint": "Hinge", "values": [45]}));
+    run(&mut s, "drawing.open", drawing);
+    assert_eq!(extract(&mut s, sheet).unwrap().stale, vec![designed]);
+    settled(&mut s, sheet);
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(posed), "set": {"pose": [{"joint": "Hinge", "values": [30]}]}}));
+    assert_eq!(extract(&mut s, sheet).unwrap().stale, vec![posed]);
+}
+
+/// A deleted joint that leaves a posed view's picture as it was keeps the view's lines, and says why on
+/// the sheet: the view takes the new model without drawing again, and the reason with it.
+#[test]
+fn a_gone_joint_keeps_a_posed_views_lines_and_says_why() {
+    let (mut s, view, _) = hinge_pair();
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    // At the value the design has, so the leaf lies where it would without the joint.
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(view), "set": {"pose": [{"joint": "Hinge", "values": [0]}]}}));
+    let why = |answer: &SheetView| answer.views.iter().find(|v| v.view == view).map(|v| v.why.clone());
+    assert_eq!(why(&settled(&mut s, sheet)), Some(None));
+    let drawing = json!({"drawing": ids::encode(s.open_drawing.unwrap())});
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "joint.delete", json!({"joint": "Hinge"}));
+    run(&mut s, "drawing.open", drawing);
+    let answer = extract(&mut s, sheet).unwrap();
+    assert!(answer.stale.is_empty(), "the picture is the same, so nothing draws again: {:?}", answer.stale);
+    assert_eq!(why(&answer), Some(Some("its position names 1 joint the design no longer has".into())));
+}
+
 /// A file can hold a dimension on a view that draws an exploded view, though no command makes one
 /// (#13048). Its view holds it back, unread and undrawn, so every command that reads the sheet
 /// lists it out of date: the scene, the export and `drawing.status`. No update would read it, so the
@@ -1172,6 +1268,7 @@ fn a_view_past_the_sheets_records_leaves_out_only_itself() {
             boundary: None,
             frame: None,
             owners: None,
+            why: None,
         }
     };
     for title_block in [None, Some(solidcraft_geom::title_block::default_block())] {
@@ -1529,6 +1626,7 @@ fn a_views_box_is_what_it_draws() {
             boundary: Some(boundary),
             frame: None,
             owners: None,
+            why: None,
         };
         let (_, _, objects, _, _) =
             assemble(&record, Projection::Third, &labels(&record), &[], &[], [(7, centre, &drawn)].into_iter()).unwrap().finish().unwrap();
@@ -1717,7 +1815,10 @@ fn overfill(s: &mut Session, view: u64) -> Drawn {
     let items = vec![Item::Stroke { path, closed: false, width_mm: 0.5, pattern: None }];
     let group = Group { object: view, kind: ObjectKind::View, items };
     entry.serial = serial;
-    std::mem::replace(&mut entry.drawn, Drawn { group: Some(group), status: Status::Drawn, stats: None, boundary: None, frame: None, owners: None })
+    std::mem::replace(
+        &mut entry.drawn,
+        Drawn { group: Some(group), status: Status::Drawn, stats: None, boundary: None, frame: None, owners: None, why: None },
+    )
 }
 
 /// Each dimension's word is the one inspect uses: read, then lost when its body goes, with why. Its
@@ -1975,6 +2076,7 @@ fn a_dimension_past_the_scenes_limits_is_left_out_and_says_why() {
         boundary: None,
         frame: Some(ViewFrame::new(solidcore_record::Plane::XY, "1:1".parse().unwrap(), Vec2::ZERO, Vec2::ZERO).unwrap()),
         owners: None,
+        why: None,
     };
     let mut assembly =
         assemble(record, Projection::Third, &labels(record), &[], &[], std::iter::once((front, Vec2::new(100.0, 100.0), view))).unwrap();
@@ -2017,6 +2119,7 @@ fn dimensions_share_one_font_table_and_one_left_out_adds_nothing() {
         boundary: None,
         frame: Some(frame),
         owners: None,
+        why: None,
     };
     let text = |id, text: &str, more: usize| {
         let style = solidcraft_sketch::TextStyle::default();

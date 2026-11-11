@@ -132,8 +132,8 @@ impl<'a> ViewPictures<'a> {
         let shown = crate::drawing_view::shown(s);
         if let Ok(whole) = &shown {
             for (id, view, centre) in crate::drawing_scene::views_on(d, sheet)? {
-                // Its lines say why it isn't drawn ([`crate::drawing_view::not_drawable_exploded`]).
-                if crate::drawing_view::not_drawable_exploded(&view).is_some() {
+                // Its lines say why it isn't drawn ([`crate::drawing_view::not_drawable_apart`]).
+                if crate::drawing_view::not_drawable_apart(&view).is_some() {
                     continue;
                 }
                 // What the view chooses to show, as its lines do ([`crate::drawing_view::measured`]).

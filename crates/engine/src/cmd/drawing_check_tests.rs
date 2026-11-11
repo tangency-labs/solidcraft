@@ -243,10 +243,10 @@ fn each_status_gives_its_kind() {
         assert_eq!(finding.as_ref().map(|f| f.kind), kind, "{status:?}");
         assert!(finding.is_none_or(|f| !f.why.is_empty() && f.sheet == ids::encode(7) && f.object == dimension), "{status:?}");
     }
-    let failed = ViewState { view: 9, status: ViewStatus::Failed("too many lines".into()), stats: None };
+    let failed = ViewState { view: 9, status: ViewStatus::Failed("too many lines".into()), stats: None, why: None };
     let finding = view_finding(7, &failed).unwrap();
     assert_eq!((finding.kind, finding.why.as_str(), finding.object), (FindingKind::Failed, "too many lines", object_of(CheckedKind::View, 9)));
-    assert!(view_finding(7, &ViewState { view: 9, status: ViewStatus::Drawn, stats: None }).is_none());
+    assert!(view_finding(7, &ViewState { view: 9, status: ViewStatus::Drawn, stats: None, why: None }).is_none());
 }
 
 /// A note on the chamfer's edge is lost with it; a note on the sheet reads no model.
@@ -632,11 +632,14 @@ fn a_note_off_the_paper_is_listed() {
     assert_eq!(of_kind(&reply, "outside_sheet"), [named("note", &off)], "{reply}");
 }
 
-/// [`plate`] with a component, Bolt, a 10 mm cube above it, and an exploded view, Apart, that moves the
-/// Bolt up 50 mm; [`drawn`]'s sheet and front view, with what `annotate` adds on that view; then the
-/// view drawing Apart, as a file can hold it (the commands refuse dimensions and notes on the model
-/// there). The session, the view, and the plate's feature.
-fn exploded(annotate: impl FnOnce(&mut Session, u64)) -> (Session, u64, u64) {
+/// [`plate`] with a component, Bolt, a 10 mm cube above it, on revolute joint Turn about Z, and an
+/// exploded view, Apart, that moves the Bolt up 50 mm; [`drawn`]'s sheet and front view, with what
+/// `annotate` adds on that view; then the view set by `apart` as a file can hold it (the commands
+/// refuse dimensions and notes on the model there). The session, the view, and the plate's feature.
+fn drawn_apart(
+    annotate: impl FnOnce(&mut Session, u64),
+    apart: impl FnOnce(&Session, &mut solidcraft_doc::drawing_view::ViewOverrides),
+) -> (Session, u64, u64) {
     let (mut s, _) = plate();
     let bolt = run(&mut s, "component.create", json!({"name": "Bolt"}))["occurrence"].as_u64().unwrap();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 20], "body_name": "Cube"}));
@@ -646,15 +649,30 @@ fn exploded(annotate: impl FnOnce(&mut Session, u64)) -> (Session, u64, u64) {
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [30, 0, 20], "body_name": "Nut"}));
     run(&mut s, "component.activate", json!({"component": "root"}));
     run(&mut s, "explode.create", json!({"name": "Apart", "moves": [{"occurrence": bolt, "translate": [0, 0, 50]}]}));
+    let at = json!({"occurrence": 0, "point": [0, 0, 20], "z": [0, 0, 1]});
+    run(&mut s, "joint.as_built", json!({"type": "revolute", "name": "Turn", "a": 0, "b": "Bolt", "at": at}));
     let plate = s.doc.features[0].id;
     let (_, view) = drawn(&mut s);
     annotate(&mut s, view);
-    let apart = s.doc.assembly.exploded[0].id;
     let mut d = (**s.drawing("test").unwrap()).clone();
     let record = d.views.iter_mut().find(|v| v.id == view).unwrap();
-    Arc::make_mut(record).settings.exploded = Some(solidcraft_doc::drawing_view::Exploded::View(apart));
+    apart(&s, &mut Arc::make_mut(record).settings);
     s.doc_mut().put_drawing(Arc::new(d));
     (s, view, plate)
+}
+
+/// [`drawn_apart`] with the view drawing Apart.
+fn exploded(annotate: impl FnOnce(&mut Session, u64)) -> (Session, u64, u64) {
+    drawn_apart(annotate, |s, set| set.exploded = Some(solidcraft_doc::drawing_view::Exploded::View(s.doc.assembly.exploded[0].id)))
+}
+
+/// [`drawn_apart`] with the view in a position of its own: Turn at half a radian.
+fn posed(annotate: impl FnOnce(&mut Session, u64)) -> (Session, u64, u64) {
+    use solidcraft_doc::drawing_view::{JointPose, Pose};
+    drawn_apart(annotate, |s, set| {
+        let turn = s.doc.assembly.joints.iter().find(|j| j.name == "Turn").unwrap().id;
+        set.pose = Some(Pose::Joints(vec![JointPose { joint: turn, values: vec![0.5] }].into()));
+    })
 }
 
 /// The why of each finding of `kind`, as (kind of record, id, why), sorted.
@@ -675,6 +693,18 @@ fn a_dimension_an_exploded_view_holds_back_says_why() {
     let reply = checked(&mut s, json!({}));
     let why = "its view draws an exploded view: not supported yet, so it isn't drawn".to_string();
     assert_eq!(whys(&reply, "out_of_date"), [("dimension".to_string(), width.as_str().unwrap().to_string(), why)], "{reply}");
+}
+
+/// A dimension that a view in a position of its own holds back is listed out of date with why, as an
+/// exploded view's is, and covers no feature: both read the design's placements.
+#[test]
+fn a_dimension_a_posed_view_holds_back_says_why_and_covers_nothing() {
+    let mut width = Value::Null;
+    let (mut s, _, plate) = posed(|s, view| width = length(s, view, [50.0, 0.0, 0.0]));
+    let reply = checked(&mut s, json!({}));
+    let why = "its view draws a position of its own: not supported yet, so it isn't drawn".to_string();
+    assert_eq!(whys(&reply, "out_of_date"), [("dimension".to_string(), width.as_str().unwrap().to_string(), why)], "{reply}");
+    assert_eq!(coverage_of(&reply, plate)["state"], json!("not_covered"), "{reply}");
 }
 
 /// A dimension that a view drawing an exploded view holds back covers no feature: the plate, which it

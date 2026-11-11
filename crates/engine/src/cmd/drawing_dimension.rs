@@ -208,7 +208,7 @@ impl Refused {
 }
 
 /// `new` as `drawing.dimension.add` places it on `record`, with how it reads, and nothing added: an
-/// error when its view draws an exploded view ([`crate::drawing_view::refuse_on_exploded`]); refused
+/// error when its view draws its parts apart ([`crate::drawing_view::refuse_apart`]); refused
 /// when its view doesn't draw what it measures or can't measure it; a new id; a radial one
 /// a diameter when it is a whole circle, if left to the default; a linear, length or chain one,
 /// with no offset given, on the side away from what it measures. It is read on `record` itself,
@@ -219,7 +219,7 @@ pub(crate) fn placed(
     cmd: &str,
     new: NewDimension,
 ) -> Result<std::result::Result<(Dimension, Option<Resolved>), Refused>> {
-    crate::drawing_view::refuse_on_exploded(record, new.view, "dimensions", cmd)?;
+    crate::drawing_view::refuse_apart(record, new.view, "dimensions", cmd)?;
     if let Err(e) = check_drawn(record, new.view, new.kind.paths(), cmd) {
         return Ok(Err(Refused::NotDrawn(e)));
     }
