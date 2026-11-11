@@ -484,22 +484,27 @@ fn faces_left_by_own_copy(k: &mut Kernel, b: Brep) -> usize {
 /// tolerance is half that and upstream's capture distance 2000 times it, 10 mm, which
 /// captured vertices of the 30 mm part up to 10 mm apart into one proto vertex, and the cut
 /// by its own copy kept faces. The capture stays below half the nearest two vertices'
-/// distance, and nothing is left.
+/// distance, and nothing is left: with SolidCraft's fix list and with the default kernel
+/// (every `UpstreamFixes` flag off), since the rule is no longer a flag.
 #[test]
 fn a_part_with_step_tolerances_minus_itself_is_empty() {
-    let mut k = rig_kernel();
-    let p = Point3::new;
-    let disc = api::create_cylinder(&mut k, p(0.0, 0.0, 0.0), 15.0, 3.0).unwrap();
-    let hub = api::create_cylinder(&mut k, p(0.0, 0.0, 0.0), 4.0, 8.0).unwrap();
-    let mut b = boolean_union(&mut k, disc, hub).unwrap();
-    let bore = api::create_cylinder(&mut k, p(0.0, 0.0, -1.0), 1.5, 10.0).unwrap();
-    b = boolean_difference(&mut k, b, bore).unwrap();
-    for (x, y) in [(7.0, -2.0), (-11.0, -2.0), (-2.0, 7.0), (-2.0, -11.0)] {
-        let pocket = api::create_box(&mut k, p(x, y, 1.0), 4.0, 4.0, 3.0).unwrap();
-        b = boolean_difference(&mut k, b, pocket).unwrap();
+    for (kernel, mut k) in [
+        ("SolidCraft's fixes", rig_kernel()),
+        ("the default kernel", Kernel::default()),
+    ] {
+        let p = Point3::new;
+        let disc = api::create_cylinder(&mut k, p(0.0, 0.0, 0.0), 15.0, 3.0).unwrap();
+        let hub = api::create_cylinder(&mut k, p(0.0, 0.0, 0.0), 4.0, 8.0).unwrap();
+        let mut b = boolean_union(&mut k, disc, hub).unwrap();
+        let bore = api::create_cylinder(&mut k, p(0.0, 0.0, -1.0), 1.5, 10.0).unwrap();
+        b = boolean_difference(&mut k, b, bore).unwrap();
+        for (x, y) in [(7.0, -2.0), (-11.0, -2.0), (-2.0, 7.0), (-2.0, -11.0)] {
+            let pocket = api::create_box(&mut k, p(x, y, 1.0), 4.0, 4.0, 3.0).unwrap();
+            b = boolean_difference(&mut k, b, pocket).unwrap();
+        }
+        let b = with_step_tolerances(&k, b);
+        assert_eq!(faces_left_by_own_copy(&mut k, b), 0, "{kernel}");
     }
-    let b = with_step_tolerances(&k, b);
-    assert_eq!(faces_left_by_own_copy(&mut k, b), 0);
 }
 
 /// A block with a boss and a bore through it, every tolerance 0.01: at the bore's rim the
