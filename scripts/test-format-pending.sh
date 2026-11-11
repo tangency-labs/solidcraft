@@ -7,7 +7,20 @@ set -euo pipefail
 
 root=$(git rev-parse --show-toplevel)
 tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
+# Cleanup never changes the result of the check. A background git process (auto gc, maintenance) can
+# still be writing into .git when this runs ("rm: cannot remove .git: Directory not empty"), so retry
+# briefly, and ignore a failure: the temp directory is the system's to clear, the check already ran.
+cleanup() {
+  local status=$?
+  trap - EXIT
+  set +e
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    rm -rf "$tmp" 2>/dev/null && [ ! -e "$tmp" ] && break
+    sleep 0.2
+  done
+  exit "$status"
+}
+trap cleanup EXIT
 repo="$tmp/repo"
 mkdir -p "$repo/crates/doc/src/drawing" "$repo/scripts"
 cp -r "$root/crates/doc/src/format" "$repo/crates/doc/src/"
@@ -15,7 +28,8 @@ cp -r "$root/crates/doc/src/drawing/format" "$repo/crates/doc/src/drawing/"
 cp "$root/crates/doc/build.rs" "$repo/crates/doc/"
 cp "$root/scripts/fold-format-pending.sh" "$repo/scripts/"
 rm -f "$repo"/crates/doc/src/format/pending/*.rs "$repo"/crates/doc/src/drawing/format/pending/*.rs  # start from a release: nothing pending
-git() { command git -C "$repo" -c user.name=test -c user.email=test@example.com "$@"; }
+# No background gc or maintenance in the throwaway repo: nothing may still be writing to .git at cleanup.
+git() { command git -C "$repo" -c user.name=test -c user.email=test@example.com -c gc.auto=0 -c maintenance.auto=false -c gc.autoDetach=false -c core.fsmonitor=false "$@"; }
 git init -q -b main
 git add -A
 git commit -qm base
