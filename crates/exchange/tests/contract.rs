@@ -8,10 +8,10 @@ use std::f64::consts::PI;
 
 use common::*;
 use solidcore_record::Vec3;
-use solidcraft_doc::{FeatureKind, Model, Operation, UserMaterial, point_expr};
+use solidcraft_doc::{Dir, Document, FeatureKind, Model, Operation, UserMaterial, point_expr};
 use solidcraft_exchange::{
-    BodyName, Elasticity, Error, FaceName, MaterialAxes, Mm, Options, Override, ParameterValue, Point, Property, Quantity, Snapshot, Surface,
-    Tolerance, from_json, open, to_json,
+    BodyName, Elasticity, Error, FaceName, MaterialAxes, Mm, Options, Override, ParameterValue, Point, Property, Quantity, Radians, Snapshot,
+    Surface, Tolerance, from_json, open, to_json,
 };
 
 fn face_names(s: &Snapshot) -> BTreeSet<FaceName> {
@@ -73,6 +73,47 @@ fn a_hole_is_a_cylinder_face_with_its_axis_and_radius() {
     let tol = 2e-4 * (20f64 * 20.0 + 20.0 * 20.0 + 10.0 * 10.0).sqrt();
     let v = volume(b);
     assert!(v >= exact - 1e-9 && v - exact <= 2.0 * PI * 3.0 * 10.0 * tol, "{v} vs {exact}");
+}
+
+/// A torus and a cone come out as their analytic surfaces, not `other` (a kernel change that
+/// holds them otherwise would otherwise go unseen).
+#[test]
+fn a_torus_and_a_cone_are_their_analytic_surfaces() {
+    let mut doc = Document::new("torus");
+    doc.add_feature(
+        FeatureKind::Torus { center: point_expr(Vec3::new(0.0, 0.0, 0.0)), major: "20".into(), minor: "5".into(), operation: Operation::NewBody },
+        None,
+    )
+    .unwrap();
+    let s = snap(&doc);
+    let [b] = s.bodies.as_slice() else { panic!("one body") };
+    assert!(!b.faces.is_empty());
+    for f in &b.faces {
+        let Surface::Torus { center: Point(center), major: Mm(major), minor: Mm(minor), .. } = f.surface else { panic!("{:?}", f.surface) };
+        assert!((major - 20.0).abs() < 1e-9 && (minor - 5.0).abs() < 1e-9 && dist(center, [0.0; 3]) < 1e-9);
+    }
+
+    let mut doc = Document::new("cone");
+    doc.add_feature(
+        FeatureKind::Cone {
+            base: point_expr(Vec3::new(0.0, 0.0, 0.0)),
+            axis: Dir(Vec3::Z),
+            radius: "10".into(),
+            top_radius: "5".into(),
+            height: "10".into(),
+            operation: Operation::NewBody,
+        },
+        None,
+    )
+    .unwrap();
+    let s = snap(&doc);
+    let [b] = s.bodies.as_slice() else { panic!("one body") };
+    let cones: Vec<_> = b.faces.iter().filter(|f| matches!(f.surface, Surface::Cone { .. })).collect();
+    let planes = b.faces.iter().filter(|f| matches!(f.surface, Surface::Plane { .. })).count();
+    assert_eq!((cones.len(), planes, b.faces.len()), (1, 2, 3), "{:?}", b.faces.iter().map(|f| &f.surface).collect::<Vec<_>>());
+    let Surface::Cone { apex: Point(apex), half_angle: Radians(half), .. } = cones[0].surface else { unreachable!() };
+    // The side narrows 5 mm over 10: its apex is 20 mm up the axis.
+    assert!(dist(apex, [0.0, 0.0, 20.0]) < 1e-6 && (half - 0.5f64.atan()).abs() < 1e-9, "{apex:?} {half}");
 }
 
 #[test]

@@ -215,7 +215,8 @@ fn surface(body: &solidcraft_kernel::Body, record: Option<&Brep>, i: usize, budg
     // The face's own B-spline, else the NURBS form it is parameterised on.
     let Some(face) = record.and_then(|r| r.faces.get(i)) else { return Ok(Surface::Other) };
     let spline = match (&face.surface, &face.nurbs) {
-        (s @ (RecordSurface::Spline { .. } | RecordSurface::RationalSpline { .. }), _) | (_, Some(s)) => s,
+        (s, _) if is_spline(s) => s,
+        (_, Some(s)) => s,
         _ => return Ok(Surface::Other),
     };
     let (u_knots, v_knots, net): (&[f64], &[f64], Vec<Vec<(Vec3, f64)>>) = match spline {
@@ -247,11 +248,42 @@ fn surface(body: &solidcraft_kernel::Body, record: Option<&Brep>, i: usize, budg
     })
 }
 
+/// Whether the record holds `s` as a B-spline. Every kind is named, so a kind the record gains
+/// fails the build here rather than coming out as `other` unseen.
+fn is_spline(s: &RecordSurface) -> bool {
+    match s {
+        RecordSurface::Spline { .. } | RecordSurface::RationalSpline { .. } => true,
+        // Analytic: `face_surface` reads these; one it doesn't read comes out as its NURBS form.
+        RecordSurface::Plane { .. }
+        | RecordSurface::PlaneThrough { .. }
+        | RecordSurface::Cylinder { .. }
+        | RecordSurface::Cone { .. }
+        | RecordSurface::Sphere { .. }
+        | RecordSurface::Torus { .. }
+        | RecordSurface::BallPatch { .. }
+        | RecordSurface::PlacedRevolution { .. } => false,
+    }
+}
+
+/// Whether the record holds `c` as a straight line. Every kind is named, as in [`is_spline`].
+fn is_line(c: &RecordCurve) -> bool {
+    match c {
+        RecordCurve::Line { .. } => true,
+        // A circle is read from the kernel (`edge_circle`); the rest are `other`.
+        RecordCurve::Circle { .. }
+        | RecordCurve::Ellipse { .. }
+        | RecordCurve::Polyline { .. }
+        | RecordCurve::Spline { .. }
+        | RecordCurve::RationalSpline { .. }
+        | RecordCurve::SurfaceIntersection { .. } => false,
+    }
+}
+
 /// Edge `i`'s curve: a line (between its corners), a circle, else other.
 fn curve(body: &solidcraft_kernel::Body, record: Option<&Brep>, i: usize) -> Curve {
     if let Some(record) = record
         && let Some(e) = record.edges.get(i)
-        && matches!(e.curve, RecordCurve::Line { .. })
+        && is_line(&e.curve)
     {
         let [a, z] = e.vertices.map(|v| record.vertices.get(v as usize).map(|v| Vec3::from(v.point)));
         if let (Some(start), Some(end)) = (a, z) {
