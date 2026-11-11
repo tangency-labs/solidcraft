@@ -25,6 +25,7 @@ pub mod occurrences;
 pub mod origins;
 pub mod panels;
 pub mod params;
+pub mod plugin;
 pub mod product_scene;
 pub mod recovery;
 pub mod render_jobs;
@@ -449,7 +450,10 @@ impl ComputedCommands {
     /// Whether the source design and authoring context still match this result.
     pub fn is_current(&self, session: &Session) -> bool {
         let source = &self.source;
-        session.same_document_context(source) && session.selection == source.selection
+        session.same_document_context(source)
+            && session.selection == source.selection
+            && (!self.steps.iter().any(|step| step.id.eq_ignore_ascii_case("plugin.run"))
+                || (session.plugin_limits == source.plugin_limits && session.disabled_plugins == source.disabled_plugins))
     }
 
     /// Prepare display tessellation before returning the transaction to the window; a model that
@@ -532,6 +536,10 @@ pub struct Session {
     /// make construction geometry rather than normal geometry (off by default; #13142). A
     /// preference, kept like `auto_project` when another design is opened or started.
     pub project_construction: bool,
+    /// Host preferences; never saved in a design.
+    pub disabled_plugins: std::collections::BTreeSet<String>,
+    /// User resource ceilings; never loaded from or saved in a design.
+    pub plugin_limits: plugin::HostLimits,
     /// How calls that break a command's parameter contract are treated (off by default). It
     /// belongs to the session, not the design, so it survives opening and starting designs.
     pub param_check: schema::ParamCheck,
@@ -841,6 +849,8 @@ impl Session {
             followed: None,
             auto_project: true,
             project_construction: false,
+            disabled_plugins: Default::default(),
+            plugin_limits: plugin::default_host_limits(),
             param_check: schema::ParamCheck::Off,
             easyprint_upload: None,
             live_links: None,
@@ -907,6 +917,8 @@ impl Session {
         let project_construction = self.project_construction;
         let validation = self.validation();
         let single_surface_analysis = self.single_surface_analysis;
+        let disabled_plugins = self.disabled_plugins.clone();
+        let plugin_limits = self.plugin_limits;
         let param_check = self.param_check;
         let easyprint_upload = self.easyprint_upload.take();
         let render_viewport = self.render_viewport.clone();
@@ -927,6 +939,8 @@ impl Session {
         // already (`Session::opened_validating`).
         self.set_validation(validation);
         self.set_single_surface_analysis(single_surface_analysis);
+        self.disabled_plugins = disabled_plugins;
+        self.plugin_limits = plugin_limits;
         self.param_check = param_check;
         self.easyprint_upload = easyprint_upload;
         self.render_viewport = render_viewport;
@@ -1992,6 +2006,8 @@ impl Session {
             followed: None,
             auto_project: self.auto_project,
             project_construction: self.project_construction,
+            disabled_plugins: self.disabled_plugins.clone(),
+            plugin_limits: self.plugin_limits,
             param_check: self.param_check,
             easyprint_upload: self.easyprint_upload.clone(),
             live_links: None,
