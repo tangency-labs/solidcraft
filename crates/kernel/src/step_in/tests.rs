@@ -2578,6 +2578,67 @@ fn a_refused_solid_comes_in_as_a_surface_body_of_the_faces_that_read() {
     assert!(rel(measure(&back).unwrap().volume, 250.0 * pi) < 1e-6, "{}", measure(&back).unwrap().volume);
 }
 
+/// The can of [`can_with_its_lid_at`] with a cavity, a 1 mm ball at its middle, written as a
+/// BREP_WITH_VOIDS (the void's closed shell used through an ORIENTED_CLOSED_SHELL `.F.`).
+fn hollow_can_with_its_lid_at(lid_z: f64) -> String {
+    let renumber = |text: &str, by: u64| {
+        let mut out = String::new();
+        let mut chars = text.chars().peekable();
+        while let Some(c) = chars.next() {
+            out.push(c);
+            if c == '#' {
+                let mut n = String::new();
+                while let Some(d) = chars.next_if(char::is_ascii_digit) {
+                    n.push(d);
+                }
+                out += &(n.parse::<u64>().unwrap() + by).to_string();
+            }
+        }
+        out
+    };
+    let ball = seam_sphere_step(Vec3::new(0.0, 0.0, 5.0), 1.0, Vec3::Z, Vec3::X, 0.0, false, std::f64::consts::PI);
+    let ball = &ball[ball.find("#1=").unwrap()..ball.find("#21=").unwrap()];
+    let brep = "#22=MANIFOLD_SOLID_BREP('Can',#21);\n";
+    let can = can_with_its_lid_at(lid_z);
+    assert!(can.contains(brep));
+    let voids = format!("{}#1200=ORIENTED_CLOSED_SHELL('',*,#1020,.F.);\n#22=BREP_WITH_VOIDS('Can',#21,(#1200));\n", renumber(ball, 1000));
+    can.replacen(brep, &voids, 1)
+}
+
+/// A solid with a cavity no B-rep can be made of comes in as surfaces, as a solid without one
+/// does ([`a_refused_solid_comes_in_as_a_surface_body_of_the_faces_that_read`]), never dropped:
+/// the hollow can whose lid lies 1.5 mm off its rim is its bottom, wall and cavity, the lid left
+/// out and named. An engine block and a cylinder head of an assembly, both written with voids,
+/// were lost whole on one face each.
+#[test]
+fn a_refused_solid_with_a_cavity_comes_in_as_surfaces() {
+    let pi = std::f64::consts::PI;
+    let whole = step_import(&hollow_can_with_its_lid_at(10.0)).unwrap();
+    assert_eq!(whole.bodies.len(), 1, "{:?}", whole.warnings);
+    assert!(whole.bodies[0].closed && whole.bodies[0].refused.is_none(), "{:?}", whole.warnings);
+    let want = 250.0 * pi - 4.0 / 3.0 * pi;
+    let v = measure(&whole.bodies[0].body).unwrap().volume;
+    assert!(rel(v, want) < 1e-3, "{v} vs {want}");
+
+    let imp = step_import(&hollow_can_with_its_lid_at(11.5)).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let can = &imp.bodies[0];
+    assert!(!can.body.is_mesh() && can.body.is_surface() && !can.closed, "{:?}", imp.warnings);
+    let why = can.refused.as_deref().unwrap_or_default();
+    assert!(why.contains("face #45"), "{why}");
+    assert_eq!(can.file_faces, 4);
+    assert_eq!(can.body.face_count(), 3, "{:?}", imp.warnings);
+    assert!(!can.face_origin.contains(&45));
+    assert!(imp.warnings.iter().any(|w| w.contains("'Can': imported as surfaces: ")), "{:?}", imp.warnings);
+    assert!(imp.warnings.iter().any(|w| w.contains("'Can': left out: ") && w.contains("face #45")), "{:?}", imp.warnings);
+    assert!(!imp.warnings.iter().any(|w| w.contains("not imported")), "{:?}", imp.warnings);
+    // The bottom, the wall and the cavity's ball.
+    let mut kept = can.face_origin.clone();
+    kept.sort_unstable();
+    assert_eq!(kept[..2], [15, 20], "{kept:?}");
+    assert!(kept[2] > 1000, "the cavity's face: {kept:?}");
+}
+
 /// A sector of a cylinder (radius 5, height 10) about z, `sweep` radians from `start` on the
 /// wall's frame: a pie slice of the cylinder, its two sides through the axis.
 fn cylinder_sector(start: f64, sweep: f64) -> String {
