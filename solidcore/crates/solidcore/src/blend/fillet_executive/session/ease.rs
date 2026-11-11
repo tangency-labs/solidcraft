@@ -31,6 +31,7 @@ use crate::blend::fillet_geom::p1::{FilletGeomId, FilletVertexType, SurfaceHandl
 use crate::blend::fillet_section::section::{GnFaces, GnSectionFsg};
 use crate::blend::fillet_solver::p1::{FilletSolverOps, FilletSurfaceGeneratorType};
 use crate::curve::curve::{Curve, CurveKind};
+use crate::error::blend::BlendFailure;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -51,14 +52,14 @@ use super::FilletObject;
 
 const OP: &str = "blend::fillet_executive::session::ease";
 
-/// `SM_ERR`.
+/// `SM_ERR`: the setback's sections cannot be eased.
 fn sm_err() -> SolidError {
-    SolidError::sm_err(OP)
+    SolidError::blend_failed(OP, "the setback's sections cannot be eased")
 }
 
-/// `SM_ERR_NULL_POINTER` (`NER`).
+/// `SM_ERR_NULL_POINTER` (`NER`): an object easing the setback's sections needs.
 fn null() -> SolidError {
-    SolidError::null_pointer(OP)
+    SolidError::blend_missing(OP, "an object easing the setback's sections needs")
 }
 
 /// The B-spline part of a curve (`SM_CAST_PTR(SmBSplineCurve, ..)`): the kinds derived from
@@ -88,11 +89,13 @@ fn arc_length_param(
     if r.converged {
         Ok(r.end_param)
     } else {
-        Err(SolidError::Upstream {
-            operation: OP,
-            code: r.status(),
-            entity: None,
-        })
+        Err(SolidError::blend(
+            OP,
+            BlendFailure::PassedOn {
+                what: "the parameter at the arc length is not found",
+                status: r.status(),
+            },
+        ))
     }
 }
 
