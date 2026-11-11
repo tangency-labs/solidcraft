@@ -311,6 +311,20 @@ fn active_feature(app: &SolveApp) -> Option<(&'static crate::sketch_families::Fa
     (family.commands.len() > 1).then_some((family, id))
 }
 
+/// The tool whose degree the Feature Options' Degree row sets (#12323).
+const SPLINE_WITH_DEGREE: &str = "sketch.spline.control_point";
+
+/// A Degree row's text as a degree: a whole number from 1 to 9, else none.
+fn degree_of(text: &str) -> Option<u8> {
+    text.trim().parse::<u8>().ok().filter(|d| (1..=solidcore_record::MAX_BEZIER_DEGREE as u8).contains(d))
+}
+
+/// The degree the Control Point Spline tool draws at (#12323): the palette's Degree row, or the
+/// cubic while the row holds no degree from 1 to 9.
+pub fn spline_degree(app: &SolveApp) -> u8 {
+    degree_of(&app.ui.spline_degree).unwrap_or(3)
+}
+
 fn section_alias(name: &str, title: &str) {
     if let Some(at) = crate::scenario::handle_at(&format!("dialog:section:{title}")) {
         crate::scenario::publish_handle(name, at);
@@ -406,6 +420,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut finish = false;
     let mut tie = false;
     let mut start = None;
+    // The Degree row edits a copy, as the panel only reads `app` (#12323).
+    let mut degree_text = app.ui.spline_degree.clone();
+    let mut degree_edited = false;
     let feature = active_feature(app);
     let has_curves = !selected_curves(app).is_empty();
     let selected_types = if has_curves { selected_linetypes(app) } else { std::array::from_fn(|i| mode(app) == i as u8) };
@@ -493,6 +510,18 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                             .collect();
                         let section = ui.vertical(|ui| crate::ui_kit::tool_choices(ui, app.tr_label(family.label), current, &choices));
                         crate::scenario::publish_rect("sketch_palette:feature_options", section.response.rect);
+                        // Control Point Spline draws at the degree set here, 3 (a cubic) unless
+                        // changed; the canvas takes its clicks as before (#12323).
+                        if current == SPLINE_WITH_DEGREE {
+                            let eval = |text: &str| degree_of(text).map(f64::from);
+                            let limits = crate::ui_kit::Count { min: 1, max: solidcore_record::MAX_BEZIER_DEGREE as i64, eval: &eval };
+                            let row = ui.scope(|ui| crate::ui_kit::count_row(ui, app.tr("ui.spline_degree"), &mut degree_text, &limits));
+                            degree_edited = row.inner;
+                            row.response.on_hover_text(app.tr("ui.spline_degree_tip"));
+                            if degree_of(&degree_text).is_none() {
+                                crate::ui_kit::caption(ui, app.tr("ui.spline_degree"), app.tr("ui.spline_degree_tip"));
+                            }
+                        }
                         section.inner
                     });
                     start = section.flatten();
@@ -588,6 +617,13 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     if construction {
         toggle_construction(app);
+    }
+    if degree_edited || degree_text != app.ui.spline_degree {
+        // Text that is no degree yet (an emptied box, 12) keeps the last degree the tool had.
+        if let (Some(degree), Some(t)) = (degree_of(&degree_text), app.tool.as_mut()) {
+            t.spline_degree = degree;
+        }
+        app.ui.spline_degree = degree_text;
     }
     if let Some(id) = start {
         app.start(id);
@@ -1083,6 +1119,71 @@ mod tests {
         assert_eq!(rect.commands.len(), 4);
         assert_eq!(pressed_modes(&h, rect), ["sketch.rectangle.two_point"]);
         assert!(crate::scenario::handle_at("sketch_palette:feature:sketch.circle.center").is_none(), "only the running family is shown");
+    }
+
+    /// #12323: while Control Point Spline runs, Feature Options has a Degree row. The tool draws
+    /// the cubic until a degree is typed there; the canvas takes every click as before (no box
+    /// sits on it); a typed degree sets the spline being drawn and stays for the next one; text
+    /// that is no degree keeps the last degree.
+    #[test]
+    fn control_point_spline_draws_at_the_degree_in_feature_options() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = "en".into();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.start("sketch.spline.control_point");
+        h.settle();
+        assert!(h.widget("Degree").is_some(), "Feature Options has a Degree row");
+        assert_eq!(h.app.tool.as_ref().map(|t| t.spline_degree), Some(3), "the cubic by default");
+        h.app.start("sketch.spline.fit_point");
+        h.settle();
+        assert!(h.widget("Degree").is_none(), "only Control Point Spline has the row");
+        h.app.start("sketch.spline.control_point");
+        h.settle();
+        // The canvas places a point anywhere, also just left of and below the first one.
+        h.step(&json!({"click": {"sketch": [0, 0]}})).unwrap();
+        h.step(&json!({"click": {"sketch": [-4, -3]}})).unwrap();
+        assert_eq!(h.app.tool.as_ref().map(|t| t.pts.len()), Some(2));
+        h.step(&json!({"key": "Backspace"})).unwrap();
+        // Three steps up the Degree row's arrows: 6.
+        for _ in 0..3 {
+            h.step(&json!({"click": {"handle": "dialog:Degree up"}})).unwrap();
+        }
+        h.settle();
+        assert_eq!(h.app.ui.spline_degree, "6");
+        assert_eq!(h.app.tool.as_ref().map(|t| (t.spline_degree, t.pts.len())), Some((6, 1)), "the degree changes, the points stay");
+        for x in [10, 20, 30, 40, 50, 60] {
+            h.step(&json!({"click": {"sketch": [x, (x / 10 % 2) * 10]}})).unwrap();
+        }
+        h.step(&json!({"click": {"sketch": [60, 0]}, "button": "right"})).unwrap();
+        h.settle();
+        let state = h.app.session.model.state();
+        let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        let splines: Vec<_> = sketch
+            .curves
+            .iter()
+            .filter_map(|c| match &c.kind {
+                solidcraft_engine::sketch::CurveKind::Spline { pts, control: true, degree, .. } => Some((pts.len(), *degree)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(splines, [(7, 6)], "one control point spline, seven points at degree 6");
+        // The next spline starts at 6 too; 12 is no degree and keeps 6.
+        h.app.start("sketch.spline.control_point");
+        h.settle();
+        assert_eq!(h.app.tool.as_ref().map(|t| t.spline_degree), Some(6));
+        // Typed into the row, left of its arrows.
+        let up = crate::scenario::handle_at("dialog:Degree up").expect("the Degree row's arrows");
+        h.call("ui.click", json!({"x": up.x - 30.0, "y": up.y + 4.0}));
+        h.settle();
+        h.step(&json!({"key": "A", "cmd": true})).unwrap();
+        h.step(&json!({"text": "12"})).unwrap();
+        h.settle();
+        assert_eq!(h.app.ui.spline_degree, "12", "the typing reaches the row");
+        assert_eq!(h.app.tool.as_ref().map(|t| t.spline_degree), Some(6));
+        h.step(&json!({"key": "A", "cmd": true})).unwrap();
+        h.step(&json!({"text": "7"})).unwrap();
+        h.settle();
+        assert_eq!(h.app.tool.as_ref().map(|t| t.spline_degree), Some(7));
     }
 
     #[test]

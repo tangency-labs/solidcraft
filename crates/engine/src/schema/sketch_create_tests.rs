@@ -2,9 +2,9 @@ use serde_json::{Value, json};
 
 use super::{
     ArcSlotCenterParams, ArcSlotResult, ArcSlotThreePointParams, ArcTangentParams, BlendCurveParams, CenterlineParams, ConicParams,
-    ControlPointSplineParams, DrawResult, EditTextParams, EditTextResult, EllipseParams, FitPointSplineParams, InfiniteLineParams, LineTypeResult,
-    MidpointLineParams, SketchTextParams, SlotCenterPointParams, SplineRemovePointParams, SplineRemovePointResult, SplineReverseParams,
-    SplineReverseResult, TextResult, ThreeTangentCircleParams, TwoTangentCircleParams,
+    ControlPointSplineDegreeParams, ControlPointSplineParams, DrawResult, EditTextParams, EditTextResult, EllipseParams, FitPointSplineParams,
+    InfiniteLineParams, LineTypeResult, MidpointLineParams, SketchTextParams, SlotCenterPointParams, SplineRemovePointParams,
+    SplineRemovePointResult, SplineReverseParams, SplineReverseResult, TextResult, ThreeTangentCircleParams, TwoTangentCircleParams,
 };
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
@@ -148,6 +148,7 @@ fn creation_schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<EllipseParams>(), &["axes", "center", "construction", "major", "minor", "minor_radius", "sketch"]);
     assert_keys(input_schema_for::<FitPointSplineParams>(), &["construction", "periodic", "points", "sketch"]);
     assert_keys(input_schema_for::<ControlPointSplineParams>(), &["construction", "periodic", "points", "sketch"]);
+    assert_keys(input_schema_for::<ControlPointSplineDegreeParams>(), &["construction", "degree", "periodic", "points", "sketch"]);
     assert_keys(input_schema_for::<ConicParams>(), &["apex", "construction", "end", "rho", "sketch", "start"]);
     assert_keys(input_schema_for::<BlendCurveParams>(), &["a", "b", "continuity", "sketch"]);
     assert_keys(input_schema_for::<CenterlineParams>(), &["curves", "sketch", "value"]);
@@ -283,6 +284,16 @@ fn strict_keeps_todays_errors_before_the_sketch() {
         ("sketch.spline.fit_point", json!({"periodic": 1, "points": [[0, 0], [1, 1]]})),
         ("sketch.spline.control_point", json!({"periodic": true, "points": [[0, 0], [1, 1]]})),
         ("sketch.spline.control_point", json!({"periodic": null})),
+        // #12323: a degree that is not a whole number from 1 to 9.
+        ("sketch.spline.control_point", json!({"points": [[0, 0], [1, 1]], "degree": 0})),
+        ("sketch.spline.control_point", json!({"points": [[0, 0], [1, 1]], "degree": 10})),
+        ("sketch.spline.control_point", json!({"points": [[0, 0], [1, 1]], "degree": -1})),
+        ("sketch.spline.control_point", json!({"points": [[0, 0], [1, 1]], "degree": 2.5})),
+        ("sketch.spline.control_point", json!({"points": [[0, 0], [1, 1]], "degree": 6.0})),
+        ("sketch.spline.control_point", json!({"points": [[0, 0], [1, 1]], "degree": "6"})),
+        ("sketch.spline.control_point", json!({"points": [[0, 0], [1, 1]], "degree": true})),
+        ("sketch.spline.control_point", json!({"points": [[0, 0], [1, 1]], "degree": 1e300})),
+        ("sketch.spline.control_point", json!({"points": [[0, 0], [1, 1]], "degree": [3]})),
         ("sketch.spline.control_point_5", json!({"periodic": true})),
         ("sketch.blend_curve", json!({"continuity": "g9"})),
         ("sketch.blend_curve", json!({"continuity": "g0"})),

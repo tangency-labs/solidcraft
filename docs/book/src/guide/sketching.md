@@ -215,6 +215,13 @@ circle and update the outline when the inline **Sides** value changes. A polygon
 has a **Length** box for the side from the first click and the same **Sides** box; a typed length
 becomes a dimension of that side, and the other sides stay equal to it.
 
+**Control Point Spline** draws a cubic unless you give it another degree. While the tool runs,
+the sketch palette's **Feature Options** has a **Degree** row: type a whole number from 1 to 9, or
+use its arrows. The preview follows it, also for a spline already being drawn, and the degree stays
+for the next spline until you change it. A spline with fewer than degree + 1 control points takes
+the highest degree its points allow. In a script, `sketch.spline.control_point` takes the same
+`degree` (default 3).
+
 **Text** is set in the built-in font (Liberation Sans) unless it is given another: `sketch.text` and
 `sketch.edit_text` take a `font`, the family or full name of an installed font ("DejaVu Sans") or the path
 of a `.ttf` / `.otf` file, and the **Edit Text** dialog has a **Font** field for it. An unknown font is an

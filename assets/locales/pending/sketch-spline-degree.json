@@ -1,0 +1,38 @@
+{
+  "en": {
+    "ui.spline_degree": "Degree",
+    "ui.spline_degree_tip": "The degree the control point spline is drawn at, from 1 to 9. 3 is a cubic."
+  },
+  "ar": {
+    "ui.spline_degree": "الدرجة",
+    "ui.spline_degree_tip": "الدرجة التي يُرسم بها المنحنى الشريحي بنقاط التحكم، من 1 إلى 9. الدرجة 3 منحنى تكعيبي."
+  },
+  "de": {
+    "ui.spline_degree": "Grad",
+    "ui.spline_degree_tip": "Der Grad, mit dem der Spline mit Kontrollpunkten gezeichnet wird, von 1 bis 9. 3 ist kubisch."
+  },
+  "he": {
+    "ui.spline_degree": "מעלה",
+    "ui.spline_degree_tip": "המעלה שבה משורטט ספליין נקודות הבקרה, מ־1 עד 9. מעלה 3 היא עקומה מעוקבת."
+  },
+  "ja": {
+    "ui.spline_degree": "次数",
+    "ui.spline_degree_tip": "制御点スプラインを描く次数（1～9）。3 は 3 次です。"
+  },
+  "ko": {
+    "ui.spline_degree": "차수",
+    "ui.spline_degree_tip": "제어점 스플라인을 그리는 차수(1~9)입니다. 3은 3차입니다."
+  },
+  "pl": {
+    "ui.spline_degree": "Stopień",
+    "ui.spline_degree_tip": "Stopień, w jakim rysowany jest splajn z punktów kontrolnych, od 1 do 9. 3 to krzywa sześcienna."
+  },
+  "vi": {
+    "ui.spline_degree": "Bậc",
+    "ui.spline_degree_tip": "Bậc dùng để vẽ đường cong Spline qua điểm điều khiển, từ 1 đến 9. Bậc 3 là bậc ba."
+  },
+  "zh": {
+    "ui.spline_degree": "次数",
+    "ui.spline_degree_tip": "控制点样条曲线的绘制次数，1 到 9。3 次为三次曲线。"
+  }
+}

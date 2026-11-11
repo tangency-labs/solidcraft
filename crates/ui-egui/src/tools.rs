@@ -93,6 +93,9 @@ pub struct Tool {
     pub dim_history: Vec<crate::sketch_dims::DimBox>,
     pub dims_stage: usize,
     pub dims_focus: bool,
+    /// The degree the Control Point Spline tool draws at (#12323): the Degree row of the sketch
+    /// palette's Feature Options, 3 (a cubic) unless changed there.
+    pub spline_degree: u8,
     /// How far (radians, signed) the cursor has gone round a centre-point arc's centre since its
     /// start was placed: its sign is the way the arc runs (#6645).
     pub arc_turn: f64,
@@ -155,6 +158,7 @@ impl Tool {
             dim_history: Vec::new(),
             dims_stage: usize::MAX,
             dims_focus: false,
+            spline_degree: 3,
             arc_turn: 0.0,
             lined: Vec::new(),
             chain: Default::default(),
@@ -1225,7 +1229,11 @@ pub(crate) fn preview_curve(
                 CurveKind::Spline {
                     pts: indices,
                     control: t.cmd != "sketch.spline.fit_point",
-                    degree: if t.cmd == "sketch.spline.control_point_5" { 5 } else { 3 },
+                    degree: match t.cmd {
+                        "sketch.spline.control_point_5" => 5,
+                        "sketch.spline.control_point" => t.spline_degree,
+                        _ => 3,
+                    },
                     periodic,
                     nurbs: None,
                 },
