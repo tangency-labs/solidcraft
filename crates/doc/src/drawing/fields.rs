@@ -20,7 +20,10 @@
 //!   one of projected views only, shows the scale its views draw at. A sheet whose base views (or,
 //!   without any, its views) differ in scale shows none, as each view then carries its own scale label;
 //! - **revision:** the newest revision row's fields ([`Field`]);
-//! - **prompt:** any key; answers come with templates, so a prompt shows [`MISSING`] until then.
+//! - **prompt:** any key; a placed symbol's answers fill them ([`Values::answers`]), and anywhere
+//!   else, or unanswered, a prompt shows [`MISSING`].
+
+use std::collections::BTreeMap;
 
 use solidcraft_geom::cell::{Content, MISSING, Part, Source};
 use solidcraft_geom::revision::{Field, RevisionRow};
@@ -42,7 +45,7 @@ pub struct Component<'a> {
     /// Its part properties.
     pub metadata: &'a Metadata,
     /// Its free-text properties (the design's own: none).
-    pub properties: Option<&'a std::collections::BTreeMap<String, String>>,
+    pub properties: Option<&'a BTreeMap<String, String>>,
     /// What it is made of, as its bill of materials row would say: none when nothing is assigned.
     pub material: Option<&'a str>,
     /// What one of it weighs, written for the sheet: none when it can't be weighed.
@@ -135,6 +138,8 @@ pub struct Values<'a> {
     pub drawing: &'a Drawing,
     pub sheet: usize,
     pub component: Documented<'a>,
+    /// A placed symbol's answers to its prompts, by key: none for anything else.
+    pub answers: Option<&'a BTreeMap<String, String>>,
 }
 
 impl Values<'_> {
@@ -224,7 +229,8 @@ impl Values<'_> {
                     _ => key.strip_prefix(PROPERTIES).and_then(|name| c.properties?.get(name)).cloned(),
                 }
             }
-            Source::Prompt | Source::Row => None,
+            Source::Prompt => self.answers?.get(key).cloned(),
+            Source::Row => None,
         }
     }
 }

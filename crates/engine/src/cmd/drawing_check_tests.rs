@@ -328,6 +328,43 @@ fn a_lost_note_is_listed() {
     assert_eq!(of_kind(&checked(&mut s, json!({})), "lost"), [named("note", &note)]);
 }
 
+/// A finish mark: a line, and two texts that prompt for the roughness, one of them also reading the
+/// sheet's number.
+fn finish_mark(s: &mut Session) -> Value {
+    let field = |source: &str, key: &str| json!({"field": {"source": source, "key": key}});
+    let pieces = json!([
+        {"stroke": {"path": [{"type": "line", "a": [0, 0], "b": [8, 0]}], "line": "visible"}},
+        {"text": {"at": [0, 1], "content": [{"text": "Ra "}, field("prompt", "ra")]}},
+        {"text": {"at": [0, 5], "content": [field("prompt", "ra"), {"text": " on "}, field("sheet", "number")]}}
+    ]);
+    run(s, "drawing.symbol.define", json!({"name": "Finish", "pieces": pieces}))["symbol"].clone()
+}
+
+/// A placed symbol on the chamfer's edge is lost with it, as a note is (#13063); one on the sheet
+/// reads no model. A prompt a placement doesn't answer is one empty field, however many of its
+/// texts read it; an answered one, and the sheet's own fields, are none.
+#[test]
+fn a_lost_placement_and_its_unanswered_prompt_are_listed() {
+    let (mut s, chamfer) = plate();
+    let (sheet, view) = drawn(&mut s);
+    let mark = finish_mark(&mut s);
+    let edge = json!({"edge": {"view": ids::encode(view), "edge": [50, 0, 8]}});
+    let on_edge = run(&mut s, "drawing.symbol.place", json!({"symbol": mark, "anchor": edge, "at": [60, 40]}))["placement"].clone();
+    let answered = json!({"symbol": mark, "anchor": {"sheet": ids::encode(sheet)}, "at": [20, 20], "answers": {"ra": "1.6"}});
+    run(&mut s, "drawing.symbol.place", answered);
+    let reply = checked(&mut s, json!({}));
+    assert!(of_kind(&reply, "lost").is_empty(), "{reply}");
+    let block = ("title_block".to_string(), ids::encode(sheet));
+    assert_eq!(of_kind(&reply, "empty_field"), [named("symbol", &on_edge), block], "{reply}");
+    let finding = reply["findings"].as_array().unwrap().iter().find(|f| f["object"]["kind"] == "symbol").unwrap();
+    assert_eq!((&finding["field"], &finding["why"]), (&json!("prompt.ra"), &json!("prompt.ra has no value")), "{finding}");
+    assert!(finding.get("cell").is_none(), "{finding}");
+    with_model_changed(&mut s, |s| {
+        run(s, "timeline.delete", json!({"feature": chamfer}));
+    });
+    assert_eq!(of_kind(&checked(&mut s, json!({})), "lost"), [named("symbol", &on_edge)]);
+}
+
 /// A component, Bolt, of a 10 x 10 x 40 mm box called Shank, placed once; a drawing of the design,
 /// open, with a front view at 1:1 and a parts list on its sheet. The view, the list and the Bolt's
 /// occurrence.

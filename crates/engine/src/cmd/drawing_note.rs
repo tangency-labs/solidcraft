@@ -266,8 +266,8 @@ fn branch_result(end: End) -> BranchResult {
     BranchResult { status: status.into(), why, point, exact: end.exact, candidates }
 }
 
-/// Each field `content` reads, in order, as `values` read it.
-fn fields(values: &Values, content: &Content) -> Vec<FieldResult> {
+/// Each field `content` reads, in order, as `values` read it: a note's, and a placed symbol's texts'.
+pub(super) fn fields(values: &Values, content: &Content) -> Vec<FieldResult> {
     let field = |part: &Part| {
         let Part::Field { source, key, .. } = part else { return None };
         let (state, value) = match values.state(*source, key) {

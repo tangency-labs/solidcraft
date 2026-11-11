@@ -292,6 +292,41 @@ fn a_placement_goes_with_its_view_as_a_note_does() {
     assert!(s.drawing("test").unwrap().placed_symbols.is_empty());
 }
 
+fn inspect_placed(s: &mut Session, placement: &Value) -> Value {
+    let reply = s.execute(PLACED_INSPECT, &json!({"placement": placement})).unwrap_or_else(|e| panic!("{PLACED_INSPECT}: {e}"));
+    let schema = output_schema_for::<PlacedInspectResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+    reply
+}
+
+/// Inspect gives where a placement's anchor stands with the model and what each of its texts says:
+/// its prompts answered by the placement, unanswered ones empty, and a leader's end on the edge's
+/// middle. It changes nothing.
+#[test]
+fn inspect_says_where_a_placement_stands_and_what_it_says() {
+    let (mut s, view, part, mark) = viewed();
+    let on_sheet = place_one(&mut s, json!({"symbol": mark, "anchor": {"sheet": "Sheet 1"}, "at": [40, 25], "answers": {"rev": "C"}}));
+    let before = saved(&s);
+    let reply = inspect_placed(&mut s, &on_sheet["placement"]);
+    assert_eq!((&reply["status"], &reply["exact"], reply.get("point")), (&json!("ok"), &json!(true), None), "{reply}");
+    assert_eq!(reply["record"], on_sheet["record"]);
+    assert_eq!(reply["texts"], json!(["Rev C"]));
+    assert_eq!(reply["fields"], json!([{"source": "prompt", "key": "rev", "state": "shown", "value": "C"}]));
+    assert_eq!(saved(&s), before, "inspect changes nothing");
+
+    let edge = json!({"edge": {"view": ids::encode(view), "edge": {"point": [40, 0, 0], "path": [part]}}});
+    let on_edge = place_one(&mut s, json!({"symbol": mark, "anchor": edge, "at": [60, 40]}));
+    let reply = inspect_placed(&mut s, &on_edge["placement"]);
+    assert_eq!(reply["status"], json!("ok"), "{reply}");
+    let point: Vec<f64> = reply["point"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+    assert!(point.iter().zip([40.0, 0.0, 0.0]).all(|(a, b)| (a - b).abs() < 1e-6), "the edge's middle: {point:?}");
+    assert_eq!(reply["texts"], json!(["Rev "]), "an unanswered prompt shows nothing");
+    assert_eq!(reply["fields"][0]["state"], json!("empty"), "{reply}");
+
+    let unknown = refused(&mut s, PLACED_INSPECT, json!({"placement": ids::encode(9_999_999)}));
+    assert!(unknown.contains("the drawing has no placed symbol"), "{unknown}");
+}
+
 /// A placed symbol's delete is refused, naming its placements, unless they go too: then both go in
 /// one undo step.
 #[test]

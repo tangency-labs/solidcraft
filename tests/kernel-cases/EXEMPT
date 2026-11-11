@@ -142,6 +142,7 @@ drawing.symbol.edit               a drawing: its tests in crates/engine/src/cmd/
 drawing.symbol.place              a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.symbol.placed.delete      a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.symbol.placed.edit        a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
+drawing.symbol.placed.inspect     a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.table.add                 a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.table.delete              a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs
 drawing.table.edit                a drawing: its tests in crates/engine/src/cmd/drawing*_tests.rs

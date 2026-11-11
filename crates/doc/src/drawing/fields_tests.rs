@@ -34,7 +34,7 @@ fn field(source: Source, key: &str) -> Part {
 
 fn shown(d: &Drawing, sheet: usize, component: Option<Component>, parts: Vec<Part>) -> String {
     let component = component.map_or(Documented::Nothing, Documented::Present);
-    Values { drawing: d, sheet, component }.text(&Content(parts))
+    Values { drawing: d, sheet, component, answers: None }.text(&Content(parts))
 }
 
 /// The drawing's own fields: its name, its number (its part number property), its organization
@@ -110,16 +110,16 @@ fn empty_fields_are_named_by_source_and_key() {
         field(Source::Prompt, "checked_by"),
         field(Source::Revision, "date"),
     ]);
-    let empty = |d: &Drawing| Values { drawing: d, sheet: 0, component: Documented::Present(bracket) }.empty_fields(&content);
+    let empty = |d: &Drawing| Values { drawing: d, sheet: 0, component: Documented::Present(bracket), answers: None }.empty_fields(&content);
     assert_eq!(empty(&d), ["component.part_number", "prompt.checked_by"]);
     Arc::make_mut(&mut d.revisions).add(None, 901).unwrap();
     assert_eq!(empty(&d), ["component.part_number", "prompt.checked_by", "revision.date"]);
     Arc::make_mut(&mut d.revisions).set(901, Field::Date, "2026-11-07").unwrap();
     assert_eq!(empty(&d), ["component.part_number", "prompt.checked_by"]);
-    let lost = Values { drawing: &d, sheet: 0, component: Documented::Gone }.empty_fields(&content);
+    let lost = Values { drawing: &d, sheet: 0, component: Documented::Gone, answers: None }.empty_fields(&content);
     assert_eq!(lost, ["component.name", "component.part_number", "prompt.checked_by"], "a component since deleted");
     let unknown = Content(vec![field(Source::Component, "weight"), field(Source::Sheet, "page")]);
-    let present = Values { drawing: &d, sheet: 0, component: Documented::Present(bracket) };
+    let present = Values { drawing: &d, sheet: 0, component: Documented::Present(bracket), answers: None };
     assert_eq!(present.empty_fields(&unknown), ["component.weight", "sheet.page"], "a drawing saved with fields its sources lack");
 }
 
@@ -182,7 +182,7 @@ fn each_field_is_shown_empty_or_lost() {
     let metadata = Metadata::default();
     let bracket = Component { name: "Bracket", metadata: &metadata, properties: None, material: None, mass: None };
     let blank = BTreeMap::from([("finish".to_string(), String::new())]);
-    let state = |component, source, key| Values { drawing: &d, sheet: 0, component }.state(source, key);
+    let state = |component, source, key| Values { drawing: &d, sheet: 0, component, answers: None }.state(source, key);
     let present = Documented::Present(bracket);
     assert_eq!(state(present, Source::Component, "name"), FieldState::Shown("Bracket".into()));
     assert_eq!(state(present, Source::Component, "material"), FieldState::Empty);
@@ -197,7 +197,7 @@ fn each_field_is_shown_empty_or_lost() {
     assert_eq!(state(Documented::Gone, Source::Sheet, "name"), FieldState::Shown("Sheet 1".into()));
     let parts = Content(vec![Part::Text("Material: ".into()), field(Source::Component, "material"), Part::Text(".".into())]);
     for component in [Documented::Gone, Documented::Nothing, present] {
-        assert_eq!(Values { drawing: &d, sheet: 0, component }.text(&parts), "Material: .");
+        assert_eq!(Values { drawing: &d, sheet: 0, component, answers: None }.text(&parts), "Material: .");
     }
 }
 
@@ -266,7 +266,7 @@ fn a_field_its_source_lacks_reads_unknown() {
     let d = drawing();
     let metadata = Metadata::default();
     let bracket = Component { name: "Bracket", metadata: &metadata, properties: None, material: None, mass: None };
-    let values = Values { drawing: &d, sheet: 0, component: Documented::Present(bracket) };
+    let values = Values { drawing: &d, sheet: 0, component: Documented::Present(bracket), answers: None };
     assert_eq!(values.state(Source::Component, "weight"), FieldState::Unknown);
     assert_eq!(values.state(Source::Sheet, "scales"), FieldState::Unknown);
     assert_eq!(values.state(Source::Component, "name"), FieldState::Shown("Bracket".into()));
@@ -278,4 +278,22 @@ fn a_field_its_source_lacks_reads_unknown() {
     assert_eq!(no_field(Source::Component, "mass"), None);
     assert_eq!(unknown_field(&parts).as_deref(), Some("the component has no field `weight`"), "the first one");
     assert_eq!(unknown_field(&Content(vec![field(Source::Sheet, "scale")])), None);
+}
+
+/// A placed symbol's answers fill its prompts (#13063): an answered prompt shows its answer, and one
+/// unanswered, answered with nothing, or read anywhere without answers shows nothing and is empty.
+#[test]
+fn a_placed_symbols_answers_fill_its_prompts() {
+    let d = drawing();
+    let answers = BTreeMap::from([("rev".to_string(), "C".to_string()), ("by".to_string(), String::new())]);
+    let parts = vec![Part::Text("Rev ".into()), field(Source::Prompt, "rev"), field(Source::Prompt, "by"), field(Source::Sheet, "number")];
+    let content = Content(parts);
+    let values = Values { drawing: &d, sheet: 1, component: Documented::Nothing, answers: Some(&answers) };
+    assert_eq!(values.text(&content), "Rev C2", "the sheet's own fields read as before");
+    assert_eq!(values.state(Source::Prompt, "rev"), FieldState::Shown("C".into()));
+    assert_eq!(values.state(Source::Prompt, "date"), FieldState::Empty, "a key it doesn't answer");
+    assert_eq!(values.empty_fields(&content), ["prompt.by"]);
+    let elsewhere = Values { answers: None, ..values };
+    assert_eq!(elsewhere.text(&content), format!("Rev {MISSING}{MISSING}2"));
+    assert_eq!(elsewhere.empty_fields(&content), ["prompt.rev", "prompt.by"]);
 }

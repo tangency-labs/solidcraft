@@ -114,7 +114,8 @@ pub fn read<'c>(s: &Session, tree: &mut Tree<'_>, d: &Drawing, at: usize, conten
 /// `answer` given what sheet `at` of `d` reads its fields from ([`Values`]), for `contents`: the
 /// component the sheet documents, in the design its source names ([`Session::drawn`]; one that
 /// can't be read has nothing to show), weighed in `tree`, the tree of `s`'s design, only when one of
-/// them reads its material or mass. [`read`] and a note's inspect read through this one rule.
+/// them reads its material or mass. [`read`] and a note's inspect read through this one rule; a
+/// placed symbol's answers its prompts as well ([`Values::answers`]).
 pub fn with_values<'c, R>(
     s: &Session,
     tree: &mut Tree<'_>,
@@ -142,7 +143,7 @@ pub fn with_values<'c, R>(
         (Some(None), _) => Documented::Gone,
         _ => Documented::Nothing,
     };
-    answer(&Values { drawing: d, sheet: at, component })
+    answer(&Values { drawing: d, sheet: at, component, answers: None })
 }
 
 /// Component `id` of the design (0: the design itself) as a title block's fields read it, with

@@ -1,25 +1,32 @@
 //! `drawing.symbol.define`, `.edit` and `.delete` (#13063): a drawing's symbols of its own, each a
 //! shape of strokes, fills and text made once to be placed many times; `.place`, `.placed.edit` and
-//! `.placed.delete`: where each sits, anchored as a note is. The drawing's rules check each
-//! definition and placement ([`solidcraft_doc::drawing::symbol`]). Each command is one undo step of
-//! the drawing, none when nothing changes, and none evaluates the model. A placement is also deleted
-//! as a drawing's other objects are (`selection.delete`).
+//! `.placed.delete`: where each sits, anchored as a note is; `.placed.inspect`: where its anchor
+//! stands with the model now and what its texts say, as `drawing.note.inspect` gives a note. The
+//! drawing's rules check each definition and placement ([`solidcraft_doc::drawing::symbol`]). Each
+//! change is one undo step of the drawing, none when nothing changes, and none evaluates the model.
+//! A placement is also deleted as a drawing's other objects are (`selection.delete`).
 
 use std::sync::Arc;
 
 use serde_json::Value;
+use solidcraft_doc::bom::Tree;
 use solidcraft_doc::drawing::OnSheet;
+use solidcraft_doc::drawing::fields::Values;
 use solidcraft_doc::drawing::symbol::{PlacedSymbol, Symbol};
 use solidcraft_doc::ids;
 
 use super::CommandSpec;
-use super::drawing_note::{anchor, check_on_view};
+use super::drawing_dimension::status_words;
+use super::drawing_note::{anchor, check_on_view, fields};
+use super::drawing_view::drawn_warning;
 use crate::params::bad;
+use crate::schema::drawing_note::FieldResult;
 use crate::schema::drawing_symbol::{
     DefineParams, DeleteParams, DeleteResult, EditParams, EditResult, PlaceParams, PlacedDeleteParams, PlacedDeleteResult, PlacedEditParams,
-    PlacedEditResult, PlacedResult, SymbolResult,
+    PlacedEditResult, PlacedInspectParams, PlacedInspectResult, PlacedResult, SymbolResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
+use crate::title_block_text;
 use crate::{EngineError, Result, Session};
 
 const DEFINE: &str = "drawing.symbol.define";
@@ -34,6 +41,8 @@ const PLACED_EDIT: &str = "drawing.symbol.placed.edit";
 const PLACED_EDIT_CONTRACT: TypedContract<PlacedEditParams> = TypedContract::new();
 const PLACED_DELETE: &str = "drawing.symbol.placed.delete";
 const PLACED_DELETE_CONTRACT: TypedContract<PlacedDeleteParams> = TypedContract::new();
+const PLACED_INSPECT: &str = "drawing.symbol.placed.inspect";
+const PLACED_INSPECT_CONTRACT: TypedContract<PlacedInspectParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new(DEFINE, "Define Symbol", crate::checked!("drawing.symbol.define", define))
@@ -99,6 +108,20 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&PLACED_DELETE_CONTRACT)
         .output(output_schema_for::<PlacedDeleteResult>)
         .params("placement: its id → {placement}. Its symbol stays. One undo step; no model is evaluated."),
+    CommandSpec::new(PLACED_INSPECT, "Inspect Placed Symbol", crate::checked!("drawing.symbol.placed.inspect", placed_inspect))
+        .icon("inspect")
+        .in_drawing()
+        .noundo()
+        .doc_only()
+        .contract(&PLACED_INSPECT_CONTRACT)
+        .output(output_schema_for::<PlacedInspectResult>)
+        .params(
+            "placement: its id → {placement, record (its angle in radians), status: ok, ambiguous, suppressed or lost, why?, point?: where its \
+             leader ends, in the design's frame, exact, candidates?: [{edge: {body, index}}], texts: what each text of its symbol says here, in \
+             piece order, its fields read for its sheet and its prompts answered, fields?: [{source, key, state: shown, empty, lost or unknown, \
+             value?, why?}], warnings?: its view edited since to leave out the part its leader points at}. A lost reference keeps it in place, \
+             without a leader. Read-only; no model is evaluated.",
+        ),
 ];
 
 fn define(s: &mut Session, p: &Value) -> Result<Value> {
@@ -215,6 +238,39 @@ fn placed_delete(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(())
     })?;
     serde_json::to_value(PlacedDeleteResult { placement: ids::encode(id) }).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+fn placed_inspect(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: PlacedInspectParams = crate::schema::read(PLACED_INSPECT, p)?;
+    let id = request.placement.0;
+    let d = s.drawing(PLACED_INSPECT)?;
+    let placed = d.placed_symbols.by_id(id).ok_or_else(|| placement_missing(PLACED_INSPECT, id))?;
+    let symbol = d.symbols.by_id(placed.symbol).ok_or_else(|| missing(PLACED_INSPECT, placed.symbol))?;
+    let read = s.doc.resolve_placements(&s.model, d, &[id]).map_err(|e| bad(PLACED_INSPECT, e.to_string()))?;
+    let end = read.into_iter().next().ok_or_else(|| bad(PLACED_INSPECT, format!("placed symbol {} wasn't read", ids::encode(id))))?;
+    let (status, why, candidates) = status_words(end.status);
+    let at = d.sheet_of(&placed.anchor).ok_or_else(|| bad(PLACED_INSPECT, format!("placed symbol {} is on no sheet", ids::encode(id))))?;
+    // Its texts read the sheet's fields as a note's do, and its prompts from its own answers.
+    let read = |values: &Values| -> (Vec<String>, Vec<FieldResult>) {
+        let values = Values { answers: Some(&placed.answers), ..*values };
+        (symbol.texts().map(|content| values.text(content)).collect(), symbol.texts().flat_map(|content| fields(&values, content)).collect())
+    };
+    let state = s.model.state();
+    let (texts, fields) = title_block_text::with_values(s, &mut Tree::new(&s.doc, &state), d, at, symbol.texts(), read);
+    let reply = PlacedInspectResult {
+        placement: ids::encode(id),
+        record: serde_json::to_value(placed).map_err(|e| EngineError::Other(e.to_string()))?,
+        status: status.into(),
+        why,
+        point: end.point.map(|p| [p.x, p.y, p.z]),
+        exact: end.exact,
+        candidates,
+        texts,
+        fields,
+        warnings: placed.anchor.view().map(|view| drawn_warning(d, view, placed.anchor.path())).unwrap_or_default(),
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 fn missing(cmd: &str, id: u64) -> EngineError {

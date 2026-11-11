@@ -92,6 +92,16 @@ impl Anchor {
         sheet.is_some_and(|sheet| *self == Anchor::Sheet(sheet)) || self.view().is_some_and(|v| views.binary_search(&v).is_ok())
     }
 
+    /// Where its leader stands with the model now: a sheet or a view alone reads no model
+    /// ([`End::NONE`]). A note's and anything else placed as one is.
+    pub(super) fn end(&self, lookup: &mut Lookup<'_>) -> End {
+        match self {
+            Anchor::Sheet(_) | Anchor::View(_) => End::NONE,
+            Anchor::Edge { edge, .. } => End::edge(lookup, edge),
+            Anchor::Corner { point, .. } => End::corner(lookup, point),
+        }
+    }
+
     /// The same anchor on view `view`, when it is on one.
     pub fn on_view(&self, view: u64) -> Anchor {
         let mut anchor = self.clone();
@@ -238,7 +248,7 @@ impl Drawing {
     }
 }
 
-/// Where one leader of a note stands with the model now.
+/// Where one leader of a note, or of anything placed as one is, stands with the model now.
 #[derive(Clone, Debug, PartialEq)]
 pub struct End {
     pub status: Status,
@@ -285,11 +295,7 @@ impl Document {
             .iter()
             .map(|id| {
                 let n = drawing.notes.by_id(*id).ok_or_else(|| DocError::Unknown(format!("note {}", ids::encode(*id))))?;
-                let anchor = match &n.anchor {
-                    Anchor::Sheet(_) | Anchor::View(_) => End::NONE,
-                    Anchor::Edge { edge, .. } => End::edge(&mut lookup, edge),
-                    Anchor::Corner { point, .. } => End::corner(&mut lookup, point),
-                };
+                let anchor = n.anchor.end(&mut lookup);
                 let mut branch = |branch: &Branch| match branch {
                     Branch::Edge(edge) => End::edge(&mut lookup, edge),
                     Branch::Corner(point) => End::corner(&mut lookup, point),

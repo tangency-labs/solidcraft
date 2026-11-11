@@ -18,7 +18,8 @@
 //! view), or on an edge or a corner of a view's model. Its insertion point is at `at`, its pieces
 //! scaled by `scale` and turned by `angle` there, and its prompts answered by `answers`. It names
 //! its definition by id and keeps none of it, so a changed definition changes every placement.
-//! The rules: its symbol is one of the drawing's; its anchor's as a note's
+//! Where its anchor stands with the model is worked out, never saved, as a note's is
+//! ([`Document::resolve_placements`]). The rules: its symbol is one of the drawing's; its anchor's as a note's
 //! ([`Drawing::check_anchor`]); `at` on paper; `scale` in [`SCALE`]; `angle` finite; each answer
 //! names one of the definition's prompts and is one line of text ([`check_label`]); at most
 //! [`MAX_PLACEMENTS`], listed by id.
@@ -36,9 +37,10 @@ use solidcraft_geom::paper::{self, MAX_SIDE_MM};
 use solidcraft_geom::prelude::*;
 
 use super::by_id::Record;
-use super::note::{Anchor, CAP_MM};
+use super::dimension::Lookup;
+use super::note::{Anchor, CAP_MM, End};
 use super::{Drawing, check_name, require};
-use crate::{DocError, Result, ids};
+use crate::{DocError, Document, Model, Result, ids};
 
 /// The most symbols a drawing may have.
 pub const MAX_SYMBOLS: usize = 1_000;
@@ -121,12 +123,16 @@ impl Record for PlacedSymbol {
 }
 
 impl Symbol {
-    /// The keys its texts prompt for, each once and sorted: what a placement answers.
-    pub fn prompts(&self) -> BTreeSet<&str> {
-        let texts = self.pieces.iter().filter_map(|piece| match piece {
+    /// Its texts' contents, in piece order.
+    pub fn texts(&self) -> impl Iterator<Item = &Content> + Clone {
+        self.pieces.iter().filter_map(|piece| match piece {
             Piece::Text { content, .. } => Some(content),
             Piece::Stroke { .. } | Piece::Fill { .. } => None,
-        });
+        })
+    }
+
+    /// The keys its texts prompt for, each once and sorted: what a placement answers.
+    pub fn prompts(&self) -> BTreeSet<&str> {
         // A fn, not a closure: a closure's `&Part` and its `&str` get unrelated lifetimes.
         fn prompt(part: &Part) -> Option<&str> {
             match part {
@@ -134,7 +140,18 @@ impl Symbol {
                 _ => None,
             }
         }
-        texts.flat_map(|content| content.0.iter().filter_map(prompt)).collect()
+        self.texts().flat_map(|content| content.0.iter().filter_map(prompt)).collect()
+    }
+}
+
+impl Document {
+    /// The anchors of placements `wanted` of `drawing` (one of this design's drawings) as `model`
+    /// (this design's) has them now, as [`Document::resolve_notes`] finds a note's. `Err` only for an
+    /// id the drawing doesn't have.
+    pub fn resolve_placements(&self, model: &Model, drawing: &Drawing, wanted: &[u64]) -> Result<Vec<End>> {
+        let mut lookup = Lookup::new(self, model);
+        let placed = |id: &u64| drawing.placed_symbols.by_id(*id).ok_or_else(|| DocError::Unknown(format!("placed symbol {}", ids::encode(*id))));
+        wanted.iter().map(|id| Ok(placed(id)?.anchor.end(&mut lookup))).collect()
     }
 }
 

@@ -226,10 +226,10 @@ pub struct BranchResult {
     pub candidates: Vec<CandidateResult>,
 }
 
-/// One field a note reads.
+/// One field a note, or a placed symbol's text, reads.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct FieldResult {
-    /// `component`, `drawing`, `sheet` or `revision`.
+    /// `component`, `drawing`, `sheet`, `revision`, or `prompt` for a placed symbol's.
     #[schemars(with = "String")]
     pub source: Source,
     pub key: String,

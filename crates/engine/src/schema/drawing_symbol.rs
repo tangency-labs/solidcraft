@@ -12,7 +12,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use solidcraft_doc::drawing::symbol::Piece;
 
-use super::drawing_note::AnchorParam;
+use super::drawing_dimension::CandidateResult;
+use super::drawing_note::{AnchorParam, FieldResult};
 
 /// A symbol, by its id.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -190,6 +191,14 @@ pub struct PlacedDeleteParams {
     pub placement: PlacementIdParam,
 }
 
+/// What `drawing.symbol.placed.inspect` takes.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct PlacedInspectParams {
+    pub placement: PlacementIdParam,
+}
+
 /// A symbol as the drawing has it.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct SymbolResult {
@@ -237,6 +246,38 @@ pub struct PlacedEditResult {
     pub placement: String,
     /// The fields the edit changed.
     pub changed: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// A placement as the model has it now, as `drawing.note.inspect` gives a note.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PlacedInspectResult {
+    pub placement: String,
+    /// The record, as the drawing saves it (its angle in radians).
+    pub record: Value,
+    /// `ok`, `ambiguous`, `suppressed` or `lost`. A placement that points at nothing is always `ok`.
+    pub status: String,
+    /// Why it is lost.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
+    /// Where its leader ends, in the design's frame.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub point: Option<[f64; 3]>,
+    /// What it points at was found by exact history.
+    pub exact: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub candidates: Vec<CandidateResult>,
+    /// What each text of its symbol says here, in piece order: each field read for its sheet, each
+    /// prompt its answer.
+    pub texts: Vec<String>,
+    /// Each field its texts read, in order, as it reads them now.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<FieldResult>,
+    /// What to know about it: a view edited since to leave out what its leader points at.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
 }
