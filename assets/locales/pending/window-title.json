@@ -1,0 +1,7 @@
+{
+  "en": {
+    "prefs.design_window_title": "Show design in window title",
+    "prefs.design_window_title.help": "Shows the active design's name and marks unsaved changes in the operating system's window title. Turn off to restore the fixed SolidCraft title.",
+    "prefs.window_title": "Window title"
+  }
+}

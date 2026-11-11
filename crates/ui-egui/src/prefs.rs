@@ -1191,6 +1191,8 @@ preference_settings! {
     viewport_background: Option<[u8; 3]> = None, PAGE_APPEARANCE;
     /// The application bar's logo in the theme's accent instead of the theme's logo colours.
     logo_accent: bool = false, PAGE_APPEARANCE;
+    /// Show the active design and its unsaved state in the OS window title; off keeps SolidCraft.
+    design_window_title: bool = true, PAGE_APPEARANCE => check_id_help("prefs.design_window_title", "prefs.design_window_title.help");
     /// Imported theme files (`theme_files`), kept here so they also work in the browser.
     #[serde(deserialize_with = "themes_that_read")]
     custom_themes: Vec<crate::theme_files::ThemeFile> = Vec::new();
@@ -4753,6 +4755,42 @@ mod tests {
         assert!(restored.preferences.remember_dialog_values);
         reset_preferences(&mut app.preferences, PAGE_TOOLS);
         assert!(!app.preferences.remember_dialog_values);
+    }
+
+    #[test]
+    fn design_window_title_defaults_on_persists_and_resets_on_interface() {
+        assert!(Prefs::default().design_window_title);
+        assert!(serde_json::from_value::<Prefs>(json!({})).unwrap().design_window_title);
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        assert_eq!(set(&mut app, &json!({"design_window_title": false})).unwrap()["design_window_title"], false);
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&app.prefs());
+        assert!(!restored.preferences.design_window_title);
+        reset_preferences(&mut app.preferences, PAGE_GENERAL);
+        assert!(!app.preferences.design_window_title);
+        reset_preferences(&mut app.preferences, PAGE_APPEARANCE);
+        assert!(app.preferences.design_window_title);
+        assert!(set(&mut app, &json!({"design_window_title": "false"})).is_err());
+        assert!(app.preferences.design_window_title);
+    }
+
+    #[test]
+    fn design_window_title_interface_control_applies_cancels_and_restores_defaults() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"open": "Interface", "language": "en"}));
+        h.frames(5);
+        reveal_preference(&mut h, "prefs:design_window_title");
+        scroll_to_and_click(&mut h, "prefs:design_window_title");
+        assert!(!h.app.preferences.design_window_title);
+        h.call("ui.prefs", json!({"button": "cancel"}));
+        assert!(h.app.preferences.design_window_title);
+        h.call("ui.prefs", json!({"open": "Interface", "design_window_title": false}));
+        h.call("ui.prefs", json!({"button": "apply"}));
+        h.call("ui.prefs", json!({"button": "defaults"}));
+        assert!(h.app.preferences.design_window_title);
+        h.call("ui.prefs", json!({"button": "cancel"}));
+        assert!(!h.app.preferences.design_window_title);
     }
 
     #[test]
