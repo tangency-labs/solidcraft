@@ -1191,3 +1191,161 @@ fn rotate_member_refuses_a_member_in_another_occurrence() {
     let e = s.execute("frame.rotate_member", &json!({"face": face, "angle": "30 deg"})).unwrap_err().to_string();
     assert!(e.contains("Activate the member's component"), "{e}");
 }
+
+/// A 40 × 40 square tube on the sloped line (0, 0, 0)–(300, 0, 300), its member body `Brace`,
+/// made by the feature `Brace member`. Its profile's x runs along world Y.
+fn brace() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Brace path"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    run(&mut s, "sketch.line3d", json!({"points": [[0, 0, 0], [300, 0, 300]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "frame.member", json!({"sketch": "Brace path", "name": "Brace member", "body_name": "Brace", "profile": square_tube()}));
+    s
+}
+
+/// The side of the brace whose outward normal is the profile's x turned `deg` about the line.
+fn brace_side(s: &Session, deg: f64) -> Value {
+    let t = deg.to_radians();
+    let y = [-1.0 / 2f64.sqrt(), 0.0, 1.0 / 2f64.sqrt()];
+    let n = [t.sin() * y[0], t.cos(), t.sin() * y[2]];
+    face_pick(s, "Brace", [150.0 + 20.0 * n[0], 20.0 * n[1], 150.0 + 20.0 * n[2]], n)
+}
+
+fn brace_box(s: &mut Session) -> ([f64; 3], [f64; 3]) {
+    let b = measured(s, "Brace");
+    (b.2, b.3)
+}
+
+fn same_box(a: ([f64; 3], [f64; 3]), b: ([f64; 3], [f64; 3])) -> bool {
+    near3(a.0, b.0) && near3(a.1, b.1)
+}
+
+/// The brace turned once by `angle` from a fresh design.
+fn brace_turned(angle: &str) -> ([f64; 3], [f64; 3]) {
+    let mut s = brace();
+    let face = brace_side(&s, 0.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": angle}));
+    brace_box(&mut s)
+}
+
+#[test]
+fn a_rotate_step_turns_its_member_about_the_profile_centre() {
+    let mut s = brace();
+    let flat = measured(&mut s, "Brace");
+    let face = brace_side(&s, 0.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "45 deg"}));
+    let turned = measured(&mut s, "Brace");
+    // Square on, the brace is 40 wide across Y; turned 45° its corners stick out 40√2.
+    assert!(rel(flat.3[1] - flat.2[1], 40.0) < 1e-9, "{flat:?}");
+    assert!(rel(turned.3[1] - turned.2[1], 40.0 * 2f64.sqrt()) < 1e-9, "{turned:?}");
+    assert!(rel(turned.1, flat.1) < 1e-9, "{turned:?} vs {flat:?}");
+    // It spins about the profile's centre: its centre of mass stays put.
+    assert!(near3(turned.4, flat.4), "{turned:?} vs {flat:?}");
+}
+
+#[test]
+fn rotate_follows_suppress_delete_marker_and_edit() {
+    let mut s = brace();
+    let flat = brace_box(&mut s);
+    let face = brace_side(&s, 0.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face.clone(), "angle": "45 deg"}));
+    let turned = brace_box(&mut s);
+    assert!(!same_box(turned, flat), "{turned:?}");
+
+    run(&mut s, "timeline.suppress", json!({"feature": "Rotate1"}));
+    assert!(same_box(brace_box(&mut s), flat), "suppressed");
+    run(&mut s, "timeline.suppress", json!({"feature": "Rotate1", "suppressed": false}));
+    assert!(same_box(brace_box(&mut s), turned), "unsuppressed");
+
+    let at = s.doc.features.iter().position(|f| f.name == "Rotate1").unwrap();
+    run(&mut s, "timeline.rollback", json!({"position": at}));
+    assert!(same_box(brace_box(&mut s), flat), "rolled back before the step");
+    run(&mut s, "timeline.rollback", json!({"position": "end"}));
+    assert!(same_box(brace_box(&mut s), turned), "rolled forward");
+
+    // The edit runs with the step suppressed, so the face is picked on the member as laid.
+    run(&mut s, "timeline.redefine", json!({"feature": "Rotate1", "command": "frame.rotate_member", "params": {"face": face, "angle": "0 deg"}}));
+    assert!(same_box(brace_box(&mut s), flat), "edited to 0 deg");
+    run(&mut s, "timeline.redefine", json!({"feature": "Rotate1", "command": "frame.rotate_member", "params": {"face": face, "angle": "45 deg"}}));
+    assert!(same_box(brace_box(&mut s), turned), "edited back to 45 deg");
+
+    run(&mut s, "timeline.delete", json!({"feature": "Rotate1"}));
+    assert!(same_box(brace_box(&mut s), flat), "deleted");
+}
+
+#[test]
+fn the_later_rotate_step_wins() {
+    let mut s = brace();
+    let face = brace_side(&s, 0.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "30 deg"}));
+    let face = brace_side(&s, 30.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "60 deg"}));
+    let got = brace_box(&mut s);
+    let want = brace_turned("60 deg");
+    assert!(same_box(got, want), "{got:?} vs {want:?}");
+    assert!(!same_box(got, brace_turned("90 deg")), "the turns don't add up");
+}
+
+#[test]
+fn a_rotate_angle_parameter_drives_the_turn() {
+    let mut s = brace();
+    let flat = brace_box(&mut s);
+    run(&mut s, "parameters.add", json!({"name": "tilt", "expression": "20 deg"}));
+    let face = brace_side(&s, 0.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "tilt"}));
+    let got = brace_box(&mut s);
+    assert!(!same_box(got, flat) && same_box(got, brace_turned("20 deg")), "{got:?}");
+    run(&mut s, "parameters.change", json!({"name": "tilt", "expression": "40 deg"}));
+    let got = brace_box(&mut s);
+    let want = brace_turned("40 deg");
+    assert!(same_box(got, want), "{got:?} vs {want:?}");
+}
+
+#[test]
+fn a_rotate_step_before_its_frame_turns_nothing() {
+    let mut s = brace();
+    let flat = brace_box(&mut s);
+    let face = brace_side(&s, 0.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "45 deg"}));
+    assert!(!same_box(brace_box(&mut s), flat));
+    let step = turn_step(&s).id;
+    let frame = s.doc.features.iter().position(|f| f.name == "Brace member").unwrap();
+    run(&mut s, "timeline.reorder", json!({"feature": "Rotate1", "position": frame, "allow_errors": true}));
+    let e = s.model.result(step).and_then(|r| r.error.clone()).unwrap_or_default();
+    assert!(e.contains("Its frame member must come earlier in the timeline"), "{e}");
+    assert!(same_box(brace_box(&mut s), flat));
+}
+
+#[test]
+fn an_end_cap_follows_a_turned_member() {
+    let mut s = capped_post(square_tube());
+    let top = face_pick(&s, "Post", [18.5, 0.0, 300.0], [0.0, 0.0, 1.0]);
+    run(&mut s, "frame.end_cap", json!({"faces": [top], "thickness": 6}));
+    let face = post_side(&s);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "30 deg"}));
+    let post = measured(&mut s, "Post");
+    let cap = measured(&mut s, "Post End Cap");
+    // Turned 30°, the 40 × 40 section spans 20 (cos 30° + sin 30°) each side in X and Y.
+    let half = 20.0 * (30f64.to_radians().cos() + 30f64.to_radians().sin());
+    assert!(near3(post.2, [-half, -half, 0.0]) && near3(post.3, [half, half, 300.0]), "{post:?}");
+    assert!(near3([cap.2[0], cap.2[1], 0.0], [post.2[0], post.2[1], 0.0]), "{cap:?} vs {post:?}");
+    assert!(near3([cap.3[0], cap.3[1], 0.0], [post.3[0], post.3[1], 0.0]), "{cap:?} vs {post:?}");
+    assert!((cap.2[2] - 300.0).abs() < 1e-6 && (cap.3[2] - 306.0).abs() < 1e-6, "{cap:?}");
+}
+
+#[test]
+fn a_turned_member_keeps_its_face_names() {
+    let mut s = capped_post(square_tube());
+    let face = post_side(&s);
+    let index = face["index"].as_u64().unwrap() as usize;
+    let name = solidcraft_doc::naming::face_names(s.model.state().body("Post").unwrap())[index].clone();
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "30 deg"}));
+    let st = s.model.state();
+    let post = st.body("Post").unwrap();
+    let now = solidcraft_doc::naming::face_names(post).iter().position(|n| *n == name).unwrap_or_else(|| panic!("no face {name}"));
+    // The same side, turned 30° about Z with the member.
+    let t = 30f64.to_radians();
+    let n = post.body.planar_face(now).unwrap().normal();
+    assert!(near3([n.x, n.y, n.z], [t.cos(), t.sin(), 0.0]), "{name}: {n:?}");
+}

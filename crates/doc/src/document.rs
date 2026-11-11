@@ -1301,8 +1301,9 @@ pub enum FeatureKind {
         #[serde(default)]
         direction: crate::end_cap::Direction,
     },
-    /// Turns one frame member about its own line: the step's `angle` replaces the member's own
-    /// `angle` for that line (`eval_frame::member_turns`); the member is rebuilt turned.
+    /// Turns one frame member about its own line: the step's `angle` is added to the member's own
+    /// `angle` for that line, about the centre of the profile (`eval_frame::member_turns`, the
+    /// latest active step winning); the member is rebuilt turned.
     FrameMemberTurn {
         member: crate::end_cap::Member,
         #[walk(angle = "Angle")]

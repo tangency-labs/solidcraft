@@ -17,7 +17,7 @@ pub static COMMANDS: &[CommandSpec] =
         .at("WELDMENTS", "MODIFY")
         .icon("rotate_member")
         .enabled(not_in_sketch)
-        .params("face: {face:[x,y,z],body,index,path?} a face of the frame member to turn, picked in world mm; angle: the angle the member is turned to about its own line, counter-clockwise looking back from the line's end (an angle or a parameter expression; it replaces the member's own angle). Adds a step after the Frame Member. Common name field supported.")];
+        .params("face: {face:[x,y,z],body,index,path?} a face of the frame member to turn, picked in world mm; angle: the angle the member is turned to about its own line, counter-clockwise looking back from the line's end (an angle or a parameter expression; 0 = as the Frame Member laid it, turned about the profile's centre). Adds a step after the Frame Member. Common name field supported.")];
 
 fn rotate_member_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "frame.rotate_member";
