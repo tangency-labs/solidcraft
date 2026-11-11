@@ -1588,4 +1588,38 @@ fn a_tear_reaching_a_flange_panels_edge_is_cut() {
     let area = |s: &mut Session| -> f64 { s.model.state().sheets[0].flat_regions().unwrap_or_default().iter().map(|r| r.area()).sum() };
     let (with_tear, without) = (area(&mut with), area(&mut plain));
     assert!((with_tear - without).abs() < 1e-9, "the tear changed the flat area: {with_tear} vs {without}");
+    // The slit runs from the junction's bend line out to the parent panel's far edge, at x = 50.
+    let (from, to) = (Vec2::new(50.0, -29.283185307589793), Vec2::new(50.0, -0.1415926540000001));
+    let cut = |lp: &solidcore_record::Loop2, a: Vec2, b: Vec2| {
+        lp.segs.iter().any(|s| matches!(s, Seg2::Line { a: p, b: q } if p.dist(a) < 1e-6 && q.dist(b) < 1e-6))
+    };
+    assert!(
+        regions.iter().any(|r| cut(&r.outer, from, to) && cut(&r.outer, to, from)),
+        "no slit from {from:?} to {to:?}: {:?}",
+        regions.iter().map(|r| r.outer.segs.len()).collect::<Vec<_>>()
+    );
+}
+
+/// A hole whose boundary passes through the point a tear reaches does not make the tear safe: the
+/// deep end still lies on the blank's outer edge, where the slit already ends, so the blank parts
+/// and the tear refuses (judge round 6, #5942). Equality is defined against the parent panel's own
+/// outer edge, so the deep end always sits on the material's outer edge; an outer-to-hole slit
+/// cannot arise there, only a hole tangent to it.
+#[test]
+fn a_tear_reaching_a_hole_that_touches_the_edge_refuses_naming_the_segment() {
+    let mut s = plate_in(sheet_of_2mm(), &[("sketch.circle.center", json!({"center":[50,55],"radius":5}))]);
+    let before = s.doc.to_json();
+    let error = s
+        .execute(
+            "sheet.flange",
+            &json!({"type":"edge","edges":[{"point":[50.0, 0.0, 2.0],"segments":[
+                {"from":0,"to":0.5,"angle":"90 deg","height":"20 mm","relief":{"shape":"tear","depth":"57 mm"}},
+                {"from":0.5,"to":1,"angle":"90 deg","height":"15 mm"}]}],
+                "height":"20 mm","angle":"90 deg"}),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("edges[0].segments[0].relief"), "{error}");
+    assert!(error.contains("the tear would part it"), "{error}");
+    assert_eq!(s.doc.to_json(), before, "the refused feature changed the design");
 }

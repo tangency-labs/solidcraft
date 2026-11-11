@@ -4618,30 +4618,58 @@ impl SheetBody {
                 return Err(fail("would cut the sheet apart; reduce its depth".into()));
             }
         }
-        // A tear whose deep end lands on an edge of the blank runs boundary to boundary and parts
-        // the material in two. "Edge" here means any edge of the flat material, holes included:
-        // measure the deep end against the material's own outlines rather than sample a point, so a
-        // thin surviving bridge or a hole cannot be missed (judge round 5).
-        if depth >= room - 1e-9 {
+        // A tear parts the blank only when its slit joins two points of the SAME edge of the
+        // material: an outer edge to itself, or a hole to itself. An outer-to-hole slit opens the
+        // ring but leaves it in one piece, and a slit ending inside the material or inside a hole
+        // parts nothing. Measure against the material's own segments analytically, not against a
+        // tessellated polyline, so a grazing or a thin bridge is classified by real geometry (judge
+        // rounds 5 and 6).
+        if depth >= room - 1e-9 && outer > inner - depth {
             let flat = self.flat_material().map_err(|error| fail(error.to_string()))?;
             let p0 = d * u + n * (inner - depth);
-            let gap = |pts: &[Vec2]| -> f64 {
-                let n = pts.len();
-                let mut best = f64::MAX;
-                for i in 0..n {
-                    let (a, b) = (pts[i], pts[(i + 1) % n]);
-                    let ab = b - a;
-                    let t = if ab.dot(ab) > 0.0 { ((p0 - a).dot(ab) / ab.dot(ab)).clamp(0.0, 1.0) } else { 0.0 };
-                    best = best.min((a + ab * t).dist(p0));
+            let p1 = d * u + n * outer;
+            let gap = |seg: &Seg2, p: Vec2| -> f64 {
+                match seg {
+                    Seg2::Line { a, b } => {
+                        let ab = *b - *a;
+                        let t = if ab.dot(ab) > 0.0 { ((p - *a).dot(ab) / ab.dot(ab)).clamp(0.0, 1.0) } else { 0.0 };
+                        (*a + ab * t).dist(p)
+                    }
+                    Seg2::Arc { center, radius, start, sweep } => {
+                        let (center, radius, start, sweep) = (*center, *radius, *start, *sweep);
+                        let radial = (p.dist(center) - radius).abs();
+                        let turn = |angle: f64| -> Vec2 { center + Vec2::new(radius * angle.cos(), radius * angle.sin()) };
+                        let rel = ((p - center).angle() - start) * sweep.signum();
+                        if rel.rem_euclid(std::f64::consts::TAU) <= sweep.abs() {
+                            radial
+                        } else {
+                            turn(start).dist(p).min(turn(start + sweep).dist(p))
+                        }
+                    }
+                    _ => {
+                        // A cubic, conic or bezier edge has no closed-form distance here; walk its
+                        // polyline at 1e-4 mm, finer than the 1e-6 mm the slit accepts.
+                        let pts = seg.polyline(1e-4);
+                        let mut best = f64::MAX;
+                        for i in 0..pts.len().saturating_sub(1) {
+                            let (a, b) = (pts[i], pts[i + 1]);
+                            let ab = b - a;
+                            let t = if ab.dot(ab) > 0.0 { ((p - a).dot(ab) / ab.dot(ab)).clamp(0.0, 1.0) } else { 0.0 };
+                            best = best.min((a + ab * t).dist(p));
+                        }
+                        best
+                    }
                 }
-                best
             };
-            let on_edge = flat
-                .iter()
-                .any(|region| gap(&region.outer.polyline(1e-3)) < 1e-6 || region.holes.iter().any(|hole| gap(&hole.polyline(1e-3)) < 1e-6));
-            if on_edge {
+            let ring_gap = |ring: &Loop2, p: Vec2| -> f64 { ring.segs.iter().map(|seg| gap(seg, p)).fold(f64::MAX, f64::min) };
+            let same_edge = flat.iter().any(|region| {
+                let mut rings: Vec<&Loop2> = vec![&region.outer];
+                rings.extend(region.holes.iter());
+                rings.iter().any(|ring| ring_gap(ring, p0) < 1e-6 && ring_gap(ring, p1) < 1e-6)
+            });
+            if same_edge {
                 return Err(fail(format!(
-                    "a depth of {depth:.3} mm reaches an edge of the blank inboard of the junction ({room:.3} mm of material); the tear would part it"
+                    "a depth of {depth:.3} mm reaches the edge the slit already ends on, inboard of the junction ({room:.3} mm of material); the tear would part it"
                 )));
             }
         }
