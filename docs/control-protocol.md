@@ -1030,7 +1030,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `sheet_dxf_units` (`mm` (default) or `inches`: the units the flat-pattern DXF export writes in; Preferences › Sheet Metal)
 - `sheet_export_bend_lines` (default true: the exported flat-pattern DXF keeps the bend centre lines; false leaves BEND_UP and BEND_DOWN out, for a cutter that would cut them)
 - `sheet_export_markings` (default true: the exported flat-pattern DXF keeps the letters' contours and the bend notes; false leaves TEXT, ETCH and BEND_NOTES out, for a machine that would etch them)
-- `sheet_rule` (the sheet-metal rule — thickness, K-factor, bend radius and the rule's other fields — that new designs get; the `Steel (mm)` rule by default; Preferences › Sheet Metal)
+- `sheet_rule` (the sheet-metal rule — thickness, K-factor, bend radius and the rule's other fields — that new designs get; the `Steel (mm)` rule by default; Preferences › Sheet Metal picks it from the design's and the personal rules)
 - `show_frame_rate` (default false: frames per second in the view's bottom-right corner, counting the frames the view draws anyway; it reads 0 FPS once the view is idle)
 - `sketch_auto_dimensions` (default false: each shape drawn in a sketch gets all its dimensions at the sizes drawn, as `sketch.draw.dimensioned` with `as_drawn`; typed values win)
 - `sketch_auto_locate` (default false; with `sketch_auto_dimensions`, new shapes are also placed from the sketch origin until fully constrained, as `sketch.draw.dimensioned` with `locate`)

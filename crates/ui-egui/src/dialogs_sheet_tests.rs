@@ -194,8 +194,55 @@ fn shallow_pocket_overlay_labels_depth_without_drawing_a_through_void() {
     }
 }
 
+/// The panel's Bend lines checkbox shows and removes the bend centre lines and their legend.
+#[test]
+fn the_bend_lines_checkbox_shows_and_hides_the_flat_pattern_bends() {
+    let mut app = plate(crate::ui_kit::LayoutMode::Floating);
+    // A base sheet and four edge flanges: the flat pattern has bend lines.
+    let sk = app.session.doc.features[0].id;
+    app.session.selection = vec![Sel::Profile { sketch: sk, index: 0 }];
+    app.start("sheet.flange");
+    let c = apply_commands(&app, &app.dialog.clone().unwrap()).unwrap();
+    run_all(&mut app, c);
+    let edges: Vec<Sel> = [[50.0, 0.0, 2.5], [50.0, 60.0, 2.5], [0.0, 30.0, 2.5], [100.0, 30.0, 2.5]]
+        .iter()
+        .filter_map(|p| edge_sel(&app.session, Vec3::new(p[0], p[1], p[2])))
+        .collect();
+    assert_eq!(edges.len(), 4);
+    app.session.selection = edges;
+    app.start("sheet.flange");
+    let mut d = app.dialog.clone().unwrap();
+    if let Kind::Sheet(Sm::Flange { height, .. }) = &mut d.kind {
+        *height = "20 mm".into();
+    }
+    let c = apply_commands(&app, &d).unwrap();
+    run_all(&mut app, c);
+    let flat = app.session.execute("sheet.flat_pattern", &json!({})).unwrap();
+    assert!(!flat["bends"].as_array().unwrap().is_empty());
+    app.start("sheet.flat_pattern");
+    let mut dialog = app.dialog.clone().unwrap();
+    {
+        let Kind::Sheet(Sm::FlatPattern { data, .. }) = &mut dialog.kind else { panic!("flat dialog") };
+        *data = Some(Ok(flat));
+    }
+    let ctx = crate::fonts::test_context();
+    let mut legend = |dialog: &crate::dialogs::Dialog| -> bool {
+        let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+            let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::unique("flat-bend-test")));
+            assert!(overlay(&mut app, &painter, Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 900.0)), dialog));
+        });
+        crate::test_support::text_shapes(&output).any(|text| text.galley.text() == "Bend up")
+    };
+    assert!(legend(&dialog), "the bend lines show by default");
+    {
+        let Kind::Sheet(Sm::FlatPattern { show_bend_lines, .. }) = &mut dialog.kind else { panic!("flat dialog") };
+        *show_bend_lines = false;
+    }
+    assert!(!legend(&dialog), "the checkbox removes the bend lines and their legend");
+}
+
 /// The Flat Pattern panel shows each side of the flat size, and the thickness, whole: on one row
-/// ("1250.00 mm × 1000.00 mm × 2.50 mm") the panel cut it off after the first side.
+/// ("1250.00 mm × 1000.00 mm × 2.50 mm") the panel cut it off after its first side.
 #[test]
 fn flat_pattern_shows_each_side_of_the_flat_size_whole() {
     for layout in ["docked", "floating"] {

@@ -1,6 +1,5 @@
 {
   "en": {
-    "Thickness": "Thickness",
     "prefs.structure.sheet_metal": "Sheet Metal",
     "prefs.structure.sheet_metal_note": "What new designs start with for sheet metal, and how the flat pattern is exported as DXF.",
     "prefs.sheet_metal_default_rule": "Default rule",
@@ -12,7 +11,6 @@
     "prefs.sheet_export_markings_help": "Keep the letters (TEXT, ETCH) and the bend notes in the exported flat-pattern DXF. Off for a machine that would etch them."
   },
   "ar": {
-    "Thickness": "السماكة",
     "prefs.structure.sheet_metal": "المعدن المفلطح",
     "prefs.structure.sheet_metal_note": "ما تبدأ به التصاميم الجديدة فيما يخص المعدن المفلطح، وكيفية تصدير النمط المسطح بصيغة DXF.",
     "prefs.sheet_metal_default_rule": "القاعدة الافتراضية",
@@ -24,7 +22,6 @@
     "prefs.sheet_export_markings_help": "إبقاء الحروف (TEXT، ETCH) وملاحظات الطي في ملف DXF المصدَّر. أعدِها إن كانت الآلة ستنقشها."
   },
   "de": {
-    "Thickness": "Materialstärke",
     "prefs.structure.sheet_metal": "Blech",
     "prefs.structure.sheet_metal_note": "Womit neue Designs im Blechbereich starten und wie die flächige Darstellung als DXF exportiert wird.",
     "prefs.sheet_metal_default_rule": "Standardregel",
@@ -36,7 +33,6 @@
     "prefs.sheet_export_markings_help": "Behält die Buchstaben (TEXT, ETCH) und die Kantenhinweise im exportierten DXF. Aus für eine Maschine, die sie gravieren würde."
   },
   "he": {
-    "Thickness": "עובי",
     "prefs.structure.sheet_metal": "עיבוד לוחות",
     "prefs.structure.sheet_metal_note": "איך מתחילים עיצובים חדשים בעיבוד לוחות, ואיך יוצאים את תרשיט המישור ל־DXF.",
     "prefs.sheet_metal_default_rule": "כלל ברירת המחדל",
@@ -48,7 +44,6 @@
     "prefs.sheet_export_markings_help": "שומר את האותיות (TEXT, ETCH) וההערות ליד הכיפופים בקובץ DXF. לכבה אם המכונה תחוק אותן."
   },
   "ja": {
-    "Thickness": "厚み",
     "prefs.structure.sheet_metal": "板金",
     "prefs.structure.sheet_metal_note": "新しい設計の板金に関する初期値と、フラットパターンの DXF 出力の方法です。",
     "prefs.sheet_metal_default_rule": "デフォルトルール",
@@ -60,7 +55,6 @@
     "prefs.sheet_export_markings_help": "出力するフラットパターンの DXF に文字 (TEXT、ETCH) と曲げ注記を残します。エッチされてしまう機器ではオフにしてください。"
   },
   "ko": {
-    "Thickness": "두께",
     "prefs.structure.sheet_metal": "시트 메탈",
     "prefs.structure.sheet_metal_note": "새 디자인의 시트 메탈 초기값과 플랫 패턴의 DXF 내보내기 방법입니다.",
     "prefs.sheet_metal_default_rule": "기본 규칙",
@@ -72,7 +66,6 @@
     "prefs.sheet_export_markings_help": "내보내는 플랫 패턴 DXF에 글자(TEXT, ETCH)와 굽힘 주석을 유지합니다. 이를 각인하게 되는 기계에는 끄세요."
   },
   "vi": {
-    "Thickness": "Độ dày",
     "prefs.structure.sheet_metal": "Thép tấm",
     "prefs.structure.sheet_metal_note": "Những gì các thiết kế mới bắt đầu với thép tấm, và cách xuất sơ đồ phẳng ra DXF.",
     "prefs.sheet_metal_default_rule": "Quy tắc mặc định",
@@ -84,7 +77,6 @@
     "prefs.sheet_export_markings_help": "Giữ các chữ cái (TEXT, ETCH) và chú thích gập trong file DXF đã xuất. Tắt với máy sẽ khắc chúng."
   },
   "zh": {
-    "Thickness": "厚度",
     "prefs.structure.sheet_metal": "钣金",
     "prefs.structure.sheet_metal_note": "新设计的钣金初始内容，以及展开图导出为 DXF 的方式。",
     "prefs.sheet_metal_default_rule": "默认规则",
@@ -96,7 +88,6 @@
     "prefs.sheet_export_markings_help": "在导出的展开图 DXF 中保留文字（TEXT、ETCH）和折弯注释。会被刻掉的设备请关闭。"
   },
   "zh-TW": {
-    "Thickness": "厚度",
     "prefs.structure.sheet_metal": "板金",
     "prefs.structure.sheet_metal_note": "新設計的板金初始內容，以及展開圖導出為 DXF 的方式。",
     "prefs.sheet_metal_default_rule": "預設規則",

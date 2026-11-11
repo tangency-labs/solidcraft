@@ -1161,8 +1161,8 @@ preference_settings! {
     /// view (`canvas::boxes_shown`). Off: it is typed in the command window only, which takes the
     /// keyboard after a pick instead, and nothing covers the model (#9479).
     value_boxes_in_view: bool = true, PAGE_DESIGN => check_id("prefs.value_boxes_in_view");
-    /// The sheet-metal rule that new designs get: its thickness, K-factor and bend radius; the
-    /// rule's other fields keep their defaults. `Steel (mm)` until the user edits it.
+    /// The sheet-metal rule that new designs get; the Sheet Metal page picks it from the design's
+    /// and the personal rules. `Steel (mm)` until the user picks another.
     sheet_rule: solidcraft_engine::doc::sheet::SheetRule = solidcraft_engine::doc::sheet::SheetRule::steel(), PAGE_SHEET_METAL;
     /// The units the flat-pattern DXF is exported in: `mm` (the default) or `inches`.
     sheet_dxf_units: String = "mm".into(), PAGE_SHEET_METAL;
@@ -13406,16 +13406,31 @@ mod kit_use_tests {
     }
 
     #[test]
-    fn the_sheet_metal_page_edits_the_default_rule_and_the_dxf_export_defaults() {
+    fn the_sheet_metal_page_offers_the_system_rules_and_the_dxf_export_defaults() {
         use serde_json::json;
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
+        // A personal rule the default-rule box must offer.
+        h.app.preferences.personal_sheet_rules =
+            serde_json::from_value(json!([{ "name": "Alloy 42", "thickness": "4.2 mm", "k_factor": "0.5", "bend_radius": "Thickness", "relief_width": "Thickness", "relief_depth": "0", "corner_relief": "Thickness * 4", "corner_relief_shape": "notch", "hem_gap": "0", "gap": "0", "angle_display": "bend" }])).unwrap();
         h.call("ui.resize", json!({"width": 1467, "height": 1146}));
         h.call("ui.prefs", json!({"language": "en", "theme": "light", "open": "Sheet Metal"}));
         h.frames(6);
         assert_eq!(h.app.preferences.sheet_rule, solidcraft_engine::doc::sheet::SheetRule::steel());
         assert_eq!(h.app.preferences.sheet_dxf_units, "mm");
         assert!(crate::scenario::rect_of("prefs:page:Sheet Metal").is_some());
+        // The default-rule box picks from the design's rules and the personal ones.
+        super::reveal_preference(&mut h, "dialog:Rule");
+        h.step(&json!({"click": {"handle": "dialog:Rule"}})).unwrap();
+        h.frames(2);
+        super::reveal_preference(&mut h, "dialog:Rule:Alloy 42");
+        h.step(&json!({"click": {"handle": "dialog:Rule:Alloy 42"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.preferences.sheet_rule, h.app.preferences.personal_sheet_rules.rule("Alloy 42").unwrap().sheet_rule());
+        // The open blank design follows the choice, without an undo step.
+        assert!(h.app.session.doc.sheet.rules.iter().any(|r| r.name == "Alloy 42"), "{:?}", h.app.session.doc.sheet.rules);
+        assert_eq!(h.app.session.doc.sheet.active, Some("Alloy 42".to_string()));
+        assert!(!h.app.session.is_dirty());
         // The export defaults: units, bend lines and markings.
         super::reveal_preference(&mut h, "prefs:sheet_dxf_units:inches");
         h.step(&json!({"click": {"handle": "prefs:sheet_dxf_units:inches"}})).unwrap();
@@ -13429,16 +13444,12 @@ mod kit_use_tests {
         h.step(&json!({"click": {"handle": "prefs:sheet_export_markings"}})).unwrap();
         h.frames(2);
         assert!(!h.app.preferences.sheet_export_markings);
-        // The rule's fields render, and editing the rule follows the open blank design.
-        super::reveal_preference(&mut h, "dialog:Thickness");
-        assert!(crate::scenario::handle_at("dialog:Thickness").is_some());
-        assert!(crate::scenario::handle_at("dialog:K Factor").is_some());
-        assert!(crate::scenario::handle_at("dialog:Bend Radius").is_some());
-        h.app.preferences.sheet_rule.thickness = "3 mm".into();
-        crate::prefs::default_sheet_rule_changed(&mut h.app);
-        let rule = h.app.session.doc.sheet.rules.iter().find(|r| r.name == "Steel (mm)");
-        assert!(rule.is_some_and(|r| r.thickness == "3 mm"), "{:?}", h.app.session.doc.sheet.rules);
-        assert!(!h.app.session.is_dirty());
+        // The (i) icons hold their notes open on a click.
+        super::reveal_preference(&mut h, "prefs:sheet_export_bend_lines_help");
+        h.step(&json!({"click": {"handle": "prefs:sheet_export_bend_lines_help"}})).unwrap();
+        h.frames(2);
+        let open = h.ctx.data(|d| d.get_temp::<super::sheet_metal::HelpOpen>(egui::Id::unique("sheet_metal_prefs_help"))).unwrap_or_default();
+        assert!(open.bend_lines);
     }
 
     #[test]

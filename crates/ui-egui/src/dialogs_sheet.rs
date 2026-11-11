@@ -158,6 +158,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 status: Option<String>,
                 /// The units the flat-pattern DXF is exported in (an index into `DXF_UNITS`).
                 dxf_units: usize,
+                /// Whether the preview shows the bend centre lines (on by default).
+                show_bend_lines: bool,
             },
         }
     }
@@ -233,7 +235,10 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "sheet.flat_pattern" => {
             // The units start from the preference; the panel's choice still sets each export's.
             let dxf_units = (app.preferences.sheet_dxf_units == "inches") as usize;
-            (Sm::FlatPattern { data: None, key: None, status: None, dxf_units }, vec![SelInput::new("Body (last if none)", BODIES, false)])
+            (
+                Sm::FlatPattern { data: None, key: None, status: None, dxf_units, show_bend_lines: true },
+                vec![SelInput::new("Body (last if none)", BODIES, false)],
+            )
         }
         _ => Sm::simple_start(id)?,
     };
@@ -507,7 +512,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                 }
             }
         }
-        Sm::FlatPattern { data, key, status, dxf_units } => {
+        Sm::FlatPattern { data, key, status, dxf_units, show_bend_lines } => {
             let body = inputs.first().and_then(|i| i.items.first()).and_then(|x| if let Sel::Body { name } = x { Some(name.clone()) } else { None });
             let want = (app.session.revision, body.clone());
             if key.as_ref() != Some(&want) {
@@ -550,6 +555,9 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                             );
                         });
                     }
+                    form_row(ui, "Bend lines", |ui| {
+                        crate::ui_kit::checkbox(ui, "", show_bend_lines);
+                    });
                     choice_row(ui, "DXF Units", "sm_flat_dxf_units", dxf_units, &DXF_UNIT_LABELS);
                     ui.vertical(|ui| {
                         if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Export DXF…"), crate::ui_kit::Button::Normal).clicked() {
@@ -1262,7 +1270,7 @@ fn bend_colors() -> (Color32, Color32) {
 /// The flat pattern view: outline, cut-outs, perforations and bend lines (up and down in
 /// their colours), fitted over the viewport. True when the dialog is a flat pattern.
 pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dialog) -> bool {
-    let Kind::Sheet(Sm::FlatPattern { data, .. }) = &d.kind else { return false };
+    let Kind::Sheet(Sm::FlatPattern { data, show_bend_lines, .. }) = &d.kind else { return false };
     let t = Tokens::get();
     let (up_col, down_col) = bend_colors();
     painter.rect_filled(rect, 0.0, t.panel);
@@ -1368,10 +1376,12 @@ pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dial
     for (anchor, labels) in pocket_annotations {
         painter.text(anchor, Align2::CENTER_BOTTOM, labels.join("\n"), FontId::proportional(solidcraft_theme::Tokens::get().font_body), t.accent);
     }
-    for b in v["bends"].as_array().into_iter().flatten() {
-        let (Some(a), Some(e)) = (read(&b["start"]), read(&b["end"])) else { continue };
-        let col = if b["direction"] == "up" { up_col } else { down_col };
-        painter.extend(egui::Shape::dashed_line(&[to(a), to(e)], Stroke::new(1.6, col), 8.0, 5.0));
+    if *show_bend_lines {
+        for b in v["bends"].as_array().into_iter().flatten() {
+            let (Some(a), Some(e)) = (read(&b["start"]), read(&b["end"])) else { continue };
+            let col = if b["direction"] == "up" { up_col } else { down_col };
+            painter.extend(egui::Shape::dashed_line(&[to(a), to(e)], Stroke::new(1.6, col), 8.0, 5.0));
+        }
     }
     // Legend.
     let mut y = rect.top() + 14.0;
@@ -1382,16 +1392,18 @@ pub fn overlay(app: &mut SolveApp, painter: &egui::Painter, rect: Rect, d: &Dial
         FontId::proportional(solidcraft_theme::Tokens::get().font_button),
         t.text,
     );
-    for (label, col) in [("Bend up", up_col), ("Bend down", down_col)] {
-        y += 20.0;
-        painter.line_segment([pos2(rect.left() + 14.0, y + 7.0), pos2(rect.left() + 38.0, y + 7.0)], Stroke::new(2.0, col));
-        painter.text(
-            pos2(rect.left() + 44.0, y),
-            Align2::LEFT_TOP,
-            label,
-            FontId::proportional(solidcraft_theme::Tokens::get().font_body),
-            t.text_dim,
-        );
+    if *show_bend_lines {
+        for (label, col) in [("Bend up", up_col), ("Bend down", down_col)] {
+            y += 20.0;
+            painter.line_segment([pos2(rect.left() + 14.0, y + 7.0), pos2(rect.left() + 38.0, y + 7.0)], Stroke::new(2.0, col));
+            painter.text(
+                pos2(rect.left() + 44.0, y),
+                Align2::LEFT_TOP,
+                label,
+                FontId::proportional(solidcraft_theme::Tokens::get().font_body),
+                t.text_dim,
+            );
+        }
     }
     if !pockets.is_empty() {
         y += 20.0;
