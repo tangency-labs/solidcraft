@@ -31,8 +31,8 @@
 //! last four describe, in a phrase, the failures of offset routines that returned a bare
 //! status ([`OffsetFailure::replaces_upstream_status`]); the failure's `operation` path
 //! says which routine and its entity, where the site named one, which face. The files
-//! with open work elsewhere (`offset_executive/{p1,p2,step_gaps,reach}`,
-//! `offset_faces`, `offset_geometry_creation`) do not use them yet.
+//! with open work elsewhere (`offset_executive/{p1,p2}`, `offset_faces`) do not use
+//! them yet.
 
 use super::{
     EntityRef, ErrorKind, Failure, Reason, SM_ERR, SM_ERR_ASSERT_FAILURE, SM_ERR_BAD_INTERSECTIONS,
@@ -921,10 +921,7 @@ mod tests {
             &[
                 ("offset/offset_executive/p1.rs", 9),
                 ("offset/offset_executive/p2.rs", 9),
-                ("offset/offset_executive/reach.rs", 1),
-                ("offset/offset_executive/step_gaps.rs", 1),
                 ("offset/offset_faces.rs", 4),
-                ("offset/offset_geometry_creation.rs", 17),
             ],
         );
     }

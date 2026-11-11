@@ -18,9 +18,9 @@
 //! Deviations: not upstream. A failure says in a phrase (or by its variant) what went
 //! wrong; the failure's `operation` path says which routine. No failure names an
 //! entity: the sites they replace named none. The failures that are checks of a
-//! caller's arguments stay [`crate::SolidError::InvalidInput`]. `extent1d`, `extent2d`,
-//! `expansion` and `local_solve_nd` do not use these yet. `local_solve_nd` reads the
-//! singular system of `Matrix::solve_linear_system` by its `SM_ERR` status.
+//! caller's arguments stay [`crate::SolidError::InvalidInput`]. `expansion` does not use
+//! these yet. `local_solve_nd` reads the singular system of
+//! `Matrix::solve_linear_system` by its `SM_ERR` status.
 
 use super::{
     ErrorKind, Failure, Reason, SM_ERR, SM_ERR_INVALID_INPUT, SM_ERR_NULL_POINTER, SM_ERR_WARNING,
@@ -178,17 +178,12 @@ mod tests {
     }
 
     /// The geometry utilities describe their failures: their library code builds no bare
-    /// `Upstream` status, except the files listed (with the bare sites each may still hold)
-    /// whose conversion waits on other open work.
+    /// `Upstream` status.
     #[test]
     fn the_geom_routines_build_no_bare_statuses() {
         assert_eq!(
             super::super::query::tests::bare_statuses_in("geom", 30),
-            [
-                ("geom/extent1d.rs".to_owned(), 1),
-                ("geom/extent2d.rs".to_owned(), 2),
-                ("geom/local_solve_nd.rs".to_owned(), 1),
-            ]
+            Vec::<(String, usize)>::new()
         );
     }
 }

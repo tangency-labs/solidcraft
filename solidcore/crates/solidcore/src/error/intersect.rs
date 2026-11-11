@@ -18,8 +18,7 @@
 //! `operation` path says which routine. The handles these routines work on are the
 //! classification's or intersector's own, not ids of the caller's B-rep, so no failure
 //! names an entity. The failures that are checks of a caller's handles stay
-//! [`crate::SolidError::InvalidInput`]. `surface_intersector/p1` and `p5`, which have
-//! open work elsewhere, do not use these yet.
+//! [`crate::SolidError::InvalidInput`].
 
 use super::{
     ErrorKind, Failure, Reason, SM_ERR, SM_ERR_ASSERT_FAILURE, SM_ERR_NULL_POINTER,
@@ -208,17 +207,9 @@ pub(super) mod tests {
     }
 
     /// The intersection routines describe their failures: their library code builds no
-    /// bare `Upstream` status, except the files listed (with the bare sites each may still
-    /// hold) whose conversion waits on other open work.
+    /// bare `Upstream` status.
     #[test]
     fn the_intersect_routines_build_no_bare_statuses() {
-        super::super::bare_scan::assert_waiting(
-            "intersect",
-            40,
-            &[
-                ("intersect/surface_intersector/p1.rs", 6),
-                ("intersect/surface_intersector/p5.rs", 6),
-            ],
-        );
+        super::super::bare_scan::assert_waiting("intersect", 40, &[]);
     }
 }

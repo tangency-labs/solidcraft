@@ -403,10 +403,7 @@ mod tests {
     fn the_nurbs_routines_build_no_bare_statuses() {
         assert_eq!(
             super::super::query::tests::bare_statuses_in("nurbs", 60),
-            [
-                ("nurbs/b_spline_curve/p1.rs".to_owned(), 23),
-                ("nurbs/b_spline_curve/p3.rs".to_owned(), 5),
-            ]
+            [("nurbs/b_spline_curve/p1.rs".to_owned(), 23)]
         );
     }
 }

@@ -314,9 +314,12 @@ const fn dangling(reason: &'static str) -> SolidError {
     }
 }
 
-/// `SM_ERR` of an operation.
-const fn sm_err(operation: &'static str) -> SolidError {
-    SolidError::sm_err(operation)
+/// `SM_ERR` of an operation: an offset routine that could not continue.
+fn sm_err(operation: &'static str) -> SolidError {
+    SolidError::offset(
+        operation,
+        OffsetFailure::Failed("the offset geometry could not be built"),
+    )
 }
 
 /// A status upstream ignores (whatever it is, `SM_ERR_INVALID_INPUT` included), except
@@ -1962,7 +1965,8 @@ impl OffsetGeometryCreation {
         bounding_edges: &[O],
     ) -> Result<VertexOffsetGeometry<O>> {
         // init output
-        let original_vertex = original_vertex.ok_or(SolidError::null_pointer(OP_VERTEX))?;
+        let original_vertex = original_vertex
+            .ok_or_else(|| SolidError::offset_missing(OP_VERTEX, "the original vertex"))?;
         let mut out = VertexOffsetGeometry {
             trimming_curves: Vec::new(),
             orients: Vec::new(),
@@ -2136,11 +2140,12 @@ impl OffsetGeometryCreation {
             // SM_ERR_NULL_POINTER; the curves keep their kinds for the virtual calls below)
             let mut curves: Vec<Curve> = Vec::new();
             for &e in bounding_edges {
-                let c = brep
-                    .edge_curve(e)?
-                    .ok_or(SolidError::null_pointer(OP_VERTEX))?;
-                let bsc =
-                    vertex_b_spline_kind_of(brep, c)?.ok_or(SolidError::null_pointer(OP_VERTEX))?;
+                let c = brep.edge_curve(e)?.ok_or_else(|| {
+                    SolidError::offset_missing(OP_VERTEX, "the bounding edge's curve")
+                })?;
+                let bsc = vertex_b_spline_kind_of(brep, c)?.ok_or_else(|| {
+                    SolidError::offset_missing(OP_VERTEX, "the bounding edge's B-spline curve")
+                })?;
                 curves.push(bsc.clone());
             }
 
@@ -4003,10 +4008,12 @@ impl OffsetGeometryCreation {
         mark: MarkType,
     ) -> Result<()> {
         // These can't be Null:
-        let edgeuse = edgeuse.ok_or(SolidError::null_pointer(OP_MATE))?;
-        let other_edgeuse = other_edgeuse.ok_or(SolidError::null_pointer(OP_MATE))?;
-        let offset_edgeuse = offset_edgeuse.ok_or(SolidError::null_pointer(OP_MATE))?;
-        let other_offset_edgeuse = other_offset_edgeuse.ok_or(SolidError::null_pointer(OP_MATE))?;
+        let missing = |what| move || SolidError::offset_missing(OP_MATE, what);
+        let edgeuse = edgeuse.ok_or_else(missing("the edge use"))?;
+        let other_edgeuse = other_edgeuse.ok_or_else(missing("the other edge use"))?;
+        let offset_edgeuse = offset_edgeuse.ok_or_else(missing("the offset edge use"))?;
+        let other_offset_edgeuse =
+            other_offset_edgeuse.ok_or_else(missing("the other offset edge use"))?;
 
         // Extend Surfaces of faces connected to current edge.
         let face1 = brep
@@ -4257,7 +4264,10 @@ impl OffsetGeometryCreation {
                 .flatten()
                 .ok_or_else(missing_uv)?;
             if !is_b_spline_kind(curve_of(brep, uv1)?) || !is_b_spline_kind(curve_of(brep, uv2)?) {
-                return Err(SolidError::null_pointer(OP_MATE));
+                return Err(SolidError::offset_missing(
+                    OP_MATE,
+                    "the B-spline UV curves of the extended surfaces' intersection",
+                ));
             }
 
             // Trim the extended Surf/Surf intersection (not upstream: a curve that does not
@@ -4328,12 +4338,12 @@ impl OffsetGeometryCreation {
             .get(min_curve)
             .copied()
             .flatten()
-            .ok_or(SolidError::null_pointer(OP_MATE))?;
+            .ok_or_else(|| SolidError::offset_missing(OP_MATE, "the first surface's UV curve"))?;
         let uv_curve2_found = surface2_uv_curves
             .get(min_curve)
             .copied()
             .flatten()
-            .ok_or(SolidError::null_pointer(OP_MATE))?;
+            .ok_or_else(|| SolidError::offset_missing(OP_MATE, "the second surface's UV curve"))?;
 
         // (the found curves are removed from the arrays upstream so that they are not deleted)
 
@@ -4872,9 +4882,11 @@ impl OffsetGeometryCreation {
         // (SM_CAST_PTR(SmBSplineCurve, ..), NER, then Copy: the copy keeps the curve's kind)
         let e_curve = brep
             .edge_curve(orig_edge)?
-            .ok_or(SolidError::null_pointer(OP_EDGEUSE))?;
+            .ok_or_else(|| SolidError::offset_missing(OP_EDGEUSE, "the original edge's curve"))?;
         let mut center_line = b_spline_kind_of(brep, e_curve)?
-            .ok_or(SolidError::null_pointer(OP_EDGEUSE))?
+            .ok_or_else(|| {
+                SolidError::offset_missing(OP_EDGEUSE, "the original edge's B-spline curve")
+            })?
             .copy(k)?;
 
         // get OrigEU->Edge interval (snapped by the trims below)
@@ -4930,14 +4942,16 @@ impl OffsetGeometryCreation {
             // make temporary copy of the OrigEU->UVTrimCurve trimmed to sEdgeIvl
             let uv = brep
                 .edgeuse_uv_trim_curve(original_edgeuse)?
-                .ok_or(SolidError::null_pointer(OP_EDGEUSE))?;
+                .ok_or_else(|| {
+                    SolidError::offset_missing(OP_EDGEUSE, "the original edge use's UV trim curve")
+                })?;
             let mut uv_copy = curve_of(brep, uv)?.copy(k)?;
             uv_copy.trim(k, &mut edge_ivl, TrimMode::Notify)?; // may snap sIvl by tol to existing knots
 
             // make an offset surface from origEU->Face->Surface
-            let surface = brep
-                .face_surface(orig_face)?
-                .ok_or(SolidError::null_pointer(OP_EDGEUSE))?;
+            let surface = brep.face_surface(orig_face)?.ok_or_else(|| {
+                SolidError::offset_missing(OP_EDGEUSE, "the original face's surface")
+            })?;
             let fu = brep
                 .edgeuse_faceuse(original_edgeuse)?
                 .ok_or(dangling("edge use without face use"))?;
@@ -4969,13 +4983,18 @@ impl OffsetGeometryCreation {
         if rail2.is_none() {
             let uv = brep
                 .edgeuse_uv_trim_curve(other_original_edgeuse)?
-                .ok_or(SolidError::null_pointer(OP_EDGEUSE))?;
+                .ok_or_else(|| {
+                    SolidError::offset_missing(
+                        OP_EDGEUSE,
+                        "the other original edge use's UV trim curve",
+                    )
+                })?;
             let mut uv_copy = curve_of(brep, uv)?.copy(k)?;
             uv_copy.trim(k, &mut edge_ivl, TrimMode::Notify)?;
 
-            let surface = brep
-                .face_surface(other_orig_face)?
-                .ok_or(SolidError::null_pointer(OP_EDGEUSE))?;
+            let surface = brep.face_surface(other_orig_face)?.ok_or_else(|| {
+                SolidError::offset_missing(OP_EDGEUSE, "the other original face's surface")
+            })?;
             let fu = brep
                 .edgeuse_faceuse(other_original_edgeuse)?
                 .ok_or(dangling("edge use without face use"))?;
@@ -6334,6 +6353,20 @@ mod tests {
         assert!(passes_through(&k, &lifted, at(1e-3), &surface, uv, tol).unwrap());
         let shallow = over_the_plane(0.6_f64.to_radians().tan(), 0.0, false);
         assert!(passes_through(&k, &shallow, 0.5, &surface, uv, tol).unwrap());
+    }
+
+    #[test]
+    fn a_routine_that_cannot_continue_is_a_typed_offset_failure() {
+        let e = sm_err(OP_EDGEUSE);
+        assert_eq!(
+            e.offset_failure(),
+            Some(&OffsetFailure::Failed(
+                "the offset geometry could not be built"
+            ))
+        );
+        assert_eq!(e.operation(), OP_EDGEUSE);
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert!(e.is_status_answer());
     }
 
     #[test]

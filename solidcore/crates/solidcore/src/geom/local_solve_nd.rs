@@ -76,14 +76,6 @@ fn is_bad_jacobian(error: &SolidError) -> bool {
     error.upstream_status() == Some(SM_ERR)
 }
 
-fn sm_err(operation: &'static str) -> SolidError {
-    SolidError::Upstream {
-        operation,
-        code: SM_ERR,
-        entity: None,
-    }
-}
-
 /// How [`LocalSolveNd::solve_it`] treats next guesses that leave the parameter
 /// intervals (`SmBoundaryHandlerType`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -168,8 +160,9 @@ pub trait EvalNFunctions {
         _intervals: Option<&ExtentNd>,
         _periodicities: Option<&[bool]>,
     ) -> Result<()> {
-        Err(sm_err(
+        Err(SolidError::geom_failed(
             "geom::local_solve_nd::EvalNFunctions::set_intervals",
+            "the equations take no intervals",
         ))
     }
 
@@ -233,7 +226,10 @@ pub fn compute_jacobian<E: EvalNFunctions + ?Sized>(
         delta = hi_t - lo_t; // use the actual difference, whatever happened
 
         if delta.abs() < EFF_ZERO {
-            return Err(sm_err(OP));
+            return Err(SolidError::geom_failed(
+                OP,
+                "the parameter's difference step is zero",
+            ));
         }
 
         // jj-th Jacobian column by first order central differences
@@ -964,7 +960,7 @@ mod tests {
     struct Failing;
     impl EvalNFunctions for Failing {
         fn evaluate(&mut self, _: &[f64], _: &mut [f64], _: Option<&mut Matrix>) -> Result<bool> {
-            Err(sm_err("test"))
+            Err(SolidError::geom_failed("test", "the evaluation fails"))
         }
     }
 
@@ -1030,10 +1026,14 @@ mod tests {
         }
         let mut e = WantsIntervals;
         let mut s = LocalSolveNd::new(&mut e, None, None);
-        assert!(matches!(
-            s.solve_it(&[1.0], EFF_ZERO),
-            Err(SolidError::Upstream { code: SM_ERR, .. })
-        ));
+        let e = s.solve_it(&[1.0], EFF_ZERO).unwrap_err();
+        assert_eq!(
+            e.geom_failure(),
+            Some(&crate::error::geom::GeomFailure::Failed(
+                "the equations take no intervals"
+            ))
+        );
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
     }
 
     #[test]
@@ -1059,7 +1059,14 @@ mod tests {
         let mut j = Matrix::new(2, 2);
         let ivls = [Extent1d::from_value(0.5), Extent1d::from_min_max(-2.0, 2.0)];
         let r = compute_jacobian(&mut e, &mut x, &f, &mut j, Some(&ivls));
-        assert!(matches!(r, Err(SolidError::Upstream { code: SM_ERR, .. })));
+        let e = r.unwrap_err();
+        assert_eq!(
+            e.geom_failure(),
+            Some(&crate::error::geom::GeomFailure::Failed(
+                "the parameter's difference step is zero"
+            ))
+        );
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
         // as upstream, the parameter stays perturbed
         assert_eq!(x, [0.5, -1.0]);
     }

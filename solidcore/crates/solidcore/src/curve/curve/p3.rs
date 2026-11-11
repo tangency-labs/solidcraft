@@ -320,7 +320,10 @@ pub fn compute_crvs_normal(k: &Kernel, curves: &[Curve]) -> Result<Vec3> {
         let domain = crv.natural_interval();
 
         if crv.is_linear(k, EFF_ZERO, false)?.linear && num_curves == 1 {
-            return Err(SolidError::sm_err(OP_NORMAL));
+            return Err(SolidError::curve_failed(
+                OP_NORMAL,
+                "a single linear curve has no area normal",
+            ));
         }
 
         let mut t = 0.0;
@@ -386,7 +389,10 @@ fn compute_crvs_area_normal(k: &Kernel, curves: &[Curve]) -> Result<Vec3> {
     for curve in curves {
         let domain = curve.natural_interval();
         if curve.is_linear(k, EFF_ZERO, false)?.linear && curves.len() == 1 {
-            return Err(SolidError::sm_err(OP_NORMAL));
+            return Err(SolidError::curve_failed(
+                OP_NORMAL,
+                "a single linear curve has no area normal",
+            ));
         }
         let count = if curve.number_control_points()? == 2 {
             1_u32
@@ -864,7 +870,10 @@ impl EvalFunction for FindPcExtremaEfo<'_, Curve> {
         } else {
             while pv[1].length_squared() > 1.0e4 {
                 if pv[1].x.is_infinite() || pv[1].y.is_infinite() || pv[1].z.is_infinite() {
-                    return Err(SolidError::sm_err(OP_PC));
+                    return Err(SolidError::curve_failed(
+                        OP_PC,
+                        "the curve's tangent is infinite",
+                    ));
                 }
                 // (not upstream) an infinite tangent never scales down: see
                 // MAX_PC_SCALE_STEPS
@@ -894,7 +903,10 @@ impl EvalFunction for FindPcExtremaEfo<'_, Curve> {
                 out.found_answer = true;
                 return Ok(());
             }
-            return Err(SolidError::sm_err(OP_PC));
+            return Err(SolidError::curve_failed(
+                OP_PC,
+                "the curve's tangent is zero where the curve is not degenerate",
+            ));
         } // end zero tangent check
 
         let v_dot_v = sv.dot(sv);
@@ -949,7 +961,10 @@ impl EvalFunction for FindPcExtremaEfo<'_, Curve> {
             // for SM_SO_MINIMIZE = SUCCESS
             //     SM_SO_MAXIMIZE = FAILURE
             if self.solver_operation == SolverOperation::Maximize {
-                return Err(SolidError::sm_err(OP_PC));
+                return Err(SolidError::curve_failed(
+                    OP_PC,
+                    "the point lies on the curve, where a maximising solve finds no extremum",
+                ));
             }
             out.found_answer = true;
             return Ok(());
@@ -1201,8 +1216,10 @@ impl Curve {
             // check inputs
             let dist_tol = opts
                 .distance_tolerance
-                .ok_or(SolidError::null_pointer(OP_POINT))?;
-            let vectors = opts.vectors.ok_or(SolidError::null_pointer(OP_POINT))?;
+                .ok_or_else(|| SolidError::curve_missing(OP_POINT, "the distance tolerance"))?;
+            let vectors = opts
+                .vectors
+                .ok_or_else(|| SolidError::curve_missing(OP_POINT, "the solve's vectors"))?;
             let vec0 = *vectors
                 .first()
                 .ok_or(SolidError::invalid_input(OP_POINT, "empty option vectors"))?;
@@ -1278,7 +1295,12 @@ impl Curve {
                 Ok(r) => r,
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 // some sort of error in solver
-                Err(_) => return Err(SolidError::sm_err(OP_POINT)),
+                Err(_) => {
+                    return Err(SolidError::curve_failed(
+                        OP_POINT,
+                        "the local solver failed",
+                    ));
+                }
             };
             if r.found {
                 let t0 = r.x.first().copied().unwrap_or(0.0);
@@ -2031,7 +2053,7 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
         let tree = self.base.tree(0)?;
         let curve_node = tree.node(curve_node_id)?;
         if matches!(curve_node.data, NodeData::None) {
-            return Err(SolidError::null_pointer(OP_GS));
+            return Err(SolidError::curve_missing(OP_GS, "the tree node's span"));
         }
         let bez_span = *tree.curve_span(curve_node)?;
         let owner = tree.owner_object()?;
@@ -2539,10 +2561,15 @@ mod tests {
         let zero_area = |r: Result<Vec3>| matches!(r, Err(SolidError::InvalidInput { .. }));
         assert!(zero_area(compute_crvs_normal(&k, &[])));
         assert!(zero_area(compute_crvs_normal(&k, &collinear)));
-        assert!(matches!(
-            compute_crvs_normal(&k, &[a]),
-            Err(SolidError::Upstream { code: SM_ERR, .. })
-        ));
+        let single = compute_crvs_normal(&k, &[a]).unwrap_err();
+        assert_eq!(
+            single.curve_failure(),
+            Some(&CurveFailure::Failed(
+                "a single linear curve has no area normal"
+            ))
+        );
+        assert_eq!(single.upstream_status(), Some(SM_ERR));
+        assert!(single.is_status_answer());
     }
 
     /// The fork's be45e8d evaluates its samples with `SER(EvaluatePoint)`: a curve whose
@@ -2637,10 +2664,12 @@ mod tests {
             SolverOperation::Minimize,
         );
         let mut value = FunctionValue::default();
-        assert!(matches!(
-            evaluator.evaluate(0.25, &mut value, true),
-            Err(SolidError::Upstream { code: 1001, .. })
-        ));
+        let infinite = evaluator.evaluate(0.25, &mut value, true).unwrap_err();
+        assert_eq!(
+            infinite.curve_failure(),
+            Some(&CurveFailure::Failed("the curve's tangent is infinite"))
+        );
+        assert_eq!(infinite.upstream_status(), Some(1001));
         let (found, _): (bool, Solution<()>) = c
             .local_point_solve(
                 k,

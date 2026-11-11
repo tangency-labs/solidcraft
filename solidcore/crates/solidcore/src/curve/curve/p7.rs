@@ -119,7 +119,7 @@ fn at_most(c: ContinuityType, limit: ContinuityType) -> bool {
 /// The leaf span of `node` in `tree` (`(SmBezierSpan*)pNode->m_pData`, `NER`).
 fn leaf_span<O: Copy + PartialEq>(tree: &Tree<O>, node: &TreeNode<O>) -> Result<BezierSpan> {
     if matches!(node.data, NodeData::None) {
-        return Err(SolidError::null_pointer(OP_CCI));
+        return Err(SolidError::curve_missing(OP_CCI, "the tree node's span"));
     }
     Ok(*tree.curve_span(node)?)
 }
@@ -1146,9 +1146,11 @@ impl Curve {
         let cache = match make_curve_cache::<O>(k, self, opts.handle) {
             Ok(c) => c,
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => return Err(SolidError::null_pointer(OP_GPA)),
+            Err(_) => return Err(SolidError::curve_missing(OP_GPA, "the curve's cache")),
         };
-        let curve_tree = cache.tree().ok_or(SolidError::null_pointer(OP_GPA))?;
+        let curve_tree = cache
+            .tree()
+            .ok_or_else(|| SolidError::curve_missing(OP_GPA, "the curve cache's tree"))?;
 
         // special case SM_CP_PERPENDICULAR_TO_VECTOR
         // quit when curve is a line or when curve is in plane perp to target vector
@@ -1625,6 +1627,19 @@ mod tests {
             ..SolveRequest::default()
         };
         assert!(gs.solve_it(&req, &mut sols).is_err());
+    }
+
+    #[test]
+    fn a_leaf_without_a_span_is_a_missing_span() {
+        let tree: Tree<()> = Tree::from_point(Vec3::ZERO, 1.0, false);
+        let e = leaf_span(&tree, &TreeNode::new()).unwrap_err();
+        assert_eq!(
+            e.curve_failure(),
+            Some(&crate::error::curve::CurveFailure::Missing(
+                "the tree node's span"
+            ))
+        );
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
     }
 
     #[test]

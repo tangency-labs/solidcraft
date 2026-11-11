@@ -159,7 +159,7 @@ fn intersection_surface_caches_in<O: Copy + PartialEq>(
         if e.is_unported_or_cancelled() {
             e
         } else {
-            SolidError::null_pointer(OP_CACHES)
+            SolidError::intersect_missing(OP_CACHES, "the surface's cache or its tree")
         }
     };
     let [h1, h2] = handles;
@@ -524,7 +524,7 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
 
         // get surface caches and their decomposition trees (NER)
         if caches.is_empty() {
-            return Err(SolidError::null_pointer(OP_DI));
+            return Err(SolidError::intersect_missing(OP_DI, "the surface caches"));
         }
         for c in caches.iter_mut().take(2) {
             if !(trees_ready && c.tree().is_some()) {
@@ -532,7 +532,7 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
                     if e.is_unported_or_cancelled() {
                         e
                     } else {
-                        SolidError::null_pointer(OP_DI)
+                        SolidError::intersect_missing(OP_DI, "the surface cache's tree")
                     }
                 })?;
             }
@@ -550,20 +550,23 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
             .take(2)
             .map(|c| c.patch_boundary_bounding_planes().clone())
             .collect();
-        let mut planes1 = planes
-            .first()
-            .cloned()
-            .ok_or(SolidError::null_pointer(OP_DI))?;
+        let mut planes1 = planes.first().cloned().ok_or_else(|| {
+            SolidError::intersect_missing(OP_DI, "the patch boundary bounding planes")
+        })?;
         let mut planes2 = planes.get(1).cloned().unwrap_or_else(|| planes1.clone());
 
         let caches: &'t [SurfaceCache<O>] = caches;
-        let cache1 = caches.first().ok_or(SolidError::null_pointer(OP_DI))?;
+        let cache1 = caches
+            .first()
+            .ok_or_else(|| SolidError::intersect_missing(OP_DI, "the first surface cache"))?;
         let cache2 = caches.get(1).unwrap_or(cache1);
         self.bind_caches(cache1, cache2)?;
 
         // no work - root treeNode bounding boxes are disjoint
         let root_box = |c: &SurfaceCache<O>| -> Result<Extent3d> {
-            let tree = c.tree().ok_or(SolidError::null_pointer(OP_DI))?;
+            let tree = c
+                .tree()
+                .ok_or_else(|| SolidError::intersect_missing(OP_DI, "the surface cache's tree"))?;
             let top = tree
                 .top_node()
                 .ok_or(SolidError::invalid_input(OP_DI, "tree without top node"))?;
@@ -988,13 +991,13 @@ mod tests {
         let e = ssi
             .do_intersection_with_caches(&k, &mut caches, Some(0.5), Some(0.1))
             .unwrap_err();
-        assert!(matches!(
-            e,
-            SolidError::Upstream {
-                code: SM_ERR_NULL_POINTER,
-                ..
-            }
-        ));
+        assert_eq!(
+            e.intersect_failure(),
+            Some(&crate::error::intersect::IntersectFailure::Missing(
+                "the surface caches"
+            ))
+        );
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
         // the tolerances are set first
         assert_eq!(ssi.base.this_approx_tol_3d, 0.5);
         assert_eq!(ssi.base.this_ang_tol_rad, 0.1);

@@ -111,7 +111,7 @@ use crate::curve::curve::p3::PointSolveOptions;
 use crate::curve::curve::p6::DropPointCaches;
 use crate::curve::curve::Curve;
 use crate::curve::hermite_curve::HermiteCurve;
-use crate::error::{Result, SolidError, SM_ERR_NULL_POINTER};
+use crate::error::{Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -895,7 +895,10 @@ impl<'s> SurfaceIntersector<'s> {
 
     /// `ComputePointValuesDelta`: not implemented by the basic intersector (`SM_ERR`).
     pub fn compute_point_values_delta(&self) -> Result<()> {
-        Err(SolidError::sm_err(OP_DELTA))
+        Err(SolidError::intersect_failed(
+            OP_DELTA,
+            "the basic intersector computes no point value deltas",
+        ))
     }
 
     /// `ComputeSingularityPoint`: the basic intersector does not handle singular or
@@ -906,7 +909,10 @@ impl<'s> SurfaceIntersector<'s> {
         _point: TsectId,
         _previous: Option<TsectId>,
     ) -> Result<()> {
-        Err(SolidError::sm_err(OP_SING))
+        Err(SolidError::intersect_failed(
+            OP_SING,
+            "the basic intersector does not handle singular or tangent points",
+        ))
     }
 
     /// `ComputeStepSize`: `100 * this_approx_tol_3d` when `old_step_size` is zero
@@ -1220,7 +1226,10 @@ impl<'s> SurfaceIntersector<'s> {
 
         // check 3D space tangent vector length
         if next_tsp.crv_deriv().length() < self.stepping_parallel_tol_radians {
-            return Err(SolidError::sm_err(OP_SPAN));
+            return Err(SolidError::intersect_failed(
+                OP_SPAN,
+                "the next point's curve tangent is shorter than the parallel tolerance",
+            ));
         }
 
         // get xsect curve parameter StepSize
@@ -1695,11 +1704,10 @@ impl<'s> SurfaceIntersector<'s> {
     /// and reverses the curve point order. An empty curve is `SM_ERR_NULL_POINTER`.
     pub fn reverse_curve_direction(&mut self) -> Result<()> {
         if self.curve_points.is_empty() {
-            return Err(SolidError::Upstream {
-                operation: OP_REVERSE,
-                code: SM_ERR_NULL_POINTER,
-                entity: None,
-            });
+            return Err(SolidError::intersect_missing(
+                OP_REVERSE,
+                "the traced curve's points",
+            ));
         }
         let pnts = core::mem::take(&mut self.curve_points);
 
@@ -1989,7 +1997,10 @@ impl<'s> SurfaceIntersector<'s> {
             plane_normal,
         )?;
         if !found_answer {
-            return Err(SolidError::sm_err(OP_LAW));
+            return Err(SolidError::intersect_failed(
+                OP_LAW,
+                "the law point solve found no answer",
+            ));
         }
 
         let [s0, s1, s2, s3] = sol;
@@ -2545,8 +2556,9 @@ fn set_offset_distance(surface: &Surface, distance: f64) -> Result<()> {
             o.set_offset_distance(distance);
             Ok(())
         }
-        _ => Err(SolidError::null_pointer(
+        _ => Err(SolidError::intersect_missing(
             "intersect::surface_intersector::p1::set_offset_distance",
+            "the offset surface",
         )),
     }
 }
@@ -2554,6 +2566,7 @@ fn set_offset_distance(surface: &Surface, distance: f64) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::SM_ERR_NULL_POINTER;
     use crate::surface::plane::Plane;
 
     fn plane(o: [f64; 3], x: [f64; 3], y: [f64; 3]) -> Surface {
@@ -2685,10 +2698,21 @@ mod tests {
         let s1 = plane([0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
         let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let mut si = SurfaceIntersector::new(k, &s1, &d, &s1, &d, false).unwrap();
+        let e = si.reverse_curve_direction().unwrap_err();
+        assert_eq!(
+            e.intersect_failure(),
+            Some(&crate::error::intersect::IntersectFailure::Missing(
+                "the traced curve's points"
+            ))
+        );
+        assert_eq!(e.upstream_status(), Some(1006));
+        // the basic intersector's unimplemented virtuals answer SM_ERR
+        let e = si.compute_point_values_delta().unwrap_err();
         assert!(matches!(
-            si.reverse_curve_direction(),
-            Err(SolidError::Upstream { code: 1006, .. })
+            e.intersect_failure(),
+            Some(crate::error::intersect::IntersectFailure::Failed(_))
         ));
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
     }
 
     /// WR-51: the pinned `IsPointOnStartPoint` compares a squared distance with the

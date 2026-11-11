@@ -58,7 +58,10 @@ fn null(reason: &'static str) -> SolidError {
 }
 
 fn sm_err() -> SolidError {
-    SolidError::sm_err(OP)
+    SolidError::offset(
+        OP,
+        OffsetFailure::Failed("the gap search could not continue"),
+    )
 }
 
 /// The mate of an edge use.
@@ -1201,4 +1204,21 @@ fn set_edge_curve(
         b.set_geometry_owner_key(EntityRef::Edge(e), Some(owner));
         Ok(())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_gap_search_that_cannot_continue_is_a_typed_offset_failure() {
+        let e = sm_err();
+        assert_eq!(
+            e.offset_failure(),
+            Some(&OffsetFailure::Failed("the gap search could not continue"))
+        );
+        assert_eq!(e.operation(), OP);
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert!(e.is_status_answer());
+    }
 }

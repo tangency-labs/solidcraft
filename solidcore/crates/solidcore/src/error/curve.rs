@@ -290,14 +290,6 @@ mod tests {
     /// whose conversion waits on other open work.
     #[test]
     fn the_curve_routines_build_no_bare_statuses() {
-        super::super::bare_scan::assert_waiting(
-            "curve",
-            31,
-            &[
-                ("curve/curve/p3.rs", 9),
-                ("curve/curve/p7.rs", 3),
-                ("curve/ellipse/p1.rs", 6),
-            ],
-        );
+        super::super::bare_scan::assert_waiting("curve", 31, &[("curve/ellipse/p1.rs", 6)]);
     }
 }

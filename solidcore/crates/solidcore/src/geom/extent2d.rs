@@ -69,8 +69,8 @@
 //!   `ContainsPeriodicPoint2d`'s periodic point) are always computed; they have no
 //!   side effects.
 //! - Status codes: `SM_ERR_INVALID_INPUT` is [`SolidError::InvalidInput`]; `SM_ERR`
-//!   is [`SolidError::Upstream`] with code 1001. `Intersect` leaves an `Init()`
-//!   extent as the result when it fails; the Rust error carries no result.
+//!   is a [`crate::error::geom::GeomFailure::Failed`] (status 1001). `Intersect`
+//!   leaves an `Init()` extent as the result when it fails; the Rust error carries no result.
 //!   `Inversion` may write a partial normalised point before failing; the Rust error
 //!   carries none (no in-scope caller reads it).
 //! - `IntersectWithInfiniteLine` always returns `SM_SUCCESS`; the Rust method
@@ -89,9 +89,6 @@ use crate::geom::tol::{are_same, are_same_to_tol, is_zero_to_tol, tol3d, ScaledZ
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::sqrt;
 use crate::math::{is_infinite_param, max2, min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
-
-// Upstream status `SM_ERR`.
-use crate::error::SM_ERR;
 
 /// `SM_SS_NONE`: the point is on no boundary ([`Extent2d::point_boundaries`]).
 pub const SS_NONE: u32 = 0;
@@ -713,14 +710,15 @@ impl Extent2d {
     }
 
     /// Normalised coordinates of `p` (snapped to the boundary when within `tol` of
-    /// it, clamped to `[0, 1]`); [`SolidError::Upstream`] `SM_ERR` when `p` is
-    /// outside or a side is degenerate and `p` is off it (`Inversion`; upstream
-    /// default `tol = SM_EFF_ZERO`).
+    /// it, clamped to `[0, 1]`); a [`crate::error::geom::GeomFailure::Failed`]
+    /// (`SM_ERR`) when `p` is outside or a side is degenerate and `p` is off it
+    /// (`Inversion`; upstream default `tol = SM_EFF_ZERO`).
     pub fn inversion(&self, p: Point2, tol: f64) -> Result<Point2> {
-        let err = || SolidError::Upstream {
-            operation: "geom::extent2d::Extent2d::inversion",
-            code: SM_ERR,
-            entity: None,
+        let err = || {
+            SolidError::geom_failed(
+                "geom::extent2d::Extent2d::inversion",
+                "the point does not lie in the extent",
+            )
         };
         let mut pnt = p;
         if self.is_point_on_boundary(pnt, tol).0 {
@@ -866,7 +864,8 @@ impl Extent2d {
     }
 
     /// Maps `p` from this domain to `other` through normalised coordinates,
-    /// swapping u and v when `switch_params`; [`SolidError::Upstream`] `SM_ERR` when
+    /// swapping u and v when `switch_params`; a
+    /// [`crate::error::geom::GeomFailure::Failed`] (`SM_ERR`) when
     /// [`Extent2d::inversion`] fails (`Point2dMapToDomain`).
     pub fn point_map_to_domain(
         &self,
@@ -874,13 +873,12 @@ impl Extent2d {
         other: &Self,
         switch_params: bool,
     ) -> Result<Point2> {
-        let n = self
-            .inversion(p, EFF_ZERO)
-            .map_err(|_| SolidError::Upstream {
-                operation: "geom::extent2d::Extent2d::point_map_to_domain",
-                code: SM_ERR,
-                entity: None,
-            })?;
+        let n = self.inversion(p, EFF_ZERO).map_err(|_| {
+            SolidError::geom_failed(
+                "geom::extent2d::Extent2d::point_map_to_domain",
+                "the point does not lie in the extent",
+            )
+        })?;
         Ok(if switch_params {
             other.evaluate(n.y, n.x)
         } else {
@@ -1073,7 +1071,23 @@ mod tests {
     fn inversion_of_degenerate_side() {
         let e = Extent2d::from_bounds(0.0, 0.0, 0.0, 1.0);
         assert_eq!(e.inversion(p(0.0, 0.5), EFF_ZERO).unwrap(), p(1.0, 0.5));
-        assert!(e.inversion(p(2.0, 0.5), EFF_ZERO).is_err());
+        let outside = e.inversion(p(2.0, 0.5), EFF_ZERO).unwrap_err();
+        assert_eq!(
+            outside.geom_failure(),
+            Some(&crate::error::geom::GeomFailure::Failed(
+                "the point does not lie in the extent"
+            ))
+        );
+        assert_eq!(outside.upstream_status(), Some(crate::error::SM_ERR));
+        let mapped = e
+            .point_map_to_domain(
+                p(2.0, 0.5),
+                &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+                false,
+            )
+            .unwrap_err();
+        assert_eq!(mapped.geom_failure(), outside.geom_failure());
+        assert_eq!(mapped.upstream_status(), Some(crate::error::SM_ERR));
     }
 
     #[test]
