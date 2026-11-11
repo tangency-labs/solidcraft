@@ -129,7 +129,11 @@ Plugins will mostly be written by agents working from a spec, docs and the API, 
 2. **A plugin skill file.** A `skills/<name>/SKILL.md` written for agents, covering the API, the manifest, permissions, packaging and how to test. It links to the generated reference instead of repeating it.
 3. **A headless test harness.** `solidcraft-cli plugin test <dir>` runs a plugin against a design with no UI and prints machine-readable pass or fail per entry (JSON), with the resulting design and journal available for assertions. An agent can edit, run and iterate without a person.
 4. **Typed, actionable errors.** Every host failure names its cause as data: the permission that was missing, the command that failed and why, the limit that was hit (fuel, memory, size), and the manifest field at fault. A trap or a denial never comes back as a bare string.
-5. **Language is secondary.** Any language that compiles to a WebAssembly component works. The guide recommends what agents target most reliably: Rust first, TypeScript next.
+5. **Rust and TypeScript are first-class.** Any language that compiles to a WebAssembly component works, but these two are supported and documented.
+   - TypeScript is built with ComponentizeJS (`jco componentize`), which compiles a TS or JS plugin into a component with the JS engine inside the plugin. SolidCraft embeds no JS engine, and the same sandbox, limits and permissions apply.
+   - Typed bindings for both come from the same WIT (`jco types` for TypeScript, `wit-bindgen` for Rust), so they never drift.
+   - The skill file has a TypeScript quickstart and a Rust quickstart. A tiny example plugin in each language lives in the plugins repo, not in SolidCraft.
+   - `plugin test` works the same for both.
 
 Plugin inputs are schemas (section 2), so the app draws the values and variables editor through the design-forms work in #15100. A user changes numbers without touching code.
 
