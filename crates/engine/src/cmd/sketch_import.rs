@@ -280,7 +280,6 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
         Some(v) => v.as_f64().filter(|a| a.is_finite()).ok_or_else(|| bad(cmd, "`angle` must be a number (degrees)"))?.to_radians(),
         None => 0.0,
     };
-    let (sin, cos) = angle.sin_cos();
     let pivot = match str_(p, "align") {
         None | Some("origin") => Vec2::ZERO,
         Some("center") => (lo + hi) * 0.5,
@@ -297,10 +296,7 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
         created = r.get("sketch").and_then(Value::as_u64);
     }
     let tol = num(p, "tolerance").filter(|t| t.is_finite() && *t > 0.0).unwrap_or(1e-4).clamp(1e-9, 10.0);
-    let f = move |q: Vec2| {
-        let v = (q - pivot) * k;
-        Vec2::new(v.x * cos - v.y * sin, v.x * sin + v.y * cos) + off
-    };
+    let f = placement(pivot, Vec2::new(k, k), angle, off);
     // A dense SVG/DXF (a floorplan) can yield far more entities than a sketch takes; refuse
     // before adding so the message names the cap (#10874). Scale alone does not shrink the count.
     if geom.len() > solidcraft_sketch::limits::max_points() {
@@ -396,33 +392,15 @@ fn airfoil_error(p: &Value, msg: String) -> EngineError {
     EngineError::Other(format!("{name}: {msg}"))
 }
 
-/// The distance from `q` to the segment `a`–`b`.
-fn segment_dist(a: Vec2, b: Vec2, q: Vec2) -> f64 {
-    let d = b - a;
-    let l2 = d.len2();
-    let t = if l2 > 0.0 { ((q - a).dot(d) / l2).clamp(0.0, 1.0) } else { 0.0 };
-    q.dist(a + d * t)
-}
-
-/// The distance from `q` to the nearest piece of the polyline `poly`.
-fn polyline_dist(poly: &[Vec2], q: Vec2) -> f64 {
-    poly.windows(2).map(|w| segment_dist(w[0], w[1], q)).fold(f64::INFINITY, f64::min)
-}
-
-/// How far the fit point spline through `pts` strays from the straight lines between them: the
-/// largest distance of a point on a span from that span's chord.
-fn spline_bulge(pts: &[Vec2]) -> f64 {
-    const SAMPLES: usize = 16;
-    let mut worst: f64 = 0.0;
-    for [p0, c1, c2, p3] in solidcraft_sketch::fit_beziers(pts) {
-        for k in 1..SAMPLES {
-            let s = k as f64 / SAMPLES as f64;
-            let r = 1.0 - s;
-            let q = p0 * (r * r * r) + c1 * (3.0 * r * r * s) + c2 * (3.0 * r * s * s) + p3 * (s * s * s);
-            worst = worst.max(segment_dist(p0, p3, q));
-        }
+/// Where a point of an inserted file lands in the sketch: moved so `pivot` is at the origin,
+/// scaled per axis by `scale` (a negative `scale.y` mirrors), turned by `angle` (radians,
+/// counter-clockwise) and placed at `offset`. The one placement of every insert here.
+fn placement(pivot: Vec2, scale: Vec2, angle: f64, offset: Vec2) -> impl Fn(Vec2) -> Vec2 {
+    let (sin, cos) = angle.sin_cos();
+    move |q: Vec2| {
+        let v = Vec2::new((q.x - pivot.x) * scale.x, (q.y - pivot.y) * scale.y);
+        Vec2::new(v.x * cos - v.y * sin, v.x * sin + v.y * cos) + offset
     }
-    worst
 }
 
 /// Insert an airfoil coordinate file as one fit point spline through its points, at the chord
@@ -460,24 +438,21 @@ fn insert_airfoil(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // Chord units to the sketch: scaled to the chord, mirrored when asked, turned about the pivot
     // and placed.
-    let (sin, cos) = angle.sin_cos();
-    let sign = if flip { -1.0 } else { 1.0 };
-    let place = |q: Vec2| {
-        let v = Vec2::new((q.x - pivot) * chord, q.y * chord * sign);
-        Vec2::new(v.x * cos - v.y * sin, v.x * sin + v.y * cos) + off
-    };
+    let place = placement(Vec2::new(pivot, 0.0), Vec2::new(chord, if flip { -chord } else { chord }), angle, off);
     let file_points: Vec<Vec2> = airfoil.points.iter().map(|q| place(*q)).collect();
     // Points within the tolerance of the one before become one sketch point, as `add_geometry`
     // would make them; doing it here says how many, and leaves the spline's points known.
     let mut spline: Vec<Vec2> = Vec::with_capacity(file_points.len());
-    let mut merged = 0;
+    // Each merged point, with the index of the spline point that stands for it.
+    let mut near: Vec<(usize, [f64; 3])> = Vec::new();
     for q in &file_points {
         if spline.last().is_some_and(|k| k.dist(*q) <= tol) {
-            merged += 1;
+            near.push((spline.len() - 1, [q.x, q.y, 0.0]));
         } else {
             spline.push(*q);
         }
     }
+    let merged = near.len();
     let (Some(first), Some(last)) = (spline.first().copied(), spline.last().copied()) else {
         return Err(airfoil_error(p, "no points".into()));
     };
@@ -487,6 +462,9 @@ fn insert_airfoil(s: &mut Session, p: &Value) -> Result<Value> {
         // The spline ends where it starts: a sharp trailing edge, not a periodic (rounded) one.
         spline.pop();
         spline.push(first);
+        if last != first {
+            near.push((spline.len() - 1, [last.x, last.y, 0.0]));
+        }
     }
     if spline.len() < 4 {
         return Err(airfoil_error(p, format!("{} points left within a tolerance of {tol} mm; an airfoil needs at least four", spline.len())));
@@ -495,13 +473,10 @@ fn insert_airfoil(s: &mut Session, p: &Value) -> Result<Value> {
     if !closed {
         geom.push(Geom2::Line(last, first));
     }
-    // What is drawn, to measure the file's points against it.
-    let mut drawn = solidcraft_sketch::spline_polyline(&spline, false, 3);
-    if !closed {
-        drawn.extend([last, first]);
-    }
-    let deviation = file_points.iter().map(|q| polyline_dist(&drawn, *q)).fold(0.0, f64::max);
-    let bulge = spline_bulge(&spline);
+    // The merged points against the spline points that stand for them, and the spline against
+    // the straight lines between its points: the kernel bounds both.
+    let pieces: Vec<[[f64; 3]; 4]> = solidcraft_sketch::fit_beziers(&spline).iter().map(|piece| piece.map(|c| [c.x, c.y, 0.0])).collect();
+    let fit = solidcore_ops::curve_fit::fit_spline_bounds(&pieces, &near).map_err(|e| airfoil_error(p, e.to_string()))?;
 
     let mut created = None;
     if s.active_sketch.is_none() {
@@ -530,8 +505,8 @@ fn insert_airfoil(s: &mut Session, p: &Value) -> Result<Value> {
             merged,
             trailing_edge: if closed { "closed" } else { "open" }.to_string(),
             te_gap,
-            deviation,
-            bulge,
+            deviation: fit.deviation,
+            bulge: fit.bulge,
             info,
             param_warnings: Vec::new(),
         },

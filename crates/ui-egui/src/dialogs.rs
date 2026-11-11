@@ -417,6 +417,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             },
             /// Insert SVG / DXF: where the picked drawing goes (`dialogs_insert_drawing`).
             InsertDrawing(crate::dialogs_insert_drawing::Place),
+            /// Insert Airfoil: how the picked section goes in (`dialogs_insert_airfoil`).
+            InsertAirfoil(crate::dialogs_insert_airfoil::Airfoil),
             /// Plastic features (`dialogs_plastic`).
             Plastic(crate::dialogs_plastic::Pl),
             /// Frame members (`dialogs_frame`).
@@ -1409,7 +1411,7 @@ impl Dialog {
             Kind::SketchModify(k) => return k.previews(),
             Kind::Plastic(k) => return k.previews(),
             Kind::Frame(_) | Kind::EndCap(_) => return true,
-            Kind::Part(_) | Kind::PartSize(_) | Kind::InsertDrawing(_) => return true,
+            Kind::Part(_) | Kind::PartSize(_) | Kind::InsertDrawing(_) | Kind::InsertAirfoil(_) => return true,
             // Web previews run synchronously; a modelled thread can take seconds.
             Kind::Thread { .. } => return !cfg!(target_arch = "wasm32") && self.extra.get("modeled").and_then(Value::as_bool).unwrap_or(false),
             _ => {}
@@ -2729,6 +2731,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::ViewDxf { .. } => "Export Current View as DXF",
         Kind::ViewNavigator(_) => "CUSTOM VIEW NAVIGATOR",
         Kind::InsertDrawing(p) => crate::dialogs_insert_drawing::title(p),
+        Kind::InsertAirfoil(_) => crate::dialogs_insert_airfoil::title(),
         Kind::Plastic(k) => k.title(),
         Kind::Frame(_) => "FRAME MEMBER",
         Kind::EndCap(_) => "ui.end_cap_title",
@@ -6349,6 +6352,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::SaveMesh(k) => return crate::dialogs_save_mesh::commands(k, &d.inputs),
         Kind::ViewDxf { .. } | Kind::ViewNavigator(_) => return Ok(Vec::new()),
         Kind::InsertDrawing(p) => return crate::dialogs_insert_drawing::commands(p),
+        Kind::InsertAirfoil(a) => return crate::dialogs_insert_airfoil::commands(a),
         Kind::Plastic(k) => return crate::dialogs_plastic::commands(app, k, &d.inputs, &d.extra),
         Kind::Frame(k) => return crate::dialogs_frame::commands(app, k, &d.inputs, &d.extra),
         Kind::EndCap(k) => return crate::dialogs_end_cap::commands(app, k, &d.inputs, &d.extra),

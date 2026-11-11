@@ -214,9 +214,9 @@ written as `61.0`, a leading edge written twice, an `x` a hair above 1); what it
 refuses with the file's name and line, and never reads a placeholder as 0.
 
 The reply says what came in: the name, the layout, the point count, whether the trailing edge is
-open or closed and its gap, the largest distance from a file point to the curve (0 unless points
-merged within the tolerance), and the largest bulge of the spline between two file points, which
-shows an overshoot at the nose as a number. A sketch per section and a loft between them make a
+open or closed and its gap, how far at most a merged point is from the curve (0 unless points
+merged within the tolerance), and how far at most the spline bows from the straight lines between
+the file points, which shows an overshoot at the nose as a number. A sketch per section and a loft between them make a
 wing. `angle` turns counter-clockwise in the sketch plane, so on the planes below, whose sketch `y`
 points up (+Z), a positive angle lowers the leading edge: the usual washout at the tip.
 

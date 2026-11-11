@@ -543,11 +543,13 @@ pub struct AirfoilInserted {
     pub trailing_edge: String,
     /// The distance in mm between the first and the last point, at the chord given.
     pub te_gap: f64,
-    /// The largest distance in mm from a point of the file to the curves drawn, at the chord
-    /// given: 0 unless points were merged or the trailing edge was closed within `tolerance`.
+    /// How far, at most, in mm a merged point (or the last point of a trailing edge closed within
+    /// `tolerance`) is from the spline point that stands for it, at the chord given: the kernel's
+    /// certified bound, 0 when no point was merged.
     pub deviation: f64,
-    /// The largest distance in mm the spline strays from the straight lines between the file's
-    /// points, at the chord given: how far the curve bows between points, most at the nose.
+    /// How far, at most, in mm the spline strays from the straight lines between the file's
+    /// points, at the chord given: the kernel's certified bound of how far the curve bows
+    /// between points, most at the nose.
     pub bulge: f64,
     /// The sketch's solve afterwards; null when it was not solved.
     pub info: Option<SketchSolve>,

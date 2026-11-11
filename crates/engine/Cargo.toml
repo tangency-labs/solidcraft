@@ -36,6 +36,7 @@ required-features = ["solver-profiling"]
 
 [dependencies]
 solidcraft-viewport = { workspace = true }
+solidcore-ops = { workspace = true }
 solidcore-record = { workspace = true }
 solidcraft-color = { workspace = true }
 solidcraft-control = { workspace = true }
