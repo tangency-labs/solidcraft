@@ -10,7 +10,9 @@
 //! for a flexible occurrence inside it. A flexible occurrence also has the joints of the
 //! flexible occurrences inside its linked design: `tree.nested` lists the occurrences kept for
 //! those, and a pose of a copy under some of them names them in `through`
-//! (`{"occurrence": 21, "through": [14], "inner": 17, ...}`). An older design has none of these keys: every
+//! (`{"occurrence": 21, "through": [14], "inner": 17, ...}`). A motion link between two of a
+//! flexible occurrence's joints that is a cam in the linked design has `"carried_cam": true`
+//! and that design's `lift` table, with no `coupling`. An older design has none of these keys: every
 //! occurrence of its linked subassemblies is rigid and shows the linked design as it was
 //! saved. The last release opens a design that has them with a warning about the newer format,
 //! shows each occurrence as the linked design was saved, places nothing by a flexible

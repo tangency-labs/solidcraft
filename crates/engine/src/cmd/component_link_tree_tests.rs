@@ -1459,3 +1459,73 @@ fn a_previewed_study_shows_a_flexible_occurrences_parts_without_changing_the_des
     assert_eq!(boxes(&s), at_rest);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A feature reads every part where the design has it, and the world shows the parts of a
+/// flexible occurrence where its joints stand. A reference picked on a part that stands in a
+/// pose would be looked for where the part is not shown, so the command is refused and says how
+/// to go on. A part that stands as its design has it is picked as before: in a rigid occurrence,
+/// in a flexible one whose joint does not move it, and once the occurrence is rigid again.
+#[test]
+fn a_reference_picked_on_a_part_in_a_pose_is_refused_and_one_on_a_part_as_designed_is_kept() {
+    let dir = scratch("posed-picks");
+    let hinge = save_hinge(&dir);
+    let saved = mm(&[[0, 0, 0, 40, 20, 5], [0, 8, 5, 30, 12, 9]]);
+    let up = mm(&[[0, 0, 0, 40, 20, 5], [-2, 10, 5, 2, 40, 9]]);
+    let mut s = Session::default();
+    // The first hinge is flexible, its arm a quarter turn up; the second is rigid, as saved.
+    let inserted = run(&mut s, "component.insert_design", json!({"path": hinge, "translate": [0, 0, 50]}));
+    let (top, first) = (inserted["component"].as_u64().unwrap(), inserted["occurrence"].as_u64().unwrap());
+    run(&mut s, "component.link_mode", json!({"component": top, "flexible": true}));
+    let driven = run(&mut s, "joint.drive", json!({"joint": "Hinge", "value": 90}));
+    assert_eq!(driven["moved"], true, "{driven}");
+    run(&mut s, "component.insert_design", json!({"path": hinge, "reuse": true, "translate": [0, 100, 50]}));
+    assert_eq!(boxes(&s), together(shifted(&up, [0, 0, 50]), shifted(&saved, [0, 100, 50])));
+
+    // The first arm is shown at (-2, 10, 55)..(2, 40, 59): a top edge through (2, 25, 59), a
+    // corner at (2, 40, 59), its top face around (0, 25, 59). Its design has it at
+    // (0, 8, 55)..(30, 12, 59), where none of those picks is.
+    let before = s.doc.clone();
+    let refused =
+        |s: &mut Session, id: &str, p: Value| s.execute(id, &p).err().map(|e| e.to_string()).unwrap_or_else(|| panic!("{id} {p} went through"));
+    let told = |command: &str, why: &str| {
+        assert!(why.contains("inside a flexible occurrence of a linked subassembly"), "{command}: {why}");
+        assert!(why.contains("does not stand as its design has it") && why.contains("component.link_mode"), "{command}: {why}");
+    };
+    for (command, params) in [
+        ("construct.axis.edge", json!({"edge": {"edge": [2, 25, 59]}})),
+        ("construct.point.vertex", json!({"point": {"vertex": [2, 40, 59]}})),
+        ("construct.plane.offset", json!({"base": "XY", "through": {"vertex": [2, 40, 59]}})),
+        ("construct.plane.offset", json!({"base": {"face": [0, 25, 59]}, "offset": 5})),
+    ] {
+        told(command, &refused(&mut s, command, params));
+    }
+    assert_eq!(s.doc, before, "nothing was made");
+    // A sketch of the design projects what the design has, too.
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    told("sketch.project", &refused(&mut s, "sketch.project", json!({"refs": [{"edge": [2, 25, 59]}]})));
+    run(&mut s, "sketch.finish", json!({}));
+
+    let axis = |s: &Session, name: &str| {
+        let state = s.model.state();
+        match state.construct.iter().find(|c| c.name == name).map(|c| c.geom.clone()) {
+            Some(solidcraft_doc::construct::ConstructGeom::Axis { origin, dir }) => (origin, dir),
+            other => panic!("{name}: {other:?}"),
+        }
+    };
+    // The second hinge is rigid: its arm is where its design has it, (0, 108, 55)..(30, 112, 59).
+    run(&mut s, "construct.axis.edge", json!({"edge": {"edge": [15, 112, 59]}, "name": "On rigid arm"}));
+    let (origin, along) = axis(&s, "On rigid arm");
+    assert!((origin.y - 112.0).abs() < 1e-6 && (origin.z - 59.0).abs() < 1e-6 && along.x.abs() > 1.0 - 1e-9, "{origin:?} {along:?}");
+    // The first hinge's base is in the flexible occurrence, and its joint does not move it.
+    run(&mut s, "construct.axis.edge", json!({"edge": {"edge": [20, 0, 50]}, "name": "On base"}));
+    let (origin, along) = axis(&s, "On base");
+    assert!(origin.y.abs() < 1e-6 && (origin.z - 50.0).abs() < 1e-6 && along.x.abs() > 1.0 - 1e-9, "{origin:?} {along:?}");
+
+    // Made rigid, as the message says, the first hinge stands as saved and its arm is picked.
+    run(&mut s, "component.link_mode", json!({"component": top, "occurrence": first, "flexible": false}));
+    assert_eq!(boxes(&s), together(shifted(&saved, [0, 0, 50]), shifted(&saved, [0, 100, 50])));
+    run(&mut s, "construct.axis.edge", json!({"edge": {"edge": [15, 12, 59]}, "name": "On first arm"}));
+    let (origin, along) = axis(&s, "On first arm");
+    assert!((origin.y - 12.0).abs() < 1e-6 && (origin.z - 59.0).abs() < 1e-6 && along.x.abs() > 1.0 - 1e-9, "{origin:?} {along:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -30,7 +30,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
-use solidcraft_doc::joints::{Coupling, Joint, JointOrigin, MotionLink};
+use solidcraft_doc::joints::{Joint, JointOrigin, MotionLink};
 use solidcraft_doc::{Document, LinkTree, Mat, Metadata, ModelState};
 
 use crate::{EngineError, Result, Session};
@@ -233,14 +233,16 @@ impl SourceTree {
             ));
         }
         self.nested = doc.flexible_at_any_depth().into_iter().filter(|o| placed.contains(o)).collect();
-        let carried: BTreeMap<u64, &str> = self.joints.iter().map(|j| (j.id, j.name.as_str())).collect();
+        let carried: BTreeSet<u64> = self.joints.iter().map(|j| j.id).collect();
         for l in &doc.assembly.links {
-            let (Some(a), Some(b)) = (carried.get(&l.a), carried.get(&l.b)) else { continue };
-            if matches!(l.coupling, Some(Coupling::Cam(_))) {
-                self.notes.push(format!("the cam from joint {a} to joint {b} of the linked design is not carried: {b} stays where it is"));
+            if !carried.contains(&l.a) || !carried.contains(&l.b) {
                 continue;
             }
-            self.links.push(MotionLink { coupling: None, lift: Vec::new(), ..l.clone() });
+            // What a ratio or a cam's table is worked out from is the linked design's geometry,
+            // so both are carried as that design last worked them out, and Update Links reads
+            // them again. A cam keeps its table and says that it is one.
+            let cam = l.is_cam();
+            self.links.push(MotionLink { coupling: None, lift: if cam { l.lift.clone() } else { Vec::new() }, carried_cam: cam, ..l.clone() });
         }
         self.fixed = solidcraft_doc::joints::solve(doc, st).fixed.iter().copied().filter(|o| placed.contains(o)).collect();
         self

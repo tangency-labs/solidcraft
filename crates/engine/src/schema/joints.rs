@@ -1072,6 +1072,11 @@ pub struct LinkInfo {
     /// a cam.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lift: Option<Option<CamLift>>,
+    /// The link is a cam of a linked design, between the joints a flexible occurrence of it has
+    /// here. It follows the travel that design worked out, has a `lift` and no `coupling`, and
+    /// can't be changed here: change the cam in the linked design, then update the link.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub carried_cam: bool,
 }
 
 /// A joint origin's frame in the world.

@@ -1715,6 +1715,8 @@ impl Session {
         }
         let mapped = if outermost {
             frames::forget_picks();
+            // A pick a feature would keep must be on a body that stands as its design has it.
+            frames::refuse_posed_picks(self, spec.id, params)?;
             frames::to_local(self, spec.id, params)?
         } else {
             None

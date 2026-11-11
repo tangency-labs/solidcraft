@@ -540,16 +540,20 @@ More about flexible occurrences:
   it shows the same pose in each of them.
 - **Features read the saved pose.** A feature that reads another component reads a flexible
   occurrence at the saved pose. You cannot put a sketch on a face of a flexible occurrence, or
-  mirror, pattern or copy one of its bodies, while its pose differs from the saved pose. Other
-  picks on it, such as a face for a construction plane, are read at the saved pose. Make the
-  occurrence rigid before you pick there.
+  mirror, pattern or copy one of its bodies, while its pose differs from the saved pose. The
+  same holds for the other picks that a feature keeps on a component standing in a pose: an
+  edge for a construction axis, an edge projected into a sketch, the face an extrude runs to.
+  The command says so. Make the occurrence rigid before you pick there.
 - **Levels.** A flexible occurrence also has the joints that its linked design has for the
   flexible occurrences inside it, at every level. Each of those has its own pose here too. For
   example, a machine with two units of two hinges each can have its four hinges at four
   angles. A rigid occurrence on the way shows everything below it in the saved pose. To move
   a mechanism two levels down, make each level flexible: the lower levels in their linked
   designs, and the top level here.
-- **Not carried.** A cam of the linked design is not carried, so its follower does not move.
+- **Gears and cams.** The motion links between the joints of the linked design come with
+  them. A gear, a rack and pinion or a screw keeps its ratio, and a cam keeps the follower
+  travel that the linked design worked out. You change them in the linked design. **Update
+  Links** then reads the new ratio or travel.
 - **Whole occurrences.** An exploded view moves a linked subassembly as one occurrence, rigid
   or flexible. It has no steps for the components inside it. URDF export writes the pose that
   is shown, without the joints of the linked design.

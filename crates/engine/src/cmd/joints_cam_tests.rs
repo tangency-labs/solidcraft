@@ -435,3 +435,70 @@ fn cams_save_and_open_with_their_table() {
     let old = solidcraft_doc::format::read(&v.to_string()).unwrap_or_else(|e| panic!("{e}"));
     assert!(old.assembly.links.iter().all(|l| l.coupling.is_none() && l.lift.is_empty()));
 }
+
+/// A flexible occurrence of a linked design has that design's cam (#5526): the follower rides
+/// the travel the linked design worked out, in each occurrence at its own cam angle, and Update
+/// Links reads the travel again when the cam changes there.
+#[test]
+fn a_flexible_occurrence_of_a_linked_design_has_its_cam() {
+    let h = 6.0;
+    let tip = knife(0.0, h, R);
+    let mut made = cam_on_base();
+    tappet(&mut made, h, tip);
+    run(&mut made, "joint.cam", json!({"a": "Cam", "b": "Tappet", "profile": {"sketch": "CamSketch"}}));
+    let dir = std::env::temp_dir().join(format!("solidcraft-linked-cam-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("press.sc");
+    run(&mut made, "file.save", json!({"path": file}));
+
+    let mut s = Session::default();
+    let first = run(&mut s, "component.insert_design", json!({"path": file, "flexible": true}));
+    assert_eq!(first["joints"], 2, "{first}");
+    assert!(!first.to_string().contains("not carried"), "{first}");
+    let second = run(&mut s, "component.insert_design", json!({"path": file, "reuse": true, "translate": [0, 0, 100], "flexible": true}));
+    run(&mut s, "occurrence.ground", json!({"occurrence": second["occurrence"], "grounded": true}));
+    // Each occurrence has the cam as a link of its own, with the travel and no definition here.
+    let listed = run(&mut s, "joint.list", json!({"quiet": true}));
+    let links = listed["links"].as_array().cloned().unwrap_or_default();
+    assert_eq!(links.len(), 2, "{listed}");
+    let over_a_turn: Vec<f64> = (0..3600).map(|k| knife(f64::from(k) / 10.0, h, R)).collect();
+    let rise = over_a_turn.iter().fold(f64::MIN, |a, b| a.max(*b)) - over_a_turn.iter().fold(f64::MAX, |a, b| a.min(*b));
+    for link in &links {
+        assert!(link["carried_cam"] == true && link.get("coupling").is_none() && link.get("ratio").is_none(), "{link}");
+        assert!(close(link["lift"]["rise"].as_f64().unwrap_or(f64::NAN), rise, 2e-3), "{link} vs {rise}");
+    }
+    // Each follower rides its own cam.
+    for (cam, follower, deg) in [("Cam", "Tappet", 90.0f64), ("press:2: Cam", "press:2: Tappet", 200.0)] {
+        let d = run(&mut s, "joint.drive", json!({"joint": cam, "value": deg}));
+        assert_eq!(d["conflicts"].as_array().map(Vec::len), Some(0), "{d}");
+        let want = knife(deg, h, R) - tip;
+        assert!(close(shown(&mut s, follower), want, 1e-3), "{follower} at {deg}: {} vs {want}", shown(&mut s, follower));
+    }
+    assert!(close(shown(&mut s, "Tappet"), knife(90.0, h, R) - tip, 1e-3), "the first follower stays with its own cam");
+    // The cam can't be changed here: it is the linked design's.
+    let refused = s.execute("joint.motion_link", &json!({"a": "Cam", "b": "Tappet", "ratio": 1})).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(refused.contains("linked subassembly"), "{refused}");
+
+    // Saved and opened again, the travel is in the file.
+    let top = dir.join("line.sc");
+    run(&mut s, "file.save", json!({"path": top}));
+    let mut back = Session::default();
+    run(&mut back, "doc.open", json!({"path": top}));
+    run(&mut back, "joint.drive", json!({"joint": "Cam", "value": 300}));
+    assert!(close(shown(&mut back, "Tappet"), knife(300.0, h, R) - tip, 1e-3), "{}", shown(&mut back, "Tappet"));
+
+    // A larger cam in the linked design: Update Links reads its travel.
+    run(&mut made, "parameters.change", json!({"name": "rc", "expression": "32 mm"}));
+    run(&mut made, "file.save", json!({"path": file}));
+    run(&mut back, "component.update_links", json!({}));
+    let larger = |deg: f64| knife(deg, h, 32.0);
+    let at_rest = shown(&mut made, "Tappet");
+    run(&mut back, "joint.drive", json!({"joint": "Cam", "value": 0}));
+    run(&mut back, "joint.drive", json!({"joint": "Cam", "value": 120}));
+    run(&mut made, "joint.drive", json!({"joint": "Cam", "value": 120}));
+    let there = shown(&mut made, "Tappet");
+    assert!(close(there - at_rest, larger(120.0) - larger(0.0), 1e-3), "the linked design itself: {there} from {at_rest}");
+    assert!(close(shown(&mut back, "Tappet"), there, 1e-3), "{} vs {there}", shown(&mut back, "Tappet"));
+    let _ = std::fs::remove_dir_all(&dir);
+}

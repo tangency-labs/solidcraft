@@ -679,17 +679,28 @@ pub struct MotionLink {
     /// offset left out); empty for every other link.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub lift: Vec<f64>,
+    /// The link is a cam of a linked design, between the joints a flexible occurrence of that
+    /// design has here: b follows `lift`, the table that design worked out. It has no `coupling`
+    /// in this design, since the cam's profile is that design's geometry, so the table is not
+    /// worked out again here: Update Links reads it again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub carried_cam: bool,
 }
 
 impl MotionLink {
+    /// Whether b follows a table: a cam of this design, or one carried from a linked design.
+    pub fn is_cam(&self) -> bool {
+        self.carried_cam || matches!(self.coupling, Some(Coupling::Cam(_)))
+    }
+
     /// b's value for a's value `x` (before b's limits). A cam's table that is not whole (a
     /// hand-edited file) gives no value, so b keeps where it is; a table on any other link is
     /// not read.
     pub fn follow(&self, x: f64) -> f64 {
-        match &self.coupling {
-            Some(Coupling::Cam(_)) if self.lift.len() == cam::CAM_SAMPLES => cam::lift_at(&self.lift, x) + self.offset,
-            Some(Coupling::Cam(_)) => f64::NAN,
-            _ => self.ratio * x + self.offset,
+        match self.is_cam() {
+            true if self.lift.len() == cam::CAM_SAMPLES => cam::lift_at(&self.lift, x) + self.offset,
+            true => f64::NAN,
+            false => self.ratio * x + self.offset,
         }
     }
 }
@@ -2972,8 +2983,10 @@ mod tests {
                 constraint: None,
             })
             .collect();
-        let links =
-            (1..n).rev().map(|a| MotionLink { a, ia: 0, b: a + 1, ib: 0, ratio: 2.0, offset: 0.0, coupling: None, lift: Vec::new() }).collect();
+        let links = (1..n)
+            .rev()
+            .map(|a| MotionLink { a, ia: 0, b: a + 1, ib: 0, ratio: 2.0, offset: 0.0, coupling: None, lift: Vec::new(), carried_cam: false })
+            .collect();
         Assembly { joints, links, ..Assembly::default() }
     }
 
@@ -2988,7 +3001,8 @@ mod tests {
             assert_eq!(sources.get(&(b, 0)), Some(&BTreeSet::from([(1, 0)])), "J{b}: {sources:?}");
         }
         assert!(!sources.contains_key(&(1, 0)));
-        let link = |a: u64, ia: usize, b: u64| MotionLink { a, ia, b, ib: 0, ratio: 1.0, offset: 0.0, coupling: None, lift: Vec::new() };
+        let link =
+            |a: u64, ia: usize, b: u64| MotionLink { a, ia, b, ib: 0, ratio: 1.0, offset: 0.0, coupling: None, lift: Vec::new(), carried_cam: false };
         asm.links.push(link(5, 0, 1));
         assert!(link_sources(&asm).values().all(BTreeSet::is_empty), "{:?}", link_sources(&asm));
         let mut asm = chain(2, 0.0);
@@ -3045,7 +3059,7 @@ mod tests {
         }
         let st = ModelState::default();
         let ratio = |a: u64, b: u64, c: Coupling| {
-            let l = MotionLink { a, ia: 0, b, ib: 0, ratio: 0.0, offset: 0.0, coupling: Some(c), lift: Vec::new() };
+            let l = MotionLink { a, ia: 0, b, ib: 0, ratio: 0.0, offset: 0.0, coupling: Some(c), lift: Vec::new(), carried_cam: false };
             coupling_values(&doc, &st, &l).map(|r| r.map(|(ratio, _)| ratio).map_err(|e| e.to_string()))
         };
         let len = Size::Length;

@@ -1696,6 +1696,7 @@ fn held_values(s: &Session, j: &Joint, requested: &[f64], driven: &[usize], r: &
                 Some(joints::Coupling::RackPinion { .. }) => " (rack and pinion)",
                 Some(joints::Coupling::Screw { .. }) => " (screw)",
                 Some(joints::Coupling::Cam(_)) => " (cam)",
+                None if l.carried_cam => " (cam)",
                 None => "",
             };
             let from = s.doc.assembly.joints.iter().find(|o| o.id == l.a);
@@ -1889,7 +1890,7 @@ fn motion_link(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(why) = super::component_link::linked_coupling_refusal(s, a, b) {
         return Err(bad(cmd, why));
     }
-    s.doc_mut().assembly.links.push(MotionLink { a, ia, b, ib, ratio, offset, coupling: None, lift: Vec::new() });
+    s.doc_mut().assembly.links.push(MotionLink { a, ia, b, ib, ratio, offset, coupling: None, lift: Vec::new(), carried_cam: false });
     let sol = resolve(s);
     reply(cmd, SolveResult { solved: solve_report(&sol, p), param_warnings: Vec::new() })
 }
@@ -1946,7 +1947,7 @@ fn gear(s: &mut Session, p: &Value) -> Result<Value> {
         internal: bool_(p, "internal").unwrap_or(false),
         reverse: reverse(p),
     };
-    reply(cmd, couple(s, p, cmd, MotionLink { a, ia, b, ib, ratio: 1.0, offset: 0.0, coupling: Some(c), lift: Vec::new() })?)
+    reply(cmd, couple(s, p, cmd, MotionLink { a, ia, b, ib, ratio: 1.0, offset: 0.0, coupling: Some(c), lift: Vec::new(), carried_cam: false })?)
 }
 
 fn rack_pinion(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1954,7 +1955,7 @@ fn rack_pinion(s: &mut Session, p: &Value) -> Result<Value> {
     let (a, b) = joint_pair(s, p, cmd)?;
     let (ia, ib) = turn_and_travel(s, a, b, cmd)?;
     let c = Coupling::RackPinion { radius: size_param(s, p, "radius", cmd)?, reverse: reverse(p) };
-    reply(cmd, couple(s, p, cmd, MotionLink { a, ia, b, ib, ratio: 1.0, offset: 0.0, coupling: Some(c), lift: Vec::new() })?)
+    reply(cmd, couple(s, p, cmd, MotionLink { a, ia, b, ib, ratio: 1.0, offset: 0.0, coupling: Some(c), lift: Vec::new(), carried_cam: false })?)
 }
 
 fn screw(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1974,7 +1975,7 @@ fn screw(s: &mut Session, p: &Value) -> Result<Value> {
         }
     };
     let c = Coupling::Screw { pitch: size_param(s, p, "pitch", cmd)?, reverse: reverse(p) };
-    reply(cmd, couple(s, p, cmd, MotionLink { a, ia, b, ib, ratio: 1.0, offset: 0.0, coupling: Some(c), lift: Vec::new() })?)
+    reply(cmd, couple(s, p, cmd, MotionLink { a, ia, b, ib, ratio: 1.0, offset: 0.0, coupling: Some(c), lift: Vec::new(), carried_cam: false })?)
 }
 
 fn cam_cmd(s: &mut Session, p: &Value) -> Result<Value> {
@@ -2003,7 +2004,7 @@ fn cam_cmd(s: &mut Session, p: &Value) -> Result<Value> {
         None => None,
     };
     let mut c = Cam { profile: cam_profile(s, p, cmd)?, follower, tip, reverse: false };
-    let probe = MotionLink { a, ia: 0, b, ib: 0, ratio: 1.0, offset: 0.0, coupling: None, lift: Vec::new() };
+    let probe = MotionLink { a, ia: 0, b, ib: 0, ratio: 1.0, offset: 0.0, coupling: None, lift: Vec::new(), carried_cam: false };
     let st = s.model.state();
     c.reverse = cam::default_reverse(&s.doc, &st, &probe, &c).map_err(|e| bad(cmd, e.to_string()))? != bool_(p, "flip").unwrap_or(false);
     let offset = cam::follower_offset(&s.doc, &st, &probe, &c).map_err(|e| bad(cmd, e.to_string()))?;
@@ -2426,7 +2427,7 @@ fn link_info(s: &Session, st: &solidcraft_doc::ModelState, l: &MotionLink) -> Li
     let offset = if angle { l.offset.to_degrees() } else { l.offset };
     let ratio = l.ratio / ratio_scale(s, l.a, l.ia, l.b, l.ib);
     // A cam's follower follows its table, not a ratio: its travel instead.
-    let cam = matches!(l.coupling, Some(Coupling::Cam(_)));
+    let cam = l.is_cam();
     LinkInfo {
         a: l.a,
         ia: l.ia,
@@ -2441,6 +2442,7 @@ fn link_info(s: &Session, st: &solidcraft_doc::ModelState, l: &MotionLink) -> Li
             None => None,
         },
         lift: cam.then(|| lift_info(l, angle)),
+        carried_cam: l.carried_cam,
     }
 }
 
