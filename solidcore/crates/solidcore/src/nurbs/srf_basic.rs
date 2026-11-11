@@ -42,6 +42,7 @@
 //! | [`Surface::average_len`], [`AverageLen`]     | `N_SrfGetAverageLen`              |
 //! | [`Direction`]                                | `NL_UDIR` / `NL_VDIR` / `NL_UVDIR` |
 //! | [`WEIGHT_MIN`], [`WEIGHT_MAX`], [`WEIGHT_TOL`] | `NL_WMIN`, `NL_WMAX`, `NL_WTOL` |
+//! | [`Surface::displace_cpts`]                   | none                              |
 //!
 //! Deviations:
 //! - [`Surface`] owns its control net and knot arrays (upstream points at caller- or
@@ -92,7 +93,7 @@ use crate::nurbs::geom::{
     dist_pt_pt, dist_signed_pt_plane, plane_pt_normal_to_implicit, Rectangle,
 };
 use crate::nurbs::knots::{KnotVector, MAX_DEGREE};
-use crate::nurbs::math::{combine2_pts, combine4_pts, CPoint, MODEL_TOL, NOW};
+use crate::nurbs::math::{combine2_pts, combine4_pts, CPoint, MODEL_TOL, NOW, NOZ};
 
 /// Minimum valid weight (`NL_WMIN`).
 pub const WEIGHT_MIN: f64 = 1.0e-03;
@@ -107,6 +108,7 @@ const OP_NEW: &str = "nurbs::srf_basic::Surface::new";
 const MIXED_RATIONALITY: &str = "control points mix rational and non-rational";
 const OP_WITH_INDICES: &str = "nurbs::srf_basic::Surface::with_indices";
 const OP_CPT: &str = "nurbs::srf_basic::Surface::cpt";
+const OP_DISPLACE: &str = "nurbs::srf_basic::Surface::displace_cpts";
 const OP_SET_CPTS: &str = "nurbs::srf_basic::Surface::set_cpts_and_knots";
 const OP_SET_SIZE: &str = "nurbs::srf_basic::Surface::set_size_indices";
 const OP_COUNTS: &str = "nurbs::srf_basic::Surface::counts_are_valid";
@@ -447,6 +449,45 @@ impl Surface {
     #[must_use]
     pub fn cpts(&self) -> Vec<Vec<CPoint>> {
         self.rows().map(<[CPoint]>::to_vec).collect()
+    }
+
+    /// Moves control points by fractions of one displacement (not upstream): each
+    /// `((i, j), t)` of `moves` moves the Euclidean point of `Pw[i][j]` by `t * delta`, its
+    /// weight kept (a rational point's weighted coordinates move by `w t delta`). A point
+    /// listed twice moves by the sum of its fractions. All or nothing: on a refusal the net
+    /// is unchanged.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for an index past the net, a fraction or `delta` not finite, a 2D net
+    /// (no `z`), or a moved point not finite.
+    pub fn displace_cpts(&mut self, moves: &[((usize, usize), f64)], delta: Vec3) -> Result<()> {
+        if !(delta.x.is_finite() && delta.y.is_finite() && delta.z.is_finite()) {
+            return Err(invalid(OP_DISPLACE, "a displacement not finite"));
+        }
+        let mut next = self.clone();
+        for &((i, j), t) in moves {
+            if !t.is_finite() {
+                return Err(invalid(OP_DISPLACE, "a fraction not finite"));
+            }
+            let c = next.cpt_mut(i, j)?;
+            if c.z == NOZ {
+                return Err(invalid(OP_DISPLACE, "a 2D control net"));
+            }
+            let w = if c.w == NOW { 1.0 } else { c.w };
+            let moved = CPoint {
+                x: c.x + w * t * delta.x,
+                y: c.y + w * t * delta.y,
+                z: c.z + w * t * delta.z,
+                w: c.w,
+            };
+            if !(moved.x.is_finite() && moved.y.is_finite() && moved.z.is_finite()) {
+                return Err(invalid(OP_DISPLACE, "a moved point not finite"));
+            }
+            *c = moved;
+        }
+        *self = next;
+        Ok(())
     }
 
     /// The u knots `U[0..=r]` (`N_SrfGetKnots`).
@@ -1221,6 +1262,35 @@ mod tests {
             vec![0.0, 0.0, 1.0, 1.0],
         )
         .unwrap()
+    }
+
+    #[test]
+    fn displaced_points_move_by_their_fraction_of_the_delta() {
+        let mut s = bilinear();
+        let d = Vec3::new(0.0, 0.0, 2.0);
+        // a point listed twice moves by the sum of its fractions
+        s.displace_cpts(&[((1, 1), 0.5), ((0, 0), 1.0), ((1, 1), 0.25)], d)
+            .unwrap();
+        assert_eq!(s.cpt(0, 0).unwrap(), CPoint::new(0.0, 0.0, 2.0, NOW));
+        assert_eq!(s.cpt(1, 1).unwrap(), CPoint::new(1.0, 1.0, 1.5, NOW));
+        assert_eq!(s.cpt(0, 1).unwrap(), CPoint::new(0.0, 1.0, 0.0, NOW));
+        assert_eq!(s.cpt(1, 0).unwrap(), CPoint::new(1.0, 0.0, 0.0, NOW));
+        // a rational point keeps its weight; its weighted coordinates move by w t delta
+        let mut r = bilinear();
+        r.non_rat_to_rat();
+        *r.cpt_mut(1, 0).unwrap() = CPoint::new(2.0, 0.0, 0.0, 2.0);
+        r.displace_cpts(&[((1, 0), 1.0)], d).unwrap();
+        assert_eq!(r.cpt(1, 0).unwrap(), CPoint::new(2.0, 0.0, 4.0, 2.0));
+        // all or nothing: a bad move after a good one leaves the net as it was
+        let before = bilinear();
+        let mut t = before.clone();
+        assert!(t.displace_cpts(&[((0, 0), 1.0), ((2, 0), 1.0)], d).is_err());
+        assert!(t.displace_cpts(&[((0, 0), f64::NAN)], d).is_err());
+        assert!(t
+            .displace_cpts(&[((0, 0), 1.0)], Vec3::new(f64::INFINITY, 0.0, 0.0))
+            .is_err());
+        assert!(t.displace_cpts(&[((0, 0), f64::MAX)], d).is_err());
+        assert_eq!(t, before);
     }
 
     #[test]
