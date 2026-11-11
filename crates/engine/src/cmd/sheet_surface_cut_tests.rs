@@ -794,11 +794,8 @@ fn flat_outline(s: &mut Session) -> (f64, usize) {
 
 /// A 120 x 80 base (T 1, R 1, K 0.44, the rule's gap `gap`) with walls 35 high on its front
 /// (y = 0) and right (x = 120) edges, made by one flange feature, so that the gap closes their
-/// corner; then a rectangle on the XZ plane from (70, `z0`) to (119, `z1`) cut 3 either side of
-/// it, through the front wall up to the right wall's inside face: past the front wall's end. The
-/// folded sheet loses what the front wall had of the rectangle, and its flat loses that from its
-/// outline, a notch open at the wall's end, with no new cut-out.
-fn cut_past_a_walls_end(gap: f64, z0: f64, z1: f64) {
+/// corner.
+fn corner_sheet(gap: f64) -> Session {
     let mut s = session();
     rule(&mut s, "Corner", 1.0, 0.44, 1.0, gap);
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
@@ -806,17 +803,33 @@ fn cut_past_a_walls_end(gap: f64, z0: f64, z1: f64) {
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "sheet.flange", json!({"type": "base", "sketch": "Base", "body_name": "Plate"}));
     run(&mut s, "sheet.flange", json!({"edges": [[60, 0, 1], [120, 40, 1]], "height": 35}));
-    // By hand (T 1, R 1). The base lies at z 0..1; each wall's bend turns 90° round an axis
-    // R + T = 2 in from the base's edge and 2 up, so the base keeps 118 x 78 (x 0..118, y 2..80)
-    // and each bend is a quarter annulus of radii 1 and 2, (π/4)(2² − 1²) = 3π/4 mm² across, 118
-    // long on the front and 78 on the right. Each wall stands 33 high, z 2..35. The walls' inside
-    // faces are y = 1 and x = 119; the gap g lies between their inside corners, across the
-    // corner's 45° line, each set back g/√2 from the other's inside face: the front wall runs
-    // x 0..119 − g/√2 and the right wall y 1 + g/√2..80, each c = T + g/√2 short of the base's
-    // far edge (as `tray_volume` has it).
+    s
+}
+
+/// What `corner_sheet` holds, by hand (T 1, R 1), and how far short of the base's far edge each
+/// wall ends. The base lies at z 0..1; each wall's bend turns 90° round an axis R + T = 2 in from
+/// the base's edge and 2 up, so the base keeps 118 x 78 (x 0..118, y 2..80) and each bend is a
+/// quarter annulus of radii 1 and 2, (π/4)(2² − 1²) = 3π/4 mm² across, 118 long on the front and
+/// 78 on the right. Each wall stands 33 high, z 2..35. The walls' inside faces are y = 1 and
+/// x = 119; the gap g lies between their inside corners, across the corner's 45° line, each set
+/// back g/√2 from the other's inside face: the front wall runs x 0..119 − g/√2 and the right wall
+/// y 1 + g/√2..80, each c = T + g/√2 short of the base's far edge (as `tray_volume` has it). At
+/// g 0.25, c = 1.1767767 and the sheet holds 9204 + 33 · 197.6464466 + 147π = 16188.1469 mm³.
+fn corner_volume(gap: f64) -> (f64, f64) {
     let t = 1.0;
     let c = t + gap / SQRT_2;
-    let whole = t * (118.0 * 78.0 + 33.0 * ((120.0 - c) + (80.0 - c))) + 0.75 * PI * (118.0 + 78.0);
+    (t * (118.0 * 78.0 + 33.0 * ((120.0 - c) + (80.0 - c))) + 0.75 * PI * (118.0 + 78.0), c)
+}
+
+/// The corner sheet (see `corner_sheet`) with a rectangle on the XZ plane from (70, `z0`) to
+/// (119, `z1`) cut 3 either side of it, through the front wall up to the right wall's inside
+/// face: past the front wall's end. The folded sheet loses what the front wall had of the
+/// rectangle, and its flat loses that from its outline, a notch open at the wall's end, with no
+/// new cut-out.
+fn cut_past_a_walls_end(gap: f64, z0: f64, z1: f64) {
+    let mut s = corner_sheet(gap);
+    let t = 1.0;
+    let (whole, c) = corner_volume(gap);
     let v0 = exact_volume(&s);
     assert!((v0 - whole).abs() < 1e-6 * whole, "gap {gap}: {v0} vs {whole}");
     let (outline0, cutouts0) = flat_outline(&mut s);
@@ -841,7 +854,7 @@ fn cut_past_a_walls_end(gap: f64, z0: f64, z1: f64) {
 /// A notch down through a wall's top, from x 70 to the next wall's inside face, past the wall's
 /// end where one flange feature closed their corner with the rule's gap: the wall loses it to its
 /// end. At gaps 0.25 and 0.4 its reading failed in the kernel ("SMLib failed (status 1001)").
-/// By hand (see `cut_past_a_walls_end`), z 15..35: at g 0.25, c = 1.1767767, the sheet holds
+/// By hand (see `corner_volume`), z 15..35: at g 0.25, c = 1.1767767, the sheet holds
 /// 9204 + 33 · 197.6464466 + 147π = 16188.1469 and the notch is 48.8232233 x 20 = 976.4645,
 /// leaving 15211.6824 mm³; at g 0.4, c = 1.2828427, 16181.1465 less 48.7171573 x 20 = 974.3431,
 /// 15206.8034 mm³.
@@ -855,7 +868,7 @@ fn a_notch_past_a_walls_end_at_a_closed_corner_takes_it_to_the_end() {
 /// A window through a wall below its top, from x 70 to the next wall's inside face, past the
 /// wall's end where one flange feature closed their corner with the rule's gap: a notch open at
 /// the wall's end, not a hole. It failed at every gap ("a cut-out of the flat lost its piece").
-/// By hand (see `cut_past_a_walls_end`), z 12..25: at g 0.25, 16188.1469 less 48.8232233 x 13 =
+/// By hand (see `corner_volume`), z 12..25: at g 0.25, 16188.1469 less 48.8232233 x 13 =
 /// 634.7019, 15553.4450 mm³; at g 0.8, c = 1.5656854, 9204 + 33 · 196.8686292 + 147π =
 /// 16162.4789 less 48.4343146 x 13 = 629.6461, 15532.8328 mm³.
 #[test]
@@ -863,4 +876,62 @@ fn a_window_past_a_walls_end_at_a_closed_corner_is_a_notch_open_at_the_end() {
     for gap in [0.25, 0.8] {
         cut_past_a_walls_end(gap, 12.0, 25.0);
     }
+}
+
+/// The sheet's flat as the sheet keeps it, exactly (its curves, not points along them): its
+/// material's area, its outlines' area and how many cut-outs it has; and how many cuts of its own
+/// the sheet keeps, and how many holes its panels' outlines have.
+fn flat_exact(s: &Session) -> (f64, f64, usize, usize, usize) {
+    let Some(sk) = s.model.state().surface_sheets.first().cloned() else { panic!("the plate is a sheet") };
+    let material: f64 = sk.regions.iter().map(|r| r.area()).sum();
+    let outlines: f64 = sk.regions.iter().map(|r| r.outer.signed_area().abs()).sum();
+    let cutouts: usize = sk.regions.iter().map(|r| r.holes.len()).sum();
+    (material, outlines, cutouts, sk.sheet.cuts.len(), sk.sheet.panels.iter().map(|p| p.region.holes.len()).sum())
+}
+
+/// The corner sheet at the rule's gap 0.25 (see `corner_sheet`) with a round hole of radius 4
+/// drilled square through its front wall (y −3..3), its center 20 up and `inset` in from the
+/// wall's end at x = 119 − g/√2: the sheet's volume after it, and its flat before and after it
+/// (see `flat_exact`). By hand, either way: the hole lies all in the wall's flat part (x within
+/// 4 + `inset` of its end, z 16..24), so the sheet loses the disc, 16π = 50.2655 mm² through T 1,
+/// and holds 16188.1469 − 50.2655 = 16137.8813 mm³ (see `corner_volume`), and the flat's material
+/// loses 16π.
+fn round_hole_by_a_walls_end(inset: f64) -> (f64, (f64, f64, usize, usize, usize), (f64, f64, usize, usize, usize)) {
+    let gap = 0.25;
+    let mut s = corner_sheet(gap);
+    let before = flat_exact(&s);
+    let x = 119.0 - gap / SQRT_2 - inset;
+    run(&mut s, "solid.cylinder", json!({"radius": 4, "height": 6, "base": [x, -3, 20], "axis": "Y", "operation": "cut"}));
+    let (whole, _) = corner_volume(gap);
+    let (v, want) = (exact_volume(&s), whole - 16.0 * PI);
+    assert!((v - want).abs() < 1e-6 * want, "inset {inset}: {v} vs {want}");
+    let after = flat_exact(&s);
+    let lost = before.0 - after.0;
+    assert!((lost - 16.0 * PI).abs() < 1e-6 * before.0, "inset {inset}: the flat's material lost {lost} of {}", 16.0 * PI);
+    (v, before, after)
+}
+
+/// A round hole of radius 4 through a wall, its center 4 in from the wall's end where one flange
+/// feature closed the corner with the rule's gap 0.25: it touches the end, the edge the rip left,
+/// at one point, so it is a cut of the sheet's, cut from the wall's material as the rip leaves it
+/// (by hand, see `round_hole_by_a_walls_end`). The flat's outline takes it in at that point, or
+/// keeps it as a cut-out touching it there: either way the material loses 16π.
+#[test]
+fn a_round_hole_touching_a_walls_end_at_a_closed_corner_is_a_cut_of_the_sheets() {
+    let (_, before, after) = round_hole_by_a_walls_end(4.0);
+    assert_eq!((after.3, after.4), (before.3 + 1, before.4), "a cut of the sheet's, not a hole of the wall");
+    let into_outline = (before.1 - after.1 - 16.0 * PI).abs() < 1e-6 * before.1 && after.2 == before.2;
+    let cut_out = (before.1 - after.1).abs() < 1e-6 * before.1 && after.2 == before.2 + 1;
+    assert!(into_outline || cut_out, "the outline lost {} of {}, with {} cut-outs from {}", before.1 - after.1, 16.0 * PI, after.2, before.2);
+}
+
+/// The same hole 0.01 farther in, its center 4.01 from the wall's end: clear of it by 0.01, real
+/// metal, it is a hole of the wall's own outline, as any hole clear inside a panel (by hand, see
+/// `round_hole_by_a_walls_end`). The flat keeps its outline and has one more cut-out.
+#[test]
+fn a_round_hole_just_short_of_a_walls_end_at_a_closed_corner_is_a_hole_of_the_wall() {
+    let (_, before, after) = round_hole_by_a_walls_end(4.01);
+    assert_eq!((after.3, after.4), (before.3, before.4 + 1), "a hole of the wall, not a cut of the sheet's");
+    assert!((before.1 - after.1).abs() < 1e-9 * before.1, "the outline changed by {}", before.1 - after.1);
+    assert_eq!(after.2, before.2 + 1, "one more cut-out");
 }

@@ -33,6 +33,7 @@
 
 use solidcraft_geom::prelude::*;
 use std::collections::BTreeSet;
+use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use solidcore_record::brep::Loop as Bounds;
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2};
@@ -241,18 +242,392 @@ fn rip_edges(dev: &Development, p: usize) -> Vec<Seg2> {
         .collect()
 }
 
-/// Whether region `g` reaches any of `edges`: its outline crosses one or comes within `near` of
-/// it (a point of the chords of either within `near` of the other), or it holds one.
-fn reaches(g: &Region2, edges: &[Seg2], near: f64) -> bool {
-    let sag = near.max(1e-6);
-    let close = |s: &Seg2, p: Vec2| s.point_at(s.closest_param(p).clamp(0.0, 1.0)).dist(p) <= near;
-    let pts = g.outer.polyline(sag);
-    !solidcraft_develop::crossings(&g.outer.segs, edges).is_empty()
-        || edges.iter().any(|e| {
-            g.outer.contains(e.start())
-                || (&pts).into_iter().any(|p| close(e, *p))
-                || e.polyline(sag).into_iter().any(|p| g.outer.segs.iter().any(|s| close(s, p)))
+/// Whether region `g` reaches any of `edges`: its outline comes within `near` of one (crosses it,
+/// runs along it or touches it, if only at a point), or it holds one. Points within `near` are
+/// one point, as the body reads them; nothing else is close. Read exactly for each kind of curve
+/// (see [`near_each_other`]), never from points along them; refused for a pair of curves no exact
+/// form is known for.
+fn reaches(g: &Region2, edges: &[Seg2], near: f64) -> std::result::Result<bool, String> {
+    for e in edges {
+        for s in &g.outer.segs {
+            if near_each_other(e, s, near)? {
+                return Ok(true);
+            }
+        }
+    }
+    // Clear of the outline, an edge lies all inside it or all outside it.
+    Ok(edges.iter().any(|e| holds(&g.outer, e.start())))
+}
+
+/// What kind of curve `s` is, for a refusal.
+fn kind(s: &Seg2) -> String {
+    match s {
+        Seg2::Line { .. } => "line".into(),
+        Seg2::Arc { .. } => "arc".into(),
+        Seg2::Cubic { .. } => "cubic".into(),
+        Seg2::Conic { .. } => "conic".into(),
+        Seg2::Bezier { n, .. } => format!("curve of degree {n}"),
+    }
+}
+
+/// A box round `s`: its ends', an arc's circle's, a Bézier's or a conic's control points', which
+/// hold the curve (a conic's weight is above 0).
+pub(crate) fn seg_box(s: &Seg2) -> (Vec2, Vec2) {
+    let pts: Vec<Vec2> = match *s {
+        Seg2::Line { a, b } => vec![a, b],
+        Seg2::Arc { center, radius, .. } => vec![center - Vec2::new(radius, radius), center + Vec2::new(radius, radius)],
+        Seg2::Cubic { p0, p1, p2, p3 } => vec![p0, p1, p2, p3],
+        Seg2::Conic { a, apex, b, .. } => vec![a, apex, b],
+        Seg2::Bezier { n, p } => p.iter().take(usize::from(n) + 1).copied().collect(),
+    };
+    let lo = pts.iter().fold(Vec2::new(f64::INFINITY, f64::INFINITY), |m, q| Vec2::new(m.x.min(q.x), m.y.min(q.y)));
+    let hi = pts.iter().fold(Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY), |m, q| Vec2::new(m.x.max(q.x), m.y.max(q.y)));
+    (lo, hi)
+}
+
+/// Whether segments `x` and `y` come within `near` of each other, exactly: a line with any curve
+/// (see [`line_near`]), two arcs (see [`arcs_near`]). Two curves of other kinds whose boxes meet
+/// are refused: no exact form is known for them here.
+fn near_each_other(x: &Seg2, y: &Seg2, near: f64) -> std::result::Result<bool, String> {
+    let ((xl, xh), (yl, yh)) = (seg_box(x), seg_box(y));
+    if xl.x - yh.x > near || yl.x - xh.x > near || xl.y - yh.y > near || yl.y - xh.y > near {
+        return Ok(false);
+    }
+    match (x, y) {
+        (Seg2::Line { a, b }, other) | (other, Seg2::Line { a, b }) => Ok(line_near(*a, *b, other, near)),
+        (Seg2::Arc { .. }, Seg2::Arc { .. }) => Ok(arcs_near(x, y, near)),
+        _ => Err(format!("reaches the {} edge a rip left along a {} of its own: not supported yet", kind(x), kind(y))),
+    }
+}
+
+/// How far point `p` lies from the segment from `a` to `b`.
+fn to_segment(p: Vec2, a: Vec2, b: Vec2) -> f64 {
+    let d = b - a;
+    let t = if d.dot(d) > 0.0 { ((p - a).dot(d) / d.dot(d)).clamp(0.0, 1.0) } else { 0.0 };
+    p.dist(a + d * t)
+}
+
+/// Whether the way `v` from an arc's center lies within the arc, from angle `start` round
+/// `sweep` (counter-clockwise where above 0).
+fn on_arc(v: Vec2, start: f64, sweep: f64) -> bool {
+    sweep.abs() >= TAU || ((v.y.atan2(v.x) - start) * sweep.signum()).rem_euclid(TAU) <= sweep.abs()
+}
+
+/// How far point `p` lies from the arc round `center`, `radius` from it, from `start` round
+/// `sweep`, which ends at `ends`: square to it where the way to `p` lies within it, else from an
+/// end.
+fn to_arc(p: Vec2, (center, radius, start, sweep): (Vec2, f64, f64, f64), ends: [Vec2; 2]) -> f64 {
+    let v = p - center;
+    let square = if v.len() > 0.0 && on_arc(v, start, sweep) { (v.len() - radius).abs() } else { f64::INFINITY };
+    square.min(p.dist(ends[0])).min(p.dist(ends[1]))
+}
+
+/// Whether segment `s` comes within `near` of the segment from `a` to `b`: where it crosses the
+/// line within the segment, or where it comes nearest the line, or the segment, or the line's
+/// ends, at their ends. A line in closed form, an arc by its circle's center, any other curve by
+/// the roots of polynomials in its own parameter (see [`curve_line_near`]).
+fn line_near(a: Vec2, b: Vec2, s: &Seg2, near: f64) -> bool {
+    match *s {
+        Seg2::Line { a: c, b: d } => {
+            let side = |p: Vec2, q: Vec2, r: Vec2| (q - p).cross(r - p);
+            let (s1, s2, s3, s4) = (side(a, b, c), side(a, b, d), side(c, d, a), side(c, d, b));
+            let apart = |u: f64, v: f64| (u > 0.0 && v < 0.0) || (u < 0.0 && v > 0.0);
+            // Crossing, or one's end within `near` of the other (which takes in lines that
+            // overlap along one line).
+            (apart(s1, s2) && apart(s3, s4))
+                || to_segment(c, a, b) <= near
+                || to_segment(d, a, b) <= near
+                || to_segment(a, c, d) <= near
+                || to_segment(b, c, d) <= near
+        }
+        Seg2::Arc { center, radius, start, sweep } => {
+            let arc = (center, radius, start, sweep);
+            let ends = [s.start(), s.end()];
+            if ends.iter().any(|e| to_segment(*e, a, b) <= near) || [a, b].iter().any(|p| to_arc(*p, arc, ends) <= near) {
+                return true;
+            }
+            let Some(u) = (b - a).normalized() else { return false };
+            let (n, length) = (u.perp(), (b - a).len());
+            let (along, across) = ((center - a).dot(u), (center - a).dot(n));
+            if across.abs() >= radius {
+                // Clear of the line: the circle's point nearest it, square to it from the center.
+                return across.abs() - radius <= near && (0.0..=length).contains(&along) && on_arc(n * -across.signum(), start, sweep);
+            }
+            // The line cuts the circle: where.
+            let half = (radius * radius - across * across).sqrt();
+            [along - half, along + half].iter().any(|f| (0.0..=length).contains(f) && on_arc(a + u * *f - center, start, sweep))
+        }
+        _ => rational(s).is_some_and(|curve| curve_line_near(a, b, s, &curve, near)),
+    }
+}
+
+/// Whether arcs `x` and `y` come within `near` of each other: where their circles cross, within
+/// both; where they come nearest, on the line through their centers; or at their ends.
+fn arcs_near(x: &Seg2, y: &Seg2, near: f64) -> bool {
+    let (Seg2::Arc { center: c1, radius: r1, start: s1, sweep: w1 }, Seg2::Arc { center: c2, radius: r2, start: s2, sweep: w2 }) = (*x, *y) else {
+        return false;
+    };
+    let (e1, e2) = ([x.start(), x.end()], [y.start(), y.end()]);
+    if e1.iter().any(|p| to_arc(*p, (c2, r2, s2, w2), e2) <= near) || e2.iter().any(|p| to_arc(*p, (c1, r1, s1, w1), e1) <= near) {
+        return true;
+    }
+    // About one center, every point of either is as far from the other: their ends answer.
+    let Some(u) = (c2 - c1).normalized() else { return false };
+    let d = (c2 - c1).len();
+    if d <= r1 + r2 && d >= (r1 - r2).abs() {
+        let along = (d * d + r1 * r1 - r2 * r2) / (2.0 * d);
+        let half = (r1 * r1 - along * along).max(0.0).sqrt();
+        for side in [-1.0, 1.0] {
+            let p = c1 + u * along + u.perp() * (half * side);
+            if on_arc(p - c1, s1, w1) && on_arc(p - c2, s2, w2) {
+                return true;
+            }
+        }
+    }
+    [(1.0, 1.0), (1.0, -1.0), (-1.0, 1.0), (-1.0, -1.0)]
+        .iter()
+        .any(|(k1, k2)| (c1 + u * (r1 * k1)).dist(c2 + u * (r2 * k2)) <= near && on_arc(u * *k1, s1, w1) && on_arc(u * *k2, s2, w2))
+}
+
+/// A polynomial's coefficients, of 1, t, t², ….
+type Poly = Vec<f64>;
+
+fn eval(c: &[f64], t: f64) -> f64 {
+    c.iter().rev().fold(0.0, |acc, k| acc * t + k)
+}
+
+/// `a` + `k` `b`.
+fn plus(a: &[f64], b: &[f64], k: f64) -> Poly {
+    (0..a.len().max(b.len())).map(|i| a.get(i).copied().unwrap_or(0.0) + k * b.get(i).copied().unwrap_or(0.0)).collect()
+}
+
+fn times(a: &[f64], b: &[f64]) -> Poly {
+    let mut out = vec![0.0; (a.len() + b.len()).saturating_sub(1)];
+    for (i, x) in a.iter().enumerate() {
+        for (j, y) in b.iter().enumerate() {
+            if let Some(o) = out.get_mut(i + j) {
+                *o += x * y;
+            }
+        }
+    }
+    out
+}
+
+fn derivative(c: &[f64]) -> Poly {
+    c.iter().enumerate().skip(1).map(|(i, k)| k * i as f64).collect()
+}
+
+/// The polynomial in t of a Bézier's coordinate, from its control values `ctrl`.
+fn power_basis(ctrl: &[f64]) -> Poly {
+    let choose = |n: usize, k: usize| (0..k).fold(1.0, |acc, i| acc * (n - i) as f64 / (i + 1) as f64);
+    let n = ctrl.len().saturating_sub(1);
+    (0..=n)
+        .map(|k| {
+            let sign = |i: usize| if (k - i) % 2 == 0 { 1.0 } else { -1.0 };
+            let sum: f64 = (0..=k).map(|i| sign(i) * choose(k, i) * ctrl.get(i).copied().unwrap_or(0.0)).sum();
+            choose(n, k) * sum
         })
+        .collect()
+}
+
+/// A Bézier or a conic as polynomials in its own parameter: its point is (x, y) / w, w being 1
+/// but for a conic. None for an arc.
+fn rational(s: &Seg2) -> Option<[Poly; 3]> {
+    let (pts, weights): (Vec<Vec2>, Vec<f64>) = match *s {
+        Seg2::Line { a, b } => (vec![a, b], vec![1.0; 2]),
+        Seg2::Cubic { p0, p1, p2, p3 } => (vec![p0, p1, p2, p3], vec![1.0; 4]),
+        Seg2::Conic { a, apex, b, w } => (vec![a, apex, b], vec![1.0, w, 1.0]),
+        Seg2::Bezier { n, p } => {
+            let pts: Vec<Vec2> = p.iter().take(usize::from(n) + 1).copied().collect();
+            let k = pts.len();
+            (pts, vec![1.0; k])
+        }
+        Seg2::Arc { .. } => return None,
+    };
+    let weighted = |f: fn(&Vec2) -> f64| power_basis(&pts.iter().zip(&weights).map(|(p, w)| f(p) * w).collect::<Vec<f64>>());
+    Some([weighted(|p| p.x), weighted(|p| p.y), power_basis(&weights)])
+}
+
+/// The point of `curve` (see [`rational`]) at `t`, its ends exactly those of `s`.
+fn curve_at(s: &Seg2, [x, y, w]: &[Poly; 3], t: f64) -> Vec2 {
+    if t <= 0.0 {
+        return s.start();
+    }
+    if t >= 1.0 {
+        return s.end();
+    }
+    let k = eval(w, t);
+    Vec2::new(eval(x, t) / k, eval(y, t) / k)
+}
+
+/// The real roots in [0, 1] of the polynomial `c`, each to the last bit: between the roots of its
+/// derivative it only rises or only falls, so each stretch holds one root at most, found by
+/// halving it where its ends differ in sign. A root where it touches 0 without crossing is a root
+/// of its derivative, which callers read too.
+fn roots01(c: &[f64]) -> Vec<f64> {
+    let n = c.iter().rposition(|k| *k != 0.0).map_or(0, |i| i + 1);
+    let c = c.get(..n).unwrap_or_default();
+    match c {
+        [] | [_] => Vec::new(),
+        [c0, c1] => {
+            let t = -c0 / c1;
+            if (0.0..=1.0).contains(&t) { vec![t] } else { Vec::new() }
+        }
+        _ => {
+            let mut stops = vec![0.0];
+            stops.extend(roots01(&derivative(c)));
+            stops.push(1.0);
+            stops.sort_by(f64::total_cmp);
+            let mut out = Vec::new();
+            for w in stops.windows(2) {
+                let &[mut lo, mut hi] = w else { continue };
+                let (flo, fhi) = (eval(c, lo), eval(c, hi));
+                if flo == 0.0 || fhi == 0.0 {
+                    out.push(if flo == 0.0 { lo } else { hi });
+                    continue;
+                }
+                if (flo < 0.0) == (fhi < 0.0) {
+                    continue;
+                }
+                loop {
+                    let mid = 0.5 * (lo + hi);
+                    if mid <= lo || mid >= hi {
+                        break;
+                    }
+                    let f = eval(c, mid);
+                    if f == 0.0 {
+                        (lo, hi) = (mid, mid);
+                        break;
+                    }
+                    if (f < 0.0) == (flo < 0.0) {
+                        lo = mid;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                out.push(0.5 * (lo + hi));
+            }
+            out
+        }
+    }
+}
+
+/// Whether the Bézier or conic `s`, as `curve` (see [`rational`]), comes within `near` of the
+/// segment from `a` to `b`: at its ends; where it comes nearest either end of the segment (the
+/// roots of its distance's derivative); where it crosses the segment's line within the segment,
+/// or comes nearest the line there (the roots of its signed distance from the line, and of that
+/// distance's derivative): every polynomial in the curve's own parameter.
+fn curve_line_near(a: Vec2, b: Vec2, s: &Seg2, curve: &[Poly; 3], near: f64) -> bool {
+    let [x, y, w] = curve;
+    let at = |t: f64| curve_at(s, curve, t);
+    if [0.0, 1.0].iter().any(|t| to_segment(at(*t), a, b) <= near) {
+        return true;
+    }
+    for q in [a, b] {
+        // |p − q|² is |m|² / w², m = (x − q.x w, y − q.y w): its derivative is 0 where
+        // (m · m′) w − |m|² w′ is.
+        let (mx, my) = (plus(x, w, -q.x), plus(y, w, -q.y));
+        let dot = plus(&times(&mx, &derivative(&mx)), &times(&my, &derivative(&my)), 1.0);
+        let square = plus(&times(&mx, &mx), &times(&my, &my), 1.0);
+        let turns = plus(&times(&dot, w), &times(&square, &derivative(w)), -1.0);
+        if roots01(&turns).into_iter().any(|t| at(t).dist(q) <= near) {
+            return true;
+        }
+    }
+    let Some(u) = (b - a).normalized() else { return false };
+    let (n, length) = (u.perp(), (b - a).len());
+    // The signed distance from the line is h / w, h = (x − a.x w) n.x + (y − a.y w) n.y; its
+    // derivative is 0 where h′ w − h w′ is.
+    let h = plus(&plus(x, w, -a.x).iter().map(|k| k * n.x).collect::<Poly>(), &plus(y, w, -a.y), n.y);
+    let turns = plus(&times(&derivative(&h), w), &times(&h, &derivative(w)), -1.0);
+    roots01(&h).into_iter().chain(roots01(&turns)).any(|t| {
+        let p = at(t);
+        (0.0..=length).contains(&(p - a).dot(u)) && (p - a).dot(n).abs() <= near
+    })
+}
+
+/// Whether point `p` lies inside loop `l`, exactly: a ray from it toward +x crosses the loop an
+/// odd number of times. Each segment is taken in pieces along which y only rises or only falls,
+/// each holding its lower end and not its upper one, so that a ray through a corner counts once.
+pub(crate) fn holds(l: &Loop2, p: Vec2) -> bool {
+    l.segs.iter().map(|s| ray_crossings(s, p)).sum::<usize>() % 2 == 1
+}
+
+/// How many times a ray from `p` toward +x crosses segment `s` (see [`holds`]).
+fn ray_crossings(s: &Seg2, p: Vec2) -> usize {
+    let counts = |y0: f64, y1: f64| (y0 > p.y) != (y1 > p.y);
+    match *s {
+        Seg2::Line { a, b } => usize::from(counts(a.y, b.y) && a.x + (p.y - a.y) * (b.x - a.x) / (b.y - a.y) > p.x),
+        Seg2::Arc { center, radius, start, sweep } => {
+            // Pieces between the arc's ends and its circle's top and bottom.
+            let (lo, hi) = (start.min(start + sweep), start.max(start + sweep));
+            let mut stops = vec![0.0];
+            let mut turn = FRAC_PI_2 + PI * ((lo - FRAC_PI_2) / PI).ceil();
+            while turn < hi {
+                if turn > lo {
+                    stops.push((turn - start) / sweep);
+                }
+                turn += PI;
+            }
+            stops.push(1.0);
+            stops.sort_by(f64::total_cmp);
+            let y_at = |t: f64| match t {
+                t if t <= 0.0 => s.start().y,
+                t if t >= 1.0 => s.end().y,
+                t => center.y + radius * (start + sweep * t).sin(),
+            };
+            stops
+                .windows(2)
+                .filter(|w| {
+                    let &[t0, t1] = *w else { return false };
+                    // Along a piece the way across from the center keeps its side: x is on it.
+                    let side = (start + sweep * 0.5 * (t0 + t1)).cos().signum();
+                    let x = center.x + side * (radius * radius - (p.y - center.y).powi(2)).max(0.0).sqrt();
+                    counts(y_at(t0), y_at(t1)) && x > p.x
+                })
+                .count()
+        }
+        _ => {
+            let Some(curve) = rational(s) else { return 0 };
+            let [x, y, w] = &curve;
+            // Pieces between the curve's ends and where y turns: (y / w)′ is 0 where y′ w − y w′ is.
+            let mut stops = vec![0.0];
+            stops.extend(roots01(&plus(&times(&derivative(y), w), &times(y, &derivative(w)), -1.0)));
+            stops.push(1.0);
+            stops.sort_by(f64::total_cmp);
+            let level = plus(y, w, -p.y);
+            stops
+                .windows(2)
+                .filter(|win| {
+                    let &[t0, t1] = *win else { return false };
+                    let (y0, y1) = (curve_at(s, &curve, t0).y, curve_at(s, &curve, t1).y);
+                    if !counts(y0, y1) {
+                        return false;
+                    }
+                    // y only rises or only falls along the piece: one root of y − p.y w in it, at
+                    // its lower end where it holds that.
+                    if eval(&level, t0) == 0.0 {
+                        return curve_at(s, &curve, t0).x > p.x;
+                    }
+                    let (mut lo, mut hi) = (t0, t1);
+                    let below = eval(&level, lo) < 0.0;
+                    loop {
+                        let mid = 0.5 * (lo + hi);
+                        if mid <= lo || mid >= hi {
+                            break;
+                        }
+                        if (eval(&level, mid) < 0.0) == below {
+                            lo = mid;
+                        } else {
+                            hi = mid;
+                        }
+                    }
+                    let t = 0.5 * (lo + hi);
+                    eval(x, t) / eval(w, t) > p.x
+                })
+                .count()
+        }
+    }
 }
 
 /// A panel's frame in its body: where the fold puts it, or in the flat, where the development
@@ -768,8 +1143,15 @@ fn onto_panels(sk: &SurfaceSheet, was: &Body, now: &Body, walls: Option<&[usize]
             // cut of the sheet's instead, in the panel's chart, cut from the panel's material as
             // the rips leave it (see [`crate::sheet_surface::pieces`]).
             let rips = rip_edges(&dev, p);
-            let (ripped, through): (Vec<Region2>, Vec<Region2>) = through.into_iter().partition(|g| reaches(g, &rips, tol));
-            out.sheet.cuts.extend(ripped.into_iter().map(|region| Cut { panel: p, region }));
+            let mut own = Vec::with_capacity(through.len());
+            for g in through {
+                if reaches(&g, &rips, tol)? {
+                    out.sheet.cuts.push(Cut { panel: p, region: g });
+                } else {
+                    own.push(g);
+                }
+            }
+            let through = own;
             if !through.is_empty() {
                 match left(&panel.region, &through, &holders(sk, p), tol)? {
                     Left::Kept(kept, parted) => {
@@ -977,4 +1359,95 @@ fn bounded(q: &Query, frame: &Rigid3, group: &[usize], gone: &[Region2], near: f
         })
         .collect();
     (0..gone.len()).filter(|k| gone.get(*k).is_some_and(|g| middles.iter().any(|m| outline_gap(g, *m) <= near))).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::f64::consts::{PI, SQRT_2};
+
+    use solidcore_record::{Loop2, Region2, Seg2, Vec2};
+    use solidcraft_geom::prelude::*;
+
+    use super::reaches;
+
+    /// How near points are one, as a body reads them.
+    const NEAR: f64 = 1e-6;
+
+    /// A rip's edge as a wall's end has it in the wall's chart: x = 1, y 0..−34.
+    fn edge() -> Seg2 {
+        Seg2::Line { a: Vec2::new(1.0, 0.0), b: Vec2::new(1.0, -34.0) }
+    }
+
+    fn reached(g: &Region2) -> bool {
+        match reaches(g, &[edge()], NEAR) {
+            Ok(r) => r,
+            Err(e) => panic!("{e}"),
+        }
+    }
+
+    fn region(segs: Vec<Seg2>) -> Region2 {
+        Region2 { outer: Loop2 { segs }.ccw(), holes: Vec::new() }
+    }
+
+    fn polygon(pts: &[(f64, f64)]) -> Region2 {
+        let pts: Vec<Vec2> = pts.iter().map(|(x, y)| Vec2::new(*x, *y)).collect();
+        Region2 { outer: Loop2::polygon(&pts).ccw(), holes: Vec::new() }
+    }
+
+    /// Lines: along the edge, across it, touching it at a corner, or round it whole, a region
+    /// reaches it; 0.01 short of it, it does not.
+    #[test]
+    fn lines_reach_an_edge_along_it_across_it_at_a_corner_or_round_it() {
+        assert!(reached(&polygon(&[(1.0, -11.0), (50.0, -11.0), (50.0, -24.0), (1.0, -24.0)])));
+        assert!(!reached(&polygon(&[(1.01, -11.0), (50.0, -11.0), (50.0, -24.0), (1.01, -24.0)])));
+        assert!(reached(&polygon(&[(0.5, -11.0), (50.0, -11.0), (50.0, -24.0), (0.5, -24.0)])));
+        assert!(reached(&polygon(&[(1.0, -10.0), (5.0, -8.0), (5.0, -12.0)])));
+        assert!(reached(&polygon(&[(-5.0, 5.0), (5.0, 5.0), (5.0, -40.0), (-5.0, -40.0)])));
+        assert!(!reached(&polygon(&[(2.0, 5.0), (5.0, 5.0), (5.0, -40.0), (2.0, -40.0)])));
+    }
+
+    /// A circle of radius 4 whose center lies 4 from the edge touches it at one point, as one arc
+    /// or two; 4.01 from it, it is clear. Half of it turned away from the edge is clear too.
+    #[test]
+    fn an_arc_reaches_an_edge_where_it_touches_it() {
+        let arc = |x: f64, start: f64, sweep: f64| Seg2::Arc { center: Vec2::new(x, -19.0), radius: 4.0, start, sweep };
+        for x in [5.0, 5.01] {
+            let whole = region(vec![arc(x, 0.0, 2.0 * PI)]);
+            let halves = region(vec![arc(x, 0.5 * PI, PI), arc(x, 1.5 * PI, PI)]);
+            assert_eq!((reached(&whole), reached(&halves)), (x == 5.0, x == 5.0), "center {x}");
+        }
+        let away = region(vec![arc(5.0, -0.5 * PI, PI), Seg2::Line { a: Vec2::new(5.0, -15.0), b: Vec2::new(5.0, -23.0) }]);
+        assert!(!reached(&away));
+    }
+
+    /// A cubic that dips to the edge, x = 1 + (2t − 1)² (its control values 2, 2/3, 2/3, 2), and a
+    /// conic that is a quarter of a circle of radius 4 about (5, −19) round its point nearest the
+    /// edge: each touches it at one point, inside the curve; moved 0.01 away, each is clear.
+    #[test]
+    fn a_cubic_and_a_conic_reach_an_edge_where_they_touch_it() {
+        for off in [0.0, 0.01] {
+            let p = |x: f64, y: f64| Vec2::new(x + off, y);
+            let dip = Seg2::Cubic { p0: p(2.0, -10.0), p1: p(2.0 / 3.0, -10.0 - 4.0 / 3.0), p2: p(2.0 / 3.0, -10.0 - 8.0 / 3.0), p3: p(2.0, -14.0) };
+            let lines = [p(2.0, -14.0), p(6.0, -14.0), p(6.0, -10.0), p(2.0, -10.0)];
+            let mut segs = vec![dip];
+            segs.extend(lines.windows(2).map(|w| Seg2::Line { a: w[0], b: w[1] }));
+            assert_eq!(reached(&region(segs)), off == 0.0, "cubic {off}");
+            let r = 4.0 / SQRT_2;
+            let (a, b) = (p(5.0 - r, -19.0 + r), p(5.0 - r, -19.0 - r));
+            let quarter = Seg2::Conic { a, apex: p(5.0 - 4.0 * SQRT_2, -19.0), b, w: 0.5 * SQRT_2 };
+            assert_eq!(reached(&region(vec![quarter, Seg2::Line { a: b, b: a }])), off == 0.0, "conic {off}");
+        }
+    }
+
+    /// A curved cut that comes near a rip's curved edge has no exact reading here: refused.
+    #[test]
+    fn a_curve_near_a_curved_rip_edge_is_refused() {
+        let curved = Seg2::Cubic { p0: Vec2::new(1.0, 0.0), p1: Vec2::new(0.5, -10.0), p2: Vec2::new(0.5, -24.0), p3: Vec2::new(1.0, -34.0) };
+        let g = region(vec![
+            Seg2::Cubic { p0: Vec2::new(2.0, -10.0), p1: Vec2::new(0.0, -11.0), p2: Vec2::new(0.0, -13.0), p3: Vec2::new(2.0, -14.0) },
+            Seg2::Line { a: Vec2::new(2.0, -14.0), b: Vec2::new(2.0, -10.0) },
+        ]);
+        let e = reaches(&g, &[curved], NEAR).err().unwrap_or_default();
+        assert!(e.contains("not supported yet"), "{e}");
+    }
 }
