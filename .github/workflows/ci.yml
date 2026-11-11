@@ -1093,8 +1093,11 @@ jobs:
             echo "Waiting for $pending run(s) of this commit to finish."
             sleep 30
           done
-          # Runs with every job skipped (labels, before this job reported) are not a result.
-          latest=$(jq -r '[.[] | select(.status == "completed" and .conclusion != "skipped")]
+          # Only a run that passed or failed is a result: runs with every job skipped (labels, before
+          # this job reported) are not, and neither are cancelled ones (a run replaced by a newer push
+          # or label, or a fork run that waited for approval and was then cancelled, which has no
+          # jobs). A cancelled run as "latest" failed this check for good and blocked a PR that passed.
+          latest=$(jq -r '[.[] | select(.status == "completed" and (.conclusion == "success" or .conclusion == "failure"))]
             | sort_by(.created_at) | last | "\(.conclusion) \(.html_url)"' <<<"$runs")
           echo "The commit's latest run: $latest"
           echo "A label started this run: \`ci\` repeats the commit's latest result ($latest)." >> "$GITHUB_STEP_SUMMARY"
