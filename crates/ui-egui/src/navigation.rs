@@ -930,7 +930,12 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
                     let press = ui.input(|i| i.pointer.press_origin());
                     let anchor = model_zoom_anchor(app, rect, press.or(hover), caps.orbit);
                     let sign = if crate::prefs::nav_preset(&app.preferences.nav).reverse_drag_zoom { -1.0 } else { 1.0 };
-                    app.cam.zoom_at((f64::from(delta.y) * 0.01 * sign * crate::prefs::zoom_sign(app)).exp(), anchor);
+                    let horizontal = app.preferences.nav == "maya"
+                        && app.preferences.maya_horizontal_zoom
+                        && button == Some(crate::prefs::NavButton::Right)
+                        && mods.alt;
+                    let movement = if horizontal { -delta.x } else { delta.y };
+                    app.cam.zoom_at((f64::from(movement) * 0.01 * sign * crate::prefs::zoom_sign(app)).exp(), anchor);
                 }
                 _ => {}
             }
@@ -2172,7 +2177,8 @@ mod tests {
                                 out.textures_delta.clear();
                             };
                             let from = pos2(200.0, 300.0);
-                            let to = from + vec2(0.0, dy);
+                            let horizontal = preset == "maya" && !tool;
+                            let to = from + if horizontal { vec2(dy, 0.0) } else { vec2(0.0, dy) };
                             frame(vec![Event::PointerMoved(from)]);
                             frame(vec![Event::PointerButton { pos: from, button, pressed: true, modifiers: mods }]);
                             frame(vec![Event::PointerMoved(to)]);
@@ -2181,7 +2187,7 @@ mod tests {
                             assert!(app.cam.is_valid());
                             assert_ne!(app.cam.distance, before.distance, "the drag must zoom");
                             // Creo zooms in on a downward drag by default; the preference reverses that too.
-                            let default_zooms_out = if preset == "creo" { dy < 0.0 } else { dy > 0.0 };
+                            let default_zooms_out = if preset == "creo" || horizontal { dy < 0.0 } else { dy > 0.0 };
                             assert_eq!(
                                 app.cam.distance > before.distance,
                                 default_zooms_out != reverse,
@@ -2746,6 +2752,86 @@ mod tests {
             assert_eq!(turned, turns, "{caps:?}");
             assert_eq!(app.cam.target != before.target, !turns, "{caps:?}: pans where it doesn't turn");
         }
+    }
+
+    #[test]
+    fn maya_right_drag_zooms_horizontally_without_turning_or_editing() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"nav":"maya"}));
+        h.settle();
+        let before = h.app.cam;
+        let at = h.app.viewport.rect.expect("viewport").center();
+        let drag = |h: &mut crate::scenario::Harness, dx: f32, dy: f32| {
+            h.call("ui.drag", json!({"x0":at.x,"y0":at.y,"x1":at.x+dx,"y1":at.y+dy,"button":"right","alt":true,"steps":20}));
+        };
+        drag(&mut h, 60.0, 0.0);
+        assert!(h.app.cam.distance < before.distance, "Alt+right drag to the right zooms in");
+        drag(&mut h, -60.0, 0.0);
+        assert!((h.app.cam.distance - before.distance).abs() < 1e-6, "left reverses the zoom");
+        drag(&mut h, 0.0, 60.0);
+        assert!((h.app.cam.distance - before.distance).abs() < 1e-6, "vertical movement does not zoom");
+        assert_eq!(h.app.cam.target, before.target);
+        assert_eq!(h.app.cam.back(), before.back());
+        assert!(h.app.tool.is_none() && h.app.dialog.is_none());
+        assert!(h.app.session.undo.is_empty() && h.app.session.selection.is_empty());
+    }
+
+    #[test]
+    fn maya_zoom_axis_keeps_other_presets_and_the_zoom_tool_vertical() {
+        use crate::prefs::{NAV_PRESETS, NavButton};
+        use crate::viewport::NavMode;
+        use serde_json::json;
+        for preset in NAV_PRESETS {
+            for binding in preset.bindings.iter().filter(|binding| binding.mode == NavMode::Zoom) {
+                for horizontal in [false, true] {
+                    let mut h = crate::scenario::Harness::new();
+                    h.call("ui.prefs", json!({"nav":preset.id,"maya_horizontal_zoom":horizontal}));
+                    let at = h.app.viewport.rect.expect("viewport").center();
+                    let before = h.app.cam;
+                    let button = match binding.button {
+                        NavButton::Left => "left",
+                        NavButton::Middle => "middle",
+                        NavButton::Right => "right",
+                    };
+                    let drag = |h: &mut crate::scenario::Harness, dx: f32, dy: f32| {
+                        let out = h.call(
+                            "ui.drag",
+                            json!({"x0":at.x,"y0":at.y,"x1":at.x+dx,"y1":at.y+dy,
+                            "button":button,"alt":binding.keys.alt,"ctrl":binding.keys.ctrl,"shift":binding.keys.shift,"steps":20}),
+                        );
+                        assert_eq!(out["ok"], true, "{out}");
+                    };
+                    let uses_x = preset.id == "maya" && horizontal;
+                    drag(&mut h, 40.0, 0.0);
+                    if uses_x {
+                        assert!(h.app.cam.distance < before.distance);
+                    } else {
+                        assert_eq!(h.app.cam.distance, before.distance, "{} ignores horizontal zoom", preset.id);
+                    }
+                    h.app.cam = before;
+                    drag(&mut h, 0.0, 40.0);
+                    if uses_x {
+                        assert_eq!(h.app.cam.distance, before.distance, "Maya ignores vertical zoom");
+                    } else {
+                        assert_eq!(h.app.cam.distance < before.distance, preset.reverse_drag_zoom, "{} keeps its vertical direction", preset.id);
+                    }
+                    assert_eq!(h.app.cam.target, before.target);
+                    assert_eq!(h.app.cam.back(), before.back());
+                    assert!(h.app.session.undo.is_empty());
+                }
+            }
+        }
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"nav":"maya"}));
+        h.app.run("view.tool", json!({"tool":"zoom"})).unwrap();
+        h.settle();
+        let at = h.app.viewport.rect.expect("viewport").center();
+        let before = h.app.cam;
+        h.call("ui.drag", json!({"x0":at.x,"y0":at.y,"x1":at.x+40.0,"y1":at.y,"steps":20}));
+        assert_eq!(h.app.cam.distance, before.distance, "the fixed Zoom tool ignores horizontal motion");
+        h.call("ui.drag", json!({"x0":at.x,"y0":at.y,"x1":at.x,"y1":at.y+40.0,"steps":20}));
+        assert!(h.app.cam.distance > before.distance, "the fixed Zoom tool keeps vertical zoom");
     }
 
     /// Surface anchoring for the cap, bridge and drag-zoom is opt-in (#7435), independent of

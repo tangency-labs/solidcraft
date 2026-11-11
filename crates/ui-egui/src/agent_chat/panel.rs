@@ -1598,6 +1598,8 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
 
 #[cfg(not(target_arch = "wasm32"))]
 fn transcript_body(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) -> f32 {
+    // Select All and Copy of the whole conversation, read before its labels see the keys.
+    super::select_all::handle(chat, ui.ctx());
     let conversation = egui::ScrollArea::vertical()
         .id_salt("sc_agent_chat_scroll")
         .min_scrolled_height(0.0)
@@ -1734,7 +1736,7 @@ fn switcher(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
                             handles: "agent_chat:model",
                             current: &cur,
                             current_value: &chat.model,
-                            hint: tr("ui.agent_chat_model_search"),
+                            hint: super::model_search_hint(custom),
                             choices: &choices,
                             custom,
                             note: chat.models_note.as_deref(),
@@ -1912,7 +1914,7 @@ fn config_select(chat: &mut AgentChat, ui: &mut egui::Ui, option: &acp::ConfigOp
                         handles: &handles,
                         current: &displayed,
                         current_value: &option.current_value,
-                        hint: tr("ui.agent_chat_model_search"),
+                        hint: super::model_search_hint(true),
                         choices: &choices,
                         custom: true,
                         note: None,
@@ -2218,6 +2220,24 @@ fn copy_message_button(ui: &mut egui::Ui, n: usize, text: &str) {
     }
 }
 
+/// When a message or tool call came in, small and dim ("3 min ago"); its exact time on hover.
+#[cfg(not(target_arch = "wasm32"))]
+fn time_label(ui: &mut egui::Ui, n: usize, stamp: &times::Stamp, now: f64) {
+    let (Some(ago), Some(exact)) = (times::ago(stamp, now), times::exact(stamp)) else { return };
+    let t = Tokens::get();
+    let r = ui.add(egui::Label::new(RichText::new(ago).size(t.font_small).color(t.text_dim)).selectable(false)).backing_on_hover_text(exact);
+    crate::scenario::publish_rect(&format!("agent_chat:time:{n}"), r.rect);
+}
+
+/// After the last item of an answer: how long it took ("Answered in 23 min").
+#[cfg(not(target_arch = "wasm32"))]
+fn took_line(ui: &mut egui::Ui, stamp: &times::Stamp) {
+    if let Some(text) = times::took(stamp) {
+        let t = Tokens::get();
+        ui.label(RichText::new(text).size(t.font_small).color(t.text_dim));
+    }
+}
+
 /// The right-click menu of one transcript message (#10675): the same single action as the
 /// visible button, on the whole message area, beside the composer's own text menu.
 /// The area stays hover-only so partial text selection keeps working, so the menu opens on a
@@ -2295,7 +2315,11 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
     let mut hovered: Option<Hovered> = None;
     let current = &view.revision;
     let units = summary::Units { units: &view.units, decimals: view.decimals };
+    let all_selected = chat.all_selected;
+    let now = crate::now_ms();
+    let busy = chat.state() == State::Busy;
     for (n, item) in chat.items.iter().enumerate() {
+        let stamp = chat.stamp(n);
         match item {
             Item::User { text, image, pictures, context, files } => {
                 // A picture-only prompt has no text to copy: no action rather than an empty copy (#10675).
@@ -2304,7 +2328,7 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
                 ui_kit::assistant_bubble(ui, |ui| {
                     let gone = chat.gone.sent.get(&n).map_or(&[][..], Vec::as_slice);
                     if !text.is_empty()
-                        && let Some(group) = user_text(ui, text, context, gone, &format!("agent_chat:sent:{n}"))
+                        && let Some(group) = user_text(ui, text, context, gone, &format!("agent_chat:sent:{n}"), all_selected)
                     {
                         hovered = Some(Hovered::Group { sent: true, at: n, group });
                     }
@@ -2324,10 +2348,15 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
                         hovered = Some(Hovered::Item { sent: true, at: n, item: *item });
                     }
                     files_line(ui, files.iter().map(String::as_str));
-                    if copyable {
+                    if copyable || stamp.known() {
                         // Top-aligned: a row centred across its height takes all the height left in
                         // the conversation's view, which stretched a prompt near the top.
-                        ui.with_layout(Layout::right_to_left(Align::Min), |ui| copy_message_button(ui, n, text));
+                        ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                            if copyable {
+                                copy_message_button(ui, n, text);
+                            }
+                            time_label(ui, n, &stamp, now);
+                        });
                     }
                 });
                 if copyable {
@@ -2338,12 +2367,15 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
             }
             Item::Agent { thought, text } => {
                 if *thought {
-                    super::markdown_view::selectable(ui, egui::Label::new(RichText::new(text).italics().color(t.text_dim)).wrap());
+                    super::markdown_view::selectable(ui, egui::Label::new(RichText::new(text).italics().color(t.text_dim)).wrap(), false);
                 } else {
                     let before = ui.cursor();
-                    ui_kit::assistant_prose(ui, |ui| super::markdown_view::show(ui, n, text));
+                    ui_kit::assistant_prose(ui, |ui| super::markdown_view::show(ui, n, text, all_selected));
                     if !text.is_empty() {
-                        copy_message_button(ui, n, text);
+                        ui.horizontal(|ui| {
+                            copy_message_button(ui, n, text);
+                            time_label(ui, n, &stamp, now);
+                        });
                         let drawn = egui::Rect::from_x_y_ranges(before.x_range(), before.min.y..=ui.cursor().min.y);
                         let resp = ui.interact(drawn, Id::unique(("agent_chat_msg", n)), Sense::hover());
                         copy_message_menu(ui, &resp, n, text);
@@ -2354,9 +2386,10 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
                 if n > 0 && matches!(chat.items.get(n - 1), Some(Item::Tool { .. })) {
                     continue;
                 }
+                let cards = chat.items.iter().skip(n).take_while(|next| matches!(next, Item::Tool { .. })).count();
                 ui_kit::assistant_tool_frame(ui, false, |ui| {
                     ui.spacing_mut().item_spacing.y = Tokens::get().space_2;
-                    for (offset, next) in chat.items.iter().skip(n).take_while(|next| matches!(next, Item::Tool { .. })).enumerate() {
+                    for (offset, next) in chat.items.iter().skip(n).take(cards).enumerate() {
                         if let Item::Tool { title, kind, status, input, output, .. } = next {
                             let words = summary::summary(title, input.as_ref(), output.as_deref(), *status == Some(ToolStatus::Completed), units);
                             let call = ToolCall {
@@ -2366,11 +2399,19 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
                                 status: *status,
                                 input: input.as_ref(),
                                 output: output.as_deref(),
+                                stamp: chat.stamp(n + offset),
+                                now,
+                                live: busy,
                             };
                             tool_card(ui, n + offset, &call);
                         }
                     }
                 });
+                // The answer's time goes after the cards when they end it.
+                for k in n..n + cards {
+                    took_line(ui, &chat.stamp(k));
+                }
+                continue;
             }
             Item::Plan(entries) => {
                 for (c, s) in entries {
@@ -2419,7 +2460,7 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
             Item::Approval { id, title, tool, answer: given } => {
                 ui_kit::assistant_approval(ui, tr("ui.agent_chat_approval"), |ui| {
                     ui_kit::assistant_tool_detail(ui, |ui| {
-                        super::markdown_view::selectable(ui, egui::Label::new(RichText::new(title).monospace().size(t.font_caption)).wrap());
+                        super::markdown_view::selectable(ui, egui::Label::new(RichText::new(title).monospace().size(t.font_caption)).wrap(), false);
                     });
                     match given {
                         Some(true) => {
@@ -2477,11 +2518,25 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
                 });
             }
         }
+        took_line(ui, &stamp);
+    }
+    // While the agent works with no tool running, how long since it last said or did something
+    // (a running tool's card counts for itself).
+    if let Some(heard) = chat.heard_at()
+        && chat.waiting() == 0
+        && !matches!(chat.items.last(), Some(Item::Tool { status: Some(ToolStatus::InProgress), .. }))
+    {
+        let line = ui.label(RichText::new(times::thinking(heard, now)).color(t.text_dim).size(t.font_small));
+        crate::scenario::publish_rect("agent_chat:thinking", line.rect);
+    }
+    // "3 min ago" moves on: by the second for the first minute, then by the minute.
+    if !busy && let Some(last) = chat.times.iter().rev().find(|s| s.known()) {
+        let young = now - last.at < 60_000.0;
+        ui.ctx().request_repaint_after(std::time::Duration::from_secs(if young { 1 } else { 30 }));
     }
     let (mut send_now_clicked, mut send_queue_clicked) = (false, false);
     let mut remove: Option<usize> = None;
     let mut edit_done: Option<(usize, Option<String>)> = None;
-    let busy = chat.state() == State::Busy;
     let stopped = chat.stopped;
     let editing = chat.pending_edit.clone();
     let mut start_edit: Option<(usize, String)> = None;
@@ -2529,7 +2584,7 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
                 }
                 _ => {
                     if !p.text.is_empty()
-                        && let Some(group) = user_text(ui, &p.text, &p.context, &[], &format!("agent_chat:queued:{n}"))
+                        && let Some(group) = user_text(ui, &p.text, &p.context, &[], &format!("agent_chat:queued:{n}"), false)
                     {
                         hovered = Some(Hovered::Group { sent: false, at: n, group });
                     }
@@ -2649,13 +2704,14 @@ fn unplaced<'a>(context: &'a Context, gone: &'a [bool]) -> (std::borrow::Cow<'a,
 }
 
 /// A sent message's text, its pills drawn as pills: `gone` flags the context's items that have left
-/// the design, which strikes through the pills they are in. Returns the number of the pill under the
-/// pointer (its group), for the host to light what it stands for.
+/// the design, which strikes through the pills they are in; `selected`: the whole transcript is
+/// selected (#10676). Returns the number of the pill under the pointer (its group), for the host to
+/// light what it stands for.
 #[cfg(not(target_arch = "wasm32"))]
-fn user_text(ui: &mut egui::Ui, text: &str, context: &Context, gone: &[bool], handle: &str) -> Option<u32> {
+fn user_text(ui: &mut egui::Ui, text: &str, context: &Context, gone: &[bool], handle: &str, selected: bool) -> Option<u32> {
     let t = Tokens::get();
     if context.groups.is_empty() {
-        super::markdown_view::selectable(ui, egui::Label::new(RichText::new(text).color(t.text)).wrap());
+        super::markdown_view::selectable(ui, egui::Label::new(RichText::new(text).color(t.text)).wrap(), selected);
         return None;
     }
     let look = |id: u32| {
@@ -2669,7 +2725,7 @@ fn user_text(ui: &mut egui::Ui, text: &str, context: &Context, gone: &[bool], ha
     let font = egui::FontId::proportional(ui.style().text_styles.get(&egui::TextStyle::Body).map_or(t.font_label, |f| f.size));
     let galley = ui.fonts_mut(|f| f.layout_job(pills::job(text, &font, t.text, ui.available_width(), &look)));
     // Through the conversation's selectable label, so it stays in a selection scrolled out of view.
-    let response = super::markdown_view::selectable(ui, egui::Label::new(egui::WidgetText::Galley(Arc::clone(&galley))));
+    let response = super::markdown_view::selectable(ui, egui::Label::new(egui::WidgetText::Galley(Arc::clone(&galley))), selected);
     // Where each pill is, for tests and scripts.
     for span in pills::spans(text) {
         let row = galley.pos_from_cursor(egui::text::CCursor::new(span.start + 2));
@@ -2986,6 +3042,10 @@ struct ToolCall<'a> {
     status: Option<ToolStatus>,
     input: Option<&'a Value>,
     output: Option<&'a str>,
+    /// When the call came in, the time now (ms), and whether the agent is still at it.
+    stamp: times::Stamp,
+    now: f64,
+    live: bool,
 }
 
 /// Longest raw text shown under a card's Details (characters).
@@ -3019,9 +3079,14 @@ fn tool_card(ui: &mut egui::Ui, n: usize, call: &ToolCall) {
                     ui_kit::disclosure(ui.painter(), rect.center(), state_.is_open(), t.text_dim);
                     ui.label(RichText::new(tr("ui.ai_tool_details")).size(t.font_small).color(t.text_dim));
                 }
-                ui.label(RichText::new(tr(state)).size(t.font_small).color(color));
+                // A running call counts how long it has run ("running for 30 s").
+                let running = (call.live && status == Some(ToolStatus::InProgress)).then(|| times::running(&call.stamp, call.now)).flatten();
+                ui.label(RichText::new(running.as_deref().unwrap_or(tr(state))).size(t.font_small).color(color));
                 if !call.kind.is_empty() && call.kind != "other" {
                     ui.label(RichText::new(call.kind).size(t.font_small).color(t.text_dim));
+                }
+                if running.is_none() {
+                    time_label(ui, n, &call.stamp, call.now);
                 }
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                     let text = match call.summary {

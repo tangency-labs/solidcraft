@@ -1037,6 +1037,8 @@ pub(crate) fn panel_inline(app: &mut SolveApp, ui: &mut egui::Ui) {
     timeline_strip(app, ui, true, ui.max_rect().left());
 }
 
+/// Render the horizontal history strip and its interactive feature tiles, handling selection,
+/// edits, drags, and hover updates.
 fn timeline_strip(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool, x: f32) {
     let t = Tokens::get();
     let accent = crate::workspace::tab_accent(&t, &app.ui.tab);

@@ -419,9 +419,11 @@ agents can read the same structured settings and retained Continuity records wit
 `view.status_details` engine command. Its `current` flag guards geometry targets, and its
 per-record limits prevent mixed measurements from being mistaken for one global tolerance.
 
-The control channel is **on by default**. SolidCraft listens on `127.0.0.1` only, for JSON lines,
-so agents can drive the app without a launch flag. Every connection still needs this launch's
-token (below); nothing else on the machine, and nothing off it, can send a command.
+The control channel is **off by default**: Preferences > Assistant > Agents through MCP > "Let AI
+agents connect" turns it on, and `--control PORT` opens it for one run. Once on, SolidCraft listens on
+`127.0.0.1` only, for JSON lines, so agents can drive the app without a launch flag. Every connection
+still needs this launch's token (below); nothing else on the machine, and nothing off it, can send a
+command.
 
 Internal rendering harness: `ui.blur {radius_px?, surface_alpha?, fixture?}` queries or sets
 session-only panel blur. Radius is finite physical pixels in 0..60; the optional
@@ -455,10 +457,10 @@ evidence description, and clear the fixture before checking real capabilities.
 | Launch | What listens |
 |---|---|
 | `solidcraft --control PORT`, or `SOLIDCRAFT_CONTROL_PORT=PORT` | exactly `127.0.0.1:PORT` (the flag wins over the variable), whatever the setting |
-| neither, and Preferences > Assistant > "Let AI agents connect (control channel / MCP)" on (the default) | the default port **27878**, or the next free one up to 27893 when it is taken (a second window, another program) |
+| neither, and Preferences > Assistant > Agents through MCP > "Let AI agents connect" on (the default) | the setting's port: the default **27878**, or the next free one up to 27893 when it is taken (a second window, another program); any other port exactly, or nothing when it is taken (the panel says so) |
 | neither, and the setting off | nothing |
 
-The setting is read at start-up. Old preference files, which don't have it, load with it on. A
+Turning the setting on or off, or changing its port, takes effect at once: the channel closes (with its connections, token file and discovery file) and opens again where the setting asks. A launch with `--control` or the variable keeps its port for that run, and the setting waits for the next launch. Old preference files, which don't have it, load with it on. A
 launch with `--control` or the variable behaves as it always did (the start page stays hidden,
 the window doesn't ask for the foreground), because a scripted launch expects that; the default
 channel changes neither for a normal launch.
@@ -608,6 +610,51 @@ Any other word is refused; other methods ignore the field. An app older than thi
 reply without `param_check` as unchecked. The bridged MCP server asks once per connection
 ([mcp.md](mcp.md)).
 
+### Cancelling a request
+
+`control.cancel {id?}` cancels the request the connection still waits for: the timed-out one
+`control.pending` reports (`id`, when given, must name it). A connection can only cancel its own
+requests; another id is refused with `nothing to cancel: request … is not running on this
+connection`. What happens depends on where the request is:
+
+- **Waiting its turn** (behind a design change that computes, a file opening, the agent cursor):
+  it is removed and never runs. `{"cancelled": <id>, "method": …, "outcome": "removed", "note":
+  "cancelled: …"}`; its own reply, if anyone still reads it, is `{"ok": false, "cancelled": true,
+  "error": "cancelled: …; nothing was applied"}`.
+- **Computing off the window thread** (a design change or an export, see below, or one the
+  agent cursor is acting out): it is stopped as **Stop** stops it, and nothing of it is applied:
+  `"outcome": "stopped"`. Its worker is told to stop as well: the evaluation skips the features it
+  has not reached, the kernel starts no further boolean, and nothing it computed after that is
+  kept. A boolean or tessellation already under way still runs to its end in the
+  background. An export's worker may still write its file; the design is unchanged.
+- **Running on the window thread** (with the preference off, while it applies after computing, or
+  a file being opened or imported, which the app's own Cancel stops): it can't be cancelled.
+  `{"ok": false, "cancellable": false, "error": "cannot be cancelled: …"}`; it will still finish,
+  and `control.pending` gets its result.
+- **Finished**: its reply comes back as `control.pending` gives it (`done: true, reply`), with
+  `cancelled: null`.
+
+With nothing outstanding the reply is `{"cancelled": null, "note": "nothing to cancel: …"}`.
+After a request is cancelled or stopped the connection is free at once (`control.pending` says
+`{"pending": null}`). Since a connection sends one request at a time, only a request that
+outlasted its wait can be cancelled from the connection that sent it: 60 s, or 3600 s for
+`engine.batch` and for every request from the agent chat's own connection.
+
+### Params
+
+A field may be left out where a method marks it optional (`?`), but a field that is present must
+have the documented type: a wrong type, or `null` for a field with a default (such as `shift` or
+`delta`), is refused with an error naming the field, and nothing runs. An optional field without a
+default takes `null` as left out (not `ui.scroll`'s `unit` or `ui.home`'s `sample`, which refuse
+it); `engine.execute` takes `params: null` as `{}`, and `ui.start` as no params (so
+`solid.extrude` starts on `null` but refuses `{}`).
+`ui.set`, `ui.blur`, `ui.editFolder`, `ui.resize`, `ui.palette`, `ui.agent_cursor` and
+`ui.icon_audit` still read their fields one by one: the first four refuse a wrong type, the other
+three pass over it. Screen points (`x`, `y`)
+must lie within ±1 000 000. In particular, `engine.execute` takes `command` or its alias `id`,
+not both; `ui.help` refuses an item it doesn't know; and `ui.menu` needs both `x` and `y` to open
+a menu (neither describes the open one).
+
 ## Engine
 
 | Method | Params | Result |
@@ -618,7 +665,7 @@ reply without `param_check` as unchecked. The bridged MCP server asks once per c
 | `engine.commands` | — | every command: id, label, tab, panel, icon, shortcut (the user's current first key, or null when cleared), params doc, enabled |
 | `document.revision` | — | `{document_id, revision}`: the active design's id and a number that moves whenever the design changes, for programs that follow it ([Following the design](#following-the-design)) |
 | `control.subscribe` | — | `{document_id, revision}`, as `document.revision`; the connection is then sent a `design.changed` line whenever they change ([Following the design](#following-the-design)) |
-| `document.inspect` | `measure?`: bool, `sketch_counts?`: bool (default false) | parameters, timeline (errors, timings), bodies, sketches, selection (assembly joints: `engine.execute` `joint.inspect {joint?}`, which reads only: each joint's two origins with the occurrence, the snap as saved, the feature, face, edge or sketch curve its names refer to, and whether it resolves or why not; kind, offset, angle, flip, values, limits, expressions and motion links); with `sketch_counts` each sketch also gives its `plane` and its number of `points` and `constraints` |
+| `document.inspect` | `measure?`: bool, `sketch_counts?`: bool (default false), `timeline?`: `true` (default), `"summary"` (each feature as `id`, `name`, `type`, with `error`, `warning`, `suppressed` and `rolled_back` only when set) or `false` (left out), `bodies?`: `true` (default), `"names"` (only the body names, nothing measured) or `false` (left out) | parameters, timeline (errors, timings), bodies, sketches, selection (assembly joints: `engine.execute` `joint.inspect {joint?}`, which reads only: each joint's two origins with the occurrence, the snap as saved, the feature, face, edge or sketch curve its names refer to, and whether it resolves or why not; kind, offset, angle, flip, values, limits, expressions and motion links); with `sketch_counts` each sketch also gives its `plane` and its number of `points` and `constraints` |
 | `mcp.options` | — | `{"compact": bool}`: the output the MCP server bridged to this app should give its agents (Preferences › AI › Agents through MCP, `ui.prefs` `mcp_compact`, default false; [MCP](mcp.md#compact-output)) |
 | `document.export` | — | `{name, revision, dirty, format, text}`: the active design as its file holds it, for a host that keeps the files itself ([browser command API](browser-api.md)). `text` is the design's JSON, what a `.json` design file holds; `format` is `"json"`; `revision` is the one `document.revision` answers for this state. Only reads |
 | `document.import` | `text`: a design's JSON; `name?`: the name it takes | `{name, features, errors, revision}`: replaces the active design with `text`, timeline and parameters as saved; it opens saved, with a new `document_id` and nothing to undo. It does not ask about unsaved changes in the design it replaces: that is the caller's to decide. A text that does not read changes nothing. Waits behind a file loading or a design change, and evaluates on the window thread in the frame it runs |
@@ -745,7 +792,8 @@ drawing and answering while it runs:
   many of a batch's steps are done and a red X (with **Preferences > Layout > Show operations
   in the view** off, a chip with **Stop** instead; `ui.operations` lists and cancels the rows).
   The X answers `{"ok": false, "stopped": true, "error": "stopped: …; nothing was applied"}` and
-  the requests waiting behind it go on. The computation finishes unseen in the background.
+  the requests waiting behind it go on. The computation stops before its next feature or boolean,
+  in the background. The agent can do the same for its own request with `control.cancel` (above).
 - `file.export` and `file.save_mesh` change nothing in the design. They run on a copy of the
   design as it was when they were asked for, and nothing waits behind them.
 - Batches with `timings` or `profile` still run on the window thread, so the times they report
@@ -806,7 +854,7 @@ no box selection.
 
 | Method | Params | Notes |
 |---|---|---|
-| `ui.inspect` | — | UI state, pending file picker (`file_picker_busy`; compatibility alias `file_dialog_open`, no path), what is hidden (`visibility`: bodies, origin and construction items, sketches, joints (`hidden_joints`, joint ids); set it with the `browser.visibility` command), viewport rect, camera, the active tool (its command id), the open dialog (`dialog`, below), the windows open beside the model (`windows`, each named by what opens it: the `ui.start` command `parameters.change`, `document.metadata`, `sketch.inspect`, `assembly.bom` or `material.properties.validate`, or the `ui.help` item `about`, `updates`, `shortcuts`, `crashes`, `report`, or `messages`), what is under the pointer (`hover`, in the form of a selection item: `{"type": "edge", "body", "index", "mid", "point"}`, or null), the status line (`status`: text and whether it is an error), renderer, timings, what the GPU drew last frame (`draw`: `draw_calls`, `triangles`, `line_segments`, `supersampled`; null without a GPU) and the graphics `adapter`, live preview (`active`, `busy`, `error`, `ms`, bodies it stands in for) |
+| `ui.inspect` | — | UI state, pending file picker (`file_picker_busy`; compatibility alias `file_dialog_open`, no path), what is hidden (`visibility`: bodies, origin and construction items, sketches, joints (`hidden_joints`, joint ids); set it with the `browser.visibility` command), viewport rect, camera, the active tool (its command id), the open dialog (`dialog`, below, or else the "Recover unsaved design?" prompt shown after an unclean exit as `{kind: "recover_unsaved", title, designs: [{id, name, path, features, saved_at, autosaved}], actions: ["recover", "discard", "later"]}`, answered with `ui.recover`), the windows open beside the model (`windows`, each named by what opens it: the `ui.start` command `parameters.change`, `document.metadata`, `sketch.inspect`, `assembly.bom` or `material.properties.validate`, or the `ui.help` item `about`, `updates`, `shortcuts`, `crashes`, `report`, or `messages`), what is under the pointer (`hover`, in the form of a selection item: `{"type": "edge", "body", "index", "mid", "point"}`, or null), the status line (`status`: text and whether it is an error), renderer, timings, what the GPU drew last frame (`draw`: `draw_calls`, `triangles`, `line_segments`, `supersampled`; null without a GPU) and the graphics `adapter`, live preview (`active`, `busy`, `error`, `ms`, bodies it stands in for) |
 | `ui.set` | any `UiState` field (`tab`, `perspective`, `showGrid`, `dark`, `layout`, …), and the browser's view of the design, saved with it: `showOrigin` (the Origin folder's eye), `showSketches` (the design's Sketches folder, `c0/sketches` in `hiddenFolders`), `hiddenBodies`, `hiddenOrigin`, `hiddenSketches`, `shownSketches`, `hiddenJoints`, `hiddenFolders`, `hiddenProfiles`, `shownDims`, `lockedBodies` (whole lists; `browser.visibility` changes single items) | `dark: false` switches to the light theme; `layout: "floating"` (default) or `"compact"` (`"docked"` is also accepted) selects the transient shell layout without saving a preference. Scenarios use `{"call":"ui.set","params":{"layout":"docked"}}` |
 | `ui.view` | `view`: `front`, `back`, `top`, `bottom`, `left`, `right`, `iso`, `home`, `fit`; `animate` (bool, default false: snap) | |
 | `ui.camera` | `target?`: `[x, y, z]` (mm), `yaw?`, `pitch?`, `roll?` (radians), `distance?` (mm), `fov?`, `up?`; `fit?`: `true`, `false` or `[occurrence id or name…]` (`root`: the bodies outside every component) | the viewport's orbit camera: it looks at `target` from `distance` away; `yaw` 0 looks along +Y (from the front), `pitch` is the elevation (±π/2: straight down or up), `roll` turns the image. Fields given are set first (the others keep their values), then `fit` frames the listed occurrences (or everything), keeping the direction. The reply, passed back, sets the same view again, so a framing can be stored and replayed. `fov` is the angle the view is drawn with: 0 (parallel) with Perspective view off or while a sketch is open, else `perspective_fov`; in Render, the Render camera's own. `fov` and `up` follow the perspective setting (`ui.set`), its angle (`ui.prefs {perspective_fov}`) and the up axis preference (`ui.prefs`) and can't change here; a refused field changes nothing |
@@ -844,6 +892,7 @@ no box selection.
 | `ui.help` | `item?`: `about`, `updates` (checks for updates and shows the result), `shortcuts` (read only), `report` (opens a report draft for review), `crashes` (the Crash Reports window), `docs` (the documentation in the browser), `messages` (the Messages window), `install_cli` (macOS: links `solidcraft-cli` into `/usr/local/bin`); another item is an error | the version, commit, build date and diagnostic text |
 | `ui.prefs` | any of the [`ui.prefs` settings](#uiprefs-settings) below; also `open`, `button` and `stand_up` (listed there) | sets preferences (kept between runs), returns them all plus `dialog` (the open page or null), `apply_enabled` (whether the dialog's Apply has a change to keep), `dark`, `viewport_dark` (whether the 3D view is dark), `stand_up_offer` (the offered bodies, or null), `stand_up_note` (whether that offer is the note), `theme_followed`, `theme_follow_error`, `theme_option_defs`, `theme_option_values` and `theme_option_notices` |
 | `ui.capture` | `action?`: `capture`, `revert`, `cancel` | answers the Capture Position question (asked when a command starts or the design is saved while components were moved without capturing); without `action`, what waits |
+| `ui.recover` | `action?`: `recover`, `discard`, `later`; `id?` (a design's `id`; default: the first one listed) | answers the "Recover unsaved design?" prompt as its buttons do: `recover` opens that design's last autosave (in the background; poll `ui.inspect.file_busy`; refused while the open design has unsaved changes), `discard` deletes it (`doc.recovery_discard`), `later` closes the prompt and keeps them all for the next launch; a non-string `id` is refused, and so is `recover` while 32 designs are open and the active design is not blank (the entry stays offered); returns the prompt as `ui.inspect` reports it (`dialog`, null when no designs remain) and `file_busy`. Without `action`, returns only the current `dialog` |
 | `ui.window` | `action`: minimize, maximize, restore, toggle, close | what the title bar's caption buttons do (on Windows and Linux the application bar is the title bar); close asks about unsaved designs first |
 | `ui.agent_cursor` | `show` (bool), `speed`: a number from 1 to 5 (times the normal speed) or `"instant"` (no animation: the command runs at once and the pointer jumps to where it acted), `follow_camera` (bool); all optional | the settings. While the cursor is shown, `engine.execute` first glides to the command's toolbar button and to each pick, then runs and replies; later requests wait their turn. The pointer shows the command's localized name, including commands inside a closed toolbar group; an animated batch names each command it visits. It also follows the pointer input sent with `ui.move`, `ui.click`, `ui.drag` and `ui.scroll`, as each event reaches the app, and a press leaves a ripple. `"animate": false` on a call skips it |
 | `engine.execute` → `view.layout` | `mode`: `floating` or `compact` | Apply and save the workspace layout without opening a dialog, changing the design, resetting the camera or cancelling its active tool. General preferences expose the same choice; `ui.prefs {"layout":"compact"}` also saves it. |
@@ -854,8 +903,8 @@ no box selection.
 | `ui.resize` | `width`, `height` | |
 | `app.quit` | `force?` (quit without asking about unsaved designs) | `quitting` (the window closes), `asking` (a "save changes?" prompt is open) |
 
-`dialog` (in `ui.inspect`, `ui.start` and `ui.editFeature`) is `null`, or the open dialog as
-an object that doesn't change with the form's internals:
+`dialog` (in `ui.inspect`, `ui.start` and `ui.editFeature`) is `null`, the recovery prompt
+described above, or the open feature dialog as an object that doesn't change with the form's internals:
 
 ```json
 {"command": "solid.extrude", "title": "EXTRUDE", "editing": null,
@@ -904,6 +953,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `browser_eye_left` (default false: each browser and History tree row's eye, handle `eye:<name>`, sits in a column at the rows' right end, clear of the fold arrow and the radio; true: between them, as before #8718)
 - `check_updates` (default true; [updates](book/src/guide/updates.md))
 - `color_vision` (`off` (default), `protan`, `deutan`, `tritan`: colour vision modes, #778)
+- `constraint_glyph_scale` (1…3, default 1: how large the open sketch's constraint glyphs are drawn, a multiple of their 15-pixel badge, letter and icon included; Preferences › Sketch › Constraint glyph size, #10794)
 - `default_units`
 - `dialog_buttons` (`bottom` (default), `top`: a feature dialog's OK, Cancel and Apply sit in its title row instead of under its inputs, #6708; the buttons keep their handles, and `dialog:close` is then Cancel's; the Sketch panel's Finish Sketch row moves above its options, #9860)
 - `dialog_place` (`edge` (default) or `left_column`: command dialogs open in the left column in place of the browser and the History, #6707)
@@ -940,10 +990,11 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `look_at_speed`
 - `max_design_file_mb` (default 256): the largest design file opened, in MB, from the default up to 16384 (16 GB) (Preferences › General › Largest file to open, #4086; a `--max-file-size` launch flag overrides both for that run; the web app keeps the defaults and refuses other values; [large files](book/src/guide/files.md#large-files))
 - `max_step_file_mb` (default 512): the largest STEP or import file opened, in MB, from the default up to 16384 (16 GB) (Preferences › General › Largest file to open, #4086; a `--max-file-size` launch flag overrides both for that run; the web app keeps the defaults and refuses other values; [large files](book/src/guide/files.md#large-files))
+- `maya_horizontal_zoom`: Maya Alt+right drag zooms horizontally (right in, left out), default `true`; `false` restores vertical drag zoom. Other presets and the fixed Zoom tool are unchanged.
 - `mcp_compact` (default false): compact tool output for agents bridged to this app through the MCP server (Preferences › AI › Agents through MCP; the server reads it with `mcp.options`; [MCP compact output](mcp.md#compact-output))
 - `middle_double_click` (`home` (default), `fit`, `off`)
 - `msaa`
-- `nav` (`fusion`, `solidworks`, `creo`, `inventor`, `alias`, `blender`, `tinkercad`, `openscad`, `touchpad`)
+- `nav` (`fusion`, `solidworks`, `creo`, `inventor`, `alias`, `maya`, `blender`, `tinkercad`, `openscad`, `touchpad`)
 - `nav_bridge_enabled` (default false) and `nav_bridge_port` (default 8765: a device's own app on this computer moves the view, [the navigation bridge](3d-mouse.md#device-apps-the-navigation-bridge))
 - `navigator_arrows` (default true: the custom view navigator has the cube's orbit and roll arrows around its body; also `view.navigator {arrows}`)
 - `navigator_fit` (default false: a view chosen on the view cube or the axis gizmo also looks at the middle of the model from the one distance that fits its bounding sphere in the free part of the view, at `home_fit_size`; Home and an opened design use the same zoom and centre while it is on, so views chosen after them only turn; #10091)

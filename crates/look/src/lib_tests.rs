@@ -3,16 +3,12 @@ use super::*;
 use solidcraft_theme::{AccentRamp, TabStyle, TabTable};
 use solidcraft_ui_kit::{icons as kit_icons, theme_files, type_face};
 
-/// The host's tab table, which is not the look's: one naming the tabs the built-in themes key
-/// per-tab surfaces by (Onyx's `tabs`), which they are read against.
+/// The host's tab table, which is not the look's: it has none of the tabs the built-in themes
+/// key per-tab surfaces by (Onyx's `tabs`), and every built-in loads under it.
 const TABS: TabTable = TabTable::new(&[
-    TabStyle { name: "MODEL", ramp: AccentRamp::Main, icon_accent: None },
-    TabStyle { name: "SKETCH", ramp: AccentRamp::Sketch, icon_accent: Some("sketch") },
-    TabStyle { name: "SURFACE", ramp: AccentRamp::Surface, icon_accent: Some("surface") },
-    TabStyle { name: "MESH", ramp: AccentRamp::Mesh, icon_accent: Some("mesh") },
-    TabStyle { name: "FORM", ramp: AccentRamp::Form, icon_accent: Some("form") },
-    TabStyle { name: "SHEET METAL", ramp: AccentRamp::Sheet, icon_accent: None },
-    TabStyle { name: "RENDER", ramp: AccentRamp::Render, icon_accent: None },
+    TabStyle { name: "DRAW", ramp: AccentRamp::Main, icon_accent: None },
+    TabStyle { name: "SHAPE", ramp: AccentRamp::Surface, icon_accent: Some("surface") },
+    TabStyle { name: "PAINT", ramp: AccentRamp::Render, icon_accent: None },
 ]);
 
 #[test]
@@ -42,4 +38,17 @@ fn install_gives_the_kit_solidcrafts_icons_glyphs_fonts_and_themes() {
     assert!(ctx.fonts_mut(|f| f.has_glyphs(&type_face::semibold(14.0), "Extrude")));
     let heading = ctx.global_style().text_styles[&egui::TextStyle::Heading].family.clone();
     assert_eq!(heading, type_face::semibold(1.0).family);
+}
+
+/// Under a host whose tab table has none of SolidCraft's tabs, every built-in theme loads, Onyx
+/// without the per-tab surfaces it keys by SolidCraft's tab names.
+#[test]
+fn every_builtin_theme_loads_under_a_host_with_other_tabs() {
+    solidcraft_theme::install_tabs(TABS);
+    // The look's icon set, which the built-ins' icon palettes are read against.
+    install_tables();
+    let read = theme_files::read_builtin(themes::BUILTIN).unwrap_or_else(|e| panic!("the built-in themes read: {e}"));
+    assert_eq!(read.len(), themes::BUILTIN.len());
+    let onyx = read.iter().find(|theme| theme.id == "onyx").expect("Onyx is built in");
+    assert!(onyx.tabs.is_empty(), "{:?}", onyx.tabs.keys());
 }

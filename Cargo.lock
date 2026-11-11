@@ -4235,6 +4235,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcore-step"
+version = "0.1.0"
+dependencies = [
+ "solidcore",
+ "solidcore-convert",
+ "solidcore-ops",
+ "solidcore-record",
+]
+
+[[package]]
 name = "solidcore-tess"
 version = "0.1.0"
 dependencies = [
@@ -4249,7 +4259,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 dependencies = [
  "block2 0.6.2",
  "eframe",
@@ -4292,11 +4302,11 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-3dx-client"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 
 [[package]]
 name = "solidcraft-cli"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 dependencies = [
  "image",
  "log",
@@ -4312,11 +4322,11 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-color"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 
 [[package]]
 name = "solidcraft-control"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 dependencies = [
  "getrandom 0.3.4",
  "serde",
@@ -4325,7 +4335,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-control-egui"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 dependencies = [
  "egui",
  "image",
@@ -4335,7 +4345,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-derive"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4344,7 +4354,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-doc"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 dependencies = [
  "log",
  "serde",
@@ -4366,7 +4376,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-dynamics"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -4377,7 +4387,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-engine"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 dependencies = [
  "image",
  "log",
@@ -4403,7 +4413,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-geom"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 dependencies = [
  "serde",
  "serde_json",
@@ -4416,7 +4426,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-gpu"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 dependencies = [
  "image",
  "log",
@@ -4441,7 +4451,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-io"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 dependencies = [
  "cadmpeg-core",
  "cadmpeg-ir",
@@ -4469,7 +4479,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-kernel"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 dependencies = [
  "log",
  "proptest",
@@ -4478,11 +4488,11 @@ dependencies = [
  "serde_json",
  "solidcore-ops",
  "solidcore-record",
+ "solidcore-step",
  "solidcore-tess",
  "solidcraft-geom",
  "solidcraft-profile",
  "solidcraft-smlib",
- "solidcraft-step",
  "spade",
  "thiserror 2.0.21",
  "web-time",
@@ -4490,7 +4500,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-look"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 dependencies = [
  "egui",
  "log",
@@ -4502,7 +4512,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-mcp"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 dependencies = [
  "image",
  "serde_json",
@@ -4516,14 +4526,14 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-mcp-server"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "solidcraft-profile"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 dependencies = [
  "serde_json",
  "web-time",
@@ -4531,7 +4541,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-render"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 dependencies = [
  "flate2",
  "image",
@@ -4554,7 +4564,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-sketch"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 dependencies = [
  "harfrust",
  "serde",
@@ -4568,7 +4578,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-smlib"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 dependencies = [
  "flate2",
  "log",
@@ -4582,28 +4592,18 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-space-mouse"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 dependencies = [
  "serde",
 ]
 
 [[package]]
-name = "solidcraft-step"
-version = "0.40.0-rc.3"
-dependencies = [
- "solidcore-ops",
- "solidcore-record",
- "solidcraft-geom",
- "solidcraft-profile",
-]
-
-[[package]]
 name = "solidcraft-testkit"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 
 [[package]]
 name = "solidcraft-theme"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 dependencies = [
  "egui",
  "serde",
@@ -4613,7 +4613,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-ui-egui"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 dependencies = [
  "arboard",
  "egui",
@@ -4655,7 +4655,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-ui-kit"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 dependencies = [
  "arboard",
  "egui",
@@ -4678,14 +4678,14 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-ui-registry"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 dependencies = [
  "egui",
 ]
 
 [[package]]
 name = "solidcraft-ui-text"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 dependencies = [
  "log",
  "serde_json",
@@ -4695,7 +4695,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-viewport"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 dependencies = [
  "image",
  "serde",
@@ -4707,7 +4707,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-viewport-egui"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 dependencies = [
  "egui",
  "egui-wgpu",
@@ -4718,7 +4718,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-viewport-gpu"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 dependencies = [
  "log",
  "naga",
@@ -4734,7 +4734,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-web"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 dependencies = [
  "eframe",
  "egui",
@@ -6220,7 +6220,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "xtask"
-version = "0.40.0-rc.3"
+version = "0.40.0-rc.4"
 dependencies = [
  "flate2",
  "proc-macro2",

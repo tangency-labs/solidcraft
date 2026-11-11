@@ -962,6 +962,138 @@ fn check_parameters_tries_values_and_puts_the_design_back() {
     assert!(d["timeline"].as_array().unwrap().iter().all(|f| f["error"].is_null()), "{d}");
 }
 
+/// `bodies` and `summary` keep `check_parameters`'s reply small on a large design (#14162): only
+/// the bodies named are measured and their cylinders listed, and `measure` is the measure
+/// tool's summary. Without them the reply is as before; a bad `bodies` changes nothing.
+#[test]
+fn check_parameters_reports_only_the_bodies_asked_for_in_summary() {
+    let mut s = server();
+    parametric_box_with_cylinder(&mut s);
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10, "corner": [100, 0, 0]}}));
+    tool(&mut s, "execute", json!({"command": "solid.cylinder", "params": {"radius": 2, "height": 10, "base": [200, 0, 0]}}));
+    let names: Vec<String> =
+        tool(&mut s, "measure", json!({}))["bodies"].as_array().unwrap().iter().map(|b| b["name"].as_str().unwrap().to_string()).collect();
+    assert_eq!(names.len(), 3, "{names:?}");
+    let before = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false}));
+
+    // The default: every body measured in full, every cylinder.
+    let all = tool(&mut s, "check_parameters", json!({"set": {"len": 60}, "report": ["measure", "cylinders"]}));
+    assert_eq!(all["measure"]["body_count"], 3, "{all}");
+    assert!(all["measure"]["bodies"][0]["area_mm2"].is_number() && all["measure"]["bodies"][0]["kernel"].is_object(), "full measure: {all}");
+    assert_eq!(all["cylinders"].as_array().map(Vec::len), Some(2), "{all}");
+
+    let one = tool(&mut s, "check_parameters", json!({"set": {"len": 60}, "report": ["measure", "cylinders"], "bodies": ["Body1"], "summary": true}));
+    assert_eq!(one["restored"], true, "{one}");
+    let m = &one["measure"];
+    assert_eq!(m["bodies"].as_array().map(Vec::len), Some(1), "{one}");
+    let mut keys: Vec<&String> = m["bodies"][0].as_object().unwrap().keys().collect();
+    keys.sort();
+    assert_eq!(keys, ["bbox", "closed", "faces", "name", "volume_mm3"], "the measure tool's summary: {one}");
+    assert_eq!(m["bodies"][0]["name"], "Body1");
+    let v = m["total"]["volume_mm3"].as_f64().unwrap();
+    assert!(rel(v, box_with_cylinder_volume(60.0)) < 5e-4, "{v}");
+    assert_eq!(m["bodies"][0]["bbox"], all["measure"]["bodies"][0]["bbox"], "{one}");
+    let cyl = one["cylinders"].as_array().unwrap();
+    assert!(cyl.len() == 1 && cyl[0]["body"] == "Body1", "{one}");
+    assert!(one.to_string().len() * 3 < all.to_string().len(), "{} vs {} bytes", one.to_string().len(), all.to_string().len());
+    // `summary` on its own summarises every body.
+    let sum = tool(&mut s, "check_parameters", json!({"set": {"len": 60}, "report": ["measure"], "summary": true}));
+    assert_eq!(sum["measure"]["bodies"].as_array().map(Vec::len), Some(3), "{sum}");
+    assert!(sum["measure"]["bodies"][0].get("area_mm2").is_none(), "{sum}");
+
+    // A body the design doesn't have: an error, and the design is put back.
+    for report in [json!(["measure"]), json!(["cylinders"])] {
+        let r = raw_tool(&mut s, "check_parameters", json!({"set": {"len": 60}, "report": report, "bodies": ["Nope"]}));
+        assert_eq!(r["result"]["isError"], json!(true), "{report}: {r}");
+        let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(body["restored"], true, "{body}");
+        let e = body["error"].as_str().unwrap();
+        assert!(e.contains("no body `Nope`") && e.contains("Body1"), "{body}");
+    }
+    // A `bodies` that is not a list of names, or a `summary` that is not a flag: refused first.
+    for args in [json!({"set": {"len": 60}, "bodies": "Body1"}), json!({"set": {"len": 60}, "summary": "yes"})] {
+        let r = raw_tool(&mut s, "check_parameters", args.clone());
+        assert_eq!(r["error"]["code"], -32602, "{args}: {r}");
+    }
+    for args in [json!({"set": {"len": 60}, "bodies": []}), json!({"set": {"len": 60}, "bodies": [5]}), json!({"set": {"len": 60}, "bodies": [""]})] {
+        let r = raw_tool(&mut s, "check_parameters", args.clone());
+        assert_eq!(r["result"]["isError"], json!(true), "{args}: {r}");
+        assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains("`bodies` must be a list of body names"), "{args}: {r}");
+    }
+    assert!(rel(volume(&mut s), box_with_cylinder_volume(40.0) + 1000.0 + PI * 4.0 * 10.0) < 5e-4);
+    let after = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false}));
+    assert_eq!(after["undo"], before["undo"], "{after}");
+}
+
+/// `timeline` and `bodies` keep `inspect_design` small on a large design (#14162), with and
+/// without compact output and as a batch step; left out, the call and its reply are as before.
+#[test]
+fn inspect_design_gives_a_timeline_summary_and_body_names_when_asked() {
+    for opts in [crate::Options::default(), crate::Options { compact: true }] {
+        let mut s = Server::new(Box::new(Headless::default())).with_options(opts);
+        parametric_box_with_cylinder(&mut s);
+        tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10, "corner": [100, 0, 0]}}));
+        let base = json!({"measure": true, "sketches": false, "joints": false});
+        let with = |extra: Value| {
+            let mut a = base.clone();
+            a.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            a
+        };
+        let full = tool(&mut s, "inspect_design", base.clone());
+        assert_eq!(tool(&mut s, "inspect_design", with(json!({"timeline": true, "bodies": true}))), full, "{opts:?}");
+        assert!(full["timeline"][0]["ms"].is_number() && full["bodies"][0]["volume_mm3"].is_number(), "{full}");
+
+        let short = tool(&mut s, "inspect_design", with(json!({"timeline": "summary", "bodies": "names"})));
+        let rows = short["timeline"].as_array().unwrap();
+        assert_eq!(rows.len(), full["timeline"].as_array().unwrap().len(), "{short}");
+        for row in rows {
+            let mut keys: Vec<&String> = row.as_object().unwrap().keys().collect();
+            keys.sort();
+            assert_eq!(keys, ["id", "name", "type"], "{opts:?}: {row}");
+        }
+        assert_eq!(short["bodies"], json!(["Body1", "Body2"]), "{opts:?}: {short}");
+        assert_eq!(short["params"], full["params"]);
+        let gone = tool(&mut s, "inspect_design", with(json!({"timeline": false, "bodies": false})));
+        assert!(gone.get("timeline").is_none() && gone.get("bodies").is_none(), "{opts:?}: {gone}");
+
+        // A value the tool doesn't take is refused before anything is sent.
+        for bad in [json!({"timeline": "full"}), json!({"timeline": 1})] {
+            let r = raw_tool(&mut s, "inspect_design", bad.clone());
+            assert_eq!(r["error"]["code"], -32602, "{opts:?} {bad}: {r}");
+        }
+        // `bodies` takes a list with compact output, so its check names every form.
+        let r = raw_tool(&mut s, "inspect_design", json!({"bodies": "all"}));
+        if opts.compact {
+            assert_eq!(r["result"]["isError"], json!(true), "{r}");
+            assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains("list of body names, true, false or \"names\""), "{r}");
+        } else {
+            assert_eq!(r["error"]["code"], -32602, "{r}");
+        }
+
+        // As a batch step.
+        let r = tool(
+            &mut s,
+            "batch",
+            json!({"commands": [{"command": "inspect_design", "params": {"measure": false, "timeline": "summary", "bodies": "names"}}]}),
+        );
+        let step = &r["results"][0];
+        assert_eq!(step["bodies"], json!(["Body1", "Body2"]), "{opts:?}: {r}");
+        assert!(step["timeline"][0].get("ms").is_none(), "{opts:?}: {r}");
+    }
+
+    // Without the new arguments, document.inspect is asked exactly as before, so an app from
+    // before them answers as it always did.
+    let mut b = Answers { calls: Vec::new(), answer: Box::new(|_, _| Ok(json!({"timeline": [], "bodies": [], "sketches": []}))) };
+    crate::tools::call_tool(&mut b, "inspect_design", &json!({"sketches": false, "joints": false}));
+    crate::tools::call_tool_with(&mut b, "inspect_design", &json!({"joints": false}), crate::Options { compact: true });
+    crate::tools::call_tool_with(&mut b, "inspect_design", &json!({"joints": false, "bodies": ["B"]}), crate::Options { compact: true });
+    let sent: Vec<&Value> = b.calls.iter().filter(|(m, _)| m == "document.inspect").map(|(_, p)| p).collect();
+    assert_eq!(
+        sent,
+        [&json!({"measure": true}), &json!({"measure": true, "sketch_counts": true}), &json!({"measure": false, "sketch_counts": true})]
+    );
+}
+
 /// An unknown parameter name, a bad expression or a bad report list is an error that leaves the
 /// design untouched; `set` that is not an object is refused by argument checking; the tool is
 /// annotated as an edit (it changes the design and puts it back) and is not a batch step.
@@ -3165,6 +3297,59 @@ fn a_bridge_made_before_the_app_runs_connects_once_it_does() {
     app.join().unwrap();
 }
 
+/// #1989: the `cancel` tool sends `control.cancel` on the bridge's own connection, where the
+/// request still running waits, and reports what the app did: stopped, or why it can't be
+/// cancelled (a tool error). A bridge with no connection has nothing to cancel and sends nothing;
+/// headless calls always run to their end, so it refuses there.
+#[test]
+fn cancel_forwards_to_the_app_and_reports() {
+    use std::io::{BufRead, BufReader, Write};
+
+    let text = |r: &Value| r["content"][0]["text"].as_str().unwrap_or_default().to_string();
+    let mut never = crate::Remote::new("127.0.0.1:9", Some("0123456789abcdef0123456789abcdef"));
+    let r = crate::call_tool(&mut never, "cancel", &json!({}));
+    assert!(r["isError"] != json!(true) && text(&r).contains("nothing to cancel"), "{r}");
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    let app = std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut lines = BufReader::new(stream.try_clone().unwrap());
+        let mut asked = Vec::new();
+        for reply in [
+            json!({"ok": true, "result": {"cancelled": 7, "method": "engine.execute", "outcome": "stopped", "note": "stopped: request 7 (`engine.execute`) was computing off the window thread; nothing was applied"}}),
+            json!({"ok": false, "cancellable": false, "error": "cannot be cancelled: request 8 (`engine.execute`) already runs in the app"}),
+        ] {
+            let mut line = String::new();
+            lines.read_line(&mut line).unwrap();
+            let req: Value = serde_json::from_str(&line).unwrap();
+            asked.push((req["method"].clone(), req["token"].clone()));
+            let mut reply = reply;
+            reply["id"] = req["id"].clone();
+            writeln!(&stream, "{reply}").unwrap();
+        }
+        asked
+    });
+    let mut remote = crate::Remote::connect_with_token(&addr, Some("0123456789abcdef0123456789abcdef")).unwrap();
+    let r = crate::call_tool(&mut remote, "cancel", &json!({}));
+    assert!(r["isError"] != json!(true), "{r}");
+    let body: Value = serde_json::from_str(&text(&r)).unwrap();
+    assert_eq!((&body["cancelled"], &body["outcome"]), (&json!(7), &json!("stopped")), "{body}");
+    let r = crate::call_tool(&mut remote, "cancel", &json!({}));
+    assert!(r["isError"] == json!(true) && text(&r).starts_with("cannot be cancelled"), "{r}");
+    let asked = app.join().unwrap();
+    assert!(asked.iter().all(|(m, t)| m == "control.cancel" && t == "0123456789abcdef0123456789abcdef"), "{asked:?}");
+
+    let mut s = server();
+    let r = raw_tool(&mut s, "cancel", json!({}));
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    assert!(r["result"]["content"][0]["text"].as_str().is_some_and(|t| t.contains("headless")), "{r}");
+    let tools = crate::tools::tool_definitions();
+    let cancel = tools.iter().find(|t| t["name"] == "cancel").unwrap();
+    let a = &cancel["annotations"];
+    assert_eq!((&a["readOnlyHint"], &a["destructiveHint"], &a["openWorldHint"]), (&json!(false), &json!(false), &json!(false)), "{a}");
+}
+
 /// An app that quits while it runs a request may have applied it: the retry then finds nothing
 /// listening, and the error says the call may have run, not just that the app is not running.
 #[test]
@@ -3452,6 +3637,48 @@ fn running_sent_right_behind_a_batch_is_not_queued_behind_it() {
     let (order, held) = running_during_a_held_batch(true);
     assert_eq!(order, [json!(2), json!(1)], "`running` first");
     assert!(held, "the app was asked `control.running` while it held the batch");
+}
+
+/// #1989 with #1618: `cancel` goes out at once, not behind the request still running as other
+/// calls are; once the app has removed or stopped it, later calls are sent without waiting for it
+/// and `pending` has nothing. One that can't be cancelled is still waited for.
+#[test]
+fn cancel_frees_the_bridge_from_a_request_still_running() {
+    use crate::backend::{Backend, STILL_RUNNING};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let stuck = std::sync::Arc::new(AtomicBool::new(false));
+    let on_window = stuck.clone();
+    let (addr, seen) = scripted_app(move |req| match req["method"].as_str() {
+        Some("engine.execute") if req["params"]["command"] == "solid.fillet" => running(),
+        Some("control.pending") => json!({"ok": true, "result": {"pending": 1, "method": "engine.execute", "done": false}}),
+        Some("control.cancel") if on_window.load(Ordering::SeqCst) => {
+            json!({"ok": false, "cancellable": false, "error": "cannot be cancelled: request 1 already runs in the app"})
+        }
+        Some("control.cancel") => json!({"ok": true, "result": {"cancelled": 1, "method": "engine.execute", "outcome": "stopped"}}),
+        _ => json!({"ok": true, "result": "ran"}),
+    });
+    let mut remote = crate::Remote::connect(&addr).unwrap();
+    remote.set_waits(quick_waits(20, 20));
+    let methods = |seen: &std::sync::Mutex<(usize, Vec<String>)>| std::mem::take(&mut seen.lock().unwrap().1);
+    assert!(remote.call("engine.execute", json!({"command": "solid.fillet"})).unwrap_err().starts_with(STILL_RUNNING));
+    methods(&seen);
+    let r = crate::call_tool(&mut remote, "cancel", &json!({}));
+    assert_ne!(r["isError"], true, "{r}");
+    assert_eq!(methods(&seen), ["control.cancel"], "sent at once");
+    assert_eq!(remote.call("document.inspect", json!({})).unwrap(), "ran");
+    assert_eq!(methods(&seen), ["document.inspect"], "not behind the stopped request");
+    assert_eq!(remote.call("control.pending", json!({})).unwrap(), json!({"pending": null}));
+
+    // One the app can't cancel stays outstanding: the next call still waits for it.
+    stuck.store(true, Ordering::SeqCst);
+    assert!(remote.call("engine.execute", json!({"command": "solid.fillet"})).is_err());
+    methods(&seen);
+    let r = crate::call_tool(&mut remote, "cancel", &json!({}));
+    assert_eq!(r["isError"], true, "{r}");
+    let e = remote.call("document.inspect", json!({})).unwrap_err();
+    assert!(e.starts_with(STILL_RUNNING) && e.contains("earlier request"), "{e}");
+    assert!(!methods(&seen).iter().any(|m| m == "document.inspect"));
+    assert_eq!(seen.lock().unwrap().0, 1, "one connection throughout");
 }
 
 /// A request still running after the wait is left to the `pending` tool: the error says so
@@ -3979,7 +4206,7 @@ fn inspect_design_is_unchanged_without_compact_output() {
     let defs = tool_definitions();
     let def = defs.iter().find(|d| d["name"] == "inspect_design").unwrap();
     assert_eq!(def["inputSchema"]["properties"]["sketches"]["type"], "boolean", "{def}");
-    assert!(def["inputSchema"]["properties"].get("bodies").is_none(), "{def}");
+    assert_eq!(def["inputSchema"]["properties"]["bodies"]["type"], json!(["boolean", "string"]), "no list of names: {def}");
     let listed = call(&mut s, 1, "tools/list", json!({}));
     assert!(listed["result"]["tools"].as_array().unwrap().iter().any(|t| t == def), "tools/list serves the default definition");
 
@@ -4074,7 +4301,7 @@ impl crate::Backend for AppWithPrefs {
 fn inspect_design_is_compact(s: &mut Server) -> bool {
     let listed = call(s, 1, "tools/list", json!({}));
     let def = listed["result"]["tools"].as_array().and_then(|t| t.iter().find(|d| d["name"] == "inspect_design")).cloned().unwrap_or_default();
-    def["inputSchema"]["properties"]["bodies"].is_object()
+    def["inputSchema"]["properties"]["bodies"]["type"].as_array().is_some_and(|t| t.contains(&json!("array")))
 }
 
 /// The app's Preferences turn compact output on for a bridged server; it asks until the app

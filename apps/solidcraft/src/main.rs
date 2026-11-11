@@ -1320,12 +1320,11 @@ fn main() -> eframe::Result {
                 ));
             }
             mark("viewport pipelines");
-            // `--control`/the environment name a port; otherwise the preference (on by default)
-            // opens the default one (docs/control-protocol.md).
-            if let Some(listen_on) = solidcraft_control::auth::plan(control_port, app.preferences.agent_control) {
-                let rx = control_server::start(listen_on, cc.egui_ctx.clone());
-                app = app.with_control(rx);
-            }
+            // `--control`/the environment name a port for this run; otherwise the preference (off
+            // by default) opens its port, and turning it off or on later takes effect at once
+            // (docs/control-protocol.md).
+            let ctx = cc.egui_ctx.clone();
+            solidcraft_ui_egui::control_switch::launch(&mut app, Box::new(move |listen| control_server::start(listen, ctx.clone())), control_port);
             // The agent chat's MCP bridge reaches the app through an endpoint of its own, started
             // on a free port the first time the chat connects (docs/agent-chat.md).
             let ctx = cc.egui_ctx.clone();

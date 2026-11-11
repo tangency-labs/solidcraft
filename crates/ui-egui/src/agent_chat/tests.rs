@@ -121,6 +121,147 @@ fn transcript_shortcut_ownership_ends_when_the_panel_is_hidden() {
     }
 }
 
+/// `c` is `reference`, or `reference` faded: a window floating inside the app fades its shapes.
+fn same_colour(c: egui::Color32, reference: egui::Color32) -> bool {
+    let k = f32::from(c.a()) / f32::from(reference.a().max(1));
+    c.a() > 0
+        && [(c.r(), reference.r()), (c.g(), reference.g()), (c.b(), reference.b())]
+            .iter()
+            .all(|&(x, y)| (f32::from(x) - f32::from(y) * k).abs() <= 2.0)
+}
+
+/// The filled rectangles outlined outside, as text selection marks are, drawn this frame, with
+/// their outline colour.
+fn outlined_rects(h: &crate::scenario::Harness) -> Vec<(egui::Rect, egui::Color32)> {
+    let mut rects = Vec::new();
+    for clipped in &h.shapes {
+        crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+            if let egui::Shape::Rect(r) = shape
+                && r.stroke.width > 0.0
+                && r.stroke.color.a() > 0
+                && r.fill.a() > 0
+                && r.stroke_kind == egui::StrokeKind::Outside
+            {
+                rects.push((r.rect, r.stroke.color));
+            }
+        });
+    }
+    rects
+}
+
+/// The transcript's selection highlights (#10676), the outlined rectangles not drawn in `base`:
+/// how many, and the outline colour of the one that covers `text`'s first line.
+fn transcript_highlights(h: &crate::scenario::Harness, base: &[(egui::Rect, egui::Color32)], text: &str) -> (usize, Option<egui::Color32>) {
+    let rects: Vec<_> = outlined_rects(h).into_iter().filter(|r| !base.contains(r)).collect();
+    let mut at = None;
+    for clipped in &h.shapes {
+        crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+            if let egui::Shape::Text(t) = shape
+                && t.galley.text() == text
+            {
+                at = Some(t.pos + egui::vec2(4.0, 4.0));
+            }
+        });
+    }
+    let at = at.unwrap_or_else(|| panic!("{text:?} is drawn"));
+    (rects.len(), rects.iter().find(|(r, _)| r.contains(at)).map(|(_, c)| *c))
+}
+
+/// #10676: Ctrl+A in the transcript selects every prompt and answer of the conversation, not
+/// the one Markdown block the selection was in, and Copy copies them in order as they read.
+/// Thoughts and notices are left out; Esc ends it; a focused composer keeps its own Ctrl+A.
+#[test]
+fn select_all_in_the_transcript_takes_the_whole_conversation() {
+    let reply = "# Clipboard test heading\n\nFIRST PARAGRAPH ALPHA. This text belongs to the assistant.\n\nSECOND PARAGRAPH BETA.\n\n- List item one\n- List item two\n\n```text\nCODE BLOCK GAMMA\nsecond code line\n```\n\nFINAL PARAGRAPH OMEGA.";
+    let expected = "User:\nMake a plate\n\nAssistant:\nClipboard test heading\n\nFIRST PARAGRAPH ALPHA. This text belongs to the assistant.\n\nSECOND PARAGRAPH BETA.\n\n• List item one\n• List item two\n\nCODE BLOCK GAMMA\nsecond code line\n\nFINAL PARAGRAPH OMEGA.\n\nUser:\nThanks\n\nAssistant:\nTranscript clipboard sentinel";
+    let ctrl =
+        |key| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::CTRL | egui::Modifiers::COMMAND };
+    let copied = |h: &crate::scenario::Harness| {
+        h.output.commands.iter().find_map(|c| if let egui::OutputCommand::CopyText(t) = c { Some(t.clone()) } else { None })
+    };
+    let layouts =
+        [(crate::ui_kit::LayoutMode::Docked, false), (crate::ui_kit::LayoutMode::Floating, false), (crate::ui_kit::LayoutMode::Floating, true)];
+    for (dark, (layout, popped)) in [true, false].into_iter().flat_map(|dark| layouts.map(|l| (dark, l))) {
+        let mut h = transcript_clipboard_harness(layout);
+        h.app.preferences.theme = if dark { "dark" } else { "light" }.into();
+        h.app.ui.dark = dark;
+        if popped {
+            h.call("ui.resize", json!({"width": 1600, "height": 1000}));
+            h.app.preferences.agent_chat_popped = true;
+        }
+        // Before the sentinel, so the reply is partly scrolled away above it.
+        h.app.agent_chat.items.splice(
+            0..0,
+            [
+                Item::User { text: "Make a plate".into(), image: false, pictures: Vec::new(), context: Context::default(), files: Vec::new() },
+                Item::Agent { thought: false, text: reply.into() },
+                Item::Agent { thought: true, text: "THOUGHT DELTA".into() },
+                Item::Notice { text: "NOTICE EPSILON".into(), error: false },
+                Item::User { text: "Thanks".into(), image: false, pictures: Vec::new(), context: Context::default(), files: Vec::new() },
+            ],
+        );
+        h.frames(4);
+        // A double-click selects a word of one block, as in the report.
+        let at = transcript_text_position(&h);
+        transcript_click(&mut h, at);
+        transcript_click(&mut h, at);
+        let undo = h.app.session.undo.len();
+        let base = outlined_rects(&h);
+        h.frame_with(vec![ctrl(egui::Key::A)]);
+        assert!(h.app.agent_chat.all_selected, "{layout:?} popped {popped}: Ctrl+A selects the conversation");
+        assert!(!h.ctx.plugin::<egui::text_selection::LabelSelectionState>().lock().has_selection(), "the block selection gives way");
+        let (after, thought) = transcript_highlights(&h, &base, "THOUGHT DELTA");
+        // The prompts and one-block answers in view, and the reply's seven blocks.
+        assert!(after >= 9, "{layout:?} popped {popped}: every message block is highlighted ({after})");
+        assert!(thought.is_none(), "a thought is not highlighted");
+        // The prompt's bubble is filled with the selection colour itself: the outline must show
+        // on it, as on the reply's text and code backgrounds, in either theme.
+        let t = solidcraft_theme::Tokens::get();
+        assert_eq!(h.ctx.style_of(h.ctx.theme()).visuals.dark_mode, dark, "the theme took effect");
+        for text in ["Thanks", "Transcript clipboard sentinel", "FINAL PARAGRAPH OMEGA.", "CODE BLOCK GAMMA\nsecond code line"] {
+            let outline = transcript_highlights(&h, &base, text).1.unwrap_or_else(|| panic!("{text:?} is highlighted"));
+            for (name, under) in [("bubble", t.accent_soft), ("panel", t.panel), ("dialog body", t.dialog_body), ("code", t.field)] {
+                assert!(
+                    !same_colour(outline, under),
+                    "dark {dark} {layout:?} popped {popped}: {text:?} outline {outline:?} vanishes on the {name} {under:?}"
+                );
+            }
+        }
+        h.frame_with(vec![egui::Event::Copy]);
+        assert_eq!(copied(&h).as_deref(), Some(expected), "{layout:?} popped {popped}: Copy takes the whole conversation");
+        assert!(h.app.copied_bodies.is_empty(), "the CAD body is not copied");
+        assert!(h.app.dialog.is_none(), "Ctrl+A opens nothing in CAD");
+        assert_eq!(h.app.session.undo.len(), undo);
+        h.frame_with(vec![ctrl(egui::Key::A)]);
+        assert!(h.app.agent_chat.all_selected, "still selected");
+        h.frame_with(vec![egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        assert!(!h.app.agent_chat.all_selected, "Esc ends it");
+        assert_eq!(transcript_highlights(&h, &base, "THOUGHT DELTA").0, 0, "and its highlight");
+        // An ordinary selection works again afterwards.
+        h.frame_with(vec![ctrl(egui::Key::A)]);
+        assert!(h.app.agent_chat.all_selected);
+        transcript_click(&mut h, at);
+        transcript_click(&mut h, at);
+        assert!(!h.app.agent_chat.all_selected, "a click ends it");
+        h.frame_with(vec![egui::Event::Copy]);
+        // (The clicks follow the earlier double-click at once: a word or the block, as egui counts them.)
+        let part = copied(&h).unwrap_or_default();
+        assert!(!part.is_empty() && "Transcript clipboard sentinel".contains(&part), "a block selection copies only itself: {part:?}");
+        // The composer keeps its own Select All.
+        h.app.agent_chat.input = "draft".into();
+        h.ctx.memory_mut(|m| m.request_focus(egui::Id::unique("sc_agent_chat_input")));
+        h.frame();
+        h.frame_with(vec![ctrl(egui::Key::A)]);
+        assert!(!h.app.agent_chat.all_selected, "{layout:?} popped {popped}: Ctrl+A in the composer selects only the draft");
+    }
+}
+
 fn chat() -> AgentChat {
     let mut c = AgentChat::default();
     c.state = Some(State::Ready);
@@ -5623,6 +5764,15 @@ fn shared_assistant_header_uses_live_status_and_one_click_starts_one_new_chat() 
     assert!(h.app.agent_chat.items.is_empty());
 }
 
+/// A picker that takes a typed model id says so in its search hint; one that doesn't keeps the
+/// plain hint (#14369).
+#[test]
+fn the_model_search_hint_says_when_an_id_can_be_typed() {
+    crate::i18n::install();
+    assert_eq!(model_search_hint(false), "Search models…");
+    assert_eq!(model_search_hint(true), "Search, or type any model id…");
+}
+
 /// Enter sends the box's text with its picks, wherever the caret is; so does `send_input` on the
 /// control channel (the box is emptied, the picks go with the message).
 #[test]
@@ -5743,4 +5893,172 @@ fn new_chat_keeps_the_draft_and_its_picks() {
     new_chat(&mut app);
     assert_eq!(app.agent_chat.pills.len(), 1, "the mark is still in the box, and so is what it stands for");
     assert_eq!(pills::spans(&app.agent_chat.input).len(), 1);
+}
+
+/// How many times the last frame drew `text` (#11986).
+fn drawn(h: &crate::scenario::Harness, text: &str) -> usize {
+    let mut n = 0;
+    for clipped in &h.shapes {
+        crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+            if let egui::Shape::Text(t) = shape
+                && t.galley.text() == text
+            {
+                n += 1;
+            }
+        });
+    }
+    n
+}
+
+/// A chat with a scripted agent, open and wide enough for a tool card's whole row (#11986).
+fn timed_chat() -> (crate::scenario::Harness, Script) {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    h.app.preferences.agent_chat_width = 520.0;
+    let script = Script::default();
+    h.app.agent_chat.backend = Some(Box::new(script.clone()));
+    h.app.agent_chat.state = Some(State::Ready);
+    h.frames(2);
+    (h, script)
+}
+
+/// Move everything in the conversation `ms` into the past, as if that long had gone by.
+fn age(chat: &mut AgentChat, ms: f64) {
+    for stamp in &mut chat.times {
+        stamp.at -= ms;
+    }
+    if let Some(turn) = chat.turn.as_mut() {
+        turn.began -= ms;
+        turn.heard -= ms;
+    }
+}
+
+/// #11986: each message and tool card says when it came in ("4 min ago", its exact time on
+/// hover), and a running call counts how long it has run.
+#[test]
+fn each_message_and_tool_card_shows_when_it_came_in() {
+    let (mut h, script) = timed_chat();
+    let ctx = h.ctx.clone();
+    send(&mut h.app, &ctx, "make a dodecahedron".into());
+    script.report(Event::Text { thought: false, text: "Starting with a sketch.".into() });
+    script.report(Event::Tool {
+        id: "t1".into(),
+        title: Some("sketch.inspect".into()),
+        kind: None,
+        status: Some(ToolStatus::InProgress),
+        input: None,
+        output: None,
+    });
+    h.frames(2);
+    assert_eq!(h.app.agent_chat.times.len(), h.app.agent_chat.items.len(), "every item has its time");
+    assert!(h.app.agent_chat.times.iter().all(times::Stamp::known));
+    age(&mut h.app.agent_chat, 4.0 * 60_000.0 + 5_000.0);
+    h.frames(2);
+    assert!(drawn(&h, "4 min ago") >= 2, "the prompt and the reply say when they came");
+    assert!(drawn(&h, "running for 4 min") > 0, "the running call counts how long it has run");
+    assert!(crate::scenario::rect_of("agent_chat:thinking").is_none(), "a running call counts for itself");
+    let exact = times::exact(&h.app.agent_chat.stamp(0)).unwrap();
+    assert!(exact.ends_with(" UTC") && exact.len() == "2026-11-04 14:17:05 UTC".len(), "{exact}");
+    // Once done, the card says when it came instead.
+    script.report(Event::Tool { id: "t1".into(), title: None, kind: None, status: Some(ToolStatus::Completed), input: None, output: None });
+    h.frames(2);
+    assert!(drawn(&h, "running for 4 min") == 0);
+    assert!(drawn(&h, "4 min ago") >= 3, "the done card says when it came in");
+}
+
+/// #11986: while the agent works with nothing running, the conversation counts how long since it
+/// last said or did something, so a long think is visibly still running; anything it does starts
+/// the count again.
+#[test]
+fn a_working_agent_shows_how_long_it_has_been_thinking() {
+    let (mut h, script) = timed_chat();
+    let ctx = h.ctx.clone();
+    send(&mut h.app, &ctx, "make a dodecahedron".into());
+    h.frames(2);
+    assert!(drawn(&h, "Thinking for 0 s") > 0, "the count starts with the message");
+    age(&mut h.app.agent_chat, 12.0 * 60_000.0);
+    h.frames(2);
+    assert!(drawn(&h, "Thinking for 12 min") > 0);
+    script.report(Event::Text { thought: true, text: "Placing the faces".into() });
+    h.frames(2);
+    assert!(drawn(&h, "Thinking for 0 s") > 0, "the agent did something: the count starts again");
+    age(&mut h.app.agent_chat, 2.0 * 3_600_000.0 + 5.0 * 60_000.0);
+    h.frames(2);
+    assert!(drawn(&h, "Thinking for 2 h 5 min") > 0);
+    // Waiting for the user is not thinking.
+    h.app.agent_chat.push(Item::Permission { key: 1, title: "Write a file".into(), options: Vec::new(), answer: None });
+    h.frames(2);
+    assert!(crate::scenario::rect_of("agent_chat:thinking").is_none(), "an open question is the user's turn");
+    ended(&script, "");
+    h.frames(2);
+    assert!(h.app.agent_chat.heard_at().is_none() && crate::scenario::rect_of("agent_chat:thinking").is_none(), "no count once it answered");
+}
+
+/// #11986: an answer says how long it took under its last item, and a stopped one says it ended.
+#[test]
+fn an_answer_says_how_long_it_took() {
+    let (mut h, script) = timed_chat();
+    let ctx = h.ctx.clone();
+    send(&mut h.app, &ctx, "make a dodecahedron".into());
+    script.report(Event::Text { thought: false, text: "Done: twelve faces.".into() });
+    h.frames(2);
+    age(&mut h.app.agent_chat, 23.0 * 60_000.0 + 30_000.0);
+    ended(&script, "");
+    h.frames(2);
+    assert!(drawn(&h, "Answered in 23 min") > 0);
+    let last = h.app.agent_chat.items.len() - 1;
+    assert!(h.app.agent_chat.stamp(last).took.is_some_and(|(_, answered)| answered), "on the answer's last item");
+    send(&mut h.app, &ctx, "and a cube".into());
+    h.frames(2);
+    age(&mut h.app.agent_chat, 90_000.0);
+    cancel(&mut h.app);
+    end_turn(&mut h.app);
+    h.frames(2);
+    assert!(drawn(&h, "Ended after 1 min") > 0, "a stopped answer did not answer");
+}
+
+/// #11986: the times stay beside their items when old ones go and when a waiting prompt is taken
+/// back, and a conversation emptied by New chat starts with none.
+#[test]
+fn item_times_stay_beside_their_items() {
+    let mut chat = AgentChat::default();
+    for i in 0..MAX_ITEMS {
+        chat.push(Item::Notice { text: format!("n{i}"), error: false });
+        if let Some(s) = chat.times.last_mut() {
+            s.at = i as f64 + 1.0;
+        }
+    }
+    chat.push(Item::Notice { text: "last".into(), error: false });
+    assert_eq!(chat.times.len(), chat.items.len());
+    assert!(matches!(chat.items.first(), Some(Item::Notice { text, .. }) if text == &format!("n{}", MAX_ITEMS / 10)));
+    assert_eq!(chat.stamp(0).at, (MAX_ITEMS / 10) as f64 + 1.0, "the first item kept its own time");
+    // An item added without a time shows none, and the next one is still in its place.
+    chat.items.push(Item::Notice { text: "untimed".into(), error: false });
+    chat.push(Item::Notice { text: "timed".into(), error: false });
+    let n = chat.items.len();
+    assert!(!chat.stamp(n - 2).known() && chat.stamp(n - 1).known());
+    chat.remove_item(0);
+    assert_eq!(chat.times.len(), chat.items.len());
+    assert_eq!(chat.stamp(0).at, (MAX_ITEMS / 10) as f64 + 2.0);
+}
+
+/// #11986: lengths of time read in whole seconds, minutes, then hours and minutes; a clock that
+/// went back reads as none, never as a negative time.
+#[test]
+fn lengths_of_time_read_in_seconds_minutes_and_hours() {
+    // The English catalog: under nextest no other test has installed it in this process.
+    crate::i18n::install();
+    assert_eq!(times::span(0.0), "0 s");
+    assert_eq!(times::span(59_999.0), "59 s");
+    assert_eq!(times::span(60_000.0), "1 min");
+    assert_eq!(times::span(23.0 * 60_000.0 + 59_000.0), "23 min");
+    assert_eq!(times::span(3_600_000.0), "1 h 0 min");
+    assert_eq!(times::span(2.0 * 3_600_000.0 + 5.0 * 60_000.0), "2 h 5 min");
+    assert_eq!(times::span(-5_000.0), "0 s");
+    assert_eq!(times::span(f64::NAN), "0 s");
+    assert!(times::exact(&times::Stamp::default()).is_none() && times::ago(&times::Stamp::default(), 1.0).is_none());
+    let noon = times::Stamp { at: 1_793_793_600_000.0, took: None };
+    assert_eq!(times::exact(&noon).as_deref(), Some("2026-11-04 12:00:00 UTC"));
+    assert_eq!(times::running(&noon, noon.at + 30_000.0).as_deref(), Some("running for 30 s"));
+    assert_eq!(times::took(&times::Stamp { at: 1.0, took: Some((61_000.0, true)) }).as_deref(), Some("Answered in 1 min"));
 }
