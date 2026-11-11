@@ -7179,7 +7179,7 @@ fn flange_segment_reliefs_refuse_what_cannot_be_cut() {
         ),
         (
             edge(pair(json!({"shape":"straight","depth":"100 mm"}))),
-            "edges[0].segments[0].relief: a depth of 100.000 mm must stay inside the material inboard of the junction (97.000 mm); reaching that edge parts the blank",
+            "edges[0].segments[0].relief: a depth of 100.000 mm is deeper than the material inboard of the junction (97.000 mm)",
         ),
         (
             edge(pair(json!({"shape":"obround","depth":"0.5 mm"}))),

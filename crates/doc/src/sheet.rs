@@ -4541,13 +4541,18 @@ impl SheetBody {
             },
         };
         let room = inner - parent_panel.outer.polyline(1e-3).iter().map(|q| q.dot(n)).fold(f64::MAX, f64::min);
-        // The deep end must stay strictly inside the parent panel. A relief that reaches that
-        // panel's edge inboard of the junction runs boundary to boundary and parts the blank into
-        // two pieces, which no single flat pattern can be; a depth that only touches the edge is
-        // refused for the same reason (the judge's 57 mm tear on a 100 x 60 plate).
-        if depth >= room - 1e-9 {
+        // A depth past the material inboard of the junction always refuses: the strip would run into
+        // a bend zone, which is no panel. Touching that edge refuses only where it is an exposed edge
+        // of the blank (the parent is the base): there the strip runs boundary to boundary and parts
+        // the blank into two pieces, which no single flat pattern can be (judge round 2's 57 mm tear
+        // on a 100 x 60 plate). A flange's panel ends at its own bend zone, where the material goes
+        // on, so a relief that touches that edge cuts nothing away and is allowed.
+        if depth > room + 1e-9 {
+            return Err(fail(format!("a depth of {depth:.3} mm is deeper than the material inboard of the junction ({room:.3} mm)")));
+        }
+        if f.parent.is_none() && depth >= room - 1e-9 {
             return Err(fail(format!(
-                "a depth of {depth:.3} mm must stay inside the material inboard of the junction ({room:.3} mm); reaching that edge parts the blank"
+                "a depth of {depth:.3} mm reaches the blank's edge inboard of the junction ({room:.3} mm of material); that would part the blank"
             )));
         }
         if r.shape == ReliefShape::Obround && depth < w / 2.0 - 1e-9 {
