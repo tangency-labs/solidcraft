@@ -127,7 +127,7 @@ use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::Curve;
 use crate::curve::curve::p2::BSPLINE_CURVE_TYPE;
 use crate::error::EntityRef;
-use crate::error::{passed_on, Result, SolidError, SM_ERR_NULL_POINTER};
+use crate::error::{passed_on, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -3798,7 +3798,7 @@ mod tests {
         let e = m
             .update_edges(&k, &mut geo, 1, Some(e_old), &[e_new, e_new], Some(calling))
             .unwrap_err();
-        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
         assert_eq!(
             e.topology_failure(),
             Some(&crate::error::topology::TopologyFailure::Missing(
