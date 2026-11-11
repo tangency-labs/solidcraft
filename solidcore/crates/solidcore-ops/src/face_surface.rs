@@ -59,7 +59,7 @@ pub struct FaceSurface {
     exact: Exact,
 }
 
-impl Answer for [f64; 3] {}
+// ([f64; 3] answers through measure.rs's impl.)
 impl Answer for Closest {}
 
 fn triple(p: solidcore::Vec3) -> [f64; 3] {

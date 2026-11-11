@@ -124,9 +124,10 @@ pub fn normal(k: &Kernel, f: &FaceSurface, uv: [f64; 2]) -> Result<Vec3> {
 /// `NotConverged` past [`MAX_NEAREST_STEPS`]; `InvalidInput` for a point or guess not finite; those
 /// of the evaluations.
 pub fn nearest(k: &Kernel, f: &FaceSurface, p: Point3, guess: [f64; 2]) -> Result<Nearest> {
-    if !(p.x.is_finite() && p.y.is_finite() && p.z.is_finite())
-        || !(guess[0].is_finite() && guess[1].is_finite())
-    {
+    let finite = [p.x, p.y, p.z, guess[0], guess[1]]
+        .iter()
+        .all(|x| x.is_finite());
+    if !finite {
         return Err(SolidError::invalid_input(
             OP_NEAREST,
             "a point or guess not finite",
