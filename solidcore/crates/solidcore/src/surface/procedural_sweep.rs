@@ -736,7 +736,12 @@ impl ProceduralSweep {
         let (point, tangent) = if let Some(offset) = &self.offset {
             offset.evaluate(m, w)?
         } else {
-            let p = self.profile.evaluate(w, usize::from(first), false, false)?;
+            // At a profile knot, the profile span the face starts with, as the higher-order
+            // partials take it (`screw_derivatives_with_flags`).
+            let from_left = !(self.map.b[0] < 0.0);
+            let p = self
+                .profile
+                .evaluate(w, usize::from(first), from_left, false)?;
             (
                 p.first().copied().unwrap_or(Vec3::ZERO),
                 p.get(1).copied().unwrap_or(Vec3::ZERO),
@@ -1289,6 +1294,48 @@ impl<'a> DefinitionRef<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// At a corner of the profile inside a face, the first-order partials and the higher-order
+    /// ones take the same profile span, so they give the same tangent.
+    #[test]
+    fn first_and_higher_order_partials_agree_at_a_profile_corner() {
+        let corner = BSplineCurve::create_canonical(&crate::nurbs::b_spline_curve::CanonicalData {
+            dim: 3,
+            degree: 1,
+            control_points: &[
+                Point3::new(2.0, 0.0, 0.0),
+                Point3::new(3.0, 0.0, 0.5),
+                Point3::new(2.0, 0.0, 1.0),
+            ],
+            form: crate::nurbs::b_spline_curve::BSplineCurveForm::Unspecified,
+            knot_multiplicities: &[2, 1, 2],
+            knots: &[0.0, 0.5, 1.0],
+            knot_type: crate::nurbs::b_spline_curve::KnotType::Unspecified,
+            weights: None,
+            trim: None,
+        })
+        .unwrap();
+        let motion = ScrewMotion::new(Point3::ZERO, Vec3::Z, 2.5, None).unwrap();
+        let stations = [0.0, 0.3, 0.6];
+        let definition = ProceduralSweep::create(&corner, motion, &stations, 0.15).unwrap();
+        // The face's (u, v) at the profile corner w = 0.5, inverting the parameter map
+        // (`definition_parameters`: w = a + b p).
+        let at = |w: f64, t: f64| {
+            let m = &definition.map;
+            let (p, q) = ((w - m.a[0]) / m.b[0], (t - m.a[1]) / m.b[1]);
+            if m.swapped {
+                Point2::new(q, p)
+            } else {
+                Point2::new(p, q)
+            }
+        };
+        assert_eq!(definition.definition_parameters(at(0.5, 0.2)).x, 0.5);
+        let uv = at(0.5, 0.2);
+        let first = definition.evaluate_definition(uv, 1, 1).unwrap();
+        let higher = definition.evaluate_definition(uv, 2, 2).unwrap();
+        assert_eq!(first[1][0], higher[1][0]);
+        assert_eq!(first[0][1], higher[0][1]);
+    }
 
     /// The series enclosure holds the library's atan, and is tight.
     #[test]
