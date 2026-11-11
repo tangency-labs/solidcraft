@@ -1176,8 +1176,9 @@ fn a_rotate_step_reports_a_lost_member() {
     assert!(e.contains("Line `nope` of its frame member is gone"), "{e}");
 }
 
-#[test]
-fn rotate_member_refuses_a_member_in_another_occurrence() {
+/// A post in the component `Part`, made while `Part` is active, and its side picked through
+/// the occurrence.
+fn post_in_a_component() -> (Session, Value) {
     let mut s = Session::default();
     let part = run(&mut s, "component.create", json!({"name": "Part"}));
     let occurrence = part["occurrence"].as_u64().unwrap();
@@ -1188,8 +1189,29 @@ fn rotate_member_refuses_a_member_in_another_occurrence() {
     run(&mut s, "frame.member", json!({"sketch": "Post path", "name": "Post member", "body_name": "Post", "profile": square_tube()}));
     let mut face = post_side(&s);
     face["path"] = json!([occurrence]);
+    (s, face)
+}
+
+#[test]
+fn rotate_member_refuses_a_member_in_another_occurrence() {
+    let (mut s, face) = post_in_a_component();
+    let before = s.doc.to_json();
     let e = s.execute("frame.rotate_member", &json!({"face": face, "angle": "30 deg"})).unwrap_err().to_string();
     assert!(e.contains("not supported yet: rotating a member inside a component"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+/// With the top level active, a member inside a component is refused as not supported, not with
+/// "Activate the member's component" (activating it can't help); the member names the refusal
+/// pins on the Frame Member go back with it.
+#[test]
+fn rotate_member_refuses_a_component_member_with_the_top_level_active() {
+    let (mut s, face) = post_in_a_component();
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let before = s.doc.to_json();
+    let e = s.execute("frame.rotate_member", &json!({"face": face, "angle": "30 deg"})).unwrap_err().to_string();
+    assert!(e.contains("not supported yet: rotating a member inside a component"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
 }
 
 /// A 40 × 40 square tube on the sloped line (0, 0, 0)–(300, 0, 300), its member body `Brace`,
