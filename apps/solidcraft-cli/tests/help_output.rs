@@ -9,6 +9,7 @@ const COMMANDS: &[(&str, &str)] = &[
     ("run", "run"),
     ("eval", "eval"),
     ("inspect", "eval"),
+    ("check", "check"),
     ("script", "script"),
     ("bench-open", "bench-open"),
     ("bench-agent", "bench-agent"),
@@ -34,6 +35,7 @@ const COMMANDS: &[(&str, &str)] = &[
 const LISTED: &[&str] = &[
     "run",
     "eval",
+    "check",
     "script",
     "bench-open",
     "bench-agent",
