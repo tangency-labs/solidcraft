@@ -21,6 +21,7 @@ These are settled and override older text in this RFC, in #1221 and in the draft
 5. **Phase 1 sets the shape, so it gets a design review.** The phase 1 PR is reviewed on its design (WIT, manifest, permissions, limits) before phase 2 starts. See section 8.
 6. **Examples and converters live outside this repository.** The repo carries the WIT, the host and the tests, not each plugin.
 7. **Agent-first.** Plugins are written by agents from a spec, docs and the API. See section 6a.
+8. **Shared across Craft apps.** The plugin host is an app-agnostic crate that SolidCraft, PCBCraft and other Craft apps each plug their own commands into. See section 6b.
 
 ## 1. Goals and non-goals
 
@@ -131,6 +132,18 @@ Plugins will mostly be written by agents working from a spec, docs and the API, 
 5. **Language is secondary.** Any language that compiles to a WebAssembly component works. The guide recommends what agents target most reliably: Rust first, TypeScript next.
 
 Plugin inputs are schemas (section 2), so the app draws the values and variables editor through the design-forms work in #15100. A user changes numbers without touching code.
+
+## 6b. Shared across Craft apps
+
+[RFC 0001](0001-craft-bridge.md) hands work between Craft apps. Plugins should not need a second implementation per app either, so the host is built once and each app supplies its own commands.
+
+1. **App-agnostic core crate `craft-plugin`.** No CAD and no SolidCraft knowledge. It owns the manifest, permissions, limits (fuel, memory, no network), install and signing, and the headless test harness. The app implements one trait: its command catalog as schemas, plus "run this command". SolidCraft implements it with the MCP engine command surface. PCBCraft and other Craft apps implement their own.
+2. **Declarative UI contributions.** A plugin declares entries, placed in named slots (menu or ribbon), and inputs as schemas. The app draws them through the [#15100](https://github.com/tangency-labs/solidcraft/issues/15100) forms. A plugin ships no UI code, and each app decides which slots exist.
+3. **Runtimes are sub-crates on the same trait.** `craft-plugin-wasm` is wasmtime on desktop and jco on the web, and it is the runtime. A `craft-plugin-script` crate (Monty or Rhai) is optional, is not part of phase 1, and is not added unless the owner decides to revisit decision 2.
+4. **The WIT world is generic:** run a command, log, progress, cancel, granted files. App commands are data (schemas), not WIT types, so one WIT serves every Craft app. The `solidcraft:plugin@1.0.0` world in section 2 becomes this generic world, with SolidCraft's commands as its catalog.
+5. **Location.** The crates start in this repository as `crates/craft-plugin*`, and `cargo xtask layers` forbids any dependency on SolidCraft crates. They move to their own repository, as solidcore did, when a second app needs them.
+
+Phase 1 therefore builds the host as `craft-plugin` plus `craft-plugin-wasm` against that trait, not hard-coded to SolidCraft.
 
 ## 7. What exists today
 
