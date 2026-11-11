@@ -77,12 +77,13 @@ impl Curve {
     /// The record's `curve` over `interval` of its parameter as the sweep curves that are it,
     /// exactly, in order from the interval's start: a line as one [`Curve::Line`] between its
     /// points at the interval's ends; a polyline as a line for each of its segments the
-    /// interval reaches (cut where the interval ends inside one); a circle as one
+    /// interval reaches (cut where the interval ends inside one; the interval within its range); a circle as one
     /// [`Curve::Arc`] over the same angles (at most a full turn); an ellipse, a spline or a
     /// rational spline as one [`Curve::Nurbs`], its B-spline cut to the interval.
     ///
     /// # Errors
-    /// [`Error::Argument`] for an interval that is not finite and increasing, a traced
+    /// [`Error::Argument`] for an interval that is not finite and increasing (or, on a polyline,
+    /// past its range), a traced
     /// intersection curve (no exact sweep curve), a circle's interval past a full turn, or
     /// numbers the kernel refuses; the kernel's status.
     pub fn from_record(curve: &brep::Curve, interval: [f64; 2]) -> Result<Vec<Curve>> {
@@ -120,6 +121,12 @@ impl Curve {
                     end: point(k, &made.curve, hi)?,
                 }])),
                 (Eval::Polyline { points }, _) => {
+                    // the interval within the polyline's range [0, n - 1]: a curve shorter than
+                    // asked is no answer
+                    let last = points.len().saturating_sub(1) as f64;
+                    if lo < 0.0 || hi > last {
+                        return Ok(Err(Error::Argument));
+                    }
                     // segment i spans [i, i + 1]: those the interval reaches, cut to it
                     let mut lines = Vec::new();
                     for i in 0..points.len().saturating_sub(1) {
@@ -231,6 +238,12 @@ mod tests {
         };
         let c = Curve::from_record(&r, [0.5, 2.25]).unwrap();
         same(&r, &c, &[[0.5, 1.0], [1.0, 2.0], [2.0, 2.25]]);
+        // past either end of its range [0, 3]: refused, not cut short
+        assert_eq!(Curve::from_record(&r, [-0.5, 1.0]), Err(Error::Argument));
+        assert_eq!(Curve::from_record(&r, [2.0, 3.5]), Err(Error::Argument));
+        // its whole range
+        let c = Curve::from_record(&r, [0.0, 3.0]).unwrap();
+        same(&r, &c, &[[0.0, 1.0], [1.0, 2.0], [2.0, 3.0]]);
     }
 
     #[test]
