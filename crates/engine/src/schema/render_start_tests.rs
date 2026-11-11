@@ -1,13 +1,13 @@
 use std::collections::BTreeSet;
 
 use serde_json::{Value, json};
-use solidcraft_render::job::CpuHost;
+use solidcraft_render::job::{Admission, CancelToken, CpuHost, ImageHost, ImageRequest, ImageTask, ImageWork, JobId, JobOptions};
 
-use super::{GPU_ONLY, RUNTIME_ONLY, RenderRequest};
+use super::{GPU_ONLY, RUNTIME_ONLY, RenderChecked, RenderRequest, RenderStarted};
 use crate::Session;
 use crate::schema::check::schema_keys;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
-use crate::schema::{ParamCheck, input_schema_for};
+use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 const IDS: [&str; 2] = ["render.start", "render.preflight"];
 
@@ -292,6 +292,126 @@ fn the_check_takes_what_the_schema_allows() {
             assert_eq!(crate::schema::issues(id, p).is_empty(), *takes, "{id} {p}: {:?}", crate::schema::issues(id, p));
             assert_eq!(conforms(schema, schema, p), *takes, "{id} {p}");
         }
+    }
+}
+
+/// A GPU executor without a GPU, as in `cmd/render/job_tests.rs`: the cooperative CPU host's
+/// executor, named `gpu-path` and taking progressive requests.
+#[cfg(not(target_arch = "wasm32"))]
+struct NumericalGpu;
+
+#[cfg(not(target_arch = "wasm32"))]
+impl solidcraft_render::job::ImageExecutor for NumericalGpu {
+    fn descriptor(&self) -> solidcraft_render::job::Result<solidcraft_render::ExecutorDescriptor> {
+        let mut descriptor = CpuHost::cooperative().descriptor()?;
+        descriptor.id = solidcraft_render::ExecutorId::new("gpu-path").unwrap_or_else(|e| panic!("{e}"));
+        descriptor.profiles[0].features.extend([solidcraft_render::RenderFeature::Progressive, solidcraft_render::RenderFeature::Hdri]);
+        Ok(descriptor)
+    }
+    fn admit(
+        &self,
+        scene: &solidcraft_render::ProductScene,
+        request: &ImageRequest,
+        options: JobOptions,
+    ) -> solidcraft_render::job::Result<Admission> {
+        options.validate()?;
+        solidcraft_render::job::admit(scene, &ImageRequest { environment: None, textures: None, ..request.clone() })
+    }
+    fn begin(
+        &self,
+        scene: solidcraft_render::ProductScene,
+        request: ImageRequest,
+        _: JobOptions,
+        cancel: CancelToken,
+    ) -> solidcraft_render::job::Result<Box<dyn ImageWork>> {
+        Ok(Box::new(ImageTask::new(scene, ImageRequest { environment: None, textures: None, ..request }, cancel)?))
+    }
+}
+
+/// `params` run as `id` in Warn: the reply, which must match `schema` and have no warnings.
+fn reply(s: &mut Session, id: &str, params: &Value, schema: &schemars::Schema) -> Value {
+    let r = s.execute(id, params).unwrap_or_else(|e| panic!("{id} {params}: {e}"));
+    assert!(conforms(schema.as_value(), schema.as_value(), &r), "{id} {params}: {r} doesn't match {}", schema.as_value());
+    assert!(r.get("param_warnings").is_none(), "{id} {params}: {r}");
+    r
+}
+
+/// #13311: both commands reply as their output schemas say, in Warn without warnings, in either
+/// form: a raster request, one whose setup has a control the raster executor leaves out, and GPU
+/// requests with and without denoising and the indirect clamp. Render Image's reply is the queued
+/// job's status, with the ignored controls of a runtime request; Check Render Request's has the
+/// sections of its form.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn replies_match_the_output_schemas() {
+    let (checked, started) = (output_schema_for::<RenderChecked>(), output_schema_for::<RenderStarted>());
+    let small = json!({"width": 16, "height": 16});
+    for (p, ignored) in [
+        (json!({"settings": small}), Some(json!([]))),
+        (json!({"setup": "Bright", "transparent_background": true}), Some(json!(["exposure_ev"]))),
+        (json!({"settings": small, "progressive": true}), None),
+        (json!({"settings": small, "progressive": true, "denoise": true, "clamp_indirect": 8}), None),
+    ] {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 20, "width": 10, "height": 5})).unwrap_or_else(|e| panic!("{e}"));
+        let bright = json!({"name": "Bright", "set": {"width": 16, "height": 16, "exposure_ev": 1}});
+        s.execute("render.settings.set", &bright).unwrap_or_else(|e| panic!("{e}"));
+        s.set_render_job_host(Some(CpuHost::cooperative())).unwrap_or_else(|e| panic!("{e}"));
+        let gpu = ImageHost::with_executor(std::sync::Arc::new(NumericalGpu)).unwrap_or_else(|e| panic!("{e}"));
+        s.register_render_job_host(gpu).unwrap_or_else(|e| panic!("{e}"));
+        s.param_check = ParamCheck::Warn;
+
+        let r = reply(&mut s, "render.preflight", &p, &checked);
+        assert_eq!(r.get("ignored_controls"), ignored.as_ref(), "{p}: {r}");
+        let gpu = p["progressive"] == true;
+        for key in ["cpu_budget", "cpu_limits", "stage_transport", "retained_request_bytes"] {
+            assert_eq!(r.get(key).is_some(), !gpu, "{key} {p}: {r}");
+        }
+        for key in ["options", "retained_options_bytes"] {
+            assert_eq!(r.get(key).is_some(), gpu, "{key} {p}: {r}");
+        }
+        let denoised = p["denoise"] == true;
+        assert_eq!((r.get("denoising").is_some(), r.get("indirect_clamp").is_some()), (denoised, denoised), "{p}: {r}");
+        assert_eq!(r["resolved"]["executor"], if gpu { "gpu-path" } else { "cpu-product" }, "{p}: {r}");
+
+        let job = reply(&mut s, "render.start", &p, &started);
+        assert_eq!(job.get("ignored_controls"), ignored.as_ref(), "{p}: {job}");
+        if !gpu {
+            // The cooperative host doesn't run a job until it is pumped, so its status is as queued.
+            let id: JobId = serde_json::from_value(job["job"].clone()).unwrap_or_else(|e| panic!("{e}"));
+            let mut status = json!(s.render_jobs.status(id).unwrap_or_else(|e| panic!("{e}")));
+            status["ignored_controls"] = ignored.clone().unwrap_or_default();
+            assert_eq!(job, status);
+        }
+    }
+}
+
+/// #13311: CPU ray tracing replies as the output schemas say too, with the sections only it has:
+/// the CPU filter's denoising and a setup's clear coats.
+#[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
+#[test]
+fn cpu_ray_tracing_replies_match_the_output_schemas() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"body_name": "Panel", "length": 20, "width": 20, "height": 2})).unwrap_or_else(|e| panic!("{e}"));
+    let options =
+        json!({"progressive": {"samples_per_pixel": 1, "seed": 7}, "lights": [{"direction": [0, 0, 1], "color": [1, 1, 1], "intensity": 1}]});
+    let mut denoised = options.clone();
+    denoised["denoise"] = json!(true);
+    let set = |options: &Value| json!({"width": 8, "height": 8, "job": {"method": "cpu_raytrace", "options": options}});
+    s.execute("render.settings.set", &json!({"name": "Denoised", "set": set(&denoised)})).unwrap_or_else(|e| panic!("{e}"));
+    let coat = json!({"name": "Coat", "body_index": 0, "body_name": "Panel", "expected_revision": s.revision,
+        "coat": {"weight": 0.5, "roughness": 0.5, "ior": 1.5}, "set": set(&options)});
+    s.execute("render.coat.bind", &coat).unwrap_or_else(|e| panic!("{e}"));
+    s.set_render_job_host(Some(CpuHost::for_platform().unwrap_or_else(|e| panic!("{e}")))).unwrap_or_else(|e| panic!("{e}"));
+    s.param_check = ParamCheck::Warn;
+    let (checked, started) = (output_schema_for::<RenderChecked>(), output_schema_for::<RenderStarted>());
+    for (setup, section) in [("Denoised", "denoising"), ("Coat", "coats")] {
+        let p = json!({"setup": setup, "replace": true});
+        let r = reply(&mut s, "render.preflight", &p, &checked);
+        assert_eq!(r["resolved"]["executor"], "cpu-raytrace", "{r}");
+        assert!(r.get(section).is_some(), "{setup}: {r}");
+        let job = reply(&mut s, "render.start", &p, &started);
+        assert_eq!(job["ignored_controls"], json!([]), "{job}");
     }
 }
 

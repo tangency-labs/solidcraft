@@ -7,9 +7,7 @@ file.insert_step
 render.aging.describe
 render.backends
 render.effects.describe
-render.preflight
 render.scene
-render.start
 sheet.export_dxf
 solid.draft
 solid.hole
