@@ -116,10 +116,6 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.offset_missing_surface_fails = true;
     f.fillet_nx1_end_rib_global_merge = true;
     f.uv_trim_corner_end_points_only = true;
-    f.split_edge_definition_owns_its_curves = true;
-    f.simple_coincidence_side_across_the_curve = true;
-    f.boolean_capture_keeps_operand_vertices_apart = true;
-    f.radial_sector_step_off_coincidence_by_own_face = true;
     f.bspline_trim_preserves_uv_spans = true;
     f.cone_parallel_line_midpoint = true;
     f.cone_parallel_line_domains = true;
