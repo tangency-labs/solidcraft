@@ -6816,20 +6816,7 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
             if !solidcraft_engine::view::sketch_curve_visible(&ss.sketch, i) {
                 continue;
             }
-            let sampled = if bx.crossing {
-                crate::sketch_display::curve_sample(app, ss.feature, i, &ss.plane, proj)
-            } else {
-                std::sync::Arc::new(crate::sketch_display::curve_unclipped(&ss.sketch, i, &ss.plane, proj, app.viewport.pixels_per_point()))
-            };
-            let parts: Vec<Vec<Pos2>> = sampled.parts.iter().map(|part| to2(part)).collect();
-            let takes = if bx.crossing {
-                parts.iter().any(|part| bx.takes(part))
-            } else {
-                sampled.quality == solidcraft_engine::render::SamplingQuality::Complete
-                    && !parts.is_empty()
-                    && parts.iter().all(|part| bx.takes(part))
-            };
-            if takes {
+            if box_takes_curve(app, ss, i, proj, &bx) {
                 out.push(Sel::SketchCurve { id: c.id.clone(), sketch: None });
             }
         }
@@ -6939,6 +6926,24 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
             }
         }
     }
+    // Project takes the visible curves of the other sketches too (#14927): the marquee of its
+    // Geometry input reaches them as a click does, as `ExternalSketchCurve`.
+    if app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::SketchProject { .. }))
+        && accepts.is_some_and(|a| a & crate::selection::SKETCH_LINES != 0)
+        && !app.ui.pick_off.iter().any(|x| x == "sketch" || x == "sketch_curves")
+    {
+        for sid in visible_sketches(app) {
+            if app.session.active_sketch == Some(sid) {
+                continue;
+            }
+            let Some(ss) = st.sketch(sid) else { continue };
+            for (i, c) in ss.sketch.curves.iter().enumerate() {
+                if solidcraft_engine::view::sketch_curve_visible(&ss.sketch, i) && box_takes_curve(app, ss, i, proj, &bx) {
+                    out.push(Sel::ExternalSketchCurve { sketch: sid, id: c.id.clone() });
+                }
+            }
+        }
+    }
     let mut grouped = Vec::new();
     for item in out {
         for piece in grouped_selection(&app.session, &item) {
@@ -6955,6 +6960,23 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
     }
     let items = serde_json::to_value(&out).unwrap_or_default();
     let _ = app.run("select.set", json!({"items": items, "add": add}));
+}
+
+/// Whether a marquee takes curve `i` of a sketch: a window takes it when it lies wholly inside,
+/// a crossing box when it touches it.
+fn box_takes_curve(app: &SolveApp, ss: &solidcraft_engine::doc::SolvedSketch, i: usize, proj: &Proj, bx: &BoxSel) -> bool {
+    let to2 = |pts: &[Vec3]| -> Vec<Pos2> { pts.iter().filter_map(|p| proj.to_screen(*p)).collect() };
+    let sampled = if bx.crossing {
+        crate::sketch_display::curve_sample(app, ss.feature, i, &ss.plane, proj)
+    } else {
+        std::sync::Arc::new(crate::sketch_display::curve_unclipped(&ss.sketch, i, &ss.plane, proj, app.viewport.pixels_per_point()))
+    };
+    let parts: Vec<Vec<Pos2>> = sampled.parts.iter().map(|part| to2(part)).collect();
+    if bx.crossing {
+        parts.iter().any(|part| bx.takes(part))
+    } else {
+        sampled.quality == solidcraft_engine::render::SamplingQuality::Complete && !parts.is_empty() && parts.iter().all(|part| bx.takes(part))
+    }
 }
 
 /// Whether the origin point is drawn (the Origin shown and its point not hidden).

@@ -862,3 +862,87 @@ fn intersect_says_what_it_added_and_that_projected_geometries_hides_it() {
     assert_eq!(status, Some(("Intersect added 1 point to the sketch.".into(), false)));
     assert_eq!(links, 2);
 }
+
+// ---------------------------------------------------------------------------
+// Project: chains and marquees of another sketch's curves (#14927)
+// ---------------------------------------------------------------------------
+
+/// Sketch 1 on XY holds a two-line chain (0,0)-(20,0)-(20,20) and a lone line far from it; a
+/// second sketch above it is being edited with the Project dialog open, seen from above.
+fn project_chain_fixture() -> (Harness, u64, Vec<String>, String) {
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    h.app.ui.show_browser = false;
+    h.app.ui.show_timeline = false;
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[0,0],[20,0],[20,20]],"infer":false})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[60,40],[80,40]],"infer":false,"connect":false})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let first = h.app.session.doc.features.last().unwrap().id;
+    let (chain, lone) = {
+        let state = h.app.session.world_state().unwrap();
+        let ids: Vec<String> = state.sketch(first).unwrap().sketch.curves.iter().map(|c| c.id.clone()).collect();
+        assert_eq!(ids.len(), 3, "a two-line chain and one lone line: {ids:?}");
+        (ids[..2].to_vec(), ids[2].clone())
+    };
+    h.app.run("sketch.create", json!({"plane":"XY","offset":20})).unwrap();
+    h.step(&json!({"call": "ui.view", "params": {"view": "top"}})).unwrap();
+    h.step(&json!({"call": "ui.camera", "params": {"target": [40, 20, 0], "distance": 160}})).unwrap();
+    h.app.start("sketch.project");
+    h.settle();
+    assert!(matches!(h.app.dialog.as_ref().unwrap().kind, Kind::SketchProject { bodies: false, .. }));
+    (h, first, chain, lone)
+}
+
+fn external_curves(h: &Harness, sketch: u64) -> Vec<String> {
+    let mut ids: Vec<String> = h.app.dialog.as_ref().unwrap().inputs[0]
+        .items
+        .iter()
+        .filter_map(|s| match s {
+            Sel::ExternalSketchCurve { sketch: sk, id } if *sk == sketch => Some(id.clone()),
+            _ => None,
+        })
+        .collect();
+    ids.sort();
+    ids
+}
+
+/// Double-clicking a curve of another sketch adds its whole joined chain to Geometry, as the
+/// Entities dialogs do for the active sketch (#8390), and not the lone line.
+#[test]
+fn project_double_click_takes_the_whole_chain_of_another_sketch_14927() {
+    let (mut h, first, mut chain, _) = project_chain_fixture();
+    chain.sort();
+    h.step(&json!({"click":{"world":[10,0,0]},"double":true})).unwrap();
+    assert_eq!(external_curves(&h, first), chain, "{:?}", h.app.dialog.as_ref().unwrap().inputs[0].items);
+    // The chain is one toggle: a second double-click takes it out again.
+    h.frames(30);
+    h.step(&json!({"click":{"world":[10,0,0]},"double":true})).unwrap();
+    assert!(external_curves(&h, first).is_empty());
+}
+
+/// A window marquee takes the curves of other sketches that lie wholly inside it.
+#[test]
+fn project_window_box_takes_curves_of_other_sketches_14927() {
+    let (mut h, first, mut chain, _) = project_chain_fixture();
+    chain.sort();
+    h.step(&json!({"drag": [{"world": [-5, -5, 0]}, {"world": [25, 25, 0]}]})).unwrap();
+    assert_eq!(external_curves(&h, first), chain, "{:?}", h.app.dialog.as_ref().unwrap().inputs[0].items);
+    // A window that cuts through a curve does not take it.
+    h.app.dialog.as_mut().unwrap().inputs[0].items.clear();
+    h.step(&json!({"drag": [{"world": [-5, -5, 0]}, {"world": [10, 25, 0]}]})).unwrap();
+    assert!(external_curves(&h, first).is_empty(), "{:?}", h.app.dialog.as_ref().unwrap().inputs[0].items);
+}
+
+/// A crossing marquee takes every curve it touches, and only those.
+#[test]
+fn project_crossing_box_takes_the_curves_it_touches_14927() {
+    let (mut h, first, mut chain, lone) = project_chain_fixture();
+    chain.sort();
+    h.step(&json!({"drag": [{"world": [30, 10, 0]}, {"world": [10, -5, 0]}]})).unwrap();
+    assert_eq!(external_curves(&h, first), chain, "touches both lines of the chain, not {lone}");
+    let cmds = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(cmds.len(), 1);
+    assert_eq!(cmds[0].0, "sketch.project");
+    assert_eq!(cmds[0].1["refs"].as_array().unwrap().len(), 2);
+}
