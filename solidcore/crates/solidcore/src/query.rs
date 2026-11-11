@@ -17,6 +17,7 @@ pub(crate) mod exact;
 pub mod face;
 mod face_surface;
 pub mod r#loop;
+pub mod member_turn;
 pub mod normal;
 pub mod poly;
 pub mod poly_properties;

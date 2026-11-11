@@ -53,6 +53,7 @@
 //! | [`Vec3::unitized_derivative3`]               | `UnitizedDerivative3`                            |
 //! | [`Vec3::angle_between`]                      | `AngleBetween`                                   |
 //! | [`Vec3::ccw_angle_between`]                  | `CCWAngleBetween`                                |
+//! | [`Vec3::square_turn`]                        | (none)                                           |
 //! | [`Vec3::is_colinear_with`]                   | `IsColinearWith`                                 |
 //! | [`sqrt`], [`cbrt`], [`acos`], [`asin`]       | `sm_sqrt`, `sm_cbrt`, `sm_acos`, `sm_asin` (`smos_Sqrt`, `smos_CubeRoot`, `smos_ArcCosine`, `smos_ArcSine`) |
 //!
@@ -852,6 +853,41 @@ impl Vec3 {
         Ok(proj_ang)
     }
 
+    /// The turn about unit axis `self` that brings `normal` square to `line`, folded into
+    /// (-PI/2, PI/2]: the nearer of the two answers PI apart. `normal` and `line` act through
+    /// their projections on the plane square to the axis.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for a non-finite vector, or a `normal` or `line` along
+    /// the axis (it has no direction square to it).
+    pub fn square_turn(self, normal: Self, line: Self) -> Result<f64> {
+        let finite = |v: Self| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+        if !(finite(self) && finite(normal) && finite(line)) {
+            return Err(SolidError::InvalidInput {
+                operation: "geom::vector3d::Vec3::square_turn",
+                reason: "non-finite vector",
+            });
+        }
+        let target = self.cross(line);
+        if self.cross(normal).length_squared() < 100.0 * EFF_ZERO_SQ
+            || target.length_squared() < 100.0 * EFF_ZERO_SQ
+        {
+            return Err(SolidError::InvalidInput {
+                operation: "geom::vector3d::Vec3::square_turn",
+                reason: "a vector along the axis",
+            });
+        }
+        let turn = self.ccw_angle_between(normal, target)?;
+        Ok(if turn > PI / 2.0 {
+            turn - PI
+        } else if turn <= -PI / 2.0 {
+            turn + PI
+        } else {
+            turn
+        })
+    }
+
     /// True when `self` and `end_vec` both lie along the segment `start_pnt`..`end_pnt`
     /// (either sense), or the segment is degenerate (`IsColinearWith`).
     #[must_use]
@@ -969,7 +1005,20 @@ impl DivAssign<f64> for Vec3 {
 mod tests {
     use super::*;
 
-    /// Fuzz regression: when `|v|^2` overflows, the unit vector underflows to
+    /// A side with normal X, turned about Z to square with a line.
+    #[test]
+    fn square_turn_folds_to_the_nearer() {
+        let z = Vec3::new(0.0, 0.0, 1.0);
+        let x = Vec3::new(1.0, 0.0, 0.0);
+        let turn = |l: [f64; 3]| z.square_turn(x, Vec3::from(l)).unwrap();
+        assert!(turn([0.0, 1.0, 0.0]).abs() < 1e-12);
+        assert!((turn([1.0, 1.0, 5.0]) + PI / 4.0).abs() < 1e-12);
+        assert!((turn([1.0, 0.0, 0.0]) - PI / 2.0).abs() < 1e-12);
+        assert!(z.square_turn(x, z).is_err());
+        assert!(z.square_turn(x, Vec3::new(f64::NAN, 0.0, 0.0)).is_err());
+    }
+
+    /// Fuzz regression: when `|v|^2` overflows,the unit vector underflows to
     /// zero and upstream fails after writing the x and z out-params.
     #[test]
     fn ortho_vectors_on_overflow() {
