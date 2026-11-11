@@ -1422,6 +1422,10 @@ pub(crate) fn orbit_about(app: &mut SolveApp, _rect: egui::Rect, dx: f64, dy: f6
 fn orbit_camera(app: &mut SolveApp, dx: f64, dy: f64) {
     if !app.preferences.free_orbit {
         app.cam.orbit(dx, dy);
+    } else if app.preferences.free_orbit_upright && app.preferences.upright_orbit_unrolls {
+        // The same preference as the upright orbit's: the pointer is read through the view's
+        // roll, so a view rolled on its side still follows it. Free orbit keeps the roll.
+        app.cam.orbit_unlimited_through_roll(dx, dy);
     } else if app.preferences.free_orbit_upright {
         app.cam.orbit_unlimited(dx, dy);
     } else {
@@ -1634,6 +1638,47 @@ mod tests {
             let (_, events) = web_frame(&mut state, 3.0, vec![web_wheel(Point, delta, Modifiers::NONE)], &mut gesture);
             assert_eq!(events.len(), 1);
             assert!(!gesture);
+        }
+    }
+
+    /// Free orbit with the upright turn on a rolled view (#12458): upright, upside down or on its
+    /// side, the near side of the model goes the way the pointer does, and the roll is kept.
+    #[test]
+    fn free_orbit_upright_follows_the_pointer_on_a_rolled_view() {
+        use super::*;
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+        for roll in [0.0, std::f64::consts::PI, std::f64::consts::FRAC_PI_2, -std::f64::consts::FRAC_PI_2, 0.7, -2.3] {
+            for (dx, dy) in [(6.0, 0.0), (-6.0, 0.0), (0.0, 6.0), (0.0, -6.0), (4.0, 3.0)] {
+                let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
+                app.preferences.orbit_around = OrbitAround::ViewCentre;
+                app.preferences.free_orbit = true;
+                app.preferences.free_orbit_upright = true;
+                app.cam = Camera { yaw: 0.4, pitch: 0.5, roll, ..Default::default() };
+                let near = app.cam.target + app.cam.back() * 10.0;
+                orbit(&mut app, rect, dx, dy, None);
+                // Screen right is the camera's right, screen down is against its up.
+                let moved = app.cam.frame_coords(near);
+                let (mx, my) = (moved.x, -moved.y);
+                let along = (mx * dx + my * dy) / (mx.hypot(my) * dx.hypot(dy));
+                // A turn about the up axis moves the near side less than a tilt does (by the cosine of
+                // the elevation), so a slanted drag is followed closely, not exactly.
+                assert!(along > 0.95, "roll {roll}, drag ({dx}, {dy}): the near side went ({mx}, {my})");
+                let kept = (app.cam.roll - roll + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+                assert!(kept.abs() < 1e-6, "roll {roll} became {}", app.cam.roll);
+            }
+        }
+        // Off, free orbit's upright turn is the one before, rolled or not.
+        for roll in [0.0, std::f64::consts::FRAC_PI_2, 0.7] {
+            let mut app = crate::SolveApp::new(Default::default(), crate::Services::default());
+            app.preferences.orbit_around = OrbitAround::ViewCentre;
+            app.preferences.free_orbit = true;
+            app.preferences.free_orbit_upright = true;
+            app.preferences.upright_orbit_unrolls = false;
+            app.cam = Camera { yaw: 0.4, pitch: 0.5, roll, ..Default::default() };
+            let mut expected = app.cam;
+            expected.orbit_unlimited(5.0, -3.0);
+            orbit(&mut app, rect, 5.0, -3.0, None);
+            assert_eq!((app.cam.yaw, app.cam.pitch, app.cam.roll), (expected.yaw, expected.pitch, expected.roll), "roll {roll}");
         }
     }
 
