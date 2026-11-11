@@ -3996,11 +3996,7 @@ pub fn dims_overlay(app: &SolveApp, ctx: &egui::Context) {
                 DimFrame::Radial { center, .. } | DimFrame::ArcLength { center, .. } | DimFrame::HalfAxis { center, .. } => center,
                 DimFrame::Angular { vertex, .. } => vertex,
             };
-            let (Some(a), Some(b)) = (to(anchor), to(anchor + Vec2::X)) else { continue };
-            let px = 1.0 / f64::from(a.distance(b)).max(1e-9);
-            if !px.is_finite() {
-                continue;
-            }
+            let Some(px) = crate::dim_view::mm_per_pixel(to, anchor) else { continue };
             let expr = c.param.as_ref().and_then(|p| app.session.doc.param(p)).map(|p| p.expr.as_str());
             let col = if c.driven { tk.dimension_driven } else { tk.dimension };
             let galley = painter.layout_no_wrap(
