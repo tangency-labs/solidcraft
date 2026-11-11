@@ -886,13 +886,11 @@ fn public_split_helper_rejects_a_missing_infinite_region_after_partial_edits() {
     assert!(f.fb.brep().infinite_region().is_some());
     f.fb.brep_mut().set_infinite_region_record(None);
     let outcome = super::super::super::p1::split_rail(&f.k, &mut f.fb, &mut f.owners, id, rail);
-    assert!(matches!(
-        outcome,
-        Err(SolidError::Upstream {
-            code: crate::error::SM_ERR_NULL_POINTER,
-            ..
-        })
-    ));
+    // a typed blend failure keeps the status of the bare `Upstream` (#13790)
+    assert_eq!(
+        outcome.unwrap_err().upstream_status(),
+        Some(crate::error::SM_ERR_NULL_POINTER)
+    );
     assert_ne!(f.context().end(rail).unwrap(), old_end);
     assert!(f.fb.brep().vertex(old_end).unwrap().vertexuses.is_empty());
     assert!(f.owners.notifications.is_empty());
@@ -1063,13 +1061,11 @@ fn rollover_corner_vertex_delegates_to_the_available_geom_port() {
     let start = f.context().start(rail).unwrap();
     let r = Missing.corner_vertex(&mut f.context(), start, id);
     // the fixture's corner table is empty: the vertex's corner is not in it
-    assert!(matches!(
-        r,
-        Err(SolidError::Upstream {
-            code: crate::error::SM_ERR_NULL_POINTER,
-            ..
-        })
-    ));
+    // a typed blend failure keeps the status of the bare `Upstream` (#13790)
+    assert_eq!(
+        r.unwrap_err().upstream_status(),
+        Some(crate::error::SM_ERR_NULL_POINTER)
+    );
 }
 
 #[test]
@@ -1102,14 +1098,15 @@ fn rollover_topology_split_preserves_actual_solver_id_and_partial_edits() {
     let end_use = f.fb.brep().edge(rail).unwrap().edgeuses[1];
     let count = f.fb.geoms().len();
     let err = Missing.topology_split(&mut f.context(), id).unwrap_err();
-    assert!(
-        matches!(
-            err,
-            SolidError::Upstream {
-                operation: "blend::fillet_geom::p5::FilletBrep::make_rail_edgeuse",
-                code: crate::error::SM_ERR_NULL_POINTER,
-                ..
-            }
+    // a typed blend failure that keeps the bare `Upstream`'s status (#13790)
+    assert_eq!(
+        (err.operation(), err.blend_failure(), err.upstream_status()),
+        (
+            "blend::fillet_geom::p5::FilletBrep::make_rail_edgeuse",
+            Some(&crate::error::blend::BlendFailure::Missing(
+                "the other base edge use"
+            )),
+            Some(crate::error::SM_ERR_NULL_POINTER)
         ),
         "{err:?}"
     );

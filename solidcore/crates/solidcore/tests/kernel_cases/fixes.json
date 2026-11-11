@@ -113,8 +113,6 @@
   "bspline_trim_preserves_uv_spans",
   "bspline_trim_keeps_rational_end_spans",
   "knot_vector_valid_requires_span",
-  "cone_parallel_line_midpoint",
-  "cone_parallel_line_domains",
   "cylinder_plane_tangent_within_tolerance",
   "proto_edge_self_loop_on_vertex_degenerate",
   "slice_coincident_faces_sheet_side",

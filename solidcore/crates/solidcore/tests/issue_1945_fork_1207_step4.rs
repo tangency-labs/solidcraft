@@ -103,8 +103,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.uv_trim_corner_end_points_only = true;
     k.fixes.uv_trim_joins_drop_pieces = true;
     k.fixes.bspline_trim_preserves_uv_spans = true;
-    k.fixes.cone_parallel_line_midpoint = true;
-    k.fixes.cone_parallel_line_domains = true;
     k.fixes.cylinder_plane_tangent_within_tolerance = true;
     k.fixes.proto_edge_self_loop_on_vertex_degenerate = true;
     k.fixes.slice_coincident_faces_sheet_side = true;

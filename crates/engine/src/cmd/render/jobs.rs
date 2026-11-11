@@ -2,6 +2,7 @@ use crate::schema::render_jobs::{
     ExportFormat, ImageCopied, ImageExported, Job, JobProgressReply, JobState, PreparationCancelled, QueueReply, RenderCancelled, RenderProgress,
     ResultPinned,
 };
+use crate::schema::render_start::{Checked, Denoising, GpuChecked, IndirectClamp, RenderChecked, RenderStarted, RuntimeChecked};
 use crate::{Result, Session, params::bad, render_jobs::job_error};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -95,7 +96,7 @@ struct ProgressiveStart {
 pub(crate) struct Prepared {
     pub(crate) replace: bool,
     pub(crate) submission: Option<solidcraft_render::job::PreparedSubmission>,
-    pub(crate) reply: Value,
+    pub(crate) reply: RenderChecked,
 }
 
 fn lower_led(input: &mut Start, command: &str) -> Result<()> {
@@ -662,25 +663,31 @@ pub(crate) fn prepare_with_metadata(
         (true, false) => vec!["thin_sheet", "closed_box"],
         (false, _) => Vec::new(),
     };
-    let mut reply = json!({"ignored_controls":ignored,"stage_panels":settings.stage.len(),"stage_transport":stage_transport, "cpu_budget":budget,"cpu_limits":budget.limits(),"environment":environment_info,"textures":request.textures.as_ref().map(|maps|maps.summary()),"retained_request_bytes":retained_request_bytes,"resolved":resolved,"admission":admission,"request":request,"scene_generation":s.revision,"host":host.kind(),"transparency":transparency,"refraction":refraction,"dielectric_boundaries":dielectric_boundaries});
-    if !coats.is_empty() {
-        reply["coats"] = json!(coats);
-    }
-    if let Some(options) = request.raytrace.as_ref().filter(|options| options.denoise) {
-        reply["denoising"] = json!({
-            "method":"edge_aware_atrous", "backend":"native_cpu", "passes":options.denoise_settings.passes,
-            "steps":denoise_steps(options.denoise_settings.passes), "settings":options.denoise_settings,
-            "diagnostics_requested":options.denoise_diagnostics,
-            "outlier_policy":if options.denoise_settings.firefly_suppression {DENOISE_OUTLIER_POLICY} else {"disabled"},
-            "optical_policy":if options.denoise_settings.optical_filter {DENOISE_OPTICAL_POLICY} else {DENOISE_OPAQUE_ONLY_POLICY},
-            "guides":"deterministic_center_ray_albedo_normal_camera_relative_position_depth",
-            "bypass":if options.denoise_settings.optical_filter {"unsupported or ambiguous optical paths, emitter, background and partial coverage"} else {"all optical paths, emitter, background and partial coverage"},
-            "limitation":"biased spatial filter; optical guides do not decompose reflected and transmitted radiance or reconstruct depth-of-field correspondences",
-            "raw_linear_accumulator_preserved":true,"raw_linear_exr_preserved":true,
-            "output_stage":"linear_before_tone_map", "work_units":"one pixel visit per pass, each with at most 25 taps",
-            "checkpoints":"every complete published pass uses the same filter"
-        });
-    }
+    let denoising = request.raytrace.as_ref().filter(|options| options.denoise);
+    let checked = Checked {
+        resolved: retyped(command, &resolved)?,
+        admission: retyped(command, &admission)?,
+        request: retyped(command, request)?,
+        scene_generation: s.revision,
+        host: retyped(command, &host.kind())?,
+        stage_panels: settings.stage.len(),
+        environment: environment_info.as_ref().map(|info| retyped(command, info)).transpose()?,
+        textures: request.textures.as_ref().map(|maps| retyped(command, &maps.summary())).transpose()?,
+        transparency,
+        refraction,
+        dielectric_boundaries,
+        coats: (!coats.is_empty()).then(|| retyped(command, &coats)).transpose()?,
+        denoising: denoising.map(|options| denoising_reply(command, &options.denoise_settings, options.denoise_diagnostics, true)).transpose()?,
+        param_warnings: Vec::new(),
+    };
+    let reply = RenderChecked::Runtime(RuntimeChecked {
+        checked,
+        ignored_controls: ignored,
+        stage_transport,
+        cpu_budget: retyped(command, &budget)?,
+        cpu_limits: retyped(command, &budget.limits())?,
+        retained_request_bytes,
+    });
     Ok(Prepared { replace: input.replace, submission: Some(submission), reply })
 }
 
@@ -907,30 +914,40 @@ fn prepare_progressive(
         .and_then(|bytes| bytes.checked_add(retained_options_bytes))
         .filter(|bytes| *bytes <= host.job_limit_bytes())
         .ok_or_else(|| bad(command, "GPU work and retained metadata exceed the per-job limit"))?;
-    let reply = json!({"stage_panels":settings.stage.len(),"resolved":resolved,"admission":admission,"request":request,"textures":request.textures.as_ref().map(|resources|resources.summary()),"scene_generation":s.revision,"host":host.kind(),"transparency":if refraction {"physical_transmission"} else if input.transparent_background {"coverage_alpha"} else if input.progressive {"opaque_only"} else {"sorted_alpha_approximation"},"options":options,"retained_options_bytes":retained_options_bytes,"environment":request.environment.as_ref().map(|source|source.info()),"refraction":refraction,"dielectric_boundaries": if resolved.executor.as_str() == "gpu-path" {vec!["thin_sheet","closed_box","closed_mesh"]} else {Vec::<&str>::new()}});
-    let mut reply = reply;
-    if !coats.is_empty() {
-        reply["coats"] = json!(coats);
-    }
-    if options.denoise {
-        reply["denoising"] = json!({
-            "method":"edge_aware_atrous", "passes":options.denoise_settings.passes,
-            "steps":denoise_steps(options.denoise_settings.passes), "settings":options.denoise_settings,
-            "diagnostics_requested":options.denoise_diagnostics,
-            "outlier_policy":if options.denoise_settings.firefly_suppression {DENOISE_OUTLIER_POLICY} else {"disabled"},
-            "optical_policy":if options.denoise_settings.optical_filter {DENOISE_OPTICAL_POLICY} else {DENOISE_OPAQUE_ONLY_POLICY},
-            "guides":"deterministic_center_ray_albedo_normal_position_depth",
-            "bypass":if options.denoise_settings.optical_filter {"unsupported or ambiguous optical paths, emitter, background and partial coverage"} else {"all optical paths, emitter, background and partial coverage"},
-            "limitation":"optical guides do not decompose reflected and transmitted radiance or reconstruct depth-of-field correspondences",
-            "raw_linear_accumulator_preserved":true, "output_stage":"linear_before_tone_map"
-        });
-    }
-    if let Some(limit) = options.clamp_indirect {
-        reply["indirect_clamp"] = json!({
-            "limit":limit, "from_bounce":1, "keeps_hue":true, "biased":true,
-            "limitation":"dims real caustics and glints; the raw linear EXR master is clamped too; optical glass light connections resolved after the path are not clamped"
-        });
-    }
+    let transparency = if refraction {
+        "physical_transmission"
+    } else if input.transparent_background {
+        "coverage_alpha"
+    } else if input.progressive {
+        "opaque_only"
+    } else {
+        "sorted_alpha_approximation"
+    };
+    let dielectric_boundaries = if resolved.executor.as_str() == "gpu-path" { vec!["thin_sheet", "closed_box", "closed_mesh"] } else { Vec::new() };
+    let checked = Checked {
+        resolved: retyped(command, &resolved)?,
+        admission: retyped(command, &admission)?,
+        request: retyped(command, request)?,
+        scene_generation: s.revision,
+        host: retyped(command, &host.kind())?,
+        stage_panels: settings.stage.len(),
+        environment: request.environment.as_ref().map(|source| retyped(command, source.info())).transpose()?,
+        textures: request.textures.as_ref().map(|resources| retyped(command, &resources.summary())).transpose()?,
+        transparency,
+        refraction,
+        dielectric_boundaries,
+        coats: (!coats.is_empty()).then(|| retyped(command, &coats)).transpose()?,
+        denoising: options.denoise.then(|| denoising_reply(command, &options.denoise_settings, options.denoise_diagnostics, false)).transpose()?,
+        param_warnings: Vec::new(),
+    };
+    let indirect_clamp = options.clamp_indirect.map(|limit| IndirectClamp {
+        limit,
+        from_bounce: 1,
+        keeps_hue: true,
+        biased: true,
+        limitation: "dims real caustics and glints; the raw linear EXR master is clamped too; optical glass light connections resolved after the path are not clamped",
+    });
+    let reply = RenderChecked::Gpu(GpuChecked { checked, options: retyped(command, &options)?, retained_options_bytes, indirect_clamp });
     Ok(Prepared { replace: input.replace, submission: Some(submission), reply })
 }
 
@@ -949,8 +966,43 @@ fn ignored_controls(settings: &RenderSetup) -> Vec<&'static str> {
     ignored
 }
 
+/// How the denoising filter of a CPU ray tracing or GPU request works, for its preflight reply.
+fn denoising_reply(command: &str, settings: &solidcraft_render::job::DenoiseSettings, diagnostics: bool, cpu: bool) -> Result<Denoising> {
+    Ok(Denoising {
+        method: "edge_aware_atrous",
+        backend: cpu.then_some("native_cpu"),
+        passes: settings.passes,
+        steps: denoise_steps(settings.passes),
+        settings: retyped(command, settings)?,
+        diagnostics_requested: diagnostics,
+        outlier_policy: if settings.firefly_suppression { DENOISE_OUTLIER_POLICY } else { "disabled" },
+        optical_policy: if settings.optical_filter { DENOISE_OPTICAL_POLICY } else { DENOISE_OPAQUE_ONLY_POLICY },
+        guides: if cpu {
+            "deterministic_center_ray_albedo_normal_camera_relative_position_depth"
+        } else {
+            "deterministic_center_ray_albedo_normal_position_depth"
+        },
+        bypass: if settings.optical_filter {
+            "unsupported or ambiguous optical paths, emitter, background and partial coverage"
+        } else {
+            "all optical paths, emitter, background and partial coverage"
+        },
+        limitation: if cpu {
+            "biased spatial filter; optical guides do not decompose reflected and transmitted radiance or reconstruct depth-of-field correspondences"
+        } else {
+            "optical guides do not decompose reflected and transmitted radiance or reconstruct depth-of-field correspondences"
+        },
+        raw_linear_accumulator_preserved: true,
+        raw_linear_exr_preserved: cpu.then_some(true),
+        output_stage: "linear_before_tone_map",
+        work_units: cpu.then_some("one pixel visit per pass, each with at most 25 taps"),
+        checkpoints: cpu.then_some("every complete published pass uses the same filter"),
+    })
+}
+
 pub(super) fn preflight(s: &mut Session, params: &Value) -> Result<Value> {
-    prepare(s, params, "render.preflight", &solidcraft_render::job::CancelToken::default()).map(|p| p.reply)
+    let cmd = "render.preflight";
+    super::typed_reply(cmd, prepare(s, params, cmd, &solidcraft_render::job::CancelToken::default())?.reply)
 }
 
 pub(super) fn start(s: &mut Session, params: &Value) -> Result<Value> {
@@ -964,11 +1016,28 @@ pub(super) fn start(s: &mut Session, params: &Value) -> Result<Value> {
             params.get("setup").and_then(Value::as_str).map(str::to_owned),
         )
         .map_err(job_error)?;
-    let mut status = json!(status);
-    if let (Some(out), Some(ignored)) = (status.as_object_mut(), p.reply.get("ignored_controls")) {
-        out.insert("ignored_controls".into(), ignored.clone());
-    }
-    Ok(status)
+    Ok(started("render.start", &status, &p.reply))
+}
+
+/// What Render Image returns once its job is queued: the job's `status`, and for a runtime
+/// request the ignored controls of its preflight reply `checked`. The window's own preparation
+/// (`render_preparation`) returns it too.
+pub(crate) fn started(command: &str, status: &solidcraft_render::job::JobStatus, checked: &RenderChecked) -> Value {
+    let ignored_controls = match checked {
+        RenderChecked::Runtime(runtime) => Some(runtime.ignored_controls.clone()),
+        RenderChecked::Gpu(_) => None,
+    };
+    // The job is queued already, so this never fails: should the status ever not read as a
+    // `JobState`, the reply is the status as the render crate gives it, as before the reply type.
+    let typed =
+        retyped(command, status).and_then(|state| super::typed_reply(command, RenderStarted { state, ignored_controls: ignored_controls.clone() }));
+    typed.unwrap_or_else(|_| {
+        let mut reply = json!(status);
+        if let (Some(out), Some(ignored)) = (reply.as_object_mut(), ignored_controls) {
+            out.insert("ignored_controls".into(), json!(ignored));
+        }
+        reply
+    })
 }
 
 #[derive(Deserialize)]

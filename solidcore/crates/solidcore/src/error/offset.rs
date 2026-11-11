@@ -664,18 +664,17 @@ mod tests {
     /// hold) whose conversion waits on other open work.
     #[test]
     fn the_offset_routines_build_no_bare_statuses() {
-        const WAITING: [(&str, usize); 6] = [
-            ("offset/offset_executive/p1.rs", 9),
-            ("offset/offset_executive/p2.rs", 9),
-            ("offset/offset_executive/reach.rs", 1),
-            ("offset/offset_executive/step_gaps.rs", 1),
-            ("offset/offset_faces.rs", 4),
-            ("offset/offset_geometry_creation.rs", 17),
-        ];
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-        assert_eq!(
-            super::super::intersect::tests::bare_statuses_under(&root, "offset", 20),
-            WAITING
+        super::super::bare_scan::assert_waiting(
+            "offset",
+            20,
+            &[
+                ("offset/offset_executive/p1.rs", 9),
+                ("offset/offset_executive/p2.rs", 9),
+                ("offset/offset_executive/reach.rs", 1),
+                ("offset/offset_executive/step_gaps.rs", 1),
+                ("offset/offset_faces.rs", 4),
+                ("offset/offset_geometry_creation.rs", 17),
+            ],
         );
     }
 }

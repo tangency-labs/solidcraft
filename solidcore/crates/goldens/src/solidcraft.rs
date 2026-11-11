@@ -1762,7 +1762,6 @@ fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
         "cover_wraps_across_closed_seam" => &mut k.fixes.cover_wraps_across_closed_seam,
         "fillet_refuse_non_manifold_result" => &mut k.fixes.fillet_refuse_non_manifold_result,
         "fillet_torus_rail_on_axis" => &mut k.fixes.fillet_torus_rail_on_axis,
-        "cone_parallel_line_midpoint" => &mut k.fixes.cone_parallel_line_midpoint,
         "fillet_trace_from_tangent_point_toward_next" => {
             &mut k.fixes.fillet_trace_from_tangent_point_toward_next
         }
