@@ -1853,10 +1853,8 @@ mod tests {
     use super::super::p1::{FilletEdgeuse, FilletVertexuse};
 
     fn code(e: &SolidError) -> Option<i32> {
-        match e {
-            SolidError::Upstream { code, .. } => Some(*code),
-            _ => None,
-        }
+        // a typed blend failure reads as the status of the bare `Upstream` (#13790)
+        e.upstream_status()
     }
 
     fn unit_of(e: &SolidError) -> Option<&'static str> {
