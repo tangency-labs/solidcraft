@@ -127,7 +127,7 @@ wasmtime does not run in the browser tab. Options are jco-transpiled components,
 
 **Not built**
 - No wasmtime, no WIT file, no host, no example plugin, no permissions, no signing, no install flow (#4330 was closed), no `Plugin` feature kind. Nothing in the folder is loaded or run.
-- #4980 is an open draft of the WIT and a gear pilot, and is not merged.
+- #4980 (draft WIT and a gear pilot) was closed as superseded by this RFC. Its streaming importer design and threat model stay useful reading for phase 2.
 
 ## 8. Phases
 
