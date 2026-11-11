@@ -1401,7 +1401,7 @@ fn a_commands_menu_changes_its_keyboard_shortcut() {
     let items = crate::toolbar_custom::command_items(&app, "solid.extrude");
     assert!(items.iter().any(|i| i.label == "Change Keyboard Shortcut…"), "{:?}", items.iter().map(|i| &i.label).collect::<Vec<_>>());
     act(&mut app, &Target::ToolbarCommand { id: "solid.extrude".into() }, "Change Keyboard Shortcut…");
-    assert!(app.prefs_window.open && app.prefs_window.section == crate::prefs::PAGE_SHORTCUTS, "the Keyboard Shortcuts page is open");
+    assert!(app.prefs_window.shell.open && app.prefs_window.shell.section == crate::prefs::PAGE_SHORTCUTS, "the Keyboard Shortcuts page is open");
     assert!(crate::keymap::capturing(&app), "waiting for the new key");
 }
 
