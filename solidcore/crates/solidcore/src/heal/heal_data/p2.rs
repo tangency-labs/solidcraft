@@ -2005,7 +2005,7 @@ fn gap_histogram() -> Vec<u64> {
 fn ignore_status(r: Result<()>) -> Result<()> {
     match r {
         Ok(()) => Ok(()),
-        Err(e) if matches!(e, SolidError::Upstream { .. }) || e.is_nurbs_failure() => Ok(()),
+        Err(e) if e.upstream_status().is_some() || e.is_nurbs_failure() => Ok(()),
         Err(e) => Err(e),
     }
 }
@@ -3379,8 +3379,9 @@ impl<O: LoopObject> HealData<O> {
     pub fn fix_coin_edges(&self, this_healer_op: HealerOpType) -> Result<()> {
         let _ = this_healer_op;
         if !self.bad_edge_props_coin_edges.base.is_empty() {
-            return Err(SolidError::sm_err(
+            return Err(SolidError::heal_failed(
                 "heal::heal_data::p2::HealData::fix_coin_edges",
+                "coincident edges cannot be fixed",
             ));
         }
         Ok(())
@@ -3401,8 +3402,9 @@ impl<O: LoopObject> HealData<O> {
     pub fn fix_missed_edge_xsects(&self, this_healer_op: HealerOpType) -> Result<()> {
         let _ = this_healer_op;
         if !self.bad_edge_props_missed_edge_xsects.base.is_empty() {
-            return Err(SolidError::sm_err(
+            return Err(SolidError::heal_failed(
                 "heal::heal_data::p2::HealData::fix_missed_edge_xsects",
+                "missed edge intersections cannot be fixed",
             ));
         }
         Ok(())

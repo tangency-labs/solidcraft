@@ -5,8 +5,8 @@
 //! the hang limit as a hang finding (its kernel's [`solidcore::CancelToken`] is
 //! cancelled, and a case that still does not return is left running).
 //!
-//! Shared by `tests/panic_fuzz.rs` (the kernel's entry points) and step-brep's
-//! `tests/panic_fuzz.rs` (STEP import). Environment:
+//! Shared by `tests/panic_fuzz.rs` (the kernel's entry points), solidcore-step's
+//! `tests/panic_fuzz.rs` (STEP import) and goldens' `tests/flat_panic_fuzz.rs` (the flat arrays). Environment:
 //! - `SOLIDCORE_PANIC_FUZZ_CASES`: cases per family (default: each family's CI count).
 //! - `SOLIDCORE_PANIC_FUZZ_SEED`: the base seed (default 2490).
 //! - `SOLIDCORE_PANIC_FUZZ_HANG_SECS`: the hang limit per case (default 60 s in a debug

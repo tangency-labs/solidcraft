@@ -11,6 +11,7 @@
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent2d::Extent2d;
+use crate::geom::vector2d::Point2;
 use crate::kernel::Kernel;
 use crate::math::{Vec2, Vec3, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -66,6 +67,42 @@ pub enum Implicit {
         /// The minor radius r.
         minor: f64,
     },
+}
+
+impl Implicit {
+    /// How far `x` is from this surface.
+    #[must_use]
+    pub fn distance(&self, x: Vec3) -> f64 {
+        // the axial and radial parts of `x` about an axis through `o`
+        let about = |o: Vec3, axis: Vec3| {
+            let v = x - o;
+            let h = v.dot(axis);
+            (h, (v - axis * h).length())
+        };
+        match *self {
+            Self::Plane { origin, normal } => (x - origin).dot(normal).abs(),
+            Self::Cone {
+                origin,
+                axis,
+                radius,
+                tan_angle,
+            } => {
+                let (h, rho) = about(origin, axis);
+                (rho - (radius + tan_angle * h)).abs() / (1.0 + tan_angle * tan_angle).sqrt()
+            }
+            Self::Sphere { centre, radius } => ((x - centre).length() - radius).abs(),
+            Self::Torus {
+                centre,
+                axis,
+                major,
+                minor,
+            } => {
+                let (h, rho) = about(centre, axis);
+                let (a, b) = (rho - major, h);
+                ((a * a + b * b).sqrt() - minor).abs()
+            }
+        }
+    }
 }
 
 /// A polynomial in Bernstein form over a patch, degrees `(p, q)`, `c[i (q + 1) + j]`.
@@ -144,7 +181,9 @@ impl BPoly {
 ///
 /// `SM_ERR` without NURB data; those of the Bézier decomposition.
 pub fn lies_on(form: &BSplineSurface, a: &Implicit) -> Result<bool> {
-    let nurb = form.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
+    let nurb = form
+        .gw_nurb()
+        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
     for row in decompose_to_bez(nurb)? {
         for patch in row {
             let (p, q) = patch.degrees();
@@ -171,7 +210,10 @@ pub fn lies_on(form: &BSplineSurface, a: &Implicit) -> Result<bool> {
 ///
 /// `SM_ERR` without NURB data; those of the Bézier decomposition.
 pub fn curve_lies_on(curve: &BSplineCurve, a: &Implicit) -> Result<bool> {
-    let nurb = curve.nurb.as_ref().ok_or_else(|| SolidError::sm_err(OP))?;
+    let nurb = curve
+        .nurb
+        .as_ref()
+        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline curve has no NURB"))?;
     for seg in nurb.decompose_bez()? {
         if !bezier_on(seg.degree(), 0, seg.cpts().iter(), a) {
             return Ok(false);
@@ -306,7 +348,7 @@ fn bezier_on<'a>(
     f.c.iter().all(within)
 }
 
-const OP_EXACT: &str = "surface::implicit::check_exact_net";
+pub(crate) const OP_EXACT: &str = "surface::implicit::check_exact_net";
 
 /// A quadric `x.A.x + 2 b.x + c = 0` as `(A, b, c)`.
 pub type QuadricEquation = ([[f64; 3]; 3], [f64; 3], f64);
@@ -402,6 +444,48 @@ pub fn check_exact_net(k: &Kernel, net: &Surface, check: &ExactNetCheck) -> Resu
     Ok(())
 }
 
+/// The number of intervals [`net_miss`] samples a net at, each way.
+const MISS_SAMPLES: u32 = 16;
+
+/// How far `net` strays from the class's `surface`, sampled over its domain. A guard, not a
+/// certificate: [`check_exact_net`] is the proof, and a net that passes only this keeps no
+/// definition. It tells a net that the class's rounding leaves off the surface from one
+/// built wrongly. Being sampled ([`MISS_SAMPLES`] intervals each way), it can miss a
+/// deviation between its samples; it bounds nothing, and decides only whether a net its
+/// certificate refused is kept bare or is an error.
+///
+/// # Errors
+///
+/// Those of the evaluations.
+pub fn net_miss(k: &Kernel, net: &Surface, surface: &ClassSurface) -> Result<f64> {
+    let dom = net.natural_uv_domain_with_nurb(k)?;
+    let (lo, hi) = (dom.min(), dom.max());
+    let mut worst = 0.0_f64;
+    for i in 0..=MISS_SAMPLES {
+        for j in 0..=MISS_SAMPLES {
+            let (fu, fv) = (
+                f64::from(i) / f64::from(MISS_SAMPLES),
+                f64::from(j) / f64::from(MISS_SAMPLES),
+            );
+            let uv = Point2::new(lo.x + (hi.x - lo.x) * fu, lo.y + (hi.y - lo.y) * fv);
+            let x = net.evaluate_point(k, uv)?;
+            let miss = match surface {
+                ClassSurface::Implicit(a) => a.distance(x),
+                ClassSurface::Canal {
+                    spine, map, radius, ..
+                } => {
+                    let w = if map.along_v { uv.y } else { uv.x };
+                    let ivl = spine.natural_interval();
+                    let s = (map.a + map.b * w).max(ivl.min()).min(ivl.max());
+                    ((x - spine.evaluate_point(s)?).length() - *radius).abs()
+                }
+            };
+            worst = worst.max(miss);
+        }
+    }
+    Ok(worst)
+}
+
 /// A Bezier segment of a rational curve, Bernstein polynomials of degree `(p, 0)`: the
 /// homogeneous `(Y - O V)` components and the weight `V`.
 type CurveSegment = ([BPoly; 3], BPoly);
@@ -411,13 +495,13 @@ fn curve_segments(curve: &BSplineCurve) -> Result<(Vec<CurveSegment>, Vec3)> {
     let nurb = curve
         .nurb
         .as_ref()
-        .ok_or_else(|| SolidError::sm_err(OP_EXACT))?;
+        .ok_or_else(|| SolidError::surface_failed(OP_EXACT, "the B-spline curve has no NURB"))?;
     let w_of = |w: f64| if w == NOW { 1.0 } else { w };
     let origin = nurb
         .cpts()
         .first()
         .map(|c| Vec3::new(c.x, c.y, c.z) * (1.0 / w_of(c.w)))
-        .ok_or_else(|| SolidError::sm_err(OP_EXACT))?;
+        .ok_or_else(|| SolidError::surface_failed(OP_EXACT, "the curve has no control points"))?;
     let mut out = Vec::new();
     for seg in nurb.decompose_bez()? {
         let p = seg.degree();
@@ -804,13 +888,15 @@ fn lies_on_canal(
     map: &LeaderMap,
     radius: f64,
 ) -> Result<bool> {
-    let nurb = form.gw_nurb().ok_or_else(|| SolidError::sm_err(OP_EXACT))?;
+    let nurb = form
+        .gw_nurb()
+        .ok_or_else(|| SolidError::surface_failed(OP_EXACT, "the B-spline surface has no NURB"))?;
     let (segs, o) = curve_segments(spine)?;
     let spine_breaks = spine
         .nurb
         .as_ref()
         .map(|n| breaks(n.knots()))
-        .ok_or_else(|| SolidError::sm_err(OP_EXACT))?;
+        .ok_or_else(|| SolidError::surface_failed(OP_EXACT, "the spine has no NURB"))?;
     let (ub, vb) = (breaks(nurb.u_knots()), breaks(nurb.v_knots()));
     let along = if map.along_v { &vb } else { &ub };
     // the rounding of placing a span on the spine: of a + b w and of the spine's knots
@@ -1123,12 +1209,37 @@ impl AnalyticSupport {
         // a surface of revolution: the one the kernel recognises in the form, which must be
         // this one, take the form as its NURB and evaluate as the form at the form's own
         // parameters
-        let not_form = || {
-            SolidError::invalid_input(
-                OP_BUILD,
-                "a support's analytic surface is not its NURBS form's parametrisation",
-            )
-        };
+        let surface = self.on_form(k, &form)?;
+        if !evaluates_as(k, &surface, &form)? {
+            return Err(not_form());
+        }
+        Ok(surface)
+    }
+
+    /// The largest ratio, over the form's Greville points, of this support's analytic
+    /// surface's distance from `form` to the rounding [`evaluates_as`] derives there (#3185):
+    /// at most 1 where [`Self::build`]'s parametrisation test passes. The surface is the one
+    /// `build` makes (the kernel's recognition of `form`, carrying this support's numbers);
+    /// `lies_on` and the placement's axes are not checked here. `None` for a plane, or a
+    /// surface the bound does not cover.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` where the kernel recognises no surface of this kind in `form`; those of
+    /// the recognisers, the conversions and the evaluations.
+    pub fn parametrisation_margin(&self, k: &Kernel, form: &BSplineSurface) -> Result<Option<f64>> {
+        if matches!(self, Self::Plane { .. }) {
+            return Ok(None);
+        }
+        let surface = self.on_form(k, form)?;
+        evaluation_margin(k, &surface, form)
+    }
+
+    /// The surface of revolution of this support's kind the kernel recognises in `form`,
+    /// carrying this support's own numbers and `form` as its NURB ([`Self::build`] after its
+    /// checks of the point set, before the parametrisation's).
+    fn on_form(&self, k: &Kernel, form: &BSplineSurface) -> Result<Surface> {
+        let form = form.copy();
         let mut surface = recognise(k, self.kind(), &form)?.ok_or_else(not_form)?;
         // the recognised surface must be of this support's kind; the numbers recognition
         // recomputed are not compared with the support's, because it recomputes them from
@@ -1178,11 +1289,16 @@ impl AnalyticSupport {
             }
             _ => return Err(not_form()),
         }
-        if !evaluates_as(k, &surface, &form)? {
-            return Err(not_form());
-        }
         Ok(surface)
     }
+}
+
+/// [`AnalyticSupport::build`]'s refusal of a surface that is not its form's parametrisation.
+fn not_form() -> SolidError {
+    SolidError::invalid_input(
+        OP_BUILD,
+        "a support's analytic surface is not its NURBS form's parametrisation",
+    )
 }
 
 /// A cylinder's or cone's recognised parametrisation carried by the support's own
@@ -1259,41 +1375,314 @@ fn recognise(k: &Kernel, kind: SupportKind, form: &BSplineSurface) -> Result<Opt
 }
 
 /// Whether `surface` evaluates as `form` at the form's Greville parameters (each control
-/// point's), within the rounding of the two evaluations: `gamma_K` times the form's size,
-/// `K = 16 (p + q + 2)` for the rational evaluation of degrees `(p, q)` and the analytic
-/// one's conversion of the parameters and its trigonometry, a few ulps per operation.
+/// point's): at each, the analytic surface's point and the form's agree within the bound
+/// [`Rounding::at`] derives for that point, term by term below. The analytic side is the
+/// **STEP** evaluation of the converted parameters ([`Surface::convert_uv_from_nurbs_to_step`]
+/// and [`Surface::evaluate_step_point`]), which a cone, sphere, torus and surface of
+/// revolution compute from their placement, radii, semi-angle and generator.
+/// [`Surface::evaluate_point`] would not do: a sphere, a torus and a surface of revolution
+/// take it from their NURBS base, and that base is the `form` the caller has just installed,
+/// so it would compare the form with itself and read nothing of what the caller imposed
+/// (#2588).
 ///
-/// The analytic side is the **STEP** evaluation of the converted parameters
-/// ([`Surface::convert_uv_from_nurbs_to_step`] and [`Surface::evaluate_step_point`]),
-/// which a cone, sphere, torus and surface of revolution compute from their placement,
-/// radii, semi-angle and generator. [`Surface::evaluate_point`] would not do: a sphere, a
-/// torus and a surface of revolution take it from their NURBS base, and that base is the
-/// `form` the caller has just installed, so it would compare the form with itself and read
-/// nothing of what the caller imposed (#2588; the cone already converted and evaluated
-/// analytically, which is why only the other kinds went unchecked).
+/// What the bound forgives and what it tests (#3185): it forgives the rounding of both
+/// evaluations and of the two parameter conversions, nothing else. It does not forgive the
+/// label's frame turned about the axis against the converter's, its axis, origin or radii,
+/// a form whose parameter is not the analytic surface's (a reparametrised arc), nor the
+/// form's distance from the analytic surface: those are what the comparison proves.
+///
+/// `u` is the unit roundoff, `gamma_n = n u / (1 - n u)`. Stated assumption: the libm
+/// `sin`, `cos`, `tan` and `atan2` are within one ulp (relative `2 u`).
+///
+/// 1. **The form** (`Surface::eval`, Cox-de Boor then two blends): each basis value is a
+///    nonnegative combination over `p` levels of at most 6 operations (two knot differences,
+///    a sum, a division, a product and a sum), so relative `gamma_6p`; the blends sum
+///    `q + 1` then `p + 1` products. With positive weights the homogeneous point's error is
+///    at most `gamma_(7 (p + q) + 4) W size` and the weight's `gamma_(7 (p + q) + 4) W`, so
+///    the Euclidean point's, after the division, `E_form = (2 gamma_(7 (p + q) + 4) + u)
+///    size` (`gamma_(7 (p + q) + 4) size` when polynomial), `size` the net's largest point.
+/// 2. **The STEP point**, `O + m (cos u X + sin u Y) + h Z`, `m` and `h` the generator's
+///    radial and axial parts (the torus `R + r cos v`, `r sin v`; the sphere `r cos v`,
+///    `r sin v`; the cone `r0 + v tan a`, `v`). An angle `x` in degrees goes to radians in
+///    two operations of the rounded `PI`: `gamma_3 |x|`; with one ulp of the cosine and sine,
+///    each is off by `dc(x) = 2 u + gamma_3 |x|`. Per coordinate (unit axes) the error is at
+///    most `gamma_3 (|O| + M + H) + M (gamma_2 + 2 dc(u)) + dm + dh`, `M`, `H` the sizes of
+///    `m`, `h` and `dm`, `dh` their errors: the torus `gamma_3 (R + r) + 2 r dc(v)`, the
+///    sphere `gamma_1 r + 2 r dc(v)`, the cone `gamma_2 (|r0| + |v t|) + |v| dt` (`dt =
+///    (1 + t^2) gamma_3 |a| + 2 u |t|` for the tangent of the half angle `a`); a general
+///    surface of revolution rotates its generator's point `G` (a B-spline: item 1's bound of
+///    its own net, `E_gen`) about the axis, `gamma_8 (|O| + 3 D) + 2 D dc(u) + E_gen`, `D`
+///    the net's reach from `O`. `E_step` is `sqrt 3` times the coordinate bound.
+/// 3. **The generator's parameter**: a circle (torus, sphere) inverts its NURBS point by
+///    `atan2` about its centre `c`: at its radius `r` the error is that point's (`E_form`)
+///    plus `gamma_4 (size + |c|)` and `gamma_4 r |v|` of the angle's own rounding; a line
+///    (cone) maps it affinely in 6 operations, `gamma_6 2 (|v0| + |v1|)` along the axis and
+///    its slope, times `1 + |t|`; a B-spline generator's parameter is its NURBS's (none).
+/// 4. **The sweep's parameter**: the polar converter evaluates its circle's NURBS at the
+///    parameter (item 1's bound of that NURBS's own net, `E_polar`) and inverts the point by
+///    `atan2` about the circle's centre `c` in its frame: at the circle's radius `rc` the
+///    angle is off by `(E_polar + gamma_4 (rc + 2 |c|)) / rc`, plus `gamma_4 |s|` of the
+///    angle's own rounding and the degrees' period (`gamma_1 2 pi`), times the STEP point's
+///    distance from that axis (the lever). The converter's ends are its domain's, which
+///    recognition takes from the form's own end meridians (#3199), so they are the inverted
+///    ends to the same rounding.
+///
+/// A surface of another kind, or a general surface of revolution whose generator is not a
+/// B-spline, has no bound here and is not proved.
 ///
 /// # Errors
 ///
 /// Those of the parameter conversion and the evaluations and of the form's knots.
 fn evaluates_as(k: &Kernel, surface: &Surface, form: &BSplineSurface) -> Result<bool> {
+    Ok(evaluation_margin(k, surface, form)?.is_some_and(|m| m <= 1.0))
+}
+
+/// [`evaluates_as`]'s largest ratio of distance to bound over the Greville points (infinite
+/// for a distance that is not a number); `None` for a surface the bound does not cover.
+fn evaluation_margin(k: &Kernel, surface: &Surface, form: &BSplineSurface) -> Result<Option<f64>> {
     let (net, p, q) = euclidean_net(form)?;
     let size = net.iter().flatten().fold(0.0_f64, |a, x| a.max(x.length()));
-    let tol = gamma(16 * (p + q + 2)) * size;
+    let Some(r) = Rounding::of(surface, form.is_rational(), p, q, size, &net)? else {
+        return Ok(None);
+    };
+    let mut worst = 0.0_f64;
     for u in greville(form, true)? {
         for v in greville(form, false)? {
             let uv = Vec2::new(u, v);
             let step_uv = surface.convert_uv_from_nurbs_to_step(k, uv)?;
-            let off =
-                (surface.evaluate_step_point(k, step_uv)? - form.evaluate_point(uv)?).length();
-            if !matches!(
-                off.partial_cmp(&tol),
-                Some(core::cmp::Ordering::Less | core::cmp::Ordering::Equal)
-            ) {
-                return Ok(false);
-            }
+            let s = surface.evaluate_step_point(k, step_uv)?;
+            let f = form.evaluate_point(uv)?;
+            let ratio = (s - f).length() / r.at(step_uv, s, f);
+            worst = if ratio.is_nan() {
+                f64::INFINITY
+            } else {
+                worst.max(ratio)
+            };
         }
     }
-    Ok(true)
+    Ok(Some(worst))
+}
+
+/// A surface of revolution's generator, for [`Rounding`]'s item 2 and 3.
+#[derive(Debug, Clone, Copy)]
+enum Generator {
+    /// `R + r cos v`, `r sin v` about the circle of centre `c`.
+    Torus { major: f64, minor: f64, c: f64 },
+    /// `r cos v`, `r sin v` about the circle of centre `c`.
+    Sphere { radius: f64, c: f64 },
+    /// `r0 + v t`, `v` (the half angle `a` in radians), its STEP `v` over `[v0, v1]`.
+    Cone {
+        r0: f64,
+        t: f64,
+        a: f64,
+        v0: f64,
+        v1: f64,
+    },
+    /// A B-spline generator, its own evaluation's bound.
+    Spline { e_gen: f64 },
+}
+
+/// The pieces of [`evaluates_as`]'s bound that do not depend on the point.
+#[derive(Debug, Clone, Copy)]
+struct Rounding {
+    e_form: f64,
+    origin: Vec3,
+    /// The net's reach from the origin.
+    reach: f64,
+    generator: Generator,
+    /// The sweep converter's circle: centre, axes.
+    polar: (Vec3, Vec3, Vec3, f64, f64),
+}
+
+/// `|v|`'s largest coordinate.
+fn max_coord(v: Vec3) -> f64 {
+    v.x.abs().max(v.y.abs()).max(v.z.abs())
+}
+
+/// A rational (or polynomial) evaluation's bound of degrees summing to `n` over points of
+/// size `size` ([`evaluates_as`] item 1).
+fn eval_bound(rational: bool, n: usize, size: f64) -> f64 {
+    let g = gamma(7 * n + 4);
+    if rational {
+        (2.0 * g + crate::nurbs::math::UNIT) * size
+    } else {
+        g * size
+    }
+}
+
+impl Rounding {
+    /// The bound's data for `surface` (a cone, sphere, torus or surface of revolution with a
+    /// B-spline generator) on its form of degrees `(p, q)`, net `net`; `None` for any other.
+    fn of(
+        surface: &Surface,
+        rational: bool,
+        p: usize,
+        q: usize,
+        size: f64,
+        net: &[Vec<Vec3>],
+    ) -> Result<Option<Self>> {
+        use crate::curve::curve::CurveKind;
+        let e_form = eval_bound(rational, p + q, size);
+        let circle_centre = |rev: &crate::surface::surf_of_revolution::SurfOfRevolution| match rev
+            .gen_curve
+            .as_ref()
+            .map(crate::curve::curve::Curve::kind)
+        {
+            Some(CurveKind::Ellipse(e)) => Some(e.position.origin().length()),
+            _ => None,
+        };
+        let (rev, generator) = match surface.kind() {
+            SurfaceKind::Torus(t) => {
+                let Some(c) = circle_centre(&t.base) else {
+                    return Ok(None);
+                };
+                (
+                    &t.base,
+                    Generator::Torus {
+                        major: t.major_radius,
+                        minor: t.minor_radius,
+                        c,
+                    },
+                )
+            }
+            SurfaceKind::Sphere(sp) => {
+                let Some(c) = circle_centre(&sp.base) else {
+                    return Ok(None);
+                };
+                (
+                    &sp.base,
+                    Generator::Sphere {
+                        radius: sp.radius,
+                        c,
+                    },
+                )
+            }
+            SurfaceKind::Cone(c) => {
+                let a = c.semi_angle_deg * PI / 180.0;
+                let d = c.rev.anal_uv_domain;
+                (
+                    &c.rev,
+                    Generator::Cone {
+                        r0: c.base_radius,
+                        t: c.tan_semi_angle(),
+                        a,
+                        v0: d.v_min(),
+                        v1: d.v_max(),
+                    },
+                )
+            }
+            SurfaceKind::SurfOfRevolution(rev) => {
+                let Some(CurveKind::BSpline(g)) =
+                    rev.gen_curve.as_ref().map(crate::curve::curve::Curve::kind)
+                else {
+                    return Ok(None);
+                };
+                let pts = g.control_points()?;
+                let gsize = pts.iter().fold(0.0_f64, |m, c| {
+                    let w = if c.w == NOW { 1.0 } else { c.w };
+                    m.max((Vec3::new(c.x, c.y, c.z) * (1.0 / w)).length())
+                });
+                let rational = pts.iter().any(|c| c.w != NOW);
+                (
+                    &**rev,
+                    Generator::Spline {
+                        e_gen: eval_bound(rational, g.degree()?, gsize),
+                    },
+                )
+            }
+            _ => return Ok(None),
+        };
+        let Some(pc) = rev.polar_curve() else {
+            return Ok(None);
+        };
+        let e_polar = {
+            let pts = pc.base().control_points()?;
+            let psize = pts.iter().fold(0.0_f64, |m, c| {
+                let w = if c.w == NOW { 1.0 } else { c.w };
+                m.max((Vec3::new(c.x, c.y, c.z) * (1.0 / w)).length())
+            });
+            eval_bound(pts.iter().any(|c| c.w != NOW), pc.base().degree()?, psize)
+        };
+        let origin = rev.position.origin();
+        let reach = net
+            .iter()
+            .flatten()
+            .fold(0.0_f64, |m, x| m.max((*x - origin).length()));
+        Ok(Some(Self {
+            e_form,
+            origin,
+            reach,
+            generator,
+            polar: (
+                pc.position.origin(),
+                pc.position.x_axis(),
+                pc.position.y_axis(),
+                pc.radius_x,
+                e_polar,
+            ),
+        }))
+    }
+
+    /// The bound at the STEP parameters `step` (degrees, and the generator's), the STEP
+    /// point `s` and the form's point `f` ([`evaluates_as`] items 1 to 4).
+    fn at(&self, step: Vec2, s: Vec3, f: Vec3) -> f64 {
+        let u = crate::nurbs::math::UNIT;
+        let rad = |deg: f64| deg * PI / 180.0;
+        let dc = |deg: f64| 2.0 * u + gamma(3) * rad(deg).abs();
+        let o = max_coord(self.origin);
+        let size_f = f.length();
+        // item 2 (per coordinate) and item 3 (as a length)
+        let (coord, generator) = match self.generator {
+            Generator::Torus { major, minor, c } => {
+                let (m, h) = (major + minor, minor);
+                let dm = gamma(3) * (major + minor) + 2.0 * minor * dc(step.y);
+                let dh = gamma(1) * minor + 2.0 * minor * dc(step.y);
+                (
+                    gamma(3) * (o + m + h) + m * (gamma(2) + 2.0 * dc(step.x)) + dm + dh,
+                    self.e_form + gamma(4) * (size_f + c) + gamma(4) * minor * rad(step.y).abs(),
+                )
+            }
+            Generator::Sphere { radius, c } => {
+                let dm = gamma(1) * radius + 2.0 * radius * dc(step.y);
+                (
+                    gamma(3) * (o + 2.0 * radius)
+                        + radius * (gamma(2) + 2.0 * dc(step.x))
+                        + 2.0 * dm,
+                    self.e_form + gamma(4) * (size_f + c) + gamma(4) * radius * rad(step.y).abs(),
+                )
+            }
+            Generator::Cone { r0, t, a, v0, v1 } => {
+                let v = step.y;
+                let m = r0.abs() + (v * t).abs();
+                let dt = (1.0 + t * t) * gamma(3) * a.abs() + 2.0 * u * t.abs();
+                let dm = gamma(2) * m + v.abs() * dt;
+                (
+                    gamma(3) * (o + m + v.abs()) + m * (gamma(2) + 2.0 * dc(step.x)) + dm,
+                    gamma(6) * 2.0 * (v0.abs() + v1.abs()) * (1.0 + t.abs()),
+                )
+            }
+            Generator::Spline { e_gen } => (
+                gamma(8) * (o + 3.0 * self.reach) + 2.0 * self.reach * dc(step.x) + e_gen,
+                0.0,
+            ),
+        };
+        let e_step = 3.0_f64.sqrt() * coord;
+        // item 4: the polar converter's inversion of its own circle's point
+        let (c, x, y, rc, e_polar) = self.polar;
+        let z = x.cross(y);
+        let along = |v: Vec3| v - z * v.dot(z);
+        let lever = along(s - c).length();
+        let sweep = if rc > 0.0 {
+            lever
+                * ((e_polar + gamma(4) * (rc + 2.0 * c.length())) / rc
+                    + gamma(4) * rad(step.x).abs()
+                    + gamma(1) * 2.0 * PI)
+        } else {
+            // a circle of no radius has no angle: any, at the STEP point's lever
+            lever * PI
+        };
+        self.e_form + e_step + generator + sweep
+    }
 }
 
 const OP_DERIVE: &str = "surface::implicit::AnalyticSupport::derive";
@@ -1322,9 +1711,9 @@ fn euclidean_net(form: &BSplineSurface) -> Result<(Vec<Vec<Vec3>>, usize, usize)
     let mut net = vec![Vec::new(); nu];
     for (i, row) in net.iter_mut().enumerate() {
         for j in 0..nv {
-            let c = cps
-                .get(i * nv + j)
-                .ok_or_else(|| SolidError::sm_err(OP_DERIVE))?;
+            let c = cps.get(i * nv + j).ok_or_else(|| {
+                SolidError::surface_failed(OP_DERIVE, "the control point is outside the net")
+            })?;
             let w = if c.w == NOW { 1.0 } else { c.w };
             row.push(Vec3::new(c.x, c.y, c.z) * (1.0 / w));
         }

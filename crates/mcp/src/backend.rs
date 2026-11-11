@@ -48,6 +48,13 @@ pub trait Backend {
     fn app_options(&mut self) -> Result<Option<Value>, String> {
         Ok(None)
     }
+    /// A bridge to the same app on a connection of its own, for a backend bridged to one: the
+    /// server answers `running` on it while this backend is busy with a call (#14007), as the
+    /// app answers `control.running` on any connection at once. `None`: nothing to ask apart
+    /// (an in-process session answers only between calls).
+    fn side_channel(&self) -> Option<Remote> {
+        None
+    }
 }
 
 /// Longest reply line accepted from the app.
@@ -351,6 +358,24 @@ impl Remote {
         outcome(&v).inspect_err(|_| self.drop_conn())
     }
 
+    /// `control.cancel` for the request still running on this connection (a timed-out call's,
+    /// docs/control-protocol.md). Sent at once, without waiting for that request first, and never
+    /// on a fresh connection, which has nothing to cancel. Once the app no longer holds it
+    /// (removed, stopped or finished), later calls don't wait for it.
+    fn cancel_outstanding(&mut self, params: Value) -> Result<Value, String> {
+        if self.conn.is_none() {
+            return Ok(json!({"cancelled": null, "note": "nothing to cancel: no request of this bridge is running in the app"}));
+        }
+        let line = self.request_line("control.cancel", params);
+        let reply = self.roundtrip(&line).map_err(|e| self.explain(&e))?;
+        let v: Value = serde_json::from_str(&reply).map_err(|e| format!("bad reply from the app: {e}"))?;
+        let r = outcome(&v);
+        if r.is_ok() {
+            self.outstanding = None;
+        }
+        r
+    }
+
     /// Wait up to `limit` for the outstanding request, asking `control.pending` now and then and
     /// saying on stderr how long it takes. An error: the connection, and so the reply, was lost.
     fn wait_outstanding(&mut self, limit: Duration) -> Result<Waited, String> {
@@ -609,7 +634,7 @@ impl Remote {
         let steps = params.get("commands").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
         if self.param_check == ParamCheck::Strict {
             if let Some(refusal) = solidcraft_engine::batch_preflight::contracts(steps) {
-                return Ok(refusal.reply(steps.len()));
+                return Ok(refusal.reply(steps.len(), params.get("rollback").and_then(Value::as_bool).unwrap_or(true)));
             }
             return self.call_once("engine.batch", params, true);
         }
@@ -637,6 +662,8 @@ impl Backend for Remote {
             "engine.execute" if self.param_check != ParamCheck::Off => self.execute_checked(params),
             "engine.batch" if self.param_check != ParamCheck::Off => self.batch_checked(params),
             "engine.script" if self.param_check != ParamCheck::Off => self.call_once(method, self.at_level(params), true),
+            // Not behind the request it cancels, as other calls are.
+            "control.cancel" => self.cancel_outstanding(params),
             _ => self.call_once(method, params, true),
         }
     }
@@ -645,6 +672,10 @@ impl Backend for Remote {
     }
     fn has_ui(&self) -> bool {
         true
+    }
+    /// The same app with this bridge's token, not yet connected: it connects when asked.
+    fn side_channel(&self) -> Option<Remote> {
+        Some(Remote::new(&self.addr, self.explicit_token.as_deref()).with_param_check(self.param_check))
     }
     fn app_options(&mut self) -> Result<Option<Value>, String> {
         // This runs on the serve loop before a tool call, so it never waits: not behind a request
@@ -733,13 +764,14 @@ impl Headless {
         if steps.len() > 100_000 {
             return Err("script too long".into());
         }
+        let rollback = p.get("rollback").and_then(Value::as_bool).unwrap_or(true);
         if method == "engine.batch"
             && let Some(refusal) = solidcraft_engine::batch_preflight::check(steps, self.session.param_check, &[])
         {
-            return Ok(refusal.reply(steps.len()));
+            return Ok(refusal.reply(steps.len(), rollback));
         }
         let panels = steps.iter().filter(|step| step_command(step).is_some_and(commands::is_command)).count();
-        if method == "engine.batch" && p.get("rollback").and_then(Value::as_bool).unwrap_or(true) {
+        if method == "engine.batch" && rollback {
             if panels != steps.len() {
                 return Err(commands::error_text(error(
                     Rule::Capability,
@@ -848,6 +880,7 @@ impl Headless {
             // is ever left running.
             "control.running" => Ok(json!({"running": []})),
             "control.pending" => Ok(json!({"pending": null})),
+            "control.cancel" => Err("nothing can be cancelled in headless mode: each call runs to its end before it returns".into()),
             other => Err(format!("unknown method `{other}`")),
         }
     }
@@ -963,6 +996,9 @@ impl Backend for Auto {
             // Headless for now: the app may yet start, so ask again on a later call.
             None => Err("no app yet".into()),
         }
+    }
+    fn side_channel(&self) -> Option<Remote> {
+        self.remote.as_ref().and_then(Remote::side_channel)
     }
     fn notice(&self) -> Option<String> {
         self.headless.as_ref().map(|_| {

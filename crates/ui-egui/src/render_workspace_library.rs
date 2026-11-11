@@ -538,6 +538,7 @@ pub(super) fn card(app: &mut SolveApp, ui: &mut egui::Ui, bounds: egui::Rect) {
             editor: false,
             enabled: true,
             header_actions: (stage == super::Stage::Look).then_some(&mut actions as &mut dyn FnMut(&mut egui::Ui)),
+            move_command: "view.render_dock",
         },
         &mut side,
         &mut width,

@@ -61,6 +61,46 @@ fn pbr_brdf(base: vec3<f32>, parameters: vec3<f32>, n: vec3<f32>, v: vec3<f32>, 
     return specular + (vec3<f32>(1.0) - pbr_fresnel(f0, nv, parameters.x, parameters.z)) * (vec3<f32>(1.0) - pbr_fresnel(f0, nl, parameters.x, parameters.z)) * diffuse;
 }
 
+// The palette's PBR materials: for palette row r, texel row 2r holds each entry's linear base
+// colour (and a PBR flag), row 2r + 1 its metallic fraction, roughness and dielectric IOR.
+@group(0) @binding(2) var pbr_materials: texture_2d<f32>;
+
+// A placement of a shared smooth mesh whose palette entry names its material (the product
+// preview's instanced PBR parts): moved as `vs_tri_inst` moves it.
+@vertex
+fn vs_pbr_inst(
+    @location(0) p: vec3<f32>,
+    @location(1) n: vec3<f32>,
+    @location(3) r0: vec4<f32>,
+    @location(4) r1: vec4<f32>,
+    @location(5) r2: vec4<f32>,
+    @location(6) c: u32,
+) -> PbrOut {
+    let q = vec4<f32>(p, 1.0);
+    let wp = vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q));
+    let at = vec2<u32>(c & 2047u, (c >> 11u) * 2u);
+    var o: PbrOut;
+    o.pos = u.vp * vec4<f32>(wp, 1.0);
+    o.n = vec3<f32>(dot(r0.xyz, n), dot(r1.xyz, n), dot(r2.xyz, n));
+    o.base = textureLoad(pbr_materials, at, 0).xyz;
+    o.wp = wp;
+    o.parameters = textureLoad(pbr_materials, at + vec2<u32>(0u, 1u), 0).xyz;
+    return o;
+}
+
+// A built triangle vertex whose palette entry names its material (the product preview's blocks).
+@vertex
+fn vs_pbr_palette(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: u32) -> PbrOut {
+    let at = vec2<u32>(c & 2047u, (c >> 11u) * 2u);
+    var o: PbrOut;
+    o.pos = u.vp * vec4<f32>(p, 1.0);
+    o.n = n;
+    o.base = textureLoad(pbr_materials, at, 0).xyz;
+    o.wp = p;
+    o.parameters = textureLoad(pbr_materials, at + vec2<u32>(0u, 1u), 0).xyz;
+    return o;
+}
+
 @fragment
 fn fs_pbr(i: PbrOut) -> @location(0) vec4<f32> {
     let n = pbr_unit(i.n);

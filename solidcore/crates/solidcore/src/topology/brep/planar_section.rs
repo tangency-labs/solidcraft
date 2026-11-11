@@ -139,7 +139,10 @@ pub fn create_plane_from_bbox(
     let bilinear = BSplineSurface::create_bilinear_surface(p00, p10, p01, p11)?;
     match Plane::is_nurb_surface_plane(k, &bilinear, 1.0) {
         Ok(Some(plane)) => Ok(Some(Surface::from(plane))),
-        Ok(None) => Err(SolidError::sm_err(OP_PLANE)),
+        Ok(None) => Err(SolidError::topology_failed(
+            OP_PLANE,
+            "the bounding box's corners are not on a plane",
+        )),
         Err(e) if e.is_unported_or_cancelled() => Err(e),
         // (an `SER` inside reads as `TRUE` and leaves no plane)
         Err(_) => Ok(None),
@@ -401,7 +404,7 @@ pub fn create_planar_section_curves(
         let uv_domain = face2::uv_domain(b, f)?;
         // the face's surface, as an evaluation copy (same owner and cache slot)
         let surface = face2::surface(b, f)?
-            .ok_or_else(|| SolidError::null_pointer(OP_SECTION))?
+            .ok_or_else(|| SolidError::topology_missing(OP_SECTION, "the face's surface"))?
             .clone_for_evaluation()?;
         let face_tol = face2::tolerance(b, f)?;
 
@@ -499,7 +502,9 @@ pub fn create_planar_section_curves(
                     // check for coincidence
                     let face_curve =
                         status_free(edge::curve(b, e).map(Option::<&Curve>::cloned), None)?
-                            .ok_or_else(|| SolidError::null_pointer(OP_SECTION))?;
+                            .ok_or_else(|| {
+                                SolidError::topology_missing(OP_SECTION, "the edge's curve")
+                            })?;
                     let edge_ivl = status_free(edge::interval(b, e), Extent1d::new())?;
                     if is_full_coincidence(&face_curve, &edge_ivl)? {
                         coin_with_embedded = true;

@@ -14,6 +14,8 @@
 //! Control points are `[x, y, z, w]` (`w = NOW` non-rational, `z = NOZ` 2D); a
 //! fixture may give `[x, y, z]` triples (non-rational), e.g. from a `$pts` file.
 //! Surfaces are inline or an upstream `.sms` file (`{"sms": {"$upstream_file": ..}}`).
+//! A surface the Rust constructors refuse (its control points in use mix rational and
+//! non-rational ones) makes the case `rejected` with the constructor's reason.
 //! Every run has at least [`MIN_GENERATED`] generated cases.
 
 use serde::{Deserialize, Serialize};
@@ -284,7 +286,20 @@ fn shape(s: &InlineSrf) -> Result<([usize; 4], [usize; 4]), HarnessError> {
     Ok((big, used))
 }
 
-fn build_srf(s: &InlineSrf) -> Result<Surface, HarnessError> {
+/// Why a case's record was not produced.
+enum Fail {
+    Harness(HarnessError),
+    /// A surface constructor refused an input surface (the reason).
+    Refused(String),
+}
+
+impl From<HarnessError> for Fail {
+    fn from(e: HarnessError) -> Self {
+        Self::Harness(e)
+    }
+}
+
+fn build_srf(s: &InlineSrf) -> Result<Surface, Fail> {
     let (_, used) = shape(s)?;
     let idx = SurfaceIndices {
         n: used[0],
@@ -295,7 +310,7 @@ fn build_srf(s: &InlineSrf) -> Result<Surface, HarnessError> {
         s: used[3],
     };
     Surface::with_indices(to_net(&s.net), s.u.clone(), s.v.clone(), idx)
-    .map_err(|e| harness(format!("rust surface: {e}")))
+        .map_err(|e| Fail::Refused(format!("rust surface: {e}")))
 }
 
 fn to_cpts(v: &[[f64; 4]]) -> Vec<CPoint> {
@@ -441,7 +456,7 @@ fn pre_matrix(pre: bool, build: impl FnOnce() -> SolidResult<RealMatrix>) -> Sol
     }
 }
 
-fn rust_flat(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
+fn rust_flat(i: &Inputs) -> Result<Vec<f64>, Fail> {
     let mut o = Vec::new();
     match i {
         Inputs::ElevMatrix { p, t } => {
@@ -618,7 +633,11 @@ fn rust_flat(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
 }
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
-    to_output(i, &rust_flat(i)?)
+    match rust_flat(i) {
+        Ok(flat) => to_output(i, &flat),
+        Err(Fail::Refused(why)) => Ok(Output::rejected(why)),
+        Err(Fail::Harness(e)) => Err(e),
+    }
 }
 
 // ---- generation -------------------------------------------------------------------

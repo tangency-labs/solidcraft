@@ -1,11 +1,14 @@
 {
-  "blend.feature_executive": {
-    "single_face_fillet1019_6": "tangency-labs/solidcore#3093: success with a body that fails check_brep level 2 (11 lines, the first Bad Repeated CPts)"
-  },
   "blend.fillet_executive_p3": {
     "issue-2349-teardrop-full-r0.5": "tangency-labs/solidcore#2349: the closed round's first span is off the true round by 7.9e-4 against a 4e-5 edge tolerance; the curved-spine mitre and both exact pcurves remain unimplemented",
     "issue-2349-teardrop-full-r3": "tangency-labs/solidcore#2349: the closed-angle mitre is not certified; tangency-labs/solidcore#2404 tracks the refusal size whose fresh build fails validity",
+    "private-upstream-rollover-404-cyl-on-box1-edge12-r2": "tangency-labs/solidcraft#13694: fails in the rollover (1001) once the WR-682 surface-plane trace is taken; main's default built it, and the trace's curves agree with the two-points intersector's to the tolerance, so the cause is not found yet",
+    "radius-supported-at-limit-accepted": "tangency-labs/solidcore#3245: at the minimum radius the result depends on rounding: the round and its end arcs lie r(sqrt(2) - 1) = 3.3e-5 from the corner they replace, inside the 5e-5 of the corner vertex's and the fillet's tolerances, so whether the end arcs are imprinted (and the trim closes) flips with ulp-level changes",
     "stubs4-delete-edge-sphere_diff_3cylinders-e2-r0.5": "tangency-labs/solidcore#3053: with every fix off the round builds a body that is not closed (29 vertices, 44 edges, 9 faces, mass status 1007), where it was refused with status 1001"
+  },
+  "boolean.api_brep": {
+    "gen0150": "tangency-labs/solidcraft#14799: a sphere of radius -3.06e-4 united with a 7.5e-4 x 3.9e-4 x 1.4e-3 box returns the sphere alone (volume 1.20e-10, Level 2 check fails) where the union holds the box (4.28e-10); upstream refused it (1001) because its capture distance spanned both parts",
+    "ub175_after_editing_imprint_failure": "tangency-labs/solidcraft#14799: a sphere of radius 6.8e-4 united with a 7.8e-4 x 5.4e-4 x 7.2e-4 box reaching outside it returns the sphere alone (volume 1.33e-9, Level 2 check fails); upstream refused it (1001) because its capture distance spanned both parts"
   },
   "intersect.topology_solver_p2": {
     "subdivided_1_14_1_12_11_2_1": "tangency-labs/solidcore#3147: the All projected minimum returns 7 of the 21 answers within tolerance; the 14 missing are line endpoints (t = 0 or 1), leaving 5 of 12 vertices without an answer",
@@ -253,5 +256,11 @@
   },
   "surface.surface_approximate": {
     "gen0381": "tangency-labs/solidcore#2507: approximation reports success and a returned surface although achieved tolerance 0.5459967665063701 exceeds requested tolerance 0.0013812901040403118"
+  },
+  "topology.brep_local_operation": {
+    "gen0014": "tangency-labs/solidcore#2981: tilted disk returns three non-collinear straight boundary carriers; an affine image of the semicircle-and-diameter boundary has only one",
+    "gen0019": "tangency-labs/solidcore#2981: tilted disk returns three non-collinear straight boundary carriers; an affine image of the semicircle-and-diameter boundary has only one",
+    "gen0073": "tangency-labs/solidcore#2981: tilted disk returns three non-collinear straight boundary carriers; an affine image of the semicircle-and-diameter boundary has only one",
+    "gen0078": "tangency-labs/solidcore#2981: tilted disk returns three non-collinear straight boundary carriers; an affine image of the semicircle-and-diameter boundary has only one"
   }
 }

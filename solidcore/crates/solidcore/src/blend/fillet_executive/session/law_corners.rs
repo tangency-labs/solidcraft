@@ -85,7 +85,7 @@ impl FilletSession<'_> {
             // `GetRadiusCornerParameters` (virtual): the variable radius solver's
             let geoms = match self.objects.solvers.get(index).and_then(Option::as_ref) {
                 Some(SolverObject::VariableRadius(vr)) => {
-                    if vr.radius_corner_parameters(k)?.is_empty() {
+                    if vr.radius_corner_parameters()?.is_empty() {
                         continue;
                     }
                     vr.curve_based.solver.fillet_geoms()

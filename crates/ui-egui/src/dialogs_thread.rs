@@ -7,8 +7,8 @@
 use serde_json::{Value, json};
 use solidcraft_engine::doc::thread_forms::{SteepFlank, ThreadForm, ThreadHand, ThreadTip};
 use solidcraft_engine::doc::{
-    Document, Expr, FeatureKind, TappedThreadFamily, ThreadLimit, ThreadRunout, metric_thread_sizes, parse_metric_thread, parse_tapped_thread,
-    tapped_thread_sizes,
+    Document, Expr, FeatureKind, TappedThread, TappedThreadFamily, ThreadLimit, ThreadRunout, metric_thread_sizes, parse_metric_thread,
+    parse_tapped_thread, tapped_thread_sizes,
 };
 use solidcraft_engine::{Sel, Session};
 
@@ -169,7 +169,7 @@ pub(crate) fn hole_rows(
     form_row(ui, "Tap drill diameter", |ui| {
         match parse_tapped_thread(designation).filter(|_| custom.as_ref().is_none_or(|draft| draft.error.is_none())) {
             Some(size) => {
-                let default = format!("{} mm", size.tap_drill);
+                let default = tap_drill_label(&size);
                 let (lo, hi) = size.drill_range();
                 let mm = |v: f64| format!("{:.3}", v);
                 let args = [("drill", mm(size.tap_drill)), ("minor", mm(size.minor_diameter())), ("low", mm(lo)), ("high", mm(hi))];
@@ -193,6 +193,21 @@ pub(crate) fn hole_rows(
         }
     });
     enter || drill_enter || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+}
+
+/// A Unified size is chosen by someone working in inches, and its catalogued drill is an
+/// inch drill (#10353), so the drill field's default reads in inches. The catalogue stays in
+/// millimetres and the field's tooltip gives the millimetre drill: both values side by side do
+/// not fit the form's value column (`0.4219 in (10.715625 mm)` was cut off). Left unchanged, the
+/// field keeps the catalogue's exact drill. Metric, the G/Rp pipe sizes and the Rc/NPT taper
+/// sizes keep millimetres: their drill tables are metric.
+fn tap_drill_label(size: &TappedThread) -> String {
+    match size.family {
+        TappedThreadFamily::Unc | TappedThreadFamily::Unf => crate::prefs::format_length(size.tap_drill, "in", 3),
+        TappedThreadFamily::Metric | TappedThreadFamily::G | TappedThreadFamily::Rp | TappedThreadFamily::Rc | TappedThreadFamily::Npt => {
+            format!("{} mm", size.tap_drill)
+        }
+    }
 }
 
 /// The forms offered. The square thread is left out: no standard defines it, and the command
@@ -643,6 +658,7 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, kind: &FeatureKind) {
         designation,
         length,
         modeled,
+        continuous_flanks,
         from,
         up_to,
         form,
@@ -659,6 +675,7 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, kind: &FeatureKind) {
     else {
         return;
     };
+    d.extra.insert("continuous_flanks".into(), json!(continuous_flanks));
     if *modeled {
         d.extra.insert("modeled".into(), json!(true));
     }
@@ -1005,7 +1022,9 @@ mod contribution_tests {
         h.frames(3);
         assert_eq!(apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap()[0].1["thread"], "1/4-20 UNC");
         assert!(crate::scenario::handle_at("dialog:Nominal diameter").is_none());
-        assert!(h.widget("5.1054 mm").is_some());
+        assert!(h.widget("0.201 in").is_some(), "a UNC size's tap drill must read in inches (#10353)");
+        let unc = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0).1;
+        assert!(unc.get("diameter").is_none(), "the untouched inch default keeps the catalogue's exact drill: {unc}");
         h.step(&json!({"click":{"handle":"dialog:Profile"}})).unwrap();
         h.step(&json!({"click":{"handle":"dialog:Profile:UNF"}})).unwrap();
         h.step(&json!({"click":{"handle":"dialog:Size"}})).unwrap();
@@ -1027,6 +1046,24 @@ mod contribution_tests {
         h.frames(3);
         assert!(h.widget("Custom").is_some());
         assert!(crate::scenario::handle_at("dialog:Nominal diameter").is_some());
+    }
+
+    #[test]
+    fn unified_tap_drills_read_in_inches_and_other_profiles_in_millimetres() {
+        // #10353: 1/4-20 UNC is a #7 drill (0.201 in), 1/2-13 UNC a 27/64 in drill.
+        for (name, label) in [("1/4-20 UNC", "0.201 in"), ("1/2-13 UNC", "0.4219 in"), ("#10-32 UNF", "0.159 in")] {
+            assert_eq!(tap_drill_label(&parse_tapped_thread(name).unwrap()), label);
+        }
+        for family in [TappedThreadFamily::Unc, TappedThreadFamily::Unf] {
+            for size in tapped_thread_sizes(family) {
+                let label = tap_drill_label(&size);
+                let inches: f64 = label.strip_suffix(" in").unwrap().parse().unwrap();
+                assert!((inches * 25.4 - size.tap_drill).abs() < 0.0005 * 25.4, "{}: {label}", size.designation);
+            }
+        }
+        for (name, label) in [("M8", "6.8 mm"), ("G 1/4", "11.75 mm"), ("Rp 1/4", "11.4 mm"), ("Rc 1/2", "17.6 mm"), ("1/2 NPT", "17.6 mm")] {
+            assert_eq!(tap_drill_label(&parse_tapped_thread(name).unwrap()), label);
+        }
     }
 
     #[test]
