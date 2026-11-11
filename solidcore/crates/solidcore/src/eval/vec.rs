@@ -45,3 +45,49 @@ impl VecExt for Vec3 {
 pub fn v3(p: [f64; 3]) -> Vec3 {
     Vec3::new(p[0], p[1], p[2])
 }
+
+/// The signed Cartesian unit direction making the smallest angle with `direction`.
+/// Equal absolute coordinates choose X before Y before Z. Zero and non-finite
+/// directions have no answer. Comparing coordinates avoids normalisation and overflow.
+#[must_use]
+pub fn nearest_principal_direction(direction: Vec3) -> Option<Vec3> {
+    if !direction.is_finite() || direction == Vec3::ZERO {
+        return None;
+    }
+    let x = direction.x.abs();
+    let y = direction.y.abs();
+    let z = direction.z.abs();
+    Some(if x >= y && x >= z {
+        Vec3::new(direction.x.signum(), 0.0, 0.0)
+    } else if y >= z {
+        Vec3::new(0.0, direction.y.signum(), 0.0)
+    } else {
+        Vec3::new(0.0, 0.0, direction.z.signum())
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn principal_direction_uses_the_largest_signed_coordinate() {
+        for (input, expected) in [
+            ([4.0, 2.0, 1.0], [1.0, 0.0, 0.0]),
+            ([-4.0, 2.0, 1.0], [-1.0, 0.0, 0.0]),
+            ([1.0, 4.0, 2.0], [0.0, 1.0, 0.0]),
+            ([1.0, -4.0, 2.0], [0.0, -1.0, 0.0]),
+            ([1.0, 2.0, 4.0], [0.0, 0.0, 1.0]),
+            ([1.0, 2.0, -4.0], [0.0, 0.0, -1.0]),
+            ([-1.0, 1.0, 1.0], [-1.0, 0.0, 0.0]),
+            ([0.0, -1.0, 1.0], [0.0, -1.0, 0.0]),
+            ([f64::MAX, 1.0, 0.0], [1.0, 0.0, 0.0]),
+            ([0.0, 0.0, f64::MIN_POSITIVE], [0.0, 0.0, 1.0]),
+        ] {
+            assert_eq!(nearest_principal_direction(v3(input)), Some(v3(expected)));
+        }
+        for input in [[0.0; 3], [f64::NAN, 1.0, 0.0], [0.0, f64::INFINITY, 1.0]] {
+            assert!(nearest_principal_direction(v3(input)).is_none());
+        }
+    }
+}

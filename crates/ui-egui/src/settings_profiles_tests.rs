@@ -33,9 +33,10 @@ fn panel_arrow_bindings_and_cleared_defaults_survive_profile_export_import_and_a
 #[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
-    assert_eq!(keys.len(), 105, "Appearance system-theme slots and Maya zoom are included");
+    assert_eq!(keys.len(), 106, "Appearance system-theme slots, Maya zoom and NX shortcuts are included");
     for key in [
         "nav",
+        "nx_shortcuts",
         "maya_horizontal_zoom",
         "mouse_gestures",
         "radial_context_menu",
@@ -837,6 +838,7 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
         "navigation_bar",
         "navigator_fit",
         "navigator_style",
+        "nx_shortcuts",
         "orbit_around",
         "orbit_reverse",
         "origin_plane_names",
@@ -905,7 +907,7 @@ fn profile_keys_preserve_the_baseline_and_explicit_additions() {
     ];
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
-    assert_eq!(expected.len(), 105);
+    assert_eq!(expected.len(), 106);
     assert_eq!(actual, expected);
 }
 

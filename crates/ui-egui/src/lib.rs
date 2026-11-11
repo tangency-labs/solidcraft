@@ -1924,9 +1924,10 @@ impl SolveApp {
             print_face_ui::toggle(self);
             return;
         }
-        if id == "view.normal_to" {
+        if matches!(id, "view.align" | "view.normal_to") {
             if self.run(id, json!({"camera": self.cam})).is_ok() {
-                if self.universal_panel_host_enabled()
+                if id == "view.normal_to"
+                    && self.universal_panel_host_enabled()
                     && let (Some(mut camera), Some(layout), Ok(usable)) =
                         (self.session.camera, self.viewport.layout.as_ref(), shell::host_usable(self))
                 {

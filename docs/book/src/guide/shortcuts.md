@@ -4,6 +4,11 @@ Command shortcuts can be changed in File › Keyboard Shortcuts; these are the d
 key to replace it, or the **+** after it to give the command another key: every key it has
 runs it, and menus and tooltips show the first one.
 
+For an additional NX keyboard preset, choose **NX** under **Preferences › Navigation** and enable
+**Use NX keyboard shortcuts**. The option starts off, including for saved NX mouse preferences.
+Custom bindings take priority. Disabling the option restores the standard bindings below.
+See the [supported NX mappings and mouse differences](https://github.com/tangency-labs/solidcraft/blob/main/docs/nx-shortcuts.md).
+
 Click a binding to record a new shortcut. A shortcut can contain Shift, Ctrl/Cmd and
 Alt/Option modifiers plus exactly one other key. Hold the modifiers, then press the final
 key; you can take your time assembling the modifiers before that key. The recorder also

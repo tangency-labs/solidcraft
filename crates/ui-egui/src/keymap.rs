@@ -234,6 +234,7 @@ pub(crate) fn saved_keys(id: &str, v: &Value) -> Option<Vec<String>> {
 /// Every other application-reserved key remains protected for every command.
 fn reserved_for(id: &str, key: &str) -> bool {
     RESERVED.contains(&key)
+        && !(id == DRAG_ZOOM && key == "F6")
         && !(solidcraft_engine::panels::ContextualPanelAction::from_command_id(id).is_some()
             && key.rsplit('+').next().is_some_and(|name| matches!(name, "Left" | "Right" | "Up" | "Down")))
 }
@@ -374,18 +375,132 @@ pub fn effective(app: &SolveApp, id: &str) -> Option<String> {
     keys(app, id).into_iter().next()
 }
 
+/// Public NX conventions mapped to SolidCraft's own commands. Differences and sources are
+/// recorded in docs/nx-shortcuts.md; no NX code or command identifiers are used.
+const NX_KEYS: &[(&str, &str)] = &[
+    ("appearance.assign", "Ctrl+J"),
+    ("edit.repeat", "F4"),
+    ("file.save_as", "Ctrl+Shift+A"),
+    ("parameters.change", "Ctrl+E"),
+    ("sketch.finish", "Ctrl+Q"),
+    ("sketch.move", "Ctrl+T"),
+    ("solid.extrude", "X"),
+    ("solid.move", "Ctrl+T"),
+    ("ui.palette", "Ctrl+Space"),
+    ("ui.toggle_visibility", "Ctrl+W"),
+    ("view.align", "F8"),
+    ("view.fit", "Ctrl+F"),
+    ("view.front", "Ctrl+Alt+F"),
+    ("view.isometric", "End"),
+    ("view.normal_to", "Shift+F8"),
+    ("view.right", "Ctrl+Alt+R"),
+    ("view.tool.zoom", "Ctrl+Shift+Z"),
+    ("view.tool.zoom", "F6"),
+    ("view.top", "Ctrl+Alt+T"),
+];
+
+/// Actions with context-dependent parameters, dispatched through the same UI command paths.
+const NX_ACTION_KEYS: &[&str] =
+    &["Ctrl+1", "Ctrl+2", "Ctrl+B", "Ctrl+D", "Ctrl+R", "F7", "Ctrl+Shift+K", "Ctrl+Shift+U", "Shift+B", "Shift+C", "Shift+G"];
+
+pub(crate) fn nx_active(app: &SolveApp) -> bool {
+    app.preferences.nav == "nx" && app.preferences.nx_shortcuts
+}
+
+fn profile_default_keys(app: &SolveApp, command: &CommandSpec) -> Vec<&'static str> {
+    if !nx_active(app) {
+        return command.shortcut.filter(|key| !key.is_empty()).into_iter().collect();
+    }
+    let assigned: Vec<_> = NX_KEYS.iter().filter(|(id, _)| *id == command.id).map(|(_, key)| *key).collect();
+    if assigned.is_empty() {
+        command
+            .shortcut
+            .filter(|key| !key.is_empty() && !NX_ACTION_KEYS.contains(key) && !NX_KEYS.iter().any(|(_, nx)| nx == key))
+            .into_iter()
+            .collect()
+    } else {
+        assigned
+    }
+}
+
+fn default_keys(app: &SolveApp, command: &CommandSpec) -> Vec<&'static str> {
+    profile_default_keys(app, command)
+        .into_iter()
+        .filter(|key| {
+            !nx_active(app) || !app.keymap.custom.iter().any(|(id, keys)| id != command.id && clash(id, command.id) && keys.iter().any(|k| k == key))
+        })
+        .collect()
+}
+
+/// Host-owned file and settings keys must never become NX actions in an embedded editor.
+pub(crate) fn nx_host_key(app: &SolveApp, key: &str) -> bool {
+    app.embed_editor
+        && (matches!(key, "Ctrl+W" | "Ctrl+Shift+A")
+            || (matches!(key, "Ctrl+1" | "Ctrl+2") && !app.keymap.custom.values().any(|keys| keys.iter().any(|chord| chord == key))))
+}
+
+/// Called after focus and host ownership checks, before fixed application shortcuts.
+pub(crate) fn nx_press(app: &mut SolveApp, key: &str, repeat: bool) -> bool {
+    if !nx_active(app) || nx_host_key(app, key) {
+        return false;
+    }
+    let profile_key = NX_ACTION_KEYS.contains(&key) || NX_KEYS.iter().any(|(_, chord)| *chord == key);
+    if !profile_key {
+        return false;
+    }
+    // An explicit binding, including one in a different context, suppresses the preset action.
+    if app.keymap.custom.values().any(|keys| keys.iter().any(|k| k == key)) {
+        press(app, key, repeat);
+        return true;
+    }
+    if repeat {
+        return true;
+    }
+    if NX_KEYS.iter().any(|(_, chord)| *chord == key) {
+        press(app, key, false);
+        return true;
+    }
+    match key {
+        "Ctrl+1" => crate::prefs::open_at(app, crate::prefs::PAGE_SHORTCUTS),
+        "Ctrl+2" => crate::prefs::open_at(app, crate::prefs::PAGE_GENERAL),
+        "Ctrl+B" => crate::context_menu::set_selection_visibility(app, Some(false)),
+        "Ctrl+Shift+K" => crate::context_menu::set_selection_visibility(app, Some(true)),
+        "Ctrl+Shift+U" => {
+            let _ = app.run("browser.visibility", json!({"folder":"all", "visible":true}));
+        }
+        "Ctrl+D" => {
+            if !crate::timeline_left::delete_selected_folders(app) {
+                crate::viewport::delete_selection(app);
+            }
+        }
+        "F7" | "Ctrl+R" => {
+            let _ = app.run("view.tool", json!({"tool":"orbit"}));
+        }
+        "Shift+B" | "Shift+C" | "Shift+G" => {
+            let mode = match key {
+                "Shift+B" => "body",
+                "Shift+C" => "component",
+                _ => "face",
+            };
+            let _ = app.run("select.filter", json!({"mode":mode}));
+        }
+        _ => {}
+    }
+    true
+}
+
 /// Every key a command runs from now.
 pub fn keys(app: &SolveApp, id: &str) -> Vec<String> {
     match app.keymap.custom.get(id) {
         Some(keys) => keys.clone(),
-        None => solidcraft_engine::find_command(id).and_then(|c| c.shortcut).filter(|k| !k.is_empty()).map(str::to_string).into_iter().collect(),
+        None => solidcraft_engine::find_command(id).map(|c| default_keys(app, c).into_iter().map(str::to_string).collect()).unwrap_or_default(),
     }
 }
 
 /// Drag to Zoom has no default binding. Compare the keys and current modifiers using the
 /// same chord names as the shortcut recorder.
 pub(crate) fn drag_zoom_key(app: &SolveApp, key: egui::Key, modifiers: egui::Modifiers) -> bool {
-    app.keymap.custom.get(DRAG_ZOOM).is_some_and(|keys| !keys.is_empty() && keys.contains(&key_name(key, modifiers)))
+    keys(app, DRAG_ZOOM).contains(&key_name(key, modifiers))
 }
 
 pub(crate) fn drag_zoom_held(app: &SolveApp, input: &egui::InputState) -> bool {
@@ -396,7 +511,7 @@ pub(crate) fn drag_zoom_held(app: &SolveApp, input: &egui::InputState) -> bool {
 fn keys_for_spec<'a>(app: &'a SolveApp, command: &CommandSpec) -> Vec<&'a str> {
     match app.keymap.custom.get(command.id) {
         Some(keys) => keys.iter().map(String::as_str).collect(),
-        None => command.shortcut.filter(|k| !k.is_empty()).into_iter().collect(),
+        None => default_keys(app, command),
     }
 }
 
@@ -482,6 +597,12 @@ pub fn press(app: &mut SolveApp, key: &str, repeat: bool) {
     if keeps_old_show_hide(app, key) {
         app.start("ui.toggle_visibility");
     } else if let Some(id) = command_for(app, key) {
+        if id == "file.save_as" {
+            if !repeat && !app.embed_editor {
+                crate::toolbar::save_as(app);
+            }
+            return;
+        }
         if id == DRAG_ZOOM {
             // The viewport reads the held chord. A key press must not latch Zoom.
             return;
@@ -590,7 +711,7 @@ pub fn bind_at(app: &mut SolveApp, id: &str, slot: Option<usize>, key: &str, rep
 
 /// Keep a command's keys, as a change only when they aren't its default.
 fn set_keys(app: &mut SolveApp, id: &str, keys: Vec<String>) {
-    let default = solidcraft_engine::find_command(id).and_then(|c| c.shortcut).filter(|k| !k.is_empty());
+    let default = solidcraft_engine::find_command(id).map(|c| profile_default_keys(app, c)).unwrap_or_default();
     if keys.iter().map(String::as_str).eq(default) {
         app.keymap.custom.remove(id);
     } else {
@@ -1085,6 +1206,177 @@ pub fn capturing(app: &SolveApp) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nx_preset_is_opt_in_and_custom_bindings_survive_switching_and_reloading() {
+        let mut a = app();
+        let standard = keys(&a, "view.fit");
+        a.preferences.nav = "nx".into();
+        assert!(!nx_active(&a));
+        assert_eq!(keys(&a, "view.fit"), standard);
+        a.preferences.nx_shortcuts = true;
+        assert_eq!(keys(&a, "view.fit"), ["Ctrl+F"]);
+        assert_eq!(keys(&a, "solid.extrude"), ["X"]);
+        assert!(keys(&a, "sketch.construction").is_empty(), "the stock sketch X must not shadow NX Extrude");
+        assert_eq!(keys(&a, "ui.toggle_visibility"), ["Ctrl+W"]);
+        for (id, key) in NX_KEYS {
+            assert!(solidcraft_engine::find_command(id).is_some(), "{id}");
+            assert!(chord(key).is_some(), "{key}");
+        }
+        for spec in command_specs() {
+            for key in keys_for_spec(&a, spec) {
+                assert!(!NX_ACTION_KEYS.contains(&key), "{} shadows {key}", spec.id);
+            }
+        }
+        a.keymap.load(&json!({"solid.box":"Ctrl+F"}));
+        assert_eq!(commands_for(&a, "Ctrl+F"), ["solid.box"]);
+        assert!(keys(&a, "view.fit").is_empty());
+        bind(&mut a, "view.align", "", false).unwrap();
+        assert!(keys(&a, "view.align").is_empty());
+        bind(&mut a, DRAG_ZOOM, "F6", false).unwrap();
+        let saved = a.prefs();
+        let mut restored = app();
+        restored.load_prefs(&saved);
+        assert!(nx_active(&restored));
+        assert_eq!(commands_for(&restored, "Ctrl+F"), ["solid.box"]);
+        assert!(keys(&restored, "view.align").is_empty());
+        assert!(drag_zoom_key(&restored, egui::Key::F6, egui::Modifiers::NONE));
+        restored.preferences.nx_shortcuts = false;
+        assert_eq!(keys(&restored, "view.fit"), standard);
+        assert_eq!(keys(&restored, "solid.box"), ["Ctrl+F"]);
+        restored.preferences.nx_shortcuts = true;
+        restored.preferences.nav = "fusion".into();
+        assert!(!nx_active(&restored));
+        assert_eq!(keys(&restored, "view.fit"), standard);
+    }
+
+    #[test]
+    fn nx_host_actions_respect_custom_keys_repeat_and_embedded_ownership() {
+        let mut a = app();
+        a.home.open = false;
+        a.preferences.nav = "nx".into();
+        a.preferences.nx_shortcuts = true;
+        bind(&mut a, "view.front", "F7", false).unwrap();
+        assert!(nx_press(&mut a, "F7", false));
+        assert!(a.viewport.nav.is_none(), "the explicit command replaces the preset orbit action");
+        reset(&mut a, Some("view.front"));
+        assert!(nx_press(&mut a, "F7", true));
+        assert!(a.viewport.nav.is_none(), "held keys do not repeatedly start actions");
+        assert!(nx_press(&mut a, "F7", false));
+        assert_eq!(a.viewport.nav, Some(crate::viewport::NavMode::Orbit));
+        a.embed_editor = true;
+        for key in ["Ctrl+1", "Ctrl+2", "Ctrl+W", "Ctrl+Shift+A"] {
+            assert!(nx_host_key(&a, key));
+            assert!(!nx_press(&mut a, key, false));
+        }
+        assert!(!a.prefs_window.shell.open);
+        bind(&mut a, "view.front", "Ctrl+1", false).unwrap();
+        assert!(!nx_host_key(&a, "Ctrl+1"), "an explicit view key keeps its non-settings action");
+        assert!(nx_press(&mut a, "Ctrl+1", false));
+        assert!(!a.prefs_window.shell.open);
+    }
+
+    #[test]
+    fn nx_clear_keeps_a_disabled_override_when_another_custom_key_suppressed_the_default() {
+        let mut a = app();
+        a.preferences.nav = "nx".into();
+        a.preferences.nx_shortcuts = true;
+        a.keymap.load(&json!({"solid.box":"Ctrl+F"}));
+        bind(&mut a, "view.fit", "", false).unwrap();
+        assert!(a.keymap.custom.contains_key("view.fit"));
+        reset(&mut a, Some("solid.box"));
+        assert!(keys(&a, "view.fit").is_empty(), "clearing Fit remains explicit after its competing key is reset");
+        let saved = a.keymap.prefs();
+        a.keymap.load(&saved);
+        assert!(keys(&a, "view.fit").is_empty());
+        reset(&mut a, Some("view.fit"));
+        assert_eq!(keys(&a, "view.fit"), ["Ctrl+F"]);
+    }
+
+    #[test]
+    fn nx_settings_keys_work_on_home_without_starting_a_custom_model_command() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = true;
+        h.app.preferences.nav = "nx".into();
+        h.app.preferences.nx_shortcuts = true;
+        h.step(&json!({"key":"2","cmd":true})).unwrap();
+        assert!(h.app.prefs_window.shell.open);
+        assert_eq!(h.app.prefs_window.shell.section, crate::prefs::PAGE_GENERAL);
+        h.call("ui.prefs", json!({"button":"ok"}));
+        bind(&mut h.app, "solid.extrude", "Ctrl+1", false).unwrap();
+        h.step(&json!({"key":"1","cmd":true})).unwrap();
+        assert!(!h.app.prefs_window.shell.open && h.app.dialog.is_none() && h.app.tool.is_none());
+        assert!(h.app.home.open);
+    }
+
+    #[test]
+    fn nx_visibility_actions_are_idempotent_and_ctrl_w_keeps_the_document_open() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.nav = "nx".into();
+        h.app.preferences.nx_shortcuts = true;
+        h.app.run("select.set", json!({"items":[{"type":"plane", "name":"XY"}]})).unwrap();
+        let design = h.app.session.doc.to_json();
+        for _ in 0..2 {
+            h.step(&json!({"key":"B","cmd":true})).unwrap();
+            assert!(h.app.session.visibility.hidden_origin.iter().any(|name| name == "XY"));
+        }
+        for _ in 0..2 {
+            h.step(&json!({"key":"K","cmd":true,"shift":true})).unwrap();
+            assert!(h.app.session.visibility.hidden_origin.iter().all(|name| name != "XY"));
+        }
+        h.step(&json!({"key":"W","cmd":true})).unwrap();
+        assert!(h.app.session.visibility.hidden_origin.iter().any(|name| name == "XY"));
+        assert!(!h.app.home.open, "NX Ctrl+W must not close the active design");
+        h.step(&json!({"key":"W","cmd":true})).unwrap();
+        assert!(h.app.session.visibility.hidden_origin.iter().all(|name| name != "XY"));
+        assert_eq!(h.app.session.doc.to_json(), design);
+    }
+
+    #[test]
+    fn nx_alignment_dispatch_uses_the_live_camera_and_stops_when_the_option_is_off() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.nav = "nx".into();
+        h.app.preferences.nx_shortcuts = true;
+        h.app.preferences.look_at_anim = false;
+        h.app.cam.yaw = 0.12;
+        h.app.cam.pitch = 0.08;
+        let before = h.app.cam;
+        h.frames(2);
+        h.step(&json!({"key":"F8"})).unwrap();
+        assert!(h.app.cam.yaw.abs() < 1e-6);
+        assert!(h.app.cam.pitch.abs() < 1e-6);
+        assert_eq!(h.app.cam.target, before.target);
+        assert_eq!(h.app.cam.distance, before.distance);
+        h.app.preferences.nx_shortcuts = false;
+        h.app.cam = before;
+        h.step(&json!({"key":"F8"})).unwrap();
+        assert_eq!(h.app.cam, before);
+        h.app.preferences.nx_shortcuts = true;
+        h.call("ui.prefs", json!({"open":"Navigation"}));
+        h.step(&json!({"click":{"handle":"prefs:search"}})).unwrap();
+        h.step(&json!({"key":"F8"})).unwrap();
+        assert_eq!(h.app.cam, before, "the focused preferences field keeps its keys");
+    }
+
+    #[test]
+    fn nx_save_as_opens_the_picker_and_preserves_the_original_file() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.nav = "nx".into();
+        h.app.preferences.nx_shortcuts = true;
+        let original = h.dir.join("original.sc");
+        h.app.run("file.save_as", json!({"path":original})).unwrap();
+        let bytes = std::fs::read(&original).unwrap();
+        h.app.session.doc_mut().name = "Copy".into();
+        h.frames(3);
+        h.step(&json!({"key":"A","cmd":true,"shift":true})).unwrap();
+        h.frames(3);
+        h.settle();
+        assert_eq!(h.app.session.path.as_deref(), h.dir.join("Copy.sc").to_str());
+        assert_eq!(std::fs::read(&original).unwrap(), bytes);
+    }
 
     #[test]
     fn panel_bindings_preserve_contextual_arrows_and_rebind_clear_conflict_and_reset() {

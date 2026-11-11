@@ -4395,6 +4395,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_path_to_error",
+ "solidcore-ops",
  "solidcore-record",
  "solidcraft-color",
  "solidcraft-control",
