@@ -3,44 +3,56 @@
 //! on a circle about their common axis. Its net is the ball's arc turned about that axis, a
 //! surface of revolution carrying the round's definition.
 //!
-//! [`circle_round_torus`] reads that torus off the net as an SMLib torus is read off its
-//! NURBS form ([`Torus::is_nurb_surface_torus`]), so its frame and radii describe the net in
-//! its own parameterisation, and certifies it against the definition: the net lies on its own
-//! torus, and that torus is within the tolerance the class was read in of the torus the
-//! supports give (`ExactRound::supports_distance`). Only a round the definition names as
-//! the circle class is read so: no other surface is recognised as a torus here.
+//! [`circle_round_torus`] gives the round's exact surface: the torus its supports give (the
+//! supports classified again, the class's surface), with a frame about its axis, and the
+//! certificate that the net is that torus: the net lies on its own torus, and that torus is
+//! within the tolerance the class was read in of the supports' (`ExactRound::supports_distance`).
+//! The two are one surface within that tolerance, their frames differing only in where the
+//! angle about the axis starts. Only a round the definition names as the circle class is read
+//! so: no other surface is recognised as a torus here.
 //!
 //! Not upstream. Deviations: none (no upstream counterpart). No recursion.
 
-use crate::blend::fillet_section::station::as_b_spline;
-use crate::error::Result;
+use crate::blend::fillet_exact::{class_surface, classify_supports};
+use crate::error::{Result, SolidError};
+use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
+use crate::surface::implicit::{ClassSurface, Implicit};
 use crate::surface::procedural_blend::exact::ExactClass;
 use crate::surface::procedural_blend::BlendRef;
 use crate::surface::surface::{Surface, SurfaceKind};
-use crate::surface::torus::Torus;
 
-/// A circle-class round's torus and its certificate.
-#[derive(Debug, Clone)]
+const OP: &str = "surface::round_torus::circle_round_torus";
+
+/// A circle-class round's torus, the round's exact surface, and its certificate.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RoundTorus {
-    /// The net's torus, read off its NURBS form: its placement (origin the torus's centre, z
-    /// its axis), major and minor radii, and its NURBS (the form, as the reading made it).
-    pub torus: Torus,
-    /// The certificate: how far the net's torus is from the torus the round's supports give,
-    /// at most the tolerance the class was read in.
+    /// The torus's centre.
+    pub centre: Point3,
+    /// Its unit axis.
+    pub axis: Vec3,
+    /// A unit reference direction square to the axis: where the angle about it starts.
+    pub x_axis: Vec3,
+    /// The major radius: of the circle the ball's centre runs on.
+    pub major: f64,
+    /// The minor radius: the ball's.
+    pub minor: f64,
+    /// The certificate: how far the net's own torus is from this one, at most the tolerance
+    /// the class was read in.
     pub distance: f64,
 }
 
 /// The torus `surface` is when it is a round of the exact circle class: a surface of
 /// revolution whose definition is an exact round of that class, read and certified as the
-/// module says. `None` for every other surface, and for a round whose net does not read as a
-/// torus ([`Torus::is_nurb_surface_torus`] answers no).
+/// module says. `None` for every other surface.
 ///
 /// # Errors
 ///
-/// Those of `ExactRound::supports_distance` (supports no longer of the class, a net off
-/// its own torus or further from the class's than the tolerance: the definition and its
-/// net disagree), of making the net's NURB, and of reading the torus other than its answer.
+/// `InvalidInput` for a circle-class round without its two supports or whose supports give
+/// no torus; those of classifying the supports and of `ExactRound::supports_distance`
+/// (supports no longer of the class, a net off its own torus or further from the class's
+/// than the tolerance: the definition and its net disagree); those of the frame about a
+/// zero axis.
 pub fn circle_round_torus(k: &Kernel, surface: &Surface) -> Result<Option<RoundTorus>> {
     // (a round whose net is a torus already is one: it needs no reading)
     if !matches!(surface.kind(), SurfaceKind::SurfOfRevolution(_)) {
@@ -52,23 +64,43 @@ pub fn circle_round_torus(k: &Kernel, surface: &Surface) -> Result<Option<RoundT
     if round.class() != ExactClass::Circle {
         return Ok(None);
     }
+    let (Some(a), Some(b)) = (round.support(0), round.support(1)) else {
+        return Err(SolidError::invalid_input(
+            OP,
+            "an exact round without its two supports",
+        ));
+    };
+    let blend = classify_supports(k, [a, b], round.inputs())?;
+    let Some(ClassSurface::Implicit(Implicit::Torus {
+        centre,
+        axis,
+        major,
+        minor,
+    })) = class_surface(&blend, round.leader(), round.leader_map())
+    else {
+        return Err(SolidError::invalid_input(
+            OP,
+            "a round of the circle class whose supports give no torus",
+        ));
+    };
     let distance = round.supports_distance(k, net)?;
-    let Some(form) = as_b_spline(k, net)? else {
-        return Ok(None);
-    };
-    let torus = match Torus::is_nurb_surface_torus(k, &form, 1.0) {
-        Ok(found) => found,
-        Err(e) if e.is_status_answer() => None,
-        Err(e) => return Err(e),
-    };
-    Ok(torus.map(|torus| RoundTorus { torus, distance }))
+    // `[axis, y, z]`: y and z square to the axis, z = axis x y, so (y, z) is a frame about it
+    let [axis, x_axis, _] = axis.make_unit_ortho_vectors(None)?;
+    Ok(Some(RoundTorus {
+        centre,
+        axis,
+        x_axis,
+        major,
+        minor,
+        distance,
+    }))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::geom::axis2_placement::Axis2Placement;
-    use crate::surface::torus::TorusOptions;
+    use crate::surface::torus::{Torus, TorusOptions};
 
     /// A torus that is no round's is not read here, nor is any surface but a round's net.
     #[test]
