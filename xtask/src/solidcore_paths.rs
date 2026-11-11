@@ -57,6 +57,13 @@ fn is_public(path: &str, public: &[String]) -> bool {
     public.iter().any(|p| if p.contains("::") { path == p || path.starts_with(&format!("{p}::")) } else { *p == krate })
 }
 
+/// Keywords a crate-root path (`::solidcore::x`) can follow; any other identifier before `::` is a
+/// module, so `x::solidcore` is not the crate.
+const PATH_KEYWORDS: &[&str] = &[
+    "as", "box", "break", "const", "dyn", "else", "for", "if", "impl", "in", "let", "match", "move", "mut", "pub", "ref", "return", "static", "type",
+    "unsafe", "use", "where", "while", "yield",
+];
+
 fn is_path_sep(tokens: &[TokenTree], i: usize) -> bool {
     matches!((tokens.get(i), tokens.get(i + 1)), (Some(TokenTree::Punct(a)), Some(TokenTree::Punct(b)))
         if a.as_char() == ':' && b.as_char() == ':' && a.spacing() == proc_macro2::Spacing::Joint)
@@ -105,7 +112,13 @@ fn scan_tokens(stream: TokenStream, idents: &[String], out: &mut Vec<(usize, Str
                 // `x::solidcore::...` is some other module of that name, not the crate.
                 // A leading `::solidcore` is still the crate.
                 let after_sep = i >= 2 && is_path_sep(&tokens, i - 2);
-                let rooted = !after_sep || !(i >= 3 && matches!(&tokens[i - 3], TokenTree::Ident(_) | TokenTree::Group(_)));
+                let rooted = !after_sep
+                    || !(i >= 3
+                        && match &tokens[i - 3] {
+                            TokenTree::Ident(seg) => !PATH_KEYWORDS.iter().any(|k| seg == k),
+                            TokenTree::Group(_) => true,
+                            _ => false,
+                        });
                 let line = id.span().start().line;
                 let mut path = id.to_string();
                 let mut j = i + 1;
@@ -177,10 +190,11 @@ fn owning_crate(root: &Path, file: &Path) -> String {
 
 fn walk(root: &Path, dir: &Path, out: &mut Vec<std::path::PathBuf>) -> Result<(), String> {
     let entries = std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    for e in entries.flatten() {
+    for e in entries {
+        let e = e.map_err(|e| format!("{}: {e}", dir.display()))?;
         let path = e.path();
         let name = e.file_name().to_string_lossy().into_owned();
-        let Ok(ft) = e.file_type() else { continue };
+        let ft = e.file_type().map_err(|e| format!("{}: {e}", path.display()))?;
         if ft.is_dir() {
             if name.starts_with('.') || name == "target" || name == "node_modules" {
                 continue;
@@ -229,6 +243,7 @@ fn parse_baseline(text: &str) -> (BTreeMap<String, usize>, Vec<String>) {
         }
         let mut it = line.split_whitespace();
         match (it.next(), it.next().map(str::parse::<usize>), it.next()) {
+            (Some(c), Some(Ok(0)), None) => errors.push(format!("{BASELINE}:{}: `{c}` has a count of 0: remove its line", n + 1)),
             (Some(c), Some(Ok(k)), None) => {
                 if counts.insert(c.to_owned(), k).is_some() {
                     errors.push(format!("{BASELINE}:{}: `{c}` is listed twice", n + 1));
@@ -329,6 +344,7 @@ mod tests {
     fn non_public_solidcore_crates_and_crate_aliases_count() {
         let src = "use solidcore_convert::Order;\nuse solidcore as kernel;\nextern crate solidcore;";
         assert_eq!(paths(src), ["solidcore_convert::Order", "solidcore", "solidcore"]);
+        assert_eq!(paths("use ::solidcore::eval::Foo;\nfn f() -> impl ::solidcore::T { x }"), ["solidcore::eval::Foo", "solidcore::T"]);
     }
 
     #[test]
@@ -375,7 +391,11 @@ mod tests {
 
     #[test]
     fn baseline_lines_are_checked() {
-        let e = check(&BTreeMap::new(), "crates/smlib\ncrates/geom 1 2\ncrates/a 0\ncrates/a 0\n");
-        assert_eq!(e.len(), 3, "{e:?}");
+        let e = check(&BTreeMap::new(), "crates/smlib\ncrates/geom 1 2\ncrates/a 1\ncrates/a 1\n");
+        // three malformed or doubled lines, and crates/a (1) no longer names any path
+        assert_eq!(e.len(), 4, "{e:?}");
+        let e = check(&BTreeMap::new(), "crates/smlib 0\n");
+        assert_eq!(e.len(), 1, "{e:?}");
+        assert!(e[0].contains("count of 0"), "{e:?}");
     }
 }
