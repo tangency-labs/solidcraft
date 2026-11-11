@@ -16,7 +16,7 @@ use solidcraft_geom::prelude::*;
 
 use crate::frame::{Frame, unit};
 use crate::kinematics::{Joints, Machine, check_limits, head_dir, head_point, inverse, orient, table_dir_inv, table_point_inv, tool_axis};
-use crate::multiaxis::Toolpath5;
+use crate::multiaxis::{Move5, Toolpath5};
 use crate::path::{MAX_MOVES, Toolpath};
 use crate::tool::Tool;
 use crate::{CamError, Result, invalid};
@@ -37,6 +37,23 @@ pub struct IndexedOperation {
     pub coolant: bool,
     pub rotary: Vec<f64>,
     pub path: Toolpath,
+}
+
+impl IndexedOperation {
+    /// The operation's moves in work coordinates with the tool axis, arcs followed within `tol`:
+    /// the tips from the frame of [`frame_for_index`], the axis where the rotaries point the
+    /// tool (the frame's Z only while the head is upright).
+    pub fn poses(&self, machine: &Machine, tol: f64) -> Result<Toolpath5> {
+        let mut path = Toolpath5::from_frame(&self.path, &frame_for_index(machine, &self.rotary)?, tol)?;
+        let axis = tool_axis(machine, &self.rotary);
+        for m in &mut path.moves {
+            match m {
+                Move5::Rapid { to } | Move5::Feed { to, .. } => to.axis = axis,
+                Move5::Dwell { .. } => {}
+            }
+        }
+        Ok(path)
+    }
 }
 
 fn check_angles(machine: &Machine, rotary: &[f64]) -> Result<()> {

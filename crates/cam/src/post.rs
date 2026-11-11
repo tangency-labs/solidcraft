@@ -296,6 +296,7 @@ impl Post {
             return invalid("the post's dwell template is too long or has control characters");
         }
         fill(&self.dwell, &Values::default())?;
+        crate::machine_time::DwellUnit::of(self)?;
         for block in [
             &self.header,
             &self.tool_change,

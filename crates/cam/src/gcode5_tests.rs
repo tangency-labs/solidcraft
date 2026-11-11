@@ -1,7 +1,7 @@
 //! Tests of 4th-axis G-code: writing continuous and indexed operations, inverse-time feeds,
 //! turns of A clear of the work, rewinds, the posts and the layout switches of a post. Each
 //! written cut is put back through the machine's forward kinematics and held against the
-//! planned toolpath.
+//! planned toolpath, and whole programs are read back with [`crate::readback5`].
 
 use std::f64::consts::TAU;
 
@@ -13,6 +13,7 @@ use crate::gcode::words;
 use crate::gcode5::*;
 use crate::indexed::{IndexedOperation, frame_for_index};
 use crate::kinematics::*;
+use crate::readback5::{Readback5, readback_program, readback5};
 use crate::*;
 
 fn deg(d: f64) -> f64 {
@@ -198,7 +199,8 @@ fn largest_deviation(cuts: &[WrittenCut], planned: &[&Toolpath5], machine: &Mach
 }
 
 /// Checks that every cut of `text` lies on `program`'s toolpaths within the post's tolerance
-/// (and the rounding of the words), and that the written minutes are the planned ones.
+/// (and the rounding of the words), and that the written minutes are the planned ones; then
+/// that the read-back finds the same, both ways round and with the tool axis.
 fn assert_on_path(text: &str, program: &Program5, post: &Post5, machine: &Machine) {
     let cuts = written_cuts(text);
     assert!(!cuts.is_empty(), "{text}");
@@ -208,6 +210,19 @@ fn assert_on_path(text: &str, program: &Program5, post: &Post5, machine: &Machin
     let written: f64 = cuts.iter().map(|c| c.minutes).sum();
     let planned: f64 = paths.iter().map(|p| p.stats().cut_minutes).sum();
     close(written, planned, 2e-3 * planned);
+    let rb = readback5(text, program, post, machine).unwrap();
+    assert!(rb.within(), "{}: {rb:?}\n{text}", post.base.name);
+    assert!(rb.max_tip_deviation <= worst + rb.allowed_tip, "{rb:?}");
+    close(rb.cut_minutes, written, 1e-6 * written);
+    close(rb.planned_cut_minutes, planned, 1e-9 * planned);
+}
+
+/// Checks that `text`, read back through `machine`, is within `post`'s precision and
+/// tolerances of `program`'s toolpaths, and gives the read-back.
+fn assert_reads_back(text: &str, program: &MachineProgram, post: &Post5, machine: &Machine) -> Readback5 {
+    let rb = readback_program(text, program, post, machine).unwrap();
+    assert!(rb.within(), "{}: {rb:?}\n{text}", post.base.name);
+    rb
 }
 
 #[test]
@@ -228,7 +243,12 @@ fn three_axis_programs_match_the_3axis_emitter() {
     // As an indexed operation (no rotary to turn) the arcs are kept: the very same text.
     let indexed = IndexedOperation { name: "c".into(), tool: tool(), spindle_rpm: 9000.0, coolant: true, rotary: vec![], path: path.clone() };
     let program = MachineProgram { name: "part".into(), operations: vec![MachineOperation::Indexed(indexed)], work_offset: Some(2) };
-    assert_eq!(emit_program(&program, &post, &machine).unwrap(), old);
+    let text = emit_program(&program, &post, &machine).unwrap();
+    assert_eq!(text, old);
+    // Read back, arcs and the dwell included, it is on the toolpath and takes the planned time.
+    let rb = assert_reads_back(&text, &program, &post, &machine);
+    close(rb.cut_minutes, rb.planned_cut_minutes, 1e-4 * rb.planned_cut_minutes);
+    close(rb.cut_length, rb.planned_cut_length, 1e-4 * rb.planned_cut_length);
     // As a continuous one the arcs become lines; the lines-only toolpath gives the same text too.
     let lines_only = Toolpath { moves: path.moves.iter().copied().filter(|m| !matches!(m, Move::Arc { .. })).collect() };
     let old = emit(
@@ -252,7 +272,11 @@ fn three_axis_programs_match_the_3axis_emitter() {
         }],
         work_offset: None,
     };
-    assert_eq!(emit5(&p5, &post, &machine).unwrap(), old);
+    let new = emit5(&p5, &post, &machine).unwrap();
+    assert_eq!(new, old);
+    // The 4th-axis reader finds the blocks the 3-axis reader finds.
+    assert_eq!(parse5(&new, &[]).unwrap().len(), parse(&old).unwrap().len());
+    assert!(readback5(&new, &p5, &post, &machine).unwrap().within());
 }
 
 #[test]
@@ -354,6 +378,9 @@ fn indexed_operations_keep_their_arcs() {
     let word = |l: char| first_arc.split(' ').find_map(|w| w.strip_prefix(l)).and_then(|v| v.parse::<f64>().ok());
     close(word('X').unwrap(), planned_arc.x, 1e-4);
     close(word('Y').unwrap(), planned_arc.y, 1e-4);
+    // Read back, every side and the wrap are on their toolpaths and take the planned time.
+    let rb = assert_reads_back(&text, &program, &post, &machine);
+    close(rb.cut_minutes, rb.planned_cut_minutes, 2e-3 * rb.planned_cut_minutes);
 }
 
 #[test]
@@ -373,6 +400,12 @@ fn machines_without_4th_axis_output_are_refused() {
     };
     let e = emit5(&program, &post, &b).unwrap_err();
     assert!(matches!(e, CamError::Unsupported(_)) && e.to_string().contains("lettered A, not B"), "{e}");
+    // The read-back refuses them the same way.
+    let text = emit5(&program, &post, &Machine::four_axis_a()).unwrap();
+    for machine in [Machine::table_table_ac(), b] {
+        let e = readback5(&text, &program, &post, &machine).unwrap_err();
+        assert!(matches!(e, CamError::Unsupported(_)), "{e}");
+    }
 }
 
 #[test]
@@ -399,6 +432,9 @@ fn reversed_and_offset_rotaries_are_written_for_their_machine() {
         // Put through another machine, it is off the toolpath.
         let other = Machine::four_axis_a_at(Vec3::new(0.0, 0.0, 5.0));
         assert!(largest_deviation(&written_cuts(&text), &[&program.operations[0].path], &other) > 1.0);
+        // And the read-back says so: off by as far as it looks.
+        let rb = readback5(&text, &program, &post, &other).unwrap();
+        assert!(!rb.within() && rb.max_tip_deviation >= rb.reach, "{rb:?}");
     }
 }
 
@@ -462,6 +498,41 @@ fn hostile_programs_are_refused() {
     assert!(emit_program(&indexed(vec![0.0], bad), &post, &machine).is_err());
     let cut_first = Toolpath { moves: vec![Move::Feed { to: Vec3::X, feed: 100.0 }] };
     assert!(emit_program(&indexed(vec![0.0], cut_first), &post, &machine).is_err());
+
+    // Reading.
+    let a = [AxisLetter::A];
+    assert!(matches!(parse5("G0 X0 Y0 Z0 B10", &a), Err(CamError::Parse(1, _))));
+    assert!(matches!(parse5("G0 X0 Y0 Z0 A0\nG93 G1 X1 A10", &a), Err(CamError::Parse(2, _))));
+    assert!(parse5("G0 X0 Y0 Z0 A0\nG93 G1 X1 A10 F5\nG1 X2 A20", &a).is_err());
+    assert!(parse5("G91\nG0 X1", &a).is_err());
+    assert!(parse5("G0 X0 Y0 Z0 A0\nG2 X1 Y1 I1 J0 A5 F100", &a).is_err());
+    assert!(parse5("G0 X0 Y0 Z0 A0\nG93 G2 X1 Y1 I1 J0 F5", &a).is_err());
+    assert!(parse5("G0 X0 Y0 Z0 A0\nG2 X1 Y1 F100", &a).is_err());
+    assert!(parse5("G0 X0 Y0 Z0 A0\nG1 X1 F-5", &a).is_err());
+    assert!(parse5("X1 Y2", &a).is_err());
+    assert!(parse5("G0 X1..2", &a).is_err());
+    // What this crate does not write yet is refused, not misread: tool centre point control
+    // and arcs in a vertical plane.
+    assert!(matches!(parse5("G43.4 H1\nG0 X0 Y0 Z0 A0", &a), Err(CamError::Parse(1, _))));
+    assert!(matches!(parse5("G0 X0 Y0 Z0 A0\nG18 G2 X1 Z1 I1 K0 F100", &a), Err(CamError::Parse(2, _))));
+    assert!(matches!(parse5("G19\nG0 X0 Y0 Z0 A0", &a), Err(CamError::Parse(1, _))));
+    // G93 F applies to its own block; G53 makes the axes it names unknown; G20 scales the
+    // linear axes, not the angles.
+    let w = parse5("G20\nG0 X1 Y0 Z1 A0\nG93 G1 X2 A90 F4\nG53 G0 Z0\nG0 Z2\nG94 G1 X3 F10", &a).unwrap();
+    assert_eq!(w.len(), 4);
+    let JointWords::Feed { linear, rotary, f, inverse_time: true, .. } = &w[1] else { panic!("{w:?}") };
+    close3(*linear, Vec3::new(50.8, 0.0, 25.4), 1e-12);
+    close(rotary[0], deg(90.0), 1e-12);
+    close(*f, 4.0, 1e-12);
+    let JointWords::Rapid { linear, .. } = &w[2] else { panic!("{w:?}") };
+    close(linear.z, 50.8, 1e-12);
+    let JointWords::Feed { f, inverse_time: false, mm_per_unit, .. } = &w[3] else { panic!("{w:?}") };
+    close(f * mm_per_unit, 254.0, 1e-12);
+    // A dwell in seconds, and an arc about its centre from the start.
+    let w = parse5("G0 X1 Y0 Z0 A0\nG4 P1.5\nG3 X-1 Y0 I-1 J0 F100", &a).unwrap();
+    assert_eq!(w[1], JointWords::Dwell { line: 2, seconds: 1.5 });
+    let JointWords::Arc { center, ccw: true, .. } = &w[2] else { panic!("{w:?}") };
+    assert_eq!(*center, Vec2::ZERO);
 }
 
 fn indexed_op(name: &str, number: u32, rotary: Vec<f64>, moves: Vec<Move>) -> MachineOperation {
@@ -539,6 +610,7 @@ fn a_rotary_never_turns_after_the_tool_has_come_down() {
     ];
     for post in posts {
         let text = emit_program(&program, &post, &machine).unwrap();
+        assert_reads_back(&text, &program, &post, &machine);
         let turns = rotary_turns(&text);
         assert_eq!(turns.len(), 3, "{text}");
         for (z, peak) in &turns {
@@ -616,6 +688,7 @@ fn inverse_time_ends_before_a_tool_change() {
         let text = emit_program(&program, &post, &machine).unwrap();
         // G94 is in force from the end of the first operation's cuts: before the tool change,
         // spindle and coolant blocks of the next.
+        assert_reads_back(&text, &program, &post, &machine);
         let change = text.find("(b:").or_else(|| text.find("; b:")).unwrap();
         let before = &text[..change];
         assert!(before.rfind("G94").unwrap() > before.rfind("G93").unwrap(), "{}\n{text}", post.base.name);
@@ -651,9 +724,13 @@ fn presets_write_their_units_and_incremental_arc_centres() {
         assert!(header.contains("G20") && !header.contains("G21"), "{header}");
         assert_on_path(&text, &program, &inch, &machine);
     }
-    // The 3-axis reader takes G91.1 and refuses G90.1 (absolute arc centres).
+    // The 3-axis reader takes G91.1 and refuses G90.1 (absolute arc centres), and so does the
+    // 4th-axis one.
     assert!(matches!(parse("G90.1\nG0 X0 Y0 Z0"), Err(CamError::Parse(1, _))));
     assert_eq!(parse("G91.1 G0 X0 Y0 Z0\nG2 X2 Y0 I1 J0 F100").unwrap().len(), 2);
+    let a = [AxisLetter::A];
+    assert!(matches!(parse5("G90.1\nG0 X0 Y0 Z0 A0", &a), Err(CamError::Parse(1, _))));
+    assert_eq!(parse5("G91.1\nG0 X0 Y0 Z0 A0\nG2 X2 Y0 I1 J0 F100", &a).unwrap().len(), 2);
 }
 
 #[test]
@@ -895,7 +972,9 @@ M30
         work_offset: None,
     };
     let machine = Machine::three_axis();
-    assert_eq!(emit_program(&indexed, &post, &machine).unwrap(), text);
+    let text5 = emit_program(&indexed, &post, &machine).unwrap();
+    assert_eq!(text5, text);
+    assert_reads_back(&text5, &indexed, &post, &machine);
 
     // The work offset is written at every operation.
     let mut offset = program.clone();
@@ -978,6 +1057,9 @@ fn a_dialect_post_retracts_before_every_turn_of_a() {
     let cuts: Vec<WrittenCut> = written_cuts(helix_text).into_iter().filter(|c| c.inverse).collect();
     let MachineOperation::Continuous(helix) = &program.operations[2] else { panic!("the third operation is the helix") };
     assert!(largest_deviation(&cuts, &[&helix.path], &machine) <= post.tolerance + 1e-3);
+    // The whole program reads back: the returns home between operations make the axes they
+    // name unknown until the next move states them.
+    assert_reads_back(&text, &program, &post, &machine);
 }
 
 /// The lines of the rewinds in `text`: from the draw out of the cut to the first cut in
@@ -1068,15 +1150,27 @@ fn a_long_helix_rewinds_within_the_limits_of_a() {
     assert!(largest_deviation(&turning_cuts(&text), &[planned], &limited_a()) <= post.tolerance + 1e-3);
     let minutes: f64 = written_cuts(&text).iter().map(|c| c.minutes).sum();
     close(minutes, planned.stats().cut_minutes + 2.0 * (1.0 / 500.0 + 1.0 / 250.0), 2e-3 * minutes);
+    // Read back, only the ends in the cut of a rewind's draw out and way back in are held
+    // against the helix, and they count in the cut length and time as written. The first
+    // plunge, at the rewinds' plunge feed, is still looked for in what is written.
+    let rb = readback5(&text, &program, &post, &limited_a()).unwrap();
+    assert!(rb.within(), "{rb:?}");
+    close(rb.cut_length, rb.planned_cut_length + 2.0 * 2.0, 1e-3 * rb.planned_cut_length);
+    close(rb.cut_minutes, minutes, 1e-6 * minutes);
     // The way back in takes the operation's plunge feed, else its tool's.
     let mut own = program.clone();
     own.operations[0].plunge_feed = Some(120.0);
     let text = emit5(&own, &post, &limited_a()).unwrap();
     assert!(!rewinds_in(&text).is_empty() && rewinds_in(&text).iter().all(|r| r.contains(&"G1 Z20. F120.")), "{text}");
+    assert!(readback5(&text, &own, &post, &limited_a()).unwrap().within());
     let mut tool_feed = program.clone();
     tool_feed.operations[0].tool.plunge_feed = Some(90.0);
     let text = emit5(&tool_feed, &post, &limited_a()).unwrap();
     assert!(!rewinds_in(&text).is_empty() && rewinds_in(&text).iter().all(|r| r.contains(&"G1 Z20. F90.")), "{text}");
+    assert!(readback5(&text, &tool_feed, &post, &limited_a()).unwrap().within());
+    // A program read back against toolpaths it was not written from does not fit.
+    let gone = Program5 { operations: vec![op5("op", helix_of(4))], ..program.clone() };
+    assert!(!readback5(&text, &gone, &post, &limited_a()).unwrap().within());
 
     // Limits that a cut reaches part way through a piece: the piece is split there, each part
     // timed for its share.
@@ -1091,6 +1185,9 @@ fn a_long_helix_rewinds_within_the_limits_of_a() {
     assert!(largest_deviation(&turning_cuts(&text), &[planned], &tight) <= post.tolerance + 1e-3);
     let minutes: f64 = written_cuts(&text).iter().map(|c| c.minutes).sum();
     close(minutes, planned.stats().cut_minutes + 5.0 * (1.0 / 500.0 + 1.0 / 250.0), 2e-3 * minutes);
+    let rb = readback5(&text, &program, &post, &tight).unwrap();
+    assert!(rb.within(), "{rb:?}");
+    close(rb.cut_minutes, minutes, 1e-6 * minutes);
     // The writer says what the rewinds add, so the operation's minutes add up to the program's.
     let (again, written) = emit_program_report(&MachineProgram::from(&program), &post, &tight).unwrap();
     assert_eq!(again, text);
@@ -1138,6 +1235,13 @@ fn dialect_switches_validate_and_default_to_the_old_output() {
     assert_eq!(back, vec![Move::Rapid { to: Vec3::new(1.0, 1.0, 1.0) }, Move::Rapid { to: Vec3::new(2.0, 2.0, 5.0) }]);
     assert!(parse("G28 G91 Z0.\nG0 X1 Y1 Z1").is_err());
     assert!(parse("G91 G0 X1").is_err());
+    let a = [AxisLetter::A];
+    let w = parse5("G0 X1 Y1 Z1 A0\nG28 G91 Z0.\nG90\nG0 A90.\nG0 X2 Y2\nG43 Z5. H1", &a).unwrap();
+    assert_eq!(w.len(), 2);
+    let JointWords::Rapid { linear, rotary, .. } = &w[1] else { panic!("{w:?}") };
+    close3(*linear, Vec3::new(2.0, 2.0, 5.0), 1e-12);
+    close(rotary[0], deg(90.0), 1e-12);
+    assert!(parse5("G28 G91 Z0.\nG0 X1 Y1 Z1 A0", &a).is_err());
 }
 
 /// `op` with its coolant on.
@@ -1168,6 +1272,7 @@ fn coolant_can_come_on_after_the_first_turn_of_a() {
     // post writes).
     assert_eq!(before.replace("M8\n", ""), after.replace("M8\nG0 ", "").replace("M8\n", ""));
     assert_modal_with_points(&after);
+    assert_reads_back(&after, &program, &post, &machine);
 
     // A wrapped helix starts with a turn of A too; its coolant follows that turn.
     let helix = MachineProgram { operations: vec![MachineOperation::Continuous(op5("helix", helix_of(1)))], ..program.clone() };
@@ -1176,6 +1281,7 @@ fn coolant_can_come_on_after_the_first_turn_of_a() {
     let m8 = lines.iter().position(|l| *l == "M8").unwrap();
     assert!(lines[m8 - 1].starts_with("G0 A"), "{text}");
     assert!(!lines[..m8].iter().any(|l| l.starts_with("G1 ") || l.starts_with("G93")), "{text}");
+    assert_reads_back(&text, &helix, &post, &machine);
 
     // Where nothing turns (a 3-axis machine), the coolant is written where it always was.
     let flat = Machine::three_axis();
@@ -1194,7 +1300,7 @@ fn coolant_can_come_on_after_the_first_turn_of_a() {
 
 /// With `coolant_after_turn`, through tool changes, an operation without coolant and a wrapped
 /// cut that rewinds, with and without `safe_rotate_first`: every `M8` comes right after a turn
-/// of A, never before it or after a cut.
+/// of A, never before it or after a cut, and every program reads back.
 #[test]
 fn coolant_after_turn_follows_every_index() {
     let machine = limited_a();
@@ -1220,6 +1326,7 @@ fn coolant_after_turn_follows_every_index() {
         for i in on {
             assert!(lines[i - 1].starts_with("G0 A"), "`M8` after `{}`\n{text}", lines[i - 1]);
         }
+        assert_reads_back(&text, &program, &post, &machine);
     }
 }
 
@@ -1324,6 +1431,7 @@ fn a_rewind_draws_out_to_the_operations_clearance_and_never_above_it() {
         let rewinds = rewinds_in(&text);
         assert!(!rewinds.is_empty(), "{text}");
         assert!(rewinds.iter().all(|r| r.get(1) == Some(&"G0 Z30.")), "distance {distance}: {rewinds:?}");
+        assert!(readback5(&text, &program5(helix_of(3)), &post, &limited_a()).unwrap().within(), "distance {distance}");
         for z in text.lines().filter(|l| !l.starts_with("G28")).filter_map(|l| l.split(' ').find_map(|w| w.strip_prefix('Z'))) {
             assert!(z.parse::<f64>().unwrap() <= 30.0 + 1e-9, "distance {distance}: Z{z} above the clearance\n{text}");
         }
@@ -1438,4 +1546,86 @@ fn a_link_that_only_turns_a_is_one_retract_and_one_turn() {
     let bare = Post5 { clearance_retract: false, safe_rotate: Vec::new(), ..Post5::linuxcnc_4axis() };
     let text = emit5(&program, &bare, &machine).unwrap();
     assert_eq!(lines_with(&text, "G0 A").len(), 21, "{text}");
+}
+
+#[test]
+fn a_large_diagonal_raster_reads_back() {
+    // A 45° raster over a 300 mm square at 0.5 mm stepover: every pass one long diagonal G1.
+    let machine = Machine::four_axis_a();
+    let post = Post5::linuxcnc_4axis();
+    let step = 0.5 * 2f64.sqrt();
+    let mut moves = Vec::new();
+    let mut c = -300.0 + step * 0.5;
+    while c < 300.0 {
+        // The line x - y = c across the square.
+        let (x0, x1) = (c.max(0.0), (300.0 + c).min(300.0));
+        let (a, b) = (Vec3::new(x0, x0 - c, 0.0), Vec3::new(x1, x1 - c, 0.0));
+        moves.push(Move5::Rapid { to: Pose::vertical(a + Vec3::Z * 5.0) });
+        moves.push(Move5::Feed { to: Pose::vertical(a), feed: 300.0 });
+        moves.push(Move5::Feed { to: Pose::vertical(b), feed: 1000.0 });
+        moves.push(Move5::Rapid { to: Pose::vertical(b + Vec3::Z * 5.0) });
+        c += step;
+    }
+    assert!(moves.len() > 3000);
+    let program = program5(Toolpath5 { moves });
+    let text = emit5(&program, &post, &machine).unwrap();
+    let rb = readback5(&text, &program, &post, &machine).unwrap();
+    assert!(rb.within(), "{rb:?}");
+    close(rb.cut_length, rb.planned_cut_length, 1e-6 * rb.planned_cut_length);
+}
+
+/// Where the written moves crowd (the turns of a small helix, a written arc's many chords), a
+/// read-back point is measured against the pieces near it, not every piece within the reach,
+/// and finds the same deviations as holding every point against every piece in reach.
+#[test]
+fn readback_measures_crowded_pieces_near_each_point_only() {
+    use crate::readback5::directed_counted;
+    use std::f64::consts::PI;
+    let z = Vec3::new(0.0, 0.0, 1.0);
+    let tilted = Vec3::new(0.0, 0.05f64.sin(), 0.05f64.cos());
+    // A helix 2 mm across rising 0.05 mm a turn, 60 turns, in pieces about 0.03 mm long.
+    let per_turn = 200;
+    let helix = |t: f64, r: f64| Vec3::new(r * (TAU * t).cos(), r * (TAU * t).sin(), 0.05 * t);
+    // And, away from it where nothing crowds, a line.
+    let line = |x: f64| Pose { tip: Vec3::new(x, 0.0, 1.0), axis: z };
+    let to: Vec<(Pose, Pose)> = (0..60 * per_turn)
+        .map(|k| {
+            let (t0, t1) = (f64::from(k) / f64::from(per_turn), f64::from(k + 1) / f64::from(per_turn));
+            (Pose { tip: helix(t0, 1.0), axis: z }, Pose { tip: helix(t1, 1.0), axis: z })
+        })
+        .chain((0..10).map(|k| (line(f64::from(10 + k)), line(f64::from(11 + k)))))
+        .collect();
+    let (reach, allowed_tip, allowed_axis) = (1.0, 0.02, 0.01);
+    // Every point against every piece in reach.
+    let brute = |from: &[Pose]| {
+        from.iter()
+            .map(|p| {
+                to.iter()
+                    .filter_map(|(x, y)| {
+                        let d = p.tip.dist_to_segment(x.tip, y.tip);
+                        let e = arc_distance(p.axis, x.axis, y.axis);
+                        (d <= reach).then_some(((d / allowed_tip).max(e / allowed_axis), d, e))
+                    })
+                    .min_by(|u, v| u.partial_cmp(v).unwrap())
+                    .map_or((reach, PI), |(_, d, e)| (d, e))
+            })
+            .fold((0.0f64, 0.0f64), |(t, a), (d, e)| (t.max(d), a.max(e)))
+    };
+    // Points just off the helix, one in a hundred farther off than the near cells, one in
+    // seven with its axis tilted (every piece in reach then scores the same), and along the line.
+    let from: Vec<Pose> = (0..3000)
+        .map(|k| {
+            let r = if k % 100 == 0 { 1.4 } else { 1.003 };
+            Pose { tip: helix(f64::from(k) * 0.0197, r), axis: if k % 7 == 0 { tilted } else { z } }
+        })
+        .chain((0..100).map(|k| Pose { tip: line(10.0 + f64::from(k) * 0.1).tip + Vec3::new(0.0, 0.004 * f64::from(k % 3), 0.0), axis: z }))
+        .collect();
+    let (worst, measured) = directed_counted(&from, &to, reach, allowed_tip, allowed_axis).unwrap();
+    assert_eq!(worst, brute(&from));
+    assert!(worst.0 > 0.3 && worst.1 > 0.04, "{worst:?}");
+    assert!(measured < 400 * from.len(), "{measured} pieces measured for {} points", from.len());
+    // And beyond the reach, the reach and a half turn.
+    let lost = [Pose { tip: helix(3.0, 2.5), axis: z }];
+    assert_eq!(directed_counted(&lost, &to, reach, allowed_tip, allowed_axis).unwrap().0, (reach, PI));
+    assert_eq!(brute(&lost), (reach, PI));
 }

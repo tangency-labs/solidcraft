@@ -300,6 +300,11 @@ impl Machine {
         self
     }
 
+    /// The rotary letters in joint order.
+    pub fn letters(&self) -> Vec<AxisLetter> {
+        self.rotaries.iter().map(|r| r.letter).collect()
+    }
+
     pub fn validate(&self) -> Result<()> {
         if self.name.len() > 200 {
             return invalid("a machine's name must be at most 200 characters");

@@ -13,7 +13,7 @@ use crate::{CamError, Result, invalid};
 /// Most operations in one program.
 pub(crate) const MAX_OPERATIONS: usize = 10_000;
 /// Most lines [`parse`] reads.
-const MAX_LINES: usize = 5_000_000;
+pub(crate) const MAX_LINES: usize = 5_000_000;
 /// Longest comment written.
 pub(crate) const MAX_COMMENT: usize = 80;
 /// Slowest and fastest feed written (mm/min).

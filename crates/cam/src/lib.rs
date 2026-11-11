@@ -20,7 +20,8 @@
 //! rotary axes, for machines with up to two rotaries on the table or the head. Indexed (3+1 and
 //! 3+2) work ([`indexed`]) runs a 3-axis toolpath in a tilted work plane, with the rotaries held
 //! still. [`gcode5`] writes such toolpaths, continuous and indexed, as G-code for a 3-axis
-//! machine with a rotary `A` axis.
+//! machine with a rotary `A` axis, and [`readback5`] reads such a program back through the
+//! machine's kinematics and holds it against the toolpaths it was written from.
 //!
 //! A post ([`Post`]) is data: besides its templates it holds switches for the program's
 //! layout (a tool list, comment characters, blank lines, lines at every operation, a safe
@@ -44,6 +45,7 @@ mod gcode;
 pub mod gcode5;
 pub mod indexed;
 pub mod kinematics;
+pub mod machine_time;
 mod multiaxis;
 mod offset;
 mod ops;
@@ -52,6 +54,7 @@ mod path;
 mod piece;
 mod post;
 mod readback;
+pub mod readback5;
 pub mod stop;
 mod surface;
 pub mod surface_ops;
@@ -112,6 +115,8 @@ mod foundation_tests;
 mod gcode5_tests;
 #[cfg(test)]
 mod kinematics_tests;
+#[cfg(test)]
+mod machine_time_tests;
 #[cfg(test)]
 mod surface_ops_tests;
 #[cfg(test)]

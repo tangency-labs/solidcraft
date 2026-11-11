@@ -10,6 +10,7 @@ use solidcore_record::Vec3;
 use solidcraft_geom::prelude::*;
 
 use crate::gcode::{Program, parse};
+use crate::machine_time::{DwellUnit, dwells_in};
 use crate::path::Toolpath;
 use crate::post::Post;
 use crate::{CamError, Result};
@@ -54,7 +55,7 @@ pub fn allowed_deviation(post: &Post) -> f64 {
 /// Reads `text` (written by [`crate::emit`] from `program` through `post`) back and measures how
 /// far its cutting moves are from the program's toolpaths.
 pub fn readback(text: &str, program: &Program, post: &Post) -> Result<Readback> {
-    let written = Toolpath { moves: parse(text)? };
+    let written = Toolpath { moves: dwells_in(DwellUnit::of(post)?, parse(text)?) };
     let planned = Toolpath { moves: program.operations.iter().flat_map(|op| op.path.moves.iter().copied()).collect() };
     let allowed = allowed_deviation(post);
     let reach = (allowed * 10.0).max(1.0);

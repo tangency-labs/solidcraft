@@ -40,6 +40,9 @@
 //! comment, and with [`Post5::coolant_after_turn`] its coolant comes on after that first turn
 //! rather than before it. A rotary with limits that has room for a whole turn can take a
 //! continuous cut past them with [`Rewind`]s.
+//!
+//! [`parse5`] reads the motion back (the subset these write), which is how the output is
+//! checked: see [`crate::readback5`].
 
 use std::f64::consts::{FRAC_PI_4, PI, TAU};
 
@@ -48,8 +51,8 @@ use solidcore_record::{Vec2, Vec3};
 use solidcraft_geom::prelude::*;
 
 use crate::gcode::{
-    MAX_FEED, MAX_OPERATIONS, MIN_FEED, feed_in_range, feed_word_ok, join, number, operation_comment, plain, post_number, tool_list_line, words,
-    work_offset_code,
+    MAX_FEED, MAX_LINES, MAX_OPERATIONS, MIN_FEED, feed_in_range, feed_word_ok, join, number, operation_comment, plain, post_number, tool_list_line,
+    words, work_offset_code,
 };
 use crate::indexed::{IndexedOperation, frame_for_index, head_upright};
 use crate::kinematics::{AxisLetter, Carrier, JointMove, Joints, Machine, check_limits, forward, nearest_turn, solve_from};
@@ -1161,7 +1164,7 @@ fn unwind_from(machine: &Machine, moves: &[JointMove], previous: Option<&Joints>
 
 /// Refuses a machine this writer has no output for yet: more than one rotary, or a rotary
 /// lettered other than `A`.
-fn four_axis_only(machine: &Machine) -> Result<()> {
+pub(crate) fn four_axis_only(machine: &Machine) -> Result<()> {
     if machine.rotaries.len() > 1 {
         return Err(CamError::Unsupported(format!(
             "G-code for machine `{}`: output is written for at most one rotary axis (A), not {}",
@@ -1493,4 +1496,187 @@ fn emit_ops(name: &str, work_offset: Option<u8>, ops: &[Op<'_>], post: &Post5, m
     }
     w.template(&base.footer, &values)?;
     Ok((w.out, written))
+}
+/// One motion block of a 4th-axis program as read: where every axis is after it (mm and
+/// radians, rotaries in the order of the letters asked for).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum JointWords {
+    Rapid {
+        line: usize,
+        linear: Vec3,
+        rotary: Vec<f64>,
+    },
+    /// A cut. `f` is the `F` word in force: per minute (`G94`; the linear axes' feed in units
+    /// of `mm_per_unit` mm, or degrees a minute for a move of the rotaries alone) or, with
+    /// `inverse_time` (`G93`), 1 / the block's minutes.
+    Feed {
+        line: usize,
+        linear: Vec3,
+        rotary: Vec<f64>,
+        f: f64,
+        inverse_time: bool,
+        mm_per_unit: f64,
+    },
+    /// An arc about `center` in the XY plane of the linear axes, the rotaries held, at `f` per minute.
+    Arc {
+        line: usize,
+        linear: Vec3,
+        center: Vec2,
+        ccw: bool,
+        rotary: Vec<f64>,
+        f: f64,
+        mm_per_unit: f64,
+    },
+    Dwell {
+        line: usize,
+        seconds: f64,
+    },
+}
+
+/// Reads the motion of a 4th-axis program in absolute coordinates: `G0`–`G3` with `X Y Z`,
+/// `I J` (arcs in the XY plane, the rotaries held), the rotary words `letters` (degrees) and
+/// `F`, `G93`/`G94`, `G20`/`G21`, `G4`, and `G91.1` (arc centres from the arc's start; `G90.1`
+/// is refused). A `G53` block moves in machine coordinates and a `G28`/`G30` block (as in `G28
+/// G91 Z0.`) to the machine's home, so the axes they name are unknown until written again. Any
+/// other move in incremental coordinates (`G91`) is refused, and so are arcs in the XZ or YZ
+/// plane (`G18`, `G19`) and tool centre point control (`G43.4`), which this crate does not write
+/// yet. Everything else (spindle, tools, coolant, offsets) is skipped, and so are blocks before
+/// every axis is known.
+pub fn parse5(text: &str, letters: &[AxisLetter]) -> Result<Vec<JointWords>> {
+    let mut units = 1.0;
+    let mut mode: Option<u8> = None;
+    let mut inverse = false;
+    let mut incremental = false;
+    let mut feed: Option<f64> = None;
+    let mut lin: [Option<f64>; 3] = [None, None, None];
+    let mut rot: Vec<Option<f64>> = vec![None; letters.len()];
+    let mut out = Vec::new();
+    for (i, line) in text.lines().enumerate() {
+        let n = i + 1;
+        if n > MAX_LINES {
+            return Err(CamError::TooLarge(format!("more than {MAX_LINES} lines")));
+        }
+        let ws = words(line, n)?;
+        let (mut dwell, mut machine_coords, mut home, mut g91) = (false, false, false, false);
+        for &(c, v) in &ws {
+            if c != 'G' {
+                continue;
+            }
+            match (v * 10.0).round() as i64 {
+                0 => mode = Some(0),
+                10 => mode = Some(1),
+                20 => mode = Some(2),
+                30 => mode = Some(3),
+                40 => dwell = true,
+                180 | 190 => return Err(CamError::Parse(n, "not supported yet: arcs in the XZ or YZ plane (G18, G19)".into())),
+                200 => units = 25.4,
+                210 => units = 1.0,
+                280 | 300 => (machine_coords, home) = (true, true),
+                434 => return Err(CamError::Parse(n, "not supported yet: tool centre point control (G43.4)".into())),
+                530 => machine_coords = true,
+                900 => incremental = false,
+                910 => (incremental, g91) = (true, true),
+                901 => return Err(CamError::Parse(n, "not supported yet: absolute arc centres (G90.1)".into())),
+                930 => (inverse, feed) = (true, None),
+                940 => (inverse, feed) = (false, None),
+                _ => {}
+            }
+        }
+        if g91 && !home {
+            return Err(CamError::Parse(n, "not supported yet: incremental coordinates (G91) other than for a return home (G28 G91)".into()));
+        }
+        let word = |letter: char| ws.iter().find(|(c, _)| *c == letter).map(|(_, v)| *v);
+        if dwell {
+            out.push(JointWords::Dwell { line: n, seconds: word('X').or(word('P')).unwrap_or(0.0).max(0.0) });
+            continue;
+        }
+        for c in ['A', 'B', 'C'] {
+            if word(c).is_some() && !letters.iter().any(|l| l.char() == c) {
+                return Err(CamError::Parse(n, format!("the machine has no {c} axis")));
+            }
+        }
+        let f = word('F');
+        if let Some(f) = f {
+            if !(f > 0.0) {
+                return Err(CamError::Parse(n, "a feed rate must be above 0".into()));
+            }
+            feed = Some(f);
+        }
+        let linear_words = [word('X'), word('Y'), word('Z')];
+        let rotary_words: Vec<Option<f64>> = letters.iter().map(|l| word(l.char())).collect();
+        if machine_coords {
+            for (slot, w) in lin.iter_mut().zip(linear_words) {
+                if w.is_some() {
+                    *slot = None;
+                }
+            }
+            for (slot, w) in rot.iter_mut().zip(&rotary_words) {
+                if w.is_some() {
+                    *slot = None;
+                }
+            }
+            continue;
+        }
+        let (ti, tj) = (word('I'), word('J'));
+        if incremental && !linear_words.iter().chain(&rotary_words).chain([&ti, &tj]).all(Option::is_none) {
+            return Err(CamError::Parse(n, "not supported yet: incremental coordinates (G91)".into()));
+        }
+        if linear_words.iter().chain(&rotary_words).chain([&ti, &tj]).all(Option::is_none) {
+            continue;
+        }
+        let Some(mode) = mode else { return Err(CamError::Parse(n, "coordinates before any G0, G1, G2 or G3".into())) };
+        let from = match lin {
+            [Some(x), Some(y), Some(z)] => Some(Vec3::new(x, y, z)),
+            _ => None,
+        };
+        for (slot, w) in lin.iter_mut().zip(linear_words) {
+            if let Some(v) = w {
+                *slot = Some(v * units);
+            }
+        }
+        for (slot, w) in rot.iter_mut().zip(&rotary_words) {
+            if let Some(v) = w {
+                *slot = Some(v.to_radians());
+            }
+        }
+        let block_rate = if inverse { f } else { feed };
+        if inverse {
+            feed = None;
+        }
+        let ([Some(x), Some(y), Some(z)], Some(rotary)) = (lin, rot.iter().copied().collect::<Option<Vec<f64>>>()) else {
+            if mode >= 2 {
+                return Err(CamError::Parse(n, "an arc before the position is known".into()));
+            }
+            continue;
+        };
+        let linear = Vec3::new(x, y, z);
+        if mode == 0 {
+            out.push(JointWords::Rapid { line: n, linear, rotary });
+            continue;
+        }
+        let Some(rate) = block_rate else {
+            return Err(CamError::Parse(
+                n,
+                if inverse { "an inverse-time cut (G93) without its F".into() } else { "a cutting move without a feed rate".to_string() },
+            ));
+        };
+        if mode == 1 {
+            out.push(JointWords::Feed { line: n, linear, rotary, f: rate, inverse_time: inverse, mm_per_unit: units });
+            continue;
+        }
+        if inverse {
+            return Err(CamError::Parse(n, "not supported yet: arcs in inverse time (G93)".into()));
+        }
+        if rotary_words.iter().any(Option::is_some) {
+            return Err(CamError::Parse(n, "not supported yet: an arc that turns a rotary".into()));
+        }
+        let Some(from) = from else { return Err(CamError::Parse(n, "an arc before the position is known".into())) };
+        if ti.is_none() && tj.is_none() {
+            return Err(CamError::Parse(n, "not supported yet: arcs without I and J".into()));
+        }
+        let center = Vec2::new(from.x + ti.unwrap_or(0.0) * units, from.y + tj.unwrap_or(0.0) * units);
+        out.push(JointWords::Arc { line: n, linear, center, ccw: mode == 3, rotary, f: rate, mm_per_unit: units });
+    }
+    Ok(out)
 }
