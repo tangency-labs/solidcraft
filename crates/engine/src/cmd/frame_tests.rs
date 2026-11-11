@@ -1438,3 +1438,51 @@ fn a_rotate_step_with_a_bad_angle_errors_alone() {
         assert!(same_box(brace_box(&mut s), flat), "{bad}: unturned");
     }
 }
+
+fn brace_normals(s: &Session) -> Vec<solidcore_record::Vec3> {
+    let st = s.model.state();
+    let b = st.body("Brace").unwrap();
+    (0..b.body.face_count()).filter_map(|i| b.body.planar_face(i)).map(|pl| pl.normal()).collect()
+}
+
+fn ref_line(s: &mut Session, plane: &str, points: Value) {
+    run(s, "sketch.create", json!({"plane": plane, "name": "Ref"}));
+    run(s, "sketch.line", json!({"points": points, "ids": ["ref"]}));
+    run(s, "sketch.finish", json!({}));
+}
+
+#[test]
+fn parallel_to_lines_a_sloped_member_side_up_with_a_line() {
+    let mut s = brace();
+    ref_line(&mut s, "XY", json!([[200, -50], [250, 0]]));
+    let face = brace_side(&s, 0.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "parallel_to": {"sketch": "Ref", "curve": "ref"}}));
+    // Some side is now parallel to the line (its normal is perpendicular to it).
+    assert!(brace_normals(&s).iter().any(|n| (n.x + n.y).abs() < 1e-9), "{:?}", brace_normals(&s));
+    // The stored angle is the previous turn (0) plus a delta in (-90, 90].
+    let solidcraft_doc::FeatureKind::FrameMemberTurn { angle, .. } = &turn_step(&s).kind else { panic!("not a turn") };
+    let deg: f64 = angle.as_ref().trim_end_matches(" deg").trim_end_matches("deg").trim().parse().unwrap();
+    assert!(deg > -90.0 - 1e-9 && deg <= 90.0 + 1e-9, "{angle}");
+}
+
+#[test]
+fn parallel_to_refuses_an_end_face_a_curve_and_a_line_along_the_member() {
+    let mut s = brace();
+    ref_line(&mut s, "XY", json!([[200, -50], [200, 50]]));
+    let h = 1.0 / 2f64.sqrt();
+    let end = face_pick(&s, "Brace", [300.0, 18.5, 300.0], [h, 0.0, h]);
+    let side = brace_side(&s, 0.0);
+    let line = json!({"sketch": "Ref", "curve": "ref"});
+    let e = s.execute("frame.rotate_member", &json!({"face": end, "parallel_to": line})).unwrap_err().to_string();
+    assert!(e.contains("The member's face must be a flat side"), "{e}");
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Round"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 5, "id": "ring"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let e = s.execute("frame.rotate_member", &json!({"face": side, "parallel_to": {"sketch": "Round", "curve": "ring"}})).unwrap_err().to_string();
+    assert!(e.contains("Select a straight edge, a sketch line or an axis"), "{e}");
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Along"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [100, -100]], "ids": ["al"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let e = s.execute("frame.rotate_member", &json!({"face": side, "parallel_to": {"sketch": "Along", "curve": "al"}})).unwrap_err().to_string();
+    assert!(e.contains("That line runs along the member: its sides are already parallel to it"), "{e}");
+}
