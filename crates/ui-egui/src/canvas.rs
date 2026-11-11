@@ -422,6 +422,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
         app.dialog = Some(d);
         return;
     }
+    // Rotate Member: the dial round the member's line sets its Angle.
+    if matches!(d.kind, Kind::RotateMember(_)) {
+        draw_move_rotation(app, ui, painter, proj, &mut d);
+        app.dialog = Some(d);
+        return;
+    }
     // A cylinder's values are typed in its window; its distances from its reference edges
     // (#6380) are shown and typed on the canvas, as a hole's, then its placement handles drawn.
     if matches!(d.kind, Kind::Primitive { cmd: "solid.cylinder", .. }) {
@@ -457,19 +463,28 @@ impl MoveRotation {
     }
 }
 
+/// Move's turn about its picked axis, or Rotate Member's about the member's line.
 fn move_rotation(app: &SolveApp, d: &Dialog, proj: &Proj) -> Option<MoveRotation> {
-    let Kind::Move { angle, .. } = &d.kind else { return None };
-    let (centre, axis) = crate::dialogs_move::rotation_axis(app, d)?;
+    let (angle, (centre, axis)) = match &d.kind {
+        Kind::Move { angle, .. } => (angle, crate::dialogs_move::rotation_axis(app, d)?),
+        Kind::RotateMember(c) => (&c.angle, crate::dialogs_rotate_member::dial(app, &d.inputs)?),
+        _ => return None,
+    };
     let angle = crate::length_input::eval(&app.session.doc, angle, ValueKind::Angle).ok().filter(|a| a.is_finite()).unwrap_or(0.0);
     Some(MoveRotation { centre, axis, radius: crate::gizmo::ring_radius(proj, centre)?, angle })
 }
 
-/// Reuse the angular handle's snapping and edge-on projection for Move's selected axis.
+/// Reuse the angular handle's snapping and edge-on projection for Move's selected axis and Rotate
+/// Member's line.
 fn draw_move_rotation(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, d: &mut Dialog) -> Option<(Pos2, bool)> {
     let r = move_rotation(app, d, proj)?;
     let points: Vec<_> = (0..=64).filter_map(|i| proj.to_screen(r.point(i as f64 / 64.0 * std::f64::consts::TAU))).collect();
     painter.add(egui::Shape::line(points, Stroke::new(1.8, Tokens::get().manipulator)));
-    let Kind::Move { angle, .. } = &mut d.kind else { return None };
+    let (angle, name) = match &mut d.kind {
+        Kind::Move { angle, .. } => (angle, "move_rotate"),
+        Kind::RotateMember(c) => (&mut c.angle, "rotate_member"),
+        _ => return None,
+    };
     let before = angle.clone();
     let e1 = r.axis.any_perp();
     // Keep full turns in the expression while the shared handle works near zero.
@@ -489,7 +504,7 @@ fn draw_move_rotation(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter
         1.0,
         offset,
         (offset - span, offset + span),
-        "move_rotate",
+        name,
         angle,
     )?;
     Some((end, *angle != before))
