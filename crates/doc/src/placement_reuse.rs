@@ -55,7 +55,7 @@ impl Model {
     }
 }
 
-fn local_plane(plane: &PlaneRef, depth: usize) -> bool {
+pub(super) fn local_plane(plane: &PlaneRef, depth: usize) -> bool {
     if depth > crate::MAX_PLACEMENT_DEPTH {
         return false;
     }
@@ -163,6 +163,7 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         point_clouds,
         // Display only: a plane's drawn size shapes nothing.
         plane_extents: _,
+        notes: _,
     } = a;
     (Arc::ptr_eq(render, &b.render) || *render == b.render)
         && *format == b.format
@@ -242,8 +243,12 @@ fn same_feature(a: &Feature, b: &Feature) -> bool {
                 a == b
                     && meshes.len() == other.len()
                     && meshes.iter().zip(other).all(|(a, b)| {
-                        let crate::MeshData { name, positions, triangles, color } = a;
-                        *name == b.name && *color == b.color && Arc::ptr_eq(positions, &b.positions) && Arc::ptr_eq(triangles, &b.triangles)
+                        let crate::MeshData { name, positions, triangles, corner_normals, color } = a;
+                        *name == b.name
+                            && *color == b.color
+                            && Arc::ptr_eq(positions, &b.positions)
+                            && Arc::ptr_eq(triangles, &b.triangles)
+                            && Arc::ptr_eq(corner_normals, &b.corner_normals)
                     })
             }
             (

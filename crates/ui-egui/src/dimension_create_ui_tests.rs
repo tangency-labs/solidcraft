@@ -394,7 +394,7 @@ fn the_sketch_page_switches_dimension_values_to_a_window() {
     let mut h = Harness::new();
     h.call("ui.prefs", json!({"open": "Sketch"}));
     h.frames(4);
-    let handle = format!("dialog:{}:{}", crate::i18n::tr("prefs.dimension_values"), crate::i18n::tr("prefs.dimension_values_window"));
+    let handle = format!("dialog:{}:{}", solidcraft_ui_text::tr("prefs.dimension_values"), solidcraft_ui_text::tr("prefs.dimension_values_window"));
     crate::prefs::reveal_preference(&mut h, &handle);
     h.step(&json!({"click":{"handle": handle}})).unwrap();
     h.frames(2);
@@ -576,6 +576,35 @@ fn the_first_dimension_scales_the_drawing_unless_the_preference_is_off() {
         // On: 20 × 10 scales to side × side / 2. Off: only the side changes, side × 10.
         let want: f64 = if scales { side * side / 2. } else { side * 10. };
         assert!((area - want).abs() < 1e-6 * want.max(1.), "scales: {scales}, side {side}, area {area}");
+    }
+}
+
+/// #11043: a rectangle drawn away from the origin keeps its middle when the first dimension
+/// scales it; the Sketch preference scales it about the origin, as before.
+#[test]
+fn the_first_dimension_scales_a_free_drawing_about_its_middle_unless_the_preference_says_origin() {
+    for about_origin in [false, true] {
+        let mut h = Harness::new();
+        crate::dim_view::cancel();
+        assert!(!h.app.preferences.first_dimension_scales_about_origin, "off by default (#11043)");
+        h.app.preferences.first_dimension_scales_about_origin = about_origin;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[20,10],"p1":[40,20]})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.app.cam.distance = 80.;
+        h.app.cam.target = solidcore_record::Vec3::new(30., 15., 0.);
+        h.settle();
+        place(&mut h, &[[30., 10.]], [30., 5.]);
+        type_value(&mut h, "40 mm");
+        h.step(&json!({"key":"Enter"})).unwrap();
+        let state = h.app.session.world_state().unwrap();
+        let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        let corners: Vec<_> = sketch.points.iter().filter(|p| !p.fixed).map(|p| p.pos).collect();
+        assert_eq!(corners.len(), 4);
+        let middle = corners.iter().fold(solidcore_record::Vec2::ZERO, |m, &p| m + p * 0.25);
+        // Scaled 2×: about (30, 15) the middle stays; about the origin it doubles.
+        let want = if about_origin { solidcore_record::Vec2::new(60., 30.) } else { solidcore_record::Vec2::new(30., 15.) };
+        assert!(middle.dist(want) < 1e-6, "about origin {about_origin}: middle {middle:?}");
     }
 }
 
@@ -1267,7 +1296,7 @@ fn point_drawn(h: &mut Harness, world: [f64; 2]) -> bool {
 
 /// Is a sketch curve's hover highlight painted this frame?
 fn hover_painted(h: &Harness) -> bool {
-    let col = egui::epaint::ColorMode::Solid(crate::theme::Tokens::get().hover_profile_edge);
+    let col = egui::epaint::ColorMode::Solid(solidcraft_theme::Tokens::get().hover_profile_edge);
     h.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Path(p) if p.stroke.width == 3.0 && p.stroke.color == col))
 }
 
@@ -1970,8 +1999,9 @@ fn editing_a_dimension_to_a_definition_names_its_parameter() {
 /// the parameter name kept as typed.
 #[test]
 fn the_status_after_a_dimension_is_in_the_interface_language() {
-    let pl = crate::i18n::Locale::for_language("pl");
-    let en = crate::i18n::Locale::for_language("en");
+    crate::i18n::install();
+    let pl = solidcraft_ui_text::Locale::for_language("pl");
+    let en = solidcraft_ui_text::Locale::for_language("en");
     let status = |h: &Harness| h.app.status.as_ref().map(|s| (s.0.clone(), s.2));
     let polish = |mut h: Harness| {
         h.app.preferences.language = "pl".into();
@@ -2061,7 +2091,7 @@ fn a_typed_value_hides_the_curvature_combs() {
     let id = solved(&h).curves[0].id.clone();
     h.app.run("inspect.curvature_comb", json!({"curves":[id]})).unwrap();
     h.step(&json!({"start":"sketch.dimension"})).unwrap();
-    let teeth = egui::epaint::Stroke::new(1.0, crate::theme::Tokens::get().comb_teeth);
+    let teeth = egui::epaint::Stroke::new(1.0, solidcraft_theme::Tokens::get().comb_teeth);
     let comb_drawn = |h: &Harness| h.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::LineSegment { stroke, .. } if *stroke == teeth));
     h.frames(1);
     assert!(comb_drawn(&h), "the comb is drawn");
@@ -2135,4 +2165,22 @@ fn a_line_is_dimensioned_against_the_sketch_x_axis() {
             assert!((b.y - 12.0).abs() < 1e-6, "the end is 12 from x: {b:?}");
         }
     }
+}
+
+/// #14231: while a dimension is placed its value follows the pointer, and the pointer ring,
+/// drawn after it, sat on the number. The ring is left out on the value and kept elsewhere.
+#[test]
+fn the_pointer_ring_stays_off_the_value_being_placed() {
+    let mut h = line([20., 0.]);
+    h.step(&json!({"start":"sketch.dimension"})).unwrap();
+    h.step(&json!({"click":{"world":[10,0,0]}})).unwrap();
+    h.step(&json!({"move":{"world":[10,6,0]}})).unwrap();
+    h.settle();
+    let value = crate::dim_view::draft_text().expect("the value being placed is drawn");
+    let pointer = h.ctx.input(|i| i.pointer.hover_pos()).expect("the pointer is over the view");
+    assert!(value.contains(pointer), "the value follows the pointer: {value:?} {pointer:?}");
+    let tool = h.app.tool.as_ref().expect("the Dimension tool");
+    assert!(!crate::tools::pointer_ring_shown(tool, pointer), "no ring on the value");
+    assert!(!crate::tools::pointer_ring_shown(tool, value.right_center() + egui::vec2(4.0, 0.0)), "nor one that would touch it");
+    assert!(crate::tools::pointer_ring_shown(tool, value.right_center() + egui::vec2(20.0, 0.0)), "the ring elsewhere");
 }

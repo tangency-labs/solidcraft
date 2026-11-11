@@ -15,6 +15,7 @@ const MAX_TEXT = 20000;
 const PATH_AREAS = [
   [/^crates\/sketch\//, 'area:sketch'],
   [/^crates\/(kernel|geom)\//, 'area:kernel'],
+  [/^solidcore\//, 'area:kernel'],
   [/^crates\/doc\//, 'area:doc'],
   [/^crates\/io\//, 'area:io'],
   [/^crates\/(render|gpu)\//, 'area:render'],

@@ -1,7 +1,8 @@
 //! Construction planes resized in the view. A selected construction plane shows handles at its
 //! corners and the middles of its edges; dragging one moves that corner or edge across the
 //! plane, and letting go keeps the size (`view.plane_size`, one undo step). A plane never
-//! resized is a square around its origin that follows the zoom.
+//! resized is drawn at the size that follows the zoom and the bodies it passes through
+//! ([`crate::viewport::construction_quads`]).
 
 use std::cell::RefCell;
 
@@ -42,13 +43,13 @@ thread_local! {
 }
 
 /// The rectangle plane `id` is drawn as, `[x0, y0, x1, y1]` in its own coordinates: while its
-/// handle is dragged, where the drag has it; else the size it was given; else a square of half
-/// side `half` (the size that follows the zoom).
-pub(crate) fn extent(app: &SolveApp, id: u64, half: f64) -> [f64; 4] {
+/// handle is dragged, where the drag has it; else the size it was given; else `auto` (the size
+/// that follows the zoom and the bodies).
+pub(crate) fn extent(app: &SolveApp, id: u64, auto: [f64; 4]) -> [f64; 4] {
     if let Some(live) = DRAG.with(|d| d.borrow().as_ref().filter(|d| d.id == id).map(|d| d.live)) {
         return live;
     }
-    app.session.doc.plane_extents.get(&id).copied().unwrap_or([-half, -half, half, half])
+    app.session.doc.plane_extents.get(&id).copied().unwrap_or(auto)
 }
 
 /// The plane being dragged and where the drag has it, for the highlight's key: the highlight
@@ -70,10 +71,6 @@ fn target(app: &SolveApp) -> Option<(u64, String, Plane)> {
     solidcraft_engine::view::construction_planes(&app.session).into_iter().find(|(_, n, _)| n == name)
 }
 
-fn half(app: &SolveApp) -> f64 {
-    crate::selection::origin_size(app.cam.half_height()) * 1.2
-}
-
 /// The point of `e` a handle sits at, in plane coordinates.
 fn handle_at(e: [f64; 4], (sx, sy): Side) -> Vec2 {
     let pick = |s: i8, lo: f64, hi: f64| match s {
@@ -91,7 +88,7 @@ fn world(plane: &Plane, p: Vec2) -> Vec3 {
 /// The handles on screen: (side, screen point).
 fn handles(app: &SolveApp, proj: &Proj) -> Option<(u64, String, Plane, [f64; 4], Vec<(Side, Pos2)>)> {
     let (id, name, plane) = target(app)?;
-    let e = extent(app, id, half(app));
+    let e = extent(app, id, crate::viewport::plane_auto_extent(app, &plane));
     let at = HANDLES.iter().filter_map(|s| proj.to_screen(world(&plane, handle_at(e, *s))).map(|p| (*s, p))).collect();
     Some((id, name, plane, e, at))
 }
@@ -266,7 +263,7 @@ mod tests {
         assert_ne!(at_start, idle, "a drag is part of the key");
         DRAG.with(|d| *d.borrow_mut() = Some(drag([-10.0, -10.0, 25.0, 10.0])));
         assert_ne!(crate::viewport::highlight_key(&h.app), at_start, "the side moved");
-        assert_eq!(extent(&h.app, 7, 10.0), [-10.0, -10.0, 25.0, 10.0], "the plane is drawn where the drag has it");
+        assert_eq!(extent(&h.app, 7, [-10.0, -10.0, 10.0, 10.0]), [-10.0, -10.0, 25.0, 10.0], "the plane is drawn where the drag has it");
         cancel();
         assert_eq!(crate::viewport::highlight_key(&h.app), idle, "back once the drag is given up");
     }

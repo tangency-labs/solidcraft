@@ -1,5 +1,6 @@
 use super::*;
-use crate::{scenario::Harness, theme::Tokens};
+use crate::scenario::Harness;
+use solidcraft_theme::Tokens;
 fn fixture() -> Harness {
     let mut h = Harness::new();
     h.call("ui.resize", json!({"width":1440,"height":1000}));
@@ -66,7 +67,7 @@ fn render_workspace_shot_and_scene_widgets_fit_inspector_content_width() {
                 crate::scenario::clear_handles();
                 let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(content.expand(8.0)), ..Default::default() }, |ui| {
                     ui.scope_builder(egui::UiBuilder::new().max_rect(content), |ui| {
-                        ui.painter().rect_filled(content, 0.0, crate::theme::Tokens::get().dialog_body);
+                        ui.painter().rect_filled(content, 0.0, solidcraft_theme::Tokens::get().dialog_body);
                         ui_kit::scope(ui, |ui| {
                             let preceding: std::collections::HashSet<_> = ctx.viewport(|vp| {
                                 vp.this_pass.widgets.layers().flat_map(|(_, widgets)| widgets.iter().map(|widget| widget.id)).collect()
@@ -210,14 +211,14 @@ fn render_workspace_shot_camera_controls_save_undo_and_refuse_hostile_values() {
     setups::save(&mut h.app).unwrap();
     let name = h.app.render_workspace.view.name.clone();
     let before = h.app.session.doc.to_json();
-    let camera = solidcraft_engine::render::Camera { yaw: 0.7, roll: 0.2, distance: 123.0, ..h.app.cam };
+    let camera = solidcraft_viewport::Camera { yaw: 0.7, roll: 0.2, distance: 123.0, ..h.app.cam };
     super::super::shot::set_camera(&mut h.app, &name, camera).unwrap();
     assert_eq!(h.app.cam, camera);
     assert_eq!(h.app.session.doc.render.setups[&name].camera, camera);
     h.app.run("edit.undo", json!({})).unwrap();
     assert_eq!(h.app.session.doc.to_json(), before);
     for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0, 0.0, f64::MAX] {
-        let camera = solidcraft_engine::render::Camera { distance: value, ..camera };
+        let camera = solidcraft_viewport::Camera { distance: value, ..camera };
         assert!(super::super::shot::set_camera(&mut h.app, &name, camera).is_err());
         assert_eq!(h.app.session.doc.to_json(), before);
     }
@@ -229,7 +230,7 @@ fn render_workspace_shot_lens_saves_only_lens_and_orthographic_keeps_faded_contr
     let mut h = fixture();
     h.call("ui.resize", json!({"width":1600,"height":1800}));
     let name = "Lens shot";
-    let camera = solidcraft_engine::render::Camera { fov: 0.6, ..h.app.cam };
+    let camera = solidcraft_viewport::Camera { fov: 0.6, ..h.app.cam };
     h.app
         .run("render.settings.set", json!({"name":name,"set":{"camera":camera,"job":{"method":"gpu_path","options":{"samples":128,"seed":42}}}}))
         .unwrap();
@@ -259,7 +260,7 @@ fn render_workspace_shot_lens_saves_only_lens_and_orthographic_keeps_faded_contr
 fn inspector_dispatch_has_one_editor_per_selection_independent_of_every_stage() {
     use super::super::{RenderSelection, Stage};
     for dark in [false, true] {
-        for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+        for layout in [crate::ui_kit::LayoutMode::Docked, crate::ui_kit::LayoutMode::Floating] {
             let mut h = fixture();
             h.app.preferences.theme = if dark { "dark" } else { "light" }.into();
             h.app.ui.layout = layout;
@@ -313,7 +314,7 @@ fn inspector_dispatch_has_one_editor_per_selection_independent_of_every_stage() 
                     assert!(h.app.render_workspace.view.job.is_none());
                     assert!(h.app.render_workspace.view.completed.is_none());
                 }
-                if !dark && layout == crate::shell::LayoutMode::Floating {
+                if !dark && layout == crate::ui_kit::LayoutMode::Floating {
                     appearance_inspector_capture(&mut h, &format!("dispatch-{kind}"));
                 }
             }
@@ -438,10 +439,10 @@ fn projected_quality_changes_only_requested_budget_fields_and_has_no_runtime_cla
     h.app.render_workspace.view.studio.ambient = [0.11, 0.22, 0.33];
     let before = h.app.session.doc.to_json();
     let camera = h.app.cam;
-    let plan = h.app.run("render.quality.prepare", json!({"id":"Q-002","variant":"fixed_samples_png","acknowledge_omissions":true})).unwrap();
+    let plan = h.app.run("render.quality.prepare", json!({"id":"Q-001","variant":"fixed_samples_png","acknowledge_omissions":true})).unwrap();
     apply_quality(&mut h.app, &plan).unwrap();
-    assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (1600, 900));
-    assert_eq!(h.app.render_workspace.view.samples, 512);
+    assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (960, 540));
+    assert_eq!(h.app.render_workspace.view.samples, 64);
     assert_eq!(h.app.cam, camera);
     assert_eq!(h.app.render_workspace.view.studio.intensity, 0.42);
     assert_eq!(h.app.render_workspace.view.studio.ambient, [0.11, 0.22, 0.33]);
@@ -498,7 +499,7 @@ fn surface_stage_contains_preview_target_plane_repeat_angle_and_method_reason_in
 fn stage_catalogs_fill_a_290_by_530_panel_and_keep_two_line_labels_inside_tiles() {
     use crate::{scenario, ui_kit};
     use egui::{Pos2, RawInput, Rect, vec2};
-    let previous_theme = crate::theme::is_dark();
+    let previous_theme = solidcraft_theme::is_dark();
     for dark in [false, true] {
         for (kind, selected, method, key) in [
             ("appearances", None, ImageMethod::Raster, "render:library:catalog"),
@@ -511,15 +512,15 @@ fn stage_catalogs_fill_a_290_by_530_panel_and_keep_two_line_labels_inside_tiles(
             let mut h = fixture();
             // Capture the font atlas from its first upload along with panel textures.
             h.ctx = crate::fonts::test_context();
-            crate::theme::set_dark(dark);
+            solidcraft_theme::set_dark(dark);
             h.ctx.set_visuals(if dark { egui::Visuals::dark() } else { egui::Visuals::light() });
             // A resizable 290 pt card needs the floating, wide-screen policy.
-            h.app.ui.layout = crate::shell::LayoutMode::Floating;
+            h.app.ui.layout = crate::ui_kit::LayoutMode::Floating;
             h.app.preferences.render_browser_width = 290.0;
             h.app.preferences.render_browser_side = "left".into();
             super::super::select_image_method(&mut h.app, method);
             library::open_category(&mut h.app, kind);
-            crate::theme::TabAccent::publish(&h.app, &h.ctx);
+            h.app.publish_tab_accent(&h.ctx);
             let document = h.app.session.doc.to_json();
             let history = (h.app.session.undo.len(), h.app.session.redo.len());
             // Panel::workspace reserves an 8 pt bottom gap in these bounds.
@@ -593,7 +594,7 @@ fn stage_catalogs_fill_a_290_by_530_panel_and_keep_two_line_labels_inside_tiles(
             }
         }
     }
-    crate::theme::set_dark(previous_theme);
+    solidcraft_theme::set_dark(previous_theme);
 }
 
 #[test]
@@ -619,7 +620,7 @@ fn quality_review_is_callable_by_command_and_saves_only_after_acknowledgement() 
     let mut h = fixture();
     super::super::select_image_method(&mut h.app, ImageMethod::GpuRaytrace);
     let mut view = library::View::default();
-    library::choose(&mut h.app, &mut view, "quality", "Q-002").unwrap();
+    library::choose(&mut h.app, &mut view, "quality", "Q-001").unwrap();
     h.app.render_workspace.view.library = view;
     let before = h.app.session.doc.to_json();
     h.app.start("render.quality.prepare");
@@ -629,9 +630,25 @@ fn quality_review_is_callable_by_command_and_saves_only_after_acknowledgement() 
     h.step(&json!({"click":{"handle":"render:review:acknowledge"}})).unwrap();
     h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
     let saved = &h.app.session.doc.render.setups[&h.app.render_workspace.view.name];
-    assert_eq!((saved.width, saved.height), (1600, 900));
-    assert_eq!(h.app.render_workspace.view.samples, 512);
+    assert_eq!((saved.width, saved.height), (960, 540));
+    assert_eq!(h.app.render_workspace.view.samples, 64);
     assert!(h.app.render_workspace.view.library.review.is_none());
+
+    // Balanced keeps its canonical budget and remains read-only until acknowledged.
+    let before = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+    library::review::quality(&mut h.app, "Q-002").unwrap();
+    h.frames(3);
+    assert_eq!(h.app.render_workspace.view.library.review.as_ref().unwrap().plan["gpu_options"]["samples"], json!(512));
+    assert_eq!(h.app.session.doc.to_json(), before);
+    assert_eq!(h.app.session.undo.len(), undo);
+    h.step(&json!({"click":{"handle":"render:review:acknowledge"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.render_workspace.view.samples, 512);
+    assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (1600, 900));
+    assert!(h.app.render_workspace.view.library.review.is_none());
+    assert!(h.app.render_workspace.view.job.is_none());
 }
 
 #[test]
@@ -839,6 +856,173 @@ fn resolution_lock_reanchors_for_explicit_presets_and_does_not_affect_other_inte
 }
 
 #[test]
+fn output_dimensions_preserve_legacy_size_until_an_explicit_bounded_edit() {
+    use solidcraft_engine::render::job::CpuBudget;
+    for (width, height, field) in [(16384, 1, "render:output-width"), (1, 16384, "render:output-height")] {
+        let mut h = fixture();
+        h.call("ui.resize", json!({"width":1440,"height":1600}));
+        h.app
+            .run(
+                "render.settings.set",
+                json!({"name":"Legacy native","set":{
+                    "width":width,"height":height,
+                    "job":{"method":"cpu_raytrace","options":{"budget":"workstation"}}
+                }}),
+            )
+            .unwrap();
+        h.app.render_workspace.view.name = "Legacy native".into();
+        setups::load(&mut h.app);
+        let saved = h.app.session.doc.render.setups["Legacy native"].clone();
+        saved.validate().unwrap();
+        assert_eq!(h.app.render_workspace.view.raytrace.budget, CpuBudget::Workstation);
+        assert_eq!(h.app.render_workspace.view.studio.supersampling, 1);
+        assert!(!h.app.render_workspace.view.studio.denoise);
+        assert!(!h.app.render_workspace.view.studio.denoise_diagnostics);
+        let doc = h.app.session.doc.clone();
+        let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
+
+        // Revealing either field and navigating between editors must not turn the
+        // new 8K edit bound into a saved size change for an admitted legacy job.
+        for kind in ["output", "sampling", "output"] {
+            h.app.run("view.render_select", json!({"kind":kind})).unwrap();
+            h.frames(3);
+            assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (width, height));
+            assert_eq!(h.app.session.doc.render.setups["Legacy native"], saved);
+            assert!(Arc::ptr_eq(&doc, &h.app.session.doc), "painting must not issue a settings command");
+            assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), history);
+            assert!(h.app.render_workspace.view.job.is_none());
+        }
+
+        // An actual text edit still clamps to the current UI side limit.
+        let at = reveal_inspector_target(&mut h, field).center();
+        h.step(&json!({"click":[at.x,at.y],"double":true})).unwrap();
+        h.step(&json!({"key":"A","cmd":true,"ctrl":true})).unwrap();
+        h.step(&json!({"text":"20000"})).unwrap();
+        h.step(&json!({"key":"Enter"})).unwrap();
+        h.frames(3);
+        let edited = if width > 8192 { (8192, height) } else { (width, 8192) };
+        assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), edited);
+        let mut expected = saved.clone();
+        (expected.width, expected.height) = edited;
+        assert_eq!(h.app.session.doc.render.setups["Legacy native"], expected);
+        assert_eq!(h.app.session.undo.len(), history.1 + 1);
+
+        // Undo restores the authored size, which must remain unchanged on paint.
+        h.app.run("edit.undo", json!({})).unwrap();
+        setups::sync_revision(&mut h.app);
+        h.frames(3);
+        assert_eq!(h.app.session.doc.render.setups["Legacy native"], saved);
+        assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (width, height));
+
+        reveal_inspector_target(&mut h, "render:size:8k");
+        h.step(&json!({"click":{"handle":"render:size:8k"}})).unwrap();
+        assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (7680, 4320));
+        assert_eq!(h.app.render_workspace.view.raytrace.budget, CpuBudget::Workstation);
+        assert!(h.app.render_workspace.view.job.is_none());
+        let doc = h.app.session.doc.clone();
+        let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
+        for (width, height) in [(8193, 1), (1, 8193), (8192, 8192)] {
+            assert!(apply_size(&mut h.app, width, height, true).is_err());
+            assert!(Arc::ptr_eq(&doc, &h.app.session.doc), "side and pixel bounds must still reject explicit requests");
+            assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (7680, 4320));
+            assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), history);
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn native_cpu_legacy_dimensions_remain_checkable_renderable_and_saveable_with_bounded_new_choices() {
+    use solidcraft_engine::render::job::{CpuBudget, CpuHost, MAX_OUTPUT_DIMENSION, MAX_OUTPUT_PIXELS};
+    // Exercise both legacy side limits and a native pixel count above the new
+    // output envelope, including progressive sampling and explicit identity output.
+    for (width, height, progressive, identity_output) in [(16384, 1, false, false), (1, 16384, true, true), (8192, 8192, true, false)] {
+        let mut h = fixture();
+        h.app.render_workspace.view.live_paused = true;
+        h.app.session.set_render_job_host(Some(CpuHost::for_platform().unwrap())).unwrap();
+        let mut options = json!({"budget":"workstation","threads":1});
+        if progressive {
+            options["progressive"] = json!({"samples_per_pixel":32,"seed":81});
+        }
+        if identity_output {
+            options["output"] = json!({});
+        }
+        h.app
+            .run(
+                "render.settings.set",
+                json!({"name":"Legacy native","set":{
+                    "width":width,"height":height,"camera":h.app.cam,
+                    "job":{"method":"cpu_raytrace","options":options}
+                }}),
+            )
+            .unwrap();
+        h.app.render_workspace.view.name = "Legacy native".into();
+        setups::load(&mut h.app);
+        h.frames(3);
+        let native_size = (u64::from(width), u64::from(height));
+        assert_eq!(cpu::image_limits(&h.app).fit(native_size.0, native_size.1, None), Some(native_size));
+        assert_ne!(cpu::size_selection_limits(&h.app).fit(native_size.0, native_size.1, None), Some(native_size));
+        assert!(cpu::progressive_adoption_reason(&h.app).is_none());
+        cpu::validate_progressive_image(&h.app).unwrap();
+        let original = h.app.session.doc.render.setups["Legacy native"].clone();
+        let snapshot = setups::snapshot(&h.app).unwrap();
+        assert_eq!((snapshot.width, snapshot.height), (width, height));
+        assert_eq!(snapshot.job, original.job, "an explicit identity output object must remain native");
+        let request = super::super::image_request(&h.app).unwrap();
+        assert_eq!((request["settings"]["width"].as_u64(), request["settings"]["height"].as_u64()), (Some(native_size.0), Some(native_size.1)));
+        for action in ["render.preflight", "render.start"] {
+            super::super::ribbon::action_ready(&h.app, action).unwrap();
+        }
+        // Save uses the same validation as Check and Render. No image allocation or
+        // execution is necessary to prove that those routes accept the native intent.
+        setups::save_numerical(&mut h.app).unwrap();
+        assert_eq!(h.app.session.doc.render.setups["Legacy native"].job, original.job);
+        assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (width, height));
+        let saved = h.app.session.doc.clone();
+        let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
+        let studio = h.app.render_workspace.view.studio.clone();
+
+        for feature in ["supersampling", "denoise", "diagnostics", "exr", "presentation"] {
+            h.app.render_workspace.view.studio = studio.clone();
+            match feature {
+                "supersampling" => h.app.render_workspace.view.studio.supersampling = 2,
+                "denoise" => h.app.render_workspace.view.studio.denoise = true,
+                "diagnostics" => h.app.render_workspace.view.studio.denoise_diagnostics = true,
+                "exr" => h.app.render_workspace.view.studio.linear_exr = true,
+                _ => h.app.render_workspace.view.studio.finishing.contrast = 1.1,
+            }
+            assert!(setups::draft(&h.app).unwrap().validate().is_err(), "{feature}: saved validation owns the output envelope");
+            assert!(cpu::validate_progressive_image(&h.app).is_err(), "{feature}: UI must agree with saved/native output admission");
+            assert!(super::super::image_request(&h.app).is_err());
+            assert!(setups::snapshot(&h.app).is_err());
+            for action in ["render.preflight", "render.start"] {
+                assert!(super::super::ribbon::action_ready(&h.app, action).is_err(), "{feature}: {action}");
+            }
+            assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (width, height));
+            assert_eq!(h.app.render_workspace.view.raytrace.budget, CpuBudget::Workstation);
+            assert!(Arc::ptr_eq(&saved, &h.app.session.doc), "refusal must not downgrade or rewrite native intent");
+        }
+        h.app.render_workspace.view.studio = studio;
+        cpu::validate_progressive_image(&h.app).unwrap();
+
+        let largest = largest_output(&h.app).unwrap();
+        assert!(largest.0 <= u64::from(MAX_OUTPUT_DIMENSION) && largest.1 <= u64::from(MAX_OUTPUT_DIMENSION));
+        assert!(largest.0 * largest.1 <= MAX_OUTPUT_PIXELS);
+        assert_eq!(cpu::size_selection_limits(&h.app).fit(largest.0, largest.1, None), Some(largest));
+        for (new_width, new_height) in [(16384, 1), (1, 16384), (8192, 8192)] {
+            let refusal = apply_size(&mut h.app, new_width, new_height, true).unwrap_err();
+            assert!(refusal.contains("8192"), "the explicit size refusal must name the UI envelope: {refusal}");
+            assert!(h.app.run("render.output.size", json!({"width":new_width,"height":new_height,"custom":true})).is_err());
+            assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (width, height));
+            assert!(Arc::ptr_eq(&saved, &h.app.session.doc));
+        }
+        assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), history);
+        assert!(h.app.render_workspace.view.job.is_none());
+        assert_eq!(h.app.session.render_job_host().unwrap().admitted_bytes(), 0);
+    }
+}
+
+#[test]
 fn actual_output_ratio_is_local_and_orientation_saves_once_preserving_other_capture_fields() {
     let mut h = fixture();
     super::super::select_image_method(&mut h.app, ImageMethod::GpuRaytrace);
@@ -1032,7 +1216,7 @@ fn ribbon_navigation_reuses_inspector_and_preserves_exact_unsaved_intent() {
 #[test]
 fn render_stage_bar_keeps_actions_and_personal_preferences_in_both_layouts() {
     assert!(crate::workspace::panels("RENDER").is_empty());
-    for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+    for layout in [crate::ui_kit::LayoutMode::Docked, crate::ui_kit::LayoutMode::Floating] {
         let mut h = fixture();
         h.app.ui.layout = layout;
         h.app.toolbar_custom.panels.insert("DESIGN/RENDER/RESULT".into(), vec!["render.export".into()]);
@@ -1113,7 +1297,7 @@ fn ribbon_frame_preserves_explicit_roll_world_up_and_saved_view_authority() {
     h.app.cam.roll = 0.37;
     h.app.cam.yaw = 0.21;
     h.app.cam.pitch = 0.43;
-    h.app.cam.up = solidcraft_engine::render::UpAxis::Y;
+    h.app.cam.up = solidcraft_viewport::UpAxis::Y;
     let orientation = (h.app.cam.roll, h.app.cam.yaw, h.app.cam.pitch, h.app.cam.up);
     let document = h.app.session.doc.to_json();
     let undo = h.app.session.undo.len();
@@ -1299,7 +1483,7 @@ fn wear_selection_precedes_output_page_and_appearance_selection_chrome() {
             "inspector title has missing, empty or out-of-header bounds: {context}, bounds={bounds:?}"
         );
     }
-    for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {
+    for layout in [crate::ui_kit::LayoutMode::Docked, crate::ui_kit::LayoutMode::Floating] {
         let mut h = fixture();
         h.app.ui.layout = layout;
         h.app.session.selection = vec![solidcraft_engine::Sel::Body { name: "Subject".into() }];
@@ -1540,15 +1724,16 @@ fn clearing_physical_stage_preserves_unsaved_camera_background_and_output_intent
 
 #[test]
 fn render_camera_labels_do_not_shadow_mechanical_pitch_and_axes_remain_explicit() {
-    let en = crate::i18n::Locale::for_language("en");
-    let de = crate::i18n::Locale::for_language("de");
+    crate::i18n::install();
+    let en = solidcraft_ui_text::Locale::for_language("en");
+    let de = solidcraft_ui_text::Locale::for_language("de");
     assert_eq!(de.label("Pitch"), "Steigung");
     assert_eq!(de.text("coupling.pitch"), "Steigung");
     assert_eq!(en.text("render.camera_pitch"), "Camera pitch");
     assert_ne!(en.text("render.camera_pitch"), en.text("coupling.pitch"));
     assert_eq!(de.text("render.camera_pitch"), "Kameraneigung");
     for locale in ["en", "de", "es", "ja", "zh"] {
-        let locale = crate::i18n::Locale::for_language(locale);
+        let locale = solidcraft_ui_text::Locale::for_language(locale);
         assert_eq!(locale.text("material.editor.axes_numeric"), "1 / 2 / 3");
         assert_eq!(locale.text("material.editor.axes_wood"), "L / R / T");
     }
@@ -1559,7 +1744,7 @@ fn camera_draft_uses_render_command_and_keeps_saved_design_unchanged() {
     let mut h = fixture();
     let document = h.app.session.doc.to_json();
     let undo = h.app.session.undo.len();
-    for up in [solidcraft_engine::render::UpAxis::Z, solidcraft_engine::render::UpAxis::Y] {
+    for up in [solidcraft_viewport::UpAxis::Z, solidcraft_viewport::UpAxis::Y] {
         let mut camera = h.app.cam;
         camera.up = up;
         camera.roll = 0.41;
@@ -1732,7 +1917,7 @@ fn cpu_raster_refusing_a_size_names_the_method_and_profile_that_render_it() {
     assert!(!size_limit_reason(&h.app, 16384, 16384).contains("CPU resource profile"), "past Workstation no profile is named");
     assert_eq!(size_mark(&h.app, "fits", Some((2048, 2048))), None);
     h.app.preferences.language = "de".into();
-    let _language = crate::i18n::scope("de");
+    let _language = solidcraft_ui_text::scope("de");
     assert!(super::super::image_request(&h.app).unwrap_err().contains("CPU-Ressourcenprofil Studio"));
 }
 
@@ -1773,14 +1958,24 @@ fn a_size_the_cpu_profile_refuses_names_the_profile_that_renders_it() {
     assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (3840, 2160));
     assert!(Arc::ptr_eq(&doc, &h.app.session.doc));
 
-    // Studio renders 4K and marks nothing up to it; a 16K-wide image names Workstation.
+    // Studio renders 4K; 8K UHD needs Workstation within the new UI output envelope.
     h.app.render_workspace.view.raytrace.budget = CpuBudget::Studio;
+    assert_eq!(h.app.render_workspace.view.studio.supersampling, 1);
+    assert!(h.app.render_workspace.view.raytrace.progressive.is_none());
     cpu::validate_progressive_image(&h.app).unwrap();
     assert_eq!(size_mark(&h.app, "4K UHD", Some((3840, 2160))), None);
-    assert_eq!(size_mark(&h.app, "16K", Some((15360, 4320))).as_deref(), Some("16K · needs Workstation"));
-    assert!(size_limit_reason(&h.app, 15360, 4320).contains("choose the Workstation CPU resource profile"));
-    h.app.render_workspace.view.raytrace.budget = CpuBudget::Workstation;
+    assert_eq!(size_mark(&h.app, "8K UHD", Some((7680, 4320))).as_deref(), Some("8K UHD · needs Workstation"));
+    assert!(size_limit_reason(&h.app, 7680, 4320).contains("choose the Workstation CPU resource profile"));
+    assert_eq!(h.app.render_workspace.view.raytrace.budget, CpuBudget::Studio, "a hint does not change the profile");
+    assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (3840, 2160));
+    // Existing native requests retain their profile hint, while size selectors do
+    // not advertise a new over-8K choice.
+    assert_eq!(cpu::profile_for_size(&h.app, 15360, 4320), Some(CpuBudget::Workstation));
     assert_eq!(size_mark(&h.app, "16K", Some((15360, 4320))), None);
+    assert!(size_limit_reason(&h.app, 15360, 4320).contains("choose the Workstation CPU resource profile"));
+    assert!(!size_selection_limit_reason(&h.app, 15360, 4320).contains("CPU resource profile"));
+    h.app.render_workspace.view.raytrace.budget = CpuBudget::Workstation;
+    assert_eq!(size_mark(&h.app, "8K UHD", Some((7680, 4320))), None);
 
     // Progressive sampling's camera-sample budget counts: 4K at 64 spp needs Studio too.
     h.app.render_workspace.view.raytrace.budget = CpuBudget::Compact;
@@ -1791,7 +1986,7 @@ fn a_size_the_cpu_profile_refuses_names_the_profile_that_renders_it() {
     // Translated: the profile is named as the profile selector names it.
     h.app.preferences.language = "ja".into();
     {
-        let _language = crate::i18n::scope("ja");
+        let _language = solidcraft_ui_text::scope("ja");
         let reason = size_limit_reason(&h.app, 3840, 2160);
         assert!(reason.contains("CPUリソースプロファイル「スタジオ」"), "{reason}");
         assert_eq!(size_mark(&h.app, "4K UHD", Some((3840, 2160))).as_deref(), Some("4K UHD・「スタジオ」が必要"));
@@ -1805,7 +2000,7 @@ fn a_size_the_cpu_profile_refuses_names_the_profile_that_renders_it() {
     h.step(&json!({"click":{"handle":"render:shots:size"}})).unwrap();
     h.step(&json!({"widget":"4K UHD · 3840 × 2160"})).unwrap();
     assert_eq!(size_mark(&h.app, "4K UHD", Some((3840, 2160))), None);
-    // 15360 × 4320 is past the GPU limits, yet Workstation would admit it: still no CPU profile.
+    // An over-8K UI size never names a CPU profile, including on the GPU method.
     assert_eq!(size_mark(&h.app, "16K", Some((15360, 4320))), None);
     assert!(!size_limit_reason(&h.app, 15360, 4320).contains("CPU resource profile"));
     cpu::validate_progressive_image(&h.app).unwrap();
@@ -1927,7 +2122,7 @@ fn appearance_inspector_all_users_replaces_exact_look_once_without_changing_mass
     h.step(&json!({"click":{"handle":"render:stage:look"}})).unwrap();
     assert_eq!(selected_editor(&h.app), Editor::Appearance);
     let undo = h.app.session.undo.len();
-    h.step(&json!({"click":{"handle":format!("dialog:{}:{}", h.app.tr("render.inspector_applies_to"), crate::i18n::format("render.inspector_all_users", &[("count", "2")]))}}))
+    h.step(&json!({"click":{"handle":format!("dialog:{}:{}", h.app.tr("render.inspector_applies_to"), solidcraft_ui_text::format("render.inspector_all_users", &[("count", "2")]))}}))
         .unwrap();
     h.step(&json!({"click":{"handle":"render:appearance:preview:replace"}})).unwrap();
     h.step(&json!({"click":{"handle":"dialog: search"}})).unwrap();
@@ -2441,7 +2636,7 @@ fn appearance_inspector_approved_layout_is_305_wide_and_preserves_stage_bounds()
     assert!((inspector.width() - 305.0).abs() <= 1.0, "{inspector:?}");
     assert!((inspector.top() - browser.top()).abs() <= 1.0);
     assert!(inspector.bottom() < shots.top());
-    assert!(h.widget(&crate::i18n::format("render.inspector_all_users", &[("count", "2")])).is_some());
+    assert!(h.widget(&solidcraft_ui_text::format("render.inspector_all_users", &[("count", "2")])).is_some());
     assert!(h.widget(h.app.tr("render.inspector_save_library")).is_some());
     assert_eq!(h.app.session.doc.to_json(), before);
     assert_eq!(h.app.session.undo.len(), undo);
@@ -2887,7 +3082,7 @@ mod quality_button_contract {
     }
 
     #[test]
-    fn quality_buttons_apply_all_three_actual_catalog_budgets_as_one_numerical_edit() {
+    fn quality_buttons_apply_canonical_catalog_budgets_within_ui_limit() {
         for (index, id, width, height, samples, depth, denoise) in
             [(0, "Q-001", 960, 540, 64, 4, false), (1, "Q-002", 1600, 900, 512, 8, true), (2, "Q-003", 2560, 1440, 2048, 12, true)]
         {
@@ -2900,6 +3095,8 @@ mod quality_button_contract {
             assert_eq!(plan["settings"], json!({"width":width,"height":height}));
             assert_eq!(plan["gpu_options"], json!({"samples":samples,"max_depth":depth,"seed":21026,"denoise":denoise}));
             assert!(plan["omitted"].as_array().unwrap().iter().any(|v| v == "convergence_certification"));
+            prepare_quality_choices(&mut h.app);
+            assert_eq!(quality_reason(&h.app, index), None);
             choose_quality(&mut h.app, index).unwrap();
             assert!(h.app.render_workspace.view.library.review.is_none());
             assert_eq!((h.app.session.revision, h.app.session.undo.len()), (history.0 + 1, history.1 + 1));
@@ -2933,14 +3130,14 @@ mod quality_button_contract {
         let history = (h.app.session.revision, h.app.session.undo.len());
         h.app.run("view.render_select", json!({"kind":"sampling"})).unwrap();
         h.frames(3);
-        h.step(&json!({"click":{"handle":"render:quality:balanced"}})).unwrap();
+        h.step(&json!({"click":{"handle":"render:quality:draft"}})).unwrap();
         h.frames(3);
         assert!(h.app.render_workspace.view.library.review.is_none());
         assert_eq!(h.app.session.revision, history.0 + 1);
         assert_eq!(h.app.session.undo.len(), history.1 + 1);
-        assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (1600, 900));
-        assert_eq!((h.app.render_workspace.view.samples, h.app.render_workspace.view.max_depth, h.app.render_workspace.view.seed), (512, 8, 21026));
-        assert!(h.app.render_workspace.view.studio.denoise);
+        assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (960, 540));
+        assert_eq!((h.app.render_workspace.view.samples, h.app.render_workspace.view.max_depth, h.app.render_workspace.view.seed), (64, 4, 21026));
+        assert!(!h.app.render_workspace.view.studio.denoise);
         assert_eq!(h.app.render_workspace.view.name, shot);
         assert_eq!(h.app.render_workspace.view.stage, stage);
         assert_eq!(h.app.render_workspace.view.method, ImageMethod::GpuRaytrace);
@@ -2948,9 +3145,9 @@ mod quality_button_contract {
         assert_eq!(h.app.render_workspace.view.studio.intensity, 0.42);
         assert_eq!(h.app.render_workspace.view.studio.ambient, [0.11, 0.22, 0.33]);
         assert_eq!(h.app.render_workspace.view.draft.exposure_ev, 1.23);
-        assert_eq!(h.app.session.doc.render.setups[&shot].width, 1600);
-        assert_eq!(quality_selection(&h.app), 1);
-        let summary = quality_summary(&h.app, 1600, 900, 512, 8, 21026, true);
+        assert_eq!(h.app.session.doc.render.setups[&shot].width, 960);
+        assert_eq!(quality_selection(&h.app), 0);
+        let summary = quality_summary(&h.app, 960, 540, 64, 4, 21026, false);
         assert!(h.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == summary)));
         assert!(crate::scenario::rect_of("render:review:acknowledge").is_none());
         assert!(h.app.render_workspace.view.job.is_none(), "choosing quality never starts a renderer");
@@ -3114,12 +3311,12 @@ mod quality_button_contract {
         h.frames(3);
         let navigation = h.app.cam;
         let history = (h.app.session.revision, h.app.session.undo.len());
-        choose_quality(&mut h.app, 1).unwrap();
+        choose_quality(&mut h.app, 0).unwrap();
         h.frames(3);
         assert!(h.app.render_workspace.view.library.review.is_none());
         let updated = &h.app.session.doc.render.setups[&shot];
         assert_eq!(updated.camera, saved.camera, "a sample budget is not an Update shot action");
-        assert_eq!((updated.width, updated.height), (1600, 900));
+        assert_eq!((updated.width, updated.height), (960, 540));
         assert_eq!(h.app.cam, navigation);
         assert!(h.app.render_workspace.view.dirty, "the explicit camera draft remains unsaved");
         assert_eq!((h.app.session.revision, h.app.session.undo.len()), (history.0 + 1, history.1 + 1));
@@ -3164,14 +3361,14 @@ fn explicit_shot_thumbnail_restores_saved_cameras_and_keeps_dirty_current_shot_c
     h.app.render_workspace.view.live_paused = true;
     super::super::select_image_method(&mut h.app, ImageMethod::GpuRaytrace);
     h.app.render_workspace.view.name = "A".into();
-    let saved_a = solidcraft_engine::render::Camera { fov: 0.6, distance: 123.0, yaw: 0.7, roll: 0.2, ..h.app.cam };
+    let saved_a = solidcraft_viewport::Camera { fov: 0.6, distance: 123.0, yaw: 0.7, roll: 0.2, ..h.app.cam };
     apply_camera_draft(&mut h.app, saved_a).unwrap();
     setups::save(&mut h.app).unwrap();
-    let saved_b = solidcraft_engine::render::Camera { fov: 0.8, distance: 170.0, yaw: -0.2, up: solidcraft_engine::render::UpAxis::Y, ..saved_a };
+    let saved_b = solidcraft_viewport::Camera { fov: 0.8, distance: 170.0, yaw: -0.2, up: solidcraft_viewport::UpAxis::Y, ..saved_a };
     h.app.run("render.settings.set", json!({"name":"B","set":{"camera":saved_b,"width":321,"job":{"method":"gpu_path"}}})).unwrap();
     let document = h.app.session.doc.clone();
     let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
-    let navigated = solidcraft_engine::render::Camera { yaw: saved_a.yaw + 0.25, ..saved_a };
+    let navigated = solidcraft_viewport::Camera { yaw: saved_a.yaw + 0.25, ..saved_a };
     apply_camera_draft(&mut h.app, navigated).unwrap();
     h.frames(3);
     h.app.run("view.render_select", json!({"kind":"shot","id":"A"})).unwrap();
@@ -3215,7 +3412,7 @@ fn saved_numeric_reload_and_undo_do_not_activate_a_shot_camera() {
     setups::save(&mut h.app).unwrap();
     let name = h.app.render_workspace.view.name.clone();
     let saved = h.app.session.doc.render.setups[&name].clone();
-    let navigation = solidcraft_engine::render::Camera { yaw: h.app.cam.yaw + 0.4, distance: h.app.cam.distance * 1.2, ..h.app.cam };
+    let navigation = solidcraft_viewport::Camera { yaw: h.app.cam.yaw + 0.4, distance: h.app.cam.distance * 1.2, ..h.app.cam };
     apply_camera_draft(&mut h.app, navigation).unwrap();
     let before = setups::draft(&h.app).unwrap();
     h.app.render_workspace.view.draft.width = 513;
@@ -3239,9 +3436,9 @@ fn physical_tree_shot_activation_pairs_saved_cpu_lens_with_its_perspective_camer
     h.app.render_workspace.view.live_paused = true;
     super::super::select_image_method(&mut h.app, ImageMethod::Raster);
     h.app.render_workspace.view.name = "A".into();
-    apply_camera_draft(&mut h.app, solidcraft_engine::render::Camera::default()).unwrap();
+    apply_camera_draft(&mut h.app, solidcraft_viewport::Camera::default()).unwrap();
     setups::save(&mut h.app).unwrap();
-    let camera = solidcraft_engine::render::Camera { fov: 35f64.to_radians(), distance: 168.6, ..h.app.cam };
+    let camera = solidcraft_viewport::Camera { fov: 35f64.to_radians(), distance: 168.6, ..h.app.cam };
     let lens = ThinLens { aperture_radius_mm: 1.0, focus_distance_mm: 168.6 };
     h.app
         .run(
@@ -3278,7 +3475,7 @@ fn explicit_revert_and_restore_clean_only_the_saved_camera_and_keep_real_numeric
             h.app.render_workspace.view.live_paused = true;
             super::super::select_image_method(&mut h.app, ImageMethod::CpuRaytrace);
             h.app.render_workspace.view.name = "A".into();
-            let camera = solidcraft_engine::render::Camera { fov: 0.6, distance: 168.6, ..h.app.cam };
+            let camera = solidcraft_viewport::Camera { fov: 0.6, distance: 168.6, ..h.app.cam };
             apply_camera_draft(&mut h.app, camera).unwrap();
             setups::save(&mut h.app).unwrap();
             h.app.run("render.settings.set", json!({"name":"B","set":{"job":{"method":"raster"}}})).unwrap();
