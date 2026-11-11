@@ -504,9 +504,10 @@ fn fillet_fitted(
 ) -> std::result::Result<(kernel::Body, Option<Vec<f64>>, Vec<Vec3>), kernel::KernelError> {
     match kernel::fillet_removing(body, edges, r, turn) {
         Ok((b, gone)) => Ok((b, None, gone)),
-        Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Exact => {
-            Err(with_largest_fit(why, "radius", || kernel::fillet_max_why(body, edges, r, turn)))
-        }
+        Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Exact => Err({
+            let hint = kernel::named_fit(&why);
+            with_largest_fit(why, "radius", || kernel::fillet_max_why(body, edges, r, turn, hint))
+        }),
         Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Reduce => match kernel::fillet_max_each(body, edges, r, turn)? {
             // Built at the radius asked for after all (the groups apart): nothing reduced.
             Some((used, b)) => Ok((b, used.iter().any(|u| *u < r).then_some(used), Vec::new())),
@@ -565,13 +566,13 @@ fn with_largest_fit(
         Ok(kernel::FitSearch { found: Some((largest, _)), .. }) => {
             kernel::KernelError::TooLarge(format!("{why}; {}", kernel::largest_fit_note(size, largest)))
         }
-        Ok(kernel::FitSearch { found: None, smallest_refused: Some((at, e)) }) => kernel::KernelError::TooLarge(format!(
+        Ok(kernel::FitSearch { found: None, smallest_refused: Some((at, e)), .. }) => kernel::KernelError::TooLarge(format!(
             "{}; no smaller {size} builds either (down to {} mm: {})",
             kernel::without_fit_note(&why),
             show_mm(at),
             kernel::without_fit_note(&e.to_string())
         )),
-        Ok(kernel::FitSearch { found: None, smallest_refused: None }) => kernel::KernelError::TooLarge(kernel::without_fit_note(&why)),
+        Ok(kernel::FitSearch { found: None, smallest_refused: None, .. }) => kernel::KernelError::TooLarge(kernel::without_fit_note(&why)),
         Err(e) => {
             log::debug!("the largest {size} that fits: {e}");
             kernel::KernelError::TooLarge(format!("{}; a smaller {size} fails otherwise: {e}", kernel::without_fit_note(&why)))
@@ -3832,6 +3833,7 @@ mod largest_fit_tests {
             Ok(kernel::FitSearch {
                 found: None,
                 smallest_refused: Some((0.001, kernel::KernelError::TooLarge("the trim leaks; the largest radius that fits is 0.0004 mm".into()))),
+                tried: 14,
             })
         })
         .to_string();
@@ -9153,7 +9155,10 @@ fn chamfer_with(
     Ok(match side {
         Some(s) => kernel::chamfer_sides(b, edges, d, s, flip)?,
         None => match kernel::chamfer(b, edges, d) {
-            Err(kernel::KernelError::TooLarge(why)) => return Err(with_largest_fit(why, "distance", || kernel::chamfer_max_why(b, edges, d)).into()),
+            Err(kernel::KernelError::TooLarge(why)) => {
+                let hint = kernel::named_fit(&why);
+                return Err(with_largest_fit(why, "distance", || kernel::chamfer_max_why(b, edges, d, hint)).into());
+            }
             other => other?,
         },
     })
