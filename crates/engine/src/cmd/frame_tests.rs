@@ -1349,3 +1349,29 @@ fn a_turned_member_keeps_its_face_names() {
     let n = post.body.planar_face(now).unwrap().normal();
     assert!(near3([n.x, n.y, n.z], [t.cos(), t.sin(), 0.0]), "{name}: {n:?}");
 }
+
+/// A Rotate step whose angle can't be worked out reports it itself; its Frame Member builds as
+/// if the step weren't there (Ruling 8).
+#[test]
+fn a_rotate_step_with_a_bad_angle_errors_alone() {
+    let mut s = brace();
+    let flat = brace_box(&mut s);
+    let face = brace_side(&s, 0.0);
+    run(&mut s, "frame.rotate_member", json!({"face": face, "angle": "45 deg"}));
+    assert!(!same_box(brace_box(&mut s), flat));
+    let step = turn_step(&s).id;
+    let frame = s.doc.features.iter().find(|f| f.name == "Brace member").unwrap().id;
+    // Not a number, not an angle, and a parameter the design hasn't got.
+    for (bad, says) in [("1 / 0 * 1 deg", ""), ("45 mm", ""), ("nope", "unknown parameter `nope`")] {
+        if let Some(f) = s.doc_mut().feature_mut(step)
+            && let solidcraft_doc::FeatureKind::FrameMemberTurn { angle, .. } = &mut f.kind
+        {
+            *angle = bad.into();
+        }
+        s.refresh();
+        let e = s.model.result(step).and_then(|r| r.error.clone()).unwrap_or_default();
+        assert!(!e.is_empty() && e.contains(says), "{bad}: the step reports its angle: {e}");
+        assert!(s.model.result(frame).is_some_and(|r| r.error.is_none()), "{bad}: the frame builds");
+        assert!(same_box(brace_box(&mut s), flat), "{bad}: unturned");
+    }
+}

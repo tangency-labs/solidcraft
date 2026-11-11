@@ -103,7 +103,9 @@ fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &Mode
         Some(e) => val(vals, e, Kind::Angle)?,
         None => 0.0,
     };
-    let turns = member_turns(doc, FeatureId(f.id)).into_iter().map(|(line, e)| Ok((line, val(vals, &e, Kind::Angle)?))).collect::<Result<_>>()?;
+    // A step whose angle doesn't evaluate turns nothing (it reports why itself, `check_turn`): an
+    // earlier step for the line, if any, stands.
+    let turns = turn_steps(doc, FeatureId(f.id)).filter_map(|(line, e)| Some((line.to_string(), turn_angle(vals, e).ok()?))).collect();
     let centre = frame::anchor_point(&regions, frame::Anchor::Center);
     Ok(Layout { segments, regions, description, at, turn, turns, centre })
 }
@@ -172,23 +174,34 @@ pub fn member_names(st: &ModelState, lines: &[String], pinned: &BTreeMap<String,
 /// The angle each line of the frame member `frame` is turned to by active Rotate steps after
 /// it: line id to angle expression, a later step replacing an earlier one.
 pub fn member_turns(doc: &Document, frame: FeatureId) -> BTreeMap<String, Expr> {
-    let mut turns = BTreeMap::new();
-    let Some(at) = doc.feature_index(frame.0) else { return turns };
-    let end = doc.marker.unwrap_or(doc.features.len()).min(doc.features.len());
-    for f in doc.features.iter().take(end).skip(at.saturating_add(1)) {
-        if let FeatureKind::FrameMemberTurn { member, angle } = &f.kind
-            && !f.suppressed
-            && member.feature == frame
-        {
-            turns.insert(member.line.clone(), angle.clone());
-        }
-    }
-    turns
+    turn_steps(doc, frame).map(|(line, e)| (line.to_string(), e.clone())).collect()
 }
 
-/// A Rotate step's checks: its frame member is there, earlier, and still has the line.
-pub(super) fn check_turn(doc: &Document, f: &Feature, st: &ModelState) -> Result<()> {
-    let FeatureKind::FrameMemberTurn { member, .. } = &f.kind else {
+/// The active Rotate steps of the frame member `frame`, in timeline order: each one's line id and
+/// angle. Active: after the frame, before the marker, not suppressed; the last for a line wins.
+pub(super) fn turn_steps(doc: &Document, frame: FeatureId) -> impl Iterator<Item = (&str, &Expr)> {
+    let at = doc.feature_index(frame.0);
+    let end = doc.marker.unwrap_or(doc.features.len()).min(doc.features.len());
+    let after = at.map_or(end, |at| at.saturating_add(1));
+    doc.features.iter().take(end).skip(after).filter_map(move |f| match &f.kind {
+        FeatureKind::FrameMemberTurn { member, angle } if !f.suppressed && member.feature == frame => Some((member.line.as_str(), angle)),
+        _ => None,
+    })
+}
+
+/// A Rotate step's angle (radians), refused unless it evaluates to a finite number.
+fn turn_angle(vals: &BTreeMap<String, Value>, angle: &Expr) -> Result<f64> {
+    let a = val(vals, angle, Kind::Angle)?;
+    if !a.is_finite() {
+        return Err(DocError::Invalid("The angle must be a finite number".into()));
+    }
+    Ok(a)
+}
+
+/// A Rotate step's checks: its frame member is there, earlier, and still has the line, and its
+/// angle evaluates.
+pub(super) fn check_turn(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &ModelState) -> Result<()> {
+    let FeatureKind::FrameMemberTurn { member, angle } = &f.kind else {
         return Err(DocError::Invalid("not a rotate member feature".into()));
     };
     let gone = || DocError::Invalid("Its frame member is gone".into());
@@ -200,7 +213,7 @@ pub(super) fn check_turn(doc: &Document, f: &Feature, st: &ModelState) -> Result
     if !member_line_ids(st, &source.kind)?.contains(&member.line) {
         return Err(DocError::Invalid(format!("Line `{}` of its frame member is gone", member.line)));
     }
-    Ok(())
+    turn_angle(vals, angle).map(|_| ())
 }
 
 /// The ids of a `FrameMember` feature's lines in `st`, in the order its members are made.

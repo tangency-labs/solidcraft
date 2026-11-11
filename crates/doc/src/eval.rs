@@ -1765,24 +1765,23 @@ fn chain_fingerprint(
     fp
 }
 
-/// The turns the Rotate steps after frame member `f` give it ([`frame_member::member_turns`]),
-/// and the values of the parameters their angles use. None for a frame member without turns and
-/// any other feature, whose keys are then as they were before Rotate steps.
+/// The Rotate steps after frame member `f` that may turn it ([`frame_member::turn_steps`]), every
+/// one, since one whose angle fails gives way to an earlier one, and the values of the parameters
+/// their angles use. None for a frame member without them and any other feature, whose keys are
+/// then as they were before Rotate steps.
 fn turns_digest(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature) -> Option<u64> {
     let FeatureKind::FrameMember { .. } = &f.kind else { return None };
-    let turns = frame_member::member_turns(doc, crate::FeatureId(f.id));
-    if turns.is_empty() {
-        return None;
-    }
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    for (line, e) in &turns {
+    let mut any = false;
+    for (line, e) in frame_member::turn_steps(doc, crate::FeatureId(f.id)) {
+        any = true;
         line.hash(&mut h);
         e.hash(&mut h);
         for n in expr::references(e) {
             vals.get(&n).map(|v| v.v.to_bits()).hash(&mut h);
         }
     }
-    Some(h.finish())
+    any.then(|| h.finish())
 }
 
 /// The features a pattern or mirror of `features` replays: each source, and the sources of one
@@ -10276,7 +10275,7 @@ fn eval_feature(
             Ok(())
         }
         FeatureKind::FrameEndCap { .. } => crate::end_cap::evaluate(doc, vals, f, st),
-        FeatureKind::FrameMemberTurn { .. } => frame_member::check_turn(doc, f, st),
+        FeatureKind::FrameMemberTurn { .. } => frame_member::check_turn(doc, vals, f, st),
         FeatureKind::FrameMember { .. } => frame_member::evaluate(doc, vals, f, st),
         FeatureKind::BoundingSolid { bodies, margin } => {
             let m = val(vals, margin, Kind::Length)?;
