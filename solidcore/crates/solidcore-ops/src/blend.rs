@@ -11,7 +11,8 @@
 //! - [`fillet_variable`]: one edge rounded with a radius law.
 //! - [`edge_faces_along`]: the two faces of an edge with how far each faces a direction, for an
 //!   application choosing the face a chamfer's first distance is along.
-//! - [`tangent_chain`]: the edges a blend of some edges runs on into tangentially, the kernel's.
+//! - [`tangent_chain`]: the edges a blend of some edges runs on into tangentially, on the
+//!   kernel's measures.
 //!
 //! The kernel's session is driven as the C API's `round_edges` drove SMLib's executive:
 //! the turn, parameters, the set-back vertices, the corners (setbacks set, a chamfer's
@@ -54,6 +55,7 @@ use solidcore::{Brep, EntityRef, Kernel, SolidError, Vec3};
 use crate::body::{finish, Body, Expect};
 use crate::error::status;
 use crate::session::{answer, measure_body, with_body};
+use crate::tangent::Chain;
 use crate::{Error, FitKind, Result, RoomReason, Unblendable};
 
 mod room;
@@ -1432,39 +1434,45 @@ fn faces_along_indices(
     })
 }
 
-/// The tangent chain of the edges of `body` at record indices `edges` (the kernel's
-/// `blend_refusal::tangent_chain`): those edges (each once, in order), then every edge with a
-/// blend that one of them runs on into at a vertex, leaving it opposite within `angle`
-/// radians, along one of its faces, of its convexity and with faces not tangent there, and so
-/// on until no more do. For a blend that is to run on: the edges to blend together.
+/// The tangent chain of the edges of `body` at record indices `edges` (through `order`, its
+/// record's [`crate::Order`], or the body's own edge order): those edges (each once, in
+/// order), then every edge that continues one of them within `angle` radians at a shared
+/// vertex, and so on
+/// until no more do (the walk: [`crate::tangent`]). An edge does not join when it is not
+/// between two faces, when it is smooth (its faces meet within `angle` all along it, a seam
+/// among them), when it turns over (convex where the edge it continues is concave, or the
+/// reverse), or when it is in `passed_over`. An edge whose smoothness the kernel leaves
+/// undecided joins nothing and is named in [`Chain::undecided`]. Every measure is the kernel's
+/// (`query::tangent_edge`, `query::edge_turn`). For a blend that is to run on: the edges to
+/// blend together.
 ///
 /// # Errors
-/// [`Error::Argument`] for no edges, an index past the body's edges, or an angle not finite
-/// and strictly between 0 and a right angle; the kernel's refusals.
-pub fn tangent_chain(body: &Body, edges: &[usize], angle: f64) -> Result<Vec<usize>> {
-    if edges.is_empty() || !(angle > 0.0 && angle < std::f64::consts::FRAC_PI_2) {
-        return Err(Error::Argument);
+/// [`Error::Argument`] for no edges, an index past the edges or naming an edge the body does
+/// not have, or an angle not finite and strictly between 0 and a right angle; the kernel's
+/// refusals (a face with no NURBS form or in power-basis form, an edge use with no pcurve, a
+/// pcurve leaving its face's net); [`Error::Cancelled`] when the session's cancel token is
+/// cancelled.
+pub fn tangent_chain(
+    body: &Body,
+    order: Option<&crate::Order>,
+    edges: &[usize],
+    passed_over: &[usize],
+    angle: f64,
+) -> Result<Chain> {
+    let walk = crate::tangent::edge_walk;
+    match order {
+        Some(order) => {
+            let (copy, mapped) = body.copy_with_order(order)?;
+            with_body("tangent_chain", &copy, |k, b| {
+                walk(k, b, &mapped.edges, edges, passed_over, angle)
+            })?
+        }
+        None => measure_body("tangent_chain", body, |k, b| {
+            // the copy keeps the order: an edge's index in it is its index in the body
+            let list = b.edge_list().to_vec();
+            walk(k, b, &list, edges, passed_over, angle)
+        })?,
     }
-    measure_body("tangent_chain", body, |k, b| {
-        // the copy keeps the order: an edge's index in it is its index in the body
-        let list = b.edge_list().to_vec();
-        let mut seeds = Vec::new();
-        for &i in edges {
-            match list.get(i) {
-                Some(&e) => seeds.push(e),
-                None => return Ok(Err(Error::Argument)),
-            }
-        }
-        let chain = solidcore::blend::blend_refusal::tangent_chain(k, b, &seeds, angle)?;
-        let mut out = Vec::new();
-        for e in chain {
-            match list.iter().position(|&x| x == e) {
-                Some(i) => out.push(i),
-                None => return Ok(Err(Error::Exception)),
-            }
-        }
-        Ok(Ok(out))
-    })?
 }
 
 /// The edges of `body` at record indices `edges` chamfered `distance` back along the face of
