@@ -124,7 +124,8 @@
 //!   a plane in both, a cone (a cylinder among them) or an extrusion along its line
 //!   ([`EndContinuation::of`]), where the net is of degree 1 in it; a cone's continuation
 //!   may not reach its apex, the cone's one point on its axis ([`ConeAxis`], from the cone's
-//!   definition): the part's distance from the axis is proved above 0.
+//!   definition): the part taken back to the end it lies past is proved off the axis, so a
+//!   part wholly past the apex, on the other nappe, is refused too.
 //!   The part of the box past the end takes the end span's polynomial, which for a degree-1
 //!   direction is the face's edge jet continued, `P(u, v_e) + (v - v_e) P_v(u, v_e)`: the
 //!   same polynomial on both sides of the end, so the feet's system is smooth to every order
@@ -1086,18 +1087,25 @@ pub fn nurbs_partials_over_box_ending(
         for &(b0, b1, kv) in &vs {
             let p = nurbs_partials_over_piece(cn, ku, kv, a0, a1, b0, b1, lk)?;
             // a part past an end of a cone may not reach its apex, the one point of the cone
-            // on its axis: the part's points must be proved off the axis (the part is
-            // connected and holds the end's points, so it then lies wholly on the face's
-            // nappe)
+            // on its axis: the part taken back to the end (its range in each direction
+            // hulled with the domain's end it lies past) must be proved off the axis. That
+            // set is connected and holds points of the end, which are the face's, so off the
+            // axis it lies wholly on the face's nappe, the part with it. A part wholly past
+            // the apex (on the other nappe, off the axis itself) is refused so: the way back
+            // to the end crosses the axis
             let past = a0 < u0 || a1 > u1 || b0 < v0 || b1 > v1;
             if let (true, Some(cone)) = (past, ends.apex) {
-                let x = p.at(0, 0);
+                let back = |lo: f64, hi: f64, d0: f64, d1: f64| (lo.min(d1), hi.max(d0));
+                let (c0, c1) = back(a0, a1, u0, u1);
+                let (e0, e1) = back(b0, b1, v0, v1);
+                let to_end = nurbs_partials_over_piece(cn, ku, kv, c0, c1, e0, e1, 0)?;
+                let x = to_end.at(0, 0);
                 let [ox, oy, oz] = cone.origin.map(Ivl::from);
                 let [zx, zy, zz] = cone.axis.map(Ivl::from);
                 let (dx, dy, dz) = (x.x - ox, x.y - oy, x.z - oz);
                 let h = dx * zx + dy * zy + dz * zz;
                 // the radial vector, off the axis: proved nonzero where one of its coordinates
-                // is bounded away from 0 over the part
+                // is bounded away from 0 over that set
                 let radial = [dx - h * zx, dy - h * zy, dz - h * zz];
                 if !radial.iter().any(|c| c.mig() > 0.0) {
                     return Err(refused());
@@ -5501,7 +5509,8 @@ mod tests {
     /// its feet's box holds the cone's own point `r(h) (cos t X + sin t Y) + h Z` past the
     /// top (`r(h)` its radius at height `h`, `t` the edge point's angle), and `S_v` holds the
     /// generator; past a u end it is refused, and so is a continued part that reaches the
-    /// apex (the cone's one point on its axis).
+    /// apex (the cone's one point on its axis), and so is a box wholly past the apex, on the
+    /// other nappe.
     #[test]
     fn a_cone_s_box_continues_along_its_generator() {
         let k = Kernel::default();
@@ -5554,6 +5563,42 @@ mod tests {
         assert!(
             matches!(past_u, Err(SolidError::Unsupported { reason, .. }) if reason == FOOT_PAST_END),
             "{past_u:?}"
+        );
+        // a box wholly past the top: short of the apex it is the cone continued; wholly past
+        // the apex (heights 11 to 12, the apex at 10: on the other nappe, off the axis) it is
+        // refused, since the way back to the top crosses the axis
+        let mid_u = u0 + 0.3 * (u1 - u0);
+        let (h0, h1) = (at(mid_u, v0).z, at(mid_u, v1).z);
+        let v_at = |h: f64| v0 + (h - h0) * (v1 - v0) / (h1 - h0);
+        let apex = height * bot / (bot - top);
+        assert!((apex - 10.0).abs() < 1e-12);
+        let short_of = nurbs_partials_over_box_ending(
+            &n,
+            ends,
+            mid_u,
+            mid_u,
+            v_at(5.0),
+            v_at(6.0),
+            1,
+            FEET_BOX_CONTINUITY,
+        );
+        assert!(
+            short_of.is_ok(),
+            "past the top, short of the apex: {short_of:?}"
+        );
+        let beyond = nurbs_partials_over_box_ending(
+            &n,
+            ends,
+            mid_u,
+            mid_u,
+            v_at(11.0),
+            v_at(12.0),
+            1,
+            FEET_BOX_CONTINUITY,
+        );
+        assert!(
+            matches!(beyond, Err(SolidError::Unsupported { reason, .. }) if reason == FOOT_PAST_END),
+            "wholly past the apex: {beyond:?}"
         );
         // a cone whose apex lies just past its top: a continuation reaching it is refused
         let pointed = upright_cone(&k, 5.0, 0.05, 4.0);
