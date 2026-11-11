@@ -794,10 +794,11 @@ mod tests {
     fn a_menu_row_draws_a_hosts_texture_and_an_item_still_reads_as_its_kit_name() {
         const HOST: TextureId = TextureId::User(7);
         let item = Item { icon: ItemIcon::texture(HOST), ..Item::action("id", "Label", "") };
-        let output = crate::test_support::context().run_ui(egui::RawInput::default(), |ui| {
+        let mut output = crate::test_support::context().run_ui(egui::RawInput::default(), |ui| {
             MenuItem::new(&item.id, &item.label, item.icon.as_icon()).show(ui);
         });
         assert!(output.shapes.iter().any(|clipped| matches!(&clipped.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == HOST)));
+        output.textures_delta.clear();
 
         assert_eq!(serde_json::to_value(&item.icon).unwrap(), serde_json::json!(""), "a host's picture has no name to report");
         let named = ItemIcon::from("delete");
