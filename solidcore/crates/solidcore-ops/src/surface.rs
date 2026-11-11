@@ -32,7 +32,7 @@ use crate::sweep::{coord_ok, CURVE_MAX_POINTS};
 use crate::{Error, Result};
 
 /// A call's own refusal, else the value: as the kernel's calls answer inside [`run`].
-type Out<T> = std::result::Result<T, Error>;
+pub(crate) type Out<T> = std::result::Result<T, Error>;
 
 /// A call's own refusal inside a kernel call.
 macro_rules! refused {
@@ -97,7 +97,7 @@ fn spline(k: &Kernel, curve: &Curve) -> solidcore::Result<Out<BSplineCurve>> {
 }
 
 /// Each record curve as the kernel's B-spline ([`spline`]).
-fn splines(k: &Kernel, curves: &[Curve]) -> solidcore::Result<Out<Vec<BSplineCurve>>> {
+pub(crate) fn splines(k: &Kernel, curves: &[Curve]) -> solidcore::Result<Out<Vec<BSplineCurve>>> {
     let mut out = Vec::new();
     for c in curves {
         out.push(refused!(spline(k, c)?));
@@ -187,7 +187,7 @@ fn looped(curves: &mut [BSplineCurve], tol: f64) -> solidcore::Result<Out<()>> {
 }
 
 /// A sheet of one face on `surface`, over its whole natural box.
-fn sheet(k: &mut Kernel, surface: BSplineSurface) -> solidcore::Result<Out<Brep>> {
+pub(crate) fn sheet(k: &mut Kernel, surface: BSplineSurface) -> solidcore::Result<Out<Brep>> {
     let mut b = new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
     let surface = Surface::from(surface);
     let bx = surface.natural_uv_domain_with_nurb(k)?;
@@ -197,7 +197,7 @@ fn sheet(k: &mut Kernel, surface: BSplineSurface) -> solidcore::Result<Out<Brep>
 }
 
 /// A new body's record.
-fn record(made: Result<Out<Brep>>) -> Result<Record> {
+pub(crate) fn record(made: Result<Out<Brep>>) -> Result<Record> {
     Body::new(made??).to_record().map(|(r, _)| r)
 }
 
