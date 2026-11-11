@@ -488,10 +488,66 @@ impl Sub for Ivl {
     }
 }
 
+/// The least and the greatest of the four end products of finite, ordered `a` and `b`,
+/// from the two products their signs single out (`None` where both hold 0 inside, which
+/// needs all four).
+///
+/// Soundness: rounding to nearest is monotone and odd, so for a fixed `x >= 0` the
+/// rounded `x * y` does not fall as `y` rises, and for `x <= 0` it does not rise; with
+/// `lo <= hi` at each operand that orders the four rounded products in every sign case
+/// below, so the two named are the least and the greatest of them as values (finite
+/// operands overflow to infinities, never to NaN). Two of the four can be equal only
+/// as values, and the one double with two encodings is zero, whose ends `Ivl::checked`
+/// widens to the same bits whatever its sign, so the interval is the four-product one
+/// bit for bit.
+#[inline]
+fn sign_case_ends(a: Ivl, b: Ivl) -> Option<(f64, f64)> {
+    let (a0, a1, b0, b1) = (a.lo, a.hi, b.lo, b.hi);
+    if a0 == a1 && b0 == b1 {
+        let p = product(a0, b0);
+        return Some((p, p));
+    }
+    Some(if a0 >= 0.0 {
+        if b0 >= 0.0 {
+            (product(a0, b0), product(a1, b1))
+        } else if b1 <= 0.0 {
+            (product(a1, b0), product(a0, b1))
+        } else {
+            (product(a1, b0), product(a1, b1))
+        }
+    } else if a1 <= 0.0 {
+        if b0 >= 0.0 {
+            (product(a0, b1), product(a1, b0))
+        } else if b1 <= 0.0 {
+            (product(a1, b1), product(a0, b0))
+        } else {
+            (product(a0, b1), product(a0, b0))
+        }
+    } else if b0 >= 0.0 {
+        (product(a0, b1), product(a1, b1))
+    } else if b1 <= 0.0 {
+        (product(a1, b0), product(a0, b0))
+    } else {
+        return None;
+    })
+}
+
 impl Mul for Ivl {
     type Output = Self;
     #[inline]
     fn mul(self, b: Self) -> Self {
+        // finite ordered operands: the two products the signs name ([`sign_case_ends`])
+        if self.lo.is_finite()
+            && self.hi.is_finite()
+            && b.lo.is_finite()
+            && b.hi.is_finite()
+            && self.lo <= self.hi
+            && b.lo <= b.hi
+        {
+            if let Some((lo, hi)) = sign_case_ends(self, b) {
+                return Self::checked(lo, hi);
+            }
+        }
         let p0 = product(self.lo, b.lo);
         let rest = [
             product(self.lo, b.hi),
@@ -629,6 +685,93 @@ mod tests {
             f64::NAN,
         ] {
             same(x);
+        }
+    }
+
+    /// The product from the two end products the signs name is the four-product one bit
+    /// for bit: every sign case, points, signed zeros, subnormal and overflowing products,
+    /// and random ends (a fixed seed).
+    #[test]
+    fn the_sign_case_product_is_the_four_product_one_bit_for_bit() {
+        fn four(a: Ivl, b: Ivl) -> Ivl {
+            let p0 = product(a.lo, b.lo);
+            let mut lo = p0;
+            let mut hi = p0;
+            for pi in [
+                product(a.lo, b.hi),
+                product(a.hi, b.lo),
+                product(a.hi, b.hi),
+            ] {
+                if pi.is_nan() {
+                    return Ivl::whole();
+                }
+                lo = cmin(lo, pi);
+                hi = cmax(hi, pi);
+            }
+            Ivl::checked(lo, hi)
+        }
+        let same = |a: Ivl, b: Ivl| {
+            let (p, e) = (a * b, four(a, b));
+            assert!(
+                p.lo.to_bits() == e.lo.to_bits() && p.hi.to_bits() == e.hi.to_bits(),
+                "{a:?} * {b:?}: {p:?} against {e:?}"
+            );
+        };
+        let ends = [
+            0.0,
+            -0.0,
+            1.0,
+            -1.0,
+            0.5,
+            -2.5,
+            1.0e-300,
+            -1.0e-300,
+            1.0e-160,
+            -3.0e-170,
+            f64::MIN_POSITIVE,
+            f64::from_bits(1),
+            1.0e300,
+            -1.0e300,
+            f64::MAX,
+            -f64::MAX,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NAN,
+        ];
+        let mut intervals = Vec::new();
+        for &x in &ends {
+            for &y in &ends {
+                intervals.push(Ivl::new(x, y));
+            }
+        }
+        let mut seed = 0x51_7cc1_b727_220a_u64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        for _ in 0..4000 {
+            // random signs, exponents across the whole range, ordered or not
+            let mut end = || {
+                let e = next() % 0x7ff;
+                f64::from_bits((next() & (1 << 63)) | (e << 52) | (next() >> 12))
+            };
+            let (x, y) = (end(), end());
+            intervals.push(Ivl::new(x.min(y), x.max(y)));
+            intervals.push(Ivl::from(x));
+        }
+        for i in 0..2000 {
+            // nearby magnitudes, where products cross between binades
+            let x = f64::from(i) * 0.37 - 300.0;
+            intervals.push(Ivl::new(x, x + 0.25));
+        }
+        for (i, &a) in intervals.iter().enumerate() {
+            // every pair among the edge cases, a sample of the rest
+            let step = if i < ends.len() * ends.len() { 1 } else { 97 };
+            for &b in intervals.iter().step_by(step) {
+                same(a, b);
+            }
         }
     }
 
