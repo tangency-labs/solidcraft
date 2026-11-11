@@ -17,7 +17,7 @@ use solidcraft_engine::geom::Vec3Geom as _;
 use crate::SolveApp;
 use crate::prefs::LibrarySize;
 use crate::ui_kit::{Container, PartCard, PartCardSize, PartFace, Surface};
-use solidcraft_theme::{TabAccent, Tokens};
+use solidcraft_theme::Tokens;
 
 /// Most entries listed from one folder (a share can hold thousands).
 const MAX_ENTRIES: usize = 2000;
@@ -358,7 +358,7 @@ fn drop_point(app: &SolveApp, proj: &crate::viewport::Proj, pos: egui::Pos2) -> 
         }
     }
     let (o, d) = proj.ray(pos);
-    let up = if app.cam.up == solidcraft_engine::render::UpAxis::Y { Vec3::Y } else { Vec3::Z };
+    let up = if app.cam.up == solidcraft_viewport::UpAxis::Y { Vec3::Y } else { Vec3::Z };
     let den = d.dot(up);
     if den.abs() > 1e-9 {
         let t = -o.dot(up) / den;
@@ -407,7 +407,7 @@ pub fn view_drop(app: &mut SolveApp, ui: &egui::Ui, rect: egui::Rect, proj: &cra
     // Where it will land.
     let at = drop_point(app, proj, pos);
     if let Some(s) = proj.to_screen(at) {
-        ui.painter().circle_stroke(s, Tokens::get().space_6, egui::Stroke::new(2.0, TabAccent::for_tab(&Tokens::get(), "MODEL").color));
+        ui.painter().circle_stroke(s, Tokens::get().space_6, egui::Stroke::new(2.0, crate::workspace::tab_accent(&Tokens::get(), "MODEL").color));
     }
     if ctx.input(|i| i.pointer.primary_released())
         && let Some(d) = egui::DragAndDrop::take_payload::<Dragged>(ctx)
@@ -586,7 +586,7 @@ fn filtered(app: &SolveApp) -> Vec<Entry> {
 fn contents(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Acts, (dragged, short): (egui::Vec2, bool)) {
     let t = Tokens::get();
     let tr = solidcraft_ui_text::tr;
-    let accent = TabAccent::for_tab(&t, "MODEL");
+    let accent = crate::workspace::tab_accent(&t, "MODEL");
     // The title band drags the card; its buttons, added after, keep their clicks.
     let band = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), crate::ui_kit::header_height()));
     crate::frame::drag_dock(ui, band, DRAG_KEY, dragged, app.library.moved);
@@ -723,7 +723,7 @@ fn state(ui: &mut egui::Ui, icon: &str, ink: Option<egui::Color32>, text: &str) 
     let side = t.space_24 + t.space_8;
     let (r, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), side), egui::Sense::hover());
     let at = egui::Rect::from_center_size(r.center(), egui::vec2(side, side));
-    crate::icons::paint_ink(ui.painter(), at, icon, ink.unwrap_or(TabAccent::for_tab(&t, "MODEL").color));
+    crate::icons::paint_ink(ui.painter(), at, icon, ink.unwrap_or(crate::workspace::tab_accent(&t, "MODEL").color));
     ui.vertical_centered(|ui| ui.label(egui::RichText::new(text).size(t.font_small).color(t.form_ink)));
 }
 

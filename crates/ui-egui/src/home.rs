@@ -154,7 +154,7 @@ fn cutout(s: &Session) -> Option<egui::ColorImage> {
     if b.is_empty() {
         return None;
     }
-    cam.fit(&b);
+    cam.fit(&solidcraft_engine::render::view_bounds(&b));
     cam.distance *= 0.7;
     let guides = solidcraft_engine::view::Guides { grid: false, axes: false };
     let mut scene = solidcraft_engine::view::scene_with_guides(s, &cam, s.section, guides).ok()?;
@@ -326,7 +326,7 @@ pub(crate) fn part_picture(key: &str) -> Option<egui::ColorImage> {
         return picture(key);
     };
     let rgba: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
-    if let (Some(path), Some(bytes)) = (path, solidcraft_engine::render::png(THUMB[0], THUMB[1], rgba))
+    if let (Some(path), Some(bytes)) = (path, solidcraft_viewport::png(THUMB[0], THUMB[1], rgba))
         && let Some(dir) = path.parent()
         && std::fs::create_dir_all(dir).is_ok()
     {

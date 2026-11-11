@@ -1,9 +1,9 @@
 //! Parts library cards: a part's picture on the tile ground with its name under it, a folder with
 //! how many parts it holds, a names-only row, a placeholder while a folder is read, and the folder
-//! button that starts the library's breadcrumb. Tokens only; the Model accent marks a selection.
+//! button that starts the library's breadcrumb. Tokens only; the main accent marks a selection.
 use egui::{Response, Sense, TextureId, Ui, vec2};
 
-use solidcraft_theme::{TabAccent, Tokens};
+use solidcraft_theme::{AccentRamp, TabAccent, Tokens};
 
 /// The library's card sizes: three Small, two Medium or one Large across the list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -81,7 +81,7 @@ pub fn part_card(ui: &mut Ui, card: PartCard<'_>) -> Response {
     let width = size.width(card.room);
     let (rect, response) = ui.allocate_exact_size(vec2(width, size.height()), sense);
     let picture = egui::Rect::from_min_size(rect.min, vec2(width, size.picture()));
-    let accent = TabAccent::for_tab(&t, "MODEL");
+    let accent = TabAccent::for_ramp(&t, AccentRamp::Main);
     let painter = ui.painter_at(rect.expand(1.0));
     painter.rect_filled(picture, t.radius_md, t.dialog_footer);
     if card.selected {
@@ -134,7 +134,7 @@ pub fn part_row(ui: &mut Ui, name: &str, icon: &str, badge: Option<&str>, select
     let t = Tokens::get();
     let width = crate::metrics::dimension(ui.available_width());
     let (rect, response) = ui.allocate_exact_size(vec2(width, t.control_height), Sense::click_and_drag());
-    let accent = TabAccent::for_tab(&t, "MODEL");
+    let accent = TabAccent::for_ramp(&t, AccentRamp::Main);
     let painter = ui.painter_at(rect);
     if selected {
         painter.rect(rect, t.radius_sm, accent.soft, t.primary_border(accent.color), egui::StrokeKind::Inside);
@@ -172,7 +172,7 @@ pub fn folder_button(ui: &mut Ui, name: &str, max_width: f32) -> Response {
         egui::StrokeKind::Inside,
     );
     let icon = egui::Rect::from_center_size(egui::pos2(rect.left() + t.space_8 + t.space_14 / 2.0, rect.center().y), vec2(t.space_14, t.space_14));
-    crate::icons::paint_ink(&painter, icon, "folder", TabAccent::for_tab(&t, "MODEL").color);
+    crate::icons::paint_ink(&painter, icon, "folder", TabAccent::for_ramp(&t, AccentRamp::Main).color);
     let chevron =
         egui::Rect::from_center_size(egui::pos2(rect.right() - t.space_8 - t.space_10 / 2.0, rect.center().y), vec2(t.space_10, t.space_10));
     crate::icons::paint_ink(&painter, chevron, "chevron", t.form_dim);
