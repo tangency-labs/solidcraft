@@ -292,15 +292,6 @@ mod tests {
     #[test]
     fn the_blend_routines_build_no_bare_statuses() {
         const WAITING: &[(&str, usize)] = &[
-            ("blend/blend_corner.rs", 5),
-            ("blend/blend_corner/ball.rs", 15),
-            ("blend/blend_corner/chamfer.rs", 8),
-            ("blend/blend_corner/end.rs", 9),
-            ("blend/blend_corner/mixed.rs", 25),
-            ("blend/blend_corner/mixed/algebra.rs", 1),
-            ("blend/blend_corner/setback.rs", 27),
-            ("blend/blend_corner/swept.rs", 7),
-            ("blend/blend_setback.rs", 4),
             ("blend/fillet_corner/p1.rs", 46),
             ("blend/fillet_corner/p2.rs", 17),
             ("blend/fillet_corner/p3.rs", 25),
