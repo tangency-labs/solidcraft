@@ -4364,6 +4364,7 @@ dependencies = [
  "solidcore-tess",
  "solidcraft-color",
  "solidcraft-derive",
+ "solidcraft-format",
  "solidcraft-geom",
  "solidcraft-kernel",
  "solidcraft-profile",
@@ -4409,6 +4410,13 @@ dependencies = [
  "thiserror 2.0.21",
  "toml_edit",
  "web-time",
+]
+
+[[package]]
+name = "solidcraft-format"
+version = "0.40.0-rc.4"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]
