@@ -813,17 +813,11 @@ mod tests {
             false,
         )
         .unwrap();
-        let sheets: [(&str, Surface, fn(&ModelSurface) -> bool); 2] = [
-            ("revolved line", Surface::from(revolved_line), |surface| {
-                matches!(surface, ModelSurface::Revolution { .. })
-            }),
-            (
-                "extruded circle",
-                Surface::from(extruded_circle),
-                |surface| matches!(surface, ModelSurface::Extrusion { .. }),
-            ),
+        let sheets = [
+            ("revolved line", Surface::from(revolved_line)),
+            ("extruded circle", Surface::from(extruded_circle)),
         ];
-        for (name, surface, exported_as) in sheets {
+        for (name, surface) in sheets {
             let (mut brep, _) =
                 sheet_on(&mut kernel, surface, 1e-6).unwrap_or_else(|e| panic!("{name}: {e}"));
             // the sheet's sides have no UV curves yet: each edge use gets its own
@@ -837,10 +831,11 @@ mod tests {
             // the face keeps its kind, so the checks below go through its branch
             let model = brep_to_model(&brep).unwrap_or_else(|e| panic!("{name}: {e}"));
             assert!(
-                model.bodies[0]
-                    .faces
-                    .iter()
-                    .all(|face| exported_as(&face.surface)),
+                model.bodies[0].faces.iter().all(|face| matches!(
+                    (name, &face.surface),
+                    ("revolved line", ModelSurface::Revolution { .. })
+                        | ("extruded circle", ModelSurface::Extrusion { .. })
+                )),
                 "{name}: exported as {:?}",
                 model.bodies[0].faces
             );
