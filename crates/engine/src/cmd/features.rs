@@ -708,8 +708,8 @@ pub(super) fn check_count(s: &Session, e: &str, cmd: &str, what: &str) -> Result
 }
 
 /// What to say about an input whose plain numbers are read as mm, if anything (#5887). A bare
-/// number on its own takes the design's unit, but one inside an expression keeps the mm
-/// default, so the two readings can mean different lengths.
+/// number on its own takes the design's unit. Feature evaluation now reads a number inside an
+/// expression that way too (#9015); this speaks only when a path still used millimetres.
 pub(super) fn unit_warning(doc: &solidcraft_doc::Document, label: &str, e: &str, kind: Kind) -> Option<String> {
     let (as_mm, as_design) = doc.design_unit_mismatch(e, kind)?;
     let u = doc.units.trim();

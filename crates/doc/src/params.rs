@@ -263,11 +263,12 @@ impl Document {
 
     /// Does this expression mean something else than a reader would expect, because the plain
     /// numbers in it are read as mm? A bare number on its own takes the design's unit
-    /// ([`Document::with_design_unit`]), but one inside an expression keeps the mm default, so
-    /// `w + 1` in an inch design adds a millimetre, not an inch (#5887). Returns what the
-    /// expression evaluates to and what it would be with the design's unit, both in mm, when
-    /// the two differ. A plain multiplier (`w * 2`) reads the same either way, and is not
-    /// reported: only a number standing for a length of its own changes the value.
+    /// ([`Document::with_design_unit`]). Feature evaluation now reads a bare number *inside* an
+    /// expression in the design's unit too (#9015), so `w + 1` in an inch design is 3 in. A path
+    /// that still uses millimetre defaults would add a millimetre instead (#5887). Returns the
+    /// millimetre reading and the design-unit reading, both in mm, only when the feature actually
+    /// used the millimetre one. A plain multiplier (`w * 2`) reads the same either way, and is
+    /// not reported.
     pub fn design_unit_mismatch(&self, e: &str, kind: Kind) -> Option<(f64, f64)> {
         let u = self.units.trim();
         if kind != Kind::Length || u == "mm" || expr::is_bare_number(e) {
@@ -277,15 +278,16 @@ impl Document {
             Some((Kind::Length, s)) => s,
             _ => return None,
         };
-        let vals: std::cell::OnceCell<BTreeMap<String, Value>> = std::cell::OnceCell::new();
-        let look =
-            |n: &str| vals.get_or_init(|| self.param_values().0).get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`")));
-        let read = |d: expr::Defaults| expr::eval_with_defaults(e, &look, d).ok()?.to_kind(Kind::Length).ok();
+        let vals = self.evaluation_values();
+        let look = |n: &str| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`")));
+        let read = |d: expr::Defaults| expr::eval_with_defaults(e, &look, d).ok()?.to_kind_in(Kind::Length, d).ok();
         let as_mm = read(expr::Defaults::default())?;
         let as_design = read(expr::Defaults { len: scale, ..expr::Defaults::default() })?;
-        // Both readings are finite mm; report only a difference that is not floating-point dust.
-        let tol = 1e-9 * as_mm.abs().max(as_design.abs()).max(1.0);
-        ((as_mm - as_design).abs() > tol).then_some((as_mm, as_design))
+        let used = crate::eval::val(&vals, e, Kind::Length).ok()?;
+        // Both readings are finite mm; report only when the feature used millimetres and the
+        // design's unit would have meant a different length.
+        let tol = 1e-9 * as_mm.abs().max(as_design.abs()).max(used.abs()).max(1.0);
+        ((used - as_mm).abs() <= tol && (used - as_design).abs() > tol).then_some((as_mm, as_design))
     }
 
     /// Every length input of every feature as the geometry reads it (mm; a unit-less result is

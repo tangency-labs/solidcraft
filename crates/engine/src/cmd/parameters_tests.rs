@@ -1408,25 +1408,20 @@ fn exports_round_reported_numbers() {
     assert_eq!(vals, vec![30.0, 30.48, 0.3], "{json_text}");
 }
 
-/// A plain number on its own takes the design's unit, but one inside an expression keeps the mm
-/// default, so the same `1` stands for different lengths in one command. The feature still
-/// evaluates exactly as before; it now reports the inputs where the two readings differ (#5887).
+/// A plain number on its own takes the design's unit. Feature evaluation now reads a number
+/// inside an expression that way too (#9015), so `w + 1` in an inch design is 3 in. The warning
+/// stays off unless a path still used millimetres (#5887), and the geometry is whatever
+/// evaluation already made.
 #[test]
 fn an_expression_says_when_its_plain_numbers_are_read_as_mm() {
     let mut s = Session::default();
     run(&mut s, "parameters.add", json!({"name": "w", "expression": "2 in"}));
     run(&mut s, "document.units", json!({"units": "in"}));
-    // `w + 1` adds a millimetre to two inches: 50.8 + 1, where `1 in` would give 50.8 + 25.4.
+    // `w + 1` adds an inch to two inches: 50.8 + 25.4. A millimetre reading would be 51.8.
     let r = run(&mut s, "solid.box", json!({"length": "w + 1", "width": 10, "height": 10, "corner": [0, 0, 0]}));
-    let w = r["unit_warnings"].as_array().cloned().unwrap_or_default();
-    assert_eq!(w.len(), 1, "only the expression input is read two ways: {r}");
-    let said = w[0].as_str().unwrap_or_default();
-    assert!(said.contains("51.8") && said.contains("76.2") && said.contains("Length"), "{said}");
-    // One tidy line: no leftover indentation and no trailing zeros in the numbers.
-    assert!(!said.contains("  ") && !said.contains("51.8000"), "{said}");
-    // The geometry is untouched: 51.8 x 254 x 254 mm, as it was before the warning existed.
+    assert!(r.get("unit_warnings").is_none(), "the feature reads the 1 as in: {r}");
     let v = volume(&mut s);
-    assert!(rel(v, 51.8 * 254.0 * 254.0) < 1e-9, "the warning changed the model: {v}");
+    assert!(rel(v, 76.2 * 254.0 * 254.0) < 1e-9, "the warning changed the model: {v}");
     // A plain multiplier reads the same either way, so it is not reported.
     let r = run(&mut s, "solid.box", json!({"length": "w * 2", "width": 10, "height": 10, "corner": [500, 0, 0]}));
     assert!(r.get("unit_warnings").is_none(), "a multiplier means the same in any unit: {r}");
@@ -1450,13 +1445,11 @@ fn editing_a_feature_input_says_when_its_plain_numbers_are_read_as_mm() {
     // A plain length to start with: nothing to say, it takes the design's unit.
     let r = run(&mut s, "solid.box", json!({"length": 3, "width": 10, "height": 10, "corner": [0, 0, 0]}));
     assert!(r.get("unit_warnings").is_none(), "a bare number takes the design unit: {r}");
-    // Editing it to an expression is where the two readings part company.
+    // Editing it to an expression follows the design's unit too (#9015), so there is still
+    // nothing to say.
     let r = run(&mut s, "parameters.change", json!({"name": "d1", "expression": "w + 1"}));
-    let w = r["unit_warnings"].as_array().cloned().unwrap_or_default();
-    assert_eq!(w.len(), 1, "the edit says the same as creating it would: {r}");
-    let said = w[0].as_str().unwrap_or_default();
-    assert!(said.contains("51.8") && said.contains("76.2"), "{said}");
-    // Editing it back to something unambiguous is silent again.
+    assert!(r.get("unit_warnings").is_none(), "the edit reads the 1 as in: {r}");
+    // Editing it to something unambiguous is silent as well.
     let r = run(&mut s, "parameters.change", json!({"name": "d1", "expression": "w + 1 in"}));
     assert!(r.get("unit_warnings").is_none(), "a number with its unit is unambiguous: {r}");
 }
