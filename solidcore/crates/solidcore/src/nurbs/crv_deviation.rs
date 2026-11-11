@@ -5,6 +5,7 @@
 //! | Rust                   | Upstream |
 //! |------------------------|----------|
 //! | [`certified_distance`] | none     |
+//! | [`interpolation_bound`] | none    |
 //!
 //! Both curves are cut into Bézier pieces over the union of their breakpoints
 //! ([`Curve::refine`], [`Curve::decompose_bez`]) and each piece raised to the higher of the
@@ -24,14 +25,57 @@
 //! `M`, `q` the degree reached. The norm of each difference is rounded up by `γ_8`, and a
 //! coordinate error `e` moves a point by at most `2 e` (`√3 e`).
 //!
+//! [`interpolation_bound`] bounds how far a curve misses points it was fitted through at
+//! their parameters: each point of the curve is evaluated (the basis functions of The NURBS
+//! Book's A2.2 and their sum with the control points: `γ_(12 p + 4)` of `M` per coordinate,
+//! the count `eval::collapse` gives de Boor's `p` levels) and its computed distance from the
+//! data point rounded up by `γ_8`.
+//!
 //! Deviations: none (no upstream counterpart). Non-rational 3D curves only; their knot
 //! vectors clamped on one domain.
 
 use crate::error::{Result, SolidError};
+use crate::math::Vec3;
 use crate::nurbs::crv_basic::Curve;
+use crate::nurbs::knots::Side;
 use crate::nurbs::math::{gamma, NOW, NOZ};
 
 const OP: &str = "nurbs::crv_deviation::certified_distance";
+const OP_FIT: &str = "nurbs::crv_deviation::interpolation_bound";
+
+/// A bound `d` with `|c(u_k) - q_k| <= d` for every point `q_k` of `points` and its
+/// parameter `u_k` of `params`, every rounding of computing it included (module docs): how
+/// far the curve fitted through the points misses them.
+///
+/// # Errors
+///
+/// `InvalidInput` for a rational or 2D curve, or a parameter count other than the points';
+/// a query failure when the bound is not finite; those of the evaluation (a parameter
+/// outside the knots).
+pub fn interpolation_bound(c: &Curve, params: &[f64], points: &[Vec3]) -> Result<f64> {
+    if c.cpts().iter().any(|p| p.w != NOW || p.z == NOZ) {
+        return Err(SolidError::invalid_input(OP_FIT, "a rational or 2D curve"));
+    }
+    if params.len() != points.len() {
+        return Err(SolidError::invalid_input(
+            OP_FIT,
+            "one parameter per point needed",
+        ));
+    }
+    let size = largest_coordinate(c);
+    let mut largest = 0.0_f64;
+    for (&u, q) in params.iter().zip(points) {
+        let p = c.eval(u, Side::Left)?;
+        let (dx, dy, dz) = (p.x - q.x, p.y - q.y, p.z - q.z);
+        largest = largest.max((dx * dx + dy * dy + dz * dz).sqrt());
+    }
+    let eval_err = gamma(c.degree().saturating_mul(12).saturating_add(4)) * size;
+    let bound = (largest * (1.0 + gamma(8)) + 2.0 * eval_err) * (1.0 + gamma(2));
+    if !bound.is_finite() {
+        return Err(SolidError::query_failed(OP_FIT, "the bound is not finite"));
+    }
+    Ok(bound)
+}
 
 /// A bound `d` with `|a(t) - b(t)| <= d` at every parameter `t` of the curves' common
 /// domain, every rounding of computing it included: the largest distance between the
@@ -159,8 +203,7 @@ fn pieces(c: &Curve, other: &Curve, q: usize, size: f64) -> Result<(Vec<Curve>, 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::math::Vec3;
-    use crate::nurbs::knots::{clamped_uniform, Side};
+    use crate::nurbs::knots::clamped_uniform;
     use crate::nurbs::math::CPoint;
 
     fn spline(points: &[[f64; 3]], degree: usize) -> Curve {
@@ -231,6 +274,23 @@ mod tests {
         let bent = spline(&[[0.0, 0.0, 0.0], [2.5, 4.0, 0.0], [5.0, 0.0, 0.0]], 2);
         let d = certified_distance(&polyline, &bent).unwrap();
         assert!(d >= 2.0, "{d}");
+    }
+
+    #[test]
+    fn an_interpolants_bound_holds_its_misses_and_counts_them() {
+        let c = spline(&WAVE, 3);
+        let params = [0.0, 0.25, 0.5, 1.0];
+        let on: Vec<Vec3> = params
+            .iter()
+            .map(|&u| c.eval(u, Side::Left).unwrap())
+            .collect();
+        let d = interpolation_bound(&c, &params, &on).unwrap();
+        assert!(d < 1e-12, "{d}");
+        let mut off = on.clone();
+        off[2].z += 0.5;
+        let d = interpolation_bound(&c, &params, &off).unwrap();
+        assert!((0.5..0.5 + 1e-12).contains(&d), "{d}");
+        assert!(interpolation_bound(&c, &params[..3], &on).is_err());
     }
 
     #[test]
