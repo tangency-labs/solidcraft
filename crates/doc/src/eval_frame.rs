@@ -11,9 +11,9 @@ use solidcraft_kernel as kernel;
 use solidcraft_sketch::CurveKind;
 
 use super::{ModelBody, ModelState, SolvedSketch, new_name, path_in_frame, select_profiles, sketch_in_feature_frame, val};
-use crate::expr::{Kind, Value};
+use crate::expr::{Expr, Kind, Value};
 use crate::frame::{self, MAX_MEMBERS, MemberProfile};
-use crate::{DocError, Document, Feature, FeatureKind, ProfileSel, Result};
+use crate::{DocError, Document, Feature, FeatureId, FeatureKind, ProfileSel, Result};
 
 /// Most profiles a profile sketch may have for its material to be worked out.
 const MAX_PROFILE_PIECES: usize = 256;
@@ -149,6 +149,40 @@ pub fn member_names(st: &ModelState, lines: &[String], pinned: &BTreeMap<String,
         }
     }
     out.into_iter().map(|n| n.unwrap_or_else(|| base.to_string())).collect()
+}
+
+/// The angle each line of the frame member `frame` is turned to by active Rotate steps after
+/// it: line id to angle expression, a later step replacing an earlier one.
+pub fn member_turns(doc: &Document, frame: FeatureId) -> BTreeMap<String, Expr> {
+    let mut turns = BTreeMap::new();
+    let Some(at) = doc.feature_index(frame.0) else { return turns };
+    let end = doc.marker.unwrap_or(doc.features.len()).min(doc.features.len());
+    for f in doc.features.iter().take(end).skip(at.saturating_add(1)) {
+        if let FeatureKind::FrameMemberTurn { member, angle } = &f.kind
+            && !f.suppressed
+            && member.feature == frame
+        {
+            turns.insert(member.line.clone(), angle.clone());
+        }
+    }
+    turns
+}
+
+/// A Rotate step's checks: its frame member is there, earlier, and still has the line.
+pub(super) fn check_turn(doc: &Document, f: &Feature, st: &ModelState) -> Result<()> {
+    let FeatureKind::FrameMemberTurn { member, .. } = &f.kind else {
+        return Err(DocError::Invalid("not a rotate member feature".into()));
+    };
+    let gone = || DocError::Invalid("Its frame member is gone".into());
+    let source = doc.feature(member.feature.0).filter(|m| !m.suppressed && matches!(m.kind, FeatureKind::FrameMember { .. })).ok_or_else(gone)?;
+    let (Some(from), Some(here)) = (doc.feature_index(source.id), doc.feature_index(f.id)) else { return Err(gone()) };
+    if from >= here {
+        return Err(DocError::Invalid("Its frame member must come earlier in the timeline".into()));
+    }
+    if !member_line_ids(st, &source.kind)?.contains(&member.line) {
+        return Err(DocError::Invalid(format!("Line `{}` of its frame member is gone", member.line)));
+    }
+    Ok(())
 }
 
 /// The ids of a `FrameMember` feature's lines in `st`, in the order its members are made.

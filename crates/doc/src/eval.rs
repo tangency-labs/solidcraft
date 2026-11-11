@@ -12351,6 +12351,7 @@ fn eval_feature_kind(
             Ok(())
         }
         FeatureKind::FrameEndCap { .. } => crate::end_cap::evaluate(doc, vals, f, st),
+        FeatureKind::FrameMemberTurn { .. } => frame_member::check_turn(doc, f, st),
         FeatureKind::FrameMember { .. } => frame_member::evaluate(doc, vals, f, st),
         FeatureKind::BoundingSolid { bodies, margin, margins } => {
             let m = val(vals, margin, Kind::Length)?;
