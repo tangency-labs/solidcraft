@@ -1147,31 +1147,6 @@ impl crate::SolveApp {
         } else {
             self.shell.cards.clear();
         }
-        if self.panel_runtime.as_ref().is_some_and(|integration| integration.production.is_some()) && crate::render_workspace::active(self) {
-            // These remain legacy content surfaces. Their actual edge reservations
-            // constrain panel placement without changing the full render domain.
-            crate::render_ui::shots_strip(self, ui);
-            crate::render_workspace::panel(self, ui);
-            if self.ui.show_browser && !crate::render_ui::focused(self) {
-                // Keep the unmigrated library in its existing lower card slot.
-                // Reserve its real top edge before admitting shared placements.
-                let bounds = crate::shell::panel_bounds(self, ui.available_rect_before_wrap());
-                let upper = crate::ui_kit::Panel::stack_first_bounds(bounds);
-                crate::render_workspace::appearances_card(self, ui, crate::ui_kit::Panel::stack_next_bounds(bounds, upper));
-            }
-            for (id, (bounds, edge)) in &self.shell.workspace_panels {
-                if *id == "render:appearances" {
-                    placement.max.y = bounds.top().clamp(placement.top(), placement.bottom());
-                    continue;
-                }
-                match edge {
-                    Some(crate::ui_kit::Edge::Left) => placement.min.x = bounds.right().clamp(placement.left(), placement.right()),
-                    Some(crate::ui_kit::Edge::Right) => placement.max.x = bounds.left().clamp(placement.left(), placement.right()),
-                    Some(crate::ui_kit::Edge::Bottom) => placement.max.y = bounds.top().clamp(placement.top(), placement.bottom()),
-                    _ => {}
-                }
-            }
-        }
         let gap = crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::Panel).gap();
         placement.min.x += gap.min(placement.width() / 2.0);
         placement.max.x -= gap.min(placement.width());

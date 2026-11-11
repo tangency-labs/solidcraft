@@ -1506,7 +1506,11 @@ impl SolveApp {
                 _ => {}
             }
             if id == "view.render_inspector" {
-                render_workspace::set_inspector_visible(self, v.get("visible").and_then(Value::as_bool).unwrap_or(true));
+                if v.get("visible").and_then(Value::as_bool).unwrap_or(true) {
+                    render_workspace::reveal_inspector(self);
+                } else {
+                    render_workspace::request_inspector_visibility(self, false);
+                }
             }
             if id == "view.render_live"
                 && let Some(paused) = v.get("paused").and_then(Value::as_bool)
@@ -3708,6 +3712,9 @@ impl SolveApp {
                 });
         }
         if render_workspace::active(self) {
+            if panel_runtime::production_active(self) {
+                render_workspace::inspector_panel::owner_overlays(self, ui.ctx());
+            }
             render_ui::overlays(self, ui);
         }
         // Refresh persistent chrome before the host's early confirmation pair.
