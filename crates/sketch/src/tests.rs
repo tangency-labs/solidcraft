@@ -540,6 +540,39 @@ fn profiles_join_unconstrained_nearby_line_arc_endpoints() {
     assert!((profiles[0].area - (200.0 + PI * 25.0)).abs() < 1e-6, "{}", profiles[0].area);
 }
 
+/// #14512: the reporter's sketch, a Ø3 circle cut off by three lines that touch it. Splitting the
+/// circle at the 135-degree line, which touches it at 225 degrees, left two arcs of 0.00003 and
+/// 0.00001 mm next to the corner. With them the sketch had no profile at all.
+#[test]
+fn profiles_ignore_near_zero_arcs_left_by_a_split_at_a_touching_line() {
+    let mut sk = Sketch::new();
+    let centre = v(0.0, 0.0);
+    let p = |sk: &mut Sketch, x: f64, y: f64| sk.add_point(v(x, y), None).unwrap();
+    let bottom_left = p(&mut sk, -0.6213203435596425, -1.5);
+    let bottom_right = p(&mut sk, 0.6213203435596425, -1.5);
+    let right = p(&mut sk, 1.0606601717798214, -1.0606601717798212);
+    let corner = p(&mut sk, -1.0606821956789731, -1.060638147870911);
+    let sliver = p(&mut sk, -1.0606633888849604, -1.0606569546649243);
+    let sliver_end = p(&mut sk, -1.060656954688482, -1.0606633888614028);
+    let arc = |sk: &mut Sketch, a: usize, b: usize| {
+        let (pa, pb) = (sk.points[a].pos, sk.points[b].pos);
+        sk.add_arc(centre, pa, pb, [None, Some(a), Some(b)], None).unwrap()
+    };
+    sk.add_line_pts(bottom_left, bottom_right, None).unwrap();
+    sk.add_line_pts(bottom_right, right, None).unwrap();
+    sk.add_line_pts(bottom_left, corner, None).unwrap();
+    arc(&mut sk, right, corner);
+    arc(&mut sk, corner, sliver);
+    arc(&mut sk, sliver, sliver_end);
+
+    // The 270-degree sector and the polygon from the centre through the four line ends.
+    let r = 1.5;
+    let polygon = 1.8639610306789276;
+    let ps = find_profiles(&sk);
+    assert_eq!(ps.len(), 1, "{ps:?}");
+    assert!((ps[0].area - (0.75 * PI * r * r + polygon)).abs() < 1e-6, "{}", ps[0].area);
+}
+
 /// The end plate of #14256: an outline whose 25 mm arc meets a horizontal and a vertical line
 /// tangentially, each joint held by two "point on curve" constraints instead of one shared point.
 /// The solver leaves the arc's ends on the lines only to its 1e-9 mm residual, which along the
@@ -2149,4 +2182,26 @@ fn a_mirrored_fillet_over_three_quarters_of_a_turn_stays_the_arc_its_lines_leave
     assert!(rep.ok(), "{rep:?}");
     assert!((sweep_deg(&sk, arc) - 300.0).abs() < 1e-6, "sweep {}", sweep_deg(&sk, arc));
     assert!(lines_leave_the_arc(&sk, arc, [l1, l2]));
+}
+
+/// A short piece with no other piece beside it is a gap, not a point (#14520 review): a square
+/// whose top-left ends miss by 0.00003 splits its left side where the top line ends, and the
+/// 0.00003 piece left above that stays open, as the import's tighter join tolerance asked.
+#[test]
+fn profiles_keep_a_lone_short_piece_open() {
+    let mut sk = Sketch::new();
+    let p = |sk: &mut Sketch, x: f64, y: f64| sk.add_point(v(x, y), None).unwrap();
+    let bottom_left = p(&mut sk, 0.0, 0.0);
+    let bottom_right = p(&mut sk, 10.0, 0.0);
+    let right_bottom = p(&mut sk, 10.00005, 0.0);
+    let top_right = p(&mut sk, 10.0, 10.0);
+    let top_left = p(&mut sk, 0.0, 10.0);
+    let left_top = p(&mut sk, 0.0, 10.00003);
+    let left_bottom = p(&mut sk, 0.0, 0.00004);
+    sk.add_line_pts(bottom_left, bottom_right, None).unwrap();
+    sk.add_line_pts(right_bottom, top_right, None).unwrap();
+    sk.add_line_pts(top_right, top_left, None).unwrap();
+    sk.add_line_pts(left_top, left_bottom, None).unwrap();
+    let ps = find_profiles(&sk);
+    assert!(ps.is_empty(), "{ps:?}");
 }
