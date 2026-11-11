@@ -87,7 +87,7 @@ pub(crate) use imp::{
 /// join is of two neighbouring stretches, the left one first, and every part takes part in about
 /// log2(n) joins; joining each part onto all those before it instead hands the growing whole to
 /// every join, n²/2 parts' worth of work in all. None for no parts.
-pub(crate) fn union_tree<T>(parts: Vec<T>, mut join: impl FnMut(T, T) -> Result<T>) -> Result<Option<T>> {
+fn union_tree<T>(parts: Vec<T>, mut join: impl FnMut(T, T) -> Result<T>) -> Result<Option<T>> {
     let mut level = parts;
     while level.len() > 1 {
         let mut next = Vec::with_capacity(level.len().div_ceil(2));
@@ -1999,5 +1999,31 @@ mod imp {
         let body = body_of(brep, "screw sweep")?;
         let roles = roles(&body, plane, None, &seeds(plane, pieces, |q| q), &[], true)?;
         with_history(body, &roles, pieces)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::panic)]
+mod tests {
+    /// The corner pieces of a sweep along a path are joined in a balanced tree (#14451): every join
+    /// is of two neighbouring stretches, left first, and for 180 runs (a 181-point polyline) the
+    /// joins take in 180 · 8 = 1440 pieces' worth of operands at most, where joining each piece onto
+    /// the body so far takes in 2 + 3 + … + 180 = 16,289.
+    #[test]
+    fn corner_pieces_are_joined_neighbours_first_in_a_balanced_tree() {
+        let mut load = 0;
+        let mut joins = 0;
+        let whole = super::union_tree((0..180).map(|i| i..i + 1).collect(), |a: std::ops::Range<usize>, b: std::ops::Range<usize>| {
+            assert_eq!(a.end, b.start, "joined {a:?} with {b:?}, not its neighbour");
+            load += a.len() + b.len();
+            joins += 1;
+            Ok(a.start..b.end)
+        })
+        .unwrap();
+        assert_eq!(whole, Some(0..180));
+        assert_eq!(joins, 179);
+        assert!(load <= 180 * 8, "{load}");
+        assert_eq!(super::union_tree(Vec::<usize>::new(), |a, _| Ok(a)).unwrap(), None);
+        assert_eq!(super::union_tree(vec![7], |a, _| Ok(a)).unwrap(), Some(7));
     }
 }
