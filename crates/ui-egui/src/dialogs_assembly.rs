@@ -80,7 +80,8 @@ pub(crate) fn joint_choice(name: &str, kind: JointKind) -> String {
 /// What a joint origin input accepts: snaps on faces, edges and vertices, the world origin, a
 /// sketch point (so a joint can be placed on the design origin or a hole centre, like Fusion's),
 /// and the design's planes, axes and construction points.
-pub const SNAPS: crate::selection::Accept = FACES | EDGES | VERTICES | ORIGIN | POINTS | PLANES | AXES | CONSTRUCTION_POINTS;
+pub const SNAPS: crate::selection::Accept =
+    FACES | EDGES | VERTICES | ORIGIN | POINTS | PLANES | AXES | CONSTRUCTION_POINTS | crate::selection::SNAP_POINTS;
 /// Commands whose effect is where occurrences sit (previewed on the placed model).
 const MOVES: &[&str] = &[
     "joint.create",
@@ -946,6 +947,35 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
         }
     }
     Some(snap)
+}
+
+/// A woken snap point picked in a joint origin input (#11227) stands for the edge or face that
+/// woke it when that item's own snap is there (a hole's centre, an edge's middle, a face's
+/// centre): the joint keeps it by name, as a pick of the item itself would. Any other woken point
+/// (an arc's end, a cylinder's far end) stays a point.
+/// `snaps`: whether the dialog's active input takes joint snaps ([`takes_snaps`]).
+pub(crate) fn woken_pick(app: &SolveApp, snaps: bool, sel: Sel) -> Sel {
+    let Sel::Vertex { body, point } = &sel else { return sel };
+    let tol = 1e-4 * (1.0 + point.len());
+    let woken = &app.viewport.woken;
+    // Only the woken item's own body: another body's point there is that body's.
+    let of_body = |i: &&Sel| matches!(i, Sel::Edge { body: b, .. } | Sel::Face { body: b, .. } if b == body);
+    if !snaps || !woken.points.iter().any(|p| p.at.dist(*point) <= tol) {
+        return sel;
+    }
+    // The rim's item, or a face of its body crossed on the way to its centre.
+    [&woken.item, &woken.face]
+        .into_iter()
+        .flatten()
+        .filter(of_body)
+        .find(|item| picked_snap(app, item).is_some_and(|s| s.at.dist(*point) <= tol))
+        .cloned()
+        .unwrap_or(sel)
+}
+
+/// Whether a dialog's active input takes joint snaps (a joint's origin, a trace's point).
+pub(crate) fn takes_snaps(d: &Dialog) -> bool {
+    d.active_input().is_some_and(|i| i.accept == SNAPS)
 }
 
 /// Each pick's snap, measured once for the world state, design and open sketch it was measured in.
@@ -2018,7 +2048,7 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj, d: &mut Dia
     }
     // The snap under the cursor (found again only when the hovered item changes).
     let accepting = d.inputs.get(d.active).is_some_and(|i| i.accept == SNAPS);
-    let under = app.viewport.hover.as_ref().and_then(crate::viewport::hit_sel).filter(|_| accepting);
+    let under = app.viewport.hover.as_ref().and_then(crate::viewport::hit_sel).filter(|_| accepting).map(|s| woken_pick(app, accepting, s));
     match under {
         Some(sel) => {
             let fresh = !matches!(hover, Some((s, _)) if *s == sel);

@@ -3928,9 +3928,14 @@ pub(crate) fn sketch_constraint_at(app: &SolveApp, pos: Pos2, hit: Option<&Hit>)
 pub fn candidate(app: &SolveApp, hits: &[Hit]) -> Option<(Hit, Sel)> {
     if let Some(d) = app.dialog.as_ref().filter(|d| d.wants_picks()) {
         let snap = d.face_snap(&app.session, hits);
-        return hits
-            .iter()
-            .find_map(|h| d.candidate_on(&app.session, h, snap.as_ref()).map(|s| (h.clone(), crate::dialogs_move::component_pick(app, h, s))));
+        return hits.iter().find_map(|h| {
+            d.candidate_on(&app.session, h, snap.as_ref()).map(|s| {
+                (
+                    h.clone(),
+                    crate::dialogs_assembly::woken_pick(app, crate::dialogs_assembly::takes_snaps(d), crate::dialogs_move::component_pick(app, h, s)),
+                )
+            })
+        });
     }
     hits.iter().filter(|h| pick_allowed(app, h)).find_map(|h| hit_candidate(app, h))
 }
@@ -3943,7 +3948,18 @@ pub fn candidates(app: &SolveApp, hits: &[Hit]) -> Vec<(Hit, Sel)> {
         let snap = d.face_snap(&app.session, hits);
         return hits
             .iter()
-            .filter_map(|h| d.candidate_on(&app.session, h, snap.as_ref()).map(|s| (h.clone(), crate::dialogs_move::component_pick(app, h, s))))
+            .filter_map(|h| {
+                d.candidate_on(&app.session, h, snap.as_ref()).map(|s| {
+                    (
+                        h.clone(),
+                        crate::dialogs_assembly::woken_pick(
+                            app,
+                            crate::dialogs_assembly::takes_snaps(d),
+                            crate::dialogs_move::component_pick(app, h, s),
+                        ),
+                    )
+                })
+            })
             .collect();
     }
     hits.iter().filter(|h| pick_allowed(app, h)).filter_map(|h| hit_candidate(app, h)).collect()
