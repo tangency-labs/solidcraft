@@ -440,7 +440,7 @@ pub fn calculate_bounding_box_base(
     if req.polar {
         polar.reset();
         let mid = tangents.len() / 2;
-        polar.add_vector_with_kernel(k, tangent(mid)?, None);
+        polar.add_vector(tangent(mid)?, None);
     }
 
     // for every sample point - accumulate bounding boxes
@@ -452,7 +452,7 @@ pub fn calculate_bounding_box_base(
             pseudo.add_point(p);
         }
         if req.polar {
-            polar.add_vector_with_kernel(k, tangent(i)?, None);
+            polar.add_vector(tangent(i)?, None);
         }
     }
 
@@ -1523,8 +1523,13 @@ impl Curve {
             let this_b = self.evaluate_point(k, last.0)?;
             let other_a = other.evaluate_point(k, first.1)?;
             let other_b = other.evaluate_point(k, last.1)?;
-            let separation_a = other_a - this_a;
-            let separation_b = other_b - this_b;
+            // The side is taken across this curve, its tangent's component removed. An end
+            // of one curve that runs past the other's end drops onto that end, and the
+            // pair's difference then points along the curves, forward at one end and back at
+            // the other, for two curves that lie on each other; upstream took that for a
+            // crossing.
+            let separation_a = self.across_tangent(k, first.0, other_a - this_a)?;
+            let separation_b = self.across_tangent(k, last.0, other_b - this_b)?;
             let scaled_zero =
                 EFF_ZERO * (1.0 + max2(this_a.max_dimension(), this_b.max_dimension()));
             if separation_a.length() > scaled_zero
@@ -1546,8 +1551,9 @@ impl Curve {
                 )?;
                 let Some(cross) = found else {
                     // curves change sides but no crossing found
-                    return Err(SolidError::sm_err(
+                    return Err(SolidError::curve_failed(
                         "curve::simple_coincidence_checker (crossing)",
+                        "the curves change sides but no crossing was found",
                     ));
                 };
                 return Ok(vec![pair_solution(
@@ -1576,8 +1582,9 @@ impl Curve {
                 )?;
                 if !found {
                     // curves within tolerance but no nearest point found
-                    return Err(SolidError::sm_err(
+                    return Err(SolidError::curve_failed(
                         "curve::simple_coincidence_checker (nearest)",
+                        "the curves are within tolerance but no nearest point was found",
                     ));
                 }
                 nearest.num_variables = 2;
@@ -1591,6 +1598,22 @@ impl Curve {
 
         // add 1 coincident intersection to solution array
         Ok(vec![pair_solution(objects, first, Some(last))])
+    }
+
+    /// `v` without its component along this curve's tangent at `t`; `v` itself where the
+    /// tangent vanishes.
+    fn across_tangent(&self, k: &Kernel, t: f64, v: Vec3) -> Result<Vec3> {
+        let d = self.evaluate(k, t, 1, false, true)?;
+        let Some(&tangent) = d.get(1) else {
+            return Ok(v);
+        };
+        let len = tangent.length();
+        // (a NaN length, from an undefined tangent, also keeps `v`)
+        if len.is_nan() || len <= EFF_ZERO {
+            return Ok(v);
+        }
+        let u = tangent * (1.0 / len);
+        Ok(v - u * v.dot(u))
     }
 
     /// `GlobalCoincidenceChecker` (the pre `SM_TOLERANT_XSECT` version): the coincident
@@ -2322,7 +2345,10 @@ impl Curve {
                         pass_on,
                     )?;
                     if pass_on && !dropped.as_ref().is_some_and(|d| d.success) {
-                        return Err(SolidError::sm_err(OP_DEFORM));
+                        return Err(SolidError::curve_failed(
+                            OP_DEFORM,
+                            "the point did not drop onto the surface",
+                        ));
                     }
                     let uv = dropped.map_or(crate::math::Vec2::UNDEF, |result| result.result_uv);
                     Ok(Some(Point3::new(uv.x, uv.y, 0.0)))

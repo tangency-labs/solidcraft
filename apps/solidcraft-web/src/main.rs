@@ -904,9 +904,9 @@ mod web {
                     self.files.panel.set(false);
                 }
                 "insert" => {
-                    if !solidcraft_ui_egui::mesh_units::ask(&mut self.app, &path, true) {
-                        self.app.insert_path(&path);
-                    }
+                    // The staged loader, as Open uses: a large STEP insert keeps the page drawing
+                    // (it asks an STL's or OBJ's units first, as the synchronous insert did).
+                    self.app.insert_path_async(&path);
                     self.files.panel.set(false);
                 }
                 "download" => match vfs::read(&path, solidcraft_engine::io::MAX_DESIGN_BYTES) {
@@ -1246,7 +1246,9 @@ mod web {
     pub fn start() {
         eframe::WebLogger::init(log::LevelFilter::Info).ok();
         solidcraft_ui_egui::i18n::install();
-        solidcraft_ui_egui::icon_svg::install();
+        solidcraft_look::install_tables();
+        solidcraft_ui_egui::workspace::install_tabs();
+        solidcraft_ui_egui::navigation_slots::install();
         wasm_bindgen_futures::spawn_local(async {
             let Some(window) = web_sys::window() else { return };
             let launch = crate::Launch::parse(&query());

@@ -279,14 +279,16 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("capture")
         .contract(&CAPTURE_POSITION_CONTRACT)
         .output(output_schema_for::<CapturePositionResult>)
-        .params("keeps pending occurrence moves"),
+        .params("keeps pending occurrence moves and saves every moving joint's values → captured, joints"),
     CommandSpec::new("component.revert_position", "Revert Position", crate::checked!("component.revert_position", revert))
         .at("SOLID", "POSITION")
         .icon("revert")
-        .noundo()
         .contract(&REVERT_POSITION_CONTRACT)
         .output(output_schema_for::<RevertPositionResult>)
-        .params("occurrences?: [ids] (default all); drops selected pending occurrence moves"),
+        .params(
+            "occurrences?: [ids] (default all); drops selected pending occurrence moves; with no occurrences the joints also go back to \
+             the values Capture Position saved (clamped to limits) → reverted, joints",
+        ),
 ];
 
 const ALIGN_CONTRACT: TypedContract<OccurrenceAlignParams> = TypedContract::new();
@@ -1005,8 +1007,9 @@ fn capture(s: &mut Session, _p: &Value) -> Result<Value> {
             o.transform = m;
         }
     }
+    let joints = super::joints::capture_values(s);
     s.revision += 1;
-    reply(CapturePositionResult { captured: n, param_warnings: Vec::new() })
+    reply(CapturePositionResult { captured: n, joints, param_warnings: Vec::new() })
 }
 
 fn revert(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1027,8 +1030,11 @@ fn revert(s: &mut Session, p: &Value) -> Result<Value> {
         s.pending_moves.clear();
     }
     let n = before - s.pending_moves.len();
+    // Every occurrence going back takes the joints back too; a revert of some occurrences
+    // leaves the joints alone.
+    let joints = if p.get("occurrences").is_none() { super::joints::revert_values(s) } else { 0 };
     s.revision += 1;
-    reply(RevertPositionResult { reverted: n, param_warnings: Vec::new() })
+    reply(RevertPositionResult { reverted: n, joints, param_warnings: Vec::new() })
 }
 
 /// The active component's frame from world coordinates (for new features' geometry).

@@ -39,7 +39,7 @@ use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::topology::brep::p1;
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::edge;
-use solidcore::{Brep, Kernel, SolidError};
+use solidcore::{Brep, Kernel};
 
 /// The union and the round's material, in closed form (see the module docs).
 const ROUNDED_VOLUME: f64 = 13_998.813_587_665_97;
@@ -112,7 +112,7 @@ fn check(torus_span: bool) {
             assert!((v - ROUNDED_VOLUME).abs() < 1e-5, "{case}: {v}");
         } else {
             assert!(
-                matches!(r, Err(SolidError::Upstream { code: 1001, .. })),
+                r.as_ref().err().and_then(solidcore::error::upstream_status) == Some(1001),
                 "{case}: {r:?}"
             );
         }

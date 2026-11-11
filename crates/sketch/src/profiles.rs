@@ -24,6 +24,15 @@ const MERGE_TOL: f64 = 1e-6;
 /// within it join only when each is the other's unique nearest end, so a third end as near
 /// leaves the gap open.
 pub const ENDPOINT_JOIN_TOL: f64 = MERGE_TOL * 100.0;
+/// How far apart (mm) the ends of a line and an arc, or of two arcs, may be and still join when
+/// each end lies on the other curve. Where a curve meets an arc tangentially, a point held on
+/// both by "point on curve" constraints is only fixed to about `sqrt(2 * radius * residual)`
+/// along the tangent: the solver's 1e-9 mm residual leaves the two ends up to 2.2e-4 mm apart
+/// on a 25 mm arc (#14256). Half of [`ISLAND_MARGIN`], so joined curves share an island.
+const TANGENT_JOIN_TOL: f64 = ISLAND_MARGIN * 0.5;
+/// How near (mm) an end must lie to another curve's line or circle to count as on it for
+/// [`TANGENT_JOIN_TOL`]: well above the solver's residual, well below any visible gap.
+const ON_CARRIER_TOL: f64 = MERGE_TOL * 0.1;
 const MAX_EDGES: usize = 50_000;
 
 /// A closed region usable by features, with the ids of the curves bounding it.
@@ -484,10 +493,63 @@ fn close_line_joints(mut segs: Vec<Seg2>, tol: f64) -> Vec<Seg2> {
     segs
 }
 
-/// Joins line and arc ends that lie close together. Returns false when there were too many ends
-/// close together to look at them all (nothing is joined then).
+/// The line or circle a profile line or arc lies on, from its exact geometry.
+#[derive(Clone, Copy)]
+enum Carrier {
+    Line { a: Vec2, b: Vec2 },
+    Circle { c: Vec2, r: f64 },
+}
+
+impl Carrier {
+    fn of(sk: &Sketch, ci: usize) -> Option<Carrier> {
+        match sk.curves.get(ci)?.kind {
+            CurveKind::Line { a, b } => {
+                let (a, b) = (sk.point(a)?, sk.point(b)?);
+                (a.dist(b) > MERGE_TOL).then_some(Carrier::Line { a, b })
+            }
+            CurveKind::Arc { .. } => match sk.segs(ci).into_iter().next()? {
+                Seg2::Arc { center, radius, .. } if center.is_finite() && radius.is_finite() => Some(Carrier::Circle { c: center, r: radius }),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn distance(&self, p: Vec2) -> f64 {
+        match *self {
+            Carrier::Line { a, b } => {
+                let d = b - a;
+                (d.cross(p - a) / d.len().max(1e-12)).abs()
+            }
+            Carrier::Circle { c, r } => (p.dist(c) - r).abs(),
+        }
+    }
+}
+
+/// Whether the end `p` of a curve lying on `pc` and the end `q` of another curve lying on `qc`
+/// meet where the two curves touch: each end lies on the other's line or circle. Two lines never
+/// meet this way (an end slides freely along a line it lies on, so ends on a common line can be
+/// genuinely apart), nor do two arcs of one circle.
+fn ends_on_each_other(p: Vec2, pc: Carrier, q: Vec2, qc: Carrier) -> bool {
+    let distinct = match (pc, qc) {
+        (Carrier::Line { .. }, Carrier::Line { .. }) => false,
+        (Carrier::Circle { c, r }, Carrier::Circle { c: c2, r: r2 }) => !same_circle(c, r, c2, r2, MERGE_TOL),
+        _ => true,
+    };
+    distinct && qc.distance(p) <= ON_CARRIER_TOL && pc.distance(q) <= ON_CARRIER_TOL
+}
+
+/// Joins line and arc ends that lie close together: within [`ENDPOINT_JOIN_TOL`], or within
+/// [`TANGENT_JOIN_TOL`] where each end lies on the other curve ([`ends_on_each_other`]). Returns
+/// false when there were too many ends close together to look at them all (nothing is joined
+/// then).
 fn merge_nearby_endpoints(sk: &Sketch, endpoints: &[(usize, usize)], groups: &mut [usize], max_edges: usize) -> bool {
-    let tol = ENDPOINT_JOIN_TOL;
+    let tol = TANGENT_JOIN_TOL;
+    let mut carriers = std::collections::HashMap::<usize, Option<Carrier>>::new();
+    for &(_, curve_index) in endpoints {
+        carriers.entry(curve_index).or_insert_with(|| Carrier::of(sk, curve_index));
+    }
+    let carrier = |ci: usize| carriers.get(&ci).copied().flatten();
     let cell = |p: Vec2| ((p.x / tol).floor() as i64, (p.y / tol).floor() as i64);
     let mut curve_endpoints = std::collections::HashMap::<usize, Vec<usize>>::new();
     for &(point_index, curve_index) in endpoints {
@@ -500,19 +562,19 @@ fn merge_nearby_endpoints(sk: &Sketch, endpoints: &[(usize, usize)], groups: &mu
             Some(((*a).min(*b), (*a).max(*b)))
         })
         .collect();
-    let mut grid: std::collections::HashMap<(i64, i64), Vec<usize>> = std::collections::HashMap::new();
+    let mut grid: std::collections::HashMap<(i64, i64), Vec<(usize, usize)>> = std::collections::HashMap::new();
     let mut joins = std::collections::HashMap::<(usize, usize), f64>::new();
     let mut checks = 0usize;
     let check_limit = max_edges.saturating_mul(16).max(16);
     let mut exceeded_limit = false;
-    'points: for &(point_index, _) in endpoints {
+    'points: for &(point_index, curve_index) in endpoints {
         let Some(point) = sk.point(point_index).filter(|point| point.is_finite()) else { continue };
         let (cx, cy) = cell(point);
         for dx in -1..=1 {
             for dy in -1..=1 {
                 let (Some(x), Some(y)) = (cx.checked_add(dx), cy.checked_add(dy)) else { continue };
                 if let Some(candidates) = grid.get(&(x, y)) {
-                    for &other_index in candidates {
+                    for &(other_index, other_curve) in candidates {
                         if other_index == point_index {
                             continue;
                         }
@@ -521,7 +583,13 @@ fn merge_nearby_endpoints(sk: &Sketch, endpoints: &[(usize, usize)], groups: &mu
                             exceeded_limit = true;
                             break 'points;
                         }
-                        if let Some(distance) = sk.point(other_index).map(|other| point.dist(other)).filter(|distance| *distance <= tol) {
+                        let Some(other) = sk.point(other_index) else { continue };
+                        let distance = point.dist(other);
+                        let touching = || match (carrier(curve_index), carrier(other_curve)) {
+                            (Some(pc), Some(qc)) => curve_index != other_curve && ends_on_each_other(point, pc, other, qc),
+                            _ => false,
+                        };
+                        if distance <= ENDPOINT_JOIN_TOL || (distance <= tol && touching()) {
                             let pair = (point_index.min(other_index), point_index.max(other_index));
                             joins.entry(pair).and_modify(|best| *best = best.min(distance)).or_insert(distance);
                         }
@@ -529,7 +597,7 @@ fn merge_nearby_endpoints(sk: &Sketch, endpoints: &[(usize, usize)], groups: &mu
                 }
             }
         }
-        grid.entry((cx, cy)).or_default().push(point_index);
+        grid.entry((cx, cy)).or_default().push((point_index, curve_index));
     }
     if !exceeded_limit {
         let mut nearest = std::collections::HashMap::<usize, (f64, Option<usize>)>::new();
@@ -1483,6 +1551,31 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
             }
         }
     }
+    // A piece no longer than the end join tolerance that runs beside another piece between the
+    // same two nodes is a point: its ends become one node. A split next to where a line touches
+    // an arc leaves such pairs, and the hairline face they close hides the profile around them
+    // (#14512). A short piece with no such partner is a gap the sketch keeps open, so it stays.
+    let mut between = std::collections::HashMap::<(usize, usize), usize>::new();
+    for e in &edges {
+        *between.entry((e.u.min(e.v), e.u.max(e.v))).or_default() += 1;
+    }
+    let mut short: Vec<usize> = (0..nodes.len()).collect();
+    edges.retain(|e| {
+        let length = match e.seg {
+            Seg2::Line { a, b } => a.dist(b),
+            Seg2::Arc { radius, sweep, .. } => radius * sweep.abs(),
+            _ => f64::INFINITY,
+        };
+        if length > ENDPOINT_JOIN_TOL || e.u == e.v || between[&(e.u.min(e.v), e.u.max(e.v))] < 2 {
+            return true;
+        }
+        union(&mut short, e.u, e.v);
+        false
+    });
+    for e in &mut edges {
+        e.u = find(&mut short, e.u);
+        e.v = find(&mut short, e.v);
+    }
     let n = nodes.len();
     // One edge where pieces overlap, then prune dangling edges.
     let mut alive = without_overlaps(&edges, tol);
@@ -1610,7 +1703,7 @@ fn island_loops(sk: &Sketch, curves: &[usize], max_edges: usize) -> Island {
         if !ok || h != start {
             continue;
         }
-        let segs = close_graph_joints(segs, &edge_nodes, &edge_analytic, ENDPOINT_JOIN_TOL);
+        let segs = close_graph_joints(segs, &edge_nodes, &edge_analytic, TANGENT_JOIN_TOL);
         let lp = Loop2 { segs: close_line_joints(restore_exact(segs, &ptags, &exact), ENDPOINT_JOIN_TOL) };
         if lp.signed_area() > 1e-9 {
             let c = edges.get(start / 2).map(|e| find(&mut comp, e.u)).unwrap_or(0);

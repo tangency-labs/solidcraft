@@ -512,6 +512,28 @@ mod tests {
     }
 
     #[test]
+    fn a_saved_scan_with_properties_edges_and_faces_opens_again() {
+        // The file's normals and other numbers, an edge and a face (#14572): a design file keeps
+        // the points apart from them, so they were checked against no points and it didn't open.
+        let d = dir("properties");
+        let path = d.join("normals.ply");
+        let text = "ply\nformat ascii 1.0\nelement vertex 3\nproperty float x\nproperty float y\nproperty float z\n\
+            property float nx\nproperty float ny\nproperty float nz\nproperty int layer\nelement edge 1\nproperty int vertex1\n\
+            property int vertex2\nelement face 1\nproperty list uchar int vertex_indices\nend_header\n\
+            0 0 0 0 0 1 0\n1 0 0 0 0 1 1\n0 1 0 0 0 1 1\n0 1\n3 0 1 2\n";
+        std::fs::write(&path, text).unwrap();
+        let mut s = Session::default();
+        s.execute("pointcloud.insert", &json!({"path": path})).unwrap();
+        assert_eq!(s.doc.point_clouds[0].complex.columns.len(), 4, "nx, ny, nz and layer");
+        let compact = solidcraft_io::write_design_container_with_compression(&s.doc, solidcraft_io::DesignCompression::Compact).unwrap();
+        for file in [solidcraft_io::write_design_container(&s.doc).unwrap(), compact] {
+            let opened = solidcraft_io::read_design(&file).unwrap();
+            assert_eq!(opened.point_clouds, s.doc.point_clouds);
+        }
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
     fn a_large_scan_is_thinned_and_centred() {
         let d = dir("thin");
         let points: Vec<[f32; 3]> = (0..100).map(|i| [i as f32, 1000.0, 50.0 + (i % 2) as f32]).collect();

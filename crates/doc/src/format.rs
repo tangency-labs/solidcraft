@@ -819,8 +819,9 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
     if !all_unique(d.features.iter().map(|f| f.id))
         || !all_unique(d.components.iter().map(|c| c.id))
         || !all_unique(d.occurrences.iter().map(|o| o.id))
+        || !all_unique(d.configs.rows.iter().map(|r| r.id))
     {
-        return Err(DocError::Invalid("damaged design: duplicate feature, component or occurrence id".into()));
+        return Err(DocError::Invalid("damaged design: duplicate feature, component, occurrence or configuration row id".into()));
     }
     let component_ids: std::collections::BTreeSet<_> = d.components.iter().map(|component| component.id).chain(std::iter::once(0)).collect();
     for feature in &d.features {
@@ -864,8 +865,9 @@ fn all_unique(ids: impl Iterator<Item = u64>) -> bool {
     ids.into_iter().all(|id| seen.insert(id))
 }
 
-/// The caps interactive editing enforces, applied to the raw JSON so an oversized sketch is
-/// never deserialised. Every sketch in the timeline is solved when the design opens, and the
+/// The sketch ceilings ([`solidcraft_sketch::CEILING_POINTS`] and the others, the highest the
+/// limit interactive editing enforces may be raised to), applied to the raw JSON so an oversized
+/// sketch is never deserialised. Every sketch in the timeline is solved when the design opens, and the
 /// solver sizes its dense matrices by the sketch, so a file with hundreds of thousands of
 /// points would ask the allocator for terabytes and abort before anything could report it.
 fn validate_sketch_sizes(value: &Value) -> Result<()> {
@@ -877,10 +879,11 @@ fn validate_sketch_sizes(value: &Value) -> Result<()> {
         }
         let Some(sketch) = feature.get("sketch") else { continue };
         let len = |key: &str| sketch.get(key).and_then(Value::as_array).map_or(0, Vec::len);
-        if len("points") > solidcraft_sketch::MAX_POINTS
-            || len("curves") > solidcraft_sketch::MAX_CURVES
-            || len("constraints") > solidcraft_sketch::MAX_CONSTRAINTS
-            || len("patterns") > solidcraft_sketch::MAX_CONSTRAINTS
+        // The ceilings, not the limits in force: a design made where the limit was raised opens (#10874).
+        if len("points") > solidcraft_sketch::CEILING_POINTS
+            || len("curves") > solidcraft_sketch::CEILING_CURVES
+            || len("constraints") > solidcraft_sketch::CEILING_CONSTRAINTS
+            || len("patterns") > solidcraft_sketch::CEILING_CONSTRAINTS
         {
             return Err(invalid());
         }
@@ -891,7 +894,7 @@ fn validate_sketch_sizes(value: &Value) -> Result<()> {
             for pattern in patterns {
                 let Some(entities) = pattern.get("entities").and_then(Value::as_array) else { return Err(invalid()) };
                 let Some(instances) = pattern.get("instances").and_then(Value::as_array) else { return Err(invalid()) };
-                if entities.len() > solidcraft_sketch::MAX_CURVES + solidcraft_sketch::MAX_POINTS || instances.len() >= 500 {
+                if entities.len() > solidcraft_sketch::CEILING_CURVES + solidcraft_sketch::CEILING_POINTS || instances.len() >= 500 {
                     return Err(invalid());
                 }
                 for instance in instances {
@@ -899,9 +902,9 @@ fn validate_sketch_sizes(value: &Value) -> Result<()> {
                     points = points.saturating_add(size("points"));
                     curves = curves.saturating_add(size("curves"));
                     constraints = constraints.saturating_add(size("constraints"));
-                    if points > solidcraft_sketch::MAX_POINTS
-                        || curves > solidcraft_sketch::MAX_CURVES
-                        || constraints > solidcraft_sketch::MAX_CONSTRAINTS
+                    if points > solidcraft_sketch::CEILING_POINTS
+                        || curves > solidcraft_sketch::CEILING_CURVES
+                        || constraints > solidcraft_sketch::CEILING_CONSTRAINTS
                     {
                         return Err(invalid());
                     }
@@ -2210,9 +2213,10 @@ mod tests {
             )
             .unwrap();
         d.configs.columns = vec![Column::Param("width".into()), Column::Suppress(feature)];
+        let ids = [d.allocate_id().unwrap(), d.allocate_id().unwrap()];
         d.configs.rows = vec![
-            ConfigRow { name: "Default".into(), cells: vec!["10 mm".into(), "false".into()] },
-            ConfigRow { name: "Alternate".into(), cells: vec!["width / 2 + 5 mm".into(), "yes".into()] },
+            ConfigRow { id: ids[0], name: "Default".into(), cells: vec!["10 mm".into(), "false".into()] },
+            ConfigRow { id: ids[1], name: "Alternate".into(), cells: vec!["width / 2 + 5 mm".into(), "yes".into()] },
         ];
         d.configs.active = Some("Default".into());
         let mut legacy: Value = serde_json::from_str(&d.to_json()).unwrap();
@@ -2236,6 +2240,7 @@ mod tests {
         let mut d = Document::new("configured styles");
         d.configs.columns = vec![Column::Material("Body".into()), Column::Appearance("Body".into())];
         d.configs.rows = vec![ConfigRow {
+            id: d.allocate_id().unwrap(),
             name: "Blue steel".into(),
             cells: vec!["Steel".into(), r#"{"name":"Custom blue","color":[40,90,186],"opacity":0.4}"#.into()],
         }];
@@ -2457,7 +2462,7 @@ mod tests {
     /// file too, before the arrays are deserialised.
     #[test]
     fn oversized_sketches_are_refused_before_typed_decoding() {
-        use solidcraft_sketch::{MAX_CONSTRAINTS, MAX_CURVES, MAX_POINTS, Sketch};
+        use solidcraft_sketch::{CEILING_CONSTRAINTS, CEILING_CURVES, CEILING_POINTS, MAX_POINTS, Sketch};
 
         // A sketch right at the point cap, chained by coincident constraints.
         let mut sketch = Sketch::new();
@@ -2472,8 +2477,8 @@ mod tests {
         let at_cap: Value = serde_json::from_str(&doc.to_json()).unwrap();
         assert!(read(&at_cap.to_string()).is_ok(), "a sketch at the caps must still load");
 
-        // One past each cap, grown at the JSON level: no typed array is ever built.
-        for (key, cap) in [("points", MAX_POINTS), ("constraints", MAX_CONSTRAINTS), ("curves", MAX_CURVES)] {
+        // One past each ceiling, grown at the JSON level: no typed array is ever built.
+        for (key, cap) in [("points", CEILING_POINTS), ("constraints", CEILING_CONSTRAINTS), ("curves", CEILING_CURVES)] {
             let mut value = at_cap.clone();
             let slot = &mut value["features"][0]["sketch"][key];
             let first = slot.as_array().and_then(|a| a.first()).cloned().unwrap_or(Value::Null);
@@ -2481,6 +2486,19 @@ mod tests {
             let error = read(&value.to_string()).unwrap_err().to_string();
             assert!(error.contains("sketch too large"), "{key}: {error}");
         }
+    }
+
+    /// #10874: a design whose sketch is past the default limit (made where Preferences › Sketch ›
+    /// Largest sketch was raised) passes the size check when it opens, whatever the limit here.
+    #[test]
+    fn a_sketch_past_the_default_limit_opens() {
+        use solidcraft_sketch::{MAX_CURVES, MAX_POINTS};
+        let points: Vec<Value> = (0..MAX_POINTS + 1).map(|i| serde_json::json!({"id": format!("p{}", i + 1), "pos": [i as f64, 0.0]})).collect();
+        let curves: Vec<Value> =
+            (0..MAX_CURVES + 1).map(|i| serde_json::json!({"id": format!("l{}", i + 1), "kind": {"type": "line", "a": i, "b": i + 1}})).collect();
+        let mut v: Value = serde_json::from_str(&Document::new("dense drawing").to_json()).unwrap();
+        v["features"] = serde_json::json!([{"type": "sketch", "sketch": {"points": points, "curves": curves}}]);
+        assert!(validate_sketch_sizes(&v).is_ok(), "{} points and {} curves", MAX_POINTS + 1, MAX_CURVES + 1);
     }
 
     fn two_components_one_occurrence() -> Document {
@@ -2534,12 +2552,15 @@ mod tests {
             ("contact_sets", json!({"id": 100, "name": "Contact", "occurrences": []})),
             ("studies", json!({"id": 100, "name": "Study", "steps": 10, "keys": []})),
             ("exploded", json!({"id": 100, "name": "View", "moves": []})),
+            ("configs", json!({"columns": [], "rows": [{"id": 100, "name": "Row", "cells": []}]})),
         ];
         for (field, item) in cases {
             let json = edited(&Document::new("Legacy IDs"), |v| {
                 v.as_object_mut().unwrap().remove("next_id");
                 if matches!(field, "browser_groups" | "timeline_groups" | "canvases") {
                     v[field] = json!([item]);
+                } else if field == "configs" {
+                    v[field] = item;
                 } else {
                     v["assembly"] = json!({field: [item]});
                 }
@@ -2550,6 +2571,7 @@ mod tests {
             back.timeline_groups.clear();
             back.canvases.clear();
             back.assembly = Default::default();
+            back.configs = Default::default();
             let mut reopened = read(&back.to_json()).unwrap();
             assert_eq!(reopened.allocate_id().unwrap(), 101, "{field}: deleted legacy id was forgotten");
             assert_eq!(reopened.allocate_id().unwrap(), 102, "{field}");

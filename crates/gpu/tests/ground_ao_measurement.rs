@@ -216,6 +216,7 @@ fn comparison_frame(scene: GpuScene, cam: &Camera, width: u32, height: u32, key:
         pv_hide: false,
         preview_bounds: None,
         view_proj: cam.view_proj(f64::from(width) / f64::from(height), 200.0).to_f32(),
+        turned_depth: None,
         back: cam.back().to_f32(),
         size_px: [width as f32, height as f32],
         clip: [0.0; 4],

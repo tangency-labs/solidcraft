@@ -319,7 +319,7 @@ dependencies = [
  "futures-lite",
  "parking",
  "polling",
- "rustix 1.1.5",
+ "rustix 1.1.6",
  "slab",
  "windows-sys 0.61.2",
 ]
@@ -350,7 +350,7 @@ dependencies = [
  "cfg-if",
  "event-listener",
  "futures-lite",
- "rustix 1.1.5",
+ "rustix 1.1.6",
 ]
 
 [[package]]
@@ -376,7 +376,7 @@ dependencies = [
  "cfg-if",
  "futures-core",
  "futures-io",
- "rustix 1.1.5",
+ "rustix 1.1.6",
  "signal-hook-registry",
  "slab",
  "windows-sys 0.61.2",
@@ -1656,7 +1656,7 @@ version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1bd49230192a3797a9a4d6abe9b3eed6f7fa4c8a8a4947977c6f80025f92cbd8"
 dependencies = [
- "rustix 1.1.5",
+ "rustix 1.1.6",
  "windows-link",
 ]
 
@@ -3293,7 +3293,7 @@ dependencies = [
  "concurrent-queue",
  "hermit-abi",
  "pin-project-lite",
- "rustix 1.1.5",
+ "rustix 1.1.6",
  "windows-sys 0.61.2",
 ]
 
@@ -3721,9 +3721,9 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "1.1.5"
+version = "1.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "891efababe418670775f199f0d233d84843c227a0949a883ce15b37c78d6629d"
+checksum = "e5e76742e5294153d4dde1207dbec5bdd81eef6fabdc0d2118babadabfd858aa"
 dependencies = [
  "bitflags 2.13.2",
  "errno",
@@ -4235,6 +4235,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcore-step"
+version = "0.1.0"
+dependencies = [
+ "solidcore",
+ "solidcore-convert",
+ "solidcore-ops",
+ "solidcore-record",
+]
+
+[[package]]
 name = "solidcore-tess"
 version = "0.1.0"
 dependencies = [
@@ -4249,7 +4259,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft"
-version = "0.40.0-rc.3"
+version = "0.40.0"
 dependencies = [
  "block2 0.6.2",
  "eframe",
@@ -4275,6 +4285,7 @@ dependencies = [
  "solidcraft-control",
  "solidcraft-engine",
  "solidcraft-gpu",
+ "solidcraft-look",
  "solidcraft-space-mouse",
  "solidcraft-theme",
  "solidcraft-ui-egui",
@@ -4291,11 +4302,11 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-3dx-client"
-version = "0.40.0-rc.3"
+version = "0.40.0"
 
 [[package]]
 name = "solidcraft-cli"
-version = "0.40.0-rc.3"
+version = "0.40.0"
 dependencies = [
  "image",
  "log",
@@ -4311,11 +4322,11 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-color"
-version = "0.40.0-rc.3"
+version = "0.40.0"
 
 [[package]]
 name = "solidcraft-control"
-version = "0.40.0-rc.3"
+version = "0.40.0"
 dependencies = [
  "getrandom 0.3.4",
  "serde",
@@ -4324,7 +4335,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-control-egui"
-version = "0.40.0-rc.3"
+version = "0.40.0"
 dependencies = [
  "egui",
  "image",
@@ -4334,7 +4345,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-derive"
-version = "0.40.0-rc.3"
+version = "0.40.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4343,7 +4354,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-doc"
-version = "0.40.0-rc.3"
+version = "0.40.0"
 dependencies = [
  "log",
  "serde",
@@ -4365,7 +4376,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-dynamics"
-version = "0.40.0-rc.3"
+version = "0.40.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4376,7 +4387,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-engine"
-version = "0.40.0-rc.3"
+version = "0.40.0"
 dependencies = [
  "image",
  "log",
@@ -4402,7 +4413,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-geom"
-version = "0.40.0-rc.3"
+version = "0.40.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4415,7 +4426,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-gpu"
-version = "0.40.0-rc.3"
+version = "0.40.0"
 dependencies = [
  "image",
  "log",
@@ -4440,7 +4451,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-io"
-version = "0.40.0-rc.3"
+version = "0.40.0"
 dependencies = [
  "cadmpeg-core",
  "cadmpeg-ir",
@@ -4451,7 +4462,7 @@ dependencies = [
  "gltf",
  "log",
  "quick-xml",
- "rustix 1.1.5",
+ "rustix 1.1.6",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -4468,7 +4479,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-kernel"
-version = "0.40.0-rc.3"
+version = "0.40.0"
 dependencies = [
  "log",
  "proptest",
@@ -4477,19 +4488,31 @@ dependencies = [
  "serde_json",
  "solidcore-ops",
  "solidcore-record",
+ "solidcore-step",
  "solidcore-tess",
  "solidcraft-geom",
  "solidcraft-profile",
  "solidcraft-smlib",
- "solidcraft-step",
  "spade",
  "thiserror 2.0.21",
  "web-time",
 ]
 
 [[package]]
+name = "solidcraft-look"
+version = "0.40.0"
+dependencies = [
+ "egui",
+ "log",
+ "solidcraft-theme",
+ "solidcraft-ui-kit",
+ "tiny-skia",
+ "toml",
+]
+
+[[package]]
 name = "solidcraft-mcp"
-version = "0.40.0-rc.3"
+version = "0.40.0"
 dependencies = [
  "image",
  "serde_json",
@@ -4503,14 +4526,14 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-mcp-server"
-version = "0.40.0-rc.3"
+version = "0.40.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "solidcraft-profile"
-version = "0.40.0-rc.3"
+version = "0.40.0"
 dependencies = [
  "serde_json",
  "web-time",
@@ -4518,7 +4541,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-render"
-version = "0.40.0-rc.3"
+version = "0.40.0"
 dependencies = [
  "flate2",
  "image",
@@ -4541,7 +4564,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-sketch"
-version = "0.40.0-rc.3"
+version = "0.40.0"
 dependencies = [
  "harfrust",
  "serde",
@@ -4555,7 +4578,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-smlib"
-version = "0.40.0-rc.3"
+version = "0.40.0"
 dependencies = [
  "flate2",
  "log",
@@ -4569,28 +4592,18 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-space-mouse"
-version = "0.40.0-rc.3"
+version = "0.40.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
-name = "solidcraft-step"
-version = "0.40.0-rc.3"
-dependencies = [
- "solidcore-ops",
- "solidcore-record",
- "solidcraft-geom",
- "solidcraft-profile",
-]
-
-[[package]]
 name = "solidcraft-testkit"
-version = "0.40.0-rc.3"
+version = "0.40.0"
 
 [[package]]
 name = "solidcraft-theme"
-version = "0.40.0-rc.3"
+version = "0.40.0"
 dependencies = [
  "egui",
  "serde",
@@ -4600,7 +4613,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-ui-egui"
-version = "0.40.0-rc.3"
+version = "0.40.0"
 dependencies = [
  "arboard",
  "egui",
@@ -4609,7 +4622,6 @@ dependencies = [
  "log",
  "lopdf",
  "minisign-verify",
- "muda",
  "nix 0.31.3",
  "pollster 0.4.0",
  "proc-macro2",
@@ -4624,8 +4636,10 @@ dependencies = [
  "solidcraft-control-egui",
  "solidcraft-engine",
  "solidcraft-gpu",
+ "solidcraft-look",
  "solidcraft-space-mouse",
  "solidcraft-theme",
+ "solidcraft-ui-kit",
  "solidcraft-ui-registry",
  "solidcraft-ui-text",
  "solidcraft-viewport",
@@ -4633,7 +4647,6 @@ dependencies = [
  "solidcraft-viewport-gpu",
  "syn 2.0.119",
  "tiny-skia",
- "toml",
  "ttf-parser",
  "web-time",
  "winreg",
@@ -4641,15 +4654,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcraft-ui-kit"
+version = "0.40.0"
+dependencies = [
+ "arboard",
+ "egui",
+ "egui-wgpu",
+ "image",
+ "log",
+ "muda",
+ "serde",
+ "serde_json",
+ "solidcraft-color",
+ "solidcraft-theme",
+ "solidcraft-ui-registry",
+ "solidcraft-ui-text",
+ "solidcraft-viewport-egui",
+ "solidcraft-viewport-gpu",
+ "syn 2.0.119",
+ "tiny-skia",
+ "web-time",
+]
+
+[[package]]
 name = "solidcraft-ui-registry"
-version = "0.40.0-rc.3"
+version = "0.40.0"
 dependencies = [
  "egui",
 ]
 
 [[package]]
 name = "solidcraft-ui-text"
-version = "0.40.0-rc.3"
+version = "0.40.0"
 dependencies = [
  "log",
  "serde_json",
@@ -4659,7 +4695,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-viewport"
-version = "0.40.0-rc.3"
+version = "0.40.0"
 dependencies = [
  "image",
  "serde",
@@ -4671,7 +4707,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-viewport-egui"
-version = "0.40.0-rc.3"
+version = "0.40.0"
 dependencies = [
  "egui",
  "egui-wgpu",
@@ -4682,7 +4718,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-viewport-gpu"
-version = "0.40.0-rc.3"
+version = "0.40.0"
 dependencies = [
  "log",
  "naga",
@@ -4698,7 +4734,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-web"
-version = "0.40.0-rc.3"
+version = "0.40.0"
 dependencies = [
  "eframe",
  "egui",
@@ -4708,6 +4744,7 @@ dependencies = [
  "serde_json",
  "solidcraft-control",
  "solidcraft-engine",
+ "solidcraft-look",
  "solidcraft-ui-egui",
  "solidcraft-ui-text",
  "url",
@@ -4840,7 +4877,7 @@ dependencies = [
  "fastrand",
  "getrandom 0.4.3",
  "once_cell",
- "rustix 1.1.5",
+ "rustix 1.1.6",
  "windows-sys 0.61.2",
 ]
 
@@ -5363,7 +5400,7 @@ checksum = "38a91b4eaddff87b1cd1074985e3713da4af2c49742d1b356b2c01670a67a078"
 dependencies = [
  "cc",
  "downcast-rs",
- "rustix 1.1.5",
+ "rustix 1.1.6",
  "scoped-tls",
  "smallvec",
  "wayland-sys",
@@ -5376,7 +5413,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3c36a0f861ad76d0901f2800b46321410d9f73f2ea88aac0650d86c32688073"
 dependencies = [
  "bitflags 2.13.2",
- "rustix 1.1.5",
+ "rustix 1.1.6",
  "wayland-backend",
  "wayland-scanner",
 ]
@@ -5398,7 +5435,7 @@ version = "0.31.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a52d18780be9b1314328a3de5f930b73d2200112e3849ca6cb11822793fb34d"
 dependencies = [
- "rustix 1.1.5",
+ "rustix 1.1.6",
  "wayland-client",
  "xcursor",
 ]
@@ -6093,7 +6130,7 @@ dependencies = [
  "libc",
  "log",
  "os_pipe",
- "rustix 1.1.5",
+ "rustix 1.1.6",
  "thiserror 2.0.21",
  "tree_magic_mini",
  "wayland-backend",
@@ -6130,7 +6167,7 @@ dependencies = [
  "libc",
  "libloading",
  "once_cell",
- "rustix 1.1.5",
+ "rustix 1.1.6",
  "x11rb-protocol",
 ]
 
@@ -6183,7 +6220,7 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "xtask"
-version = "0.40.0-rc.3"
+version = "0.40.0"
 dependencies = [
  "flate2",
  "proc-macro2",
@@ -6279,7 +6316,7 @@ dependencies = [
  "hex",
  "libc",
  "ordered-stream",
- "rustix 1.1.5",
+ "rustix 1.1.6",
  "serde",
  "serde_repr",
  "tracing",

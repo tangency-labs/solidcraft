@@ -214,7 +214,10 @@ fn axis_source(s: &Session, name: &str, cmd: &str) -> Result<LinkSource> {
 fn sketch_plane(doc: &Document, id: u64, st: &solidcraft_doc::ModelState) -> Result<Plane> {
     let (vals, _) = doc.param_values();
     match doc.feature(id).map(|f| &f.kind) {
-        Some(FeatureKind::Sketch { plane, .. }) => Ok(doc.resolve_plane_in(&vals, plane, 0, Some(st))?),
+        Some(FeatureKind::Sketch { plane, .. }) => {
+            let component = doc.feature(id).map(|f| f.component).unwrap_or(0);
+            Ok(doc.resolve_plane_in(&vals, plane, 0, component, Some(st))?)
+        }
         _ => Err(EngineError::Other(format!("feature {id} is not a sketch"))),
     }
 }
@@ -452,7 +455,11 @@ fn add_link_unless_present(
     let plane = sketch_plane(&doc, id, &st)?;
     let frame = sketch_frame(s, &doc, id);
     let r = resolve_at(&doc, &vals, &st, &plane, kind, &src, frame.as_ref())?;
-    if skip_present && r.wires.is_empty() && sk.link_geometry_present(&r.geom) {
+    let present = match kind {
+        LinkKind::Intersect => sk.link_geometry_or_points_present(&r.geom),
+        _ => sk.link_geometry_present(&r.geom),
+    };
+    if skip_present && r.wires.is_empty() && present {
         return Ok(None);
     }
     // A mesh body is one face whose name says nothing of the flat patch picked: the link keeps
@@ -534,11 +541,12 @@ fn run_links(s: &mut Session, p: &Value, cmd: &str, kind: LinkKind, projection_l
         refresh(s, doc, id, sk);
         let mut out = Vec::new();
         // Projecting what the sketch already shows (the border of the face it is on, an edge
-        // projected before) would lay a second copy over the first: those references are skipped.
+        // projected before), or intersecting what was intersected before, would lay a second copy
+        // over the first: those references are skipped.
         let mut present = Vec::new();
         for src in sources {
             let what = src.describe();
-            match add_link_unless_present(s, doc, id, sk, kind, src, kind == LinkKind::Project) {
+            match add_link_unless_present(s, doc, id, sk, kind, src, matches!(kind, LinkKind::Project | LinkKind::Intersect)) {
                 Ok(Some(l)) => {
                     let (curves, points) = link_parts(sk, &l);
                     if construction {
@@ -557,7 +565,8 @@ fn run_links(s: &mut Session, p: &Value, cmd: &str, kind: LinkKind, projection_l
         }
         // Nothing new: the sketch is kept as it was.
         if out.is_empty() {
-            return Err(bad(cmd, format!("already projected into this sketch: {}", present.join(", "))));
+            let verb = if kind == LinkKind::Intersect { "intersected" } else { "projected" };
+            return Err(bad(cmd, format!("already {verb} into this sketch: {}", present.join(", "))));
         }
         Ok((out, present))
     })?;

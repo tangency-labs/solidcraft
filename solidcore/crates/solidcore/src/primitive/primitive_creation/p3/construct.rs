@@ -16,8 +16,7 @@
 //! Deviations: typed service resolution replaces pointers. Output face lists
 //! preserve partial results; owned geometry handles cleanup. Missing analytic
 //! NURBs are generated on owned copies with caller context/owner. No recursion.
-//! Not upstream (WR-404, tangency-labs/solidcore#411, opt-in
-//! `Kernel::fixes.curve_sweep_caps_at_sweep_ends`): the curve sweep's caps
+//! Not upstream (WR-404, tangency-labs/solidcore#411): the curve sweep's caps
 //! come from the side faces at the sweep's ends (`sweep_end_curves`), not the first
 //! and last `count` side faces.
 //! Not upstream (tangency-labs/solidcore#2192, opt-in
@@ -57,6 +56,8 @@ use crate::surface::surface::{
 use crate::sweep::topology_sweep::access::{FaceRef, RegionRef};
 use crate::topology::{BrepId, EdgeuseId, FaceId};
 
+use super::skin_sources::{layer_sources, LoopSpans, NotTraced, SkinSources, SkinTrace};
+
 const OP: &str = "primitive::primitive_creation::p3";
 
 pub(super) fn target(primitive: &PrimitiveCreation, brep: BrepId) -> Result<RegionRef> {
@@ -64,12 +65,12 @@ pub(super) fn target(primitive: &PrimitiveCreation, brep: BrepId) -> Result<Regi
         brep,
         primitive
             .region()
-            .ok_or_else(|| SolidError::null_pointer(OP))?,
+            .ok_or_else(|| SolidError::primitive_missing(OP, "the target region"))?,
     ))
 }
 fn face_surface(a: &impl PrimitiveAccess, face: FaceRef) -> Result<&Surface> {
     crate::topology::face::p2::surface(a.brep(face.0)?, face.1)?
-        .ok_or_else(|| SolidError::null_pointer(OP))
+        .ok_or_else(|| SolidError::primitive_missing(OP, "the face's surface"))
 }
 
 /// Parameters for `CreateBlendPrimitive`.
@@ -222,12 +223,40 @@ impl PrimitiveCreation {
         degree: usize,
         new_faces: &mut Vec<FaceId>,
     ) -> Result<()> {
+        self.create_skin_from_faces_traced(
+            a, brep, faces, profiles, approx_tol, degree, new_faces, None,
+        )
+    }
+
+    /// [`PrimitiveCreation::create_skin_from_faces`], also tracing which profile curves
+    /// each new face was swept from into `trace` when given (not upstream:
+    /// [`super::skin_sources`], tangency-labs/solidcore#3139). The faces and surfaces are
+    /// those `create_skin_from_faces` makes; the trace adds no failure.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`PrimitiveCreation::create_skin_from_faces`].
+    #[allow(clippy::too_many_arguments)] // upstream's arguments and the trace
+    pub fn create_skin_from_faces_traced(
+        &mut self,
+        a: &mut impl PrimitiveAccess,
+        brep: BrepId,
+        faces: &[FaceRef],
+        profiles: &[BSplineCurve],
+        approx_tol: f64,
+        degree: usize,
+        new_faces: &mut Vec<FaceId>,
+        trace: Option<&mut SkinTrace>,
+    ) -> Result<()> {
         self.init_entity_maps();
         new_faces.clear();
         let _ = target(self, brep)?;
         let mut skin_curves = Vec::new();
         let mut layers = Vec::new();
         let mut layer_count = 0;
+        // (the trace: each section loop's spans, by layer, and the first reason it fails)
+        let mut loop_spans: Vec<(usize, LoopSpans)> = Vec::new();
+        let mut untraced: Option<NotTraced> = None;
         for (i, &face) in faces.iter().enumerate() {
             let domain = crate::topology::face::p2::uv_domain(a.brep(face.0)?, face.1)?;
             face_surface(a, face)?.evaluate_normal(
@@ -236,14 +265,24 @@ impl PrimitiveCreation {
                 Side::Left,
                 Side::Left,
             )?;
-            let composites = a.face_composites(face)?;
+            let composites = a.face_composites_with_edges(face)?;
             if i == 0 {
                 layer_count = composites.len();
             } else if layer_count != composites.len() {
-                return Err(SolidError::sm_err(OP));
+                return Err(SolidError::primitive_failed(
+                    OP,
+                    "the faces have different numbers of layers",
+                ));
             }
-            for (j, mut composite) in composites.into_iter().enumerate() {
-                skin_curves.push(composite.make_composite_nurb()?);
+            for (j, (mut composite, edges)) in composites.into_iter().enumerate() {
+                let (joined, breaks) = composite.make_composite_nurb_with_breaks()?;
+                if trace.is_some() && untraced.is_none() {
+                    match LoopSpans::of(&joined, breaks, edges) {
+                        Ok(spans) => loop_spans.push((j, spans)),
+                        Err(_) => untraced = Some(NotTraced::JoinedCurveUnreadable),
+                    }
+                }
+                skin_curves.push(joined);
                 layers.push(j);
             }
         }
@@ -251,7 +290,9 @@ impl PrimitiveCreation {
             skin_curves.extend_from_slice(profiles);
             layer_count = 1;
             layers.resize(skin_curves.len(), 0);
+            untraced = Some(NotTraced::OpenProfiles);
         }
+        let mut traced: Vec<(FaceId, Vec<usize>)> = Vec::new();
         let mut made = Vec::new();
         for layer in 0..layer_count {
             let curves: Vec<_> = skin_curves
@@ -270,6 +311,10 @@ impl PrimitiveCreation {
                     ..Default::default()
                 },
             )?;
+            // (the trace: the surface's knots across the sections, V)
+            let surface_knots = trace
+                .is_some()
+                .then(|| surface.knots(SurfParamType::V, None).map(|(k, _)| k));
             let surface = Surface::from(surface);
             // (a B-spline surface just made: never lazy)
             let domain = surface.natural_uv_domain_if_built();
@@ -280,6 +325,34 @@ impl PrimitiveCreation {
                 p,
             )?)?;
             new_faces.extend_from_slice(&made);
+            if trace.is_some() && untraced.is_none() {
+                let sections: Vec<&LoopSpans> = loop_spans
+                    .iter()
+                    .filter(|(l, _)| *l == layer)
+                    .map(|(_, s)| s)
+                    .collect();
+                let found = match (surface_knots, face_v_intervals(&*a, brep, &made)) {
+                    (Some(Ok(knots)), Some(intervals)) => {
+                        let edge_curves = trace
+                            .as_deref()
+                            .map_or(&[][..], |t| t.edge_curves.as_slice());
+                        layer_sources(edge_curves, &sections, &knots, &intervals)
+                    }
+                    (Some(Err(_)) | None, _) => Err(NotTraced::SurfaceKnotsUnreadable),
+                    (_, None) => Err(NotTraced::FaceDomainUnreadable),
+                };
+                match found {
+                    Ok(mut layer_faces) => traced.append(&mut layer_faces),
+                    Err(why) => untraced = Some(why),
+                }
+            }
+        }
+        if let Some(t) = trace {
+            let why = untraced.or_else(|| t.open_profiles.then_some(NotTraced::OpenProfiles));
+            t.sources = Some(match why {
+                Some(why) => SkinSources::NotTraced { why },
+                None => SkinSources::Traced(traced),
+            });
         }
         Ok(())
     }
@@ -430,7 +503,7 @@ impl PrimitiveCreation {
         self.init_entity_maps();
         side_faces.clear();
         if profiles.is_empty() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::primitive_failed(OP, "no profiles to sweep"));
         }
         // SolidCraft fork (5d3939e): a scaled sweep's sections are no rigid images of the
         // profile.
@@ -453,7 +526,6 @@ impl PrimitiveCreation {
                 options,
                 test_continuity,
             )?;
-            let count = prepared.profiles.len();
             let curves = core::mem::take(&mut prepared.profiles)
                 .into_iter()
                 .map(Curve::from)
@@ -544,8 +616,8 @@ impl PrimitiveCreation {
             let cap_ends = options.cap_ends
                 && !(a.kernel(brep)?.fixes.curve_sweep_closed_path_joins_ends
                     && sweep_ends_coincide(&*a, brep, side_faces, options.translational_sweep)?);
-            if cap_ends && a.kernel(brep)?.fixes.curve_sweep_caps_at_sweep_ends {
-                // not upstream (WR-404, #411, opt-in)
+            if cap_ends {
+                // not upstream (WR-404, #411)
                 let (mut starts, mut ends) = sweep_end_curves(
                     &*a,
                     brep,
@@ -554,59 +626,6 @@ impl PrimitiveCreation {
                     options.translational_sweep,
                     approx_tol,
                 )?;
-                a.planar_faces(region, &mut starts, approx_tol, start_faces)?;
-                a.planar_faces(region, &mut ends, approx_tol, end_faces)?;
-            } else if cap_ends {
-                let mut starts = Vec::new();
-                let mut ends = Vec::new();
-                let mut direction = SurfParamType::U;
-                let total = side_faces.len();
-                for (i, &face) in side_faces.iter().enumerate() {
-                    let surface = face_surface(a, (brep, face))?;
-                    let domain = surface.natural_uv_domain_with_nurb(a.kernel(brep)?)?;
-                    if i < count {
-                        direction = if options.translational_sweep {
-                            SurfParamType::V
-                        } else {
-                            SurfParamType::U
-                        };
-                        let param = if options.translational_sweep {
-                            domain.min().y
-                        } else {
-                            domain.min().x
-                        };
-                        let curve = surface
-                            .create_iso_parametric_curve(
-                                a.kernel(brep)?,
-                                direction,
-                                param,
-                                approx_tol / 10.0,
-                                None,
-                                false,
-                            )?
-                            .curve;
-                        starts.push(Some(curve));
-                    }
-                    if count > total || i >= total - count {
-                        let param = if options.translational_sweep {
-                            direction = SurfParamType::V;
-                            domain.max().y
-                        } else {
-                            domain.max().x
-                        };
-                        let curve = surface
-                            .create_iso_parametric_curve(
-                                a.kernel(brep)?,
-                                direction,
-                                param,
-                                approx_tol / 10.0,
-                                None,
-                                false,
-                            )?
-                            .curve;
-                        ends.push(Some(curve));
-                    }
-                }
                 a.planar_faces(region, &mut starts, approx_tol, start_faces)?;
                 a.planar_faces(region, &mut ends, approx_tol, end_faces)?;
             }
@@ -786,6 +805,24 @@ fn sweep_ends_coincide(
     Ok(true)
 }
 
+/// Each of `faces`' V interval: its surface's natural domain across the sections
+/// (`None` when one cannot be read; the trace then reports it, the skin is unchanged).
+fn face_v_intervals(
+    a: &impl PrimitiveAccess,
+    brep: BrepId,
+    faces: &[FaceId],
+) -> Option<Vec<(FaceId, f64, f64)>> {
+    let k = a.kernel(brep).ok()?;
+    let b = a.brep(brep).ok()?;
+    let mut out = Vec::new();
+    for &f in faces {
+        let surface = crate::topology::face::p2::surface(b, f).ok()??;
+        let domain = surface.natural_uv_domain_with_nurb(k).ok()?;
+        out.push((f, domain.min().y, domain.max().y));
+    }
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -957,7 +994,6 @@ mod tests {
         let mut outer_solid = sweep(&mut k, &[Some(&outer)]).brep;
         let solid_outer = brep_volume(&k, &mut outer_solid, 1e-6, &attributes).unwrap();
 
-        k.fixes.curve_sweep_caps_at_sweep_ends = true;
         let mut pipe = sweep(&mut k, &[Some(&outer), Some(&inner)]);
         // each cap is the annulus: the outer loop and the hole
         for cap in [pipe.start_faces[0], pipe.end_faces[0]] {

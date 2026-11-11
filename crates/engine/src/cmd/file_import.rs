@@ -9,7 +9,6 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
-use serde_json::{Value, json};
 use solidcore_record::Vec3;
 use solidcraft_doc::joints::{Joint, JointKind, JointOrigin, Snap};
 use solidcraft_doc::kernel::{StepImport, StepNode};
@@ -187,7 +186,8 @@ fn node_key(imp: &StepImport, node: &StepNode, depth: usize) -> u64 {
     h.finish()
 }
 
-/// The import's component, as the command reports it.
+/// The import's component, as the command reports it. The reply types in `schema/insert_mesh.rs`
+/// and `schema/insert_step.rs` are what the commands answer with these fields.
 pub(crate) struct Placed {
     pub component: u64,
     pub occurrence: Option<u64>,
@@ -196,18 +196,6 @@ pub(crate) struct Placed {
     pub components: usize,
     /// Rigid joints holding its contents together.
     pub joints: Vec<u64>,
-}
-
-impl Placed {
-    pub fn report(&self, out: &mut Value) {
-        out["component"] = json!(self.component);
-        out["component_name"] = json!(self.name);
-        out["occurrence"] = json!(self.occurrence);
-        if self.components > 0 {
-            out["subcomponents"] = json!(self.components);
-            out["rigid_joints"] = json!(self.joints.len());
-        }
-    }
 }
 
 /// The component an import makes: named `name`, in the active component at its origin.
@@ -415,11 +403,8 @@ fn add_rigid_joints(s: &mut Session, pairs: &[(u64, u64, Mat)]) -> Result<Vec<u6
                 id,
                 name: format!("Rigid Group {a}:{b}"),
                 kind: JointKind::Rigid,
-                a: JointOrigin {
-                    occurrence: *a,
-                    snap: Snap::Frame { origin: point(m, Vec3::ZERO), z: vector(m, Vec3::Z), x: Some(vector(m, Vec3::X)) },
-                },
-                b: JointOrigin { occurrence: *b, snap: Snap::Frame { origin: Vec3::ZERO, z: Vec3::Z, x: Some(Vec3::X) } },
+                a: JointOrigin::new(*a, Snap::Frame { origin: point(m, Vec3::ZERO), z: vector(m, Vec3::Z), x: Some(vector(m, Vec3::X)) }),
+                b: JointOrigin::new(*b, Snap::Frame { origin: Vec3::ZERO, z: Vec3::Z, x: Some(Vec3::X) }),
                 values: Vec::new(),
                 limits: Vec::new(),
                 flip: true,
@@ -427,6 +412,8 @@ fn add_rigid_joints(s: &mut Session, pairs: &[(u64, u64, Mat)]) -> Result<Vec<u6
                 angle: 0.0,
                 suppressed: false,
                 exprs: Default::default(),
+                captured: None,
+                constraint: None,
             })
         })
         .collect::<Result<_>>()?;

@@ -104,7 +104,7 @@ use crate::curve::curve::p7::PropertyAnalysisOptions;
 use crate::curve::curve::{Curve, CurveKind, CurvePropertyType};
 use crate::curve::ellipse::p2::set_up_polar_conversion;
 use crate::curve::ellipse::{Ellipse, EllipseOptions, PolarConversion};
-use crate::error::{ignore_status, ignored, Result, SolidError, SM_ERR};
+use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -582,7 +582,10 @@ impl SurfOfRevolution {
 
         // sYVec can be 0,0,0 if revolving a line coincident with the axis
         if y_vec.length_squared() < crate::math::EFF_ZERO_SQ {
-            return Err(SolidError::sm_err(OP_CANONICAL));
+            return Err(SolidError::surface_failed(
+                OP_CANONICAL,
+                "the generator line lies on the axis",
+            ));
         }
         let y_vec = y_vec.unitize()?;
 
@@ -662,7 +665,7 @@ impl SurfOfRevolution {
             let own = self
                 .gen_curve
                 .as_mut()
-                .ok_or(SolidError::null_pointer(OP_GEN))?;
+                .ok_or_else(|| SolidError::surface_missing(OP_GEN, "the generator curve"))?;
             gen_adjust_step_interval(k, own, &surf_gen_step_ivl)?;
             gen_adjust_step_interval(k, &mut gen_curve, &surf_gen_step_ivl)?;
         }
@@ -772,7 +775,10 @@ impl SurfOfRevolution {
 
         // update PolarConverter
         if iso_degenerate {
-            return Err(SolidError::sm_err(OP_REBUILD));
+            return Err(SolidError::surface_failed(
+                OP_REBUILD,
+                "the sweep iso curve is degenerate",
+            ));
         }
         let CurveKind::Ellipse(circle) = sweep_iso.kind_mut() else {
             return Err(SolidError::invalid_input(
@@ -796,7 +802,7 @@ impl SurfOfRevolution {
     pub(crate) fn gen(&self) -> Result<&Curve> {
         self.gen_curve
             .as_ref()
-            .ok_or(SolidError::null_pointer(OP_GEN))
+            .ok_or_else(|| SolidError::surface_missing(OP_GEN, "the generator curve"))
     }
 
     /// The generating curve (`GetGenCurve`).
@@ -1167,7 +1173,10 @@ impl SurfOfRevolution {
         // Get GeneratorPoint for given Param
         let generator_domain = gen.natural_interval();
         if !generator_domain.contains_value(gen_param, 0.0) {
-            return Err(SolidError::sm_err(OP_DIRECTRIX));
+            return Err(SolidError::surface_failed(
+                OP_DIRECTRIX,
+                "the generator parameter is outside the generator's interval",
+            ));
         }
         let generator_point = gen.evaluate_point(k, gen_param)?;
 
@@ -1294,7 +1303,9 @@ impl SurfOfRevolution {
         // when polar conversion is possible
         let mut exact_conversion = false;
         if self.have_polar_conversion() {
-            let circle = self.polar_curve().ok_or(SolidError::null_pointer(OP_GEN))?;
+            let circle = self.polar_curve().ok_or_else(|| {
+                SolidError::surface_missing(OP_GEN, "the polar conversion circle")
+            })?;
             let (x, exact) = self
                 .polar
                 .convert_to_polar_parameter(k, circle, swapped.x)?;
@@ -1389,7 +1400,10 @@ impl SurfOfRevolution {
     ) -> Result<()> {
         // check input
         if hu > 3 || hv > 3 {
-            return Err(SolidError::sm_err(OP_EVAL_STEP));
+            return Err(SolidError::surface_failed(
+                OP_EVAL_STEP,
+                "a derivative order above 3 was asked",
+            ));
         }
 
         // locals
@@ -1707,7 +1721,12 @@ impl SurfOfRevolution {
                 }
                 let mut angle_rad = axis
                     .ccw_angle_between(self.position.x_axis(), target_vec)
-                    .map_err(|_| SolidError::sm_err(OP_XPLANE))?;
+                    .map_err(|_| {
+                        SolidError::surface_failed(
+                            OP_XPLANE,
+                            "the angle to the plane's direction could not be measured",
+                        )
+                    })?;
                 if angle_rad < 0.0 {
                     angle_rad += 2.0 * PI;
                 }
@@ -2091,11 +2110,10 @@ pub fn test_for_iso_circles(
 
     // all done
     if n_degen == test_vals.len() {
-        return Err(SolidError::Upstream {
-            operation: OP_ISO_CIRCLES,
-            code: SM_ERR,
-            entity: None,
-        });
+        return Err(SolidError::surface_failed(
+            OP_ISO_CIRCLES,
+            "every test iso curve is degenerate",
+        ));
     }
     Ok(out)
 }
@@ -2339,7 +2357,7 @@ mod tests {
         l.make_nurb().unwrap();
         let r =
             SurfOfRevolution::create_canonical(&k(), Curve::from(l), Vec3::ZERO, Vec3::Z, false);
-        assert!(matches!(r, Err(SolidError::Upstream { code: SM_ERR, .. })));
+        assert!(matches!(&r, Err(e) if e.upstream_status() == Some(crate::error::SM_ERR)));
     }
 
     /// The full revolution about Z through the origin of the unbounded line
@@ -2409,7 +2427,7 @@ mod tests {
             None,
         );
         assert!(
-            matches!(r, Err(SolidError::Upstream { code: SM_ERR, .. })),
+            matches!(&r, Err(e) if e.upstream_status() == Some(crate::error::SM_ERR)),
             "{r:?}"
         );
     }
@@ -2490,7 +2508,7 @@ mod tests {
             None,
         );
         assert!(
-            matches!(r, Err(SolidError::Upstream { code: SM_ERR, .. })),
+            matches!(&r, Err(e) if e.upstream_status() == Some(crate::error::SM_ERR)),
             "{r:?}"
         );
     }

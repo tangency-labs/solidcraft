@@ -101,7 +101,7 @@ fn offset_profile_in(
             .face(face)?
             .surface
             .as_ref()
-            .ok_or_else(|| SolidError::null_pointer(OP))?
+            .ok_or_else(|| SolidError::primitive_missing(OP, "the new face's surface"))?
             .evaluate_normal(k, domain.evaluate(0.5, 0.5), Side::Left, Side::Left)?;
         // build a CompositeCurve for every loop
         let composites = crate::topology::face::p3::create_composites(k, brep, face)?;
@@ -173,5 +173,5 @@ fn difference(k: &mut Kernel, mut a: Brep, mut b: Brep) -> Result<Brep> {
         (&mut a_marks, &mut b_marks),
         &mut state.env(None),
     )?;
-    result.ok_or_else(|| SolidError::null_pointer(OP))
+    result.ok_or_else(|| SolidError::primitive_missing(OP, "the difference's B-rep"))
 }

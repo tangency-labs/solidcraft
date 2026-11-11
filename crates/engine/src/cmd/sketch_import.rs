@@ -6,12 +6,12 @@ use std::collections::HashMap;
 use serde_json::{Value, json};
 use solidcore_record::Vec2;
 use solidcraft_io::{DxfEntity, DxfLayer, Geom2, MAX_DRAWING_BYTES};
-use solidcraft_sketch::{Analysis, CurveKind, LinkKind, LinkSource, Sketch};
+use solidcraft_sketch::{Analysis, ConstraintKind, CurveKind, LinkKind, LinkSource, Sketch};
 
 use super::CommandSpec;
 use super::sketch::{Left, edit_solved, ids_of};
 use super::sketch_store;
-use crate::params::{bad, num, str_, vec2};
+use crate::params::{bad, bool_, num, str_, vec2};
 use crate::schema::sketch_import::{DrawingInserted, DxfExported, ExportDxfParams, ExportDxfResult, InsertDxfParams, InsertSvgParams, SketchSolve};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
@@ -32,17 +32,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("sketch_dxf")
         .contract(&INSERT_DXF_CONTRACT)
         .output(output_schema_for::<DrawingInserted>)
-        .params(concat!("path | text: ASCII DXF (blocks expanded); at?: [x,y] offset, scale? | width? | height?: mm, the drawing's size before rotation, aspect kept (win over scale); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
+        .params(concat!("path | text: ASCII DXF (blocks expanded); at?: [x,y] offset, scale? | width? | height?: mm, the size of the drawn geometry's bounds before rotation, aspect kept (win over scale); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); fixed?: bool (a Fix constraint on every point the drawing adds, as sketch.constraint.fix puts one; a circle's or ellipse's radius stays free; default false); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
     CommandSpec::new("sketch.insert_svg", "Insert SVG", crate::checked!("sketch.insert_svg", insert_svg))
         .at("SKETCH", "INSERT")
         .icon("svg")
         .contract(&INSERT_SVG_CONTRACT)
         .output(output_schema_for::<DrawingInserted>)
-        .params(concat!("path | text: SVG; at?: [x,y] offset, scale? | width? | height?: mm, the drawing's size before rotation, aspect kept (win over scale); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
+        .params(concat!("path | text: SVG; at?: [x,y] offset, scale? | width? | height?: mm, the drawing's size before rotation, aspect kept (win over scale); size_from?: \"geometry\" (default: width and height are the bounds of the drawn geometry) | \"viewbox\" (the SVG sheet: its viewBox, else its width and height; a drawing smaller than its sheet then comes out smaller than width or height say); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's (or sheet's) middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); fixed?: bool (every point it adds gets a Fix constraint, so the drawing stays where it is put); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
     CommandSpec::new("sketch.drawing_bounds", "Drawing Size", drawing_bounds)
         .icon("svg")
         .noundo()
-        .params("path | text: SVG or DXF (by `format`: \"svg\" | \"dxf\", default by the file name, else SVG); returns min, max, width and height in the file's own size"),
+        .params("path | text: SVG or DXF (by `format`: \"svg\" | \"dxf\", default by the file name, else SVG); returns min, max, width and height of the drawn geometry in the file's own size, and for an SVG with a viewBox (or width and height) its sheet: {min, max, width, height}"),
     CommandSpec::new("sketch.export_dxf", "Save As DXF", crate::checked!("sketch.export_dxf", export_dxf))
         .icon("sketch_dxf")
         .noundo()
@@ -132,7 +132,15 @@ pub(super) fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> 
             Geom2::Ellipse { c, major, minor } => Some(CurveKind::Ellipse { c: pt(sk, *c)?, m: pt(sk, *major)?, r: minor * k }),
             Geom2::Spline { pts, control, degree } => {
                 let mut idx = Vec::new();
-                for p in pts.iter().take(solidcraft_sketch::MAX_SPLINE_POINTS) {
+                // A spline past the cap keeps every n-th point and always its last, so a loop stays
+                // closed (taking the first ones only cut its tail off, #11119).
+                let cap = solidcraft_sketch::MAX_SPLINE_POINTS;
+                let keep: Vec<&Vec2> = if pts.len() > cap {
+                    (0..cap).map(|k| &pts[(k * (pts.len() - 1) + (cap - 1) / 2) / (cap - 1)]).collect()
+                } else {
+                    pts.iter().collect()
+                };
+                for p in keep {
                     let i = pt(sk, *p)?;
                     if idx.last() != Some(&i) {
                         idx.push(i);
@@ -206,14 +214,18 @@ fn bounds_of(geom: &[Geom2]) -> Option<(Vec2, Vec2)> {
 
 /// The drawing's geometry and the box around it; a drawing with none is an error that says why
 /// (#9641).
-fn read_drawing(p: &Value, cmd: &str, svg: bool) -> Result<(Vec<Geom2>, (Vec2, Vec2))> {
+fn read_drawing(p: &Value, cmd: &str, svg: bool) -> Result<(Vec<Geom2>, (Vec2, Vec2), String)> {
     let text = source_text(p, cmd, svg)?;
     let geom = if svg { solidcraft_io::read_svg(&text) } else { solidcraft_io::read_dxf(&text) }.map_err(|e| drawing_error(p, svg, e.to_string()))?;
     let Some(bounds) = bounds_of(&geom) else {
         let why = if svg { solidcraft_io::svg_nothing_to_import(&text) } else { "the DXF has no entities SolidCraft reads".to_string() };
         return Err(drawing_error(p, svg, why));
     };
-    Ok((geom, bounds))
+    Ok((geom, bounds, text))
+}
+
+fn sheet_json((lo, hi): (Vec2, Vec2)) -> Value {
+    json!({"min": [lo.x, lo.y], "max": [hi.x, hi.y], "width": hi.x - lo.x, "height": hi.y - lo.y})
 }
 
 /// How big a drawing is in its own file, to size it before it is inserted.
@@ -224,12 +236,23 @@ fn drawing_bounds(_s: &mut Session, p: &Value) -> Result<Value> {
         Some(f) => !f.eq_ignore_ascii_case("dxf"),
         None => !name_is_dxf,
     };
-    let (_, (lo, hi)) = read_drawing(p, cmd, svg)?;
-    Ok(json!({"min": [lo.x, lo.y], "max": [hi.x, hi.y], "width": hi.x - lo.x, "height": hi.y - lo.y}))
+    let (_, bounds, text) = read_drawing(p, cmd, svg)?;
+    let mut out = sheet_json(bounds);
+    if svg && let Some(sheet) = solidcraft_io::svg_sheet(&text) {
+        out["sheet"] = sheet_json(sheet);
+    }
+    Ok(out)
 }
 
 fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
-    let (geom, (lo, hi)) = read_drawing(p, cmd, svg)?;
+    let (geom, (lo, hi), text) = read_drawing(p, cmd, svg)?;
+    // What `width`, `height` and `align: center` refer to: the drawn geometry, or the SVG sheet.
+    let (lo, hi) = match str_(p, "size_from") {
+        None | Some("geometry") => (lo, hi),
+        Some("viewbox") if !svg => return Err(bad(cmd, "`size_from: viewbox` is for SVG drawings; a DXF has no sheet")),
+        Some("viewbox") => solidcraft_io::svg_sheet(&text).ok_or_else(|| bad(cmd, "the SVG has no viewBox or width and height to size by"))?,
+        Some(_) => return Err(bad(cmd, "`size_from` must be \"geometry\" or \"viewbox\"")),
+    };
     // A size in millimetres wins over a factor; the aspect ratio is always kept.
     let natural = (hi.x - lo.x, hi.y - lo.y);
     let sized = |key: &str, of: fn(&(f64, f64)) -> f64| -> Result<Option<f64>> {
@@ -270,14 +293,29 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
     };
     // A dense SVG/DXF (a floorplan) can yield far more entities than a sketch takes; refuse
     // before adding so the message names the cap (#10874). Scale alone does not shrink the count.
-    if geom.len() > solidcraft_sketch::MAX_POINTS {
+    if geom.len() > solidcraft_sketch::limits::max_points() {
         return Err(solidcraft_sketch::SketchError::TooLarge.into());
     }
+    let fixed = bool_(p, "fixed").unwrap_or(false);
     // `sketch::edit`, but keeping the solve as a typed value for the reply.
     let target = sketch_store::target(s, p, cmd)?;
-    let ((curves, texts), report) = edit_solved(s, target, false, Analysis::Freedom, |sk, _| {
+    let ((curves, texts, n_fixed), report) = edit_solved(s, target, false, Analysis::Freedom, |sk, _| {
+        let first = sk.points.len();
         let (cs, texts) = add_geometry(sk, &geom, &f, k, tol)?;
-        Ok(((ids_of(sk, &cs), texts), Left::Unsolved))
+        // Fixed where it is put: a Fix constraint on every point the drawing added (a circle's
+        // or ellipse's radius stays free). Refused as a whole when the constraints would not fit.
+        let mut n_fixed = 0;
+        if fixed {
+            let limit = solidcraft_sketch::limits::max_constraints();
+            if sk.constraints.len() + (sk.points.len() - first) > limit {
+                return Err(bad(cmd, format!("fixing the drawing's points needs more than the sketch's {limit} constraints")));
+            }
+            for q in first..sk.points.len() {
+                sk.add_constraint(ConstraintKind::Fix { p: q }, None)?;
+                n_fixed += 1;
+            }
+        }
+        Ok(((ids_of(sk, &cs), texts, n_fixed), Left::Unsolved))
     })?;
     let info = report.map(|rep| SketchSolve { solved: rep.keeps_orientation(), dof: rep.dof });
     // Text becomes sketch text.
@@ -304,7 +342,18 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
             }
         }
     }
-    reply(cmd, DrawingInserted { sketch: id, created_sketch: created, curves: curves.len(), texts: n_text, info, param_warnings: Vec::new() })
+    reply(
+        cmd,
+        DrawingInserted {
+            sketch: id,
+            created_sketch: created,
+            curves: curves.len(),
+            texts: n_text,
+            fixed: fixed.then_some(n_fixed),
+            info,
+            param_warnings: Vec::new(),
+        },
+    )
 }
 
 fn insert_dxf(s: &mut Session, p: &Value) -> Result<Value> {
@@ -612,10 +661,58 @@ mod tests {
         }
     }
 
+    /// #11119: a closed SPLINE with more control points than a sketch spline holds keeps its
+    /// whole loop, ends and all, so it still makes a profile; the tail was cut off before, which
+    /// left an outline of open splines that cannot be extruded.
+    #[test]
+    fn a_closed_spline_with_too_many_control_points_still_closes() {
+        let n = solidcraft_sketch::MAX_SPLINE_POINTS * 3;
+        let mut points = String::new();
+        for i in 0..=n {
+            let a = std::f64::consts::TAU * (i % n) as f64 / n as f64;
+            points.push_str(&format!(
+                "10
+{}
+20
+{}
+",
+                30.0 * a.cos(),
+                30.0 * a.sin()
+            ));
+        }
+        let dxf = format!(
+            "0
+SECTION
+2
+ENTITIES
+0
+SPLINE
+70
+11
+71
+3
+{points}0
+ENDSEC
+0
+EOF
+"
+        );
+        let mut s = Session::default();
+        let r = s.execute("sketch.insert_dxf", &json!({"text": dxf})).unwrap();
+        let sk = s.model.state().sketch(r["sketch"].as_u64().unwrap()).unwrap().clone();
+        assert_eq!(sk.profiles.len(), 1, "the loop closes into one profile: {r}");
+        let want = std::f64::consts::PI * 900.0;
+        assert!((sk.profiles[0].area - want).abs() < want * 0.01, "{} vs {want}", sk.profiles[0].area);
+    }
+
+    /// The sketch limit is process-wide: the tests that depend on it take turns.
+    static SKETCH_LIMIT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// #10874: a drawing with more entities than a sketch can hold is refused with the point
     /// cap and that scale alone does not help (a floorplan SVG often hits this).
     #[test]
     fn a_drawing_with_too_many_entities_names_the_sketch_cap() {
+        let _turn = SKETCH_LIMIT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let n = solidcraft_sketch::MAX_POINTS + 1;
         let mut dxf = String::from("0\nSECTION\n2\nENTITIES\n");
         for i in 0..n {
@@ -624,8 +721,32 @@ mod tests {
         dxf.push_str("0\nENDSEC\n0\nEOF\n");
         let mut s = Session::default();
         let e = s.execute("sketch.insert_dxf", &json!({"text": dxf})).unwrap_err().to_string();
-        assert!(e.contains("20000") && e.contains("scale"), "{e}");
+        assert!(e.contains("20000") && e.contains("scale") && e.contains("Largest sketch"), "{e}");
         assert!(s.active_sketch.is_none(), "a refused insert leaves no empty sketch behind");
+    }
+
+    /// #10874: with Preferences › Sketch › Largest sketch raised, a drawing past the default
+    /// limit goes into one sketch; back at the default it is refused again.
+    #[test]
+    fn a_raised_sketch_limit_takes_a_denser_drawing() {
+        use solidcraft_sketch::limits;
+        let _turn = SKETCH_LIMIT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let n = limits::DEFAULT_POINTS + 1;
+        let mut dxf = String::from("0\nSECTION\n2\nENTITIES\n");
+        for i in 0..n {
+            dxf.push_str(&format!("0\nPOINT\n10\n{}\n20\n{}\n", i % 200, i / 200));
+        }
+        dxf.push_str("0\nENDSEC\n0\nEOF\n");
+        let mut s = Session::default();
+        limits::set_max_points(limits::DEFAULT_POINTS + 1000).unwrap();
+        let raised = s.execute("sketch.insert_dxf", &json!({"text": dxf}));
+        limits::set_max_points(limits::DEFAULT_POINTS).unwrap();
+        raised.unwrap();
+        let id = s.active_sketch.unwrap();
+        assert!(super::sketch_store::read(&s.doc, id).unwrap().points.len() > limits::DEFAULT_POINTS, "every point went in");
+        s.execute("sketch.finish", &json!({})).unwrap();
+        let e = s.execute("sketch.insert_dxf", &json!({"text": dxf})).unwrap_err().to_string();
+        assert!(e.contains("at most 20000"), "{e}");
     }
 
     /// #9641: an SVG with nothing SolidCraft can draw (here only an embedded picture) is refused
@@ -729,6 +850,68 @@ mod tests {
             p.as_object_mut().unwrap().extend(bad.as_object().unwrap().clone());
             assert!(s.execute("sketch.insert_svg", &p).is_err(), "{bad}");
         }
+    }
+
+    /// A 20 × 10 rectangle drawn at (10, 10) on a 100 × 50 sheet.
+    const ON_SHEET: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="50mm" viewBox="0 0 100 50"><rect x="10" y="10" width="20" height="10"/></svg>"#;
+
+    /// `width` and `height` size the drawn geometry unless `size_from: viewbox` makes them the
+    /// sheet's, so a drawing that does not fill its sheet keeps its place and size on it.
+    #[test]
+    fn an_svg_can_be_sized_by_its_sheet() {
+        let near = |a: (f64, f64, f64, f64), e: (f64, f64, f64, f64)| {
+            assert!((a.0 - e.0).abs() < 1e-6 && (a.1 - e.1).abs() < 1e-6 && (a.2 - e.2).abs() < 1e-6 && (a.3 - e.3).abs() < 1e-6, "{a:?} vs {e:?}")
+        };
+        let inserted = |params: serde_json::Value| {
+            let mut s = Session::default();
+            s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+            let mut p = json!({"text": ON_SHEET});
+            p.as_object_mut().unwrap().extend(params.as_object().unwrap().clone());
+            s.execute("sketch.insert_svg", &p).unwrap();
+            span(&s)
+        };
+        // By the geometry (as before): the rectangle itself becomes 200 wide, placed at the origin.
+        near(inserted(json!({"width": 200})), (100.0, -200.0, 300.0, -100.0));
+        // By the sheet: the sheet becomes 200 wide, so the rectangle is 40 × 20 at (20, −40).
+        near(inserted(json!({"width": 200, "size_from": "viewbox"})), (20.0, -40.0, 60.0, -20.0));
+        near(inserted(json!({"size_from": "viewbox"})), (10.0, -20.0, 30.0, -10.0));
+        // Centred on `at` by the sheet's middle (50, −25): the rectangle sits above and left of it.
+        near(inserted(json!({"size_from": "viewbox", "align": "center", "at": [50, 50]})), (10.0, 55.0, 30.0, 65.0));
+        let mut s = Session::default();
+        let b = s.execute("sketch.drawing_bounds", &json!({"text": ON_SHEET})).unwrap();
+        assert_eq!((b["width"].as_f64(), b["sheet"]["width"].as_f64(), b["sheet"]["height"].as_f64()), (Some(20.0), Some(100.0), Some(50.0)), "{b}");
+        let b = s.execute("sketch.drawing_bounds", &json!({"text": r#"<svg><rect width="20" height="10"/></svg>"#})).unwrap();
+        assert!(b.get("sheet").is_none(), "no viewBox, no width: {b}");
+        // No sheet to size by, a DXF, and a wrong word are refused.
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        let bare = json!({"text": r#"<svg><rect width="20" height="10"/></svg>"#, "size_from": "viewbox", "width": 50});
+        assert!(s.execute("sketch.insert_svg", &bare).unwrap_err().to_string().contains("viewBox"));
+        let dxf = json!({"text": "0\nSECTION\n2\nENTITIES\n0\nLINE\n8\n0\n10\n0\n20\n0\n11\n10\n21\n0\n0\nENDSEC\n0\nEOF\n", "size_from": "viewbox"});
+        assert!(s.execute("sketch.insert_dxf", &dxf).unwrap_err().to_string().contains("DXF"));
+        let word = json!({"text": ON_SHEET, "size_from": "sheet"});
+        assert!(s.execute("sketch.insert_svg", &word).unwrap_err().to_string().contains("size_from"));
+    }
+
+    /// `fixed: true` fixes every point the drawing adds, so the sketch has nothing left to move.
+    #[test]
+    fn an_inserted_drawing_can_come_in_fixed() {
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        let r = s.execute("sketch.insert_svg", &json!({"text": PLATE, "fixed": true})).unwrap();
+        assert_eq!((r["curves"].as_u64(), r["fixed"].as_u64()), (Some(4), Some(4)), "{r}");
+        assert_eq!(r["created"]["constraints"].as_array().map(Vec::len), Some(4), "{r}");
+        let solved = s.execute("sketch.solve", &json!({})).unwrap();
+        assert_eq!(solved["dof"], json!(0), "{solved}");
+        // Without it, as before: nothing fixed, four free points.
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        let r = s.execute("sketch.insert_svg", &json!({"text": PLATE})).unwrap();
+        assert!(r.get("fixed").is_none() && r["created"]["constraints"].as_array().is_some_and(Vec::is_empty), "{r}");
+        // A circle: its centre is fixed, its radius stays free.
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        let circle = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><circle cx="10" cy="10" r="5"/></svg>"#;
+        let r = s.execute("sketch.insert_svg", &json!({"text": circle, "fixed": true})).unwrap();
+        assert_eq!(r["fixed"], json!(1), "{r}");
+        assert_eq!(s.execute("sketch.solve", &json!({})).unwrap()["dof"], json!(1), "the radius");
     }
 
     #[test]

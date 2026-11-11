@@ -66,6 +66,10 @@ pub(crate) struct State {
     pub left_space: Option<Rect>,
     /// The left column an open dialog holds this frame (`dialog_column`).
     pub dialog_column: Option<Rect>,
+    /// The design tree over the view while a dialog holds the left column (`dialog_tree`), and
+    /// whether it is open (folded otherwise; each dialog starts with it folded).
+    pub dialog_tree: Option<Rect>,
+    pub dialog_tree_open: bool,
     /// The status bar along the window's bottom edge, while it is shown (#7243).
     pub status_bar: Option<Rect>,
 }
@@ -165,6 +169,7 @@ fn occluding_rects(app: &SolveApp, fitting: bool, input: bool, include_confirm: 
     if include_confirm {
         rects.extend(crate::view_confirm::rect(app));
     }
+    rects.extend(app.shell.dialog_tree.filter(|_| app.dialog.is_some()));
     rects.extend(app.shell.status_bar.filter(|_| crate::status_bar::shown(app)));
     rects.retain(|r| r.is_finite() && r.is_positive());
     rects
@@ -254,6 +259,20 @@ pub(crate) fn tool_drag_rect(app: &SolveApp, placement: Rect) -> Rect {
         bounds.min.y = within(card.bottom() + gap, bounds.top(), bounds.bottom());
     }
     bounds
+}
+
+/// Initial placement for floating editor windows in the shared-panel workspace.
+pub(crate) fn floating_editor_anchor(app: &SolveApp, ctx: &egui::Context) -> Option<(egui::Align2, egui::Pos2)> {
+    if !crate::panel_runtime::production_active(app) {
+        return None;
+    }
+    let viewport = crate::agent_chat::tool_space(app, content_rect(app, app.viewport.rect.unwrap_or_else(|| ctx.content_rect())));
+    let side = crate::frame::Side::Right;
+    Some((egui::Align2::RIGHT_TOP, pos2(side.anchor_x(viewport), panel_top(app, viewport, viewport.bottom(), side))))
+}
+
+pub(crate) fn floating_editor_side(app: &SolveApp, use_left: bool) -> crate::frame::Side {
+    if use_left && !crate::panel_runtime::production_active(app) { crate::frame::Side::Left } else { crate::frame::Side::Right }
 }
 
 pub(crate) fn panel_top(app: &SolveApp, viewport: Rect, bottom: f32, side: crate::frame::Side) -> f32 {
