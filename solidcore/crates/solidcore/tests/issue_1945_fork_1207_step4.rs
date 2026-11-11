@@ -117,7 +117,6 @@ fn sc_fixes(k: &mut Kernel) {
     k.fixes.cover_refuses_folded_continuation = true;
     k.fixes.cover_wraps_across_closed_seam = true;
     k.fixes.boolean2d_plane_covers_far_faces = true;
-    k.fixes.boolean_vertex_by_best_crossing = true;
     k.fixes.boolean_splits_definition_across_split = true;
     k.fixes.proto_edge_splits_at_captured_vertices = true;
     k.fixes.boolean_cleanup_removes_slits = true;

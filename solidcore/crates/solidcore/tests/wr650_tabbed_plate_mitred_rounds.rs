@@ -164,7 +164,6 @@ fn round() -> (f64, Result<(bool, f64), i32>) {
     k.fixes.boolean_outer_shell_first = true;
     k.fixes.boolean_skips_faces_apart = true;
     k.fixes.boolean_splits_definition_across_split = true;
-    k.fixes.boolean_vertex_by_best_crossing = true;
     k.fixes.boolean_wire_edge_keeps_faceuse_shell = true;
     k.fixes.box_face_failures_propagate = true;
     k.fixes.bspline_check_min_radius = true;
