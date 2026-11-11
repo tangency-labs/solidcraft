@@ -733,7 +733,9 @@ fn a_segment_junction_relief_notches_the_flat_pattern_and_the_dxf() {
     let es = entities(&export(&mut s, json!({})));
     let outline: Vec<(Vec2, Vec2)> =
         es.iter().filter(|e| e.0 == "LINE" && e.1.iter().any(|(c, v)| *c == 8 && v == "OUTLINE")).map(|e| (point(e, 10), point(e, 11))).collect();
-    for (a, b) in [(ld, lf), (lf, rf), (rf, rd)] {
+    // The notch opens at the far edge, so the outline carries its deep end and its two sides,
+    // never a line across the open end.
+    for (a, b) in [(ld, rd), (lf, ld), (rf, rd)] {
         assert!(drawn(&outline, a, b), "the DXF has no notch line {a:?} to {b:?}: {outline:?}");
     }
     assert!(!drawn(&outline, slit.0, slit.1), "the DXF still has the junction cut: {outline:?}");
