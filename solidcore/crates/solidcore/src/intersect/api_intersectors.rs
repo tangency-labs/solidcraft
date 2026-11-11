@@ -69,6 +69,9 @@ use crate::topology::FaceId;
 const OP: &str = "intersect::api_intersectors::intersect_brep_with_plane";
 const OP_CURVES: &str = "intersect::api_intersectors::intersect_curves";
 const OP_SURFACES: &str = "intersect::api_intersectors::intersect_surfaces";
+
+/// The phrase of [`intersect_surfaces`]'s failure when the surfaces do not meet at all.
+pub(crate) const NO_SURFACE_INTERSECTION: &str = "the surfaces do not intersect";
 const OP_BREPS: &str = "intersect::api_intersectors::intersect_breps";
 const OP_CURVE_SURFACE: &str = "intersect::api_intersectors::intersect_curve_surface";
 const OP_CURVE_FACE: &str = "intersect::api_intersectors::intersect_curve_face";
@@ -199,7 +202,7 @@ pub fn intersect_surfaces(
         if result.curves_3d.is_empty() {
             Err(SolidError::intersect_failed(
                 OP_SURFACES,
-                "the surfaces do not intersect",
+                NO_SURFACE_INTERSECTION,
             ))
         } else {
             Ok(())
