@@ -145,7 +145,7 @@
 //! - No recursion.
 
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{ignored, EntityRef, Result, SolidError, SM_ERR};
+use crate::error::{ignored, EntityRef, Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::point_set::PointContainment;
@@ -2658,8 +2658,8 @@ pub(crate) mod tests {
         let face = EntityRef::Face(FaceId::from_index(3));
         let e = no_loop_classifies(face);
         assert_eq!(e.operation(), OP_CLASSIFY);
-        assert_eq!(e.upstream_status(), Some(SM_ERR));
-        assert_eq!(e.sm_status(), Some(SM_ERR));
+        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
         assert_eq!(e.entity(), Some(face));
         assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
         assert!(matches!(
