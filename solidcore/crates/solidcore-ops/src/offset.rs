@@ -39,49 +39,48 @@ use crate::{Error, OffsetRefusal, Result};
 /// The largest offset distance or wall the operations take.
 const MAX_DISTANCE: f64 = 1e6;
 
-/// An offset's kernel error as the operation's: walls that touch ([`Error::WallsTouch`]), a wall
-/// whose face's offset folds ([`Error::WallFolds`], with the largest wall the kernel names), a
-/// vertex moved past an edge's other end ([`Error::Unsupported`]), any other offset refusal
-/// the kernel gives a reason for as [`Error::OffsetRefused`], its face through `index` (#14783),
-/// and the rest as [`crate::error::status`].
+/// What [`Error::Unsupported`] says for an offset that moves a vertex past an edge's other end.
+const EDGE_VANISHES: &str = "a vertex moved past the other end of an edge";
+
+/// An offset's kernel error as the operation's: a refusal the kernel gives a reason for by that
+/// reason ([`offset_refused`]); one without, by its kind: walls that touch
+/// ([`Error::WallsTouch`]), a wall that folds ([`Error::WallFolds`], no largest wall named), a
+/// vertex moved past an edge's other end ([`Error::Unsupported`]); the rest as
+/// [`crate::error::status`].
 fn status(e: SolidError, index: &dyn Fn(FaceId) -> Option<usize>) -> Error {
+    if let Some(Reason::Offset(o)) = e.failure().map(|f| &f.reason) {
+        return offset_refused(*o, index);
+    }
     match e.kind() {
         ErrorKind::OffsetWallsTouch => Error::WallsTouch,
-        // (the kernel's fold kind also covers an offset not certified regular, which is no
-        // fold: its own reason, #14783)
-        ErrorKind::OffsetFolds => match e.failure().map(|f| &f.reason) {
-            Some(Reason::Offset(OffsetFailure::Folds { largest, .. })) => Error::WallFolds {
-                largest: Some(*largest),
-            },
-            Some(Reason::Offset(o @ OffsetFailure::NotCertified { .. })) => {
-                offset_refused(*o, index)
-            }
-            _ => Error::WallFolds { largest: None },
-        },
-        ErrorKind::OffsetEdgeVanishes => {
-            Error::Unsupported("a vertex moved past the other end of an edge")
-        }
-        _ => {
-            let offset = match e.failure().map(|f| &f.reason) {
-                Some(Reason::Offset(o)) => Some(*o),
-                _ => None,
-            };
-            match offset {
-                Some(o) => offset_refused(o, index),
-                None => kernel_status(e),
-            }
-        }
+        ErrorKind::OffsetFolds => Error::WallFolds { largest: None },
+        ErrorKind::OffsetEdgeVanishes => Error::Unsupported(EDGE_VANISHES),
+        _ => kernel_status(e),
     }
 }
 
-/// The kernel's offset refusal `o` as [`Error::OffsetRefused`]: why, and the face it names
-/// through `index` (`None` where it names none, or one `index` does not find).
+/// The kernel's offset refusal `o` as the operation's error: walls that touch
+/// ([`Error::WallsTouch`]), a wall whose face's offset folds ([`Error::WallFolds`], with the
+/// largest wall the kernel names), a vertex moved past an edge's other end
+/// ([`Error::Unsupported`]), and every other reason as [`Error::OffsetRefused`] (#14783): why,
+/// and the face it names through `index` (`None` where it names none, or one `index` does not
+/// find). The match names every reason, so one the kernel adds does not build until it is
+/// named here (#15035).
 fn offset_refused(o: OffsetFailure, index: &dyn Fn(FaceId) -> Option<usize>) -> Error {
     let face = match o.entity() {
         Some(EntityRef::Face(f)) => index(f),
         _ => None,
     };
     let why = match o {
+        OffsetFailure::Folds { largest, .. } => {
+            return Error::WallFolds {
+                largest: Some(largest),
+            }
+        }
+        OffsetFailure::WallsTouch { .. } => return Error::WallsTouch,
+        OffsetFailure::EdgeVanishes { .. } => return Error::Unsupported(EDGE_VANISHES),
+        // (the kernel's fold kind also covers an offset not certified regular, which is no
+        // fold: its own reason, #14783)
         OffsetFailure::NotCertified { distance, .. } => OffsetRefusal::NotCertified { distance },
         OffsetFailure::Collapses {
             distance, radius, ..
@@ -103,20 +102,12 @@ fn offset_refused(o: OffsetFailure, index: &dyn Fn(FaceId) -> Option<usize>) -> 
         OffsetFailure::ReachUncertified { .. } => OffsetRefusal::ReachUncertified,
         OffsetFailure::LoopGapUncertified { .. } => OffsetRefusal::LoopGapUncertified,
         OffsetFailure::Unsound { what } => OffsetRefusal::Unsound { what },
-        // a reason this version does not name (one the kernel adds later; `Folds`, `WallsTouch`
-        // and `EdgeVanishes` come with their own kinds, taken above): still said, never a bare
-        // status
-        other => unnamed(&other),
+        OffsetFailure::Failed(what) => OffsetRefusal::Failed { what },
+        OffsetFailure::Missing(what) => OffsetRefusal::Missing { what },
+        OffsetFailure::InvalidValue(what) => OffsetRefusal::InvalidValue { what },
+        OffsetFailure::Inconsistent(what) => OffsetRefusal::Inconsistent { what },
     };
     Error::OffsetRefused { face, why }
-}
-
-/// A kernel offset refusal ops does not name yet, as [`OffsetRefusal::Other`]: the kernel's
-/// own statement of it.
-fn unnamed(o: &OffsetFailure) -> OffsetRefusal {
-    OffsetRefusal::Other {
-        message: o.to_string(),
-    }
 }
 
 /// A face's record index through `order`, the [`Order`] of the call's body.

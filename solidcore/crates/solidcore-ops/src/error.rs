@@ -336,10 +336,29 @@ pub enum OffsetRefusal {
         /// What the built body fails.
         what: solidcore::error::offset::Unsoundness,
     },
-    /// A reason this version of ops does not name yet: the kernel's own statement of it.
-    Other {
-        /// The kernel's statement of its reason.
-        message: String,
+    /// An offset routine could not continue, as the kernel's phrase says (its
+    /// `OffsetFailure::Failed`).
+    Failed {
+        /// The kernel's phrase.
+        what: &'static str,
+    },
+    /// Something an offset routine needs is missing, as the kernel's phrase says (its
+    /// `OffsetFailure::Missing`).
+    Missing {
+        /// What is missing.
+        what: &'static str,
+    },
+    /// A value an offset routine was given is not one it can use, as the kernel's phrase says
+    /// (its `OffsetFailure::InvalidValue`).
+    InvalidValue {
+        /// The kernel's phrase.
+        what: &'static str,
+    },
+    /// A consistency check of an offset routine's own data did not hold, as the kernel's phrase
+    /// says (its `OffsetFailure::Inconsistent`).
+    Inconsistent {
+        /// The kernel's phrase.
+        what: &'static str,
     },
 }
 
@@ -389,7 +408,10 @@ impl std::fmt::Display for OffsetRefusal {
                 )
             }
             OffsetRefusal::Unsound { what } => write!(f, "the body built is unsound ({what:?})"),
-            OffsetRefusal::Other { message } => write!(f, "{message}"),
+            OffsetRefusal::Failed { what } => f.write_str(what),
+            OffsetRefusal::Missing { what } => write!(f, "{what} is missing"),
+            OffsetRefusal::InvalidValue { what } => write!(f, "invalid input: {what}"),
+            OffsetRefusal::Inconsistent { what } => write!(f, "a consistency check failed: {what}"),
         }
     }
 }

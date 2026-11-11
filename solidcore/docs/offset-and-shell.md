@@ -198,8 +198,10 @@ built there, its offset face comes out inside out and the executive's lamina-edg
 away, as upstream does (`offset_face_prefix`, `p2.rs`).
 
 **In ops**, `Folds` becomes `Error::WallFolds { largest }` (`solidcore-ops/src/offset.rs`,
-`status`); `Collapses` reaches the caller as a plain kernel status, so the radius it names is not
-passed on. That mapping is open.
+`offset_refused`), the touching walls and the vanishing edge their own errors, and every other
+reason a named `OffsetRefusal` with the face it names: `Collapses` passes on the distance and the
+radius. The match names every `OffsetFailure`, so a reason the kernel adds does not build until
+ops names it.
 
 ### 4.3 Room for an inward wall
 

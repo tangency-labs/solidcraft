@@ -40,8 +40,10 @@ use super::{
 use crate::topology::{EdgeId, FaceId};
 
 /// Why an offset, shell, thicken or local operation is refused.
+///
+/// Exhaustive on purpose: a caller names every reason, so a reason added here does not build
+/// until each caller names it too.
 #[derive(Debug, Clone, Copy, PartialEq)]
-#[non_exhaustive]
 pub enum OffsetFailure {
     /// The offset of `face` by `distance` folds: the wall is thicker than a radius of
     /// curvature of the face on its side (WR-718; every offset but the local operation).

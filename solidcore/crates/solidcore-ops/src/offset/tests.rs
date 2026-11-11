@@ -536,28 +536,18 @@ fn every_other_offset_refusal_says_why_and_where() {
         assert_eq!(got, Error::OffsetRefused { face, why }, "{o:?}");
         assert!(!got.to_string().contains("status"), "{got}");
     }
-}
-
-/// A reason ops does not name yet (one the kernel adds later) is said in the kernel's words,
-/// never a bare status: [`super::unnamed`], the arm every unnamed reason takes, keeps the
-/// kernel's own statement, and the error says it.
-#[test]
-fn an_unnamed_offset_refusal_keeps_the_kernels_words() {
-    use solidcore::error::offset::OffsetFailure;
-    let o = OffsetFailure::ExactCurveUncut;
-    let why = super::unnamed(&o);
-    assert_eq!(
-        why,
-        crate::OffsetRefusal::Other {
-            message: o.to_string()
-        }
-    );
-    assert!(!o.to_string().is_empty());
-    let e = Error::OffsetRefused { face: Some(2), why };
-    assert_eq!(
-        e.to_string(),
-        format!("the offset is refused at face 2: {o}")
-    );
+    // a routine's own failure says the kernel's words, as it did when it arrived as text
+    for o in [
+        O::Failed("the face has no surface"),
+        O::Missing("the face's surface"),
+        O::InvalidValue("the face has no outer face use"),
+        O::Inconsistent("an offset edge has no curve"),
+    ] {
+        let Error::OffsetRefused { why, .. } = refused(o) else {
+            panic!("not an offset refusal: {o:?}");
+        };
+        assert_eq!(why.to_string(), o.to_string());
+    }
 }
 
 /// A face whose surface the kernel's room test cannot measure (an offset surface): the room
