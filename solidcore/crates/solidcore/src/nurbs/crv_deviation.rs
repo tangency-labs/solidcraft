@@ -29,7 +29,9 @@
 //! their parameters: each point of the curve is evaluated (the basis functions of The NURBS
 //! Book's A2.2 and their sum with the control points: `γ_(12 p + 4)` of `M` per coordinate,
 //! the count `eval::collapse` gives de Boor's `p` levels) and its computed distance from the
-//! data point rounded up by `γ_8`.
+//! data point rounded up by `γ_8`. Every distance is a scaled norm (the components divided by
+//! the largest before squaring), so a difference near the bottom of the floating range is not
+//! lost to underflow.
 //!
 //! Deviations: none (no upstream counterpart). Non-rational 3D curves only, of degree 1 to
 //! [`MAX_DEGREE`]; their knot vectors clamped on one domain.
@@ -82,11 +84,12 @@ pub fn interpolation_bound(c: &Curve, params: &[f64], points: &[Vec3]) -> Result
     let mut largest = 0.0_f64;
     for (&u, q) in params.iter().zip(points) {
         let p = c.eval(u, Side::Left)?;
-        let (dx, dy, dz) = (p.x - q.x, p.y - q.y, p.z - q.z);
-        largest = largest.max((dx * dx + dy * dy + dz * dz).sqrt());
+        let d = norm_up(p.x - q.x, p.y - q.y, p.z - q.z)
+            .ok_or_else(|| SolidError::query_failed(OP_FIT, "the bound is not finite"))?;
+        largest = largest.max(d);
     }
     let eval_err = gamma(c.degree().saturating_mul(12).saturating_add(4)) * size;
-    let bound = (largest * (1.0 + gamma(8)) + 2.0 * eval_err) * (1.0 + gamma(2));
+    let bound = (largest + 2.0 * eval_err) * (1.0 + gamma(2));
     if !bound.is_finite() {
         return Err(SolidError::query_failed(OP_FIT, "the bound is not finite"));
     }
@@ -138,15 +141,35 @@ pub fn certified_distance(a: &Curve, b: &Curve) -> Result<f64> {
             ));
         }
         for (p, r) in x.cpts().iter().zip(y.cpts()) {
-            let (dx, dy, dz) = (p.x - r.x, p.y - r.y, p.z - r.z);
-            largest = largest.max((dx * dx + dy * dy + dz * dz).sqrt());
+            let d = norm_up(p.x - r.x, p.y - r.y, p.z - r.z)
+                .ok_or_else(|| SolidError::query_failed(OP, "the bound is not finite"))?;
+            largest = largest.max(d);
         }
     }
-    let bound = (largest * (1.0 + gamma(8)) + 2.0 * (ea + eb)) * (1.0 + gamma(2));
+    let bound = (largest + 2.0 * (ea + eb)) * (1.0 + gamma(2));
     if !bound.is_finite() {
         return Err(SolidError::query_failed(OP, "the bound is not finite"));
     }
     Ok(bound)
+}
+
+/// An upper bound of the length of the difference `(dx, dy, dz)` (each one subtraction),
+/// every rounding included and nothing lost to underflow: the components are divided by the
+/// largest before they are squared (each quotient rounds by `γ_1`, the squares, sums and
+/// root by `γ_5`, the product by `γ_1`, the subtractions by `γ_1`: `γ_8` in all), and the
+/// smallest subnormals a product with a subnormal largest can lose are added back. `None`
+/// for a difference that overflows.
+fn norm_up(dx: f64, dy: f64, dz: f64) -> Option<f64> {
+    let s = dx.abs().max(dy.abs()).max(dz.abs());
+    if !s.is_finite() {
+        return None;
+    }
+    if s == 0.0 {
+        return Some(0.0);
+    }
+    let (x, y, z) = (dx / s, dy / s, dz / s);
+    let bound = s * (x * x + y * y + z * z).sqrt() * (1.0 + gamma(8)) + 4.0 * f64::from_bits(1);
+    bound.is_finite().then_some(bound)
 }
 
 /// Whether `c`'s degree is one NLib takes (1 to [`MAX_DEGREE`]) and its knots fit its control
@@ -385,6 +408,19 @@ mod tests {
             interpolation_bound(&wild, &[0.0], &[Vec3::new(0.0, 0.0, 0.0)]),
             Err(SolidError::InvalidInput { .. })
         ));
+    }
+
+    #[test]
+    fn a_gap_near_the_bottom_of_the_floating_range_is_not_lost_to_underflow() {
+        // a line of length 1e-200 and points 1e-200 off it: squaring 1e-200 underflows to 0
+        let line = spline(&[[0.0, 0.0, 0.0], [1e-200, 0.0, 0.0]], 1);
+        let off = Vec3::new(0.0, 1e-200, 0.0);
+        let d = interpolation_bound(&line, &[0.0], &[off]).unwrap();
+        assert!(d >= 1e-200, "{d}");
+        let beside = spline(&[[0.0, 1e-200, 0.0], [1e-200, 1e-200, 0.0]], 1);
+        let d = certified_distance(&line, &beside).unwrap();
+        assert!(d >= 1e-200, "{d}");
+        assert!(d <= 1.0001e-200, "{d}");
     }
 
     #[test]
