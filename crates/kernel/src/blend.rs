@@ -357,22 +357,15 @@ fn concave_overflow_round(body: &Body, pick: Vec3, radius: f64, turn: FilletTurn
         let rounded = crate::blend_smlib::fillet(&carried, &[pick], radius, turn);
         let rounded = rounded.ok()?;
         let fill = crate::boolean(&rounded, &carried, crate::BoolOp::Cut).ok()??;
-        // a point of the face beside the edge, for its sheet
-        let into = rec.uses(f).find(|x| x.edge as usize == e).and_then(|x| rec.direction_into_face(f, x))?;
-        let sheet = crate::copy_faces(body, &[middle + into * (0.5 * radius)]).ok()?;
-        // the copied face must be this plane
-        let on_plane =
-            Faces::of(&sheet).ok().is_some_and(|s| s.rec.faces.len() == 1 && s.natural_plane_normal(0).is_some_and(|m| m.dot(n).abs() > 1.0 - 1e-9));
-        if !on_plane {
-            continue;
-        }
+        // the face itself, by its index, for its sheet
+        let sheet = crate::surfaces::taken(body, &rec.rec, &[(f, false)]).ok()?;
         let prism = crate::thicken(&sheet, 4.0 * (radius + size * 1e-3 + 1.0), true).ok()?;
         let kept = crate::boolean(&fill, &prism, crate::BoolOp::Intersect).ok()??;
         let joined = crate::boolean(body, &kept, crate::BoolOp::Union).ok()??;
         let joined = closed(body, joined).ok()?;
         let grew = |x: &Body| crate::measure(x).ok().map(|m| m.volume);
         if grew(&joined)? > grew(body)? {
-            return Some(joined);
+            return Some(over_body_alone(joined, body, e));
         }
     }
     None
@@ -395,6 +388,61 @@ pub fn fillet_setback(body: &Body, edges: &[Vec3], radius: f64, setbacks: &[(Vec
     body.require_brep("fillet")?;
     setbacks_reach(body, edges, radius, setbacks)?;
     crate::blend_smlib::fillet_setback(body, edges, radius, setbacks).and_then(|b| closed(body, b))
+}
+
+/// `joined` (the union of `body` and the material a round of its edge `edge` adds, its history
+/// over those two) with its history over `body` alone, as a fillet reports it: a face or an
+/// edge of the body stays that; a face only the added material brought is made in place of
+/// the edge, and an edge where such a face meets a face of the body is where the edge's round
+/// meets that face. Without a history where the union reported none or the rewritten one does
+/// not describe the body: a result is never given a guessed history.
+fn over_body_alone(joined: Body, body: &Body, edge: usize) -> Body {
+    use crate::history::{Change, EdgeOrigin, EdgeProv, FaceOrigin, FaceProv, History, Side};
+    let Some(union) = joined.history().filter(|h| h.operands == 2).cloned() else { return joined.without_history() };
+    let round = FaceOrigin::Edge { operand: 0, edge };
+    // An origin in the body stays; one in the added material is the round.
+    let of_body = |o: &FaceOrigin| match *o {
+        FaceOrigin::Face { operand, .. } | FaceOrigin::Edge { operand, .. } | FaceOrigin::Offset { operand, .. } => operand == 0,
+        FaceOrigin::Profile { .. } | FaceOrigin::Cap { .. } => false,
+    };
+    let faces = union
+        .faces
+        .iter()
+        .map(|f| {
+            let origins: Vec<FaceOrigin> = f.origins.iter().filter(|o| of_body(o)).copied().collect();
+            if origins.is_empty() {
+                return FaceProv { origins: vec![round], change: Change::Generated };
+            }
+            // A face of the body the added material's face was joined to is that face, grown.
+            let change = if f.change == Change::Merged && origins.len() == 1 { Change::Modified } else { f.change };
+            FaceProv { origins, change }
+        })
+        .collect();
+    let side = |s: &Side| Side::new(s.origins().iter().map(|o| if of_body(o) { *o } else { round }));
+    let edges = union
+        .edges
+        .iter()
+        .map(|e| {
+            let origins = e
+                .origins
+                .iter()
+                .filter_map(|o| match o {
+                    EdgeOrigin::Edge { operand: 0, .. } => Some(o.clone()),
+                    EdgeOrigin::Edge { .. } => None,
+                    EdgeOrigin::Meet { a, b } => match (side(a), side(b)) {
+                        (Some(a), Some(b)) if a != b => Some(EdgeOrigin::meet(a, b)),
+                        _ => None,
+                    },
+                })
+                .collect();
+            EdgeProv { faces: e.faces.clone(), origins }
+        })
+        .collect();
+    let history = History { operands: 1, faces, edges };
+    match history.check_counts((joined.face_count(), joined.edge_count()), &crate::record::counts(&[body])) {
+        Ok(()) => joined.clone().with_history_counts(history, &crate::record::counts(&[body])).unwrap_or_else(|_| joined.without_history()),
+        Err(_) => joined.without_history(),
+    }
 }
 
 /// Refuses a setback that does not reach past where its corner's rounds meet without one
@@ -1414,6 +1462,14 @@ mod tests {
             assert!(matches!(fillet(&body, &[pick], r), Err(KernelError::TooLarge(_))), "SMLib refuses r {r}");
             let (rounded, gone) = fillet_removing(&body, &[pick], r, FilletTurn::Mitre).unwrap_or_else(|e| panic!("r {r}: {e}"));
             assert!(gone.is_empty());
+            // its history is a fillet's, over the body alone: a face made in place of the edge
+            let (picked, _) = crate::blend_smlib::picked_edges(&body, &[pick]).unwrap();
+            let h = rounded.history().expect("a history");
+            assert_eq!(h.operands, 1);
+            assert!(h.faces.iter().any(|f| f.origins == [crate::history::FaceOrigin::Edge { operand: 0, edge: picked[0] }]), "r {r}");
+            // and every face of the body is still there, under its own origin
+            let still = |i: usize| h.faces.iter().any(|f| f.origins.contains(&crate::history::FaceOrigin::Face { operand: 0, face: i }));
+            assert!((0..body.face_count()).all(still), "r {r}");
             let m = crate::measure(&rounded).unwrap();
             let added = m.volume - before.volume;
             let full = section(r) * 24.0;
