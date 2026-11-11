@@ -1875,15 +1875,17 @@ mod tests {
         }
         let saved = saved_geometry(&s, &s.doc).unwrap();
         let records = &saved.records;
-        let sheets = records["sheets"].as_array().unwrap();
+        // Every sheet here is made from surfaces: the flat model's list stays empty.
+        assert_eq!(records["sheets"].as_array().map(Vec::len), Some(0), "no record in the flat model's list");
+        let sheets = records["surface_sheets"].as_array().unwrap();
         let texts: std::collections::HashSet<String> = sheets.iter().map(Value::to_string).collect();
         assert_eq!(texts.len(), sheets.len(), "each sheet once");
         let mut held = std::collections::HashSet::new();
         for (r, feature) in s.model.results.iter().zip(records["features"].as_array().unwrap()) {
             let state = &records["states"][feature["state"].as_u64().unwrap() as usize];
-            let named = state["sheets"].as_array().unwrap();
-            assert_eq!(named.len(), r.state.sheets.len());
-            for (i, sheet) in named.iter().zip(&r.state.sheets) {
+            let named = state["surface_sheets"].as_array().unwrap();
+            assert_eq!(named.len(), r.state.surface_sheets.len());
+            for (i, sheet) in named.iter().zip(&r.state.surface_sheets) {
                 let written = &sheets[i.as_u64().unwrap() as usize];
                 assert_eq!(*written, serde_json::to_value(sheet).unwrap(), "{}: the record of its own sheet", r.name);
                 held.insert(written.to_string());
@@ -2052,17 +2054,17 @@ mod tests {
         };
         let size = |s: &Session| serde_json::to_vec(&saved_geometry(s, &s.doc).unwrap().records).unwrap().len();
         let (few, many) = (design(2), design(12));
-        let sheet = serde_json::to_vec(&many.model.state().sheets).unwrap().len();
+        let sheet = serde_json::to_vec(&many.model.state().surface_sheets).unwrap().len();
         let per_feature = (size(&many) - size(&few)) / 10;
         assert!(per_feature * 2 < sheet, "each later feature adds {per_feature} bytes, the sheet is {sheet}");
         // Taken from the file as saved: the sheet is the one evaluated.
-        let flat = many.model.state().sheets.clone();
+        let sheets = many.model.state().surface_sheets.clone();
         let path = std::env::temp_dir().join(format!("solidcraft-sheet-cache-{}.solidcraft", std::process::id()));
         std::fs::write(&path, many.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap()).unwrap();
         let mut reopened = Session::default();
         reopened.execute("doc.open", &json!({"path":path})).unwrap();
         assert!(reopened.model.results.iter().zip(&many.model.results).all(|(a, b)| a.ms == b.ms), "taken from the file, not evaluated");
-        assert_eq!(serde_json::to_value(&reopened.model.state().sheets).unwrap(), serde_json::to_value(&flat).unwrap());
+        assert_eq!(serde_json::to_value(&reopened.model.state().surface_sheets).unwrap(), serde_json::to_value(&sheets).unwrap());
         std::fs::remove_file(path).unwrap();
     }
 
@@ -2184,6 +2186,30 @@ mod tests {
         let repeated: Vec<Value> = (0..4000).map(|_| json!([0, 1])).collect();
         let last = hostile.records["states"].as_array().unwrap().len() - 1;
         hostile.records["states"][last]["threads"] = Value::Array(repeated);
+        assert!(solidcraft_doc::Model::adopt(&s.doc, &hostile).is_err());
+    }
+
+    /// A saved model whose states name one large sheet made from surfaces over and over is refused,
+    /// as a repeated marking is: every state holds its own copy of each sheet it lists.
+    #[test]
+    fn a_saved_model_repeating_a_large_surface_sheet_is_refused() {
+        let mut s = Session::new(Document::new("Sheet"));
+        let rule = json!({"name": "AL2", "thickness": "2 mm", "k_factor": "0.5", "bend_radius": "1 mm", "active": true});
+        s.execute("sheet.manage_rules", &rule).unwrap();
+        s.execute("sketch.create", &json!({"plane": "XY", "name": "Base"})).unwrap();
+        s.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [150, 100]})).unwrap();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        s.execute("sheet.flange", &json!({"sketch": "Base"})).unwrap();
+        let saved = saved_geometry(&s, &s.doc).unwrap();
+        assert!(solidcraft_doc::Model::adopt(&s.doc, &saved).is_ok());
+        // A large sheet listed where it is held reads back.
+        let mut large = solidcraft_doc::SavedModel { records: saved.records.clone(), bodies: saved.bodies.clone() };
+        large.records["surface_sheets"][0]["body"] = json!("S".repeat(1 << 20));
+        assert!(solidcraft_doc::Model::adopt(&s.doc, &large).is_ok());
+        // Listed 4,000 times in one state, it is refused before any copy is made.
+        let mut hostile = large;
+        let last = hostile.records["states"].as_array().unwrap().len() - 1;
+        hostile.records["states"][last]["surface_sheets"] = Value::Array(vec![json!(0); 4000]);
         assert!(solidcraft_doc::Model::adopt(&s.doc, &hostile).is_err());
     }
 

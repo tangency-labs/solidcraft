@@ -127,6 +127,21 @@ impl BodyKey {
     }
 }
 
+/// The place of a sheet's record in `list`, written the first time a state holds it. Keyed by the
+/// sheet written as text, straight from the sheet: every state asks for each of its sheets, and
+/// building the record (a JSON tree) each time only to find it written already took most of a
+/// sheet-metal design's save (906 states, 300 sheets: 0.8 s). Two sheets are the same text exactly
+/// when they are the same record.
+fn shared<T: serde::Serialize>(list: &mut Vec<Json>, index: &mut HashMap<String, usize>, sheet: &T) -> Option<usize> {
+    let key = serde_json::to_string(sheet).ok()?;
+    if let Some(i) = index.get(&key) {
+        return Some(*i);
+    }
+    list.push(serde_json::to_value(sheet).ok()?);
+    index.insert(key, list.len() - 1);
+    Some(list.len() - 1)
+}
+
 /// Indices as runs of consecutive ones (`[first, count]`): a state lists mostly the bodies of the
 /// state before it, in order.
 fn runs(indices: &[usize]) -> Vec<[usize; 2]> {
@@ -153,6 +168,9 @@ struct Writer {
     /// share them (writing them with every state made a sheet-metal design's model too large to keep).
     sheets: Vec<Json>,
     sheet_index: HashMap<String, usize>,
+    /// Sheets made from surfaces, shared by the states the same way.
+    surface_sheets: Vec<Json>,
+    surface_sheet_index: HashMap<String, usize>,
     /// Tap markings (cosmetic threads) by their record, as the sheets: every state lists the
     /// markings of all the features before it, so writing them with each state grew with the
     /// square of the features (400 marked cylinders: 34 of a 37 MB manifest, past its limit).
@@ -299,6 +317,10 @@ impl Writer {
         Some(self.sheets.len() - 1)
     }
 
+    fn surface_sheet(&mut self, sheet: &crate::SurfaceSheet) -> Option<usize> {
+        shared(&mut self.surface_sheets, &mut self.surface_sheet_index, sheet)
+    }
+
     /// The places of `st`'s markings among the written ones. A marking at the same place in the
     /// state written last, the same to the bit, is that one (no text built); any other is keyed by
     /// its text, as a sheet is.
@@ -333,11 +355,12 @@ impl Writer {
         let bodies = st.bodies.iter().map(|b| self.model_body(b)).collect::<Option<Vec<_>>>()?;
         let sketches = st.sketches.iter().map(|s| self.sketch(s)).collect::<Option<Vec<_>>>()?;
         let sheets = st.sheets.iter().map(|s| self.sheet(s)).collect::<Option<Vec<_>>>()?;
+        let surface_sheets = st.surface_sheets.iter().map(|s| self.surface_sheet(s)).collect::<Option<Vec<_>>>()?;
         let threads = self.threads(st)?;
         let r = json!({
             "bodies": runs(&bodies), "sketches": runs(&sketches), "body_counter": st.body_counter,
             "reserved_body_names": st.reserved_body_names.iter().collect::<Vec<_>>(),
-            "sheets": sheets, "surface_sheets": serde_json::to_value(&st.surface_sheets).ok()?, "construct": serde_json::to_value(&st.construct).ok()?,
+            "sheets": sheets, "surface_sheets": surface_sheets, "construct": serde_json::to_value(&st.construct).ok()?,
             "threads": runs(&threads),
             "sketch_key_set": self.sketch_key_set(&st.sketch_keys),
             "blend_edges": serde_json::to_value(&st.blend_edges).ok()?, "fitted": serde_json::to_value(&st.fitted).ok()?,
@@ -374,7 +397,8 @@ impl Model {
             // The check mode the results were evaluated under: they are another mode's results.
             let records = json!({
                 "features": features, "states": w.states, "model_bodies": w.model_bodies, "names": w.names, "sketches": w.sketches,
-                "sheets": w.sheets, "threads": w.threads, "validation": self.validation().id(), "rounds": w.rounds,
+                "sheets": w.sheets, "surface_sheets": w.surface_sheets, "threads": w.threads, "validation": self.validation().id(),
+                "rounds": w.rounds,
                 "sketch_key_sets": w.sketch_key_sets,
             });
             Ok(SavedModel { records, bodies: w.bodies })
@@ -457,6 +481,15 @@ impl SavedModel {
         for s in list("sheets")? {
             sheets.push(serde_json::from_value::<crate::sheet::SheetBody>(s.clone()).map_err(|_| bad("saved model: sheet"))?);
         }
+        // Sheets made from surfaces: none in a model that holds none. Each one's weight is what it
+        // costs to clone (its items and text), as a marking's is.
+        let (mut surface_sheets, mut surface_weight) = (Vec::new(), Vec::new());
+        if records.get("surface_sheets").is_some() {
+            for s in list("surface_sheets")? {
+                surface_sheets.push(serde_json::from_value::<crate::SurfaceSheet>(s.clone()).map_err(|_| bad("saved model: sheet"))?);
+                surface_weight.push(1usize.saturating_add(serde_json::to_vec(s).map_or(usize::MAX, |b| b.len()) / 64));
+            }
+        }
         let mut threads = Vec::new();
         for t in list("threads")? {
             threads.push(serde_json::from_value::<ThreadInfo>(t.clone()).map_err(|_| bad("saved model: tap marking"))?);
@@ -510,6 +543,12 @@ impl SavedModel {
                 held = held.saturating_add(thread_weight[end].saturating_sub(thread_weight[first]));
             }
             held = held.saturating_add(s.get("sheets").and_then(Json::as_array).map_or(0, Vec::len));
+            // A sheet made from surfaces is cloned deeply into every state that lists it, as a
+            // marking is, so each counts by its weight: a large sheet listed again and again cannot
+            // exhaust memory.
+            for i in s.get("surface_sheets").and_then(Json::as_array).map_or(&[][..], Vec::as_slice) {
+                held = held.saturating_add(surface_weight.get(index(Some(i), surface_weight.len())?).copied().unwrap_or(usize::MAX));
+            }
             held = held.saturating_add(key_sets.get(index(s.get("sketch_key_set"), key_sets.len())?).map_or(0, BTreeMap::len));
             if held > MAX_HELD {
                 return Err(bad("saved model: states"));
@@ -552,7 +591,14 @@ impl SavedModel {
                     .map(|i| index(Some(i), sheets.len()).and_then(|i| sheets.get(i).cloned().ok_or_else(|| bad("saved model: sheet"))))
                     .collect::<Result<Vec<_>>>()?,
                 surface_sheets: match s.get("surface_sheets") {
-                    Some(v) => serde_json::from_value(v.clone()).map_err(invalid)?,
+                    Some(v) => v
+                        .as_array()
+                        .ok_or_else(|| bad("saved model: state"))?
+                        .iter()
+                        .map(|i| {
+                            index(Some(i), surface_sheets.len()).and_then(|i| surface_sheets.get(i).cloned().ok_or_else(|| bad("saved model: sheet")))
+                        })
+                        .collect::<Result<Vec<_>>>()?,
                     None => Vec::new(),
                 },
                 construct: serde_json::from_value(field("construct")?).map_err(invalid)?,
@@ -704,11 +750,14 @@ impl SavedModel {
         let mut kept_bodies = vec![false; model_bodies.len()];
         let (mut names_used, mut sketches_used) = (vec![false; names.len()], vec![false; sketches.len()]);
         let mut stored = std::collections::HashSet::new();
-        // The sheet bodies and tap markings, each written once and named by place in the states: all kept.
+        // The sheet bodies, the sheets made from surfaces and the tap markings, each written once and
+        // named by place in the states: all kept.
         let sheets = list("sheets").cloned().unwrap_or_default();
+        let surface_sheets = list("surface_sheets").cloned().unwrap_or_default();
         let threads = list("threads").cloned().unwrap_or_default();
         let key_sets = list("sketch_key_sets").cloned().unwrap_or_default();
-        let mut used = [&sheets, &threads, &key_sets].iter().flat_map(|l| bytes(l.as_slice())).fold(0usize, |t, b| t.saturating_add(b));
+        let mut used =
+            [&sheets, &surface_sheets, &threads, &key_sets].iter().flat_map(|l| bytes(l.as_slice())).fold(0usize, |t, b| t.saturating_add(b));
         for s in std::iter::once(last).chain(order) {
             let (mut adds, mut new_names, mut new_sketches) = (HashMap::new(), std::collections::HashSet::new(), std::collections::HashSet::new());
             let mut records = *state_bytes.get(s)?;
@@ -817,6 +866,9 @@ impl SavedModel {
             "sketches": kept_of(sketches.as_slice(), &sketches_used), "sheets": sheets, "threads": threads, "rounds": out_rounds,
             "sketch_key_sets": key_sets,
         });
+        if let (Some(_), Some(out)) = (self.records.get("surface_sheets"), records.as_object_mut()) {
+            out.insert("surface_sheets".into(), json!(surface_sheets));
+        }
         // The check mode the results were evaluated under, as the model records it (a model
         // that records none stays without one: adopting it is refused either way).
         if let (Some(validation), Some(out)) = (self.records.get("validation"), records.as_object_mut()) {
