@@ -312,7 +312,13 @@ fn the_round_over_a_bspline_round_of_its_radius_is_the_ball_s_piece() {
 }
 
 /// A ball smaller than the B-spline round (R1.5 against 2): it matches the face nowhere, so
-/// nothing collapses and the round is the one the exact cylinder's box gets.
+/// nothing collapses and the round is the one the exact cylinder's box gets. There that
+/// round is the exact torus (R 0.5 about the wall's axis, r 1.5); here the wall's top spans
+/// are the same quarter cylinder, and the round is its definition with a certified net: at
+/// every point the net is within its bound of the torus, and the volumes removed differ by
+/// at most the round's area times that bound, plus the integration's 1e-9. (Since #14405
+/// the net has 24 knots, not 57, and its bound is 1.05e-6, not 3.86e-6: the volumes moved
+/// from 1.6e-8 apart to 3.2e-7, the net from the torus to 1.03e-6.)
 #[test]
 fn a_ball_narrower_than_the_bspline_round_rolls_as_on_the_cylinder() {
     let mut k = kernel();
@@ -325,9 +331,39 @@ fn a_ball_narrower_than_the_bspline_round_rolls_as_on_the_cylinder() {
     let mut kr = kernel();
     let r = reference(&mut kr);
     let (want, _) = round_top_at(&mut kr, r, 1.5).unwrap();
+    let torus = |p: Point3| {
+        let rho = ((p.x - 8.0).powi(2) + (p.y - 8.0).powi(2)).sqrt();
+        (((rho - 0.5).powi(2) + (p.z + 1.5).powi(2)).sqrt() - 1.5).abs()
+    };
+    let mut slack = 0.0_f64;
+    let ids: Vec<FaceId> = b.faces().ids().collect();
+    for f in ids {
+        let s = b.face(f).unwrap().surface.as_ref().unwrap().clone();
+        let SurfaceKind::ProceduralBlend(pb) = s.kind() else {
+            continue;
+        };
+        let d = pb.net().natural_uv_domain();
+        for i in 0..=200 {
+            for j in 0..=20 {
+                let uv = Point2::new(
+                    d.min().x + (d.max().x - d.min().x) * f64::from(i) / 200.0,
+                    d.min().y + (d.max().y - d.min().y) * f64::from(j) / 20.0,
+                );
+                let off = torus(pb.net().evaluate_point(uv).unwrap());
+                assert!(
+                    off <= pb.bound(),
+                    "{off:e} off the torus, bound {:e}",
+                    pb.bound()
+                );
+            }
+        }
+        let area = solidcore::mass::integrator::properties::face_area(&k, &mut b, f, 1e-9);
+        slack += area.unwrap() * pb.bound();
+    }
+    assert!(slack > 0.0, "no round by its definition");
     assert!(
-        (removed - want).abs() <= 1e-9 * want,
-        "removed {removed}, the cylinder's {want}"
+        (removed - want).abs() <= slack + 1e-9 * want,
+        "removed {removed}, the cylinder's {want}, the nets' slack {slack:e}"
     );
 }
 

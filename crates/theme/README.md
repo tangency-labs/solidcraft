@@ -23,3 +23,9 @@ fades) stays in the app: it resolves `Tokens` and hands them to this crate.
 | `apply(ctx)` | egui's visuals and spacing from the tokens |
 | `contrast_ratio`, `composite`, `panel_surface_fill`, ... | WCAG contrast checks on token pairs |
 | `icon_strokes` | The primary strokes the tokens share with SolidCraft's icon artwork |
+
+## Licence
+
+This crate is part of SolidCraft's brand and interface, under the SolidCraft Brand and Interface
+Licence ([LICENSE](LICENSE)). Use it as part of SolidCraft; using it in another program or product
+needs the maintainers' written permission first.

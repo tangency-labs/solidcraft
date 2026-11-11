@@ -246,7 +246,7 @@ pub(super) fn dot(a: V3<Ivl>, b: V3<Ivl>) -> Ivl {
     (a.x * b.x + a.y * b.y) + a.z * b.z
 }
 
-fn square(x: Ivl) -> Ivl {
+pub(super) fn square(x: Ivl) -> Ivl {
     Ivl::checked(x.mig() * x.mig(), x.mag() * x.mag())
 }
 

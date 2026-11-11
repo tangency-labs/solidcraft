@@ -273,7 +273,7 @@ fn radius_slot<'a>(t: &'a mut Tokens, key: &str) -> Option<&'a mut u8> {
 impl ThemeFile {
     /// Shared by import and preference restoration; invalid saved maps are dropped as a unit.
     pub fn set_tabs(&mut self, source: &Value) -> Result<(), String> {
-        self.tabs = parse_tabs(source.get("tabs"))?;
+        self.tabs = parse_tabs(source.get("tabs"), UnknownTabs::Refuse)?;
         Ok(())
     }
 
@@ -575,6 +575,20 @@ pub fn parse(text: &str) -> Result<ThemeFile, String> {
 
 /// [`parse`] for JSON already read (`ui.prefs` `theme_import`).
 pub fn from_value(v: &Value) -> Result<ThemeFile, String> {
+    read_value(v, UnknownTabs::Refuse)
+}
+
+/// What reading a theme does with a `tabs` entry naming a tab the host's table lacks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum UnknownTabs {
+    /// Refuse the file, naming the entry: a file a user wrote, imported or saved.
+    Refuse,
+    /// Leave the entry out once its surfaces are checked: a built-in file, which is the look's,
+    /// keyed by the look's tab names, and is read under whichever host installed the look.
+    LeaveOut,
+}
+
+fn read_value(v: &Value, unknown: UnknownTabs) -> Result<ThemeFile, String> {
     if v.get("format").and_then(Value::as_str) != Some(FORMAT) {
         return Err(format!("not a theme file: `format` must be \"{FORMAT}\""));
     }
@@ -592,7 +606,7 @@ pub fn from_value(v: &Value) -> Result<ThemeFile, String> {
         Some(value) => value.as_u64().ok_or("`requires` must be a nonnegative integer")?,
     };
     let layer = parse_layer(v)?;
-    let tabs = parse_tabs(v.get("tabs"))?;
+    let tabs = parse_tabs(v.get("tabs"), unknown)?;
     let options = if requires > REQUIREMENTS_LEVEL { Vec::new() } else { parse_options(v.get("options"))? };
     if requires < 2 && options.iter().any(|option| option.effect.is_some()) {
         return Err("option effects require `requires` of at least 2".into());
@@ -613,17 +627,19 @@ pub fn from_value(v: &Value) -> Result<ThemeFile, String> {
     })
 }
 
-/// Keep the accepted vocabulary at the same boundary as the existing accent mapping.
-fn parse_tabs(v: Option<&Value>) -> Result<BTreeMap<String, BTreeMap<String, Value>>, String> {
+/// Keep the accepted vocabulary at the same boundary as the existing accent mapping: the host's
+/// tab table. `unknown` says what a tab the table lacks does.
+fn parse_tabs(v: Option<&Value>, unknown: UnknownTabs) -> Result<BTreeMap<String, BTreeMap<String, Value>>, String> {
     let Some(v) = v else { return Ok(BTreeMap::new()) };
     let tabs = v.as_object().ok_or("`tabs` must be an object")?;
     let known = solidcraft_theme::installed_tabs();
-    if tabs.len() > known.names().len() {
+    if unknown == UnknownTabs::Refuse && tabs.len() > known.names().len() {
         return Err("`tabs` has too many entries".into());
     }
     let mut parsed = BTreeMap::new();
     for (tab, surfaces) in tabs {
-        if !known.contains(tab) {
+        let hosts = known.contains(tab);
+        if !hosts && unknown == UnknownTabs::Refuse {
             return Err(format!("`tabs.{tab}` is not a ribbon tab"));
         }
         let surfaces = surfaces.as_object().ok_or_else(|| format!("`tabs.{tab}` must be an object"))?;
@@ -637,7 +653,9 @@ fn parse_tabs(v: Option<&Value>) -> Result<BTreeMap<String, BTreeMap<String, Val
             }
             values.insert(key.clone(), value.clone());
         }
-        parsed.insert(tab.clone(), values);
+        if hosts {
+            parsed.insert(tab.clone(), values);
+        }
     }
     Ok(parsed)
 }
@@ -1093,7 +1111,7 @@ pub fn resolve_for_tab(theme: &ThemeFile, saved: &BTreeMap<String, OptionValue>,
     let mut tab_panel = false;
     if crate::theme_options::tab_settings(theme, &values).0
         && let Some(tab) = tab
-        && let Ok(tabs) = serde_json::to_value(&theme.tabs).map_err(|e| e.to_string()).and_then(|v| parse_tabs(Some(&v)))
+        && let Ok(tabs) = serde_json::to_value(&theme.tabs).map_err(|e| e.to_string()).and_then(|v| parse_tabs(Some(&v), UnknownTabs::Refuse))
         && let Some(surfaces) = tabs.get(tab)
     {
         for (key, value) in surfaces {
@@ -1367,6 +1385,9 @@ pub fn builtin() -> &'static [ThemeFile] {
     })
 }
 
+/// The host's built-in theme files, checked as a user's file is, except that a `tabs` entry for a
+/// tab the installed tab table lacks is left out: built-ins come with a look, keyed by its tab
+/// names, and every host that installs the look reads them.
 pub fn read_builtin(sources: &[(&str, &str)]) -> Result<Vec<ThemeFile>, String> {
     let mut orders = std::collections::BTreeSet::new();
     let mut ids = std::collections::BTreeSet::new();
@@ -1386,7 +1407,7 @@ pub fn read_builtin(sources: &[(&str, &str)]) -> Result<Vec<ThemeFile>, String> 
         if value.get("provenance").and_then(Value::as_str).is_none_or(|s| s.trim().is_empty()) {
             return Err(format!("theme {id}: missing provenance"));
         }
-        let theme = from_value(&value).map_err(|e| format!("theme {id}: {e}"))?;
+        let theme = read_value(&value, UnknownTabs::LeaveOut).map_err(|e| format!("theme {id}: {e}"))?;
         themes.push((order, ThemeFile { id: id.into(), ..theme }));
     }
     if themes.is_empty() {
@@ -2168,6 +2189,28 @@ mod tests {
             assert!(read_builtin(&[("a", &text(order))]).is_err());
         }
         assert!(read_builtin(&[]).is_err());
+    }
+
+    /// A built-in file is the look's, its per-tab surfaces keyed by the look's tab names: under a
+    /// host without a tab it names, it loads and that tab's surfaces are left out. A file a user
+    /// imports or saves that names such a tab is still refused, and a built-in's surfaces are
+    /// still checked. The kit's tests install no tab table, so no tab is the host's here.
+    #[test]
+    fn a_builtin_keeps_only_the_hosts_tabs_and_a_users_file_is_still_refused() {
+        let theme = |surfaces: Value| {
+            json!({"format": FORMAT, "name": "Tinted", "base": "dark", "provenance": "Original", "order": 1,
+                "tabs": {"SKETCH": surfaces, "RENDER": {"viewport_top": "#202020"}}})
+        };
+        let good = theme(json!({"panel": "#102030"}));
+        let read = read_builtin(&[("tinted", &good.to_string())]).unwrap();
+        assert_eq!(read.len(), 1);
+        assert!(read[0].tabs.is_empty(), "no tab of the host's is named");
+        assert_eq!(resolve_for_tab(&read[0], &BTreeMap::new(), Some("SKETCH")), resolve(&read[0]));
+        assert!(from_value(&good).unwrap_err().contains("`tabs`"), "a user's file is refused as before");
+        let mut saved = ThemeFile::default();
+        assert!(saved.set_tabs(&good).is_err(), "a saved theme's tabs are read as before");
+        let bad = theme(json!({"panle": "#102030"}));
+        assert!(read_builtin(&[("tinted", &bad.to_string())]).unwrap_err().contains("`tabs.SKETCH.panle` is not a tab surface"));
     }
 
     #[test]

@@ -7,5 +7,8 @@
   "ui.window_hide": "Hide {title}",
   "ui.window_maximize": "Maximize",
   "ui.window_minimize": "Minimize",
-  "ui.window_restore": "Restore"
+  "ui.window_restore": "Restore",
+  "ui.save": "Save",
+  "ui.cancel": "Cancel",
+  "ui.don_t_save": "Don't Save"
 }
