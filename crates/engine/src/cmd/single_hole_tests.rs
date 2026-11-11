@@ -160,3 +160,26 @@ fn a_countersink_beside_a_wall_stays_below_the_face() {
     let got = volume(&mut s);
     assert!((got - want).abs() < 1e-3, "volume {got}, want {want}");
 }
+
+/// #14424: a countersunk hole's bore starts its circle at the cone's seam, so the circle where
+/// the cone meets the bore is one edge with one vertex. 8 faces (6 planes, cone, bore), 17 edges
+/// (12 box edges, 3 circles, 2 seams), 11 vertices (8 corners, one per circle), as the same hole
+/// cut by a revolved sketch gives.
+#[test]
+fn a_countersink_hole_shares_one_seam_with_its_bore() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "A"}));
+    run(
+        &mut s,
+        "solid.hole",
+        json!({"position": [10, 10, 10], "diameter": 5, "type": "countersink", "cs_diameter": 12, "cs_angle": 90, "targets": ["A"]}),
+    );
+    let st = s.model.state();
+    let [body] = st.bodies.as_slice() else { panic!("one body, got {}", st.bodies.len()) };
+    let counts = (body.body.face_count(), body.body.edge_count(), body.body.vertex_count());
+    assert_eq!(counts, (8, 17, 11), "faces, edges, vertices");
+    let (rr, r, h) = (6.0_f64, 2.5_f64, 3.5_f64);
+    let want = 4000.0 - PI * r * r * 10.0 - (PI * h / 3.0 * (rr * rr + r * r + rr * r) - PI * r * r * h);
+    let got = volume(&mut s);
+    assert!((got - want).abs() < 1e-3, "volume {got}, want {want}");
+}

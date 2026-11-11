@@ -5205,18 +5205,24 @@ fn hole_tools_and_prisms(
     let plane = Plane::from_normal(*position, -dir).ok_or_else(|| DocError::Invalid("hole axis".into()))?;
     // Each tool's circle seam at its own angle, so seams don't line up between tools.
     let seam = std::cell::Cell::new(0.0);
-    let disc = |rad: f64| {
-        seam.set(seam.get() + 0.613);
-        Region2 { outer: solidcore_record::Loop2::circle_from(Vec2::ZERO, rad, seam.get()), holes: vec![] }
+    // A tool that meets another one along a circle takes that tool's seam angle (`at`) instead,
+    // so the circle they share keeps one vertex, not one per seam (#14424).
+    let disc = |rad: f64, at: Option<f64>| {
+        let start = at.unwrap_or_else(|| {
+            seam.set(seam.get() + 0.613);
+            seam.get()
+        });
+        Region2 { outer: solidcore_record::Loop2::circle_from(Vec2::ZERO, rad, start), holes: vec![] }
     };
-    let cyl = |rad: f64, lo: f64, hi: f64, part: &str| -> Result<(Traced, Option<more::PrimitivePrism>)> {
-        let tool = kernel::extrude(&plane, &[disc(rad)], lo, hi)?.pop().ok_or_else(|| DocError::Invalid("hole tool".into()))?;
+    let cyl = |rad: f64, lo: f64, hi: f64, part: &str, at: Option<f64>| -> Result<(Traced, Option<more::PrimitivePrism>)> {
+        let tool = kernel::extrude(&plane, &[disc(rad, at)], lo, hi)?.pop().ok_or_else(|| DocError::Invalid("hole tool".into()))?;
         let axis = plane.normal();
         let prism = more::PrimitivePrism::Cylinder { base: *position + axis * lo, axis, radius: rad, height: hi - lo };
         Ok((crate::lineage::part_tool(tool, part), Some(prism)))
     };
-    // Reuse the existing drill-point tool for the narrow bore, independently of its entry.
-    let bore = |tip_angle: Option<&crate::Expr>| -> Result<Vec<(Traced, Option<more::PrimitivePrism>)>> {
+    // Reuse the existing drill-point tool for the narrow bore, independently of its entry. `at` is
+    // the straight bore's seam angle when it must match the entry's (a countersink's cone).
+    let bore = |tip_angle: Option<&crate::Expr>, at: Option<f64>| -> Result<Vec<(Traced, Option<more::PrimitivePrism>)>> {
         if let Some(tip_angle) = tip_angle {
             let half = val(vals, tip_angle, Kind::Angle)? / 2.0;
             // A hole exactly as deep as the material: the point is in the air past the exit
@@ -5244,19 +5250,19 @@ fn hole_tools_and_prisms(
                     .collect());
             }
         }
-        Ok(vec![cyl(r, bottom, top, "bore")?])
+        Ok(vec![cyl(r, bottom, top, "bore", at)?])
     };
     let mut tools = Vec::new();
     match hole {
-        HoleKind::Simple => tools.extend(bore(None)?),
-        HoleKind::Drilled { tip_angle } => tools.extend(bore(Some(tip_angle))?),
+        HoleKind::Simple => tools.extend(bore(None, None)?),
+        HoleKind::Drilled { tip_angle } => tools.extend(bore(Some(tip_angle), None)?),
         HoleKind::Counterbore { cb_diameter, cb_depth, tip_angle, bridge } => {
             let (rc, dc) = (val(vals, cb_diameter, Kind::Length)? / 2.0, val(vals, cb_depth, Kind::Length)?);
             if !(rc > r && dc > 0.0 && -dc > bottom) {
                 return Err(DocError::Invalid("the counterbore must be wider than the hole and shallower than it".into()));
             }
             // Wide and shallow first: the narrow hole then crosses the pocket floor.
-            tools.push(cyl(rc, -dc, top, "cbore")?);
+            tools.push(cyl(rc, -dc, top, "cbore", None)?);
             if let Some(layer) = bridge {
                 let layer = val(vals, layer, Kind::Length)?;
                 tools.extend(bridge_tools(&plane, r, rc, dc, bottom, layer)?);
@@ -5270,7 +5276,7 @@ fn hole_tools_and_prisms(
                     }
                 }
             }
-            tools.extend(bore(tip_angle.as_ref())?);
+            tools.extend(bore(tip_angle.as_ref(), None)?);
         }
         HoleKind::Countersink { cs_diameter, cs_angle, tip_angle } => {
             let (rc, half) = (val(vals, cs_diameter, Kind::Length)? / 2.0, val(vals, cs_angle, Kind::Angle)? / 2.0);
@@ -5294,7 +5300,8 @@ fn hole_tools_and_prisms(
             let r_end = r * 0.9;
             let len = (rc - r_end) / half.tan();
             let up = -dir;
-            let rp = Plane::new(*position, up.any_perp(), up).ok_or_else(|| DocError::Invalid("hole axis".into()))?;
+            let side = up.any_perp();
+            let rp = Plane::new(*position, side, up).ok_or_else(|| DocError::Invalid("hole axis".into()))?;
             let pts = [Vec2::new(rc, 0.0), Vec2::new(r_end, -len), Vec2::new(0.0, -len), Vec2::new(0.0, top), Vec2::new(rc, top)];
             let region = Region2 { outer: solidcore_record::Loop2::polygon(&pts), holes: vec![] };
             tools.extend(
@@ -5302,7 +5309,11 @@ fn hole_tools_and_prisms(
                     .into_iter()
                     .map(|tool| (crate::lineage::part_tool(tool, "csink"), None)),
             );
-            tools.extend(bore(tip_angle.as_ref())?);
+            // The cone's seam lies along `side`; the bore's circle starts there too, so the circle
+            // where the bore meets the cone has one vertex, not two (#14424). A drill-point bore is
+            // revolved from `side` already.
+            let cone_seam = side.dot(plane.y).atan2(side.dot(plane.x));
+            tools.extend(bore(tip_angle.as_ref(), Some(cone_seam))?);
         }
     }
     Ok(tools)
