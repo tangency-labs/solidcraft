@@ -26,8 +26,10 @@
 //! The result is certified: the distance between each input curve and the surface's iso-curve
 //! at its parameter ([`certified_distance`], plus the rounding of extracting the iso-curve by
 //! knot insertion: `γ_(12 (d + 1))` of twice the net's largest coordinate per coordinate, `d`
-//! the cross degree, a coordinate error `e` moving a point by at most `2 e`), and the largest
-//! such bound is returned with the surface. Past the tolerance the network is refused.
+//! the cross degree, a coordinate error `e` moving a point by at most `2 e`), all counted in the
+//! network's own frame (minus its first control point, each moved coordinate rounding once) so
+//! the bound follows the network's size, not its distance from the origin; the largest such
+//! bound is returned with the surface. Past the tolerance the network is refused.
 //!
 //! Deviations: none (no upstream counterpart). Non-rational 3D curves only. No recursion.
 
@@ -165,6 +167,37 @@ fn surface(net: Vec<Vec<Vec3>>, p: usize, q: usize, u: &[f64], v: &[f64]) -> Res
     Surface::new(net, p, q, u.to_vec(), v.to_vec())
 }
 
+/// `c` moved by minus `o`, into the network's own frame.
+fn moved(c: &Curve, o: CPoint) -> Result<Curve> {
+    let pw = c
+        .cpts()
+        .iter()
+        .map(|q| CPoint::new(q.x - o.x, q.y - o.y, q.z - o.z, q.w))
+        .collect();
+    Curve::new(pw, c.degree(), c.knots().to_vec())
+}
+
+/// `s` moved by minus `o`, into the network's own frame.
+fn moved_surface(s: &Surface, o: CPoint) -> Result<Surface> {
+    let net = s
+        .rows()
+        .map(|row| {
+            row.iter()
+                .map(|q| CPoint::new(q.x - o.x, q.y - o.y, q.z - o.z, q.w))
+                .collect()
+        })
+        .collect();
+    let (p, q) = s.degrees();
+    Surface::new(net, p, q, s.u_knots().to_vec(), s.v_knots().to_vec())
+}
+
+/// The largest coordinate of `points`.
+fn largest<'a>(points: impl Iterator<Item = &'a CPoint>) -> f64 {
+    points
+        .map(|c| c.x.abs().max(c.y.abs()).max(c.z.abs()))
+        .fold(0.0_f64, f64::max)
+}
+
 /// The Gordon surface of the u-curves `us` and the v-curves `vs` (module docs), its crossings
 /// and its curves proved within `tol` of it.
 ///
@@ -248,15 +281,31 @@ pub fn gordon(
         return Ok(Err(NetworkRefusal::Order));
     }
 
-    // the crossing points at the common parameters, each proved within tol of both curves
+    // The certificates are counted in the network's own frame (minus the first u-curve's
+    // first control point), so their rounding follows the network's size, not its distance
+    // from the origin: each moved coordinate rounds once (`γ_1` of the moved value), moving a
+    // point by at most `2 γ_1 M`, `M` the largest moved coordinate.
+    let origin = c0
+        .cpts()
+        .first()
+        .copied()
+        .ok_or_else(|| bad("a curve without points"))?;
+    let cu_local: Vec<Curve> = cu.iter().map(|c| moved(c, origin)).collect::<Result<_>>()?;
+    let dv_local: Vec<Curve> = dv.iter().map(|d| moved(d, origin)).collect::<Result<_>>()?;
+    let size = largest(cu_local.iter().chain(&dv_local).flat_map(Curve::cpts));
+    let move_err = 2.0 * gamma(1) * size;
+
+    // the crossing points at the common parameters, each proved within tol of both curves:
+    // |C(u) - D(v)| <= |C(u) - q| + |D(v) - q| for any q, both bounded in the network's frame
     let mut grid: Vec<Vec<Vec3>> = Vec::with_capacity(r + 1);
-    for (kk, (c, &v)) in cu.iter().zip(&v_at).enumerate() {
+    for (kk, ((c, c_local), &v)) in cu.iter().zip(&cu_local).zip(&v_at).enumerate() {
         let mut row = Vec::with_capacity(s + 1);
-        for (l, (d, &u)) in dv.iter().zip(&u_at).enumerate() {
+        for (l, (d_local, &u)) in dv_local.iter().zip(&u_at).enumerate() {
             let q = c.eval(u, Side::Left)?;
-            let on_c = interpolation_bound(c, &[u], &[q])?;
-            let on_d = interpolation_bound(d, &[v], &[q])?;
-            let gap = (on_c + on_d) * (1.0 + gamma(1));
+            let q_local = c_local.eval(u, Side::Left)?;
+            let on_c = interpolation_bound(c_local, &[u], &[q_local])?;
+            let on_d = interpolation_bound(d_local, &[v], &[q_local])?;
+            let gap = (on_c + on_d + 2.0 * move_err) * (1.0 + gamma(2));
             if !(gap <= tol) {
                 return Ok(Err(NetworkRefusal::Gap { u: kk, v: l, gap }));
             }
@@ -345,25 +394,23 @@ pub fn gordon(
         .as_ref()
         .ok_or_else(|| bad("a surface without its NURB"))?;
 
-    // the certificate: each input curve against its iso-curve, extraction rounding included
-    let largest = s_nurb
-        .cpts()
-        .iter()
-        .flatten()
-        .map(|c| c.x.abs().max(c.y.abs()).max(c.z.abs()))
-        .fold(0.0_f64, f64::max);
-    let (dp, dq) = s_nurb.degrees();
+    // the certificate: each input curve against its iso-curve, in the network's frame; the
+    // extraction's rounding and both moves included
+    let s_local = moved_surface(s_nurb, origin)?;
+    let s_size = largest(s_local.rows().flatten()).max(size);
+    let s_move = 2.0 * gamma(1) * s_size;
+    let (dp, dq) = s_local.degrees();
     let mut bound = 0.0_f64;
-    for (c, &v) in cu.iter().zip(&v_at) {
-        let iso = extract_iso_crv(s_nurb, v, Direction::U)?;
-        let extraction = 4.0 * gamma(12 * (dq + 1)) * largest;
-        let d = (certified_distance(&iso, c)? + extraction) * (1.0 + gamma(1));
+    for (c, &v) in cu_local.iter().zip(&v_at) {
+        let iso = extract_iso_crv(&s_local, v, Direction::U)?;
+        let extraction = 4.0 * gamma(12 * (dq + 1)) * s_size;
+        let d = (certified_distance(&iso, c)? + extraction + s_move + move_err) * (1.0 + gamma(3));
         bound = bound.max(d);
     }
-    for (d, &u) in dv.iter().zip(&u_at) {
-        let iso = extract_iso_crv(s_nurb, u, Direction::V)?;
-        let extraction = 4.0 * gamma(12 * (dp + 1)) * largest;
-        let e = (certified_distance(&iso, d)? + extraction) * (1.0 + gamma(1));
+    for (d, &u) in dv_local.iter().zip(&u_at) {
+        let iso = extract_iso_crv(&s_local, u, Direction::V)?;
+        let extraction = 4.0 * gamma(12 * (dp + 1)) * s_size;
+        let e = (certified_distance(&iso, d)? + extraction + s_move + move_err) * (1.0 + gamma(3));
         bound = bound.max(e);
     }
     if !(bound <= tol) {
@@ -506,5 +553,87 @@ mod tests {
         ));
         // too few curves
         assert!(gordon(&k, &us[..1], &vs, 1e-6).is_err());
+    }
+
+    #[test]
+    fn a_patchs_iso_curves_give_the_patch_back() {
+        // a polynomial patch, cubic in u with two interior knots and a cubic Bezier in v: four
+        // u-curves skinned by cubics reproduce its v, and L2 = T exactly, so S is the patch
+        let k = Kernel::default();
+        let net: Vec<Vec<CPoint>> = (0..6)
+            .map(|i| {
+                (0..4)
+                    .map(|j| {
+                        let z = ((i * 7 + j * 3) % 5) as f64 - 2.0;
+                        CPoint::from_point(Vec3::new(2.0 * i as f64, 3.0 * j as f64, z))
+                    })
+                    .collect()
+            })
+            .collect();
+        let third = 1.0 / 3.0;
+        let patch = Surface::new(
+            net,
+            3,
+            3,
+            vec![0.0, 0.0, 0.0, 0.0, third, 2.0 * third, 1.0, 1.0, 1.0, 1.0],
+            vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let iso = |t: f64, dir: Direction| {
+            BSplineCurve::from_gw_nurb(3, &extract_iso_crv(&patch, t, dir).unwrap())
+        };
+        let us: Vec<BSplineCurve> = [0.0, 0.3, 0.7, 1.0].map(|v| iso(v, Direction::U)).to_vec();
+        let vs: Vec<BSplineCurve> = [0.0, 0.25, 0.6, 1.0].map(|u| iso(u, Direction::V)).to_vec();
+        let g = gordon(&k, &us, &vs, 1e-6).unwrap().unwrap();
+        assert!(g.bound <= 1e-9, "{}", g.bound);
+        let s = g.surface.nurb.as_ref().unwrap();
+        for i in 0..=10 {
+            for j in 0..=10 {
+                let (a, b) = (f64::from(i) / 10.0, f64::from(j) / 10.0);
+                let (p, q) = (at(s, a, b), at(&patch, a, b));
+                assert!((p - q).length() < 1e-9, "{p:?} against {q:?} at ({a}, {b})");
+            }
+        }
+    }
+
+    #[test]
+    fn a_closed_grid_meets_at_its_corners_once() {
+        // three lines each way on the rectangle [0, 10] x [0, 20]: the outer curves meet at
+        // their ends, and the inner ones end on the outer ones
+        let k = Kernel::default();
+        let us: Vec<BSplineCurve> = [0.0, 5.0, 20.0]
+            .map(|y| line([0.0, y, 0.0], [10.0, y, 0.0]))
+            .to_vec();
+        let vs: Vec<BSplineCurve> = [0.0, 4.0, 10.0]
+            .map(|x| line([x, 0.0, 0.0], [x, 20.0, 0.0]))
+            .to_vec();
+        let g = gordon(&k, &us, &vs, 1e-6).unwrap().unwrap();
+        assert!(g.bound <= 1e-9, "{}", g.bound);
+        let s = g.surface.nurb.as_ref().unwrap();
+        for (a, b) in [(0.0, 0.0), (1.0, 1.0), (0.4, 0.25), (0.7, 0.9)] {
+            let p = at(s, a, b);
+            assert!(p.z.abs() < 1e-9 && (0.0..=10.0).contains(&p.x) && (0.0..=20.0).contains(&p.y));
+        }
+    }
+
+    #[test]
+    fn the_bound_follows_the_networks_size_far_from_the_origin() {
+        // the bilinear network far out: its bound follows its own size, not its coordinates
+        let k = Kernel::default();
+        // 2e5 out: counted on the coordinates, the extraction's rounding alone would be
+        // 4 γ_24 2e5 ≈ 2e-9; on the network's size (10) it is below 1e-13, and the nets' own
+        // rounding there about 1e-10
+        let o = [1.0e5, -2.0e5, 3.0e4];
+        let p = [
+            [0.0, 0.0, 0.0],
+            [10.0, 0.0, 0.0],
+            [0.0, 10.0, 0.0],
+            [10.0, 10.0, 5.0],
+        ]
+        .map(|q| [q[0] + o[0], q[1] + o[1], q[2] + o[2]]);
+        let us = [line(p[0], p[1]), line(p[2], p[3])];
+        let vs = [line(p[0], p[2]), line(p[1], p[3])];
+        let g = gordon(&k, &us, &vs, 1e-6).unwrap().unwrap();
+        assert!(g.bound <= 5e-10, "{}", g.bound);
     }
 }
