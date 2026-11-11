@@ -156,11 +156,11 @@ fn inside(poly: &Polygons, d: usize, c: f64) -> Vec<[f64; 2]> {
         }
     }
     at.sort_by(f64::total_cmp);
-    at.chunks_exact(2)
-        .filter_map(|w| match *w {
-            [x0, x1] if x1 > x0 => Some([x0, x1]),
-            _ => None,
-        })
+    at.as_chunks::<2>()
+        .0
+        .iter()
+        .filter(|[x0, x1]| x1 > x0)
+        .copied()
         .collect()
 }
 
