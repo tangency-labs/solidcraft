@@ -50,7 +50,7 @@
 //! Opt-in `Kernel::fixes.cover_wraps_across_closed_seam` (WR-599, the fork's
 //! tangency-labs/smlib@16bf1cb): after each face merge `boolean_post_process` runs
 //! `HasSeamProblem` on the merged face and `SplitAtSeam` when a seam is crossed or missing.
-//! The temporary origin shift (WR-586, #483): failed boxes and temporary translations
+//! Not upstream (WR-586, #483): the temporary origin shift's failed boxes and translations
 //! propagate, a failed second translation restores the first operand, and inverse
 //! transforms attempt all surviving operands before returning their first error. A
 //! callback that fails may already have mutated its operand; this does not promise
