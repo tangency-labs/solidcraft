@@ -478,13 +478,15 @@ fn a_hole_moved_off_the_part_says_it_removes_no_material() {
 }
 
 /// A hole wider than the part takes all of it away and says so (#10702): at creation, and when
-/// a parameter widens it later. A hole across the part's width keeps the rest, silently.
+/// a parameter widens it later. A hole across the part's width keeps the rest, silently. The hole
+/// touches none of the plate's sides: one touching a side along a line would leave pieces that
+/// meet only there, which are separate bodies.
 #[test]
 fn a_hole_wider_than_the_part_says_it_removes_all_of_it() {
     let mut s = Session::default();
     run(&mut s, "parameters.add", json!({"name": "hd", "expression": "40 mm"}));
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "name": "Plate"}));
-    run(&mut s, "solid.hole", json!({"position": [10, 10, 10], "diameter": "hd", "name": "H1"}));
+    run(&mut s, "solid.hole", json!({"position": [10, 15, 10], "diameter": "hd", "name": "H1"}));
     assert_eq!(said(&s, "H1"), "");
     assert_eq!(s.model.state().bodies.len(), 1);
     change(&mut s, "hd", "100 mm");
