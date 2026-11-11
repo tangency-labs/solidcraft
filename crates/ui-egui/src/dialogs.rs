@@ -4024,7 +4024,7 @@ pub(crate) fn card_width(d: &Dialog) -> f32 {
     let t = Tokens::get();
     if matches!(d.kind, Kind::Appearance(_) | Kind::Material { .. }) {
         t.form_card_width + t.form_label_width + t.space_6
-    } else if matches!(&d.kind, Kind::Motion(k) if k.wide()) {
+    } else if matches!(&d.kind, Kind::Motion(k) if k.wide_card()) {
         t.form_card_width * 3.0
     } else {
         t.form_card_width

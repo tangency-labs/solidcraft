@@ -200,6 +200,47 @@ fn picked_occurrences(s: &Session, inputs: &[SelInput], i: usize) -> Vec<u64> {
     out
 }
 
+impl Analysis {
+    /// Forget the last collision check: it was for another study.
+    pub fn forget_collisions(&mut self) {
+        self.collisions = None;
+    }
+}
+
+/// A colliding pair as "A and B collide at steps 3-9, 40" (`motion.interference`'s entry).
+fn collision_text(c: &Value) -> String {
+    let steps: Vec<String> = c["steps"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|r| {
+            let (from, to) = (r[0].as_f64().unwrap_or(0.0).round(), r[1].as_f64().unwrap_or(0.0).round());
+            if from == to { format!("{from}") } else { format!("{from}-{to}") }
+        })
+        .collect();
+    let name = |k: &str| c[k].as_str().unwrap_or_default().to_string();
+    solidcraft_ui_text::format("motion.collision", &[("a", &name("a")), ("b", &name("b")), ("steps", &steps.join(", "))])
+}
+
+/// The compact Motion Study's collisions: what the editor's last check found, each pair dimmed
+/// until the step shown is one where it collides. A click shows where they first collide.
+pub fn compact_collisions(ui: &mut egui::Ui, a: &Analysis, step: &mut f64, playing: &mut bool, t: &Tokens) {
+    let Some((_, Ok(v))) = a.collisions.as_ref() else { return };
+    let now = step.round();
+    ui.vertical(|ui| {
+        for (i, c) in v["collisions"].as_array().into_iter().flatten().enumerate() {
+            let here = collision_bands(&json!({"collisions": [c]})).iter().any(|[from, to]| (from.round()..=to.round()).contains(&now));
+            let link = ui.link(RichText::new(collision_text(c)).color(if here { t.error } else { t.text_dim }));
+            crate::scenario::publish_handle(&format!("motion:compact_collision:{i}"), link.rect.center());
+            if link.clicked()
+                && let Some(first) = c["first_step"].as_f64()
+            {
+                (*step, *playing) = (first, false);
+            }
+        }
+    });
+}
+
 /// The step ranges where any pair collides, from `motion.interference`'s answer.
 pub fn collision_bands(v: &Value) -> Vec<[f64; 2]> {
     let ranges = v["collisions"].as_array().into_iter().flatten().flat_map(|c| c["steps"].as_array().cloned().unwrap_or_default());
@@ -288,20 +329,8 @@ fn collision_rows(
                         ui.label(RichText::new(solidcraft_ui_text::tr("motion.no_collisions")).color(t.text_dim));
                     }
                     for (i, c) in hits.iter().enumerate() {
-                        let steps: Vec<String> = c["steps"]
-                            .as_array()
-                            .into_iter()
-                            .flatten()
-                            .map(|r| {
-                                let (from, to) = (r[0].as_f64().unwrap_or(0.0).round(), r[1].as_f64().unwrap_or(0.0).round());
-                                if from == to { format!("{from}") } else { format!("{from}-{to}") }
-                            })
-                            .collect();
-                        let name = |k: &str| c[k].as_str().unwrap_or_default().to_string();
-                        let text =
-                            solidcraft_ui_text::format("motion.collision", &[("a", &name("a")), ("b", &name("b")), ("steps", &steps.join(", "))]);
                         // A click shows where they first collide.
-                        let link = ui.link(RichText::new(text).color(t.error));
+                        let link = ui.link(RichText::new(collision_text(c)).color(t.error));
                         crate::scenario::publish_handle(&format!("motion:collision:{i}"), link.rect.center());
                         if link.clicked()
                             && let Some(first) = c["first_step"].as_f64()
