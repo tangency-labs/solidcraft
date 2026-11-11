@@ -642,10 +642,9 @@ pub(crate) fn screw_patch_enclosure(
             "iso box exceeds certified support",
         ));
     }
-    let net = sweep
-        .net()
-        .gw_nurb()
-        .ok_or_else(|| SolidError::null_pointer(OP_SCREW_BOX))?;
+    let net = sweep.net().gw_nurb().ok_or_else(|| {
+        SolidError::curve_missing(OP_SCREW_BOX, "the retained screw net's NURBS form")
+    })?;
     let u_support = net
         .u_knots()
         .iter()
