@@ -1,17 +1,20 @@
 //! Free curves: a B-spline from the control points a designer places, one of its control points
-//! moved, the curve under an affine map, and its curvature comb. The curve is the record's
-//! ([`Curve`]); the knots, the map's carrying of the control points and the curvature are the
-//! kernel's ([`solidcore::nurbs::knots::clamped_uniform`],
+//! moved, the curve under an affine map, the curve seen in two views, and its curvature comb.
+//! The curve is the record's ([`Curve`]); the knots, the map's carrying of the control points,
+//! the views' meeting and the curvature are the kernel's
+//! ([`solidcore::nurbs::knots::clamped_uniform`],
 //! [`solidcore::nurbs::crv_basic::Curve::transform`],
+//! [`solidcore::intersect::views::curves_from_views`],
 //! [`solidcore::query::continuity::curve_comb`]). Ops checks the inputs and converts.
 
 use solidcore::curve::from_parameters::from_parameters;
 use solidcore::geom::certified::Verdict;
+use solidcore::intersect::views::{curves_from_views, views_do_not_meet};
 use solidcore::nurbs::knots::{clamped_uniform, MAX_DEGREE};
 use solidcore::nurbs::math::{MatrixType, RealMatrix};
 use solidcore::query::continuity;
-use solidcore::SolidError;
-use solidcore_record::brep::Curve;
+use solidcore::{SolidError, Vec3};
+use solidcore_record::brep::{Curve, Invalid};
 
 use crate::body::REGULAR_RATIO;
 use crate::continuity::{tooth, CombTooth, MAX_COMB_TEETH, MIN_COMB_TEETH};
@@ -129,6 +132,44 @@ pub fn transform(curve: &Curve, matrix: &[[f64; 4]; 4]) -> Result<Curve> {
         let columns = RealMatrix::from_rows(3, 3, rows, MatrixType::Full, 3)?;
         nurb.transform(&columns)?;
         Ok(record_of(&nurb))
+    })?
+}
+
+/// The 3D curves seen as `a` along `a_dir` and as `b` along `b_dir` (a side view and a plan
+/// view, say): where `a` extruded both ways along `a_dir` meets `b` extruded along `b_dir`, far
+/// enough that none of it is left out ([`curves_from_views`], whose docs give the bound). Each
+/// curve is a spline within the kernel's default approximation tolerance of both extrusions.
+/// The directions need not be unit vectors; `a` and `b` are splines or rational splines, open or
+/// closed.
+///
+/// # Errors
+/// [`Error::Argument`] for a direction not finite or past the coordinate bound, of no length,
+/// or (within the kernel's angular zero) parallel to the other, or a curve that is not a spline
+/// the record takes; [`Error::Empty`] when the views do not meet; [`Error::Record`] for a
+/// meeting curve the record cannot hold; the kernel's status otherwise.
+pub fn two_view(a: &Curve, a_dir: [f64; 3], b: &Curve, b_dir: [f64; 3]) -> Result<Vec<Curve>> {
+    if !coord_ok(&a_dir) || !coord_ok(&b_dir) {
+        return Err(Error::Argument);
+    }
+    let (a, b) = (net_of(a)?, net_of(b)?);
+    let ([ax, ay, az], [bx, by, bz]) = (a_dir, b_dir);
+    run("curve::two_view", |k| {
+        let curves =
+            match curves_from_views(k, &a, Vec3::new(ax, ay, az), &b, Vec3::new(bx, by, bz)) {
+                Ok(curves) => curves,
+                Err(SolidError::InvalidInput { .. }) => return Ok(Err(Error::Argument)),
+                Err(e) if views_do_not_meet(&e) => return Ok(Err(Error::Empty)),
+                Err(e) => return Err(e),
+            };
+        let mut records = Vec::new();
+        for c in &curves {
+            let made = solidcore::curve::from_parameters::record_of(k, c, &c.natural_interval())?;
+            match solidcore_convert::record_curve(made.curve) {
+                Ok(record) => records.push(record),
+                Err(Invalid(why)) => return Ok(Err(Error::Record(why.to_owned()))),
+            }
+        }
+        Ok(Ok(records))
     })?
 }
 
@@ -428,6 +469,113 @@ mod tests {
             end: [1.0; 3],
         };
         assert_eq!(transform(&line, &MIRROR_Y), Err(Error::Argument));
+    }
+
+    /// The kernel's default approximation tolerance of a traced curve: half its zone tolerance
+    /// of 1e-5.
+    const APPROX_TOL: f64 = 5e-6;
+
+    /// The side view, z = f(x) in the plane y = 0: a cubic Bézier curve whose control points
+    /// are evenly spaced in x, so x = 9 t; its slope |dz/dx| at most 1 (its polygon's).
+    fn side() -> Curve {
+        cv_curve(
+            &[
+                [0.0, 0.0, 0.0],
+                [3.0, 0.0, 2.0],
+                [6.0, 0.0, -1.0],
+                [9.0, 0.0, 1.0],
+            ],
+            3,
+        )
+        .unwrap()
+    }
+
+    /// The plan view, y = g(x) in the plane z = 0, x = shift - 3 + 15 t; |dy/dx| at most 0.6.
+    fn plan(shift: f64) -> Curve {
+        cv_curve(
+            &[
+                [shift - 3.0, 1.0, 0.0],
+                [shift + 2.0, 4.0, 0.0],
+                [shift + 7.0, 2.0, 0.0],
+                [shift + 12.0, 5.0, 0.0],
+            ],
+            3,
+        )
+        .unwrap()
+    }
+
+    /// The point of the spline `c` at `t`, by the kernel's evaluator.
+    fn at(c: &Curve, t: f64) -> [f64; 3] {
+        let p = net_of(c)
+            .unwrap()
+            .eval(t, solidcore::nurbs::knots::Side::Left)
+            .unwrap();
+        [p.x, p.y, p.z]
+    }
+
+    #[test]
+    fn a_side_and_a_plan_view_give_the_curve_on_both_extrusions() {
+        let (a, b) = (side(), plan(0.0));
+        let curves = two_view(&a, [0.0, 1.0, 0.0], &b, [0.0, 0.0, 2.0]).unwrap();
+        assert!(!curves.is_empty());
+        let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+        for c in &curves {
+            let (Curve::Spline { knots, .. } | Curve::RationalSpline { knots, .. }) = c else {
+                panic!("a spline: {c:?}")
+            };
+            let (t0, t1) = (knots[0], knots[knots.len() - 1]);
+            for i in 0..=64 {
+                let x = at(c, t0 + (t1 - t0) * f64::from(i) / 64.0);
+                assert!(
+                    (-APPROX_TOL..=9.0 + APPROX_TOL).contains(&x[0]),
+                    "past the side view: {x:?}"
+                );
+                (lo, hi) = (lo.min(x[0]), hi.max(x[0]));
+                // On the side view's extrusion along y: a gap measured along z is at most the
+                // distance times sqrt(1 + slope²), below 1 + slope, the slope at most 1.
+                let on_a = at(&a, (x[0] / 9.0).clamp(0.0, 1.0));
+                assert!(
+                    (on_a[2] - x[2]).abs() <= 2.0 * APPROX_TOL,
+                    "{x:?} against {on_a:?}"
+                );
+                // On the plan view's extrusion along z, the slope at most 0.6.
+                let on_b = at(&b, (x[0] + 3.0) / 15.0);
+                assert!(
+                    (on_b[1] - x[1]).abs() <= 1.6 * APPROX_TOL,
+                    "{x:?} against {on_b:?}"
+                );
+            }
+        }
+        // The whole of the side view's run is seen.
+        assert!(
+            lo <= APPROX_TOL && hi >= 9.0 - APPROX_TOL,
+            "from {lo} to {hi}"
+        );
+    }
+
+    #[test]
+    fn parallel_directions_are_refused_and_views_apart_are_empty() {
+        let (a, b) = (side(), plan(0.0));
+        let y = [0.0, 1.0, 0.0];
+        assert_eq!(two_view(&a, y, &b, [0.0, -2.0, 0.0]), Err(Error::Argument));
+        assert_eq!(two_view(&a, y, &b, [0.0; 3]), Err(Error::Argument));
+        assert_eq!(
+            two_view(&a, y, &b, [f64::NAN, 0.0, 1.0]),
+            Err(Error::Argument)
+        );
+        let line = Curve::Line {
+            start: [0.0; 3],
+            end: [1.0; 3],
+        };
+        assert_eq!(
+            two_view(&line, y, &b, [0.0, 0.0, 1.0]),
+            Err(Error::Argument)
+        );
+        // The plan view moved to x in [20, 35], past the side view's [0, 9].
+        assert_eq!(
+            two_view(&a, y, &plan(23.0), [0.0, 0.0, 1.0]),
+            Err(Error::Empty)
+        );
     }
 
     #[test]
