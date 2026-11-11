@@ -994,6 +994,64 @@ mod tests {
         );
     }
 
+    /// One flank moves and the other stays (#11582): the kept flank's section starts on the
+    /// root land's radius, so with only its own (zero) move to pad its search interval, that
+    /// root sat on the interval's end and no endpoint sign proved it ("thread radial inverse
+    /// chart is unresolved"). The operation's move pads every flank.
+    #[test]
+    fn a_kept_flank_beside_a_moved_one_proves_its_section_order() {
+        use groove::{Affine, Band, Flank};
+        let origin = Vec3::new(-1.0, -64.0, 0.0);
+        let motion = ScrewMotion::new(origin, Vec3::Z, 2.5, None).unwrap();
+        let lines = [
+            [
+                Vec3::new(7.646835306586814, -64.0, -2.8125),
+                Vec3::new(9.125, -64.0, -3.6659187836487037),
+            ],
+            [
+                Vec3::new(9.125, -64.0, -1.3340812163512963),
+                Vec3::new(7.646835306586814, -64.0, -2.1875),
+            ],
+        ];
+        for (moved, sign) in [(0, 1.0), (0, -1.0), (1, 1.0), (1, -1.0)] {
+            let mut index = 0;
+            let flanks = lines.map(|[a, b]| {
+                let rate = if index == moved { 0.1 * sign } else { 0.0 };
+                index += 1;
+                Flank {
+                    section: ScrewOffsetSection::new(a, b, &motion, 0.0).unwrap(),
+                    radius: Affine {
+                        origin: Ivl::from(a.x) - Ivl::from(origin.x),
+                        rate: Ivl::from(b.x) - Ivl::from(a.x),
+                    },
+                    distance: Affine {
+                        origin: Ivl::from(0.0),
+                        rate: Ivl::from(rate),
+                    },
+                    radial: Vec3::X,
+                    cancel: None,
+                }
+            });
+            let band = Band {
+                flanks,
+                radii: [8.646835306586814, 10.0].map(|r| Affine {
+                    origin: Ivl::from(r),
+                    rate: Ivl::from(0.0),
+                }),
+                pitch: 2.5,
+                winding: 0,
+                cancel: None,
+            };
+            let roots = band
+                .certify()
+                .unwrap_or_else(|e| panic!("flank {moved} moved {sign}: {e}"));
+            assert!(roots
+                .iter()
+                .flatten()
+                .all(|v| v.lo.is_finite() && v.hi.is_finite()));
+        }
+    }
+
     #[test]
     fn retained_m20_sections_prove_ordering_and_first_land_events() {
         use groove::{Affine, Band, Flank};
