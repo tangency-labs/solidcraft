@@ -533,16 +533,61 @@ fn removed_note(gone: &[Vec3]) -> String {
 thread_local! {
     /// Current feature evaluation validation mode (`EachStep`, `EachFeature`, or `Off`).
     static EVAL_VALIDATION: std::cell::Cell<kernel::Validation> = const { std::cell::Cell::new(kernel::Validation::EachFeature) };
+    /// Latest successful thread output per body, confined to the current feature evaluation.
+    static CHECKED_THREAD_OUTPUTS: std::cell::Cell<Option<BTreeMap<String, Body>>> = const { std::cell::Cell::new(None) };
 }
 
-/// Restores `EVAL_VALIDATION` to its previous value when dropped.
-struct EvalValidationGuard(kernel::Validation);
+/// Restores the validation mode and the enclosing feature's checks on scope exit.
+struct EvalValidationGuard {
+    mode: kernel::Validation,
+    checked: Option<BTreeMap<String, Body>>,
+}
+
+impl EvalValidationGuard {
+    fn new(mode: kernel::Validation) -> Self {
+        Self { mode: EVAL_VALIDATION.replace(mode), checked: CHECKED_THREAD_OUTPUTS.replace(Some(BTreeMap::new())) }
+    }
+}
 
 impl Drop for EvalValidationGuard {
-    /// Restores the saved validation mode on scope exit.
     fn drop(&mut self) {
-        EVAL_VALIDATION.set(self.0);
+        CHECKED_THREAD_OUTPUTS.set(self.checked.take());
+        EVAL_VALIDATION.set(self.mode);
     }
+}
+
+/// Record only an unchanged final thread output after its native check succeeded.
+fn remember_checked_thread_output(name: &str, body: &Body) {
+    if EVAL_VALIDATION.get() != kernel::Validation::EachFeature {
+        return;
+    }
+    CHECKED_THREAD_OUTPUTS.with(|cell| {
+        let mut checked = cell.take();
+        if let Some(bodies) = checked.as_mut() {
+            bodies.insert(name.to_owned(), body.clone());
+        }
+        cell.set(checked);
+    });
+}
+
+/// A successful thread check can replace only the same feature's check of that exact shape.
+fn checked_thread_output(body: &Body) -> bool {
+    if EVAL_VALIDATION.get() != kernel::Validation::EachFeature {
+        return false;
+    }
+    CHECKED_THREAD_OUTPUTS.with(|cell| {
+        let checked = cell.take();
+        let found = checked.as_ref().is_some_and(|bodies| bodies.values().any(|old| old.same_shape(body)));
+        cell.set(checked);
+        found
+    })
+}
+
+/// Run a full check, counting the calls separately from reused successful thread checks.
+fn check_feature_body(body: &Body) -> kernel::Result<()> {
+    #[cfg(test)]
+    cost_tests::count(|c| c.kept_checks += 1);
+    kernel::check_kept(body)
 }
 
 /// A blend's refusal as too large (`why`) with the largest `size` (radius, distance) that fits,
@@ -1880,7 +1925,12 @@ fn check_kept(before: &ModelState, after: &ModelState) -> kernel::Result<()> {
         if before.bodies.iter().any(|old| old.body.same_shape(&b.body)) {
             continue;
         }
-        kernel::check_kept(&b.body).map_err(|e| kernel::KernelError::Failed(format!("body `{}`: {e}", b.name)))?;
+        if checked_thread_output(&b.body) {
+            #[cfg(test)]
+            cost_tests::count(|c| c.reused_checks += 1);
+            continue;
+        }
+        check_feature_body(&b.body).map_err(|e| kernel::KernelError::Failed(format!("body `{}`: {e}", b.name)))?;
     }
     Ok(())
 }
@@ -3424,7 +3474,7 @@ impl Model {
                         }
                     }
                     None => kernel::guard(&f.name, || {
-                        let _val_guard = EvalValidationGuard(EVAL_VALIDATION.replace(validation));
+                        let _val_guard = EvalValidationGuard::new(validation);
                         let (r, deferred) =
                             kernel::validating(validation, || eval_feature(doc, &vals, f, &mut next, &mut warning, &mut import_report, &mut repair));
                         r.map_err(|e| match e {

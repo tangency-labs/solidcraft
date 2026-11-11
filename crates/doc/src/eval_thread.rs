@@ -832,6 +832,20 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             selected.push(on);
         }
     }
+    if *modeled && *tip == ThreadTip::None && selected.len() > 1 && super::EVAL_VALIDATION.get() == kernel::Validation::EachFeature {
+        match cut_grouped(st, &selected, *continuous_flanks) {
+            Ok(Some(next)) => {
+                *st = next;
+                return Ok(());
+            }
+            Ok(None) => {}
+            Err(DocError::Kernel(_)) => {
+                #[cfg(test)]
+                super::cost_tests::count(|c| c.grouped_thread_fallbacks += 1);
+            }
+            Err(error) => return Err(error),
+        }
+    }
     for on in selected {
         if !*modeled {
             st.threads.push(on.info);
@@ -867,6 +881,80 @@ pub(super) fn runout(vals: &BTreeMap<String, Value>, e: &Option<crate::ThreadRun
         Some(crate::ThreadRunout::Short) => (0.0, 1.25),
         Some(crate::ThreadRunout::Length { length }) => (val(vals, length, Kind::Length)?, 0.0),
     })
+}
+
+/// Prepare the existing exact groove tool, including its shoulder trims, without cutting a target.
+fn groove_tool(
+    t: &ThreadInfo,
+    cyl: kernel::CylinderFace,
+    ends: [End; 2],
+    steep: SteepFlank,
+    ease: [f64; 2],
+    radius: f64,
+    taper: Option<(f64, usize)>,
+    continuous_flanks: bool,
+) -> Result<Body> {
+    let mut grooves = Vec::new();
+    for g in thread_grooves(t, radius, (cyl.start, cyl.end), ends, steep, ease, taper)? {
+        let section = Region2 { outer: solidcore_record::Loop2::polygon(&g.section), holes: Vec::new() };
+        grooves.push(kernel::sweep_helix_radial(&g.plane, &section, g.base, g.axis, g.pitch, g.turns, &g.law, continuous_flanks)?);
+    }
+    if let Some(taper) = taper
+        && let Some(envelope) = taper_envelope(t, radius, ends, taper)?
+    {
+        grooves.push(envelope);
+    }
+    let tool = match grooves.as_slice() {
+        [one] => one.clone(),
+        many => kernel::union_all(&many.iter().collect::<Vec<_>>())?,
+    };
+    let tool = trim_at_shoulders(tool, t.axis_point, ends, (cyl.start, cyl.end), t.axis)?;
+    Ok(tool)
+}
+
+/// Separate external grooves on one body can share its cut and its final validity check.
+/// Unsupported or overlapping tool sets retain the ordinary per-face cutter.
+fn cut_grouped(st: &ModelState, selected: &[ThreadOn], continuous_flanks: bool) -> Result<Option<ModelState>> {
+    if selected.iter().any(|on| on.info.internal || on.info.form.is_taper() || on.narrow.is_some() || on.shoulder_unchecked) {
+        return Ok(None);
+    }
+    let mut groups: BTreeMap<&str, Vec<&ThreadOn>> = BTreeMap::new();
+    for on in selected {
+        groups.entry(on.info.body.as_str()).or_default().push(on);
+    }
+    let mut next = st.clone();
+    let mut checked = Vec::new();
+    for (name, group) in groups {
+        let index = st.bodies.iter().position(|body| body.name == name).ok_or_else(|| DocError::Invalid("threaded body".into()))?;
+        let original = st.bodies.get(index).ok_or_else(|| DocError::Invalid("threaded body".into()))?;
+        let tools = group
+            .iter()
+            .map(|on| groove_tool(&on.info, on.cyl, on.ends, on.steep, on.ease, on.cyl.radius, None, continuous_flanks))
+            .collect::<Result<Vec<_>>>()?;
+        let tool = match tools.as_slice() {
+            [one] => one.clone(),
+            many => match kernel::union_apart(many)? {
+                Some(one) => one,
+                None => return Ok(None),
+            },
+        };
+        #[cfg(test)]
+        super::cost_tests::count(|c| c.thread_cuts += 1);
+        let body = kernel::boolean(&original.body, &tool, BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("the threads removed everything".into()))?;
+        // The check also keeps a bad shoulder trim on the established per-face fallback path.
+        super::check_feature_body(&body)?;
+        let faces = crate::lineage::Lineage::unnamed_faces(tool.face_count());
+        let lineage = original.traced().lineage.and_then(|lineage| crate::lineage::Lineage::step(&body, &[&lineage, &faces]));
+        checked.push((original.name.clone(), body.clone()));
+        if let Some(slot) = next.bodies.get_mut(index) {
+            *slot = ModelBody::traced_new(original.name.clone(), Traced { body, lineage, recipe: None }, original.feature);
+        }
+    }
+    // Nothing enters the live state or its validation scope until every target succeeded.
+    for (name, body) in checked {
+        super::remember_checked_thread_output(&name, &body);
+    }
+    Ok(Some(next))
 }
 
 /// Cut a modelled thread with its historical half-turn faces and groove-before-chamfer
@@ -935,30 +1023,23 @@ fn cut_with_flanks(
     if continuous_flanks {
         input = chamfer(input)?;
     }
-    let cut_grooves = |ends: [End; 2]| -> Result<(Option<Body>, usize)> {
-        let mut grooves = Vec::new();
-        for g in thread_grooves(&t, groove_radius, (cyl.start, cyl.end), ends, steep, ease, taper)? {
-            let section = Region2 { outer: solidcore_record::Loop2::polygon(&g.section), holes: Vec::new() };
-            grooves.push(kernel::sweep_helix_radial(&g.plane, &section, g.base, g.axis, g.pitch, g.turns, &g.law, continuous_flanks)?);
-        }
-        if let Some(taper) = taper
-            && let Some(envelope) = taper_envelope(&t, radius, ends, taper)?
-        {
-            grooves.push(envelope);
-        }
-        let tool = match grooves.as_slice() {
-            [one] => one.clone(),
-            many => kernel::union_all(&many.iter().collect::<Vec<_>>())?,
-        };
-        let tool = trim_at_shoulders(tool, t.axis_point, ends, (cyl.start, cyl.end), t.axis)?;
+    let cut_grooves = |ends: [End; 2]| -> Result<(Option<Body>, usize, Option<Body>)> {
+        let tool = groove_tool(&t, cyl, ends, steep, ease, groove_radius, taper, continuous_flanks)?;
+        #[cfg(test)]
+        super::cost_tests::count(|c| c.thread_cuts += 1);
         let cut = kernel::boolean(&input.body, &tool, BoolOp::Cut)?;
         // Now rather than at the feature's end, where it could only fail the feature.
-        if ends.contains(&End::Shoulder)
-            && let Some(body) = &cut
-        {
-            kernel::check_kept(body)?;
-        }
-        Ok((cut, tool.face_count()))
+        let checked = if ends.contains(&End::Shoulder) {
+            if let Some(body) = &cut {
+                super::check_feature_body(body)?;
+                Some(body.clone())
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        Ok((cut, tool.face_count(), checked))
     };
     // A design that built with the square stop keeps building: where the kernel can't make the
     // trimmed cut, the groove stops clear of the shoulder as it did, and the feature says so.
@@ -974,7 +1055,7 @@ fn cut_with_flanks(
             t.designation
         )
     });
-    let (nb, groove_faces) = made?;
+    let (nb, groove_faces, checked) = made?;
     let nb = nb.ok_or_else(|| DocError::Invalid("the thread removed everything".into()))?;
     // The groove's faces have no role to name them by.
     let groove = crate::lineage::Lineage::unnamed_faces(groove_faces);
@@ -982,6 +1063,10 @@ fn cut_with_flanks(
     let nb = Traced { body: nb, lineage, recipe: None };
     let nb = if continuous_flanks { nb } else { chamfer(nb)? };
     if let Some(slot) = st.bodies.get_mut(i) {
+        // A later tip boolean needs its own check; the unmodified shoulder cut already passed.
+        if checked.as_ref().is_some_and(|body| body.same_shape(&nb.body)) {
+            super::remember_checked_thread_output(&mb.name, &nb.body);
+        }
         *slot = ModelBody::traced_new(mb.name, nb, mb.feature);
     }
     Ok(note)
@@ -1066,6 +1151,12 @@ fn tip_cones(
         return Err(DocError::Invalid("a chamfered tip needs a free end of the thread (one with no material past it)".into()));
     }
     Ok(out)
+}
+
+/// Replace the existing shoulder-trim failure hook for document orchestration tests.
+#[cfg(test)]
+pub(super) fn replace_empty_trim_for_test(value: bool) -> bool {
+    tests::EMPTY_TRIM.replace(value)
 }
 
 #[cfg(test)]
