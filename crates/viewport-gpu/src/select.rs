@@ -166,10 +166,23 @@ fn instance() -> wgpu::Instance {
     wgpu::Instance::new(desc)
 }
 
+// Some Windows Vulkan drivers crash or hang while unloading their DLL during FLS cleanup.
+// Retain one successful instance for the process, while every call still creates its own
+// descriptor and devices. Retaining no device also leaves device loss and limits per caller.
+#[cfg(target_os = "windows")]
+fn retain_vulkan_instance(instance: &wgpu::Instance, found: &[wgpu::Adapter]) {
+    if found.iter().any(|adapter| adapter.get_info().backend == wgpu::Backend::Vulkan) {
+        static INSTANCE: std::sync::OnceLock<wgpu::Instance> = std::sync::OnceLock::new();
+        let _ = INSTANCE.get_or_init(|| instance.clone());
+    }
+}
+
 /// Every adapter the native backends offer, best first.
 #[cfg(not(target_arch = "wasm32"))]
 fn adapters(instance: &wgpu::Instance) -> Vec<wgpu::Adapter> {
     let mut all = pollster::block_on(instance.enumerate_adapters(native_backends()));
+    #[cfg(target_os = "windows")]
+    retain_vulkan_instance(instance, &all);
     all.sort_by_key(|a| std::cmp::Reverse(rank(a.get_info().device_type)));
     all
 }
@@ -210,7 +223,10 @@ pub fn pick_path(policy: Policy, keep: impl Fn(&wgpu::AdapterInfo) -> bool) -> O
     }
     let mut desc = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
     desc.backends = backends;
-    let mut all = pollster::block_on(wgpu::Instance::new(desc).enumerate_adapters(backends));
+    let instance = wgpu::Instance::new(desc);
+    let mut all = pollster::block_on(instance.enumerate_adapters(backends));
+    #[cfg(target_os = "windows")]
+    retain_vulkan_instance(&instance, &all);
     all.sort_by_key(|a| std::cmp::Reverse(rank(a.get_info().device_type)));
     all.into_iter()
         .filter(|a| keep(&a.get_info()))

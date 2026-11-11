@@ -1072,6 +1072,12 @@ pub enum FeatureKind {
         /// was left to the tap drill: a 12 mm hole stays M14 there. New threads leave it off.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         old_auto_size: bool,
+        /// Other cylindrical faces threaded with the same options, in selection order.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        additional_faces: Vec<FacePick>,
+        /// The definition body for each selected face, primary first. Empty keeps legacy selection.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        target_bodies: Vec<BodyName>,
     },
     /// Ruled loft through profiles of several sketches, in order.
     Loft {

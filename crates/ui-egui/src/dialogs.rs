@@ -285,6 +285,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 suggested: Option<String>,
                 /// The picks used for the suggestion, so an unchanged dialog does no geometry work.
                 of: Vec<Sel>,
+                /// A body-qualified feature keeps the plural constructor when edited down to one face.
+                grouped: bool,
                 options: crate::dialogs_thread::Options,
             },
             /// A rib (one wall along open curves) or a web (a wall per curve).
@@ -703,7 +705,8 @@ fn display_quality(app: &SolveApp) -> solidcraft_engine::doc::display_quality::D
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn begin_applying(app: &SolveApp, d: &Dialog) -> Option<Applying> {
     let wait = app.apply_off_thread?;
-    if !d.previews() && d.editing.is_none() {
+    let multiple_threads = matches!(d.kind, Kind::Thread { .. }) && sels(d, 0).len() > 1;
+    if !d.previews() && !multiple_threads && d.editing.is_none() {
         return None;
     }
     let computation = DialogComputation::new(app, d).ok()?;
@@ -1013,7 +1016,14 @@ impl Dialog {
                 vec![SelInput::new("Body to split", BODIES, false), SelInput::new("Splitting tool", PLANES | FACES | AXES, false)],
             ),
             "solid.thread" => Dialog::new(
-                Kind::Thread { designation: String::new(), length: String::new(), suggested: None, of: Vec::new(), options: Default::default() },
+                Kind::Thread {
+                    designation: String::new(),
+                    length: String::new(),
+                    suggested: None,
+                    of: Vec::new(),
+                    grouped: false,
+                    options: Default::default(),
+                },
                 crate::dialogs_thread::inputs(),
             ),
             "material.assign" => {
@@ -1178,6 +1188,13 @@ impl Dialog {
         // face or edge stands for its body where bodies are wanted. (Edit Text's selection is the
         // text it edits, not its path.)
         let preselection: &[Sel] = if matches!(d.kind, Kind::Text(_)) { &[] } else { &s.selection };
+        // Several selected faces explicitly start a grouped Thread. Ordinary face clicks still replace.
+        if matches!(d.kind, Kind::Thread { .. })
+            && preselection.iter().filter(|sel| fits(FACES, sel)).take(2).count() > 1
+            && let Some(inp) = d.inputs.first_mut()
+        {
+            inp.multi = true;
+        }
         for sel in preselection {
             if !matches!(d.kind, Kind::OffsetPlane { .. } | Kind::Construct { .. }) && is_wire_point(s, sel) {
                 continue;
@@ -1952,6 +1969,13 @@ impl Dialog {
             self.picked_edges.clear();
         }
         let Some(inp) = self.inputs.get_mut(self.active) else { return };
+        // A multiple-face marquee or an explicit add opts into grouped Thread selection.
+        if self.active == 0
+            && matches!(self.kind, Kind::Thread { .. })
+            && (add || sels.iter().filter(|sel| fits(inp.accept, sel)).take(2).count() > 1)
+        {
+            inp.multi = true;
+        }
         if !add {
             inp.items.clear();
         }
@@ -5158,7 +5182,8 @@ pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
     if let Kind::SaveMesh(k) = &d.kind {
         return crate::dialogs_save_mesh::run(app, k, &d.inputs);
     }
-    if d.previews() {
+    let multiple_threads = matches!(d.kind, Kind::Thread { .. }) && sels(d, 0).len() > 1;
+    if d.previews() || multiple_threads {
         let prepared = DialogComputation::new(app, d)?.compute()?;
         return adopt_dialog(app, prepared, d);
     }
@@ -6076,14 +6101,36 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             need(0, "faces")?;
             ("solid.offset_face", with_single_body(json!({"faces": face_points(0)}), sels(d, 0)))
         }
-        Kind::Thread { designation, length, suggested, options, .. } => {
+        Kind::Thread { designation, length, suggested, grouped, options, .. } => {
             need(0, "a cylindrical face")?;
-            let mut p = json!({"face": face_points(0).into_iter().next().unwrap_or(Value::Null)});
-            if !designation.trim().is_empty() && suggested.as_deref() != Some(designation.as_str()) {
-                p["designation"] = json!(designation.trim());
+            let mut common = Value::Object(d.extra.clone());
+            if let Some(params) = common.as_object_mut() {
+                params.remove("face");
+                params.remove("faces");
             }
-            crate::dialogs_thread::put_params(&mut p, length, options, &d.inputs);
-            ("solid.thread", p)
+            if !designation.trim().is_empty() && suggested.as_deref() != Some(designation.as_str()) {
+                common["designation"] = json!(designation.trim());
+            }
+            crate::dialogs_thread::put_params(&mut common, length, options, &d.inputs);
+            let mut seen = std::collections::BTreeSet::new();
+            let mut faces = Vec::new();
+            for pick in sels(d, 0) {
+                let Sel::Face { body, index, point } = pick else { continue };
+                if *index == usize::MAX {
+                    return Err(solidcraft_engine::doc::DocError::reselect("face").to_string());
+                }
+                if seen.insert((body, index)) {
+                    faces.push(json!({"body": body, "point": pt(*point)}));
+                }
+            }
+            if let [face] = faces.as_slice()
+                && !*grouped
+            {
+                common["face"] = face["point"].clone();
+            } else {
+                common["faces"] = json!(faces);
+            }
+            return Ok(vec![("solid.thread".to_string(), common)]);
         }
         Kind::Material { index, editor } => {
             if editor.editing() {
@@ -6808,7 +6855,16 @@ pub(crate) fn face_sel_on(s: &Session, only: Option<&str>, p0: Vec3) -> Option<S
 
 /// Resolve a stored name on the current input body before placing its pick in the viewport.
 /// Keep the resolved index: a face point can lie on a boundary shared with another face.
-fn named_refill(s: &Session, body: Option<&str>, name: &str, point: Vec3, edge: bool) -> Option<Sel> {
+pub(crate) fn named_refill(s: &Session, body: Option<&str>, name: &str, point: Vec3, edge: bool) -> Option<Sel> {
+    named_refill_in(s, body, name, point, edge, false)
+}
+
+/// A saved grouped Thread names each target body independently; never fall back to another body.
+pub(crate) fn named_refill_on_body(s: &Session, body: &str, name: &str, point: Vec3) -> Option<Sel> {
+    named_refill_in(s, Some(body), name, point, false, true)
+}
+
+fn named_refill_in(s: &Session, body: Option<&str>, name: &str, point: Vec3, edge: bool, strict: bool) -> Option<Sel> {
     use solidcraft_engine::doc::naming;
 
     if name.is_empty() {
@@ -6825,6 +6881,8 @@ fn named_refill(s: &Session, body: Option<&str>, name: &str, point: Vec3, edge: 
         (b, hit.edge, hit.point)
     } else if let Some((b, (index, point))) = body.and_then(|n| st.body(n)).and_then(|b| naming::face_on_body(b, name, point).map(|hit| (b, hit))) {
         (b, index, point)
+    } else if strict {
+        return None;
     } else {
         let hit = naming::locate_face(&st, name, point)?;
         (st.bodies.get(hit.body)?, hit.face, hit.point)
@@ -7960,7 +8018,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
         }
         FeatureKind::Thread { .. } => {
             let mut d = start("solid.thread")?;
-            crate::dialogs_thread::reopen(&mut d, s, &f.kind);
+            crate::dialogs_thread::reopen(&mut d, s, &f);
             d.sync_thread(s);
             d
         }

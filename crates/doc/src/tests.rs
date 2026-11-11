@@ -1992,3 +1992,71 @@ fn a_sketch_on_the_construction_plane_of_another_component_lies_on_it() {
     let end = solved.plane.origin + solved.plane.x * 10.0 + solved.plane.y * 5.0;
     close(crate::apply_point(&m, end), want.origin + want.x * 10.0 + want.y * 5.0, "line end");
 }
+
+#[test]
+fn thread_additional_faces_preserve_old_single_face_serialization() {
+    let old = serde_json::json!({"type":"thread", "face":[3.0,0.0,5.0]});
+    let kind: FeatureKind = serde_json::from_value(old.clone()).unwrap();
+    assert!(matches!(&kind, FeatureKind::Thread { additional_faces, .. } if additional_faces.is_empty()));
+    assert_eq!(serde_json::to_value(kind).unwrap(), old);
+}
+
+#[test]
+fn thread_additional_faces_round_trip_without_moving_legacy_face_name_slots() {
+    let mut kind: FeatureKind = serde_json::from_value(serde_json::json!({"type":"thread", "face":[3.0,0.0,5.0]})).unwrap();
+    if let FeatureKind::Thread { additional_faces, up_to, .. } = &mut kind {
+        *up_to = Some(crate::ThreadLimit::Face(crate::FacePick(Vec3::new(0.0, 0.0, 8.0))));
+        additional_faces.extend([crate::FacePick(Vec3::new(13.0, 0.0, 5.0)), crate::FacePick(Vec3::new(23.0, 0.0, 5.0))]);
+    }
+    let expected = vec![Vec3::new(3.0, 0.0, 5.0), Vec3::new(0.0, 0.0, 8.0), Vec3::new(13.0, 0.0, 5.0), Vec3::new(23.0, 0.0, 5.0)];
+    assert_eq!(kind.face_points(), expected);
+    let saved = serde_json::to_value(&kind).unwrap();
+    assert_eq!(saved["additional_faces"], serde_json::json!([[13.0, 0.0, 5.0], [23.0, 0.0, 5.0]]));
+    let reopened: FeatureKind = serde_json::from_value(saved).unwrap();
+    assert_eq!(reopened.face_points(), expected);
+}
+
+#[test]
+fn thread_target_body_identities_follow_face_slots_and_reference_remapping() {
+    let mut kind: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type":"thread", "face":[3,0,2],
+        "additional_faces":[[13,0,2],[23,0,2]], "target_bodies":["A","B","A"]
+    }))
+    .unwrap();
+    if let FeatureKind::Thread { up_to, .. } = &mut kind {
+        *up_to = Some(crate::ThreadLimit::Face(crate::FacePick(Vec3::new(0.0, 0.0, 8.0))));
+    }
+    assert_eq!(kind.thread_target_body(0), Some("A"));
+    assert_eq!(kind.thread_target_body(1), None, "Up To is outside the per-target identity list");
+    assert_eq!(kind.thread_target_body(2), Some("B"));
+    assert_eq!(kind.thread_target_body(3), Some("A"));
+    assert_eq!(kind.input_bodies(), ["A", "B", "A"]);
+    kind.remap_bodies(&std::collections::BTreeMap::from([("A".into(), "Renamed".into())]));
+    assert_eq!(kind.input_bodies(), ["Renamed", "B", "Renamed"]);
+    let saved = serde_json::to_value(&kind).unwrap();
+    assert_eq!(saved["target_bodies"], serde_json::json!(["Renamed", "B", "Renamed"]));
+    let reopened: FeatureKind = serde_json::from_value(saved).unwrap();
+    assert_eq!(reopened, kind);
+}
+
+#[test]
+fn restoring_a_thread_pick_preserves_saved_bits_but_follows_an_upstream_move() {
+    for saved in [Vec3::new(3.0, -0.0, 5.0), Vec3::new(1e8, -0.0, 5.0)] {
+        let rounded = Vec3::new(f64::from_bits(saved.x.to_bits() + 1), 0.0, saved.z);
+        let restored = restored_thread_pick(saved, rounded);
+        assert_eq!([restored.x.to_bits(), restored.y.to_bits(), restored.z.to_bits()], [saved.x.to_bits(), saved.y.to_bits(), saved.z.to_bits()]);
+        let moved = Vec3::new(saved.x + 0.01, 0.0, saved.z);
+        assert_eq!(restored_thread_pick(saved, moved), moved);
+    }
+    assert_eq!(restored_thread_pick(Vec3::ZERO, Vec3::new(f64::EPSILON, 0.0, 0.0)), Vec3::ZERO);
+}
+
+#[test]
+fn restoring_a_thread_pick_keeps_the_resolved_point_when_a_distance_is_refused() {
+    let resolved = Vec3::new(3.0, 0.0, 5.0);
+    assert_eq!(restored_thread_pick(Vec3::new(f64::NAN, 0.0, 0.0), resolved), resolved);
+    let resolved = Vec3::new(f64::INFINITY, 0.0, 5.0);
+    assert_eq!(restored_thread_pick(Vec3::ZERO, resolved), resolved);
+    let resolved = Vec3::new(f64::MAX, 0.0, 0.0);
+    assert_eq!(restored_thread_pick(Vec3::new(-f64::MAX, 0.0, 0.0), resolved), resolved);
+}
