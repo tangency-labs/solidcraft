@@ -10,7 +10,7 @@
 
 use std::f64::consts::TAU;
 
-use crate::curve::arc::{ArcDefinition, MIN_ARC, SQUARE_TOL};
+use crate::curve::arc::{frame_error, ArcDefinition, MIN_ARC};
 use crate::error::{Result, SolidError};
 use crate::eval::Frame;
 use crate::geom::certified::{difference, distance, dot, Bounded};
@@ -30,7 +30,9 @@ fn v3(p: [f64; 3]) -> Vec3 {
 ///
 /// `InvalidInput` for numbers not finite, a radius below [`MIN_ARC`], an interval that does not
 /// increase by at least [`MIN_ARC`] or turns more than once round, or axes not proved of unit
-/// length and square to each other (to [`SQUARE_TOL`]).
+/// length and square to each other to the arc's own frame error ([`frame_error`]): a frame
+/// farther off would make the arc's circle (its placement made orthonormal) another circle
+/// than the record's, by that much times the radius.
 pub fn arc_of_circle(frame: &Frame, radius: f64, interval: [f64; 2]) -> Result<ArcDefinition> {
     let bad = |reason: &'static str| SolidError::invalid_input(OP, reason);
     let [start, end] = interval;
@@ -52,8 +54,10 @@ pub fn arc_of_circle(frame: &Frame, radius: f64, interval: [f64; 2]) -> Result<A
         return Err(bad("an interval past a full turn"));
     }
     let (x, y) = (v3(frame.x_axis), v3(frame.y_axis));
-    // the record's frame: unit axes square to each other, each proved to SQUARE_TOL (as the
-    // arc's placement takes its reference square to its axis)
+    // the record's frame: unit axes square to each other, each proved to the arc's own frame
+    // error, so the arc's orthonormal placement is the record's circle to within the error its
+    // placement has anyway, at any radius (a relative bound)
+    let within = frame_error();
     let unit_long = |v: Vec3| {
         let length = distance(Vec3::ZERO, v);
         let off = difference(length.value, 1.0);
@@ -61,7 +65,7 @@ pub fn arc_of_circle(frame: &Frame, radius: f64, interval: [f64; 2]) -> Result<A
             value: off.value,
             bound: off.bound + length.bound,
         }
-        .at_most(SQUARE_TOL)
+        .at_most(within)
         .is_yes()
     };
     if !unit_long(x) || !unit_long(y) {
@@ -72,7 +76,7 @@ pub fn arc_of_circle(frame: &Frame, radius: f64, interval: [f64; 2]) -> Result<A
         value: across.value.abs(),
         ..across
     };
-    if !across.at_most(SQUARE_TOL).is_yes() {
+    if !across.at_most(within).is_yes() {
         return Err(bad("axes not square to each other"));
     }
     let arc = ArcDefinition {
@@ -147,6 +151,13 @@ mod tests {
             &frame([2.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
             1.0,
             [0.0, 1.0]
+        ));
+        // nearly square (within 1e-9) is not the record's circle at a large radius: at 1e6 its
+        // point at a quarter turn is 5e-4 off the arc's
+        assert!(refused(
+            &frame([1.0, 0.0, 0.0], [5e-10, 1.0, 0.0]),
+            1e6,
+            [0.0, 2.0]
         ));
     }
 }
