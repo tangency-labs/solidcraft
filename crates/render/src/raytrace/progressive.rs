@@ -65,6 +65,12 @@ impl CameraFilm {
             _ => Err(JobError::new(ErrorCode::Internal, "ordinary film has no adaptive state")),
         }
     }
+    pub(super) fn configure_caustics(&mut self, caustics: Option<crate::job::CausticOptions>) -> Result<()> {
+        if let Self::Adaptive(_) = self {
+            self.state_mut()?.configure_caustics(caustics)?;
+        }
+        Ok(())
+    }
     pub(super) fn samples(&self) -> u32 {
         match self {
             Self::Uniform(film) => film.samples(),
@@ -89,12 +95,15 @@ impl CameraFilm {
             Self::Adaptive(_) => self.state_mut()?.initialize_one(cancel, charge),
         }
     }
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn add(
         &mut self,
         index: usize,
         ordinal: u32,
         rgb: [f64; 3],
         covered: bool,
+        components: Option<&crate::radiance::RadianceComponents>,
+        support: crate::job::adaptive::PilotPhotonSupport,
         cancel: &CancelToken,
         charge: &mut impl FnMut() -> Result<()>,
     ) -> Result<()> {
@@ -107,7 +116,7 @@ impl CameraFilm {
                 }
                 let identity =
                     film.sampling_identity(index)?.ok_or_else(|| JobError::new(ErrorCode::Internal, "stopped CPU adaptive pixel was traced"))?;
-                film.add(index, identity, rgb, covered, cancel, charge)
+                film.add_with_evidence(index, identity, rgb, covered, components, support, cancel, charge)
             }
         }
     }
@@ -173,6 +182,7 @@ impl CameraFilm {
     }
 }
 pub(super) struct Progressive {
+    pub sampler: crate::sampling::Sampler,
     pub film: CameraFilm,
     pub options: CpuProgressiveOptions,
     pub target: u32,
@@ -184,8 +194,12 @@ impl Progressive {
         self.film.identity(pixel, self.options.seed)?.ok_or_else(|| JobError::new(ErrorCode::Internal, "stopped adaptive pixel requested variates"))
     }
     pub(super) fn variates(&self, pixel: usize, domain: u64) -> Result<[f64; 2]> {
+        self.branch_variates(pixel, domain, 0)
+    }
+    pub(super) fn branch_variates(&self, pixel: usize, domain: u64, branch: u32) -> Result<[f64; 2]> {
         let identity = self.identity(pixel)?;
-        Ok(variates(identity.seed, pixel as u64, identity.ordinal, domain))
+        let sampler = if identity.stage == PreviewStage::Pilot { crate::sampling::Sampler::Independent } else { self.sampler };
+        Ok(sampler.pair(identity.seed ^ branch.wrapping_mul(0x85eb_ca6b), pixel as u64, identity.ordinal, domain))
     }
     pub(super) fn area_key(&self, pixel: usize, value: u64) -> Result<u64> {
         let identity = self.identity(pixel)?;
@@ -196,16 +210,5 @@ impl Progressive {
 /// Integer-only mixing before conversion to exactly representable 53-bit unit
 /// variates. Domains separate camera, BSDF and environment choices at each bounce.
 pub(super) fn variates(seed: u32, pixel: u64, ordinal: u32, domain: u64) -> [f64; 2] {
-    fn mix(mut value: u64) -> u64 {
-        value ^= value >> 30;
-        value = value.wrapping_mul(0xbf58_476d_1ce4_e5b9);
-        value ^= value >> 27;
-        value = value.wrapping_mul(0x94d0_49bb_1331_11eb);
-        value ^ (value >> 31)
-    }
-    let key = mix(u64::from(seed) ^ 0x4350_5546_494c_4d00)
-        ^ mix(pixel.wrapping_add(0x9e37_79b9_7f4a_7c15))
-        ^ mix(u64::from(ordinal).wrapping_add(0xd1b5_4a32_d192_ed03))
-        ^ mix(domain.wrapping_add(0x94d0_49bb_1331_11eb));
-    [0_u64, 1].map(|axis| (mix(key ^ mix(axis.wrapping_add(0x632b_e59b_d9b4_e019))) >> 11) as f64 / 9_007_199_254_740_992.0)
+    crate::sampling::independent_pair(seed, pixel, ordinal, domain)
 }

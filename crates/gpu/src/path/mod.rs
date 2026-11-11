@@ -27,12 +27,16 @@ mod dispatch;
 mod image_pages;
 mod media_hierarchy;
 mod photons;
+mod radiance;
 mod scene;
 #[cfg(test)]
 mod tests;
 mod textures;
-// Opaque producers specialize away dielectric traversal and use a single
-// unused medium slot. Optical producers share the sixteen-medium shader.
+// Every scene uses the full sixteen-medium producer. With this shader, opaque
+// specialization produces invalid radiance on RADV PHOENIX in the box and
+// furnace regressions, even with sixteen medium slots; disabling the override
+// restores those controls. The full stack also preserves mapped optical
+// transport. Nested-media options still govern admission and boundary changes.
 macro_rules! path_shader {
     ($capacity:literal) => {
         concat!(
@@ -40,6 +44,11 @@ macro_rules! path_shader {
             $capacity,
             "u;\n",
             include_str!("path.wgsl"),
+            "\n",
+            include_str!("radiance.wgsl"),
+            include_str!("adaptive_evidence.wgsl"),
+            "\n",
+            include_str!("sampling.wgsl"),
             "\n",
             include_str!("metal_energy.wgsl"),
             "\n",
@@ -62,7 +71,6 @@ macro_rules! path_shader {
     };
 }
 const SHADER: &str = path_shader!(16);
-const SINGLE_MEDIUM_SHADER: &str = path_shader!(1);
 const MAX_TRIANGLES: u64 = MAX_GPU_PATH_TRIANGLES;
 const PATH_WORKGROUP_SIZE: u32 = 32;
 const SCENE_PIPELINE_CACHE_SLOTS: usize = 5;
@@ -269,17 +277,13 @@ impl Context {
             return Ok(pipeline);
         }
         let scopes = scopes(&self.device);
-        // RADV's one-medium opaque specialization corrupts shading normals
-        // after texture sampling (the mapped Lambertian plane loses its rim
-        // light). Keep the qualified full producer for every textured scene.
-        let specialize_opaque = opaque && !maps;
-        let mut constants = vec![("OPAQUE_SCENE", f64::from(u8::from(specialize_opaque))), ("HAS_TEXTURES", f64::from(u8::from(maps)))];
+        let mut constants = vec![("OPAQUE_SCENE", 0.0), ("HAS_TEXTURES", f64::from(u8::from(maps)))];
         if clamp {
             constants.extend_from_slice(CLAMP_INDIRECT);
         }
         let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("gpu-path captured scene"),
-            source: wgpu::ShaderSource::Wgsl(scene_shader(specialize_opaque).into()),
+            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
         });
         let layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("gpu-path captured scene"),
@@ -334,10 +338,8 @@ impl Executor {
         });
         let compiling = one_compile_at_a_time();
         let scopes = scopes(&device);
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("gpu-path"),
-            source: wgpu::ShaderSource::Wgsl(scene_shader(true).into()),
-        });
+        let shader =
+            device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("gpu-path"), source: wgpu::ShaderSource::Wgsl(SHADER.into()) });
         let entries: Vec<_> = (0..7)
             .map(|binding| wgpu::BindGroupLayoutEntry {
                 binding,
@@ -365,7 +367,7 @@ impl Executor {
             layout: Some(&pipeline_layout),
             module: &shader,
             entry_point: Some("main"),
-            compilation_options: wgpu::PipelineCompilationOptions { constants: &[("OPAQUE_SCENE", 1.0)], ..Default::default() },
+            compilation_options: wgpu::PipelineCompilationOptions { constants: &[("OPAQUE_SCENE", 0.0)], ..Default::default() },
             cache: None,
         });
         checked(scopes)?;
@@ -539,13 +541,6 @@ fn descriptor() -> Result<ExecutorDescriptor> {
     })
 }
 
-// RADV failed to cover mapped thin-glass pixels with the combined one-medium
-// producer. Keep the qualified full stack for optical transport. The nested
-// media option still controls admission and the actual boundary transitions.
-fn scene_shader(opaque: bool) -> &'static str {
-    if opaque { SINGLE_MEDIUM_SHADER } else { SHADER }
-}
-
 fn scene_pipeline_variant(opaque: bool, maps: bool, nested: bool) -> Option<usize> {
     if opaque { maps.then_some(0) } else { Some(1 + 2 * usize::from(maps) + usize::from(nested)) }
 }
@@ -617,11 +612,11 @@ fn admission_with_device_limits(scene: &ProductScene, request: &ImageRequest, op
     }
     let scattering = |t: Option<solidcraft_render::transmission::Transmission>| t.and_then(|v| v.subsurface()).is_some_and(|s| s.active());
     if scene.meshes.iter().any(|b| scattering(b.transmission) || b.faces.iter().any(|f| scattering(f.transmission)))
-        && (options.denoise || options.transmission_samples != 1 || options.volume.is_some_and(|v| v.active()))
+        && (options.denoise || options.production_lanes() != 1 || options.volume.is_some_and(|v| v.active()))
     {
         return Err(JobError::new(
             ErrorCode::InvalidRequest,
-            "subsurface random walks require disabled surface denoising, one Fresnel stratum and no external volume",
+            "subsurface random walks require disabled surface denoising, one production camera lane and no external volume",
         ));
     }
     let camera = request.camera;
@@ -652,8 +647,11 @@ fn admission_with_device_limits(scene: &ProductScene, request: &ImageRequest, op
     let mut admission = admit_geometry_with_limits(scene, request, MAX_TRIANGLES, MAX_GPU_PATH_BODIES, 2 * 1024 * 1024 * 1024, trace_limits)?;
     let output_pixels = u64::from(output.width) * u64::from(output.height);
     admission.encoded_limit = output_pixels * 8 + 65_536;
-    if let Some(caustics) = options.caustics.filter(|caustics| caustics.refresh_per_pass) {
-        admission.caustic_work = caustics.refresh_work(options.preview_target()?)?;
+    if let Some(caustics) = options.caustics {
+        admission.caustic_work = match options.adaptive {
+            Some(adaptive) => adaptive.photon_work(caustics, options.samples)?,
+            None => caustics.refresh_work(options.samples)?,
+        };
     }
     if scene
         .meshes
@@ -722,9 +720,10 @@ fn admission_with_device_limits(scene: &ProductScene, request: &ImageRequest, op
     admission.preparation_bytes += photo_bytes;
     // Two pilot/budget planes plus a second readback plane. Adaptive denoising's
     // independent normalized preview input is included in denoise_bytes above.
-    let adaptive_bytes = pixels * if options.adaptive.is_some() { 48 } else { 0 };
-    admission.pixel_scratch_bytes += adaptive_bytes + optical_tile_bytes;
-    admission.preparation_bytes += adaptive_bytes + optical_tile_bytes;
+    let adaptive_bytes = pixels * if options.adaptive.is_some() { 48 + u64::from(adaptive::evidence_planes(options)) * 16 } else { 0 };
+    let radiance_bytes = radiance::bytes(options, pixels)?;
+    admission.pixel_scratch_bytes += adaptive_bytes + optical_tile_bytes + radiance_bytes;
+    admission.preparation_bytes += adaptive_bytes + optical_tile_bytes + radiance_bytes;
     admission.preparation_bytes = admission
         .preparation_bytes
         .checked_add(photons::admission_bytes(options.caustics)?)
@@ -759,6 +758,7 @@ fn admit_device_resources(
     device_limits: &wgpu::Limits,
 ) -> Result<()> {
     if let Some(caustics) = options.caustics {
+        caustics.validate_probe(request.width, request.height, options.samples)?;
         if device_limits.max_storage_buffers_per_shader_stage < 7 {
             return Err(JobError::new(
                 ErrorCode::HostUnavailable,
@@ -836,6 +836,12 @@ impl ImageExecutor for Executor {
     fn supports_glass_models(&self) -> bool {
         true
     }
+    fn supports_sampling_controls(&self) -> bool {
+        true
+    }
+    fn supports_radiance_statistics(&self) -> bool {
+        true
+    }
     fn supports_caustics(&self) -> bool {
         true
     }
@@ -861,6 +867,9 @@ impl ImageExecutor for Executor {
         true
     }
     fn supports_transmission_sampling(&self) -> bool {
+        true
+    }
+    fn supports_first_interface_splitting(&self) -> bool {
         true
     }
     fn supports_bloom(&self) -> bool {
@@ -983,6 +992,9 @@ fn validate_punctual_origin(options: JobOptions, origin: Vec3) -> Result<()> {
 }
 
 struct Task {
+    photon_diagnostics: Vec<solidcraft_render::job::photon_diagnostics::PhotonDiagnostics>,
+    radiance_report: Option<solidcraft_render::radiance_film::RadianceReport>,
+    optical_scene: bool,
     dispatch_budget: dispatch::Budget,
     context: Arc<Context>,
     request: ImageRequest,
@@ -1050,6 +1062,7 @@ impl Task {
         request = trace_request(&request, options)?;
         validate_punctual_origin(options, request.camera.target)?;
         let opaque_scene = use_opaque_pipeline(&scene, options);
+        let optical_scene = scene.meshes.iter().any(|body| body.transmission.is_some() || body.faces.iter().any(|face| face.transmission.is_some()));
         let has_textures = request.textures.is_some();
         let start = Instant::now();
         let aging = options.aging.gpu_layers([request.camera.target.x, request.camera.target.y, request.camera.target.z])?;
@@ -1093,6 +1106,9 @@ impl Task {
                 )
             })
             .transpose()?;
+        if let Some(photons) = &photons {
+            photons.configure_probe(&context, options.supersampling, options.samples)?;
+        }
         cancel.check()?;
         let glass_lighting = needs_glass_lighting(&scene);
         let optical_tile_bytes = glass_tile_bytes(&scene, &request);
@@ -1153,7 +1169,9 @@ impl Task {
                 let accumulation = device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some("path accumulation page"),
                     size: page_layout.buffer_bytes(window.core_pixels)?,
-                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                    usage: wgpu::BufferUsages::STORAGE
+                        | wgpu::BufferUsages::COPY_SRC
+                        | if cfg!(test) { wgpu::BufferUsages::COPY_DST } else { wgpu::BufferUsages::empty() },
                     mapped_at_creation: false,
                 });
                 let mut entries: Vec<_> = [&uniform, &triangles, &nodes, &accumulation, &environment]
@@ -1177,13 +1195,15 @@ impl Task {
             let accumulation = first.accumulation.clone();
             let bind = first.bind.clone();
             let denoiser = if options.denoise || options.denoise_diagnostics {
-                Some(denoise::Resources::new_for_layout(
+                Some(denoise::Resources::new_for_layout_with_components(
                     &context,
                     &uniform,
                     [&triangles, &nodes, &environment, &texture_buffer, &failures],
                     &accumulation,
                     options.adaptive.is_some(),
                     page_layout,
+                    options.denoise_settings.variance_guided,
+                    options.denoise_settings.component_filtering,
                 )?)
             } else {
                 None
@@ -1213,6 +1233,9 @@ impl Task {
             cancel.check()?;
         }
         Ok(Self {
+            photon_diagnostics: Vec::new(),
+            radiance_report: None,
+            optical_scene,
             dispatch_budget: Default::default(),
             #[cfg(test)]
             opaque_scene,
@@ -1274,7 +1297,13 @@ impl Task {
             self.options.seed,
             self.options.max_depth,
             count,
-            u32::from(self.environment_bottom_only),
+            u32::from(self.environment_bottom_only)
+                | (u32::from(!self.options.sampler.is_independent()) << 3)
+                | (u32::from(radiance::enabled(self.options)) << 5)
+                | (u32::from(self.options.radiance_components) << 6)
+                | (u32::from(self.options.adaptive.is_some_and(|a| a.component_uncertainty)) << 7)
+                | (u32::from(self.options.adaptive.is_some_and(|a| a.evidence_enabled())) << 8)
+                | (u32::from(self.options.split_first_interface) << 9),
         ] {
             bytes.extend_from_slice(&x.to_le_bytes());
         }
@@ -1332,9 +1361,9 @@ impl Task {
             bytes.resize(448, 0);
         }
 
-        let adaptive = self.options.adaptive;
+        let adaptive = self.options.adaptive.map(|a| a.for_optical_scene(self.optical_scene));
         for value in
-            [adaptive.map_or(0, |a| a.pilot_samples), adaptive.map_or(0, |a| a.min_samples), self.options.transmission_samples, self.options.samples]
+            [adaptive.map_or(0, |a| a.pilot_samples), adaptive.map_or(0, |a| a.min_samples), self.options.production_lanes(), self.options.samples]
         {
             bytes.extend_from_slice(&value.to_le_bytes());
         }
@@ -1380,10 +1409,12 @@ impl Task {
             bytes.extend_from_slice(&value.to_le_bytes());
         }
         let page = self.current_page()?;
-        // z carries the indirect clamp as f32 bits (zero is off). Validation keeps a set limit a
-        // normal f32, so it never rounds to zero here.
+        // z retains the indirect clamp as f32 bits. w packs the optional
+        // photon assessment count above the production-refresh flag.
         let clamp = self.options.clamp_indirect.map_or(0, |limit| (limit as f32).to_bits());
-        for value in [page.start, page.pixels, clamp, 0] {
+        let assessment = self.options.adaptive.map_or(0, |adaptive| adaptive.map_validation_batches);
+        let refresh = u32::from(self.options.caustics.is_some_and(|caustics| caustics.refresh_per_pass));
+        for value in [page.start, page.pixels, clamp, (assessment << 1) | refresh] {
             bytes.extend_from_slice(&value.to_le_bytes());
         }
         Ok(bytes)
@@ -1406,10 +1437,15 @@ impl Task {
         // before any tile of the new pass, never between Fresnel strata.
         if self.offset == 0
             && self.lane == 0
-            && self.options.caustics.is_some_and(|caustics| caustics.refresh_per_pass)
+            && (self.options.caustics.is_some_and(|caustics| caustics.refresh_per_pass)
+                || self.options.adaptive.is_some_and(|a| a.map_validation_batches > 0))
             && let Some(resources) = &mut self.photons
         {
-            resources.ensure_pass(self.sample)?;
+            if self.options.adaptive.is_some_and(|a| a.map_validation_batches > 0) {
+                resources.ensure_camera_pass(self.sample, self.options.adaptive)?;
+            } else {
+                resources.ensure_pass(self.sample)?;
+            }
         }
         if let Some(resources) = self.photons.as_ref().filter(|resources| !resources.ready()) {
             let parameters = self.parameters(resources.count())?;
@@ -1451,7 +1487,7 @@ impl Task {
         self.offset += count;
         if self.offset == pixels {
             self.offset = 0;
-            let strata = if self.options.adaptive.is_some_and(|a| self.sample < a.pilot_samples) { 1 } else { self.options.transmission_samples };
+            let strata = if self.options.adaptive.is_some_and(|a| self.sample < a.pilot_samples) { 1 } else { self.options.production_lanes() };
             self.lane += 1;
             if self.lane == strata {
                 self.sample += 1;
@@ -1466,7 +1502,7 @@ impl Task {
         let maximum = (self.request.width * self.request.height)
             .div_ceil(dispatch::MIN_PATHS)
             .checked_add(self.page_layout.page_count())
-            .and_then(|count| count.checked_mul(self.options.transmission_samples))
+            .and_then(|count| count.checked_mul(self.options.production_lanes()))
             .and_then(|count| count.checked_add(self.photons.as_ref().map_or(0, photons::Resources::maximum_quanta)))
             .ok_or_else(|| gpu("test sample wave count overflow"))?;
         for _ in 0..maximum {
@@ -1637,6 +1673,9 @@ impl Task {
             },
             |failures| {
                 let word = |i: usize| failures.as_chunks::<4>().0.get(i).map_or(0, |w| u32::from_le_bytes(*w));
+                if word(7) & 32 != 0 {
+                    return Err(JobError::new(ErrorCode::Internal, "scene-linear GPU components do not reproduce the camera observation"));
+                }
                 if word(7) & 16 != 0 {
                     return Err(JobError::new(ErrorCode::InvalidScene, "rough optical response exceeds GPU arithmetic precision"));
                 }
@@ -1662,9 +1701,9 @@ impl Task {
                     let pixels = u64::from(self.request.width) * u64::from(self.request.height);
                     let paths = preview_paths.unwrap_or_else(|| {
                         self.sampling_report.as_ref().map_or(
-                            pixels * u64::from(self.sample.max(1)) * u64::from(self.options.transmission_samples),
+                            pixels * u64::from(self.sample.max(1)) * u64::from(self.options.production_lanes()),
                             |report| {
-                                report.production_samples * u64::from(report.transmission_strata)
+                                report.production_samples * u64::from(report.production_lanes())
                                     + pixels * u64::from(report.pilot_samples_per_pixel)
                             },
                         )
@@ -1689,6 +1728,12 @@ impl Task {
 use solidcraft_render::job::presentation::Display;
 
 impl ImageWork for Task {
+    fn photon_diagnostics(&self) -> Option<solidcraft_render::job::photon_diagnostics::PhotonDiagnostics> {
+        self.photon_diagnostics.first().copied()
+    }
+    fn radiance_report(&self) -> Option<solidcraft_render::radiance_film::RadianceReport> {
+        self.radiance_report.clone()
+    }
     fn denoise_diagnostics(&self) -> Option<solidcraft_render::job::DenoiseDiagnostics> {
         self.denoise_diagnostics
     }
@@ -1774,7 +1819,7 @@ impl ImageWork for Task {
             }
             return Ok(TaskPoll::Pending(Progress { phase: Phase::Running, done: u64::from(self.sample), total: u64::from(self.target_samples()) }));
         }
-        if self.sampling_report.is_none() && (self.options.adaptive.is_some() || self.options.transmission_samples != 1) {
+        if self.sampling_report.is_none() && (self.options.adaptive.is_some() || self.options.production_lanes() != 1) {
             self.sampling_report = Some(adaptive::report(self)?);
         }
         if self.options.denoise_diagnostics && self.denoise_diagnostics.is_none() {
@@ -1829,11 +1874,44 @@ impl Task {
     }
 
     fn finish_output(&mut self, mut linear: Vec<[f32; 4]>) -> Result<TaskPoll> {
+        let statistics = if radiance::enabled(self.options) { Some(radiance::read(self)?) } else { None };
+        if !self.encoding_preview {
+            self.radiance_report = statistics.as_ref().map(|stats| stats.report.clone());
+            if let Some(mut report) = self.photons.as_ref().map(|photons| photons.diagnostics(&self.context, &self.cancel)).transpose()?.flatten() {
+                let [x, y] = report.camera.output_pixel;
+                let index = u64::from(y) * u64::from(self.output_request.width) + u64::from(x);
+                let index = usize::try_from(index).map_err(|_| gpu("photon output pixel exceeds address space"))?;
+                let raw = *linear.get(index).ok_or_else(|| gpu("photon output pixel is missing from raw resolve"))?;
+                let counts = report.camera.trace_pixels.map(|pixel| pixel.planned_samples.unwrap_or(0));
+                report.finalize(raw, counts, 2e-4)?;
+                report.split_first_interface = self.options.split_first_interface;
+                if !self.photon_diagnostics.is_empty() {
+                    return Err(gpu("photon output probe was finalized twice"));
+                }
+                if self.photon_diagnostics.capacity() == 0 {
+                    self.photon_diagnostics
+                        .try_reserve_exact(1)
+                        .map_err(|_| JobError::new(ErrorCode::AllocationFailed, "bounded photon report allocation failed"))?;
+                }
+                if self.photon_diagnostics.capacity() != 1 {
+                    return Err(gpu("photon report capacity exceeds admission"));
+                }
+                self.photon_diagnostics.push(report);
+            }
+        }
         if let Some(denoiser) = self.denoiser.as_ref().filter(|_| self.options.denoise) {
             // Diagnose the raw path buffer before filtering: never hide invalid media
             // or nonfinite radiance by replacing a pixel with neighbouring values.
             drop(linear);
-            linear = self.resolve_output(denoiser.read_filtered(self, self.encoding_preview && self.options.adaptive.is_some())?)?;
+            let preview = self.encoding_preview && self.options.adaptive.is_some();
+            let filtered = if self.options.denoise_settings.component_filtering {
+                denoiser.read_filtered_components(self, preview)?
+            } else {
+                let uncertainty =
+                    statistics.as_ref().filter(|_| self.options.denoise_settings.variance_guided).map(|stats| stats.uncertainty.as_slice());
+                denoiser.read_filtered_with_uncertainty(self, preview, uncertainty)?
+            };
+            linear = self.resolve_output(filtered)?;
         }
         if let Some(options) = self.options.finishing.bloom.filter(|options| options.active()) {
             self.bloom_work = Some(solidcraft_render::job::bloom::BloomTask::new(

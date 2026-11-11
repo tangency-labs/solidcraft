@@ -121,6 +121,8 @@ pub(super) fn draft(app: &SolveApp) -> Result<RenderSetup, String> {
                     }),
                     aging: view.studio.aging.clone(),
                     adaptive: view.studio.adaptive,
+                    sampler: view.studio.sampler,
+                    radiance_components: view.studio.radiance_components,
                     denoise: view.studio.denoise,
                     denoise_settings: view.studio.denoise_settings,
                     denoise_diagnostics: view.studio.denoise_diagnostics,
@@ -172,7 +174,10 @@ pub(super) fn draft(app: &SolveApp) -> Result<RenderSetup, String> {
                     nested_media: studio.nested_media,
                     volume: studio.volume,
                     adaptive: studio.adaptive,
+                    sampler: studio.sampler,
+                    radiance_components: studio.radiance_components,
                     transmission_samples: studio.transmission_samples,
+                    split_first_interface: studio.split_first_interface,
                     finishing: studio.finishing,
                     backdrop: studio.backdrop_enabled.then_some(studio.backdrop),
                     linear_exr: studio.linear_exr,
@@ -269,6 +274,8 @@ pub(super) fn persist_editor(app: &mut SolveApp, before: &RenderSetup) -> Result
             app.render_workspace.view.raytrace.threads = options.threads;
             app.render_workspace.view.raytrace.lens = options.lens;
             app.render_workspace.view.raytrace.path = options.path;
+            app.render_workspace.view.studio.transmission_samples = options.path.map_or(1, |path| path.transmission_samples);
+            app.render_workspace.view.studio.split_first_interface = options.path.is_some_and(|path| path.split_first_interface);
             app.render_workspace.view.raytrace.volume = options.volume;
         }
         let mut saved = saved.clone();
@@ -340,6 +347,10 @@ fn load_values(view: &mut super::ViewState, setup: RenderSetup) {
             view.studio.supersampling = options.supersampling;
             view.studio.aging = options.aging.clone();
             view.studio.adaptive = options.adaptive;
+            view.studio.sampler = options.sampler;
+            view.studio.radiance_components = options.radiance_components;
+            view.studio.transmission_samples = options.path.map_or(1, |path| path.transmission_samples);
+            view.studio.split_first_interface = options.path.is_some_and(|path| path.split_first_interface);
             view.studio.sun_enabled = options.sun.is_some();
             if let Some(sun) = options.sun {
                 view.studio.sun = sun;
@@ -354,6 +365,8 @@ fn load_values(view: &mut super::ViewState, setup: RenderSetup) {
                 sun: options.sun.map(Box::new),
                 volume: options.volume,
                 adaptive: options.adaptive.map(Box::new),
+                sampler: options.sampler,
+                radiance_components: options.radiance_components,
                 denoise: options.denoise,
                 denoise_settings: options.denoise_settings,
                 denoise_diagnostics: options.denoise_diagnostics,
@@ -417,7 +430,10 @@ fn load_values(view: &mut super::ViewState, setup: RenderSetup) {
             view.studio.nested_media = options.nested_media;
             view.studio.volume = options.volume;
             view.studio.adaptive = options.adaptive;
+            view.studio.sampler = options.sampler;
+            view.studio.radiance_components = options.radiance_components;
             view.studio.transmission_samples = options.transmission_samples;
+            view.studio.split_first_interface = options.split_first_interface;
             view.studio.finishing = options.finishing;
             view.studio.backdrop_enabled = options.backdrop.is_some();
             view.studio.backdrop = options.backdrop.unwrap_or_default();
@@ -619,6 +635,8 @@ pub(super) fn sync_revision(app: &mut SolveApp) {
         raytrace.primary_samples,
         raytrace.progressive,
         raytrace.adaptive,
+        raytrace.sampler,
+        raytrace.radiance_components,
         raytrace.preset,
         raytrace.lights,
         raytrace.punctual_lights,
@@ -639,7 +657,10 @@ pub(super) fn sync_revision(app: &mut SolveApp) {
         studio.caustics,
         studio.volume,
         studio.adaptive,
+        studio.sampler,
+        studio.radiance_components,
         studio.transmission_samples,
+        studio.split_first_interface,
         studio.finishing,
         studio.backdrop_enabled,
         studio.backdrop,
@@ -762,6 +783,8 @@ fn save_with_camera(app: &mut SolveApp, save_camera: bool) -> Result<(), String>
         app.render_workspace.view.raytrace.threads = options.threads;
         app.render_workspace.view.raytrace.lens = options.lens;
         app.render_workspace.view.raytrace.path = options.path;
+        app.render_workspace.view.studio.transmission_samples = options.path.map_or(1, |path| path.transmission_samples);
+        app.render_workspace.view.studio.split_first_interface = options.path.is_some_and(|path| path.split_first_interface);
         app.render_workspace.view.raytrace.volume = options.volume;
     }
     app.render_workspace.view.draft = setup.clone();

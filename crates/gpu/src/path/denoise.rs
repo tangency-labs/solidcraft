@@ -1,9 +1,14 @@
 //! Optional output filtering; never writes the Monte Carlo accumulation buffer.
 use super::{Context, Result, SHADER, TIMEOUT, Task, checked, placeholder_bind, scopes, warm_up};
 use solidcraft_render::job::{DenoiseDiagnostics, DenoiseGuideClass, resolve_denoise_class};
-use std::sync::atomic::{AtomicBool, Ordering};
+use solidcraft_render::radiance::UncertaintyPixel;
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+#[path = "denoise_components.rs"]
+mod components;
 use wgpu::util::DeviceExt;
 
+pub(super) const COMPONENT_BYTES_PER_PIXEL: u64 = components::EXTRA_BYTES_PER_PIXEL;
 pub(super) const GUIDE_BYTES_PER_PIXEL: u64 = 96; // two complete surface guides
 pub(super) const BYTES_PER_PIXEL: u64 = GUIDE_BYTES_PER_PIXEL + 32; // two colour vec4s
 const FILTER: &str = include_str!("denoise.wgsl");
@@ -19,6 +24,7 @@ pub(super) struct Pipelines {
     filter: wgpu::ComputePipeline,
     classify: wgpu::ComputePipeline,
     filter_layout: wgpu::BindGroupLayout,
+    components: OnceLock<components::Pipelines>,
 }
 
 impl Pipelines {
@@ -42,7 +48,7 @@ impl Pipelines {
             compilation_options: wgpu::PipelineCompilationOptions { constants: &[("HAS_TEXTURES", 1.0)], ..Default::default() },
             cache: None,
         });
-        let entries: Vec<_> = (0..4)
+        let entries: Vec<_> = (0..5)
             .map(|binding| wgpu::BindGroupLayoutEntry {
                 binding,
                 visibility: wgpu::ShaderStages::COMPUTE,
@@ -80,9 +86,9 @@ impl Pipelines {
         });
         checked(error_scopes)?;
         warm_up(device, &context.queue, &guide, &placeholder_bind(device, &context.layout, 7)?, &context.healthy)?;
-        warm_up(device, &context.queue, &filter, &placeholder_bind(device, &filter_layout, 4)?, &context.healthy)?;
-        warm_up(device, &context.queue, &classify, &placeholder_bind(device, &filter_layout, 4)?, &context.healthy)?;
-        Ok(Self { guide, filter, classify, filter_layout })
+        warm_up(device, &context.queue, &filter, &placeholder_bind(device, &filter_layout, 5)?, &context.healthy)?;
+        warm_up(device, &context.queue, &classify, &placeholder_bind(device, &filter_layout, 5)?, &context.healthy)?;
+        Ok(Self { guide, filter, classify, filter_layout, components: OnceLock::new() })
     }
 
     fn shared(context: &Context) -> Result<&Self> {
@@ -96,6 +102,7 @@ impl Pipelines {
 
 pub(super) struct Resources {
     adaptive: Option<AdaptiveInput>,
+    components: Option<components::Resources>,
     layout: Option<super::image_pages::Layout>,
     input: Option<wgpu::Buffer>,
     guides_ready: AtomicBool,
@@ -107,6 +114,9 @@ pub(super) struct Resources {
     filter_binds: Vec<wgpu::BindGroup>,
     output: wgpu::Buffer,
     temporary: wgpu::Buffer,
+    uncertainty: Option<wgpu::Buffer>,
+    uncertainty_pixels: u32,
+    uncertainty_ready: AtomicU32,
     // Retained for diagnostic tests; bind groups also retain the guide allocation.
     _guides: wgpu::Buffer,
 }
@@ -128,20 +138,34 @@ impl Resources {
         size: u64,
         adaptive_preview: bool,
     ) -> Result<Self> {
-        Self::build(context, path_uniform, scene, accumulation, size, adaptive_preview, None)
+        Self::build(context, path_uniform, scene, accumulation, size, adaptive_preview, None, false, false)
     }
 
-    pub(super) fn new_for_layout(
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn new_for_layout_with_components(
         context: &Context,
         path_uniform: &wgpu::Buffer,
         scene: [&wgpu::Buffer; 5],
         accumulation: &wgpu::Buffer,
         adaptive_preview: bool,
         layout: super::image_pages::Layout,
+        variance_guided: bool,
+        component_filtering: bool,
     ) -> Result<Self> {
-        Self::build(context, path_uniform, scene, accumulation, u64::from(layout.max_window_pixels()) * 16, adaptive_preview, Some(layout))
+        Self::build(
+            context,
+            path_uniform,
+            scene,
+            accumulation,
+            u64::from(layout.max_window_pixels()) * 16,
+            adaptive_preview,
+            Some(layout),
+            variance_guided,
+            component_filtering,
+        )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn build(
         context: &Context,
         path_uniform: &wgpu::Buffer,
@@ -150,7 +174,10 @@ impl Resources {
         size: u64,
         adaptive_preview: bool,
         layout: Option<super::image_pages::Layout>,
+        variance_guided: bool,
+        component_filtering: bool,
     ) -> Result<Self> {
+        let variance_guided = variance_guided || component_filtering;
         let pipelines = Pipelines::shared(context)?;
         let device = &context.device;
         let error_scopes = scopes(device);
@@ -162,11 +189,17 @@ impl Resources {
                 mapped_at_creation: false,
             })
         };
-        let input = layout.filter(|layout| layout.is_paged()).map(|layout| buffer("denoise gathered film window", size * u64::from(layout.planes)));
+        let input = layout
+            .filter(|layout| layout.is_paged())
+            .map(|layout| buffer("denoise gathered film window", size * u64::from(layout.filter_input_planes())));
         let accumulation = input.as_ref().unwrap_or(accumulation);
         let guides = buffer("denoise first-hit guide window", size * (GUIDE_BYTES_PER_PIXEL / 16));
         let output = buffer("denoise filtered colour window", size);
         let temporary = buffer("denoise intermediate colour window", size);
+        let uncertainty_pixels =
+            if variance_guided { u32::try_from(size / 16).map_err(|_| super::gpu("uncertainty window exceeds address space"))? } else { 0 };
+        let uncertainty = variance_guided.then(|| buffer("denoise camera uncertainty window", size));
+        let uncertainty_buffer = uncertainty.as_ref().unwrap_or(&guides);
         let [triangles, nodes, environment, textures, failures] = scene;
         let entries: Vec<_> = [path_uniform, triangles, nodes, &guides, environment, textures, failures]
             .into_iter()
@@ -183,7 +216,7 @@ impl Resources {
         let filter_binds = [(accumulation, &output), (&output, &temporary), (&temporary, &output)]
             .into_iter()
             .map(|(source, destination)| {
-                let entries: Vec<_> = [&filter_uniform, &guides, source, destination]
+                let entries: Vec<_> = [&filter_uniform, &guides, source, destination, uncertainty_buffer]
                     .into_iter()
                     .enumerate()
                     .map(|(binding, value)| wgpu::BindGroupEntry { binding: binding as u32, resource: value.as_entire_binding() })
@@ -195,10 +228,30 @@ impl Resources {
                 })
             })
             .collect();
-        let adaptive = adaptive_preview.then(|| AdaptiveInput::new(context, pipelines, accumulation, &guides, &filter_uniform, &output, size));
+        let adaptive = adaptive_preview
+            .then(|| AdaptiveInput::new(context, pipelines, accumulation, &guides, &filter_uniform, &output, uncertainty_buffer, size));
+        let components = if component_filtering {
+            Some(components::Resources::new(
+                context,
+                pipelines,
+                components::Inputs {
+                    uniform: &filter_uniform,
+                    beauty: accumulation,
+                    preview: adaptive.as_ref().map(|input| &input._pixels),
+                    guides: &guides,
+                    output: &output,
+                    temporary: &temporary,
+                    uncertainty: uncertainty_buffer,
+                },
+                size,
+            )?)
+        } else {
+            None
+        };
         checked(error_scopes)?;
         Ok(Self {
             adaptive,
+            components,
             layout,
             input,
             guides_ready: AtomicBool::new(false),
@@ -210,6 +263,9 @@ impl Resources {
             filter_binds,
             output,
             temporary,
+            uncertainty,
+            uncertainty_pixels,
+            uncertainty_ready: AtomicU32::new(0),
             _guides: guides,
         })
     }
@@ -231,7 +287,7 @@ impl Resources {
             let submission = super::checked_creation(&context.device, || {
                 let mut encoder =
                     context.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("denoise film window gather") });
-                let planes = if preview { task.page_layout.planes } else { 1 };
+                let planes = if preview { task.page_layout.filter_input_planes() } else { 1 };
                 for plane in 0..planes {
                     task.copy_film_range(&mut encoder, window.start, window.pixels, plane, input, u64::from(plane) * u64::from(window.pixels) * 16)?;
                 }
@@ -259,12 +315,18 @@ impl Resources {
     fn generate_guides_window(&self, task: &Task, window: Window) -> Result<()> {
         // Camera dimensions, footprints and random keys use global pixels.
         // Only guide storage uses the current window's local index.
-        let guide_flags = u32::from(task.photons.is_some()) | (u32::from(task.optical_resolve.is_some()) << 1);
+        let guide_flags = u32::from(task.photons.is_some())
+            | (u32::from(task.optical_resolve.is_some()) << 1)
+            | (u32::from(task.options.denoise_settings.extended_optical_guides) << 2);
         let mut budget = super::dispatch::Budget::default();
+        // Cold work still starts at only 64 pixels. The longer optional route
+        // also caps growth in proportion to its worst-case seven vs three traces.
+        let max_paths =
+            if task.options.denoise_settings.extended_optical_guides { super::dispatch::MAX_PATHS * 3 / 7 } else { super::dispatch::MAX_PATHS };
         let mut offset = 0;
         while offset < window.pixels {
             task.cancel.check()?;
-            let count = budget.count(window.pixels - offset);
+            let count = budget.count(window.pixels - offset).min(max_paths);
             let mut parameters = task.parameters(count)?;
             let global = window.start + offset;
             for (start, word) in
@@ -284,12 +346,67 @@ impl Resources {
         task.cancel.check()
     }
 
+    /// Upload one admitted window. The caller owns the full-image statistics and
+    /// must provide new observations for each published camera pass.
+    pub(super) fn set_uncertainty_window(&self, context: &Context, values: &[UncertaintyPixel]) -> Result<()> {
+        let count = u32::try_from(values.len()).map_err(|_| super::gpu("uncertainty window exceeds address space"))?;
+        if count == 0 || count > self.uncertainty_pixels {
+            return Err(super::gpu("denoise uncertainty window exceeds admission"));
+        }
+        let buffer = self.uncertainty.as_ref().ok_or_else(|| super::gpu("uncertainty storage was not admitted"))?;
+        self.uncertainty_ready.store(0, Ordering::Relaxed);
+        // A fixed stack upload avoids an unadmitted second full-image plane.
+        let mut bytes = [0_u8; 4096];
+        for (chunk_index, chunk) in values.chunks(256).enumerate() {
+            for (index, pixel) in chunk.iter().enumerate() {
+                pixel.validate()?;
+                let start = index * 16;
+                for (lane, word) in pixel.variance_of_mean.into_iter().map(f32::to_bits).chain([pixel.count]).enumerate() {
+                    bytes
+                        .get_mut(start + lane * 4..start + lane * 4 + 4)
+                        .ok_or_else(|| super::gpu("uncertainty upload cursor exceeded its chunk"))?
+                        .copy_from_slice(&word.to_le_bytes());
+                }
+            }
+            context.queue.write_buffer(buffer, chunk_index as u64 * 4096, &bytes[..chunk.len() * 16]);
+        }
+        self.uncertainty_ready.store(count, Ordering::Relaxed);
+        Ok(())
+    }
+
+    fn prepare_uncertainty(&self, task: &Task, window: Window, values: Option<&[UncertaintyPixel]>) -> Result<()> {
+        if !task.options.denoise_settings.variance_guided {
+            return Ok(());
+        }
+        task.cancel.check()?;
+        let all = values.ok_or_else(|| super::gpu("variance-guided filtering requires camera statistics"))?;
+        if all.len() != (task.request.width * task.request.height) as usize {
+            return Err(super::gpu("denoise uncertainty does not cover the trace grid"));
+        }
+        let window_values = all
+            .get(window.start as usize..(window.start + window.pixels) as usize)
+            .ok_or_else(|| super::gpu("denoise uncertainty window is incomplete"))?;
+        self.set_uncertainty_window(&task.context, window_values)?;
+        task.cancel.check()
+    }
+
     /// Assemble only each core after filtering its complete dependency halo.
     /// The source film and every pixel/sample identity remain unchanged.
+    #[cfg(test)]
     pub(super) fn read_filtered(&self, task: &Task, preview: bool) -> Result<Vec<[f32; 4]>> {
+        self.read_filtered_with_uncertainty(task, preview, None)
+    }
+
+    pub(super) fn read_filtered_with_uncertainty(
+        &self,
+        task: &Task,
+        preview: bool,
+        uncertainty: Option<&[UncertaintyPixel]>,
+    ) -> Result<Vec<[f32; 4]>> {
         let Some(layout) = self.layout.filter(|layout| layout.is_paged()) else {
             let window = full_window(task);
             self.prepare_window(task, window, preview)?;
+            self.prepare_uncertainty(task, window, uncertainty)?;
             self.run_filter_window(task, preview, window)?;
             return task.read_linear_buffer(self.output(task.options.denoise_settings.passes));
         };
@@ -297,6 +414,7 @@ impl Resources {
         let source = self.output(task.options.denoise_settings.passes);
         for window in layout.windows() {
             self.prepare_window(task, window, preview)?;
+            self.prepare_uncertainty(task, window, uncertainty)?;
             self.run_filter_window(task, preview, window)?;
             let bytes = u64::from(window.core_pixels) * 16;
             task.readback_data(
@@ -325,6 +443,67 @@ impl Resources {
         }
         if values.len() != (task.request.width * task.request.height) as usize {
             return Err(super::gpu("denoise windows do not cover the complete trace grid"));
+        }
+        task.validate_failures(None)?;
+        Ok(values)
+    }
+
+    pub(super) fn read_filtered_components(&self, task: &Task, preview: bool) -> Result<Vec<[f32; 4]>> {
+        let components = self.components.as_ref().ok_or_else(|| super::gpu("component filtering was not admitted"))?;
+        let mut values = super::scene::reserved((task.request.width * task.request.height) as usize)?;
+        let paged = self.layout.filter(|layout| layout.is_paged());
+        let windows = paged.into_iter().flat_map(|layout| layout.windows());
+        let single = paged.is_none().then_some(full_window(task)).into_iter();
+        for window in windows.chain(single) {
+            self.prepare_window(task, window, preview)?;
+            for component in 0..6 {
+                components.prepare(task, &self.filter_uniform, window, component, preview)?;
+                self.filter_window(task, false, window, Some(component))?;
+                components.add(task, &self.filter_uniform, window, component)?;
+            }
+            let mut offset = 0;
+            let maximum = u32::try_from(task.readback.size() / 16).map_err(|_| super::gpu("component readback address space overflow"))?;
+            if maximum == 0 {
+                return Err(super::gpu("component readback is not admitted"));
+            }
+            while offset < window.core_pixels {
+                task.cancel.check()?;
+                let count = (window.core_pixels - offset).min(maximum);
+                let bytes = u64::from(count) * 16;
+                task.readback_data(
+                    bytes,
+                    |encoder| {
+                        encoder.copy_buffer_to_buffer(
+                            &components.sum,
+                            u64::from(window.core_start - window.start + offset) * 16,
+                            &task.readback,
+                            0,
+                            bytes,
+                        );
+                        Ok(())
+                    },
+                    |data| {
+                        for (index, pixel) in data.as_chunks::<16>().0.iter().enumerate() {
+                            if index % 4096 == 0 {
+                                task.cancel.check()?;
+                            }
+                            let mut value = [0.0; 4];
+                            for (value, bytes) in value.iter_mut().zip(pixel.as_chunks::<4>().0) {
+                                *value = f32::from_le_bytes(*bytes);
+                            }
+                            if value.iter().any(|value| !value.is_finite() || *value < 0.0) || value[3] > 1.0 {
+                                return Err(super::gpu("invalid recombined component radiance or coverage"));
+                            }
+                            values.push(value);
+                        }
+                        Ok(())
+                    },
+                )?;
+                offset += count;
+            }
+        }
+        if values.len() != (task.request.width * task.request.height) as usize {
+            return Err(super::gpu("component windows do not cover the trace grid"));
         }
         task.validate_failures(None)?;
         Ok(values)
@@ -423,10 +602,22 @@ impl Resources {
     }
 
     fn run_filter_window(&self, task: &Task, preview: bool, window: Window) -> Result<()> {
-        let settings = task.options.denoise_settings;
+        self.filter_window(task, preview, window, None)
+    }
+
+    fn filter_window(&self, task: &Task, preview: bool, window: Window, component: Option<u32>) -> Result<()> {
+        let mut settings = task.options.denoise_settings;
+        if component.is_some() {
+            settings.variance_guided = true;
+        }
         settings.validate()?;
+        if component.is_none() && settings.variance_guided && self.uncertainty_ready.load(Ordering::Relaxed) != window.pixels {
+            return Err(super::gpu("denoise uncertainty was not prepared for this window"));
+        }
         for (pass, bind) in self.filter_binds.iter().take(settings.passes as usize).enumerate() {
-            let bind = if preview && pass == 0 {
+            let bind = if component.is_some() && pass == 0 {
+                &self.components.as_ref().ok_or_else(|| super::gpu("component filtering resources disappeared"))?.filter_bind
+            } else if preview && pass == 0 {
                 &self.adaptive.as_ref().ok_or_else(|| super::gpu("missing adaptive denoise preview input"))?.filter_bind
             } else {
                 bind
@@ -443,13 +634,13 @@ impl Resources {
                     1 << pass,
                     offset,
                     count,
-                    task.normalization_samples(),
+                    if component.is_some() { 1 } else { task.normalization_samples() },
                     (settings.strength as f32).to_bits(),
                     u32::from(settings.firefly_suppression),
                     window.start,
                     window.pixels,
-                    u32::from(settings.optical_filter),
-                    0,
+                    u32::from(settings.optical_filter) | (u32::from(settings.variance_guided) << 1),
+                    component.map_or(0, |index| index / 2 + 1),
                 ] {
                     bytes.extend_from_slice(&word.to_le_bytes());
                 }
@@ -474,6 +665,7 @@ struct AdaptiveInput {
     filter_bind: wgpu::BindGroup,
 }
 impl AdaptiveInput {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         context: &Context,
         pipelines: &Pipelines,
@@ -481,6 +673,7 @@ impl AdaptiveInput {
         guides: &wgpu::Buffer,
         filter_uniform: &wgpu::Buffer,
         output: &wgpu::Buffer,
+        uncertainty: &wgpu::Buffer,
         size: u64,
     ) -> Self {
         let device = &context.device;
@@ -536,7 +729,7 @@ impl AdaptiveInput {
             layout: &layout,
             entries: &entries,
         });
-        let entries: Vec<_> = [filter_uniform, guides, &pixels, output]
+        let entries: Vec<_> = [filter_uniform, guides, &pixels, output, uncertainty]
             .into_iter()
             .enumerate()
             .map(|(binding, buffer)| wgpu::BindGroupEntry { binding: binding as u32, resource: buffer.as_entire_binding() })

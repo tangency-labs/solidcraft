@@ -291,3 +291,117 @@ fn regrade_and_export_of_a_linear_master_reply_with_their_schemas() {
         }
     }
 }
+
+/// The typed reply boundary must retain all optional convergence sections and
+/// their nested saved controls. No renderer feature is needed to check this
+/// serialization boundary; the fixed status envelope comes from a real job.
+#[test]
+fn typed_job_state_preserves_convergence_controls_and_diagnostics() {
+    use solidcraft_render::job::adaptive::{AdaptiveSampling, SamplingReport};
+    use solidcraft_render::job::photon_diagnostics::PhotonDiagnostics;
+    use solidcraft_render::job::{CausticOptions, CpuPathOptions, CpuProgressiveOptions, DenoiseSettings, JobOptions, RaytraceOptions};
+    use solidcraft_render::radiance_film::RadianceReport;
+    use solidcraft_render::sampling::Sampler;
+
+    let host = CpuHost::cooperative();
+    let mut session = Session::default();
+    session.set_render_job_host(Some(host.clone())).unwrap_or_else(|e| panic!("{e}"));
+    let job = start(&mut session);
+    finish(&host);
+    let mut status = session.render_jobs.status(job).unwrap_or_else(|e| panic!("{e}"));
+    let denoise = DenoiseSettings {
+        optical_filter: false,
+        variance_guided: true,
+        extended_optical_guides: true,
+        component_filtering: true,
+        ..Default::default()
+    };
+    let adaptive = AdaptiveSampling { optical_min_samples: 48, component_uncertainty: true, map_validation_batches: 2, ..Default::default() };
+    let caustics = CausticOptions {
+        refresh_per_pass: true,
+        progressive_radius: true,
+        glossy_continuation_max_roughness: Some(0.35),
+        probe_pixel: Some([2, 3]),
+        probe_sample: 5,
+        ..Default::default()
+    };
+    status.options = JobOptions {
+        samples: 64,
+        sampler: Sampler::ScrambledSobol,
+        radiance_components: true,
+        denoise: true,
+        denoise_settings: denoise,
+        adaptive: Some(adaptive),
+        transmission_samples: 4,
+        caustics: Some(caustics),
+        ..status.options
+    };
+    status.request.raytrace = Some(RaytraceOptions {
+        sampler: Sampler::ScrambledSobol,
+        radiance_components: true,
+        denoise: true,
+        denoise_settings: denoise,
+        progressive: Some(CpuProgressiveOptions { samples_per_pixel: 64, seed: 19 }),
+        adaptive: Some(Box::new(adaptive)),
+        path: Some(CpuPathOptions { max_depth: 8, transmission_samples: 4, russian_roulette: true, ..Default::default() }),
+        caustics: Some(caustics),
+        ..Default::default()
+    });
+    status.sampling = Some(SamplingReport {
+        pilot_samples_per_pixel: 32,
+        minimum_production_samples: 48,
+        maximum_production_samples: 64,
+        production_samples: 256 * 64,
+        primary_path_evaluations: 256 * (32 + 64 * 4),
+        pixels_at_cap: 256,
+        budget_limited_pixels: 19,
+        transmission_strata: 4,
+        split_first_interface: false,
+        pilot_evidence: Some(solidcraft_render::job::adaptive::PilotEvidenceReport {
+            component_uncertainty: true,
+            map_batches: 2,
+            camera_observations_per_map: 16,
+            ..Default::default()
+        }),
+    });
+    status.photon_diagnostics = Some(PhotonDiagnostics::new([2, 3], 5, 5, 19, [0.7, 0.9]));
+    status.radiance = Some(RadianceReport {
+        pixels: 256,
+        observations: 256 * 64,
+        minimum_samples: 64,
+        maximum_samples: 64,
+        mean_radiance_sum: [0.0; 3],
+        component_radiance_sum: Some([[0.0; 3]; 6]),
+        maximum_recombination_error: 0.0,
+        uncertainty: "camera-observation scatter, not a convergence bound",
+    });
+    let original = serde_json::to_value(status).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(original["options"]["sampler"], "scrambled_sobol");
+    assert_eq!(original["options"]["caustics"]["glossy_continuation_max_roughness"], 0.35);
+    assert_eq!(original["request"]["raytrace"]["caustics"]["glossy_continuation_max_roughness"], 0.35);
+    assert_eq!(original["request"]["raytrace"]["path"]["russian_roulette"], true);
+    assert_eq!(original["options"]["denoise_settings"]["optical_filter"], false);
+    assert_eq!(original["sampling"]["budget_limited_pixels"], 19);
+    assert_eq!(original["sampling"]["pilot_evidence"]["map_batches"], 2);
+    let typed: super::JobState = serde_json::from_value(original.clone()).unwrap_or_else(|e| panic!("{e}"));
+    let roundtrip = serde_json::to_value(typed).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(roundtrip, original, "typed replies preserve every option, report, array and numeric value");
+    let schema = output_schema_for::<super::JobState>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &roundtrip), "{roundtrip} doesn't match {}", schema.as_value());
+
+    let mut split = original;
+    split["options"]["transmission_samples"] = serde_json::json!(1);
+    split["options"]["split_first_interface"] = serde_json::json!(true);
+    split["request"]["raytrace"]["path"]["transmission_samples"] = serde_json::json!(1);
+    split["request"]["raytrace"]["path"]["split_first_interface"] = serde_json::json!(true);
+    split["sampling"]["transmission_strata"] = serde_json::json!(1);
+    split["sampling"]["split_first_interface"] = serde_json::json!(true);
+    split["sampling"]["primary_path_evaluations"] = serde_json::json!(256 * (32 + 64 * 2));
+    split["photon_diagnostics"]["split_first_interface"] = serde_json::json!(true);
+    let typed: super::JobState = serde_json::from_value(split.clone()).unwrap();
+    assert_eq!(serde_json::to_value(typed).unwrap(), split);
+    assert!(conforms(schema.as_value(), schema.as_value(), &split));
+    let options: JobOptions = serde_json::from_value(split["options"].clone()).unwrap();
+    options.validate().unwrap();
+    assert_eq!(options.production_lanes(), 2);
+}

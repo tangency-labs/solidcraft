@@ -105,14 +105,14 @@ fn glass_offer_light(lights:ptr<function,array<vec4<u32>,6>>,count:ptr<function,
     (*lights)[2]=bitcast<vec4<u32>>(vec4<f32>(incident,ni));
     (*lights)[3]=bitcast<vec4<u32>>(vec4<f32>(prefix,nt));
     (*lights)[4]=bitcast<vec4<u32>>(vec4<f32>(medium.sigma,medium.scatter.x));
-    (*lights)[5]=bitcast<vec4<u32>>(vec4<f32>(medium.id,medium.ior,medium.scatter.y,0.0));
+    (*lights)[5]=bitcast<vec4<u32>>(vec4<f32>(medium.id,medium.ior,medium.scatter.y,f32(radiance_tag())));
 }
 // Eight vec4 lanes per path in one bounded dispatch tile. The first six
 // contain the selected request, then count/wavelength and the camera path value.
 // Film planes precede this scratch and retain their historical offsets. Integer
 // metadata uses exact numeric f32 encoding rather than subnormal bit patterns.
 fn glass_tile_address(pixel:u32)->u32 {
-    return film_pixels()*select(1u,3u,u.adaptive_budget.x>0u)+(pixel-u.image.w)*8u;
+    return film_pixels()*(radiance_base()+radiance_plane_count()+adaptive_evidence_plane_count())+(pixel-u.image.w)*8u;
 }
 fn glass_capture_light(lights:ptr<function,array<vec4<u32>,6>>,count:u32,wavelength:f32,pixel:u32) {
     let address=glass_tile_address(pixel);
@@ -191,7 +191,10 @@ fn glass_resolve_light(lights:ptr<function,array<vec4<u32>,6>>,count:u32,wavelen
         if emitter_hit_precise(physical.hi,physical.lo,direction,0.0).distance<endpoint {continue;}
         let visibility=shadow_transmittance(physical.hi,physical.lo,direction,endpoint,0.0);
         let atmosphere=volume_transmittance_precise(physical.hi,physical.lo,direction,distance);
-        result+=contribution*visibility.transmittance*atmosphere;
+        let term=contribution*visibility.transmittance*atmosphere;
+        if mode==1u {radiance_record_class(prefix.xyz*term*f32(count),radiance_camera,visibility.crossings>0u);}
+        else {radiance_optical_record(prefix.xyz*term*f32(count),dot(normal,direction)<0.0,radiance_receiver || visibility.crossings>0u);}
+        result+=term;
     }
     transport_medium_id=saved_id;transport_medium_ior=saved_ior;
     transport_medium_sigma=saved_sigma;transport_medium_scatter=saved_scatter;
@@ -205,6 +208,7 @@ fn glass_camera_sheet(t:Triangle,point:PrecisePoint,source_triangle:u32,incident
     var direct=vec3<f32>(0.0);var continuous=prior_continuous;
     let outward=unit(cross(t.p1.xyz-t.p0.xyz,t.p2.xyz-t.p0.xyz));
     for(var event=0u;event<remaining;event+=1u) {
+        photon_probe_sheet_event(event);
         let macro_normal=select(-normal,normal,dot(direction,normal)<0.0);
         let ni=select(outside,inside,internal);let nt=select(inside,outside,internal);
         let actual_geometric=select(-geometric,geometric,dot(direction,normal)<0.0);
@@ -212,11 +216,13 @@ fn glass_camera_sheet(t:Triangle,point:PrecisePoint,source_triangle:u32,incident
         let side=select(-1,1,dot(face_outward,outward)>0.0);
         if !photon_enabled() || !continuous {
             glass_offer_light(lights,light_count,selection_rng,point,direction,prefix*weight,ni,nt,source_triangle,select(2u,3u,internal),glass_vacuum());
-            direct+=weight*photon_gather_glass(t,point.hi+point.lo,macro_normal,actual_geometric,direction,ni,nt,wavelength,side);
+            direct+=weight*radiance_glass_photons(prefix*weight,t,point.hi+point.lo,macro_normal,actual_geometric,direction,ni,nt,wavelength,side);
         }
-        let sampled=glass_interface(t,direction,macro_normal,actual_geometric,ni,nt,wavelength,true,stratum,select(1u,strata,event==0u),rng);
+        let sampled=glass_interface_at(t,direction,macro_normal,actual_geometric,ni,nt,wavelength,true,stratum,select(1u,strata,event==0u),event+1u,rng);
         if !sampled.valid {return GlassRadiantSheet(GlassSheetWalk(sampled.direction,vec3<f32>(0.0),event+1u,false),direct,continuous);}
         if glass_rough_active(t,ni,nt) && !(sampled.transmitted && ni==nt) {continuous=true;}
+        photon_probe_interface(1u);
+        radiance_camera_event(sampled.transmitted,glass_rough_active(t,ni,nt) && !(sampled.transmitted && ni==nt));
         direction=sampled.direction;weight*=sampled.weight;
         if (!internal && !sampled.transmitted) || (internal && sampled.transmitted) {
             let valid=dot(direction,normal)*dot(direction,geometric)>0.0;

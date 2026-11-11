@@ -314,7 +314,9 @@ pub struct JobState {
     pub preview_retention_skips: u32,
     /// The sections that apply to this job, each an object as the render crate gives it:
     /// `preview` and `preview_unavailable_reason`, `presentation` (for a regraded image),
-    /// `linear_master`, `sampling`, `environment` and `punctual_diagnostics`.
+    /// `linear_master`, `sampling`, `environment`, `punctual_diagnostics`,
+    /// `denoise_diagnostics`, `denoise_mask`, `photon_diagnostics` and `radiance`.
+    /// Keep these sections intact when the render crate adds diagnostic fields.
     #[serde(flatten)]
     pub sections: Map<String, Value>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

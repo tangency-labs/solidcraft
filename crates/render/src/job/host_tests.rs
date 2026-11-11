@@ -1726,7 +1726,7 @@ fn celestial_cancelled_capture_retains_only_exact_boxes_and_fixed_header_until_l
         _worker: None,
     }));
     let options = RaytraceOptions {
-        path: Some(CpuPathOptions { max_depth: 2 }),
+        path: Some(CpuPathOptions { max_depth: 2, ..Default::default() }),
         progressive: Some(CpuProgressiveOptions { samples_per_pixel: 3, seed: 81 }),
         sun: Some(Box::new(Sun { direction: [0.0, 0.0, 1.0], angular_radius_rad: 0.02, radiance: [3.0, 2.0, 1.0] })),
         sky: Some(Box::new(CpuSky::default())),
@@ -1994,7 +1994,7 @@ mod prepared_optical_submission {
         }
         scene.bounds = scene.meshes[0].mesh.bounds();
         let options = request.raytrace.as_mut().unwrap();
-        options.path = Some(crate::job::CpuPathOptions { max_depth: 16 });
+        options.path = Some(crate::job::CpuPathOptions { max_depth: 16, ..Default::default() });
         options.progressive = Some(crate::job::CpuProgressiveOptions { samples_per_pixel: 4, seed: 9 });
         options.shadows = true;
         options.dielectrics[0].boundary = DielectricBoundary::ClosedMesh;
@@ -3104,7 +3104,7 @@ mod native_memory_admission {
                 threads: crate::job::MAX_CPU_THREADS,
                 budget: CpuBudget::Workstation,
                 progressive: Some(CpuProgressiveOptions { samples_per_pixel: crate::job::MAX_UI_SAMPLES, seed: 7 }),
-                path: Some(CpuPathOptions { max_depth: crate::job::MAX_PATH_DEPTH }),
+                path: Some(CpuPathOptions { max_depth: crate::job::MAX_PATH_DEPTH, ..Default::default() }),
                 texture_filtering: true,
                 metal_energy_compensation: true,
                 adaptive: Some(Box::new(crate::job::adaptive::AdaptiveSampling {
@@ -3120,7 +3120,7 @@ mod native_memory_admission {
                 }),
                 supersampling: 2,
                 denoise: true,
-                denoise_settings: DenoiseSettings { passes: 3, strength: 1.0, firefly_suppression: true, optical_filter: true },
+                denoise_settings: DenoiseSettings { passes: 3, strength: 1.0, firefly_suppression: true, optical_filter: true, ..Default::default() },
                 denoise_diagnostics: true,
                 output: Some(Box::new(OutputOptions {
                     linear_exr: true,

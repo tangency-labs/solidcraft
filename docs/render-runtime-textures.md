@@ -121,14 +121,24 @@ GPU mip chains require 129,324,176 bytes before lookup records. The full texture
 buffer fits a 128 MiB storage binding. Admission separately checks geometry,
 film, device limits and the complete job budget.
 
-The GPU executor selects a bounded opaque pipeline for map-free scenes with
-no physical transmission or active volume. Mapped scenes, Glass and active volume
-rendering use the general pipeline. This avoids the RADV specialization's
-mapped-surface normal corruption; captured filtering and face precedence remain
-authoritative.
-The map-free opaque specialization has one private media-stack entry; the
-general pipeline retains sixteen. The authored nested-media policy still controls
-admission and boundary transitions. Captured scene options select at most six cached programs.
+The GPU executor retains bounded scene classification and cache routing for
+map-free opaque, mapped, Glass and active-volume jobs. Eager and captured-scene
+programs use the same sixteen-entry media stack with `OPAQUE_SCENE=0`; texture
+and indirect-clamp specialization flags remain unchanged. Captured filtering,
+face precedence and the authored nested-media admission and boundary policy
+remain authoritative. Scene and optional clamped variants occupy bounded,
+separate caches.
+
+On the tested RADV PHOENIX adapter, the opaque specialization produced invalid
+radiance in controlled probes. Disabling that specialization resolved those
+probes and the complete focused GPU library suite on tree `9fdbe15d`; that
+run's retained log identifies RADV PHOENIX as an integrated GPU on Vulkan.
+CI05 separately passed the complete library on `4861c922` (268 passed,
+zero failed, three ignored, zero filtered), with a GPU required and both
+selectors set to `auto`; its full-CI log does not retain adapter identity.
+These checks establish specialization
+dependence, not a compiler or driver cause. Opaque throughput remains
+unqualified. See the [current GPU qualification](render-glass-convergence-validation.md#current-integration).
 
 The independent progressive device requests six storage buffers per shader
 stage. An adapter limited to fewer cannot install this executor; raster and

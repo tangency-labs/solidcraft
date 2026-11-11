@@ -570,6 +570,10 @@ pub struct JobStatus {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sampling: Option<super::adaptive::SamplingReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub photon_diagnostics: Option<super::photon_diagnostics::PhotonDiagnostics>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub radiance: Option<crate::radiance_film::RadianceReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub linear_master: Option<LinearMasterInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preview: Option<PreviewInfo>,
@@ -592,6 +596,8 @@ struct Data {
     completed_duration: Option<std::time::Duration>,
     punctual_diagnostics: Option<super::PunctualDiagnostics>,
     sampling: Option<super::adaptive::SamplingReport>,
+    photon_diagnostics: Option<super::photon_diagnostics::PhotonDiagnostics>,
+    radiance: Option<crate::radiance_film::RadianceReport>,
     progress: Progress,
     error: Option<JobError>,
     frame: Option<Arc<RenderFrame>>,
@@ -672,6 +678,8 @@ impl JobHandle {
             punctual_diagnostics: data.punctual_diagnostics,
             presentation: self.0.presentation.as_deref().map(|retained| retained.info.clone()),
             sampling: data.sampling.clone(),
+            photon_diagnostics: data.photon_diagnostics,
+            radiance: data.radiance.clone(),
             linear_master: data.frame.as_ref().and_then(|frame| frame.linear_master_info().cloned()),
             preview: data.preview.as_ref().map(|preview| preview.info.clone()),
             textures: self.0.textures.clone(),
@@ -1256,6 +1264,22 @@ impl WorkTask {
             _ => Ok(None),
         }
     }
+    fn photon_diagnostics(&self) -> Option<super::photon_diagnostics::PhotonDiagnostics> {
+        match self {
+            Self::Registered(task) => task.photon_diagnostics(),
+            #[cfg(feature = "raytrace-cpu")]
+            Self::Raytrace(slot) => slot.0.first().and_then(|task| task.photon_diagnostics()),
+            _ => None,
+        }
+    }
+    fn radiance_report(&self) -> Option<crate::radiance_film::RadianceReport> {
+        match self {
+            Self::Registered(task) => task.radiance_report(),
+            #[cfg(feature = "raytrace-cpu")]
+            Self::Raytrace(slot) => slot.0.first().and_then(|task| task.radiance_report()),
+            _ => None,
+        }
+    }
     fn sampling_report(&self) -> Option<super::adaptive::SamplingReport> {
         match self {
             Self::Registered(task) => task.sampling_report(),
@@ -1460,6 +1484,8 @@ impl Running {
                 // keep the original admission lease while hashing the sole PNG.
                 self.source_master = self.task.as_ref().map(WorkTask::source_master).transpose()?.flatten();
                 data.sampling = self.task.as_ref().and_then(WorkTask::sampling_report);
+                data.photon_diagnostics = self.task.as_ref().and_then(WorkTask::photon_diagnostics);
+                data.radiance = self.task.as_ref().and_then(WorkTask::radiance_report);
                 let exr = self.task.as_mut().and_then(WorkTask::take_linear_exr);
                 let retain_exr = self
                     .handle
@@ -1997,6 +2023,12 @@ impl ImageHost {
             {
                 return Err(JobError::new(ErrorCode::InvalidRequest, "registered executor does not implement the authored advanced Glass models"));
             }
+            if !options.sampler.is_independent() && !executor.supports_sampling_controls() {
+                return Err(JobError::new(ErrorCode::InvalidRequest, "registered executor does not implement the selected camera sampler"));
+            }
+            if (options.radiance_components || options.denoise_settings.variance_guided) && !executor.supports_radiance_statistics() {
+                return Err(JobError::new(ErrorCode::InvalidRequest, "registered executor does not implement camera radiance statistics"));
+            }
             if options.caustics.is_some() && !executor.supports_caustics() {
                 return Err(JobError::new(ErrorCode::InvalidRequest, "registered executor does not implement caustic photons"));
             }
@@ -2020,6 +2052,9 @@ impl ImageHost {
             }
             if options.transmission_samples != 1 && !executor.supports_transmission_sampling() {
                 return Err(JobError::new(ErrorCode::InvalidRequest, "registered executor does not implement transmission strata"));
+            }
+            if options.split_first_interface && !executor.supports_first_interface_splitting() {
+                return Err(JobError::new(ErrorCode::InvalidRequest, "registered executor does not implement first-interface splitting"));
             }
             if options.supersampling != 1 && !executor.supports_supersampling() {
                 return Err(JobError::new(ErrorCode::InvalidRequest, "this executor does not support supersampling"));
@@ -2536,6 +2571,8 @@ impl ImageHost {
                 completed_duration: None,
                 punctual_diagnostics: None,
                 sampling: None,
+                photon_diagnostics: None,
+                radiance: None,
                 progress: Progress { phase: Phase::Queued, done: 0, total: 1 },
                 error: None,
                 frame: None,
@@ -2676,6 +2713,8 @@ impl ImageHost {
                 completed_duration: None,
                 punctual_diagnostics: None,
                 sampling: None,
+                photon_diagnostics: None,
+                radiance: None,
                 progress: Progress { phase: Phase::Queued, done: 0, total: 1 },
                 error: None,
                 frame: None,

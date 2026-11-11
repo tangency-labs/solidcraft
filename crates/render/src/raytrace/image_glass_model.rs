@@ -53,10 +53,10 @@ fn ior(task: &TransportContext<'_>, state: &State, index: Option<usize>) -> job:
     let input = task.options.dielectrics.get(index).ok_or_else(|| invalid("CPU spectral medium index is invalid"))?;
     input.model.unwrap_or_default().ior(input.ior, wavelength(state)?).map_err(model_error)
 }
-fn uniforms(task: &TransportContext<'_>, state: &State) -> job::Result<[f64; 3]> {
+fn uniforms(task: &TransportContext<'_>, state: &mut State) -> job::Result<[f64; 3]> {
     let [branch, x] = variates(task, state, 0x4000)?;
     let [y, _] = variates(task, state, 0x4001)?;
-    Ok([x, y, branch])
+    Ok([x, y, fresnel_draw(task, state, branch)?])
 }
 fn apply_weight(state: &mut State, weight: f64) -> job::Result<()> {
     if !weight.is_finite() || weight < 0.0 {
@@ -178,12 +178,33 @@ pub(super) fn resume_surface(task: &TransportContext<'_>, state: &mut State, eve
     }
     let input = task.options.dielectrics.get(event.index).ok_or_else(|| invalid("CPU advanced glass material disappeared"))?;
     let thin = event.kind == glass_lighting::InterfaceKind::SheetExternal;
-    let Some(sample) = input
-        .model
-        .unwrap_or_default()
-        .sample(event.incident, event.normal, event.ni, event.nt, event.wavelength_nm, uniforms(task, state)?)
-        .map_err(model_error)?
-    else {
+    let model = input.model.unwrap_or_default();
+    let uniforms = uniforms(task, state)?;
+    let sample =
+        if !thin && model.roughness == 0.0 && model.thin_film.is_none_or(|film| film.thickness_nm == 0.0) && first_interface_split(task, state)? {
+            // A bare delta event has one scalar Fresnel mass even after a hero
+            // wavelength was selected. The existing indices already include dispersion.
+            let interface = dielectric::interface(event.incident, event.normal, event.ni, event.nt).map_err(error)?;
+            let choice = state.group.split(interface.reflectance, interface.transmitted.is_some())?;
+            if choice.weight == 0.0 {
+                None
+            } else {
+                Some(crate::glass_model::InterfaceSample {
+                    direction: if choice.transmitted {
+                        interface.transmitted.ok_or_else(|| invalid("CPU split transmission direction is missing"))?
+                    } else {
+                        interface.reflected
+                    },
+                    weight: choice.weight * if choice.transmitted { (event.ni / event.nt).powi(2) } else { 1.0 },
+                    pdf: choice.weight * 0.5,
+                    crosses: choice.transmitted,
+                    delta: true,
+                })
+            }
+        } else {
+            model.sample(event.incident, event.normal, event.ni, event.nt, event.wavelength_nm, uniforms).map_err(model_error)?
+        };
+    let Some(sample) = sample else {
         state.stage = Stage::Commit;
         return Ok(());
     };
@@ -192,6 +213,10 @@ pub(super) fn resume_surface(task: &TransportContext<'_>, state: &mut State, eve
         return Ok(());
     }
     apply_weight(state, sample.weight)?;
+    if sample.crosses {
+        state.eta_scale = sampling::refractive_scale(state.eta_scale, event.ni, event.nt)?;
+    }
+    state.interface_event(sample.crosses, !sample.delta);
     state.sampled_continuous |= !sample.delta;
     if thin && sample.crosses {
         state.optical.as_mut().ok_or_else(|| invalid("CPU rough sheet stack missing"))?.sheet =
@@ -210,6 +235,7 @@ fn smooth_sheet(task: &TransportContext<'_>, state: &mut State, index: usize, no
     let (interface, reflected, transmitted) = dielectric::modeled_sheet(direction, normal, input).map_err(error)?;
     let probability = thin_probability(reflected, transmitted)?;
     let [draw, _] = variates(task, state, 0x4000)?;
+    let draw = fresnel_draw(task, state, draw)?;
     let (outgoing, preserve) = if draw < probability {
         state.throughput = multiply(state.throughput, reflected / probability);
         (interface.reflected, false)
@@ -225,6 +251,7 @@ fn smooth_sheet(task: &TransportContext<'_>, state: &mut State, index: usize, no
         (direction, input.shadow_transmission)
     };
     super::super::super::lighting::validate_radiance(state.throughput).map_err(error)?;
+    state.interface_event(outgoing.dot(normal) < 0.0, false);
     finish(task, state, index, outgoing, 0.0, None, preserve)
 }
 
@@ -284,6 +311,10 @@ pub(super) fn resume_sheet(task: &TransportContext<'_>, state: &mut State, event
         return Ok(());
     }
     apply_weight(state, sample.weight)?;
+    if sample.crosses {
+        state.eta_scale = sampling::refractive_scale(state.eta_scale, event.ni, event.nt)?;
+    }
+    state.interface_event(sample.crosses, !sample.delta);
     state.sampled_continuous |= !sample.delta;
     if sample.crosses {
         if sample.direction.dot(walk.normal) * sample.direction.dot(walk.geometric) <= 0.0 {

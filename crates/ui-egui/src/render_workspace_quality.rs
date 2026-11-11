@@ -170,7 +170,25 @@ pub(super) fn denoise_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         let response = ui_kit::checkbox(ui, &label, &mut app.render_workspace.view.studio.denoise_settings.optical_filter);
         publish_target("render:denoise-optical-filter", response.rect);
         response.backing_on_hover_text(app.tr("render.denoise_optical_filter_help"));
+        let label = app.tr("render.convergence.variance_guided").to_string();
+        ui.add_enabled_ui(!app.render_workspace.view.studio.denoise_settings.component_filtering, |ui| {
+            let response = ui_kit::checkbox(ui, &label, &mut app.render_workspace.view.studio.denoise_settings.variance_guided);
+            publish_target("render:denoise-variance-guided", response.rect);
+        });
+        ui_kit::text(ui, app.tr("render.convergence.variance_help"), ui_kit::Text::Note("render.convergence.variance_help"));
+        let label = app.tr("render.convergence.optical_endpoints").to_string();
+        let response = ui_kit::checkbox(ui, &label, &mut app.render_workspace.view.studio.denoise_settings.extended_optical_guides);
+        publish_target("render:denoise-optical-endpoints", response.rect);
+        ui_kit::text(ui, app.tr("render.convergence.optical_help"), ui_kit::Text::Note("render.convergence.optical_help"));
     });
+    let can_filter_components = enabled && app.render_workspace.view.studio.radiance_components;
+    let selected = app.render_workspace.view.studio.denoise_settings.component_filtering;
+    ui.add_enabled_ui(can_filter_components || selected, |ui| {
+        let label = app.tr("render.convergence.component_filtering").to_string();
+        let response = ui_kit::checkbox(ui, &label, &mut app.render_workspace.view.studio.denoise_settings.component_filtering);
+        publish_target("render:denoise-components", response.rect);
+    });
+    ui_kit::text(ui, app.tr("render.convergence.component_filtering_help"), ui_kit::Text::Note("render.convergence.component_filtering_help"));
     ui_kit::text(ui, app.tr("render.denoise_settings_help"), ui_kit::Text::Note("render.denoise_settings_help"));
     let label = app.tr("render.denoise_diagnostics_enable").to_string();
     let response = ui_kit::checkbox(ui, &label, &mut app.render_workspace.view.studio.denoise_diagnostics);
@@ -201,6 +219,9 @@ pub(super) fn diagnostic_class_label(class: DenoiseGuideClass) -> &'static str {
         DenoiseGuideClass::ReflectiveEndpoint => "render.denoise_class_reflection",
         DenoiseGuideClass::IdentityLimit => "render.denoise_class_identity",
         DenoiseGuideClass::PartialCoverage => "render.denoise_class_coverage",
+        DenoiseGuideClass::OpticalTopologyLimit => "render.denoise_class_optical_topology",
+        DenoiseGuideClass::OpticalRouteLimit => "render.denoise_class_optical_route",
+        DenoiseGuideClass::OpticalReflectionLimit => "render.denoise_class_optical_reflections",
     }
 }
 

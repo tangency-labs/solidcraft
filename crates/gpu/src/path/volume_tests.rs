@@ -682,9 +682,9 @@ fn volume_orthographic_segment(o: vec3<f32>, d: vec3<f32>, limit: f32) -> vec2<f
     // The archived pre-GPU12 control fingerprint remains historical evidence:
     // f373400816e40e803691ceb847d8c9d7983fd4744c3874a322363810c14b6d6c.
     // Map filtering, optical transport and producer specialization can change. Reconstruct
-    // each current producer, changing only this signed primary hook/helper.
-    let old_pipeline = |opaque: bool| {
-        let shader = scene_shader(opaque);
+    // the shared current producer, changing only this signed primary hook/helper.
+    let old_pipeline = {
+        let shader = SHADER;
         assert_eq!(shader.matches(new_hook).count(), 1);
         assert_eq!(shader.matches(helper).count(), 1);
         let helper_block = format!("\n{helper}");
@@ -710,7 +710,7 @@ fn volume_orthographic_segment(o: vec3<f32>, d: vec3<f32>, limit: f32) -> vec2<f
             module: &module,
             entry_point: Some("main"),
             compilation_options: wgpu::PipelineCompilationOptions {
-                constants: &[("OPAQUE_SCENE", f64::from(u8::from(opaque))), ("HAS_TEXTURES", 0.0)],
+                constants: &[("OPAQUE_SCENE", 0.0), ("HAS_TEXTURES", 0.0)],
                 ..Default::default()
             },
             cache: None,
@@ -720,7 +720,6 @@ fn volume_orthographic_segment(o: vec3<f32>, d: vec3<f32>, limit: f32) -> vec2<f
             .unwrap();
         pipeline
     };
-    let pipelines = [old_pipeline(true), old_pipeline(false)];
     let mut inactive_baseline = None;
     for mode in 0..8 {
         let case = OpticalLineCase {
@@ -765,12 +764,13 @@ fn volume_orthographic_segment(o: vec3<f32>, d: vec3<f32>, limit: f32) -> vec2<f
             }
             _ => panic!("unexpected unchanged-volume fixture mode"),
         }
-        // None and zero extinction use the opaque producer. The active fog
-        // routes use the general producer, with no maps or nested glass.
+        // None and zero extinction retain the opaque scene classification.
+        // Active fog uses the general cache slot; both share the full producer.
+        // These fixtures have no maps or nested glass.
         let opaque = mode < 2;
         assert_eq!(use_opaque_pipeline(&source, options), opaque);
         assert!(image.textures.is_none() && !options.nested_media);
-        let pipeline = &pipelines[usize::from(!opaque)];
+        let pipeline = &old_pipeline;
         let run = |old: bool| {
             let mut task = Task::new(context.clone(), source.clone(), image.clone(), options, CancelToken::default()).unwrap();
             assert_eq!((task.opaque_scene, task.has_textures, task.options.nested_media), (opaque, false, false));

@@ -16,8 +16,11 @@ pub mod mapping;
 mod model_bounds;
 pub mod optical_boundary;
 mod product;
+pub mod radiance;
+pub mod radiance_film;
 #[cfg(feature = "raytrace-cpu")]
 pub mod raytrace;
+pub mod sampling;
 pub mod stage;
 pub mod studio;
 pub mod surface_patterns;

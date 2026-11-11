@@ -24,6 +24,9 @@ pub(super) struct View {
     pub volume: Option<solidcraft_engine::render::job::volume::HomogeneousVolume>,
     pub adaptive: Option<solidcraft_engine::render::job::adaptive::AdaptiveSampling>,
     pub transmission_samples: u32,
+    pub split_first_interface: bool,
+    pub sampler: solidcraft_engine::render::sampling::Sampler,
+    pub radiance_components: bool,
     pub finishing: solidcraft_engine::render::job::finishing::Finishing,
     pub backdrop_enabled: bool,
     pub backdrop: solidcraft_engine::render::job::finishing::Backdrop,
@@ -65,6 +68,9 @@ impl Default for View {
             volume: None,
             adaptive: None,
             transmission_samples: 1,
+            split_first_interface: false,
+            sampler: Default::default(),
+            radiance_components: false,
             finishing: Default::default(),
             backdrop_enabled: false,
             backdrop: Default::default(),
@@ -131,6 +137,15 @@ pub(super) fn params(app: &SolveApp, params: &mut Value) -> Result<(), String> {
     params["volume"] = json!(view.volume);
     params["adaptive"] = json!(view.adaptive);
     params["transmission_samples"] = json!(view.transmission_samples);
+    if view.split_first_interface {
+        params["split_first_interface"] = json!(true);
+    }
+    if !view.sampler.is_independent() {
+        params["sampler"] = json!(view.sampler);
+    }
+    if view.radiance_components {
+        params["radiance_components"] = json!(true);
+    }
     if view.lens_enabled {
         view.lens.validate().map_err(|error| error.to_string())?;
         if view.lens.aperture_radius_mm > 0.0 && app.cam.fov == 0.0 {

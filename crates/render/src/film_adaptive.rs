@@ -2,10 +2,13 @@
 //! Independent pilots allocate fixed production counts. Pilot radiance is discarded,
 //! and complete passes borrow exact integer counts without retaining a new snapshot.
 use super::{invalid, limit};
+#[path = "film_adaptive_evidence.rs"]
+mod evidence;
 use crate::job::{
     CancelToken, CpuBudget, CpuProgressiveOptions, ErrorCode, JobError, Result,
     adaptive::{AdaptivePreview, AdaptiveSampling, PreviewStage, SamplingReport},
 };
+use evidence::EvidenceFilm;
 
 #[derive(Clone, Copy, Default)]
 struct Moments {
@@ -83,6 +86,7 @@ pub struct AdaptiveCameraFilm {
     stage: Stage,
     report: SamplingReport,
     production_evaluations: u64,
+    evidence: EvidenceFilm,
 }
 /// Borrowing this view prevents reset/add/skip until finishing releases it.
 /// It is neither an encoded image nor a transferable retained snapshot/lease.
@@ -125,6 +129,7 @@ impl AdaptiveCameraFilm {
         budget.validate_image(width, height, Some(CpuProgressiveOptions { samples_per_pixel: total, ..production }))?;
         (u64::from(width) * u64::from(height))
             .checked_mul((std::mem::size_of::<Moments>() + std::mem::size_of::<PixelCounts>()) as u64)
+            .and_then(|bytes| EvidenceFilm::bytes(u64::from(width) * u64::from(height), options).ok().and_then(|extra| bytes.checked_add(extra)))
             .and_then(|bytes| bytes.checked_add(std::mem::size_of::<Self>() as u64))
             .filter(|bytes| *bytes <= budget.limits().max_job_bytes)
             .ok_or_else(|| limit("adaptive film storage exceeds the unchanged CPU profile"))
@@ -172,10 +177,29 @@ impl AdaptiveCameraFilm {
                 production_samples: 0,
                 primary_path_evaluations: 0,
                 pixels_at_cap: 0,
+                budget_limited_pixels: 0,
                 transmission_strata: 1,
+                split_first_interface: false,
+                pilot_evidence: options.evidence_enabled().then(|| crate::job::adaptive::PilotEvidenceReport {
+                    component_uncertainty: options.component_uncertainty,
+                    map_batches: options.map_validation_batches,
+                    ..Default::default()
+                }),
             },
             production_evaluations: 0,
+            evidence: EvidenceFilm::new(count, options, cancel)?,
         })
+    }
+    pub fn configure_caustics(&mut self, caustics: Option<crate::job::CausticOptions>) -> Result<()> {
+        if self.initialized() != 0 {
+            return Err(invalid("pilot map configuration must precede film initialization"));
+        }
+        self.options.validate_caustics(caustics)?;
+        self.evidence.configure_maps(caustics.is_some_and(|options| options.refresh_per_pass));
+        if self.options.evidence_enabled() {
+            self.report.pilot_evidence = Some(crate::job::adaptive::PilotEvidenceReport::new(self.options, caustics)?);
+        }
+        Ok(())
     }
     pub fn dimensions(&self) -> [u32; 2] {
         [self.width, self.height]
@@ -184,7 +208,7 @@ impl AdaptiveCameraFilm {
         self.counts.values.len()
     }
     pub fn ready(&self) -> bool {
-        self.initialized() == self.count && self.moments.len() == self.count
+        self.initialized() == self.count && self.moments.len() == self.count && self.evidence.ready()
     }
     pub fn initialize_one(&mut self, cancel: &CancelToken, charge: &mut impl FnMut() -> Result<()>) -> Result<()> {
         cancel.check()?;
@@ -195,6 +219,7 @@ impl AdaptiveCameraFilm {
         cancel.check()?;
         self.moments.push(Moments::default());
         self.counts.values.push(PixelCounts::default());
+        self.evidence.initialize_one();
         Ok(())
     }
     pub fn next_pixel(&self) -> usize {
@@ -263,6 +288,20 @@ impl AdaptiveCameraFilm {
         cancel: &CancelToken,
         charge: &mut impl FnMut() -> Result<()>,
     ) -> Result<()> {
+        self.add_with_evidence(index, identity, rgb, covered, None, crate::job::adaptive::PilotPhotonSupport::default(), cancel, charge)
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_with_evidence(
+        &mut self,
+        index: usize,
+        identity: SamplingIdentity,
+        rgb: [f64; 3],
+        covered: bool,
+        components: Option<&crate::radiance::RadianceComponents>,
+        support: crate::job::adaptive::PilotPhotonSupport,
+        cancel: &CancelToken,
+        charge: &mut impl FnMut() -> Result<()>,
+    ) -> Result<()> {
         cancel.check()?;
         let expected = self.sampling_identity(index)?.ok_or_else(|| invalid("stopped adaptive pixel cannot accept another sample"))?;
         if identity != expected {
@@ -279,6 +318,8 @@ impl AdaptiveCameraFilm {
         }
         let hits =
             counts.covered.checked_add(u32::from(covered)).filter(|hits| *hits <= samples).ok_or_else(|| limit("adaptive coverage overflow"))?;
+        let mut evidence = None;
+        let mut budget_limited = false;
         if self.stage == Stage::Pilot {
             let value = [rgb[0], rgb[1], rgb[2], f64::from(u8::from(covered))];
             for ((mean, m2), value) in moments.value.iter_mut().zip(moments.m2.iter_mut()).zip(value) {
@@ -286,8 +327,17 @@ impl AdaptiveCameraFilm {
                 *mean += delta / f64::from(samples);
                 *m2 += delta * (value - *mean);
             }
+            if self.evidence.enabled() {
+                evidence = Some(self.evidence.prepare(index, samples - 1, value, components, support, self.options, self.maximum)?);
+            }
             if samples == self.options.pilot_samples {
-                counts.planned = self.options.target(moments.value, moments.m2, self.maximum)?;
+                let allocation = if let Some(allocation) = evidence.as_ref().and_then(|update| update.allocation) {
+                    allocation
+                } else {
+                    self.options.allocation(moments.value, moments.m2, self.maximum)?
+                };
+                counts.planned = allocation.samples;
+                budget_limited = allocation.budget_limited;
             }
         } else {
             for (sum, value) in moments.value.iter_mut().take(3).zip(rgb) {
@@ -309,6 +359,10 @@ impl AdaptiveCameraFilm {
             report.production_samples =
                 report.production_samples.checked_add(u64::from(target)).ok_or_else(|| limit("adaptive report allocation overflow"))?;
             report.pixels_at_cap += u64::from(target == self.maximum);
+            report.budget_limited_pixels += u64::from(budget_limited);
+            if let (Some(report), Some(update)) = (report.pilot_evidence.as_mut(), evidence.as_ref()) {
+                report.observe_pixel(update.summary);
+            }
         }
         let evaluations = self
             .production_evaluations
@@ -320,6 +374,9 @@ impl AdaptiveCameraFilm {
         cancel.check()?;
         *target_moments = moments;
         *target_counts = counts;
+        if let Some(update) = evidence {
+            self.evidence.commit(index, update);
+        }
         self.report = report;
         self.production_evaluations = evaluations;
         self.advance();

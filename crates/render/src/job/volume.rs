@@ -160,7 +160,7 @@ mod cpu_contract_tests {
         };
         let mut options = RaytraceOptions {
             volume: Some(v),
-            path: Some(CpuPathOptions { max_depth: 4 }),
+            path: Some(CpuPathOptions { max_depth: 4, ..Default::default() }),
             progressive: Some(CpuProgressiveOptions { samples_per_pixel: 4, seed: 9 }),
             ..Default::default()
         };

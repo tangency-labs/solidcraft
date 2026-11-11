@@ -293,7 +293,7 @@ fn cpu_native_studios_preserve_full_job_and_exact_hdr_rig_authority_for_all_twen
             budget: CpuBudget::Studio,
             progressive: Some(CpuProgressiveOptions { samples_per_pixel: 64, seed: 947 }),
             adaptive: Some(AdaptiveSampling::default()),
-            path: Some(CpuPathOptions { max_depth: 5 }),
+            path: Some(CpuPathOptions { max_depth: 5, ..Default::default() }),
             denoise: true,
             lens: Some(ThinLens { aperture_radius_mm: 0.2, focus_distance_mm: 100.0 }),
             output: Some(Box::new(solidcraft_render::job::OutputOptions { linear_exr: true, ..Default::default() })),

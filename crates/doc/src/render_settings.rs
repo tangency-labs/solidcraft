@@ -238,6 +238,15 @@ impl RenderSetup {
                             .map_err(|e| DocError::Invalid(e.to_string()))?,
                     )
                     .map_err(|e| DocError::Invalid(e.to_string()))?;
+                if let (Some(path), Some(production)) = (options.path, options.progressive) {
+                    path.validate_camera_budget(
+                        u64::from(trace_width) * u64::from(trace_height),
+                        production.samples_per_pixel,
+                        options.adaptive.map_or(0, |adaptive| adaptive.pilot_samples),
+                        options.budget,
+                    )
+                    .map_err(|e| DocError::Invalid(e.to_string()))?;
+                }
                 if let Some(output) = &options.output {
                     output.validate_image(self.width, self.height).map_err(|e| DocError::Invalid(e.to_string()))?;
                 }
@@ -1111,7 +1120,7 @@ fn composed_cpu_path_preserves_saved_optics_alpha_filter_lens_and_master_intent(
             transparent_background: true,
             options: Box::new(CpuJob {
                 denoise: true,
-                path: Some(CpuPathOptions { max_depth: 3 }),
+                path: Some(CpuPathOptions { max_depth: 3, ..Default::default() }),
                 progressive: Some(CpuProgressiveOptions { samples_per_pixel: 3, seed: 81 }),
                 lens: Some(ThinLens { aperture_radius_mm: 1.0, focus_distance_mm: 123.0 }),
                 output: Some(Box::new(OutputOptions { linear_exr: true, ..Default::default() })),

@@ -41,6 +41,7 @@ struct Worker {
     aging: Vec<super::super::aging::Task>,
     results: Vec<CameraResult>,
     diagnostics: job::PunctualDiagnostics,
+    photon_diagnostics: job::photon_diagnostics::PhotonProbe,
     work: WorkBudget,
     failure: Option<JobError>,
 }
@@ -102,6 +103,10 @@ impl<'a> Source<'a> {
             aging: &mut worker.aging,
             caustics: self.caustics,
             punctual_diagnostics: &mut worker.diagnostics,
+            photon_diagnostics: &mut worker.photon_diagnostics,
+            capture_components: transport::capture_components(self.options, self.progressive),
+            completed_components: None,
+            completed_pilot_support: Default::default(),
             progressive: self.progressive,
             glass: self.glass,
             environment: self.environment,
@@ -119,6 +124,7 @@ impl<'a> Source<'a> {
             bvh: self.bvh,
             pixel,
             spatial: 0,
+            fresnel_stratum: 0,
             primary_coverage: 0,
             completed: None,
         }
@@ -156,6 +162,7 @@ impl Worker {
             aging,
             results: reserve(TILE_PIXELS)?,
             diagnostics: Default::default(),
+            photon_diagnostics: job::photon_diagnostics::PhotonProbe::with_supersampling(task.options.caustics, task.options.supersampling)?,
             work: WorkBudget::new(job::MAX_CPU_WORK).map_err(error)?,
             failure: None,
         })
@@ -164,6 +171,7 @@ impl Worker {
         self.work.parallel_reset(remaining, ledger);
         self.results.clear();
         self.diagnostics = Default::default();
+        self.photon_diagnostics.reset();
         self.failure = None;
     }
     fn camera(&mut self, source: &Source<'_>, begin: usize, end: usize) -> job::Result<()> {
@@ -177,7 +185,15 @@ impl Worker {
                     None => false,
                 };
                 let output = if skipped {
-                    direct::Pixel { pixel, radiance: Vec3::ZERO, covered: 0, attempts: 1, rgba: None }
+                    direct::Pixel {
+                        pixel,
+                        radiance: Vec3::ZERO,
+                        covered: 0,
+                        attempts: 1,
+                        rgba: None,
+                        components: None,
+                        pilot_support: Default::default(),
+                    }
                 } else if source.options.path.is_some() {
                     let state = paths.first_mut().ok_or_else(|| invalid("CPU worker path state missing"))?;
                     let mut context = source.context(self, pixel);
@@ -191,6 +207,8 @@ impl Worker {
                         covered: context.primary_coverage,
                         attempts: 1,
                         rgba: None,
+                        components: context.completed_components,
+                        pilot_support: context.completed_pilot_support,
                     }
                 } else {
                     let state = direct.first_mut().ok_or_else(|| invalid("CPU worker direct state missing"))?;
@@ -324,6 +342,9 @@ impl Pool {
             task.punctual_diagnostics.radiance_limit = task.punctual_diagnostics.radiance_limit.saturating_add(worker.diagnostics.radiance_limit);
             task.punctual_diagnostics.shadow_offset_crossed =
                 task.punctual_diagnostics.shadow_offset_crossed.saturating_add(worker.diagnostics.shadow_offset_crossed);
+            if let Some(report) = worker.photon_diagnostics.report() {
+                task.photon_diagnostics.merge(&report)?;
+            }
             for result in &worker.results {
                 if task.pixel != result.pixel.pixel {
                     return Err(invalid("CPU worker results are not in camera order"));
@@ -340,6 +361,10 @@ impl Pool {
                         return Err(invalid("CPU progressive worker returned a fixed-sample pixel"));
                     }
                     task.primary_coverage = result.pixel.covered;
+                    if let Some(stats) = task.statistics.first_mut() {
+                        stats.completed_components = result.pixel.components;
+                        stats.completed_pilot_support = result.pixel.pilot_support;
+                    }
                     task.finish_sample(result.pixel.radiance)?;
                 } else {
                     direct::publish(task, result.pixel)?;

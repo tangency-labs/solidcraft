@@ -330,7 +330,7 @@ mod tests {
         assert_eq!(crate::Document::from_json(&direct_document.to_json()).unwrap(), direct_document);
         options.progressive = Some(solidcraft_render::job::CpuProgressiveOptions { samples_per_pixel: 16, seed: 9 });
         options.shadows = true;
-        options.path = Some(solidcraft_render::job::CpuPathOptions { max_depth: 3 });
+        options.path = Some(solidcraft_render::job::CpuPathOptions { max_depth: 3, ..Default::default() });
         setup.job = Some(RenderJob::CpuRaytrace { transparent_background: false, options: Box::new(options.clone()) });
         setup.validate().unwrap();
         let mut document = crate::Document::default();

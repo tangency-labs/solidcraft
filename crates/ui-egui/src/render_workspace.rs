@@ -1330,20 +1330,28 @@ fn switch_celestial_method(app: &mut SolveApp, method: ImageMethod, enable_indir
     let before = setups::draft(app)?;
     let before_render = std::sync::Arc::downgrade(&app.session.doc.render);
     let previous = app.render_workspace.view.clone();
-    if previous.studio.transmission_samples != 1 {
-        return Err(app.tr("render.cpu_celestial_unportable").into());
-    }
     let mut next = previous.clone();
     if method == ImageMethod::CpuRaytrace {
         if enable_indirect {
             let depth = u8::try_from(next.max_depth).map_err(|_| app.tr("render.cpu_celestial_switch").to_string())?;
-            let path = solidcraft_engine::render::job::CpuPathOptions { max_depth: depth };
+            let path = solidcraft_engine::render::job::CpuPathOptions {
+                max_depth: depth,
+                transmission_samples: previous.studio.transmission_samples,
+                split_first_interface: previous.studio.split_first_interface,
+                ..next.raytrace.path.unwrap_or_default()
+            };
             path.validate().map_err(|error| error.to_string())?;
             next.raytrace.path = Some(path);
             next.raytrace.progressive.get_or_insert_default();
             next.raytrace.primary_samples = 1;
             next.raytrace.shadows = true;
             next.cpu_sampling_initialized = true;
+        }
+        if let Some(path) = &mut next.raytrace.path {
+            path.transmission_samples = previous.studio.transmission_samples;
+            path.split_first_interface = previous.studio.split_first_interface;
+        } else if previous.studio.transmission_samples != 1 || previous.studio.split_first_interface {
+            return Err(app.tr("render.cpu_celestial_unportable").into());
         }
         if next.raytrace.path.is_none() {
             if next.studio.volume.is_some_and(|volume| volume.active()) {
@@ -1380,6 +1388,10 @@ fn switch_celestial_method(app: &mut SolveApp, method: ImageMethod, enable_indir
             next.cpu.hdr = previous.studio.hdr.clone();
         }
     } else if method == ImageMethod::GpuRaytrace {
+        if let Some(path) = previous.raytrace.path {
+            next.studio.transmission_samples = path.transmission_samples;
+            next.studio.split_first_interface = path.split_first_interface;
+        }
         next.studio.environment = match previous.cpu.environment {
             cpu::Environment::Sky => studio::Environment::Sky,
             cpu::Environment::Hdr => studio::Environment::Hdr,
@@ -1425,7 +1437,10 @@ fn select_image_method(app: &mut SolveApp, method: ImageMethod) {
     if method != app.render_workspace.view.method
         && method != ImageMethod::Raster
         && app.render_workspace.view.method != ImageMethod::Raster
-        && (celestial_switch_active(app) || app.render_workspace.view.studio.volume.is_some() || app.render_workspace.view.studio.caustics.is_some())
+        && (celestial_switch_active(app)
+            || app.render_workspace.view.studio.volume.is_some()
+            || app.render_workspace.view.studio.caustics.is_some()
+            || app.render_workspace.view.studio.split_first_interface)
     {
         let result = if app.render_workspace.view.studio.volume.is_some() {
             switch_volume_method(app, method, false)
@@ -1437,7 +1452,20 @@ fn select_image_method(app: &mut SolveApp, method: ImageMethod) {
         }
         return;
     }
-    app.render_workspace.view.method = method;
+    let view = &mut app.render_workspace.view;
+    if view.method == ImageMethod::GpuRaytrace && method == ImageMethod::CpuRaytrace {
+        if let Some(path) = &mut view.raytrace.path {
+            path.transmission_samples = view.studio.transmission_samples;
+            path.split_first_interface = view.studio.split_first_interface;
+        }
+    } else if view.method == ImageMethod::CpuRaytrace
+        && method == ImageMethod::GpuRaytrace
+        && let Some(path) = view.raytrace.path
+    {
+        view.studio.transmission_samples = path.transmission_samples;
+        view.studio.split_first_interface = path.split_first_interface;
+    }
+    view.method = method;
     if method == ImageMethod::CpuRaytrace && !app.render_workspace.view.cpu_sampling_initialized {
         let options = &mut app.render_workspace.view.raytrace;
         if !app.preferences.render_legacy_image_defaults && options.progressive.is_none() {
@@ -1469,8 +1497,10 @@ fn method_selector(app: &mut SolveApp, ui: &mut egui::Ui) {
 fn method_dropdown(app: &mut SolveApp, ui: &mut egui::Ui) -> egui::Response {
     let current = app.render_workspace.view.method;
     let label = app.tr(current.label()).to_string();
-    let bounded =
-        celestial_switch_active(app) || app.render_workspace.view.studio.volume.is_some() || app.render_workspace.view.studio.caustics.is_some();
+    let bounded = celestial_switch_active(app)
+        || app.render_workspace.view.studio.volume.is_some()
+        || app.render_workspace.view.studio.caustics.is_some()
+        || app.render_workspace.view.studio.split_first_interface;
     let width = ui.available_width().min(solidcraft_theme::Tokens::get().form_card_width);
     let choices = |ui: &mut egui::Ui| {
         for (method, handle) in [
@@ -1492,7 +1522,10 @@ fn method_dropdown(app: &mut SolveApp, ui: &mut egui::Ui) -> egui::Response {
         }
         let volume_path = app.render_workspace.view.studio.volume.is_some_and(|volume| volume.active());
         if current == ImageMethod::GpuRaytrace
-            && (celestial_switch_active(app) || volume_path || app.render_workspace.view.studio.caustics.is_some())
+            && (celestial_switch_active(app)
+                || volume_path
+                || app.render_workspace.view.studio.caustics.is_some()
+                || app.render_workspace.view.studio.split_first_interface)
             && app.render_workspace.view.raytrace.path.is_none()
         {
             let sampling = app.render_workspace.view.raytrace.progressive.unwrap_or_default();

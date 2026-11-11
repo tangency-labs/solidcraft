@@ -1311,7 +1311,7 @@ fn path_fixture(samples: u32, depth: u8, ceiling: bool) -> ImageTask {
     let scene = ProductScene { bounds: meshes.iter().fold(Aabb3::EMPTY, |b, m| b.union(&m.mesh.bounds())), meshes };
     let options = RaytraceOptions {
         threads: 1,
-        path: Some(job::CpuPathOptions { max_depth: depth }),
+        path: Some(job::CpuPathOptions { max_depth: depth, ..Default::default() }),
         budget: job::CpuBudget::Studio,
         progressive: Some(job::CpuProgressiveOptions { samples_per_pixel: samples, seed: 9 }),
         shadows: true,
@@ -1638,7 +1638,11 @@ fn cpu_path_refuses_mixed_transport_instead_of_erasing_selected_optical_data() {
     assert!(admit(&original.scene, &request, &options).unwrap_err().message.contains("selected reflection"));
     assert_eq!(options.reflections, Some(reflection));
     for depth in [0, job::MAX_PATH_DEPTH + 1] {
-        assert!(RaytraceOptions { path: Some(job::CpuPathOptions { max_depth: depth }), ..original.options.clone() }.validate().is_err());
+        assert!(
+            RaytraceOptions { path: Some(job::CpuPathOptions { max_depth: depth, ..Default::default() }), ..original.options.clone() }
+                .validate()
+                .is_err()
+        );
     }
     assert!(RaytraceOptions { progressive: None, ..original.options.clone() }.validate().unwrap_err().message.contains("progressive"));
     assert!(RaytraceOptions { shadows: false, ..original.options.clone() }.validate().unwrap_err().message.contains("shadows"));
@@ -1767,8 +1771,12 @@ fn composed_cpu_path_alpha_and_denoise_keep_analytic_matte_all_prefixes_and_raw_
     let output = job::OutputOptions { linear_exr: true, ..Default::default() };
     let make = |samples, transparent, denoise, path: bool| {
         let original = alpha_fixture(Some(samples), 1, transparent, Some(output), 1.5);
-        let options =
-            RaytraceOptions { path: path.then_some(job::CpuPathOptions { max_depth: 1 }), denoise, shadows: true, ..original.options.clone() };
+        let options = RaytraceOptions {
+            path: path.then_some(job::CpuPathOptions { max_depth: 1, ..Default::default() }),
+            denoise,
+            shadows: true,
+            ..original.options.clone()
+        };
         let request = ImageRequest { raytrace: Some(options.clone()), ..original.request.clone() };
         ImageTask::new(original.scene, request, original.cancel, options).unwrap()
     };
@@ -1819,7 +1827,7 @@ fn composed_panel_fixture(samples: u32, denoise: bool, path: bool, panel_z: f64,
         .collect();
     let options = RaytraceOptions {
         denoise,
-        path: path.then_some(job::CpuPathOptions { max_depth: 1 }),
+        path: path.then_some(job::CpuPathOptions { max_depth: 1, ..Default::default() }),
         area_lights: Some(lights),
         area_samples: Some(1),
         seed: Some(31),
@@ -2064,7 +2072,7 @@ fn aging_image(samples: u32, path: bool, denoise: bool, layers: &[job::aging::Ag
     let options = RaytraceOptions {
         aging: (!layers.is_empty()).then(|| aging_stack(layers)),
         denoise,
-        path: path.then_some(job::CpuPathOptions { max_depth: 2 }),
+        path: path.then_some(job::CpuPathOptions { max_depth: 2, ..Default::default() }),
         lights: (!path)
             .then(|| vec![job::DirectionalLightOptions { direction: [0.0, 0.0, 1.0], color: [1.0; 3], intensity: std::f64::consts::PI }])
             .or_else(|| Some(vec![])),
@@ -2411,7 +2419,7 @@ fn cpu_mapped_fixture(samples: u32, path: bool, guides: bool, all_roles: bool) -
         binding.normal = Some(job::textures::TextureMap::new(cpu_map_png(1, 1, &[128, 255, 255, 255]), MapRole::NormalOpenGl).unwrap());
     }
     let options = RaytraceOptions {
-        path: path.then_some(job::CpuPathOptions { max_depth: 2 }),
+        path: path.then_some(job::CpuPathOptions { max_depth: 2, ..Default::default() }),
         denoise: guides,
         lights: Some(if path { vec![] } else { vec![job::DirectionalLightOptions { direction: [0.0, 0.0, 1.0], color: [1.0; 3], intensity: 3.0 }] }),
         environment: path.then_some(job::RaytraceEnvironmentOptions { color: [1.0; 3], intensity: 1.0 }),
@@ -2821,7 +2829,7 @@ fn composed_map_aging_fixture(samples: u32, path: bool, guides: bool, explicit: 
     };
     let options = RaytraceOptions {
         aging: (!explicit).then(|| aging_stack(&[layer])),
-        path: path.then_some(job::CpuPathOptions { max_depth: 2 }),
+        path: path.then_some(job::CpuPathOptions { max_depth: 2, ..Default::default() }),
         denoise: guides,
         environment: path.then_some(job::RaytraceEnvironmentOptions { color: [1.0; 3], intensity: 1.0 }),
         lights: Some(if path {
@@ -2972,7 +2980,16 @@ mod adaptive_cpu_images {
     use crate::job::adaptive::{AdaptiveSampling, SamplingReport};
 
     fn policy() -> AdaptiveSampling {
-        AdaptiveSampling { pilot_samples: 16, min_samples: 16, relative_error: 0.0, absolute_error: 0.2, coverage_error: 0.1 }
+        AdaptiveSampling {
+            optical_min_samples: 0,
+            pilot_samples: 16,
+            min_samples: 16,
+            relative_error: 0.0,
+            absolute_error: 0.2,
+            coverage_error: 0.1,
+            component_uncertainty: false,
+            map_validation_batches: 0,
+        }
     }
     fn adaptive_fixture(denoise: bool, path: bool, lens: bool) -> ImageTask {
         let mut camera = solidcraft_viewport::Camera { distance: 10.0, fov: 0.0, ..Default::default() };
@@ -3009,7 +3026,7 @@ mod adaptive_cpu_images {
             adaptive: Some(Box::new(policy())),
             progressive: Some(job::CpuProgressiveOptions { samples_per_pixel: 48, seed: 9 }),
             denoise,
-            path: path.then_some(job::CpuPathOptions { max_depth: 1 }),
+            path: path.then_some(job::CpuPathOptions { max_depth: 1, ..Default::default() }),
             shadows: path,
             lens: lens.then_some(job::ThinLens { aperture_radius_mm: 0.01, focus_distance_mm: 10.0 }),
             output: Some(Box::new(job::OutputOptions { linear_exr: true, ..Default::default() })),
@@ -3415,7 +3432,14 @@ mod composed_adaptive_map_aging_tests {
         let original = composed_map_aging_fixture(32, path, guides, explicit, true);
         let options = RaytraceOptions {
             adaptive: adaptive.then(|| {
-                Box::new(AdaptiveSampling { pilot_samples: 16, min_samples: 16, relative_error: 0.0, absolute_error: 0.2, coverage_error: 0.01 })
+                Box::new(AdaptiveSampling {
+                    pilot_samples: 16,
+                    min_samples: 16,
+                    relative_error: 0.0,
+                    absolute_error: 0.2,
+                    coverage_error: 0.01,
+                    ..Default::default()
+                })
             }),
             ..original.options
         };
@@ -3661,7 +3685,7 @@ fn cpu_general_glass_fixture(samples: u32, nested: bool, ior: f64) -> ImageTask 
         .collect();
     let options = RaytraceOptions {
         threads: 1,
-        path: Some(job::CpuPathOptions { max_depth: 16 }),
+        path: Some(job::CpuPathOptions { max_depth: 16, ..Default::default() }),
         progressive: Some(job::CpuProgressiveOptions { samples_per_pixel: samples, seed: 9 }),
         budget: job::CpuBudget::Studio,
         dielectrics,
@@ -3705,7 +3729,7 @@ fn opus_serial_optics_fixture(count: usize, depth: u8, inside_last: bool) -> Ima
         .collect();
     let options = RaytraceOptions {
         threads: 1,
-        path: Some(job::CpuPathOptions { max_depth: depth }),
+        path: Some(job::CpuPathOptions { max_depth: depth, ..Default::default() }),
         progressive: Some(job::CpuProgressiveOptions { samples_per_pixel: 1, seed: 9 }),
         budget: job::CpuBudget::Studio,
         dielectrics,
@@ -4295,8 +4319,11 @@ fn cpu_inside_glass_total_internal_reflection_retains_the_initial_medium_until_t
             "all axis-face encounters are analytically above the critical angle"
         );
     }
-    let request = ImageRequest { camera, raytrace: Some(options.clone()), ..base.request.clone() };
-    assert_eq!(path_mean(ImageTask::new(base.scene.clone(), request, CancelToken::default(), options).unwrap()).0, [0.0; 3]);
+    for split in [false, true] {
+        options.path.as_mut().unwrap().split_first_interface = split;
+        let request = ImageRequest { camera, raytrace: Some(options.clone()), ..base.request.clone() };
+        assert_eq!(path_mean(ImageTask::new(base.scene.clone(), request, CancelToken::default(), options.clone()).unwrap()).0, [0.0; 3]);
+    }
 }
 #[test]
 fn cpu_inside_glass_refuses_actual_near_clip_crossings_for_eye_and_pupil_without_publishing_a_frame() {
@@ -4539,7 +4566,7 @@ fn cpu_inside_glass_origin_slot_keeps_exact_capacity_and_no_sample_commit_on_wor
 fn cpu_subsurface_fixture(samples: u32, nested: bool, endpoint: u8, depth: u8, rates: [f64; 2], g: f64, lens: Option<job::ThinLens>) -> ImageTask {
     let base = cpu_inside_glass_fixture(samples, nested, endpoint, lens);
     let mut options = base.options.clone();
-    options.path = Some(job::CpuPathOptions { max_depth: depth });
+    options.path = Some(job::CpuPathOptions { max_depth: depth, ..Default::default() });
     for (index, input) in options.dielectrics.iter_mut().enumerate() {
         input.subsurface = Some(crate::transmission::subsurface::Subsurface { scattering_per_mm: rates[index], anisotropy: g });
     }
@@ -4561,7 +4588,7 @@ fn cpu_subsurface_only_keeps_smooth_snell_direction_and_opt_in_caustics_keep_geo
         let mesh = Arc::make_mut(&mut scene.meshes[0].mesh);
         mesh.normals = vec![smooth; mesh.positions.len()];
         let mut options = base.options.clone();
-        options.path = Some(job::CpuPathOptions { max_depth: 2 });
+        options.path = Some(job::CpuPathOptions { max_depth: 2, ..Default::default() });
         options.progressive.as_mut().unwrap().seed = seed;
         options.dielectrics[0].subsurface = Some(crate::transmission::subsurface::Subsurface { scattering_per_mm: 0.3, anisotropy: 0.4 });
         options.caustics = caustics.then_some(job::CausticOptions { photons: 1, ..Default::default() });
@@ -5086,7 +5113,7 @@ fn cpu_volume_fixture(samples: u32, depth: u8, perspective: bool, opaque: bool, 
     let options = RaytraceOptions {
         threads: 1,
         volume,
-        path: Some(job::CpuPathOptions { max_depth: depth }),
+        path: Some(job::CpuPathOptions { max_depth: depth, ..Default::default() }),
         budget: job::CpuBudget::Studio,
         progressive: Some(job::CpuProgressiveOptions { samples_per_pixel: samples, seed: 9 }),
         lights: Some(vec![]),
@@ -5289,7 +5316,7 @@ fn independent_volume_celestial(
 }
 #[test]
 fn cpu_volume_none_and_authored_zero_keep_original_pixels_rng_work_and_heap_owners() {
-    for path in [None, Some(job::CpuPathOptions { max_depth: 4 })] {
+    for path in [None, Some(job::CpuPathOptions { max_depth: 4, ..Default::default() })] {
         let build = |zero: bool| {
             let base =
                 cpu_volume_fixture(7, 4, false, true, zero.then(|| job::volume::HomogeneousVolume { extinction_per_mm: 0.0, ..volume_slab() }));
@@ -6241,7 +6268,7 @@ fn cpu_model_sheet_fixture(samples: u32, depth: u8, model: crate::glass_model::G
     });
     scene.bounds = scene.meshes[0].mesh.bounds();
     let mut options = original.options.clone();
-    options.path = Some(job::CpuPathOptions { max_depth: depth });
+    options.path = Some(job::CpuPathOptions { max_depth: depth, ..Default::default() });
     options.dielectrics[0].boundary = job::DielectricBoundary::ThinSheet;
     options.dielectrics[0].thickness_mm = 0.7;
     options.dielectrics[0].absorption_per_mm = absorption;
@@ -6338,7 +6365,7 @@ fn cpu_directional_caustic_fixture(photons: u32, radius_mm: f64) -> ImageTask {
     });
     scene.bounds = scene.meshes.iter().fold(Aabb3::EMPTY, |bounds, body| bounds.union(&body.mesh.bounds()));
     let mut options = original.options.clone();
-    options.path = Some(job::CpuPathOptions { max_depth: 1 });
+    options.path = Some(job::CpuPathOptions { max_depth: 1, ..Default::default() });
     options.dielectrics[0].absorption_per_mm = [0.0; 3];
     options.lights = Some(vec![job::DirectionalLightOptions { direction: [0.0, 0.0, 1.0], color: [1.0; 3], intensity: 1.0 }]);
     options.environment = Some(job::RaytraceEnvironmentOptions { color: [0.0; 3], intensity: 0.0 });
@@ -6352,6 +6379,7 @@ fn cpu_directional_caustic_fixture(photons: u32, radius_mm: f64) -> ImageTask {
         guided_emission: false,
         refresh_per_pass: false,
         power_weighted_sources: false,
+        ..Default::default()
     });
     let camera = solidcraft_viewport::Camera {
         target: Vec3::new(0.0, 0.0, 1.0),
@@ -6598,7 +6626,7 @@ fn cpu_guided_photons_preserve_translated_aperture_power_and_upstream_occlusion(
         color: [1.0; 3],
         intensity: 1.0,
     }]);
-    area.path = Some(job::CpuPathOptions { max_depth: 4 });
+    area.path = Some(job::CpuPathOptions { max_depth: 4, ..Default::default() });
     area.caustics.as_mut().unwrap().area_lights = true;
     // A 0.5 mm panel and 0.75 mm gather radius at 7 mm are within 4%
     // of the centre-axis irradiance from a differential emitter.
@@ -6640,7 +6668,7 @@ fn cpu_area_photon_caustics_match_rectangle_radiometry_and_partition_camera_dept
     let render = |area_lights, photon_depth, camera_depth, roughness| {
         let mut options = original.options.clone();
         options.caustics = Some(job::CausticOptions { area_lights, max_depth: photon_depth, ..options.caustics.unwrap() });
-        options.path = Some(job::CpuPathOptions { max_depth: camera_depth });
+        options.path = Some(job::CpuPathOptions { max_depth: camera_depth, ..Default::default() });
         options.dielectrics[0].model = Some(crate::glass_model::GlassModel { roughness, ..Default::default() });
         let request = ImageRequest { raytrace: Some(options.clone()), ..original.request.clone() };
         path_mean(ImageTask::new(original.scene.clone(), request, CancelToken::default(), options).unwrap()).0
@@ -6680,7 +6708,7 @@ fn cpu_area_photon_caustics_match_rectangle_radiometry_and_partition_camera_dept
     blocker.intensity = 0.0;
     lights.push(blocker);
     options.caustics.as_mut().unwrap().area_lights = true;
-    options.path = Some(job::CpuPathOptions { max_depth: 4 });
+    options.path = Some(job::CpuPathOptions { max_depth: 4, ..Default::default() });
     let request = ImageRequest { raytrace: Some(options.clone()), ..original.request };
     let blocked = path_mean(ImageTask::new(original.scene, request, CancelToken::default(), options).unwrap()).0;
     assert_eq!(blocked, [0.0; 3], "the receiver-facing rectangle intercepts both representations of the same path");
@@ -6699,7 +6727,7 @@ fn cpu_environment_caustics_match_disk_radiometry_and_preserve_finite_sun() {
     let render_mode = |environment, photon_depth, camera_depth, sun: bool, blocker: bool, guided_emission| {
         let mut options = original.options.clone();
         options.caustics = Some(job::CausticOptions { environment, max_depth: photon_depth, guided_emission, ..options.caustics.unwrap() });
-        options.path = Some(job::CpuPathOptions { max_depth: camera_depth });
+        options.path = Some(job::CpuPathOptions { max_depth: camera_depth, ..Default::default() });
         options.sun = sun.then(|| Box::new(job::Sun { direction: [0.0, 0.0, 1.0], angular_radius_rad: 0.7, radiance: [0.25, 0.5, 0.75] }));
         if blocker {
             options.area_lights = Some(vec![job::RectangleLightOptions {
@@ -6878,7 +6906,7 @@ fn cpu_hard_rough_fixture(samples: u32, depth: u8, sheet: bool, roughness: f64, 
     let model = crate::glass_model::GlassModel { roughness, ..Default::default() };
     let base = if sheet { cpu_model_sheet_fixture(samples, depth, model, [0.0; 3]) } else { cpu_general_glass_fixture(samples, false, 1.5) };
     let mut options = base.options.clone();
-    options.path = Some(job::CpuPathOptions { max_depth: depth });
+    options.path = Some(job::CpuPathOptions { max_depth: depth, ..Default::default() });
     options.dielectrics[0].model = Some(model);
     options.dielectrics[0].absorption_per_mm = [0.0; 3];
     options.lights = Some(vec![job::DirectionalLightOptions { direction: light, color: [1.0; 3], intensity: 1.0 }]);
@@ -7002,6 +7030,7 @@ fn cpu_backlit_rough_fixture(depth: u8, sheet: bool, map: bool, photons: u32) ->
             guided_emission: false,
             refresh_per_pass: false,
             power_weighted_sources: false,
+            ..Default::default()
         });
     })
 }
@@ -7154,6 +7183,7 @@ fn cpu_hg_photon_reservoir_reaches_volume_receivers_after_a_closed_optical_event
                 guided_emission: false,
                 refresh_per_pass: false,
                 power_weighted_sources: false,
+                ..Default::default()
             });
         })
     };
@@ -7714,7 +7744,7 @@ fn workstation_admits_combined_maximum_quality_and_optional_pilots_photons_witho
                     threads: job::MAX_CPU_THREADS,
                     budget: job::CpuBudget::Workstation,
                     progressive: Some(job::CpuProgressiveOptions { samples_per_pixel: job::MAX_UI_SAMPLES, seed: 3 }),
-                    path: Some(job::CpuPathOptions { max_depth: job::MAX_PATH_DEPTH }),
+                    path: Some(job::CpuPathOptions { max_depth: job::MAX_PATH_DEPTH, ..Default::default() }),
                     texture_filtering: true,
                     metal_energy_compensation: true,
                     adaptive: adaptive.then(|| {
@@ -7732,7 +7762,13 @@ fn workstation_admits_combined_maximum_quality_and_optional_pilots_photons_witho
                     }),
                     supersampling: 2,
                     denoise: true,
-                    denoise_settings: job::DenoiseSettings { passes: 3, strength: 1.0, firefly_suppression: true, optical_filter: true },
+                    denoise_settings: job::DenoiseSettings {
+                        passes: 3,
+                        strength: 1.0,
+                        firefly_suppression: true,
+                        optical_filter: true,
+                        ..Default::default()
+                    },
                     denoise_diagnostics: true,
                     output: Some(Box::new(job::OutputOptions {
                         linear_exr: true,
@@ -7808,4 +7844,640 @@ fn browser_refuses_custom_native_workers_without_rewriting_saved_intent() {
     let request = ImageRequest { raytrace: Some(options.clone()), ..source.request };
     assert_eq!(admit_layout(&source.scene, &request, &options).unwrap_err().code, ErrorCode::HostUnavailable);
     assert_eq!(request.raytrace.as_ref().unwrap().threads, 2);
+}
+
+#[test]
+fn progressive_photon_maps_rebuild_at_global_epochs_and_probes_preserve_transport() {
+    let render = |probe_pixel, threads| {
+        let original = cpu_directional_caustic_fixture(2048, 3.0);
+        let mut options = original.options;
+        options.threads = threads;
+        options.progressive.as_mut().unwrap().samples_per_pixel = 3;
+        let caustics = options.caustics.as_mut().unwrap();
+        caustics.refresh_per_pass = true;
+        caustics.progressive_radius = true;
+        caustics.probe_pixel = probe_pixel;
+        caustics.probe_sample = if probe_pixel.is_some() { 1 } else { 0 };
+        let schedule = *caustics;
+        let request = ImageRequest { raytrace: Some(options.clone()), ..original.request };
+        let mut task = ImageTask::new(original.scene, request, CancelToken::default(), options).unwrap();
+        let mut maps = Vec::new();
+        let mut films = Vec::new();
+        for _ in 0..2_000_000 {
+            if let Some(map) = task.caustics.first()
+                && map.ready()
+                && map.test_epoch() as usize == maps.len()
+            {
+                assert_eq!(map.test_radii(), schedule.radii_mm(map.test_epoch()).unwrap());
+                maps.push(map.test_deposits());
+            }
+            if let Some(progressive) = task.progressive.as_ref()
+                && progressive.film.samples() as usize > films.len()
+            {
+                films.push(progressive.film.pixel(0).unwrap().0);
+            }
+            if films.len() == 3 {
+                return (maps, films, task.photon_diagnostics());
+            }
+            task.step_with_previews(1).unwrap();
+        }
+        panic!("bounded progressive photon fixture did not finish");
+    };
+    let ordinary = render(None, 1);
+    let measured = render(Some([0, 0]), 1);
+    assert_eq!(ordinary.0, measured.0, "probes never change photon paths or reservoir choices");
+    assert_eq!(ordinary.1, measured.1, "probes never change raw scene-linear pixels");
+    assert_eq!(ordinary.0.len(), 3);
+    assert_ne!(ordinary.0[0], ordinary.0[1]);
+    let report = measured.2.unwrap();
+    assert!(report.selected && report.gathers > 0 && report.contributing > 0);
+    assert_eq!((report.sample, report.epoch), (1, 1));
+    assert_eq!(report.histogram.iter().sum::<u32>(), report.contributing);
+    assert!(report.visited >= report.eligible && report.eligible >= report.contributing);
+    for channel in 0..3 {
+        let second_sample = measured.1[1][channel] * 2.0 - measured.1[0][channel];
+        assert!((second_sample - report.local_radiance_sum[channel]).abs() < 1e-12);
+    }
+    for entry in report.largest.iter().take(report.top_count as usize) {
+        assert_eq!(entry.source_probability, 1.0);
+        assert_eq!(entry.reservoir_visits, 1);
+        assert_eq!(entry.receiver_kind, 1);
+        assert_eq!(entry.normal_measure, 1.0);
+        assert!(entry.emission_density > 0.0);
+        entry.validate().unwrap();
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let parallel = render(Some([0, 0]), 2);
+        assert_eq!(measured, parallel, "worker batching preserves map epochs and the selected probe");
+    }
+}
+
+#[test]
+fn cpu_independent_map_assessment_restores_fixed_and_refreshed_production_streams() {
+    for (refresh, progressive_radius) in [(false, false), (true, false), (true, true)] {
+        let run = |assessment, threads| {
+            let base = cpu_directional_caustic_fixture(128, 3.0);
+            let mut options = base.options;
+            options.threads = threads;
+            options.progressive.as_mut().unwrap().samples_per_pixel = 16;
+            options.path.as_mut().unwrap().transmission_samples = 2;
+            options.caustics.as_mut().unwrap().refresh_per_pass = refresh;
+            options.caustics.as_mut().unwrap().progressive_radius = progressive_radius;
+            options.adaptive = Some(Box::new(job::adaptive::AdaptiveSampling {
+                pilot_samples: 16,
+                min_samples: 16,
+                component_uncertainty: assessment,
+                map_validation_batches: if assessment { 2 } else { 0 },
+                ..Default::default()
+            }));
+            options.radiance_components = false;
+            let request = ImageRequest { raytrace: Some(options.clone()), ..base.request };
+            let mut task = ImageTask::new(base.scene, request, CancelToken::default(), options).unwrap();
+            let work = task.admission.caustic_work;
+            let map_buffers = task.caustics[0].test_buffers();
+            if assessment {
+                assert_eq!(work.unwrap().maps, if refresh { 18 } else { 3 });
+            }
+            let mut production_map = None;
+            let mut assessment_epochs = std::collections::BTreeSet::new();
+            for _ in 0..2_000_000 {
+                if let Some(map) = task.caustics.first().filter(|map| map.ready()) {
+                    if map.test_epoch() >= 0x8000_0000 {
+                        assert_eq!(map.test_buffers(), map_buffers, "all assessment maps reuse the two admitted buffers");
+                        assessment_epochs.insert(map.test_epoch());
+                    }
+                    if task.progressive.as_ref().is_some_and(|p| p.film.samples() >= 16)
+                        && map.test_epoch() == if refresh { 16 } else { 0 }
+                        && production_map.is_none()
+                    {
+                        production_map = Some(map.test_deposits());
+                        assert_eq!(map.test_radii(), task.options.caustics.unwrap().radii_mm(if refresh { 16 } else { 0 }).unwrap());
+                    }
+                }
+                if let ImagePoll::Complete(png) = task.step_with_previews(4).unwrap() {
+                    let report = task.sampling_report().unwrap();
+                    assert!(task.radiance_report().is_none(), "pilot-only components must not create a production statistics film");
+                    assert_eq!(report.production_samples, 16);
+                    assert_eq!(report.primary_path_evaluations, 16 + 16 * 2);
+                    if assessment {
+                        assert_eq!(assessment_epochs.len(), 2);
+                        let evidence = report.pilot_evidence.as_ref().unwrap();
+                        assert_eq!(evidence.map_batches, 2);
+                        assert_eq!(evidence.camera_observations_per_map, 8);
+                        assert_eq!(evidence.invalid_evidence_pixels, 0);
+                        assert!(evidence.photon_query_observations > 0);
+                    }
+                    return (png, task.take_linear_exr().unwrap(), production_map.unwrap());
+                }
+            }
+            panic!("bounded independent-map CPU fixture did not finish");
+        };
+        let baseline = run(false, 1);
+        assert_eq!(run(true, 1), baseline, "assessment radiance/maps must never enter the canonical production master");
+        assert_eq!(run(true, 2), baseline, "worker emission copies assessment identities and restores canonical map order");
+    }
+}
+
+#[test]
+fn cpu_photon_camera_probe_keeps_prefork_spectral_lanes_and_raw_transport_exact() {
+    let render = |sheet: bool, probe: bool| {
+        let base = cpu_backlit_rough_fixture(3, sheet, true, 2048);
+        let mut options = base.options;
+        options.threads = 1;
+        options.progressive.as_mut().unwrap().samples_per_pixel = 4;
+        options.path.as_mut().unwrap().transmission_samples = 4;
+        options.dielectrics[0].model.as_mut().unwrap().dispersion = Some(crate::glass_model::Dispersion { abbe_number: 40.0 });
+        options.caustics.as_mut().unwrap().probe_pixel = probe.then_some([0, 0]);
+        let request = ImageRequest { raytrace: Some(options.clone()), ..base.request };
+        let mut task = ImageTask::new(base.scene, request, CancelToken::default(), options).unwrap();
+        for _ in 0..1_000_000 {
+            if let ImagePoll::Complete(png) = task.step_with_previews(64).unwrap() {
+                return (png, task.take_linear_exr().unwrap(), task.photon_diagnostics());
+            }
+        }
+        panic!("bounded spectral photon probe fixture did not finish");
+    };
+    for sheet in [false, true] {
+        let ordinary = render(sheet, false);
+        let measured = render(sheet, true);
+        assert_eq!(ordinary.0, measured.0);
+        assert_eq!(ordinary.1, measured.1, "probe must preserve every raw bit before any reconstruction");
+        let report = measured.2.unwrap();
+        assert!(report.selected && report.contributing > 0 && report.camera_contributing > 0);
+        let selected = report.camera.selected_sample.unwrap();
+        assert_eq!(selected.strata, 4);
+        assert!(
+            report.largest_camera.iter().take(report.camera_top_count as usize).any(|event| {
+                event.camera_depth == 0
+                    && event.camera_interfaces == 0
+                    && event.fresnel_strata == 4
+                    && event.camera_prefix.iter().filter(|value| **value == 3.0).count() == 1
+                    && event.camera_prefix.iter().filter(|value| **value == 0.0).count() == 2
+            }),
+            "the rough receiver is evaluated with its spectral prefix before the first Fresnel fork"
+        );
+        for axis in 0..3 {
+            let expected = report.camera_radiance_sum[axis] / 4.0;
+            assert!((selected.radiance.photon[axis] - expected).abs() <= 2e-12 * expected.abs().max(f64::MIN_POSITIVE));
+        }
+        let output = report.camera.output.unwrap();
+        assert_eq!(output.raw_rgba, native_exr_pixels(&measured.1).get_pixel(0, 0).0.map(f64::from));
+        for axis in 0..3 {
+            let beauty = output.raw_rgba[axis];
+            assert!((beauty - output.photon[axis] - output.other_estimators[axis]).abs() <= 2e-6 * beauty.abs().max(f64::MIN_POSITIVE));
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn cpu_photon_probe_workers_merge_unequal_adaptive_supersample_counts_and_unreached_detail() {
+    let render = |probe_sample: Option<u32>, threads| {
+        let base = cpu_directional_caustic_fixture(2048, 3.0);
+        let mut scene = base.scene;
+        // A fixed geometric edge cuts the first trace-pixel column in half.
+        // Its independent pilot needs the cap, while the next column is constant.
+        // A64-pixel trace row puts the four sibling pixels in two worker tiles.
+        let (origin, direction) = base.request.camera.ray(0.5, 0.5, 64.0, 2.0);
+        let edge = (origin + direction * ((1.0 - origin.z) / direction.z)).x;
+        let receiver = scene.meshes.last_mut().unwrap();
+        let mut mesh = receiver.mesh.as_ref().clone();
+        mesh.positions[0].x = edge;
+        mesh.positions[3].x = edge;
+        receiver.mesh = Arc::new(mesh);
+        scene.bounds = scene.meshes.iter().fold(Aabb3::EMPTY, |bounds, body| bounds.union(&body.mesh.bounds()));
+        let mut options = base.options;
+        options.threads = threads;
+        options.supersampling = 2;
+        options.path.as_mut().unwrap().transmission_samples = 4;
+        options.progressive.as_mut().unwrap().samples_per_pixel = 32;
+        options.adaptive = Some(Box::new(job::adaptive::AdaptiveSampling {
+            pilot_samples: 16,
+            min_samples: 16,
+            relative_error: 0.0,
+            absolute_error: 1e-5,
+            coverage_error: 0.25,
+            ..Default::default()
+        }));
+        let caustics = options.caustics.as_mut().unwrap();
+        caustics.probe_pixel = probe_sample.map(|_| [1, 0]);
+        caustics.probe_sample = probe_sample.unwrap_or(0);
+        let request = ImageRequest { width: 32, height: 1, raytrace: Some(options.clone()), ..base.request };
+        let mut task = ImageTask::new(scene, request, CancelToken::default(), options).unwrap();
+        for _ in 0..3_000_000 {
+            if let ImagePoll::Complete(png) = task.step_with_previews(256).unwrap() {
+                return (png, task.take_linear_exr().unwrap(), task.photon_diagnostics());
+            }
+        }
+        panic!("bounded adaptive supersampled photon probe fixture did not finish");
+    };
+    let ordinary = render(None, 1);
+    let serial = render(Some(0), 1);
+    let parallel = render(Some(0), 2);
+    let unreached = render(Some(31), 2);
+    assert_eq!(serial, parallel, "worker scheduling preserves every per-pixel denominator and diagnostic event");
+    for measured in [&serial, &unreached] {
+        assert_eq!(ordinary.0, measured.0);
+        assert_eq!(ordinary.1, measured.1, "capturing the footprint must not alter camera samples or raw output");
+        let report = measured.2.unwrap();
+        let counts = report.camera.trace_pixels.map(|pixel| pixel.samples);
+        assert_eq!(counts, [32, 16, 32, 16], "independent pilot allocation must exercise unequal sibling budgets");
+        assert_eq!(report.camera.output_pixel, [0, 0]);
+        assert_eq!(report.camera.output.unwrap().raw_rgba, native_exr_pixels(&measured.1).get_pixel(0, 0).0.map(f64::from));
+    }
+    let report = serial.2.unwrap();
+    assert_eq!(report.camera.selected_sample.unwrap().strata, 4, "even a no-fork terminated path completes all configured lanes");
+    assert!(report.gathers >= 4 && report.contributing > 0);
+    let report = unreached.2.unwrap();
+    assert!(!report.selected && report.camera.selected_sample.is_none());
+    assert_eq!(report.gathers, 0);
+    assert!(report.camera.output.is_some(), "a capped-away selected sample must retain complete final-pixel accounting");
+}
+
+#[test]
+fn cpu_smooth_split_transmission_preserves_inside_absorption_and_radiance_eta() {
+    let base = cpu_inside_glass_fixture(16, false, 0, None);
+    let mut options = base.options;
+    options.threads = 1;
+    options.path = Some(job::CpuPathOptions { max_depth: 2, split_first_interface: true, ..Default::default() });
+    options.dielectrics[0].ior = 1.5;
+    let sigma = options.dielectrics[0].absorption_per_mm;
+    let camera = base.request.camera;
+    let mut expected = [0.0; 3];
+    for ordinal in 0..16 {
+        let [x, y] = progressive::variates(9, 0, ordinal, 0);
+        let direction = camera.ray(x, y, 1.0, 1.0).1;
+        let cosine = -direction.z;
+        let fresnel = crate::transmission::fresnel(cosine, 1.5, 1.0).unwrap();
+        assert!(fresnel.transmitted_cosine.is_some());
+        for (sum, sigma) in expected.iter_mut().zip(sigma) {
+            *sum += (-sigma / cosine).exp() * (1.0 - fresnel.reflectance()) * 2.25 / 16.0;
+        }
+    }
+    let request = ImageRequest { raytrace: Some(options.clone()), ..base.request };
+    let actual = path_mean(ImageTask::new(base.scene, request, CancelToken::default(), options).unwrap()).0;
+    assert_rgb_close(actual, expected, 2e-12);
+}
+
+#[test]
+fn cpu_smooth_split_photon_probe_closes_with_one_map_per_complete_observation() {
+    let render = |probe: bool, refreshed: bool| {
+        let base = cpu_directional_caustic_fixture(512, 3.0);
+        let mut options = base.options;
+        options.threads = 1;
+        options.path = Some(job::CpuPathOptions { max_depth: 2, split_first_interface: true, ..Default::default() });
+        options.progressive.as_mut().unwrap().samples_per_pixel = 2;
+        options.radiance_components = true;
+        let caustics = options.caustics.as_mut().unwrap();
+        caustics.probe_pixel = probe.then_some([0, 0]);
+        caustics.refresh_per_pass = refreshed;
+        caustics.progressive_radius = refreshed;
+        let mut request = base.request;
+        request.camera.distance = 4.0;
+        request.raytrace = Some(options.clone());
+        let mut task = ImageTask::new(base.scene, request, CancelToken::default(), options).unwrap();
+        let mut second_lane_epochs = Vec::new();
+        for _ in 0..1_000_000 {
+            if task.path.first().is_some_and(|path| path.sampling_probe().0 == 1) {
+                let ordinal = task.progressive.as_ref().unwrap().identity(0).unwrap().ordinal;
+                let map = task.caustics.first().unwrap();
+                assert!(map.ready());
+                assert_eq!(map.test_epoch(), if refreshed { ordinal } else { 0 });
+                if second_lane_epochs.last() != Some(&ordinal) {
+                    second_lane_epochs.push(ordinal);
+                }
+            }
+            if let ImagePoll::Complete(png) = task.step_with_previews(1).unwrap() {
+                assert_eq!(second_lane_epochs, [0, 1]);
+                return (png, task.take_linear_exr().unwrap(), task.photon_diagnostics(), task.radiance_report().unwrap());
+            }
+        }
+        panic!("bounded split photon fixture did not finish");
+    };
+    for refreshed in [false, true] {
+        let ordinary = render(false, refreshed);
+        let measured = render(true, refreshed);
+        assert_eq!((ordinary.0, ordinary.1), (measured.0.clone(), measured.1.clone()));
+        assert_eq!(serde_json::to_value(ordinary.3).unwrap(), serde_json::to_value(&measured.3).unwrap());
+        let report = measured.2.unwrap();
+        assert!(report.split_first_interface && report.selected && report.contributing > 0);
+        assert_eq!(report.camera.selected_sample.unwrap().strata, 2);
+        assert_eq!(report.camera.trace_pixels[0].samples, 2);
+        assert_eq!(report.camera.output.unwrap().raw_rgba, native_exr_pixels(&measured.1).get_pixel(0, 0).0.map(f64::from));
+        for entry in report.largest_camera.iter().take(report.camera_top_count as usize) {
+            assert_eq!((entry.stratum, entry.fresnel_strata, entry.camera_interfaces), (1, 2, 1));
+            assert!(entry.camera_prefix.into_iter().all(|value| (value - 2.0 * 0.96 / 2.25).abs() < 1e-12));
+            assert_eq!(entry.final_output_radiance.unwrap(), entry.camera_radiance.map(|value| value / 4.0));
+        }
+        assert_eq!((measured.3.observations, measured.3.minimum_samples, measured.3.maximum_samples), (2, 2, 2));
+        assert!(measured.3.maximum_recombination_error < 1e-12);
+    }
+}
+
+fn cpu_glossy_continuation_fixture(environment: bool, roughness: f64) -> ImageTask {
+    let base = cpu_directional_caustic_fixture(2048, 3.0);
+    let mut scene = base.scene;
+    for point in &mut Arc::make_mut(&mut scene.meshes[1].mesh).positions {
+        point.z = -1.0;
+    }
+    scene.meshes[1].surface = Some(OpaqueSurface::new(Vec3::new(0.7, 0.45, 0.2), 0.85, roughness, 1.5).unwrap());
+    scene.bounds = scene.meshes.iter().fold(Aabb3::EMPTY, |bounds, body| bounds.union(&body.mesh.bounds()));
+    let mut options = base.options;
+    options.progressive = Some(job::CpuProgressiveOptions { samples_per_pixel: 8, seed: 12 });
+    options.path = Some(job::CpuPathOptions { max_depth: 4, ..Default::default() });
+    options.dielectrics[0].ior = 1.0;
+    options.radiance_components = true;
+    options.lights = Some(vec![]);
+    options.environment = Some(job::RaytraceEnvironmentOptions { color: [0.8, 0.6, 0.3], intensity: if environment { 1.0 } else { 0.0 } });
+    options.area_lights = (!environment).then(|| {
+        vec![job::RectangleLightOptions {
+            center_mm: [0.0, 0.0, 3.0],
+            edge_u_mm: [18.0, 0.0, 0.0],
+            edge_v_mm: [0.0, -18.0, 0.0],
+            color: [0.8, 0.6, 0.3],
+            intensity: 2.0,
+        }]
+    });
+    options.caustics =
+        Some(job::CausticOptions { max_depth: 3, area_lights: !environment, environment, probe_pixel: Some([0, 0]), ..options.caustics.unwrap() });
+    let mut request = base.request;
+    request.camera.target.z = -1.0;
+    request.raytrace = Some(options.clone());
+    ImageTask::new(scene, request, CancelToken::default(), options).unwrap()
+}
+
+fn cpu_finish_glossy_continuation(
+    base: &ImageTask,
+    options: RaytraceOptions,
+) -> (Vec<u8>, Option<job::photon_diagnostics::PhotonDiagnostics>, crate::radiance_film::RadianceReport) {
+    let request = ImageRequest { raytrace: Some(options.clone()), ..base.request.clone() };
+    let mut task = ImageTask::new(base.scene.clone(), request, CancelToken::default(), options).unwrap();
+    for _ in 0..100_000 {
+        if let ImagePoll::Complete(_) = task.step_with_previews(256).unwrap() {
+            return (task.take_linear_exr().unwrap(), task.photon_diagnostics(), task.radiance_report().unwrap());
+        }
+    }
+    panic!("bounded glossy-continuation fixture did not finish");
+}
+
+#[test]
+fn cpu_glossy_continuation_matches_the_reciprocal_camera_estimator_and_keeps_physical_caustics() {
+    for environment in [false, true] {
+        for roughness in [0.06, 0.32] {
+            let base = cpu_glossy_continuation_fixture(environment, roughness);
+            let mut selected = base.options.clone();
+            selected.caustics.as_mut().unwrap().glossy_continuation_max_roughness = Some(0.35);
+            let continuation = cpu_finish_glossy_continuation(&base, selected.clone());
+            let mut reference = selected.clone();
+            // Keep the same caustic-job normal policy and camera stream. Only
+            // continuous-source photon ownership is absent in this reference.
+            reference.caustics.as_mut().unwrap().area_lights = false;
+            reference.caustics.as_mut().unwrap().environment = false;
+            reference.caustics.as_mut().unwrap().glossy_continuation_max_roughness = None;
+            let camera = cpu_finish_glossy_continuation(&base, reference.clone());
+            assert_eq!(continuation.0, camera.0, "the transferred path family must equal the same unsmoothed camera estimator");
+            assert_eq!(continuation.2.component_radiance_sum, camera.2.component_radiance_sum);
+            let physical = continuation.2.component_radiance_sum.unwrap();
+            assert!(physical[1].iter().any(|value| *value > 0.0), "physical caustics survive the estimator transfer");
+            let report = continuation.1.unwrap();
+            assert!(report.selected && report.gathers > 0 && report.visited > 0);
+            assert_eq!(report.contributing, 0);
+            let output = report.camera.output.unwrap();
+            assert_eq!(output.photon, [0.0; 3]);
+            assert!(output.other_estimators.iter().any(|value| *value > 0.0));
+            for (raw, other) in output.raw_rgba[..3].iter().zip(output.other_estimators) {
+                assert!((*raw - other).abs() <= 2e-6 * other.abs(), "non-photon accounting must close against actual raw output");
+            }
+            selected.caustics.as_mut().unwrap().probe_pixel = None;
+            assert_eq!(cpu_finish_glossy_continuation(&base, selected).0, camera.0, "the new policy keeps probe-on/off transport exact");
+            // The selected threshold cannot create missing finite-depth slots.
+            reference.path.as_mut().unwrap().max_depth = 3;
+            let mut shallow = reference.clone();
+            shallow.caustics.as_mut().unwrap().area_lights = !environment;
+            shallow.caustics.as_mut().unwrap().environment = environment;
+            shallow.caustics.as_mut().unwrap().glossy_continuation_max_roughness = Some(0.35);
+            assert_eq!(cpu_finish_glossy_continuation(&base, shallow).0, cpu_finish_glossy_continuation(&base, reference).0);
+        }
+    }
+}
+
+#[test]
+fn cpu_glossy_continuation_uses_aged_receiver_roughness_and_preserves_excluded_receivers() {
+    for (authored, aged, eligible) in [(0.65, 0.32, true), (0.06, 0.65, false)] {
+        let base = cpu_glossy_continuation_fixture(false, authored);
+        let layer = job::aging::AgingLayer {
+            target: Some(job::aging::BodyTarget { body_index: 1, body_name: job::aging::BodyName::new(&base.scene.meshes[1].name).unwrap() }),
+            roughness: aged,
+            metallic: 0.85,
+            color_srgb: [255; 3],
+            ..solid_age()
+        };
+        let mut legacy = base.options.clone();
+        legacy.aging = Some(aging_stack(&[layer]));
+        let gathered = cpu_finish_glossy_continuation(&base, legacy.clone());
+        let measured = gathered.1.unwrap();
+        assert!(measured.contributing > 0);
+        assert!(
+            measured
+                .largest
+                .iter()
+                .take(measured.top_count as usize)
+                .all(|event| { event.receiver_roughness.is_some_and(|value| (value - aged).abs() < 1e-12) })
+        );
+        let mut selected = legacy.clone();
+        selected.caustics.as_mut().unwrap().glossy_continuation_max_roughness = Some(0.35);
+        let result = cpu_finish_glossy_continuation(&base, selected);
+        if eligible {
+            legacy.caustics.as_mut().unwrap().area_lights = false;
+            assert_eq!(result.0, cpu_finish_glossy_continuation(&base, legacy).0);
+            assert_eq!(result.1.unwrap().camera.output.unwrap().photon, [0.0; 3]);
+        } else {
+            assert_eq!(result.0, gathered.0);
+            assert_eq!(result.1.unwrap().local_radiance_sum, measured.local_radiance_sum);
+        }
+    }
+    // A roughness map crosses the authored threshold in the same direction.
+    let mut mapped = cpu_glossy_continuation_fixture(false, 0.65);
+    let mut binding = cpu_map_binding(1, &mapped.scene.meshes[1].name, None);
+    binding.roughness =
+        Some(job::textures::TextureMap::new(cpu_map_png(1, 1, &[80, 80, 80, 255]), crate::texture_input::MapRole::Roughness).unwrap());
+    mapped.request.textures = Some(Arc::new(job::textures::RuntimeTextures::new(vec![binding]).unwrap()));
+    let legacy_mapped = cpu_finish_glossy_continuation(&mapped, mapped.options.clone());
+    assert!(legacy_mapped.1.unwrap().contributing > 0);
+    assert!(
+        legacy_mapped
+            .1
+            .unwrap()
+            .largest
+            .iter()
+            .take(legacy_mapped.1.unwrap().top_count as usize)
+            .all(|event| { event.receiver_roughness.is_some_and(|value| (value - 80.0 / 255.0).abs() < 1e-7) })
+    );
+    let mut selected = mapped.options.clone();
+    selected.caustics.as_mut().unwrap().glossy_continuation_max_roughness = Some(0.35);
+    let mut reference = mapped.options.clone();
+    reference.caustics.as_mut().unwrap().area_lights = false;
+    assert_eq!(cpu_finish_glossy_continuation(&mapped, selected).0, cpu_finish_glossy_continuation(&mapped, reference).0);
+    let base = cpu_glossy_continuation_fixture(false, 0.65);
+    let legacy = cpu_finish_glossy_continuation(&base, base.options.clone());
+    let mut excluded = base.options.clone();
+    excluded.caustics.as_mut().unwrap().glossy_continuation_max_roughness = Some(0.35);
+    assert_eq!(cpu_finish_glossy_continuation(&base, excluded).0, legacy.0);
+}
+
+#[test]
+fn cpu_glossy_continuation_retains_hard_rough_and_volume_photons_and_refuses_straight_closed_shadows() {
+    let base = cpu_directional_caustic_fixture(2048, 3.0);
+    let legacy = path_mean(cpu_directional_caustic_fixture(2048, 3.0)).0;
+    let mut options = base.options.clone();
+    options.caustics.as_mut().unwrap().glossy_continuation_max_roughness = Some(1.0);
+    let request = ImageRequest { raytrace: Some(options.clone()), ..base.request.clone() };
+    let selected = path_mean(ImageTask::new(base.scene.clone(), request, CancelToken::default(), options.clone()).unwrap()).0;
+    assert_eq!(selected, legacy);
+    assert!(selected.into_iter().all(|value| value > 0.0), "hard-source caustics remain represented");
+    options.dielectrics[0].shadow_transmission = true;
+    let request = ImageRequest { raytrace: Some(options.clone()), ..base.request };
+    let error = match ImageTask::new(base.scene, request, CancelToken::default(), options) {
+        Ok(_) => panic!("closed straight shadow transmission was admitted"),
+        Err(error) => error,
+    };
+    assert_eq!(error.code, ErrorCode::InvalidRequest);
+    assert!(error.message.contains("closed dielectric light connections"));
+    for sheet in [false, true] {
+        let base = cpu_backlit_rough_fixture(3, sheet, true, 2048);
+        let mut options = base.options.clone();
+        options.caustics.as_mut().unwrap().glossy_continuation_max_roughness = Some(1.0);
+        let request = ImageRequest { raytrace: Some(options.clone()), ..base.request.clone() };
+        let selected = path_mean(ImageTask::new(base.scene.clone(), request, CancelToken::default(), options).unwrap()).0;
+        assert_eq!(selected, path_mean(base).0, "rough receiver gathers retain their existing estimator");
+        assert!(selected.into_iter().any(|value| value > 0.0));
+    }
+    let volume = |threshold| {
+        let base = cpu_subsurface_fixture(64, false, 0, 1, [0.8, 0.0], 0.4, None);
+        cpu_reconfigure(base, |options| {
+            options.dielectrics[0].absorption_per_mm = [0.0; 3];
+            options.lights = Some(vec![job::DirectionalLightOptions { direction: [0.0, 0.0, 1.0], color: [1.0; 3], intensity: 1.0 }]);
+            options.environment = Some(job::RaytraceEnvironmentOptions { color: [0.0; 3], intensity: 0.0 });
+            options.caustics = Some(job::CausticOptions {
+                photons: 1024,
+                radius_mm: 3.0,
+                max_depth: 4,
+                glossy_continuation_max_roughness: threshold,
+                ..Default::default()
+            });
+        })
+    };
+    let selected = path_mean(volume(Some(1.0))).0;
+    assert_eq!(selected, path_mean(volume(None)).0, "HG volume receivers retain the same photon estimator");
+    assert!(selected.into_iter().all(|value| value > 0.0));
+}
+
+#[test]
+fn cpu_glossy_continuation_retains_coat_lobes_and_nonuniform_camera_glass_prefix_at_the_depth_boundary() {
+    let mut base = cpu_glossy_continuation_fixture(false, 0.32);
+    base.scene.meshes[1].surface =
+        Some(base.scene.meshes[1].surface.unwrap().with_clear_coat(solidcraft_viewport::clear_coat::ClearCoat::new(0.7, 0.08, 1.4).unwrap()));
+    base.request.camera.distance = 3.5; // Eye z=2.5: above the slab, below the area source.
+    base.options.path.as_mut().unwrap().max_depth = 6;
+    base.options.dielectrics[0].absorption_per_mm = [0.1, 0.2, 0.3];
+    // Index matching gives F=0: the forced reflection child is zero, while
+    // transmission carries twice the nonuniform Beer prefix before the group /2.
+    assert_eq!(base.options.dielectrics[0].ior, 1.0);
+    let mut ordinary_prefix = None;
+    for split_first_interface in [false, true] {
+        let lanes = if split_first_interface { 2_u32 } else { 1 };
+        base.options.path.as_mut().unwrap().split_first_interface = split_first_interface;
+        let gathered = cpu_finish_glossy_continuation(&base, base.options.clone());
+        let report = gathered.1.unwrap();
+        assert!(report.contributing > 0 && report.top_count > 0);
+        let prefix = *ordinary_prefix.get_or_insert(report.largest[0].camera_prefix);
+        for event in report.largest.iter().take(report.top_count as usize) {
+            assert_eq!((event.stratum, event.fresnel_strata), (u32::from(split_first_interface), lanes));
+            assert_eq!(event.camera_prefix, prefix.map(|value| value * f64::from(lanes)));
+            assert_eq!(event.final_output_radiance.unwrap(), event.camera_radiance.map(|value| value / (8.0 * f64::from(lanes))));
+        }
+        assert!(report.largest.iter().take(report.top_count as usize).all(|event| {
+            event.camera_interfaces == 2 && event.camera_prefix[0] > event.camera_prefix[1] && event.camera_prefix[1] > event.camera_prefix[2]
+        }));
+        let mut selected = base.options.clone();
+        selected.caustics.as_mut().unwrap().glossy_continuation_max_roughness = Some(0.35);
+        let mut reference = base.options.clone();
+        reference.caustics.as_mut().unwrap().area_lights = false;
+        let actual = cpu_finish_glossy_continuation(&base, selected.clone());
+        let camera = cpu_finish_glossy_continuation(&base, reference.clone());
+        for result in [&gathered, &actual, &camera] {
+            let probe = result.1.as_ref().unwrap();
+            assert_eq!(probe.split_first_interface, split_first_interface);
+            assert_eq!(probe.camera.selected_sample.unwrap().strata, lanes);
+            assert_eq!(probe.camera.selected_sample.unwrap().coverage, 1.0);
+            assert_eq!((probe.camera.trace_pixels[0].samples, probe.camera.trace_pixels[0].covered_samples), (8, 8));
+            assert_eq!((result.2.observations, result.2.minimum_samples, result.2.maximum_samples), (8, 8, 8));
+        }
+        assert_eq!(actual.0, camera.0);
+        assert_eq!(actual.2.component_radiance_sum, camera.2.component_radiance_sum);
+        assert!(actual.2.component_radiance_sum.unwrap()[5].iter().any(|value| *value > 0.0));
+        assert_eq!(actual.1.unwrap().camera.output.unwrap().photon, [0.0; 3]);
+        selected.path.as_mut().unwrap().max_depth = 5;
+        reference.path.as_mut().unwrap().max_depth = 5;
+        let shallow = cpu_finish_glossy_continuation(&base, selected);
+        assert_eq!(shallow.0, cpu_finish_glossy_continuation(&base, reference).0);
+        assert_eq!(shallow.2.component_radiance_sum.unwrap()[5], [0.0; 3]);
+        assert_eq!(shallow.2.mean_radiance_sum, [0.0; 3], "two prefix interfaces plus receiver, two tail interfaces and endpoint need six slots");
+    }
+}
+
+#[test]
+fn cpu_glossy_continuation_resets_ownership_at_the_last_opaque_receiver() {
+    for (first_roughness, last_roughness, last_continues) in [(0.06, 0.65, false), (0.65, 0.06, true)] {
+        let mut base = cpu_glossy_continuation_fixture(false, last_roughness);
+        // The camera sees the lower side of this patch. Source photons arrive
+        // on its opposite side and cannot pass the gather normal-support test.
+        // Every nonzero camera path must visit the floor second, then cross the
+        // slab above both receivers before reaching the area emitter.
+        base.scene.meshes.push(ProductMesh {
+            name: "First downward-facing opaque receiver".into(),
+            mesh: Arc::new(Mesh {
+                positions: vec![
+                    Vec3::new(-0.15, -0.15, -0.25),
+                    Vec3::new(0.15, -0.15, -0.25),
+                    Vec3::new(0.15, 0.15, -0.25),
+                    Vec3::new(-0.15, 0.15, -0.25),
+                ],
+                triangles: vec![[0, 2, 1], [0, 3, 2]],
+                ..Default::default()
+            }),
+            surface: Some(OpaqueSurface::new(Vec3::new(0.7, 0.45, 0.2), 0.85, first_roughness, 1.5).unwrap()),
+            color: [255; 3],
+            opacity: 1.0,
+            transmission: None,
+            faces: vec![],
+        });
+        base.request.camera.target.z = -0.25;
+        base.request.camera.distance = 0.25;
+        base.request.camera.pitch = -std::f64::consts::FRAC_PI_2;
+        base.options.progressive.as_mut().unwrap().samples_per_pixel = 64;
+        base.options.path.as_mut().unwrap().max_depth = 5;
+        let mut selected = base.options.clone();
+        selected.caustics.as_mut().unwrap().glossy_continuation_max_roughness = Some(0.35);
+        let mut reference = base.options.clone();
+        if last_continues {
+            reference.caustics.as_mut().unwrap().area_lights = false;
+        }
+        let actual = cpu_finish_glossy_continuation(&base, selected.clone());
+        let expected = cpu_finish_glossy_continuation(&base, reference.clone());
+        assert_eq!(actual.0, expected.0, "the last receiver must establish ownership independently of the first");
+        assert!(actual.2.mean_radiance_sum.iter().any(|value| *value > 0.0), "the two-receiver path must actually contribute");
+        let output = actual.1.unwrap().camera.output.unwrap();
+        if last_continues {
+            assert_eq!(output.photon, [0.0; 3]);
+        } else {
+            assert!(output.photon.iter().any(|value| *value > 0.0));
+        }
+        selected.path.as_mut().unwrap().max_depth = 4;
+        reference.path.as_mut().unwrap().max_depth = 4;
+        let shallow = cpu_finish_glossy_continuation(&base, selected);
+        assert_eq!(shallow.0, cpu_finish_glossy_continuation(&base, reference).0);
+        assert_eq!(shallow.2.mean_radiance_sum, [0.0; 3], "the receiver plus smooth tail must fit the same remaining depth");
+    }
 }

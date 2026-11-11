@@ -23,6 +23,9 @@ pub enum DenoiseGuideClass {
     ReflectiveEndpoint = 14,
     IdentityLimit = 15,
     PartialCoverage = 16,
+    OpticalTopologyLimit = 17,
+    OpticalRouteLimit = 18,
+    OpticalReflectionLimit = 19,
 }
 
 impl DenoiseGuideClass {
@@ -44,6 +47,9 @@ impl DenoiseGuideClass {
         Self::ReflectiveEndpoint,
         Self::IdentityLimit,
         Self::PartialCoverage,
+        Self::OpticalTopologyLimit,
+        Self::OpticalRouteLimit,
+        Self::OpticalReflectionLimit,
     ];
 
     pub fn from_code(code: u32) -> Option<Self> {
@@ -77,12 +83,15 @@ impl DenoiseGuideClass {
             Self::ReflectiveEndpoint => [235, 157, 190],
             Self::IdentityLimit => [178, 167, 98],
             Self::PartialCoverage => [229, 229, 229],
+            Self::OpticalTopologyLimit => [128, 94, 25],
+            Self::OpticalRouteLimit => [244, 155, 52],
+            Self::OpticalReflectionLimit => [70, 60, 150],
         };
         [rgb[0], rgb[1], rgb[2], 255]
     }
 }
 
-fn serialize_counts<S: Serializer>(counts: &[u64; 17], serializer: S) -> Result<S::Ok, S::Error> {
+fn serialize_counts<S: Serializer>(counts: &[u64; 20], serializer: S) -> Result<S::Ok, S::Error> {
     let mut map = serializer.serialize_map(Some(DenoiseGuideClass::ALL.len()))?;
     for (class, count) in DenoiseGuideClass::ALL.iter().zip(counts) {
         map.serialize_entry(class, count)?;
@@ -97,12 +106,12 @@ pub struct DenoiseDiagnostics {
     pub width: u32,
     pub height: u32,
     #[serde(serialize_with = "serialize_counts")]
-    pub counts: [u64; 17],
+    pub counts: [u64; 20],
 }
 
 impl DenoiseDiagnostics {
     pub fn new(width: u32, height: u32) -> Self {
-        Self { width, height, counts: [0; 17] }
+        Self { width, height, counts: [0; 20] }
     }
 
     pub fn record(&mut self, class: DenoiseGuideClass) {

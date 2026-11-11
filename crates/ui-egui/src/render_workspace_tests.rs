@@ -4093,11 +4093,18 @@ fn clicked_setup_save_reload_and_switch_keep_gpu_numeric_intent_without_a_host()
                 adaptive: Some(solidcraft_engine::render::job::adaptive::AdaptiveSampling {
                     pilot_samples: 16,
                     min_samples: 16,
+                    optical_min_samples: 0,
                     relative_error: 0.1,
                     absolute_error: 0.003,
                     coverage_error: 0.02,
+
+                    component_uncertainty: false,
+                    map_validation_batches: 0,
                 }),
                 transmission_samples: 4,
+                split_first_interface: false,
+                sampler: Default::default(),
+                radiance_components: false,
                 finishing: Default::default(),
                 backdrop: None,
                 linear_exr: false,
@@ -12357,7 +12364,7 @@ fn cpu_celestial_switch_refuses_incompatible_depth_or_sampling_atomically() {
         if incompatible == "depth" {
             h.app.render_workspace.view.max_depth = 65;
         } else if incompatible == "transmission" {
-            h.app.render_workspace.view.studio.transmission_samples = 4;
+            h.app.render_workspace.view.studio.transmission_samples = 3;
         } else {
             h.app.render_workspace.view.raytrace.progressive =
                 Some(solidcraft_engine::render::job::CpuProgressiveOptions { samples_per_pixel: 64, seed: 81 });
@@ -15929,6 +15936,7 @@ fn advanced_glass_lens_save_preserves_caustic_job_drafts_and_refuses_unsaved_opt
             guided_emission: true,
             refresh_per_pass: false,
             power_weighted_sources: false,
+            ..Default::default()
         };
         h.app.render_workspace.view.studio.caustics = Some(quality);
         if method == ImageMethod::CpuRaytrace {
@@ -16115,6 +16123,7 @@ fn caustic_quality_survives_cpu_gpu_ui_save_load_and_changes_the_paused_live_req
             guided_emission: true,
             refresh_per_pass: true,
             power_weighted_sources: true,
+            ..Default::default()
         };
         h.app.render_workspace.view.studio.caustics = Some(quality);
         if method == ImageMethod::CpuRaytrace {
@@ -16306,7 +16315,7 @@ fn render_quality_settings_roundtrip_offline_runtime_and_one_step_undo() {
         let camera = h.app.cam;
         let before = setups::draft(&h.app).unwrap();
         let undo = h.app.session.undo.len();
-        let settings = DenoiseSettings { passes: 2, strength: 0.45, firefly_suppression: false, optical_filter: false };
+        let settings = DenoiseSettings { passes: 2, strength: 0.45, firefly_suppression: false, optical_filter: false, ..Default::default() };
         h.app.render_workspace.view.studio.supersampling = 2;
         h.app.render_workspace.view.studio.denoise = false;
         h.app.render_workspace.view.studio.denoise_settings = settings;
@@ -16722,4 +16731,465 @@ fn render_backend_save_failure_does_not_schedule_a_restart() {
     assert_eq!(h.app.preferences.graphics_backend, "auto");
     assert!(!h.app.quit_requested && h.app.docs.quitting.is_none());
     assert!(crate::update::take_launch(&mut h.app).is_none());
+}
+
+#[test]
+fn glass_convergence_controls_preserve_cpu_and_gpu_saved_intent_and_undo() {
+    use solidcraft_engine::render::sampling::Sampler;
+    for cpu_method in [false, true] {
+        let mut h = Harness::new();
+        h.app.session.set_render_job_host(None).unwrap();
+        let method = if cpu_method { "cpu_raytrace" } else { "gpu_path" };
+        let mut options = json!({"sampler":"scrambled_sobol","radiance_components":true,
+            "denoise":true,"denoise_settings":{"variance_guided":true,"extended_optical_guides":true,"component_filtering":true},
+            "adaptive":{"pilot_samples":16,"min_samples":16,"optical_min_samples":32,"component_uncertainty":true,"map_validation_batches":2},
+            "caustics":{"refresh_per_pass":true,"progressive_radius":true,"photons":64}});
+        if cpu_method {
+            options["progressive"] = json!({"samples_per_pixel":48,"seed":81});
+            options["path"] = json!({"max_depth":3,"transmission_samples":4,"russian_roulette":true});
+        } else {
+            options["samples"] = json!(48);
+            options["caustics"] = json!({"refresh_per_pass":true,"progressive_radius":true,"photons":64});
+        }
+        h.app
+            .run(
+                "render.settings.set",
+                json!({"name":"Glass convergence", "set":{
+            "width":16,"height":16,"job":{"method":method,"options":options}}}),
+            )
+            .unwrap();
+        let persisted = h.app.session.doc.render.setups["Glass convergence"].clone();
+        enter(&mut h.app, true).unwrap();
+        h.app.render_workspace.view.name = "Glass convergence".into();
+        let live_camera = h.app.cam;
+        setups::load(&mut h.app);
+        assert_eq!(h.app.cam, live_camera, "loading numeric options preserves the live camera");
+        let expected = setups::snapshot(&h.app).unwrap();
+        assert_eq!(expected, solidcraft_engine::doc::render_settings::RenderSetup { camera: live_camera, ..persisted.clone() });
+        let studio = &h.app.render_workspace.view.studio;
+        assert_eq!(studio.sampler, Sampler::ScrambledSobol);
+        assert!(studio.radiance_components);
+        assert!(studio.denoise_settings.variance_guided && studio.denoise_settings.extended_optical_guides);
+        assert!(studio.denoise_settings.component_filtering);
+        if cpu_method {
+            assert_eq!(studio.transmission_samples, 4);
+            let path = h.app.render_workspace.view.raytrace.path.unwrap();
+            assert_eq!(path.transmission_samples, 4);
+            assert!(path.russian_roulette);
+        }
+        assert_eq!(studio.adaptive.unwrap().optical_min_samples, 32);
+        assert!(studio.adaptive.unwrap().component_uncertainty);
+        assert_eq!(studio.adaptive.unwrap().map_validation_batches, 2);
+        let mut runtime = json!({"settings":{"camera":h.app.cam}});
+        if cpu_method {
+            cpu::params(&h.app, &mut runtime).unwrap();
+        } else {
+            studio::params(&h.app, &mut runtime).unwrap();
+        }
+        let captured = if cpu_method { &runtime["raytrace"] } else { &runtime };
+        assert_eq!(captured["sampler"], json!("scrambled_sobol"));
+        assert_eq!(captured["radiance_components"], json!(true));
+        assert_eq!(captured["adaptive"]["optical_min_samples"], json!(32));
+        assert_eq!(captured["adaptive"]["component_uncertainty"], json!(true));
+        assert_eq!(captured["adaptive"]["map_validation_batches"], json!(2));
+        assert_eq!(captured["denoise_settings"]["component_filtering"], json!(true));
+        if cpu_method {
+            assert_eq!(captured["path"]["transmission_samples"], json!(4));
+            assert_eq!(captured["path"]["russian_roulette"], json!(true));
+        }
+        h.app.render_workspace.view.studio.denoise_settings.component_filtering = false;
+        h.app.render_workspace.view.studio.sampler = Sampler::Independent;
+        h.app.render_workspace.view.studio.radiance_components = false;
+        setups::save(&mut h.app).unwrap();
+        assert_eq!(h.app.session.doc.render.setups["Glass convergence"].camera, live_camera, "explicit Save captures the live camera");
+        h.app.run("edit.undo", json!({})).unwrap();
+        setups::sync_revision(&mut h.app);
+        assert_eq!(h.app.cam, live_camera, "Undo restores saved intent without navigating the live view");
+        assert_eq!(setups::snapshot(&h.app).unwrap(), expected);
+        assert_eq!(
+            h.app.session.doc.render.setups["Glass convergence"], persisted,
+            "Undo restores the complete authored setup, including its camera"
+        );
+        let reopened = solidcraft_engine::doc::Document::from_json(&h.app.session.doc.to_json()).unwrap();
+        assert_eq!(reopened.render.setups["Glass convergence"], persisted);
+    }
+}
+
+#[test]
+fn celestial_method_switch_preserves_supported_first_fresnel_strata() {
+    for (strata, split) in [(4, false), (1, true)] {
+        let mut h = celestial_editor_fixture(true);
+        h.app.render_workspace.view.studio.transmission_samples = strata;
+        h.app.render_workspace.view.studio.split_first_interface = split;
+        let camera = h.app.cam;
+        switch_celestial_method(&mut h.app, ImageMethod::CpuRaytrace, true).unwrap();
+        let path = h.app.render_workspace.view.raytrace.path.unwrap();
+        assert_eq!((path.transmission_samples, path.split_first_interface), (strata, split));
+        let cpu = image_request(&h.app).unwrap();
+        let cpu_path = &cpu["settings"]["job"]["options"]["path"];
+        assert_eq!(cpu_path["transmission_samples"].as_u64().unwrap_or(1), u64::from(strata));
+        assert_eq!(cpu_path["split_first_interface"].as_bool().unwrap_or(false), split);
+        switch_celestial_method(&mut h.app, ImageMethod::GpuRaytrace, false).unwrap();
+        let studio = &h.app.render_workspace.view.studio;
+        assert_eq!((studio.transmission_samples, studio.split_first_interface), (strata, split));
+        let gpu = image_request(&h.app).unwrap();
+        let gpu_options = &gpu["settings"]["job"]["options"];
+        assert_eq!(gpu_options["transmission_samples"], strata);
+        assert_eq!(gpu_options["split_first_interface"].as_bool().unwrap_or(false), split);
+        assert_eq!(h.app.cam, camera);
+    }
+}
+
+#[test]
+fn cpu_strata_size_hints_count_production_lanes_and_single_pilots() {
+    let mut h = Harness::new();
+    h.app.render_workspace.view.method = ImageMethod::CpuRaytrace;
+    h.app.render_workspace.view.draft.width = 1024;
+    h.app.render_workspace.view.draft.height = 256;
+    h.app.render_workspace.view.raytrace.progressive = Some(solidcraft_engine::render::job::CpuProgressiveOptions { samples_per_pixel: 16, seed: 0 });
+    h.app.render_workspace.view.raytrace.path = Some(Default::default());
+    h.app.render_workspace.view.studio.adaptive =
+        Some(solidcraft_engine::render::job::adaptive::AdaptiveSampling { pilot_samples: 16, min_samples: 16, ..Default::default() });
+    cpu::validate_progressive_image(&h.app).unwrap();
+    let ordinary = cpu::image_limits(&h.app);
+    h.app.render_workspace.view.raytrace.path.as_mut().unwrap().transmission_samples = 4;
+    let stratified = cpu::image_limits(&h.app);
+    assert!(stratified.max_pixels < ordinary.max_pixels);
+    assert!(cpu::validate_progressive_image(&h.app).is_err());
+    assert_eq!(cpu::profile_for_size(&h.app, 1024, 256), Some(solidcraft_engine::render::job::CpuBudget::Studio));
+    assert_eq!(h.app.render_workspace.view.raytrace.budget, solidcraft_engine::render::job::CpuBudget::Compact);
+    assert_eq!((h.app.render_workspace.view.draft.width, h.app.render_workspace.view.draft.height), (1024, 256));
+    let plan = json!({"variant":"cpu_progressive_png",
+        "cpu_context":{"minimum_budget":"compact","adaptive":h.app.render_workspace.view.studio.adaptive},
+        "settings":{"width":1024,"height":256},
+        "cpu_options":{"budget":"compact","progressive":{"samples_per_pixel":16,"seed":0}}});
+    assert!(inspector::apply_quality_transaction(&mut h.app, &plan).is_err(), "a preset must count the path options it preserves");
+    assert_eq!(h.app.render_workspace.view.raytrace.path.unwrap().transmission_samples, 4);
+}
+
+#[test]
+fn convergence_controls_are_reversible_and_keep_component_filtering_dependencies() {
+    fn frame(h: &mut Harness, events: Vec<egui::Event>) {
+        let mut output = h.ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(480.0, 2400.0))),
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                transport::adaptive_controls(&mut h.app, ui);
+                transport::glass_controls(&mut h.app, ui);
+                quality::denoise_controls(&mut h.app, ui);
+            },
+        );
+        output.textures_delta.clear();
+    }
+    fn click(h: &mut Harness, target: &str) {
+        // A lower control can enable a checkbox already painted above it.
+        // Settle that dependency before egui hit-tests the next press against
+        // its previous frame's widget state, as the real frame loop does.
+        frame(h, vec![]);
+        let at = crate::scenario::handle_at(target).unwrap_or_else(|| panic!("missing convergence control {target}"));
+        for pressed in [true, false] {
+            frame(
+                h,
+                vec![
+                    egui::Event::PointerMoved(at),
+                    egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() },
+                ],
+            );
+        }
+    }
+    let mut h = Harness::new();
+    h.app.render_workspace.view.method = ImageMethod::CpuRaytrace;
+    h.app.render_workspace.view.draft.width = 8;
+    h.app.render_workspace.view.draft.height = 8;
+    h.app.render_workspace.view.raytrace.progressive = Some(Default::default());
+    h.app.render_workspace.view.raytrace.path = Some(Default::default());
+    h.app.render_workspace.view.studio.denoise = true;
+    h.app.render_workspace.view.studio.radiance_components = true;
+    frame(&mut h, vec![]);
+    frame(&mut h, vec![]);
+    click(&mut h, "render:cpu-fresnel:4");
+    click(&mut h, "render:cpu-roulette");
+    let path = h.app.render_workspace.view.raytrace.path.unwrap();
+    assert_eq!(path.transmission_samples, 4);
+    assert!(path.russian_roulette);
+    assert_eq!(h.app.render_workspace.view.studio.transmission_samples, 4);
+    click(&mut h, "render:denoise-components");
+    assert!(h.app.render_workspace.view.studio.denoise_settings.component_filtering);
+    click(&mut h, "render:denoise-enable");
+    assert!(!h.app.render_workspace.view.studio.denoise);
+    assert!(h.app.render_workspace.view.studio.denoise_settings.component_filtering, "turning off denoising preserves dormant filter intent");
+    click(&mut h, "render:convergence:components");
+    assert!(h.app.render_workspace.view.studio.radiance_components, "recording remains required by component-filtering intent");
+    click(&mut h, "render:denoise-components");
+    assert!(!h.app.render_workspace.view.studio.denoise_settings.component_filtering, "an inactive saved option can always be removed");
+    click(&mut h, "render:convergence:components");
+    assert!(!h.app.render_workspace.view.studio.radiance_components);
+    let snapshot = setups::snapshot(&h.app).unwrap();
+    let Some(solidcraft_engine::doc::render_settings::RenderJob::CpuRaytrace { options, .. }) = snapshot.job else { panic!("CPU job expected") };
+    assert_eq!(options.path.unwrap(), path);
+    assert!(!options.denoise && !options.radiance_components && !options.denoise_settings.component_filtering);
+
+    click(&mut h, "render:adaptive-enable");
+    let policy = h.app.render_workspace.view.studio.adaptive.unwrap();
+    assert!(!policy.component_uncertainty && policy.map_validation_batches == 0);
+    h.app.render_workspace.view.raytrace.path = None;
+    click(&mut h, "render:convergence:component-pilots");
+    assert!(!h.app.render_workspace.view.studio.adaptive.unwrap().component_uncertainty, "component pilots require the path integrator");
+    h.app.render_workspace.view.raytrace.path = Some(path);
+    click(&mut h, "render:convergence:component-pilots");
+    assert!(h.app.render_workspace.view.studio.adaptive.unwrap().component_uncertainty);
+    click(&mut h, "render:convergence:map-assessment");
+    assert_eq!(h.app.render_workspace.view.studio.adaptive.unwrap().map_validation_batches, 0, "assessment cannot be enabled without caustics");
+    click(&mut h, "render:caustics:enable");
+    assert!(h.app.render_workspace.view.studio.caustics.is_some());
+    click(&mut h, "render:convergence:map-assessment");
+    click(&mut h, "render:convergence:map-batches:2");
+    assert_eq!(h.app.render_workspace.view.studio.adaptive.unwrap().map_validation_batches, 2);
+
+    // An authored pilot count need not divide every offered batch count. The
+    // unavailable choice must leave that count and the valid selection intact.
+    h.app.render_workspace.view.studio.adaptive.as_mut().unwrap().pilot_samples = 18;
+    let before_invalid_choice = h.app.render_workspace.view.studio.adaptive;
+    click(&mut h, "render:convergence:map-assessment");
+    click(&mut h, "render:convergence:map-batches:4");
+    assert_eq!(h.app.render_workspace.view.studio.adaptive, before_invalid_choice);
+    frame(&mut h, vec![egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() }]);
+    frame(
+        &mut h,
+        vec![egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: false, repeat: false, modifiers: Default::default() }],
+    );
+    h.app.render_workspace.view.studio.adaptive.as_mut().unwrap().pilot_samples = 16;
+
+    let selected_policy = h.app.render_workspace.view.studio.adaptive.unwrap();
+    let enabled_snapshot = setups::snapshot(&h.app).unwrap();
+    let Some(solidcraft_engine::doc::render_settings::RenderJob::CpuRaytrace { options, .. }) = &enabled_snapshot.job else {
+        panic!("CPU job expected")
+    };
+    assert_eq!(options.adaptive, Some(selected_policy));
+    assert!(!options.radiance_components, "pilot capture does not enable production component recording");
+    let mut runtime = json!({"settings":{"camera":h.app.cam}});
+    cpu::params(&h.app, &mut runtime).unwrap();
+    let captured: solidcraft_engine::render::job::RaytraceOptions = serde_json::from_value(runtime["raytrace"].clone()).unwrap();
+    assert_eq!(captured.adaptive.as_deref(), Some(&selected_policy));
+    assert!(captured.caustics.is_some() && !captured.radiance_components);
+    h.app.render_workspace.view.name = "Clicked pilot evidence".into();
+    setups::save(&mut h.app).unwrap();
+    let live_camera = h.app.cam;
+
+    // Removing a prerequisite preserves saved intent until the user reverses
+    // its dependent control; neither checkbox nor selector may become trapped.
+    click(&mut h, "render:caustics:enable");
+    assert!(h.app.render_workspace.view.studio.caustics.is_none());
+    assert_eq!(h.app.render_workspace.view.studio.adaptive.unwrap().map_validation_batches, 2);
+    click(&mut h, "render:convergence:map-assessment");
+    click(&mut h, "render:convergence:map-batches:0");
+    assert_eq!(h.app.render_workspace.view.studio.adaptive.unwrap().map_validation_batches, 0);
+    h.app.render_workspace.view.raytrace.path = None;
+    click(&mut h, "render:convergence:component-pilots");
+    assert!(!h.app.render_workspace.view.studio.adaptive.unwrap().component_uncertainty);
+    h.app.render_workspace.view.raytrace.path = Some(path);
+    setups::save(&mut h.app).unwrap();
+    h.app.run("edit.undo", json!({})).unwrap();
+    setups::sync_revision(&mut h.app);
+    assert_eq!(h.app.cam, live_camera);
+    assert_eq!(setups::snapshot(&h.app).unwrap(), enabled_snapshot);
+    click(&mut h, "render:adaptive-enable");
+    assert!(h.app.render_workspace.view.studio.adaptive.is_none());
+}
+
+#[test]
+fn glossy_caustic_and_interface_split_controls_preserve_explicit_saved_intent() {
+    fn frame(h: &mut Harness, events: Vec<egui::Event>) {
+        let mut output = h.ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(480.0, 2400.0))),
+                events,
+                ..Default::default()
+            },
+            |ui| transport::glass_controls(&mut h.app, ui),
+        );
+        output.textures_delta.clear();
+    }
+    fn click(h: &mut Harness, target: &str) {
+        frame(h, vec![]);
+        let at = crate::scenario::handle_at(target).unwrap_or_else(|| panic!("missing glass control {target}"));
+        for pressed in [true, false] {
+            frame(
+                h,
+                vec![
+                    egui::Event::PointerMoved(at),
+                    egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() },
+                ],
+            );
+        }
+    }
+    for cpu_method in [false, true] {
+        let mut h = Harness::new();
+        h.app.session.set_render_job_host(None).unwrap();
+        h.app.render_workspace.view.method = if cpu_method { ImageMethod::CpuRaytrace } else { ImageMethod::GpuRaytrace };
+        h.app.render_workspace.view.draft.width = 8;
+        h.app.render_workspace.view.draft.height = 8;
+        h.app.render_workspace.view.raytrace.progressive = Some(Default::default());
+        h.app.render_workspace.view.raytrace.path = Some(Default::default());
+        let document = h.app.session.doc.clone();
+        let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
+        let legacy = setups::snapshot(&h.app).unwrap();
+        frame(&mut h, vec![]);
+        frame(&mut h, vec![]);
+        assert_eq!(setups::snapshot(&h.app).unwrap(), legacy);
+        assert!(std::sync::Arc::ptr_eq(&document, &h.app.session.doc));
+        assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), history);
+        assert!(!h.app.render_workspace.view.studio.split_first_interface);
+        assert!(h.app.render_workspace.view.studio.caustics.is_none());
+        if !cpu_method {
+            h.app.render_workspace.view.studio.split_first_interface = true;
+            h.app.render_workspace.view.raytrace.path = None;
+            select_image_method(&mut h.app, ImageMethod::CpuRaytrace);
+            assert_eq!(h.app.render_workspace.view.method, ImageMethod::GpuRaytrace, "an explicit CPU path choice is required");
+            assert!(h.app.render_workspace.view.studio.split_first_interface, "a refused method switch cannot discard split intent");
+            assert!(std::sync::Arc::ptr_eq(&document, &h.app.session.doc));
+            h.app.render_workspace.view.studio.split_first_interface = false;
+            h.app.render_workspace.view.raytrace.path = Some(Default::default());
+        }
+
+        click(&mut h, "render:caustics:enable");
+        assert!(h.app.render_workspace.view.studio.caustics.unwrap().glossy_continuation_max_roughness.is_none());
+        click(&mut h, "render:caustics:glossy-continuation");
+        assert!(
+            h.app.render_workspace.view.studio.caustics.unwrap().glossy_continuation_max_roughness.is_none(),
+            "enabling the transfer first requires an area or environment source"
+        );
+        click(&mut h, "render:caustics:area-lights");
+        click(&mut h, "render:caustics:glossy-continuation");
+        assert_eq!(h.app.render_workspace.view.studio.caustics.unwrap().glossy_continuation_max_roughness, Some(0.35));
+        h.app.render_workspace.view.studio.caustics.as_mut().unwrap().glossy_continuation_max_roughness = Some(0.17);
+        frame(&mut h, vec![]);
+        assert!(crate::scenario::rect_of("render:caustics:glossy-roughness").is_some());
+        assert_eq!(h.app.render_workspace.view.studio.caustics.unwrap().glossy_continuation_max_roughness, Some(0.17));
+        click(&mut h, "render:caustics:area-lights");
+        assert_eq!(
+            h.app.render_workspace.view.studio.caustics.unwrap().glossy_continuation_max_roughness,
+            Some(0.17),
+            "removing a source preserves dormant authored intent"
+        );
+        click(&mut h, "render:caustics:glossy-continuation");
+        assert!(h.app.render_workspace.view.studio.caustics.unwrap().glossy_continuation_max_roughness.is_none());
+        click(&mut h, "render:caustics:environment");
+        click(&mut h, "render:caustics:glossy-continuation");
+        assert_eq!(h.app.render_workspace.view.studio.caustics.unwrap().glossy_continuation_max_roughness, Some(0.35));
+        h.app.render_workspace.view.studio.caustics.as_mut().unwrap().glossy_continuation_max_roughness = Some(0.17);
+
+        let backend = if cpu_method { "cpu" } else { "gpu" };
+        click(&mut h, &format!("render:{backend}-fresnel:4"));
+        click(&mut h, "render:convergence:split-first-interface");
+        assert!(!h.app.render_workspace.view.studio.split_first_interface, "splitting does not silently replace authored Fresnel strata");
+        assert_eq!(h.app.render_workspace.view.studio.transmission_samples, 4);
+        click(&mut h, &format!("render:{backend}-fresnel:1"));
+        click(&mut h, "render:convergence:split-first-interface");
+        assert!(h.app.render_workspace.view.studio.split_first_interface);
+        click(&mut h, &format!("render:{backend}-fresnel:4"));
+        assert_eq!(h.app.render_workspace.view.studio.transmission_samples, 1, "strata cannot be combined with splitting");
+        click(&mut h, "render:convergence:split-first-interface");
+        assert!(!h.app.render_workspace.view.studio.split_first_interface);
+        click(&mut h, "render:convergence:split-first-interface");
+        if cpu_method {
+            let path = h.app.render_workspace.view.raytrace.path.unwrap();
+            assert!(path.split_first_interface);
+            assert_eq!(path.transmission_samples, 1);
+        }
+
+        if !cpu_method {
+            h.app.render_workspace.view.studio.volume = Some(Default::default());
+            assert_eq!(environment::validate_atmosphere(&h.app).unwrap_err(), h.app.tr("render.convergence.volume_single_path"));
+            h.app.render_workspace.view.studio.volume = None;
+        }
+        let selected = setups::snapshot(&h.app).unwrap();
+        let mut runtime = json!({"settings":{"camera":h.app.cam}});
+        if cpu_method {
+            cpu::params(&h.app, &mut runtime).unwrap();
+        } else {
+            studio::params(&h.app, &mut runtime).unwrap();
+        }
+        let captured = if cpu_method { &runtime["raytrace"] } else { &runtime };
+        let path = if cpu_method { &captured["path"] } else { captured };
+        assert_eq!(path["split_first_interface"], true);
+        assert_eq!(captured["caustics"]["glossy_continuation_max_roughness"], 0.17);
+        h.app.render_workspace.view.name = "Explicit glass paths".into();
+        setups::save(&mut h.app).unwrap();
+        let authored = h.app.session.doc.render.setups["Explicit glass paths"].clone();
+        let reopened = solidcraft_engine::doc::Document::from_json(&h.app.session.doc.to_json()).unwrap();
+        assert_eq!(reopened.render.setups["Explicit glass paths"], authored);
+        let live_camera = h.app.cam;
+
+        click(&mut h, "render:convergence:split-first-interface");
+        click(&mut h, "render:caustics:glossy-continuation");
+        setups::save(&mut h.app).unwrap();
+        h.app.run("edit.undo", json!({})).unwrap();
+        setups::sync_revision(&mut h.app);
+        assert_eq!(setups::snapshot(&h.app).unwrap(), selected);
+        assert_eq!(h.app.session.doc.render.setups["Explicit glass paths"], authored);
+        assert_eq!(h.app.cam, live_camera);
+
+        // Reload restores numerical intent without moving the live camera.
+        h.app.render_workspace.view.studio.split_first_interface = false;
+        h.app.render_workspace.view.studio.caustics.as_mut().unwrap().glossy_continuation_max_roughness = None;
+        setups::load(&mut h.app);
+        assert_eq!(setups::snapshot(&h.app).unwrap(), selected);
+        assert_eq!(h.app.cam, live_camera);
+
+        // A malformed authored combination is refused rather than normalized.
+        h.app.render_workspace.view.studio.transmission_samples = 4;
+        if cpu_method {
+            h.app.render_workspace.view.raytrace.path.as_mut().unwrap().transmission_samples = 4;
+        }
+        let before_refusal = h.app.session.doc.clone();
+        assert!(setups::snapshot(&h.app).is_err());
+        assert!(std::sync::Arc::ptr_eq(&before_refusal, &h.app.session.doc));
+        click(&mut h, "render:convergence:split-first-interface");
+        assert!(!h.app.render_workspace.view.studio.split_first_interface, "an incompatible saved split can always be removed");
+        assert_eq!(h.app.render_workspace.view.studio.transmission_samples, 4);
+        assert!(setups::snapshot(&h.app).is_ok());
+
+        click(&mut h, &format!("render:{backend}-fresnel:1"));
+        click(&mut h, "render:convergence:split-first-interface");
+        // Reloading a GPU setup clears dormant CPU options. Preserve the
+        // authored controls until the user explicitly adopts CPU Path.
+        let original_method = h.app.render_workspace.view.method;
+        let other_method = if cpu_method { ImageMethod::GpuRaytrace } else { ImageMethod::CpuRaytrace };
+        if cpu_method {
+            select_image_method(&mut h.app, other_method);
+        } else {
+            assert!(h.app.render_workspace.view.raytrace.path.is_none());
+            let before_switch = setups::draft(&h.app).unwrap();
+            let document = h.app.session.doc.clone();
+            let history = (h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len());
+            select_image_method(&mut h.app, other_method);
+            assert_eq!(h.app.render_workspace.view.method, original_method);
+            assert_eq!(setups::draft(&h.app).unwrap(), before_switch);
+            assert!(std::sync::Arc::ptr_eq(&document, &h.app.session.doc));
+            assert_eq!((h.app.session.revision, h.app.session.undo.len(), h.app.session.redo.len()), history);
+            assert_eq!(h.app.cam, live_camera);
+            assert!(h.app.render_workspace.view.studio.split_first_interface);
+            assert_eq!(h.app.render_workspace.view.studio.caustics.unwrap().glossy_continuation_max_roughness, Some(0.17));
+            for _ in 0..3 {
+                celestial_method_frame(&mut h, vec![]);
+            }
+            celestial_method_click(&mut h, "render:method");
+            celestial_method_frame(&mut h, vec![]);
+            celestial_method_click(&mut h, "render:method-cpu-indirect");
+        }
+        assert_eq!(h.app.render_workspace.view.method, other_method);
+        assert!(h.app.render_workspace.view.studio.split_first_interface);
+        let path = h.app.render_workspace.view.raytrace.path.unwrap();
+        assert_eq!((path.transmission_samples, path.split_first_interface), (1, true));
+        assert_eq!(h.app.render_workspace.view.studio.caustics.unwrap().glossy_continuation_max_roughness, Some(0.17));
+        select_image_method(&mut h.app, original_method);
+        assert_eq!(h.app.render_workspace.view.method, original_method);
+        assert!(h.app.render_workspace.view.studio.split_first_interface);
+        assert_eq!(h.app.render_workspace.view.studio.caustics.unwrap().glossy_continuation_max_roughness, Some(0.17));
+        assert_eq!(h.app.cam, live_camera);
+    }
 }

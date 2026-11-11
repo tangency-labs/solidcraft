@@ -38,3 +38,7 @@ flate2 = "1"
 [[example]]
 name = "cpu_resource_smoke"
 required-features = ["raytrace-cpu"]
+
+[[example]]
+name = "validate_glass_convergence"
+required-features = ["raytrace-cpu"]

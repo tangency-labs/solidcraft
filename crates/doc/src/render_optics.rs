@@ -265,6 +265,10 @@ mod advanced_model_contract_tests {
             guided_emission: true,
             refresh_per_pass: true,
             power_weighted_sources: true,
+            progressive_radius: true,
+            glossy_continuation_max_roughness: Some(0.35),
+            probe_pixel: Some([2, 3]),
+            probe_sample: 0,
         });
         let cpu = CpuJob {
             caustics,
@@ -282,6 +286,14 @@ mod advanced_model_contract_tests {
         assert!(serde_json::to_value(CpuJob::default()).unwrap().get("caustics").is_none());
         assert!(serde_json::to_value(CpuJob::default()).unwrap().get("environment_importance_sampling").is_none());
         assert!(serde_json::to_value(GpuJob::default()).unwrap().get("caustics").is_none());
+        let legacy: solidcraft_render::job::CausticOptions = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(legacy.glossy_continuation_max_roughness, None);
+        assert!(serde_json::to_value(legacy).unwrap().get("glossy_continuation_max_roughness").is_none());
+        for invalid in [-0.01, 1.01] {
+            let invalid = Some(solidcraft_render::job::CausticOptions { glossy_continuation_max_roughness: Some(invalid), ..legacy });
+            assert!(CpuJob { caustics: invalid, ..cpu.clone() }.to_runtime(0.0).is_err());
+            assert!(GpuJob { caustics: invalid, ..gpu.clone() }.to_runtime(0.0).is_err());
+        }
     }
 }
 #[cfg(test)]

@@ -328,9 +328,22 @@ fn origin_vacuum(o:vec3<f32>,d:vec3<f32>)->bool {
         assert_eq!(word(word(3) as usize + tops[0].0), word(word(3) as usize + tops[1].0), "the actual uploaded face has one certified patch");
         let coefficients = |index: usize| {
             let material = word(2) as usize + word(7 + index * 4) as usize * 20;
-            [6, 8, 9, 10, 11, 16, 17, 18, 19].map(|offset| word(material + offset))
+            [6, 8, 9, 10, 11, 16, 17, 19].map(|offset| word(material + offset))
         };
         assert_eq!(coefficients(tops[0].0), coefficients(tops[1].0), "actual IOR/absorption/medium/SSS/parent coefficients agree");
+        let flags_and_topology = |index: usize| {
+            let material = word(2) as usize + word(7 + index * 4) as usize * 20;
+            let encoded = f32::from_bits(word(material + 18));
+            assert!(encoded.is_finite() && (0.0..=16_777_215.0).contains(&encoded) && encoded.fract() == 0.0);
+            let packed = encoded as u32;
+            (packed & 3, (packed >> 13) & 2047, (packed >> 2) & 2047)
+        };
+        let a = flags_and_topology(tops[0].0);
+        let b = flags_and_topology(tops[1].0);
+        assert_eq!(a.0, b.0, "the original stage/scalar-face material flags agree");
+        assert_eq!(a.1, b.1, "adjacent faces belong to the same bounded topology");
+        assert!((1..=2047).contains(&a.1) && a.2 < a.1 && b.2 < b.1);
+        assert_ne!(a.2, b.2, "distinct local guide ordinals must not alter physical boundary equivalence");
         let origin = [0.0_f32, f32::from_bits(0xb686_37bd), 4.0];
         let direction = [f32::from_bits(0xb69a_9748), f32::from_bits(0xb643_2e36), -1.0];
         // Products of two binary32 values fit exactly in binary64 here. This

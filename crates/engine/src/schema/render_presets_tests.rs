@@ -145,3 +145,22 @@ fn cpu_quality_and_studio_contracts_preserve_both_executors() {
         }
     }
 }
+
+#[test]
+fn cpu_quality_schema_preserves_optional_component_and_map_pilot_policy() {
+    let input = input_schema_for::<QualityParams>();
+    let output = output_schema_for::<QualityResult>();
+    for level in [ParamCheck::Warn, ParamCheck::Strict] {
+        let mut session = with_a_shot(level);
+        let request = json!({"id":"Q-001","variant":"cpu_progressive_png","acknowledge_omissions":true,
+            "cpu":{"minimum_budget":"studio","adaptive":{"pilot_samples":16,"min_samples":16,"optical_min_samples":16,"component_uncertainty":true,"map_validation_batches":2}}});
+        assert!(conforms(input.as_value(), input.as_value(), &request));
+        let before = session.doc.clone();
+        let reply = session.execute("render.quality.prepare", &request).unwrap();
+        assert!(conforms(output.as_value(), output.as_value(), &reply), "{reply}");
+        assert_eq!(reply["cpu_context"]["adaptive"]["component_uncertainty"], true);
+        assert_eq!(reply["cpu_context"]["adaptive"]["map_validation_batches"], 2);
+        assert_eq!(reply["cpu_context"]["adaptive"]["optical_min_samples"], 16);
+        assert_eq!(session.doc, before);
+    }
+}

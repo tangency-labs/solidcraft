@@ -1,10 +1,13 @@
 //! One prepaid opaque path continuation. No ray queue, recursion or image storage.
 use super::*;
+use crate::radiance::{CameraPath, LightPath, RadianceComponents};
 use crate::raytrace::indirect::{self, Rectangle, multiply, power_weight};
 #[path = "image_glass_model.rs"]
 mod advanced;
 #[path = "image_glass_lighting.rs"]
 mod glass_lighting;
+#[path = "image_sampling.rs"]
+mod sampling;
 #[path = "image_scattering.rs"]
 mod scattering;
 #[path = "image_volume.rs"]
@@ -45,8 +48,14 @@ enum Stage {
     Scatter,
     Commit,
 }
+#[derive(Default)]
+struct ProbeLane {
+    radiance: job::photon_diagnostics::PhotonEstimatorPartition,
+    interfaces: u32,
+}
 pub(super) struct State {
     stage: Stage,
+    probe: Vec<ProbeLane>,
     optical: Option<GlassPath>,
     volume: Option<volume::Context>,
     origins: Vec<super::super::origin::Task>,
@@ -63,6 +72,15 @@ pub(super) struct State {
     depth: u8,
     throughput: Vec3,
     radiance: Vec3,
+    components: RadianceComponents,
+    pilot_support: job::adaptive::PilotPhotonSupport,
+    camera_path: CameraPath,
+    camera_open: bool,
+    receiver_seen: bool,
+    light_tail_optical: bool,
+    group: sampling::FresnelGroup,
+    eta_scale: f64,
+    roulette_depth: u8,
     previous_pdf: f64,
     previous_position: Vec3,
     texture_position: Vec3,
@@ -81,6 +99,7 @@ impl Default for State {
     fn default() -> Self {
         Self {
             stage: Stage::New,
+            probe: Vec::new(),
             optical: None,
             volume: None,
             origins: Vec::new(),
@@ -97,6 +116,15 @@ impl Default for State {
             depth: 0,
             throughput: Vec3::new(1.0, 1.0, 1.0),
             radiance: Vec3::ZERO,
+            components: RadianceComponents::default(),
+            pilot_support: Default::default(),
+            camera_path: CameraPath::Other,
+            camera_open: true,
+            receiver_seen: false,
+            light_tail_optical: false,
+            group: Default::default(),
+            eta_scale: 1.0,
+            roulette_depth: 0,
             previous_pdf: 0.0,
             previous_position: Vec3::ZERO,
             texture_position: Vec3::ZERO,
@@ -113,6 +141,92 @@ impl Default for State {
         }
     }
 }
+impl State {
+    fn endpoint_class(&self) -> LightPath {
+        if self.receiver_seen && self.light_tail_optical { LightPath::Caustic } else { LightPath::NonCaustic }
+    }
+    fn connection_class(&self, current_optical: bool, shadow_optical: bool) -> LightPath {
+        if shadow_optical || (current_optical && self.receiver_seen) { LightPath::Caustic } else { LightPath::NonCaustic }
+    }
+    fn camera_event(&self, transmitted: bool) -> CameraPath {
+        if self.camera_open {
+            self.camera_path.first(if transmitted { CameraPath::Transmitted } else { CameraPath::Reflected })
+        } else {
+            self.camera_path
+        }
+    }
+    fn optical_event(&mut self, transmitted: bool, continuous: bool) {
+        self.camera_path = self.camera_event(transmitted);
+        // This physical tail exists independently of whether a photon estimator
+        // is enabled. Rough interfaces may receive a caustic and continue it.
+        self.light_tail_optical |= self.receiver_seen;
+        self.receiver_seen |= continuous;
+    }
+    fn interface_event(&mut self, transmitted: bool, continuous: bool) {
+        self.optical_event(transmitted, continuous);
+        // Only represented dielectric camera interfaces count here: sharp metal
+        // and shadow connections have separate physical-component semantics.
+        if let Some(probe) = self.probe.first_mut() {
+            probe.interfaces += 1;
+        }
+    }
+    fn receiver(&mut self) {
+        self.camera_open = false;
+        self.receiver_seen = true;
+        self.light_tail_optical = false;
+    }
+    fn add_radiance(&mut self, task: &TransportContext<'_>, value: Vec3, light: LightPath, camera: CameraPath) -> job::Result<()> {
+        self.add_estimator_radiance(task, value, light, camera, false)
+    }
+    fn add_photon_radiance(&mut self, task: &TransportContext<'_>, value: Vec3, camera: CameraPath) -> job::Result<()> {
+        self.add_estimator_radiance(task, value, LightPath::Caustic, camera, true)
+    }
+    fn add_estimator_radiance(
+        &mut self,
+        task: &TransportContext<'_>,
+        value: Vec3,
+        light: LightPath,
+        camera: CameraPath,
+        photon: bool,
+    ) -> job::Result<()> {
+        // Keep the transport addition and its order unchanged. Estimator
+        // accounting observes exactly the term delivered to this addition.
+        let sum = self.radiance + value;
+        super::super::lighting::validate_radiance(sum).map_err(error)?;
+        if let Some(probe) = self.probe.first_mut() {
+            super::super::lighting::validate_radiance(value).map_err(error)?;
+            let target = if photon { &mut probe.radiance.photon } else { &mut probe.radiance.other_estimators };
+            for (target, value) in target.iter_mut().zip([value.x, value.y, value.z]) {
+                *target += value;
+                if !target.is_finite() {
+                    return Err(invalid("CPU photon camera accounting overflow"));
+                }
+            }
+        }
+        if task.capture_components {
+            self.components.add(camera, light, [value.x, value.y, value.z])?;
+        }
+        self.radiance = sum;
+        Ok(())
+    }
+    fn set_probe_prefix(&mut self, task: &TransportContext<'_>) -> job::Result<()> {
+        let prefix = if let Some(probe) = self.probe.first() {
+            Some(super::caustics::ProbePrefix {
+                throughput: self.throughput,
+                depth: u32::from(self.depth),
+                interfaces: probe.interfaces,
+                strata: production_strata(task)?,
+                camera_path: self.camera_path,
+                camera_open: self.camera_open,
+            })
+        } else {
+            None
+        };
+        self.caustic_gather.set_camera_prefix(prefix);
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 pub(super) struct ShadowProbe {
     pub ray_origin: Option<Vec3>,
@@ -153,6 +267,9 @@ impl State {
     }
     pub(super) fn continuous_sampled(&self) -> bool {
         self.sampled_continuous
+    }
+    pub(super) fn sampling_probe(&self) -> (u32, bool, f64) {
+        (self.group.lane, self.group.stratified, self.eta_scale)
     }
     pub(super) fn volume_probe(&self) -> Option<VolumeProbe> {
         self.volume.as_ref().map(|v| VolumeProbe {
@@ -238,13 +355,64 @@ impl State {
 }
 fn variates(task: &TransportContext<'_>, state: &State, domain: u64) -> job::Result<[f64; 2]> {
     let p = task.progressive.as_ref().ok_or_else(|| invalid("CPU path needs progressive film"))?;
-    p.variates(task.pixel, (0x5041_5448_0000_u64 + u64::from(state.depth) * 0x10000).wrapping_add(domain))
+    let branch = if state.group.stratified { state.group.lane + 1 } else { 0 };
+    p.branch_variates(task.pixel, (0x5041_5448_0000_u64 + u64::from(state.depth) * 0x10000).wrapping_add(domain), branch)
+}
+fn production_strata(task: &TransportContext<'_>) -> job::Result<u32> {
+    let progressive = task.progressive.ok_or_else(|| invalid("CPU Fresnel group needs progressive sampling"))?;
+    if progressive.identity(task.pixel)?.stage == job::adaptive::PreviewStage::Pilot {
+        return Ok(1);
+    }
+    Ok(task.options.path.ok_or_else(|| invalid("CPU Fresnel group needs path settings"))?.production_lanes())
+}
+fn probe_identity(task: &TransportContext<'_>) -> job::Result<Option<job::photon_diagnostics::PhotonCameraSample>> {
+    if !task.photon_diagnostics.enabled() {
+        return Ok(None);
+    }
+    let width = task.request.width as usize;
+    if width == 0 {
+        return Err(invalid("CPU photon probe needs a nonempty image"));
+    }
+    let pixel = [
+        u32::try_from(task.pixel % width).map_err(|_| invalid("CPU photon probe x overflow"))?,
+        u32::try_from(task.pixel / width).map_err(|_| invalid("CPU photon probe y overflow"))?,
+    ];
+    if !task.photon_diagnostics.captures_pixel(pixel) {
+        return Ok(None);
+    }
+    let progressive = task.progressive.ok_or_else(|| invalid("CPU photon camera accounting needs progressive sampling"))?;
+    let identity = progressive.identity(task.pixel)?;
+    if identity.stage != job::adaptive::PreviewStage::Production {
+        return Ok(None);
+    }
+    let (epoch, _) = super::caustics::probe_metadata(task)?;
+    Ok(Some(job::photon_diagnostics::PhotonCameraSample {
+        pixel,
+        sample: identity.ordinal,
+        epoch,
+        stratum: task.fresnel_stratum,
+        strata: production_strata(task)?,
+    }))
+}
+fn first_interface_split(task: &TransportContext<'_>, state: &State) -> job::Result<bool> {
+    Ok(task.options.path.is_some_and(|path| path.split_first_interface) && !state.group.stratified && production_strata(task)? == 2)
+}
+fn fresnel_draw(task: &TransportContext<'_>, state: &mut State, uniform: f64) -> job::Result<f64> {
+    // Unsupported boundaries keep their ordinary draw and leave the split token
+    // available. Independent pilots are unsplit as well as unstratified.
+    if task.options.path.is_some_and(|path| path.split_first_interface) {
+        return Ok(uniform);
+    }
+    state.group.branch(uniform, production_strata(task)?)
 }
 fn remaining_depth(task: &TransportContext<'_>, state: &State) -> job::Result<u8> {
     Ok(task.options.path.ok_or_else(|| invalid("CPU path settings disappeared"))?.max_depth.saturating_sub(state.depth))
 }
 fn continuing(task: &TransportContext<'_>, state: &State) -> job::Result<bool> {
     Ok(remaining_depth(task, state)? > 1)
+}
+fn sharp_metal(surface: OpaqueSurface) -> bool {
+    surface.metallic() >= 0.99 && surface.roughness() <= 0.05 && surface.clear_coat().is_none_or(|coat| coat.weight() == 0.0)
 }
 fn owned_caustic_tail(task: &TransportContext<'_>, state: &State) -> Option<job::CausticOptions> {
     let events = state.smooth_caustic_chain?;
@@ -383,28 +551,83 @@ pub(super) fn step(task: &mut ImageTask) -> job::Result<()> {
     // The same borrowed transport context serves serial continuations and native
     // worker batches; only the owner mutates the film in pixel order.
     let mut paths = std::mem::take(&mut task.path);
-    let (result, completed, coverage, pupil) = {
+    let (result, completed, coverage, pupil, components, pilot_support) = {
         let mut context = TransportContext::from_image(task);
         let result =
             paths.last_mut().ok_or_else(|| invalid("CPU path continuation missing")).and_then(|state| advance_or_commit(&mut context, state));
-        (result, context.completed, context.primary_coverage, context.pupil_sample)
+        (result, context.completed, context.primary_coverage, context.pupil_sample, context.completed_components, context.completed_pilot_support)
     };
     task.path = paths;
     task.primary_coverage = coverage;
     task.pupil_sample = pupil;
     result?;
     if let Some(radiance) = completed {
+        if let Some(stats) = task.statistics.first_mut() {
+            stats.completed_components = components;
+            stats.completed_pilot_support = pilot_support;
+        }
         task.finish_sample(radiance)?;
     }
     Ok(())
 }
 
+fn pilot_evidence_active(task: &TransportContext<'_>) -> bool {
+    task.options
+        .adaptive
+        .as_ref()
+        .is_some_and(|adaptive| adaptive.evidence_enabled() && task.progressive.is_some_and(|p| p.film.samples() < adaptive.pilot_samples))
+}
+
 pub(super) fn advance_or_commit(task: &mut TransportContext<'_>, state: &mut State) -> job::Result<()> {
+    task.fresnel_stratum = state.group.lane;
+    if state.stage == Stage::New && state.probe.is_empty() && probe_identity(task)?.is_some() {
+        if state.probe.capacity() == 0 {
+            state
+                .probe
+                .try_reserve_exact(1)
+                .map_err(|_| JobError::new(job::ErrorCode::AllocationFailed, "could not reserve bounded camera probe lane"))?;
+            if state.probe.capacity() != 1 {
+                return Err(invalid("CPU camera probe lane exceeds its admission"));
+            }
+        }
+        state.probe.push(ProbeLane::default());
+    }
     if state.stage == Stage::Commit {
-        task.finish_sample(state.radiance)?;
+        task.cancel.check()?;
+        let strata = production_strata(task)?;
+        if let Some(identity) = probe_identity(task)? {
+            let probe = state.probe.first().ok_or_else(|| invalid("CPU photon camera lane disappeared"))?;
+            let (_, radii) = super::caustics::probe_metadata(task)?;
+            task.photon_diagnostics.record_radiance(identity, true, probe.radiance.photon)?;
+            task.photon_diagnostics.record_radiance(identity, false, probe.radiance.other_estimators)?;
+            task.photon_diagnostics.complete_lane(
+                identity,
+                [state.radiance.x, state.radiance.y, state.radiance.z],
+                task.primary_coverage != 0,
+                radii,
+            )?;
+        }
+        let completed = state.group.complete(state.radiance, task.capture_components.then_some(state.components), task.primary_coverage, strata)?;
         let mut origins = std::mem::take(&mut state.origins);
         origins.clear();
-        *state = State { origins, ..Default::default() };
+        let mut probe = std::mem::take(&mut state.probe);
+        probe.clear();
+        let mut caustic_gather = std::mem::take(&mut state.caustic_gather);
+        caustic_gather.reset();
+        if let Some((radiance, components, coverage)) = completed {
+            task.completed_components = components;
+            // Adaptive pilots always have one complete camera lane. Production
+            // lanes never contribute to allocation or receiver-query evidence.
+            task.completed_pilot_support = state.pilot_support;
+            task.primary_coverage = coverage;
+            task.finish_sample(radiance)?;
+            *state = State { origins, probe, caustic_gather, ..Default::default() };
+        } else {
+            let group = state.group;
+            *state = State { origins, group, probe, caustic_gather, ..Default::default() };
+            task.primary_coverage = 0;
+            task.pupil_sample = None;
+        }
         return Ok(());
     }
     advance(task, state)
@@ -451,6 +674,26 @@ fn advance(task: &mut TransportContext<'_>, state: &mut State) -> job::Result<()
         scattering::shadow_setup(task, state)?;
         return Ok(());
     }
+    if state.stage == Stage::Trace
+        && state.depth >= 3
+        && state.roulette_depth != state.depth
+        && task.options.path.is_some_and(|options| options.russian_roulette)
+    {
+        task.work.tick(task.cancel).map_err(error)?;
+        state.roulette_depth = state.depth;
+        let probability = sampling::survival(state.throughput, state.eta_scale)?;
+        if probability < 1.0 {
+            let [uniform, _] = variates(task, state, 0x8000)?;
+            if uniform >= probability {
+                state.stage = Stage::Commit;
+            } else {
+                state.throughput = state.throughput / probability;
+                super::super::lighting::validate_radiance(state.throughput).map_err(error)?;
+            }
+        }
+        return Ok(());
+    }
+
     if state.stage == Stage::Trace || state.stage == Stage::Shadow {
         let bvh = task.bvh.as_ref().ok_or_else(|| invalid("CPU path BVH missing"))?;
         let cursor = state.cursor.as_mut().ok_or_else(|| invalid("CPU path traversal cursor missing"))?;
@@ -623,7 +866,7 @@ fn advance(task: &mut TransportContext<'_>, state: &mut State) -> job::Result<()
                     )
                     .map_err(error)?
                 };
-                state.radiance += multiply(state.throughput, light.radiance) * weight;
+                state.add_radiance(task, multiply(state.throughput, light.radiance) * weight, state.endpoint_class(), state.camera_path)?;
                 if state.depth == 0 {
                     task.primary_coverage = 1;
                 }
@@ -677,7 +920,7 @@ fn advance(task: &mut TransportContext<'_>, state: &mut State) -> job::Result<()
                         } else {
                             power_weight(state.previous_pdf, f64::from(n) * pdf).map_err(error)?
                         };
-                        state.radiance += multiply(state.throughput, radiance) * weight;
+                        state.add_radiance(task, multiply(state.throughput, radiance) * weight, state.endpoint_class(), state.camera_path)?;
                     }
                     if let Some(sun) = task.options.sun.as_deref().copied() {
                         let pdf = super::super::celestial::pdf(sun, direction).map_err(error)?;
@@ -686,7 +929,12 @@ fn advance(task: &mut TransportContext<'_>, state: &mut State) -> job::Result<()
                         } else {
                             power_weight(state.previous_pdf, pdf).map_err(error)?
                         };
-                        state.radiance += multiply(state.throughput, super::super::celestial::radiance(sun, direction).map_err(error)?) * weight;
+                        state.add_radiance(
+                            task,
+                            multiply(state.throughput, super::super::celestial::radiance(sun, direction).map_err(error)?) * weight,
+                            state.endpoint_class(),
+                            state.camera_path,
+                        )?;
                     }
                 }
                 state.stage = Stage::Commit;
@@ -793,24 +1041,45 @@ fn advance(task: &mut TransportContext<'_>, state: &mut State) -> job::Result<()
             if let Some((body, emission)) = task.emissions.get(state.emission_cursor) {
                 let hit = shared(task, state)?;
                 if *body == hit.body_index {
-                    state.radiance += multiply(state.throughput, emission.radiance(hit.front_face));
+                    state.add_radiance(
+                        task,
+                        multiply(state.throughput, emission.radiance(hit.front_face)),
+                        state.endpoint_class(),
+                        state.camera_path,
+                    )?;
                 }
                 state.emission_cursor += 1;
                 super::super::lighting::validate_radiance(state.radiance).map_err(error)?;
             } else {
+                if state.camera_open {
+                    let surface = shared(task, state)?.surface;
+                    if sharp_metal(surface) {
+                        state.camera_path = state.camera_path.first(CameraPath::Reflected);
+                    }
+                    state.camera_open = false;
+                }
                 state.light = 0;
-                state.caustic_gather = Default::default();
+                state.caustic_gather.reset();
                 state.stage = if task.caustics.is_empty() { Stage::Directional } else { Stage::Caustics };
             }
         }
         Stage::Caustics => {
+            state.set_probe_prefix(task)?;
+            state.caustic_gather.enable_support(pilot_evidence_active(task));
             let hit = shared(task, state)?;
             let view = -state.ray.ok_or_else(|| invalid("CPU caustic receiver ray missing"))?.direction();
             let remaining = remaining_depth(task, state)?;
             if let Some(contribution) = super::caustics::gather(task, &mut state.caustic_gather, hit, view, remaining)? {
-                state.radiance += multiply(state.throughput, contribution);
+                state.add_photon_radiance(task, multiply(state.throughput, contribution), state.camera_path)?;
                 super::super::lighting::validate_radiance(state.radiance).map_err(error)?;
             } else {
+                if let Some(report) = state.caustic_gather.take_diagnostics() {
+                    task.photon_diagnostics.merge(&report)?;
+                }
+                if pilot_evidence_active(task) {
+                    let (support, valid) = state.caustic_gather.take_support();
+                    state.pilot_support.observe_query(support, valid);
+                }
                 state.stage = Stage::Directional;
             }
         }
@@ -981,7 +1250,13 @@ fn advance(task: &mut TransportContext<'_>, state: &mut State) -> job::Result<()
                 };
                 state.contribution = state.contribution * weight;
             }
-            state.radiance += state.contribution;
+            let current_optical = task.capture_components
+                && state.receiver_seen
+                && state.hit.is_some()
+                && !state.volume.as_ref().is_some_and(|volume| volume.event.is_some())
+                && sharp_metal(shared(task, state)?.surface);
+            let light = state.connection_class(current_optical, state.optical.as_ref().is_some_and(|optical| optical.shadow_interfaces > 0));
+            state.add_radiance(task, state.contribution, light, state.camera_path)?;
             super::super::lighting::validate_radiance(state.radiance).map_err(error)?;
             state.stage = state.after_shadow;
         }
@@ -1009,8 +1284,26 @@ fn advance(task: &mut TransportContext<'_>, state: &mut State) -> job::Result<()
                 state.throughput = multiply(state.throughput, sample.weight);
                 super::super::lighting::validate_radiance(state.throughput).map_err(error)?;
                 if state.throughput != Vec3::ZERO {
+                    if sharp_metal(hit.surface) {
+                        state.optical_event(false, true);
+                        state.camera_open = false;
+                    } else {
+                        state.receiver();
+                    }
                     state.sampled_continuous = true;
-                    state.smooth_caustic_chain = task.options.caustics.filter(|caustics| caustics.area_lights || caustics.environment).map(|_| 0);
+                    // Reset ownership at this actual mapped and aged receiver.
+                    // Transferred paths retain the existing camera BSDF estimator.
+                    state.smooth_caustic_chain = task
+                        .options
+                        .caustics
+                        .filter(|caustics| {
+                            (caustics.area_lights || caustics.environment)
+                                && !job::photon_receiver::continues_smooth_caustics(
+                                    caustics.glossy_continuation_max_roughness,
+                                    hit.surface.roughness(),
+                                )
+                        })
+                        .map(|_| 0);
                     state.previous_pdf = sample.pdf;
                     state.previous_position = hit.position;
                     if let Some(optical) = &mut state.optical {
@@ -1177,6 +1470,8 @@ fn glass_one(task: &mut TransportContext<'_>, state: &mut State) -> job::Result<
     let direction = state.ray.ok_or_else(|| invalid("CPU glass incident ray missing"))?.direction();
     let normal = hit.oriented_geometric_normal();
     let [draw, _] = variates(task, state, 0x4000)?;
+    let draw = fresnel_draw(task, state, draw)?;
+    let mut eta_ratio = None;
     let mut preserve_pdf = false;
     let (outgoing, weight, entering) = if input.boundary == job::DielectricBoundary::ThinSheet {
         let normal = if advanced_normals(task) {
@@ -1225,16 +1520,28 @@ fn glass_one(task: &mut TransportContext<'_>, state: &mut State) -> job::Result<
         } else {
             dielectric::shaded_interface(direction, normal, hit.shading_normal, ni, nt).map_err(error)?.0
         };
-        if draw < interface.reflectance || interface.transmitted.is_none() {
-            (interface.reflected, Vec3::new(1.0, 1.0, 1.0), None)
+        let split =
+            if first_interface_split(task, state)? { Some(state.group.split(interface.reflectance, interface.transmitted.is_some())?) } else { None };
+        if split.is_some_and(|choice| choice.weight == 0.0) {
+            state.stage = Stage::Commit;
+            return Ok(());
+        }
+        let multiplier = split.map_or(1.0, |choice| choice.weight);
+        if split.map_or(draw < interface.reflectance || interface.transmitted.is_none(), |choice| !choice.transmitted) {
+            (interface.reflected, Vec3::new(1.0, 1.0, 1.0) * multiplier, None)
         } else {
+            eta_ratio = Some((ni, nt));
             (
                 interface.transmitted.ok_or_else(|| invalid("CPU Snell transmission missing"))?,
-                Vec3::new(1.0, 1.0, 1.0) * (ni / nt).powi(2),
+                Vec3::new(1.0, 1.0, 1.0) * ((ni / nt).powi(2) * multiplier),
                 Some(hit.front_face),
             )
         }
     };
+    state.interface_event(outgoing.dot(normal) < 0.0, false);
+    if let Some((incident, transmitted)) = eta_ratio {
+        state.eta_scale = sampling::refractive_scale(state.eta_scale, incident, transmitted)?;
+    }
     let optical = state.optical.as_mut().ok_or_else(|| invalid("CPU glass stack missing"))?;
     if let Some(enter) = entering {
         if enter {

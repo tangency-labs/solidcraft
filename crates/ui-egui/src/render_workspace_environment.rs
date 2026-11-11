@@ -965,6 +965,9 @@ fn validate_volume_value(app: &SolveApp, value: Option<solidcraft_engine::render
         if view.studio.transmission_samples != 1 {
             return Err(app.tr("render.volume_single_stratum_required").into());
         }
+        if view.studio.split_first_interface {
+            return Err(app.tr("render.convergence.volume_single_path").into());
+        }
         if !view.studio.lighting_enabled && view.studio.environment == studio::Environment::None {
             return Err(app.tr("render.volume_lighting_required").into());
         }

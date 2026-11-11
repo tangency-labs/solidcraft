@@ -6,6 +6,7 @@ use super::super::{
 };
 use super::*;
 use crate::glass_model::WAVELENGTHS_NM;
+use job::photon_diagnostics::{EmissionMeasure, PhotonContribution, PhotonDiagnostics};
 use std::f64::consts::{PI, TAU};
 
 #[derive(Clone, Copy, Default)]
@@ -20,6 +21,17 @@ struct Photon {
     side: i8,
     source: u32,
     smooth_chain_events: u8,
+    diagnostic_index: u32,
+}
+#[derive(Clone, Copy, Default)]
+struct PhotonMetadata {
+    emitted_path: u32,
+    source: u32,
+    source_probability: f64,
+    emission_density: f64,
+    emission_measure: EmissionMeasure,
+    light_depth: u8,
+    reservoir_visits: u8,
 }
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum ReceiverKind {
@@ -64,6 +76,7 @@ struct Path {
     verify_origin: bool,
     reservoir: Option<Photon>,
     candidates: u8,
+    metadata: PhotonMetadata,
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Stage {
@@ -81,7 +94,9 @@ enum Stage {
 pub(super) struct Task {
     photons: Vec<Photon>,
     scratch: Vec<Photon>,
+    metadata: Vec<PhotonMetadata>,
     options: job::CausticOptions,
+    radii: [f64; 2],
     guide_bounds: Bounds,
     guide_region: usize,
     guide: Option<PhotonGuide>,
@@ -91,6 +106,8 @@ pub(super) struct Task {
     sky_integral: f64,
     sources: Option<job::photon_sources::PhotonSourceDistribution>,
     pass: u32,
+    assessment: Option<job::adaptive::AdaptiveSampling>,
+    map_identity: job::adaptive::PhotonMapIdentity,
     ordinal: u32,
     path: Option<Path>,
     stage: Stage,
@@ -129,19 +146,34 @@ impl Task {
     pub(super) fn required_bytes(options: job::CausticOptions) -> job::Result<u64> {
         options.validate()?;
         u64::from(options.photons)
-            .checked_mul(2 * std::mem::size_of::<Photon>() as u64)
+            .checked_mul(
+                2 * std::mem::size_of::<Photon>() as u64
+                    + if options.probe_pixel.is_some() { std::mem::size_of::<PhotonMetadata>() as u64 } else { 0 },
+            )
             .and_then(|bytes| bytes.checked_add(std::mem::size_of::<Self>() as u64))
             .ok_or_else(|| error(TraceError::MemoryLimit))
     }
     pub(super) fn new(options: job::CausticOptions) -> job::Result<Self> {
         Self::with_capacity(options, options.photons as usize)
     }
+    pub(super) fn configure_assessment(&mut self, adaptive: Option<job::adaptive::AdaptiveSampling>) -> job::Result<()> {
+        if self.pass != 0 || self.ordinal != 0 || self.path.is_some() || !self.photons.is_empty() {
+            return Err(invalid("CPU photon assessment must be configured before emission"));
+        }
+        self.assessment = adaptive.filter(|a| a.map_validation_batches > 0);
+        let identity = job::adaptive::PhotonMapIdentity::for_pass(self.options, self.assessment, 0)?;
+        self.radii = self.options.radii_mm(identity.radius_epoch)?;
+        self.map_identity = identity;
+        Ok(())
+    }
     fn with_capacity(options: job::CausticOptions, capacity: usize) -> job::Result<Self> {
         Self::required_bytes(options)?;
         Ok(Self {
             photons: reserve(capacity)?,
             scratch: reserve(capacity)?,
+            metadata: reserve(if options.probe_pixel.is_some() { capacity } else { 0 })?,
             options,
+            radii: options.radii_mm(0)?,
             guide_bounds: Bounds::empty(),
             guide_region: 0,
             guide: None,
@@ -151,6 +183,8 @@ impl Task {
             sky_integral: 0.0,
             sources: None,
             pass: 0,
+            assessment: None,
+            map_identity: job::adaptive::PhotonMapIdentity::for_pass(options, None, 0)?,
             ordinal: 0,
             path: None,
             stage: if options.guided_emission {
@@ -175,7 +209,7 @@ impl Task {
     #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn worker_bytes(capacity: usize) -> job::Result<u64> {
         (capacity as u64)
-            .checked_mul(2 * std::mem::size_of::<Photon>() as u64)
+            .checked_mul(2 * std::mem::size_of::<Photon>() as u64 + std::mem::size_of::<PhotonMetadata>() as u64)
             .and_then(|bytes| bytes.checked_add(std::mem::size_of::<Self>() as u64))
             .ok_or_else(|| error(TraceError::MemoryLimit))
     }
@@ -204,7 +238,9 @@ impl Task {
         }
         self.photons.clear();
         self.scratch.clear();
+        self.metadata.clear();
         self.options = source.options;
+        self.radii = source.radii;
         self.guide_bounds = source.guide_bounds;
         self.guide_region = source.guide_region;
         self.guide = source.guide;
@@ -214,6 +250,8 @@ impl Task {
         self.sky_integral = source.sky_integral;
         self.sources = source.sources;
         self.pass = source.pass;
+        self.assessment = source.assessment;
+        self.map_identity = source.map_identity;
         self.ordinal = begin;
         self.stage = Stage::Emit;
         self.begin = begin as usize;
@@ -240,15 +278,26 @@ impl Task {
     }
     #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn merge_batch(&mut self, worker: &mut Self) -> job::Result<()> {
-        if worker.begin != self.ordinal as usize || worker.pass != self.pass || worker.path.is_some() {
+        if worker.begin != self.ordinal as usize || worker.pass != self.pass || worker.map_identity != self.map_identity || worker.path.is_some() {
             return Err(invalid("CPU photon batches must merge in ordinal order"));
         }
-        for photon in worker.photons.drain(..) {
+        let metadata_offset = u32::try_from(self.metadata.len()).map_err(|_| invalid("CPU photon metadata offset overflow"))?;
+        for mut photon in worker.photons.drain(..) {
+            if self.options.probe_pixel.is_some() {
+                photon.diagnostic_index =
+                    photon.diagnostic_index.checked_add(metadata_offset).ok_or_else(|| invalid("CPU photon metadata index overflow"))?;
+            }
             if self.photons.len() == self.photons.capacity() || self.scratch.len() == self.scratch.capacity() {
                 return Err(error(TraceError::MemoryLimit));
             }
             self.photons.push(photon);
             self.scratch.push(Photon::default());
+        }
+        for metadata in worker.metadata.drain(..) {
+            if self.metadata.len() == self.metadata.capacity() {
+                return Err(error(TraceError::MemoryLimit));
+            }
+            self.metadata.push(metadata);
         }
         worker.scratch.clear();
         self.ordinal = worker.ordinal;
@@ -261,16 +310,24 @@ impl Task {
         self.pass == 0 && !self.ready()
     }
     pub(super) fn refresh_due(&self, pass: u32) -> bool {
-        self.options.refresh_per_pass && pass != self.pass
+        (self.options.refresh_per_pass || self.assessment.is_some()) && pass != self.pass
     }
     fn refresh(&mut self, pass: u32, work: &mut WorkBudget, cancel: &CancelToken) -> job::Result<()> {
         if !self.ready() || self.path.is_some() || self.pass.checked_add(1) != Some(pass) {
             return Err(invalid("CPU caustic refresh requires the next complete camera pass"));
         }
+        let identity = job::adaptive::PhotonMapIdentity::for_pass(self.options, self.assessment, pass)?;
+        let radii = self.options.radii_mm(identity.radius_epoch)?;
         work.tick(cancel).map_err(error)?;
         self.pass = pass;
+        if self.map_identity == identity {
+            return Ok(());
+        }
+        self.radii = radii;
+        self.map_identity = identity;
         self.photons.clear();
         self.scratch.clear();
+        self.metadata.clear();
         self.ordinal = 0;
         self.stage = Stage::Emit;
         self.width = 1;
@@ -295,7 +352,11 @@ impl Task {
     }
     #[cfg(test)]
     pub(super) fn test_epoch(&self) -> u32 {
-        self.pass
+        self.map_identity.epoch
+    }
+    #[cfg(test)]
+    pub(super) fn test_radii(&self) -> [f64; 2] {
+        self.radii
     }
     #[cfg(test)]
     pub(super) fn test_buffers(&self) -> [usize; 2] {
@@ -311,16 +372,29 @@ impl Task {
         (u64::from(self.ordinal), u64::from(self.options.photons))
     }
     fn random(&self, depth: u8, domain: u64) -> [f64; 2] {
-        super::super::progressive::variates(self.options.seed, u64::from(self.pass), self.ordinal, 0x4341_5553_0000 + u64::from(depth) * 256 + domain)
+        super::super::progressive::variates(
+            self.map_identity.seed,
+            u64::from(self.map_identity.epoch),
+            self.ordinal,
+            0x4341_5553_0000 + u64::from(depth) * 256 + domain,
+        )
     }
     fn finish_path(&mut self) -> job::Result<()> {
-        if let Some(path) = self.path.take()
+        if let Some(mut path) = self.path.take()
             && let Some(mut photon) = path.reservoir
         {
             photon.flux = photon.flux * f64::from(path.candidates);
             finite_flux(photon.flux)?;
             if self.photons.len() == self.photons.capacity() || self.scratch.len() == self.scratch.capacity() {
                 return Err(error(TraceError::MemoryLimit));
+            }
+            if self.options.probe_pixel.is_some() {
+                if self.metadata.len() == self.metadata.capacity() {
+                    return Err(error(TraceError::MemoryLimit));
+                }
+                photon.diagnostic_index = u32::try_from(self.metadata.len()).map_err(|_| invalid("CPU photon metadata index overflow"))?;
+                path.metadata.reservoir_visits = path.candidates;
+                self.metadata.push(path.metadata);
             }
             self.photons.push(photon);
             self.scratch.push(Photon::default());
@@ -351,8 +425,9 @@ fn candidate(
     // One independent counter draw selects a uniform visit, without changing
     // any interface, wavelength, or free-flight variate on this light path.
     if map.random(path.depth, 13)[0] < 1.0 / f64::from(path.candidates) {
+        path.metadata.light_depth = path.depth;
         path.reservoir = Some(Photon {
-            cell: cell(position, map.options.radius_mm)?,
+            cell: cell(position, map.radii[1])?,
             position,
             normal,
             incoming,
@@ -362,6 +437,7 @@ fn candidate(
             side,
             source: path.source_index,
             smooth_chain_events: if path.smooth_source.is_some() { path.depth } else { 0 },
+            diagnostic_index: 0,
         });
     }
     Ok(())
@@ -513,12 +589,19 @@ fn emit(map: &mut Task, task: &TransportContext<'_>) -> job::Result<()> {
     };
     let [u, v] = map.random(0, 1);
     let normalization = inverse_probability / f64::from(map.options.photons);
-    let (origin, direction, flux, point_source) = if let Some(light) = task.lights.lights().get(source) {
+    let (origin, direction, flux, point_source, emission_density, emission_measure) = if let Some(light) = task.lights.lights().get(source) {
         let Some((origin, radius)) = bounding_disk(task, map.guide, light.direction(), [u, v])? else {
             map.finish_path()?;
             return Ok(());
         };
-        (origin, -light.direction(), light.color() * (light.intensity() * PI * radius * radius * normalization), None)
+        (
+            origin,
+            -light.direction(),
+            light.color() * (light.intensity() * PI * radius * radius * normalization),
+            None,
+            1.0 / (PI * radius * radius),
+            EmissionMeasure::DiskArea,
+        )
     } else if source < delta_count {
         let light = task
             .options
@@ -565,13 +648,26 @@ fn emit(map: &mut Task, task: &TransportContext<'_>) -> job::Result<()> {
             direction,
             color * (light.intensity * light.reference_distance_mm.powi(2) * feather * normalization / density),
             Some((origin, light.minimum_distance_mm)),
+            density,
+            EmissionMeasure::SolidAngle,
         )
     } else if source < local_count {
-        let light = area.get(source - delta_count).ok_or_else(|| invalid("CPU caustic area source index"))?;
-        let light = super::super::indirect::Rectangle::new(light).map_err(error)?;
+        let input = area.get(source - delta_count).ok_or_else(|| invalid("CPU caustic area source index"))?;
+        let light = super::super::indirect::Rectangle::new(input).map_err(error)?;
         let guided = map.guide.map(|guide| (guide, map.random(0, 17)[0]));
         let (origin, direction, power) = light.emit_photon(map.random(0, 16), [u, v], guided).map_err(error)?;
-        (origin, direction, power * normalization, None)
+        let density = if map.options.probe_pixel.is_some() && power != Vec3::ZERO {
+            let v = |a: [f64; 3]| Vec3::new(a[0], a[1], a[2]);
+            let checked =
+                super::super::area::RectangleLight::new(v(input.center_mm), v(input.edge_u_mm), v(input.edge_v_mm), v(input.color), input.intensity)
+                    .map_err(error)?;
+            let emitted = v(input.color) * (input.intensity * checked.normal().dot(direction).max(0.0));
+            let luma = |v: Vec3| v.x * 0.2126 + v.y * 0.7152 + v.z * 0.0722;
+            luma(emitted) / luma(power)
+        } else {
+            0.0
+        };
+        (origin, direction, power * normalization, None, density, EmissionMeasure::AreaSolidAngle)
     } else {
         let [x, y] = map.random(0, 16);
         let x = super::super::indirect::open_stratum(x, 0, 1).map_err(error)?;
@@ -583,7 +679,14 @@ fn emit(map: &mut Task, task: &TransportContext<'_>) -> job::Result<()> {
         };
         // The disk is perpendicular to the sampled incident direction, so
         // its projected area is constant without an extra cosine factor.
-        (origin, -toward, radiance * (PI * radius * radius * normalization / pdf), None)
+        (
+            origin,
+            -toward,
+            radiance * (PI * radius * radius * normalization / pdf),
+            None,
+            pdf / (PI * radius * radius),
+            EmissionMeasure::DiskAreaSolidAngle,
+        )
     };
     finite_flux(flux)?;
     if flux == Vec3::ZERO {
@@ -629,6 +732,14 @@ fn emit(map: &mut Task, task: &TransportContext<'_>) -> job::Result<()> {
         verify_origin: false,
         reservoir: None,
         candidates: 0,
+        metadata: PhotonMetadata {
+            emitted_path: map.ordinal,
+            source: u32::try_from(source).map_err(|_| invalid("CPU photon diagnostic source overflow"))?,
+            source_probability: 1.0 / inverse_probability,
+            emission_density,
+            emission_measure,
+            ..Default::default()
+        },
     });
     Ok(())
 }
@@ -899,7 +1010,9 @@ fn sheet(map: &mut Task, task: &TransportContext<'_>, path: &mut Path) -> job::R
 }
 fn sort(map: &mut Task) -> job::Result<()> {
     if map.width >= map.photons.len() {
-        if !map.options.refresh_per_pass {
+        // Fixed production can release sorting scratch only after the final
+        // assessment map has been replaced by its canonical production map.
+        if !map.options.refresh_per_pass && !map.map_identity.assessment {
             map.scratch = Vec::new();
         }
         map.stage = Stage::Ready;
@@ -1048,26 +1161,175 @@ fn advance(map: &mut Task, task: &mut TransportContext<'_>) -> job::Result<()> {
     }
 }
 
+/// Camera prefix is supplied before ranking so spectral weights cannot hide a
+/// camera-dominant event behind the receiver-local top list.
+#[derive(Clone, Copy)]
+pub(super) struct ProbePrefix {
+    pub throughput: Vec3,
+    pub depth: u32,
+    pub interfaces: u32,
+    pub strata: u32,
+    pub camera_path: crate::radiance::CameraPath,
+    pub camera_open: bool,
+}
 #[derive(Default)]
 pub(super) struct Gather {
     cell: Option<[i64; 3]>,
     neighbor: u8,
     index: usize,
     end: usize,
+    probe_initialized: bool,
+    // One prepaid slot is reused across queries and camera lanes. Keeping the
+    // report out of this continuation preserves the probe-off task size.
+    diagnostics: Vec<PhotonDiagnostics>,
+    prefix: Option<ProbePrefix>,
+    support: job::photon_support::PhotonContributionSupport,
+    support_enabled: bool,
+    support_invalid: bool,
+    last_transmitted: Option<bool>,
 }
-fn next(task: &TransportContext<'_>, cursor: &mut Gather, position: Vec3) -> job::Result<Option<Option<(Photon, f64)>>> {
+impl Gather {
+    pub(super) fn reset(&mut self) {
+        let mut diagnostics = std::mem::take(&mut self.diagnostics);
+        diagnostics.clear();
+        *self = Self { diagnostics, ..Self::default() };
+    }
+    pub(super) fn set_camera_prefix(&mut self, prefix: Option<ProbePrefix>) {
+        self.prefix = prefix;
+    }
+    pub(super) fn enable_support(&mut self, enabled: bool) {
+        self.support_enabled |= enabled;
+    }
+    pub(super) fn take_support(&mut self) -> (job::photon_support::PhotonContributionSupport, bool) {
+        let value = (self.support, !self.support_invalid);
+        self.support = Default::default();
+        self.support_invalid = false;
+        value
+    }
+    pub(super) fn last_transmitted(&self) -> Option<bool> {
+        self.last_transmitted
+    }
+    pub(super) fn take_diagnostics(&mut self) -> Option<PhotonDiagnostics> {
+        let mut report = self.diagnostics.pop()?;
+        for entry in
+            report.largest.iter_mut().take(report.top_count as usize).chain(report.largest_camera.iter_mut().take(report.camera_top_count as usize))
+        {
+            entry.query_eligible = report.eligible;
+            entry.query_contributing = report.contributing;
+            entry.support = self.support;
+            entry.query_effective_event_support = self.support.effective_event_support();
+        }
+        Some(report)
+    }
+}
+pub(super) fn probe_metadata(task: &TransportContext<'_>) -> job::Result<(u32, [f64; 2])> {
+    let map = task.caustics.first().filter(|map| map.ready()).ok_or_else(|| invalid("CPU photon diagnostic map is incomplete"))?;
+    Ok((map.map_identity.epoch, map.radii))
+}
+fn probe(task: &TransportContext<'_>, map: &Task) -> job::Result<Option<PhotonDiagnostics>> {
+    let Some([x, y]) = map.options.probe_pixel else { return Ok(None) };
+    if u64::from(y) * u64::from(task.request.width) + u64::from(x) != task.pixel as u64 {
+        return Ok(None);
+    }
+    let (sample, production) = if let Some(progressive) = task.progressive {
+        let identity = progressive.identity(task.pixel)?;
+        (identity.ordinal, identity.stage == job::adaptive::PreviewStage::Production)
+    } else {
+        (0, true)
+    };
+    if !production || sample != map.options.probe_sample {
+        return Ok(None);
+    }
+    let mut report = PhotonDiagnostics::new([x, y], sample, map.map_identity.epoch, map.map_identity.seed, map.radii);
+    report.begin_gather()?;
+    Ok(Some(report))
+}
+struct ReceiverContribution {
+    response: Vec3,
+    measure: f64,
+    radius: f64,
+    radiance: Vec3,
+    roughness: Option<f64>,
+}
+fn record(task: &TransportContext<'_>, cursor: &mut Gather, photon: Photon, value: ReceiverContribution) -> job::Result<()> {
+    let ReceiverContribution { response, measure, radius, radiance, roughness } = value;
+    if cursor.support_enabled || !cursor.diagnostics.is_empty() {
+        cursor.support_invalid |= !cursor.support.observe(radiance.x * 0.2126 + radiance.y * 0.7152 + radiance.z * 0.0722);
+    }
+    let Some(report) = cursor.diagnostics.first_mut() else { return Ok(()) };
+    let prefix = cursor.prefix.ok_or_else(|| invalid("CPU photon diagnostic camera prefix is missing"))?;
+    let camera_path = if prefix.camera_open {
+        cursor.last_transmitted.map_or(prefix.camera_path, |transmitted| {
+            prefix.camera_path.first(if transmitted { crate::radiance::CameraPath::Transmitted } else { crate::radiance::CameraPath::Reflected })
+        })
+    } else {
+        prefix.camera_path
+    };
+    let map = task.caustics.first().ok_or_else(|| invalid("CPU photon diagnostic map missing"))?;
+    let metadata = *map.metadata.get(photon.diagnostic_index as usize).ok_or_else(|| invalid("CPU photon diagnostic record missing"))?;
+    let rgb = |v: Vec3| [v.x, v.y, v.z];
+    report.observe(PhotonContribution {
+        emitted_path: metadata.emitted_path,
+        source: metadata.source,
+        source_probability: metadata.source_probability,
+        emission_density: metadata.emission_density,
+        emission_measure: metadata.emission_measure,
+        light_depth: u32::from(metadata.light_depth),
+        reservoir_visits: u32::from(metadata.reservoir_visits),
+        receiver_kind: match photon.kind {
+            ReceiverKind::Opaque => 1,
+            ReceiverKind::Rough => 2,
+            ReceiverKind::Volume => 3,
+        },
+        receiver: u32::try_from(photon.body).map_err(|_| invalid("CPU diagnostic receiver identity overflow"))?,
+        stratum: task.fresnel_stratum,
+        photon_flux: rgb(photon.flux),
+        response: rgb(response),
+        normal_measure: measure,
+        radius_mm: radius,
+        radiance: rgb(radiance),
+        camera_prefix: rgb(prefix.throughput),
+        camera_radiance: rgb(multiply(prefix.throughput, radiance)),
+        fresnel_strata: prefix.strata,
+        camera_depth: prefix.depth,
+        camera_interfaces: prefix.interfaces,
+        camera_path,
+        receiver_roughness: roughness,
+        ..PhotonContribution::default()
+    })
+}
+fn next(task: &TransportContext<'_>, cursor: &mut Gather, position: Vec3, volume: bool) -> job::Result<Option<Option<(Photon, f64)>>> {
+    cursor.last_transmitted = None;
     let map = task.caustics.first().filter(|map| map.ready()).ok_or_else(|| invalid("CPU caustic map is incomplete"))?;
+    if !cursor.probe_initialized {
+        if let Some(report) = probe(task, map)? {
+            if cursor.diagnostics.capacity() == 0 {
+                cursor
+                    .diagnostics
+                    .try_reserve_exact(1)
+                    .map_err(|_| job::JobError::new(job::ErrorCode::AllocationFailed, "could not reserve bounded photon query probe"))?;
+                if cursor.diagnostics.capacity() != 1 {
+                    return Err(invalid("CPU photon query capacity exceeds its admission"));
+                }
+            }
+            cursor.diagnostics.push(report);
+        }
+        cursor.probe_initialized = true;
+    }
     let center = if let Some(center) = cursor.cell {
         center
     } else {
-        let center = cell(position, map.options.radius_mm)?;
+        let center = cell(position, map.radii[1])?;
         cursor.cell = Some(center);
         center
     };
     if cursor.index < cursor.end {
         let photon = *map.photons.get(cursor.index).ok_or_else(|| invalid("CPU caustic gather index"))?;
         cursor.index += 1;
-        return Ok(Some(Some((photon, map.options.radius_mm))));
+        if let Some(report) = cursor.diagnostics.first_mut() {
+            report.visit()?;
+        }
+        return Ok(Some(Some((photon, map.radii[usize::from(volume)]))));
     }
     if cursor.neighbor == 27 {
         return Ok(None);
@@ -1098,11 +1360,16 @@ pub(super) fn gather(
     view: Vec3,
     camera_remaining: u8,
 ) -> job::Result<Option<Vec3>> {
-    let Some(visit) = next(task, cursor, hit.position)? else { return Ok(None) };
+    let Some(visit) = next(task, cursor, hit.position, false)? else { return Ok(None) };
     let Some((photon, radius)) = visit else { return Ok(Some(Vec3::ZERO)) };
     let geometric = hit.oriented_geometric_normal();
     if photon.kind != ReceiverKind::Opaque
         || photon.body != hit.body_index
+        || (photon.smooth_chain_events != 0
+            && job::photon_receiver::continues_smooth_caustics(
+                task.options.caustics.and_then(|caustics| caustics.glossy_continuation_max_roughness),
+                hit.surface.roughness(),
+            ))
         // The camera needs a receiver, every glass event, and the emitter endpoint.
         || (photon.smooth_chain_events != 0 && photon.smooth_chain_events + 1 >= camera_remaining)
         || !source_allows(task, photon, hit.position)?
@@ -1116,7 +1383,9 @@ pub(super) fn gather(
     }
     let brdf = hit.surface.brdf(hit.shading_normal, view, photon.incoming).map_err(|_| invalid("CPU caustic receiver BRDF is invalid"))?;
     let measure = crate::glass_model::surface_normal_measure(photon.incoming, hit.shading_normal, geometric).map_err(model_error)?;
-    Ok(Some(multiply(brdf, photon.flux) * (measure / (PI * radius.powi(2)))))
+    let radiance = multiply(brdf, photon.flux) * (measure / (PI * radius.powi(2)));
+    record(task, cursor, photon, ReceiverContribution { response: brdf, measure, radius, radiance, roughness: Some(hit.surface.roughness()) })?;
+    Ok(Some(radiance))
 }
 
 #[derive(Clone, Copy)]
@@ -1134,7 +1403,7 @@ pub(super) struct RoughReceiver {
     pub wavelength_nm: f64,
 }
 pub(super) fn gather_rough(task: &TransportContext<'_>, cursor: &mut Gather, receiver: RoughReceiver) -> job::Result<Option<Vec3>> {
-    let Some(visit) = next(task, cursor, receiver.position)? else { return Ok(None) };
+    let Some(visit) = next(task, cursor, receiver.position, false)? else { return Ok(None) };
     let Some((photon, radius)) = visit else { return Ok(Some(Vec3::ZERO)) };
     if photon.kind != ReceiverKind::Rough
         || photon.body != receiver.body
@@ -1153,7 +1422,15 @@ pub(super) fn gather_rough(task: &TransportContext<'_>, cursor: &mut Gather, rec
         .map_err(model_error)?
         .value;
     let measure = crate::glass_model::surface_normal_measure(photon.incoming, receiver.normal, receiver.geometric).map_err(model_error)?;
-    Ok(Some(photon.flux * (value * measure / (PI * radius.powi(2)))))
+    cursor.last_transmitted = Some(photon.incoming.dot(receiver.normal) < 0.0);
+    let radiance = photon.flux * (value * measure / (PI * radius.powi(2)));
+    record(
+        task,
+        cursor,
+        photon,
+        ReceiverContribution { response: Vec3::new(value, value, value), measure, radius, radiance, roughness: Some(receiver.model.roughness) },
+    )?;
+    Ok(Some(radiance))
 }
 pub(super) fn gather_volume(
     task: &TransportContext<'_>,
@@ -1163,7 +1440,7 @@ pub(super) fn gather_volume(
     incident: Vec3,
     scattering: crate::transmission::subsurface::Subsurface,
 ) -> job::Result<Option<Vec3>> {
-    let Some(visit) = next(task, cursor, position)? else { return Ok(None) };
+    let Some(visit) = next(task, cursor, position, true)? else { return Ok(None) };
     let Some((photon, radius)) = visit else { return Ok(Some(Vec3::ZERO)) };
     if photon.kind != ReceiverKind::Volume
         || photon.body != body
@@ -1174,5 +1451,7 @@ pub(super) fn gather_volume(
     }
     let phase = scattering.phase(incident.dot(photon.incoming).clamp(-1.0, 1.0)).map_err(model_error)?;
     let kernel = crate::glass_model::volume_photon_kernel(radius, scattering.scattering_per_mm).map_err(model_error)?;
-    Ok(Some(photon.flux * (phase * kernel)))
+    let radiance = photon.flux * (phase * kernel);
+    record(task, cursor, photon, ReceiverContribution { response: Vec3::new(phase, phase, phase), measure: 1.0, radius, radiance, roughness: None })?;
+    Ok(Some(radiance))
 }

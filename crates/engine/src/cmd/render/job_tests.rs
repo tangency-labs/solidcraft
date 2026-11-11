@@ -104,6 +104,9 @@ fn saved_gpu_job_routes_before_dispatch_and_reaches_preflight_and_start_without_
     // A protocol executor verifies the captured inputs without probing a physical GPU.
     struct NumericalGpu(&'static str);
     impl ImageExecutor for NumericalGpu {
+        fn supports_first_interface_splitting(&self) -> bool {
+            true
+        }
         fn descriptor(&self) -> solidcraft_render::job::Result<solidcraft_render::ExecutorDescriptor> {
             let mut descriptor = CpuHost::cooperative().descriptor()?;
             descriptor.id = solidcraft_render::ExecutorId::new(self.0).unwrap();
@@ -133,7 +136,7 @@ fn saved_gpu_job_routes_before_dispatch_and_reaches_preflight_and_start_without_
     let camera = solidcraft_viewport::Camera { fov: 0.8, ..Default::default() };
     s.execute("render.settings.set", &json!({"name":"GPU","set":{
         "width":4,"height":4,"camera":camera,"exposure_ev":1.75,"job":{"method":"gpu_path","transparent_background":true,"options":{
-            "samples":7,"max_depth":3,"seed":456,"denoise":true,"clamp_indirect":8,"tone_map":"aces_fitted",
+            "samples":7,"max_depth":3,"seed":456,"denoise":true,"clamp_indirect":8,"tone_map":"aces_fitted","split_first_interface":true,
             "lens":{"aperture_radius_mm":0.5,"focus_distance_mm":20},
             "lighting":{"environment":[0.1,0.3,0.6],"sun":{"direction":[1,-1,-1],"angular_radius_rad":0.05,"radiance":[2,3,4]},"area_lights":[],"directional_lights":[
                 {"direction":[0,0,2],"color":[0.25,0.5,1],"intensity":0},
@@ -157,12 +160,23 @@ fn saved_gpu_job_routes_before_dispatch_and_reaches_preflight_and_start_without_
     s.register_render_job_host(gpu.clone()).unwrap();
     let doc = s.doc.clone();
     let before = (s.revision, s.evaluations, s.undo.len(), s.redo.len(), s.is_dirty());
+    let mut clamped_probe = json!({"settings":saved});
+    clamped_probe["settings"]["job"]["options"]["caustics"] = json!({"probe_pixel":[0,0]});
+    for command in ["render.preflight", "render.start"] {
+        let error = s.execute(command, &clamped_probe).unwrap_err().to_string();
+        assert!(error.contains("photon contribution probes require clamp_indirect to be omitted"), "{error}");
+        assert_eq!(gpu.admitted_bytes(), 0, "invalid probe accounting is refused before allocating a job");
+        assert!(Arc::ptr_eq(&doc, &s.doc));
+        assert_eq!(before, (s.revision, s.evaluations, s.undo.len(), s.redo.len(), s.is_dirty()));
+    }
     let checked = s.execute("render.preflight", &named).unwrap();
     let inline = s.execute("render.preflight", &json!({"settings":saved})).unwrap();
     assert_eq!(preflight_without_memory_observations(checked.clone()), preflight_without_memory_observations(inline));
     assert_eq!(checked["resolved"]["executor"], "gpu-path");
     assert_eq!(checked["options"]["exposure_ev"], 1.75);
     assert_eq!(checked["options"]["samples"], 7);
+    assert_eq!(checked["options"]["split_first_interface"], true);
+    assert_eq!(checked["options"]["transmission_samples"], 1);
     assert_eq!(checked["options"]["lighting"]["environment"], json!([0.1, 0.3, 0.6]));
     let captured_options: JobOptions = serde_json::from_value(checked["options"].clone()).unwrap();
     assert_eq!(checked["retained_options_bytes"], json!(captured_options.retained_bytes().unwrap()));
@@ -253,9 +267,14 @@ fn saved_gpu_job_routes_before_dispatch_and_reaches_preflight_and_start_without_
     assert_eq!(checked["environment"]["rotation_rad"], -0.25);
     assert_eq!(checked["options"]["exposure_ev"], 1.75);
     assert_eq!(checked["options"]["samples"], 7);
-    let runtime = json!({"progressive":true,"settings":{"width":4,"height":4},"environment":{
+    assert_eq!(checked["options"]["split_first_interface"], true);
+    assert_eq!(checked["options"]["transmission_samples"], 1);
+    let runtime = json!({"progressive":true,"split_first_interface":true,"settings":{"width":4,"height":4},"environment":{
         "kind":"embedded_hdr","resource":info["sha256"],"rotation_rad":-0.25,"intensity":2.5}});
-    assert_eq!(s.execute("render.preflight", &runtime).unwrap()["environment"], checked["environment"]);
+    let runtime_checked = s.execute("render.preflight", &runtime).unwrap();
+    assert_eq!(runtime_checked["environment"], checked["environment"]);
+    assert_eq!(runtime_checked["options"]["split_first_interface"], true);
+    assert_eq!(runtime_checked["options"]["transmission_samples"], 1);
     let started = s.execute("render.start", &json!({"setup":"HDR"})).unwrap();
     let id: JobId = serde_json::from_value(started["job"].clone()).unwrap();
     let status = s.render_job_handle(id).unwrap().wait_timeout(std::time::Duration::from_secs(10)).unwrap();
@@ -1279,6 +1298,10 @@ fn runtime_texture_controls_require_progressive_and_leave_document_unchanged() {
     let input = json!({"raytrace":{"textures":[{"body_index":0,"body_name":"No body","frame":{"origin":[0,0,0],"u":[1,0,0],"v":[0,1,0]},"normal_opengl":"not-opened.png"}]}});
     let error = s.execute("render.preflight", &input).unwrap_err().to_string();
     assert!(error.contains("require progressive"), "{error}");
+    for split in [false, true] {
+        let error = s.execute("render.preflight", &json!({"split_first_interface": split})).unwrap_err().to_string();
+        assert!(error.contains("require progressive"), "{error}");
+    }
     assert!(Arc::ptr_eq(&doc, &s.doc));
 }
 
@@ -1594,7 +1617,11 @@ fn saved_cpu_denoise_reports_its_actual_native_request_and_keeps_regrade_raw() {
     assert_eq!(checked["denoising"]["backend"], "native_cpu");
     assert_eq!(checked["denoising"]["passes"], 2);
     assert_eq!(checked["denoising"]["steps"], json!([1, 2]));
-    assert_eq!(checked["denoising"]["settings"], json!({"passes":2,"strength":0.5,"firefly_suppression":false,"optical_filter":false}));
+    assert_eq!(
+        checked["denoising"]["settings"],
+        json!({"passes":2,"strength":0.5,"firefly_suppression":false,"optical_filter":false,
+            "variance_guided":false,"extended_optical_guides":false,"component_filtering":false})
+    );
     assert_eq!(checked["denoising"]["outlier_policy"], "disabled");
     assert_eq!(checked["denoising"]["optical_policy"], "legacy opaque-only filtering; mirror and glass radiance bypass display filtering");
     assert_eq!(checked["request"]["raytrace"]["denoise_settings"]["optical_filter"], false);
@@ -1976,7 +2003,7 @@ fn cpu_stage_preflight_describes_actual_opt_in_path_transport_without_changing_t
     let direct = s.execute("render.preflight", &json!({"setup":"Stage"})).unwrap();
     let mut path = saved.clone();
     let Some(solidcraft_doc::render_settings::RenderJob::CpuRaytrace { options, .. }) = &mut path.job else { panic!("CPU fixture") };
-    options.path = Some(solidcraft_render::job::CpuPathOptions { max_depth: 3 });
+    options.path = Some(solidcraft_render::job::CpuPathOptions { max_depth: 3, ..Default::default() });
     let indirect = s.execute("render.preflight", &json!({"settings":path})).unwrap();
     assert_eq!(direct["stage_transport"], "CPU direct/specular only; no diffuse interreflection");
     assert_eq!(indirect["stage_transport"], "CPU finite-depth opaque diffuse/specular path lighting");
@@ -3302,6 +3329,63 @@ mod native_camera_queue_preparation {
 
     #[test]
     fn native_batch_retained_plan_and_completed_images_allow_a_new_ram_epoch_before_next_capture() {
+        // A real platform host shares a process-wide RAM ledger. Other libtest
+        // cases must not contribute leases or block this scenario's new epoch.
+        const CASE: &str = "cmd::render::job_tests::native_camera_queue_preparation::native_batch_retained_plan_and_completed_images_allow_a_new_ram_epoch_before_next_capture";
+        const CHILD: &str = "SOLIDCRAFT_NATIVE_BATCH_RAM_EPOCH_CHILD";
+        const COMPLETE: &str = "SOLIDCRAFT_NATIVE_BATCH_RAM_EPOCH_COMPLETE";
+        if std::env::var_os(CHILD).is_none() {
+            struct IsolatedTest(std::process::Child);
+            impl Drop for IsolatedTest {
+                fn drop(&mut self) {
+                    if self.0.try_wait().ok().flatten().is_none() {
+                        let _ = self.0.kill();
+                        let _ = self.0.wait();
+                    }
+                }
+            }
+            fn collect_output(mut pipe: impl std::io::Read + Send + 'static) -> std::thread::JoinHandle<String> {
+                std::thread::spawn(move || {
+                    let mut output = String::new();
+                    pipe.read_to_string(&mut output).unwrap();
+                    output
+                })
+            }
+            let mut child = IsolatedTest(
+                std::process::Command::new(std::env::current_exe().unwrap())
+                    .args(["--exact", CASE, "--test-threads=1", "--nocapture", "--color=never"])
+                    .env(CHILD, CASE)
+                    .env("RUST_TEST_THREADS", "1")
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()
+                    .unwrap(),
+            );
+            let stdout = collect_output(child.0.stdout.take().unwrap());
+            let stderr = collect_output(child.0.stderr.take().unwrap());
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+            let mut timed_out = false;
+            let status = loop {
+                if let Some(status) = child.0.try_wait().unwrap() {
+                    break status;
+                }
+                if std::time::Instant::now() >= deadline {
+                    timed_out = true;
+                    let _ = child.0.kill();
+                    break child.0.wait().unwrap();
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            };
+            let stdout = stdout.join().unwrap();
+            let stderr = stderr.join().unwrap();
+            assert!(!timed_out, "isolated RAM epoch test exceeded its 120-second deadline\n{stdout}\n{stderr}");
+            assert!(status.success(), "isolated RAM epoch test failed: {status}\n{stdout}\n{stderr}");
+            assert!(stdout.lines().any(|line| line == "running 1 test"), "{stdout}\n{stderr}");
+            assert!(stdout.lines().any(|line| line.starts_with("test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured;")), "{stdout}\n{stderr}");
+            assert_eq!(stdout.matches(COMPLETE).count(), 1, "the exact scenario must complete once\n{stdout}\n{stderr}");
+            return;
+        }
+        assert_eq!(std::env::var(CHILD).unwrap(), CASE, "unexpected isolated-test marker");
         let (mut s, _) = fixture(2);
         let host = CpuHost::for_platform().unwrap();
         s.set_render_job_host(Some(host.clone())).unwrap();
@@ -3348,6 +3432,7 @@ mod native_camera_queue_preparation {
         wait_released(&second_handle);
         assert!(second_handle.frame().unwrap().is_some());
         assert!(!frame.png().is_empty(), "the earlier image remains valid across the next epoch");
+        println!("{COMPLETE}");
     }
 
     #[test]

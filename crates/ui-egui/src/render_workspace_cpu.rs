@@ -26,6 +26,15 @@ pub(super) fn validate_progressive_image(app: &SolveApp) -> Result<(), String> {
     if view.method == super::ImageMethod::CpuRaytrace {
         let (trace_width, trace_height) = trace_dimensions(view, width, height)?;
         view.raytrace.budget.validate_image(trace_width, trace_height, camera_sampling).map_err(|error| error.to_string())?;
+        if let (Some(path), Some(production)) = (view.raytrace.path, view.raytrace.progressive) {
+            path.validate_camera_budget(
+                u64::from(trace_width) * u64::from(trace_height),
+                production.samples_per_pixel,
+                view.studio.adaptive.map_or(0, |adaptive| adaptive.pilot_samples),
+                view.raytrace.budget,
+            )
+            .map_err(|error| error.to_string())?;
+        }
         if view.studio.denoise || view.studio.denoise_diagnostics {
             solidcraft_engine::render::job::validate_cpu_denoise_image(trace_width, trace_height).map_err(|error| error.to_string())?;
         }
@@ -79,7 +88,17 @@ pub(super) fn image_limits(app: &SolveApp) -> solidcraft_engine::render::RenderL
         solidcraft_engine::render::job::cpu_camera_sampling(options.progressive, app.render_workspace.view.studio.adaptive, options.budget)
             .unwrap_or(options.progressive);
     if let Some(progressive) = sampling {
-        let work = u64::from(progressive.samples_per_pixel.max(1)).saturating_mul(scale).saturating_mul(scale);
+        let observations = match (options.path, options.progressive) {
+            (Some(path), Some(production)) => path
+                .camera_evaluations(
+                    1,
+                    production.samples_per_pixel,
+                    app.render_workspace.view.studio.adaptive.map_or(0, |adaptive| adaptive.pilot_samples),
+                )
+                .unwrap_or(u64::MAX),
+            _ => u64::from(progressive.samples_per_pixel.max(1)),
+        };
+        let work = observations.saturating_mul(scale).saturating_mul(scale);
         limits.max_pixels = limits.max_pixels.min(options.budget.limits().max_camera_samples / work.max(1));
     }
     limits
@@ -117,7 +136,20 @@ pub(super) fn profile_for_size(app: &SolveApp, width: u64, height: u64) -> Optio
             app.render_workspace.view.studio.adaptive,
             *budget,
         )
-        .is_ok_and(|sampling| budget.validate_image(width, height, sampling).is_ok())
+        .is_ok_and(|sampling| {
+            budget.validate_image(width, height, sampling).is_ok()
+                && match (view.raytrace.path, view.raytrace.progressive) {
+                    (Some(path), Some(production)) => path
+                        .validate_camera_budget(
+                            u64::from(width) * u64::from(height),
+                            production.samples_per_pixel,
+                            view.studio.adaptive.map_or(0, |adaptive| adaptive.pilot_samples),
+                            *budget,
+                        )
+                        .is_ok(),
+                    _ => true,
+                }
+        })
     })
 }
 
@@ -240,7 +272,7 @@ pub(super) fn progressive_controls(app: &mut SolveApp, ui: &mut egui::Ui) -> boo
             .studio
             .adaptive
             .and_then(|adaptive| {
-                let minimum = adaptive.min_samples.max(16);
+                let minimum = adaptive.min_samples.max(adaptive.optical_min_samples).max(16);
                 let cap = profile_maximum.checked_sub(adaptive.pilot_samples)?.min(super::quality::MAX_UI_SAMPLES);
                 (minimum <= cap).then_some(minimum..=cap)
             })
@@ -294,7 +326,11 @@ pub(super) fn path_reason(app: &SolveApp) -> Option<String> {
         return Some(reason);
     }
     let mut options = app.render_workspace.view.raytrace.clone();
-    options.path.get_or_insert_default();
+    options.path.get_or_insert(solidcraft_engine::render::job::CpuPathOptions {
+        transmission_samples: app.render_workspace.view.studio.transmission_samples,
+        split_first_interface: app.render_workspace.view.studio.split_first_interface,
+        ..Default::default()
+    });
     options.validate().err().map(|error| error.to_string())
 }
 fn path_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -304,7 +340,11 @@ fn path_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     let response = ui.add_enabled_ui(enabled || reason.is_none(), |ui| ui_kit::checkbox(ui, &label, &mut enabled));
     crate::scenario::publish_target("render:cpu-path", response.inner.rect);
     if response.inner.changed() {
-        app.render_workspace.view.raytrace.path = enabled.then(solidcraft_engine::render::job::CpuPathOptions::default);
+        app.render_workspace.view.raytrace.path = enabled.then(|| solidcraft_engine::render::job::CpuPathOptions {
+            transmission_samples: app.render_workspace.view.studio.transmission_samples,
+            split_first_interface: app.render_workspace.view.studio.split_first_interface,
+            ..Default::default()
+        });
         app.render_workspace.view.dirty = true;
     }
     if let Some(reason) = reason {
@@ -536,6 +576,8 @@ pub(super) fn params(app: &SolveApp, params: &mut Value) -> Result<(), String> {
     options.metal_energy_compensation = app.render_workspace.view.studio.metal_energy_compensation;
     options.output = super::studio::cpu_output(&app.render_workspace.view);
     options.adaptive = app.render_workspace.view.studio.adaptive.map(Box::new);
+    options.sampler = app.render_workspace.view.studio.sampler;
+    options.radiance_components = app.render_workspace.view.studio.radiance_components;
     options.denoise = app.render_workspace.view.studio.denoise;
     options.denoise_settings = app.render_workspace.view.studio.denoise_settings;
     options.denoise_diagnostics = app.render_workspace.view.studio.denoise_diagnostics;

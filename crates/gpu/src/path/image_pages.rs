@@ -17,6 +17,9 @@ pub(super) struct Layout {
     pub optical_bytes: u64,
     filter: bool,
     adaptive: bool,
+    statistics: bool,
+    uncertainty: bool,
+    components: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -43,14 +46,17 @@ impl Layout {
         }
         options.denoise_settings.validate()?;
         let adaptive = options.adaptive.is_some();
-        let planes = if adaptive { 3 } else { 1 };
+        let statistics = super::radiance::enabled(options);
+        let components = options.denoise_settings.component_filtering;
+        let uncertainty = options.denoise_settings.variance_guided || components;
+        let planes = (if adaptive { 3 } else { 1 }) + super::radiance::planes(options) + super::adaptive::evidence_planes(options);
         let filter = options.denoise || options.denoise_diagnostics;
         let halo = if options.denoise { 2 * ((1 << options.denoise_settings.passes) - 1) } else { 0 };
         let storage = limits.max_storage_buffer_binding_size.min(limits.max_buffer_size).min(TARGET_BUFFER_BYTES);
         let film_row = u64::from(width) * 16 * u64::from(planes);
         let storage_rows = storage.checked_sub(optical_bytes).ok_or_else(|| limit("GPU storage cannot fit optical dispatch scratch"))? / film_row;
         let readback_rows = limits.max_buffer_size.checked_sub(FAILURE_BYTES).ok_or_else(|| limit("GPU readback cannot fit diagnostics"))?
-            / (u64::from(width) * 16 * if adaptive { 2 } else { 1 });
+            / (u64::from(width) * 16 * if adaptive || statistics { 2 } else { 1 });
         let mut rows = u64::from(height).min(storage_rows).min(readback_rows);
         if filter {
             let window_rows = storage / (u64::from(width) * super::denoise::GUIDE_BYTES_PER_PIXEL);
@@ -73,7 +79,7 @@ impl Layout {
         if rows == 0 {
             return Err(limit("GPU storage cannot fit one complete image row and its required scratch"));
         }
-        let layout = Self { width, height, rows, halo, planes, optical_bytes, filter, adaptive };
+        let layout = Self { width, height, rows, halo, planes, optical_bytes, filter, adaptive, statistics, uncertainty, components };
         if layout.buffer_bytes(layout.max_core_pixels())? > storage || layout.readback_bytes()? > limits.max_buffer_size {
             return Err(limit("GPU image page allocation exceeds the selected adapter limits"));
         }
@@ -117,9 +123,15 @@ impl Layout {
     }
 
     pub(super) fn readback_bytes(self) -> Result<u64> {
-        let film = u64::from(self.max_core_pixels()) * 16 * if self.adaptive { 2 } else { 1 };
+        let film = u64::from(self.max_core_pixels()) * 16 * if self.adaptive || self.statistics { 2 } else { 1 };
         let filter = if self.filter { u64::from(self.max_window_pixels()) * 16 } else { 0 };
         film.max(filter).checked_add(FAILURE_BYTES).ok_or_else(|| limit("GPU page readback byte count overflow"))
+    }
+
+    /// Display normalization needs only beauty and, for adaptive previews,
+    /// the two allocation/control planes. Statistics use their own window copies.
+    pub(super) fn filter_input_planes(self) -> u32 {
+        if self.adaptive { 3 } else { 1 }
     }
 
     pub(super) fn filter_scratch_bytes(self) -> Result<u64> {
@@ -127,9 +139,11 @@ impl Layout {
             return Ok(0);
         }
         let normalized = if self.adaptive { 16 } else { 0 };
-        let gather = if self.is_paged() { 16 * u64::from(self.planes) } else { 0 };
+        let uncertainty = if self.uncertainty { 16 } else { 0 };
+        let components = if self.components { super::denoise::COMPONENT_BYTES_PER_PIXEL } else { 0 };
+        let gather = if self.is_paged() { 16 * u64::from(self.filter_input_planes()) } else { 0 };
         u64::from(self.max_window_pixels())
-            .checked_mul(super::denoise::BYTES_PER_PIXEL + normalized + gather)
+            .checked_mul(super::denoise::BYTES_PER_PIXEL + normalized + gather + uncertainty + components)
             .ok_or_else(|| limit("GPU filter window byte count overflow"))
     }
 

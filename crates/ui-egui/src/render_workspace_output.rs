@@ -902,7 +902,9 @@ struct QualitySource {
     method: ImageMethod,
     progressive: bool,
     budget: solidcraft_engine::render::job::CpuBudget,
-    adaptive: Option<(u32, u32, [u64; 3])>,
+    path: Option<solidcraft_engine::render::job::CpuPathOptions>,
+    supersampling: u32,
+    adaptive: Option<(u32, u32, u32, bool, u32, [u64; 3])>,
 }
 fn quality_source(app: &SolveApp) -> QualitySource {
     let view = &app.render_workspace.view;
@@ -911,10 +913,19 @@ fn quality_source(app: &SolveApp) -> QualitySource {
         method: view.method,
         progressive: cpu && view.raytrace.progressive.is_some(),
         budget: if cpu { view.raytrace.budget } else { Default::default() },
+        path: if cpu { view.raytrace.path } else { None },
+        supersampling: if cpu { view.studio.supersampling } else { 1 },
         adaptive: if cpu {
-            view.studio
-                .adaptive
-                .map(|a| (a.pilot_samples, a.min_samples, [a.relative_error.to_bits(), a.absolute_error.to_bits(), a.coverage_error.to_bits()]))
+            view.studio.adaptive.map(|a| {
+                (
+                    a.pilot_samples,
+                    a.min_samples,
+                    a.optical_min_samples,
+                    a.component_uncertainty,
+                    a.map_validation_batches,
+                    [a.relative_error.to_bits(), a.absolute_error.to_bits(), a.coverage_error.to_bits()],
+                )
+            })
         } else {
             None
         },
@@ -941,7 +952,12 @@ fn prepare_quality_choices(app: &mut SolveApp) {
     let source = quality_source(app);
     if app.render_workspace.view.inspector.quality_source != Some(source) || app.render_workspace.view.inspector.quality_plans.is_none() {
         let plans = QUALITY_IDS.map(|id| {
-            quality_request(app, id).and_then(|params| app.session.execute("render.quality.prepare", &params).map_err(|error| error.to_string()))
+            quality_request(app, id)
+                .and_then(|params| app.session.execute("render.quality.prepare", &params).map_err(|error| error.to_string()))
+                .and_then(|plan| {
+                    validate_quality_path_work(app, &plan)?;
+                    Ok(plan)
+                })
         });
         app.render_workspace.view.inspector.quality_plans = Some(plans);
         app.render_workspace.view.inspector.quality_source = Some(source);
@@ -1457,6 +1473,33 @@ pub(super) fn apply_quality(app: &mut SolveApp, plan: &Value) -> Result<(), Stri
     view.dirty = true;
     Ok(())
 }
+/// Presets retain the authored path. Their immutable catalogue sample count
+/// therefore needs the same lane-work admission as an explicitly edited image.
+fn validate_quality_path_work(app: &SolveApp, plan: &Value) -> Result<(), String> {
+    let view = &app.render_workspace.view;
+    if view.method != ImageMethod::CpuRaytrace {
+        return Ok(());
+    }
+    let Some(path) = view.raytrace.path else { return Ok(()) };
+    let integer =
+        |value: &Value| value.as_u64().and_then(|n| u32::try_from(n).ok()).ok_or_else(|| app.tr("render.error_quality_projection").to_string());
+    let (width, height) = solidcraft_engine::render::job::supersampled_dimensions(
+        integer(&plan["settings"]["width"])?,
+        integer(&plan["settings"]["height"])?,
+        view.studio.supersampling,
+    )
+    .map_err(|error| error.to_string())?;
+    let samples = integer(&plan["cpu_options"]["progressive"]["samples_per_pixel"])?;
+    let budget = serde_json::from_value(plan["cpu_options"]["budget"].clone()).map_err(|error| error.to_string())?;
+    path.validate_camera_budget(
+        u64::from(width) * u64::from(height),
+        samples,
+        view.studio.adaptive.map_or(0, |adaptive| adaptive.pilot_samples),
+        budget,
+    )
+    .map_err(|error| error.to_string())
+}
+
 fn apply_cpu_quality(app: &mut SolveApp, plan: &Value) -> Result<(), String> {
     use solidcraft_engine::render::job::{CpuBudget, CpuProgressiveOptions, cpu_camera_sampling};
     let view = &app.render_workspace.view;
@@ -1480,6 +1523,7 @@ fn apply_cpu_quality(app: &mut SolveApp, plan: &Value) -> Result<(), String> {
     let (trace_width, trace_height) =
         solidcraft_engine::render::job::supersampled_dimensions(width, height, view.studio.supersampling).map_err(|error| error.to_string())?;
     budget.validate_image(trace_width, trace_height, sampling).map_err(|error| error.to_string())?;
+    validate_quality_path_work(app, plan)?;
     if view.studio.denoise {
         solidcraft_engine::render::job::validate_cpu_denoise_image(trace_width, trace_height).map_err(|error| error.to_string())?;
     }

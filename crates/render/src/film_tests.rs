@@ -303,7 +303,17 @@ mod cpu_adaptive_foundation {
     };
 
     fn options() -> AdaptiveSampling {
-        AdaptiveSampling { pilot_samples: 16, min_samples: 16, relative_error: 0.0, absolute_error: 0.1, coverage_error: 0.25 }
+        AdaptiveSampling {
+            pilot_samples: 16,
+            min_samples: 16,
+            optical_min_samples: 0,
+            relative_error: 0.0,
+            absolute_error: 0.1,
+            coverage_error: 0.25,
+
+            component_uncertainty: false,
+            map_validation_batches: 0,
+        }
     }
     fn film(maximum: u32) -> AdaptiveCameraFilm {
         let production = CpuProgressiveOptions { samples_per_pixel: maximum, seed: 81 };
@@ -414,6 +424,18 @@ mod cpu_adaptive_foundation {
         assert_eq!((report.pilot_samples_per_pixel, report.minimum_production_samples, report.maximum_production_samples), (16, 16, 27));
         assert_eq!((report.production_samples, report.primary_path_evaluations, report.pixels_at_cap, report.transmission_strata), (43, 75, 0, 1));
         assert_eq!(work, 133, "init/reset and each sampled/skipped pixel own one exact work unit");
+    }
+    #[test]
+    fn cpu_adaptive_reports_pilot_budget_exhaustion_without_claiming_convergence() {
+        let mut film = film(16);
+        let mut work = 0;
+        while !film.is_final() {
+            step(&mut film, &mut work);
+        }
+        let report = film.report().unwrap();
+        assert_eq!(report.pixels_at_cap, 2);
+        assert_eq!(report.budget_limited_pixels, 1, "only the varying pilot asks for more than the cap");
+        assert_eq!(report.production_samples, 32);
     }
     #[test]
     fn cpu_adaptive_counts_keep_five_of_six_alpha_exact_without_quantizing_raw_radiance() {
@@ -753,5 +775,230 @@ mod cpu_adaptive_foundation {
         }
         assert!(film.add(1, key, [0.0; 3], false, &CancelToken::default(), &mut || Ok(())).is_err());
         assert!(film.skip_one(0, &CancelToken::default(), &mut || Ok(())).is_err());
+    }
+}
+
+#[test]
+fn photon_query_support_is_scale_invariant_and_not_an_independent_count() {
+    use crate::job::photon_support::PhotonContributionSupport;
+    for scale in [1e-250, 1.0, 1e250] {
+        let mut support = PhotonContributionSupport::default();
+        for weight in [1.0, 2.0, 3.0, 0.0] {
+            assert!(support.observe(weight * scale));
+        }
+        assert_eq!(support.accepted, 3);
+        assert!((support.effective_event_support().unwrap() - 36.0 / 14.0).abs() < 1e-12);
+        let prior = support;
+        assert!(!support.observe(f64::INFINITY));
+        assert_eq!(support, prior);
+    }
+    assert_eq!(PhotonContributionSupport::default().effective_event_support(), None);
+}
+
+mod pilot_component_and_map_evidence {
+    use crate::{
+        film::adaptive::AdaptiveCameraFilm,
+        job::{
+            CancelToken, CausticOptions, CpuBudget, CpuProgressiveOptions,
+            adaptive::{AdaptiveSampling, PhotonMapIdentity, PilotEvidenceLayout, PilotPhotonSupport},
+        },
+        radiance::{CameraPath, LightPath, RadianceComponents},
+    };
+
+    fn film(options: AdaptiveSampling, caustics: Option<CausticOptions>) -> AdaptiveCameraFilm {
+        let production = CpuProgressiveOptions { samples_per_pixel: 64, seed: 81 };
+        let bytes = AdaptiveCameraFilm::required_bytes(1, 1, production, options, CpuBudget::Studio).unwrap();
+        let mut film = AdaptiveCameraFilm::new(1, 1, production, options, CpuBudget::Studio, bytes, &CancelToken::default()).unwrap();
+        film.configure_caustics(caustics).unwrap();
+        film.initialize_one(&CancelToken::default(), &mut || Ok(())).unwrap();
+        film
+    }
+    fn finish(film: &mut AdaptiveCameraFilm) {
+        let cancel = CancelToken::default();
+        film.begin_production(&cancel, &mut || Ok(())).unwrap();
+        film.reset_one(&cancel, &mut || Ok(())).unwrap();
+        while !film.is_final() {
+            if let Some(identity) = film.sampling_identity(0).unwrap() {
+                film.add(0, identity, [3.0, 2.0, 1.0], true, &cancel, &mut || Ok(())).unwrap();
+            } else {
+                film.skip_one(0, &cancel, &mut || Ok(())).unwrap();
+            }
+        }
+        assert_eq!(film.complete_pass().unwrap().pixel(0).unwrap(), ([3.0, 2.0, 1.0], 1.0));
+    }
+    #[test]
+    fn component_pilots_detect_cancelled_beauty_variation_and_keep_production_capture_separate() {
+        let policy = AdaptiveSampling { pilot_samples: 16, min_samples: 16, relative_error: 0.0, absolute_error: 0.1, ..Default::default() };
+        for components_enabled in [false, true] {
+            let policy = AdaptiveSampling { component_uncertainty: components_enabled, ..policy };
+            let mut film = film(policy, None);
+            for ordinal in 0..16 {
+                let mut components = RadianceComponents::default();
+                components
+                    .add(if ordinal % 2 == 0 { CameraPath::Reflected } else { CameraPath::Transmitted }, LightPath::NonCaustic, [1.0, 0.0, 0.0])
+                    .unwrap();
+                let identity = film.sampling_identity(0).unwrap().unwrap();
+                film.add_with_evidence(
+                    0,
+                    identity,
+                    components.beauty(),
+                    true,
+                    Some(&components),
+                    PilotPhotonSupport::default(),
+                    &CancelToken::default(),
+                    &mut || Ok(()),
+                )
+                .unwrap();
+            }
+            assert_eq!(film.production_target(0).unwrap(), if components_enabled { 64 } else { 16 });
+            finish(&mut film);
+            let report = film.report().unwrap();
+            assert_eq!(report.production_samples, if components_enabled { 64 } else { 16 });
+            if components_enabled {
+                let evidence = report.pilot_evidence.unwrap();
+                assert_eq!(evidence.component_budget_limited_pixels, 1);
+                assert_eq!(evidence.invalid_evidence_pixels, 0);
+                assert_eq!(evidence.photon_query_observations, 0);
+                assert_eq!(evidence.minimum_query_effective_event_support, None);
+            } else {
+                assert!(report.pilot_evidence.is_none());
+            }
+        }
+    }
+    #[test]
+    fn map_pilots_separate_fixed_map_scatter_from_reducible_camera_work() {
+        let policy = AdaptiveSampling {
+            pilot_samples: 16,
+            min_samples: 16,
+            map_validation_batches: 2,
+            relative_error: 0.0,
+            absolute_error: 0.125,
+            ..Default::default()
+        };
+        for refresh in [false, true] {
+            let caustics = CausticOptions { refresh_per_pass: refresh, progressive_radius: refresh, ..Default::default() };
+            let mut film = film(policy, Some(caustics));
+            for ordinal in 0..16 {
+                let identity = film.sampling_identity(0).unwrap().unwrap();
+                let support = if ordinal % 2 == 0 { PilotPhotonSupport { queries: 1, ..Default::default() } } else { PilotPhotonSupport::default() };
+                film.add_with_evidence(
+                    0,
+                    identity,
+                    [f64::from(u8::from(ordinal >= 8)), 0.0, 0.0],
+                    true,
+                    None,
+                    support,
+                    &CancelToken::default(),
+                    &mut || Ok(()),
+                )
+                .unwrap();
+            }
+            let target = film.production_target(0).unwrap();
+            if refresh {
+                assert!((32..=33).contains(&target), "two constant maps have zero conditional camera variance and map variance 0.5");
+            } else {
+                assert_eq!(target, 16, "camera work cannot reduce one fixed map's error");
+            }
+            finish(&mut film);
+            let evidence = film.report().unwrap().pilot_evidence.unwrap();
+            assert_eq!(evidence.map_batches, 2);
+            assert_eq!(evidence.camera_observations_per_map, 8);
+            assert_eq!(evidence.map_scatter_above_tolerance_pixels, 1);
+            assert!((evidence.maximum_map_scatter_to_tolerance - 0.5_f64.sqrt() / 0.125).abs() < 1e-12);
+            assert_eq!(evidence.photon_query_observations, 8);
+            assert_eq!(evidence.photon_empty_observations, 8);
+            assert_eq!(evidence.minimum_query_effective_event_support, None, "zero positive photon observations are unavailable evidence");
+            assert_eq!(evidence.assessment_radii_mm, Some(caustics.radii_mm(if refresh { 16 } else { 0 }).unwrap()));
+        }
+        let policy = AdaptiveSampling { absolute_error: 0.24, ..policy };
+        for refresh in [false, true] {
+            let mut film = film(policy, Some(CausticOptions { refresh_per_pass: refresh, ..Default::default() }));
+            for ordinal in 0..16 {
+                // Batch means 1 and 3, within variance 8/7, between variance 2.
+                let value = f64::from(2 * (ordinal % 2 + u32::from(ordinal >= 8)));
+                let identity = film.sampling_identity(0).unwrap().unwrap();
+                film.add_with_evidence(0, identity, [value, 0.0, 0.0], true, None, Default::default(), &CancelToken::default(), &mut || Ok(()))
+                    .unwrap();
+            }
+            assert_eq!(film.production_target(0).unwrap(), if refresh { 53 } else { 20 });
+            finish(&mut film);
+            let evidence = film.report().unwrap().pilot_evidence.unwrap();
+            // Removing W/K is essential: the residual map variance is 13/7,
+            // not the observed batch-mean variance of 2.
+            assert!((evidence.maximum_map_scatter_to_tolerance - (13.0_f64 / 7.0).sqrt() / 0.24).abs() < 1e-12);
+            assert_eq!(evidence.invalid_evidence_pixels, 0);
+        }
+    }
+    #[test]
+    fn component_pilot_transactions_reject_missing_misrecombined_and_unpaid_observations() {
+        let policy = AdaptiveSampling { pilot_samples: 16, min_samples: 16, component_uncertainty: true, ..Default::default() };
+        let mut film = film(policy, None);
+        let cancel = CancelToken::default();
+        let identity = film.sampling_identity(0).unwrap().unwrap();
+        let zero = RadianceComponents::default();
+        assert!(film.add_with_evidence(0, identity, [0.0; 3], true, None, Default::default(), &cancel, &mut || Ok(())).is_err());
+        assert!(film.add_with_evidence(0, identity, [1.0; 3], true, Some(&zero), Default::default(), &cancel, &mut || Ok(())).is_err());
+        assert!(
+            film.add_with_evidence(0, identity, [0.0; 3], true, Some(&zero), Default::default(), &cancel, &mut || Err(crate::job::JobError::new(
+                crate::job::ErrorCode::LimitExceeded,
+                "test work debit"
+            )))
+            .is_err()
+        );
+        assert_eq!(film.completed_passes(), 0);
+        for _ in 0..16 {
+            let identity = film.sampling_identity(0).unwrap().unwrap();
+            film.add_with_evidence(0, identity, [0.0; 3], true, Some(&zero), Default::default(), &cancel, &mut || Ok(())).unwrap();
+        }
+        assert_eq!(film.production_target(0).unwrap(), 16);
+        finish(&mut film);
+        assert_eq!(film.report().unwrap().pilot_evidence.unwrap().invalid_evidence_pixels, 0);
+    }
+    #[test]
+    fn assessment_identity_radius_and_work_are_separate_and_restore_canonical_production() {
+        for batches in [2, 4, 8] {
+            for refresh in [false, true] {
+                for progressive in [false, true] {
+                    if progressive && !refresh {
+                        continue;
+                    }
+                    let policy = AdaptiveSampling { pilot_samples: 16, min_samples: 16, map_validation_batches: batches, ..Default::default() };
+                    let caustics = CausticOptions { refresh_per_pass: refresh, progressive_radius: progressive, photons: 64, ..Default::default() };
+                    let mut previous = None;
+                    let mut builds = 0;
+                    for pass in 0..32 {
+                        let identity = PhotonMapIdentity::for_pass(caustics, Some(policy), pass).unwrap();
+                        if previous != Some(identity) {
+                            builds += 1;
+                            previous = Some(identity);
+                        }
+                        assert_eq!(identity.seed, caustics.seed);
+                        if pass < 16 {
+                            assert!(identity.assessment);
+                            assert_eq!(identity.epoch, 0x8000_0000 | (pass / (16 / batches)));
+                            assert_eq!(identity.radius_epoch, if refresh { 16 } else { 0 });
+                        } else {
+                            assert!(!identity.assessment);
+                            assert_eq!(identity, PhotonMapIdentity::for_pass(caustics, None, pass).unwrap());
+                        }
+                    }
+                    assert_eq!(builds, policy.photon_work(caustics, 16).unwrap().unwrap().maps);
+                    let maximum = crate::job::MAX_SAMPLES_PER_PIXEL + crate::job::adaptive::MAX_PILOT_SAMPLES - 1;
+                    assert!(PhotonMapIdentity::for_pass(caustics, None, maximum).unwrap().epoch < 0x8000_0000);
+                }
+            }
+        }
+        for batches in [1, 3, 16] {
+            assert!(AdaptiveSampling { map_validation_batches: batches, ..Default::default() }.validate(64).is_err());
+        }
+        assert!(AdaptiveSampling { pilot_samples: 17, map_validation_batches: 2, ..Default::default() }.validate(64).is_err());
+        assert!(AdaptiveSampling { map_validation_batches: 2, ..Default::default() }.validate_caustics(None).is_err());
+        let plain = AdaptiveSampling::default();
+        let full = AdaptiveSampling { component_uncertainty: true, map_validation_batches: 2, ..plain };
+        assert_eq!(PilotEvidenceLayout::new(plain).gpu_planes(), 0);
+        assert_eq!(PilotEvidenceLayout::new(full).planes(), 38);
+        assert_eq!(PilotEvidenceLayout::new(full).gpu_planes(), 44);
+        assert!(serde_json::to_value(plain).unwrap().get("component_uncertainty").is_none());
+        assert!(serde_json::to_value(plain).unwrap().get("map_validation_batches").is_none());
     }
 }
