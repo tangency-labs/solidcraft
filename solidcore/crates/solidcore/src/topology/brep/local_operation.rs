@@ -2974,7 +2974,12 @@ mod tests {
         let points: Vec<(Point3, f64)> = b
             .vertices()
             .ids()
-            .map(|v| (vertex::point(b, v).unwrap(), vertex::tolerance(b, v).unwrap()))
+            .map(|v| {
+                (
+                    vertex::point(b, v).unwrap(),
+                    vertex::tolerance(b, v).unwrap(),
+                )
+            })
             .collect();
         for want in wants {
             assert!(
@@ -3028,8 +3033,7 @@ mod tests {
     /// vertices: ten vertices in all. The body is the cube with its corner cut by the
     /// circle R: `10 (96 + A)`, `A` the part of the corner square inside the circle.
     #[test]
-    fn tangent_edges_a_round_given_a_wider_coaxial_cylinder_meets_its_sides_on_the_corner_side()
-    {
+    fn tangent_edges_a_round_given_a_wider_coaxial_cylinder_meets_its_sides_on_the_corner_side() {
         use crate::primitive::api_primitives as ap;
         for radius in [2.3_f64, 2.05] {
             let mut k = Kernel::default();

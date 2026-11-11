@@ -1148,7 +1148,8 @@ impl OffsetBrep<Handle> for EdgeBrep<'_> {
     fn edgeuse_middle_binormal(&mut self, k: &Kernel, u: Handle) -> Result<Vec3> {
         let (arena, u) = u.edgeuse()?;
         let b = self.brep_mut(arena);
-        let e = eu::edge(b, u)?.ok_or_else(|| SolidError::invalid_input(OP, "edge use without edge"))?;
+        let e = eu::edge(b, u)?
+            .ok_or_else(|| SolidError::invalid_input(OP, "edge use without edge"))?;
         let middle = edge::interval(b, e)?.evaluate(0.5);
         let options = eu3::BinormalOptions::default();
         Ok(eu3::evaluate_binormal(k, b, u, middle, false, &options)?.binormal)

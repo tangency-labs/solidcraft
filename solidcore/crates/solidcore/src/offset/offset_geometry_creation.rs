@@ -2956,7 +2956,9 @@ impl OffsetGeometryCreation {
             // A mated vertex off the curve is refused, not replaced by a nearest cut.
             if let Some(ends) = crossing_ends {
                 if ends.is_empty() {
-                    return Err(Failure::new(OP_TRIM, OffsetFailure::TangentEndOffCurve).into_error());
+                    return Err(
+                        Failure::new(OP_TRIM, OffsetFailure::TangentEndOffCurve).into_error()
+                    );
                 }
                 solutions = ends;
                 face_solutions.clear();
