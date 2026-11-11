@@ -96,7 +96,7 @@ fn issue_919_a_g1_round_is_not_a_gn_section() {
     for radius in [R, 9.99] {
         let (result, b) = blended(radius, 1);
         assert!(
-            matches!(result, Err(SolidError::Upstream { code, .. }) if code == SM_ERR_INVALID_INPUT),
+            matches!(&result, Err(e) if solidcore::error::upstream_status(e) == Some(SM_ERR_INVALID_INPUT)),
             "r {radius}: {result:?}"
         );
         assert_eq!(kinds(&b), ["cylinder", "plane", "plane"], "r {radius}");
