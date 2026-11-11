@@ -88,7 +88,8 @@ pub fn move_cvs(sheet: &Brep, moves: &[((usize, usize), [f64; 3])]) -> Result<Br
 /// then each row of the result along v ([`approx_knots`], The NURBS Book §9.4.3).
 ///
 /// # Errors
-/// As [`control_net`]; [`Error::Argument`] for a degree of 0 or past the record's most, no
+/// As [`control_net`]; [`Error::Argument`] for a surface on knots not clamped (a periodic
+/// one), a degree of 0 or past the record's most, no
 /// spans, fewer than three or more than a record's control points either way, more samples
 /// than [`REBUILD_MAX_SAMPLES`], or a `tol` not finite or negative; [`Error::PastTolerance`]
 /// with the bound when it is past `tol`; the kernel's status otherwise.
@@ -129,6 +130,12 @@ pub fn rebuild(
     let uk = clamped_uniform(nu, deg_u).map_err(|_| Error::Argument)?;
     let vk = clamped_uniform(nv, deg_v).map_err(|_| Error::Argument)?;
     let original = kernel_surface(u, v, points)?;
+    // A surface on unclamped knots is not sampled: the kernel's surface evaluation keeps
+    // upstream's clamped reading of a domain's ends (N_BasisEval), and the certified bound takes
+    // clamped knots only.
+    if !(clamped(u, original.p()) && clamped(v, original.q())) {
+        return Err(Error::Argument);
+    }
     let fitted = run("surface_cvs::rebuild", |_| {
         let mut unit = original.clone();
         let square = Rectangle {
@@ -177,6 +184,14 @@ pub fn rebuild(
         sheet_of(k, BSplineSurface::from_gw_nurb(&fit))
     }))?;
     Ok((made, bound))
+}
+
+/// Whether the first and last `degree + 1` of `knots` are each one value.
+fn clamped(knots: &[f64], degree: usize) -> bool {
+    let flat =
+        |ends: Option<&[f64]>| ends.is_some_and(|e| e.windows(2).all(|w| w.first() == w.get(1)));
+    let last = knots.len().checked_sub(degree + 1);
+    flat(knots.get(..=degree)) && flat(last.and_then(|s| knots.get(s..)))
 }
 
 /// The kernel's surface of a record net and its knots (degrees from the knot counts).
@@ -426,6 +441,19 @@ mod tests {
         assert_eq!(rebuild(&s, 3, 3, 0, 1, 1.0), Err(Error::Argument));
         assert_eq!(rebuild(&s, 1, 1, 1, 1, 1.0), Err(Error::Argument));
         assert_eq!(rebuild(&s, 3, 3, 1, 1, f64::NAN), Err(Error::Argument));
+    }
+
+    #[test]
+    fn a_surface_on_unclamped_knots_is_not_sampled() {
+        // the bicubic's u knots made unclamped on the same domain [0, 1]: its face, box and
+        // sides unchanged, so it reads as untrimmed, but its ends are no clamped ends
+        let mut s = bicubic();
+        let Surface::Spline { u_knots, .. } = &mut s.faces[0].surface else {
+            panic!("a spline sheet")
+        };
+        *u_knots = vec![-3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0, 4.0];
+        assert!(control_net(&s).is_ok());
+        assert_eq!(rebuild(&s, 3, 3, 1, 1, 1.0), Err(Error::Argument));
     }
 
     #[test]
