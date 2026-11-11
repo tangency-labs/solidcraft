@@ -1,19 +1,19 @@
 //! Interior isoparm lines of a sheet for display: on each face, lines of constant u and of
-//! constant v evenly spaced inside its parameter box, clipped to the face's boundary and sampled
-//! by the rules a free curve is ([`crate::curve_points`]). The surfaces and boundaries are the
-//! ones the mesher plans the face with ([`crate::mesher::prepare`]), so the lines lie on what is
-//! drawn and stop where its boundary does. Display points, not geometry: drawn, never measured
-//! or modelled with.
+//! constant v evenly spaced inside its parameter box, drawn on the face's display triangles. The
+//! plan the mesh is evaluated from ([`crate::plan`], [`crate::TessPlan::evaluate`]) gives each
+//! face's triangles in its (u, v) and their corners' points; a line is cut by the triangles it
+//! crosses in (u, v), and each piece mapped linearly onto its triangle. So the lines lie on the
+//! shaded triangles, never behind them where the surface curves away from the chords (a concave
+//! neck), and stop where the face's triangles do. Display points, not geometry: drawn, never
+//! measured or modelled with.
 
-use solidcore::Vec3;
-use solidcore::eval::plan::EvalSurface;
+use solidcore_record::Vec3;
 use solidcore_record::brep::Brep;
 
-use crate::mesher::edges::bisect;
-use crate::mesher::size::Rules;
-use crate::mesher::{Polygons, comp, polygons, prepare, uv};
-use crate::vec::VecExt as _;
-use crate::{MeshTolerance, Result, TessError};
+use crate::mesher::comp;
+use crate::mesher::surface::eval_surface;
+use crate::mesher::uv;
+use crate::{MeshTolerance, Result, TessError, plan};
 
 /// Most isoparms one direction of a face may ask for.
 pub const MAX_ISOPARMS: usize = 1024;
@@ -21,28 +21,25 @@ pub const MAX_ISOPARMS: usize = 1024;
 /// Most copies, a period apart, of a line on a closed direction that can cross one face.
 const MAX_COPIES: usize = 8;
 
-/// The interior isoparms of every face of `sheet`: on each face, `u_count` lines of constant u
-/// at `u0 + i (u1 - u0) / (u_count + 1)`, `i` from 1 to `u_count`, over its parameter box
-/// `[u0, u1] × [v0, v1]` (the record's `domain`), then `v_count` lines of constant v likewise.
-/// Each line is cut where it crosses the face's boundary (inside its outer loop, outside its
-/// holes: one polyline per run inside) and sampled from end to end with every chord within
-/// `tolerance` of the surface, as [`crate::curve_points`] samples a curve. `size` is the body's
-/// size (its box diagonal) as [`crate::plan`] takes it, so the tolerance is the plan's (never
-/// finer than a millionth of the body) and the boundary is the one the plan draws: its edges'
-/// chords, which a run ends on, within the tolerance of the trim. A face the
-/// mesher leaves out of its plan gets no lines (one it cannot read, close, or tell the poles
-/// of).
+/// The interior isoparms of every face of `sheet`, on its display mesh: on each face,
+/// `u_count` lines of constant u at `u0 + i (u1 - u0) / (u_count + 1)`, `i` from 1 to
+/// `u_count`, over its parameter box `[u0, u1] × [v0, v1]` (the record's `domain`), then
+/// `v_count` lines of constant v likewise. `tolerance` and `size` are the plan's
+/// ([`crate::plan`]): the lines are drawn on the triangles of the mesh planned with them. Each
+/// line is cut by the face's triangles in (u, v) and each piece mapped linearly onto its
+/// triangle, so every point lies on a triangle of the evaluated mesh, and the lines follow the
+/// surface as closely as the mesh does; one polyline per run of triangles it crosses (a line
+/// broken by a hole or a trim gives one each side). A face the plan leaves out, or whose nodes
+/// the evaluator refuses, gets no lines.
 ///
-/// The polylines are display points, not geometry: points on the surface for drawing, each
-/// chord within the tolerance, never a curve to model with or measure (an isoparm as geometry
-/// is the kernel's iso curve of the surface).
+/// The polylines are display points, not geometry: points on the display mesh for drawing,
+/// never a curve to model with or measure (an isoparm as geometry is the kernel's iso curve of
+/// the surface).
 ///
 /// # Errors
 ///
-/// [`TessError::Invalid`] for more than [`MAX_ISOPARMS`] lines a direction; the mesher's errors
-/// for a body none of whose faces can be read; [`TessError::Failed`] for a face whose surface
-/// does not evaluate on a line, or a line that needs more points than an edge may have at
-/// `tolerance` (never handed over with chords past it).
+/// [`TessError::Invalid`] for more than [`MAX_ISOPARMS`] lines a direction; those of
+/// [`crate::plan`].
 pub fn isoparms(
     sheet: &Brep,
     u_count: usize,
@@ -59,41 +56,30 @@ pub fn isoparms(
     if u_count == 0 && v_count == 0 {
         return Ok(out);
     }
-    let (tol, turn) = tolerance.rules(size);
-    let prepared = prepare(sheet, tol, turn)?;
-    let rules = Rules {
-        tol,
-        max_len: f64::INFINITY,
-        turn,
-    };
-    for (fi, face) in sheet.faces.iter().enumerate() {
-        if prepared.why.get(fi).is_some_and(Option::is_some) {
-            continue;
-        }
-        let (Some(s), Some(map), Some(&(h, _))) = (
-            prepared.evals.get(fi),
-            prepared.params.get(fi),
-            prepared.sizes.get(fi),
-        ) else {
+    let (planned, _) = plan(sheet, &tolerance, size)?;
+    for fp in &planned.faces {
+        let Some(face) = sheet.faces.get(fp.face as usize) else {
             continue;
         };
-        // The boundary as the planner triangulates it: its pole and seam fixes made. One the
-        // planner cannot close leaves the face unplanned too.
-        let Ok(poly) = polygons(
-            s,
-            prepared.loops(fi),
-            &prepared.rules,
-            h,
-            prepared.reach(fi),
-        ) else {
-            continue;
-        };
-        // A point whose poles the kernel could not tell refuses the face in the plan
-        // ([`crate::plan`]): it gets no lines either.
-        if s.refusal().is_some() {
+        // the triangles the mesh keeps (on the face's own nodes), and their corners' points
+        let triangles: Vec<[u32; 3]> = fp
+            .triangles
+            .iter()
+            .filter(|t| t.iter().all(|&i| (i as usize) < fp.uv.len()))
+            .copied()
+            .collect();
+        if triangles.is_empty() {
             continue;
         }
-        let period = uv::domain(s).period;
+        let nodes = planned.nodes(fp);
+        if nodes.failure.is_some() {
+            continue;
+        }
+        // the record's parameters to the surface's the plan's (u, v) are in
+        let Ok((surface, map)) = eval_surface(face.parameters(), face.domain) else {
+            continue;
+        };
+        let period = uv::domain(&surface).period;
         let [[u0, u1], [v0, v1]] = face.domain;
         for (count, constant_u) in [(u_count, true), (v_count, false)] {
             for i in 1..=count {
@@ -114,10 +100,8 @@ pub fn isoparms(
                     _ => continue,
                 };
                 let per = period.get(d).copied().flatten();
-                for c in copies(&poly.uvs, d, comp(&a, d), per) {
-                    for run in inside(&poly, d, c) {
-                        out.push(sample(s, fi, d, c, run, &rules)?);
-                    }
+                for c in copies(&fp.uv, d, comp(&a, d), per) {
+                    out.extend(on_triangles(&fp.uv, &nodes.positions, &triangles, d, c));
                 }
             }
         }
@@ -126,7 +110,7 @@ pub fn isoparms(
 }
 
 /// The values of the surface's parameter `d`, `c` and its copies a whole `period` along, that
-/// lie within the boundary's extent in `d` (`c` alone on an open direction).
+/// lie within the face's extent in `d` (`c` alone on an open direction).
 fn copies(uvs: &[[f64; 2]], d: usize, c: f64, period: Option<f64>) -> Vec<f64> {
     let Some(per) = period.filter(|p| p.is_finite() && *p > 0.0) else {
         return vec![c];
@@ -146,67 +130,77 @@ fn copies(uvs: &[[f64; 2]], d: usize, c: f64, period: Option<f64>) -> Vec<f64> {
         .collect()
 }
 
-/// The runs of the line where the surface's parameter `d` is `c` that lie inside the boundary `poly`, by the
-/// even-odd rule: increasing intervals of the other parameter.
-fn inside(poly: &Polygons, d: usize, c: f64) -> Vec<[f64; 2]> {
+/// The line where parameter `d` is `c`, on the triangles `triangles` of nodes at `uvs` with
+/// points `at`: each triangle it crosses gives the piece between the two sides it crosses, its
+/// ends the sides' points at the crossing (each piece straight on its flat triangle), and the
+/// pieces join into polylines where one ends where the next starts. A side is crossed by the
+/// half-open rule (one end at or below `c`, the other above), so a line through a node or along
+/// a side between two triangles is taken once.
+fn on_triangles(
+    uvs: &[[f64; 2]],
+    at: &[Vec3],
+    triangles: &[[u32; 3]],
+    d: usize,
+    c: f64,
+) -> Vec<Vec<[f64; 3]>> {
     let o = usize::from(d == 0);
-    let mut at: Vec<f64> = Vec::new();
-    for range in &poly.ranges {
-        let Some(nodes) = poly.uvs.get(range.clone()) else {
+    let corner = |i: u32| Some((*uvs.get(i as usize)?, *at.get(i as usize)?));
+    // each piece: its run of the other parameter, and its two points
+    let mut pieces: Vec<([f64; 2], [Vec3; 2])> = Vec::new();
+    for &[i0, i1, i2] in triangles {
+        let (Some(a), Some(b), Some(e)) = (corner(i0), corner(i1), corner(i2)) else {
             continue;
         };
-        let next = nodes.iter().cycle().skip(1);
-        for (p, q) in nodes.iter().zip(next) {
-            let (pd, qd) = (comp(p, d), comp(q, d));
-            // half open, so a node on the line is crossed once or not at all
+        let mut hits: Vec<(f64, Vec3)> = Vec::with_capacity(2);
+        for (p, q) in [(a, b), (b, e), (e, a)] {
+            let (pd, qd) = (comp(&p.0, d), comp(&q.0, d));
             if (pd <= c) != (qd <= c) {
-                let t = (c - pd) / (qd - pd);
-                at.push(comp(p, o) + t * (comp(q, o) - comp(p, o)));
+                let s = (c - pd) / (qd - pd);
+                let x = comp(&p.0, o) + s * (comp(&q.0, o) - comp(&p.0, o));
+                hits.push((x, p.1 + (q.1 - p.1) * s));
+            }
+        }
+        if let [(x0, p0), (x1, p1)] = hits.as_slice() {
+            if x0 < x1 {
+                pieces.push(([*x0, *x1], [*p0, *p1]));
+            } else if x1 < x0 {
+                pieces.push(([*x1, *x0], [*p1, *p0]));
             }
         }
     }
-    at.sort_by(f64::total_cmp);
-    at.as_chunks::<2>()
-        .0
+    pieces.sort_by(|a, b| a.0[0].total_cmp(&b.0[0]));
+    // two pieces meet where one's start is the other's end, to the rounding of the parameters
+    let (lo, hi) = uvs
         .iter()
-        .filter(|[x0, x1]| x1 > x0)
-        .copied()
-        .collect()
-}
-
-/// The points of the run `[x0, x1]` of the line where parameter `d` of face `fi`'s surface `s`
-/// is `c`, every chord within the rules.
-fn sample(
-    s: &EvalSurface,
-    fi: usize,
-    d: usize,
-    c: f64,
-    [x0, x1]: [f64; 2],
-    rules: &Rules,
-) -> Result<Vec<[f64; 3]>> {
-    let at = |x: f64| -> Result<Vec3> {
-        let q = if d == 0 { [c, x] } else { [x, c] };
-        s.derivs(q[0], q[1])
-            .map(|p| p.0)
-            .filter(|p| p.is_finite())
-            .ok_or_else(|| {
-                TessError::Failed(format!(
-                    "isoparms: face {fi}: the surface does not evaluate at {q:?}"
-                ))
-            })
-    };
-    let ends = [at(x0)?, at(x1)?];
-    let [front, back] = ends;
-    let initial = if front.dist(back) <= rules.tol { 4 } else { 1 };
-    let nodes = bisect(&at, [x0, x1], ends, initial, rules, f64::INFINITY)?;
-    // a bound stopped a chord that still wants splitting: the line is not within the tolerance
-    if let Some((cap, sag, _)) = nodes.capped {
-        return Err(TessError::Failed(format!(
-            "isoparms: face {fi}: a line needs more points than the sampling bound ({cap:?}) \
-             allows at this tolerance: its chords sag up to {sag} mm"
-        )));
+        .map(|q| comp(q, o))
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(l, h), x| {
+            (l.min(x), h.max(x))
+        });
+    let meet = 1e-9 * (hi - lo).abs().max(f64::MIN_POSITIVE);
+    let xyz = |p: Vec3| [p.x, p.y, p.z];
+    let mut lines = Vec::new();
+    let mut line: Vec<[f64; 3]> = Vec::new();
+    let mut end = f64::NEG_INFINITY;
+    for ([x0, x1], [p0, p1]) in pieces {
+        if !line.is_empty() && x0 <= end + meet {
+            // a piece on from the last (one wholly covered already, a side shared by two
+            // triangles, adds nothing)
+            if x1 > end + meet {
+                line.push(xyz(p1));
+                end = x1;
+            }
+        } else {
+            if line.len() >= 2 {
+                lines.push(std::mem::take(&mut line));
+            }
+            line = vec![xyz(p0), xyz(p1)];
+            end = x1;
+        }
     }
-    Ok(nodes.points.iter().map(|p| [p.x, p.y, p.z]).collect())
+    if line.len() >= 2 {
+        lines.push(line);
+    }
+    lines
 }
 
 #[cfg(test)]
@@ -253,9 +247,12 @@ mod tests {
         let lines = isoparms(&b, 3, 0, MeshTolerance::chord(0.01), size).unwrap();
         assert!(lines.len() >= 12, "{}", lines.len());
         for line in &lines {
-            // a plane's lines are straight: one chord
-            assert_eq!(line.len(), 2, "{line:?}");
-            let (p, q) = (line[0], line[1]);
+            // a plane's lines are straight: every point on the chord between its ends
+            let (p, q) = (line[0], line[line.len() - 1]);
+            assert!(
+                line.iter().all(|x| off_segment(*x, p, q) < 1e-9),
+                "{line:?}"
+            );
             assert!(on_an_edge(&b, p) && on_an_edge(&b, q), "{line:?}");
             // on the face whose plane holds it, at one of its three u
             let at_its_u = b.faces.iter().any(|f| {
@@ -352,7 +349,7 @@ mod tests {
             for l in &lines {
                 let on_side = l.iter().all(|p| {
                     let (r, radius) = radial(&side.surface, *p).unwrap();
-                    (r - radius).abs() < 1e-6
+                    (r - radius).abs() <= tol * 1.0001
                 });
                 if !on_side || l.len() < 3 {
                     continue;
@@ -390,7 +387,10 @@ mod tests {
         let from_centre = |p: [f64; 3]| dot(sub(p, c), sub(p, c)).sqrt();
         let on: Vec<Vec<[f64; 3]>> = lines
             .iter()
-            .filter(|l| l.iter().all(|p| (from_centre(*p) - r).abs() < 1e-6))
+            .filter(|l| {
+                l.iter()
+                    .all(|p| (from_centre(*p) - r).abs() <= tol * 1.0001)
+            })
             .cloned()
             .collect();
         for l in &on {
@@ -479,7 +479,7 @@ mod tests {
             .unwrap();
         let on_side = |p: &[f64; 3]| {
             let (r, radius) = radial(&side.surface, *p).unwrap();
-            (r - radius).abs() < 1e-6
+            (r - radius).abs() <= 1.0001
         };
         for l in coarse.iter().filter(|l| l.iter().all(on_side)) {
             for w in l.windows(2) {
@@ -490,14 +490,43 @@ mod tests {
         }
     }
 
+    /// Whether `p` lies on a triangle of `mesh` within `eps`: in its plane and inside it.
+    fn on_mesh(mesh: &crate::Mesh, p: [f64; 3], eps: f64) -> bool {
+        mesh.triangles.iter().any(|t| {
+            let [a, b, c] = t.map(|i| {
+                let v = mesh.positions[i as usize];
+                [v.x, v.y, v.z]
+            });
+            let (ab, ac, ap) = (sub(b, a), sub(c, a), sub(p, a));
+            let n = cross(ab, ac);
+            let area = dot(n, n).sqrt();
+            if area == 0.0 || dot(ap, n).abs() > eps * area {
+                return false;
+            }
+            // the barycentric coordinates of p, within eps of the triangle's sides
+            let (d00, d01, d11) = (dot(ab, ab), dot(ab, ac), dot(ac, ac));
+            let (d20, d21) = (dot(ap, ab), dot(ap, ac));
+            let den = d00 * d11 - d01 * d01;
+            let v = (d11 * d20 - d01 * d21) / den;
+            let w = (d00 * d21 - d01 * d20) / den;
+            let slack = eps * (d00.max(d11)).sqrt() / area;
+            v >= -slack && w >= -slack && v + w <= 1.0 + slack
+        })
+    }
+
     #[test]
-    fn a_line_too_fine_to_sample_is_refused() {
-        // a circle of radius 10 at a chord of 1e-12 needs millions of points, past an edge's
-        // bound: refused, not handed over with chords past the tolerance
-        let b = fixture("cylinder_r10_h5");
-        assert!(matches!(
-            isoparms(&b, 0, 1, MeshTolerance::chord(1e-12), 0.0),
-            Err(TessError::Failed(why)) if why.contains("sampling bound")
-        ));
+    fn a_concave_necks_lines_lie_on_its_triangles() {
+        // the inside of a torus is a neck: concave along its tube's circles, where the true
+        // surface lies behind the chords; every isoparm point on a displayed triangle
+        let (b, size) = (fixture("torus_22_4"), size_of("torus_22_4"));
+        let t = MeshTolerance::display_of(size);
+        let lines = isoparms(&b, 6, 6, t, size).unwrap();
+        assert!(lines.len() >= 12, "{}", lines.len());
+        let (mesh, _) = crate::plan(&b, &t, size).unwrap().0.evaluate();
+        for l in &lines {
+            for p in l {
+                assert!(on_mesh(&mesh, *p, 1e-9), "{p:?} off the mesh");
+            }
+        }
     }
 }

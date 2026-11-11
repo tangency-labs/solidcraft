@@ -180,10 +180,8 @@ pub fn plan(b: &brep::Brep, t: &crate::MeshTolerance, size: f64) -> Result<(Tess
 }
 
 /// What the planner reads of a body before it plans any face, in the record's order: each face's
-/// surface (in the evaluator's parameters, with how the record's map to them), target size and
-/// boundary loops in (u, v), every edge's shared nodes, and why each face left out is. [`plan_at`]
-/// plans the faces from it; other display products (isoparms, [`crate::isoparms`]) read the same
-/// surfaces and boundaries, so they follow what is drawn.
+/// surface (in the evaluator's parameters), target size and boundary loops in (u, v), every
+/// edge's shared nodes, and why each face left out is. [`plan_at`] plans the faces from it.
 pub(crate) struct Prepared {
     /// The rules every edge was sampled to.
     pub(crate) rules: size::Rules,
@@ -193,8 +191,6 @@ pub(crate) struct Prepared {
     pub(crate) edge_faces: Vec<Vec<usize>>,
     /// Each face's surface (a plane in the place of a face left out).
     pub(crate) evals: Vec<poles::Face>,
-    /// How each face's record parameters become its surface's.
-    pub(crate) params: Vec<surface::Params>,
     /// Each face's target side length and its surface's mean speed along u and v.
     pub(crate) sizes: Vec<(f64, [f64; 2])>,
     /// Every edge's shared nodes.
@@ -210,26 +206,12 @@ pub(crate) struct Prepared {
     pub(crate) tangled: Vec<(usize, String)>,
 }
 
-impl Prepared {
-    /// Face `fi`'s boundary loops in its surface's (u, v), each unwrapped along itself (empty for
-    /// a face left out).
-    pub(crate) fn loops(&self, fi: usize) -> &[seam::Loop] {
-        self.boundaries.get(fi).map_or(&[], |fb| fb.loops.as_slice())
-    }
-
-    /// How near a pole a point of face `fi` is taken as one ([`Boundary::reach`]; 0 for a face
-    /// left out).
-    pub(crate) fn reach(&self, fi: usize) -> f64 {
-        self.boundaries.get(fi).map_or(0.0, |fb| fb.reach)
-    }
-}
-
 /// Plan the tessellation of `b` with chord tolerance `tol` and, when given, a facet angle no
 /// facet may turn more than (where it sags above the angle's floor). Faces and edges are the
 /// record's, in its order.
 pub(crate) fn plan_at(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result<(TessPlan, PlanStats)> {
     let faces = &b.faces;
-    let Prepared { rules, forward, edge_faces, evals, params: _, sizes, nodes, unsampled_edges, kept_strict, boundaries, why, tangled } = prepare(b, tol, turn)?;
+    let Prepared { rules, forward, edge_faces, evals, sizes, nodes, unsampled_edges, kept_strict, boundaries, why, tangled } = prepare(b, tol, turn)?;
     let curved = evals.iter().filter(|e| !matches!(***e, EvalSurface::Plane { .. })).count();
     let indexed: Vec<usize> = (0..faces.len()).collect();
     let planned = crate::par::map("face tessellation", &indexed, curved >= PARALLEL_FACES, |&fi| {
@@ -427,7 +409,7 @@ pub(crate) fn prepare(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Res
         });
     }
     let tangled = untangle(b, &evals, &edge_faces, rules.tol, &mut nodes, &mut boundaries, &face_boundary, &mut why)?;
-    Ok(Prepared { rules, forward, edge_faces, evals, params, sizes, nodes, unsampled_edges, kept_strict, boundaries, why, tangled })
+    Ok(Prepared { rules, forward, edge_faces, evals, sizes, nodes, unsampled_edges, kept_strict, boundaries, why, tangled })
 }
 
 /// Face `fi`'s boundary, loop by loop: the shared edge nodes (each edge's last node is the next
@@ -1209,7 +1191,7 @@ fn fan(range: std::ops::Range<usize>, uvs: &[[f64; 2]], same: &dyn Fn(u32, u32) 
 }
 
 /// A face's boundary loops as closed polygons in its surface's (u, v), as the planner
-/// triangulates them (and [`crate::isoparms`] clips its lines to them): every node in order, the
+/// triangulates them: every node in order, the
 /// 3D point each stands for, and each loop's range.
 pub(crate) struct Polygons {
     /// Each node's (u, v).
@@ -1222,11 +1204,11 @@ pub(crate) struct Polygons {
     pub(crate) seamed: bool,
 }
 
-/// Face loops `loops` on `s` (from [`Prepared::loops`]) made closed polygons in (u, v): a loop
+/// Face loops `loops` on `s` made closed polygons in (u, v): a loop
 /// up a seam to a pole and back down it opened at the pole; a face whose boundary winds round a
 /// closed direction cut along a parameter line into one period ([`seam::cut`], at side `h`); a
 /// loop from pole to pole and back along one seam opened, and holes moved by whole periods
-/// beside the outer loop; and at a pole (within `reach`, [`Prepared::reach`]) the free parameter
+/// beside the outer loop; and at a pole (within `reach`, [`Boundary::reach`]) the free parameter
 /// split into the previous node's value and the next one's, so the polygon runs along the
 /// collapsed side. Why not, where the boundary winds round the surface and cannot be cut.
 pub(crate) fn polygons(s: &poles::Face, loops: &[seam::Loop], rules: &size::Rules, h: f64, reach: f64) -> std::result::Result<Polygons, &'static str> {
