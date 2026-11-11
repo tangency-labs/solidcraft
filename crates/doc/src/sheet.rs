@@ -4550,11 +4550,6 @@ impl SheetBody {
         if depth > room + 1e-9 {
             return Err(fail(format!("a depth of {depth:.3} mm is deeper than the material inboard of the junction ({room:.3} mm)")));
         }
-        if f.parent.is_none() && depth >= room - 1e-9 {
-            return Err(fail(format!(
-                "a depth of {depth:.3} mm reaches the blank's edge inboard of the junction ({room:.3} mm of material); that would part the blank"
-            )));
-        }
         if r.shape == ReliefShape::Obround && depth < w / 2.0 - 1e-9 {
             return Err(fail(format!("an obround relief needs a depth of at least half its width ({:.3} mm)", w / 2.0)));
         }
@@ -4621,6 +4616,21 @@ impl SheetBody {
             }
             if self.flat_regions().map_err(|error| fail(error.to_string()))?.len() != 1 {
                 return Err(fail("would cut the sheet apart; reduce its depth".into()));
+            }
+        }
+        // A tear whose deep end lands on an exposed edge of the blank runs boundary to boundary and
+        // parts the material in two. Whether that edge is exposed is a question about the material
+        // itself, not about the flange tree: if the flat sheet has material just beyond the deep
+        // end, the edge is a bend zone or an inner line and the tear cuts nothing away; if it has
+        // none, the tear would part the blank.
+        if depth >= room - 1e-9 {
+            let flat = self.flat_material().map_err(|error| fail(error.to_string()))?;
+            let beyond = d * u + n * (inner - depth - 1e-3);
+            let continues = flat.iter().any(|region| region.outer.polyline(1e-3).contains(beyond));
+            if !continues {
+                return Err(fail(format!(
+                    "a depth of {depth:.3} mm reaches an exposed edge of the blank inboard of the junction ({room:.3} mm of material); that would part it"
+                )));
             }
         }
         // The stretch keeps the relief it asked for: the flat pattern's junction slit and the bend
