@@ -353,26 +353,31 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                                 row.equal &= !changed;
                                 enter |= expr_row(ui, &format!("Segment {part} angle"), &mut row.angle);
                                 enter |= expr_row(ui, &format!("Segment {part} height"), &mut row.height);
-                                // The stretch's own side: the feature's, or the other one. A side the
-                                // design spelled out (even the feature's) stays as it was until this
-                                // choice is moved off the one it shows.
+                                // The stretch's own side and the relief at the junction after it, on one
+                                // row: a four-stretch edge still fits the dialog's page without
+                                // scrolling, and a scenario click lands on a field rather than on a
+                                // clipped one. A side the design spelled out (even the feature's)
+                                // stays as it was until this choice is moved off the one it shows.
                                 let mut way = usize::from(matches!(row.flip, Some(f) if f != *flip));
-                                choice_row(ui, &format!("Segment {part} turns"), &format!("sm_segment_way_{n}_{m}"), &mut way, &BEND_WAY_LABELS);
+                                let mut relief = row.relief.clone().unwrap_or((0, String::new(), String::new()));
+                                crate::ui_kit::row(ui, &format!("Segment {part} turns"), |ui| {
+                                    ui.columns(2, |cols| {
+                                        crate::ui_kit::dropdown(&mut cols[0], &format!("sm_segment_way_{n}_{m}"), &mut way, &BEND_WAY_LABELS);
+                                        crate::ui_kit::dropdown(
+                                            &mut cols[1],
+                                            &format!("sm_segment_relief_{n}_{m}"),
+                                            &mut relief.0,
+                                            &SEGMENT_RELIEF_LABELS,
+                                        );
+                                    });
+                                });
                                 if way == 1 {
                                     row.flip = Some(!*flip);
                                 } else if row.flip == Some(!*flip) {
                                     row.flip = None;
                                 }
-                                // The relief at the junction after this stretch: none unless asked, and
-                                // its own width and depth (empty follows the rule).
-                                let mut relief = row.relief.clone().unwrap_or((0, String::new(), String::new()));
-                                choice_row(
-                                    ui,
-                                    &format!("Segment {part} relief"),
-                                    &format!("sm_segment_relief_{n}_{m}"),
-                                    &mut relief.0,
-                                    &SEGMENT_RELIEF_LABELS,
-                                );
+                                // A relief's own width and depth (empty follows the rule) appear
+                                // only once a shape is chosen, so the common case adds no rows.
                                 if SEGMENT_RELIEFS.get(relief.0).is_some_and(|s| s.is_empty()) {
                                     row.relief = None;
                                 } else {
