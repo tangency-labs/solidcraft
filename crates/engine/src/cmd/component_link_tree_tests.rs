@@ -45,8 +45,8 @@ fn save_unit(dir: &Path) -> PathBuf {
     save_part(&pin, [4.0, 6.0, 10.0], "Pin", "PN-1");
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 40, "width": 2, "height": 2, "corner": [0, 22, 0], "body_name": "Rail"}));
-    run(&mut s, "component.insert_design", json!({"path": plate}));
-    run(&mut s, "component.insert_design", json!({"path": pin, "translate": [5, 5, 5]}));
+    run(&mut s, "component.insert_design", json!({"path": plate, "structure": true}));
+    run(&mut s, "component.insert_design", json!({"path": pin, "translate": [5, 5, 5], "structure": true}));
     run(&mut s, "component.insert_design", json!({"path": pin, "reuse": true, "translate": [30, 5, 5]}));
     run(&mut s, "occurrence.move", json!({"occurrence": "pin:2", "axis": [0, 0, 1], "angle": "90 deg", "origin": [30, 5, 0]}));
     run(&mut s, "document.metadata.set", json!({"values": {"part_number": "UNIT-1", "description": "Bearing unit"}}));
@@ -113,7 +113,7 @@ fn a_linked_assembly_comes_in_as_a_subassembly_and_its_parts_count_in_the_bill_o
 
     let mut s = Session::default();
     let undo = s.undo.len();
-    let inserted = run(&mut s, "component.insert_design", json!({"path": unit, "translate": [100, 0, 0]}));
+    let inserted = run(&mut s, "component.insert_design", json!({"path": unit, "translate": [100, 0, 0], "structure": true}));
     let top = inserted["component"].as_u64().unwrap();
     // The unit's plate and pin are components inside it, the pin placed twice.
     assert_eq!(s.doc.components.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["unit", "plate", "pin"]);
@@ -161,7 +161,7 @@ fn update_links_follows_the_parts_a_linked_assembly_gains_moves_renames_and_lose
     let dir = scratch("update");
     let unit = save_unit(&dir);
     let mut s = Session::default();
-    let top = run(&mut s, "component.insert_design", json!({"path": unit}))["component"].as_u64().unwrap();
+    let top = run(&mut s, "component.insert_design", json!({"path": unit, "structure": true}))["component"].as_u64().unwrap();
     let (plate, pin) = (component(&s, "plate"), component(&s, "pin"));
     let pins = placements(&s, pin, top);
     let evaluated = || super::EVALUATED.with(std::cell::Cell::get);
@@ -226,7 +226,8 @@ fn a_saved_assembly_reopens_with_its_subassemblies() {
     let dir = scratch("reopen");
     let unit = save_unit(&dir);
     let mut s = Session::default();
-    let top = run(&mut s, "component.insert_design", json!({"path": unit, "translate": [0, 0, 50]}))["component"].as_u64().unwrap();
+    let top =
+        run(&mut s, "component.insert_design", json!({"path": unit, "translate": [0, 0, 50], "structure": true}))["component"].as_u64().unwrap();
     let bom = run(&mut s, "assembly.bom", json!({}));
     for (file, format) in [("machine.json", "json"), ("machine.sc", "container")] {
         let path = dir.join(file);
@@ -252,9 +253,9 @@ fn subassemblies_nest_in_subassemblies() {
     // A machine: two units and a plate of its own.
     let machine = dir.join("machine.sc");
     let mut m = Session::default();
-    run(&mut m, "component.insert_design", json!({"path": unit}));
+    run(&mut m, "component.insert_design", json!({"path": unit, "structure": true}));
     run(&mut m, "component.insert_design", json!({"path": unit, "reuse": true, "translate": [0, 60, 0]}));
-    run(&mut m, "component.insert_design", json!({"path": dir.join("plate.sc"), "translate": [0, 0, 30]}));
+    run(&mut m, "component.insert_design", json!({"path": dir.join("plate.sc"), "translate": [0, 0, 30], "structure": true}));
     run(&mut m, "file.save", json!({"path": machine}));
     assert!((volume(&mut m) - (2.0 * 4640.0 + 4000.0)).abs() < 1e-6);
     let machine_boxes = boxes(&m);
@@ -262,7 +263,7 @@ fn subassemblies_nest_in_subassemblies() {
 
     // A line of two machines.
     let mut s = Session::default();
-    let top = run(&mut s, "component.insert_design", json!({"path": machine}))["component"].as_u64().unwrap();
+    let top = run(&mut s, "component.insert_design", json!({"path": machine, "structure": true}))["component"].as_u64().unwrap();
     run(&mut s, "component.insert_design", json!({"path": machine, "reuse": true, "translate": [200, 0, 0]}));
     let mut both = machine_boxes.clone();
     both.extend(shifted(&machine_boxes, [200, 0, 0]));
@@ -291,7 +292,8 @@ fn a_joint_to_a_part_of_a_subassembly_moves_the_subassembly() {
     run(&mut s, "component.create", json!({"name": "Base"}));
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [-50, 0, 0], "body_name": "Block"}));
     run(&mut s, "component.activate", json!({"component": 0}));
-    let top = run(&mut s, "component.insert_design", json!({"path": unit, "translate": [100, 0, 0]}))["component"].as_u64().unwrap();
+    let top =
+        run(&mut s, "component.insert_design", json!({"path": unit, "translate": [100, 0, 0], "structure": true}))["component"].as_u64().unwrap();
     let plate = placements(&s, component(&s, "plate"), top)[0];
     // A slider along Z between the grounded base and the plate inside the unit.
     let origin = |occurrence: Value| json!({"occurrence": occurrence, "point": [0, 0, 0], "z": [0, 0, 1]});
@@ -330,7 +332,7 @@ fn a_joint_to_a_part_two_levels_down_moves_the_outer_subassembly() {
     let unit = save_unit(&dir);
     let machine = dir.join("machine.sc");
     let mut m = Session::default();
-    run(&mut m, "component.insert_design", json!({"path": unit}));
+    run(&mut m, "component.insert_design", json!({"path": unit, "structure": true}));
     run(&mut m, "component.insert_design", json!({"path": unit, "reuse": true, "translate": [0, 60, 0]}));
     run(&mut m, "file.save", json!({"path": machine}));
     let machine_boxes = boxes(&m);
@@ -339,7 +341,7 @@ fn a_joint_to_a_part_two_levels_down_moves_the_outer_subassembly() {
     run(&mut s, "component.create", json!({"name": "Base"}));
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [-50, 0, 0], "body_name": "Block"}));
     run(&mut s, "component.activate", json!({"component": 0}));
-    let top = run(&mut s, "component.insert_design", json!({"path": machine}))["component"].as_u64().unwrap();
+    let top = run(&mut s, "component.insert_design", json!({"path": machine, "structure": true}))["component"].as_u64().unwrap();
     let unit_here = component(&s, "unit");
     let pin = placements(&s, component(&s, "pin"), unit_here)[0];
     let origin = |occurrence: Value| json!({"occurrence": occurrence, "point": [0, 0, 0], "z": [0, 0, 1]});
@@ -370,7 +372,7 @@ fn the_parts_of_a_linked_assembly_stay_as_its_design_has_them_until_the_link_is_
     let unit = save_unit(&dir);
     let mut s = Session::default();
     run(&mut s, "component.create", json!({"name": "Cell", "activate": false}));
-    let top = run(&mut s, "component.insert_design", json!({"path": unit, "parent": "Cell"}))["component"].as_u64().unwrap();
+    let top = run(&mut s, "component.insert_design", json!({"path": unit, "parent": "Cell", "structure": true}))["component"].as_u64().unwrap();
     let pin = component(&s, "pin");
     let placed = placements(&s, pin, top);
     let before = s.doc.clone();
@@ -405,8 +407,8 @@ fn save_hinge(dir: &Path) -> PathBuf {
     save_part(&base, [40.0, 20.0, 5.0], "Base", "BS-1");
     save_part(&arm, [30.0, 4.0, 4.0], "Arm", "AR-1");
     let mut s = Session::default();
-    run(&mut s, "component.insert_design", json!({"path": base}));
-    run(&mut s, "component.insert_design", json!({"path": arm, "translate": [0, 8, 5]}));
+    run(&mut s, "component.insert_design", json!({"path": base, "structure": true}));
+    run(&mut s, "component.insert_design", json!({"path": arm, "translate": [0, 8, 5], "structure": true}));
     let origin = |part: &str| json!({"occurrence": part, "point": [0, 10, 7], "z": [0, 0, 1]});
     let joint = json!({"type": "revolute", "name": "Hinge", "flip": true, "limits": [[-90, 90]], "a": origin("base"), "b": origin("arm")});
     run(&mut s, "joint.create", joint);
@@ -438,7 +440,7 @@ fn each_occurrence_of_a_subassembly_is_rigid_or_flexible_and_has_its_own_pose() 
     let saved = boxes(&open(&hinge));
     assert_eq!(saved, mm(&[[0, 0, 0, 40, 20, 5], [0, 8, 5, 30, 12, 9]]));
     let mut s = Session::default();
-    let inserted = run(&mut s, "component.insert_design", json!({"path": hinge, "translate": [0, 0, 50]}));
+    let inserted = run(&mut s, "component.insert_design", json!({"path": hinge, "translate": [0, 0, 50], "structure": true}));
     let (top, first) = (inserted["component"].as_u64().unwrap(), inserted["occurrence"].as_u64().unwrap());
     // Rigid, as a link is made: its design's joint is not a joint here, and it moves as one.
     assert!(s.doc.assembly.joints.is_empty());
@@ -566,7 +568,7 @@ fn each_occurrence_of_a_subassembly_is_rigid_or_flexible_and_has_its_own_pose() 
     assert!(s.execute("component.link_mode", &json!({"component": top, "structure": false, "flexible": true})).is_err());
     assert!(s.execute("component.link_mode", &json!({"component": top, "occurrence": first})).is_err(), "an occurrence needs `flexible`");
     assert!(s.execute("component.link_mode", &json!({"component": top, "occurrence": base, "flexible": true})).is_err(), "not an occurrence of it");
-    assert!(s.execute("component.insert_design", &json!({"path": hinge, "flexible": "yes"})).is_err());
+    assert!(s.execute("component.insert_design", &json!({"path": hinge, "flexible": "yes", "structure": true})).is_err());
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -651,8 +653,8 @@ fn a_carried_joint_between_two_datum_planes_keeps_its_side() {
     save_part(&base, [40.0, 20.0, 5.0], "Base", "BS-1");
     save_part(&arm, [30.0, 4.0, 4.0], "Arm", "AR-1");
     let mut design = Session::default();
-    run(&mut design, "component.insert_design", json!({"path": base}));
-    run(&mut design, "component.insert_design", json!({"path": arm, "translate": [0, 8, 5]}));
+    run(&mut design, "component.insert_design", json!({"path": base, "structure": true}));
+    run(&mut design, "component.insert_design", json!({"path": arm, "translate": [0, 8, 5], "structure": true}));
     let plane = |part: &str| json!({"occurrence": part, "plane": "XY"});
     run(&mut design, "joint.create", json!({"type": "planar", "name": "Flat", "a": plane("base"), "b": plane("arm")}));
     run(&mut design, "file.save", json!({"path": flat}));
@@ -706,7 +708,7 @@ fn what_a_link_keeps_is_changed_in_its_design_only() {
     for (command, params) in [
         ("component.activate", json!({"component": arm_component})),
         ("component.create", json!({"name": "Mine", "parent": arm_component})),
-        ("component.insert_design", json!({"path": hinge, "parent": arm_component})),
+        ("component.insert_design", json!({"path": hinge, "parent": arm_component, "structure": true})),
         ("occurrence.copy", json!({"occurrence": arm})),
         ("occurrence.ground", json!({"occurrence": arm, "grounded": true})),
         ("joint.delete", json!({"joint": "Hinge"})),
@@ -835,12 +837,13 @@ fn a_design_inserted_flexible_brings_its_joints_and_the_list_says_which_parts_a_
 }
 
 #[test]
-fn a_link_keeps_the_assembly_in_one_component_when_asked_and_relink_changes_that() {
+fn a_link_keeps_the_assembly_in_one_component_unless_asked_and_relink_changes_that() {
     let dir = scratch("flat");
     let unit = save_unit(&dir);
     let unit_boxes = boxes(&open(&unit));
     let mut s = Session::default();
-    let inserted = run(&mut s, "component.insert_design", json!({"path": unit, "structure": false}));
+    // Untold: one component, as every design came in before links kept components.
+    let inserted = run(&mut s, "component.insert_design", json!({"path": unit}));
     let top = inserted["component"].as_u64().unwrap();
     // One component holding the four bodies the unit shows, as before.
     assert_eq!(s.doc.components.len(), 1);
@@ -882,14 +885,14 @@ fn a_part_design_links_as_one_component_and_becomes_a_subassembly_when_it_gets_c
     save_part(&part, [40.0, 20.0, 5.0], "Bracket", "BR-1");
     save_part(&dir.join("pin.sc"), [4.0, 6.0, 10.0], "Pin", "PN-1");
     let mut s = Session::default();
-    let inserted = run(&mut s, "component.insert_design", json!({"path": part}));
+    let inserted = run(&mut s, "component.insert_design", json!({"path": part, "structure": true}));
     let top = inserted["component"].as_u64().unwrap();
     assert_eq!(s.doc.components.len(), 1);
     assert!(inserted.get("subcomponents").is_none() && s.doc.assembly.joints.is_empty(), "{inserted}");
     assert_eq!(counts(&run(&mut s, "assembly.bom", json!({}))), rows(&[("BR-1", 1)]));
     // The bracket's design gets a pin of its own.
     let mut source = open(&part);
-    run(&mut source, "component.insert_design", json!({"path": dir.join("pin.sc"), "translate": [5, 5, 5]}));
+    run(&mut source, "component.insert_design", json!({"path": dir.join("pin.sc"), "translate": [5, 5, 5], "structure": true}));
     run(&mut source, "file.save", json!({}));
     assert_eq!(run(&mut s, "component.update_links", json!({}))["updated"], json!(["bracket"]));
     assert_eq!(s.doc.components.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["bracket", "pin"]);
@@ -1003,9 +1006,17 @@ fn a_subassembly_weighs_what_it_holds_in_each_of_its_occurrences() {
     let dir = scratch("mass");
     let unit = save_unit(&dir);
     let mut s = Session::default();
-    run(&mut s, "component.insert_design", json!({"path": unit}));
+    run(&mut s, "component.insert_design", json!({"path": unit, "structure": true}));
     run(&mut s, "component.insert_design", json!({"path": unit, "reuse": true, "translate": [0, 0, 100]}));
-    let mass = run(&mut s, "assembly.mass_properties", json!({}));
+    // Untold, the parts inside are listed at the first placement only, and a warning says so.
+    let first = run(&mut s, "assembly.mass_properties", json!({}));
+    let said = |reply: &Value| {
+        reply["warnings"].as_array().is_some_and(|all| all.iter().any(|w| w.as_str().is_some_and(|w| w.contains("first placement only"))))
+    };
+    assert!(said(&first), "{first}");
+    let mass = run(&mut s, "assembly.mass_properties", json!({"every_placement": true}));
+    assert!(first["occurrences"].as_array().unwrap().len() < mass["occurrences"].as_array().unwrap().len(), "{first}");
+    assert!(s.execute("assembly.mass_properties", &json!({"every_placement": "yes"})).is_err());
     let total: f64 = mass["occurrences"]
         .as_array()
         .unwrap()
@@ -1019,7 +1030,7 @@ fn a_subassembly_weighs_what_it_holds_in_each_of_its_occurrences() {
     let paths: Vec<usize> =
         mass["occurrences"].as_array().unwrap().iter().filter(|o| o["component"] == plate).map(|o| o["path"].as_array().unwrap().len()).collect();
     assert_eq!(paths, [2, 2], "{mass}");
-    assert!(mass["warnings"].as_array().is_none_or(|all| all.iter().all(|w| !w.as_str().unwrap().contains("first placement only"))), "{mass}");
+    assert!(!said(&mass), "{mass}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -1068,7 +1079,7 @@ fn no_command_puts_this_designs_work_into_a_component_a_link_keeps() {
     let dir = scratch("kept-guard");
     let unit = save_unit(&dir);
     let mut s = Session::default();
-    run(&mut s, "component.insert_design", json!({"path": unit}));
+    run(&mut s, "component.insert_design", json!({"path": unit, "structure": true}));
     let before = serde_json::to_string(&*s.doc).unwrap();
     let refused = |s: &mut Session, id: &str, p: Value| {
         let e = s.execute(id, &p).expect_err(&format!("{id} {p}")).to_string();
@@ -1103,7 +1114,7 @@ fn a_flexible_occurrence_inside_a_linked_design_shows_in_the_pose_that_design_ha
     assert_eq!(in_mid, mm(&[[-2, 10, 5, 2, 40, 9], [0, 0, 0, 40, 20, 5]]));
     run(&mut m, "file.save", json!({"path": mid}));
     let mut s = Session::default();
-    run(&mut s, "component.insert_design", json!({"path": mid, "translate": [0, 0, 50]}));
+    run(&mut s, "component.insert_design", json!({"path": mid, "translate": [0, 0, 50], "structure": true}));
     run(&mut s, "component.insert_design", json!({"path": mid, "reuse": true, "translate": [0, 200, 50]}));
     let expected = together(shifted(&in_mid, [0, 0, 50]), shifted(&in_mid, [0, 200, 50]));
     assert_eq!(boxes(&s), expected, "each occurrence shows the hinge as the linked design has it");
@@ -1214,7 +1225,7 @@ fn two_components_of_one_occurrence_are_joined_only_where_its_joints_move_them()
     let dir = scratch("inner-sides");
     let hinge = save_hinge(&dir);
     let mut s = Session::default();
-    let inserted = run(&mut s, "component.insert_design", json!({"path": hinge}));
+    let inserted = run(&mut s, "component.insert_design", json!({"path": hinge, "structure": true}));
     let (top, first) = (inserted["component"].as_u64().unwrap(), inserted["occurrence"].as_u64().unwrap());
     let (base, arm) = (placements(&s, component(&s, "base"), top)[0], placements(&s, component(&s, "arm"), top)[0]);
     let side = |part: u64, at: [i64; 3]| json!({"occurrence": part, "point": at, "z": [0, 0, 1]});
@@ -1379,7 +1390,7 @@ fn joints_three_levels_down_move_from_the_top_when_every_level_is_flexible() {
 
     // Rigid in the top: the machine as it was saved, 300 mm along X.
     let mut s = Session::default();
-    let inserted = run(&mut s, "component.insert_design", json!({"path": machine, "translate": [300, 0, 0]}));
+    let inserted = run(&mut s, "component.insert_design", json!({"path": machine, "translate": [300, 0, 0], "structure": true}));
     assert!(s.doc.assembly.joints.is_empty(), "rigid: no joint of the machine is carried");
     assert_eq!(boxes(&s), shifted(&in_machine, [300, 0, 0]));
     // Flexible: the joints the machine has for its units' hinges are joints here.
@@ -1405,7 +1416,7 @@ fn a_rigid_occurrence_on_the_way_keeps_what_is_below_it_as_saved() {
     let hinge = save_hinge(&dir);
     let unit = dir.join("unit-rigid.sc");
     let mut u = Session::default();
-    run(&mut u, "component.insert_design", json!({"path": hinge}));
+    run(&mut u, "component.insert_design", json!({"path": hinge, "structure": true}));
     run(&mut u, "file.save", json!({"path": unit}));
     let mut s = Session::default();
     let inserted = run(&mut s, "component.insert_design", json!({"path": unit, "flexible": true}));
@@ -1473,7 +1484,7 @@ fn a_reference_picked_on_a_part_in_a_pose_is_refused_and_one_on_a_part_as_design
     let up = mm(&[[0, 0, 0, 40, 20, 5], [-2, 10, 5, 2, 40, 9]]);
     let mut s = Session::default();
     // The first hinge is flexible, its arm a quarter turn up; the second is rigid, as saved.
-    let inserted = run(&mut s, "component.insert_design", json!({"path": hinge, "translate": [0, 0, 50]}));
+    let inserted = run(&mut s, "component.insert_design", json!({"path": hinge, "translate": [0, 0, 50], "structure": true}));
     let (top, first) = (inserted["component"].as_u64().unwrap(), inserted["occurrence"].as_u64().unwrap());
     run(&mut s, "component.link_mode", json!({"component": top, "flexible": true}));
     let driven = run(&mut s, "joint.drive", json!({"joint": "Hinge", "value": 90}));
@@ -1527,5 +1538,18 @@ fn a_reference_picked_on_a_part_in_a_pose_is_refused_and_one_on_a_part_as_design
     run(&mut s, "construct.axis.edge", json!({"edge": {"edge": [15, 12, 59]}, "name": "On first arm"}));
     let (origin, along) = axis(&s, "On first arm");
     assert!((origin.y - 12.0).abs() < 1e-6 && (origin.z - 59.0).abs() < 1e-6 && along.x.abs() > 1.0 - 1e-9, "{origin:?} {along:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A flexible occurrence needs the design's components, so asking for one asks for them too,
+/// and asking for one without them is refused.
+#[test]
+fn a_flexible_occurrence_is_asked_for_with_the_designs_components() {
+    let dir = scratch("implied");
+    let hinge = save_hinge(&dir);
+    let mut s = Session::default();
+    let made = run(&mut s, "component.insert_design", json!({"path": hinge, "flexible": true}));
+    assert_eq!((made["subcomponents"].clone(), made["joints"].clone()), (json!(2), json!(1)), "{made}");
+    assert!(s.execute("component.insert_design", &json!({"path": hinge, "structure": false, "flexible": true})).is_err());
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -10,23 +10,26 @@ use crate::SolveApp;
 /// What Insert Design asks of `component.insert_design` for a design that has components of
 /// its own, from the preferences: keep them as components inside the linked one
 /// (`insert_keeps_components`), and bring its joints too (`insert_flexible`), which needs them.
-/// Keeping them is what the command does when it is not told: it is left out, so that a design
-/// with more components than a link keeps still comes in, as one component and with a warning.
+/// One component is what the command does when it is not told, so nothing is asked for it.
 pub(crate) fn insert_design_options(preferences: &crate::prefs::Prefs) -> Vec<(&'static str, bool)> {
     match (preferences.insert_keeps_components, preferences.insert_flexible) {
-        (false, _) => vec![("structure", false)],
-        (true, true) => vec![("flexible", true)],
-        (true, false) => Vec::new(),
+        (false, _) => Vec::new(),
+        (true, true) => vec![("structure", true), ("flexible", true)],
+        (true, false) => vec![("structure", true)],
     }
 }
 
 /// The switch the menu of `occurrence`, an occurrence of linked component `component`, offers
 /// for how the link keeps its design: keep its components when it keeps none, else make this
 /// occurrence flexible or rigid again (each occurrence is one or the other on its own). `None`
-/// when the design has no components to keep apart.
+/// when the design has no components to keep apart: a link that keeps them and found none, or
+/// one that keeps none and holds a single body, which is a part.
 pub(crate) fn link_mode_item(doc: &solidcraft_engine::doc::Document, component: u64, occurrence: u64) -> Option<(&'static str, serde_json::Value)> {
     let link = doc.links.get(&component)?;
     Some(match link.tree.as_ref() {
+        // One body is a part. A link from before its bodies were recorded is offered the
+        // switch, as one with several bodies is: its design may be an assembly.
+        None if link.inherited.len() == 1 => return None,
         None => ("Keep Its Components", json!({"component": component, "structure": true})),
         Some(tree) if tree.components.is_empty() || occurrence == 0 => return None,
         Some(tree) => {
@@ -346,11 +349,13 @@ mod tests {
     #[test]
     fn insert_design_takes_how_a_linked_design_comes_in_from_the_preferences() {
         let mut prefs = crate::prefs::Prefs::default();
-        assert_eq!(insert_design_options(&prefs), [], "as shipped: its components kept, rigid, which is what the command does untold");
+        assert_eq!(insert_design_options(&prefs), [], "as shipped: one component, which is what the command does untold");
         prefs.insert_flexible = true;
-        assert_eq!(insert_design_options(&prefs), [("flexible", true)]);
-        prefs.insert_keeps_components = false;
-        assert_eq!(insert_design_options(&prefs), [("structure", false)], "one component has no joints to bring");
+        assert_eq!(insert_design_options(&prefs), [], "one component has no joints to bring");
+        prefs.insert_keeps_components = true;
+        assert_eq!(insert_design_options(&prefs), [("structure", true), ("flexible", true)]);
+        prefs.insert_flexible = false;
+        assert_eq!(insert_design_options(&prefs), [("structure", true)], "its components kept, rigid");
     }
 
     /// A linked design that has components (#5526): its menu switches it between rigid and
@@ -376,7 +381,7 @@ mod tests {
         design.execute("file.save", &json!({"path": unit})).unwrap();
 
         let mut app = SolveApp::new(Session::default(), Default::default());
-        let linked = app.run("component.insert_design", json!({"path": unit})).unwrap()["component"].as_u64().unwrap();
+        let linked = app.run("component.insert_design", json!({"path": unit, "structure": true})).unwrap()["component"].as_u64().unwrap();
         let own = app.run("component.insert_design", json!({"path": plate, "translate": [50, 0, 0]})).unwrap()["component"].as_u64().unwrap();
         let switch =
             |app: &SolveApp, id: u64| context_menu::entries(app, &Target::Component { id }).into_iter().find(|i| i.id == "component.link_mode");

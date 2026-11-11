@@ -189,14 +189,16 @@ pub struct InsertDesignParams {
     /// it. Default: false.
     #[serde(default)]
     pub reuse: Option<bool>,
-    /// Keep the design's own components as components inside the new one. Default: true. With
-    /// false, every body goes into the one new component, whatever components the design has.
+    /// Keep the design's own components as components inside the new one (a linked
+    /// subassembly). Default: false: every body goes into the one new component, whatever
+    /// components the design has. `flexible` keeps them too.
     #[serde(default)]
     pub structure: Option<bool>,
     /// Flexible: the design's own joints are joints here too, on this occurrence's own copy of
     /// its components, so they move by them. Default: false, which is rigid: they stay as the
     /// design was saved and it moves as one. Each occurrence is one or the other on its own
-    /// (also with `reuse`). Needs `structure`.
+    /// (also with `reuse`). It keeps the design's components as `structure` does, and can't go
+    /// with `structure: false`.
     #[serde(default)]
     pub flexible: Option<bool>,
 }

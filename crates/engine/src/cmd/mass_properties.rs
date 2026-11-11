@@ -11,11 +11,12 @@
 //! Rigid groups are the occurrences that move as one body: those an unsuppressed rigid joint
 //! ties together, and a nested occurrence that no joint places with the occurrence it sits in
 //! (the joint solver leaves it where its parent puts it). A group holding the design itself or
-//! a grounded occurrence is fixed. An occurrence is listed where the joint solver places it, its
-//! first placement. An occurrence inside a subassembly placed more than once is listed again
-//! for each further placement, by its `path`, so the subassembly weighs what it holds wherever
-//! it is placed. Inside a linked subassembly, the copy that a flexible occurrence's joints move
-//! is a group of its own, and what they do not move belongs to the occurrence's group.
+//! a grounded occurrence is fixed. Occurrences are taken where the joint solver places them, so
+//! an occurrence inside a subassembly placed more than once is listed at the subassembly's first
+//! placement (a warning says so). With `every_placement`, it is listed again for each further
+//! placement, by its `path`, so the subassembly weighs what it holds wherever it is placed.
+//! Inside a linked subassembly, the copy that a flexible occurrence's joints move is a group of
+//! its own, and what they do not move belongs to the occurrence's group.
 
 use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -41,7 +42,9 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Mass Properties",
     .contract(&CONTRACT)
     .output(output_schema_for::<AssemblyMassResult>)
     .params(
-        "no parameters → occurrences: [{occurrence (0: the design's own bodies), name, component, path, group, fixed, frame \
+        "every_placement?: bool (default false: an occurrence inside a subassembly placed more than once is listed at the \
+         subassembly's first placement only, with a warning; true: at each of its placements, by its path) → occurrences: \
+         [{occurrence (0: the design's own bodies), name, component, path, group, fixed, frame \
          {origin, x, y, z}, bodies: [{name, material, density_g_cm3, closed, volume_mm3, mass_kg}], open_bodies_skipped, mass}], \
          groups: [{group, occurrences, fixed, frame_occurrence, frame, mass}] (occurrences an unsuppressed rigid joint ties \
          together, and a nested occurrence no joint places with its parent; fixed: holds the design or a grounded occurrence), \
@@ -177,6 +180,12 @@ impl Session {
     /// Mass, centre of mass and inertia of every occurrence and rigid group of the design, as
     /// `assembly.mass_properties` returns them (kg, mm, kg·mm²), pending moves included.
     pub fn mass_properties(&self) -> Result<AssemblyMassResult> {
+        self.mass_properties_listing(false)
+    }
+
+    /// [`Self::mass_properties`]. With `every_placement`, an occurrence inside a subassembly
+    /// placed more than once is listed at each of its placements, not at the first one only.
+    pub fn mass_properties_listing(&self, every_placement: bool) -> Result<AssemblyMassResult> {
         let mut doc = (*self.doc).clone();
         for occurrence in &mut doc.occurrences {
             if let Some(transform) = self.pending_moves.get(&occurrence.id) {
@@ -184,7 +193,7 @@ impl Session {
             }
         }
         let state = self.model.state();
-        assembly(&doc, &state)
+        assembly(&doc, &state, every_placement)
     }
 }
 
@@ -197,16 +206,16 @@ struct Shape {
     gyration: Option<Tensor3>,
 }
 
-/// [`Session::mass_properties`] of a document and its evaluated state.
-pub fn assembly(doc: &Document, state: &ModelState) -> Result<AssemblyMassResult> {
+/// [`Session::mass_properties_listing`] of a document and its evaluated state.
+pub fn assembly(doc: &Document, state: &ModelState, every_placement: bool) -> Result<AssemblyMassResult> {
     if doc.occurrences.len() >= MAX_PLACEMENTS {
         return Err(bad(CMD, format!("assembly exceeds {MAX_PLACEMENTS} occurrences")));
     }
     let mut warnings = Vec::new();
     // Index 0 is the design itself; then the occurrences by id, each at its first placement
-    // (through the first occurrence of each component above it, where joints place it); then
-    // the further placements of the occurrences inside a component that is placed more than
-    // once, so that such a component weighs what it holds wherever it is placed.
+    // (through the first occurrence of each component above it, where joints place it); then,
+    // when asked for, the further placements of the occurrences inside a component that is
+    // placed more than once, so that such a component weighs what it holds wherever it is placed.
     let mut ids: Vec<u64> = doc.occurrences.iter().map(|o| o.id).filter(|id| *id != 0).collect();
     ids.sort_unstable();
     ids.dedup();
@@ -215,7 +224,7 @@ pub fn assembly(doc: &Document, state: &ModelState) -> Result<AssemblyMassResult
     let mut paths: Vec<Vec<u64>> = ids.iter().map(|id| if *id == 0 { Vec::new() } else { canonical_path(doc, *id) }).collect();
     let mut worlds: Vec<Mat> = ids.iter().map(|id| if *id == 0 { IDENTITY } else { joints::occurrence_world(doc, *id) }).collect();
     let mut further: HashMap<Vec<u64>, usize> = HashMap::new();
-    if doc.occurrences.iter().any(|o| o.parent != 0) {
+    if every_placement && doc.occurrences.iter().any(|o| o.parent != 0) {
         for (_, path, world) in doc.placements() {
             let Some(first) = path.last().and_then(|last| index.get(last)).copied() else { continue };
             if paths.get(first) == Some(&path) {
@@ -225,6 +234,17 @@ pub fn assembly(doc: &Document, state: &ModelState) -> Result<AssemblyMassResult
             ids.push(path.last().copied().unwrap_or(0));
             paths.push(path);
             worlds.push(world);
+        }
+    }
+    if !every_placement {
+        for c in doc.components.iter().filter(|c| doc.occurrences.iter().any(|o| o.parent == c.id)) {
+            let copies = doc.occurrences.iter().filter(|o| o.component == c.id).count();
+            if copies > 1 {
+                warnings.push(format!(
+                    "`{}` is placed {copies} times: the occurrences inside it are listed at its first placement only, where joints place them",
+                    c.name
+                ));
+            }
         }
     }
     // The entry of the placement at `path`.
@@ -403,8 +423,13 @@ pub fn assembly(doc: &Document, state: &ModelState) -> Result<AssemblyMassResult
     Ok(AssemblyMassResult { occurrences, groups: out_groups, warnings, param_warnings: Vec::new() })
 }
 
-fn run(s: &mut Session, _p: &Value) -> Result<Value> {
-    let r = s.mass_properties()?;
+fn run(s: &mut Session, p: &Value) -> Result<Value> {
+    let every_placement = match p.get("every_placement") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(every)) => *every,
+        Some(_) => return Err(bad(CMD, "`every_placement` must be true or false")),
+    };
+    let r = s.mass_properties_listing(every_placement)?;
     serde_json::to_value(r).map_err(|e| EngineError::Other(e.to_string()))
 }
 

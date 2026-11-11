@@ -303,7 +303,7 @@ fn the_parts_of_a_linked_assembly_are_not_context_around_it() {
     let mut unit = Session::default();
     unit.execute("component.insert_design", &json!({"path": f.plate_file, "translate": [0, 0, 40]})).unwrap();
     unit.execute("file.save", &json!({"path": unit_file})).unwrap();
-    let made = f.app.run("component.insert_design", json!({"path": unit_file, "translate": [0, 200, 0]})).unwrap();
+    let made = f.app.run("component.insert_design", json!({"path": unit_file, "translate": [0, 200, 0], "structure": true})).unwrap();
     assert_eq!(made["subcomponents"], 1, "{made}");
     f.app.run("file.save", json!({})).unwrap();
     double_click_component(&mut f.app, json!({"component": made["component"]}));

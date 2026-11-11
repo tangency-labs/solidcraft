@@ -116,8 +116,8 @@ A frame holds a panel on a hinge along X at the origin. An actuator runs from a 
 
 `component.insert_design {path, translate?, reuse?, structure?, flexible?}` links a saved design as a component; `"reuse":true` places one already linked again.
 
-- **A design with components of its own is linked as a linked subassembly.** Its components are components inside the linked component, each with its part properties. `assembly.bom` and `assembly.mass_properties` count them in every occurrence. `component.list` gives each of them a `link`: the linked component that keeps it. `component.links` lists the linked components, with `structure` and the `flexible` occurrences.
-- **Rigid is the default.** A rigid occurrence shows the saved pose: where the linked design was saved with its components. It moves as one body. None of the linked design's joints are in `joint.list`. A joint made here to one of its components moves the whole occurrence. No joint is added for that.
+- **`"structure":true` links a design with components of its own as a linked subassembly.** Without it, all its bodies go into the one linked component, and `assembly.bom` counts it as one part. With it, its components are components inside the linked component, each with its part properties. `assembly.bom` counts them in every occurrence, and so does `assembly.mass_properties {"every_placement":true}` (without that, the components inside are listed at the first occurrence only, and `warnings` says so). `"flexible":true` keeps the components too. `component.list` gives each of them a `link`: the linked component that keeps it. `component.links` lists the linked components, with `structure` and the `flexible` occurrences.
+- **A linked subassembly's occurrence is rigid by default.** A rigid occurrence shows the saved pose: where the linked design was saved with its components. It moves as one body. None of the linked design's joints are in `joint.list`. A joint made here to one of its components moves the whole occurrence. No joint is added for that.
 - **Flexible is per occurrence.** `component.link_mode {"component":..., "occurrence":..., "flexible":true}` gives that occurrence the linked design's joints. A joint has the name that it has in the linked design, or `<occurrence>: <name>` (such as `hinge:2: Hinge`) when a joint here has that name. `joint.drive` and motion studies then move its components. Without `occurrence`, the command changes every occurrence. A linked design without joints stays rigid, and the reply says so.
 - **Rigid again.** `"flexible":false` removes the occurrence's joints and shows the saved pose. It does not read the linked design's file.
 - **Insert flexible.** `"flexible":true` on `component.insert_design` makes the new occurrence flexible. With `reuse`, the reply has `joints` too.
@@ -133,11 +133,11 @@ A frame holds a panel on a hinge along X at the origin. An actuator runs from a 
 - **Gears and cams.** The linked design's motion links between carried joints come with them. A gear, rack and pinion or screw keeps its ratio. A cam keeps the follower travel that the linked design worked out: `joint.list` gives that link `carried_cam: true` and a `lift`, with no `coupling`. Change them in the linked design, then run `component.update_links`.
 - **Levels.** A flexible occurrence also carries the joints that its linked design has for the flexible occurrences inside it, level after level. Their names carry the way down, such as `unit:2: hinge:2: Hinge`, and `joint.list` gives it in `a_inside` and `b_inside`. Each has its own pose here. A rigid occurrence on the way keeps everything below it at the saved pose: make each level flexible, the lower ones in their linked designs.
 - **Old links** keep the linked design in one component. `component.link_mode {"component":..., "structure":true}` makes a link keep the linked design's components. A joint that was picked on a face of the component then stays as a fixed frame, and `warnings` names it.
-- **Large designs.** A link keeps at most 5,000 components and 20,000 occurrences. Without `structure`, a larger design goes into one component, and `warnings` says so. With `"structure":true` it is refused.
+- **Large designs.** A link keeps at most 5,000 components and 20,000 occurrences. With `"structure":true` a larger design is refused. With `"flexible":true` alone it goes into one component, and `warnings` says so.
 
 ## Worked example: a hinge as a linked subassembly
 
-A base and an arm, each a design of its own, make a hinge design; a machine places the hinge twice. `DIR` stands for a folder the server may write to.
+A base and an arm, each a design of its own, make a hinge design; a machine places the hinge twice, as a linked subassembly (`"structure":true`). `DIR` stands for a folder the server may write to.
 
 ```json
 {"commands":[
@@ -155,7 +155,7 @@ A base and an arm, each a design of its own, make a hinge design; a machine plac
  {"command":"joint.create","params":{"type":"revolute","name":"Hinge","flip":true,"limits":[[-90,90]],"a":{"occurrence":"base","point":[0,10,7],"z":[0,0,1]},"b":{"occurrence":"arm","point":[0,10,7],"z":[0,0,1]}}},
  {"command":"file.save","params":{"path":"DIR/hinge.sc"}},
  {"command":"file.new","params":{"name":"machine"}},
- {"command":"component.insert_design","params":{"path":"DIR/hinge.sc","translate":[0,0,50]}},
+ {"command":"component.insert_design","params":{"path":"DIR/hinge.sc","translate":[0,0,50],"structure":true}},
  {"command":"component.insert_design","params":{"path":"DIR/hinge.sc","reuse":true,"translate":[0,100,50]}}
 ]}
 ```

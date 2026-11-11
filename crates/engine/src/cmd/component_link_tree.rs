@@ -104,6 +104,9 @@ impl Keep {
     /// The design's components kept, each occurrence rigid or flexible as it is.
     pub(super) const STRUCTURE: Keep = Keep { structure: true, flexible: None, occurrence: None };
 
+    /// Every body in the linked component itself, as a link was before links kept components.
+    pub(super) const ONE_COMPONENT: Keep = Keep { structure: false, flexible: None, occurrence: None };
+
     /// As a link with this record keeps its design now.
     pub(super) fn of(tree: Option<&LinkTree>) -> Keep {
         Keep { structure: tree.is_some(), ..Keep::STRUCTURE }

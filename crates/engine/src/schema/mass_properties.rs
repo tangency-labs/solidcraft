@@ -11,7 +11,14 @@ use serde::{Deserialize, Serialize};
 /// density. Read-only.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
-pub struct AssemblyMassParams {}
+pub struct AssemblyMassParams {
+    /// List an occurrence inside a subassembly that is placed more than once at each of its
+    /// placements, by its `path`, so the subassembly weighs what it holds wherever it is placed.
+    /// Default: false: such an occurrence is listed at the subassembly's first placement only,
+    /// and a warning says so.
+    #[serde(default)]
+    pub every_placement: Option<bool>,
+}
 
 /// A placed coordinate frame in world coordinates (mm): its origin and its unit axes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -97,13 +104,13 @@ pub struct RigidGroupMass {
 /// What `assembly.mass_properties` returns.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct AssemblyMassResult {
-    /// Every occurrence, the design's own bodies (0) first, then by occurrence id, each at its
-    /// first placement; then the further placements of the occurrences inside a component that
-    /// is placed more than once, each with its `path`.
+    /// Every occurrence, the design's own bodies (0) first, then by occurrence id. With
+    /// `every_placement`, the further placements of the occurrences inside a component that is
+    /// placed more than once follow, each with its `path`.
     pub occurrences: Vec<OccurrenceMass>,
     /// The rigid groups, in order of their lowest occurrence id.
     pub groups: Vec<RigidGroupMass>,
-    /// Approximations made (open bodies, scaled frames).
+    /// Approximations made (open bodies, repeated subassemblies, scaled frames).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

@@ -472,13 +472,19 @@ the assembly last read them (`changed`). When a file can't be reached it also gi
 the part's bodies only: its timeline, parameters and sheet-metal data (flat pattern, bend
 table) stay in the part's own design.
 
-When the linked design has components of its own, the linked component is a **linked
-subassembly**. The components of the linked design become components inside the linked
+A linked design that has components of its own can come in as a **linked subassembly**. As
+shipped, **Insert Design** puts all its bodies into the one linked component. Turn on
+Preferences › Design › Linked designs › **Insert Design keeps a linked design's components**
+to link it as a subassembly, or choose **Keep Its Components** in the linked component's menu.
+The components of the linked design then become components inside the linked
 component. Each keeps its name and its part properties. A component that the linked design
 places several times is one component here, with one occurrence for each place. The Browser
 shows these components under the linked component and marks them with a lock. The bill of
 materials counts them at any depth. An assembly with two occurrences of a linked subassembly
-lists each of its components twice. `assembly.mass_properties` also counts each occurrence.
+lists each of its components twice. `assembly.mass_properties` lists the components inside a
+subassembly at its first occurrence only, with a warning, as it does for any subassembly that
+is placed more than once. With `every_placement: true` it lists and weighs them in each
+occurrence.
 
 The linked design decides what is inside a linked subassembly. In this design you cannot do
 these things to one of its components:
@@ -559,20 +565,23 @@ More about flexible occurrences:
   is shown, without the joints of the linked design.
 - **Break Link** makes every occurrence rigid first.
 
-**Keep Its Components** changes a link that puts all bodies into the one linked component. A
+**Keep Its Components** changes a link that puts all bodies into the one linked component. The
+menu offers it when that component holds more than one body. A
 joint that was picked on a face of that component then stays where it is, as a fixed frame, and
 the reply names it. Pick its face again to make it follow the face.
 
 Preferences › Design › Linked designs set how **Insert Design** links a design.
-**Insert Design keeps a linked design's components** (on) makes a linked subassembly. When it
-is off, all bodies go into the one linked component, as in designs from earlier versions. **A
-new occurrence of a linked design with joints is flexible** is off as shipped. In
-scripts, use `structure` and `flexible` on `component.insert_design` (defaults `true` and
-`false`), `component.relink` and `component.link_mode`. `component.link_mode` takes
+**Insert Design keeps a linked design's components** makes a linked subassembly. It is off as
+shipped: all bodies go into the one linked component, as in earlier versions. **A new
+occurrence of a linked design with joints is flexible** is off as shipped too, and needs the
+first one. In scripts, use `structure` and `flexible` on `component.insert_design` (both
+default to `false`, and `flexible` keeps the components as `structure` does),
+`component.relink` and `component.link_mode`. `component.link_mode` takes
 `occurrence` for one occurrence. Without `occurrence`, the command changes every occurrence.
 `component.links` reports `structure` and the flexible occurrences of each link. A linked
 design with more than 5,000 components or 20,000 occurrences is too large for a link to keep.
-Without `structure`, it then goes into one component, and the reply says so.
+With `structure: true` it is refused. With `flexible` alone it goes into one component, and
+the reply says so.
 
 **Extract to File** and **Replace with Link** still make links of the earlier kind.
 

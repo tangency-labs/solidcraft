@@ -64,20 +64,21 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<InsertDesignResult>)
         .params(
         "path: a .sc design → a new component linked to it, holding its solid bodies as placed in that design and a copy of its design properties; \
-         a design with components of its own (an assembly) comes in as a subassembly: its components and their occurrences are kept as \
-         components inside the new one, each with its part properties, and stay where that design has them, so it moves as one \
-         (rigid; a joint made here to one of its components moves the whole of it) → subcomponents; \
          name? (default: the design's name); parent?: component id or name (default: the active one); \
          translate?: [x,y,z] in mm from the destination parent's origin (default [0,0,0], also with reuse); \
          reuse?: bool (default false): insert a free occurrence, reusing an existing link to the same file when available; \
-         structure?: bool (default true; false: every body goes into the one new component, whatever components the design has); \
-         flexible?: bool (default false: rigid; true: this occurrence is flexible: the design's own joints are joints here too, on \
+         structure?: bool (default false: every body goes into the one new component, whatever components the design has; true: a \
+         design with components of its own (an assembly) comes in as a subassembly: its components and their occurrences are kept as \
+         components inside the new one, each with its part properties, and stay where that design has them, so it moves as one \
+         (rigid; a joint made here to one of its components moves the whole of it) → subcomponents); \
+         flexible?: bool (default false: rigid; true: the components are kept as with `structure`, and this occurrence is flexible: \
+         the design's own joints are joints here too, on \
          this occurrence's own copy of its components, named as there or `<occurrence>: <name>` where the name is taken, so \
          joint.drive moves them; each occurrence is rigid or flexible on its own and has its own pose; also with reuse; a design \
          without joints stays rigid) → joints; with reuse and a link to the file there already → occurrence, component, and \
          warnings when `structure` is not how that link keeps the design (component.link_mode changes a link); a design with more \
-         components than a link keeps (5000, or 20000 occurrences) comes in as one component, with a warning, unless `structure` \
-         is given",
+         components than a link keeps (5000, or 20000 occurrences) is refused with `structure: true`, and with `flexible` alone \
+         comes in as one component, with a warning",
     ),
     CommandSpec::new("component.update_links", "Update Links", crate::checked!("component.update_links", update_links))
         .icon("update")
@@ -284,7 +285,7 @@ fn keep_param(p: &Value, default: tree::Keep, cmd: &str) -> Result<tree::Keep> {
     };
     let structure = flag("structure")?.unwrap_or(default.structure());
     match (structure, flag("flexible")?) {
-        (false, Some(true)) => Err(bad(cmd, "`flexible` needs the design's components: leave `structure` on")),
+        (false, Some(true)) => Err(bad(cmd, "`flexible` needs the design's components (`structure: true`)")),
         (false, _) => Ok(tree::Keep { structure: false, flexible: None, ..default }),
         (true, flexible) => Ok(tree::Keep { structure: true, flexible, ..default }),
     }
@@ -680,7 +681,10 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
     if s.path.as_deref().is_some_and(|own| same_file(Path::new(own), &file)) {
         return Err(bad(cmd, "a design can't be linked into itself"));
     }
-    let keep = keep_param(p, tree::Keep::STRUCTURE, cmd)?;
+    // A design comes in as one component, as it did before links kept components, unless the
+    // call asks for its components (`structure`) or for a flexible occurrence, which needs them.
+    let asked_flexible = matches!(p.get("flexible"), Some(Value::Bool(true)));
+    let keep = keep_param(p, if asked_flexible { tree::Keep::STRUCTURE } else { tree::Keep::ONE_COMPONENT }, cmd)?;
     let structure = keep.structure();
     if p.get("parent").is_some()
         && let Some(why) = kept_component_refusal(s, component_key(s, p, "parent", cmd)?)
