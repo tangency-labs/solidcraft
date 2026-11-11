@@ -33,6 +33,8 @@
 //!
 //! Deviations: none (no upstream counterpart). Non-rational 3D curves only. No recursion.
 
+use core::cmp::Ordering;
+
 use crate::curve::curve::Curve as KCurve;
 use crate::error::intersect::IntersectFailure;
 use crate::error::{Result, SolidError};
@@ -198,6 +200,11 @@ fn largest<'a>(points: impl Iterator<Item = &'a CPoint>) -> f64 {
         .fold(0.0_f64, f64::max)
 }
 
+/// Whether `x` is at most `tol`; a NaN is not.
+fn within(x: f64, tol: f64) -> bool {
+    matches!(x.partial_cmp(&tol), Some(Ordering::Less | Ordering::Equal))
+}
+
 /// The Gordon surface of the u-curves `us` and the v-curves `vs` (module docs), its crossings
 /// and its curves proved within `tol` of it.
 ///
@@ -306,7 +313,7 @@ pub fn gordon(
             let on_c = interpolation_bound(c_local, &[u], &[q_local])?;
             let on_d = interpolation_bound(d_local, &[v], &[q_local])?;
             let gap = (on_c + on_d + 2.0 * move_err) * (1.0 + gamma(2));
-            if !(gap <= tol) {
+            if !within(gap, tol) {
                 return Ok(Err(NetworkRefusal::Gap { u: kk, v: l, gap }));
             }
             row.push(q);
@@ -413,7 +420,7 @@ pub fn gordon(
         let e = (certified_distance(&iso, d)? + extraction + s_move + move_err) * (1.0 + gamma(3));
         bound = bound.max(e);
     }
-    if !(bound <= tol) {
+    if !within(bound, tol) {
         return Ok(Err(NetworkRefusal::PastTolerance { bound }));
     }
     Ok(Ok(Gordon {
@@ -564,8 +571,8 @@ mod tests {
             .map(|i| {
                 (0..4)
                     .map(|j| {
-                        let z = ((i * 7 + j * 3) % 5) as f64 - 2.0;
-                        CPoint::from_point(Vec3::new(2.0 * i as f64, 3.0 * j as f64, z))
+                        let z = f64::from((i * 7 + j * 3) % 5) - 2.0;
+                        CPoint::from_point(Vec3::new(2.0 * f64::from(i), 3.0 * f64::from(j), z))
                     })
                     .collect()
             })
