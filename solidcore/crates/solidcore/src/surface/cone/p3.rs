@@ -1268,8 +1268,7 @@ mod tests {
 
     #[test]
     fn issue711_overlapping_holes_keep_both_trimmed_intersections() {
-        let mut k = Kernel::default();
-        k.fixes.cone_parallel_line_domains = true;
+        let k = Kernel::default();
         let a = cylinder(&k, Vec3::new(6.0, 0.0, -1.0), false, false, false);
         let b = cylinder(&k, Vec3::new(3.0, 5.196, -1.0), false, false, false);
         let da = axial_domain(&k, &a, 1.0, 11.0);
@@ -1295,8 +1294,7 @@ mod tests {
 
     #[test]
     fn issue711_axial_trims_respect_both_parameterizations_and_axis_directions() {
-        let mut k = Kernel::default();
-        k.fixes.cone_parallel_line_domains = true;
+        let k = Kernel::default();
         for flags in 0..32 {
             let reverse = flags & 16 != 0;
             let a = cylinder(&k, Vec3::ZERO, false, flags & 1 != 0, flags & 2 != 0);
@@ -1321,8 +1319,7 @@ mod tests {
 
     #[test]
     fn issue711_upper_trim_shortens_lines_and_tangent_lines() {
-        let mut k = Kernel::default();
-        k.fixes.cone_parallel_line_domains = true;
+        let k = Kernel::default();
         let a = cylinder(&k, Vec3::ZERO, false, false, false);
         for (offset, count, kind) in [
             (6.0, 2, TsectCurveType::Crossing),
@@ -1341,43 +1338,29 @@ mod tests {
     }
 
     #[test]
-    fn issue711_domain_clipping_is_independent_of_midpoint() {
-        for midpoint in [false, true] {
-            for domains in [false, true] {
-                let mut k = Kernel::default();
-                assert!(!k.fixes.cone_parallel_line_domains);
-                k.fixes.cone_parallel_line_midpoint = midpoint;
-                k.fixes.cone_parallel_line_domains = domains;
-                let a = cylinder(&k, Vec3::ZERO, false, false, false);
-                let b = cylinder(&k, Vec3::new(6.0, 0.0, 0.0), false, false, false);
-                // The full line's bottom (0) and middle (6) are both outside
-                // this overlap. Clipping moves them into the requested faces.
-                let da = axial_domain(&k, &a, 1.0, 4.0);
-                let db = axial_domain(&k, &b, 2.0, 5.0);
-                let (more, out) = a.intersect_with_cone(&k, &da, &b, &db, Some(1e-7)).unwrap();
-                assert!(!more);
-                assert_axial_lines(&out, if domains { 2 } else { 0 }, 2.0, 4.0);
-                // Default compatibility also keeps overlong lines when their
-                // bottom lies in both faces, as the native fixture compares.
-                let da = axial_domain(&k, &a, 0.0, 4.0);
-                let db = b.rev().base().natural_uv_domain();
-                let (more, out) = a.intersect_with_cone(&k, &da, &b, &db, Some(1e-7)).unwrap();
-                assert!(!more);
-                if domains {
-                    assert_axial_lines(&out, 2, 0.0, 4.0);
-                } else if midpoint {
-                    assert!(out.curves_3d.is_empty());
-                } else {
-                    assert_axial_lines(&out, 2, 0.0, 12.0);
-                }
-            }
-        }
+    fn issue711_lines_end_where_either_face_ends() {
+        let k = Kernel::default();
+        let a = cylinder(&k, Vec3::ZERO, false, false, false);
+        let b = cylinder(&k, Vec3::new(6.0, 0.0, 0.0), false, false, false);
+        // The full line's bottom (0) and middle (6) are both outside this
+        // overlap: the lines are clipped to the faces and tested inside them.
+        let da = axial_domain(&k, &a, 1.0, 4.0);
+        let db = axial_domain(&k, &b, 2.0, 5.0);
+        let (more, out) = a.intersect_with_cone(&k, &da, &b, &db, Some(1e-7)).unwrap();
+        assert!(!more);
+        assert_axial_lines(&out, 2, 2.0, 4.0);
+        // A line's bottom in both faces does not make it run on past the
+        // shorter face's top.
+        let da = axial_domain(&k, &a, 0.0, 4.0);
+        let db = b.rev().base().natural_uv_domain();
+        let (more, out) = a.intersect_with_cone(&k, &da, &b, &db, Some(1e-7)).unwrap();
+        assert!(!more);
+        assert_axial_lines(&out, 2, 0.0, 4.0);
     }
 
     #[test]
     fn issue711_axial_disjoint_and_touching_domains() {
-        let mut k = Kernel::default();
-        k.fixes.cone_parallel_line_domains = true;
+        let k = Kernel::default();
         let a = cylinder(&k, Vec3::ZERO, false, false, false);
         let b = cylinder(&k, Vec3::new(6.0, 0.0, 0.0), false, false, false);
         let da = axial_domain(&k, &a, 1.0, 4.0);
@@ -1398,8 +1381,7 @@ mod tests {
 
     #[test]
     fn issue711_trimmed_cylinder_with_nonzero_step_origin() {
-        let mut k = Kernel::default();
-        k.fixes.cone_parallel_line_domains = true;
+        let k = Kernel::default();
         let mut a = cylinder(&k, Vec3::ZERO, false, false, false);
         let da = axial_domain(&k, &a, 2.0, 10.0);
         a.trim_with_domain(&k, &da).unwrap();
