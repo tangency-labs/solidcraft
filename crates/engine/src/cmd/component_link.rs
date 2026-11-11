@@ -109,7 +109,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          shows the design as it was saved, which needs no reading of the design; default: each occurrence as it is; needs structure) \
          — changes how the link keeps its design, reading the design again except to make an occurrence rigid, as one undo step → \
          component, structure, flexible (the flexible occurrences, by id), subcomponents, joints (the design's joints each flexible \
-         occurrence has; 0 when none is flexible), warnings (also when the design has no joints, so nothing is flexible)",
+         occurrence has; 0 when none is flexible), warnings (also when the design has no components to keep, or no joints, so nothing is flexible)",
     ),
     CommandSpec::new("component.break_link", "Break Link", crate::checked!("component.break_link", break_link))
         .icon("break")
@@ -786,7 +786,7 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         ));
     }
     // The design's own components, as components inside the new one.
-    let kept = if structure { tree::sync(s, comp, id, &source, keep, &mut warnings)? } else { tree::Synced::default() };
+    let kept = if structure { tree::sync(s, comp, id, &source, keep, None, &mut warnings)? } else { tree::Synced::default() };
     if keep.flexible == Some(true) && flexible_occurrences(s, comp).is_empty() {
         warnings.push("the linked design has no joints to carry: the occurrence is rigid".to_string());
     }
@@ -851,17 +851,24 @@ pub(crate) fn kept_changed(before: &solidcraft_doc::Document, after: &solidcraft
             name(top)
         )
     };
-    let was: HashMap<u64, u64> = before.features.iter().map(|f| (f.id, f.component)).collect();
+    let was: HashMap<u64, &solidcraft_doc::Feature> = before.features.iter().map(|f| (f.id, f)).collect();
     for f in &after.features {
-        let new = was.get(&f.id) != Some(&f.component);
+        let old = was.get(&f.id).copied();
+        let new = old.map(|old| old.component) != Some(f.component);
         if new && kept.contains_key(&f.component) {
             return Some(refusal(format!("{} would be in", f.name), f.component));
         }
-        if let solidcraft_doc::FeatureKind::BodyTransfer { from, to, .. } = &f.kind
-            && !was.contains_key(&f.id)
-            && let Some(component) = [*from, *to].into_iter().find(|c| kept.contains_key(c))
-        {
-            return Some(refusal("a body would be moved out of or into".to_string(), component));
+        if let FeatureKind::BodyTransfer { bodies, from, to, .. } = &f.kind {
+            // A transfer that was there, moving the same bodies between the same components, is
+            // not the command's doing. One the command made is, and so is one it gave other
+            // bodies or another component (`timeline.edit`).
+            let same = match old.map(|old| &old.kind) {
+                Some(FeatureKind::BodyTransfer { bodies: b, from: f0, to: t0, .. }) => b == bodies && f0 == from && t0 == to,
+                _ => false,
+            };
+            if !same && let Some(component) = [*from, *to].into_iter().find(|c| kept.contains_key(c)) {
+                return Some(refusal("a body would be moved out of or into".to_string(), component));
+            }
         }
     }
     let parents: HashMap<u64, u64> = before.components.iter().map(|c| (c.id, c.parent)).collect();
@@ -1017,7 +1024,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
         let kept = s.doc.feature(link.feature).map(|f| &f.link_faces);
         if same && kept == Some(&faces) {
             // The same bodies: the design may still place, name or count its parts differently.
-            let moved = structured && tree::sync(s, comp, link.feature, &source, keep, &mut warnings)?.changed;
+            let moved = structured && tree::sync(s, comp, link.feature, &source, keep, None, &mut warnings)?.changed;
             if inherit_properties(s, comp, &properties)? || moved {
                 updated.push(cname)
             } else {
@@ -1047,7 +1054,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             f.link_faces = faces;
         }
         s.refresh();
-        let changed = (structured && tree::sync(s, comp, link.feature, &source, keep, &mut warnings)?.changed) || changed;
+        let changed = (structured && tree::sync(s, comp, link.feature, &source, keep, None, &mut warnings)?.changed) || changed;
         let changed = inherit_properties(s, comp, &properties)? || changed;
         if changed { updated.push(cname) } else { unchanged.push(cname) }
     }
@@ -1370,6 +1377,11 @@ fn link_mode(s: &mut Session, p: &Value) -> Result<Value> {
     link_refused(s.path.as_deref(), &link.path).map_err(|e| bad(cmd, e.to_string()))?;
     let file = resolve(s.path.as_deref(), &link.path);
     let (_, _, mut warnings, kept) = take_design(s, comp, &link, &file, keep, cmd)?;
+    // Asked to keep the design's components, and it has none: nothing shows that, so it is
+    // said. The link is set to keep them all the same, for when the design has some.
+    if matches!(p.get("structure"), Some(Value::Bool(true))) && kept.components == 0 {
+        warnings.push("the linked design has no components of its own to keep: it stays one component until it has some".to_string());
+    }
     // An occurrence is flexible by the joints it has from the linked design.
     if keep.flexible == Some(true) && flexible_occurrences(s, comp).is_empty() {
         warnings.push("the linked design has no joints to carry: every occurrence is rigid".to_string());
@@ -1431,6 +1443,9 @@ fn take_design(
     if geometry_changed && s.doc.assembly.joints.iter().any(|j| !own_holds.contains(&j.id) && (on_link(&j.a) || on_link(&j.b))) {
         warnings.push("the linked geometry changed; check this component's joints, even when the solver reports no error".to_string());
     }
+    // The model before the link's bodies are replaced: a joint that stays where it is when the
+    // link starts to keep components was found on these bodies ([`tree::sync`]).
+    let as_it_was = s.model.state();
     if let Some(f) = s.doc_mut().feature_mut(link.feature) {
         if f.body_names.len() != sf.body_names.len() {
             f.body_names = sf.body_names;
@@ -1445,8 +1460,11 @@ fn take_design(
     }
     // The components and joints the link keeps follow the new design; a link told to keep
     // none gives up the ones it had (the read gave no structure then).
-    let kept =
-        if structure || link.tree.is_some() { tree::sync(s, comp, link.feature, &source, keep, &mut warnings)? } else { tree::Synced::default() };
+    let kept = if structure || link.tree.is_some() {
+        tree::sync(s, comp, link.feature, &source, keep, Some(as_it_was.as_ref()), &mut warnings)?
+    } else {
+        tree::Synced::default()
+    };
     inherit_properties(s, comp, &properties)?;
     s.refresh();
     Ok((path, geometry_changed, warnings, kept))

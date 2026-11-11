@@ -1,45 +1,54 @@
 {
   "ar": {
+    "prefs.insert_flexible_help": "يتطلب أن يُبقي «إدراج تصميم» مكوّنات التصميم المرتبط: المكوّن الواحد لا يجلب مفاصل.",
     "settings.insert_flexible": "التصميم المرتبط ذو المفاصل يُدرج مرنًا",
     "ui.link_make_flexible": "جعله مرنًا",
     "ui.link_make_rigid": "جعله صلبًا"
   },
   "de": {
+    "prefs.insert_flexible_help": "Erfordert, dass Konstruktion einfügen die Komponenten des verknüpften Designs behält: Eine einzelne Komponente bringt keine Gelenke mit.",
     "settings.insert_flexible": "Ein verknüpftes Design mit Gelenken wird flexibel eingefügt",
     "ui.link_make_flexible": "Flexibel machen",
     "ui.link_make_rigid": "Starr machen"
   },
   "en": {
+    "prefs.insert_flexible_help": "Needs Insert Design to keep the linked design's components: one component brings no joints.",
     "settings.insert_flexible": "A new occurrence of a linked design with joints is flexible",
     "ui.link_make_flexible": "Make Flexible",
     "ui.link_make_rigid": "Make Rigid"
   },
   "es": {
+    "prefs.insert_flexible_help": "Requiere que Insertar Diseño conserve los componentes del diseño vinculado: un solo componente no trae uniones.",
     "settings.insert_flexible": "Un diseño vinculado con uniones se inserta flexible",
     "ui.link_make_flexible": "Hacer flexible",
     "ui.link_make_rigid": "Hacer rígido"
   },
   "he": {
+    "prefs.insert_flexible_help": "דורש ש«הוספת תכנון» תשמור את רכיבי התכן המקושר: רכיב יחיד אינו מביא מפרקים.",
     "settings.insert_flexible": "תכן מקושר עם מפרקים נוסף כגמיש",
     "ui.link_make_flexible": "הפיכה לגמיש",
     "ui.link_make_rigid": "הפיכה לקשיח"
   },
   "ja": {
+    "prefs.insert_flexible_help": "「デザインを挿入」でリンクされたデザインのコンポーネントを保持する設定が必要です。コンポーネントが 1 つではジョイントは取り込まれません。",
     "settings.insert_flexible": "ジョイントのあるリンクされたデザインをフレキシブルとして挿入",
     "ui.link_make_flexible": "フレキシブルにする",
     "ui.link_make_rigid": "リジッドにする"
   },
   "ko": {
+    "prefs.insert_flexible_help": "디자인 삽입에서 연결된 디자인의 구성 요소를 유지해야 합니다. 구성 요소 하나에는 가져올 관절이 없습니다.",
     "settings.insert_flexible": "관절이 있는 연결된 디자인을 유연하게 삽입",
     "ui.link_make_flexible": "유연하게 설정",
     "ui.link_make_rigid": "강체로 설정"
   },
   "vi": {
+    "prefs.insert_flexible_help": "Cần bật Chèn thiết kế giữ các cụm chi tiết của thiết kế liên kết: một cụm chi tiết duy nhất không mang theo khớp nối.",
     "settings.insert_flexible": "Thiết kế liên kết có khớp nối được chèn ở dạng linh hoạt",
     "ui.link_make_flexible": "Đặt thành linh hoạt",
     "ui.link_make_rigid": "Đặt thành cứng"
   },
   "zh": {
+    "prefs.insert_flexible_help": "需要“插入设计”保留链接设计的组件：单个组件不带接头。",
     "settings.insert_flexible": "带接头的链接设计以柔性方式插入",
     "ui.link_make_flexible": "设为柔性",
     "ui.link_make_rigid": "设为刚性"

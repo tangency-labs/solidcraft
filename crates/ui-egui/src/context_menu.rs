@@ -2021,6 +2021,9 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         // They recompute the history from the changed feature on: off the frame, as the timeline does.
         "timeline.suppress" | "timeline.roll_to" if item.params.is_some() => drop(app.run_heavy(&item.id, p)),
         "component.move_sketches.to_parts" => sketches_to_parts(app, p),
+        // What the command says of the linked design (no components to keep, no joints to
+        // carry) goes to the status line: nothing else would show why the menu changed nothing.
+        "component.link_mode" if item.params.is_some() => crate::linked_source::change_mode(app, p),
         id if item.params.is_some() => {
             let _ = app.run(id, p);
         }

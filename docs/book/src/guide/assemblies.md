@@ -484,7 +484,9 @@ materials counts them at any depth. An assembly with two occurrences of a linked
 lists each of its components twice. `assembly.mass_properties` lists the components inside a
 subassembly at its first occurrence only, with a warning, as it does for any subassembly that
 is placed more than once. With `every_placement: true` it lists and weighs them in each
-occurrence.
+occurrence. A further occurrence is in the rigid groups as the first one is: what a joint moves
+there is a group of its own. A design with 100,000 placements or more is refused with
+`every_placement: true`, because its list would not be complete.
 
 The linked design decides what is inside a linked subassembly. In this design you cannot do
 these things to one of its components:
@@ -498,8 +500,9 @@ To change something, open the linked design (**Open Linked Design** in the compo
 save it, and use **Update Links** here. **Update Links** adds the components that the linked
 design has gained. It removes the components that the linked design has lost. A joint that was
 made to a removed component is removed too, and the reply names it. The other components keep
-their occurrences and the joints made to them. **Break Link** keeps the components and makes
-them ordinary components of this design.
+their occurrences and the joints made to them. An occurrence that the linked design has moved
+into another of its components keeps the joints made to it too. **Break Link** keeps the
+components and makes them ordinary components of this design.
 
 Each occurrence of a linked subassembly is **rigid** or **flexible**. The menu of the
 occurrence changes this at any time. The **saved pose** is where the linked design was saved
@@ -531,8 +534,10 @@ The joints of a flexible occurrence:
   occurrence. You cannot join two components that those joints do not move.
 - **A component in several places.** When the linked design places a moved component in more
   than one place, a joint from this design can go to its first place only.
-- **Move.** **Move** and a drag in the view act on the occurrence that you picked.
-  `joint.reach` takes `path` for that: the occurrence ids from the top of the assembly down.
+- **Move.** **Move** and a drag in the view act on the occurrence that you picked. The
+  **Move** handles go when you pick the component in another occurrence: start **Move** again
+  there. `joint.reach` takes `path` for that: the occurrence ids from the top of the assembly
+  down.
 
 More about flexible occurrences:
 
@@ -566,15 +571,20 @@ More about flexible occurrences:
 - **Break Link** makes every occurrence rigid first.
 
 **Keep Its Components** changes a link that puts all bodies into the one linked component. The
-menu offers it when that component holds more than one body. A
+menu offers it on every such link. A
 joint that was picked on a face of that component then stays where it is, as a fixed frame, and
 the reply names it. Pick its face again to make it follow the face.
+
+When the linked design has no components of its own, **Keep Its Components** says so in the
+status line. Nothing else changes until the design has some: **Update Links** keeps them from
+then on.
 
 Preferences › Design › Linked designs set how **Insert Design** links a design.
 **Insert Design keeps a linked design's components** makes a linked subassembly. It is off as
 shipped: all bodies go into the one linked component, as in earlier versions. **A new
-occurrence of a linked design with joints is flexible** is off as shipped too, and needs the
-first one. In scripts, use `structure` and `flexible` on `component.insert_design` (both
+occurrence of a linked design with joints is flexible** is off as shipped too. It needs the
+first one, and the page greys it until that one is on. In scripts, use `structure` and
+`flexible` on `component.insert_design` (both
 default to `false`, and `flexible` keeps the components as `structure` does),
 `component.relink` and `component.link_mode`. `component.link_mode` takes
 `occurrence` for one occurrence. Without `occurrence`, the command changes every occurrence.
@@ -584,6 +594,9 @@ With `structure: true` it is refused. With `flexible` alone it goes into one com
 the reply says so.
 
 **Extract to File** and **Replace with Link** still make links of the earlier kind.
+**Replace with Link** and `component.copies` compare a component body for body with such a
+link. They refuse a link that keeps its design's components, and the message says how to go
+on: `component.link_mode` with `structure: false`, replace, then `structure: true` again.
 
 To edit a linked part where it sits, double-click it, in the Browser or on one of its faces in
 the view, or choose **Edit in Place** from its menu. Its design opens in a tab of its own with the

@@ -504,9 +504,14 @@ pub(crate) fn placement_at(s: &Session, p: Vec3) -> Option<Vec<u64>> {
     for b in &st.bodies {
         // Which body a pick is on is a model decision: its exact box, not its display mesh's.
         let Ok(bb) = b.body.exact_bounds() else { continue };
+        // The box is where the body's feature builds it. A body built in another frame than its
+        // component's (a part of a linked subassembly, built where the linked design has it)
+        // stands in the component through its offset, so the pick is taken back through both.
+        let offset = s.doc.model_body_offset(b);
         for (_, path, t) in of.get(&s.doc.model_body_component(b)).into_iter().flatten() {
+            let frame = offset.map_or(*t, |offset| solidcraft_doc::mat_mul(t, offset));
             // A placement that can't be undone (a hand-edited file) is skipped, not every pick.
-            let Some(inv) = solidcraft_doc::mat_inverse(t) else { continue };
+            let Some(inv) = solidcraft_doc::mat_inverse(&frame) else { continue };
             let q = solidcraft_doc::apply_point(&inv, p);
             let c = Vec3::new(q.x.clamp(bb.min.x, bb.max.x), q.y.clamp(bb.min.y, bb.max.y), q.z.clamp(bb.min.z, bb.max.z));
             let d = c.dist(q);
@@ -1871,20 +1876,14 @@ fn body_centre(s: &Session, occ: u64) -> Vec3 {
     st.bodies
         .iter()
         .filter(|b| s.doc.model_body_component(b) == comp)
-        .fold(Aabb3::EMPTY, |mut bb, b| {
+        .fold(Aabb3::EMPTY, |bb, b| {
             let own = b.mesh().bounds();
             // A body its feature builds in another frame than its component's (a part of a
-            // linked subassembly) is in the component's through its offset.
+            // linked subassembly) is in the component's through its offset. Its box is placed
+            // there by the function that places a body's box already, not worked out again here.
             match s.doc.model_body_offset(b) {
-                Some(offset) if !own.is_empty() => {
-                    for k in 0..8 {
-                        let pick = |bit: usize, low: f64, high: f64| if k & bit == 0 { low } else { high };
-                        let corner = Vec3::new(pick(1, own.min.x, own.max.x), pick(2, own.min.y, own.max.y), pick(4, own.min.z, own.max.z));
-                        bb.add(solidcraft_doc::apply_point(offset, corner));
-                    }
-                    bb
-                }
-                _ => bb.union(&own),
+                Some(offset) => bb.union(&super::component::properties::placed_box(offset, &own)),
+                None => bb.union(&own),
             }
         })
         .center()

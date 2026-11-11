@@ -974,6 +974,12 @@ impl<'d> Posed<'d> {
     }
 
     /// Whether `component` holds, at any depth, an occurrence that `posed` has a pose for.
+    /// `depth` ends a walk of occurrences that lead back to themselves, and is no part of what
+    /// is remembered. It cuts an answer short only where a component lies `MAX_PLACEMENT_DEPTH`
+    /// levels below `component`, so deeper than that below the design, and
+    /// `step_export_products` refuses an assembly that deep: no file is written from a cut
+    /// answer. Remembered for each depth, what one level of [`Self::product`] found below it
+    /// would be looked for again at the next level.
     fn holds(&mut self, component: u64, posed: u64, depth: usize) -> bool {
         if let Some(known) = self.holds.get(&(component, posed)) {
             return *known;

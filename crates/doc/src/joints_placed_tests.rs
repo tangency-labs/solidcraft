@@ -336,3 +336,105 @@ fn a_flexible_occurrence_has_a_copy_under_each_flexible_occurrence_inside_it() {
     assert_eq!(named, [(10, vec![20, 31]), (10, vec![21, 31]), (10, vec![])]);
     assert_eq!(doc.flexible_at_any_depth(), BTreeSet::from([10, 20, 21]));
 }
+
+/// Component 1 is a unit, a linked subassembly placed once (10, flexible and grounded, at x 100).
+/// Inside it are a base (20, at x 5), which its design holds still, and a carriage (21,
+/// component 3, at x 50) with an arm (31, component 4) in it. The carriage is flexible in the
+/// unit's own design, and that design's joints move it: the link keeps it as `nested` and not as
+/// `fixed`, and the flexible unit has both of that design's sliders for itself. Joint 100 is
+/// between the base and the carriage at 5, joint 101 between the carriage and its arm at 4, and
+/// each puts its B side's origin on its A side's, slid along z by its value. The linked design
+/// was saved with the arm at x 1 and z 2 in the carriage (the pose for 21).
+fn an_arm_on_a_carriage_that_moves() -> Document {
+    let frame = || Snap::Frame { origin: Vec3::ZERO, z: Vec3::Z, x: Some(Vec3::X) };
+    let side = |inside: &[u64]| JointOrigin { occurrence: 10, inside: inside.to_vec(), snap: frame() };
+    let slider = |id: u64, a: JointOrigin, b: JointOrigin, value: f64| Joint {
+        id,
+        name: format!("J{id}"),
+        kind: super::super::JointKind::Slider,
+        a,
+        b,
+        values: vec![value],
+        limits: vec![None],
+        flip: true,
+        offset: 0.0,
+        angle: 0.0,
+        suppressed: false,
+        exprs: Default::default(),
+        captured: None,
+        constraint: None,
+    };
+    let mut doc = Document {
+        occurrences: vec![
+            Occurrence { grounded: true, ..occurrence(10, 1, 0, 100.0) },
+            occurrence(20, 2, 1, 5.0),
+            occurrence(21, 3, 1, 50.0),
+            occurrence(31, 4, 3, 1.0),
+        ],
+        ..Document::default()
+    };
+    let tree = LinkTree {
+        occurrences: BTreeMap::from([(1, 20), (2, 21), (3, 31)]),
+        fixed: BTreeSet::from([20]),
+        nested: BTreeSet::from([21]),
+        flexible: BTreeMap::from([(10, BTreeMap::from([(7, 100), (8, 101)]))]),
+        ..LinkTree::default()
+    };
+    doc.links.insert(1, crate::DesignLink { path: "unit.sc".into(), feature: 0, inherited: Vec::new(), file_sha256: None, tree: Some(tree) });
+    doc.assembly.joints = vec![slider(100, side(&[20]), side(&[21]), 5.0), slider(101, side(&[21]), side(&[21, 31]), 4.0)];
+    let mut saved = IDENTITY;
+    saved[3] = [1.0, 0.0, 2.0, 1.0];
+    doc.assembly.poses = vec![PlacedPose { occurrence: 21, through: Vec::new(), inner: 31, transform: saved }];
+    doc
+}
+
+/// A copy inside another copy is posed in the copy above it as the same solve leaves that one.
+/// The base's origin is at x 100 + 5, so the carriage first stands at (105, z 5) and its arm 4
+/// on from it, at z 9. Then the carriage is driven to 10 while it has a pose already, and the
+/// solve places the arm at 10 + 4 = 14. Read against the pose the carriage had before that solve
+/// (5), the arm's own pose came to 14 - 5 = 9, and the world showed the arm at 10 + 9 = 19 until
+/// the next solve.
+#[test]
+fn a_copy_inside_a_copy_that_moves_again_is_shown_where_the_solve_places_it() {
+    let mut doc = an_arm_on_a_carriage_that_moves();
+    let st = ModelState::default();
+    let shown =
+        |doc: &Document, path: &[u64]| doc.path_placement(path).map(|(_, m)| ((m[3][0] * 1e6).round() / 1e6, (m[3][2].abs() * 1e6).round() / 1e6));
+    let solved = |doc: &mut Document| {
+        let sol = super::super::solve(doc, &st);
+        assert!(sol.errors.is_empty() && sol.conflicts.is_empty(), "{:?} {:?}", sol.errors, sol.conflicts);
+        doc.apply_joint_solution(&sol)
+    };
+    assert!(solved(&mut doc));
+    assert_eq!((shown(&doc, &[10, 21]), shown(&doc, &[10, 21, 31])), (Some((105.0, 5.0)), Some((105.0, 9.0))));
+    // The carriage on to 10: it and the arm in it move in one solve, and both have a pose.
+    doc.assembly.joints[0].values = vec![10.0];
+    assert!(solved(&mut doc));
+    assert_eq!((shown(&doc, &[10, 21]), shown(&doc, &[10, 21, 31])), (Some((105.0, 10.0)), Some((105.0, 14.0))));
+    // The arm's pose is in the carriage, where its own joint has it: 4 along z, as before.
+    let arm = doc.assembly.poses.iter().find(|p| (p.occurrence, p.inner) == (10, 31)).map(|p| p.transform[3]);
+    assert_eq!(arm.map(|at| at.map(|v| (v.abs() * 1e6).round() / 1e6)), Some([0.0, 0.0, 4.0, 1.0]));
+    assert!(!solved(&mut doc), "solved again, nothing moves");
+}
+
+/// `posed_worlds` lists each copy that has a pose where the world shows it, and that holds for
+/// a pose kept from the linked design too. Before any solve that pose is the only one: the arm
+/// at (1, z 2) in the carriage, which stands at x 100 + 50. Solved, the flexible unit has the
+/// carriage at (105, z 5) and the arm at z 5 + 4 = 9 on it, and the unit is the first occurrence
+/// of its component, so that is where the world shows the arm of the kept pose as well. Walked
+/// down from the carriage alone, it was listed at the kept pose on the moved carriage,
+/// (105 + 1, z 5 + 2), where the world shows nothing.
+#[test]
+fn a_pose_kept_from_the_linked_design_is_listed_where_the_flexible_occurrence_above_shows_it() {
+    let mut doc = an_arm_on_a_carriage_that_moves();
+    let st = ModelState::default();
+    let listed = |doc: &Document| -> Vec<(u64, Vec<u64>, u64, f64, f64)> {
+        let round = |v: f64| (v * 1e6).round() / 1e6;
+        doc.posed_worlds().into_iter().map(|c| (c.occurrence, c.through, c.inner, round(c.world[3][0]), round(c.world[3][2].abs()))).collect()
+    };
+    assert_eq!(listed(&doc), [(21, vec![], 31, 151.0, 2.0)]);
+    assert!(doc.apply_joint_solution(&super::super::solve(&doc, &st)));
+    assert_eq!(listed(&doc), [(10, vec![], 21, 105.0, 5.0), (10, vec![21], 31, 105.0, 9.0), (21, vec![], 31, 105.0, 9.0)]);
+    // The same transform as the placement the world shows, to the last bit.
+    assert_eq!(doc.posed_worlds().last().map(|c| c.world), doc.path_placement(&[10, 21, 31]).map(|(_, m)| m));
+}

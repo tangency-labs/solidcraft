@@ -1553,3 +1553,364 @@ fn a_flexible_occurrence_is_asked_for_with_the_designs_components() {
     assert!(s.execute("component.insert_design", &json!({"path": hinge, "structure": false, "flexible": true})).is_err());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// A joint origin given by a point in the world, with no occurrence named, is on the part whose
+/// body the point is on. A part of a linked subassembly is built where the linked design has it,
+/// and its offset takes it into its component's frame: the hinge's arm is built as the box
+/// (0, 8, 5)..(30, 12, 9), its component's frame is at (0, 8, 5) in the hinge, and the hinge is
+/// placed at z 50. The point (15, 10, 57) is the middle of the arm as the world shows it,
+/// (0, 8, 55)..(30, 12, 59), and 2 mm above the base, (0, 0, 50)..(40, 20, 55). Taken back
+/// through the arm's placement alone it is (15, 2, 2): 6 along Y and 3 along Z from the box the
+/// arm is built as, sqrt(45) = 6.7 mm, further than the base's 2 mm, so the base would be picked.
+#[test]
+fn a_point_picked_on_a_part_of_a_linked_subassembly_is_on_that_part() {
+    let dir = scratch("pick-part");
+    let hinge = save_hinge(&dir);
+    let mut s = Session::default();
+    let inserted = run(&mut s, "component.insert_design", json!({"path": hinge, "translate": [0, 0, 50], "structure": true}));
+    let top = inserted["component"].as_u64().unwrap();
+    let (base, arm) = (placements(&s, component(&s, "base"), top)[0], placements(&s, component(&s, "arm"), top)[0]);
+    run(&mut s, "joint.origin", json!({"name": "On arm", "point": [15, 10, 57], "z": [0, 0, 1]}));
+    let made = s.doc.assembly.origins[0].origin.clone();
+    assert_eq!(made.occurrence, arm, "on the arm, not on the base ({base}) below it: {made:?}");
+    // In the arm's own coordinates: the middle of the box (0, 0, 0)..(30, 4, 4).
+    let solidcraft_doc::joints::Snap::Point { point, .. } = &made.snap else { panic!("{made:?}") };
+    assert_eq!([point.x, point.y, point.z].map(|v| (v * 1e3).round() as i64), [15_000, 2_000, 2_000]);
+    // A point in the base, 3 mm below the arm, is on the base as before.
+    run(&mut s, "joint.origin", json!({"name": "On base", "point": [20, 10, 52], "z": [0, 0, 1]}));
+    assert_eq!(s.doc.assembly.origins[1].origin.occurrence, base);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// What asks where a placement is shown (`Session::occurrence_placement`: the origin drawn for
+/// a component, the frame of a pick) follows a previewed study as the world does. What reports
+/// the design's own placements does not. The arm's frame is at (0, 8, 5) in the hinge, which
+/// stands at z 50: (0, 8, 55). A quarter turn about Z through (0, 10) takes a point (x, y) to
+/// (0 - (y - 10), 10 + (x - 0)), so (0, 8) goes to (2, 10).
+#[test]
+fn a_previewed_study_is_where_a_shown_placement_is_asked_for() {
+    let dir = scratch("preview-placement");
+    let (mut s, top, first, _) = two_hinges(&dir);
+    let arm = placements(&s, component(&s, "arm"), top)[0];
+    let (_, name) = joint_of(&s, top, first);
+    // A placement's origin in the world, in micrometres.
+    let origin = |world: solidcraft_doc::Mat| [world[3][0], world[3][1], world[3][2]].map(|v| (v * 1e3).round() as i64);
+    let shown = |s: &Session| origin(s.occurrence_placement(&[first, arm]).unwrap().world);
+    let designed = |s: &Session| origin(s.occurrence_placement_with(&[first, arm], &s.uncaptured_moves()).unwrap().world);
+    assert_eq!((shown(&s), designed(&s)), ([0, 8_000, 55_000], [0, 8_000, 55_000]));
+    // As the Motion Study dialog does: the study is played on a copy, and its poses are shown.
+    let mut copy = s.scratch();
+    let keys = json!([{"joint": name, "points": [[0, 0], [10, 90]]}]);
+    let study = run(&mut copy, "motion.study", json!({"name": "Swing", "steps": 10, "keys": keys}))["study"].clone();
+    run(&mut copy, "motion.play", json!({"study": study, "step": 10}));
+    s.pending_poses = Some(copy.doc.assembly.poses.clone());
+    assert_eq!(shown(&s), [2_000, 10_000, 55_000], "where the preview shows the arm");
+    assert_eq!(designed(&s), [0, 8_000, 55_000], "the design has it where it was");
+    // The preview ends: it is shown where the design has it again.
+    s.pending_poses = None;
+    assert_eq!(shown(&s), [0, 8_000, 55_000]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Asked to keep the components of a linked design that has none, `component.link_mode` says
+/// so: the menu offers Keep Its Components on every link that keeps none, since what a link
+/// holds does not say whether its design has components. The link is set to keep them, which
+/// shows nothing until the design has some. A design that has components is kept without a
+/// word about it.
+#[test]
+fn a_link_asked_to_keep_components_says_when_its_design_has_none() {
+    let dir = scratch("no-components");
+    let part = dir.join("bracket.sc");
+    save_part(&part, [40.0, 20.0, 5.0], "Bracket", "BR-1");
+    let unit = save_unit(&dir);
+    let mut s = Session::default();
+    let bracket = run(&mut s, "component.insert_design", json!({"path": part}))["component"].as_u64().unwrap();
+    let kept = run(&mut s, "component.link_mode", json!({"component": bracket, "structure": true}));
+    assert_eq!((kept["structure"].clone(), kept["subcomponents"].clone()), (json!(true), json!(0)), "{kept}");
+    assert!(kept["warnings"].to_string().contains("no components of its own"), "{kept}");
+    assert!(s.doc.links.get(&bracket).is_some_and(|link| link.tree.is_some()), "set to keep them once it has some");
+    let top = run(&mut s, "component.insert_design", json!({"path": unit, "translate": [0, 100, 0]}))["component"].as_u64().unwrap();
+    let kept = run(&mut s, "component.link_mode", json!({"component": top, "structure": true}));
+    assert_eq!(kept["subcomponents"], 2, "{kept}");
+    assert!(!kept["warnings"].to_string().contains("no components"), "{kept}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// As `a_joint_stays_where_it_is_when_its_link_starts_to_keep_components`, for a part the
+/// linked design places twice. Kept in one component, the link has a body for each placement;
+/// keeping components, it has one body for the part, at its first placement. A joint on the top
+/// face of the second pin stays on that pin, and does not go to the same face of the first: in
+/// the unit the second pin is the box (24, 5, 5)..(30, 9, 15), its top face around (27, 7, 15),
+/// and the first is (5, 5, 5)..(9, 11, 15), 20 mm away.
+#[test]
+fn a_joint_on_the_second_placement_of_a_part_stays_there_when_its_link_starts_to_keep_components() {
+    let dir = scratch("keep-joints-second");
+    let unit = save_unit(&dir);
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Base", "activate": true}));
+    run(&mut s, "solid.box", json!({"length": 50, "width": 50, "height": 10, "corner": [-200, 0, 0], "body_name": "Base block"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "component.insert_design", json!({"path": unit, "translate": [0, 0, 100], "structure": false}));
+    // From the base's top face up to the second pin's top face, at (27, 7, 115) in the world.
+    let joint = json!({"type": "slider", "name": "Lift", "flip": true,
+                       "a": {"occurrence": "Base", "point": [-175, 25, 10], "z": [0, 0, 1]},
+                       "b": {"occurrence": "unit", "face": [27, 7, 115]}});
+    run(&mut s, "joint.create", joint);
+    // The joint has brought the unit to the base. The base block is the one box it is not.
+    let base_block = [-200_000, 0, 0, -150_000, 50_000, 10_000];
+    let unit_of = |all: Vec<[i64; 6]>| all.into_iter().filter(|b| *b != base_block).collect::<Vec<_>>();
+    let before = boxes(&s);
+    assert_eq!(unit_of(before.clone()).len(), 4, "{before:?}");
+    let kept = run(&mut s, "component.link_mode", json!({"component": "unit", "structure": true}));
+    assert_eq!(kept["subcomponents"], 2, "{kept}");
+    let warnings = kept["warnings"].to_string();
+    assert!(warnings.contains("joint Lift") && warnings.contains("stay where they are"), "{warnings}");
+    assert_eq!(boxes(&s), before, "nothing moved: the joint is where the second pin's face is");
+    // It still lifts the whole unit, 10 mm along the joint.
+    let driven = run(&mut s, "joint.drive", json!({"joint": "Lift", "value": 10}));
+    assert_eq!(driven["moved"], true, "{driven}");
+    let (moved, unit_before) = (unit_of(boxes(&s)), unit_of(before));
+    let rise = moved[0][2] - unit_before[0][2];
+    assert!(rise.abs() == 10_000, "the unit moved 10 mm along the joint: {rise}");
+    assert_eq!(moved, shifted(&unit_before, [0, 0, rise / 1000]));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The linked design moves a part into another of its components (Move to Component there):
+/// the same placement, in another component. Update Links keeps it the placement it is here,
+/// in the component kept for that one, and a joint of this design made to it stays on it. The
+/// unit's first pin goes into a new component `Cell`, which sits at the unit's origin, so
+/// nothing moves: the unit stands 100 mm along X before and after, and the joint still lifts
+/// it 10 mm.
+#[test]
+fn update_links_keeps_the_placement_and_the_joint_of_a_part_its_design_moves_into_another_component() {
+    let dir = scratch("moved-in");
+    let unit = save_unit(&dir);
+    let unit_boxes = boxes(&open(&unit));
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Base"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [-50, 0, 0], "body_name": "Block"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let inserted = run(&mut s, "component.insert_design", json!({"path": unit, "translate": [100, 0, 0], "structure": true}));
+    let (top, unit_here) = (inserted["component"].as_u64().unwrap(), inserted["occurrence"].as_u64().unwrap());
+    let pin = component(&s, "pin");
+    let pins = placements(&s, pin, top);
+    // A slider along Z between the grounded base and the first pin inside the unit.
+    let origin = |occurrence: Value| json!({"occurrence": occurrence, "point": [0, 0, 0], "z": [0, 0, 1]});
+    run(&mut s, "joint.create", json!({"type": "slider", "name": "Lift", "flip": true, "a": origin(json!("Base")), "b": origin(json!(pins[0]))}));
+    let with_block = |unit: Vec<[i64; 6]>| together(unit, mm(&[[-50, 0, 0, -40, 10, 10]]));
+    assert_eq!(boxes(&s), with_block(shifted(&unit_boxes, [100, 0, 0])), "joined where it sits, nothing moves");
+
+    let mut source = open(&unit);
+    run(&mut source, "component.create", json!({"name": "Cell", "activate": false}));
+    run(&mut source, "occurrence.reparent", json!({"occurrence": "pin:1", "parent": "Cell"}));
+    run(&mut source, "file.save", json!({}));
+    assert_eq!(boxes(&source), unit_boxes, "the pin is where it was in the unit");
+    let updated = run(&mut s, "component.update_links", json!({}));
+    assert_eq!(updated["updated"], json!(["unit"]), "{updated}");
+    assert!(!updated["warnings"].to_string().contains("Lift"), "{updated}");
+    // The same two placements of the pin, the first now in the component kept for the cell.
+    let cell = component(&s, "Cell");
+    let cell_here = placements(&s, cell, top);
+    assert_eq!(cell_here.len(), 1);
+    assert_eq!((placements(&s, pin, cell), placements(&s, pin, top)), (vec![pins[0]], vec![pins[1]]));
+    // The joint reaches the pin through the cell now, and holds the unit as it did.
+    let lift = s.doc.assembly.joints.iter().find(|j| j.name == "Lift").cloned().expect("the joint to the pin is kept");
+    assert_eq!((lift.b.occurrence, lift.b.inside.clone()), (unit_here, vec![cell_here[0], pins[0]]));
+    assert_eq!(boxes(&s), with_block(shifted(&unit_boxes, [100, 0, 0])));
+    let driven = run(&mut s, "joint.drive", json!({"joint": "Lift", "value": 10}));
+    assert_eq!(driven["moved"], true, "{driven}");
+    assert_eq!(boxes(&s), with_block(shifted(&unit_boxes, [100, 0, 10])));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A design holds at most 10 000 joints. When the linked design replaces a joint by another,
+/// the one here goes and the new one takes its place: the count does not grow, so a design
+/// that is full takes the update. Here one joint of the design's own, 9 998 suppressed copies of
+/// it and the hinge's one joint are 10 000. The hinge's design deletes `Hinge` and makes
+/// `Pivot` in its place. After Update Links the design holds 10 000 joints again, `Pivot`
+/// among them.
+#[test]
+fn a_design_full_of_joints_takes_the_joint_that_replaces_one_in_its_linked_design() {
+    let dir = scratch("full");
+    let hinge = save_hinge(&dir);
+    let mut s = Session::default();
+    for name in ["A", "B"] {
+        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [-60, 0, 0]}));
+        run(&mut s, "component.activate", json!({"component": 0}));
+    }
+    let origin = |part: &str| json!({"occurrence": part, "point": [-60, 0, 0], "z": [0, 0, 1]});
+    run(&mut s, "joint.create", json!({"type": "revolute", "name": "Mine", "flip": true, "a": origin("A"), "b": origin("B")}));
+    let mine = s.doc.assembly.joints[0].clone();
+    let inserted = run(&mut s, "component.insert_design", json!({"path": hinge, "translate": [0, 0, 50], "flexible": true}));
+    let (top, first) = (inserted["component"].as_u64().unwrap(), inserted["occurrence"].as_u64().unwrap());
+    assert_eq!(joint_of(&s, top, first).1, "Hinge");
+    let limit = solidcraft_doc::joints::MAX_JOINTS;
+    let mut doc = (*s.doc).clone();
+    for k in doc.assembly.joints.len()..limit {
+        let id = doc.allocate_id().unwrap();
+        doc.assembly.joints.push(solidcraft_doc::joints::Joint { id, name: format!("Spare {k}"), suppressed: true, ..mine.clone() });
+    }
+    s.set_doc(doc);
+    assert_eq!(s.doc.assembly.joints.len(), limit);
+
+    let mut design = open(&hinge);
+    run(&mut design, "joint.delete", json!({"joint": "Hinge"}));
+    let side = |part: &str| json!({"occurrence": part, "point": [0, 10, 7], "z": [0, 0, 1]});
+    let pivot = json!({"type": "revolute", "name": "Pivot", "flip": true, "limits": [[-90, 90]], "a": side("base"), "b": side("arm")});
+    run(&mut design, "joint.create", pivot);
+    run(&mut design, "file.save", json!({}));
+    let updated = run(&mut s, "component.update_links", json!({}));
+    assert_eq!(updated["updated"], json!(["hinge"]), "{updated}");
+    assert!(!updated["warnings"].to_string().contains("no room"), "{updated}");
+    assert_eq!(joint_of(&s, top, first).1, "Pivot", "the occurrence has the joint that replaced its hinge");
+    assert!(s.doc.assembly.joints.iter().all(|j| j.name != "Hinge"), "and the one it replaced is gone");
+    assert_eq!(s.doc.assembly.joints.len(), limit);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A body transfer that is in the timeline already is left alone, until a command turns it on
+/// a component a link keeps: edited to take the plate's body out of the plate, it is refused as
+/// a new transfer of that body is, and the design stays as it was.
+#[test]
+fn an_edited_body_transfer_cannot_take_a_body_out_of_a_component_a_link_keeps() {
+    let dir = scratch("kept-transfer");
+    let unit = save_unit(&dir);
+    let mut s = Session::default();
+    run(&mut s, "component.insert_design", json!({"path": unit, "structure": true}));
+    let plate = component(&s, "plate");
+    // A block of this design's own, moved into a component of this design's own.
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 50], "body_name": "Block"}));
+    let mine = run(&mut s, "component.create", json!({"name": "Mine", "activate": false}))["component"].as_u64().unwrap();
+    let transfer = run(&mut s, "component.move_bodies", json!({"component": mine, "bodies": ["Block"]}))["features"][0].as_u64().unwrap();
+    let owner = |s: &Session, body: &str| s.doc.model_body_component(s.model.state().body(body).unwrap());
+    assert_eq!((owner(&s, "Block"), owner(&s, "Plate")), (mine, plate));
+    let before = serde_json::to_string(&*s.doc).unwrap();
+    let edit = json!({"feature": transfer, "set": {"from": plate, "bodies": ["Plate"]}});
+    let refused = s.execute("timeline.edit", &edit).expect_err("the plate's body would leave the plate").to_string();
+    assert!(refused.contains("linked subassembly unit"), "{refused}");
+    assert_eq!(serde_json::to_string(&*s.doc).unwrap(), before, "the design is as it was");
+    assert_eq!((owner(&s, "Block"), owner(&s, "Plate")), (mine, plate));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Asked for every placement, the command must have every placement to weigh. A design walks at
+/// most 100 000 placements, and one whose subassemblies come to more is refused, not weighed in
+/// part: 317 racks of 317 slots each are 317 + 317 x 317 = 100 806 placements, from 634
+/// occurrences. Untold, the 634 are listed once each, with the design itself, as before.
+#[test]
+fn every_placement_is_refused_where_a_design_has_more_placements_than_can_be_listed() {
+    let mut s = Session::default();
+    let rack = run(&mut s, "component.create", json!({"name": "Rack", "activate": false}))["component"].as_u64().unwrap();
+    let slot = run(&mut s, "component.create", json!({"name": "Slot", "parent": rack, "activate": false}))["component"].as_u64().unwrap();
+    let mut doc = (*s.doc).clone();
+    for k in 2..=317 {
+        for (component, parent, name) in [(rack, 0, "Rack"), (slot, rack, "Slot")] {
+            let id = doc.allocate_id().unwrap();
+            let name = format!("{name}:{k}");
+            doc.occurrences.push(solidcraft_doc::Occurrence { id, component, parent, name, transform: solidcraft_doc::IDENTITY, grounded: false });
+        }
+    }
+    s.set_doc(doc);
+    assert_eq!(s.doc.occurrences.len(), 634);
+    let first = run(&mut s, "assembly.mass_properties", json!({}));
+    assert_eq!(first["occurrences"].as_array().map(Vec::len), Some(635), "each occurrence once, and the design itself");
+    let refused = s.execute("assembly.mass_properties", &json!({"every_placement": true})).expect_err("100 806 placements").to_string();
+    assert!(refused.contains("more placements than `every_placement` lists"), "{refused}");
+}
+
+/// With `every_placement`, a further placement stands in the rigid groups as the first one
+/// does. A cell that holds a flexible hinge is placed twice. In each cell the hinge's joint
+/// moves the arm against the base, so the arm (30 x 4 x 4 = 480 mm3) is a group of its own, the
+/// base (40 x 20 x 5 = 4000 mm3) is in its hinge's group, and neither is in the cell's. Untold,
+/// the hinge and its parts are listed once, in the first cell.
+#[test]
+fn every_placement_keeps_what_a_joint_moves_apart_in_each_placement() {
+    let dir = scratch("mass-groups");
+    let hinge = save_hinge(&dir);
+    let mut s = Session::default();
+    let cell_one = run(&mut s, "component.create", json!({"name": "Cell", "activate": false}))["occurrence"].as_u64().unwrap();
+    let inserted = run(&mut s, "component.insert_design", json!({"path": hinge, "parent": "Cell", "flexible": true}));
+    let (top, hinge_here) = (inserted["component"].as_u64().unwrap(), inserted["occurrence"].as_u64().unwrap());
+    let cell_two = run(&mut s, "occurrence.copy", json!({"occurrence": cell_one, "translate": [0, 100, 0]}))["occurrence"].as_u64().unwrap();
+    let (base, arm) = (placements(&s, component(&s, "base"), top)[0], placements(&s, component(&s, "arm"), top)[0]);
+    let listed = |mass: &Value| (mass["occurrences"].as_array().map(Vec::len), mass["groups"].as_array().map(Vec::len));
+
+    // Untold: the design, the two cells, the hinge, its base and its arm. The base is in the
+    // hinge's group, so there are five groups.
+    let first = run(&mut s, "assembly.mass_properties", json!({}));
+    assert_eq!(listed(&first), (Some(6), Some(5)), "{first}");
+
+    // Every placement: the hinge, its base and its arm once more, in the second cell, and two
+    // groups more for them.
+    let mass = run(&mut s, "assembly.mass_properties", json!({"every_placement": true}));
+    assert_eq!(listed(&mass), (Some(9), Some(7)), "{mass}");
+    let entries = mass["occurrences"].as_array().unwrap();
+    let at = |path: &[u64]| entries.iter().find(|o| o["path"] == json!(path)).unwrap_or_else(|| panic!("{path:?} in {mass}"));
+    let group = |path: &[u64]| at(path)["group"].as_u64().unwrap() as usize;
+    let kg = |group: usize| mass["groups"][group]["mass"]["mass_kg"].as_f64().unwrap();
+    let solid = |path: &[u64]| at(path)["bodies"][0]["volume_mm3"].as_f64().map(f64::round);
+    for cell in [cell_one, cell_two] {
+        let (of_cell, of_hinge) = (group(&[cell]), group(&[cell, hinge_here]));
+        let (of_base, of_arm) = (group(&[cell, hinge_here, base]), group(&[cell, hinge_here, arm]));
+        assert!(of_arm != of_base && of_arm != of_cell, "the hinge's joint moves the arm: {mass}");
+        assert!(of_base == of_hinge && of_hinge != of_cell, "the base stays with its hinge: {mass}");
+        assert_eq!(mass["groups"][of_arm]["occurrences"], json!([arm]), "{mass}");
+        assert_eq!((solid(&[cell, hinge_here, arm]), solid(&[cell, hinge_here, base])), (Some(480.0), Some(4000.0)));
+        // One material throughout, so the two groups weigh as their volumes: 480 to 4000.
+        assert!((kg(of_arm) / kg(of_base) - 0.12).abs() < 1e-9, "{mass}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Replace with Link and Find Identical Copies compare a component body for body with a link
+/// that holds its design in one component. A link that keeps its design's components builds a
+/// part the design places twice once, so a component that builds the unit's four solids (the
+/// plate, the rail, and the pin at both its places) is not compared with it: both commands say
+/// why and how to go on, where the one said the copy "is not the same" and the other found no
+/// copy. The way they name works: with the link in one component the copy is found and
+/// replaced, and the link keeps its components again, the copy now the unit's second
+/// occurrence, 100 mm along Y, where it stood.
+#[test]
+fn replace_with_link_says_why_it_takes_no_link_that_keeps_components_and_how_to_go_on() {
+    let dir = scratch("replace");
+    let unit = save_unit(&dir);
+    let unit_boxes = boxes(&open(&unit));
+    let mut s = Session::default();
+    let top = run(&mut s, "component.insert_design", json!({"path": unit, "structure": true}))["component"].as_u64().unwrap();
+    // The same four solids as bodies of one component. The unit's second pin is the first
+    // turned a quarter turn: the box (24, 5, 5)..(30, 9, 15), 6 x 4 x 10.
+    run(&mut s, "component.create", json!({"name": "Copy"}));
+    for (size, corner, body) in [
+        ([40, 20, 5], [0, 0, 0], "Copy plate"),
+        ([40, 2, 2], [0, 22, 0], "Copy rail"),
+        ([4, 6, 10], [5, 5, 5], "Copy pin"),
+        ([6, 4, 10], [24, 5, 5], "Copy pin 2"),
+    ] {
+        run(&mut s, "solid.box", json!({"length": size[0], "width": size[1], "height": size[2], "corner": corner, "body_name": body}));
+    }
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Copy:1", "translate": [0, 100, 0]}));
+    let both = together(unit_boxes.clone(), shifted(&unit_boxes, [0, 100, 0]));
+    assert_eq!(boxes(&s), both);
+    let before = serde_json::to_string(&*s.doc).unwrap();
+    let asked = [("component.replace_with_link", json!({"component": "Copy", "with": top})), ("component.copies", json!({"component": top}))];
+    for (command, params) in asked {
+        let why = s.execute(command, &params).expect_err(command).to_string();
+        assert!(why.contains("unit keeps its linked design's components") && why.contains("component.link_mode"), "{command}: {why}");
+    }
+    assert_eq!(serde_json::to_string(&*s.doc).unwrap(), before, "the design is as it was");
+    // The way round that the message names.
+    run(&mut s, "component.link_mode", json!({"component": top, "structure": false}));
+    let copies = run(&mut s, "component.copies", json!({"component": top}));
+    assert_eq!(copies["copies"][0]["name"], "Copy", "{copies}");
+    let replaced = run(&mut s, "component.replace_with_link", json!({"component": "Copy", "with": top}));
+    assert_eq!(replaced["replaced"], json!(["Copy"]), "{replaced}");
+    run(&mut s, "component.link_mode", json!({"component": top, "structure": true}));
+    assert_eq!(s.doc.components.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["unit", "plate", "pin"]);
+    assert_eq!(placements(&s, top, 0).len(), 2, "the copy is the unit's second occurrence");
+    assert_eq!(boxes(&s), both, "and shows what it showed");
+    assert!((volume(&mut s) - 9280.0).abs() < 1e-6, "{}", volume(&mut s));
+    let _ = std::fs::remove_dir_all(&dir);
+}

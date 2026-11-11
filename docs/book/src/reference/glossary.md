@@ -559,7 +559,7 @@ A component that holds components.
 The bill of materials counts the parts of a subassembly through it. A *linked subassembly* is
 a subassembly whose components come from a linked design.
 
-- **In SolidCraft:** `assembly.bom` (`mode: top` lists a subassembly as one row).
+- **In SolidCraft:** `assembly.bom` (`levels: "top"` lists a subassembly as one row).
 - **Don't use:** sub-assembly, nested assembly.
 - **Elsewhere:** sub-assembly.
 - **For translators:** one word, without a hyphen.

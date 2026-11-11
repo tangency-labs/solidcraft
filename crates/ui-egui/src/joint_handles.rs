@@ -24,9 +24,10 @@ use solidcraft_theme::Tokens;
 #[derive(Clone, Debug)]
 pub(crate) struct Mode {
     occurrence: u64,
-    /// The placement picked: the occurrences from the top of the assembly down to `occurrence`,
-    /// when it is one of several its component shows in (an occurrence inside a linked
-    /// subassembly is the same in every occurrence of that subassembly). Empty: its first.
+    /// The placement picked, when `occurrence` is inside a linked subassembly: the occurrences
+    /// from the top of the assembly down to it. Every occurrence of the subassembly has that
+    /// occurrence, each its own copy of it. Empty for any other occurrence: its handles are on
+    /// its first placement, as they were before links kept components.
     path: Vec<u64>,
     axes: Vec<joints::MotionAxis>,
     drag: Option<Drag>,
@@ -92,7 +93,6 @@ pub(crate) fn selected_path(app: &SolveApp) -> Option<Vec<u64>> {
     }
 }
 
-/// Both Assemble > Move and the context menu enter here; picking a face alone never does.
 /// Where the world shows occurrence `occurrence`: at the placement `path` when one is given,
 /// else at its first.
 fn placed_world(doc: &solidcraft_engine::doc::Document, occurrence: u64, path: &[u64]) -> solidcraft_engine::doc::Mat {
@@ -100,12 +100,23 @@ fn placed_world(doc: &solidcraft_engine::doc::Document, occurrence: u64, path: &
     at_path.unwrap_or_else(|| joints::occurrence_world(doc, occurrence))
 }
 
+/// The placement the handles are for ([`Mode::path`]), from the selection: the path picked, for
+/// an occurrence inside a linked subassembly, where the joints of the occurrence picked move
+/// its own copy alone. Empty for any other occurrence, wherever it was picked.
+fn picked_path(app: &SolveApp, occurrence: u64) -> Vec<u64> {
+    if app.session.doc.link_keeping_occurrence(occurrence).is_none() {
+        return Vec::new();
+    }
+    selected_path(app).filter(|path| path.len() > 1 && path.last() == Some(&occurrence)).unwrap_or_default()
+}
+
+/// Both Assemble > Move and the context menu enter here; picking a face alone never does.
 pub(crate) fn begin(app: &mut SolveApp, occurrence: u64) -> bool {
     close(app);
     if !app.preferences.assembly_move_handles || app.session.active_sketch.is_some() || app.applying.is_some() {
         return false;
     }
-    let path = selected_path(app).filter(|path| path.len() > 1 && path.last() == Some(&occurrence)).unwrap_or_default();
+    let path = picked_path(app, occurrence);
     let world = placed_world(&app.session.doc, occurrence, &path);
     let anchor = app
         .session
@@ -153,7 +164,9 @@ impl Mode {
             .doc
             .body_frames_with_source(&app.session.model.state())
             .into_iter()
-            .filter(|(_, _, _, path, _)| path.last() == Some(&self.occurrence))
+            // The copy the handles are on, when they are on one of several: another copy can be
+            // anywhere, and would size the handles by how far away it stands.
+            .filter(|(_, _, _, path, _)| if self.path.is_empty() { path.last() == Some(&self.occurrence) } else { *path == self.path })
             .map(|(name, ..)| name)
             .collect();
         let world = crate::open_meshing::session_world(&app.session);
@@ -187,6 +200,11 @@ pub(crate) fn sync(app: &mut SolveApp) {
     let Some(mut mode) = app.viewport.joint_handles.take() else { return };
     if mode.drag.is_none() {
         if selected_occurrence(app) != Some(mode.occurrence) {
+            return;
+        }
+        // The same occurrence picked in another occurrence of its linked subassembly is another
+        // part to move: the handles of the copy picked before must not go on standing for it.
+        if !mode.path.is_empty() && picked_path(app, mode.occurrence) != mode.path {
             return;
         }
         if !Arc::ptr_eq(&mode.doc, &app.session.doc) {
@@ -1163,5 +1181,85 @@ mod tests {
             assert_eq!(h.app.session.selection, selection);
             assert_eq!(h.app.session.undo.len(), undo);
         }
+    }
+
+    /// Two flexible occurrences of one hinge design, both held still: `hinge:1` where its design
+    /// has it and `hinge:2` 100 mm along Y. In the design an arm, the box (0, 8, 5)..(30, 12, 9),
+    /// turns on a base about Z through (0, 10). Returns the two occurrences, the arm's own
+    /// occurrence, which is in both, and the folder of the design files.
+    fn two_hinges(name: &str) -> (Harness, u64, u64, u64, std::path::PathBuf) {
+        let folder = std::env::temp_dir().join(format!("solidcraft-joint-handles-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        let (base_file, arm_file, hinge_file) = (folder.join("base.sc"), folder.join("arm.sc"), folder.join("hinge.sc"));
+        for (file, size, body) in [(&base_file, [40, 20, 5], "Base"), (&arm_file, [30, 4, 4], "Arm")] {
+            let mut part = solidcraft_engine::Session::default();
+            part.execute("solid.box", &json!({"length": size[0], "width": size[1], "height": size[2], "body_name": body})).unwrap();
+            part.execute("file.save", &json!({"path": file})).unwrap();
+        }
+        let mut design = solidcraft_engine::Session::default();
+        design.execute("component.insert_design", &json!({"path": base_file})).unwrap();
+        design.execute("component.insert_design", &json!({"path": arm_file, "translate": [0, 8, 5]})).unwrap();
+        let origin = |part: &str| json!({"occurrence": part, "point": [0, 10, 7], "z": [0, 0, 1]});
+        let joint = json!({"type": "revolute", "name": "Hinge", "flip": true, "limits": [[-90, 90]], "a": origin("base"), "b": origin("arm")});
+        design.execute("joint.create", &joint).unwrap();
+        design.execute("file.save", &json!({"path": hinge_file})).unwrap();
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        let one = h.app.run("component.insert_design", json!({"path": hinge_file, "flexible": true})).unwrap()["occurrence"].as_u64().unwrap();
+        let again = json!({"path": hinge_file, "reuse": true, "translate": [0, 100, 0], "flexible": true});
+        let two = h.app.run("component.insert_design", again).unwrap()["occurrence"].as_u64().unwrap();
+        h.app.run("occurrence.ground", json!({"occurrence": two, "grounded": true})).unwrap();
+        let doc = &h.app.session.doc;
+        let arm = doc.find_component("arm").and_then(|c| doc.occurrence_of(c)).map(|o| o.id).unwrap();
+        h.frames(4);
+        (h, one, two, arm, folder)
+    }
+
+    /// The name the world shows the body of the placement `path` under: a pick of that copy.
+    fn body_at(h: &Harness, path: &[u64]) -> String {
+        let s = &h.app.session;
+        let placed = s.doc.body_frames_with_source(&s.model.state());
+        placed.into_iter().find(|(_, _, _, at, _)| at.as_slice() == path).map(|(world, ..)| world).unwrap()
+    }
+
+    /// Inside a linked subassembly an occurrence is in every occurrence of the subassembly, each
+    /// with its own copy. Move is for the copy picked: the handles are that copy's, and they go
+    /// when the same occurrence is picked in another copy, as they do for another part.
+    #[test]
+    fn move_handles_are_for_the_copy_picked_and_go_when_another_copy_is_picked() {
+        let (mut h, one, two, arm, folder) = two_hinges("copy");
+        h.app.session.selection = vec![Sel::Body { name: body_at(&h, &[two, arm]) }];
+        h.app.start("occurrence.move");
+        h.frames(3);
+        let mode = h.app.viewport.joint_handles.as_ref().unwrap();
+        assert_eq!(mode.path, [two, arm]);
+        // The second hinge's own joint: about Z through (0, 110), its design's (0, 10) moved
+        // 100 mm along Y with the occurrence.
+        assert_eq!(mode.axes.len(), 1, "{:?}", mode.axes);
+        let axis = &mode.axes[0];
+        assert!(axis.angular && axis.origin.x.abs() < 1e-6 && (axis.origin.y - 110.0).abs() < 1e-6, "{axis:?}");
+        h.app.session.selection = vec![Sel::Body { name: body_at(&h, &[one, arm]) }];
+        h.frames(2);
+        assert!(h.app.viewport.joint_handles.is_none(), "the handles of the copy picked before must not stay for this one");
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    /// The rotation handles are sized by the part they turn. The second hinge's arm is the box
+    /// (0, 108, 5)..(30, 112, 9) and turns about Z through (0, 110): its far corners are 30
+    /// along X and 2 along Y from the axis, sqrt(904) = 30.07 mm. The same arm in the first
+    /// hinge, (0, 8, 5)..(30, 12, 9), is another copy: it reaches sqrt(30² + 102²) = 106.3 mm
+    /// from that axis, and is not what these handles turn.
+    #[test]
+    fn rotation_handles_are_sized_by_the_copy_they_turn() {
+        let (mut h, _, two, arm, folder) = two_hinges("radius");
+        h.app.session.selection = vec![Sel::Body { name: body_at(&h, &[two, arm]) }];
+        h.app.start("occurrence.move");
+        h.frames(3);
+        let mode = h.app.viewport.joint_handles.as_ref().unwrap();
+        let axis = &mode.axes[0];
+        let extent = mode.radii[&(axis.joint, axis.index)];
+        assert!((extent - 904.0_f64.sqrt()).abs() < 1e-3, "{extent}");
+        let _ = std::fs::remove_dir_all(folder);
     }
 }

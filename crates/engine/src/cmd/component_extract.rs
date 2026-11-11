@@ -618,6 +618,23 @@ impl Before {
     }
 }
 
+/// Why linked component `linked` can't be what a component is compared with (Replace with Link,
+/// Find Identical Copies): its link keeps its design's components. Its Import feature then has
+/// one body for a part that design places several times, where a component that builds the same
+/// assembly has a body at each place, and a joint to a face of a replaced component would have
+/// to go to a component kept inside the link. `None` for a link that holds its design in one
+/// component, which is compared body for body.
+fn kept_refusal(s: &Session, linked: u64) -> Option<String> {
+    let tree = s.doc.links.get(&linked)?.tree.as_ref()?;
+    if tree.occurrences.is_empty() {
+        return None;
+    }
+    let name = s.doc.components.iter().find(|c| c.id == linked).map(|c| c.name.clone()).unwrap_or_default();
+    Some(format!(
+        "{name} keeps its linked design's components (a linked subassembly). Replace with Link and Find Identical Copies compare a component body for body with a link that holds its design in one component: use component.link_mode with `structure: false` on {name} first, and `structure: true` again afterwards"
+    ))
+}
+
 /// The components other than `linked`, a linked component, whose design on its own builds the
 /// same bodies as its link.
 fn copies_of(s: &Session, linked: u64) -> Result<Vec<u64>> {
@@ -752,6 +769,9 @@ pub(super) fn copies(s: &mut Session, p: &Value) -> Result<Value> {
     if !s.doc.links.contains_key(&linked) {
         return Err(bad(cmd, "that component is not linked to a design"));
     }
+    if let Some(why) = kept_refusal(s, linked) {
+        return Err(bad(cmd, why));
+    }
     let found = copies_of(s, linked)?;
     reply(cmd, CopiesResult { copies: named(s, &found), param_warnings: Vec::new() })
 }
@@ -791,6 +811,9 @@ pub(super) fn replace_with_link(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let link = s.doc.links.get(&linked).cloned().ok_or_else(|| bad(cmd, "the replacement is not linked to a design"))?;
     let lname = s.doc.components.iter().find(|c| c.id == linked).map(|c| c.name.clone()).unwrap_or_default();
+    if let Some(why) = kept_refusal(s, linked) {
+        return Err(bad(cmd, why));
+    }
     let mut warnings = Vec::new();
     let mut replaced = Vec::new();
     for t in targets {

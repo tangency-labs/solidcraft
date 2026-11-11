@@ -111,12 +111,30 @@ impl<T: Copy> ByCopy<T> {
     }
 }
 
+/// What tells one pose from another, in the order the poses are kept and searched in: the
+/// occurrence it is for, then the inner occurrence, then what the copy is under.
+fn copy_of(pose: &PlacedPose) -> (u64, u64, &[u64]) {
+    (pose.occurrence, pose.inner, pose.through.as_slice())
+}
+
 impl Assembly {
     /// Put the poses in order, by occurrence, then inner occurrence, then what the copy is
     /// under, one for each copy: lookups search them in that order.
     pub fn order_poses(&mut self) {
-        self.poses.sort_by(|a, b| (a.occurrence, a.inner, &a.through).cmp(&(b.occurrence, b.inner, &b.through)));
-        self.poses.dedup_by(|a, b| (a.occurrence, a.inner, &a.through) == (b.occurrence, b.inner, &b.through));
+        self.poses.sort_by(|a, b| copy_of(a).cmp(&copy_of(b)));
+        self.poses.dedup_by(|a, b| copy_of(a) == copy_of(b));
+    }
+
+    /// `poses` in that order: the list itself when it is in it already, as a design's own is,
+    /// else a copy put in it. For poses shown in place of a design's own, whoever listed them
+    /// ([`Document::posed_local_among`]).
+    pub fn poses_in_order(poses: &[PlacedPose]) -> std::borrow::Cow<'_, [PlacedPose]> {
+        if poses.is_sorted_by(|a, b| copy_of(a) < copy_of(b)) {
+            return std::borrow::Cow::Borrowed(poses);
+        }
+        let mut sorted = Assembly { poses: poses.to_vec(), ..Assembly::default() };
+        sorted.order_poses();
+        std::borrow::Cow::Owned(sorted.poses)
     }
 }
 
@@ -304,7 +322,14 @@ impl Document {
     /// it (a pose), else its own. `path` is occurrence ids from any ancestor down to `o`. For
     /// walks of placements made outside this crate; [`Document::placements`] uses the same.
     pub fn posed_local(&self, path: &[u64], o: &Occurrence) -> Mat {
-        Poses::of(self).map_or(o.transform, |poses| poses.local(path, o))
+        Self::posed_local_among(&self.assembly.poses, path, o)
+    }
+
+    /// [`Self::posed_local`] among `poses` in place of the design's own, for a walk that shows
+    /// poses the design does not hold: a previewed motion's. They are searched in the order
+    /// [`Assembly::order_poses`] puts them, as a design's own are ([`Assembly::poses_in_order`]).
+    pub fn posed_local_among(poses: &[PlacedPose], path: &[u64], o: &Occurrence) -> Mat {
+        if poses.is_empty() { o.transform } else { Poses { all: poses }.local(path, o) }
     }
 
     /// Whether the world shows the placement `path` (occurrence ids from the root down) elsewhere
@@ -320,18 +345,23 @@ impl Document {
         })
     }
 
-    /// World transform of every copy that has a pose, where the world shows it.
+    /// World transform of every copy that has a pose, where the world shows it: below the first
+    /// occurrence of each component above the pose's occurrence, as `occurrence_world` places
+    /// an occurrence.
     pub fn posed_worlds(&self) -> Vec<PlacedCopy> {
         let Some(poses) = Poses::of(self) else { return Vec::new() };
         let index = Index::of(self);
-        let mut tops: HashMap<u64, Mat> = HashMap::new();
         let mut out = Vec::with_capacity(self.assembly.poses.len());
         for pose in &self.assembly.poses {
             let Some(top) = index.at.get(&pose.occurrence).copied() else { continue };
-            let way = index.way_through(top, &pose.through, pose.inner);
-            let Some(down) = way.and_then(|way| index.down(Some(&poses), top, &way, 0)) else { continue };
-            let world = *tops.entry(top.id).or_insert_with(|| index.world(Some(&poses), top.id));
-            out.push(PlacedCopy { occurrence: pose.occurrence, through: pose.through.clone(), inner: pose.inner, world: mat_mul(&world, &down) });
+            let Some(way) = index.way_through(top, &pose.through, pose.inner) else { continue };
+            let Some(below) = way.iter().map(|id| index.at.get(id).copied()).collect::<Option<Vec<_>>>() else { continue };
+            // The whole placement, from the root down, and not from the pose's occurrence: a
+            // flexible occurrence above that one can have a copy of its own of what a pose kept
+            // from the linked design is for, and the world shows that copy there.
+            let mut chain = index.chain(top.id);
+            chain.extend(below);
+            out.push(PlacedCopy { occurrence: pose.occurrence, through: pose.through.clone(), inner: pose.inner, world: poses.along(&chain) });
         }
         out
     }
@@ -389,7 +419,11 @@ impl Document {
             let copy = entry.copy;
             let mut parent = entry.top;
             for (id, under, shown) in entry.above {
-                let local = fresh.get(&(copy.occurrence, id, under)).copied().unwrap_or(shown);
+                // The copy above, as this loop leaves it: a pose that was there before this
+                // solve is changed where it is in the list, and a new one waits in `fresh`. An
+                // occurrence that is no copy of this occurrence's is where it was shown.
+                let kept = find(poses, copy.occurrence, id, &under).ok().and_then(|at| poses.get(at)).map(|p| p.transform);
+                let local = kept.or_else(|| fresh.get(&(copy.occurrence, id, under)).copied()).unwrap_or(shown);
                 parent = mat_mul(&parent, &local);
             }
             let Some(local) = mat_inverse(&parent).map(|inverse| mat_mul(&inverse, &copy.world)) else { continue };

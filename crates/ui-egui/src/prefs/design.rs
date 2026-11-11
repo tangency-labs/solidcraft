@@ -190,8 +190,14 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             crate::scenario::publish_target("dialog:Insert Design lists the designs open in other tabs first", response.rect);
             let response = setting::insert_keeps_components(app, ui);
             crate::scenario::publish_target("prefs:insert_keeps_components", response.rect);
-            let response = setting::insert_flexible(app, ui);
-            crate::scenario::publish_target("prefs:insert_flexible", response.rect);
+            // Insert Design brings a linked design's joints only with its components
+            // (`linked_source::insert_design_options`). Until those are kept this one changes
+            // nothing, so it is greyed, and says what it needs.
+            ui.add_enabled_ui(app.preferences.insert_keeps_components, |ui| {
+                let help = app.tr("prefs.insert_flexible_help");
+                let response = setting::insert_flexible(app, ui).backing_on_hover_text(help).backing_on_disabled_hover_text(help);
+                crate::scenario::publish_target("prefs:insert_flexible", response.rect);
+            });
         });
         ui_kit::settings_section(ui, "assemblies", app.tr("prefs.assemblies"), |ui| {
             ui.horizontal_wrapped(|ui| {

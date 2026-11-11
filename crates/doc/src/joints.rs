@@ -2729,11 +2729,7 @@ impl Document {
     /// A frame for an as-built joint: the world frame `w` seen from an occurrence.
     pub fn frame_in_occurrence(&self, occ: u64, w: &Mat) -> Option<Snap> {
         let t = if occ == 0 { IDENTITY } else { occurrence_world(self, occ) };
-        let local = mat_mul(&mat_inverse(&t)?, w);
-        let o = apply_point(&local, Vec3::ZERO);
-        let z = apply_vector(&local, Vec3::Z);
-        let x = apply_vector(&local, Vec3::X);
-        Some(Snap::Frame { origin: o, z, x: Some(x) })
+        Some(frame_snap(&mat_mul(&mat_inverse(&t)?, w)))
     }
 
     /// A joint origin's frame in the world (for as-built joints and display).

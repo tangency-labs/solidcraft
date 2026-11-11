@@ -425,20 +425,59 @@ pub(super) fn admit(top_name: &str, source: &SourceTree) -> Result<()> {
     Ok(())
 }
 
+/// The way from linked component `top` down to occurrence `inner`: the occurrences from the one
+/// placed in `top` to `inner`, each placed in the component of the one before. A component on
+/// the way is reached through the occurrence of it among `named`, when there is one, else
+/// through its first occurrence, which is the way a joint of the linked design reaches it
+/// (`solidcraft_doc::joints::placed`). `at` has each occurrence's component and parent, and
+/// `first` each component's first occurrence. `None` when `inner` is not inside `top`.
+fn way_down(top: u64, at: &HashMap<u64, (u64, u64)>, first: &HashMap<u64, u64>, named: &[u64], inner: u64) -> Option<Vec<u64>> {
+    let mut way = Vec::new();
+    let mut cur = inner;
+    for _ in 0..=solidcraft_doc::MAX_PLACEMENT_DEPTH {
+        let (_, parent) = *at.get(&cur)?;
+        way.push(cur);
+        if parent == top {
+            way.reverse();
+            return Some(way);
+        }
+        let through = named.iter().copied().find(|id| at.get(id).is_some_and(|(component, _)| *component == parent));
+        cur = match through {
+            Some(id) => id,
+            None => *first.get(&parent).filter(|_| parent != 0)?,
+        };
+    }
+    None
+}
+
 /// Make the components and occurrences linked component `top` keeps those of `source`, its
 /// linked design, whose bodies the link's Import feature `feature` has just built (the design
 /// is evaluated). With an empty `source` whatever the link kept goes, and the bodies are the
 /// linked component's own again.
 ///
 /// A component or occurrence the link already keeps for one the design still has stays the
-/// same one here, and takes the design's name, part properties and transform. One the design
-/// has gained is made, one it has lost is removed, with what referred to it; `warnings` names
-/// the joints that go that way. The record of what stands for what ([`LinkTree`]) is written to
-/// the link unless `keep` asks for no structure, which drops it. For each occurrence of the
-/// linked component that is flexible once `keep` is done, the design's joints are made, written
-/// again or removed in the same way, each keeping the values it has here; an occurrence made
-/// rigid loses its joints and its pose.
-pub(super) fn sync(s: &mut Session, top: u64, feature: u64, source: &SourceTree, keep: Keep, warnings: &mut Vec<String>) -> Result<Synced> {
+/// same one here, and takes the design's name, part properties and transform. An occurrence the
+/// design has moved into another of its components stays the same one too, in the component
+/// kept for that one, and a joint of this design that reaches a part through it is given the
+/// way there is to it now. One the design has gained is made, one it has lost is removed, with
+/// what referred to it; `warnings` names the joints that go that way. The record of what
+/// stands for what ([`LinkTree`]) is written to the link unless `keep` asks for no structure,
+/// which drops it. For each occurrence of the linked component that is flexible once `keep` is
+/// done, the design's joints are made, written again or removed in the same way, each keeping
+/// the values it has here; an occurrence made rigid loses its joints and its pose.
+///
+/// `as_it_was` is the model as it stood before the link's bodies were replaced, from a caller
+/// that replaced them in the same command: a joint that stays where it is when the link starts
+/// to keep components is found on those bodies. `None`: the model as it is now.
+pub(super) fn sync(
+    s: &mut Session,
+    top: u64,
+    feature: u64,
+    source: &SourceTree,
+    keep: Keep,
+    as_it_was: Option<&ModelState>,
+    warnings: &mut Vec<String>,
+) -> Result<Synced> {
     let top_name = s.doc.components.iter().find(|c| c.id == top).map(|c| c.name.clone()).unwrap_or_default();
     let fail = |e: solidcraft_doc::DocError| EngineError::Other(format!("{top_name}: {e}"));
     fits(s, top, source, keep)?;
@@ -475,8 +514,12 @@ pub(super) fn sync(s: &mut Session, top: u64, feature: u64, source: &SourceTree,
                 )
                 && s.doc.occurrences.iter().any(|x| x.id == o.occurrence && x.component == top)
         };
+        // Where each stands is read from the bodies it was found on. The bodies just built
+        // have only the first placement of a part the design places several times, so a side
+        // on another placement would be read on the first one, or not be found.
+        let found_on = as_it_was.unwrap_or(state.as_ref());
         let frozen = |o: &JointOrigin| {
-            let frame = solidcraft_doc::joints::resolve_origin(&s.doc, &state, o).ok()?;
+            let frame = solidcraft_doc::joints::resolve_origin(&s.doc, found_on, o).ok()?;
             Some(JointOrigin::new(o.occurrence, solidcraft_doc::joints::frame_snap(&frame)))
         };
         let mut kept_in_place: Vec<String> = Vec::new();
@@ -565,9 +608,12 @@ pub(super) fn sync(s: &mut Session, top: u64, feature: u64, source: &SourceTree,
         }
     }
 
-    // The occurrences, each where the design has it.
+    // The occurrences, each where the design has it. One the design has moved into another of
+    // its components (Move to Component there) is the same occurrence here, in the component
+    // kept for that one: what refers to it here stays.
     let mut occurrences: BTreeMap<u64, u64> = BTreeMap::new();
     let mut placed: BTreeSet<u64> = BTreeSet::new();
+    let mut moved: BTreeSet<u64> = BTreeSet::new();
     let mut names = OccurrenceNames::of(&d);
     let named: HashMap<u64, String> = d.components.iter().map(|c| (c.id, c.name.clone())).collect();
     let mut counts: HashMap<u64, usize> = HashMap::new();
@@ -584,11 +630,15 @@ pub(super) fn sync(s: &mut Session, top: u64, feature: u64, source: &SourceTree,
             .occurrences
             .get(&o.id)
             .copied()
-            .filter(|id| was_placed.contains(id) && d.occurrences.iter().any(|x| x.id == *id && x.component == component && x.parent == parent))
+            .filter(|id| was_placed.contains(id) && d.occurrences.iter().any(|x| x.id == *id && x.component == component))
             .filter(|id| placed.insert(*id));
         let id = match here {
             Some(id) => {
                 if let Some(x) = d.occurrences.iter_mut().find(|x| x.id == id) {
+                    if x.parent != parent {
+                        x.parent = parent;
+                        moved.insert(id);
+                    }
                     x.transform = o.transform;
                     // Grounded, it would hold the whole subassembly to the world.
                     x.grounded = false;
@@ -609,6 +659,49 @@ pub(super) fn sync(s: &mut Session, top: u64, feature: u64, source: &SourceTree,
             }
         };
         occurrences.insert(o.id, id);
+    }
+
+    // A joint side or a joint origin of this design that reaches a part through an occurrence
+    // the design has moved names the way down to it, and that is another way now. It is given
+    // the way there is: through the occurrences it named where they still lead there, else
+    // through the first occurrence of each component on the way, as a side named by the part
+    // alone is found (`Document::through_subassembly`). So the joint stays on the part it was
+    // made to. Only what the design still has is on that way: what goes below is still here.
+    if !moved.is_empty() {
+        let at: HashMap<u64, (u64, u64)> = d.occurrences.iter().filter(|o| placed.contains(&o.id)).map(|o| (o.id, (o.component, o.parent))).collect();
+        let mut first: HashMap<u64, u64> = HashMap::new();
+        for o in d.occurrences.iter().filter(|o| placed.contains(&o.id)) {
+            first.entry(o.component).or_insert(o.id);
+        }
+        let of_top: HashSet<u64> = d.occurrences.iter().filter(|o| o.component == top).map(|o| o.id).collect();
+        let reroute = |side: &mut JointOrigin| {
+            let Some(last) = side.inside.iter().rposition(|id| moved.contains(id)) else { return };
+            // The way starts below the occurrence of the linked component that the side is on,
+            // or that it passes through.
+            let from = if of_top.contains(&side.occurrence) {
+                Some(0)
+            } else {
+                side.inside.get(..last).and_then(|above| above.iter().rposition(|id| of_top.contains(id))).map(|through| through + 1)
+            };
+            let Some(from) = from else { return };
+            let (Some(above), Some(old_way), Some(inner), Some(below)) =
+                (side.inside.get(..from), side.inside.get(from..last), side.inside.get(last), side.inside.get(last + 1..))
+            else {
+                return;
+            };
+            let Some(way) = way_down(top, &at, &first, old_way, *inner) else { return };
+            let inside: Vec<u64> = above.iter().chain(&way).chain(below).copied().collect();
+            if inside.len() <= solidcraft_doc::MAX_PLACEMENT_DEPTH {
+                side.inside = inside;
+            }
+        };
+        for j in &mut d.assembly.joints {
+            reroute(&mut j.a);
+            reroute(&mut j.b);
+        }
+        for origin in &mut d.assembly.origins {
+            reroute(&mut origin.origin);
+        }
     }
 
     // What the design no longer has goes, with what referred to it. The joints its flexible
@@ -667,24 +760,10 @@ pub(super) fn sync(s: &mut Session, top: u64, feature: u64, source: &SourceTree,
     for o in &d.occurrences {
         first.entry(o.component).or_insert(o.id);
     }
-    let way_down = |inner: u64| -> Option<Vec<u64>> {
-        let mut way = Vec::new();
-        let mut cur = inner;
-        for _ in 0..=solidcraft_doc::MAX_PLACEMENT_DEPTH {
-            let (_, parent) = *at.get(&cur)?;
-            way.push(cur);
-            if parent == top {
-                way.reverse();
-                return Some(way);
-            }
-            cur = *first.get(&parent).filter(|_| parent != 0)?;
-        }
-        None
-    };
     // A side on a copy inside a flexible occurrence of the design (`inside` there) goes on down
     // through the occurrences kept for those.
     let side = |occurrence: u64, o: &JointOrigin| -> Option<JointOrigin> {
-        let mut inside = if o.occurrence == 0 { Vec::new() } else { way_down(*occurrences.get(&o.occurrence)?)? };
+        let mut inside = if o.occurrence == 0 { Vec::new() } else { way_down(top, &at, &first, &[], *occurrences.get(&o.occurrence)?)? };
         for id in &o.inside {
             inside.push(*occurrences.get(id)?);
         }
@@ -701,6 +780,13 @@ pub(super) fn sync(s: &mut Session, top: u64, feature: u64, source: &SourceTree,
     let mut carried: BTreeSet<u64> = BTreeSet::new();
     // Where each joint is in the list, which only grows from here on.
     let mut joint_at: HashMap<u64, usize> = d.assembly.joints.iter().enumerate().map(|(at, j)| (j.id, at)).collect();
+    // The joints this link made for the design's own are in its record and on an occurrence of
+    // the linked component: each is written again below, or goes. Every other joint stays, and
+    // those with the ones carried so far are what the design will hold. A joint the design has
+    // replaced by another still stands in the list here until it goes, and must not take the
+    // room of the one that replaces it.
+    let theirs = |j: &Joint| recorded.contains(&j.id) && tops.contains_key(&j.a.occurrence) && j.a.occurrence == j.b.occurrence;
+    let staying = d.assembly.joints.iter().filter(|j| !theirs(j)).count();
     // The copies each flexible occurrence's joints move: the ones that keep a pose.
     let mut posed: HashSet<(u64, Vec<u64>, u64)> = HashSet::new();
     let mut full = false;
@@ -735,7 +821,7 @@ pub(super) fn sync(s: &mut Session, top: u64, feature: u64, source: &SourceTree,
                     *here = Joint { id: here.id, name: here.name.clone(), suppressed: here.suppressed, captured, a, b, values, ..j.clone() };
                     here.id
                 }
-                None if d.assembly.joints.len() < solidcraft_doc::joints::MAX_JOINTS => {
+                None if staying.saturating_add(carried.len()) < solidcraft_doc::joints::MAX_JOINTS => {
                     let id = d.allocate_id().map_err(fail)?;
                     let name = joint_names.next(tops.get(occurrence).map_or(top_name.as_str(), String::as_str), &j.name);
                     joint_at.insert(id, d.assembly.joints.len());
@@ -761,13 +847,7 @@ pub(super) fn sync(s: &mut Session, top: u64, feature: u64, source: &SourceTree,
     }
     // A joint the design no longer has, or of an occurrence that is rigid again, goes: one the
     // record names that is on an occurrence of the linked component, and no other.
-    let dropped: BTreeSet<u64> = d
-        .assembly
-        .joints
-        .iter()
-        .filter(|j| recorded.contains(&j.id) && !carried.contains(&j.id) && tops.contains_key(&j.a.occurrence) && j.a.occurrence == j.b.occurrence)
-        .map(|j| j.id)
-        .collect();
+    let dropped: BTreeSet<u64> = d.assembly.joints.iter().filter(|j| theirs(j) && !carried.contains(&j.id)).map(|j| j.id).collect();
     gone_joints.extend(dropped.iter().copied());
     remove_joints(&mut d, &dropped);
     // The motion links between an occurrence's joints are the design's. One made here between
@@ -787,8 +867,13 @@ pub(super) fn sync(s: &mut Session, top: u64, feature: u64, source: &SourceTree,
     // for the flexible subassemblies inside it are kept as it has them now, for the occurrences
     // that stand for its own, so those show here as it shows them.
     let ours: HashSet<u64> = occurrences.values().copied().collect();
+    // The pose a flexible occurrence has for an occurrence the design has moved into another
+    // component was in the component it was in: that copy stands where the design has it until
+    // its joints are solved again.
     d.assembly.poses.retain(|p| {
-        !ours.contains(&p.occurrence) && (!tops.contains_key(&p.occurrence) || posed.contains(&(p.occurrence, p.through.clone(), p.inner)))
+        !ours.contains(&p.occurrence)
+            && !moved.contains(&p.inner)
+            && (!tops.contains_key(&p.occurrence) || posed.contains(&(p.occurrence, p.through.clone(), p.inner)))
     });
     for (occurrence, through, inner, transform) in &source.poses {
         let through: Option<Vec<u64>> = through.iter().map(|under| occurrences.get(under).copied()).collect();

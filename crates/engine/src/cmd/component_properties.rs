@@ -130,8 +130,9 @@ fn square_to_axes(m: &Mat) -> bool {
     m.iter().take(3).all(|c| c.iter().take(3).filter(|v| v.abs() > 1e-12).count() == 1)
 }
 
-/// The box around the corners of `b` placed by `m`.
-fn placed_box(m: &Mat, b: &Aabb3) -> Aabb3 {
+/// The box around the corners of `b` placed by `m`. Also for the commands beside this one that
+/// place a body's box (the point a joint reach starts from), so they do not work it out again.
+pub(in crate::cmd) fn placed_box(m: &Mat, b: &Aabb3) -> Aabb3 {
     let mut out = Aabb3::EMPTY;
     if b.is_empty() {
         return out;
