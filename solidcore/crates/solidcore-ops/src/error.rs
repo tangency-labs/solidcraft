@@ -124,6 +124,43 @@ pub enum Error {
         /// The join's index: after piece `join`.
         join: usize,
     },
+    /// The curves bounding a patch (`crate::surface`) that do not meet end to end: the end of
+    /// curve `join` is not proved within the model's zone tolerance of an end of the next one
+    /// (for the last join, `join + 1` the number of curves, of the first), `gap` apart (the
+    /// kernel's distance between the nearest ends).
+    BoundaryGap {
+        /// The join's index: after curve `join`.
+        join: usize,
+        /// How far apart the ends are.
+        gap: f64,
+    },
+    /// A curve network (`crate::network`) whose u-curve `u` and v-curve `v` do not cross
+    /// once: the kernel's intersector found `count` crossings.
+    NoCrossing {
+        /// The u-curve's index.
+        u: usize,
+        /// The v-curve's index.
+        v: usize,
+        /// How many crossings were found.
+        count: usize,
+    },
+    /// A curve network whose u-curve `u` and v-curve `v` are not proved within the model's
+    /// zone tolerance at the network's common crossing parameters: `gap` bounds how far apart
+    /// they are there (the curves do not cross at one parameter of each family).
+    NetworkGap {
+        /// The u-curve's index.
+        u: usize,
+        /// The v-curve's index.
+        v: usize,
+        /// The certified bound of their distance.
+        gap: f64,
+    },
+    /// A change to a curve that would move it farther than the tolerance asked (a knot
+    /// removed, its degree lowered): the kernel's certified bound of how far it would move.
+    PastTolerance {
+        /// The certified bound of the move.
+        bound: f64,
+    },
     /// An extension that cannot run as far as asked (a weight of the extended surface would
     /// vanish, a pole, an apex or a full turn is reached, or its length there cannot be
     /// measured to the kernel's stop): the longest distance proved to work, when there is one.
@@ -484,6 +521,22 @@ impl std::fmt::Display for Error {
                 "the sweep path's pieces {join} and {} do not meet",
                 join.saturating_add(1)
             ),
+            Error::BoundaryGap { join, gap } => write!(
+                f,
+                "the boundary curves {join} and {} do not meet: {gap} apart",
+                join.saturating_add(1)
+            ),
+            Error::NoCrossing { u, v, count } => write!(
+                f,
+                "the network's u-curve {u} and v-curve {v} cross {count} times, not once"
+            ),
+            Error::NetworkGap { u, v, gap } => write!(
+                f,
+                "the network's u-curve {u} and v-curve {v} are up to {gap} apart where they cross"
+            ),
+            Error::PastTolerance { bound } => {
+                write!(f, "the change would move the curve by up to {bound}")
+            }
             Error::TooFar { largest } => write!(f, "too far to extend (largest {largest:?})"),
             Error::Exception => write!(f, "solidcore raised an internal exception"),
             Error::ContactUndecided {

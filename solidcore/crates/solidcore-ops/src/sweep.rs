@@ -71,7 +71,9 @@ use crate::{Error, Result};
 /// A call's own refusal, else the value: as the kernel's calls answer inside [`run`].
 type Out<T> = std::result::Result<T, Error>;
 
+pub mod birail;
 pub mod railed;
+mod record;
 
 /// A coordinate no larger than this (mm, 1000 km), so that the kernel's tolerances stay
 /// meaningful.
