@@ -2,7 +2,8 @@
 //! constant v evenly spaced inside its parameter box, clipped to the face's boundary and sampled
 //! by the rules a free curve is ([`crate::curve_points`]). The surfaces and boundaries are the
 //! ones the mesher plans the face with ([`crate::mesher::prepare`]), so the lines lie on what is
-//! drawn and stop where its boundary does. A display product: drawn, never measured.
+//! drawn and stop where its boundary does. Display points, not geometry: drawn, never measured
+//! or modelled with.
 
 use solidcore::Vec3;
 use solidcore::eval::plan::EvalSurface;
@@ -29,6 +30,10 @@ const MAX_COPIES: usize = 8;
 /// `tolerance` of the surface, as [`crate::curve_points`] samples a curve. The boundary is the
 /// mesher's, its edges' chords: a run ends on it, within the tolerance of the trim. A face the
 /// mesher leaves out of its plan gets no lines.
+///
+/// The polylines are display points, not geometry: points on the surface for drawing, each
+/// chord within the tolerance, never a curve to model with or measure (an isoparm as geometry
+/// is the kernel's iso curve of the surface).
 ///
 /// # Errors
 ///
