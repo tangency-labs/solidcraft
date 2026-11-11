@@ -947,6 +947,17 @@ fn dirty(app: &SolveApp, i: usize) -> bool {
     app.docs.slots.get(i).and_then(Option::as_ref).is_some_and(|s| s.session.is_dirty())
 }
 
+/// The OS window title, which taskbars, docks and window switchers show (#14791): the design on
+/// screen, after a bullet while it has unsaved changes. The start page shows the app's name alone.
+pub fn window_title(app: &SolveApp) -> String {
+    if app.home.open {
+        return "SolidCraft".to_string();
+    }
+    let name = &app.session.doc.name;
+    let name = if name == "Untitled" { app.tr("ui.untitled") } else { name.as_str() };
+    format!("{}{name} — SolidCraft", if app.session.is_dirty() { "● " } else { "" })
+}
+
 /// Tab names (with an unsaved-changes flag), in order.
 pub fn tabs_info(app: &SolveApp) -> Vec<(String, bool)> {
     if app.docs.slots.is_empty() {
@@ -1782,6 +1793,23 @@ mod tests {
             let path = std::path::Path::new(&home).join(&relative);
             assert_eq!(tab_tooltip("bracket", path.to_str(), false, false), format!("~/{}", relative.display()));
         }
+    }
+
+    /// #14791: the OS window title names the design on screen, after a bullet while it has
+    /// unsaved changes, and only the app on the start page.
+    #[test]
+    fn window_title_names_the_design_and_its_unsaved_changes() {
+        crate::i18n::install();
+        let mut a = app();
+        assert_eq!(window_title(&a), "Untitled — SolidCraft");
+        a.session.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        assert_eq!(window_title(&a), "● Untitled — SolidCraft");
+        let mut doc = (*a.session.doc).clone();
+        doc.name = "v13-tubes".into();
+        let mut b = SolveApp::new(Session::opened(doc, None), Services::default());
+        assert_eq!(window_title(&b), "v13-tubes — SolidCraft");
+        b.home.open = true;
+        assert_eq!(window_title(&b), "SolidCraft");
     }
 
     fn app() -> SolveApp {

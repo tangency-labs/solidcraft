@@ -107,6 +107,8 @@ struct App {
     dialog_folder: DialogFolder,
     /// Settings go to `app.ron` in the frame they change (#8275).
     prefs_writer: PrefsWriter,
+    /// The OS window title last sent: a new one goes only when it changes (#14791).
+    window_title: String,
 }
 
 /// Settings written to the settings file soon after they change (#8275). eframe saves them
@@ -252,6 +254,12 @@ impl eframe::App for App {
             menu.tick(&mut self.solve, ctx);
         }
         self.solve.logic(ctx);
+        // Taskbars and window switchers tell windows apart by the design they show (#14791).
+        let title = solidcraft_ui_egui::documents::window_title(&self.solve);
+        if title != self.window_title {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+            self.window_title = title;
+        }
         // The file chooser that opened is not the desktop's own: the user has to be told (#10159).
         #[cfg(target_os = "linux")]
         if let Some(reason) = desktop_chooser::take_reason() {
@@ -1423,6 +1431,8 @@ fn main() -> eframe::Result {
                 starting,
                 backend_attempt: attempt_in_app,
                 frames: 0,
+                // As the viewport opens it (`app_viewport`).
+                window_title: "SolidCraft".to_string(),
                 take_focus_unwanted: control_port.is_some(),
                 come_forward: come_forward::ComeForward::default(),
                 gpu,
