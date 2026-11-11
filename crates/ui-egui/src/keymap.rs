@@ -229,6 +229,7 @@ pub(crate) fn saved_keys(id: &str, v: &Value) -> Option<Vec<String>> {
 /// Every other application-reserved key remains protected for every command.
 fn reserved_for(id: &str, key: &str) -> bool {
     RESERVED.contains(&key)
+        && !(id == DRAG_ZOOM && key == "F6")
         && !(solidcraft_engine::panels::ContextualPanelAction::from_command_id(id).is_some()
             && key.rsplit('+').next().is_some_and(|name| matches!(name, "Left" | "Right" | "Up" | "Down")))
 }
@@ -369,18 +370,131 @@ pub fn effective(app: &SolveApp, id: &str) -> Option<String> {
     keys(app, id).into_iter().next()
 }
 
+/// Public NX shortcut conventions mapped to existing SolidCraft commands.
+/// Source: https://learnnx.com/wp-content/uploads/2024/11/learnNX-shortcuts.pdf
+const NX_KEYS: &[(&str, &str)] = &[
+    ("appearance.assign", "Ctrl+J"),
+    ("edit.repeat", "F4"),
+    ("file.save_as", "Ctrl+Shift+A"),
+    ("parameters.change", "Ctrl+E"),
+    ("sketch.finish", "Ctrl+Q"),
+    ("sketch.move", "Ctrl+T"),
+    ("solid.extrude", "X"),
+    ("solid.move", "Ctrl+T"),
+    ("view.fit", "Ctrl+F"),
+    ("view.front", "Ctrl+Alt+F"),
+    ("view.isometric", "End"),
+    ("view.normal_to", "Shift+F8"),
+    ("view.right", "Ctrl+Alt+R"),
+    ("view.tool.zoom", "Ctrl+Shift+Z"),
+    ("view.tool.zoom", "F6"),
+    ("view.top", "Ctrl+Alt+T"),
+];
+
+const NX_ACTION_KEYS: &[&str] = &[
+    "Ctrl+1",
+    "Ctrl+2",
+    "Ctrl+B",
+    "Ctrl+D",
+    "Ctrl+R",
+    "F7",
+    "Ctrl+Space",
+    "Ctrl+W",
+    "Ctrl+Shift+K",
+    "Ctrl+Shift+U",
+    "Shift+B",
+    "Shift+C",
+    "Shift+G",
+];
+
+pub(crate) fn nx_active(app: &SolveApp) -> bool {
+    app.preferences.nav == "nx" && app.preferences.nx_shortcuts
+}
+
+fn default_keys(app: &SolveApp, command: &CommandSpec) -> Vec<&'static str> {
+    if nx_active(app) {
+        let assigned: Vec<_> = NX_KEYS.iter().filter(|(id, _)| *id == command.id).map(|(_, key)| *key).collect();
+        if !assigned.is_empty() {
+            return assigned
+                .into_iter()
+                .filter(|key| !app.keymap.custom.iter().any(|(id, keys)| id != command.id && clash(id, command.id) && keys.iter().any(|k| k == key)))
+                .collect();
+        }
+        return command
+            .shortcut
+            .filter(|key| !key.is_empty() && !NX_ACTION_KEYS.contains(key) && !NX_KEYS.iter().any(|(id, nx)| nx == key && clash(id, command.id)))
+            .into_iter()
+            .collect();
+    }
+    command.shortcut.filter(|key| !key.is_empty()).into_iter().collect()
+}
+
+/// NX host actions share the global focus guards and never run while typing.
+/// Explicit custom bindings take priority over profile defaults.
+pub(crate) fn nx_press(app: &mut SolveApp, key: &str, repeat: bool) -> bool {
+    if !nx_active(app) {
+        return false;
+    }
+    if app.keymap.custom.values().any(|keys| keys.iter().any(|k| k == key)) {
+        press(app, key, repeat);
+        return true;
+    }
+    if NX_KEYS.iter().any(|(_, k)| *k == key) {
+        if repeat || (key == "Ctrl+Shift+A" && app.embed_editor) {
+            return true;
+        }
+        press(app, key, repeat);
+        return true;
+    }
+    if !NX_ACTION_KEYS.contains(&key) {
+        return false;
+    }
+    if repeat {
+        return true;
+    }
+    match key {
+        "Ctrl+1" => crate::prefs::open_at(app, crate::prefs::PAGE_SHORTCUTS),
+        "Ctrl+2" => crate::prefs::open_at(app, crate::prefs::PAGE_GENERAL),
+        "Ctrl+D" => {
+            if !crate::timeline_left::delete_selected_folders(app) {
+                crate::viewport::delete_selection(app);
+            }
+        }
+        "Ctrl+B" => crate::context_menu::set_selection_visibility(app, Some(false)),
+        "Ctrl+Shift+K" => crate::context_menu::set_selection_visibility(app, Some(true)),
+        "Ctrl+W" => crate::context_menu::toggle_visibility(app),
+        "Ctrl+Shift+U" => {
+            let _ = app.run("browser.visibility", json!({"folder":"all", "visible":true}));
+        }
+        "Ctrl+R" | "F7" => {
+            let _ = app.run("view.tool", json!({"tool":"orbit"}));
+        }
+        "Ctrl+Space" => app.start("ui.palette"),
+        "Shift+B" | "Shift+C" | "Shift+G" => {
+            let mode = match key {
+                "Shift+B" => "body",
+                "Shift+C" => "component",
+                _ => "face",
+            };
+            let _ = app.run("select.filter", json!({"mode":mode}));
+        }
+        _ => {}
+    }
+    true
+}
+
 /// Every key a command runs from now.
 pub fn keys(app: &SolveApp, id: &str) -> Vec<String> {
     match app.keymap.custom.get(id) {
         Some(keys) => keys.clone(),
-        None => solidcraft_engine::find_command(id).and_then(|c| c.shortcut).filter(|k| !k.is_empty()).map(str::to_string).into_iter().collect(),
+        None => solidcraft_engine::find_command(id).map(|c| default_keys(app, c).into_iter().map(str::to_string).collect()).unwrap_or_default(),
     }
 }
 
-/// Drag to Zoom has no default binding. Compare the keys and current modifiers using the
+/// Drag to Zoom follows the active profile and custom bindings. Compare modifiers using the
 /// same chord names as the shortcut recorder.
 pub(crate) fn drag_zoom_key(app: &SolveApp, key: egui::Key, modifiers: egui::Modifiers) -> bool {
-    app.keymap.custom.get(DRAG_ZOOM).is_some_and(|keys| !keys.is_empty() && keys.contains(&key_name(key, modifiers)))
+    keys(app, DRAG_ZOOM).contains(&key_name(key, modifiers))
 }
 
 pub(crate) fn drag_zoom_held(app: &SolveApp, input: &egui::InputState) -> bool {
@@ -391,7 +505,7 @@ pub(crate) fn drag_zoom_held(app: &SolveApp, input: &egui::InputState) -> bool {
 fn keys_for_spec<'a>(app: &'a SolveApp, command: &CommandSpec) -> Vec<&'a str> {
     match app.keymap.custom.get(command.id) {
         Some(keys) => keys.iter().map(String::as_str).collect(),
-        None => command.shortcut.filter(|k| !k.is_empty()).into_iter().collect(),
+        None => default_keys(app, command),
     }
 }
 
@@ -493,6 +607,12 @@ pub fn command_for(app: &SolveApp, key: &str) -> Option<&'static str> {
 /// starts in the new sketch.
 pub fn press(app: &mut SolveApp, key: &str, repeat: bool) {
     if let Some(id) = command_for(app, key) {
+        if id == "file.save_as" {
+            if !repeat && !app.embed_editor {
+                crate::toolbar::save_as(app);
+            }
+            return;
+        }
         if id == DRAG_ZOOM {
             // The viewport reads the held chord. A key press must not latch Zoom.
             return;
@@ -593,7 +713,7 @@ pub fn bind_at(app: &mut SolveApp, id: &str, slot: Option<usize>, key: &str, rep
 
 /// Keep a command's keys, as a change only when they aren't its default.
 fn set_keys(app: &mut SolveApp, id: &str, keys: Vec<String>) {
-    let default = solidcraft_engine::find_command(id).and_then(|c| c.shortcut).filter(|k| !k.is_empty());
+    let default = solidcraft_engine::find_command(id).map(|c| default_keys(app, c)).unwrap_or_default();
     if keys.iter().map(String::as_str).eq(default) {
         app.keymap.custom.remove(id);
     } else {
@@ -664,6 +784,9 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     let mut action: Option<(String, &str)> = None;
     ui_kit::scope(ui, |ui| {
+        if nx_active(app) {
+            ui_kit::text(ui, app.tr("nav.nx_shortcuts.actions"), ui_kit::Text::Hint("nx_shortcuts"));
+        }
         if !filtering {
             let t = solidcraft_theme::Tokens::get();
             let edit_label = if app.keymap.read_only { app.tr_label("Edit shortcuts") } else { app.tr("install.done") };
@@ -1083,6 +1206,136 @@ pub fn capturing(app: &SolveApp) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nx_defaults_follow_navigation_preserve_custom_keys_and_can_be_disabled() {
+        let mut a = app();
+        let old = keys(&a, "view.fit");
+        a.preferences.nav = "nx".into();
+        assert_eq!(keys(&a, "view.fit"), ["Ctrl+F"]);
+        assert_eq!(keys(&a, "solid.extrude"), ["X"]);
+        for (id, _) in NX_KEYS {
+            assert!(solidcraft_engine::find_command(id).is_some(), "{id}");
+        }
+        bind(&mut a, "view.fit", "Alt+F", false).unwrap();
+        assert_eq!(keys(&a, "view.fit"), ["Alt+F"]);
+        let saved = a.keymap.prefs();
+        a.keymap.load(&saved);
+        assert_eq!(keys(&a, "view.fit"), ["Alt+F"]);
+        reset(&mut a, Some("view.fit"));
+        assert_eq!(keys(&a, "view.fit"), ["Ctrl+F"]);
+        bind(&mut a, DRAG_ZOOM, "F6", false).unwrap();
+        let saved = a.keymap.prefs();
+        a.keymap.load(&saved);
+        assert_eq!(keys(&a, DRAG_ZOOM), ["F6"]);
+        a.preferences.nx_shortcuts = false;
+        assert_eq!(keys(&a, "view.fit"), old);
+        a.preferences.nx_shortcuts = true;
+        a.preferences.nav = "fusion".into();
+        assert_eq!(keys(&a, "view.fit"), old);
+    }
+
+    #[test]
+    fn nx_f8_snaps_to_the_nearest_principal_view_and_respects_the_profile() {
+        use solidcore_record::Vec3;
+        use solidcraft_engine::geom::prelude::*;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.nav = "nx".into();
+        h.app.preferences.look_at_anim = false;
+        let design = h.app.session.doc.to_json();
+        for axis in [Vec3::X, -Vec3::X, Vec3::Y, -Vec3::Y, Vec3::Z, -Vec3::Z] {
+            h.app.cam = h.app.cam.looking_from(axis + Vec3::new(0.12, 0.17, 0.08));
+            let before = h.app.cam;
+            h.frames(2);
+            h.step(&json!({"key":"F8"})).unwrap();
+            // Camera::looking_from keeps a one-microradian offset at the poles.
+            assert!(h.app.cam.back().dist(axis) < 2e-6, "{axis:?}");
+            assert_eq!(h.app.cam.target, before.target);
+            assert_eq!(h.app.cam.distance, before.distance);
+        }
+        h.app.preferences.nx_shortcuts = false;
+        h.app.cam = h.app.cam.looking_from(Vec3::new(0.2, 0.3, 1.0));
+        let before = h.app.cam;
+        h.step(&json!({"key":"F8"})).unwrap();
+        assert_eq!(h.app.cam, before);
+        h.app.preferences.nx_shortcuts = true;
+        h.app.run("select.set", json!({"items":[{"type":"plane", "name":"XY"}]})).unwrap();
+        h.step(&json!({"key":"F8"})).unwrap();
+        assert!(h.app.cam.back().z.abs() > 0.999);
+        assert_eq!(h.app.session.doc.to_json(), design);
+    }
+
+    #[test]
+    fn nx_orbit_and_selection_filters_use_existing_commands() {
+        let mut a = app();
+        a.preferences.nav = "nx".into();
+        assert!(nx_press(&mut a, "F7", false));
+        assert_eq!(a.viewport.nav, Some(crate::viewport::NavMode::Orbit));
+        for (key, mode) in [("Shift+B", "body"), ("Shift+G", "face"), ("Shift+C", "component")] {
+            assert!(nx_press(&mut a, key, false));
+            assert_eq!(a.ui.pick_bodies, mode == "body");
+            assert_eq!(a.ui.pick_components, mode == "component");
+        }
+    }
+
+    #[test]
+    fn nx_profile_defaults_yield_to_existing_custom_bindings() {
+        let mut a = app();
+        bind(&mut a, "solid.box", "Ctrl+F", true).unwrap();
+        a.preferences.nav = "nx".into();
+        assert_eq!(commands_for(&a, "Ctrl+F"), ["solid.box"]);
+        reset(&mut a, Some("solid.box"));
+        assert_eq!(commands_for(&a, "Ctrl+F"), ["view.fit"]);
+        for (_, key) in NX_KEYS {
+            let commands = commands_for(&a, key);
+            for first in &commands {
+                for second in &commands {
+                    assert!(first == second || !clash(first, second), "{key}: {first} conflicts with {second}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn nx_save_as_uses_the_file_picker_and_finish_sketch_uses_the_existing_command() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.nav = "nx".into();
+        h.app.session.doc_mut().name = "NX copy".into();
+        h.step(&json!({"key":"A", "cmd":true, "shift":true})).unwrap();
+        h.frames(3);
+        h.settle();
+        assert_eq!(h.app.session.path.as_deref(), h.dir.join("NX copy.sc").to_str());
+        assert_eq!(effective(&h.app, "file.save_as").as_deref(), Some("Ctrl+Shift+A"));
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.frames(3);
+        assert!(h.app.session.active_sketch.is_some());
+        h.step(&json!({"key":"Q", "cmd":true})).unwrap();
+        assert!(h.app.session.active_sketch.is_none());
+    }
+
+    #[test]
+    fn nx_hide_is_idempotent_show_restores_and_ctrl_w_keeps_the_document_open() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.nav = "nx".into();
+        h.app.run("solid.box", json!({"width":10,"length":10,"height":10,"body_name":"Block"})).unwrap();
+        h.app.run("select.set", json!({"items":[{"type":"body", "name":"Block"}]})).unwrap();
+        h.frames(3);
+        let depth = h.app.session.undo.len();
+        h.step(&json!({"key":"Z", "cmd":true, "shift":true})).unwrap();
+        assert_eq!(h.app.session.undo.len(), depth, "NX Zoom must not undo");
+        for _ in 0..2 {
+            h.step(&json!({"key":"B", "cmd":true})).unwrap();
+            assert!(h.app.session.visibility.hidden_bodies.contains(&"Block".into()));
+        }
+        h.step(&json!({"key":"K", "cmd":true, "shift":true})).unwrap();
+        assert!(!h.app.session.visibility.hidden_bodies.contains(&"Block".into()));
+        h.step(&json!({"key":"W", "cmd":true})).unwrap();
+        assert!(!h.app.home.open, "NX Show/Hide must not close the design");
+        assert!(h.app.session.visibility.hidden_bodies.contains(&"Block".into()));
+        h.step(&json!({"key":"U", "cmd":true, "shift":true})).unwrap();
+        assert!(!h.app.session.visibility.hidden_bodies.contains(&"Block".into()));
+    }
 
     #[test]
     fn panel_bindings_preserve_contextual_arrows_and_rebind_clear_conflict_and_reset() {

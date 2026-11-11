@@ -1,0 +1,10 @@
+{
+  "en": {
+    "nav.nx_shortcuts.label": "Use NX keyboard shortcuts with the NX navigation profile",
+    "nav.nx_shortcuts.actions": "F8 align to selection or nearest principal view; NX: Ctrl+B hide; Ctrl+Shift+K show; Ctrl+Shift+U show all; Ctrl+W toggle selection visibility; Ctrl+D delete; Ctrl+R orbit; Ctrl+Space command search; Ctrl+1 shortcuts; Ctrl+2 preferences; Shift+B/G/C select bodies/faces/components."
+  },
+  "de": {
+    "nav.nx_shortcuts.label": "NX-Tastenkürzel mit dem NX-Navigationsprofil verwenden",
+    "nav.nx_shortcuts.actions": "F8 auf Auswahl oder nächste Hauptansicht ausrichten; NX: Strg+B ausblenden; Strg+Umschalt+K einblenden; Strg+Umschalt+U alles einblenden; Strg+W Sichtbarkeit der Auswahl umschalten; Strg+D löschen; Strg+R drehen; Strg+Leertaste Befehlssuche; Strg+1 Tastenkürzel; Strg+2 Einstellungen; Umschalt+B/G/C Körper/Flächen/Komponenten auswählen."
+  }
+}

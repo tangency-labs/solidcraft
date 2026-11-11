@@ -2280,7 +2280,7 @@
   "nav.hfss.help": "Alt+left drag pans, Shift+Alt+left zooms, Ctrl+left drag on empty space orbits",
   "nav.inventor.help": "Middle drag pans, Shift+middle orbits, Ctrl+middle zooms, right drag orbits",
   "nav.maya.help": "Alt+left drag orbits, Alt+middle pans, Alt+right zooms; middle drag also pans",
-  "nav.nx.help": "Middle drag orbits, Shift+middle pans (NX's middle + right), Ctrl+middle zooms (NX's middle + left); right drag leaves the camera",
+  "nav.nx.help": "Middle drag orbits; middle + left or Ctrl+middle zooms; middle + right or Shift+middle pans; hold the middle button still, then drag, to orbit about the point under it; right drag leaves the camera",
   "nav.openscad.help": "Left drag on empty space orbits, Shift+left drag box-selects, sketch geometry drags edit; right or middle drag pans, Shift+right or Shift+middle drag zooms",
   "nav.orbit_cursor_wrap.help": "An orbit drag that reaches the edge of the view moves the cursor to the opposite edge and keeps turning. Off: the drag stops at the edge of the screen. Has no effect on Wayland or in the browser.",
   "nav.orbit_cursor_wrap.label": "Wrap the cursor while orbiting",

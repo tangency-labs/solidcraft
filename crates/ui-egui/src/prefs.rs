@@ -85,6 +85,18 @@ const fn bind(button: NavButton, keys: NavKeys, mode: NavMode) -> NavBinding {
     NavBinding { button, keys, mode }
 }
 
+/// A two-button drag: the middle button held together with `with` does `mode` (NX: middle + left
+/// zooms, middle + right pans), whichever of the two went down first.
+#[derive(Clone, Copy, Debug)]
+pub struct NavChord {
+    pub with: NavButton,
+    pub mode: NavMode,
+}
+
+const fn chord(with: NavButton, mode: NavMode) -> NavChord {
+    NavChord { with, mode }
+}
+
 /// A mouse mapping: its bindings, most specific first (the first one whose button is dragged
 /// with all its keys held wins).
 pub struct NavPreset {
@@ -101,12 +113,30 @@ pub struct NavPreset {
     /// Choosing the preset sets "Right drag orbits" (`None` leaves it as it is).
     pub right_drag_orbits: Option<bool>,
     pub bindings: &'static [NavBinding],
+    /// Two-button drags with the middle button, checked before `bindings`.
+    pub chords: &'static [NavChord],
+    /// Holding the middle button still for a moment, before dragging, makes the model point under
+    /// it the drag's orbit point (NX), whatever Orbit around says.
+    pub middle_hold_pivot: bool,
 }
 
 impl NavPreset {
     /// What dragging `button` with `mods` held does, if anything.
     pub fn mode(&self, button: NavButton, mods: Modifiers) -> Option<NavMode> {
         self.bindings.iter().find(|b| b.button == button && b.keys.held(mods)).map(|b| b.mode)
+    }
+
+    /// What dragging the middle button does while the left (`left`) or right (`right`) button is
+    /// held too, if the preset has such a chord.
+    pub fn chord_mode(&self, left: bool, right: bool) -> Option<NavMode> {
+        self.chords
+            .iter()
+            .find(|c| match c.with {
+                NavButton::Left => left,
+                NavButton::Right => right,
+                NavButton::Middle => false,
+            })
+            .map(|c| c.mode)
     }
 }
 
@@ -124,6 +154,8 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         middle_double_click: None,
         right_drag_orbits: None,
         bindings: &[bind(Middle, NavKeys::SHIFT, Orbit), bind(Middle, NavKeys::NONE, Pan), bind(Right, NavKeys::NONE, Orbit)],
+        chords: &[],
+        middle_hold_pivot: false,
     },
     NavPreset {
         id: "solidworks",
@@ -140,6 +172,8 @@ pub const NAV_PRESETS: &[NavPreset] = &[
             bind(Middle, NavKeys::NONE, Orbit),
             bind(Right, NavKeys::NONE, Orbit),
         ],
+        chords: &[],
+        middle_hold_pivot: false,
     },
     // Public Creo Parametric dynamic-viewing bindings; no product code or assets are used.
     // https://support.ptc.com/help/creo/creo_pma/r12/usascii/fundamentals/fundamentals/About_Dynamic_Viewing.html
@@ -152,19 +186,23 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         middle_double_click: None,
         right_drag_orbits: None,
         bindings: &[bind(Middle, NavKeys::CTRL, Zoom), bind(Middle, NavKeys::SHIFT, Pan), bind(Middle, NavKeys::NONE, Orbit)],
+        chords: &[],
+        middle_hold_pivot: false,
     },
     NavPreset {
         id: "nx",
         label: "NX",
-        // NX's CAD1 scheme drags middle to rotate, middle + left to zoom and middle + right to
-        // pan; the bindings here hold one button at a time, so the two-button drags are the
-        // middle drag with Ctrl (zoom) and Shift (pan).
-        help: "Middle drag orbits, Shift+middle pans (NX's middle + right), Ctrl+middle zooms (NX's middle + left); right drag leaves the camera",
+        // NX's mouse: middle drag rotates, middle + left (or Ctrl+middle) zooms, middle + right
+        // (or Shift+middle) pans, and holding the middle button still before dragging rotates
+        // about the point under it. The right button stays the context menu.
+        help: "Middle drag orbits; middle + left or Ctrl+middle zooms; middle + right or Shift+middle pans; hold the middle button still, then drag, to orbit about the point under it; right drag leaves the camera",
         reverse_zoom: false,
         reverse_drag_zoom: false,
         middle_double_click: Some("fit"),
         right_drag_orbits: Some(false),
         bindings: &[bind(Middle, NavKeys::SHIFT, Pan), bind(Middle, NavKeys::CTRL, Zoom), bind(Middle, NavKeys::NONE, Orbit)],
+        chords: &[chord(Left, Zoom), chord(Right, Pan)],
+        middle_hold_pivot: true,
     },
     NavPreset {
         id: "inventor",
@@ -180,6 +218,8 @@ pub const NAV_PRESETS: &[NavPreset] = &[
             bind(Middle, NavKeys::NONE, Pan),
             bind(Right, NavKeys::NONE, Orbit),
         ],
+        chords: &[],
+        middle_hold_pivot: false,
     },
     NavPreset {
         id: "alias",
@@ -197,6 +237,8 @@ pub const NAV_PRESETS: &[NavPreset] = &[
             bind(Middle, NavKeys::NONE, Pan),
             bind(Right, NavKeys::NONE, Orbit),
         ],
+        chords: &[],
+        middle_hold_pivot: false,
     },
     NavPreset {
         id: "maya",
@@ -212,6 +254,8 @@ pub const NAV_PRESETS: &[NavPreset] = &[
             bind(Right, NavKeys::ALT, Zoom),
             bind(Middle, NavKeys::NONE, Pan),
         ],
+        chords: &[],
+        middle_hold_pivot: false,
     },
     NavPreset {
         id: "blender",
@@ -222,6 +266,8 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         middle_double_click: None,
         right_drag_orbits: None,
         bindings: &[bind(Middle, NavKeys::SHIFT, Pan), bind(Middle, NavKeys::CTRL, Zoom), bind(Middle, NavKeys::NONE, Orbit)],
+        chords: &[],
+        middle_hold_pivot: false,
     },
     NavPreset {
         id: "tinkercad",
@@ -232,6 +278,8 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         middle_double_click: None,
         right_drag_orbits: None,
         bindings: &[bind(Right, NavKeys::SHIFT, Pan), bind(Right, NavKeys::NONE, Orbit), bind(Middle, NavKeys::NONE, Pan)],
+        chords: &[],
+        middle_hold_pivot: false,
     },
     NavPreset {
         id: OPENSCAD_NAV,
@@ -248,6 +296,8 @@ pub const NAV_PRESETS: &[NavPreset] = &[
             bind(Right, NavKeys::NONE, Pan),
             bind(Middle, NavKeys::NONE, Pan),
         ],
+        chords: &[],
+        middle_hold_pivot: false,
     },
     NavPreset {
         id: "hfss",
@@ -260,6 +310,8 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         // Ctrl+left orbit is the drag from empty space every preset has: as a binding it would
         // also take a Ctrl+click on geometry, which adds to the selection.
         bindings: &[bind(Left, NavKeys::SHIFT_ALT, Zoom), bind(Left, NavKeys::ALT, Pan)],
+        chords: &[],
+        middle_hold_pivot: false,
     },
     NavPreset {
         id: TOUCHPAD_NAV,
@@ -270,6 +322,8 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         middle_double_click: None,
         right_drag_orbits: None,
         bindings: &[bind(Middle, NavKeys::NONE, Pan), bind(Right, NavKeys::NONE, Orbit)],
+        chords: &[],
+        middle_hold_pivot: false,
     },
 ];
 
@@ -1057,6 +1111,8 @@ preference_settings! {
     default_units: String = "mm".into(), PAGE_DESIGN;
     /// Mouse mapping: `fusion`, `solidworks` or `inventor`.
     nav: String = "fusion".into(), PAGE_NAVIGATION;
+    /// Use NX keyboard defaults with the NX mouse profile; disabling restores SolidCraft keys.
+    nx_shortcuts: bool = true, PAGE_NAVIGATION => check_tr("nav.nx_shortcuts.label");
     /// Opt in to rotation through both poles with roll, without the Shift axis-snap spring.
     /// Independent of mouse bindings; false also preserves existing saved presets' behavior.
     free_orbit: bool = false, PAGE_NAVIGATION;

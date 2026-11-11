@@ -3648,6 +3648,9 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
         if shown && (crate::keymap::drag_zoom_key(app, k, mods) || crate::navigation::view_key(app, ctx, k, mods, repeat)) {
             continue;
         }
+        if shown && crate::keymap::nx_press(app, &crate::keymap::key_name(k, mods), repeat) {
+            continue;
+        }
         if mods.command {
             match k {
                 // An editing embed's host has its own New, Open, Save, Close and settings.

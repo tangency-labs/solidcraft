@@ -128,6 +128,14 @@ pub struct ViewportState {
     pub(crate) middle_clicked: bool,
     /// The right button held down has moved or been held too long for a click, so it navigates.
     pub(crate) right_drag: bool,
+    /// A two-button drag (NX: middle + left, middle + right) took part of this press: its buttons'
+    /// clicks select nothing and open no menu. Cleared once every button is up.
+    pub(crate) chord_press: bool,
+    /// Where and when the middle button went down, while it has not moved since (NX's hold to
+    /// pick the orbit point).
+    pub(crate) middle_still: Option<(Pos2, f64)>,
+    /// The orbit point that holding the middle button still picked, until the button is let go.
+    pub(crate) held_pivot: Option<Vec3>,
     /// The last pick (its key and hits): reused while nothing it depends on changed.
     last_pick: Option<(u64, Vec<Hit>)>,
     pub rect: Option<Rect>,
@@ -5162,6 +5170,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && matches!(cand.as_ref().map(|c| &c.0), Some(Hit::SketchPoint { .. } | Hit::SketchCurve { .. }))
             && crate::dim_view::hit_text(p).is_none();
         let reference_pick = (resp.clicked() || resp.double_clicked())
+            && !app.viewport.chord_press
             && !midpoint_geometry
             && !held
             && app.dialog.is_none()
@@ -5176,7 +5185,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         {
             dialog.restore_value_focus = true;
         }
-        if resp.clicked() && !held && !reference_pick && !joint_handle_pointer && !app.viewport.draw_drag_handled {
+        if resp.clicked() && !held && !reference_pick && !joint_handle_pointer && !app.viewport.draw_drag_handled && !app.viewport.chord_press {
             if crate::browser_canvas::click(app, &proj, p) {
                 // Calibrate Canvas: the click sets Point A or B on the image (#9108).
             } else if app.tool.is_some() {
@@ -5300,7 +5309,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         // A right-click, unless the same press opened the mouse gestures' ring. egui's click
         // already allows the pointer a few points of travel, as a mouse moves while it is clicked.
-        if resp.secondary_clicked() && !crate::mouse_gesture::took_press(app) {
+        if resp.secondary_clicked() && !crate::mouse_gesture::took_press(app) && !app.viewport.chord_press {
             if app.tool.is_some() {
                 crate::tools::finish(app);
             } else if app.dialog.is_none() {
@@ -6919,14 +6928,16 @@ pub(crate) fn standalone_points(app: &SolveApp) -> Vec<Vec3> {
 }
 
 /// Sketch points and the status of the active sketch (constraint glyphs: `sketch_tools`).
-/// The point the 3D mouse is turning the view around, as a faint ball, so the user sees what the
-/// turn holds still (#7435). Lighter, smaller discs stacked toward the top left give it its shading.
+/// The point the 3D mouse is turning the view around, or the one a held middle button picked (NX),
+/// as a faint ball, so the user sees what the turn holds still (#7435). Lighter, smaller discs
+/// stacked toward the top left give it its shading.
 fn paint_device_pivot(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
-    let Some(p) = app.viewport.device_pivot.and_then(|p| proj.to_screen(p)) else { return };
     let t = Tokens::get();
-    painter.circle(p, 8.0, t.accent.gamma_multiply(0.18), Stroke::new(1.0, t.accent.gamma_multiply(0.5)));
-    painter.circle_filled(p + vec2(-1.5, -1.5), 5.0, t.accent.gamma_multiply(0.2));
-    painter.circle_filled(p + vec2(-2.5, -2.5), 2.5, t.accent.gamma_multiply(0.3));
+    for p in [app.viewport.device_pivot, app.viewport.held_pivot].into_iter().flatten().filter_map(|p| proj.to_screen(p)) {
+        painter.circle(p, 8.0, t.accent.gamma_multiply(0.18), Stroke::new(1.0, t.accent.gamma_multiply(0.5)));
+        painter.circle_filled(p + vec2(-1.5, -1.5), 5.0, t.accent.gamma_multiply(0.2));
+        painter.circle_filled(p + vec2(-2.5, -2.5), 2.5, t.accent.gamma_multiply(0.3));
+    }
 }
 
 fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {

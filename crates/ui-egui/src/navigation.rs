@@ -467,6 +467,28 @@ pub(crate) fn view_key(app: &mut SolveApp, ctx: &egui::Context, key: egui::Key, 
         return false;
     }
     let result = crate::render_workspace::result_active(app);
+    if key == Key::F8
+        && crate::keymap::nx_active(app)
+        && !app.keymap.custom.values().any(|keys| keys.iter().any(|key| key == "F8"))
+        && !ctrl
+        && !mods.shift
+        && !result
+    {
+        if !repeat {
+            if solidcraft_engine::find_command("view.normal_to").is_some_and(|command| command.info(&app.session).disabled_reason.is_none()) {
+                crate::viewport::look_at_selection(app);
+            } else {
+                let camera = app.settled_cam();
+                let back = camera.to_frame(camera.back());
+                let direction = [Vec3::X, -Vec3::X, Vec3::Y, -Vec3::Y, Vec3::Z, -Vec3::Z]
+                    .into_iter()
+                    .max_by(|a, b| a.dot(back).total_cmp(&b.dot(back)))
+                    .unwrap_or(Vec3::Z);
+                let _ = app.run("view.navigate", json!({"camera": camera, "direction": direction}));
+            }
+        }
+        return true;
+    }
     if key == Key::Num8 && ctrl && !mods.shift && !result {
         crate::viewport::look_at_selection(app);
         return true;
@@ -623,6 +645,26 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
                     && ui.ctx().layer_id_at(p).is_some_and(crate::ui_kit::container::is_canvas)
             }));
     app.viewport.mouse = hover.filter(|_| inside);
+    // Two-button drags (NX: the middle button with the left zooms, with the right pans), in
+    // either order. The press is the chord's until every button is up, so neither button's
+    // release clicks: no selection, context menu or finished tool.
+    let preset = crate::prefs::nav_preset(&app.preferences.nav);
+    let (any_released, raw_secondary) = ui.input(|i| (i.pointer.any_released(), i.pointer.secondary_down()));
+    let chord = if middle && (inside || app.viewport.chord_press || app.viewport.button_nav.is_some()) {
+        preset.chord_mode(primary_down, secondary_down)
+    } else {
+        None
+    };
+    if chord.is_some() {
+        app.viewport.chord_press = true;
+        if primary_down {
+            // The left button joins the drag: whatever box it began to draw is dropped.
+            app.viewport.boxsel = None;
+        }
+    } else if !middle && !primary_down && !raw_secondary && !any_released {
+        app.viewport.chord_press = false;
+    }
+    middle_hold_pivot(app, ui, rect, inside, middle, preset.middle_hold_pivot && caps.orbit);
     // Sketch snap suppression is set once in `viewport::show` from preferences.
     middle_double_click(app, ui, inside);
     // The 3D mouse's motion this frame, with what this page's camera may do.
@@ -759,6 +801,11 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     } else if zoom_drag || (!primary_down && !primary_released) {
         app.viewport.primary_nav = None;
     }
+    // The left button of a middle + left chord navigates until it is let go, like a preset's
+    // left binding: it neither selects nor drags geometry.
+    if let Some(mode) = chord.filter(|_| primary_down && !zoom_drag) {
+        app.viewport.primary_nav = Some(mode);
+    }
     // Hold Space for a momentary pan: the hand tool of design apps. It overrides whatever the
     // left button would otherwise do - selecting, dragging geometry, the preset's binding or the
     // navigation bar's fixed mode - and lasts only while the key is held. Space still types in a
@@ -807,6 +854,12 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     // doesn't turn the rest into a pan (#9557). Off in Preferences, the keys held decide on every
     // frame, as before.
     let button_mode = match button {
+        // A chord decides while both its buttons are down; let go of one and the middle drag
+        // goes on as the keys held say (NX: back to orbiting).
+        Some(_) if chord.is_some() && dragging && app.viewport.axis_drag.is_none() => {
+            app.viewport.button_nav = None;
+            chord
+        }
         Some(b) if dragging && app.viewport.axis_drag.is_none() => {
             let kept = app.viewport.button_nav.filter(|(held, _)| *held == b && app.preferences.nav_drag_keeps_mode);
             let mode = kept.map_or_else(|| crate::prefs::nav_mode(app, b, mods), |(_, mode)| mode);
@@ -1225,16 +1278,49 @@ pub(crate) fn orbit_drag(app: &mut SolveApp, rect: Rect, dx: f64, dy: f64, press
     // The cursor and origin pivots stay still; the axis gizmo has no pivot (it orbits about the
     // view centre, see `axis_view`).
     let pivot = if around_cursor {
-        match app.preferences.orbit_around {
+        app.viewport.held_pivot.or(match app.preferences.orbit_around {
             crate::prefs::OrbitAround::Origin => Some(Vec3::ZERO),
             _ => app.viewport.orbit_pivot,
-        }
+        })
     } else {
         None
     };
     app.cam = target;
     if let Some(p) = pivot {
         app.cam.place(p, displayed.frame_coords(p));
+    }
+}
+
+/// How long the middle button must stay still before its drag orbits about the point under it.
+const MIDDLE_HOLD_SECS: f64 = 0.4;
+/// How far (points) the pointer may move while the middle button is held still.
+const MIDDLE_HOLD_SLOP: f32 = 3.0;
+
+/// NX's orbit point: press the middle button on the model and hold it still for a moment, and the
+/// drag that follows turns about the point under it (marked like the 3D mouse's pivot) until the
+/// button is let go. A middle press that moves at once orbits as Orbit around says.
+fn middle_hold_pivot(app: &mut SolveApp, ui: &egui::Ui, rect: Rect, inside: bool, middle: bool, enabled: bool) {
+    if !enabled || !middle {
+        app.viewport.middle_still = None;
+        app.viewport.held_pivot = None;
+        return;
+    }
+    let (pressed, pos, time) = ui.input(|i| (i.pointer.button_pressed(egui::PointerButton::Middle), i.pointer.latest_pos(), i.time));
+    if pressed && inside {
+        app.viewport.held_pivot = None;
+        app.viewport.middle_still = pos.filter(|p| p.is_finite()).map(|p| (p, time));
+    }
+    let Some((at, since)) = app.viewport.middle_still else { return };
+    if app.viewport.chord_press || pos.is_none_or(|p| p.distance(at) > MIDDLE_HOLD_SLOP) {
+        app.viewport.middle_still = None;
+    } else if time - since >= MIDDLE_HOLD_SECS {
+        app.viewport.middle_still = None;
+        let pivot = pivot_under(app, &projection(app, rect), at);
+        app.viewport.held_pivot = pivot.is_finite().then_some(pivot);
+        app.viewport.orbit_from = None;
+    } else {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_secs_f64(MIDDLE_HOLD_SECS - (time - since)).min(std::time::Duration::from_millis(50)));
     }
 }
 
@@ -1254,8 +1340,10 @@ pub(crate) fn middle_double_click(app: &mut SolveApp, ui: &egui::Ui, inside: boo
     });
     // egui pairs clicks of any buttons; the first click must have been the middle one too (or
     // both arrive in this frame).
-    let go = double && inside && !other && (app.viewport.middle_clicked || releases >= 2);
-    app.viewport.middle_clicked = if other || dragging || go { false } else { middle || app.viewport.middle_clicked };
+    // The middle button of a two-button drag (NX: middle + left) clicks nothing.
+    let chord = app.viewport.chord_press;
+    let go = double && inside && !other && !chord && (app.viewport.middle_clicked || releases >= 2);
+    app.viewport.middle_clicked = if other || dragging || chord || go { false } else { middle || app.viewport.middle_clicked };
     if !go {
         return;
     }
@@ -1272,20 +1360,7 @@ pub(crate) fn middle_double_click(app: &mut SolveApp, ui: &egui::Ui, inside: boo
 /// the centre of the visible geometry instead, so the model never swings around a far-off point.
 /// The cursor pivot is chosen once, when the drag begins.
 pub fn orbit(app: &mut SolveApp, rect: egui::Rect, dx: f64, dy: f64, press: Option<Pos2>) {
-    let pivot = match app.preferences.orbit_around {
-        OrbitAround::ViewCentre => None,
-        OrbitAround::Origin => Some(Vec3::ZERO),
-        OrbitAround::Cursor => Some(match app.viewport.orbit_pivot {
-            Some(p) => p,
-            None => {
-                let proj = crate::viewport::projection(app, rect);
-                let at = press.unwrap_or(rect.center());
-                let p = pivot_under(app, &proj, at);
-                app.viewport.orbit_pivot = Some(p);
-                p
-            }
-        }),
-    };
+    let pivot = if let Some(held) = app.viewport.held_pivot { Some(held) } else { orbit_around_pivot(app, rect, press) };
     if app.preferences.free_orbit {
         app.viewport.orbit_from = None;
         match pivot {
@@ -1309,6 +1384,25 @@ pub fn orbit(app: &mut SolveApp, rect: egui::Rect, dx: f64, dy: f64, press: Opti
         None => app.cam.orbit(dx, dy),
     }
     app.viewport.orbit_from = Some(OrbitFrom { dx, dy, last: app.cam, ..from });
+}
+
+/// The point an orbit turns about by Orbit around: none for the view's centre, the world origin,
+/// or the model point under `press` (picked once per drag).
+fn orbit_around_pivot(app: &mut SolveApp, rect: egui::Rect, press: Option<Pos2>) -> Option<Vec3> {
+    match app.preferences.orbit_around {
+        OrbitAround::ViewCentre => None,
+        OrbitAround::Origin => Some(Vec3::ZERO),
+        OrbitAround::Cursor => Some(match app.viewport.orbit_pivot {
+            Some(p) => p,
+            None => {
+                let proj = crate::viewport::projection(app, rect);
+                let at = press.unwrap_or(rect.center());
+                let p = pivot_under(app, &proj, at);
+                app.viewport.orbit_pivot = Some(p);
+                p
+            }
+        }),
+    }
 }
 
 /// What continuous orbit turns about, by Orbit around: the view's centre (none), the world origin,
@@ -2895,6 +2989,137 @@ mod tests {
         app.viewport.device_motion = Some(DeviceMotion { motion: Motion { translation: [0.0; 3], rotation: [0.3, 0.3, 0.3] }, seconds: 0.05 });
         super::device(&mut app, page, super::NavCaps::MODEL);
         assert_eq!(turn(&app.cam), turn(&square_on));
+    }
+
+    /// One NX mouse frame driver: events at `time` seconds over an 800×600 view of `app`.
+    fn nx_frame(app: &mut crate::SolveApp, ctx: &egui::Context, time: f64, events: Vec<egui::Event>) -> super::CameraInput {
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))),
+            time: Some(time),
+            focused: true,
+            events,
+            ..Default::default()
+        };
+        let mut input = None;
+        let mut out = ctx.run_ui(raw, |ui| {
+            let rect = ui.max_rect();
+            app.viewport.rect = Some(rect);
+            let resp = ui.interact(rect, ui.scope_id().with("model"), egui::Sense::click_and_drag());
+            input = Some(super::handle(app, ui, rect, &resp, super::NavCaps::MODEL));
+        });
+        out.textures_delta.clear();
+        input.expect("the view ran")
+    }
+
+    /// NX's two-button drags: middle + left zooms and middle + right pans, whichever button went
+    /// down first; neither turns the view, and the left button of the chord navigates, so it
+    /// selects nothing. Presets without chords keep a middle drag with the left held as it was.
+    #[test]
+    fn nx_middle_with_left_zooms_and_middle_with_right_pans() {
+        use egui::{Event, Modifiers, PointerButton, pos2};
+        for (preset, other, middle_first) in [
+            ("nx", PointerButton::Primary, true),
+            ("nx", PointerButton::Primary, false),
+            ("nx", PointerButton::Secondary, true),
+            ("nx", PointerButton::Secondary, false),
+            ("blender", PointerButton::Primary, true),
+        ] {
+            let mut s = solidcraft_engine::Session::default();
+            s.execute("solid.box", &serde_json::json!({"length":40,"width":30,"height":20})).unwrap();
+            let mut app = crate::SolveApp::new(s, crate::Services::default());
+            crate::prefs::set(&mut app, &serde_json::json!({"nav":preset})).unwrap();
+            let ctx = egui::Context::default();
+            let mut time = 0.0;
+            let mut frame = |app: &mut crate::SolveApp, events: Vec<Event>| {
+                time += 1.0 / 60.0;
+                nx_frame(app, &ctx, time, events)
+            };
+            let press = |button, pos, pressed| Event::PointerButton { pos, button, pressed, modifiers: Modifiers::NONE };
+            let at = pos2(400.0, 300.0);
+            frame(&mut app, vec![Event::PointerMoved(at)]);
+            let (first, second) = if middle_first { (PointerButton::Middle, other) } else { (other, PointerButton::Middle) };
+            frame(&mut app, vec![press(first, at, true)]);
+            let input = frame(&mut app, vec![press(second, at, true)]);
+            let before = app.cam;
+            let mut last = at;
+            for step in 1..=6 {
+                last = pos2(400.0 + 6.0 * step as f32, 300.0 + 10.0 * step as f32);
+                frame(&mut app, vec![Event::PointerMoved(last)]);
+            }
+            let what = format!("{preset} {other:?} middle_first={middle_first}");
+            if preset != "nx" {
+                assert!(!app.viewport.chord_press, "{what}: no chord");
+                assert_ne!((app.cam.yaw, app.cam.pitch), (before.yaw, before.pitch), "{what}: the middle drag orbits as before");
+                continue;
+            }
+            assert!(app.viewport.chord_press, "{what}");
+            assert_eq!((app.cam.yaw, app.cam.pitch, app.cam.roll), (before.yaw, before.pitch, before.roll), "{what}: a chord doesn't turn the view");
+            if other == PointerButton::Primary {
+                assert_eq!(input.primary_nav, Some(crate::viewport::NavMode::Zoom), "{what}: the left button navigates");
+                // As Ctrl+middle: dragging down zooms out (Preferences can reverse it).
+                assert!(app.cam.distance > before.distance, "{what}: dragging down zooms out");
+            } else {
+                assert_ne!(app.cam.target, before.target, "{what}: the chord pans");
+                assert!((app.cam.distance - before.distance).abs() < 1e-9, "{what}: a pan doesn't zoom");
+            }
+            // Let go of both: the chord is over once every button is up, not on the release frame
+            // (its clicks must see it).
+            frame(&mut app, vec![press(other, last, false)]);
+            assert!(app.viewport.chord_press, "{what}");
+            frame(&mut app, vec![press(PointerButton::Middle, last, false)]);
+            assert!(app.viewport.chord_press, "{what}: the release frame still belongs to the chord");
+            frame(&mut app, Vec::new());
+            assert!(!app.viewport.chord_press, "{what}");
+        }
+    }
+
+    /// NX: the middle button held still on the model for a moment picks the point under it, and
+    /// the drag that follows turns about it, keeping it still on screen; a middle drag that
+    /// moves at once orbits as Orbit around says. Letting go forgets the point.
+    #[test]
+    fn nx_holding_the_middle_button_still_orbits_about_the_point_under_it() {
+        use egui::{Event, Modifiers, PointerButton, pos2};
+        for hold in [true, false] {
+            let mut s = solidcraft_engine::Session::default();
+            s.execute("solid.box", &serde_json::json!({"length":40,"width":30,"height":20})).unwrap();
+            let mut app = crate::SolveApp::new(s, crate::Services::default());
+            crate::prefs::set(&mut app, &serde_json::json!({"nav":"nx", "orbit_around":"view_centre"})).unwrap();
+            let ctx = egui::Context::default();
+            let mut time = 0.0;
+            let mut frame = |app: &mut crate::SolveApp, dt: f64, events: Vec<Event>| {
+                time += dt;
+                nx_frame(app, &ctx, time, events)
+            };
+            frame(&mut app, 0.0, Vec::new());
+            app.fit_view();
+            let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+            // A point on the box, off the view's centre.
+            let target = crate::viewport::projection(&app, rect).to_screen(solidcore_record::Vec3::new(10.0, 8.0, 20.0)).expect("on screen");
+            let at = target;
+            let press = |pos, pressed| Event::PointerButton { pos, button: PointerButton::Middle, pressed, modifiers: Modifiers::NONE };
+            frame(&mut app, 1.0 / 60.0, vec![Event::PointerMoved(at)]);
+            frame(&mut app, 1.0 / 60.0, vec![press(at, true)]);
+            if hold {
+                for _ in 0..30 {
+                    frame(&mut app, 1.0 / 60.0, Vec::new());
+                }
+            }
+            let picked = app.viewport.held_pivot;
+            assert_eq!(picked.is_some(), hold, "hold={hold}");
+            let mut last = at;
+            for step in 1..=5 {
+                last = pos2(at.x + 15.0 * step as f32, at.y + 5.0 * step as f32);
+                frame(&mut app, 1.0 / 60.0, vec![Event::PointerMoved(last)]);
+            }
+            if let Some(p) = picked {
+                let on_screen = crate::viewport::projection(&app, rect).to_screen(p).expect("the pivot stays on screen");
+                assert!(on_screen.distance(target) < 1.0, "the held point stays still: {on_screen:?} vs {target:?}");
+                assert_eq!(app.viewport.held_pivot, picked, "kept for the whole drag");
+            }
+            frame(&mut app, 1.0 / 60.0, vec![press(last, false)]);
+            frame(&mut app, 1.0 / 60.0, Vec::new());
+            assert_eq!(app.viewport.held_pivot, None, "hold={hold}: letting go forgets the point");
+        }
     }
 }
 

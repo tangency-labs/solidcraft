@@ -1192,7 +1192,7 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                     let mut chosen = None;
                     for (id, label) in items {
                         let mut item = crate::ui_kit::Item::action(id, label, "");
-                        if id == "ui.closeTab" && i == app.docs.active {
+                        if id == "ui.closeTab" && i == app.docs.active && !crate::keymap::nx_active(app) {
                             item = item.key("Ctrl+W");
                         }
                         item.enabled = id != "ui.closeOtherTabs" || n > 1;
