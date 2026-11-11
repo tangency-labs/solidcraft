@@ -82,7 +82,7 @@ commands:
                   kernel operations, operand records, fix set and expected values in
                   DIR/<area>/<case>.json and DIR/manifest.json, every case not expressible as
                   kernel input listed with its reasons; with --ladder too
-  known-failing --junit PATH... [--list FILE]
+  known-failing --junit PATH... [--list FILE] [--quarantine FILE]
                   grade a nextest run's junit report (a file, or every .xml under a directory)
                   against the tests known to fail today on the default kernel,
                   tests/KNOWN_FAILING_TESTS (or FILE): fails

@@ -34,8 +34,8 @@ use solidcore_record::brep::Brep as Record;
 
 use solidcore_ops::{
     blend, blend_ordered, chamfer_sides, edge_faces_along, fillet_variable, make_box, make_cone,
-    make_cylinder, tangent_chain, Blend, Body, ChamferSecond, CheckLevel, Corners, Error, FitKind,
-    Order, SetBack, Turn, Unblendable,
+    make_cylinder, tangent_chain, Blend, BlendOptions, Body, ChamferSecond, CheckLevel, Corners,
+    Error, FitKind, Order, SetBack, Turn, Unblendable,
 };
 
 /// The block's top front edge, 30 long, between the top (z = 10) and the front (y = 0).
@@ -199,7 +199,10 @@ fn rounds_turn_round_a_boss_edge_mitred_or_swept() {
             &[1.0],
             &[],
             Corners::Filled,
-            turn,
+            BlendOptions {
+                turn,
+                ..BlendOptions::default()
+            },
         )
         .unwrap();
         assert!(b.check(CheckLevel::All).unwrap().is_valid(), "{turn:?}");
@@ -233,7 +236,10 @@ fn rounds_turn_round_a_boss_edge_mitred_or_swept() {
             sizes,
             &[],
             Corners::Filled,
-            Turn::Swept,
+            BlendOptions {
+                turn: Turn::Swept,
+                ..BlendOptions::default()
+            },
         )
         .err()
     };
@@ -258,7 +264,10 @@ fn rounds_turn_round_a_boss_edge_mitred_or_swept() {
         &[1.0],
         &[],
         Corners::Filled,
-        Turn::Mitre,
+        BlendOptions {
+            turn: Turn::Mitre,
+            ..BlendOptions::default()
+        },
     )
     .unwrap();
     let v = p.volume(1e-10).unwrap();

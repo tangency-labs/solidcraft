@@ -23,6 +23,9 @@
 //! | [`KnotVector::basis_i_derivs`]         | `N_BasisIDerivs`                  |
 //! | [`Side`]                               | `NL_LEFT` / `NL_RIGHT` flags      |
 //! | [`MAX_DEGREE`]                         | `NL_MAXDEG`                       |
+//! | [`clamped_uniform`]                    | none (not upstream)               |
+//! | [`periodic_uniform`]                   | none (not upstream)               |
+//! | [`is_periodic`]                        | none (not upstream)               |
 //!
 //! Deviations:
 //! - Out-params become return values ([`Basis`], tuples, `Vec`s sized by the callee).
@@ -818,8 +821,179 @@ impl<'a> KnotVector<'a> {
     }
 }
 
+/// The clamped uniform knot vector of `count` control points of `degree` on `[0, 1]`: `degree +
+/// 1` zeros, the interior knots `i / (count - degree)` for `i` in `1..count - degree`, and
+/// `degree + 1` ones (Piegl and Tiller, *The NURBS Book*, 2nd ed., §2.2: a non-periodic,
+/// uniform knot vector).
+///
+/// Not upstream: the knots of a curve made from control points alone.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a degree of 0 or past [`MAX_DEGREE`], or fewer than
+/// `degree + 1` points.
+pub fn clamped_uniform(count: usize, degree: usize) -> Result<Vec<f64>> {
+    if degree == 0 || degree > MAX_DEGREE || count < degree + 1 {
+        return Err(SolidError::invalid_input(
+            "nurbs::knots::clamped_uniform",
+            "a degree of 0 or past the most, or too few points for it",
+        ));
+    }
+    let spans = count - degree;
+    let mut knots = vec![0.0; degree + 1];
+    knots.extend((1..spans).map(|i| i as f64 / spans as f64));
+    knots.extend(std::iter::repeat_n(1.0, degree + 1));
+    Ok(knots)
+}
+
+/// The uniform knots of a closed (periodic) curve of `count` control points of `degree`,
+/// whose control polygon repeats its first `degree` points after its last (`count + degree`
+/// points in all): `count + 2 degree + 1` knots `(i - degree) / count`, evenly spaced, so the
+/// curve's domain `[knots[degree], knots[count + degree]]` is `[0, 1]` and it joins itself
+/// there with continuity `degree - 1` (Piegl and Tiller, *The NURBS Book*, 2nd ed., §12.2:
+/// a periodic, uniform knot vector, unclamped).
+///
+/// Not a clamped vector, so not one for the routines that take only those:
+/// [`KnotVector::validate`] (upstream's clamped check) refuses it ([`is_periodic`] is its
+/// check), and [`KnotVector::basis_eval`] (upstream's `N_BasisEval`, kept for parity) reads the
+/// domain's ends as clamped ones, so the NLib curve's `eval` is wrong at them: evaluate such a
+/// curve with the general basis ([`crate::eval`]'s evaluator, or the NLib curve's `derivs`).
+///
+/// Not upstream: the knots of a closed curve made from control points alone.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a degree of 0 or past [`MAX_DEGREE`], fewer than
+/// `degree + 1` points, or more knots than [`crate::limits::MAX_ALLOC_BYTES`] holds;
+/// [`NurbsFailure::Memory`] when they cannot be reserved.
+pub fn periodic_uniform(count: usize, degree: usize) -> Result<Vec<f64>> {
+    if degree == 0 || degree > MAX_DEGREE || count < degree + 1 {
+        return Err(SolidError::invalid_input(
+            "nurbs::knots::periodic_uniform",
+            "a degree of 0 or past the most, or too few points for it",
+        ));
+    }
+    let len = count
+        .checked_add(2 * degree + 1)
+        .filter(|&len| crate::limits::fits::<f64>(len))
+        .ok_or_else(|| {
+            SolidError::invalid_input("nurbs::knots::periodic_uniform", "too many points")
+        })?;
+    let mut knots = Vec::new();
+    if !crate::limits::try_reserve_total(&mut knots, len) {
+        return Err(SolidError::nurbs(
+            "nurbs::knots::periodic_uniform",
+            NurbsFailure::Memory,
+        ));
+    }
+    let n = count as f64;
+    let p = degree as f64;
+    knots.extend((0..len).map(|i| (i as f64 - p) / n));
+    Ok(knots)
+}
+
+/// Whether `knots` are a periodic curve's of `degree`: unclamped (`U[0] < U[p]`), and every
+/// knot `n` places on, `n = len - 2 degree - 1` the curve's distinct control points, one
+/// period `T = U[n + p] - U[p]` (the domain's length) past it: `U[i + n] - U[i] = T` for
+/// `i = 0..=2 degree`, within the rounding of knots computed on the domain (8 ε of the
+/// largest knot and the period). Then a polygon that repeats its first `degree` points after
+/// its last closes on itself with continuity `degree - 1` (Piegl and Tiller, *The NURBS Book*,
+/// 2nd ed., §12.2); repeated points on other knots do not.
+///
+/// Not upstream.
+#[must_use]
+pub fn is_periodic(knots: &[f64], degree: usize) -> bool {
+    if degree == 0 || degree > MAX_DEGREE || !knots.iter().all(|k| k.is_finite()) {
+        return false;
+    }
+    let Some(n) = knots.len().checked_sub(2 * degree + 1).filter(|&n| n > 0) else {
+        return false;
+    };
+    let (Some(&u0), Some(&up), Some(&unp)) =
+        (knots.first(), knots.get(degree), knots.get(n + degree))
+    else {
+        return false;
+    };
+    let period = unp - up;
+    if !(u0 < up && period > 0.0) {
+        return false;
+    }
+    let largest = knots.iter().fold(0.0_f64, |m, k| m.max(k.abs()));
+    let slack = 8.0 * f64::EPSILON * (largest + period);
+    (0..=2 * degree).all(|i| match (knots.get(i), knots.get(i + n)) {
+        (Some(&a), Some(&b)) => (b - a - period).abs() <= slack,
+        _ => false,
+    })
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn periodic_knots_repeat_their_spans_one_period_on() {
+        for (count, degree) in [(3, 1), (4, 3), (7, 2), (12, 5)] {
+            let knots = periodic_uniform(count, degree).unwrap();
+            assert!(is_periodic(&knots, degree), "{count}, {degree}");
+            // shifted and scaled, still periodic
+            let moved: Vec<f64> = knots.iter().map(|k| 3.0 * k - 7.0).collect();
+            assert!(is_periodic(&moved, degree), "{count}, {degree}");
+        }
+        // unclamped but not periodic: the spans past the domain differ from those in it
+        assert!(!is_periodic(&[-2.0, -1.0, 0.0, 1.0, 2.0, 4.0, 5.0, 6.0], 2));
+        // clamped, or too few knots for the degree, or not finite
+        assert!(!is_periodic(&[0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0], 2));
+        assert!(!is_periodic(&[0.0, 1.0, 2.0, 3.0], 2));
+        assert!(!is_periodic(
+            &[0.0, f64::NAN, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0],
+            2
+        ));
+    }
+
+    #[test]
+    fn periodic_uniform_knots_are_evenly_spaced_with_the_domain_zero_to_one() {
+        let knots = periodic_uniform(4, 3).unwrap();
+        assert_eq!(knots.len(), 4 + 2 * 3 + 1);
+        assert_eq!(knots[3], 0.0);
+        assert_eq!(knots[7], 1.0);
+        assert_eq!(knots[0], -0.75);
+        assert_eq!(knots[10], 1.75);
+        for w in knots.windows(2) {
+            assert!((w[1] - w[0] - 0.25).abs() < 1e-15, "{knots:?}");
+        }
+        // the periodic contract, which the clamped validator (rightly) refuses
+        assert!(is_periodic(&knots, 3));
+        assert!(KnotVector::from_slice(&knots).unwrap().validate(3).is_err());
+        for (count, degree) in [(3, 3), (5, 0), (1, 1), (usize::MAX / 2, 1), (usize::MAX, 3)] {
+            assert!(
+                periodic_uniform(count, degree).is_err(),
+                "{count}, {degree}"
+            );
+        }
+    }
+
+    #[test]
+    fn clamped_uniform_knots_clamp_both_ends_and_space_the_rest_evenly() {
+        assert_eq!(
+            clamped_uniform(4, 3).unwrap(),
+            vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]
+        );
+        assert_eq!(
+            clamped_uniform(5, 2).unwrap(),
+            vec![0.0, 0.0, 0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0, 1.0, 1.0]
+        );
+        assert_eq!(clamped_uniform(2, 1).unwrap(), vec![0.0, 0.0, 1.0, 1.0]);
+        for (count, degree) in [(3, 3), (5, 0), (1, 1)] {
+            assert!(clamped_uniform(count, degree).is_err(), "{count}, {degree}");
+        }
+        for (count, degree) in [(7, 3), (12, 5)] {
+            let knots = clamped_uniform(count, degree).unwrap();
+            assert_eq!(knots.len(), count + degree + 1);
+            KnotVector::from_slice(&knots)
+                .unwrap()
+                .validate(degree)
+                .unwrap();
+        }
+    }
     use super::*;
     use crate::kernel::UpstreamFixes;
     use crate::nurbs::math::{CPoint, NOW};

@@ -145,7 +145,7 @@ fn array(v: Vec3) -> [f64; 3] {
 }
 
 /// The kernel's tooth as ops gives it.
-fn tooth(c: CurvatureAt) -> CombTooth {
+pub(crate) fn tooth(c: CurvatureAt) -> CombTooth {
     CombTooth {
         at: array(c.point),
         curvature: array(c.curvature),

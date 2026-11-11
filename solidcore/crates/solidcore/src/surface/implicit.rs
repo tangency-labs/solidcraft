@@ -181,7 +181,9 @@ impl BPoly {
 ///
 /// `SM_ERR` without NURB data; those of the Bézier decomposition.
 pub fn lies_on(form: &BSplineSurface, a: &Implicit) -> Result<bool> {
-    let nurb = form.gw_nurb().ok_or_else(|| SolidError::sm_err(OP))?;
+    let nurb = form
+        .gw_nurb()
+        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline surface has no NURB"))?;
     for row in decompose_to_bez(nurb)? {
         for patch in row {
             let (p, q) = patch.degrees();
@@ -208,7 +210,10 @@ pub fn lies_on(form: &BSplineSurface, a: &Implicit) -> Result<bool> {
 ///
 /// `SM_ERR` without NURB data; those of the Bézier decomposition.
 pub fn curve_lies_on(curve: &BSplineCurve, a: &Implicit) -> Result<bool> {
-    let nurb = curve.nurb.as_ref().ok_or_else(|| SolidError::sm_err(OP))?;
+    let nurb = curve
+        .nurb
+        .as_ref()
+        .ok_or_else(|| SolidError::surface_failed(OP, "the B-spline curve has no NURB"))?;
     for seg in nurb.decompose_bez()? {
         if !bezier_on(seg.degree(), 0, seg.cpts().iter(), a) {
             return Ok(false);
@@ -490,13 +495,13 @@ fn curve_segments(curve: &BSplineCurve) -> Result<(Vec<CurveSegment>, Vec3)> {
     let nurb = curve
         .nurb
         .as_ref()
-        .ok_or_else(|| SolidError::sm_err(OP_EXACT))?;
+        .ok_or_else(|| SolidError::surface_failed(OP_EXACT, "the B-spline curve has no NURB"))?;
     let w_of = |w: f64| if w == NOW { 1.0 } else { w };
     let origin = nurb
         .cpts()
         .first()
         .map(|c| Vec3::new(c.x, c.y, c.z) * (1.0 / w_of(c.w)))
-        .ok_or_else(|| SolidError::sm_err(OP_EXACT))?;
+        .ok_or_else(|| SolidError::surface_failed(OP_EXACT, "the curve has no control points"))?;
     let mut out = Vec::new();
     for seg in nurb.decompose_bez()? {
         let p = seg.degree();
@@ -883,13 +888,15 @@ fn lies_on_canal(
     map: &LeaderMap,
     radius: f64,
 ) -> Result<bool> {
-    let nurb = form.gw_nurb().ok_or_else(|| SolidError::sm_err(OP_EXACT))?;
+    let nurb = form
+        .gw_nurb()
+        .ok_or_else(|| SolidError::surface_failed(OP_EXACT, "the B-spline surface has no NURB"))?;
     let (segs, o) = curve_segments(spine)?;
     let spine_breaks = spine
         .nurb
         .as_ref()
         .map(|n| breaks(n.knots()))
-        .ok_or_else(|| SolidError::sm_err(OP_EXACT))?;
+        .ok_or_else(|| SolidError::surface_failed(OP_EXACT, "the spine has no NURB"))?;
     let (ub, vb) = (breaks(nurb.u_knots()), breaks(nurb.v_knots()));
     let along = if map.along_v { &vb } else { &ub };
     // the rounding of placing a span on the spine: of a + b w and of the spine's knots
@@ -1704,9 +1711,9 @@ fn euclidean_net(form: &BSplineSurface) -> Result<(Vec<Vec<Vec3>>, usize, usize)
     let mut net = vec![Vec::new(); nu];
     for (i, row) in net.iter_mut().enumerate() {
         for j in 0..nv {
-            let c = cps
-                .get(i * nv + j)
-                .ok_or_else(|| SolidError::sm_err(OP_DERIVE))?;
+            let c = cps.get(i * nv + j).ok_or_else(|| {
+                SolidError::surface_failed(OP_DERIVE, "the control point is outside the net")
+            })?;
             let w = if c.w == NOW { 1.0 } else { c.w };
             row.push(Vec3::new(c.x, c.y, c.z) * (1.0 / w));
         }

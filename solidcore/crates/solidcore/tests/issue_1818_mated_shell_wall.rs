@@ -314,7 +314,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.offset_clip_right_side_out = true;
     f.revolution_offset_axis_both_sides = true;
     f.offset_extended_edges_mated = true;
-    f.remove_slit_loops_where_solids_touch = true;
     f.keep_operand_uv_trims = true;
     f.geometric_g2_continuity = true;
     f.proto_vertex_miss_is_false = true;
@@ -338,8 +337,6 @@ fn solidcraft_fixes() -> UpstreamFixes {
     f.fillet_nx1_end_rib_global_merge = true;
     f.uv_trim_corner_end_points_only = true;
     f.bspline_trim_preserves_uv_spans = true;
-    f.cone_parallel_line_midpoint = true;
-    f.cone_parallel_line_domains = true;
     f.proto_edge_self_loop_on_vertex_degenerate = true;
     f.slice_coincident_faces_sheet_side = true;
     f.boolean_outer_shell_first = true;

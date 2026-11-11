@@ -296,9 +296,9 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         _ => Paint::One,
     };
     let changes_of = c.colored_property().filter(|n| c.complex.integer(n)).map(str::to_string);
-    let at = panel_pos(app);
+    let (pivot, at) = crate::shell::floating_editor_anchor(app, ctx).unwrap_or_else(|| (egui::Align2::LEFT_TOP, panel_pos(app)));
     let (closed, action) = ui_kit::Window::new(egui::Id::unique("sc_point_cloud_panel"), "point", &title)
-        .placed(egui::Align2::LEFT_TOP, at)
+        .placed(pivot, at)
         .fields()
         .actions("", solidcraft_ui_text::tr("ui.close"), None)
         .show(ctx, true, |ui| {

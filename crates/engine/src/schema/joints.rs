@@ -413,7 +413,7 @@ macro_rules! read_with {
     )*};
 }
 
-read_with!(JointKey, OccurrenceKey, JointTypeParam, JointValue, JointValues, JointLimits, JointOriginArg);
+read_with!(JointKey, OccurrenceKey, JointTypeParam, ConstraintTypeParam, JointValue, JointValues, JointLimits, JointOriginArg);
 
 /// The call's keys as an object. (`TypedContract::check` has refused anything else already.)
 fn keys<'de, D: Deserializer<'de>>(d: D) -> Result<Map<String, Value>, D::Error> {
@@ -639,6 +639,37 @@ impl<'de> Deserialize<'de> for CreateConstraintParams {
             quiet: flag(&m, "quiet")?,
         })
     }
+}
+
+/// Change a constraint (a joint made with `assembly.constraint.create`) in place: its rule, gap,
+/// angle, facing, name or suppression. A new rule must fit the references the constraint has; the gap
+/// carries over. The change goes through joint.edit: the values start again where the parts are.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct EditConstraintParams {
+    /// The constraint, by id or name.
+    pub constraint: IdOrName,
+    /// The new rule, as assembly.constraint.create takes it. Default: the rule it has.
+    #[serde(default, rename = "type", deserialize_with = "present")]
+    pub kind: Option<ConstraintTypeParam>,
+    /// The gap: a length, or an expression the constraint follows. Default: the gap it has.
+    #[serde(default, deserialize_with = "present")]
+    pub offset: Option<LengthExpr>,
+    /// An angle rule's angle: an angle, or an expression. Needed to change to angle.
+    #[serde(default, deserialize_with = "present")]
+    pub angle: Option<AngleExpr>,
+    /// True turns b over: from the new rule's way after a type change, else from how it faces now.
+    #[serde(default, deserialize_with = "present")]
+    pub flip: Option<bool>,
+    /// The constraint's new name.
+    #[serde(default, deserialize_with = "present")]
+    pub name: Option<String>,
+    /// Suppress the constraint (true) or bring it back (false).
+    #[serde(default, deserialize_with = "present")]
+    pub suppressed: Option<bool>,
+    /// Leave out the degrees of freedom and the fixed occurrences in the reply.
+    #[serde(default, deserialize_with = "present")]
+    pub quiet: Option<bool>,
 }
 
 /// Add a joint between two occurrences that stay where they are: its frame is a joint origin
@@ -2360,6 +2391,9 @@ pub struct ReachResult {
     pub stopped_by_limit: Option<Vec<LimitStop>>,
     /// The closed loop that stopped it (its chain alone gets closer); `null` when none.
     pub stopped_by_loop: Option<ReachLoopStop>,
+    /// With contact sets on: the pair of a set that stopped it where they touch, as `joint.drive`
+    /// says; `null` when none.
+    pub stopped_by_contact: Option<ContactStop>,
     /// Why nothing can move. Left out when the reach worked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,

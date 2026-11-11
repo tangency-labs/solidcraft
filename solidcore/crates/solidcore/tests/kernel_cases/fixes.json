@@ -41,7 +41,6 @@
   "offset_extended_edges_mated",
   "offset_swap_uv_extended_distance",
   "thicken_planar_side_walls",
-  "remove_slit_loops_where_solids_touch",
   "keep_operand_uv_trims",
   "geometric_g2_continuity",
   "degen_param_tiebreak_uses_actual_param",
@@ -114,13 +113,10 @@
   "bspline_trim_preserves_uv_spans",
   "bspline_trim_keeps_rational_end_spans",
   "knot_vector_valid_requires_span",
-  "cone_parallel_line_midpoint",
-  "cone_parallel_line_domains",
   "cylinder_plane_tangent_within_tolerance",
   "proto_edge_self_loop_on_vertex_degenerate",
   "slice_coincident_faces_sheet_side",
   "boolean_outer_shell_first",
-  "boolean_temporary_transform_statuses",
   "planar_path_sweep_statuses",
   "brep_edit_statuses_pass_on",
   "query_statuses_pass_on",
@@ -243,9 +239,5 @@
   "fillet_section_end_trim_at_creases",
   "fillet_overflow_crease_along_edge",
   "plane_first_torus_section_exact",
-  "keep_exact_pcurves",
-  "split_edge_definition_owns_its_curves",
-  "simple_coincidence_side_across_the_curve",
-  "boolean_capture_keeps_operand_vertices_apart",
-  "radial_sector_step_off_coincidence_by_own_face"
+  "keep_exact_pcurves"
 ]

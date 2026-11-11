@@ -640,6 +640,21 @@ After a request is cancelled or stopped the connection is free at once (`control
 outlasted its wait can be cancelled from the connection that sent it: 60 s, or 3600 s for
 `engine.batch` and for every request from the agent chat's own connection.
 
+### Params
+
+A field may be left out where a method marks it optional (`?`), but a field that is present must
+have the documented type: a wrong type, or `null` for a field with a default (such as `shift` or
+`delta`), is refused with an error naming the field, and nothing runs. An optional field without a
+default takes `null` as left out (not `ui.scroll`'s `unit` or `ui.home`'s `sample`, which refuse
+it); `engine.execute` takes `params: null` as `{}`, and `ui.start` as no params (so
+`solid.extrude` starts on `null` but refuses `{}`).
+`ui.set`, `ui.blur`, `ui.editFolder`, `ui.resize`, `ui.palette`, `ui.agent_cursor` and
+`ui.icon_audit` still read their fields one by one: the first four refuse a wrong type, the other
+three pass over it. Screen points (`x`, `y`)
+must lie within ±1 000 000. In particular, `engine.execute` takes `command` or its alias `id`,
+not both; `ui.help` refuses an item it doesn't know; and `ui.menu` needs both `x` and `y` to open
+a menu (neither describes the open one).
+
 ## Engine
 
 | Method | Params | Result |
@@ -784,6 +799,12 @@ drawing and answering while it runs:
 - Batches with `timings` or `profile` still run on the window thread, so the times they report
   measure the real work.
 
+A file being opened or inserted (from the window or the control channel) holds the agent's
+design changes the same way until it is in, so an agent's `doc.open` and the edits after it go
+in that order. The person at the window can go on working meanwhile: the file is a row of the
+operations panel, and its result lands after their edits (`ui.prefs {"file_operations_wait":
+true}` brings back the card over the design that makes everything wait for the file).
+
 Timeouts and `control.pending` work as described above. A slow command is still answered when it
 is done, from a later frame. With the preference off, commands run on the window thread, and the
 window waits for each one.
@@ -839,7 +860,7 @@ no box selection.
 
 | Method | Params | Notes |
 |---|---|---|
-| `ui.inspect` | — | UI state, pending file picker (`file_picker_busy`; compatibility alias `file_dialog_open`, no path), what is hidden (`visibility`: bodies, origin and construction items, sketches, joints (`hidden_joints`, joint ids); set it with the `browser.visibility` command), viewport rect, camera, the active tool (its command id), the open dialog (`dialog`, below), the windows open beside the model (`windows`, each named by what opens it: the `ui.start` command `parameters.change`, `document.metadata`, `sketch.inspect`, `assembly.bom` or `material.properties.validate`, or the `ui.help` item `about`, `updates`, `shortcuts`, `crashes`, `report`, or `messages`), what is under the pointer (`hover`, in the form of a selection item: `{"type": "edge", "body", "index", "mid", "point"}`, or null), the status line (`status`: text and whether it is an error), renderer, timings, what the GPU drew last frame (`draw`: `draw_calls`, `triangles`, `line_segments`, `supersampled`; null without a GPU) and the graphics `adapter`, live preview (`active`, `busy`, `error`, `ms`, bodies it stands in for) |
+| `ui.inspect` | — | UI state, pending file picker (`file_picker_busy`; compatibility alias `file_dialog_open`, no path), what is hidden (`visibility`: bodies, origin and construction items, sketches, joints (`hidden_joints`, joint ids); set it with the `browser.visibility` command), viewport rect, camera, the active tool (its command id), the open dialog (`dialog`, below, or else the "Recover unsaved design?" prompt shown after an unclean exit as `{kind: "recover_unsaved", title, designs: [{id, name, path, features, saved_at, autosaved}], actions: ["recover", "discard", "later"]}`, answered with `ui.recover`), the windows open beside the model (`windows`, each named by what opens it: the `ui.start` command `parameters.change`, `document.metadata`, `sketch.inspect`, `assembly.bom` or `material.properties.validate`, or the `ui.help` item `about`, `updates`, `shortcuts`, `crashes`, `report`, or `messages`), what is under the pointer (`hover`, in the form of a selection item: `{"type": "edge", "body", "index", "mid", "point"}`, or null), the status line (`status`: text and whether it is an error), renderer, timings, what the GPU drew last frame (`draw`: `draw_calls`, `triangles`, `line_segments`, `supersampled`; null without a GPU) and the graphics `adapter`, live preview (`active`, `busy`, `error`, `ms`, bodies it stands in for) |
 | `ui.set` | any `UiState` field (`tab`, `perspective`, `showGrid`, `dark`, `layout`, …), and the browser's view of the design, saved with it: `showOrigin` (the Origin folder's eye), `showSketches` (the design's Sketches folder, `c0/sketches` in `hiddenFolders`), `hiddenBodies`, `hiddenOrigin`, `hiddenSketches`, `shownSketches`, `hiddenJoints`, `hiddenFolders`, `hiddenProfiles`, `shownDims`, `lockedBodies` (whole lists; `browser.visibility` changes single items) | `dark: false` switches to the light theme; `layout: "floating"` (default) or `"compact"` (`"docked"` is also accepted) selects the transient shell layout without saving a preference. Scenarios use `{"call":"ui.set","params":{"layout":"docked"}}` |
 | `ui.view` | `view`: `front`, `back`, `top`, `bottom`, `left`, `right`, `iso`, `home`, `fit`; `animate` (bool, default false: snap) | |
 | `ui.camera` | `target?`: `[x, y, z]` (mm), `yaw?`, `pitch?`, `roll?` (radians), `distance?` (mm), `fov?`, `up?`; `fit?`: `true`, `false` or `[occurrence id or name…]` (`root`: the bodies outside every component) | the viewport's orbit camera: it looks at `target` from `distance` away; `yaw` 0 looks along +Y (from the front), `pitch` is the elevation (±π/2: straight down or up), `roll` turns the image. Fields given are set first (the others keep their values), then `fit` frames the listed occurrences (or everything), keeping the direction. The reply, passed back, sets the same view again, so a framing can be stored and replayed. `fov` is the angle the view is drawn with: 0 (parallel) with Perspective view off or while a sketch is open, else `perspective_fov`; in Render, the Render camera's own. `fov` and `up` follow the perspective setting (`ui.set`), its angle (`ui.prefs {perspective_fov}`) and the up axis preference (`ui.prefs`) and can't change here; a refused field changes nothing |
@@ -877,6 +898,7 @@ no box selection.
 | `ui.help` | `item?`: `about`, `updates` (checks for updates and shows the result), `shortcuts` (read only), `report` (opens a report draft for review), `crashes` (the Crash Reports window), `docs` (the documentation in the browser), `messages` (the Messages window), `install_cli` (macOS: links `solidcraft-cli` into `/usr/local/bin`); another item is an error | the version, commit, build date and diagnostic text |
 | `ui.prefs` | any of the [`ui.prefs` settings](#uiprefs-settings) below; also `open`, `button` and `stand_up` (listed there) | sets preferences (kept between runs), returns them all plus `dialog` (the open page or null), `apply_enabled` (whether the dialog's Apply has a change to keep), `dark`, `viewport_dark` (whether the 3D view is dark), `stand_up_offer` (the offered bodies, or null), `stand_up_note` (whether that offer is the note), `theme_followed`, `theme_follow_error`, `theme_option_defs`, `theme_option_values` and `theme_option_notices` |
 | `ui.capture` | `action?`: `capture`, `revert`, `cancel` | answers the Capture Position question (asked when a command starts or the design is saved while components were moved without capturing); without `action`, what waits |
+| `ui.recover` | `action?`: `recover`, `discard`, `later`; `id?` (a design's `id`; default: the first one listed) | answers the "Recover unsaved design?" prompt as its buttons do: `recover` opens that design's last autosave (in the background; poll `ui.inspect.file_busy`; refused while the open design has unsaved changes), `discard` deletes it (`doc.recovery_discard`), `later` closes the prompt and keeps them all for the next launch; a non-string `id` is refused, and so is `recover` while 32 designs are open and the active design is not blank (the entry stays offered); returns the prompt as `ui.inspect` reports it (`dialog`, null when no designs remain) and `file_busy`. Without `action`, returns only the current `dialog` |
 | `ui.window` | `action`: minimize, maximize, restore, toggle, close | what the title bar's caption buttons do (on Windows and Linux the application bar is the title bar); close asks about unsaved designs first |
 | `ui.agent_cursor` | `show` (bool), `speed`: a number from 1 to 5 (times the normal speed) or `"instant"` (no animation: the command runs at once and the pointer jumps to where it acted), `follow_camera` (bool); all optional | the settings. While the cursor is shown, `engine.execute` first glides to the command's toolbar button and to each pick, then runs and replies; later requests wait their turn. The pointer shows the command's localized name, including commands inside a closed toolbar group; an animated batch names each command it visits. It also follows the pointer input sent with `ui.move`, `ui.click`, `ui.drag` and `ui.scroll`, as each event reaches the app, and a press leaves a ripple. `"animate": false` on a call skips it |
 | `engine.execute` → `view.layout` | `mode`: `floating` or `compact` | Apply and save the workspace layout without opening a dialog, changing the design, resetting the camera or cancelling its active tool. General preferences expose the same choice; `ui.prefs {"layout":"compact"}` also saves it. |
@@ -887,8 +909,8 @@ no box selection.
 | `ui.resize` | `width`, `height` | |
 | `app.quit` | `force?` (quit without asking about unsaved designs) | `quitting` (the window closes), `asking` (a "save changes?" prompt is open) |
 
-`dialog` (in `ui.inspect`, `ui.start` and `ui.editFeature`) is `null`, or the open dialog as
-an object that doesn't change with the form's internals:
+`dialog` (in `ui.inspect`, `ui.start` and `ui.editFeature`) is `null`, the recovery prompt
+described above, or the open feature dialog as an object that doesn't change with the form's internals:
 
 ```json
 {"command": "solid.extrude", "title": "EXTRUDE", "editing": null,
@@ -960,6 +982,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `hole_several` (default false: a face takes several Single holes; a pick elsewhere on a face that has a hole adds another, and a pick on a hole takes it out)
 - `hole_snaps` (default false: a Single hole snaps to its face's middle and round edges' centres)
 - `home_fit_size` (0.1…1, default 1: how much of the view the model fills when Home, Fit, an opened design or a navigator view change frames it, with `navigator_fit` on or off; 1 fills the room between the panels, the compass and the navigation bar, as before; #10091)
+- `joint_drag_trackball` (default true: dragging a part that a ball joint holds to a part fixed in place turns it by the smallest turn about the joint, like a trackball the size of the part; false: the grabbed point follows the pointer and the part may spin about it, as before #13262)
 - `joint_rotation_coarse` (default 10°): coarse Assembly Move rotation step, in 0.001…180°.
 - `joint_rotation_fine` (default 0.1°): fine Assembly Move rotation step, in 0.001…180°.
 - `keep_unsaved_also_asks` (default true; web app, with `keep_unsaved_in_browser` on: the browser's "leave site?" box still appears when the tab closes with unsaved work; off, it appears only while a copy isn't current yet, #10220)

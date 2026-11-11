@@ -271,7 +271,6 @@ fn inputs() -> (Vec<Curve>, Vec<Curve>) {
     (vec![profile.into()], vec![path.into()])
 }
 fn enable_audited_fixes(k: &mut Kernel) {
-    k.fixes.boolean_temporary_transform_statuses = true;
     k.fixes.planar_path_profile_placement_statuses = true;
     k.fixes.planar_path_sweep_statuses = true;
     k.fixes.fillet_trim_status = true;

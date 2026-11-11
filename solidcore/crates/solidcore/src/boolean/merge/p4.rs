@@ -52,6 +52,7 @@ use crate::math::Vec3;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::brep::BrepQuery;
 use crate::topology::brep::p1 as bp;
+use crate::topology::brep::p9::OrientSheetNote;
 use crate::topology::edgeuse::p1 as eu;
 use crate::topology::face::p2 as face;
 use crate::topology::topology_traverser::{self as traverser, Entity, Marks};
@@ -1285,7 +1286,9 @@ fn is_oriented_sheet(kernels: &mut BooleanKernels<'_>, other: &Brep) -> Result<b
 /// under the type code and arena index of each entity (`loopuse::notify_ref`, as the
 /// slit-loop removal below), and without a context: the boolean holds no notification
 /// state for the other B-rep, so its attributes and the context's callbacks see none
-/// of these edits (upstream's do).
+/// of these edits (upstream's do). Its note is returned as upstream's status `1`
+/// ([`OrientSheetNote::stop_on_note`]), which the merge ignores or passes on as it does
+/// any other status of the call.
 fn orient_sheet_surfaces(
     kernels: &mut BooleanKernels<'_>,
     other: &mut Brep,
@@ -1301,7 +1304,13 @@ fn orient_sheet_surfaces(
         context: None,
         key_of: &crate::topology::loopuse::notify_ref,
     };
-    crate::topology::brep::p9::orient_sheet_surfaces(k, other, Some(face), same, &mut env)
+    OrientSheetNote::stop_on_note(crate::topology::brep::p9::orient_sheet_surfaces(
+        k,
+        other,
+        Some(face),
+        same,
+        &mut env,
+    ))
 }
 
 /// `new SmBrep(dSize, dRatio, pOptContextForStack)` for a component: the B-rep and its
@@ -1773,18 +1782,15 @@ fn manifold_boolean_translated(
             *primary = None;
         }
     }
-    // Not upstream (tangency-labs/solidcore#746; opt-in,
-    // `Kernel::fixes.remove_slit_loops_where_solids_touch`): a volumetric Boolean's result
+    // Not upstream (tangency-labs/solidcore#746, WR-360): a volumetric Boolean's result
     // loses the zero-area inner loops a contact curve inside a face left, and the shells
     // joined only through them are split (the fork's `RemoveSlitLoopsWhereSolidsTouch`
     // before `rpResult = m_vTI.m_pBrep`). The destroyed edge uses notify on call-local
     // records under their type code and arena index.
-    if kernels.primary.fixes.remove_slit_loops_where_solids_touch
-        && matches!(
-            operation,
-            BooleanOperation::Union | BooleanOperation::Intersection | BooleanOperation::Difference
-        )
-    {
+    if matches!(
+        operation,
+        BooleanOperation::Union | BooleanOperation::Intersection | BooleanOperation::Difference
+    ) {
         if let Some(a) = primary.as_mut() {
             let editing = a.editing_enabled();
             a.set_editing_enabled(true);

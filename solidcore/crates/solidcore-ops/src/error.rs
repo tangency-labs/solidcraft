@@ -124,6 +124,43 @@ pub enum Error {
         /// The join's index: after piece `join`.
         join: usize,
     },
+    /// The curves bounding a patch (`crate::surface`) that do not meet end to end: the end of
+    /// curve `join` is not proved within the model's zone tolerance of an end of the next one
+    /// (for the last join, `join + 1` the number of curves, of the first), `gap` apart (the
+    /// kernel's distance between the nearest ends).
+    BoundaryGap {
+        /// The join's index: after curve `join`.
+        join: usize,
+        /// How far apart the ends are.
+        gap: f64,
+    },
+    /// A curve network (`crate::network`) whose u-curve `u` and v-curve `v` do not cross
+    /// once: the kernel's intersector found `count` crossings.
+    NoCrossing {
+        /// The u-curve's index.
+        u: usize,
+        /// The v-curve's index.
+        v: usize,
+        /// How many crossings were found.
+        count: usize,
+    },
+    /// A curve network whose u-curve `u` and v-curve `v` are not proved within the model's
+    /// zone tolerance at the network's common crossing parameters: `gap` bounds how far apart
+    /// they are there (the curves do not cross at one parameter of each family).
+    NetworkGap {
+        /// The u-curve's index.
+        u: usize,
+        /// The v-curve's index.
+        v: usize,
+        /// The certified bound of their distance.
+        gap: f64,
+    },
+    /// A change to a curve that would move it farther than the tolerance asked (a knot
+    /// removed, its degree lowered): the kernel's certified bound of how far it would move.
+    PastTolerance {
+        /// The certified bound of the move.
+        bound: f64,
+    },
     /// An extension that cannot run as far as asked (a weight of the extended surface would
     /// vanish, a pole, an apex or a full turn is reached, or its length there cannot be
     /// measured to the kernel's stop): the longest distance proved to work, when there is one.
@@ -227,6 +264,134 @@ pub enum Error {
         /// The bound below which an angle meets the other face.
         largest: f64,
     },
+    /// An offset, shell, thicken, sheet offset or draft the kernel refuses with a reason of
+    /// its own (its `OffsetFailure`, other than those [`Error::WallsTouch`],
+    /// [`Error::WallFolds`] and [`Error::Unsupported`] carry): why, and the face it names, by
+    /// its record index where the call takes the body's [`crate::Order`] (else by its index
+    /// among the body's faces), when it names one the body holds.
+    OffsetRefused {
+        /// The face the refusal names.
+        face: Option<usize>,
+        /// Why.
+        why: OffsetRefusal,
+    },
+}
+
+/// Why the kernel refuses an offset or a draft ([`Error::OffsetRefused`]), as its
+/// `OffsetFailure` names it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum OffsetRefusal {
+    /// The face's offset by `distance` is not proved regular, and no wall size would help:
+    /// the face bends towards that side nowhere the kernel's sizing looked, so no radius of
+    /// curvature limits the wall, and the proof ran out (not a wall thicker than the face
+    /// curves, [`Error::WallFolds`]).
+    NotCertified {
+        /// The offset distance asked for (signed).
+        distance: f64,
+    },
+    /// The face's offset by `distance` collapses onto a line or point: the face has a radius
+    /// of curvature `radius` on the displaced side that the distance reaches.
+    Collapses {
+        /// The offset distance asked for (signed).
+        distance: f64,
+        /// The radius of curvature the face attains on the displaced side.
+        radius: f64,
+    },
+    /// Loops of the face's offset cross in a way the offset does not resolve: how.
+    LoopsCross {
+        /// How they cross.
+        crossing: solidcore::error::offset::LoopCrossing,
+    },
+    /// The offset distance is not a finite length at least the body's tolerance, the
+    /// smallest distance it resolves.
+    DistanceUnresolved {
+        /// The distance asked for.
+        distance: f64,
+        /// The smallest distance the body resolves.
+        resolution: f64,
+    },
+    /// The offset body's tolerance would be nonzero but no more than the effective zero: one
+    /// no body can hold.
+    ToleranceUnresolved {
+        /// The tolerance asked for.
+        tolerance: f64,
+    },
+    /// The face meets itself across a seam, and the surface the operation gives it is not
+    /// closed there.
+    SeamOpened,
+    /// The faces beside an edge meet on an exact curve that could not be cut into its pieces.
+    ExactCurveUncut,
+    /// In a local operation, the new surfaces of the face and of its neighbour across an
+    /// edge meet nowhere near the edge, so the edge cannot be found again.
+    FacesApart,
+    /// How far the surfaces beside an edge or at a vertex of the face must be extended to
+    /// meet has no certified bound (a pair or corner of kinds it does not bound yet): refused
+    /// before anything changed.
+    ReachUncertified,
+    /// An offset face has a gap in its loops, and the segment that would bridge it is not
+    /// established within tolerance.
+    LoopGapUncertified,
+    /// The body built fails what the input did not: what.
+    Unsound {
+        /// What the built body fails.
+        what: solidcore::error::offset::Unsoundness,
+    },
+    /// A reason this version of ops does not name yet: the kernel's own statement of it.
+    Other {
+        /// The kernel's statement of its reason.
+        message: String,
+    },
+}
+
+impl std::fmt::Display for OffsetRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OffsetRefusal::NotCertified { distance } => {
+                write!(f, "its offset by {distance} is not proved regular")
+            }
+            OffsetRefusal::Collapses { distance, radius } => write!(
+                f,
+                "its offset by {distance} collapses (a radius of curvature {radius})"
+            ),
+            OffsetRefusal::LoopsCross { crossing } => {
+                write!(f, "its offset's loops cross ({crossing:?})")
+            }
+            OffsetRefusal::DistanceUnresolved {
+                distance,
+                resolution,
+            } => write!(
+                f,
+                "the distance {distance} is below the body's resolution {resolution}"
+            ),
+            OffsetRefusal::ToleranceUnresolved { tolerance } => {
+                write!(f, "the tolerance {tolerance} is one no body can hold")
+            }
+            OffsetRefusal::SeamOpened => write!(f, "its surface opens across its seam"),
+            OffsetRefusal::ExactCurveUncut => {
+                write!(f, "an exact curve between extended faces could not be cut")
+            }
+            OffsetRefusal::FacesApart => {
+                write!(
+                    f,
+                    "its new surface and a neighbour's meet nowhere near their edge"
+                )
+            }
+            OffsetRefusal::ReachUncertified => {
+                write!(
+                    f,
+                    "how far its neighbours extend to meet it has no certified bound"
+                )
+            }
+            OffsetRefusal::LoopGapUncertified => {
+                write!(
+                    f,
+                    "a gap in its offset's loops cannot be bridged within tolerance"
+                )
+            }
+            OffsetRefusal::Unsound { what } => write!(f, "the body built is unsound ({what:?})"),
+            OffsetRefusal::Other { message } => write!(f, "{message}"),
+        }
+    }
 }
 
 /// Why an edge has no blend ([`Error::EdgeNotBlendable`]), as the kernel names it
@@ -356,6 +521,22 @@ impl std::fmt::Display for Error {
                 "the sweep path's pieces {join} and {} do not meet",
                 join.saturating_add(1)
             ),
+            Error::BoundaryGap { join, gap } => write!(
+                f,
+                "the boundary curves {join} and {} do not meet: {gap} apart",
+                join.saturating_add(1)
+            ),
+            Error::NoCrossing { u, v, count } => write!(
+                f,
+                "the network's u-curve {u} and v-curve {v} cross {count} times, not once"
+            ),
+            Error::NetworkGap { u, v, gap } => write!(
+                f,
+                "the network's u-curve {u} and v-curve {v} are up to {gap} apart where they cross"
+            ),
+            Error::PastTolerance { bound } => {
+                write!(f, "the change would move the curve by up to {bound}")
+            }
             Error::TooFar { largest } => write!(f, "too far to extend (largest {largest:?})"),
             Error::Exception => write!(f, "solidcore raised an internal exception"),
             Error::ContactUndecided {
@@ -404,6 +585,10 @@ impl std::fmt::Display for Error {
                 f,
                 "the chamfer angle {angle} rad of edge {edge} runs past the other face: below {largest} rad fits"
             ),
+            Error::OffsetRefused { face, why } => match face {
+                Some(face) => write!(f, "the offset is refused at face {face}: {why}"),
+                None => write!(f, "the offset is refused: {why}"),
+            },
         }
     }
 }

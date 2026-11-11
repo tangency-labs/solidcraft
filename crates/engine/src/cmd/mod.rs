@@ -41,7 +41,8 @@ mod face;
 mod features;
 mod features_more;
 mod join_pieces;
-pub(crate) use construct::{GeoForm, GeoFormError, REF as GEO_REF_FORMS, SKETCH_PART, geo_form, is_model_axis, plane_axis_point_kind};
+pub use construct::picked_plane_refs;
+pub(crate) use construct::{GeoForm, GeoFormError, REF as GEO_REF_FORMS, SKETCH_PART, geo_form, is_model_axis, picked_plane};
 pub use construct_auto::{construct_method, construct_methods, is_construct_tool};
 pub use design_link::{LinkProblem, LinkState};
 pub(crate) use face::{FaceRefForm, face_ref_form};
@@ -109,7 +110,10 @@ mod parameters;
 mod plastic;
 mod print_face;
 mod render;
-pub(crate) use render::{PreparedCapture, prepare_capture_with_metadata, render_cancel_params};
+pub(crate) use render::{
+    PreparedCapture, prepare_capture_with_metadata, read_render_request, render_cancel_params, render_form_refusal, render_saved_job_refusal,
+    render_started,
+};
 pub(crate) use render_ui::batch_request;
 mod render_ui;
 #[cfg(test)]

@@ -682,6 +682,7 @@ fn offscreen(
         pv_hide: false,
         preview_bounds: None,
         view_proj,
+        turned_depth: None,
         back,
         size_px: [size as f32; 2],
         clip: [0.0; 4],

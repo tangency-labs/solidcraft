@@ -421,7 +421,7 @@ fn read_with<'a>(
         skipped |= any;
         shells.push(faces);
     }
-    b.finish(item, name, shells, if skipped { Kind::Open } else { kind })
+    b.finish(item, name, shells, if skipped { Kind::Open { voids: kind == Kind::Voids } } else { kind })
 }
 
 /// A face of a solid read on its own ([`read_faces_with`]).
@@ -550,8 +550,12 @@ enum Kind {
     Solid,
     Voids,
     Model,
-    /// A solid with faces left out ([`read_solid_without`]): its shells are sheets only.
-    Open,
+    /// A solid with faces left out ([`read_solid_without`]): its shells are sheets, but for a
+    /// shell still closed, which bounds a region of its own (a void's cavity, where `voids`: the
+    /// solid's shells after the first are its voids).
+    Open {
+        voids: bool,
+    },
 }
 
 /// A curve the edge can be read on, and how its parameter relates to its vertices.
@@ -1335,9 +1339,16 @@ impl<'b, 'a> Builder<'b, 'a> {
                     regions.push(Region { shells: vec![index(v)?], void: true });
                 }
             }
-            Kind::Open => {
+            Kind::Open { voids } => {
                 if let Some(r) = regions.first_mut() {
                     r.shells = (0..index(shells.len())?).collect();
+                }
+                // A closed shell bounds two regions: the cavity inside a void still whole, or
+                // the inside of an outer shell or a model's shell still whole.
+                for (k, c) in closed.iter().enumerate() {
+                    if *c {
+                        regions.push(Region { shells: vec![index(k)?], void: voids && k > 0 });
+                    }
                 }
             }
             Kind::Model => {
@@ -1351,7 +1362,7 @@ impl<'b, 'a> Builder<'b, 'a> {
                 }
             }
         }
-        let sheet = kind == Kind::Open || !closed.iter().any(|c| *c);
+        let sheet = matches!(kind, Kind::Open { .. }) || !closed.iter().any(|c| *c);
 
         // Canonical order: faces walking regions → shells → oriented faces.
         let nf = self.faces.len();
@@ -1593,13 +1604,14 @@ impl<'b, 'a> Builder<'b, 'a> {
                     None => self.face_extent(fi)?,
                 };
                 let extent = extent.ok_or_else(|| unsupported("a face whose boundary does not lie on its surface"))?;
-                Some(crate::kernel::form::surface_within(&label, extent, tol).ok_or_else(|| unsupported("a face of more than one turn"))?)
+                let (f, d) = crate::kernel::form::surface_within(&label, extent, tol).ok_or_else(|| unsupported("a face of more than one turn"))?;
+                Some((f, d, extent))
             }
             None => None,
         };
-        let (form, box_on_form) = match form {
-            Some((f, d)) => (Some(f), Some(d)),
-            None => (None, None),
+        let (form, box_on_form, extent) = match form {
+            Some((f, d, e)) => (Some(f), Some(d), Some(e)),
+            None => (None, None, None),
         };
         let surface = form.clone().unwrap_or_else(|| label.clone());
         // How far each edge lies off this surface, so its closed form is checked at that.
@@ -1618,8 +1630,14 @@ impl<'b, 'a> Builder<'b, 'a> {
             }
             _ => None,
         };
-        let pcs =
+        let mut pcs =
             pcurve::pcurves_within(&surface, &uses_of(&self.edges, &edge_loops, made.as_ref())?, tol, box_on_form).map_err(|e| e.to_string())?;
+        // A form ends on a quarter line its face's boundary runs past by up to the tolerance: the
+        // pcurves are put on its range, as the face's domain is ([`face_domain`]), and the edges'
+        // tolerances cover the move.
+        if let (Some(f), Some(e)) = (&form, extent) {
+            onto_form(f, &label, e, tol, &mut pcs);
+        }
         self.raise_edges(&surface, &edge_loops, &pcs)?;
         // Signed areas of the loops that close in (u, v).
         let periods = natural_periods(&surface);
@@ -1869,6 +1887,72 @@ fn loop_area(l: &[(u32, bool)], pcs: &[Curve2], periodic: [bool; 2]) -> Option<f
         magnitude += c.abs();
     }
     (area.abs() > 1e-9 * magnitude && magnitude > 0.0).then_some(0.5 * area)
+}
+
+/// The angles `tolerance` (mm) makes along the two directions of a face on `label` over the
+/// height `v`: on the widest circle of the face about the axis (a cylinder or cone), and on a
+/// sphere's meridian or a torus's tube. `form::surface_within` ends a face's form on a quarter
+/// line its domain ends within these angles of; zero along a direction that is no angle.
+fn form_reach(label: &BSurface, v: [f64; 2], tolerance: f64) -> [f64; 2] {
+    let reach = |radius: f64| if tolerance > 0.0 && radius > 0.0 && radius.is_finite() { tolerance / radius } else { 0.0 };
+    match label {
+        BSurface::Cylinder { radius, .. } => [reach(radius.abs()), 0.0],
+        BSurface::Cone { radius_at_origin, half_angle, .. } => {
+            let slope = half_angle.tan();
+            [reach(v.iter().map(|h| (radius_at_origin + h * slope).abs()).fold(0.0, f64::max)), 0.0]
+        }
+        BSurface::Sphere { radius, .. } => [reach(radius.abs()), reach(radius.abs())],
+        BSurface::Torus { major_radius, minor_radius, .. } => [reach(major_radius.abs() + minor_radius.abs()), reach(minor_radius.abs())],
+        _ => [0.0, 0.0],
+    }
+}
+
+/// A face's pcurves on the form `form::surface_within` made for it (`form`, over `domain` on
+/// the label `label`), put on the form's range. Where the domain ends within `tolerance` of a
+/// quarter's end the form ends there, but the boundary still lies where its edges do, as much as
+/// `tolerance` past it: a pcurve control point past the form's end by no more than the form
+/// parameter of that angle (less than the angle: a quarter's parameter changes by at most 1/√2
+/// per radian, [`form_reach`]) is moved onto the end. A B-spline is a convex combination of its
+/// control points, so each pcurve then lies on the form, and the face's domain, which ends at
+/// the form's, holds it; the pcurve moves by no more than its points did, a gap the edges'
+/// tolerances are measured to cover (`raise_edges`). A point further out is left as it is, for
+/// the record check to refuse. The number of control point coordinates moved.
+fn onto_form(form: &BSurface, label: &BSurface, domain: [[f64; 2]; 2], tolerance: f64, pcs: &mut [Vec<Curve2>]) -> usize {
+    let reach = form_reach(label, domain[1], tolerance);
+    let ranges = solidcore_ops::label::surface_natural(form);
+    let mut moved = 0;
+    let mut onto = |p: &mut [f64; 2]| {
+        for (d, reach) in reach.iter().enumerate() {
+            let (Some(Natural::Range(a, b)), Some(x)) = (ranges.get(d), p.get_mut(d)) else { continue };
+            let end = if *x < *a {
+                *a
+            } else if *x > *b {
+                *b
+            } else {
+                continue;
+            };
+            if (*x - end).abs() <= *reach {
+                *x = end;
+                moved += 1;
+            }
+        }
+    };
+    for c in pcs.iter_mut().flatten() {
+        match c {
+            Curve2::Spline { points, .. } => points.iter_mut().for_each(&mut onto),
+            Curve2::RationalSpline { homogeneous, .. } => {
+                for h in homogeneous.iter_mut().filter(|h| h[2] > 0.0) {
+                    let mut p = [h[0] / h[2], h[1] / h[2]];
+                    let before = p;
+                    onto(&mut p);
+                    if p != before {
+                        (h[0], h[1]) = (p[0] * h[2], p[1] * h[2]);
+                    }
+                }
+            }
+        }
+    }
+    moved
 }
 
 /// The parameter box around every pcurve's control points, padded a little, within the

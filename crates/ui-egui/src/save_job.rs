@@ -32,7 +32,7 @@ pub fn start(app: &mut SolveApp, command: &'static str, params: Value) -> bool {
         return false;
     }
     #[cfg(not(target_arch = "wasm32"))]
-    if app.saving.is_none() && app.file_picker.is_none() && !app.file_load.busy() {
+    if app.saving.is_none() && app.file_picker.is_none() && !app.file_load_holds() {
         let mut copy = app.session.scratch();
         // The copy has no file: the command saves to this session's (and names the design after it).
         copy.path.clone_from(&app.session.path);
