@@ -134,6 +134,27 @@ pub enum Error {
         /// How far apart the ends are.
         gap: f64,
     },
+    /// A curve network (`crate::network`) whose u-curve `u` and v-curve `v` do not cross
+    /// once: the kernel's intersector found `count` crossings.
+    NoCrossing {
+        /// The u-curve's index.
+        u: usize,
+        /// The v-curve's index.
+        v: usize,
+        /// How many crossings were found.
+        count: usize,
+    },
+    /// A curve network whose u-curve `u` and v-curve `v` are not proved within the model's
+    /// zone tolerance at the network's common crossing parameters: `gap` bounds how far apart
+    /// they are there (the curves do not cross at one parameter of each family).
+    NetworkGap {
+        /// The u-curve's index.
+        u: usize,
+        /// The v-curve's index.
+        v: usize,
+        /// The certified bound of their distance.
+        gap: f64,
+    },
     /// A change to a curve that would move it farther than the tolerance asked (a knot
     /// removed, its degree lowered): the kernel's certified bound of how far it would move.
     PastTolerance {
@@ -504,6 +525,14 @@ impl std::fmt::Display for Error {
                 f,
                 "the boundary curves {join} and {} do not meet: {gap} apart",
                 join.saturating_add(1)
+            ),
+            Error::NoCrossing { u, v, count } => write!(
+                f,
+                "the network's u-curve {u} and v-curve {v} cross {count} times, not once"
+            ),
+            Error::NetworkGap { u, v, gap } => write!(
+                f,
+                "the network's u-curve {u} and v-curve {v} are up to {gap} apart where they cross"
             ),
             Error::PastTolerance { bound } => {
                 write!(f, "the change would move the curve by up to {bound}")
