@@ -122,7 +122,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             };
             let made = Traced::step(trimmed, &[&mb.traced()]);
             if let Some(slot) = st.bodies.get_mut(i) {
-                *slot = ModelBody::traced_new(mb.name, made, mb.feature);
+                *slot = mb.remade(made);
             }
             Ok(())
         }
@@ -357,7 +357,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             match rest {
                 Some(rest) => {
                     if let Some(slot) = st.bodies.get_mut(i) {
-                        *slot = ModelBody::traced_new(mb.name.clone(), source.then(rest), mb.feature);
+                        *slot = mb.remade(source.then(rest));
                     }
                 }
                 None => {
@@ -375,7 +375,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
             let turned = mb.traced().then(kernel::reverse_faces(&mb.body, &crate::plain(faces))?);
             if let Some(slot) = st.bodies.get_mut(i) {
-                *slot = ModelBody::traced_new(mb.name, turned, mb.feature);
+                *slot = mb.remade(turned);
             }
             Ok(())
         }
@@ -551,7 +551,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let made = mb.traced().then(kernel::untrim(&mb.body, fi, which, *outer, replace)?);
             if replace {
                 if let Some(slot) = st.bodies.get_mut(i) {
-                    *slot = ModelBody::traced_new(mb.name, made, mb.feature);
+                    *slot = mb.remade(made);
                 }
             } else {
                 let name = new_name(st, f, 0);
