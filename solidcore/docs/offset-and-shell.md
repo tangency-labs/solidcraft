@@ -302,9 +302,9 @@ old line, unless the reach proves that the new surfaces, a plane and a quadric, 
 normal section of the edge (`LocalReach::crossing`, `local_extension_reach`). The plane then cuts
 the quadric on both sides of the old edge, about √(2rδ) away for a round of radius r moved by δ,
 so the nearest midpoint decides nothing: the mitre keeps the cut on the curved face's side, where
-the plane is extended past its edge. An edge that ends beside such a tangent edge ends at that
-edge's new vertex; where the vertex is not on its curve, the operation is refused
-(`OffsetFailure::TangentEndOffCurve`).
+the plane is extended past its edge. An edge mated next to such a tangent edge, once that one is
+mated, ends at its new vertex (a lamina edge still ends at its vertex's image); where that vertex
+is not on the edge's curve, the mate is refused (`OffsetFailure::TangentEndOffCurve`).
 
 **Moving faces** (`offset/offset_faces.rs`, `OffsetFacesExecutive`): the tangent blends on the
 named faces are taken off, the faces moved by a local operation onto their offset surfaces, and the

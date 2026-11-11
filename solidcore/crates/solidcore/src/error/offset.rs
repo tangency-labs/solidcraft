@@ -596,7 +596,8 @@ impl core::fmt::Display for OffsetFailure {
                  mated",
             ),
             Self::TangentEndOffCurve => f.write_str(
-                "an edge ends beside a tangent edge whose new faces now cross, and that edge's                  new vertex is not on the edge's new curve, so the edge cannot end there",
+                "an edge ends beside a tangent edge whose new faces now cross, and that edge's new \
+                 vertex is not on the edge's new curve, so the edge cannot end there",
             ),
             Self::ToleranceUnresolved { tolerance } => write!(
                 f,

@@ -2500,9 +2500,10 @@ impl OffsetGeometryCreation {
     /// extended surfaces of the offsets of non-tangent neighbours (non-grazing ones
     /// only); or, without candidates, the drop of the base vertex onto the curve. The
     /// candidate closest to the base vertex (and not the start already chosen) wins.
-    /// Not upstream: beside a mated neighbour whose faces were tangent in the input and whose
-    /// new surfaces cross in a local operation (`OffsetExecutive::crosses_at`), that
-    /// neighbour's vertices on the curve are the only candidates.
+    /// Not upstream: beside a neighbour already offset (marked) whose faces were tangent in
+    /// the input and whose new surfaces cross in a local operation
+    /// (`OffsetExecutive::crosses_at`), that neighbour's vertices on the curve are the only
+    /// candidates (a lamina base edge still takes its vertex's image).
     /// `None` (`bGoodEdge == FALSE`) when an end has no candidate or the interval is
     /// zero length. `offset_edgeuse` and `other_offset_edgeuse` are `NotUsed`.
     ///
@@ -4547,7 +4548,8 @@ impl OffsetGeometryCreation {
     /// extends convex edges, lamina and tangent edges are
     /// extended/trimmed (`ExtendTrimEdges`) and the others mated (`MateEdges`),
     /// problems only reported (not upstream: a tangent edge whose new surfaces cross in a
-    /// local operation is mated, and [`OffsetFailure::TangentEndOffCurve`] passed on). Otherwise a non-convex radial sector gets nothing
+    /// local operation is mated, and the mate's [`OffsetFailure::TangentEndOffCurve`] is
+    /// passed on). Otherwise a non-convex radial sector gets nothing
     /// (`SM_ERR` for a tangent sector with gaps between the offsets), a lamina edge
     /// nothing, an inset on a shell face mates the offset edges to the other face's
     /// surface; else the rails (the offset edges' trimmed curves, or the approximated
