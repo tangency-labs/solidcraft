@@ -151,10 +151,10 @@ fn an_edge_origin_on_a_body_placed_by_an_offset_lands_on_that_edge() {
 fn a_corner_whose_other_edge_is_gone_asks_again() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 5, "corner": [0, 0, 0], "body_name": "Plate"}));
-    let boss = run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 5, "base": [20, 20, 5], "operation": "join", "targets": ["Plate"]}))
-        ["feature"]
-        .as_u64()
-        .unwrap();
+    let boss =
+        run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 5, "base": [20, 20, 5], "operation": "join", "targets": ["Plate"]}))["feature"]
+            .as_u64()
+            .unwrap();
     let st = s.model.state();
     let snap = solidcraft_doc::joints::edge_snap(
         &s.doc,
