@@ -1493,7 +1493,10 @@ fn nearly_round_spindle_torus_pin_end_in_halves_imports_whole() {
     t += &context(70, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))").replace("LENGTH_MEASURE(1.E-6)", "LENGTH_MEASURE(1.E-5)");
     t += TAIL;
     let (volume, area) = pin_with_cylinder(major, minor);
-    assert_closed_measures(&t, volume, area, &[]);
+    // The apex lies 3.6e-5 mm off the pole, past the file's 1e-5: the body's tolerance covers it,
+    // as SMLib checks a vertex's gap from its faces against the body's.
+    let note = "solid 'Pin': the file states its geometry within 0.00001 mm, but its edges and vertices need tolerances up to 2.174e-4 mm and its vertices lie up to 3.623e-5 mm off their faces: the body's tolerance is 7.246e-5 mm";
+    assert_closed_measures(&t, volume, area, &[note]);
 }
 
 /// The lemon of a spindle torus (the tube's part across the axis: a closed surface with a pole
@@ -2041,7 +2044,10 @@ fn extruded_ellipse_patch_crossing_profile_seam_stays_trimmed() {
             );
             assert!(text.contains(&old));
             let text = text.replacen(&old, &surface, 1);
-            let imported = step_import(&text).unwrap();
+            let mut imported = step_import(&text).unwrap();
+            // The ellipse's edges lie up to 6e-4 mm off the patch, past the zone the file's 1e-3
+            // gives them in SMLib, so their tolerances are raised; that note is not this test's.
+            imported.warnings.retain(|w| !w.contains("edges lie off their faces' surfaces"));
             // Against its loop (same_sense false) the face is turned over, and the import says so.
             let open = "solid 'Strip': imported as an open body (the shell is not closed)";
             let turned = "solid 'Strip': 1 faces turned over: their loops disagree with their same_sense";
@@ -2180,9 +2186,22 @@ fn dome_with_edges_raised(dz: f64) -> String {
     patch_with_edges_raised(dz, false)
 }
 
+/// [`dome_with_edges_raised`] with only the edges' inner control points raised: the vertices lie
+/// on the dome's corners and each edge bows off it between them, up to `0.75 dz` at its middle,
+/// as an intersection curve written looser than its file states does.
+fn dome_with_edges_bowed(dz: f64) -> String {
+    patch_with_edges(dz, false, false)
+}
+
 /// [`dome_with_edges_raised`], or with `flat` the plane z = 0 in its place: its edges' pcurves
 /// are then their control points' projections onto it, in closed form.
 fn patch_with_edges_raised(dz: f64, flat: bool) -> String {
+    patch_with_edges(dz, flat, true)
+}
+
+/// [`patch_with_edges_raised`]; with `ends` false the vertices and the edges' end control points
+/// stay on the patch.
+fn patch_with_edges(dz: f64, flat: bool, ends: bool) -> String {
     let z = |i: usize, j: usize| if !flat && (1..=2).contains(&i) && (1..=2).contains(&j) { 6.0 } else { 0.0 };
     let mut t = String::from(HEAD);
     let mut rows = Vec::new();
@@ -2205,12 +2224,13 @@ fn patch_with_edges_raised(dz: f64, flat: bool) -> String {
     // i = 3, then back; each side's control points are the patch's, raised.
     let sides: [[(usize, usize); 4]; 4] =
         [[(0, 0), (1, 0), (2, 0), (3, 0)], [(3, 0), (3, 1), (3, 2), (3, 3)], [(3, 3), (2, 3), (1, 3), (0, 3)], [(0, 3), (0, 2), (0, 1), (0, 0)]];
-    let p = |(i, j): (usize, usize)| format!("({}.,{}.,{})", i * 10, j * 10, z(i, j) + dz);
+    let p = |(i, j): (usize, usize), dz: f64| format!("({}.,{}.,{})", i * 10, j * 10, z(i, j) + dz);
+    let end_dz = if ends { dz } else { 0.0 };
     for (k, side) in sides.iter().enumerate() {
-        t += &format!("#{}=CARTESIAN_POINT('',{});\n#{}=VERTEX_POINT('',#{});\n", 200 + k, p(side[0]), 210 + k, 200 + k);
+        t += &format!("#{}=CARTESIAN_POINT('',{});\n#{}=VERTEX_POINT('',#{});\n", 200 + k, p(side[0], end_dz), 210 + k, 200 + k);
         let pts: Vec<String> = (0..4).map(|m| format!("#{}", 300 + k * 4 + m)).collect();
         for (m, &q) in side.iter().enumerate() {
-            t += &format!("#{}=CARTESIAN_POINT('',{});\n", 300 + k * 4 + m, p(q));
+            t += &format!("#{}=CARTESIAN_POINT('',{});\n", 300 + k * 4 + m, p(q, if m == 0 || m == 3 { end_dz } else { dz }));
         }
         t += &format!("#{}=B_SPLINE_CURVE_WITH_KNOTS('',3,({}),.UNSPECIFIED.,.F.,.F.,(4,4),(0.,1.),.UNSPECIFIED.);\n", 400 + k, pts.join(","));
     }
@@ -2241,6 +2261,16 @@ fn edges_written_off_their_spline_face_carry_their_gap_as_their_tolerance() {
     assert!(imp.warnings.iter().any(|w| w.contains("4 edges lie off their faces' surfaces")), "{:?}", imp.warnings);
     let r = imp.bodies[0].body.record();
     assert!(r.edges.iter().all(|e| e.tolerance >= 2e-4 && e.tolerance < 1e-3), "{:?}", r.edges.iter().map(|e| e.tolerance).collect::<Vec<_>>());
+    // A record tolerance is SMLib's intersection tolerance, twice the zone a gap must lie within,
+    // and SMLib checks a vertex's gaps against half its zone (#11997): with its vertices on the
+    // dome's corners and its edges bowed off between them, the body checks there (at 1.5 times
+    // the gap SMLib refused it, "Bad Gap"). Edges up to 1e-4 off keep within SMLib's 1000:1 to
+    // the body's 1e-6; vertices off their faces, or edges farther off, need the body's tolerance
+    // raised.
+    for dz in [2e-5, 1e-4] {
+        let imp = step_import(&dome_with_edges_bowed(dz)).unwrap();
+        crate::validation::check_kept(&imp.bodies[0].body).unwrap_or_else(|e| panic!("edges {dz} mm off: {e}"));
+    }
     // Far off (1.5 mm) is refused, naming the gap.
     let far = step_import(&dome_with_edges_raised(1.5));
     let refused = match &far {
@@ -2248,6 +2278,110 @@ fn edges_written_off_their_spline_face_carry_their_gap_as_their_tolerance() {
         Err(e) => e.to_string().contains("off the face's surface"),
     };
     assert!(refused, "{far:?}");
+}
+
+/// A file whose edges or vertices lie farther off their faces than its stated uncertainty allows
+/// SMLib (#11997: a body written with 1e-6 whose intersection edges lie 5.6e-4 off a spline face).
+/// SMLib checks each vertex's gap from its faces against the body's tolerance, and takes no edge
+/// or vertex zone of 1000 times the body's: such a body was refused before any operation. The
+/// body's tolerance now covers both, and the body checks.
+#[test]
+fn edges_farther_off_than_the_stated_uncertainty_allows_raise_the_bodys_tolerance() {
+    let tolerances = |imp: &crate::step_in::StepImport| {
+        let r = imp.bodies[0].body.record();
+        let widest = r.edges.iter().map(|e| e.tolerance).chain(r.vertices.iter().map(|v| v.tolerance)).fold(0.0, f64::max);
+        (r.tolerance, widest)
+    };
+    // Edges bowed up to 3.75e-4 mm off between vertices on the dome, 375 times the file's 1e-6:
+    // the body's tolerance keeps the widest edge or vertex within SMLib's ratio, no more.
+    let imp = step_import(&dome_with_edges_bowed(5e-4)).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    crate::validation::check_kept(&imp.bodies[0].body).unwrap();
+    let (body, widest) = tolerances(&imp);
+    assert!(body >= widest / 1000.0 && body <= widest / 100.0, "body {body}, widest {widest}");
+    assert!(imp.warnings.iter().any(|w| w.contains("the body's tolerance is")), "{:?}", imp.warnings);
+    // Edges and vertices 5e-4 mm off: the body's tolerance covers the vertices' gaps.
+    let imp = step_import(&dome_with_edges_raised(5e-4)).unwrap();
+    crate::validation::check_kept(&imp.bodies[0].body).unwrap();
+    let (body, _) = tolerances(&imp);
+    assert!((5e-4..=1.1e-3).contains(&body), "body {body}");
+    // Within what the stated uncertainty allows, the body keeps it.
+    let imp = step_import(&dome_with_edges_bowed(5e-5)).unwrap();
+    assert_eq!(tolerances(&imp).0, 1e-6, "{:?}", imp.warnings);
+}
+
+/// The dome of [`dome_with_edges_bowed`] whose four edges are polylines along its flat
+/// boundary, 64 spans each, with one inner point `dz` mm above it: each edge bumps off the dome
+/// over 1/32 of its length, peaking halfway between two of the points the reader
+/// samples its gaps at (#12757).
+fn dome_with_narrow_bumps(dz: f64) -> String {
+    let base = patch_with_edges(0.0, false, false);
+    let sides: [[(usize, usize); 2]; 4] = [[(0, 0), (3, 0)], [(3, 0), (3, 3)], [(3, 3), (0, 3)], [(0, 3), (0, 0)]];
+    let mut t = String::new();
+    for line in base.lines() {
+        // Each side's cubic, #400..#403, is replaced by its polyline (points from #1000).
+        let side = (0..4).find(|k| line.starts_with(&format!("#{}=B_SPLINE_CURVE_WITH_KNOTS", 400 + k)));
+        let Some(k) = side else {
+            t += line;
+            t += "\n";
+            continue;
+        };
+        let [(i0, j0), (i1, j1)] = sides[k];
+        let n = 65;
+        let mut ids = Vec::new();
+        for m in 0..n {
+            let f = m as f64 / (n - 1) as f64;
+            let (x, y) = ((i0 as f64 + (i1 as f64 - i0 as f64) * f) * 10.0, (j0 as f64 + (j1 as f64 - j0 as f64) * f) * 10.0);
+            let id = 1000 + k * 100 + m;
+            t += &format!("#{id}=CARTESIAN_POINT('',({x:.17E},{y:.17E},{:.17E}));\n", if m == 2 { dz } else { 0.0 });
+            ids.push(format!("#{id}"));
+        }
+        let knots: Vec<String> = (0..n).map(|m| format!("{:.17E}", m as f64 / (n - 1) as f64)).collect();
+        let mults: Vec<String> = (0..n).map(|m| if m == 0 || m == n - 1 { "2" } else { "1" }.to_string()).collect();
+        t += &format!(
+            "#{}=B_SPLINE_CURVE_WITH_KNOTS('',1,({}),.UNSPECIFIED.,.F.,.F.,({}),({}),.UNSPECIFIED.);\n",
+            400 + k,
+            ids.join(","),
+            mults.join(","),
+            knots.join(",")
+        );
+    }
+    t
+}
+
+#[test]
+fn an_edges_gap_between_the_points_sampled_is_covered() {
+    // Each edge bumps 2e-5 mm off the dome, narrowly, between two of the reader's samples
+    // (#12757: 15 edges of an imported body lay up to 1.7 times farther off than sampled, and
+    // SMLib refused it, "Bad Gap"). Its tolerance covers the peak, and the body checks.
+    let imp = step_import(&dome_with_narrow_bumps(2e-5)).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let r = imp.bodies[0].body.record();
+    assert!(r.edges.iter().all(|e| e.tolerance >= 2e-5), "{:?}", r.edges.iter().map(|e| e.tolerance).collect::<Vec<_>>());
+    crate::validation::check_kept(&imp.bodies[0].body).unwrap_or_else(|e| panic!("{e}"));
+}
+
+/// A vertex's tolerance is six times its gap (#11997) but never past SMLib's 1 mm: the ends of
+/// edges 0.2 mm off their face take 1 mm and are kept, as they were at 1.5 times the gap. (The
+/// vertex 0.19 mm off its LINE of #3352 needs no raise now: the edge is read as the segment
+/// between its vertices, and the part still reads.)
+#[test]
+fn raised_vertex_tolerances_stay_within_smlib_limit() {
+    let slipped = step_import(include_str!("../../../../tests/kernel-cases/import/3352-vertex-off-its-edge-curve/input.step")).unwrap();
+    assert_eq!(slipped.bodies.len(), 1, "{:?}", slipped.warnings);
+    let imp = step_import(&dome_with_edges_bowed(0.3)).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let r = imp.bodies[0].body.record();
+    let most = r.vertices.iter().map(|v| v.tolerance).chain(r.edges.iter().map(|e| e.tolerance)).fold(0.0, f64::max);
+    assert!(most > 0.2 && most <= 1.0, "bowed edges: {most}");
+    // Edges bowed about 0.6 mm off: three times the gap passes SMLib's 1 mm, so they take 1 mm and
+    // are kept, as they were at 1.5 times it (a NIST FTC 07 edge 0.64 mm off its face).
+    let far = step_import(&dome_with_edges_bowed(0.8)).unwrap();
+    assert_eq!(far.bodies.len(), 1, "{:?}", far.warnings);
+    assert!(!far.warnings.iter().any(|w| w.contains("left out") || w.contains("imported as surfaces")), "{:?}", far.warnings);
+    let r = far.bodies[0].body.record();
+    let most = r.edges.iter().map(|e| e.tolerance).fold(0.0, f64::max);
+    assert!(most > 0.5 && most <= 1.0, "edges bowed farther: {most}");
 }
 
 #[test]

@@ -66,6 +66,10 @@ fn trims(face: &TrimFace<'_>) -> Result<Vec<Vec<Curve2>>, String> {
     Ok(result)
 }
 
+/// The least margin an edge's tolerance covers its gap with where [`SURFACE_GAP_MARGIN`] would
+/// pass SMLib's limit: it takes the limit instead, as the STEP reader does.
+const LEAST_GAP_MARGIN: f64 = 1.5;
+
 /// Each bare use's edge measured against the face's surface as SMLib measures it (over the
 /// surface's own domain: an edge run a few um past its patch measures how far), and its
 /// `EDGE_TOLERANCE` in `arrays` raised to cover that gap with [`SURFACE_GAP_MARGIN`]: SMLib keeps
@@ -85,14 +89,16 @@ fn cover_gaps(body: &crate::Brep, face: &TrimFace<'_>, bare: &HashSet<(u32, u32,
     let mut raised = false;
     for e in edges {
         let gap = body.edge_face_distance(e, 0).map_err(|e| e.to_string())?;
-        let need = SURFACE_GAP_MARGIN * gap;
+        // The margin up to SMLib's limit; refused only where even the least margin, the reader's
+        // (1.5), would pass it.
+        if !(LEAST_GAP_MARGIN * gap <= crate::flat::MAX_TOLERANCE) {
+            return Err(format!("an edge lies {gap} mm off the face's surface"));
+        }
+        let need = (SURFACE_GAP_MARGIN * gap).min(crate::flat::MAX_TOLERANCE);
         let tolerances = arrays.reals.get_mut(&crate::flat::EDGE_TOLERANCE).ok_or("edge tolerances")?;
         let given = tolerances.get_mut(e).ok_or("edge reference")?;
         if need <= *given {
             continue;
-        }
-        if !(need <= crate::flat::MAX_TOLERANCE) {
-            return Err(format!("an edge lies {gap} mm off the face's surface"));
         }
         *given = need;
         raised = true;
