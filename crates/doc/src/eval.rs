@@ -5007,7 +5007,10 @@ fn named_pieces_of(
             (name, feature)
         };
         taken.insert(name.clone());
-        out.push(ModelBody::new(name, p, made_by).with_lineage(lineage));
+        // Each piece stays in the whole's component until the feature ends (#14305).
+        let mut piece = ModelBody::new(name, p, made_by).with_lineage(lineage);
+        piece.component = mb.component;
+        out.push(piece);
     }
     out
 }
