@@ -3570,6 +3570,7 @@ fn paint_product_kind(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, c
             pv_hide: false,
             preview_bounds: None,
             view_proj: product_projection(camera, radius, rect, image).to_f32(),
+            turned_depth: None,
             back: camera.back().to_f32(),
             size_px: [rect.width() * ppp, rect.height() * ppp],
             clip: [0.0; 4],

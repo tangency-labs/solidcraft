@@ -1076,6 +1076,10 @@ pub struct Frame {
     pub preview_bounds: Option<solidcraft_viewport::vec::Bounds>,
     /// Column-major view-projection.
     pub view_proj: [[f32; 4]; 4],
+    /// Each column's depth turned round (w - z) for a reversed depth buffer, worked out in f64
+    /// (`Mat4::turned_depth_f32`). None: taken from `view_proj`, which is exact enough while the
+    /// near plane is not tiny beside the scene.
+    pub turned_depth: Option<[f32; 4]>,
     /// Direction toward the eye (for lighting).
     pub back: [f32; 3],
     /// Viewport size in physical pixels.
@@ -2720,10 +2724,20 @@ pub fn far_depth(reversed: bool) -> f32 {
 /// The view-projection the GPU draws with: `vp` (depth 0 near, 1 far, as the CPU uses it), with
 /// depth turned round (z' = w - z) for reversed depth. Columns, as `Mat4::to_f32` gives them.
 pub fn gpu_view_proj(vp: [[f32; 4]; 4], reversed: bool) -> [[f32; 4]; 4] {
+    gpu_view_proj_turned(vp, None, reversed)
+}
+
+/// [`gpu_view_proj`] with the turned depth of each column given where the caller worked it out
+/// in f64 ([`Frame::turned_depth`]).
+pub fn gpu_view_proj_turned(vp: [[f32; 4]; 4], turned: Option<[f32; 4]>, reversed: bool) -> [[f32; 4]; 4] {
     if !reversed {
         return vp;
     }
-    vp.map(|c| [c[0], c[1], c[3] - c[2], c[3]])
+    let mut out = vp.map(|c| [c[0], c[1], c[3] - c[2], c[3]]);
+    if let Some(t) = turned {
+        out.iter_mut().zip(t).for_each(|(c, z)| c[2] = z);
+    }
+    out
 }
 
 impl Renderer {
@@ -3655,6 +3669,7 @@ pub fn frame_key(cb: &Frame) -> u64 {
     cb.pv_key.hash(&mut h);
     cb.pv_hide.hash(&mut h);
     cb.view_proj.iter().flatten().for_each(|v| v.to_bits().hash(&mut h));
+    cb.turned_depth.iter().flatten().for_each(|v| v.to_bits().hash(&mut h));
     cb.back.map(f32::to_bits).hash(&mut h);
     cb.eye.map(f32::to_bits).hash(&mut h);
     cb.size_px.map(f32::to_bits).hash(&mut h);
@@ -4628,7 +4643,7 @@ fn local_direction(model: &[[f32; 4]; 4], d: [f32; 3]) -> [f32; 3] {
 }
 
 fn uniform_bytes_placing(cb: &Frame, w: f32, h: f32, linear: bool, reversed: bool, model: [[f32; 4]; 4]) -> Vec<u8> {
-    let mut v: Vec<f32> = gpu_view_proj(cb.view_proj, reversed).iter().flatten().copied().collect();
+    let mut v: Vec<f32> = gpu_view_proj_turned(cb.view_proj, cb.turned_depth, reversed).iter().flatten().copied().collect();
     v.extend([cb.back[0], cb.back[1], cb.back[2], if linear { 1.0 } else { 0.0 }]);
     v.extend([w.max(1.0), h.max(1.0), 0.0, if cb.outline { 1.0 } else { 0.0 }]);
     v.extend(cb.clip);
@@ -4931,6 +4946,7 @@ mod tests {
             pv_hide: false,
             preview_bounds: None,
             view_proj: [[0.0; 4]; 4],
+            turned_depth: None,
             back: [0.0; 3],
             size_px: [800.0, 600.0],
             clip: [0.0; 4],
@@ -5470,6 +5486,7 @@ mod glass_tests {
             pv_hide: false,
             preview_bounds: None,
             view_proj: [[0.1, 0.0, 0.0, 0.0], [0.0, 0.1, 0.0, 0.0], [0.0, 0.0, -0.01, 0.0], [0.0, 0.0, 0.5, 1.0]],
+            turned_depth: None,
             back: [0.0, 0.0, 1.0],
             size_px: [SIZE as f32; 2],
             clip,
@@ -5669,6 +5686,7 @@ mod glass_tests {
             pv_hide: false,
             preview_bounds: None,
             view_proj: [[0.1, 0.0, 0.0, 0.0], [0.0, 0.1, 0.0, 0.0], [0.0, 0.0, -0.01, 0.0], [0.0, 0.0, 0.5, 1.0]],
+            turned_depth: None,
             back: [0.0, 0.0, 1.0],
             size_px: [SIZE as f32; 2],
             clip: [0.0; 4],
