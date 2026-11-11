@@ -49,7 +49,8 @@ const OP_FIT: &str = "nurbs::crv_deviation::interpolation_bound";
 ///
 /// # Errors
 ///
-/// `InvalidInput` for a rational or 2D curve, or a parameter count other than the points';
+/// `InvalidInput` for a rational or 2D curve, a parameter count other than the points', or a
+/// number not finite;
 /// a query failure when the bound is not finite; those of the evaluation (a parameter
 /// outside the knots).
 pub fn interpolation_bound(c: &Curve, params: &[f64], points: &[Vec3]) -> Result<f64> {
@@ -61,6 +62,15 @@ pub fn interpolation_bound(c: &Curve, params: &[f64], points: &[Vec3]) -> Result
             OP_FIT,
             "one parameter per point needed",
         ));
+    }
+    // a NaN distance would be dropped by `f64::max`: every number is checked first
+    if !finite(c)
+        || !params.iter().all(|u| u.is_finite())
+        || !points
+            .iter()
+            .all(|q| q.x.is_finite() && q.y.is_finite() && q.z.is_finite())
+    {
+        return Err(SolidError::invalid_input(OP_FIT, "numbers not finite"));
     }
     let size = largest_coordinate(c);
     let mut largest = 0.0_f64;
@@ -85,8 +95,8 @@ pub fn interpolation_bound(c: &Curve, params: &[f64], points: &[Vec3]) -> Result
 ///
 /// # Errors
 ///
-/// `InvalidInput` for a rational or 2D curve, knots not clamped, or two curves on different
-/// domains; a query failure when their pieces do not share their spans or the bound is not
+/// `InvalidInput` for a rational or 2D curve, a number not finite, knots not clamped, or two
+/// curves on different domains; a query failure when their pieces do not share their spans or the bound is not
 /// finite; those of the refinement, the extraction and the elevation.
 pub fn certified_distance(a: &Curve, b: &Curve) -> Result<f64> {
     check(a)?;
@@ -133,8 +143,20 @@ pub fn certified_distance(a: &Curve, b: &Curve) -> Result<f64> {
     Ok(bound)
 }
 
-/// Refuses a curve the bound does not take: rational, 2D, or with knots not clamped.
+/// Whether every control point coordinate and knot of `c` is finite.
+fn finite(c: &Curve) -> bool {
+    c.cpts()
+        .iter()
+        .all(|p| p.x.is_finite() && p.y.is_finite() && p.z.is_finite())
+        && c.knots().iter().all(|k| k.is_finite())
+}
+
+/// Refuses a curve the bound does not take: rational, 2D, with a number not finite, or with
+/// knots not clamped.
 fn check(c: &Curve) -> Result<()> {
+    if !finite(c) {
+        return Err(SolidError::invalid_input(OP, "numbers not finite"));
+    }
     if c.cpts().iter().any(|p| p.w != NOW) {
         return Err(SolidError::invalid_input(OP, "a rational curve"));
     }
@@ -291,6 +313,36 @@ mod tests {
         let d = interpolation_bound(&c, &params, &off).unwrap();
         assert!((0.5..0.5 + 1e-12).contains(&d), "{d}");
         assert!(interpolation_bound(&c, &params[..3], &on).is_err());
+    }
+
+    #[test]
+    fn numbers_not_finite_are_refused_not_dropped() {
+        let c = spline(&WAVE, 3);
+        let params = [0.0, 0.5, 1.0];
+        let mut on: Vec<Vec3> = params
+            .iter()
+            .map(|&u| c.eval(u, Side::Left).unwrap())
+            .collect();
+        assert!(matches!(
+            interpolation_bound(&c, &[0.0, f64::NAN, 1.0], &on),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        on[1].y = f64::NAN;
+        assert!(matches!(
+            interpolation_bound(&c, &params, &on),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        let mut bad = WAVE;
+        bad[2][0] = f64::NAN;
+        let nan = spline(&bad, 3);
+        assert!(matches!(
+            certified_distance(&c, &nan),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        assert!(matches!(
+            interpolation_bound(&nan, &params, &on[..]),
+            Err(SolidError::InvalidInput { .. })
+        ));
     }
 
     #[test]
