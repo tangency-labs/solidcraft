@@ -629,13 +629,18 @@ mod tests {
         let mut points = String::new();
         for i in 0..=n {
             let a = std::f64::consts::TAU * (i % n) as f64 / n as f64;
-            points.push_str(&format!("10
+            points.push_str(&format!(
+                "10
 {}
 20
 {}
-", 30.0 * a.cos(), 30.0 * a.sin()));
+",
+                30.0 * a.cos(),
+                30.0 * a.sin()
+            ));
         }
-        let dxf = format!("0
+        let dxf = format!(
+            "0
 SECTION
 2
 ENTITIES
@@ -649,7 +654,8 @@ SPLINE
 ENDSEC
 0
 EOF
-");
+"
+        );
         let mut s = Session::default();
         let r = s.execute("sketch.insert_dxf", &json!({"text": dxf})).unwrap();
         let sk = s.model.state().sketch(r["sketch"].as_u64().unwrap()).unwrap().clone();
