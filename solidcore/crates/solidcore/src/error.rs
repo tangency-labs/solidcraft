@@ -29,7 +29,7 @@
 //! | [`nurbs::NurbsFailure`], [`nurbs::BSplineFailure`] | NLib error flag + `NL_ERROR.eno` (`N_ErrSet`): the `NL_*_ERR` numbers, in solidcore's terms |
 //! | [`defeature::DefeatureFailure`] | none: why a defeature keeps a feature (#3218) |
 //! | [`sweep::SweepFailure`]     | none: why a sweep or loft refuses, and the sweep routines' failures |
-//! | [`curve::CurveFailure`]     | none: why a curve query refuses (#3184)           |
+//! | [`curve::CurveFailure`]     | none: why a curve query refuses, and the curve routines' failures |
 //! | [`query::QueryFailure`]     | none: the query routines' failures               |
 //! | [`topology::TopologyFailure`] | none: the topology routines' failures          |
 //!
@@ -1081,9 +1081,10 @@ impl SolidError {
     /// an `Upstream` site ([`nurbs::BSplineFailure`], [`intersect::IntersectFailure`],
     /// [`primitive::PrimitiveFailure`], [`mass::MassFailure`], [`heal::HealFailure`],
     /// [`geom::GeomFailure`], [`query::QueryFailure`], [`topology::TopologyFailure`], a
-    /// [`sweep::SweepFailure`] that
-    /// [replaced one](sweep::SweepFailure::replaces_upstream_status)). The callers that branch
-    /// on an upstream status use it so that they treat both alike; it goes with `Upstream` in
+    /// [`sweep::SweepFailure`] or [`curve::CurveFailure`] that replaced one
+    /// ([`sweep::SweepFailure::replaces_upstream_status`],
+    /// [`curve::CurveFailure::replaces_upstream_status`])). The callers that branch on an
+    /// upstream status use it so that they treat both alike; it goes with `Upstream` in
     /// the last PR of the typed-errors work.
     #[must_use]
     pub(crate) fn upstream_status(&self) -> Option<i32> {
@@ -1099,6 +1100,7 @@ impl SolidError {
                 | Reason::Query(_)
                 | Reason::Topology(_) => Some(f.status),
                 Reason::Sweep(w) if w.replaces_upstream_status() => Some(f.status),
+                Reason::Curve(c) if c.replaces_upstream_status() => Some(f.status),
                 _ => None,
             },
             _ => None,
@@ -1320,8 +1322,9 @@ impl SolidError {
 /// ([`nurbs::BSplineFailure`], [`intersect::IntersectFailure`],
 /// [`primitive::PrimitiveFailure`], [`mass::MassFailure`], [`heal::HealFailure`],
 /// [`geom::GeomFailure`], [`query::QueryFailure`], [`topology::TopologyFailure`], a
-/// [`sweep::SweepFailure`] that
-/// [replaced one](sweep::SweepFailure::replaces_upstream_status)).
+/// [`sweep::SweepFailure`] or [`curve::CurveFailure`] that replaced one
+/// ([`sweep::SweepFailure::replaces_upstream_status`],
+/// [`curve::CurveFailure::replaces_upstream_status`])).
 ///
 /// For difftest's comparison only: it is removed with `Upstream` and `sm_status` in the
 /// last PR of the typed-errors work. Callers match [`SolidError::kind`] and the
