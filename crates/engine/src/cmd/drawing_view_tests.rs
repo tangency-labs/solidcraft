@@ -2519,9 +2519,10 @@ fn a_posed_view_says_the_travel_its_screw_link_draws() {
     assert!((values[1].as_f64().unwrap_or(f64::NAN) - 4.0).abs() < 1e-6, "{pose}");
 }
 
-/// A study holds only the values it keys, as `motion.play` does: the joint's other values follow the
-/// solve. The nut keyed to two turns rises two pitches, 4 mm, though the study keys only its turn;
-/// held at its slide as the design places it, it wouldn't rise.
+/// A study keys only the thread's turn, and the nut's travel follows it through the screw link: two
+/// turns rise two pitches, 4 mm. (A screw link sets the travel whatever the solve holds; holding only
+/// the keyed values shows in a closed loop, which
+/// [`a_study_holds_only_the_values_it_keys_and_a_closed_loop_moves_the_rest`] covers.)
 #[test]
 fn a_study_step_holds_only_the_values_the_study_keys() {
     let (mut s, view) = screw_nut();
@@ -2532,6 +2533,39 @@ fn a_study_step_holds_only_the_values_the_study_keys() {
     assert!((height(&mut s, view) - 11.0).abs() < 1e-6, "{pose}");
     let slide = pose["drawn"][0]["values"][1].as_f64().unwrap_or(f64::NAN);
     assert!((slide - 4.0).abs() < 1e-6, "{pose}");
+}
+
+/// A study holds only the values it keys, as `motion.play` does, and a closed loop moves the rest. In
+/// [`slotted_arm`](crate::cmd::joints::tests::slotted_arm), study Swing keys only the slot's angle; the
+/// loop slides the pin out along the slot as it turns. A view at the study's last step draws the slot
+/// at the angle and slide play gives there. Holding the slide too, the loop couldn't close.
+#[test]
+fn a_study_holds_only_the_values_it_keys_and_a_closed_loop_moves_the_rest() {
+    let mut s = crate::cmd::joints::tests::slotted_arm(false, 0.0);
+    let keys = json!([{"joint": "Slot", "index": 0, "points": [[0, 0], [10, 20]]}]);
+    run(&mut s, "motion.study", json!({"name": "Swing", "steps": 10, "keys": keys}));
+    // Played on a copy: the view draws from the design's placement, where the slide is 26 mm.
+    let mut played = s.scratch();
+    run(&mut played, "motion.play", json!({"study": "Swing", "step": 10}));
+    let id = |name: &str| played.doc.assembly.joints.iter().find(|j| j.name == name).map(|j| j.id).unwrap();
+    let values = solidcraft_doc::joints::joint_values(&played.doc.assembly);
+    let (want, yaw) = (values.get(&id("Slot")).cloned().unwrap(), values.get(&id("Yaw")).and_then(|v| v.first().copied()).unwrap());
+    // Play moved the loop: the slot turned to 20° and the pin slid out to the fixture's closed form for the
+    // clamp's turn, √(26² + 52² − 2·26·52 cos θ), 26.80 mm here, off the 26 mm it starts at.
+    let slid = (26.0f64.powi(2) + 52.0f64.powi(2) - 2.0 * 26.0 * 52.0 * yaw.cos()).sqrt();
+    assert!(
+        (want[0].to_degrees().abs() - 20.0).abs() < 1e-6 && (want[1].abs() - slid).abs() < 1e-6 && (want[1].abs() - 26.0).abs() > 0.5,
+        "play moved the loop: {want:?}, the clamp turned {yaw} rad"
+    );
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = ids::encode(s.drawing("test").unwrap().sheets[0].id);
+    let p = json!({"sheet": sheet, "view": "top", "scale": "1:1", "position_mm": [150, 150]});
+    let view = ids::decode(run(&mut s, "drawing.view.base", p)["view"].as_str().unwrap()).unwrap();
+    edit_view(&mut s, view, json!({"pose": {"study": "Swing", "step": 10}}));
+    let pose = inspect_view(&mut s, view)["settings"]["pose"].clone();
+    let drawn = &pose["drawn"][0]["values"];
+    let (angle, slide) = (drawn[0].as_f64().unwrap_or(f64::NAN), drawn[1].as_f64().unwrap_or(f64::NAN));
+    assert!((angle - want[0].to_degrees()).abs() < 1e-6 && (slide - want[1]).abs() < 1e-6, "drawn {angle}°, {slide} mm; play {want:?}: {pose}");
 }
 
 /// Dimensions on a posed view would measure the design's placement: they are refused there, by the
