@@ -4554,6 +4554,17 @@ fn preferences_reads_and_sets() {
     assert_eq!(r["result"]["isError"], json!(true), "{r}");
 }
 
+/// Preference reads and writes must not drive dialogs or act on the current design.
+#[test]
+fn preferences_refuses_ui_actions_before_forwarding_any_change() {
+    for (key, value) in [("open", json!("General")), ("button", json!("restart_graphics")), ("stand_up", json!(true))] {
+        let (b, reply, is_error) = app_tool("preferences", json!({key: value, "theme": "dark"}));
+        assert!(is_error, "{key}: {reply}");
+        assert!(reply["content"][0]["text"].as_str().unwrap().contains(key), "{reply}");
+        assert!(b.calls.is_empty(), "a refused request must not change preferences or open a dialog");
+    }
+}
+
 /// #3704: `agent_cursor` passes show/speed/follow_camera to ui.agent_cursor, and speed may be "instant".
 #[test]
 fn agent_cursor_bridges_to_ui_agent_cursor() {

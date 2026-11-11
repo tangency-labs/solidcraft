@@ -386,7 +386,8 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
             "The desktop app's preferences. With no arguments, reads them all back. With arguments, sets the named ones and returns all of them. \
              Any preference the app's ui.prefs accepts may be set (docs/control-protocol.md), such as default_units, theme, language, up_axis, \
              msaa, ui_scale, zoom_to_cursor, smooth_wheel_zoom, show_frame_rate. Kept between runs. Needs the desktop app: headless returns \
-             an error. External MCP clients only; not available in the in-app Assistant.",
+             an error. UI-only actions open, button and stand_up are refused: this tool never opens dialogs or changes the current design. \
+             External MCP clients only; not available in the in-app Assistant.",
             json!({
                 "type": "object",
                 "properties": {},
@@ -1064,6 +1065,11 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
         "preferences" => {
             if !b.has_ui() {
                 return Err("preferences: needs the desktop app (headless has no preferences window)".into());
+            }
+            if let Some(key) = ["open", "button", "stand_up"].into_iter().find(|key| a.contains_key(*key)) {
+                return Err(format!(
+                    "preferences: `{key}` is an interactive UI action, not a preference; this tool never opens dialogs or acts on designs"
+                ));
             }
             b.call("ui.prefs", Value::Object(a.clone()))
         }

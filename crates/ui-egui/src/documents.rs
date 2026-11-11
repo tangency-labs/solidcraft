@@ -1271,6 +1271,7 @@ pub fn reopen_plan(app: &SolveApp, dir: Option<&std::path::Path>) -> (Vec<String
 
 /// Refuse a noninteractive close before changing tabs or creating a save prompt.
 pub(crate) fn check_close_without_prompt(app: &SolveApp, index: Option<&Value>, force: bool) -> Result<(), String> {
+    check_noninteractive_idle(app)?;
     let index = match index {
         None | Some(Value::Null) => app.docs.active,
         Some(value) => value.as_u64().and_then(|i| usize::try_from(i).ok()).ok_or("index must be a nonnegative tab index")?,
@@ -1285,11 +1286,20 @@ pub(crate) fn check_close_without_prompt(app: &SolveApp, index: Option<&Value>, 
 
 /// Refuse a noninteractive quit before changing the active tab or creating a save prompt.
 pub(crate) fn check_quit_without_prompt(app: &SolveApp, force: bool) -> Result<(), String> {
+    check_noninteractive_idle(app)?;
     if !force {
         let names: Vec<String> = tabs_info(app).into_iter().filter(|(_, dirty)| *dirty).map(|(name, _)| format!("`{name}`")).collect();
         if !names.is_empty() {
             return Err(format!("designs with unsaved changes: {}; save them first or use force: true to discard them", names.join(", ")));
         }
+    }
+    Ok(())
+}
+
+/// A programmatic close must not interrupt an in-flight file operation or a person's save prompt.
+fn check_noninteractive_idle(app: &SolveApp) -> Result<(), String> {
+    if app.file_picker_busy() || app.file_load.busy() || app.docs.closing.is_some() || app.docs.quitting.is_some() || app.docs.batch.is_some() {
+        return Err("a file is being opened or saved, or designs are being closed: try again".into());
     }
     Ok(())
 }

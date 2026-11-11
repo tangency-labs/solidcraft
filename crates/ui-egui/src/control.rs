@@ -981,7 +981,7 @@ fn ui_workspace(app: &mut SolveApp, q: params::WorkspaceParams) -> Outcome {
 
 /// `ui.agent_cursor {show?, speed?, follow_camera?}`: the agent cursor's settings.
 fn ui_agent_cursor(app: &mut SolveApp, p: &Value) -> Outcome {
-    let s = &mut app.ui.agent_cursor;
+    let mut s = app.ui.agent_cursor;
     if let Some(v) = p.get("show").and_then(Value::as_bool) {
         s.show = v;
     }
@@ -994,6 +994,7 @@ fn ui_agent_cursor(app: &mut SolveApp, p: &Value) -> Outcome {
             None => return err("speed must be a number from 1 to 5, or \"instant\""),
         }
     }
+    app.ui.agent_cursor = s;
     ok(json!(app.ui.agent_cursor))
 }
 
@@ -1445,6 +1446,13 @@ fn app_quit(app: &mut SolveApp, ctx: &egui::Context, q: params::Quit) -> Outcome
     }
     // `force`: quit without asking about unsaved designs.
     if q.force {
+        if !q.ask {
+            // An explicit noninteractive discard also drops the recovery copies at shutdown.
+            app.session.mark_saved();
+            for slot in app.docs.background_mut() {
+                slot.session.mark_saved();
+            }
+        }
         app.quit_requested = true;
     } else {
         crate::documents::request_quit(app);
@@ -1576,6 +1584,40 @@ pub(crate) fn write_screenshot(image: &egui::ColorImage, path: &str) -> Result<(
 
 #[cfg(test)]
 mod tests {
+    /// A noninteractive force cannot override a person's in-progress save question.
+    #[test]
+    fn noninteractive_close_and_quit_leave_existing_save_prompts_untouched() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.save_prompt_one_at_a_time = false;
+        h.app.run("parameters.add", json!({"name": "width", "expression": "12 mm"})).unwrap();
+        h.call("ui.documents", json!({"action": "new"}));
+        h.app.run("parameters.add", json!({"name": "height", "expression": "24 mm"})).unwrap();
+        assert_eq!(h.call("app.quit", json!({}))["result"]["asking"], true);
+        let prompt = h.call("ui.documents", json!({}))["result"]["save_prompt"].clone();
+        assert!(!prompt.is_null());
+        for (method, params) in
+            [("app.quit", json!({"ask": false, "force": true})), ("ui.documents", json!({"action": "close", "ask": false, "force": true}))]
+        {
+            assert_eq!(h.call(method, params)["ok"], false);
+            assert!(!h.app.quit_requested && h.app.session.is_dirty());
+            assert_eq!(h.call("ui.documents", json!({}))["result"]["save_prompt"], prompt);
+        }
+    }
+
+    /// A refused cursor update must leave every setting unchanged.
+    #[test]
+    fn agent_cursor_rejects_invalid_speed_without_partial_changes() {
+        let mut h = crate::scenario::Harness::new();
+        let before = h.call("ui.agent_cursor", json!({}))["result"].clone();
+        let show = !before["show"].as_bool().unwrap();
+        let follow = !before["follow_camera"].as_bool().unwrap();
+        for speed in [json!("bad"), json!(0), json!(6), Value::Null] {
+            let refused = h.call("ui.agent_cursor", json!({"show": show, "follow_camera": follow, "speed": speed}));
+            assert_eq!(refused["ok"], false, "{refused}");
+            assert_eq!(h.call("ui.agent_cursor", json!({}))["result"], before);
+        }
+    }
+
     /// #3704: a bridged close must refuse a dirty tab atomically, including a background tab.
     #[test]
     fn noninteractive_document_close_refuses_dirty_tabs_without_a_prompt() {

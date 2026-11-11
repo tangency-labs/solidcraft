@@ -199,7 +199,9 @@ External MCP clients connected to the desktop app can also use:
 - `agent_cursor {}` reads cursor settings; `show`, `speed` (1–5 or `"instant"`), and `follow_camera` change them.
 
 Closing or quitting with unsaved changes is refused and names the designs unless `force: true`
-explicitly discards them. These calls never open dialogs. Headless servers return an error
+explicitly discards them, including their recovery copies. These calls never open dialogs.
+`preferences` refuses the interactive `open`, `button` and `stand_up` actions before changing any settings.
+Headless servers return an error
 saying they need the desktop app. Confined clients cannot start persistent `theme_follow` reads; use inline `theme_import` instead. These tools cannot be used as `batch` steps or wrapped in
 `execute`. The in-app Assistant does not offer them: its permission gate excludes app management.
 
