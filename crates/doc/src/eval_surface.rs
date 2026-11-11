@@ -8,13 +8,20 @@ use solidcore_record::Seg2;
 
 pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
     match &f.kind {
-        FeatureKind::Patch { sketch, profiles, body, edges, crown, continuity, points } => {
+        FeatureKind::Patch { sketch, profiles, profiles_3d, body, edges, crown, continuity, points } => {
             let mut made = Vec::new();
             if let Some(sk) = sketch {
                 let ss = st.sketch(sk.0).ok_or_else(|| DocError::Unknown(format!("sketch {sk} (it must come earlier in the timeline)")))?;
-                let regions = solidcraft_sketch::merge_regions(&select_profiles(ss, profiles)?);
-                for r in &regions {
-                    made.push(kernel::patch_region(&ss.plane, r)?);
+                // An empty index list means the caller asked only for 3D loops (#741).
+                if !matches!(profiles, ProfileSel::Indices { indices } if indices.is_empty()) {
+                    let regions = solidcraft_sketch::merge_regions(&select_profiles(ss, profiles)?);
+                    for r in &regions {
+                        made.push(kernel::patch_region(&ss.plane, r)?);
+                    }
+                }
+                for &i in profiles_3d {
+                    let p = ss.profiles_3d.get(i).ok_or_else(|| DocError::Invalid(format!("sketch {sk} has no 3D profile {i}")))?;
+                    made.push(kernel::patch_region(&p.plane, &p.region)?);
                 }
             }
             if !edges.is_empty() {
@@ -33,7 +40,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 made.push(kernel::patch_edges_with(&b.body, &crate::plain(edges), &spec)?);
             }
             if made.is_empty() {
-                return Err(DocError::Invalid("a patch needs a sketch region or a loop of edges".into()));
+                return Err(DocError::Invalid("a patch needs a sketch region, a 3D sketch loop, or a loop of edges".into()));
             }
             for (k, b) in made.into_iter().enumerate() {
                 let name = new_name(st, f, k);
@@ -109,7 +116,9 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                         keeps,
                     )?
                 }
-                (None, None) => kernel::trim_keep(&mb.body, &kernel::SplitTool::Plane(doc.resolve_plane_in(vals, plane, 0, Some(st))?), keeps)?,
+                (None, None) => {
+                    kernel::trim_keep(&mb.body, &kernel::SplitTool::Plane(doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?), keeps)?
+                }
             };
             let made = Traced::step(trimmed, &[&mb.traced()]);
             if let Some(slot) = st.bodies.get_mut(i) {
@@ -132,7 +141,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 }
                 Some(crate::ExtendTo::Bounds) => kernel::extend_surface(&mb.body, &crate::plain(edges), &at(kernel::ExtendLimit::Bounds))?,
                 Some(crate::ExtendTo::Plane(plane)) => {
-                    let tool = kernel::SplitTool::Plane(doc.resolve_plane_in(vals, plane, 0, Some(st))?);
+                    let tool = kernel::SplitTool::Plane(doc.resolve_plane_in(vals, plane, 0, f.component, Some(st))?);
                     kernel::extend_surface(&mb.body, &crate::plain(edges), &at(kernel::ExtendLimit::UpTo(&tool)))?
                 }
                 Some(crate::ExtendTo::Face(t)) => {
@@ -311,9 +320,20 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?,
                 f.component,
             )?;
-            let (o, d) = revolve_axis(vals, &ss, axis, &*super::axis_state(doc, st, f.component, axis)?, &|name| {
-                construction_axis_in(Some(doc), st, name, f.component)
-            })?;
+            let (o, d) = revolve_axis(
+                Some(doc),
+                f.component,
+                vals,
+                &ss,
+                axis,
+                &*super::axis_state(doc, st, f.component, axis)?,
+                &|name| construction_axis_in(Some(doc), st, name, f.component),
+                &|owner, curve| {
+                    let solved =
+                        st.sketch(owner).ok_or_else(|| DocError::Unknown(format!("sketch {owner} (it must come earlier in the timeline)")))?;
+                    sketch_line_world(&sketch_in_feature_frame(doc, solved, f.component)?, curve)
+                },
+            )?;
             let a = val(vals, angle, Kind::Angle)?;
             let (start, sweep) = match (angle2, symmetric) {
                 (Some(a2), _) => {

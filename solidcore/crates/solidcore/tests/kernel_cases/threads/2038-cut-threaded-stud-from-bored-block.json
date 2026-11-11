@@ -1,0 +1,187 @@
+{
+  "area": "threads",
+  "bodies": {
+    "b31": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b32": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b32"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b33"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b33"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b34"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b31"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b35"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b35"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b36"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b34"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b37"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b36"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b38"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b37",
+        "b38"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b39"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "2038-cut-threaded-stud-from-bored-block",
+  "expected": {
+    "bbox": {
+      "max": [
+        20,
+        20,
+        14
+      ],
+      "min": [
+        -20,
+        -20,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "ISO 68-1 basic profile: H = P sqrt3/2, basic depth 5H/8. External groove (the space between teeth): a trapezoid P/4 wide at the root radius d/2 - 5H/8, widening by 2 tan30 per unit of radius to 7P/8 at d/2. Internal groove: P/8 wide at the major radius d/2, widening to 3P/4 at the minor radius, cut only where there is material (r >= hole radius). Pappus: volume per turn = 2 pi A rc (A the trapezoid area, rc its centroid radius from the axis); a helical sweep of L/P turns removes exactly (L/P) x that, where each end of the thread is a free end or lies inside material. Block 40x40x14 with a 19.2 mm bore (r=9.6). Stud R=10.5, 24 long (passing through, helix runs out of both ends), M21x1.8 over its whole length. Cutting the stud from the block removes block intersect stud = the ring 9.6<=r<=10.5 over the 14 mm slab minus the stud's groove there: pi (10.5^2 - 9.6^2) 14 - (14/1.8) x V_turn_ext(clipped to r>=9.6) = 795.6398 - 7.778 x 60.41976 = 325.7083. V = 22400 - pi 9.6^2 14 - 325.7083 = 18020.8832 mm3. One body remains (the stud is consumed). Tolerance 1%: a modelled thread is a faceted helical solid (radial chord error up to 1% of the pitch on every wall, i.e. a volume deficit of about 4/3 x sag/R).",
+    "outcome": "solid",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#2038"
+    ],
+    "tolerance": {
+      "rel": 0.003
+    },
+    "volume_mm3": 18020.8832,
+    "what": "cutting an externally threaded stud out of a block bored at the tap drill (to make the internal thread): the boolean found no result"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 168,
+      "faces": 58,
+      "vertices": 112
+    }
+  },
+  "records": "2038-cut-threaded-stud-from-bored-block.bodies.json.gz",
+  "result": [
+    {
+      "body": "Block",
+      "made": "b39"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 6202.336522744991,
+      "body_count": 1,
+      "edges": 120,
+      "faces": 42,
+      "vertices": 80,
+      "volume_mm3": 18020.883866757256
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#2038"
+  ],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "extrude",
+    "screw_sweep",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "cutting an externally threaded stud out of a block bored at the tap drill (to make the internal thread): the boolean found no result",
+  "why_not": []
+}

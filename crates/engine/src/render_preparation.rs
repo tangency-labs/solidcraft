@@ -88,7 +88,7 @@ fn same_moves(a: &BTreeMap<u64, solidcraft_doc::Mat>, b: &BTreeMap<u64, solidcra
     a.len() == b.len()
         && a.iter().zip(b).all(|((ka, a), (kb, b))| ka == kb && a.iter().flatten().zip(b.iter().flatten()).all(|(a, b)| a.to_bits() == b.to_bits()))
 }
-fn camera_bits(camera: Option<solidcraft_render::Camera>) -> Option<(solidcraft_render::UpAxis, [u64; 8])> {
+fn camera_bits(camera: Option<solidcraft_viewport::Camera>) -> Option<(solidcraft_viewport::UpAxis, [u64; 8])> {
     camera.map(|camera| {
         (
             camera.up,

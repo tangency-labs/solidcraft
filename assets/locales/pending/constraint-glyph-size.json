@@ -1,0 +1,38 @@
+{
+  "en": {
+    "prefs.constraint_glyph_size": "Constraint glyph size",
+    "prefs.constraint_glyph_size_note": "How large constraint glyphs and their letters or icons are drawn in a sketch. 100% is the usual size; glyphs keep this screen size at every zoom."
+  },
+  "ar": {
+    "prefs.constraint_glyph_size": "حجم رموز القيود",
+    "prefs.constraint_glyph_size_note": "حجم رسم رموز القيود وحروفها أو أيقوناتها في الرسم. 100% هو الحجم المعتاد؛ وتحتفظ الرموز بهذا الحجم على الشاشة عند أي مستوى تكبير."
+  },
+  "de": {
+    "prefs.constraint_glyph_size": "Größe der Bindungssymbole",
+    "prefs.constraint_glyph_size_note": "Wie groß Bindungssymbole samt Buchstaben oder Icons in einer Skizze gezeichnet werden. 100 % ist die übliche Größe; die Symbole behalten diese Bildschirmgröße bei jedem Zoom."
+  },
+  "fr": {
+    "prefs.constraint_glyph_size": "Taille des symboles de contraintes",
+    "prefs.constraint_glyph_size_note": "Taille à laquelle les symboles de contraintes, avec leurs lettres ou icônes, sont dessinés dans une esquisse. 100 % est la taille habituelle ; les symboles gardent cette taille à l'écran quel que soit le zoom."
+  },
+  "he": {
+    "prefs.constraint_glyph_size": "גודל סמלי האילוצים",
+    "prefs.constraint_glyph_size_note": "הגודל שבו מצוירים סמלי האילוצים, עם האותיות או הסמלונים שלהם, בשרטוט. 100% הוא הגודל הרגיל; הסמלים שומרים על גודל המסך הזה בכל זום."
+  },
+  "ja": {
+    "prefs.constraint_glyph_size": "拘束グリフのサイズ",
+    "prefs.constraint_glyph_size_note": "スケッチ内の拘束グリフとその文字やアイコンを描く大きさ。100% が通常のサイズです。グリフはどのズームでもこの画面サイズを保ちます。"
+  },
+  "ko": {
+    "prefs.constraint_glyph_size": "구속 조건 기호 크기",
+    "prefs.constraint_glyph_size_note": "스케치에서 구속 조건 기호와 그 문자나 아이콘을 그리는 크기입니다. 100%가 기본 크기이며, 기호는 확대/축소와 관계없이 이 화면 크기를 유지합니다."
+  },
+  "vi": {
+    "prefs.constraint_glyph_size": "Kích thước biểu tượng ràng buộc",
+    "prefs.constraint_glyph_size_note": "Kích thước vẽ biểu tượng ràng buộc cùng chữ cái hoặc biểu tượng bên trong trong bản phác. 100% là kích thước thông thường; biểu tượng giữ kích thước màn hình này ở mọi mức thu phóng."
+  },
+  "zh": {
+    "prefs.constraint_glyph_size": "约束符号大小",
+    "prefs.constraint_glyph_size_note": "草图中约束符号及其字母或图标的绘制大小。100% 为常规大小；任意缩放比例下符号都保持此屏幕大小。"
+  }
+}

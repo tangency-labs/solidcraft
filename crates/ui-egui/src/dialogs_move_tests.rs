@@ -446,6 +446,94 @@ fn a_body_pick_goes_on_to_the_point_or_axis() {
     assert!(matches!(d.inputs[1].items.as_slice(), [Sel::Vertex { .. }]), "{:?}", d.inputs[1].items);
 }
 
+/// #14205: once Point to Point, Point to Position or Rotate has gone on from Bodies (#6170), a
+/// Ctrl or Shift click on another body adds it to Bodies, and the window stays where it was, so
+/// the next plain click still picks the From point, Point or Axis. A Ctrl/Shift click on a picked
+/// body takes it out. Free Move never goes on, and plain clicks there add bodies as before.
+#[test]
+fn ctrl_or_shift_click_adds_bodies_after_move_has_gone_on() {
+    for mode in [POINT_TO_POINT, POINT_TO_POSITION, ROTATE] {
+        let mut h = three_bodies_in_move(mode);
+        let body = |name: &str| Sel::Body { name: name.into() };
+        let (a, b, c) = (body("A"), body("B"), body("C"));
+        h.step(&json!({ "click": { "world": [10, 10, 10] } })).unwrap();
+        assert_eq!(h.app.dialog.as_ref().unwrap().active, 1, "{}: a plain click goes on (#6170)", TYPES[mode]);
+        h.step(&json!({ "click": { "world": [40, 10, 10] }, "ctrl": true })).unwrap();
+        h.step(&json!({ "click": { "world": [70, 10, 10] }, "shift": true })).unwrap();
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.inputs[0].items, vec![a.clone(), b.clone(), c.clone()], "{}: Ctrl and Shift clicks add bodies", TYPES[mode]);
+        assert_eq!(d.active, 1, "{}: and stay on {}", TYPES[mode], d.inputs[1].label);
+        assert!(d.inputs[1].items.is_empty(), "{}: {:?}", TYPES[mode], d.inputs[1].items);
+        h.step(&json!({ "click": { "world": [40, 10, 10] }, "ctrl": true })).unwrap();
+        assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![a.clone(), c.clone()], "{}: a picked body comes out", TYPES[mode]);
+        // The next plain click is the From point, Point or Axis, not another body.
+        let edge = if mode == ROTATE { [10, 0, 10] } else { [0, 0, 10] };
+        h.step(&json!({ "click": { "world": edge } })).unwrap();
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.inputs[0].items, vec![a, c], "{}: the plain click picked no body", TYPES[mode]);
+        assert_eq!(d.inputs[1].items.len(), 1, "{}: it picked {}", TYPES[mode], d.inputs[1].label);
+    }
+}
+
+/// Boxes A, B and C (20 wide, at x 0, 30 and 60) seen from the top, and Move open on `mode`
+/// with Bodies active.
+fn three_bodies_in_move(mode: usize) -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    for (x, name) in [(0, "A"), (30, "B"), (60, "C")] {
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0], "body_name": name})).unwrap();
+    }
+    h.app.run("select.clear", json!({})).unwrap();
+    h.call("ui.view", json!({"view": "top"}));
+    h.app.fit_view();
+    h.settle();
+    h.app.start("solid.move");
+    let d = h.app.dialog.as_mut().unwrap();
+    d.kind = kind(mode, &h.app.session.doc);
+    d.inputs = inputs(mode);
+    d.active = 0;
+    h
+}
+
+/// #14205: with Shift adding only (Preferences), a Shift click on a body Move has picked already
+/// keeps it in Bodies, while a Ctrl click still takes it out.
+#[test]
+fn an_add_only_shift_click_keeps_a_picked_body_in_move() {
+    let mut h = three_bodies_in_move(POINT_TO_POINT);
+    h.app.preferences.selection_shift_add_only = true;
+    let body = |name: &str| Sel::Body { name: name.into() };
+    h.step(&json!({ "click": { "world": [10, 10, 10] } })).unwrap();
+    h.step(&json!({ "click": { "world": [40, 10, 10] }, "shift": true })).unwrap();
+    h.step(&json!({ "click": { "world": [40, 10, 10] }, "shift": true })).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(d.inputs[0].items, vec![body("A"), body("B")], "Shift adds only");
+    assert_eq!(d.active, 1, "and Move stays on {}", d.inputs[1].label);
+    h.step(&json!({ "click": { "world": [40, 10, 10] }, "ctrl": true })).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![body("A")], "Ctrl still takes it out");
+}
+
+/// #14205: while OK computes, a Ctrl or Shift click leaves Bodies as it is, as other picks do.
+#[test]
+fn a_ctrl_or_shift_click_holds_bodies_while_move_computes() {
+    let mut h = three_bodies_in_move(POINT_TO_POINT);
+    h.step(&json!({ "click": { "world": [10, 10, 10] } })).unwrap();
+    let (_finish, done) = std::sync::mpsc::channel();
+    h.app.applying = Some(crate::dialogs::Applying {
+        done,
+        ready: None,
+        seen: true,
+        started: crate::now_ms(),
+        cmds: Vec::new(),
+        progress: Default::default(),
+        quality: Default::default(),
+    });
+    h.step(&json!({ "click": { "world": [40, 10, 10] }, "ctrl": true })).unwrap();
+    h.step(&json!({ "click": { "world": [10, 10, 10] }, "shift": true })).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(d.inputs[0].items, vec![Sel::Body { name: "A".into() }]);
+    assert_eq!(d.active, 1);
+}
+
 /// #8265: input queued while the window is busy arrives together, so one frame can carry the
 /// button let go and the mouse already moving on. The drag must end where the button was
 /// released, not jump the value to where the mouse has since got to.
@@ -748,4 +836,65 @@ fn selected_components_are_copied_when_create_copy_is_ticked_after_them() {
     h.app.dialog.as_mut().unwrap().extra.insert("copy".into(), json!(true));
     let p = crate::dialogs_move::params(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
     assert_eq!(p["occurrences"], json!([[first], [second]]));
+}
+
+/// The Move dialog on the 20 × 30 × 10 box with the triad drawn, and the screen point of a handle.
+fn move_triad_fixture() -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 20, "width": 30, "height": 10})).unwrap();
+    h.app.start("solid.move");
+    h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    h.frames(3);
+    h
+}
+
+fn pointer_button(p: [f64; 2], pressed: bool) -> egui::Event {
+    egui::Event::PointerButton {
+        pos: egui::pos2(p[0] as f32, p[1] as f32),
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Default::default(),
+    }
+}
+
+fn pointer_at(p: [f64; 2]) -> egui::Event {
+    egui::Event::PointerMoved(egui::pos2(p[0] as f32, p[1] as f32))
+}
+
+fn box_label(h: &mut crate::scenario::Harness) -> Option<&'static str> {
+    h.app.dialog.as_mut().and_then(|d| d.primary()).map(|p| p.0)
+}
+
+/// A press and release on an arrow, with no drag between, puts the canvas box on that arrow's value,
+/// and moves nothing.
+#[test]
+fn a_click_on_an_arrow_puts_the_box_on_its_axis() {
+    // The press and the release in frames of their own, and both in one frame (input queued while
+    // the window is busy arrives together, #8265), there with the pointer then moved off the triad.
+    for (handle, label, one_frame, off) in [
+        ("y", "Y", false, false),
+        ("z", "Z", false, false),
+        ("x", "X", false, false),
+        ("y", "Y", true, false),
+        ("z", "Z", true, false),
+        ("y", "Y", true, true),
+    ] {
+        let mut h = move_triad_fixture();
+        assert_eq!(box_label(&mut h), Some("X"), "the box starts on X");
+        let at = h.at(&json!({"gizmo": handle})).unwrap();
+        h.frame_with(vec![pointer_at(at)]);
+        if off {
+            let away = h.at(&json!({"gizmo": "ball"})).map(|b| [b[0] - 3.0 * (at[0] - b[0]), b[1] - 3.0 * (at[1] - b[1])]).unwrap();
+            h.frame_with(vec![pointer_button(at, true), pointer_button(at, false), pointer_at(away)]);
+        } else if one_frame {
+            h.frame_with(vec![pointer_button(at, true), pointer_button(at, false)]);
+        } else {
+            h.frame_with(vec![pointer_button(at, true)]);
+            h.frame_with(vec![pointer_button(at, false)]);
+        }
+        h.frames(2);
+        assert_eq!(box_label(&mut h), Some(label), "a click on the {label} arrow (one frame: {one_frame}, off: {off})");
+        let Kind::Move { x, y, z, .. } = &h.app.dialog.as_ref().unwrap().kind else { panic!("not a move") };
+        assert_eq!((x.as_str(), y.as_str(), z.as_str()), ("0 mm", "0 mm", "0 mm"), "a click moves nothing");
+    }
 }
