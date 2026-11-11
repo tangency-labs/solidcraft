@@ -374,9 +374,9 @@ enum Exact {
 /// `surface`'s class: its analytic label (a plane, cylinder, cone or sphere) with its NURBS
 /// form proved on that label's implicit equation ([`implicit::lies_on`], the owner's rule
 /// for an exact class at bound 0); a B-spline surface or extrusion with no label and no
-/// definition is a bare net ([`net::Net::of`]), a plane stored as a NURBS among them.
-/// `None` for any other kind, a torus (its sections are quartics), or a form not proved on
-/// its label.
+/// definition is a bare net where [`net::Net::of`] takes it, a plane stored as a NURBS among
+/// them. `None` for any other kind, a net [`net::Net::of`] turns away, a torus (its
+/// sections are quartics), or a form not proved on its label.
 fn exact_class(k: &Kernel, surface: &Surface) -> Result<Option<Exact>> {
     let Some(support) = AnalyticSupport::of(surface) else {
         return Ok(net::Net::of(k, surface)?.map(|n| Exact::Net(std::rc::Rc::new(n))));
@@ -1862,10 +1862,11 @@ fn kept_straight_edge_corner(
 /// point proved the same way.
 ///
 /// Anything else beside an edge or at a vertex where something moves (two curved
-/// quadrics but along a kept straight edge with a plane, a quadric or net beside a net, a
-/// torus, a blend or sweep, a plane not proved on its label, an edge curve with no NURBS
-/// form), a meeting with a net that is not proved, and a piece left undecided past the caps,
-/// has no certified bound here:
+/// quadrics but along a kept straight edge with a plane, a quadric or net beside a net, any
+/// three faces at the vertex but those above, even three that all stay, a net
+/// [`net::Net::of`] turns away, a torus, a blend or sweep, a plane not proved on its label,
+/// an edge curve with no NURBS form), a meeting with a net that is not proved, and a piece
+/// left undecided past the caps, has no certified bound here:
 /// [`OffsetFailure::ReachUncertified`].
 ///
 /// # Errors
