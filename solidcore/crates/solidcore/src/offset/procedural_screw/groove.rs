@@ -852,6 +852,27 @@ pub(super) fn cap_disk_parameters(
     Ok([u, v])
 }
 
+/// How far a periodic thread operation extends each face's surface
+/// ([`operation_reach`]): one common length, and an end cap's own longer margin
+/// where its stored support stops short of the thread's radial disk.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ThreadReach {
+    /// The certified reach every surface is extended by.
+    pub reach: f64,
+    /// The end caps that need more, each with its margin (at least `reach`).
+    pub caps: Vec<(FaceId, f64)>,
+}
+
+impl ThreadReach {
+    /// The margin the surface of original face `face` is extended by.
+    pub(crate) fn margin(&self, face: FaceId) -> f64 {
+        self.caps
+            .iter()
+            .find(|(id, _)| *id == face)
+            .map_or(self.reach, |(_, m)| m.max(self.reach))
+    }
+}
+
 /// A common periodic thread operation supplies its geometric reach, rather than
 /// interpreting the body's bounding sphere as a displacement. The class consists
 /// of two retained affine screw sections, their coaxial cylindrical lands, and
@@ -862,7 +883,7 @@ pub(crate) fn operation_reach(
     body: &Brep,
     faces: &[FaceId],
     replacements: &[Surface],
-) -> Result<Option<f64>> {
+) -> Result<Option<ThreadReach>> {
     if faces.len() != replacements.len() {
         return Err(bad("thread replacement count does not match its face list"));
     }
@@ -1012,7 +1033,7 @@ pub(crate) fn operation_reach(
             .ok_or_else(|| bad("thread cylinder has no support group"))?;
         labels.insert(id, label);
     }
-    for (label, id) in cap_ids.into_iter().enumerate() {
+    for (label, &id) in cap_ids.iter().enumerate() {
         labels.insert(id, label + 2);
     }
     for family in &families {
@@ -1107,11 +1128,16 @@ pub(crate) fn operation_reach(
             }
         }
     }
-    // The unchanged cap supports must already contain the entire radial disk.
-    // Invert the literal placement's Gram matrix; no orthonormality assumption
-    // discards its stored tilt. This avoids demanding an irrelevant azimuthal
-    // extension proportional to radius/pitch at a moving helix/cap corner.
-    for (plane, height) in [(*cap_a, ca), (*cap_b, cb)] {
+    // The unchanged caps must cover the entire radial disk. Invert the literal
+    // placement's Gram matrix; no orthonormality assumption discards its stored
+    // tilt. This avoids demanding an irrelevant azimuthal extension proportional
+    // to radius/pitch at a moving helix/cap corner. A plane continues exactly, so
+    // a cap whose stored support stops short of the disk (a support kept at its
+    // face's box) is extended over it: by its overshoot past each side, at the
+    // plane's speed along that axis, as that cap's own margin.
+    let mut cap_needs = Vec::new();
+    for ((plane, height), &id) in [(*cap_a, ca), (*cap_b, cb)].iter().zip(&cap_ids) {
+        let (plane, height) = (*plane, *height);
         let scale = plane.uv_scale();
         let [u, v] = cap_disk_parameters(
             plane.position(),
@@ -1122,14 +1148,33 @@ pub(crate) fn operation_reach(
             height,
         )?;
         let domain = plane.step_uv_domain();
-        if u.lo < domain.u_min()
-            || u.hi > domain.u_max()
-            || v.lo < domain.v_min()
-            || v.hi > domain.v_max()
-        {
+        let over = |x: Ivl, lo: f64, hi: f64| {
+            (Ivl::from(lo) - Ivl::from(x.lo))
+                .hi
+                .max((Ivl::from(x.hi) - Ivl::from(hi)).hi)
+                .max(0.0)
+        };
+        let position = plane.position();
+        let along = |over: f64, axis: Vec3, scale: f64| {
+            (Ivl::from(over) * norm(boxed(axis)) * Ivl::from(scale.abs())).hi
+        };
+        let need = along(
+            over(u, domain.u_min(), domain.u_max()),
+            position.x_axis(),
+            scale.x,
+        )
+        .max(along(
+            over(v, domain.v_min(), domain.v_max()),
+            position.y_axis(),
+            scale.y,
+        ));
+        if !need.is_finite() {
             return Err(bad(
-                "thread endcap support does not contain its radial disk",
+                "thread endcap extension over its radial disk is not finite",
             ));
+        }
+        if need > 0.0 {
+            cap_needs.push((id, need));
         }
     }
     if let Some(event) = band.first_event(1.0)? {
@@ -1216,5 +1261,16 @@ pub(crate) fn operation_reach(
             return Err(bad("continued thread support is not proved regular"));
         }
     }
-    Ok(Some(reach))
+    // A cap's own margin keeps the disk one displacement inside its extension,
+    // as the common reach keeps its meetings.
+    let caps = cap_needs
+        .into_iter()
+        .map(|(id, need)| {
+            (
+                id,
+                (Ivl::from(need) + Ivl::from(displacement)).hi.max(reach),
+            )
+        })
+        .collect();
+    Ok(Some(ThreadReach { reach, caps }))
 }

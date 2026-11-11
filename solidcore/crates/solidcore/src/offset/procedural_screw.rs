@@ -11,7 +11,7 @@ mod cylinder;
 mod groove;
 pub(super) mod seam;
 
-pub(crate) use groove::operation_reach;
+pub(crate) use groove::{operation_reach, ThreadReach};
 
 use std::f64::consts::TAU;
 
@@ -828,7 +828,7 @@ mod tests {
             let sweep = replacements[index].procedural_sweep().unwrap();
             let continued = sweep
                 .definition()
-                .extended_for_offset(sweep.net(), margin, tolerance / 2.0)
+                .extended_for_offset(sweep.net(), margin.reach, tolerance / 2.0)
                 .unwrap();
             let continued = continued.procedural_sweep().unwrap();
             assert!(sweep
