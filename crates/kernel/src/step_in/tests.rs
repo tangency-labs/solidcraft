@@ -351,8 +351,11 @@ fn parallel_curved_import_keeps_face_colours_and_exact_display_meshes() {
     let bodies: Vec<_> = (0..8)
         .map(|i| {
             let body = cylinder(Vec3::new(i as f64 * 20.0, 0.0, 0.0), Vec3::Z, 5.0, 12.0).unwrap();
-            body.with_color(Some([0.2, 0.4, 0.6]))
-                .with_paint(Some(crate::Paint { opacity: 0.7, faces: vec![crate::FacePaint { face: 0, color: [0.8, 0.1, 0.3], opacity: 0.5 }] }))
+            body.with_color(Some([0.2, 0.4, 0.6])).with_paint(Some(crate::Paint {
+                opacity: 0.7,
+                faces: vec![crate::FacePaint { face: 0, color: [0.8, 0.1, 0.3], opacity: 0.5, name: None }],
+                name: None,
+            }))
         })
         .collect();
     let text = step_export(&bodies.iter().collect::<Vec<_>>(), "coloured cylinders").unwrap();
@@ -3094,6 +3097,75 @@ fn a_torus_face_round_most_of_its_tube_is_formed_within_one_turn_of_it() {
         assert!(rel(m.volume, volume) < 1e-6, "{tube:?}: volume {} vs {volume}", m.volume);
         assert!(rel(m.area, area) < 1e-6, "{tube:?}: area {} vs {area}", m.area);
     }
+}
+
+/// A colour comes in with its name in the file: `COLOUR_RGB`'s own, or a pre-defined colour's,
+/// decoded and made safe as a design keeps names (no control characters, at most 128
+/// characters); an empty or blank name is none. A face's over-riding style names the face's
+/// colour, a see-through style keeps its name, and an export writes the names back.
+#[test]
+fn colour_names_come_in_with_their_colours_and_go_out_again() {
+    let style = |id: u64, item: &str, colour: &str, extra: &str| {
+        format!(
+            "#{id}=STYLED_ITEM('',(#{}),{item});\n#{}=PRESENTATION_STYLE_ASSIGNMENT((#{}));\n#{}=SURFACE_STYLE_USAGE(.BOTH.,#{});\n#{}=SURFACE_SIDE_STYLE('',(#{}{extra}));\n#{}=SURFACE_STYLE_FILL_AREA(#{});\n#{}=FILL_AREA_STYLE('',(#{}));\n#{}=FILL_AREA_STYLE_COLOUR('',#{});\n#{}={colour};\n",
+            id + 1,
+            id + 1,
+            id + 2,
+            id + 2,
+            id + 3,
+            id + 3,
+            id + 4,
+            id + 4,
+            id + 5,
+            id + 5,
+            id + 6,
+            id + 6,
+            id + 7,
+            id + 7,
+        )
+    };
+    let import = |styles: &str| {
+        let mut t = String::from(HEAD);
+        t += &cube_entities();
+        t += &context(20, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+        t += "#60=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#101),#20);\n";
+        t += styles;
+        t += TAIL;
+        let imp = step_import(&t).unwrap();
+        assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+        imp.bodies.into_iter().next().unwrap()
+    };
+    let named = |name: &str| import(&style(70, "#101", &format!("COLOUR_RGB('{name}',1.,0.5,0.)"), "")).body.paint().unwrap().name.clone();
+    assert_eq!(named("Steel - Satin").as_deref(), Some("Steel - Satin"));
+    assert_eq!(named("Opaque(97,69,55)").as_deref(), Some("Opaque(97,69,55)"));
+    assert_eq!(named(""), None);
+    assert_eq!(named("   "), None);
+    assert_eq!(named("  Blue  ").as_deref(), Some("Blue"));
+    assert_eq!(named(r"Bl\X2\00E9\X0\").as_deref(), Some("Blé"), "escapes are decoded");
+    assert_eq!(named(r"a\X\0Ab\X\09c").as_deref(), Some("abc"), "control characters are dropped");
+    assert_eq!(named(&"x".repeat(300)).map(|n| n.chars().count()), Some(crate::COLOUR_NAME_MAX));
+    // A pre-defined colour is called by its name.
+    let red = import(&style(70, "#101", "DRAUGHTING_PRE_DEFINED_COLOUR('red')", ""));
+    assert_eq!((red.color, red.body.paint().unwrap().name.as_deref()), (Some([1.0, 0.0, 0.0]), Some("red")));
+    // A see-through colour keeps its name.
+    let glass = import(&(style(70, "#101", "COLOUR_RGB('Smoked',0.4,0.4,0.4)", ",#90") + "#90=SURFACE_STYLE_TRANSPARENT(0.5);\n"));
+    let paint = glass.body.paint().unwrap();
+    assert_eq!((paint.opacity, paint.name.as_deref()), (0.5, Some("Smoked")));
+    // A face over-ridden by a style of its own: its colour is named as the file names it.
+    let cube = cube_entities();
+    let face = cube.split('\n').find(|l| l.contains("=ADVANCED_FACE(")).and_then(|l| l.split('=').next()).unwrap().to_string();
+    let styles = style(70, "#101", "COLOUR_RGB('Body grey',0.5,0.5,0.5)", "") + &style(80, &face, "COLOUR_RGB('Accent',0.,0.,1.)", "");
+    let painted = import(&styles);
+    let paint = painted.body.paint().unwrap();
+    assert_eq!(paint.name.as_deref(), Some("Body grey"));
+    assert_eq!(paint.faces.iter().map(|f| (f.color, f.name.as_deref())).collect::<Vec<_>>(), [([0.0, 0.0, 1.0], Some("Accent"))]);
+    // Written out and read back, the names come back with their colours.
+    let text = step_export(&[&painted.body.clone().with_color(painted.color)], "named").unwrap();
+    assert!(text.contains("COLOUR_RGB('Body grey'") && text.contains("COLOUR_RGB('Accent'"), "{text}");
+    let back = step_import(&text).unwrap().bodies.remove(0);
+    let back_paint = back.body.paint().unwrap();
+    assert_eq!(back_paint.name.as_deref(), Some("Body grey"));
+    assert_eq!(back_paint.faces.iter().map(|f| f.name.as_deref()).collect::<Vec<_>>(), [Some("Accent")]);
 }
 
 /// #12291: a part styled with a surface colour and, beside it, a curve style (its edges) is the

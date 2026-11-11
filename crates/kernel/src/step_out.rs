@@ -209,14 +209,15 @@ pub fn step_export_products(products: &[ExportProduct], root: usize, header: &St
             let opacity = b.body.paint().map_or(1.0, |p| p.opacity);
             let items: Vec<u64> = written.solids.iter().copied().chain(written.sheets).collect();
             if let Some(c) = b.color {
+                let name = b.body.paint().and_then(|p| p.name.as_deref());
                 for item in &items {
-                    styled.push(style(&mut w, *item, c, opacity));
+                    styled.push(style(&mut w, *item, c, opacity, name));
                 }
             }
             // Faces with colours of their own.
             for f in b.body.paint().map(|p| p.faces.as_slice()).unwrap_or(&[]) {
                 if let Some(&face) = written.faces.get(f.face).filter(|id| **id != 0) {
-                    styled.push(style(&mut w, face, f.color, f.opacity));
+                    styled.push(style(&mut w, face, f.color, f.opacity, f.name.as_deref()));
                 }
             }
             solids.extend(written.solids);
@@ -279,9 +280,11 @@ pub fn step_export_products(products: &[ExportProduct], root: usize, header: &St
     Ok(text)
 }
 
-/// A surface colour for an item (STYLED_ITEM chain; the styles are shared).
-fn style(w: &mut Writer, item: u64, c: [f32; 3], opacity: f32) -> u64 {
-    let rgb = w.add("COLOUR_RGB", &[s(""), Param::Real(c[0] as f64), Param::Real(c[1] as f64), Param::Real(c[2] as f64)]);
+/// A surface colour for an item (STYLED_ITEM chain; the styles are shared), named as its look is
+/// (`COLOUR_RGB`'s name, read back on import) when it has a name.
+fn style(w: &mut Writer, item: u64, c: [f32; 3], opacity: f32, name: Option<&str>) -> u64 {
+    let name = name.and_then(crate::body::colour_name).unwrap_or_default();
+    let rgb = w.add("COLOUR_RGB", &[s(&name), Param::Real(c[0] as f64), Param::Real(c[1] as f64), Param::Real(c[2] as f64)]);
     let fasc = w.add("FILL_AREA_STYLE_COLOUR", &[s(""), r(rgb)]);
     let fas = w.add("FILL_AREA_STYLE", &[s(""), refs(&[fasc])]);
     let ssfa = w.add("SURFACE_STYLE_FILL_AREA", &[r(fas)]);
