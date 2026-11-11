@@ -1583,3 +1583,113 @@ fn a_tolerance_whose_zone_underflows_is_refused() {
         Err(Unsupported::Invalid(_))
     ));
 }
+
+/// Timings of an M20×2.5 external thread, 4 and 10 turns: the groove's build, the cut, the
+/// record both ways (opening a saved body is `to_kernel`, the median of eleven), the record's
+/// evaluators (every face's and edge's, as display builds them; the median of eleven) and a
+/// closest point over every edge of the body just opened. A bench: it prints, and asserts
+/// only that each step succeeds and the record's volume is the body's. `cargo test --profile
+/// goldens -p solidcore-convert --test brep -- --ignored --nocapture m20_thread_timings`.
+#[test]
+#[ignore = "a bench: prints timings"]
+#[allow(clippy::disallowed_methods)] // Test-only fixture.
+fn m20_thread_timings() {
+    use solidcore::boolean::api_brep::boolean_difference;
+    use solidcore::curve::curve::Curve as KernelCurve;
+    use solidcore::geom::tol::{brep_approx_tol_3d, SmallTopoType};
+    use solidcore::math::Point3;
+    use solidcore::primitive::api_curves::create_line_segment;
+    use solidcore::query::api_queries::edge_closest_point;
+    use solidcore::sweep::screw::screw_sweep;
+    use std::time::Instant;
+
+    for turns in [4.0, 10.0] {
+        let mut k = kernel();
+        let pitch = 2.5_f64;
+        let minor = 10.0 - 5.0 * pitch * 3.0_f64.sqrt() / 16.0;
+        let high = 10.0 + 0.05 * pitch;
+        let half_low = pitch / 8.0;
+        let half_high = half_low + (high - minor) / 3.0_f64.sqrt();
+        let points = [
+            Point3::new(minor, 0.0, -half_low),
+            Point3::new(high, 0.0, -half_high),
+            Point3::new(high, 0.0, half_high),
+            Point3::new(minor, 0.0, half_low),
+        ];
+        let profile: Vec<KernelCurve> = points
+            .iter()
+            .zip(points.iter().cycle().skip(1))
+            .map(|(&a, &b)| KernelCurve::from(create_line_segment(a, b).unwrap()))
+            .collect();
+        let length = pitch * (turns - 1.0);
+        let stock =
+            primitives::create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, length).unwrap();
+        let tolerance = brep_approx_tol_3d(&k, &stock, SmallTopoType::NormalSize);
+        let t = Instant::now();
+        let mut groove = screw_sweep(
+            &mut k,
+            &profile,
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::Z,
+            pitch,
+            turns,
+            tolerance,
+        )
+        .unwrap();
+        let build = t.elapsed();
+        let groove_volume = volume(&k, &mut groove);
+        let t = Instant::now();
+        let mut body = boolean_difference(&mut k, stock, groove).unwrap();
+        let cut = t.elapsed();
+        let body_volume = volume(&k, &mut body);
+        let t = Instant::now();
+        let (record, _) = to_record(&mut k, &mut body).unwrap();
+        let write = t.elapsed();
+        // the median of eleven opens
+        let mut opens = Vec::new();
+        for _ in 0..11 {
+            let t = Instant::now();
+            let _ = to_kernel(&mut k, &record, true).unwrap();
+            opens.push(t.elapsed());
+        }
+        opens.sort();
+        let open = opens[5];
+        let (mut back, _) = to_kernel(&mut k, &record, true).unwrap();
+        let back_volume = volume(&k, &mut back);
+        let mut evals = Vec::new();
+        for _ in 0..11 {
+            let t = Instant::now();
+            for f in &record.faces {
+                solidcore::eval::SurfaceEval::new(&solidcore_convert::surface(&f.surface).unwrap())
+                    .unwrap();
+            }
+            let context = solidcore_convert::curve_context::BodyCurveContext::new(&record).unwrap();
+            for i in 0..record.edges.len() {
+                context.edge(i).unwrap();
+            }
+            evals.push(t.elapsed());
+        }
+        evals.sort();
+        let evaluators = evals[5];
+        assert!((back_volume - body_volume).abs() <= 1e-9 * body_volume);
+        let q = Vec3::new(-9.0, 0.5, 0.4 * length);
+        let t = Instant::now();
+        let mut nearest = f64::INFINITY;
+        for &e in back.edge_list() {
+            let d = edge_closest_point(&k, &back, e, q)
+                .unwrap()
+                .closest
+                .distance;
+            nearest = nearest.min(d);
+        }
+        let closest = t.elapsed();
+        eprintln!(
+            "M20 turns {turns}: groove {groove_volume:.6} body {body_volume:.6} faces {} edges {} | \
+             build {build:?} cut {cut:?} to_record {write:?} to_kernel {open:?} evaluators {evaluators:?} \
+             closest-over-{}-edges {closest:?} (nearest {nearest:.9})",
+            back.face_list().len(),
+            back.edge_list().len(),
+            back.edge_list().len(),
+        );
+    }
+}

@@ -87,9 +87,8 @@ impl ProceduralSweep {
         } else {
             self.profile.evaluate(w, dw, !ending_w, false)?
         };
-        let turn = self.checked_turn_at_side(wt.y, ending_t)?;
+        let (turn, rotation) = self.checked_turn_rotation(wt.y, ending_t)?;
         let (theta, rate) = (turn.theta, turn.rate);
-        let rotation = checked::Rotation::new(theta)?;
         let (Some(&first), Some(&last)) = (self.stations.first(), self.stations.last()) else {
             return Err(SolidError::invalid_input(OP, "empty screw stations"));
         };

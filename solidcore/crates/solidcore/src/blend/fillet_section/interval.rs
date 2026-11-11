@@ -297,6 +297,7 @@ impl Ivl {
     }
 
     /// `sm_Checked`: `[a, b]` rounded outward, or the whole line if either is NaN.
+    #[inline]
     #[must_use]
     pub fn checked(a: f64, b: f64) -> Self {
         if a.is_nan() || b.is_nan() {
@@ -473,6 +474,7 @@ impl Ivl {
 
 impl Add for Ivl {
     type Output = Self;
+    #[inline]
     fn add(self, b: Self) -> Self {
         Self::checked(self.lo + b.lo, self.hi + b.hi)
     }
@@ -480,6 +482,7 @@ impl Add for Ivl {
 
 impl Sub for Ivl {
     type Output = Self;
+    #[inline]
     fn sub(self, b: Self) -> Self {
         Self::checked(self.lo - b.hi, self.hi - b.lo)
     }
@@ -487,6 +490,7 @@ impl Sub for Ivl {
 
 impl Mul for Ivl {
     type Output = Self;
+    #[inline]
     fn mul(self, b: Self) -> Self {
         let p0 = product(self.lo, b.lo);
         let rest = [
@@ -509,6 +513,7 @@ impl Mul for Ivl {
 
 impl Div for Ivl {
     type Output = Self;
+    #[inline]
     fn div(self, b: Self) -> Self {
         let excludes_zero = b.lo > 0.0 || b.hi < 0.0;
         if !excludes_zero {

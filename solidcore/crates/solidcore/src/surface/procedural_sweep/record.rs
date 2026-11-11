@@ -1,10 +1,13 @@
 //! Screw definitions reconstructed from raw coefficients and certified against their nets.
 //! Serialized bounds are never evidence: both the section and the complete net are
-//! re-enclosed from the stored numbers before the surface is returned.
+//! re-enclosed from the stored numbers before the surface is returned: a saved net on its
+//! regenerated net's basis by their control nets span by span, any other by Bezier cells.
 //! Deviations: no upstream counterpart. No recursion; counts use the screw-net budgets.
 
 use crate::blend::fillet_section::interval::Ivl;
-use crate::blend::fillet_section::recertify::mapped_clamped_net_distance;
+use crate::blend::fillet_section::recertify::{
+    mapped_clamped_net_distance, same_basis, same_basis_net_distance,
+};
 use crate::error::{Result, SolidError};
 use crate::eval::geometry::sweep as r;
 use crate::math::Vec3;
@@ -257,13 +260,16 @@ impl ProceduralSweep {
             definition.bound = super::refined_net::certify_refined(&definition, &net, pieces)?;
         } else {
             let expected = screw_net(&profile, &motion, &record.stations)?;
-            let discrepancy = mapped_clamped_net_distance(
-                &net,
-                &expected,
-                record.map_a,
-                record.map_b,
-                record.swapped,
-            )?;
+            // A wall's saved net is on its regenerated net's own basis (the same knots,
+            // read through an identity map, transposed when swapped) unless it was cut or
+            // reparametrized. On one basis their control nets bound their distance span
+            // by span; any other net is refined to Bezier cells against the regenerated one.
+            let (a, b, swapped) = (record.map_a, record.map_b, record.swapped);
+            let discrepancy = if same_basis(&net, &expected, a, b, swapped)? {
+                same_basis_net_distance(&net, &expected, swapped)?
+            } else {
+                mapped_clamped_net_distance(&net, &expected, a, b, swapped)?
+            };
             let certified = (Ivl::from(definition.certify()?) + Ivl::from(discrepancy)).hi;
             if !certified.is_finite() {
                 return Err(bad("saved screw net error is not certified finite"));
