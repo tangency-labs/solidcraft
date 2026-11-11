@@ -45,23 +45,35 @@ fn tilts_and_twists_turn_the_cap_the_right_way() {
 /// user's choice of which motion drives which row, then the driver's mapping with the user's own
 /// inversions folded in.
 fn view_axes(raw: [i16; 6], source: [usize; 6], reverse: [bool; 6]) -> crate::space_mouse::Motion {
+    view_axes_under(raw, source, reverse, crate::space_mouse::DriverMapping::object_mode())
+}
+
+/// The same, under the mapping navigation really used.
+fn view_axes_under(raw: [i16; 6], source: [usize; 6], reverse: [bool; 6], mapping: crate::space_mouse::DriverMapping) -> crate::space_mouse::Motion {
     let axes = crate::space_mouse::reassigned(raw.into(), source);
-    crate::space_mouse::DriverMapping::object_mode().with_user_axes(reverse, [1.0; 6]).apply(axes)
+    mapping.with_user_axes(reverse, [1.0; 6]).apply(axes)
+}
+
+/// The mapping a device without a 3DxWare profile gets, and the one navigation uses.
+fn object_mode() -> crate::space_mouse::DriverMapping {
+    crate::space_mouse::DriverMapping::object_mode()
 }
 
 #[test]
-fn the_picture_reads_the_device_as_the_view_reads_it() {
+fn the_picture_shows_the_device_as_it_is() {
     // The user turned the tilt row over, because their device reports the tilt the other way.
     let raw = [0, 0, 0, 200, 0, 0];
     let reverse = [false, false, false, true, false, false];
-    let (_, travel, _) = corner_reading(None, raw, crate::space_mouse::SAME_AXES, reverse);
+    let (_, axes, _) = corner_reading(None, raw, crate::space_mouse::SAME_AXES, Some(object_mode()));
     let view = view_axes(raw, crate::space_mouse::SAME_AXES, reverse);
-    // The picture tilts the way the view tilts: the other way round from the raw reading.
-    assert!(travel[3] < 0.0, "the picture tilts the way the user turned the row");
-    assert!(view.rotation[0] < 0.0, "and the view tilts with it");
-    // The cap in the picture leans that way too: its top away from the user.
-    let leaned = apply(&Pose::new(travel).turn, [0.0, 0.0, 1.0]);
-    assert!(leaned[1] > 0.1, "the cap's top leans away from the user");
+    // The view tilts the other way round, but the picture shows the device: the user's own
+    // inversions are a matter of taste and are left to the view.
+    assert!(view.rotation[0] < 0.0, "the view tilts the way the user turned the row");
+    assert!(axes[3] > 0.0, "the picture shows the device leaning the way the user leans it");
+    // The cap in the picture leans that way too: its top toward the user.
+    let (gestures, _) = as_gestures(axes, [false; 6]);
+    let leaned = apply(&Pose::new(gestures).turn, [0.0, 0.0, 1.0]);
+    assert!(leaned[1] < -0.1, "the cap's top leans toward the user");
 }
 
 #[test]
@@ -69,29 +81,73 @@ fn the_picture_shows_the_motion_the_row_reads() {
     // The user drives the view's first axis with the device's second motion.
     let raw = [0, 100, 0, 0, 0, 0];
     let source = [1usize, 0, 2, 3, 4, 5];
-    let (_, travel, moving) = corner_reading(None, raw, source, [false; 6]);
-    // The row shows the motion it reads, and its marker lights.
-    assert!(travel[0] > 0.0, "the row shows the motion it reads");
+    let (_, axes, moving) = corner_reading(None, raw, source, Some(object_mode()));
+    // The axis shows the motion it reads, and its marker lights.
+    assert!(axes[0] > 0.0, "the axis shows the motion it reads");
     assert!(moving[0], "and its marker lights");
-    assert_eq!(travel[1], 0.0, "the other row reads the motion that is still");
+    assert_eq!(axes[1], 0.0, "the other axis reads the motion that is still");
     assert!(!moving[1]);
+}
+
+#[test]
+fn the_picture_shows_the_motion_the_view_applies() {
+    // The driver's object mode swaps the tilt and the twist, so the view rolls on the tilt and
+    // spins on the twist: the picture shows each motion where the view uses it.
+    let source = crate::space_mouse::SAME_AXES;
+    // The cap is tilted to the left.
+    let tilted = [0, 0, 0, 0, 350, 0];
+    let (_, picture, _) = corner_reading(None, tilted, source, Some(object_mode()));
+    let view = view_axes(tilted, source, [false; 6]);
+    assert_eq!(view.rotation[2], -1.0, "the tilt rolls the view");
+    assert_eq!(view.rotation[1], 0.0, "the twist is still");
+    assert_eq!(picture[5], 1.0, "the picture shows the tilt where the view rolls it");
+    assert_eq!(picture[4], 0.0, "and nothing where the view spins it");
+    // The cap is twisted instead.
+    let twisted = [0, 0, 0, 0, 0, 350];
+    let (_, picture, _) = corner_reading(None, twisted, source, Some(object_mode()));
+    let view = view_axes(twisted, source, [false; 6]);
+    assert_eq!(view.rotation[1], -1.0, "the twist spins the view");
+    assert_eq!(picture[4], 1.0, "the picture shows the twist where the view spins it");
+    assert_eq!(picture[5], 0.0, "and nothing where the view rolls it");
+}
+
+#[test]
+fn the_picture_follows_the_mapping_navigation_uses() {
+    // A driver that maps the axes as they are: the tilt spins the view, as that mapping says,
+    // and not as the object mode's swap does.
+    let raw = [0, 0, 0, 0, 350, 0];
+    let mapping = crate::space_mouse::DriverMapping::default();
+    let (_, picture, _) = corner_reading(None, raw, crate::space_mouse::SAME_AXES, Some(mapping));
+    let view = view_axes_under(raw, crate::space_mouse::SAME_AXES, [false; 6], mapping);
+    assert_eq!(view.rotation[1], 1.0, "the tilt spins the view");
+    assert_eq!(picture[4], 1.0, "the picture shows the tilt where the view spins it");
+    assert_eq!(picture[5], 0.0, "and nothing where the view rolls it");
 }
 
 #[test]
 fn the_picture_is_the_device_as_it_is_by_default() {
     let raw = [100, -200, 300, -400, 500, -600];
-    let (_, travel, moving) = corner_reading(None, raw, crate::space_mouse::SAME_AXES, [false; 6]);
-    let expected = raw.map(|value| f32::from(value) / f32::from(solidcraft_space_mouse::FULL_SCALE));
-    assert_eq!(travel, expected, "the default assignment leaves the picture as it was");
+    let (_, axes, moving) = corner_reading(None, raw, crate::space_mouse::SAME_AXES, Some(object_mode()));
+    // The driver's object mode sends the twist to the view's spin and the tilt to its roll, so
+    // the last two axes carry the twist and the tilt the other way round.
+    let expected = [100.0, -200.0, 300.0, -400.0, -600.0, 500.0].map(|value| value / f32::from(solidcraft_space_mouse::FULL_SCALE));
+    assert_eq!(axes, expected, "the picture reads the device the way the view does");
     assert_eq!(moving, [true; 6]);
+    // The cap in the picture is the device as it is.
+    let (gestures, _) = as_gestures(axes, moving);
+    assert_eq!(
+        gestures,
+        raw.map(|value| f32::from(value) / f32::from(solidcraft_space_mouse::FULL_SCALE)),
+        "the default assignment leaves the cap as it was"
+    );
 }
 
 #[test]
 fn a_broken_assignment_reads_as_the_default() {
     // Two rows reading the same motion: the view falls back to the default, and so does the picture.
     let raw = [0, 100, 0, 0, 0, 0];
-    let (_, travel, _) = corner_reading(None, raw, [0, 0, 2, 3, 4, 5], [false; 6]);
-    assert_eq!(travel[1], 100.0 / f32::from(solidcraft_space_mouse::FULL_SCALE));
+    let (_, axes, _) = corner_reading(None, raw, [0, 0, 2, 3, 4, 5], Some(object_mode()));
+    assert_eq!(axes[1], 100.0 / f32::from(solidcraft_space_mouse::FULL_SCALE));
 }
 
 #[test]

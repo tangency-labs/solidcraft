@@ -5912,7 +5912,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             calibration,
             app.space_mouse.raw.into(),
             app.preferences.space_mouse_axis_source,
-            app.preferences.space_mouse_reverse,
+            // The mapping navigation really used, so the picture and the view read the device
+            // the same way.
+            app.space_mouse.mapping,
         );
     }
     // Last, so it sits over the overlays; only where a click would reach the model.
