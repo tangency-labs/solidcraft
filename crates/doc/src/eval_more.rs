@@ -612,7 +612,7 @@ pub(super) fn sheet_eval(
             }
             Ok(())
         }
-        FeatureKind::SheetContour { sketch, curves, distance, rule, flip, reverse } => {
+        FeatureKind::SheetContour { sketch, curves, distance, radius, rule, orientation, symmetric, flip, reverse } => {
             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?.clone();
             let segs = chain_segs(&ss, &ss.chain_order(curves)?)?;
             let w = val(vals, distance, Kind::Length)?;
@@ -620,9 +620,17 @@ pub(super) fn sheet_eval(
                 return Err(DocError::Invalid("the contour flange distance must be positive".into()));
             }
             let r = doc.sheet_rule(rule.as_deref());
-            let rv = doc.rule_values(vals, &r)?;
-            let plane = if *reverse { Plane { origin: ss.plane.origin, x: ss.plane.x, y: ss.plane.y * -1.0 } } else { ss.plane };
-            let segs: Vec<Seg2> = if *reverse {
+            let mut rv = doc.rule_values(vals, &r)?;
+            if let Some(radius) = radius {
+                rv.bend_radius = val(vals, radius, Kind::Length)?;
+                if !(rv.bend_radius >= 0.0 && rv.bend_radius < 1e4) {
+                    return Err(DocError::Invalid("the contour flange bend radius must be non-negative".into()));
+                }
+            }
+            // `reverse` mirrors the sketch (older designs); with an orientation saved it is not used.
+            let legacy_reverse = *reverse && orientation.is_none();
+            let plane = if legacy_reverse { Plane { origin: ss.plane.origin, x: ss.plane.x, y: ss.plane.y * -1.0 } } else { ss.plane };
+            let segs: Vec<Seg2> = if legacy_reverse {
                 segs.iter()
                     .map(|s| match *s {
                         Seg2::Arc { center, radius, start, sweep } => {
@@ -634,9 +642,10 @@ pub(super) fn sheet_eval(
             } else {
                 segs
             };
+            let orientation = orientation.as_deref().unwrap_or("side1");
             // Mirroring the sketch swaps the material side too.
             let name = new_name(st, f, 0);
-            let sh = sheet::contour_flange_path(&name, &r.name, &rv, &plane, &segs, w, *flip != *reverse)?;
+            let sh = sheet::contour_flange_path(&name, &r.name, &rv, &plane, &segs, w, orientation, *symmetric, *flip != legacy_reverse)?;
             let solid = sh.solid()?;
             st.bodies.push(ModelBody::new(name, solid, f.id));
             st.sheets.push(sh);

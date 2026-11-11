@@ -6897,14 +6897,24 @@ pub fn base_flange(body: &str, rule: &str, rv: &RuleValues, plane: Plane, region
     }
 }
 
-/// A sheet from an open chain of lines (contour flange): `pts` in `plane`, the material on the
-/// right of the travel (or the left when `flip`), `width` along the plane normal.
-pub fn contour_flange(body: &str, rule: &str, rv: &RuleValues, plane: &Plane, pts: &[Vec2], width: f64, flip: bool) -> Result<SheetBody> {
+/// A sheet from an open chain of lines (contour flange): `pts` in `plane`, as
+/// [`contour_flange_path`].
+pub fn contour_flange(
+    body: &str,
+    rule: &str,
+    rv: &RuleValues,
+    plane: &Plane,
+    pts: &[Vec2],
+    width: f64,
+    orientation: &str,
+    symmetric: bool,
+    flip: bool,
+) -> Result<SheetBody> {
     if pts.len() < 2 {
         return Err(DocError::Invalid("a contour flange needs an open chain of lines".into()));
     }
     let segs: Vec<Seg2> = pts.windows(2).map(|w| Seg2::Line { a: w[0], b: w[1] }).collect();
-    contour_flange_path(body, rule, rv, plane, &segs, width, flip)
+    contour_flange_path(body, rule, rv, plane, &segs, width, orientation, symmetric, flip)
 }
 
 /// A sheet from an open chain of lines and circular arcs (contour flange): `segs` in `plane`,
@@ -6913,13 +6923,29 @@ pub fn contour_flange(body: &str, rule: &str, rv: &RuleValues, plane: &Plane, pt
 /// surface: when the bend turns toward the material the sheet is outside that surface, so the
 /// bend's inner radius is the arc's less the thickness; when it turns away the arc is the inner
 /// surface and its radius is the bend's. A line-line corner is a sharp corner and gets a bend of
-/// the rule's radius, as a chain of lines always did.
-pub fn contour_flange_path(body: &str, rule: &str, rv: &RuleValues, plane: &Plane, segs: &[Seg2], width: f64, flip: bool) -> Result<SheetBody> {
+/// the rule's radius, as a chain of lines always did. `orientation` puts the profile on one face
+/// of the sheet (`side1`, `side2`) or through its middle (`center`); `symmetric` takes `width`
+/// each way across the sketch plane.
+#[allow(clippy::too_many_arguments)]
+pub fn contour_flange_path(
+    body: &str,
+    rule: &str,
+    rv: &RuleValues,
+    plane: &Plane,
+    segs: &[Seg2],
+    width: f64,
+    orientation: &str,
+    symmetric: bool,
+    flip: bool,
+) -> Result<SheetBody> {
     if segs.is_empty() {
         return Err(DocError::Invalid("a contour flange needs an open profile".into()));
     }
     if !(width.is_finite() && width > 0.0) {
         return Err(DocError::Invalid("the contour flange distance must be positive".into()));
+    }
+    if !matches!(orientation, "center" | "side1" | "side2") {
+        return Err(DocError::Invalid("contour flange orientation must be center, side1 or side2".into()));
     }
     let (t, r) = (rv.thickness, rv.bend_radius);
     // Material side in the sketch: right of travel, or left when flipped.
@@ -6934,10 +6960,19 @@ pub fn contour_flange_path(body: &str, rule: &str, rv: &RuleValues, plane: &Plan
     let d0 = d0 / l0;
     let m0 = Vec2::new(d0.y, -d0.x) * side;
     let (x, z) = (plane.dir_to_world(d0), plane.dir_to_world(m0));
-    let frame = Plane::new(plane.to_world(start), x, z.cross(x)).ok_or_else(|| DocError::Invalid("contour frame".into()))?;
+    // Where the profile lies across the thickness: on the side1 face (0), in the middle
+    // (center) or on the other face (side2); setbacks and arc radii are measured there.
+    let depth = match orientation {
+        "center" => t / 2.0,
+        "side2" => t,
+        _ => 0.0,
+    };
+    let thickness_offset = -depth;
+    let frame = Plane::new(plane.to_world(start) + z * thickness_offset, x, z.cross(x)).ok_or_else(|| DocError::Invalid("contour frame".into()))?;
     let ysign = if frame.y.dot(plane.normal()) >= 0.0 { 1.0 } else { -1.0 };
-    let (y0, y1) = if ysign > 0.0 { (0.0, width) } else { (-width, 0.0) };
-    let setback = |ang: f64, up: bool| if up { (r + t) * (ang / 2.0).tan() } else { r * (ang / 2.0).tan() };
+    let (p0, p1) = if symmetric { (-width, width) } else { (0.0, width) };
+    let (y0, y1) = if ysign > 0.0 { (p0, p1) } else { (-p1, -p0) };
+    let setback = |ang: f64, up: bool| if up { (r + t - depth) * (ang / 2.0).tan() } else { (r + depth) * (ang / 2.0).tan() };
     // The junction after each segment: a sharp line-line corner (its unsigned turn and whether
     // it bends toward the material), or none where a line meets an arc tangentially.
     let mut sharp: Vec<Option<(f64, bool)>> = Vec::with_capacity(segs.len().saturating_sub(1));
@@ -7000,7 +7035,7 @@ pub fn contour_flange_path(body: &str, rule: &str, rv: &RuleValues, plane: &Plan
                 }
                 let angle = -sweep * side;
                 let up = angle >= 0.0;
-                let inner = if up { radius - t } else { radius };
+                let inner = if up { radius - (t - depth) } else { radius - depth };
                 if !(inner.is_finite() && inner > 1e-9) {
                     return Err(DocError::Invalid("a contour arc's radius is no larger than the sheet is thick".into()));
                 }
@@ -7390,12 +7425,75 @@ mod tests {
         // Oracle 72: XZ chain (0,0)→(40,0)→(40,−30)→(70,−30), 50 wide.
         let xz = Plane::new(Vec3::ZERO, Vec3::X, Vec3::new(0.0, 0.0, -1.0)).unwrap();
         let pts = [Vec2::new(0.0, 0.0), Vec2::new(40.0, 0.0), Vec2::new(40.0, -30.0), Vec2::new(70.0, -30.0)];
-        let s = contour_flange("Body1", "Steel (mm)", &steel(), &xz, &pts, 50.0, false).unwrap();
+        let s = contour_flange("Body1", "Steel (mm)", &steel(), &xz, &pts, 50.0, "side1", false, false).unwrap();
         let b = s.solid().unwrap();
         assert!((vol(&b) - 12097.622).abs() < 1.2, "{}", vol(&b));
         let m = kernel::measure(&b).unwrap();
         assert!((m.bbox.max.z - 32.5).abs() < 1e-6 && (m.bbox.max.y - 50.0).abs() < 1e-6, "{:?}", m.bbox);
         assert!((s.flat_size().unwrap().0 - 96.309734).abs() < 1e-5, "{:?}", s.flat_size());
+    }
+
+    #[test]
+    fn contour_flange_orientation_thickness_width_direction_and_radius() {
+        let xz = Plane::new(Vec3::ZERO, Vec3::X, Vec3::new(0.0, 0.0, -1.0)).unwrap();
+        let pts = [Vec2::new(0.0, 0.0), Vec2::new(40.0, 0.0), Vec2::new(40.0, -30.0)];
+        let geometry = |orientation, symmetric| {
+            let mut rv = steel();
+            rv.bend_radius = 1.5;
+            let sheet = contour_flange("Body1", "Steel (mm)", &rv, &xz, &pts, 50.0, orientation, symmetric, false).unwrap();
+            assert!(sheet.flanges.iter().all(|flange| flange.radius == 1.5));
+            let bounds = kernel::measure(&sheet.solid().unwrap()).unwrap().bbox;
+            (bounds.min.y, bounds.max.y, bounds.min.z)
+        };
+        let side1_min_z = geometry("side1", false).2;
+        for (orientation, expected_z) in [("center", -1.25), ("side1", 0.0), ("side2", -2.5)] {
+            for (symmetric, expected_y) in [(false, (0.0, 50.0)), (true, (-50.0, 50.0))] {
+                let actual = geometry(orientation, symmetric);
+                assert!((actual.0 - expected_y.0).abs() < 1e-8 && (actual.1 - expected_y.1).abs() < 1e-8, "{orientation} {symmetric}: {actual:?}");
+                assert!((actual.2 - side1_min_z - expected_z).abs() < 1e-8, "{orientation} {symmetric}: {actual:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn contour_flange_orientation_tracks_all_segments_of_a_bent_chain() {
+        let plane = Plane::XZ;
+        let pts = [Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0), Vec2::new(200.0, 25.0), Vec2::new(260.0, 110.0)];
+        let mut rv = steel();
+        rv.bend_radius = 1.5;
+
+        for (orientation, reference_z) in [("center", rv.thickness / 2.0), ("side1", 0.0), ("side2", rv.thickness)] {
+            let sheet = contour_flange("Body1", "Steel (mm)", &rv, &plane, &pts, 50.0, orientation, false, false).unwrap();
+            for segment in 0..pts.len() - 1 {
+                let direction = (pts[segment + 1] - pts[segment]).normalized().unwrap();
+                let length = pts[segment].dist(pts[segment + 1]);
+                let (local_x, along) = if segment == 0 {
+                    let along = length / 2.0;
+                    (along, along)
+                } else {
+                    let flange = &sheet.flanges[segment - 1];
+                    let previous = (pts[segment] - pts[segment - 1]).normalized().unwrap();
+                    let angle = previous.dot(direction).clamp(-1.0, 1.0).acos();
+                    let turns_toward_material = previous.cross(direction) < 0.0;
+                    let radius = match orientation {
+                        "center" => rv.bend_radius + rv.thickness / 2.0,
+                        "side1" if turns_toward_material => rv.bend_radius + rv.thickness,
+                        "side1" => rv.bend_radius,
+                        "side2" if turns_toward_material => rv.bend_radius,
+                        "side2" => rv.bend_radius + rv.thickness,
+                        _ => rv.bend_radius,
+                    };
+                    let before = radius * (angle / 2.0).tan();
+                    let along = before + flange.leg / 2.0;
+                    (flange.p.x + sheet.allowance(flange) + flange.leg / 2.0, along)
+                };
+                let local = Vec3::new(local_x, 0.0, reference_z);
+                let panel = if segment > 0 { Some(segment - 1) } else { None };
+                let actual = apply_point(&sheet.world(panel), local);
+                let expected = plane.to_world(pts[segment] + direction * along);
+                assert!(actual.dist(expected) < 1e-6, "{orientation}, segment {segment}: actual={actual:?}, expected={expected:?}");
+            }
+        }
     }
 
     #[test]
