@@ -7,10 +7,10 @@
 //! and each body that fits is moved there by a Move feature, all in one undo step. Bodies that
 //! don't fit stay where they are and are listed.
 //!
-//! A body in a component is laid out with its whole component (its placement under the design,
-//! moved as one), and placements joints join go together, keeping where they are to each other
-//! ([`Piece`]). The sheet may also be sketch areas and flat faces in one plane, joined where
-//! they touch, as Extrude takes areas ([`sheet_areas`]).
+//! Each body listed is laid out on its own, one in a component too: only that body moves, by a
+//! Move feature in its component, and the component's placement and its joints stay as they
+//! are. The sheet may also be sketch areas and flat faces in one plane, joined where they
+//! touch, as Extrude takes areas ([`sheet_areas`]).
 
 use serde_json::{Value, json};
 use solidcore_record::brep::Brep;
@@ -42,7 +42,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("solid.arrange", "Arran
     .contract(&CONTRACT)
     .output(output_schema_for::<ArrangeReply>)
     .params(
-        "bodies: [names] (solid bodies; a body in a component brings its whole component, its placement under the design moved as one, and placements joints join to it come too, keeping their places to each other; a placement jointed to the design itself can't move); width, length: expr (the rectangle along X and Y); \
+        "bodies: [names] (solid bodies; each is laid out on its own: a body in a component moves alone, its component's placement, its other bodies and its joints stay as they are, and copies of it are bodies of the design's own); width, length: expr (the rectangle along X and Y); \
          plane?: plane (the rectangle lies on it, along its X and Y from its origin, the bodies on its normal side; default XY); origin?: [x, y] (its lower-left corner on the plane, default [0, 0]); sheet?: face | [{face: face} | {sketch: id|name, profile: index}] (in place of the rectangle: flat faces at any tilt, of bodies \
          not arranged, and sketch areas, all in one plane; their outlines and holes, joined where they touch, each piece apart a sheet of its own; the bodies lie on them, laid out in their plane, on the first one's side); spacing?: mm between bodies (default 1); margin?: mm from the sheet's edge \
          (default 0); angle_step?: degrees a body may turn by about Z (default 90; 0 keeps each body's turn); method?: \"true_shape\" (default: \
@@ -51,8 +51,8 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("solid.arrange", "Arran
          along +X (default 1); sheet_spacing?: mm between them (default 10); copy?: bool (default false: the bodies are moved; true leaves them \
          where they are, clear of the layout, and lays out copies; copies always go into a new browser group \"Arrangement n\"); lay_flat?: bool (default true: each body lies on the flat side it \
          rests on best, nothing hanging below it; false keeps it as it stands); avoid?: bool (default true: keep clear of the \
-         other bodies shown on the sheet and the originals; false lays out as if the sheet were empty); bottoms?: [faces] (a flat face per body to lay it on) → placed: [{body, copy_of?, with?, occurrences?, sheet, x, y, \
-         angle_deg, bottom?}] (with: the other bodies moved with it; occurrences: the placements moved, or the copies made of them) (how far each body moved and turned, about the world Z axis through the origin, then moved; bottom: the side it \
+         other bodies shown on the sheet and the originals; false lays out as if the sheet were empty); bottoms?: [faces] (a flat face per body to lay it on) → placed: [{body, copy_of?, sheet, x, y, \
+         angle_deg, bottom?}] (how far each body moved and turned, about the world Z axis through the origin, then moved; bottom: the side it \
          was laid on); boxed?: [names] (no outline from above: placed by their box); hurried?: true (the layout ran long, about 30 s, \
          6 s on the web, and hurried to finish: some parts may be boxed or unplaced); unplaced: [names] (did not fit; not moved); copies_left (copies that did not fit); sheets_used; fill (the footprints \
          over the area of the sheets used); footprint_error_mm. Bodies stand on the sheet (z = 0 for the rectangle). Other bodies on it stay \
@@ -119,10 +119,8 @@ fn arrange_bodies(s: &mut Session, p: &Value) -> Result<Value> {
     if names.len() > MAX_BODIES {
         return Err(bad(cmd, format!("at most {MAX_BODIES} bodies")));
     }
-    // What moves as one: a body of the design's own, or a whole component with the placements
-    // joints join to it. A piece a joint holds to the design is only laid out as copies.
-    let copies_only = p.get("copy").and_then(Value::as_bool).unwrap_or(false);
-    let pieces = pieces(s, &names, copies_only, cmd)?;
+    // Each body is laid out on its own, whatever component it is in or joints hold it.
+    let pieces = pieces(s, &names);
     let in_piece = |name: &String| pieces.iter().any(|pc| pc.bodies.contains(name));
     // A number (mm or degrees) or an expression with units ("200 mm", "w / 2", "45 deg").
     let value = |k: &str, kind: Kind| -> Result<Option<f64>> {
@@ -317,8 +315,7 @@ fn arrange_bodies(s: &mut Session, p: &Value) -> Result<Value> {
         let mut bounds: Option<solidcraft_geom::Aabb3> = None;
         for m in &pc.bodies {
             let body = world.body(m).ok_or_else(|| bad(cmd, format!("no body `{m}`")))?;
-            // A mesh body in a component goes with it, by its box; one picked alone can't go yet.
-            if body.body.is_mesh() && pc.paths.is_empty() {
+            if body.body.is_mesh() {
                 return Err(bad(cmd, format!("`{m}` is a mesh body: only solid bodies can be arranged yet")));
             }
             // On a tilted sheet, the body as seen in the sheet's frame.
@@ -612,7 +609,13 @@ fn arrange_bodies(s: &mut Session, p: &Value) -> Result<Value> {
         let Some(pc) = pieces.get(i) else { continue };
         let name = pc.name().to_string();
         let down = laid_down.get(i).copied().flatten();
-        // Copies first, from the piece where it stands; the piece itself takes the first spot.
+        // A body in a component is copied by way of a copy of it in the design's own bodies,
+        // made where it stands (its shape only): Move copies a body in its own component's
+        // frame, which is not where it stands under a moved placement.
+        let copies = list.len().saturating_sub(usize::from(!keep));
+        let source = if pc.placed && copies > 0 { copy_into_design(s, std::slice::from_ref(&name), cmd)?.into_iter().next() } else { None };
+        let last_copy = if keep { 0 } else { list.len().saturating_sub(1) };
+        // Copies first, from the body where it stands; the body itself takes the first spot.
         for (n, (sheet, pl)) in list.iter().enumerate().skip(1).chain(list.iter().enumerate().take(1)) {
             let copy = n > 0 || keep;
             // Laying down, then the layout's turn about Z: one turn about the origin.
@@ -635,57 +638,53 @@ fn arrange_bodies(s: &mut Session, p: &Value) -> Result<Value> {
                 q["angle"] = json!(format!("{} deg", turn.to_degrees()));
             }
             let mut body = name.clone();
-            let mut with: Vec<String> = pc.bodies.iter().skip(1).cloned().collect();
-            let mut occurrences: Vec<u64> = pc.paths.iter().filter_map(|path| path.last().copied()).collect();
             if copy {
-                // A copy of a component is a component of its own, as Paste New makes it; the
-                // joints between the originals are not copied.
-                q["copy"] = json!(true);
-                q["bodies"] = json!(if pc.paths.is_empty() { vec![name.clone()] } else { Vec::new() });
-                if !pc.paths.is_empty() {
-                    q["occurrences"] = json!(pc.paths);
-                }
-                let reply = mover.run_nested(s, &q)?;
-                if pc.paths.is_empty() {
-                    body = reply["created_bodies"]
-                        .get(0)
-                        .and_then(Value::as_str)
-                        .map(String::from)
-                        .ok_or_else(|| EngineError::Other("the copy made no body".into()))?;
-                    with.clear();
-                } else {
-                    occurrences = reply["occurrences"].as_array().into_iter().flatten().filter_map(Value::as_u64).collect();
-                    let made = placement_bodies(s, &occurrences);
-                    body = made.first().cloned().unwrap_or_default();
-                    with = made.into_iter().skip(1).collect();
+                match &source {
+                    // The copy made in the design takes the last place itself.
+                    Some(src) if n == last_copy => {
+                        if t.x != 0.0 || t.y != 0.0 || t.z != 0.0 || turned {
+                            q["bodies"] = json!([src]);
+                            mover.run_nested(s, &q)?;
+                        }
+                        body = src.clone();
+                    }
+                    _ => {
+                        q["copy"] = json!(true);
+                        q["bodies"] = json!([source.as_ref().unwrap_or(&name)]);
+                        let reply = mover.run_nested(s, &q)?;
+                        body = reply["created_bodies"]
+                            .get(0)
+                            .and_then(Value::as_str)
+                            .map(String::from)
+                            .ok_or_else(|| EngineError::Other("the copy made no body".into()))?;
+                    }
                 }
             } else if t.x != 0.0 || t.y != 0.0 || t.z != 0.0 || turned {
-                if pc.paths.is_empty() {
-                    q["bodies"] = json!([name]);
-                    mover.run_nested(s, &q)?;
-                } else {
-                    move_placements(s, &pc.paths, t, turned.then_some((axis, turn)), cmd)?;
+                q["bodies"] = json!([name]);
+                // Move takes the motion in the frame the body's geometry is in: for a body in
+                // a placed component, the world's motion as seen from that placement.
+                if let Some(frame) = pc.frame.as_ref()
+                    && let Some(back) = solidcraft_doc::mat_inverse(frame)
+                {
+                    let at = solidcraft_doc::apply_point(frame, Vec3::new(0.0, 0.0, 0.0));
+                    let moved = if turned { about(axis, turn, at) } else { at };
+                    let (a, tl) = (solidcraft_doc::apply_vector(&back, axis), solidcraft_doc::apply_vector(&back, moved + t - at));
+                    q["translate"] = json!([tl.x, tl.y, tl.z]);
+                    if turned {
+                        q["axis"] = json!([a.x, a.y, a.z]);
+                    }
                 }
+                mover.run_nested(s, &q)?;
             }
             let bottom = down.map(|d| to_world(d.normal)).map(|v| [v.x, v.y, v.z]);
             let copy_of = copy.then(|| name.clone());
-            placed.push(ArrangedBody {
-                body,
-                copy_of,
-                with,
-                occurrences,
-                sheet: *sheet,
-                x: pl.shift.x,
-                y: pl.shift.y,
-                angle_deg: pl.angle.to_degrees(),
-                bottom,
-            });
+            placed.push(ArrangedBody { body, copy_of, sheet: *sheet, x: pl.shift.x, y: pl.shift.y, angle_deg: pl.angle.to_degrees(), bottom });
         }
     }
     // The copies of bodies made go into a new group of their own in the browser ("Arrangement
-    // 1", ...); a copy of a component is a component of its own.
+    // 1", ...).
     let mut copy_groups = Vec::new();
-    let copies: Vec<&str> = placed.iter().filter(|b| b.copy_of.is_some() && b.occurrences.is_empty()).map(|b| b.body.as_str()).collect();
+    let copies: Vec<&str> = placed.iter().filter(|b| b.copy_of.is_some()).map(|b| b.body.as_str()).collect();
     if !copies.is_empty() {
         let st = s.model.state();
         let mut by_component: Vec<(u64, Vec<String>)> = Vec::new();
@@ -738,15 +737,15 @@ fn arrange_bodies(s: &mut Session, p: &Value) -> Result<Value> {
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
-/// Bodies laid out as one: a body of the design's own, or a component's placement under the
-/// design with all its bodies, together with the placements joints join to it.
+/// A body laid out: on its own, whatever component it is in.
 #[derive(Debug)]
 struct Piece {
-    /// Its bodies, world names; the one listed first leads and names the piece.
+    /// The body, by its world name (a list so an outline is worked out the same way for all).
     bodies: Vec<String>,
-    /// The placements under the design moved (paths `[occurrence]`); none for a body of the
-    /// design's own.
-    paths: Vec<Vec<u64>>,
+    /// Whether it is in a component placed in the design, not a body of the design's own.
+    placed: bool,
+    /// For one in a placed component: from the frame its geometry is in to the world.
+    frame: Option<solidcraft_doc::Mat>,
 }
 
 impl Piece {
@@ -755,119 +754,64 @@ impl Piece {
     }
 }
 
-/// The pieces `names` make, in the order listed: a body of the design's own alone; a body in a
-/// component brings the whole placement it is in under the design (moving part of a component
-/// would change the part); and placements joined by joints that are not suppressed go together,
-/// those not listed too, so the joints hold as they are. A piece jointed to the design itself
-/// (the world) can't move without breaking that joint: refused.
-fn pieces(s: &Session, names: &[String], copies_only: bool, cmd: &str) -> Result<Vec<Piece>> {
+/// The pieces `names` make, in the order listed: each body alone. One in a component moves by
+/// a Move feature in that component; its placement and joints are not touched.
+fn pieces(s: &Session, names: &[String]) -> Vec<Piece> {
     let st = s.model.state();
     let frames = s.placed_document().body_frames_with_source(&st);
     drop(st);
-    // The placement under the design an occurrence is in (itself when it is one).
-    let top = |occ: u64| -> Option<u64> {
-        if s.doc.occurrences.iter().any(|o| o.id == occ && o.parent == 0) {
-            return Some(occ);
-        }
-        frames.iter().find_map(|f| if f.3.contains(&occ) { f.3.first().copied() } else { None })
-    };
-    let mut links: Vec<(u64, u64)> = Vec::new();
-    // Placements a joint holds to the world, with that joint's name.
-    let mut fixed: Vec<(u64, String)> = Vec::new();
-    for j in s.doc.assembly.joints.iter().filter(|j| !j.suppressed) {
-        // Occurrence 0 is the design itself; an end on an occurrence that is gone holds nothing.
-        let end = |o: u64| if o == 0 { Some(None) } else { top(o).map(Some) };
-        match (end(j.a.occurrence), end(j.b.occurrence)) {
-            (Some(Some(a)), Some(Some(b))) if a != b => links.push((a, b)),
-            (Some(Some(a)), Some(None)) | (Some(None), Some(Some(a))) => fixed.push((a, j.name.clone())),
-            _ => {}
-        }
-    }
-    let mut out: Vec<Piece> = Vec::new();
-    let mut taken: Vec<u64> = Vec::new();
-    for n in names {
-        let first = frames.iter().find(|f| &f.0 == n).and_then(|f| f.3.first().copied());
-        let Some(first) = first else {
-            out.push(Piece { bodies: vec![n.clone()], paths: Vec::new() });
-            continue;
-        };
-        // Listed with another body of the same piece.
-        if taken.contains(&first) {
-            continue;
-        }
-        let mut group = vec![first];
-        let mut k = 0;
-        while let Some(&o) = group.get(k) {
-            for &(a, b) in &links {
-                let other = if a == o {
-                    b
-                } else if b == o {
-                    a
-                } else {
-                    continue;
-                };
-                if !group.contains(&other) {
-                    group.push(other);
-                }
-            }
-            k += 1;
-        }
-        if let Some((_, joint)) = fixed.iter().find(|(o, _)| !copies_only && group.contains(o)) {
-            return Err(bad(
-                cmd,
-                format!(
-                    "`{n}` is in a component the joint `{joint}` holds to the design itself: it can't be laid out without breaking that joint; suppress or delete the joint, or turn on Keep Originals to lay out copies"
-                ),
-            ));
-        }
-        taken.extend(&group);
-        let mut bodies = vec![n.clone()];
-        for f in frames.iter().filter(|f| f.3.first().is_some_and(|o| group.contains(o))) {
-            if !bodies.contains(&f.0) {
-                bodies.push(f.0.clone());
-            }
-        }
-        out.push(Piece { bodies, paths: group.into_iter().map(|o| vec![o]).collect() });
-    }
-    Ok(out)
-}
-
-/// The world names of the bodies in the placements `occurrences` under the design.
-fn placement_bodies(s: &Session, occurrences: &[u64]) -> Vec<String> {
-    let st = s.model.state();
-    s.placed_document()
-        .body_frames_with_source(&st)
-        .into_iter()
-        .filter(|f| f.3.first().is_some_and(|o| occurrences.contains(o)))
-        .map(|(w, ..)| w)
+    names
+        .iter()
+        .map(|n| {
+            let frame = frames.iter().find(|f| &f.0 == n && !f.3.is_empty()).map(|f| f.4);
+            Piece { bodies: vec![n.clone()], placed: frame.is_some(), frame }
+        })
         .collect()
 }
 
-/// Moves the placements `paths` together in the world: turned by `turn` (axis, radians) about
-/// the world origin, then moved by `t`, as a Move feature moves bodies. They are all moved
-/// before the joints are solved, so joints between them hold as they were; a grounded one
-/// moves too (it was picked) and stays grounded.
-fn move_placements(s: &mut Session, paths: &[Vec<u64>], t: Vec3, turn: Option<(Vec3, f64)>, cmd: &str) -> Result<()> {
-    let mover = super::find_command("occurrence.move").ok_or_else(|| EngineError::UnknownCommand("occurrence.move".into()))?;
-    for path in paths {
-        let Some(&occurrence) = path.last() else { continue };
-        let mut q =
-            json!({"occurrence": occurrence, "path": path, "space": "world", "translate": [t.x, t.y, t.z], "capture": false, "move_grounded": true});
-        if let Some((axis, angle)) = turn {
-            q["axis"] = json!([axis.x, axis.y, axis.z]);
-            q["angle"] = json!(angle);
-        }
-        mover.run_nested(s, &q)?;
+/// `v` turned by `angle` (radians) about `axis` through the origin.
+fn about(axis: Vec3, angle: f64, v: Vec3) -> Vec3 {
+    let Some(k) = axis.normalized() else { return v };
+    let (sin, cos) = angle.sin_cos();
+    v * cos + k.cross(v) * sin + k * (k.dot(v) * (1.0 - cos))
+}
+
+/// Copies of `bodies` (in components) in the design's own bodies, each where it stands in the
+/// world: its shape only, kept in the design as a fixed import, with no link to its part and no
+/// joint. Named as the app names copies; the new names, in order.
+fn copy_into_design(s: &mut Session, bodies: &[String], cmd: &str) -> Result<Vec<String>> {
+    let world = s.world_state()?;
+    let st = s.model.state();
+    let own: Vec<(String, String)> = s.placed_document().body_frames_with_source(&st).into_iter().map(|(w, o, ..)| (w, o)).collect();
+    let mut names: Vec<String> = Vec::with_capacity(bodies.len());
+    let mut shapes = Vec::with_capacity(bodies.len());
+    for n in bodies {
+        let body = world.body(n).ok_or_else(|| bad(cmd, format!("no body `{n}`")))?;
+        let base = own.iter().find(|(w, _)| w == n).map_or(n.as_str(), |(_, o)| o.as_str());
+        let taken = |x: &str| st.body(x).is_some() || world.body(x).is_some() || names.iter().any(|m| m == x);
+        names.push(solidcraft_doc::copy_name(base, taken));
+        shapes.push(body.body.clone());
     }
-    for path in paths {
-        let Some(&occurrence) = path.last() else { continue };
-        let next = s.pending_moves.remove(&occurrence).ok_or_else(|| bad(cmd, "a component's move was not kept"))?;
-        if let Some(o) = s.doc_mut().occurrences.iter_mut().find(|o| o.id == occurrence) {
-            o.transform = next;
-        }
+    drop(st);
+    let list: Vec<solidcraft_kernel::ExportBody> =
+        names.iter().zip(&shapes).map(|(name, body)| solidcraft_kernel::ExportBody { name: name.clone(), body, color: body.color() }).collect();
+    let header = solidcraft_kernel::StepHeader { organization: "SolidCraft".into(), ..Default::default() };
+    let step = solidcraft_kernel::step_export_bodies(&list, &header).map_err(|e| bad(cmd, format!("copying the bodies in: {e}")))?;
+    // The design itself (its root component, at the world's frame).
+    let root = 0;
+    let mut scratch = s.scratch();
+    let kind = solidcraft_doc::FeatureKind::Import { file: "Arrange copies".into(), step: step.into(), components: Vec::new(), skip: Vec::new() };
+    let id = scratch.doc_mut().add_feature(kind, None)?;
+    if let Some(f) = scratch.doc_mut().feature_mut(id) {
+        f.component = root;
+        f.body_names = names.clone();
     }
-    s.refresh();
-    Ok(())
+    scratch.refresh();
+    if let Some(error) = scratch.model.result(id).and_then(|r| r.error.as_ref()) {
+        return Err(bad(cmd, format!("the copies of the bodies in components didn't come in: {error}")));
+    }
+    s.accept_computed(scratch);
+    Ok(names)
 }
 
 /// The sheets laid out on, in their frame.

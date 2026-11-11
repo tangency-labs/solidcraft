@@ -24,7 +24,7 @@
     "arrange.sheet": "Sheet",
     "arrange.sheet_size": "Sheet {w} × {l} mm",
     "arrange.sheets": "Sheets",
-    "arrange.tip_bodies": "The bodies to lay out on the sheet; a body in a component brings its whole component, and parts joined to it come too",
+    "arrange.tip_bodies": "The bodies to lay out on the sheet; each is laid out on its own",
     "arrange.tip_bottoms": "Optional: a flat face of a body for it to lie on",
     "arrange.tip_plane": "Optional: the plane the rectangle lies on (XY when empty)",
     "arrange.tip_sheet": "Optional: flat faces or sketch areas in one plane, at any tilt, to lay the bodies on in place of the rectangle",
@@ -33,7 +33,7 @@
     "arrange.turn_90": "Every 90°",
     "arrange.turn_off": "Keep Angle",
     "cmd.solid.arrange": "Arrange",
-    "help.solid.arrange": "Lays the selected bodies out side by side on a rectangle, on the XY plane or a picked plane, or on flat faces and sketch areas at any tilt, turning them in its plane to fit more. Each part lies on the flat side it rests on best, stays as it stands, or lies on a face you pick. Quantity lays out copies; more Sheets take what does not fit on the first. Keep Originals leaves the bodies where they are and lays out copies. The copies go into a new Arrangement group in the browser. A body in a component brings its whole component, and parts joined to it by joints come along, keeping their places to each other. Use it to fill a build plate or a sheet to cut parts from."
+    "help.solid.arrange": "Lays the selected bodies out side by side on a rectangle, on the XY plane or a picked plane, or on flat faces and sketch areas at any tilt, turning them in its plane to fit more. Each part lies on the flat side it rests on best, stays as it stands, or lies on a face you pick. Quantity lays out copies; more Sheets take what does not fit on the first. Keep Originals leaves the bodies where they are and lays out copies. The copies go into a new Arrangement group in the browser. Each body is laid out on its own: one in a component moves alone, and the component's other bodies and its joints stay as they are. Use it to fill a build plate or a sheet to cut parts from."
   },
   "ja": {
     "Areas": "領域",

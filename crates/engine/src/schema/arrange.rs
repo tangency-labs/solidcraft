@@ -18,9 +18,9 @@ pub const MAX_SIZE: f64 = 1e6;
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ArrangeParams {
-    /// The bodies to arrange, by name. Solid bodies only: a mesh body can't be arranged yet. A
-    /// body in a component brings its whole component (its placement under the design, moved as
-    /// one), and the placements joints join to it come too, keeping their places to each other.
+    /// The bodies to arrange, by name. Solid bodies only: a mesh body can't be arranged yet. Each
+    /// is laid out on its own: a body in a component moves alone, and its component's placement,
+    /// its other bodies and its joints stay as they are.
     pub bodies: StringList,
     /// The rectangle's size along X: above 0, at most 1 000 000 mm. Needed unless `sheet` is given.
     #[serde(default)]
@@ -136,12 +136,6 @@ pub struct ArrangedBody {
     /// When `body` is a copy made by the arrangement: the body it is a copy of.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub copy_of: Option<String>,
-    /// The other bodies moved with it as one (its component's, and those joints join to it).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub with: Vec<String>,
-    /// The placements under the design it moved, or for a copy the copies of them made.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub occurrences: Vec<u64>,
     /// Which sheet it is on, from 0.
     pub sheet: usize,
     /// How far the body moved along X after turning, in mm.

@@ -1074,97 +1074,87 @@ fn pegged_plate(s: &mut Session, name: &str, corner: [f64; 3]) -> (u64, Vec<Stri
     (c["occurrence"].as_u64().unwrap_or_else(|| panic!("{c}")), after.into_iter().filter(|n| !before.contains(n)).collect())
 }
 
-/// Where a body's box starts, less where another's does: unchanged when they moved as one.
-fn offset(s: &Session, a: &str, b: &str) -> [f64; 3] {
-    let (pa, pb) = (bounds(s, a).0, bounds(s, b).0);
-    [pa[0] - pb[0], pa[1] - pb[1], pa[2] - pb[2]]
-}
-
 fn same(a: [f64; 3], b: [f64; 3]) {
     assert!(a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-6), "{a:?} != {b:?}");
 }
 
 #[test]
-fn a_body_in_a_component_brings_its_whole_component() {
+fn a_body_in_a_component_is_laid_out_alone() {
     let mut s = Session::default();
-    let (occ, bodies) = pegged_plate(&mut s, "Plate", [0.0, -60.0, 0.0]);
+    let (_, bodies) = pegged_plate(&mut s, "Plate", [0.0, -60.0, 0.0]);
     assert_eq!(bodies.len(), 2, "{bodies:?}");
     block(&mut s, "Block", [10.0, 10.0, 10.0], [0.0, 60.0, 0.0]);
-    let apart = offset(&s, &bodies[0], &bodies[1]);
+    let plate = bounds(&s, &bodies[0]);
     let r = run(&mut s, "solid.arrange", json!({"bodies": ["Block", bodies[1]], "width": 200, "length": 200, "origin": [100, 100]}));
-    let placed: Vec<&Value> = r["placed"].as_array().into_iter().flatten().collect();
-    assert_eq!(placed.len(), 2, "{r}");
-    // The peg was picked; the plate came with it, and its placement moved, not the part.
-    let plate = placed.iter().find(|p| p["body"] == json!(bodies[1])).unwrap_or_else(|| panic!("{r}"));
-    assert_eq!(plate["with"], json!([bodies[0]]), "{r}");
-    assert_eq!(plate["occurrences"], json!([occ]), "{r}");
-    same(offset(&s, &bodies[0], &bodies[1]), apart);
-    assert_laid_out(&mut s, &["Block", &bodies[0], &bodies[1]], [100.0, 100.0, 300.0, 300.0], 0.0);
-    let r2 = run(&mut s, "inspect.clearance", json!({"bodies": ["Block", bodies[0]], "clearance": 1.0 - 1e-4}));
-    assert!(r2["near"].as_array().is_some_and(Vec::is_empty) && r2["overlaps"].as_array().is_some_and(Vec::is_empty), "{r2}");
-    // Standing on the sheet: the plate's underside at z = 0.
-    assert!(bounds(&s, &bodies[0]).0[2].abs() < 1e-6);
+    // The peg was picked: it and the block are placed, and nothing else is named or moved.
+    assert_eq!(names(&r["placed"]), ["Block".to_string(), bodies[1].clone()], "{r}");
+    same(bounds(&s, &bodies[0]).0, plate.0);
+    assert_laid_out(&mut s, &["Block", &bodies[1]], [100.0, 100.0, 300.0, 300.0], 1.0);
+    // Standing on the sheet: the peg's underside at z = 0.
+    assert!(bounds(&s, &bodies[1]).0[2].abs() < 1e-6);
     // One step: one undo puts it all back.
     run(&mut s, "edit.undo", json!({}));
-    same(bounds(&s, &bodies[0]).0, [0.0, -60.0, 0.0]);
+    same(bounds(&s, &bodies[1]).0, [30.0, -53.0, 3.0]);
     same(bounds(&s, "Block").0, [0.0, 60.0, 0.0]);
 }
 
 #[test]
-fn components_joined_by_joints_are_laid_out_as_one() {
+fn a_jointed_part_is_laid_out_alone_and_its_joint_holds() {
     let mut s = Session::default();
     let (a, base) = pegged_plate(&mut s, "Base", [0.0, 0.0, 0.0]);
     let (b, arm) = pegged_plate(&mut s, "Arm", [0.0, 0.0, 20.0]);
     let at = |o: u64, z: f64| json!({"occurrence": o, "point": [20, 10, z], "z": [0, 0, 1]});
     run(&mut s, "joint.create", json!({"type": "revolute", "a": at(a, 3.0), "b": at(b, 20.0), "flip": true, "name": "Hinge"}));
-    let apart = offset(&s, &arm[0], &base[0]);
-    // Only the base is picked: the arm the hinge joins to it comes along, as one.
-    let r = run(&mut s, "solid.arrange", json!({"bodies": [base[0]], "width": 300, "length": 300, "origin": [200, 0]}));
-    let placed: Vec<&Value> = r["placed"].as_array().into_iter().flatten().collect();
-    assert_eq!(placed.len(), 1, "{r}");
-    let mut moved: Vec<u64> = placed[0]["occurrences"].as_array().into_iter().flatten().filter_map(Value::as_u64).collect();
-    moved.sort_unstable();
-    assert_eq!(
-        moved,
-        {
-            let mut v = vec![a, b];
-            v.sort_unstable();
-            v
-        },
-        "{r}"
-    );
-    same(offset(&s, &arm[0], &base[0]), apart);
-    assert!(bounds(&s, &base[0]).0[0] >= 200.0 - 1e-6 && bounds(&s, &arm[0]).0[0] >= 200.0 - 1e-6, "{r}");
-    // The hinge still holds: solving changes nothing.
-    let held = bounds(&s, &arm[0]);
+    // A joint to the design itself is no reason to refuse either: the placement is not moved.
+    let origin = json!({"occurrence": 0, "point": [0, 0, 0], "z": [0, 0, 1]});
+    run(&mut s, "joint.create", json!({"type": "rigid", "a": origin, "b": {"occurrence": a, "point": [0, 0, 0], "z": [0, 0, 1]}, "name": "Fixed"}));
+    let before: Vec<_> = [&base[0], &base[1], &arm[1]].iter().map(|n| bounds(&s, n)).collect();
+    // Only the arm's plate is picked: only it goes to the sheet.
+    let r = run(&mut s, "solid.arrange", json!({"bodies": [arm[0]], "width": 300, "length": 300, "origin": [200, 0]}));
+    assert_eq!(names(&r["placed"]), [arm[0].clone()], "{r}");
+    let lo = bounds(&s, &arm[0]).0;
+    assert!(lo[0] >= 200.0 - 1e-6 && lo[2].abs() < 1e-6, "{lo:?}");
+    for (n, was) in [&base[0], &base[1], &arm[1]].iter().zip(&before) {
+        same(bounds(&s, n).0, was.0);
+    }
+    // The joints still hold: solving changes nothing.
     run(&mut s, "joint.solve", json!({}));
-    same(bounds(&s, &arm[0]).0, held.0);
-    // A copy of the pair is two components of their own, laid out where the pair was not.
-    let r = run(&mut s, "solid.arrange", json!({"bodies": [arm[1]], "width": 300, "length": 300, "origin": [200, 0], "copy": true}));
-    let copy = &r["placed"][0];
-    assert_eq!(copy["copy_of"], json!(arm[1]), "{r}");
-    assert_eq!(copy["occurrences"].as_array().map(Vec::len), Some(2), "{r}");
-    assert!(copy["occurrences"].as_array().into_iter().flatten().all(|o| o.as_u64().is_some_and(|o| o != a && o != b)), "{r}");
-    same(offset(&s, &arm[0], &base[0]), apart);
-    assert!(r["copy_groups"].as_array().is_none_or(Vec::is_empty), "{r}");
+    same(bounds(&s, &arm[0]).0, lo);
+    same(bounds(&s, &arm[1]).0, before[2].0);
 }
 
 #[test]
-fn a_component_jointed_to_the_design_itself_is_refused() {
+fn copies_of_a_body_in_a_moved_component_are_made_where_it_stands() {
     let mut s = Session::default();
-    let (a, plate) = pegged_plate(&mut s, "Plate", [0.0, 0.0, 0.0]);
-    let origin = json!({"occurrence": 0, "point": [0, 0, 0], "z": [0, 0, 1]});
-    run(&mut s, "joint.create", json!({"type": "rigid", "a": origin, "b": {"occurrence": a, "point": [0, 0, 0], "z": [0, 0, 1]}, "name": "Fixed"}));
-    let before = bounds(&s, &plate[0]);
-    let e =
-        s.execute("solid.arrange", &json!({"bodies": [plate[0]], "width": 200, "length": 200, "origin": [100, 100]})).err().map(|e| e.to_string());
-    let e = e.unwrap_or_else(|| panic!("laid out a component fixed to the design"));
-    assert!(e.contains("Fixed") && e.contains(&plate[0]), "{e}");
-    same(bounds(&s, &plate[0]).0, before.0);
-    // Copies of it can be laid out: the original stays held where it is.
-    let r = run(&mut s, "solid.arrange", json!({"bodies": [plate[0]], "width": 200, "length": 200, "origin": [100, 100], "copy": true}));
-    assert_eq!(r["placed"].as_array().map(Vec::len), Some(1), "{r}");
-    same(bounds(&s, &plate[0]).0, before.0);
+    let (a, base) = pegged_plate(&mut s, "Base", [0.0, 0.0, 0.0]);
+    let (b, arm) = pegged_plate(&mut s, "Arm", [0.0, 0.0, 20.0]);
+    // The joint moves the arm's placement: its bodies no longer stand where they were made.
+    let at = |o: u64, p: [f64; 3]| json!({"occurrence": o, "point": p, "z": [0, 0, 1]});
+    run(&mut s, "joint.create", json!({"type": "rigid", "a": at(a, [0.0, 0.0, 0.0]), "b": at(b, [50.0, 0.0, 20.0]), "name": "Held"}));
+    let stood = bounds(&s, &arm[0]);
+    let all = |s: &Session| s.world_state().map(|w| w.bodies.len()).unwrap_or(0);
+    let count = all(&s);
+    // Keep Originals: the body stays, and one copy of it, a body of the design's own, is laid out.
+    let r = run(&mut s, "solid.arrange", json!({"bodies": [arm[0]], "width": 100, "length": 100, "origin": [200, 0], "copy": true}));
+    let copy = r["placed"][0]["body"].as_str().unwrap_or_else(|| panic!("{r}")).to_string();
+    assert_eq!(r["placed"][0]["copy_of"], json!(arm[0]), "{r}");
+    assert_ne!(copy, arm[0]);
+    assert_eq!(all(&s), count + 1, "{r}");
+    same(bounds(&s, &arm[0]).0, stood.0);
+    assert_laid_out(&mut s, &[&copy], [200.0, 0.0, 300.0, 100.0], 0.0);
+    let mut size = spans(&s, &copy);
+    size.sort_by(f64::total_cmp);
+    same(size, [3.0, 20.0, 40.0]);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(all(&s), count);
+    // Three of it without Keep Originals: the body itself and two copies, all on the sheet.
+    let r = run(&mut s, "solid.arrange", json!({"bodies": [arm[0]], "width": 100, "length": 100, "origin": [200, 0], "quantity": 3}));
+    let placed = names(&r["placed"]);
+    assert_eq!(placed.len(), 3, "{r}");
+    assert_eq!(all(&s), count + 2, "{r}");
+    let refs: Vec<&str> = placed.iter().map(String::as_str).collect();
+    assert_laid_out(&mut s, &refs, [200.0, 0.0, 300.0, 100.0], 1.0);
+    same(bounds(&s, &base[0]).0, [0.0, 0.0, 0.0]);
 }
 
 /// The index of the area of sketch `id` whose centre is nearest `at`.
