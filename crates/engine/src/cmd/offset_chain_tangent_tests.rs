@@ -15,8 +15,16 @@ fn chain() -> (Session, Vec<String>) {
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
     let mut ids = Vec::new();
     let mut id_of = |v: Value| ids.push(v["curves"][0].as_str().unwrap().to_string());
-    id_of(run(&mut s, "sketch.arc.three_point", json!({"start": [27.057152168740334, 4.6392170815647855], "through": [29.1011788575, 6.683243770299466], "end": [27.057152168731445, 8.7272704590365]})));
-    id_of(run(&mut s, "sketch.line", json!({"points": [[27.057152168728745, 8.72727045903728], [3.3203869526962912, 8.727270459038918]], "connect": false})));
+    id_of(run(
+        &mut s,
+        "sketch.arc.three_point",
+        json!({"start": [27.057152168740334, 4.6392170815647855], "through": [29.1011788575, 6.683243770299466], "end": [27.057152168731445, 8.7272704590365]}),
+    ));
+    id_of(run(
+        &mut s,
+        "sketch.line",
+        json!({"points": [[27.057152168728745, 8.72727045903728], [3.3203869526962912, 8.727270459038918]], "connect": false}),
+    ));
     id_of(run(
         &mut s,
         "sketch.spline.control_point",
