@@ -29,7 +29,8 @@
 //!
 //! [`interpolation_bound`] bounds how far a curve misses points it was fitted through at
 //! their parameters: each point of the curve is evaluated (the basis functions of The NURBS
-//! Book's A2.2 and their sum with the control points: `γ_(12 p + 4)` of `M` per coordinate,
+//! Book's A2.3 at order 0, the general basis whatever the knots, and their sum with the
+//! control points: `γ_(12 p + 4)` of `M` per coordinate,
 //! the count `eval::collapse` gives de Boor's `p` levels) and its computed distance from the
 //! data point rounded up by `γ_8`. Every distance is a scaled norm (the components divided by
 //! the largest before squaring), so a difference near the bottom of the floating range is not
@@ -85,7 +86,13 @@ pub fn interpolation_bound(c: &Curve, params: &[f64], points: &[Vec3]) -> Result
     let size = largest_coordinate(c);
     let mut largest = 0.0_f64;
     for (&u, q) in params.iter().zip(points) {
-        let p = c.eval(u, Side::Left)?;
+        // the general basis (derivatives of order 0): the NLib `eval` keeps upstream's
+        // clamped reading of a domain's ends, wrong on a periodic curve's
+        let p = c
+            .derivs(u, Side::Left, 0)?
+            .first()
+            .copied()
+            .ok_or_else(|| SolidError::query_failed(OP_FIT, "no point evaluated"))?;
         let d = norm_up(p.x - q.x, p.y - q.y, p.z - q.z)
             .ok_or_else(|| SolidError::query_failed(OP_FIT, "the bound is not finite"))?;
         largest = largest.max(d);
@@ -358,6 +365,28 @@ mod tests {
         let bent = spline(&[[0.0, 0.0, 0.0], [2.5, 4.0, 0.0], [5.0, 0.0, 0.0]], 2);
         let d = certified_distance(&polyline, &bent).unwrap();
         assert!(d >= 2.0, "{d}");
+    }
+
+    #[test]
+    fn a_periodic_curves_ends_are_read_through_the_general_basis() {
+        // the periodic uniform cubic on a square's corners (polygon wrapped, knots unclamped)
+        // starts and ends at (P0 + 4 P1 + P2) / 6; the NLib eval would answer P0 and P2
+        let square = [
+            [0.0, 0.0, 0.0],
+            [10.0, 0.0, 0.0],
+            [10.0, 10.0, 0.0],
+            [0.0, 10.0, 0.0],
+        ];
+        let pw = square
+            .iter()
+            .chain(&square[..3])
+            .map(|&[x, y, z]| CPoint::from_point(Vec3::new(x, y, z)))
+            .collect();
+        let knots = crate::nurbs::knots::periodic_uniform(4, 3).unwrap();
+        let closed = Curve::new(pw, 3, knots).unwrap();
+        let start = Vec3::new(50.0 / 6.0, 10.0 / 6.0, 0.0);
+        let d = interpolation_bound(&closed, &[0.0, 1.0], &[start, start]).unwrap();
+        assert!(d < 1e-12, "{d}");
     }
 
     #[test]
