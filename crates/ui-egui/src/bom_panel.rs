@@ -9,7 +9,7 @@ use serde_json::{Map, Value, json};
 use solidcraft_engine::doc::metadata::{self, BOM_KEYS};
 
 use crate::SolveApp;
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 /// The window's state; the rows come from the engine.
 #[derive(Default)]
@@ -409,7 +409,7 @@ mod tests {
         h.frames(2);
         let (Some(desc), Some(rev)) = (h.widget("Description"), h.widget("Rev")) else { panic!("the grid's headers are drawn") };
         // Before, every column but the last was as narrow as a button and the grid used a third of the window.
-        let card = f64::from(crate::theme::Tokens::get().form_card_width);
+        let card = f64::from(solidcraft_theme::Tokens::get().form_card_width);
         assert!(rev[0] - desc[0] > card, "Description spreads out: it starts at {}, Rev at {}", desc[0], rev[0]);
     }
 

@@ -1,0 +1,193 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b12": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b12"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b13"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b14"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b14"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b15"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b15"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b16"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  8.178681931579773,
+                  5.754056122601737,
+                  24.089340965789912
+                ],
+                [
+                  9.999999999999982,
+                  -6.439293542825907e-15,
+                  24.999999999999993
+                ]
+              ],
+              "index": 0
+            },
+            {
+              "at": [
+                [
+                  9.999999999999982,
+                  -6.439293542825907e-15,
+                  24.999999999999993
+                ],
+                [
+                  8.178681931579773,
+                  5.754056122601737,
+                  24.089340965789912
+                ]
+              ],
+              "index": 3
+            }
+          ],
+          "points": [
+            [
+              -9.513156213587932,
+              -3.0427703489430584,
+              15.243421893206037
+            ],
+            [
+              9.514585928255212,
+              3.043577468818782,
+              24.7572929641276
+            ]
+          ],
+          "tolerance": 1.8482042582198324
+        },
+        "kind": "round",
+        "sizes": [
+          2.0,
+          2.0
+        ]
+      }
+    }
+  ],
+  "case": "cov-fillet-exact-oblique-plane-cylinder-rim-r2",
+  "expected": {
+    "body_count": 1,
+    "continuity": {
+      "order": "g1"
+    },
+    "method": "the ball's centre runs on the cylinder R8 and on the plane moved 2 down, so the spine is their ellipse; the contact lines are the ellipse moved along each face's normal, rational, and the round (the circles of the ball between them, rational quadratic arcs whose weights are rational in the ellipse's parameter) is a rational B-spline of degrees (4, 2). V0 = 2000 pi (the plane's tilt cancels round the axis); the round removes 68.775042921067, (1/3) of the flux of the position through the boundary of the material the round removes: the round's surface as the ball's circles about the spine from contact to contact, the strips of the faces between the edge and the contact lines, each written out exactly and integrated by Gauss-Legendre quadrature (24 points a panel). The round's faces, each of those degrees: a closed round is two faces (split at the seam of its closed surface).",
+    "source": "analytic",
+    "sources": [],
+    "splines": [
+      {
+        "degree": [
+          4,
+          2
+        ]
+      },
+      {
+        "degree": [
+          4,
+          2
+        ]
+      }
+    ],
+    "surface_types": [
+      "bspline",
+      "cylinder",
+      "plane"
+    ],
+    "tolerance": {
+      "rel": 1e-6
+    },
+    "volume_mm3": 6214.41026425852,
+    "what": "a cylinder R10 cut by the plane z = 20 + x/2: its elliptical top rim rounded r2"
+  },
+  "expressible": false,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 8,
+      "faces": 5,
+      "vertices": 5
+    }
+  },
+  "records": "cov-fillet-exact-oblique-plane-cylinder-rim-r2.bodies.json.gz",
+  "result": [
+    {
+      "body": "Post",
+      "made": "b16"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 1847.5899721150238,
+      "body_count": 1,
+      "edges": 8,
+      "faces": 5,
+      "vertices": 5,
+      "volume_mm3": 6214.410266311706
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "copy",
+    "copy",
+    "tagged",
+    "blend_dropping"
+  ],
+  "ungraded": [
+    "continuity: SolidCraft computes it"
+  ],
+  "what": "a cylinder R10 cut by the plane z = 20 + x/2: its elliptical top rim rounded r2",
+  "why_not": []
+}

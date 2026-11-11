@@ -16,10 +16,10 @@ use solidcraft_engine::{
 
 use crate::{
     SolveApp,
-    theme::Tokens,
     ui_kit::{Container, Surface},
     viewport::Proj,
 };
+use solidcraft_theme::Tokens;
 
 #[derive(Clone, Debug)]
 pub(crate) struct Mode {
@@ -1016,7 +1016,7 @@ mod tests {
             for (query, key, text, expected) in
                 [("Near-axis step", "joint_rotation_coarse", "0.025", (0.025, 0.1)), ("Far-axis step", "joint_rotation_fine", "12.5", (0.025, 12.5))]
             {
-                h.app.prefs_window.filter = query.into();
+                h.app.prefs_window.shell.filter = query.into();
                 h.frames(5);
                 let target = format!("prefs:{key}");
                 crate::prefs::reveal_preference(&mut h, &target);

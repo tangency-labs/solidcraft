@@ -26,8 +26,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::SolveApp;
-use crate::theme::Tokens;
 use crate::ui_kit;
+use solidcraft_theme::Tokens;
 
 /// The repository releases come from.
 pub const REPO: &str = "tangency-labs/solidcraft";
@@ -200,7 +200,7 @@ pub fn detect(p: &Probe) -> InstallKind {
             if let Some(id) = env("FLATPAK_ID") {
                 return InstallKind::Flatpak(id);
             }
-            if env("SNAP").is_some() && env("SNAP_NAME").is_none_or(|n| n.starts_with("solidcraft")) {
+            if is_snap(&env) {
                 // Locally installed (unasserted) snaps have revisions x1, x2, …
                 return InstallKind::Snap { store: !env("SNAP_REVISION").is_some_and(|r| r.starts_with('x')) };
             }
@@ -233,6 +233,12 @@ pub fn detect(p: &Probe) -> InstallKind {
         "macos" => app_bundle(&exe).map_or(InstallKind::Other, InstallKind::MacApp),
         _ => InstallKind::Other,
     }
+}
+
+/// The SolidCraft Snap is running: `SNAP` is set and `SNAP_NAME`, when set, is ours. SolidCraft
+/// started from a terminal inside another snap (a confined editor) sees that snap's variables.
+pub(crate) fn is_snap(env: &dyn Fn(&str) -> Option<String>) -> bool {
+    env("SNAP").is_some() && env("SNAP_NAME").is_none_or(|n| n.starts_with("solidcraft"))
 }
 
 /// `path` is inside `dir` (Windows paths: case-insensitive).
@@ -666,6 +672,8 @@ pub struct Updater {
     pub installed: Option<Result<install::Outcome, String>>,
     /// A program for the host to start as SolidCraft exits (restart, installer).
     launch: Option<(PathBuf, Vec<String>)>,
+    /// The host should drop process-local graphics fallback overrides for this restart.
+    graphics_restart: bool,
 }
 
 impl Updater {
@@ -702,6 +710,7 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     // Quitting to restart or install was cancelled (a "save changes?" answered Cancel).
     if app.updater.launch.is_some() && app.docs.quitting.is_none() && !app.quit_requested {
         app.updater.launch = None;
+        app.updater.graphics_restart = false;
     }
     if !app.updater.started {
         app.updater.started = true;
@@ -916,6 +925,7 @@ fn poll_install(app: &mut SolveApp) {
                 Ok(exe) => install::relaunch_after(program, args, &exe),
                 _ => (program.clone(), args.clone()),
             });
+            app.updater.graphics_restart = false;
             crate::documents::request_quit(app);
         }
         Ok(install::Outcome::Opened(dmg)) => {
@@ -935,8 +945,24 @@ fn poll_install(app: &mut SolveApp) {
 pub fn restart(app: &mut SolveApp) {
     if let Some(Ok(install::Outcome::Restart(program))) = &app.updater.installed {
         app.updater.launch = Some((program.clone(), Vec::new()));
+        app.updater.graphics_restart = false;
         crate::documents::request_quit(app);
     }
+}
+
+/// Apply a saved graphics choice through the ordinary quit/save flow. Cancellation
+/// leaves the app open and tick clears the scheduled relaunch.
+pub fn restart_graphics(app: &mut SolveApp) {
+    if let Some(launch) = app.services.graphics_restart.clone() {
+        app.updater.launch = Some(launch);
+        app.updater.graphics_restart = true;
+        crate::documents::request_quit(app);
+    }
+}
+
+/// Whether the pending launch applies graphics settings, consumed by the native host.
+pub fn take_graphics_restart(app: &mut SolveApp) -> bool {
+    std::mem::take(&mut app.updater.graphics_restart) && app.updater.launch.is_some()
 }
 
 /// For the host, as SolidCraft exits: the program to start (the new version, an installer).
@@ -1254,11 +1280,16 @@ pub enum Block {
     Paragraph(Vec<Span>),
     /// A list item, at a nesting depth.
     Item(usize, Vec<Span>),
+    /// A row of a `|` table, its cells in order; `header` for the row above the `|---|` line.
+    Row {
+        header: bool,
+        cells: Vec<Vec<Span>>,
+    },
 }
 
 /// The Markdown GitHub release notes use, enough to read them: headings, paragraphs (soft line
-/// breaks joined), `-`/`*` lists, `**strong**`, `` `code` ``, `[links](…)` and bare pull-request
-/// URLs (shown as `#123`, linking to them). Anything else shows as written.
+/// breaks joined), `-`/`*` lists, `|` tables, `**strong**`, `` `code` ``, `[links](…)` and bare
+/// pull-request URLs (shown as `#123`, linking to them). Anything else shows as written.
 pub fn parse_markdown(src: &str) -> Vec<Block> {
     let mut blocks = Vec::new();
     let mut para = String::new();
@@ -1277,6 +1308,17 @@ pub fn parse_markdown(src: &str) -> Vec<Block> {
         let indent = line.len() - trimmed.len();
         if trimmed.is_empty() {
             flush(&mut blocks, &mut para, &mut item);
+        } else if let Some(row) = trimmed.strip_prefix('|') {
+            flush(&mut blocks, &mut para, &mut item);
+            let row = row.trim_end().strip_suffix('|').unwrap_or(row);
+            if row.contains('-') && row.chars().all(|c| matches!(c, '-' | ':' | '|' | ' ')) {
+                // The `|---|` line under a header row.
+                if let Some(Block::Row { header, .. }) = blocks.last_mut() {
+                    *header = true;
+                }
+            } else {
+                blocks.push(Block::Row { header: false, cells: row.split('|').map(|cell| inline(cell.trim())).collect() });
+            }
         } else if let Some(h) = trimmed.strip_prefix('#') {
             flush(&mut blocks, &mut para, &mut item);
             blocks.push(Block::Heading(inline(h.trim_start_matches('#').trim())));
@@ -1366,7 +1408,30 @@ fn strip_links(s: &str) -> String {
         .collect()
 }
 
+/// One table row as a line of text: the cells in order, between ` · `, empty ones left out. A
+/// row of a long table reads as an entry led by its first cell (bold), so it wraps to a narrow
+/// window instead of widening it (#7776).
+pub fn row_spans(cells: &[Vec<Span>], header: bool) -> Vec<Span> {
+    let mut out = Vec::new();
+    for (i, cell) in cells.iter().filter(|cell| !cell.is_empty()).enumerate() {
+        if i > 0 {
+            out.push(Span::Text(" · ".into()));
+        }
+        out.extend(cell.iter().cloned().map(|span| match span {
+            Span::Text(s) if i == 0 && !header => Span::Strong(s),
+            span => span,
+        }));
+    }
+    out
+}
+
 fn markdown(ui: &mut egui::Ui, src: &str, t: &Tokens) {
+    markdown_blocks(ui, &parse_markdown(src), t);
+}
+
+/// Parsed Markdown, for a text shown every frame that is parsed once (the About dialog's
+/// attributions, #7776).
+pub fn markdown_blocks(ui: &mut egui::Ui, blocks: &[Block], t: &Tokens) {
     let body = ui.visuals().text_color();
     let job = |spans: &[Span], size: f32, strong: bool, wrap: f32| {
         let mut job = LayoutJob::default();
@@ -1404,25 +1469,32 @@ fn markdown(ui: &mut egui::Ui, src: &str, t: &Tokens) {
     };
     // The notes wrap to the card; they never widen it, whatever their lines.
     let width = (ui.available_width() - 2.0 * t.space_8).max(60.0);
-    for block in parse_markdown(src) {
+    for block in blocks {
         match block {
             Block::Heading(spans) => {
                 ui.add_space(4.0);
-                ui.add(egui::Label::new(job(&spans, t.font_heading, true, width)).wrap());
+                ui.add(egui::Label::new(job(spans, t.font_heading, true, width)).wrap());
             }
             Block::Paragraph(spans) => {
-                ui.add(egui::Label::new(job(&spans, t.font_label, false, width)).wrap());
-                links(ui, &spans, 0.0);
+                ui.add(egui::Label::new(job(spans, t.font_label, false, width)).wrap());
+                links(ui, spans, 0.0);
                 ui.add_space(3.0);
             }
+            Block::Row { header, cells } => {
+                let spans = row_spans(cells, *header);
+                let size = if *header { t.font_caption } else { t.font_label };
+                ui.add(egui::Label::new(job(&spans, size, false, width)).wrap());
+                links(ui, &spans, 0.0);
+                ui.add_space(2.0);
+            }
             Block::Item(depth, spans) => {
-                let indent = 6.0 + 12.0 * depth.min(4) as f32;
+                let indent = 6.0 + 12.0 * (*depth).min(4) as f32;
                 ui.horizontal_top(|ui| {
                     ui.add_space(indent);
-                    ui.label(RichText::new("•").size(crate::theme::Tokens::get().font_label));
-                    ui.add(egui::Label::new(job(&spans, t.font_label, false, width - indent - 14.0)).wrap());
+                    ui.label(RichText::new("•").size(solidcraft_theme::Tokens::get().font_label));
+                    ui.add(egui::Label::new(job(spans, t.font_label, false, width - indent - 14.0)).wrap());
                 });
-                links(ui, &spans, indent + 14.0);
+                links(ui, spans, indent + 14.0);
             }
         }
     }

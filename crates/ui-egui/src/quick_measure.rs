@@ -1,7 +1,8 @@
 //! Quick measurement (#7000): what the selection measures, in the view's bottom right corner above
 //! History, so a simple size needs no Measure tool. One item gives the Measure tool's rows (an
-//! edge's length, Ø and R for a round one, a face's area, a point's position); two give their
-//! distance and angle; several edges or several faces their count and total length or area.
+//! edge's length, Ø and R for a round one, a face's area and perimeter, a point's position); two
+//! give their distance and angle; several edges or several faces their count and total length or
+//! area.
 //! Computed off the window thread from a copy of the session ([`Session::measure_items`]) whenever
 //! the selection or the design changes; nothing shows while it computes, or for a selection with
 //! nothing to measure. A click copies the readout.
@@ -128,7 +129,7 @@ fn measure(session: &solidcraft_engine::Session, selection: &[Sel]) -> Option<Va
 
 /// One measured item's rows, each "label  value": Ø, R and the length of a round one (its
 /// circumference, or an arc's length and angle), a slot's sizes, a straight edge's length, a face's
-/// area, a point's position. The Measure tool lists the same.
+/// area and perimeter, a point's position. The Measure tool lists the same.
 pub(crate) fn item_lines(app: &SolveApp, it: &Value) -> Vec<String> {
     let tr = solidcraft_ui_text::tr;
     let mm = |v: &Value| v.as_f64().map(|x| crate::prefs::show_mm(app, x, 1)).unwrap_or_default();
@@ -151,7 +152,18 @@ pub(crate) fn item_lines(app: &SolveApp, it: &Value) -> Vec<String> {
     let round = it.get("diameter").is_some();
     match it["type"].as_str() {
         Some("edge" | "sketch_curve") if !round => lines.push(format!("{}  {}", tr("Length"), mm(&it["length_mm"]))),
-        Some("face" | "profile") => lines.push(format!("{}  {}", tr("Area"), crate::prefs::show_mm(app, it["area_mm2"].as_f64().unwrap_or(0.0), 2))),
+        Some("face" | "profile") => {
+            lines.push(format!("{}  {}", tr("Area"), crate::prefs::show_mm(app, it["area_mm2"].as_f64().unwrap_or(0.0), 2)));
+            for (id, key) in [
+                ("measure.perimeter", "perimeter_mm"),
+                ("measure.perimeter_outer", "outer_perimeter_mm"),
+                ("measure.perimeter_inner", "inner_perimeter_mm"),
+            ] {
+                if it.get(key).is_some() {
+                    lines.push(format!("{}  {}", tr(id), mm(&it[key])));
+                }
+            }
+        }
         Some("vertex" | "sketch_point" | "point") => {
             let p = &it["position"];
             lines.push(format!("{}  {}, {}, {}", tr("measure.at"), mm(&p[0]), mm(&p[1]), mm(&p[2])));
@@ -223,7 +235,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &egui::Ui, view: egui::Rect, taken: &
     if rows.is_empty() || !view.is_finite() || !view.is_positive() {
         return None;
     }
-    let t = crate::theme::Tokens::get();
+    let t = solidcraft_theme::Tokens::get();
     let painter = ui.painter().clone();
     let font = egui::FontId::proportional(t.font_label);
     let pad = egui::vec2(t.space_8, t.space_4);

@@ -16,7 +16,7 @@ use crate::SolveApp;
 use crate::dialogs::{combo, field, form_row};
 use crate::dialogs_assembly::Asm;
 use crate::selection::{EDGES, FACES, PROFILES, SelInput, SelectionExt as _, VERTICES};
-use crate::theme::Tokens;
+use solidcraft_theme::Tokens;
 
 /// The follower types, as `joint.cam` takes them, and their labels.
 const FOLLOWERS: [&str; 3] = ["knife", "roller", "flat"];

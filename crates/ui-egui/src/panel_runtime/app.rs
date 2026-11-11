@@ -682,7 +682,9 @@ impl AppPanelRuntime {
                 if (self.runtime.environment() != &before || self.runtime.layout().inspect().revision != revision)
                     && let Some(host) = &mut self.host
                 {
-                    host.invalidate_context();
+                    // Presentation metadata can revise an unrelated panel.
+                    // Scope and focused-owner checks decide input ownership.
+                    host.invalidate_geometry();
                     host.reconcile_scope(&self.runtime);
                 }
             }
@@ -963,7 +965,7 @@ pub(crate) fn sync_production_setting(app: &mut crate::SolveApp) -> PanelResult<
 pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
     // Switching placement systems waits until Preferences Apply/Cancel settles
     // its snapshot. Content state itself always remains owned by the app.
-    if !app.prefs_window.open
+    if !app.prefs_window.shell.open
         && let Err(reason) = sync_production_setting(app)
     {
         app.set_status(solidcraft_ui_text::tr(super::workspace::rule_key(reason.rule)).to_owned(), true);
@@ -1081,7 +1083,11 @@ impl crate::SolveApp {
         // not panel paint/input regions. Cover the native GPU clear through the
         // shared viewport surface without changing any declared panel geometry.
         let backdrop = crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::Viewport);
-        crate::ui_kit::Container::paint_frame(ui.painter(), backdrop.edge_frame(crate::theme::Tokens::get().panel), ui.available_rect_before_wrap());
+        crate::ui_kit::Container::paint_frame(
+            ui.painter(),
+            backdrop.edge_frame(solidcraft_theme::Tokens::get().panel),
+            ui.available_rect_before_wrap(),
+        );
         crate::timeline::follow_view_pick(self);
         crate::render_ui::focus_shortcut(self, ui);
         crate::dialogs::sync_feature_edit(self);
