@@ -1027,6 +1027,10 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `save_prompt_one_at_a_time` (default false: closing several tabs or quitting with more than one unsaved design asks once, in one "Save changes to N designs?" list; true restores one "Save changes?" prompt per design, #11680)
 - `select_hidden_edges` (default false: v0.30.1 visible-only edge picking; true allows ordinary edge picks through faces in Shaded with hidden edges, including Fillet inputs; hidden bodies and section-clipped edges stay excluded)
 - `select_other_hidden` (default true: Select Other includes hidden geometry near the pointer; false restores the original visible-only list under the pointer)
+- `sheet_dxf_units` (`mm` (default) or `inches`: the units the flat-pattern DXF export writes in; Preferences › Sheet Metal)
+- `sheet_export_bend_lines` (default true: the exported flat-pattern DXF keeps the bend centre lines; false leaves BEND_UP and BEND_DOWN out, for a cutter that would cut them)
+- `sheet_export_markings` (default true: the exported flat-pattern DXF keeps the letters' contours and the bend notes; false leaves TEXT, ETCH and BEND_NOTES out, for a machine that would etch them)
+- `sheet_rule` (the sheet-metal rule — thickness, K-factor, bend radius and the rule's other fields — that new designs get; the `Steel (mm)` rule by default; Preferences › Sheet Metal)
 - `show_frame_rate` (default false: frames per second in the view's bottom-right corner, counting the frames the view draws anyway; it reads 0 FPS once the view is idle)
 - `sketch_auto_dimensions` (default false: each shape drawn in a sketch gets all its dimensions at the sizes drawn, as `sketch.draw.dimensioned` with `as_drawn`; typed values win)
 - `sketch_auto_locate` (default false; with `sketch_auto_dimensions`, new shapes are also placed from the sketch origin until fully constrained, as `sketch.draw.dimensioned` with `locate`)
@@ -1096,7 +1100,7 @@ and output schema types live in `solidcraft_engine::schema::ui_prefs` (`PrefsPar
 
 Other `ui.prefs` parameters:
 
-- `open` opens Preferences at General; Look: Appearance, Layout, Graphics; Work: Design, Sketch, Tools; Input: Navigation, 3D mouse, Shortcuts; or Extend: Assistant, Plugins. Names are case-insensitive. Legacy aliases remain accepted: Interface → Appearance, Interface/navigation bar → Layout, Keyboard Shortcuts → Shortcuts, AI → Assistant, and Selection, Sketch & selection or Sketch and selection → Sketch. Replies use the canonical page name. The corresponding legacy `prefs:page:<name>` scenario handles also remain aliases of the canonical page rows.
+- `open` opens Preferences at General; Look: Appearance, Layout, Graphics; Work: Design, Sheet Metal, Sketch, Tools; Input: Navigation, 3D mouse, Shortcuts; or Extend: Assistant, Plugins. Names are case-insensitive. Legacy aliases remain accepted: Interface → Appearance, Interface/navigation bar → Layout, Keyboard Shortcuts → Shortcuts, AI → Assistant, and Selection, Sketch & selection or Sketch and selection → Sketch. Replies use the canonical page name. The corresponding legacy `prefs:page:<name>` scenario handles also remain aliases of the canonical page rows.
 - `button`: `ok`, `cancel`, `apply`, `defaults`
 - `stand_up: true` stands up a just-opened Y-up file, `stand_up: false` leaves it as it is ("Leave it": the offer, dialog or note, closes and `offer_stand_up` stays on)
 - the dialog's buttons are the handles `stand_up:stand`, `stand_up:leave` and `stand_up:never`

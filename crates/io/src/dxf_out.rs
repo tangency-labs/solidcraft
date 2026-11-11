@@ -331,15 +331,16 @@ impl DxfShape {
             DxfShape::Circle { c, r } => DxfShape::Circle { c: *c * k, r: *r * k },
             DxfShape::Arc { c, r, a0, a1 } => DxfShape::Arc { c: *c * k, r: *r * k, a0: *a0, a1: *a1 },
             DxfShape::Ellipse { c, major, ratio, t0, t1 } => DxfShape::Ellipse { c: *c * k, major: *major * k, ratio: *ratio, t0: *t0, t1: *t1 },
-            DxfShape::Spline { degree, knots, ctrl, weights } => DxfShape::Spline {
-                degree: *degree,
-                knots: knots.clone(),
-                ctrl: ctrl.iter().map(|p| *p * k).collect(),
-                weights: weights.clone(),
-            },
-            DxfShape::Text { at, height, angle_deg, text } => DxfShape::Text { at: *at * k, height: *height * k, angle_deg: *angle_deg, text: text.clone() },
+            DxfShape::Spline { degree, knots, ctrl, weights } => {
+                DxfShape::Spline { degree: *degree, knots: knots.clone(), ctrl: ctrl.iter().map(|p| *p * k).collect(), weights: weights.clone() }
+            }
+            DxfShape::Text { at, height, angle_deg, text } => {
+                DxfShape::Text { at: *at * k, height: *height * k, angle_deg: *angle_deg, text: text.clone() }
+            }
             DxfShape::Polyline { points } => DxfShape::Polyline { points: points.iter().map(|p| *p * k).collect() },
-            DxfShape::LwPolyline { verts, closed } => DxfShape::LwPolyline { verts: verts.iter().map(|(p, b)| (*p * k, *b)).collect(), closed: *closed },
+            DxfShape::LwPolyline { verts, closed } => {
+                DxfShape::LwPolyline { verts: verts.iter().map(|(p, b)| (*p * k, *b)).collect(), closed: *closed }
+            }
         }
     }
 }
@@ -1001,7 +1002,7 @@ mod tests {
     fn scaled_keeps_angles_ratios_knots_and_weights_and_scales_the_lengths() {
         let shape = DxfShape::Ellipse { c: Vec2::new(50.0, 40.0), major: Vec2::new(25.0, 0.0), ratio: 0.48, t0: 0.0, t1: FRAC_PI_2 };
         let twice = shape.scaled(2.0);
-        let DxfShape::Ellipse { c, major, ratio, t0, t1 } = twice else { panic!("{twice:?}") };
+        let DxfShape::Ellipse { c, major, ratio, t0: _, t1 } = twice else { panic!("{twice:?}") };
         assert!(c.dist(Vec2::new(100.0, 80.0)) < 1e-12 && major.dist(Vec2::new(50.0, 0.0)) < 1e-12);
         assert!((ratio - 0.48).abs() < 1e-12 && (t1 - FRAC_PI_2).abs() < 1e-12);
         let text = DxfShape::Text { at: Vec2::new(30.0, 12.0), height: 3.0, angle_deg: 90.0, text: "AB".into() };
@@ -1050,8 +1051,7 @@ mod tests {
         for (i, s) in q.iter_mut().enumerate() {
             *s = Vec2::new(i as f64, (i % 3) as f64);
         }
-        let nine = write_dxf_drawing(&[], &[DxfEntity { layer: "0".into(), shape: seg_shape(&Seg2::Bezier { n: 9, p: q }) }])
-            .unwrap();
+        let nine = write_dxf_drawing(&[], &[DxfEntity { layer: "0".into(), shape: seg_shape(&Seg2::Bezier { n: 9, p: q }) }]).unwrap();
         let back_nine = read_dxf(&nine).unwrap();
         assert!(
             matches!(&back_nine[..], [Geom2::Spline { pts, control: true, degree: 9 }] if pts.len() == 10 && pts.iter().zip(&q).all(|(a, b)| a.dist(*b) < 1e-9)),
@@ -1134,8 +1134,7 @@ mod tests {
     fn hidden_polylines_continue_short_dashes_across_chords_and_round_trip() {
         let points = vec![Vec2::ZERO, Vec2::new(1., 0.), Vec2::new(2., 1.), Vec2::new(3., 1.)];
         let layer = DxfLayer { linetype: DxfLinetype::Hidden, ..DxfLayer::new("HIDDEN", 8) };
-        let text = write_dxf_drawing(&[layer], &[DxfEntity { layer: "HIDDEN".into(), shape: DxfShape::Polyline { points } }])
-            .unwrap();
+        let text = write_dxf_drawing(&[layer], &[DxfEntity { layer: "HIDDEN".into(), shape: DxfShape::Polyline { points } }]).unwrap();
         let records = entities(&text);
         assert_eq!(records[0].0, "LWPOLYLINE");
         assert_eq!(field(&records[0].1, 70), "128");
@@ -1150,8 +1149,7 @@ mod tests {
     fn text_is_centred_on_its_point_and_the_reader_gets_it_back() {
         let at = Vec2::new(30.0, 12.0);
         let note = DxfShape::Text { at, height: 3.0, angle_deg: 90.0, text: "AB%%d\nC\u{b0}".into() };
-        let dxf =
-            write_dxf_drawing(&[DxfLayer::new("NOTES", 8)], &[DxfEntity { layer: "NOTES".into(), shape: note }]).unwrap();
+        let dxf = write_dxf_drawing(&[DxfLayer::new("NOTES", 8)], &[DxfEntity { layer: "NOTES".into(), shape: note }]).unwrap();
         let file = entities(&dxf);
         let [text] = file.as_slice() else { panic!("{file:?}") };
         assert_eq!(text.0, "TEXT");

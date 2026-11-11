@@ -556,6 +556,42 @@ fn a_bend_note_gives_the_included_angle_when_the_rule_reads_it_so() {
     }
 }
 
+/// `markings: false` leaves the letter contours and the bend notes out; the outline, the cut-outs
+/// and the bends stay, and a letter's pocket is no longer etched.
+#[test]
+fn the_markings_option_leaves_the_letters_and_the_notes_out() {
+    let mut s = tray_with(&marks());
+    let plain = entities(&export(&mut s, json!({})));
+    assert!(plain.iter().any(|e| layer_of(e) == "TEXT"), "the default export has the letters");
+    // The letters and their counters are gone, as are the notes when asked for together.
+    let bare = export(&mut s, json!({"markings": false}));
+    let es = entities(&bare);
+    assert!(
+        !es.iter().any(|e| layer_of(e) == "TEXT" || layer_of(e) == "ETCH"),
+        "{:?}",
+        es.iter().filter(|e| layer_of(e) == "TEXT" || layer_of(e) == "ETCH").map(|e| (e.0.clone(), layer_of(e))).collect::<Vec<_>>()
+    );
+    assert!(es.iter().any(|e| layer_of(e) == "OUTLINE") && es.iter().any(|e| layer_of(e) == "BEND_UP"));
+    assert!(entities(&export(&mut s, json!({"markings": false, "bend_notes": true}))).iter().all(|e| e.0 != "TEXT"));
+    // The hole and the slot are no letters: they stay on CUT.
+    let cut = es.iter().filter(|e| layer_of(e) == "CUT").collect::<Vec<_>>();
+    assert_eq!((count_of(&cut, "CIRCLE"), count_of(&cut, "LINE")), (1, 4), "{cut:?}");
+    assert_eq!(export(&mut s, json!({"markings": true})), export(&mut s, json!({})));
+    assert!(s.execute("sheet.export_dxf", &json!({"markings": "no"})).is_err());
+    // A pocket that is letters (a shallow text cut) is a marking and goes with them.
+    let mut p = Session::default();
+    run(&mut p, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut p, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+    run(&mut p, "sketch.finish", json!({}));
+    run(&mut p, "sheet.flange", json!({"sketch": "Base"}));
+    run(&mut p, "sketch.create", json!({"plane": "XY", "name": "Marks"}));
+    run(&mut p, "sketch.text", json!({"text": "AB", "at": [40, 28], "height": 8}));
+    run(&mut p, "sketch.finish", json!({}));
+    run(&mut p, "solid.extrude", json!({"sketch": "Marks", "distance": 1, "operation": "cut"}));
+    assert!(export(&mut p, json!({})).contains("ETCH"));
+    assert!(!export(&mut p, json!({"markings": false})).contains("ETCH"));
+}
+
 /// A body whose base flange names its rule keeps that rule's notes whichever rule is active when
 /// the DXF is written, and a bend down reads its included angle the same way.
 #[test]

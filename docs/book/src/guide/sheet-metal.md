@@ -398,6 +398,11 @@ drawing is the same part, only its units are different; the bend table's CSV sta
 {"command":"sheet.export_dxf","params":{"path":"bracket-flat-in.dxf","units":"inches"}}
 ```
 
+`"bend_lines"` (default `true`) and `"markings"` (default `true`) keep or leave out the bend
+centre lines and the letters' contours with the bend notes — for a cutter that would cut or etch
+them. Preferences > Sheet Metal sets the defaults for both, for the export units, and for the
+sheet-metal rule that new designs start with.
+
 | Layer | Colour | Line | Holds |
 |---|---|---|---|
 | `OUTLINE` | 7 white or black | continuous | the outer contour of each piece of the sheet |
