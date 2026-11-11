@@ -87,6 +87,7 @@ pub(super) fn status(e: SolidError) -> Error {
         e if is_curve_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
         e if is_surface_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
         e if is_offset_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
+        e if is_blend_failure(&e) => Error::Status(e.sm_status().unwrap_or(solidcore::error::SM_ERR)),
         SolidError::InvalidInput { .. } => Error::Status(INVALID_INPUT),
         SolidError::Unsupported { reason, .. } if reason == MIXED_CORNER_RAILS_CROSS => Error::Unported(MIXED_CORNER_UNSUPPORTED),
         e if is_boolean_failure(&e) => boolean_status(e),
@@ -178,6 +179,13 @@ fn is_surface_failure(e: &SolidError) -> bool {
 /// refusals replaced none and pass on as before.
 fn is_offset_failure(e: &SolidError) -> bool {
     e.offset_failure().is_some_and(|o| o.replaces_upstream_status())
+}
+
+/// A blend routine's failure (solidcore's `BlendFailure`) that replaced a status the routine
+/// returned (`Upstream` before solidcore described it): it passes on as that status, whether or
+/// not it names an entity.
+fn is_blend_failure(e: &SolidError) -> bool {
+    e.blend_failure().is_some_and(|b| b.replaces_upstream_status())
 }
 
 /// `size_ok`.
@@ -1633,5 +1641,25 @@ mod tests {
         assert!(matches!(status(at), Error::Status(1007)));
         let folds = offset(OffsetFailure::Folds { face: solidcore::topology::FaceId::from_index(1), distance: 2.0, largest: 1.0 });
         assert!(!matches!(status(folds), Error::Status(_)));
+    }
+
+    /// A blend routine's failure passes on as the status it replaced, as the `Upstream` it
+    /// replaced did, whether or not it names an edge.
+    #[test]
+    fn blend_failures_pass_on_as_their_status() {
+        use solidcore::error::Failure;
+        use solidcore::error::blend::BlendFailure;
+        let blend = |b| Failure::new("blend::feature_executive", b).into_error();
+        assert!(matches!(status(blend(BlendFailure::Failed("x"))), Error::Status(1001)));
+        assert!(matches!(status(blend(BlendFailure::Missing("the edge use's edge"))), Error::Status(1006)));
+        assert!(matches!(status(blend(BlendFailure::InvalidValue("x"))), Error::Status(1007)));
+        assert!(matches!(status(blend(BlendFailure::Inconsistent("x"))), Error::Status(1005)));
+        assert!(matches!(status(blend(BlendFailure::BadIntersections("x"))), Error::Status(1027)));
+        assert!(matches!(status(blend(BlendFailure::NotConverged("x"))), Error::Status(1022)));
+        assert!(matches!(status(blend(BlendFailure::PassedOn { what: "x", status: 1020 })), Error::Status(1020)));
+        let at = Failure::new("blend::fillet_executive::p3", BlendFailure::Failed("x"))
+            .at(solidcore::EntityRef::Edge(solidcore::topology::EdgeId::from_index(2)))
+            .into_error();
+        assert!(matches!(status(at), Error::Status(1001)));
     }
 }

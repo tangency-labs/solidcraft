@@ -255,8 +255,12 @@ fn a_feature_that_cannot_be_partitioned_refuses_the_call_and_leaves_the_base() {
         ex.features_mut()[1].defeature_ready = false;
         ex.do_defeature(&mut k)
     };
+    // a status answer: an `Upstream`, or the typed blend failure that replaced it (#13790)
     assert!(
-        matches!(r, Err(solidcore::SolidError::Upstream { .. })),
+        r.as_ref()
+            .err()
+            .and_then(solidcore::error::upstream_status)
+            .is_some(),
         "{r:?}"
     );
     assert_eq!(state(&mut k, &mut b), before);
