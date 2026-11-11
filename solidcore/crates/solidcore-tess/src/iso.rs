@@ -30,7 +30,8 @@ const MAX_COPIES: usize = 8;
 /// size (its box diagonal) as [`crate::plan`] takes it, so the tolerance is the plan's (never
 /// finer than a millionth of the body) and the boundary is the one the plan draws: its edges'
 /// chords, which a run ends on, within the tolerance of the trim. A face the
-/// mesher leaves out of its plan gets no lines.
+/// mesher leaves out of its plan gets no lines (one it cannot read, close, or tell the poles
+/// of).
 ///
 /// The polylines are display points, not geometry: points on the surface for drawing, each
 /// chord within the tolerance, never a curve to model with or measure (an isoparm as geometry
@@ -86,6 +87,11 @@ pub fn isoparms(
         ) else {
             continue;
         };
+        // A point whose poles the kernel could not tell refuses the face in the plan
+        // ([`crate::plan`]): it gets no lines either.
+        if s.refusal().is_some() {
+            continue;
+        }
         let period = uv::domain(s).period;
         let [[u0, u1], [v0, v1]] = face.domain;
         for (count, constant_u) in [(u_count, true), (v_count, false)] {
