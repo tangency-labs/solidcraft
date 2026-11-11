@@ -38,7 +38,7 @@ use solidcraft_doc::drawing::dimension::{Dimension, LabelKind, MAX_DECIMALS, rea
 use solidcraft_doc::drawing::note::Note;
 use solidcraft_doc::drawing::view::{ResolvedView, SetBy, Setting, View, ViewKind, ViewPlace, check_occurrence_paths, check_pose};
 use solidcraft_doc::drawing_view::{
-    Exploded, JointPose, Looking, MAX_POSE_JOINTS, OccurrencePaths, Pose, StudyStep, TangentEdges, ViewDirection, ViewOverrides,
+    Exploded, JointPose, Looking, MAX_POSE_JOINTS, OccurrencePaths, Pose, StudyStep, TangentEdges, ViewConfiguration, ViewDirection, ViewOverrides,
 };
 use solidcraft_doc::ids;
 use solidcraft_geom::Aabb2;
@@ -924,6 +924,7 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
                         line_group: matches!(resolved.line_group.set_by, SetBy::This | SetBy::Parent(_)).then_some(resolved.line_group.value),
                         exploded: Some(resolved.exploded.value).filter(|exploded| *exploded != Exploded::Assembled),
                         pose: Some(resolved.pose.value.clone()).filter(|pose| *pose != Pose::Designed),
+                        configuration: Some(resolved.configuration.value).filter(|row| *row != ViewConfiguration::Active),
                     };
                     view.place = ViewPlace::At([to.x, to.y]);
                 }
@@ -989,6 +990,7 @@ fn base(s: &mut Session, p: &Value) -> Result<Value> {
         line_group: None,
         exploded: request.exploded.as_ref().map(|chosen| exploded_of(s, chosen, BASE)).transpose()?,
         pose: request.pose.as_ref().map(|chosen| pose_of(s, chosen, BASE)).transpose()?,
+        configuration: None,
     };
     let place = ViewPlace::At([position.x, position.y]);
     let kind = ViewKind::Base { source, view: direction };

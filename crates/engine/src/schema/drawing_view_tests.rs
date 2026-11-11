@@ -66,6 +66,7 @@ fn the_edit_contract_lists_a_saved_views_settings() {
         line_group: Some(Default::default()),
         exploded: Some(Default::default()),
         pose: Some(Default::default()),
+        configuration: Some(Default::default()),
     };
     let own = serde_json::to_value(all).unwrap_or_default();
     let named = |key: &String| if key == "occurrences" { "source".to_string() } else { key.clone() };
