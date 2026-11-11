@@ -7322,6 +7322,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             ease_out,
             to,
             references,
+            old_surface_start: _,
         } => {
             let mut d = start("solid.hole")?;
             let mut k = hole_defaults(s);

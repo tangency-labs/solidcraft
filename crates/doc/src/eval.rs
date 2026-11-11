@@ -5065,6 +5065,12 @@ fn line_meets_box(p: Vec3, dir: Vec3, b: &solidcraft_geom::Aabb3) -> bool {
 /// bodies in `scope` count (every body when it is empty, see [`hole_scope`]). Edit Hole seeds from
 /// this point so the dialog's face pick matches where evaluation drills (#10689).
 pub fn hole_on_surface(st: &ModelState, p: Vec3, dir: Vec3, scope: &[String]) -> Vec3 {
+    hole_on_surface_in(st, p, dir, scope, true)
+}
+
+/// [`hole_on_surface`]; with `from_inside` false a position inside a body stays where it is (a
+/// hole from a sketch on an explicit plane starts at that plane, #11538).
+fn hole_on_surface_in(st: &ModelState, p: Vec3, dir: Vec3, scope: &[String], from_inside: bool) -> Vec3 {
     let size = st.bodies.iter().map(|b| b.body.size()).fold(1.0, f64::max);
     let eps = size * 1e-6;
     let mut best: Option<Vec3> = None;
@@ -5080,6 +5086,9 @@ pub fn hole_on_surface(st: &ModelState, p: Vec3, dir: Vec3, scope: &[String]) ->
         if let Some((t, _)) = m.raycast(p - dir * eps, dir)
             && t < eps * 4.0
         {
+            return p;
+        }
+        if !from_inside && m.contains(p) {
             return p;
         }
         let q = if m.contains(p) { m.raycast(p, -dir).map(|(t, _)| p - dir * t) } else { m.raycast(p, dir).map(|(t, _)| p + dir * t) };
@@ -5925,7 +5934,7 @@ fn backticked<S: AsRef<str>>(ids: &[S]) -> String {
 /// Where a hole feature drills (each on the surface) and in which direction: at its sketch
 /// points perpendicular to the sketch (into the material), else at its position. A point gone
 /// from the sketch drops only its own hole ([`hole_points_gone`]); with none left it fails.
-fn hole_spots(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature) -> Result<(Vec<Vec3>, Vec3)> {
+fn hole_spots(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature) -> Result<(Vec<Vec3>, Vec3)> {
     let FeatureKind::Hole { position, at, direction, points, .. } = &f.kind else { return Err(DocError::Invalid("not a hole".into())) };
     let (spots, dir) = match points {
         Some(sp) if !sp.single => {
@@ -5951,7 +5960,35 @@ fn hole_spots(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature) -> R
     if spots.is_empty() || spots.len() > 10_000 {
         return Err(DocError::Invalid("a hole needs 1…10000 points".into()));
     }
-    Ok((spots.into_iter().map(|p| hole_on_surface(st, p, dir, hole_scope(f))).collect(), dir))
+    let from_inside = hole_from_inside(doc, f);
+    Ok((spots.into_iter().map(|p| hole_on_surface_in(st, p, dir, hole_scope(f), from_inside)).collect(), dir))
+}
+
+/// Whether a hole's spots that lie inside a body move back to its surface: not for the points
+/// of a sketch on a derived plane (#11538), unless the hole was saved before that.
+fn hole_from_inside(doc: &Document, f: &Feature) -> bool {
+    match &f.kind {
+        FeatureKind::Hole { old_surface_start: true, .. } => true,
+        FeatureKind::Hole { points: Some(sp), .. } if !sp.single => sketch_plane_follows_face(doc, sp.sketch.0),
+        _ => true,
+    }
+}
+
+/// Whether the sketch lies on a picked face, a standard plane (or a plane given outright), so a hole at its points
+/// follows that face back to the surface; a sketch on an offset, construction or other derived
+/// plane is where the user put it.
+fn sketch_plane_follows_face(doc: &Document, sketch: u64) -> bool {
+    fn picked(p: &PlaneRef) -> bool {
+        match p {
+            PlaneRef::Origin { .. } | PlaneRef::Face { .. } | PlaneRef::Custom { .. } | PlaneRef::Placed { .. } => true,
+            PlaneRef::Flipped { base, .. } => picked(base),
+            _ => false,
+        }
+    }
+    match doc.feature(sketch).map(|f| &f.kind) {
+        Some(FeatureKind::Sketch { plane, .. }) => picked(plane),
+        _ => true,
+    }
 }
 
 /// A hole's depth: down to the To Object (where the hole's axis meets the face there, else the
@@ -6112,16 +6149,22 @@ fn parallel_tapped_wall(st: &ModelState, entry: Vec3, inward: Vec3, radius: f64,
 
 /// The cutting tools of a hole feature at every spot, each with its exact geometry when it is a
 /// straight cylinder (see [`hole_tools_and_prisms`]).
-fn hole_feature_tools(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Feature) -> Result<Vec<(Traced, Option<more::PrimitivePrism>)>> {
+fn hole_feature_tools(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    st: &ModelState,
+    f: &Feature,
+) -> Result<Vec<(Traced, Option<more::PrimitivePrism>)>> {
     let FeatureKind::Hole { diameter, depth, hole, to, .. } = &f.kind else { return Err(DocError::Invalid("not a hole".into())) };
-    let (spots, dir) = hole_spots(vals, st, f)?;
+    let (spots, dir) = hole_spots(doc, vals, st, f)?;
     if spots.is_empty() || spots.len() > 10_000 {
         return Err(DocError::Invalid("a hole needs 1…10000 points".into()));
     }
+    let kept_inside = !hole_from_inside(doc, f);
     let mut tools = Vec::new();
     for at in spots {
         let depth = hole_depth_to(st, &at, dir, &to.map(Vec3::from), depth)?;
-        tools.extend(hole_tools_and_prisms(vals, st, &at, dir, diameter, &depth, hole)?);
+        tools.extend(hole_tools_and_prisms(vals, st, &at, dir, diameter, &depth, hole, kept_inside)?);
     }
     Ok(tools)
 }
@@ -6205,7 +6248,8 @@ fn sheet_hole_cut(
     Ok(handled)
 }
 
-/// The cutting tools of one hole at `position`, drilling along `dir`.
+/// The cutting tools of one hole at `position`, drilling along `dir` (`kept_inside`: see
+/// [`hole_tools_and_prisms`]).
 #[allow(clippy::too_many_arguments)]
 fn hole_tools(
     vals: &BTreeMap<String, Value>,
@@ -6215,8 +6259,9 @@ fn hole_tools(
     diameter: &str,
     depth: &Option<crate::Expr>,
     hole: &HoleKind,
+    kept_inside: bool,
 ) -> Result<Vec<Traced>> {
-    Ok(hole_tools_and_prisms(vals, st, position, dir, diameter, depth, hole)?.into_iter().map(|(tool, _)| tool).collect())
+    Ok(hole_tools_and_prisms(vals, st, position, dir, diameter, depth, hole, kept_inside)?.into_iter().map(|(tool, _)| tool).collect())
 }
 
 /// The scale a hole's tools are sized by: the largest body the hole's axis meets (#2904), so a
@@ -6343,12 +6388,21 @@ fn hole_tools_and_prisms(
     diameter: &str,
     depth: &Option<crate::Expr>,
     hole: &HoleKind,
+    kept_inside: bool,
 ) -> Result<Vec<(Traced, Option<more::PrimitivePrism>)>> {
     let r = val(vals, diameter, Kind::Length)? / 2.0;
     if !(r > 1e-6) {
         return Err(DocError::Invalid("hole diameter must be positive".into()));
     }
     let size = hole_axis_size(st, position, dir);
+    let mut top = (size * 0.01).max(0.1);
+    // A hole whose spot stays inside the part (`kept_inside`: a sketch on a plane through it,
+    // #11538) starts there: the reach above a face, there so the tool's top never lies on that
+    // face, would cut the material above the plane. Judged at the spot itself, so a plane just
+    // under a face keeps the thin roof above it.
+    if kept_inside && st.bodies.iter().any(|b| matches!(b.body.classify_point(*position), Ok(kernel::PointClass::Inside))) {
+        top = size * 1e-4;
+    }
     // Tools are cylinders and cones made by (tapered) extrudes along the axis, cut one
     // after another, widest first.
     let plane = Plane::from_normal(*position, -dir).ok_or_else(|| DocError::Invalid("hole axis".into()))?;
@@ -6359,7 +6413,7 @@ fn hole_tools_and_prisms(
         }
         HoleKind::Simple | HoleKind::Drilled { .. } => r,
     };
-    let (top, above) = hole_run_on(st, &plane, if wide.is_finite() { wide } else { r }, (size * 0.01).max(0.1));
+    let (top, above) = hole_run_on(st, &plane, if wide.is_finite() { wide } else { r }, top);
     let bottom = match depth {
         Some(d) => -val(vals, d, Kind::Length)?,
         None => -(size * 2.0 + 1.0),
@@ -7375,7 +7429,7 @@ fn feature_tools_with_constructor(
             val(vals, top_radius, Kind::Length)?,
             val(vals, height, Kind::Length)?,
         )?]),
-        FeatureKind::Hole { .. } => Ok(hole_feature_tools(vals, st, f)?.into_iter().map(|(tool, _)| tool).collect()),
+        FeatureKind::Hole { .. } => Ok(hole_feature_tools(doc, vals, st, f)?.into_iter().map(|(tool, _)| tool).collect()),
         _ => Err(DocError::Invalid(format!("{} cannot be patterned or mirrored yet", f.name))),
     }
 }
@@ -8690,6 +8744,8 @@ fn replay(
             // a blind hole's depth counts from the face at the copy, not from the bottom of the
             // original hole under the original spot.
             let (spots, dir) = hole_spots_raw(vals, st, src)?;
+            // Copies start where the original does (#11538).
+            let from_inside = hole_from_inside(doc, src);
             // A hole at sketch points drills into the material, judged at each copy's spots as
             // the source's side was judged at its own (#14050): judged at the source spots, where
             // the source has already left an empty bore, a through hole's copies turned away.
@@ -8710,12 +8766,12 @@ fn replay(
                 let start = copies.len();
                 let mut on = Vec::with_capacity(spots.len());
                 for p in &spots {
-                    let at = hole_on_surface(st, crate::apply_point(m, *p), d, hole_scope(src));
+                    let at = hole_on_surface_in(st, crate::apply_point(m, *p), d, hole_scope(src), from_inside);
                     on.push((at, d));
                     let to = to.map(|t| crate::apply_point(m, t.0));
                     let depth = hole_depth_to(st, &at, d, &to, depth)?;
                     // Each copy's faces are named as the hole's, with the instance.
-                    copies.extend(hole_tools(vals, st, &at, d, diameter, &depth, hole)?.into_iter().map(|t| Traced {
+                    copies.extend(hole_tools(vals, st, &at, d, diameter, &depth, hole, !from_inside)?.into_iter().map(|t| Traced {
                         lineage: t.lineage.map(|l| l.copied(src.id, first + k + 1)),
                         body: t.body,
                         recipe: None,
@@ -9281,7 +9337,7 @@ fn eval_feature(
             if thread_depth.is_some_and(|d| !d.is_finite() || d <= 0.0) {
                 return Err(DocError::Invalid("thread depth must be finite and positive".into()));
             }
-            let (spots, dir) = hole_spots(vals, st, f)?;
+            let (spots, dir) = hole_spots(doc, vals, st, f)?;
             let points_gone = hole_points_gone(st, f);
             if !points_gone.is_empty() {
                 append_warning(
@@ -9302,7 +9358,7 @@ fn eval_feature(
             } else {
                 Vec::new()
             };
-            let tools = hole_feature_tools(vals, st, f)?;
+            let tools = hole_feature_tools(doc, vals, st, f)?;
             let handled = sheet_hole_cut(st, f, &tools, warning)?;
             let tools: Vec<Traced> = tools.into_iter().map(|(tool, _)| tool).collect();
             if handled.is_empty() {
