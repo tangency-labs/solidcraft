@@ -219,7 +219,7 @@ impl ProceduralSweep {
             .and_then(|row| row.first())
             .copied()
             .ok_or_else(|| SolidError::invalid_input(OP, "missing screw point"))?;
-        self.verify_runtime_point(uv, point)?;
+        self.verify_turned_point(uv, point, &turn, &rotation)?;
         Ok(result)
     }
 }

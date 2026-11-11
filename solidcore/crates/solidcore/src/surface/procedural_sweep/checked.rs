@@ -216,10 +216,14 @@ pub(super) fn powi(x: f64, n: usize) -> Result<f64> {
     verify(candidate, enclosure, enclosure.mag())
 }
 
+/// A checked rotation by `theta`: its sine and cosine, and the enclosures of the exact
+/// sine and cosine of `theta` that checked them (which a point check reuses).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Rotation {
     sine: f64,
     cosine: f64,
+    sine_box: Ivl,
+    cosine_box: Ivl,
 }
 impl Rotation {
     pub(super) fn new(theta: f64) -> Result<Self> {
@@ -227,6 +231,8 @@ impl Rotation {
         Ok(Self {
             sine: verify(theta.sin(), s, theta)?,
             cosine: verify(theta.cos(), c, theta)?,
+            sine_box: s,
+            cosine_box: c,
         })
     }
     pub(super) fn turn(&self, k: Vec3, v: Vec3) -> Vec3 {
@@ -239,6 +245,21 @@ pub(super) struct Turn {
     pub theta: f64,
     pub rate: f64,
     pub tau: f64,
+    /// What proved `theta`, for a point check at the same parameters.
+    proof: TurnProof,
+}
+
+/// The proof of a [`Turn`]'s angle: the clamped parameter `t` it was taken at, in the
+/// station span `[a, b]` whose `tan(width / 4)` is enclosed by `tau_box`, and the
+/// enclosure of the exact turn at `t` that `theta` was checked against.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct TurnProof {
+    t: f64,
+    index: usize,
+    a: f64,
+    b: f64,
+    tau_box: Ivl,
+    theta_box: Ivl,
 }
 
 fn boxed(p: Vec3) -> Box3 {
@@ -412,16 +433,24 @@ impl ProceduralSweep {
         let tau_box = self.span_tau_box_at(index, a, b);
         let (near_box, rate_box) = turn_near(t, a, b, tau_box, x, atan_x);
         let scale = a.abs().max(b.abs());
-        let theta = if let Ok(theta) = verify(theta, near_box, scale) {
-            theta
+        let (theta, theta_box) = if let Ok(theta) = verify(theta, near_box, scale) {
+            (theta, near_box)
         } else {
             let (theta_box, _) = self.turn_enclosure(t, ending)?;
-            verify(theta, theta_box, scale)?
+            (verify(theta, theta_box, scale)?, theta_box)
         };
         Ok(Turn {
             theta,
             rate: verify(rate, rate_box, rate_box.mag())?,
             tau,
+            proof: TurnProof {
+                t,
+                index,
+                a,
+                b,
+                tau_box,
+                theta_box,
+            },
         })
     }
 
@@ -606,6 +635,26 @@ impl ProceduralSweep {
     }
 
     fn checked_patch_enclosure(&self, [u, v]: [Ivl; 2]) -> Result<Option<Box3>> {
+        let Some((point, t)) = self.checked_source_and_turn_parameter([u, v])? else {
+            return Ok(None);
+        };
+        // theta(t) is monotone and continuous across all retained arc joints.
+        // Endpoint enclosures therefore cover even a rounded map crossing a knot.
+        let theta = self.mathematical_turn_range(t)?;
+        // A whole patch can cross many quadrants. A width at most one radian
+        // leaves the nearest-quadrant remainder inside [-1.5,1.5]; wider
+        // patches use the mathematical global range, not a failed local proof.
+        let (s, c) = if (Ivl::from(theta.hi) - Ivl::from(theta.lo)).hi > 1.0 {
+            (Ivl::new(-1.0, 1.0), Ivl::new(-1.0, 1.0))
+        } else {
+            sin_cos_certified(theta)
+        };
+        self.screw_box(point, theta, s, c).map(Some)
+    }
+
+    /// The enclosure of the exact source point over the face's `[u, v]` and of the exact
+    /// turn parameter `t` there, or `None` for a class the evaluator does not cover.
+    fn checked_source_and_turn_parameter(&self, [u, v]: [Ivl; 2]) -> Result<Option<(Box3, Ivl)>> {
         if !self.checked_source_class()? {
             return Ok(None);
         }
@@ -616,7 +665,9 @@ impl ProceduralSweep {
         if ![u.lo, u.hi, v.lo, v.hi].iter().all(|x| x.is_finite()) || u.lo > u.hi || v.lo > v.hi {
             return Err(bad("face parameters must be finite"));
         }
-        let motion = self.screw().ok_or_else(|| bad("missing screw motion"))?;
+        if self.screw().is_none() {
+            return Err(bad("missing screw motion"));
+        }
         let (p, q) = if self.map.swapped { (v, u) } else { (u, v) };
         let [a0, a1] = self.map.a;
         let [b0, b1] = self.map.b;
@@ -632,17 +683,13 @@ impl ProceduralSweep {
         );
         let point =
             section.point_enclosure((w - Ivl::from(lo)) / (Ivl::from(hi) - Ivl::from(lo)))?;
-        // theta(t) is monotone and continuous across all retained arc joints.
-        // Endpoint enclosures therefore cover even a rounded map crossing a knot.
-        let theta = self.mathematical_turn_range(t)?;
-        // A whole patch can cross many quadrants. A width at most one radian
-        // leaves the nearest-quadrant remainder inside [-1.5,1.5]; wider
-        // patches use the mathematical global range, not a failed local proof.
-        let (s, c) = if (Ivl::from(theta.hi) - Ivl::from(theta.lo)).hi > 1.0 {
-            (Ivl::new(-1.0, 1.0), Ivl::new(-1.0, 1.0))
-        } else {
-            sin_cos_certified(theta)
-        };
+        Ok(Some((point, t)))
+    }
+
+    /// The screw motion of the source box `point` by the turn `theta`, whose sine and
+    /// cosine `s` and `c` enclose.
+    fn screw_box(&self, point: Box3, theta: Ivl, s: Ivl, c: Ivl) -> Result<Box3> {
+        let motion = self.screw().ok_or_else(|| bad("missing screw motion"))?;
         let k = boxed(motion.axis());
         let origin = boxed(motion.origin());
         let r = sub(point, origin);
@@ -660,7 +707,120 @@ impl ProceduralSweep {
         if !finite_box(result) {
             return Err(bad("screw point cannot be enclosed"));
         }
-        Ok(Some(result))
+        Ok(result)
+    }
+
+    /// The enclosure of the exact definition point at the face's `uv` from the proofs of
+    /// the turn and rotation the candidate was evaluated with, no series taken; `None`
+    /// where they do not cover it (a class the evaluator does not cover, an exact turn
+    /// parameter past the spans next to the turn's, a failed enclosure).
+    ///
+    /// Soundness: the exact turn parameter lies in `t_box` (the map in interval
+    /// arithmetic), clamped to the stations in `reached`, where the exact turn is
+    /// `theta(t') = (a + b) / 2 + 2 atan(x(t'))` of the span holding `t'`, its rate at
+    /// most `slope` ([`Self::turn_slope_over`]). So it lies within `slope |t' - t|` of
+    /// the exact turn at the turn's `t`, which `theta_box` encloses: `theta` below
+    /// encloses it. Sine and cosine move by at most
+    /// the change of their angle, so the exact sine and cosine there lie within
+    /// `|theta - theta_c|` of those of the candidate's angle `theta_c`, which the
+    /// rotation's boxes enclose. The rest is [`Self::screw_box`], as for a patch.
+    fn turned_point_enclosure(
+        &self,
+        uv: Point2,
+        turn: &Turn,
+        rotation: &Rotation,
+    ) -> Result<Option<Box3>> {
+        let Some((point, t_box)) =
+            self.checked_source_and_turn_parameter([Ivl::from(uv.x), Ivl::from(uv.y)])?
+        else {
+            return Ok(None);
+        };
+        let proof = &turn.proof;
+        let (Some(&first), Some(&last)) = (self.stations.first(), self.stations.last()) else {
+            return Ok(None);
+        };
+        // the exact parameters the definition takes there, clamped as it clamps
+        let reached = Ivl::new(
+            crate::math::clamp_between(t_box.lo, first, last),
+            crate::math::clamp_between(t_box.hi, first, last),
+        );
+        let Some(slope) = self.turn_slope_over(proof, reached) else {
+            return Ok(None);
+        };
+        let off = (reached - Ivl::from(proof.t)).mag();
+        let theta = proof.theta_box + Ivl::from(slope) * Ivl::new(-off, off);
+        let moved = (theta - Ivl::from(turn.theta)).mag();
+        let s = rotation.sine_box + Ivl::new(-moved, moved);
+        let c = rotation.cosine_box + Ivl::new(-moved, moved);
+        if !(theta.is_finite() && s.is_finite() && c.is_finite()) {
+            return Ok(None);
+        }
+        Ok(self.screw_box(point, theta, s, c).ok())
+    }
+
+    /// An upper bound on the rate of the exact turn over `reached` and the turn's own
+    /// parameter: the largest `4 tan(width / 4) / width`, enclosed above, of the turn's
+    /// station span and of the span on either side that `reached` runs into; `None` past
+    /// those.
+    ///
+    /// Soundness: on a span the exact turn's rate `4 tau / (width (1 + x^2))` is at most
+    /// `4 tau / width`, and the turn is continuous at each station (`theta(a) = a` from
+    /// both sides), so the largest of the bounds bounds its change between any two
+    /// parameters of the spans taken.
+    fn turn_slope_over(&self, proof: &TurnProof, reached: Ivl) -> Option<f64> {
+        let slope = |index: usize| -> Option<f64> {
+            let (&a, &b) = (self.stations.get(index)?, self.stations.get(index + 1)?);
+            let tau = self.span_tau_box_at(index, a, b);
+            let width = Ivl::from(b) - Ivl::from(a);
+            let bound = (Ivl::from(4.0) * tau / width).hi;
+            (tau.lo > 0.0 && width.lo > 0.0 && bound.is_finite()).then_some(bound)
+        };
+        let mut bound = slope(proof.index)?;
+        if reached.lo < proof.a {
+            let before = proof.index.checked_sub(1)?;
+            if !(*self.stations.get(before)? <= reached.lo) {
+                return None;
+            }
+            bound = bound.max(slope(before)?);
+        }
+        if reached.hi > proof.b {
+            let after = proof.index + 1;
+            if !(*self.stations.get(after + 1)? >= reached.hi) {
+                return None;
+            }
+            bound = bound.max(slope(after)?);
+        }
+        Some(bound)
+    }
+
+    /// [`Self::verify_runtime_point`] for a candidate evaluated with `turn` and
+    /// `rotation`: the enclosure from their proofs ([`Self::turned_point_enclosure`])
+    /// first, and only where it does not prove the candidate, the full check. It passes
+    /// when either proves the candidate, so the order never changes an answer.
+    ///
+    /// # Errors
+    /// Those of [`Self::verify_runtime_point`].
+    pub(super) fn verify_turned_point(
+        &self,
+        uv: Point2,
+        candidate: Point3,
+        turn: &Turn,
+        rotation: &Rotation,
+    ) -> Result<()> {
+        let key = [uv.x, uv.y, candidate.x, candidate.y, candidate.z].map(f64::to_bits);
+        let slot = memo_slot(&key);
+        if self.checked_cache.points.get(key, slot).is_some() {
+            return Ok(());
+        }
+        if let Ok(Some(enclosure)) = self.turned_point_enclosure(uv, turn, rotation) {
+            let error = magnitude(sub(boxed(candidate), enclosure)).hi;
+            let cap = self.runtime_evaluation_allowance();
+            if error.is_finite() && cap.is_ok_and(|cap| error <= cap) {
+                self.checked_cache.points.put(key, slot, ());
+                return Ok(());
+            }
+        }
+        self.verify_runtime_point(uv, candidate)
     }
 
     pub(super) fn verify_runtime_point(&self, uv: Point2, candidate: Point3) -> Result<()> {
@@ -724,6 +884,74 @@ mod tests {
                 [w.lo, w.hi].map(f64::to_bits)
             );
         }
+    }
+
+    /// The point check from the turn's and rotation's proofs covers the points inside
+    /// spans, at stations and past the ends (where the map's interval runs into the next
+    /// span or is clamped), and refuses what the full check refuses: a candidate off by
+    /// twice the allowance.
+    #[test]
+    fn turned_point_checks_agree_with_the_full_check() {
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::surface::procedural_sweep::ScrewMotion;
+
+        let profile = BSplineCurve::create_line_segment(
+            3,
+            Vec3::new(8.0, 0.0, 0.0),
+            Vec3::new(10.0, 0.0, 1.0),
+        )
+        .unwrap();
+        let motion = ScrewMotion::new(Vec3::ZERO, Vec3::Z, 2.5, None).unwrap();
+        let stations = [0.0, 0.3, 0.7, 1.2, 1.25];
+        let definition = ProceduralSweep::create(&profile, motion, &stations, 0.3).unwrap();
+        let cap = definition.runtime_evaluation_allowance().unwrap();
+        let mut covered = 0;
+        for &t in &[
+            -0.5,
+            0.0,
+            0.1,
+            0.3,
+            0.30000000000000004,
+            0.55,
+            0.7,
+            1.2,
+            1.249,
+            1.25,
+            3.0,
+        ] {
+            for ending in [false, true] {
+                let uv = Point2::new(0.37, t);
+                let (turn, rotation) = definition.checked_turn_rotation(t, ending).unwrap();
+                let point = definition
+                    .evaluate_definition_side(uv, 0, 0, ending)
+                    .unwrap()[0][0];
+                // copies with nothing kept, so neither check meets the other's pass
+                let fresh = || {
+                    let mut copy = definition.clone();
+                    copy.invalidate_runtime_allowance();
+                    copy
+                };
+                let (turned, full) = (fresh(), fresh());
+                turned
+                    .verify_turned_point(uv, point, &turn, &rotation)
+                    .unwrap();
+                full.verify_runtime_point(uv, point).unwrap();
+                if let Some(enclosure) =
+                    turned.turned_point_enclosure(uv, &turn, &rotation).unwrap()
+                {
+                    // the proofs alone prove the candidate
+                    assert!(magnitude(sub(boxed(point), enclosure)).hi <= cap, "t {t}");
+                    covered += 1;
+                }
+                let off = point + Vec3::X * (2.0 * cap);
+                assert!(turned
+                    .verify_turned_point(uv, off, &turn, &rotation)
+                    .is_err());
+                assert!(full.verify_runtime_point(uv, off).is_err());
+            }
+        }
+        // the proofs cover every one of them, the stations and the clamped ends included
+        assert_eq!(covered, 22);
     }
 
     /// A class without a checked evaluator (rational controls, a varying radial

@@ -734,7 +734,9 @@ impl ProceduralSweep {
             Motion::Path(m) => self.path_partials(m, wt, first, left)?,
         };
         if self.screw().is_some() {
-            self.verify_runtime_point(uv, s)?;
+            // the turn the partials took, kept by its bits ([`Self::checked_turn_rotation`])
+            let (turn, rotation) = self.checked_turn_rotation(wt.y, left)?;
+            self.verify_turned_point(uv, s, &turn, &rotation)?;
         }
         Ok(self.assemble(s, s_w, s_t, s_wt, highest_u_deriv, highest_v_deriv))
     }
