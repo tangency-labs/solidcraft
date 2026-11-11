@@ -152,10 +152,11 @@ fn no_english_is_painted_where_the_language_has_a_translation() {
     let english = english_ids();
     let mut h = sample();
     let mut names = design_names(&h.app);
-    // Values the preference editors show as typed (the sheet rule's expressions).
+    // Rule names the preference's default-rule box shows as named.
     {
-        let r = &h.app.preferences.sheet_rule;
-        names.extend([r.thickness.clone(), r.k_factor.clone(), r.bend_radius.clone()]);
+        names.insert(h.app.preferences.sheet_rule.name.clone());
+        names.extend(h.app.preferences.personal_sheet_rules.rules().iter().map(|r| r.name().to_string()));
+        names.extend(h.app.session.doc.sheet.rules.iter().map(|r| r.name.clone()));
     }
     assert!(names.contains("Boss") && names.len() > 5, "{names:?}");
     let mut leaks = Vec::new();
