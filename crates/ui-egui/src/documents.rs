@@ -67,6 +67,8 @@ pub struct DocSlot {
 /// waits in the same slot, so showing the tab again picks up exactly where it was left.
 #[derive(Default)]
 struct DocWork {
+    /// Shared panel content belongs to the design, independently of its current placement.
+    bom: Option<crate::bom_panel::BomPanel>,
     dialog: Option<crate::dialogs::Dialog>,
     editing_state: Option<crate::dialogs::EditingState>,
     tool: Option<crate::tools::Tool>,
@@ -79,12 +81,15 @@ struct DocWork {
 /// computing after OK can't wait (its result belongs to the window thread): that dialog is
 /// cancelled, as without the preference.
 fn take_work(app: &mut SolveApp) -> DocWork {
+    let keep_bom = crate::panel_runtime::production_active(app);
+    let bom = app.bom.take().filter(|_| keep_bom);
     if !app.preferences.keep_work_on_tab_switch || app.applying.is_some() {
         crate::dialogs::cancel(app);
         app.tool = None;
-        return DocWork::default();
+        return DocWork { bom, ..DocWork::default() };
     }
     DocWork {
+        bom,
         dialog: app.dialog.take(),
         editing_state: app.editing_state.take(),
         tool: app.tool.take(),
@@ -97,6 +102,10 @@ fn take_work(app: &mut SolveApp) -> DocWork {
 /// design's history rolled back for an edit, and only the dialog's Cancel or OK puts it back.
 /// `before`: the session's revision before the switch moved it on to refresh the views.
 fn put_work(app: &mut SolveApp, mut work: DocWork, before: u64) {
+    if crate::panel_runtime::production_active(app) {
+        app.bom = work.bom;
+        crate::bom_panel::set_focus_pending(app, true);
+    }
     // That refresh is not a change to the design: the edit's Cancel must still see the design
     // it left (`Session::restore_editor` compares revisions), as `PendingFeatureEdit` does.
     if let Some(state) = &mut work.editing_state {
@@ -402,7 +411,6 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     crate::dim_view::cancel();
     app.params = None;
     app.design_properties = None;
-    app.bom = None;
     app.cancel_view_animation();
     app.viewport.orbit_free = None;
     app.preview.reset();
@@ -673,6 +681,7 @@ pub fn adopt(app: &mut SolveApp, session: Session) -> bool {
         crate::semantic_content::leave_document(app);
         crate::dialogs::cancel(app);
         app.tool = None;
+        app.bom = None;
         crate::design_properties::close_object(app);
         crate::sketch_attachment_ui::clear(app);
         app.session.replace_design(session);
@@ -827,6 +836,7 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
         let rev = app.session.revision;
         crate::dialogs::cancel(app);
         app.tool = None;
+        app.bom = None;
         app.session.replace_design(Session::default());
         app.session.revision = rev + 1;
         crate::prefs::apply_new_design(app);
