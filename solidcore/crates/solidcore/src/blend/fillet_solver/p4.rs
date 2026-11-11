@@ -2464,14 +2464,12 @@ mod tests_c3 {
     }
 
     /// WR-603: two points, the first a tangent point, at uv `(0.2, 0.3)` and
-    /// `(0.6, 0.7)` of the first surface; the trace start direction with and without
-    /// `fixes.fillet_trace_from_tangent_point_toward_next`, and the chord between the
-    /// points on the first offset surface.
-    fn traced_from_tangent_first(fix: bool) -> (Vec3, Vec3) {
+    /// `(0.6, 0.7)` of the first surface; the trace start direction, and the chord
+    /// between the points on the first offset surface.
+    fn traced_from_tangent_first() -> (Vec3, Vec3) {
         use crate::intersect::surface_intersector::p1::SrfIndex;
 
-        let mut k = Kernel::default();
-        k.fixes.fillet_trace_from_tangent_point_toward_next = fix;
+        let k = Kernel::default();
         let (a, b) = planes();
         let mut fs = solver(&k, &a, &b);
         let mut st = state(line(), [a, b]);
@@ -2493,14 +2491,12 @@ mod tests_c3 {
     }
 
     #[test]
-    fn trace_from_a_tangent_first_point_starts_toward_the_next_with_the_fix() {
-        let (dir, chord) = traced_from_tangent_first(true);
+    fn trace_from_a_tangent_first_point_starts_toward_the_next() {
+        let (dir, chord) = traced_from_tangent_first();
         assert_eq!(dir, chord);
         assert!(chord.length() > 0.1, "{chord:?}");
-        // upstream: the filleted edge's start tangent
-        let (dir, chord) = traced_from_tangent_first(false);
-        assert_eq!(dir, state(line(), planes().into()).pv_start[1]);
-        assert_ne!(dir, chord);
+        // not the filleted edge's start tangent, which upstream starts along
+        assert_ne!(dir, state(line(), planes().into()).pv_start[1]);
     }
 
     #[test]

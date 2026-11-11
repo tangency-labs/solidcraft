@@ -115,9 +115,9 @@ fn holed_cube_blend(k: &mut Kernel, size: f64, xsect: u32) -> Outcome {
 }
 
 /// A blend whose setback reaches exactly the openings' rims (5): SMLib's rollover fails
-/// on the rail touching the rim's corners and running along its top edge. With
-/// `fillet_rail_rim_on_face` it builds, to the closed forms 4000 - 12.5 * 20 (chamfer) and
-/// 4000 - (1 - pi/4) * 25 * 20 (round).
+/// on the rail touching the rim's corners and running along its top edge. Joining the
+/// rail's intervals on its face first, it builds, to the closed forms 4000 - 12.5 * 20
+/// (chamfer) and 4000 - (1 - pi/4) * 25 * 20 (round).
 #[test]
 fn rail_along_its_face_rim_rolls_over_only_where_it_leaves_the_face() {
     for (xsect, expected) in [
@@ -125,12 +125,6 @@ fn rail_along_its_face_rim_rolls_over_only_where_it_leaves_the_face() {
         (1, 4000.0 - (1.0 - std::f64::consts::FRAC_PI_4) * 500.0),
     ] {
         let mut k = Kernel::default();
-        assert_eq!(
-            holed_cube_blend(&mut k, 5.0, xsect),
-            Outcome::Refused { code: 4 },
-            "xsect {xsect}: SM_FILERR_EDGE_PROBLEM (Unable to Process Rollover)"
-        );
-        let mut k = kernel(|f| f.fillet_rail_rim_on_face = true);
         let Outcome::Built { volume, manifold } = holed_cube_blend(&mut k, 5.0, xsect) else {
             panic!("xsect {xsect}: refused");
         };
@@ -141,14 +135,22 @@ fn rail_along_its_face_rim_rolls_over_only_where_it_leaves_the_face() {
     }
 }
 
-/// Sizes that leave the rim alone build the same either way.
+/// A size that leaves the rims alone (4) takes the closed forms 4000 - 8 * 20 (chamfer)
+/// and 4000 - (1 - pi/4) * 16 * 20 (round).
 #[test]
-fn rail_rim_on_face_leaves_other_sizes_alone() {
-    for xsect in [0, 1] {
+fn rail_clear_of_the_rim_builds_to_the_closed_form() {
+    for (xsect, expected) in [
+        (0, 3840.0),
+        (1, 4000.0 - (1.0 - std::f64::consts::FRAC_PI_4) * 320.0),
+    ] {
         let mut k = Kernel::default();
-        let off = holed_cube_blend(&mut k, 4.0, xsect);
-        let mut k = kernel(|f| f.fillet_rail_rim_on_face = true);
-        assert_eq!(holed_cube_blend(&mut k, 4.0, xsect), off);
+        let Outcome::Built { volume, manifold } = holed_cube_blend(&mut k, 4.0, xsect) else {
+            panic!("xsect {xsect}: refused");
+        };
+        assert!(
+            manifold && near(volume, expected, 1e-4),
+            "xsect {xsect}: {volume}"
+        );
     }
 }
 
