@@ -27,7 +27,7 @@ use std::collections::{HashMap, HashSet};
 
 use solidcore::blend::band_room::law_fits_band;
 use solidcore::blend::blend_corner::BlendCornerEvent;
-use solidcore::blend::blend_refusal::{BlendRefusal, NotBlendable};
+use solidcore::blend::blend_refusal::{BlendRefusal, NotBlendable, SetbackTooShortWhy};
 use solidcore::blend::chamfer_side::faces_along;
 use solidcore::blend::fillet_executive::p3::{
     ErrorInfo, FitKind as KernelFit, FitSize as KernelFitSize, NoRoomReason,
@@ -287,18 +287,81 @@ fn room_reason(r: NoRoomReason) -> Option<RoomReason> {
 const RAIL_LEAVES_FACE: &str =
     "a blend whose rail leaves its face, refused without the cliff overflow fix";
 
-/// A failure of the session as the operation's: a blend too large that the kernel sizes is
-/// [`Error::TooLarge`] (the edge it was found for returned with it); a vertex no corner kind
-/// handles is [`Error::CornerUnsupported`] (`corner`: the corners step noted one, which stands
-/// for any later failure); a blend larger than its faces allow, unsized, is [`Error::NoRoom`];
-/// any other is the kernel's.
-fn blend_failure(s: &FilletSession<'_>, e: SolidError, corner: bool) -> (Error, Option<EdgeId>) {
-    if let SolidError::BlendRefused { refusal, .. } = &e {
-        if let Some(refused) = refused(s.target(), refusal) {
-            return (refused, None);
+/// What a fillet session was doing when it failed, for [`session_refusal`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SessionCall {
+    /// The corners step noted a vertex no corner kind handles (`SM_FILERR_CORNER_UNSUPPORTED`
+    /// in the session's error info after `create_corners` succeeded): the corner it could not
+    /// make stands for any later failure.
+    pub corner: bool,
+    /// The session marks the set-back corners' patches for another patch to replace
+    /// (`set_mark_corner_patches`): the kernel's fill is then not the corner, so a setback it
+    /// names is not one shown to build.
+    pub patches: bool,
+    /// The session blends chamfers: a fit of an equal chamfer's offset is given as its distance.
+    pub chamfer: bool,
+}
+
+/// A refusal of a fillet session as the operation's ([`session_refusal`]), with the edge a
+/// sized refusal was found for, until [`SessionRefusal::on`] reads that edge's point.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SessionRefusal {
+    error: Error,
+    edge: Option<EdgeId>,
+}
+
+impl SessionRefusal {
+    /// The refusal, an [`Error::TooLarge`] given the point at the middle of the edge its size
+    /// was found for, read on `b` once the session has let it go. An edge or point that cannot
+    /// be read leaves the size without a point.
+    ///
+    /// # Errors
+    /// The kernel's failure to evaluate the edge's curve.
+    pub fn on(self, k: &Kernel, b: &Brep) -> solidcore::Result<Error> {
+        sized_on(k, b, self.edge, self.error)
+    }
+}
+
+/// A failure `e` of the kernel's fillet session `s` (its preparation, corners or filleting) as
+/// the refusal it stands for, for an application that drives the session itself: one
+/// implementation of the refusal for ops and its callers.
+///
+/// - A setback too short for its corner's fill (the kernel's `BlendRefusal::SetbackTooShort`
+///   from the fill's convex or concave test) is [`Error::SetbackTooShort`] with the least
+///   setback, the corner's point and whether that setback builds (not where `call.patches`).
+/// - A blend too large that the kernel sizes (`SolidError::FilletRefused`, or the session's
+///   fit under `SM_FILERR_NO_ROOM`) is [`Error::TooLarge`] with the size, what it sizes, and
+///   the kernel's reason ([`RoomReason`]), unless the corners step noted an unsupported vertex
+///   or the rail leaves its face; an equal chamfer's fit by radius as its distance, or
+///   [`Error::NoRoom`] where it cannot be read so.
+/// - Otherwise, a vertex no corner kind handles is [`Error::CornerUnsupported`]; a blend whose
+///   rail leaves its face without the cliff overflow fix is [`Error::Unsupported`]; any other
+///   blend too large is [`Error::NoRoom`].
+///
+/// # Errors
+/// `e` back, for a failure that is no refusal of the blend's size or corners: a kernel failure
+/// (`SolidError::Unsupported`, `SolidError::Unported`, or a status other than
+/// `SM_FILERR_NO_ROOM`), which the caller maps as it maps the kernel's failures.
+pub fn session_refusal(
+    s: &FilletSession<'_>,
+    e: SolidError,
+    call: SessionCall,
+) -> std::result::Result<SessionRefusal, SolidError> {
+    let info = s.error_info();
+    if let SolidError::BlendRefused {
+        refusal:
+            BlendRefusal::SetbackTooShort {
+                vertex,
+                least,
+                why: SetbackTooShortWhy::ConvexFill | SetbackTooShortWhy::ConcaveFill,
+            },
+        ..
+    } = e
+    {
+        if let Some(error) = setback_too_short(s, vertex, least, true, call.patches) {
+            return Ok(SessionRefusal { error, edge: None });
         }
     }
-    let info = s.error_info();
     let (fit, reason) = match &e {
         SolidError::FilletRefused { fit, reason, .. } => {
             (Some(*fit), reason.or(info.no_room_reason()))
@@ -310,10 +373,10 @@ fn blend_failure(s: &FilletSession<'_>, e: SolidError, corner: bool) -> (Error, 
         e,
         SolidError::Unsupported { .. } | SolidError::Unported { .. }
     ) {
-        return (status(e), None);
+        return Err(e);
     }
     if let Some(fit) = fit {
-        if !corner
+        if !call.corner
             && info.no_room_reason() != Some(NoRoomReason::RailLeavesFace)
             && fit.size.is_finite()
             && fit.size > 0.0
@@ -330,15 +393,52 @@ fn blend_failure(s: &FilletSession<'_>, e: SolidError, corner: bool) -> (Error, 
                 at: None,
                 why,
             };
-            return (refusal, fit.edge);
+            return Ok(SessionRefusal {
+                error: chamfer_sized(s, call.chamfer, fit.edge, refusal),
+                edge: fit.edge,
+            });
         }
     }
-    (blend_failure_unsized(info, e, corner), None)
+    blend_failure_unsized(info, e, call.corner).map(|error| SessionRefusal { error, edge: None })
+}
+
+/// A failure of the session as the operation's: the kernel's refusal of an edge or a corner
+/// by its entity's index ([`refused`]), else [`session_refusal`]'s, the kernel's failures
+/// mapped by [`status`].
+fn blend_failure(s: &FilletSession<'_>, e: SolidError, call: SessionCall) -> SessionRefusal {
+    if let SolidError::BlendRefused { refusal, .. } = &e {
+        if let Some(error) = refused(s, refusal, call.patches) {
+            return SessionRefusal { error, edge: None };
+        }
+    }
+    session_refusal(s, e, call).unwrap_or_else(|e| SessionRefusal {
+        error: status(e),
+        edge: None,
+    })
+}
+
+/// [`Error::SetbackTooShort`] at the session's corner `v`, `fill` the fill's test refusing it
+/// (else the rails'); `None` for a vertex the session's body does not hold.
+fn setback_too_short(
+    s: &FilletSession<'_>,
+    v: VertexId,
+    least: f64,
+    fill: bool,
+    patches: bool,
+) -> Option<Error> {
+    let vertex = s.target().vertex_list().iter().position(|&x| x == v)?;
+    Some(Error::SetbackTooShort {
+        vertex,
+        least,
+        at: s.error_info().location.map(|p| [p.x, p.y, p.z]),
+        builds: fill && !patches,
+    })
 }
 
 /// The kernel's refusal of an edge or a corner as the operation's, its entities by their
-/// indices in `b`; `None` for an entity `b` does not hold.
-fn refused(b: &Brep, refusal: &BlendRefusal) -> Option<Error> {
+/// indices in the session's body; `None` for an entity that body does not hold.
+fn refused(s: &FilletSession<'_>, refusal: &BlendRefusal, patches: bool) -> Option<Error> {
+    let b = s.target();
     let edge = |e: EdgeId| b.edge_list().iter().position(|&x| x == e);
     let vertex = |v: VertexId| b.vertex_list().iter().position(|&x| x == v);
     Some(match *refusal {
@@ -371,11 +471,16 @@ fn refused(b: &Brep, refusal: &BlendRefusal) -> Option<Error> {
             smallest: smallest_radius,
         },
         BlendRefusal::SetbackTooShort {
-            vertex: v, least, ..
-        } => Error::SetbackTooShort {
-            vertex: vertex(v)?,
+            vertex: v,
             least,
-        },
+            why,
+        } => {
+            let fill = matches!(
+                why,
+                SetbackTooShortWhy::ConvexFill | SetbackTooShortWhy::ConcaveFill
+            );
+            return setback_too_short(s, v, least, fill, patches);
+        }
         BlendRefusal::SetbackTooLong {
             vertex: v, largest, ..
         } => Error::SetbackTooLong {
@@ -395,16 +500,21 @@ fn refused(b: &Brep, refusal: &BlendRefusal) -> Option<Error> {
     })
 }
 
-/// [`blend_failure`] where the kernel gives no size.
-fn blend_failure_unsized(info: &ErrorInfo<FilletObject>, e: SolidError, corner: bool) -> Error {
+/// [`session_refusal`] where the kernel gives no size; `e` back for a failure that is not
+/// the blend's.
+fn blend_failure_unsized(
+    info: &ErrorInfo<FilletObject>,
+    e: SolidError,
+    corner: bool,
+) -> std::result::Result<Error, SolidError> {
     if corner || info.code == FilletErrorType::CornerUnsupported as i32 {
-        Error::CornerUnsupported
+        Ok(Error::CornerUnsupported)
     } else if info.code != FilletErrorType::NoRoom as i32 {
-        status(e)
+        Err(e)
     } else if info.no_room_reason() == Some(NoRoomReason::RailLeavesFace) {
-        Error::Unsupported(RAIL_LEAVES_FACE)
+        Ok(Error::Unsupported(RAIL_LEAVES_FACE))
     } else {
-        Error::NoRoom
+        Ok(Error::NoRoom)
     }
 }
 
@@ -412,19 +522,14 @@ fn blend_failure_unsized(info: &ErrorInfo<FilletObject>, e: SolidError, corner: 
 /// distance that builds, which the kernel reads through the chamfer's definition
 /// ([`FilletSession::chamfer_fit`]); one it cannot read so is [`Error::NoRoom`]. Any other
 /// failure, or a blend that is no chamfer, as it is.
-fn chamfer_sized(
-    s: &FilletSession<'_>,
-    section: Section<'_>,
-    edge: Option<EdgeId>,
-    e: Error,
-) -> Error {
+fn chamfer_sized(s: &FilletSession<'_>, chamfer: bool, edge: Option<EdgeId>, e: Error) -> Error {
     match e {
         Error::TooLarge {
             size,
             kind: FitKind::Radius,
             at,
             why,
-        } if section.chamfer() => {
+        } if chamfer => {
             let fit = KernelFitSize {
                 size,
                 edge,
@@ -634,6 +739,11 @@ fn pass(
             step = corners(&mut s, p.section, p.setbacks);
         }
         s.set_mark_corner_patches(p.patches);
+        let call = SessionCall {
+            corner,
+            patches: p.patches,
+            chamfer: p.section.chamfer(),
+        };
         match step {
             // the marks go with the session: read them before it drops
             Ok(Ok(set_back)) => match s.do_filleting(k, None) {
@@ -645,16 +755,16 @@ fn pass(
                         stopped.overflow = Some(s.overflow_edges());
                         stopped.mitred = s.mitred_edges();
                     }
-                    let (why, edge) = blend_failure(&s, e, corner);
-                    fit_edge = edge;
-                    Ok(Err(Refused::Error(chamfer_sized(&s, p.section, edge, why))))
+                    let refusal = blend_failure(&s, e, call);
+                    fit_edge = refusal.edge;
+                    Ok(Err(Refused::Error(refusal.error)))
                 }
             },
             Ok(Err(refusal)) => Ok(Err(refusal)),
             Err(e) => {
-                let (why, edge) = blend_failure(&s, e, corner);
-                fit_edge = edge;
-                Ok(Err(Refused::Error(chamfer_sized(&s, p.section, edge, why))))
+                let refusal = blend_failure(&s, e, call);
+                fit_edge = refusal.edge;
+                Ok(Err(Refused::Error(refusal.error)))
             }
         }
     };

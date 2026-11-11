@@ -8,7 +8,7 @@ use std::f64::consts::PI;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use super::blend::{Corners, blend, blend_dropping, blend_holes, chamfer_sides, fillet_variable};
+use super::blend::{Corners, blend, blend_dropping, blend_holes, chamfer_sides, fillet_variable, refusal};
 use super::boolean::boolean;
 use super::{Body, counts, make_box, make_cylinder, to_arrays, volume};
 use crate::export::native;
@@ -351,6 +351,126 @@ fn a_blend_too_large_is_refused_with_the_largest_size_that_fits() {
     let e = timed("fit_1080", move || blend(&rib.core(), Blend::Chamfer, &top, &[3.0], TOL, &[], &[], Corners::Filled).map(|_| ()).unwrap_err());
     let Error::TooLarge { size, kind, at: Some(_), .. } = e else { panic!("{e:?}") };
     assert!((size - 2.0).abs() < 1e-12 && kind == crate::FitKind::Distance, "{size} {kind:?}");
+}
+
+/// A blend too large reaches SolidCraft's error with ops' reason as ops gives it
+/// ([`solidcore_ops::blend::session_refusal`]), one case per reason a SolidCraft blend of
+/// boxes and cylinders gives, each the kernel's or ops' own case of that reason
+/// (solidcore's `wr696_fit_sizes.rs`): the L's inner edge past its
+/// wall's top, a can's rim chamfered across its top, a bossed can's rim past the boss, both
+/// edges of a narrow end, a cube's corner. The collapsed offset's is solidcraft-kernel's
+/// `a_ball_as_wide_as_the_round_it_rolls_on_is_refused_saying_why`. ops' thin wall
+/// (`BreaksThrough`) builds with SolidCraft's fixes, and the rest reach SolidCraft only from
+/// bodies these shapes do not make: [`every_room_reason_is_ops_own`] covers them.
+#[test]
+fn each_room_reason_reaches_the_refusal_as_ops_gives_it() {
+    use crate::{FitKind as K, RoomReason as R};
+    let union = |a: Shape, b: Shape| boolean(&a.core(), &b.core(), BooleanOp::Union).unwrap().unwrap();
+    let rim = |r: f64, z: f64| [r * 100f64.to_radians().cos(), r * 100f64.to_radians().sin(), z];
+    #[allow(clippy::type_complexity)]
+    let cases: Vec<(&str, Body, Blend, Vec<[f64; 3]>, f64, R, K, [f64; 2])> = vec![
+        // fit 8 less the margin: the rail on the wall at z = 2 + r reaches its top
+        (
+            "l_wall",
+            union(Shape::Box([0.0; 3], [20.0, 20.0, 2.0]), Shape::Box([0.0; 3], [2.0, 20.0, 10.0])),
+            Blend::Round,
+            vec![[2.0, 10.0, 2.0]],
+            9.0,
+            R::RailLeavesFace,
+            K::Radius,
+            [7.98, 8.0],
+        ),
+        // the cone takes the whole top: an offset of 10 less the margin, as its distance
+        (
+            "can_top",
+            Shape::Cylinder([0.0; 3], 10.0, 20.0).core(),
+            Blend::Chamfer,
+            vec![rim(10.0, 20.0)],
+            10.0,
+            R::FaceConsumed,
+            K::Distance,
+            [0.0, 10.0],
+        ),
+        // the rail on the top, a circle of radius 7 - r, reaches the boss at r = 4.3
+        (
+            "boss",
+            union(Shape::Cylinder([0.0; 3], 7.0, 48.2), Shape::Cylinder([0.0, 0.0, 48.2], 2.7, 2.0)),
+            Blend::Round,
+            vec![rim(7.0, 48.2)],
+            6.9,
+            R::RunsIntoMaterial,
+            K::Radius,
+            [4.28, 4.3],
+        ),
+        // the bands meet at 7.5, a full round of the 15 wide end
+        (
+            "narrow_end",
+            Shape::Box([0.0; 3], [80.0, 15.0, 20.0]).core(),
+            Blend::Round,
+            vec![[80.0, 0.0, 10.0], [80.0, 15.0, 10.0]],
+            7.6,
+            R::BandsOverlap,
+            K::Radius,
+            [7.49, 7.5],
+        ),
+        // the corner takes each edge's whole length at 20, less the margin
+        (
+            "cube_corner",
+            Shape::Box([0.0; 3], [20.0; 3]).core(),
+            Blend::Round,
+            vec![[10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 10.0]],
+            20.0,
+            R::CornersTakeWholeEdge,
+            K::Radius,
+            [19.98, 20.0],
+        ),
+    ];
+    for (name, body, kind, points, size, reason, fit, [lo, hi]) in cases {
+        let e = timed(name, move || blend(&body, kind, &points, &[size], TOL, &[], &[], Corners::Filled).map(|_| ()).err());
+        let Some(e) = e else { panic!("{name}: built") };
+        let Error::TooLarge { size, kind, at: Some(_), why: Some(why) } = e else { panic!("{name}: {e:?}") };
+        assert_eq!((why, kind), (reason, fit), "{name}");
+        assert!(size > lo && size < hi, "{name}: {size} outside ({lo}, {hi})");
+    }
+}
+
+/// Every reason ops gives a blend too large reaches SolidCraft's [`Error::TooLarge`] unchanged,
+/// with its size, kind and point: SolidCraft's reasons are ops' own (`crate::RoomReason`), so a
+/// reason ops adds reaches SolidCraft with nothing to map (the match fails to compile until it
+/// has a row here).
+#[test]
+fn every_room_reason_is_ops_own() {
+    use solidcore_ops::RoomReason as R;
+    for why in [
+        R::BallDoesNotFit,
+        R::RailLeavesFace,
+        R::FaceConsumed,
+        R::BandsOverlap,
+        R::BallsFold,
+        R::OffsetFolds,
+        R::CutsThePart,
+        R::BreaksThrough,
+        R::OffsetCollapses,
+        R::CornersTakeWholeEdge,
+        R::RunsIntoMaterial,
+    ] {
+        match why {
+            R::BallDoesNotFit
+            | R::RailLeavesFace
+            | R::FaceConsumed
+            | R::BandsOverlap
+            | R::BallsFold
+            | R::OffsetFolds
+            | R::CutsThePart
+            | R::BreaksThrough
+            | R::OffsetCollapses
+            | R::CornersTakeWholeEdge
+            | R::RunsIntoMaterial => {}
+        }
+        let ops = solidcore_ops::Error::TooLarge { size: 2.5, kind: solidcore_ops::FitKind::Chord, at: Some([1.0, 2.0, 3.0]), why: Some(why) };
+        let want: crate::RoomReason = why;
+        assert_eq!(refusal(ops), Error::TooLarge { size: 2.5, kind: crate::FitKind::Chord, at: Some([1.0, 2.0, 3.0]), why: Some(want) });
+    }
 }
 
 /// A cliff overflow the fork refuses too (`fixes.fillet_cliff_overflow`, solidcore#960): the
