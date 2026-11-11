@@ -1,10 +1,10 @@
-//! Patches bounded by curves: the boundary patch of curves meeting end to end round one loop (a
-//! Coons patch of four, an n-sided fill of three or of five and more) and the ruled surface
-//! between two curves, each a new sheet record. The curves are the record's ([`Curve`]), each
-//! over its natural range; the patches are the kernel's (`BSplineSurface::create_coons_patch`,
-//! `create_n_sided_patch`, `create_ruled_surface`), and so is every distance compared. Ops
-//! checks the inputs, turns the curves to run end to end, sequences the kernel's calls and
-//! converts.
+//! Patches bounded by curves: the Coons patch of four curves meeting end to end round one loop
+//! (three: its degenerate case, one side collapsed to a corner) and the ruled surface between
+//! two curves, each a new one-face sheet record whose sides are the curves themselves. The
+//! curves are the record's ([`Curve`]), each over its natural range; the geometry is the
+//! kernel's (`make_curves_compatible`, `BSplineSurface::create_coons_patch`,
+//! `create_ruled_surface`), and so is every distance compared. Ops checks the inputs, turns the
+//! curves to run end to end, sequences the kernel's calls and converts.
 
 use solidcore::curve::curve::CurveKind;
 use solidcore::curve::from_parameters::from_parameters;
@@ -12,12 +12,14 @@ use solidcore::geom::certified::Bounded;
 use solidcore::geom::tol::{context_zone_tol_3d, SmallTopoType, USE_DEFAULT};
 use solidcore::geom::vector3d::{Point3, Vec3};
 use solidcore::kernel::Kernel;
-use solidcore::nurbs::b_spline_curve::{BSplineCurve, Ends};
+use solidcore::nurbs::b_spline_curve::{
+    BSplineCurve, BSplineCurveForm, CanonicalData, Ends, KnotType,
+};
 use solidcore::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
+use solidcore::primitive::api_curve_ops::make_curves_compatible;
 use solidcore::query::api_queries::point_distance;
 use solidcore::surface::surface::Surface;
 use solidcore::topology::brep::p3::new_brep;
-use solidcore::topology::brep::p4::stitch_faces;
 use solidcore::topology::brep::sheet::face_on;
 use solidcore::topology::Brep;
 use solidcore::SolidError;
@@ -31,13 +33,6 @@ use crate::{Error, Result};
 
 /// A call's own refusal, else the value: as the kernel's calls answer inside [`run`].
 type Out<T> = std::result::Result<T, Error>;
-
-/// Most curves one boundary patch takes.
-pub const MAX_SIDES: usize = 64;
-
-/// The angle (degrees) within which the kernel's n-sided fill matches the cross-boundary
-/// derivatives it builds across its inner curves: the kernel's own tests' value.
-const N_SIDED_ANGLE_DEG: f64 = 1.0;
 
 /// A call's own refusal inside a kernel call.
 macro_rules! refused {
@@ -191,24 +186,13 @@ fn looped(curves: &mut [BSplineCurve], tol: f64) -> solidcore::Result<Out<()>> {
     Ok(Ok(()))
 }
 
-/// A sheet of one face on each of `surfaces`, over its whole natural box, stitched along the
-/// sides they share.
-fn sheet(k: &mut Kernel, surfaces: Vec<BSplineSurface>) -> solidcore::Result<Out<Brep>> {
-    let many = surfaces.len() > 1;
+/// A sheet of one face on `surface`, over its whole natural box.
+fn sheet(k: &mut Kernel, surface: BSplineSurface) -> solidcore::Result<Out<Brep>> {
     let mut b = new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
-    for s in surfaces {
-        let s = Surface::from(s);
-        let bx = s.natural_uv_domain_with_nurb(k)?;
-        face_on(k, &mut b, s, &bx)?;
-    }
+    let surface = Surface::from(surface);
+    let bx = surface.natural_uv_domain_with_nurb(k)?;
+    face_on(k, &mut b, surface, &bx)?;
     b.refresh_cached_topology();
-    if many {
-        let tol = b.tolerance();
-        if let Err(e) = stitch_faces(k, &mut b, tol, None, false) {
-            return Ok(Err(status(e)));
-        }
-        b.refresh_cached_topology();
-    }
     finish(k, b, Expect::FACES)
 }
 
@@ -217,76 +201,108 @@ fn record(made: Result<Out<Brep>>) -> Result<Record> {
     Body::new(made??).to_record().map(|(r, _)| r)
 }
 
+/// The curve that stays at `p`: degree 1 on `[0, 1]`, both control points `p` (a side of a
+/// patch collapsed to a corner).
+fn at_point(p: Point3) -> solidcore::Result<BSplineCurve> {
+    let points = [p, p];
+    BSplineCurve::create_canonical(&CanonicalData {
+        dim: 3,
+        degree: 1,
+        control_points: &points,
+        form: BSplineCurveForm::Unspecified,
+        knot_multiplicities: &[2, 2],
+        knots: &[0.0, 1.0],
+        knot_type: KnotType::Unspecified,
+        weights: None,
+        trim: None,
+    })
+}
+
+/// `a` and `b` made compatible, exactly: one degree (the higher, by degree elevation), one
+/// parameter range (`[0, 1]` when theirs differ, by a linear change of parameter) and one knot
+/// vector (by knot insertion), each curve's shape unchanged (the kernel's
+/// `make_curves_compatible`).
+fn compatible(a: BSplineCurve, b: BSplineCurve) -> solidcore::Result<[BSplineCurve; 2]> {
+    let mut pair = [a, b];
+    make_curves_compatible(&mut pair)?;
+    Ok(pair)
+}
+
 /// The patch bounded by `curves`, which meet end to end round one loop in the order given
-/// (each may run either way: it is turned to run on from the one before). Four curves bound a
-/// bilinear Coons patch, one face; three, or five and more, an n-sided fill: N four-sided faces
-/// round a centre, each bounded by halves of two curves and two inner curves from their
-/// middles to the centre, stitched into one sheet. Each curve is taken over its natural range
-/// (a line from its start to its end, a spline over its knots' domain); the ends must meet
-/// within the model's zone tolerance, as the kernel's distance proves.
+/// (each may run either way: it is turned to run on from the one before).
+///
+/// Four curves bound the bilinear Coons patch of its four sides, one face. Opposite sides are
+/// first made compatible (one degree, parameter range and knot vector each pair, exactly), so
+/// the patch's sides are the four curves themselves: the patch at the side of one curve is that
+/// curve, point for point at the same fraction of its range (a rational curve, an arc, stays the
+/// same curve but not the same parameter: the kernel gives the four common end weights). Three curves bound the same patch
+/// with its fourth side collapsed to the point where the third curve meets the first (a
+/// degenerate Coons patch: one side of its box is that corner). Each curve is taken over its
+/// natural range (a line from its start to its end, a spline over its knots' domain).
+///
+/// The ends must meet within the model's zone tolerance: the kernel's tolerance within which
+/// two points are one point of the model (`context_zone_tol_3d`), compared with the kernel's
+/// distance between the ends and the bound on its rounding, so a join is taken only where it is
+/// proved. The patch's corners are the middles of the ends that meet there, within that
+/// tolerance of each curve's end.
 ///
 /// # Errors
-/// [`Error::Argument`] for fewer than three curves or more than [`MAX_SIDES`], or a curve
-/// refused (a circle, an ellipse, a traced intersection curve, numbers the kernel refuses);
-/// [`Error::BoundaryGap`] for curves that do not meet; [`Error::Unsupported`] for a rational
-/// curve (an arc) bounding an n-sided fill, which the kernel's fill does not take; the
+/// [`Error::Argument`] for fewer than three curves, or a curve refused (a circle, an ellipse, a
+/// traced intersection curve, numbers the kernel refuses); [`Error::Unsupported`] for five or
+/// more curves (no n-sided patch yet); [`Error::BoundaryGap`] for curves that do not meet; the
 /// kernel's status.
 pub fn boundary(curves: &[Curve]) -> Result<Record> {
-    if curves.len() < 3 || curves.len() > MAX_SIDES {
+    if curves.len() < 3 {
         return Err(Error::Argument);
+    }
+    if curves.len() > 4 {
+        return Err(Error::Unsupported("a patch bounded by five or more curves"));
     }
     record(run("surface::boundary", |k| {
         let mut sides = refused!(splines(k, curves)?);
         let tol = context_zone_tol_3d(k, None, SmallTopoType::NormalSize);
         refused!(looped(&mut sides, tol)?);
-        let surfaces = match <[BSplineCurve; 4]>::try_from(sides) {
-            Ok([c0, c1, mut c2, mut c3]) => {
-                // c0 runs P0 to P1, c1 P1 to P2, c2 P2 to P3, c3 P3 to P0. The kernel's sides,
-                // in its order: P0 to P1 and P3 to P2 (running in u), P0 to P3 and P1 to P2
-                // (running in v).
-                reverse(&mut c2)?;
-                reverse(&mut c3)?;
-                let mut quad = [c0, c2, c3, c1];
-                match BSplineSurface::create_coons_patch(tol, true, &mut quad, &mut []) {
-                    Ok(s) => vec![s],
-                    Err(e) => return Ok(Err(status(e))),
-                }
-            }
-            Err(mut sides) => {
-                for s in &sides {
-                    if s.is_rational()? {
-                        return Ok(Err(Error::Unsupported(
-                            "a rational curve bounding an n-sided patch",
-                        )));
-                    }
-                }
-                let mut across: Vec<Option<BSplineCurve>> = sides.iter().map(|_| None).collect();
-                match BSplineSurface::create_n_sided_patch(
-                    &mut sides,
-                    &mut across,
-                    N_SIDED_ANGLE_DEG,
-                    None,
-                ) {
-                    Ok(s) => s,
-                    Err(e) => return Ok(Err(status(e))),
-                }
-            }
+        // c0 runs P0 to P1, c1 P1 to P2, c2 P2 to P3 and c3 P3 to P0 (three curves: c2 runs P2
+        // to P0, and the fourth side stays at P0). The kernel's sides, in its order: P0 to P1 and
+        // P3 to P2 (running in u, at v min and max), P0 to P3 and P1 to P2 (running in v, at u
+        // min and max).
+        let mut sides = sides.into_iter();
+        let (Some(c0), Some(c1), Some(mut c2)) = (sides.next(), sides.next(), sides.next()) else {
+            return Ok(Err(Error::Argument));
         };
-        sheet(k, surfaces)
+        let mut c3 = match sides.next() {
+            Some(c3) => c3,
+            None => at_point(c0.ends()?.start)?,
+        };
+        reverse(&mut c2)?;
+        reverse(&mut c3)?;
+        let [u0, u1] = compatible(c0, c2)?;
+        let [v0, v1] = compatible(c3, c1)?;
+        let mut quad = [u0, u1, v0, v1];
+        match BSplineSurface::create_coons_patch(tol, true, &mut quad, &mut []) {
+            Ok(s) => sheet(k, s),
+            Err(e) => Ok(Err(status(e))),
+        }
     }))
 }
 
-/// The ruled surface between `a` and `b`, one face: straight lines join the points at the
-/// same fraction of each curve's natural range, `a` and `b` running as given.
+/// The ruled surface between `a` and `b`, one face: `S(s, t) = (1 - t) a(s) + t b(s)`, `s` the
+/// same fraction of each curve's natural range (the two first made compatible, exactly, as in
+/// [`boundary`]), `t` from 0 on `a` to 1 on `b`. So the surface's sides are the two curves
+/// themselves. With `reversed`, `b` runs the other way first (its end is joined to `a`'s start).
 ///
 /// # Errors
 /// [`Error::Argument`] for a curve refused (as [`boundary`]); the kernel's status.
-pub fn ruled(a: &Curve, b: &Curve) -> Result<Record> {
+pub fn ruled(a: &Curve, b: &Curve, reversed: bool) -> Result<Record> {
     record(run("surface::ruled", |k| {
         let a = refused!(spline(k, a)?);
-        let b = refused!(spline(k, b)?);
+        let mut b = refused!(spline(k, b)?);
+        if reversed {
+            reverse(&mut b)?;
+        }
+        let [a, b] = compatible(a, b)?;
         match BSplineSurface::create_ruled_surface(&a, &b, SurfParamType::V) {
-            Ok(s) => sheet(k, vec![s]),
+            Ok(s) => sheet(k, s),
             Err(e) => Ok(Err(status(e))),
         }
     }))
@@ -385,51 +401,130 @@ mod tests {
         }
     }
 
+    /// The quadratic spline from `a` to `b` whose middle control point stands `up` above the
+    /// chord's middle.
+    fn bulge(a: [f64; 3], b: [f64; 3], up: f64) -> Curve {
+        let m = lerp(a, b, 0.5);
+        Curve::Spline {
+            knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            points: vec![a, [m[0], m[1], m[2] + up], b],
+        }
+    }
+
+    /// The point of a quadratic Bézier spline at `s`.
+    fn on(c: &Curve, s: f64) -> [f64; 3] {
+        let Curve::Spline { points, .. } = c else {
+            panic!("a spline")
+        };
+        lerp(
+            lerp(points[0], points[1], s),
+            lerp(points[1], points[2], s),
+            s,
+        )
+    }
+
+    /// The four sides of `face`, each at the fraction `s` of its range.
+    fn sides_at(face: &Face, s: f64) -> [[f64; 3]; 4] {
+        [
+            at(face, s, 0.0),
+            at(face, s, 1.0),
+            at(face, 0.0, s),
+            at(face, 1.0, s),
+        ]
+    }
+
+    /// Whether the point of `c` at every sampled fraction is a side of `face` at that fraction
+    /// or at its complement (a side may run either way).
+    fn a_side_of(face: &Face, c: &Curve) -> bool {
+        (0..=8).all(|i| {
+            let s = f64::from(i) / 8.0;
+            let p = on(c, s);
+            sides_at(face, s)
+                .iter()
+                .chain(&sides_at(face, 1.0 - s))
+                .any(|q| near(*q, p, 1e-9))
+        })
+    }
+
     #[test]
-    fn a_ruled_surface_joins_two_lines_straight() {
-        let (a0, a1) = ([0.0, 0.0, 0.0], [10.0, 0.0, 0.0]);
-        let (b0, b1) = ([0.0, 5.0, 3.0], [10.0, 5.0, 8.0]);
-        let sheet = ruled(&line(a0, a1), &line(b0, b1)).unwrap();
+    fn four_splines_are_the_sides_of_their_patch() {
+        let curves: Vec<Curve> = (0..4)
+            .map(|i| bulge(P[i], P[(i + 1) % 4], 1.0 + i as f64))
+            .collect();
+        let sheet = boundary(&curves).unwrap();
+        assert_eq!(sheet.faces.len(), 1);
+        for c in &curves {
+            assert!(a_side_of(&sheet.faces[0], c), "{c:?}");
+        }
+    }
+
+    #[test]
+    fn three_splines_bound_a_patch_with_a_side_at_a_corner() {
+        let p = [[0.0, 0.0, 0.0], [40.0, 0.0, 0.0], [20.0, 35.0, 0.0]];
+        let curves: Vec<Curve> = (0..3).map(|i| bulge(p[i], p[(i + 1) % 3], 1.2)).collect();
+        let sheet = boundary(&curves).unwrap();
         assert_eq!(sheet.faces.len(), 1);
         let face = &sheet.faces[0];
-        for s in [0.0, 0.3, 0.5, 1.0] {
-            for t in [0.0, 0.4, 1.0] {
-                let want = lerp(lerp(a0, a1, s), lerp(b0, b1, s), t);
-                assert!(near(at(face, s, t), want, 1e-9), "at ({s}, {t})");
+        for c in &curves {
+            assert!(a_side_of(face, c), "{c:?}");
+        }
+        // the fourth side is the corner where the third curve meets the first
+        let collapsed = [0.0, 0.25, 0.5, 1.0].map(|s| sides_at(face, s));
+        assert!(
+            (0..4).any(|k| collapsed.iter().all(|sides| near(sides[k], p[0], 1e-9))),
+            "{collapsed:?}"
+        );
+    }
+
+    #[test]
+    fn three_arcs_bound_an_octant_of_a_sphere() {
+        // three quarter circles of radius 10 (rational) meeting round a loop
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        let quarter = |a: [f64; 3], corner: [f64; 3], b: [f64; 3]| Curve::RationalSpline {
+            knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            homogeneous: vec![
+                [a[0], a[1], a[2], 1.0],
+                [corner[0] * w, corner[1] * w, corner[2] * w, w],
+                [b[0], b[1], b[2], 1.0],
+            ],
+        };
+        let (x, y, z) = ([10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 10.0]);
+        let arcs = [
+            quarter(x, [10.0, 10.0, 0.0], y),
+            quarter(y, [0.0, 10.0, 10.0], z),
+            quarter(z, [10.0, 0.0, 10.0], x),
+        ];
+        let sheet = boundary(&arcs).unwrap();
+        assert_eq!(sheet.faces.len(), 1);
+        // every side's point is on the sphere the arcs lie on
+        for i in 0..=8 {
+            for q in sides_at(&sheet.faces[0], f64::from(i) / 8.0) {
+                let r = q.iter().map(|x| x * x).sum::<f64>().sqrt();
+                assert!((r - 10.0).abs() < 1e-9, "{q:?} at {r}");
             }
         }
     }
 
-    /// The quadratic spline from `a` to `b` whose middle control point stands 1.2 above the
-    /// chord's middle, and the curve's middle (0.6 above it).
-    fn bulge(a: [f64; 3], b: [f64; 3]) -> (Curve, [f64; 3]) {
-        let m = lerp(a, b, 0.5);
-        (
-            Curve::Spline {
-                knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
-                points: vec![a, [m[0], m[1], m[2] + 1.2], b],
-            },
-            [m[0], m[1], m[2] + 0.6],
-        )
-    }
-
     #[test]
-    fn three_splines_bound_an_n_sided_sheet_on_them() {
-        let p = [[0.0, 0.0, 0.0], [40.0, 0.0, 0.0], [20.0, 35.0, 0.0]];
-        let sides: Vec<(Curve, [f64; 3])> = (0..3).map(|i| bulge(p[i], p[(i + 1) % 3])).collect();
-        let curves: Vec<Curve> = sides.iter().map(|(c, _)| c.clone()).collect();
-        let sheet = boundary(&curves).unwrap();
-        // three four-sided faces round a centre, stitched along the three inner curves
-        assert_eq!(sheet.faces.len(), 3);
-        let shared = sheet.edges.iter().filter(|e| e.uses.len() == 2).count();
-        assert_eq!(shared, 3);
-        // the corners and the curves' middles are vertices of the sheet: its boundary runs
-        // through them
-        let on = |q: [f64; 3]| sheet.vertices.iter().any(|v| near(v.point, q, 1e-6));
-        for (corner, (_, middle)) in p.iter().zip(&sides) {
-            assert!(on(*corner), "corner {corner:?}");
-            assert!(on(*middle), "middle {middle:?}");
-        }
+    fn a_ruled_surface_has_its_two_curves_as_sides() {
+        let a = bulge([0.0, 0.0, 0.0], [10.0, 0.0, 0.0], 2.0);
+        let (b0, b1) = ([0.0, 5.0, 3.0], [10.0, 5.0, 8.0]);
+        let check = |sheet: &Record, from: [f64; 3], to: [f64; 3]| {
+            assert_eq!(sheet.faces.len(), 1);
+            let face = &sheet.faces[0];
+            for i in 0..=8 {
+                let s = f64::from(i) / 8.0;
+                // a at t = 0, b at t = 1, at the same fraction s
+                assert!(near(at(face, s, 0.0), on(&a, s), 1e-9), "a at {s}");
+                assert!(near(at(face, s, 1.0), lerp(from, to, s), 1e-9), "b at {s}");
+                // straight between them
+                let mid = lerp(on(&a, s), lerp(from, to, s), 0.5);
+                assert!(near(at(face, s, 0.5), mid, 1e-9), "ruling at {s}");
+            }
+        };
+        check(&ruled(&a, &line(b0, b1), false).unwrap(), b0, b1);
+        // reversed: b's end is joined to a's start
+        check(&ruled(&a, &line(b0, b1), true).unwrap(), b1, b0);
     }
 
     #[test]
@@ -464,28 +559,22 @@ mod tests {
     }
 
     #[test]
-    fn too_few_curves_arcs_round_n_sides_and_circles_are_refused() {
+    fn too_few_or_too_many_curves_and_circles_are_refused() {
         assert_eq!(
             boundary(&[line(P[0], P[1]), line(P[1], P[0])]),
             Err(Error::Argument)
         );
-        // three quarter circles (rational) meeting round a loop
-        let w = std::f64::consts::FRAC_1_SQRT_2;
-        let quarter = |a: [f64; 3], corner: [f64; 3], b: [f64; 3]| Curve::RationalSpline {
-            knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
-            homogeneous: vec![
-                [a[0], a[1], a[2], 1.0],
-                [corner[0] * w, corner[1] * w, corner[2] * w, w],
-                [b[0], b[1], b[2], 1.0],
-            ],
-        };
-        let (x, y, z) = ([10.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 10.0]);
-        let arcs = [
-            quarter(x, [10.0, 10.0, 0.0], y),
-            quarter(y, [0.0, 10.0, 10.0], z),
-            quarter(z, [10.0, 0.0, 10.0], x),
+        let corners = [
+            [0.0, 0.0, 0.0],
+            [10.0, 0.0, 0.0],
+            [12.0, 8.0, 0.0],
+            [5.0, 12.0, 0.0],
+            [-2.0, 8.0, 0.0],
         ];
-        assert!(matches!(boundary(&arcs), Err(Error::Unsupported(_))));
+        let pentagon: Vec<Curve> = (0..5)
+            .map(|i| line(corners[i], corners[(i + 1) % 5]))
+            .collect();
+        assert!(matches!(boundary(&pentagon), Err(Error::Unsupported(_))));
         let circle = Curve::Circle {
             frame: Frame {
                 origin: [0.0; 3],
@@ -494,6 +583,9 @@ mod tests {
             },
             radius: 5.0,
         };
-        assert_eq!(ruled(&circle, &line(P[0], P[1])), Err(Error::Argument));
+        assert_eq!(
+            ruled(&circle, &line(P[0], P[1]), false),
+            Err(Error::Argument)
+        );
     }
 }
