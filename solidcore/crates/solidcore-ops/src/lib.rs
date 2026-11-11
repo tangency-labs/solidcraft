@@ -36,6 +36,7 @@ pub mod cancel;
 pub mod check;
 pub mod contact;
 pub mod continuity;
+pub mod curve;
 pub mod error;
 pub mod extend;
 pub mod file;
@@ -64,7 +65,7 @@ pub use body::{make_box, make_cone, make_cylinder, make_sphere, make_torus, Body
 pub use boolean::BooleanOp;
 pub use check::{CheckLevel, CheckReport};
 pub use contact::Gap;
-pub use error::{Error, FitKind, Result, RoomReason, Unblendable};
+pub use error::{Error, FitKind, OffsetRefusal, Result, RoomReason, Unblendable};
 pub use measure::{
     point_distance, Distance, EdgePoint, FaceCentroid, GapSample, MassPropertiesEstimate, Normal,
     PointClass,

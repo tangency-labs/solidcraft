@@ -412,7 +412,10 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     ) -> Result<()> {
         let caches = self.alt_caches_mut();
         if caches.len() > MAX_ALT_CACHES {
-            return Err(SolidError::sm_err(OP_ADD));
+            return Err(SolidError::surface_failed(
+                OP_ADD,
+                "the alternate caches are full",
+            ));
         }
 
         if caches.len() == MAX_ALT_CACHES {
@@ -467,10 +470,13 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             (n.aux_type, n.child1.is_some(), fields)
         };
         if aux_type != AuxDataType::BezierSurface && aux_type != AuxDataType::AuxData {
-            return Err(SolidError::sm_err(OP_TEST));
+            return Err(SolidError::surface_failed(
+                OP_TEST,
+                "the node is not a surface node",
+            ));
         }
         if has_child {
-            return Err(SolidError::sm_err(OP_TEST));
+            return Err(SolidError::surface_failed(OP_TEST, "the node has children"));
         }
         let fields = fields.ok_or_else(|| invalid(OP_TEST, "node has no surface data"))?;
 
@@ -848,7 +854,9 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                 _ => return Err(invalid(OP_BLOCK, "node has no surface data")),
             }
         };
-        let handle = fields.surface.ok_or(SolidError::null_pointer(OP_BLOCK))?;
+        let handle = fields
+            .surface
+            .ok_or_else(|| SolidError::surface_missing(OP_BLOCK, "the node's surface"))?;
         // upstream works on the node's surface itself (`pAux->mBA_pSurface`); the cache is
         // edited below, so an evaluation copy (exact knots, owner kept) stands for it: the
         // copy constructor's knot fix-up would move near-coincident knots and so the splits.
@@ -1049,7 +1057,9 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         let mut curr: Vec<NodeId> = base_nodes.clone();
         let mut next: Vec<NodeId> = Vec::with_capacity(base_nodes.len());
         let at = |v: &[NodeId], i: usize| -> Result<NodeId> {
-            v.get(i).copied().ok_or(SolidError::sm_err(OP_BLOCK))
+            v.get(i)
+                .copied()
+                .ok_or_else(|| SolidError::surface_failed(OP_BLOCK, "a base node is out of range"))
         };
 
         // assemble U and V splits until there is just one
@@ -1335,7 +1345,7 @@ mod tests {
         let e = c
             .subdivide_by_block(&Kernel::default(), NodeId(0))
             .expect_err("null");
-        assert!(matches!(e, SolidError::Upstream { code: 1006, .. }));
+        assert_eq!(e.upstream_status(), Some(1006));
     }
 
     #[test]

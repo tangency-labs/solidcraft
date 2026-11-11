@@ -161,7 +161,9 @@ fn to_output(items: &[Item]) -> Output {
 /// Upstream status of a Rust error.
 fn status(e: &SolidError) -> i64 {
     match e {
-        up_err if solidcore::error::upstream_status(up_err).is_some() => i64::from(solidcore::error::upstream_status(up_err).unwrap_or(-1)),
+        e if solidcore::error::upstream_status(e).is_some() => {
+            i64::from(solidcore::error::upstream_status(e).unwrap_or(-1))
+        }
         _ => -1,
     }
 }

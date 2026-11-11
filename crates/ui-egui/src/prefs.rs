@@ -1160,6 +1160,11 @@ preference_settings! {
     /// too, so its components move by them. Off: rigid, it moves as one. Either can be changed
     /// afterwards from the linked component's menu.
     insert_flexible: bool = false, PAGE_DESIGN => check_id("settings.insert_flexible");
+    /// Dragging a part a ball joint holds to a part fixed in place turns it like a trackball: by
+    /// the smallest turn about the joint, on a sphere at least the part's size (`joint_drag`,
+    /// #13262). Off: the grabbed point goes to the pointer and the part may spin about it, as
+    /// before.
+    joint_drag_trackball: bool = true, PAGE_DESIGN => check_id("prefs.joint_drag_trackball");
     /// Reopen the saved designs that were open when the app was last closed (#5542).
     reopen_designs: bool = true, PAGE_GENERAL;
     /// Ask separately when closing several unsaved designs, as before grouped saving.

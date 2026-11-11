@@ -144,6 +144,9 @@ impl Hub {
                     shared.lock().retain(|(i, _)| *i != id);
                 });
             }
+            // A captured value drops after the body's locals, so without this `_closed` would tell
+            // `Stop::stop` the port is free while the listener still holds it (#14752).
+            drop(listener);
         });
         Ok(stop)
     }

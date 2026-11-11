@@ -2198,6 +2198,12 @@ fn limits(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn edit(s: &mut Session, p: &Value) -> Result<Value> {
+    edit_joint(s, p, true)
+}
+
+/// joint.edit's change, also run by `assembly.constraint.edit`. `plain`: a change of kind makes a
+/// constraint a plain joint (joint.edit); the constraint command keeps the rule it has just set.
+pub(super) fn edit_joint(s: &mut Session, p: &Value, plain: bool) -> Result<Value> {
     let cmd = "joint.edit";
     let id = joint_id(s, p.get("joint"), cmd)?;
     if let Some(why) = super::component_link::linked_joint_refusal(s, id) {
@@ -2241,7 +2247,7 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
         j.kind = k;
         // A constraint changed to another kind of joint is a plain joint now: its tag would keep
         // restarting it, and a tangent's gap expression would leave the radius out of its offset.
-        if k != was {
+        if k != was && plain {
             if j.constraint == Some(joints::Constraint::Tangent) {
                 j.exprs.offset = None;
             }
