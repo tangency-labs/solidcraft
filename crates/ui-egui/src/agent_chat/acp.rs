@@ -390,6 +390,10 @@ impl AuthMethod {
     /// the Claude adapter's Console login, or an API key. Agents name these only in free text.
     pub fn bills_per_use(&self) -> bool {
         let text = format!("{} {} {}", self.id, self.name, self.description).to_ascii_lowercase();
+        // "No API key required" describes a sign-in that bills no API key.
+        let text = ["no api key", "without an api key", "without api key", "api key not required", "api key is not required"]
+            .iter()
+            .fold(text, |text, negated| text.replace(negated, " "));
         let named = ["api usage billing", "api-key", "api_key", "api key"].iter().any(|word| text.contains(word));
         named
             || match &self.kind {
@@ -931,6 +935,13 @@ mod tests {
         let m = auth_methods(&init);
         assert_eq!(m.iter().map(|x| x.id.as_str()).collect::<Vec<_>>(), ["chatgpt", "a", "b"], "the order is otherwise kept");
         assert_eq!(m.iter().map(AuthMethod::bills_per_use).collect::<Vec<_>>(), [false, true, true]);
+        // A sign-in that says it needs no API key is not one that bills for each use.
+        let init = json!({"authMethods": [
+            {"id": "sub", "name": "Subscription", "description": "Sign in with your plan, no API key required"},
+            {"id": "plan", "name": "Plan", "description": "Works without an API key"},
+            {"id": "key", "name": "API key", "description": "Paste an API key"}]});
+        let m = auth_methods(&init);
+        assert_eq!(m.iter().map(AuthMethod::bills_per_use).collect::<Vec<_>>(), [false, false, true]);
     }
 
     #[test]
