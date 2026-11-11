@@ -1,0 +1,22 @@
+{
+ "sources": [],
+ "what": "timeline.delete of the block the round and the notch are made on",
+ "source": "invariants",
+ "method": "the delete is made (only a sketch takes features with it); the round and the cut have no body now and are reported failing, in timeline order; no body is left",
+ "body_count": 0,
+ "results": [
+  {
+   "step": 7,
+   "json": {
+    "failing": [
+     {
+      "feature": "Round"
+     },
+     {
+      "feature": "Notch"
+     }
+    ]
+   }
+  }
+ ]
+}

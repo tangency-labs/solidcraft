@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "what": "a rectangular pocket's floor edges and rim edges rounded r2 in one fillet (5 mm walls: 1 mm of flat wall left between them)",
+ "source": "analytic",
+ "method": "plate 60x40x10 with the pocket 30x20x5 (x 15..45, y 10..30, floor z = 5, sharp vertical corners): V0 = 24000 - 3000 = 21000. The floor rounds and the rim rounds touch different parts of the walls (2 + 2 < 5), so they add up: + (100 A - 4 r^3 (5/3-pi/2)) = 82.7729 - (100 A + 4 r^3 (5/3-pi/2)) = 88.9086. V = 20993.8643. Faces 19.",
+ "body_count": 1,
+ "volume_mm3": 20993.864298248205,
+ "faces": 19,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   10
+  ]
+ },
+ "continuity": {
+  "order": "g1"
+ }
+}

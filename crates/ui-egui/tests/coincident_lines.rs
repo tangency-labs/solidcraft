@@ -3,6 +3,7 @@
 mod support;
 
 use serde_json::json;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::sketch::ConstraintKind;
 use solidcraft_ui_egui::scenario::Harness;
 

@@ -1,0 +1,24 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4623",
+  "tangency-labs/solidcraft#4180",
+  "tangency-labs/solidcraft#4881"
+ ],
+ "what": "a join of two pleated skins (lofts between 24-pleat star outlines, less the same loft moved in 1.1 mm) that cross along a ring near their bottoms: truck panicked ('tolerance must be no less than 1e-6') or gave no result",
+ "source": "analytic",
+ "method": "the narrowing cone skin and the flaring lip skin cross at z = -0.3, so their union is one connected solid: one valid closed body, no panic. The reporter's own script (pleated_union.py, 24 pleats). Every outline has its 48 vertices on the same rays (every 7.5 deg), and a ruled loft takes vertex to vertex, so at each z every loft is the star polygon with radii linear in z on those rays (a convex combination of two points on a ray stays on it), and each inner loft lies inside its outer one at every z (the radii are smaller on every ray). Skin volumes: the section area is quadratic in z (wedge areas r_i r_i+1 sin(7.5 deg) / 2), so Simpson is exact: cone 39321.32 (z -1..88.3), lip 5571.95 (z -1..6). Their overlap, by integrating over z -1..6 and each wedge's angle the radial intersection of the two skins' intervals (1/2 (r1^2 - r0^2) dtheta, converged to 0.3): 449.76. Join: 39321.32 + 5571.95 - 449.76 = 44443.5 (the two skins' plain sum, 44893.3, and either skin alone fall outside the tolerance). Box: the lip's top outline (r 120 on the axes) and the skins' z -1..88.3",
+ "body_count": 1,
+ "volume_mm3": 44443.5,
+ "bbox": {
+  "min": [
+   -120.0,
+   -120.0,
+   -1.0
+  ],
+  "max": [
+   120.0,
+   120.0,
+   88.3
+  ]
+ }
+}

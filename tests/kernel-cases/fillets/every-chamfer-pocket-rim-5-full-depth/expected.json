@@ -1,0 +1,24 @@
+{
+ "sources": [],
+ "what": "a 5 mm deep pocket's rim edges chamfered 5: the legs use the whole walls, ending on the floor's edges, and it builds",
+ "source": "analytic",
+ "method": "plate 60x40x10 with the pocket 30x20x5 (x 15..45, y 10..30, floor z = 5, sharp vertical corners): V0 = 24000 - 3000 = 21000. Each convex rim edge loses the triangle d^2/2 along its length (100 in all); at each pocket corner the two chamfers run on past it and meet in a mitre, the quadrant losing what both remove: points (s, t) past both walls with s + u < d and t + u < d (u the depth), int_0^d (d-u)^2 du = d^3/3: removed = 50 d^2 + (4/3) d^3. d = 5, the walls' full depth (the owner's ruling of 2026-10-30 (d7): a chamfer that reaches or runs past a rim builds): the walls are used up, the chamfers meeting the floor along its edges, so the faces are the plate's 6, the floor and the 4 chamfers: 11. Removed 1416.666667. V = 19583.333333.",
+ "body_count": 1,
+ "volume_mm3": 19583.333333333332,
+ "faces": 11,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   10
+  ]
+ },
+ "continuity": {
+  "order": "g0"
+ }
+}

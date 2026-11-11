@@ -1,0 +1,200 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "PathA"
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     50.0,
+     0.0
+    ],
+    "through": [
+     3.061616997868383e-15,
+     50.0
+    ],
+    "end": [
+     -50.0,
+     6.123233995736766e-15
+    ],
+    "id": "a1"
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      50.0,
+      0.0,
+      30.0
+     ],
+     "x_dir": [
+      1.0,
+      0.0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "ProfA"
+   }
+  },
+  {
+   "command": "sketch.rectangle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "corner": [
+     6,
+     30
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.sweep",
+   "params": {
+    "sketch": "ProfA",
+    "path_sketch": "PathA",
+    "path": [
+     "a1"
+    ],
+    "operation": "new",
+    "body_name": "WallA"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "PathB"
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     3.5514757175273244e-15,
+     58.0
+    ],
+    "through": [
+     -58.0,
+     7.102951435054649e-15
+    ],
+    "end": [
+     -1.0654427152581972e-14,
+     -58.0
+    ],
+    "id": "a1"
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      3.5514757175273244e-15,
+      58.0,
+      30.0
+     ],
+     "x_dir": [
+      6.123233995736766e-17,
+      1.0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "ProfB"
+   }
+  },
+  {
+   "command": "sketch.rectangle.center",
+   "params": {
+    "center": [
+     0,
+     0
+    ],
+    "corner": [
+     6,
+     30
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.sweep",
+   "params": {
+    "sketch": "ProfB",
+    "path_sketch": "PathB",
+    "path": [
+     "a1"
+    ],
+    "operation": "join",
+    "targets": [
+     "WallA"
+    ]
+   }
+  }
+ ]
+}

@@ -8,6 +8,86 @@ fn first_sketch(app: &SolveApp) -> u64 {
     app.session.doc.features.iter().find(|f| matches!(f.kind, FeatureKind::Sketch { .. })).map(|f| f.id).unwrap()
 }
 
+fn plate_and_cylinder() -> crate::scenario::Harness {
+    use serde_json::json;
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    for (command, params) in [
+        ("sketch.create", json!({"plane": "XY", "name": "Sketch1"})),
+        ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"name": "Plate", "distance": 10})),
+        ("solid.cylinder", json!({"name": "Cyl", "base": [60, 15, 0], "radius": 8, "height": 20, "operation": "new"})),
+    ] {
+        h.app.run(command, params).unwrap();
+    }
+    h
+}
+
+#[test]
+fn finishing_an_edited_sketch_undoes_the_edit_with_the_complete_design_visible() {
+    use serde_json::json;
+    for engine_finish in [false, true] {
+        let mut h = plate_and_cylinder();
+        let before = h.app.session.doc.to_json();
+        let id = first_sketch(&h.app);
+        h.app.edit_sketch(id);
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [20, 20]})).unwrap();
+        if engine_finish {
+            h.app.run("sketch.finish", json!({})).unwrap();
+        } else {
+            h.app.finish_sketch();
+        }
+        assert_eq!(h.app.session.doc.marker, None);
+        let edited = h.app.session.doc.to_json();
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc.marker, None, "Undo must not expose the temporary sketch rollback");
+        assert_eq!(h.app.session.active_sketch, None);
+        assert_eq!(h.app.session.doc.to_json(), before, "one Undo takes back the sketch edit");
+        assert_eq!(h.app.session.model.state().bodies.len(), 2);
+        let volume = h.app.run("inspect.measure", json!({"bodies": ["Body1"]})).unwrap();
+        assert!((volume["total"]["volume_mm3"].as_f64().unwrap() - 12000.0).abs() < 1e-6);
+        h.app.run("edit.redo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc.to_json(), edited);
+        assert_eq!(h.app.session.active_sketch, None);
+        assert_eq!(h.app.session.model.state().bodies.len(), 2);
+    }
+}
+
+#[test]
+fn engine_finish_restores_the_marker_from_a_ui_sketch_edit() {
+    use serde_json::json;
+    for marker in [None, Some(0), Some(2)] {
+        let mut h = plate_and_cylinder();
+        h.app.run("timeline.roll_to", json!({"position": marker})).unwrap();
+        let before = h.app.session.doc.to_json();
+        let bodies = h.app.session.model.state().bodies.len();
+        let id = first_sketch(&h.app);
+        h.app.edit_sketch(id);
+        // Deliberately bypass the window's completion callback: the engine owns restoration.
+        h.app.session.execute("sketch.finish", &json!({})).unwrap();
+        assert_eq!(h.app.session.active_sketch, None);
+        assert_eq!(h.app.session.doc.to_json(), before);
+        assert_eq!(h.app.session.model.state().bodies.len(), bodies);
+    }
+}
+
+#[test]
+fn unchanged_sketch_edit_keeps_undo_and_redo() {
+    use serde_json::json;
+    let mut h = plate_and_cylinder();
+    h.app.run("edit.undo", json!({})).unwrap();
+    let before = h.app.session.doc.to_json();
+    let history = (h.app.session.undo.len(), h.app.session.redo.len());
+    let id = first_sketch(&h.app);
+    h.app.edit_sketch(id);
+    h.app.finish_sketch();
+    assert_eq!(h.app.session.doc.to_json(), before);
+    assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+    h.app.run("edit.redo", json!({})).unwrap();
+    assert_eq!(h.app.session.model.state().bodies.len(), 2);
+}
+
 #[test]
 fn edit_sketch_rolls_back_and_finish_restores() {
     let mut app = sample_app();
@@ -174,7 +254,7 @@ fn ribbon_edit_sketch_handles_an_empty_design_without_running_a_command() {
 mod exit_keeps_view {
     use crate::scenario::Harness;
     use serde_json::json;
-    use solidcraft_engine::render::Camera;
+    use solidcraft_viewport::Camera;
 
     /// Start a sketch on XY from the iso view, then orbit and pan into a 3D view of the user's own.
     fn sketching_in_3d() -> (Harness, Camera) {
@@ -358,7 +438,7 @@ mod exit_view_preference {
     use crate::prefs::SketchExitView;
     use crate::scenario::Harness;
     use serde_json::json;
-    use solidcraft_engine::render::Camera;
+    use solidcraft_viewport::Camera;
 
     /// A sketch on XY started from the iso view with `choice` set, and that iso view.
     fn sketching(choice: SketchExitView) -> (Harness, Camera) {
@@ -456,9 +536,10 @@ mod exit_view_preference {
     #[test]
     fn a_sketch_opened_by_a_command_leaves_the_view_alone() {
         let (mut h, _) = sketching(SketchExitView::Previous);
-        // Finished by the command, so the views saved for this sketch stay behind.
+        // A programmatic finish clears this sketch's saved view too. A later sketch opened
+        // entirely by commands must not inherit that view.
         h.app.run("sketch.finish", json!({})).unwrap();
-        assert!(h.app.pre_sketch_cam.is_some());
+        assert!(h.app.pre_sketch_cam.is_none());
         h.app.run("sketch.create", json!({"plane": "XZ"})).unwrap();
         h.app.cam.orbit(60.0, -40.0);
         h.app.cam_anim = None;
@@ -487,7 +568,7 @@ mod exit_view_preference {
 mod extrude_view_preference {
     use crate::scenario::Harness;
     use serde_json::json;
-    use solidcraft_engine::render::{Camera, StandardView};
+    use solidcraft_viewport::{Camera, StandardView};
 
     /// A finished sketch on XY, seen from the top, with the two preferences set; and that view.
     fn from_the_top(isometric: bool, back: bool) -> (Harness, Camera) {
@@ -558,6 +639,82 @@ mod extrude_view_preference {
             open_extrude(&mut h);
             assert_eq!(h.app.cam, iso_of(top), "{close}: isometric again");
         }
+    }
+
+    /// #10571: Extrude clicked with the sketch still open ends the sketch on its way, and that
+    /// end turns the view back where it opened (Preferences › Sketch). The turn must not become
+    /// the view Extrude goes back to: it is the view the command was clicked in.
+    #[test]
+    fn extrude_from_an_open_sketch_goes_back_to_the_view_it_was_clicked_in() {
+        let mut h = Harness::new();
+        h.app.preferences.extrude_view_isometric = true;
+        h.app.preferences.extrude_view_return = true;
+        h.app.preferences.sketch_exit_view = crate::prefs::SketchExitView::Previous;
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})).unwrap();
+        h.call("ui.view", json!({"view": "top"}));
+        h.settle();
+        let top = h.app.cam;
+        open_extrude(&mut h);
+        assert_eq!(h.app.cam, iso_of(top), "isometric while Extrude is open");
+        h.step(&json!({"widget": "Cancel"})).unwrap();
+        h.settle();
+        assert!(h.app.dialog.is_none());
+        assert_eq!(h.app.session.active_sketch, None, "Extrude ended the sketch");
+        assert_eq!(h.app.cam, top, "back to the sketch view it was clicked in");
+    }
+}
+
+/// #14128: Extrude clicked while an edited sketch is still open ends the sketch on its way. The
+/// sketch is already used by an earlier extrude, so once it is finished it is hidden, and its new
+/// rectangle could not be picked: the Extrude dialog showed no profiles to click. The sketch stays
+/// shown while the Extrude it started is open, a click inside the new rectangle picks it, and OK
+/// builds a solid from it, the same as after Finish Sketch. Closing the dialog hides it again.
+#[test]
+fn extrude_from_an_open_used_sketch_picks_its_new_profile() {
+    use serde_json::json;
+    for close in ["OK", "Cancel"] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let sketch = h.app.run("sketch.create", json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        // The rectangle by its curves, as the Extrude dialog stores it: the new one stays a profile.
+        h.app.run("solid.extrude", json!({"distance": 10, "profiles": [0]})).unwrap();
+        assert!(!solidcraft_engine::view::sketch_shown(&h.app.session, sketch), "{close}: the extrude hides the sketch it uses");
+        h.app.edit_feature(sketch);
+        h.settle();
+        assert_eq!(h.app.session.active_sketch, Some(sketch), "{close}");
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [60, 0], "p1": [80, 30]})).unwrap();
+        h.call("ui.view", json!({"view": "top"}));
+        h.settle();
+        let features = h.app.session.doc.features.len();
+        h.step(&json!({"start": "solid.extrude"})).unwrap();
+        h.settle();
+        assert_eq!(h.app.session.active_sketch, None, "{close}: Extrude ended the sketch");
+        assert!(h.app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Extrude { .. })), "{close}: Extrude is open");
+        assert!(solidcraft_engine::view::sketch_shown(&h.app.session, sketch), "{close}: the sketch stays shown while its Extrude is open");
+        h.step(&json!({"click": {"world": [70, 15, 0]}})).unwrap();
+        h.settle();
+        let picked = h.app.dialog.as_ref().and_then(|d| d.inputs.first()).map(|i| i.items.clone()).unwrap_or_default();
+        let new_profile = crate::open_meshing::session_world(&h.app.session)
+            .sketch(sketch)
+            .and_then(|ss| ss.profiles.iter().position(|p| p.contains(solidcore_record::Vec2::new(70.0, 15.0))))
+            .unwrap();
+        assert_eq!(picked, vec![solidcraft_engine::Sel::Profile { sketch, index: new_profile }], "{close}: the click picks the new rectangle");
+        h.step(&json!({"widget": close})).unwrap();
+        h.settle();
+        assert!(h.app.dialog.is_none(), "{close}");
+        assert!(!solidcraft_engine::view::sketch_shown(&h.app.session, sketch), "{close}: hidden again once the dialog closes");
+        if close == "Cancel" {
+            assert_eq!(h.app.session.doc.features.len(), features, "Cancel adds nothing");
+            continue;
+        }
+        assert_eq!(h.app.session.doc.features.len(), features + 1, "OK adds the extrude");
+        let Some(FeatureKind::Extrude { thin, .. }) = h.app.session.doc.features.last().map(|f| &f.kind) else { panic!("an extrude") };
+        assert!(thin.is_none(), "a solid from the profile, not a thin wall along its lines");
+        let volume = h.app.run("inspect.measure", json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+        assert!((volume - (40.0 * 30.0 * 10.0 + 20.0 * 30.0 * 10.0)).abs() < 1e-6, "both blocks are solid: {volume}");
     }
 }
 

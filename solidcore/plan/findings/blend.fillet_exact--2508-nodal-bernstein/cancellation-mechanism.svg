@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1280" height="800" viewBox="0 0 1280 800">
+  <title>Nodal quartic — cancellation and Bernstein construction</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect x="0" y="0" width="1280" height="800" fill="#ffffff"/>
+    <text transform="matrix(1 0 0 1 35 45)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">Why the nodal-quartic spine lost precision</tspan></text>
+    <text transform="matrix(1 0 0 1 35 78)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">Same rational construction; different arithmetic for its homogeneous weight.</tspan></text>
+    <text transform="matrix(1 0 0 1 35 126)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">Global power coefficients</tspan></text>
+    <rect x="35" y="150" width="340" height="90" fill="#f0f0f0" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10"/>
+    <rect x="460" y="150" width="340" height="90" fill="#f0f0f0" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10"/>
+    <rect x="885" y="150" width="340" height="90" fill="#f0f0f0" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 50 180)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">Rounded global coefficients</tspan></text>
+    <text transform="matrix(1 0 0 1 50 210)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">c0, c1, c2, c3, c4</tspan></text>
+    <text transform="matrix(1 0 0 1 475 180)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">Signed terms nearly cancel</tspan></text>
+    <text transform="matrix(1 0 0 1 475 210)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">W(s) = sum of c_k s^k</tspan></text>
+    <text transform="matrix(1 0 0 1 900 180)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">Power-to-Bernstein conversion</tspan></text>
+    <text transform="matrix(1 0 0 1 900 210)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">Lost coefficient bits stay lost</tspan></text>
+    <g>
+      <g>
+        <path d="M385 194.25 L442 194.25 L442 195.75 L385 195.75 Z" fill="#555555"/>
+        <path d="M445 195 L439 198 L439 192 Z" fill="#555555"/>
+      </g>
+    </g>
+    <g>
+      <g>
+        <path d="M810 194.25 L867 194.25 L867 195.75 L810 195.75 Z" fill="#555555"/>
+        <path d="M870 195 L864 198 L864 192 Z" fill="#555555"/>
+      </g>
+    </g>
+    <text transform="matrix(1 0 0 1 460 270)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">Positive terms</tspan></text>
+    <rect x="460" y="283" width="270" height="12" fill="#1f6fb2"/>
+    <text transform="matrix(1 0 0 1 460 320)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">Magnitude of negative terms</tspan></text>
+    <rect x="460" y="333" width="268" height="12" fill="#555555"/>
+    <polyline points="730,288 785,288 785,340" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="5 4"/>
+    <line x1="728" y1="339" x2="785" y2="339" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="5 4"/>
+    <text transform="matrix(1 0 0 1 810 305)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">Small residual W</tspan></text>
+    <text transform="matrix(1 0 0 1 810 330)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">Small coefficient errors become</tspan></text>
+    <text transform="matrix(1 0 0 1 810 348)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">large relative errors in W.</tspan></text>
+    <text transform="matrix(1 0 0 1 35 385)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">Amplification:  sum |c_k s^k| / |W(s)|</tspan></text>
+    <text transform="matrix(1 0 0 1 35 447)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#1f6fb2"><tspan x="0" y="0">Direct Bernstein construction on each segment</tspan></text>
+    <rect x="35" y="475" width="340" height="100" fill="#dce9f5" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <rect x="460" y="475" width="340" height="100" fill="#dce9f5" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <rect x="885" y="475" width="340" height="100" fill="#dce9f5" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 50 505)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">Local endpoint directions</tspan></text>
+    <text transform="matrix(1 0 0 1 50 537)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">u = w(a),  v = w(b)</tspan></text>
+    <text transform="matrix(1 0 0 1 475 505)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">Quadratic Bernstein controls</tspan></text>
+    <text transform="matrix(1 0 0 1 475 537)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">P(u,u),  P(u,v),  P(v,v)</tspan></text>
+    <text transform="matrix(1 0 0 1 900 500)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#000000"><tspan x="0" y="0">Bernstein products</tspan></text>
+    <text transform="matrix(1 0 0 1 900 530)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">W = V^T A V</tspan></text>
+    <text transform="matrix(1 0 0 1 900 555)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">M = q W - 2 (g . V) V</tspan></text>
+    <g>
+      <g>
+        <path d="M385 524.25 L442 524.25 L442 525.75 L385 525.75 Z" fill="#555555"/>
+        <path d="M445 525 L439 528 L439 522 Z" fill="#555555"/>
+      </g>
+    </g>
+    <g>
+      <g>
+        <path d="M810 524.25 L867 524.25 L867 525.75 L810 525.75 Z" fill="#555555"/>
+        <path d="M870 525 L864 528 L864 522 Z" fill="#555555"/>
+      </g>
+    </g>
+    <rect x="35" y="620" width="1190" height="80" fill="#ffffff" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 50 648)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#1f6fb2"><tspan x="0" y="0">Independent certificate</tspan></text>
+    <text transform="matrix(1 0 0 1 50 677)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">Both offset equations hold coefficient by coefficient; the canal identity certifies the round at bound 0.</tspan></text>
+    <text transform="matrix(1 0 0 1 35 742)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">P(u,v) = (u^T C v) r - (r^T C u) v - (r^T C v) u</tspan></text>
+    <text transform="matrix(1 0 0 1 35 768)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">Local controls and Bernstein products avoid forming the cancelling global power coefficients.</tspan></text>
+  </g>
+</svg>

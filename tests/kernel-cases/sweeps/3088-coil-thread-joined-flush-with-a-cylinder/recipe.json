@@ -1,0 +1,41 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 15,
+    "height": 40,
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": "Z",
+    "body_name": "Body2"
+   }
+  },
+  {
+   "command": "solid.coil",
+   "params": {
+    "axis": "Z",
+    "base": [
+     0,
+     0,
+     2
+    ],
+    "clockwise": true,
+    "diameter": 30.8,
+    "height": 36,
+    "name": "HoseThread",
+    "operation": "join",
+    "pitch": 9,
+    "section": "square",
+    "section_position": "inside",
+    "section_size": 4,
+    "targets": [
+     "Body2"
+    ]
+   }
+  }
+ ]
+}

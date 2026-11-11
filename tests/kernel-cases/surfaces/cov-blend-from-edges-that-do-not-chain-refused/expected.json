@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "a blend from two opposite sides of a sheet: they share no vertex, so they are no chain; refused",
+ "source": "invariants",
+ "method": "an end of a blend is one chain of edges, each running on from the last",
+ "outcome": "refused",
+ "refusal": "the picked edges do not run on from one another"
+}

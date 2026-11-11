@@ -1,0 +1,34 @@
+{
+ "sources": [],
+ "what": "a cone (apex (0, 0, 10 sqrt 2), half-angle 45 deg) and a post R10 tilted 20 deg through the origin, both touching the ball R10 about the origin along circles that do not meet, joined: the concave edge where the cone leaves the post rounded r1",
+ "source": "analytic",
+ "method": "the offsets by 1 (the post R11, the cone with its apex sqrt 2 higher) both touch the ball R11 about the origin, so they meet in two plane conics (the cone and the post are each the ball's sphere less a multiple of the square of their contact circle's plane, and their difference is two planes); the spine is the conic round the post, and the round, between contact lines that are rational on both quadrics, is a rational B-spline of degrees (6, 2). V0 = the cone and the post less their overlap, about the cone's apex (where the cone gives no flux): the post's wall below the edge and its bottom cap: 21763.823377543333; the round adds 1.884007899126, (1/3) of the flux of the position through the boundary of the material the round adds: the round's surface as the ball's circles about the spine from contact to contact, the strips of the faces between the edge and the contact lines, each written out exactly and integrated by Gauss-Legendre quadrature (24 points a panel), about the apex. The round's faces, each of those degrees: a closed round is two faces (split at the seam of its closed surface).",
+ "body_count": 1,
+ "volume_mm3": 21765.70738544246,
+ "tolerance": {
+  "rel": 1e-06
+ },
+ "surface_types": [
+  "bspline",
+  "cone",
+  "cylinder",
+  "plane"
+ ],
+ "splines": [
+  {
+   "degree": [
+    6,
+    2
+   ]
+  },
+  {
+   "degree": [
+    6,
+    2
+   ]
+  }
+ ],
+ "continuity": {
+  "order": "g1"
+ }
+}

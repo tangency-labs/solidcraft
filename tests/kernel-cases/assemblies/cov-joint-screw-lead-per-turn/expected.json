@@ -1,0 +1,41 @@
+{
+ "sources": [],
+ "what": "a screw of lead 2 mm on a cylindrical joint, turned half a turn",
+ "source": "analytic",
+ "method": "Base: box 20x20x10 from (-10,-10,-10), grounded; Arm: box 40x10x10 from (0,-5,0), centre (20,0,5); joint.screw on cylindrical Spindle, pitch 2: ratio 2/360 mm per degree, so 180 degrees advance 1 mm: M = Rz(180)\u00b7T(0,0,1): (20,0,5) -> (-20,0,6)",
+ "body_count": 2,
+ "volume_mm3": 8000.0,
+ "results": [
+  {
+   "step": 9,
+   "json": {
+    "ratio": 0.005556
+   }
+  },
+  {
+   "step": 10,
+   "json": {
+    "values": [
+     {
+      "value": 180.0
+     },
+     {
+      "value": 1.0
+     }
+    ]
+   }
+  },
+  {
+   "step": 11,
+   "json": {
+    "total": {
+     "center_of_mass": [
+      -20.0,
+      0.0,
+      6.0
+     ]
+    }
+   }
+  }
+ ]
+}

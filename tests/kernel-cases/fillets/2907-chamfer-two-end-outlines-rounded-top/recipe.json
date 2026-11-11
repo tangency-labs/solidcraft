@@ -1,0 +1,150 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "YZ"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      16
+     ],
+     [
+      0,
+      0
+     ],
+     [
+      30,
+      0
+     ],
+     [
+      30,
+      16
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     26,
+     16
+    ],
+    "start": [
+     30,
+     16
+    ],
+    "end": [
+     26,
+     20
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      26,
+      20
+     ],
+     [
+      4,
+      20
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.center_point",
+   "params": {
+    "center": [
+     4,
+     16
+    ],
+    "start": [
+     4,
+     20
+    ],
+    "end": [
+     0,
+     16
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 40
+   }
+  },
+  {
+   "command": "solid.chamfer",
+   "params": {
+    "distance": 1.5,
+    "edges": [
+     [
+      0,
+      0,
+      8
+     ],
+     [
+      0,
+      15,
+      20
+     ],
+     [
+      0,
+      30,
+      8
+     ],
+     [
+      0,
+      28.82842712474619,
+      18.82842712474619
+     ],
+     [
+      0,
+      1.1715728752538102,
+      18.82842712474619
+     ],
+     [
+      40,
+      0,
+      8
+     ],
+     [
+      40,
+      15,
+      20
+     ],
+     [
+      40,
+      30,
+      8
+     ],
+     [
+      40,
+      28.82842712474619,
+      18.82842712474619
+     ],
+     [
+      40,
+      1.1715728752538102,
+      18.82842712474619
+     ]
+    ]
+   }
+  }
+ ]
+}

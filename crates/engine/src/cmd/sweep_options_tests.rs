@@ -3,7 +3,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use std::f64::consts::PI;
+use std::f64::consts::{FRAC_1_SQRT_2, PI};
 
 use serde_json::{Value, json};
 
@@ -31,7 +31,7 @@ fn setup() -> Session {
 }
 
 fn measure(s: &Session, body: &str) -> solidcraft_kernel::BodyMeasure {
-    solidcraft_kernel::measure(&s.world_state().body(body).unwrap().body).unwrap()
+    solidcraft_kernel::measure(&s.world_state().unwrap().body(body).unwrap().body).unwrap()
 }
 
 fn sweep(s: &mut Session, sketch: &str, body: &str, extra: Value) -> Result<Value, String> {
@@ -92,7 +92,7 @@ fn twisted_sweep_faces_follow_the_profile_curves() {
     // The end cap turns with the twist: at 90 deg a square's corners are back where they were,
     // at 45 deg its top reaches out to the corner radius along the axes.
     let reach = |s: &Session| {
-        let mesh = s.world_state().body("Twisted").unwrap().body.tessellate(0.01).unwrap();
+        let mesh = s.world_state().unwrap().body("Twisted").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
         mesh.positions.iter().filter(|p| (p.z - 40.0).abs() < 1e-6).map(|p| p.x).fold(f64::MIN, f64::max)
     };
     assert!((reach(&s) - 5.0).abs() < 1e-3, "{}", reach(&s));
@@ -159,5 +159,118 @@ fn hostile_sweep_options_are_refused() {
         p.as_object_mut().unwrap().extend(bad.as_object().unwrap().clone());
         assert!(s.execute("surface.sweep", &p).is_err(), "surface {bad}");
         assert_eq!(s.doc.features.len(), before, "{bad}");
+    }
+}
+
+/// #3345: a 4 x 3 profile drawn at the middle of the bottom line of a closed rounded rectangle
+/// (60 x 40, corners r8), swept round all of it, path picked from that line's start. The path is
+/// followed from the profile: the tube stays on the path (Pappus: A L), within 2 mm of it
+/// sideways, instead of standing off it by the half line the path's start lies away.
+#[test]
+fn a_sweep_round_a_closed_path_starts_where_the_profile_is() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Path"}));
+    run(&mut s, "sketch.line", json!({"points": [[-22, -20], [22, -20]], "infer": false, "ids": ["l1"]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [22, -12], "start": [22, -20], "end": [30, -12], "id": "a1"}));
+    run(&mut s, "sketch.line", json!({"points": [[30, -12], [30, 12]], "infer": false, "ids": ["l2"]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [22, 12], "start": [30, 12], "end": [22, 20], "id": "a2"}));
+    run(&mut s, "sketch.line", json!({"points": [[22, 20], [-22, 20]], "infer": false, "ids": ["l3"]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [-22, 12], "start": [-22, 20], "end": [-30, 12], "id": "a3"}));
+    run(&mut s, "sketch.line", json!({"points": [[-30, 12], [-30, -12]], "infer": false, "ids": ["l4"]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [-22, -12], "start": [-30, -12], "end": [-22, -20], "id": "a4"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, -20, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": "Prof"}));
+    run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [2, 1.5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let path = json!(["l1", "a1", "l2", "a2", "l3", "a3", "l4", "a4"]);
+    run(&mut s, "solid.sweep", json!({"sketch": "Prof", "path_sketch": "Path", "path": path, "operation": "new", "body_name": "Tube"}));
+    let m = measure(&s, "Tube");
+    let want = 12.0 * (2.0 * 44.0 + 2.0 * 24.0 + 4.0 * (PI / 2.0) * 8.0);
+    assert!((m.volume - want).abs() < want * 1e-3, "{} vs {want}", m.volume);
+    // Within the rig's 1e-3 of the box diagonal (the box is measured on a mesh).
+    for (got, want) in [(m.bbox.min.x, -32.0), (m.bbox.min.y, -22.0), (m.bbox.max.x, 32.0), (m.bbox.max.y, 22.0)] {
+        assert!((got - want).abs() < 0.08, "{:?}", m.bbox);
+    }
+}
+
+/// #2216: a sweep whose path is a closed loop of a body's edges is followed from the profile,
+/// like a closed sketch path: the tube stays on the loop, within the profile's half width of
+/// it, instead of standing off it by the distance between the profile and the vertex the
+/// first picked edge happened to be on. A body's top face is a closed loop of eight edges; a
+/// 4 x 3 profile at the middle of one of them, square to it, swept round the whole loop.
+#[test]
+fn a_sweep_round_a_closed_body_edge_path_starts_where_the_profile_is() {
+    let mut s = Session::default();
+    // A rounded rectangle 60 x 40, corners r8, extruded 10: its top face is a closed loop of
+    // eight edges, smooth all round.
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Loop"}));
+    run(&mut s, "sketch.line", json!({"points": [[-22, -20], [22, -20]], "infer": false, "ids": ["l1"]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [22, -12], "start": [22, -20], "end": [30, -12], "id": "a1"}));
+    run(&mut s, "sketch.line", json!({"points": [[30, -12], [30, 12]], "infer": false, "ids": ["l2"]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [22, 12], "start": [30, 12], "end": [22, 20], "id": "a2"}));
+    run(&mut s, "sketch.line", json!({"points": [[22, 20], [-22, 20]], "infer": false, "ids": ["l3"]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [-22, 12], "start": [-22, 20], "end": [-30, 12], "id": "a3"}));
+    run(&mut s, "sketch.line", json!({"points": [[-30, 12], [-30, -12]], "infer": false, "ids": ["l4"]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [-22, -12], "start": [-30, -12], "end": [-22, -20], "id": "a4"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Loop", "distance": 10, "operation": "new", "body_name": "Slab"}));
+    // A 4 x 3 profile at the middle of the loop's bottom edge, square to it.
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, -20, 10], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": "Prof"}));
+    run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [2, 1.5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    // The path: the loop's eight edges, one point on each, in order round it.
+    let c = 8.0 * FRAC_1_SQRT_2;
+    run(
+        &mut s,
+        "solid.sweep",
+        json!({
+            "sketch": "Prof",
+            "path_body": "Slab",
+            "path_edges": [
+                [-11.0, -20.0, 10.0],
+                [22.0 + c, -12.0 - c, 10.0],
+                [30.0, 0.0, 10.0],
+                [22.0 + c, 12.0 + c, 10.0],
+                [-11.0, 20.0, 10.0],
+                [-22.0 - c, 12.0 + c, 10.0],
+                [-30.0, 0.0, 10.0],
+                [-22.0 - c, -12.0 - c, 10.0]
+            ],
+            "operation": "new",
+            "body_name": "Tube"
+        }),
+    );
+    let m = measure(&s, "Tube");
+    // Pappus: the profile's area (4 x 3) times the loop's length.
+    let want = 12.0 * (2.0 * 44.0 + 2.0 * 24.0 + 4.0 * (PI / 2.0) * 8.0);
+    assert!((m.volume - want).abs() < want * 1e-3, "{} vs {want}", m.volume);
+    // The tube stays on the loop: within the profile's half width (2) of it, the loop's own
+    // bounds (-30..30 by -20..20) grown by it.
+    for (got, want) in
+        [(m.bbox.min.x, -32.0), (m.bbox.max.x, 32.0), (m.bbox.min.y, -22.0), (m.bbox.max.y, 22.0), (m.bbox.min.z, 8.5), (m.bbox.max.z, 11.5)]
+    {
+        assert!((got - want).abs() < 0.08, "{:?}", m.bbox);
+    }
+}
+
+/// #3604: a path whose first curve is a spline of several exact pieces, the next curve meeting
+/// it at its start, follows the spline back from its end: a curve is turned round whole, not
+/// piece by piece. A 2 x 2 profile at the spline's end (20, 0), swept along the spline through
+/// (20, 0), (10, 0), (0, 0) and on along the line to (-15, 0): a 35 long bar.
+#[test]
+fn a_path_turns_a_spline_of_several_pieces_round_whole() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Path"}));
+    run(&mut s, "sketch.spline.fit_point", json!({"points": [[0, 0], [10, 0], [20, 0]], "ids": ["s1"]}));
+    run(&mut s, "sketch.line", json!({"points": [[-15, 0], [0, 0]], "infer": false, "ids": ["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [20, 0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": "Prof"}));
+    run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [1, 1]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.sweep", json!({"sketch": "Prof", "path_sketch": "Path", "path": ["s1", "l1"], "operation": "new", "body_name": "Bar"}));
+    let m = measure(&s, "Bar");
+    assert!((m.volume - 140.0).abs() < 140.0 * 1e-6, "{}", m.volume);
+    for (got, want) in [(m.bbox.min.x, -15.0), (m.bbox.max.x, 20.0), (m.bbox.min.y, -1.0), (m.bbox.max.y, 1.0)] {
+        assert!((got - want).abs() < 0.04, "{:?}", m.bbox);
     }
 }

@@ -1,0 +1,32 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#9"
+ ],
+ "what": "three r5 rounds at a box corner with the curvature (g2) corner at its default setback 1.5 r: the corner patch meets the rounds and faces G2 clear of the vertices where the seams turn",
+ "source": "invariants",
+ "method": "as ladder 07-fillets/015: box 60x40x20, the three edges at the corner (60, 40, 20) rounded r5 with corner g2, the corner set back 7.5 and filled with one patch built G2 to the three rounds and the three faces; no closed-form volume: one valid body, 6 faces + 3 rounds + the patch, within the box; every seam of the patch G2, measured as Continuity Analysis measures it Graded as ladder 07/019, scaled by r: at a hole corner the round is only tangent (G1) to the plane, its curvature jumping by 1/r, so no patch is G2 to both there; the curvature jump is bounded at stations at least 1.2 mm (0.24 r) from each turn, within 11 mm of the corner, at most 0.001 per mm (0.5% of 1/r).",
+ "body_count": 1,
+ "faces": 10,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   20
+  ]
+ },
+ "continuity": {
+  "near": [
+   60,
+   40,
+   20
+  ],
+  "within_mm": 11,
+  "clear_mm": 1.2,
+  "curvature_jump_per_mm": 0.001
+ }
+}

@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4286"
+ ],
+ "what": "a body split by a plane, its two pieces joined back, flush on the split faces (the report's part was an imported vendor connector; synthetic: a block with a bore and a boss, both cut by the plane): the join never finished",
+ "source": "analytic",
+ "method": "the pieces meet over the whole split face, so the join gives the body back: V = 60*40*20 - pi 36 20 + pi 36 10 = 46869.027, one body",
+ "body_count": 1,
+ "volume_mm3": 46869.0266
+}

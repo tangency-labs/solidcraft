@@ -1,7 +1,35 @@
-//! Contracts for view-only surface analyses; the handlers validate domain ranges.
+//! Contracts and result types for the view-only surface analyses, the commands in
+//! `cmd/surface_analysis.rs`; the handlers validate domain ranges.
 use super::{AxisDir, Point3, present};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+/// `true`, `false` or null, with the handler's message for anything else.
+fn flag<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
+    match Value::deserialize(d)? {
+        Value::Null => Ok(None),
+        Value::Bool(b) => Ok(Some(b)),
+        _ => Err(serde::de::Error::custom("must be true or false")),
+    }
+}
+
+/// Say which view analysis is on (zebra, draft, curvature map, environment map, accessibility,
+/// continuity, isocurves or curvature combs: one at a time), or turn it off.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct AnalysisParams {
+    /// Turn the view analysis on now off.
+    #[serde(default, deserialize_with = "flag")]
+    pub off: Option<bool>,
+}
+
+/// What `inspect.analysis` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct AnalysisState {
+    /// The command id of the view analysis on (after `off`), or null when none is.
+    pub active: Option<String>,
+}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -74,6 +102,14 @@ pub struct ContinuityParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "f64")]
     pub curvature_tolerance_per_mm: Option<f64>,
+    /// Tolerance on the jump of the curvature's change across the seam (G3) in inverse mm².
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "f64")]
+    pub curvature_change_tolerance_per_mm2: Option<f64>,
+    /// Tolerance on the jump of that change's rate (G4) in inverse mm³.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "f64")]
+    pub curvature_change_rate_tolerance_per_mm3: Option<f64>,
     /// Preserve other measured seams, replacing only matching body/edge records.
     pub add: Option<bool>,
     pub clear: Option<bool>,
@@ -116,6 +152,11 @@ pub struct EdgeReport {
     pub gap_mm: Metric,
     pub normal_angle_deg: Metric,
     pub curvature_jump_per_mm: Metric,
+    pub curvature_change_jump_per_mm2: Metric,
+    pub curvature_change_rate_jump_per_mm3: Metric,
+    /// The highest continuity order met along the whole edge (`g0`…`g4`), null where the faces do
+    /// not meet.
+    pub order: Option<String>,
     pub verdict: Verdict,
 }
 #[derive(Serialize, JsonSchema)]
@@ -130,6 +171,8 @@ pub struct Tolerances {
     pub gap_mm: f64,
     pub angle_deg: f64,
     pub curvature_per_mm: f64,
+    pub curvature_change_per_mm2: f64,
+    pub curvature_change_rate_per_mm3: f64,
 }
 #[derive(Serialize, JsonSchema)]
 pub struct Summary {
@@ -140,6 +183,8 @@ pub struct Summary {
     pub gap: usize,
     pub skipped: usize,
     pub unmeasured: usize,
+    /// How many edges meet each order.
+    pub orders: serde_json::Map<String, Value>,
     pub worst: Option<Verdict>,
 }
 #[derive(Serialize, JsonSchema)]
@@ -161,3 +206,7 @@ pub enum ContinuityResult {
         param_warnings: Vec<String>,
     },
 }
+
+#[cfg(test)]
+#[path = "surface_analysis_tests.rs"]
+mod tests;

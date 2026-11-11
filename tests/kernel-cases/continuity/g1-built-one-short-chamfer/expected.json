@@ -1,0 +1,25 @@
+{
+ "sources": [],
+ "body_count": 1,
+ "what": "the G1 case's edge cut by a chamfer instead of rounded: the chamfer meets each plane at 45 degrees, one order short of G1",
+ "source": "analytic",
+ "method": "box 20x20x20, its edge at x=20, y=0 chamfered 5: the chamfer plane x - y = 15 meets y=0 along x=15 and x=20 along y=5 at 45 degrees (G0, not G1). V = 8000 - 20 * 12.5 = 7750, 7 faces.",
+ "volume_mm3": 7750.0,
+ "faces": 7,
+ "continuity": {
+  "order": "g0",
+  "exact": true,
+  "edges": [
+   [
+    15,
+    0,
+    10
+   ],
+   [
+    20,
+    5,
+    10
+   ]
+  ]
+ }
+}

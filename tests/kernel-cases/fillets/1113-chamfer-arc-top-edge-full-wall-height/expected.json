@@ -1,0 +1,15 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#1113",
+  "tangency-labs/solidcraft#851"
+ ],
+ "what": "the top edge of #851's concave R21 wall chamfered 10, the wall's full height: its leg down the wall ends on the wall's bottom edge, using the wall up, and it builds",
+ "source": "analytic",
+ "method": "plate x 0..41.1667, y -21..0 and the corner x 41.1667..62.1667 less the cylinder r 21 about (62.1667, -21), 10 high (tessellation/1263): V0 = 10 (62.1667 x 21 - pi 21^2/4) = 9591.394099. s = 10, the wall's full height (the owner's ruling of 2026-10-30 (d7): a chamfer that reaches or runs past a rim builds). The blend's section in (rho, z) about the wall's axis, the triangle (rho - 21) + (10 - z) <= s, is swept round it from the front face (square to the arc) to the back face y = 0, which the arc runs into tangent at the tip: at radius rho the part spans the angle asin(21/rho), so the blend takes Int_21^31 rho asin(21/rho) h(rho) drho with h(rho) = s - (rho - 21), integrated as Int u (21/sin u) h(21/sin u) 21 cos u / sin^2 u du over u = asin(21/rho) in [asin(21/31), pi/2] (smooth there), Gauss-Legendre 30 points on 64 pieces, converged to the last digit: 1303.400331. V = 8287.993768",
+ "body_count": 1,
+ "volume_mm3": 8287.993767991788,
+ "bbox": null,
+ "continuity": {
+  "order": "g0"
+ }
+}

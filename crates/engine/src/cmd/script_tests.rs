@@ -103,12 +103,13 @@ fn ids_names_suppression_marker_and_failures_survive() {
     run(&mut s, "parameters.add", json!({"name": "twice_depth", "expression": format!("{depth} * 2")}));
     run(&mut s, "parameters.comment", json!({"name": depth, "comment": "plate depth"}));
     run(&mut s, "parameters.favorite", json!({"name": depth}));
-    // A fillet that a parameter change makes too big fails, and the design keeps it.
+    // A fillet that a parameter change makes impossible (a radius below zero) fails, and the
+    // design keeps it. (A convex round wider than its faces is built now, by subtraction.)
     run(&mut s, "parameters.add", json!({"name": "r", "expression": "1 mm"}));
     // Pick only the plate's edge, clear of the overlapping box's edge.
     run(&mut s, "solid.fillet", json!({"edges": [[20, 0, 10]], "radius": "r"}));
     let fillet = s.doc.features.last().unwrap().id;
-    run(&mut s, "parameters.change", json!({"name": "r", "expression": "50 mm"}));
+    run(&mut s, "parameters.change", json!({"name": "r", "expression": "-1 mm"}));
     assert!(s.model.result(fillet).and_then(|r| r.error.clone()).is_some(), "the fillet fails");
     run(&mut s, "timeline.rollback", json!({"position": 3}));
     let mut t = replay(&script(&mut s));

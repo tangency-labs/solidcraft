@@ -1,0 +1,8 @@
+{
+ "sources": [],
+ "what": "a comb with no curve, edge or face",
+ "source": "analytic",
+ "method": "box 40 x 30 x 20 with a corner at the origin; nothing picked: refused",
+ "outcome": "refused",
+ "refusal": "give `curves`, `edges` or `faces`"
+}

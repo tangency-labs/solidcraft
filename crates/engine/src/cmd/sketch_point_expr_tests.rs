@@ -2,7 +2,8 @@
 //! where it comes to, and the point follows the parameters without a dimension or a solve.
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 
 use crate::Session;
 

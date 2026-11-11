@@ -1,0 +1,30 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "radius": 10,
+    "height": 20,
+    "body_name": "Part"
+   }
+  },
+  {
+   "command": "solid.chamfer",
+   "params": {
+    "edges": [
+     [
+      10,
+      0,
+      20
+     ]
+    ],
+    "distance": 2
+   }
+  }
+ ]
+}

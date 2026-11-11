@@ -1,0 +1,15 @@
+#### UB-68. `SmPlane` hazards
+- **Severity:** Crash / undefined behaviour
+- **Area:** Surfaces and volumes
+- **Location:**
+  - `SmPlane.cpp:1536` `SmPlane::Evaluate`: `lHighestVDeriv - k` wraps as a `ULONG` with `bOnlyUpperHalf` and more u than v derivatives, and writes outside the array.
+  - `SmPlane.cpp:83` `SmPlane(Origin, Normal)`: with `|n|^2 < SM_EFF_ZERO_SQ`, `MakeUnitOrthoVectors` fails, the status is ignored and the axes stay uninitialised.
+  - `SmBSplineSurfaceNLib.cpp:7223` `SmBSplineSurface::Reverse` and `SmPlane.cpp:4285` `SmPlane::RebuildSTEPFromNURBParameters`: on a plane whose NURB cannot be made (degenerate or inverted domain), they pass a NULL NURB to `N_SrfReverse` / `EvaluatePoint`.
+- **What happens:** Out-of-bounds write, uninitialised axes, NULL dereference.
+- **Trigger:** `SmPlane(O, (0,0,1e-13))`; `Reverse` on a plane with an inverted domain.
+- **How found:** read during porting (review of `surface.plane_p1`).
+- **Confirmed:** no.
+- **Severity:** crash/UB.
+- **Rust port:** Returns `InvalidInput` / `SM_ERR`.
+- **Fuzz sweep trigger (2026-10-20):** two more NULL-NURB paths. `SmBSplineSurface::Transform` (`SmBSplineSurface.cpp:5299`, `N_SrfTransform(GetOrCreateGwNurbPointer(), ..)`) on a bounded plane with an inverted domain (`u0 = 2147483648 > u1 = 5`; `v1 = -0.0 < v0 = 4`), and `SmPlane::IntersectWithPlane` (`SmPlane.cpp:2191`-`2192`, `:2274`, `:2284`) of non-parallel planes, which boxes a bounded plane with an empty or inverted domain through `SmBSplineSurface::CalculateBoundingBox` (`SmBSplineSurface.cpp:489`-`490` reads `->net`). `surface.plane_p2` `fuzz00149`, `fuzz00896`, `fuzz01393`, `fuzz01926`. Confirmed: yes (segfault). The `surface.plane_p2` FFI rejects both (`nurb_less`, `bounded_nurb_less`).
+- **Fuzz sweep trigger (2026-10-20):** the surface cache of a plane with an inverted domain passes the NULL `m_pNurb` to `sm_CreateBezierPatchBlock` (`SmSurfaceCache.cpp:5042`, dereferenced at `:4795`) (`intersect.surface_intersector_p5` `fuzz-out/n2000/intersect.surface_intersector_p5/fuzz00950.json`, `/a/domain/2 = -1.0`; SIGSEGV, confirmed yes). Guards: `crates/solidcore-ffi/src/units/intersect_surface_intersector_p5.rs:238`, `crates/solidcore-ffi/src/units/intersect_surface_drop_lib_p2.rs:387`.

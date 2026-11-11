@@ -1,0 +1,14 @@
+{
+  "sources": [
+    "tangency-labs/solidcraft#818"
+  ],
+  "what": "a blind hole cut into a ring whose six concave corners are filleted: the cut used to split every vertical edge (the outer seam and all twelve fillet tangent edges) at the hole's depth, and the fillet corners drew black",
+  "source": "analytic",
+  "method": "Ring: circle d=55 less the hexagon inscribed in r=25 (vertex at (0,25)), 10 mm tall. Hexagon area 3 sqrt(3)/2 25^2 = 1623.798. Each of its six concave corners (interior angle 120 deg) filled by a 4 mm round gains t r - r^2 (pi-120deg)/2 = 0.8600 (tangent length t = r/tan 60 = 2.3094). Plan area A_p = pi 27.5^2 - hexagon + 6 gain = 757.192. The hole d=3, 3 deep at (24,0) lies between the hexagon's flat (x=21.65) and the rim: V = 10 A_p - pi 1.5^2 3 = 7550.714. Area = top + bottom (2 A_p, the hole's floor replaces what its opening removes from the top) + outer wall 2 pi 27.5 10 + inner wall 10 (6 (25-2t) + 6 r (pi - 120deg)) + hole wall 2 pi 1.5 3 = 4744.733. Faces: 8 cylinders (outer, 6 rounds, hole) and 9 planes (top, bottom, 6 hexagon flats, hole floor). Edges, counting each whole curve once and each cylinder's seam (a whole circle is one closed edge): top 1+12+1, bottom 1+12, vertical 12 tangent edges, hole floor 1, seams of the outer wall and the hole wall 2 = 42; vertices 28.",
+  "body_count": 1,
+  "volume_mm3": 7550.714,
+  "area_mm2": 4744.733,
+  "faces": 17,
+  "edges": 42,
+  "vertices": 28
+}

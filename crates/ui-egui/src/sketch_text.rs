@@ -2,13 +2,15 @@
 //! sketch text's outlines; OK runs `sketch.edit_text`. The canvas follows the fields as they
 //! change (live `sketch.edit_text`); the whole edit is one undo step and Cancel puts the text
 //! back. The Text tool places a text and opens this dialog on it, so a new text is typed here too.
+use crate::ui_kit::BackingTooltipExt as _;
+use solidcraft_engine::geom::prelude::*;
 use std::sync::{Arc, OnceLock};
 
 use serde_json::{Value, json};
 use solidcraft_engine::{
     Sel,
     doc::expr::Kind as ValueKind,
-    sketch::{LinkKind, LinkSource, TextAlign, TextStyle},
+    sketch::{LinkKind, LinkSource, TextAlign, TextStyle, TextVerticalAlign},
 };
 
 use crate::SolveApp;
@@ -86,7 +88,7 @@ const PLACEHOLDER: &str = "Text";
 /// Resolve an outline or filled letter only when all its boundaries belong to one text.
 pub(crate) fn entity_for_selection(app: &SolveApp, selection: &Sel) -> Option<String> {
     let sid = app.session.active_sketch?;
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let ss = state.sketch(sid)?;
     let ids = match selection {
         Sel::SketchCurve { id, .. } => vec![id.clone()],
@@ -132,7 +134,7 @@ pub(crate) fn one_letter() -> bool {
 /// letter is picked whole. The letters' counters (the inside of an O) are left out; inside one,
 /// a letter is a letter again. The picked profile comes first when it is a letter.
 pub(crate) fn text_profiles(s: &solidcraft_engine::Session, sketch: u64, index: usize) -> Option<Vec<usize>> {
-    let state = s.world_state();
+    let state = crate::open_meshing::session_world(s);
     let ss = state.sketch(sketch)?;
     // The text bounding a profile, with or without other curves; whether only it bounds it.
     let text_of = |profile: &solidcraft_engine::sketch::Profile| -> Option<(String, bool)> {
@@ -345,7 +347,7 @@ pub(crate) fn open(app: &mut SolveApp, entity: &str) {
 /// The Text tool's click: put a placeholder text down at `at` (sketch coordinates) and open
 /// Edit Text on it, its text selected so that typing replaces it. Cancel takes it away again;
 /// OK keeps it as one undo step.
-pub(crate) fn place(app: &mut SolveApp, at: solidcraft_engine::geom::Vec2, height: f64) {
+pub(crate) fn place(app: &mut SolveApp, at: solidcore_record::Vec2, height: f64) {
     let Some(checkpoint) = app.session.execute("edit.checkpoint", &json!({})).ok().and_then(|r| r["checkpoint"].as_u64()) else { return };
     let placed = app.run("sketch.text", json!({"text": PLACEHOLDER, "at": [at.x, at.y], "height": height}));
     let curve = placed.as_ref().ok().and_then(|v| v["curves"].get(0)?.as_str().map(str::to_owned));
@@ -504,11 +506,11 @@ fn font_has_bold_face(name: &str) -> bool {
 /// starts a new line there). `inputs` and `active`: the dialog's Path input.
 pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], active: &mut usize) -> bool {
     let mut enter = false;
-    let id = egui::Id::new("sketch_text_content");
+    let id = egui::Id::unique("sketch_text_content");
     if ui.memory(|m| m.has_focus(id)) {
         enter |= ui.input_mut(|i| !i.modifiers.shift && i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
     }
-    let response = ui_kit::multiline_text_field(ui, "Text", id, &mut k.text).on_hover_text(crate::i18n::tr("sketch_text.formula"));
+    let response = ui_kit::multiline_text_field(ui, "Text", id, &mut k.text).backing_on_hover_text(solidcraft_ui_text::tr("sketch_text.formula"));
     crate::scenario::publish_handle("dialog:Text", response.rect.center());
     if k.focus {
         response.request_focus();
@@ -523,15 +525,20 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
         k.style.bold = false;
     }
     ui_kit::row(ui, "Font", |ui| font_row(ui, k));
-    ui_kit::row(ui, "Style", |ui| ui_kit::text_emphasis(ui, &mut k.style.bold, &mut k.style.italic, font_has_bold));
+    let emphasis = ui_kit::EmphasisLabels {
+        bold: solidcraft_ui_text::tr("sketch_text.bold"),
+        italic: solidcraft_ui_text::tr("sketch_text.italic"),
+        no_bold: solidcraft_ui_text::tr("sketch_text.no_bold"),
+    };
+    ui_kit::row(ui, "Style", |ui| ui_kit::text_emphasis(ui, &mut k.style.bold, &mut k.style.italic, font_has_bold, &emphasis));
     ui_kit::row(ui, "Alignment", |ui| {
         let mut selected = match k.style.align {
             TextAlign::Left => 0,
             TextAlign::Center => 1,
             TextAlign::Right => 2,
         };
-        let labels = ["sketch_text.align_left", "sketch_text.align_center", "sketch_text.align_right"].map(crate::i18n::tr);
-        ui_kit::segmented(ui, &mut selected, &labels, ui_kit::Segments { compact: true, ..Default::default() });
+        let labels = ["sketch_text.align_left", "sketch_text.align_center", "sketch_text.align_right"].map(solidcraft_ui_text::tr);
+        ui_kit::segmented(ui, &mut selected, &labels, ui_kit::Segments { compact: true, glyphs: Some(&paragraph_glyph), ..Default::default() });
         k.style.align = match selected {
             1 => TextAlign::Center,
             2 => TextAlign::Right,
@@ -543,6 +550,26 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
             }
         }
     });
+    ui_kit::row(ui, "Vertical", |ui| {
+        const ORDER: [TextVerticalAlign; 4] =
+            [TextVerticalAlign::Baseline, TextVerticalAlign::Top, TextVerticalAlign::Middle, TextVerticalAlign::Bottom];
+        let mut selected = ORDER.iter().position(|v| *v == k.style.vertical_align).unwrap_or(0);
+        let labels = ["sketch_text.valign_baseline", "sketch_text.valign_top", "sketch_text.valign_middle", "sketch_text.valign_bottom"]
+            .map(solidcraft_ui_text::tr);
+        // Four worded segments do not fit the dialog's width: each shows "Ag" with a line where the anchor is.
+        let glyph = |p: &egui::Painter, r: egui::Rect, i: usize, ink: egui::Color32| {
+            vertical_glyph(p, r, ORDER.get(i).copied().unwrap_or_default(), ink);
+        };
+        ui_kit::segmented(ui, &mut selected, &labels, ui_kit::Segments { compact: true, glyphs: Some(&glyph), ..Default::default() });
+        k.style.vertical_align = ORDER.get(selected).copied().unwrap_or_default();
+        for (label, handle) in
+            labels.iter().zip(["dialog:Vertical baseline", "dialog:Vertical top", "dialog:Vertical middle", "dialog:Vertical bottom"])
+        {
+            if let Some(at) = crate::scenario::handle_at(&format!("dialog:Vertical:{label}")) {
+                crate::scenario::publish_handle(handle, at);
+            }
+        }
+    });
     // On a path the curve places the text: X, Y and the angle do not.
     let on_path = k.style.path.is_some();
     let (xy, rest) = k.values.split_at_mut(2);
@@ -550,7 +577,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
         let response = ui.add_enabled_ui(!on_path, |ui| ui_kit::value_pair(ui, "Position", [x, y], ["X", "Y"], None));
         enter |= response.inner;
         if on_path {
-            response.response.on_disabled_hover_text(crate::i18n::tr("sketch_text.on_path"));
+            response.response.backing_on_disabled_hover_text(solidcraft_ui_text::tr("sketch_text.on_path"));
         }
     }
     for (i, (label, value)) in LABELS.iter().skip(2).zip(rest).enumerate() {
@@ -558,7 +585,7 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
         let response = ui.add_enabled_ui(!(on_path && index == ANGLE), |ui| ui_kit::row(ui, label, |ui| ui_kit::field(ui, value)));
         enter |= response.inner;
         if on_path && index == ANGLE {
-            response.response.on_disabled_hover_text(crate::i18n::tr("sketch_text.on_path"));
+            response.response.backing_on_disabled_hover_text(solidcraft_ui_text::tr("sketch_text.on_path"));
         }
     }
     path_row(ui, k, inputs, active);
@@ -570,9 +597,10 @@ pub(crate) fn rows(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], activ
 fn path_row(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], active: &mut usize) {
     ui_kit::row(ui, "Path", |ui| {
         let on = k.style.path.is_some();
-        let text = if on { crate::i18n::format("dialog.selected_count", &[("count", "1")]) } else { crate::i18n::tr("dialog.select").into() };
+        let text =
+            if on { solidcraft_ui_text::format("dialog.selected_count", &[("count", "1")]) } else { solidcraft_ui_text::tr("dialog.select").into() };
         let chip = ui_kit::selection_field(ui, &text, ui_kit::Selection { active: k.picking, filled: on })
-            .on_hover_text(crate::i18n::tr("sketch_text.path_hint"));
+            .backing_on_hover_text(solidcraft_ui_text::tr("sketch_text.path_hint"));
         let chip_rect = chip.rect;
         crate::scenario::publish_handle("dialog:Path", chip.rect.center());
         if chip.clicked() {
@@ -580,7 +608,7 @@ fn path_row(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], active: &mut
             *active = 0;
         }
         if on {
-            let size = crate::theme::Tokens::get().space_24;
+            let size = solidcraft_theme::Tokens::get().space_24;
             let rect = egui::Rect::from_center_size(egui::pos2(chip_rect.right() - size / 2.0, chip_rect.center().y), egui::vec2(size, size));
             let clear = ui_kit::icon_button_at(ui, rect, "close", "sketch_text.path_clear");
             crate::scenario::publish_handle("dialog:Path clear", clear.rect.center());
@@ -595,7 +623,7 @@ fn path_row(ui: &mut egui::Ui, k: &mut Tx, inputs: &mut [SelInput], active: &mut
     });
     if k.style.path.is_some() {
         ui_kit::section(ui, "path_options", "Options", true, |ui| {
-            let reverse = ui_kit::checkbox(ui, crate::i18n::tr_label("Reverse"), &mut k.style.reverse);
+            let reverse = ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("Reverse"), &mut k.style.reverse);
             crate::scenario::publish_handle("dialog:Reverse", reverse.rect.center());
         });
     }
@@ -634,15 +662,53 @@ fn is_font_file(s: &str) -> bool {
 }
 
 /// The application supplies families/file recognition; the kit owns search and list widgets.
+/// The symbol of a horizontal alignment (0 left, 1 centre, 2 right): three lines of a paragraph set that way.
+fn paragraph_glyph(p: &egui::Painter, r: egui::Rect, align: usize, ink: egui::Color32) {
+    let t = solidcraft_theme::Tokens::get();
+    let width = r.width().min(t.space_16 + t.space_2);
+    let stroke = egui::Stroke::new(1.5, ink);
+    for (row, share) in [1.0_f32, 0.6, 0.8].into_iter().enumerate() {
+        let length = width * share;
+        let left = match align {
+            0 => r.center().x - width / 2.0,
+            1 => r.center().x - length / 2.0,
+            _ => r.center().x + width / 2.0 - length,
+        };
+        p.hline(left..=left + length, r.center().y + (row as f32 - 1.0) * t.space_4, stroke);
+    }
+}
+
+/// The symbol of a vertical alignment: "Ag" with an accent line where the text's anchor is, at the
+/// capitals' tops, halfway down them, on the baseline or under the g's tail.
+fn vertical_glyph(p: &egui::Painter, r: egui::Rect, align: TextVerticalAlign, ink: egui::Color32) {
+    let t = solidcraft_theme::Tokens::get();
+    let size = t.font_label;
+    let galley = p.layout_no_wrap("Ag".to_owned(), crate::ui_kit::type_face::semibold(size), ink);
+    let at = r.center() - galley.size() / 2.0;
+    // The baseline: where the first row's glyphs stand, else an estimate from the font size.
+    let baseline = galley.rows.first().and_then(|row| row.row.glyphs.first().map(|g| row.pos.y + g.pos.y)).unwrap_or(galley.size().y * 0.8);
+    let base = at.y + baseline;
+    let cap = size * 0.72;
+    let y = match align {
+        TextVerticalAlign::Top => base - cap,
+        TextVerticalAlign::Middle => base - cap / 2.0,
+        TextVerticalAlign::Baseline => base,
+        TextVerticalAlign::Bottom => base + size * 0.24,
+    };
+    let half = (galley.size().x / 2.0 + t.space_3).min(r.width() / 2.0);
+    p.galley(at, galley, ink);
+    p.hline(r.center().x - half..=r.center().x + half, y, egui::Stroke::new(1.5, t.accent));
+}
+
 fn font_row(ui: &mut egui::Ui, k: &mut Tx) {
-    let builtin = crate::i18n::format("sketch_text.builtin_font", &[("family", solidcraft_engine::sketch::DEFAULT_FONT_FAMILY)]);
+    let builtin = solidcraft_ui_text::format("sketch_text.builtin_font", &[("family", solidcraft_engine::sketch::DEFAULT_FONT_FAMILY)]);
     let current = if k.font.trim().is_empty() { builtin.clone() } else { k.font.clone() };
     let families = families(ui.ctx());
     let mut options = vec![ui_kit::SearchOption { value: "", label: &builtin, handle: Some("dialog:Font built-in") }];
     if let Some(list) = &families {
         options.extend(list.iter().map(|family| ui_kit::SearchOption { value: family, label: family, handle: None }));
     }
-    let custom = is_font_file(&k.font_filter).then(|| crate::i18n::format("sketch_text.use_font_file", &[("path", k.font_filter.trim())]));
+    let custom = is_font_file(&k.font_filter).then(|| solidcraft_ui_text::format("sketch_text.use_font_file", &[("path", k.font_filter.trim())]));
     if let Some(font) = ui_kit::searchable_dropdown(
         ui,
         "sketch_text_font",
@@ -650,7 +716,7 @@ fn font_row(ui: &mut egui::Ui, k: &mut Tx) {
         &mut k.font_filter,
         &options,
         custom.as_deref(),
-        families.is_none().then(|| crate::i18n::tr("sketch_text.loading_fonts")),
+        families.is_none().then(|| solidcraft_ui_text::tr("sketch_text.loading_fonts")),
     ) {
         k.font = font;
         k.font_filter.clear();
@@ -703,10 +769,17 @@ fn edit_params(app: &SolveApp, k: &Tx) -> Result<Value, String> {
         TextAlign::Center => "center",
         TextAlign::Right => "right",
     };
+    let vertical_align = match k.style.vertical_align {
+        TextVerticalAlign::Baseline => "baseline",
+        TextVerticalAlign::Top => "top",
+        TextVerticalAlign::Middle => "middle",
+        TextVerticalAlign::Bottom => "bottom",
+    };
     let bold = k.style.bold && font_has_bold_face(&k.font);
     let mut params = json!({
         "link": k.link, "at": [sent_x, sent_y], "height": sent_height,
         "bold": bold, "italic": k.style.italic, "align": align,
+        "vertical_align": vertical_align,
         "letter_spacing": letter_spacing, "line_spacing": line_spacing,
         "path": k.style.path.clone().unwrap_or_default(), "reverse": k.style.reverse,
     });
@@ -755,7 +828,7 @@ mod tests {
         h.app.cam.distance = 25.0;
         h.frames(3);
         let sid = h.app.session.active_sketch.unwrap();
-        let at = h.app.session.world_state().sketch(sid).unwrap().profiles[0].centroid;
+        let at = h.app.session.world_state().unwrap().sketch(sid).unwrap().profiles[0].centroid;
         let [x, y] = h.at(&json!({"sketch":[at.x,at.y]})).unwrap();
         h.call("ui.menu", json!({"x":x,"y":y}));
         h.frames(3);
@@ -790,7 +863,7 @@ mod tests {
         };
         let before = outline(&h);
         assert!(before.len() > 4 && before.iter().all(|(_, l)| l.as_deref() == Some(link.as_str())));
-        let profiles = h.app.session.world_state().sketch(sid).unwrap().profiles.len();
+        let profiles = h.app.session.world_state().unwrap().sketch(sid).unwrap().profiles.len();
         h.app.session.selection = vec![Sel::SketchCurve { id: before[0].0.clone(), sketch: None }];
         let undo = h.app.session.undo.len();
         let item = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport)
@@ -805,7 +878,7 @@ mod tests {
         assert!(after.iter().all(|(_, l)| l.is_none()), "no outline belongs to the text");
         let sk = h.app.session.doc.sketch(sid).unwrap();
         assert!(sk.link(&link).is_none(), "the text is gone");
-        assert_eq!(h.app.session.world_state().sketch(sid).unwrap().profiles.len(), profiles, "the letters still make the same profiles");
+        assert_eq!(h.app.session.world_state().unwrap().sketch(sid).unwrap().profiles.len(), profiles, "the letters still make the same profiles");
         assert_eq!(h.app.session.undo.len(), undo + 1);
         // No longer text: nothing to edit or explode.
         assert!(selected_entity(&h.app).is_none());
@@ -822,7 +895,7 @@ mod tests {
         h.app.cam.distance = 25.0;
         h.frames(3);
         let sid = h.app.session.active_sketch.unwrap();
-        let at = h.app.session.world_state().sketch(sid).unwrap().profiles[0].centroid;
+        let at = h.app.session.world_state().unwrap().sketch(sid).unwrap().profiles[0].centroid;
         h.step(&json!({"start":"sketch.edit_text"})).unwrap();
         h.step(&json!({"click":{"sketch":[at.x,at.y]}})).unwrap();
         assert_eq!(tx(&h.app).link, link);
@@ -833,12 +906,12 @@ mod tests {
         let (mut h, link, _) = setup();
         h.app.run("sketch.edit_text", json!({"link":link,"text":"O"})).unwrap();
         let sid = h.app.session.active_sketch.unwrap();
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let profile = state.sketch(sid).unwrap().profiles.iter().position(|p| !p.hole_curves.is_empty()).unwrap();
         let selection = Sel::Profile { sketch: sid, index: profile };
         assert!(entity_for_selection(&h.app, &selection).is_some());
         h.app.run("sketch.text", json!({"text":"I","at":[20,0],"height":10})).unwrap();
-        let profiles = h.app.session.world_state().sketch(sid).unwrap().profiles.len();
+        let profiles = h.app.session.world_state().unwrap().sketch(sid).unwrap().profiles.len();
         h.app.session.selection = (0..profiles).map(|index| Sel::Profile { sketch: sid, index }).collect();
         assert!(selected_entity(&h.app).is_none());
         assert!(entity_for_selection(&h.app, &Sel::Profile { sketch: sid + 1, index: 0 }).is_none());
@@ -849,7 +922,7 @@ mod tests {
         let (mut h, _, _) = setup();
         h.app.run("sketch.line", json!({"points":[[-10,3],[10,3]]})).unwrap();
         let sid = h.app.session.active_sketch.unwrap();
-        let count = h.app.session.world_state().sketch(sid).unwrap().profiles.len();
+        let count = h.app.session.world_state().unwrap().sketch(sid).unwrap().profiles.len();
         assert!(count >= 2);
         for index in 0..count {
             assert!(entity_for_selection(&h.app, &Sel::Profile { sketch: sid, index }).is_none());
@@ -894,7 +967,7 @@ mod tests {
         let sk = h.app.session.doc.sketch(sid).unwrap();
         let expected = LinkSource::Text {
             text: "O".into(),
-            at: solidcraft_engine::geom::Vec2::new(25.0, 12.0),
+            at: solidcore_record::Vec2::new(25.0, 12.0),
             height: 20.0,
             angle: std::f64::consts::FRAC_PI_2,
             font: None,
@@ -902,7 +975,7 @@ mod tests {
             exprs: Default::default(),
         };
         assert_eq!(sk.link(&link).unwrap().source, expected);
-        assert!(!h.app.session.world_state().sketch(sid).unwrap().profiles.is_empty());
+        assert!(!h.app.session.world_state().unwrap().sketch(sid).unwrap().profiles.is_empty());
         let changed = h.app.session.doc.to_json();
         let reopened = solidcraft_engine::Session::new(solidcraft_engine::doc::Document::from_json(&changed).unwrap());
         assert_eq!(reopened.doc.sketch(sid).unwrap().link(&link).unwrap().source, expected);
@@ -963,7 +1036,7 @@ mod tests {
         };
         let area = |h: &Harness| -> f64 {
             let sid = h.app.session.active_sketch.unwrap();
-            h.app.session.world_state().sketch(sid).unwrap().profiles.iter().map(|p| p.area).sum()
+            h.app.session.world_state().unwrap().sketch(sid).unwrap().profiles.iter().map(|p| p.area).sum()
         };
         assert!((area(&h) - 13.5557).abs() < 2e-3);
         h.app.start("sketch.edit_text");
@@ -1089,10 +1162,10 @@ mod tests {
         h.frames(2);
         h.step(&json!({"click":{"handle":"menu:report"}})).unwrap();
         h.frames(3);
-        let token = h.app.shot_token;
+        let token = h.app.shots.token;
         crate::issue_report::receive(&mut h.app, token, std::sync::Arc::new(egui::ColorImage::new([2, 2], vec![egui::Color32::GREEN; 4])));
         h.frames(3);
-        let focus = egui::Id::new("issue_report_title");
+        let focus = egui::Id::unique("issue_report_title");
         h.ctx.memory_mut(|memory| memory.request_focus(focus));
         h.frames(2);
         assert_eq!(h.ctx.memory(|memory| memory.focused()), Some(focus));
@@ -1314,7 +1387,7 @@ mod tests {
         // A placeholder is down at once, Edit Text is open on it with the text selected, and the tool has ended.
         assert!(editing(&h.app));
         assert!(h.app.tool.is_none());
-        let at = solidcraft_engine::geom::Vec2::new(5.0, 5.0);
+        let at = solidcore_record::Vec2::new(5.0, 5.0);
         assert!(matches!(texts(&h).as_slice(), [LinkSource::Text { text, at: a, .. }] if text == PLACEHOLDER && a.dist(at) < 1e-9));
         // Typing replaces it, and the canvas follows every key.
         h.step(&json!({"text":"Hi"})).unwrap();
@@ -1403,7 +1476,7 @@ mod tests {
         h.app.cam.distance = 60.0;
         h.frames(3);
         let sid = h.app.session.active_sketch.unwrap();
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let profiles = &state.sketch(sid).unwrap().profiles;
         assert_eq!(profiles.len(), 3);
         let sorted = |v: &[String]| {
@@ -1439,29 +1512,29 @@ mod tests {
     fn a_text_crossed_by_an_edge_is_picked_whole() {
         let (mut h, sid, i, _, _) = letters();
         let area = |h: &Harness, picked: &[usize]| {
-            let state = h.app.session.world_state();
+            let state = h.app.session.world_state().unwrap();
             let profiles = &state.sketch(sid).unwrap().profiles;
             picked.iter().map(|&k| profiles[k].region.area()).sum::<f64>()
         };
         let whole = area(&h, &text_profiles(&h.app.session, sid, i).unwrap());
         // The I's stem, below where the rectangle's top will cross it.
-        let stem = solidcraft_engine::geom::Vec2::new(h.app.session.world_state().sketch(sid).unwrap().profiles[i].centroid.x, 2.0);
+        let stem = solidcore_record::Vec2::new(h.app.session.world_state().unwrap().sketch(sid).unwrap().profiles[i].centroid.x, 2.0);
         h.app.run("sketch.rectangle.two_point", json!({"p0":[-5,-5],"p1":[40,8]})).unwrap();
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let profiles = &state.sketch(sid).unwrap().profiles;
         let below = solidcraft_engine::sketch::profile_at_point(profiles, stem).unwrap();
         let picked = text_profiles(&h.app.session, sid, below).unwrap();
         assert_eq!(picked[0], below);
         assert!(picked.len() > 2, "the letters are cut in pieces: {picked:?}");
         assert!((area(&h, &picked) - whole).abs() < 1e-5 * whole, "{} {whole}", area(&h, &picked));
-        let round = solidcraft_engine::sketch::profile_at_point(profiles, solidcraft_engine::geom::Vec2::new(-3.0, -3.0)).unwrap();
+        let round = solidcraft_engine::sketch::profile_at_point(profiles, solidcore_record::Vec2::new(-3.0, -3.0)).unwrap();
         assert!(text_profiles(&h.app.session, sid, round).is_none());
     }
 
     #[test]
     fn clicking_a_letter_selects_the_whole_text_for_an_extrude() {
         let (mut h, sid, i, ring, _) = letters();
-        let at = h.app.session.world_state().sketch(sid).unwrap().profiles[i].centroid;
+        let at = h.app.session.world_state().unwrap().sketch(sid).unwrap().profiles[i].centroid;
         h.step(&json!({"click":{"sketch":[at.x,at.y]}})).unwrap();
         h.frames(2);
         let has = |sel: &[Sel], index: usize| sel.iter().any(|s| matches!(s, Sel::Profile { sketch, index: x } if *sketch == sid && *x == index));
@@ -1489,7 +1562,7 @@ mod tests {
     #[test]
     fn shift_clicking_a_letter_selects_that_letter_alone() {
         let (mut h, sid, i, ring, _) = letters();
-        let at = h.app.session.world_state().sketch(sid).unwrap().profiles[i].centroid;
+        let at = h.app.session.world_state().unwrap().sketch(sid).unwrap().profiles[i].centroid;
         h.step(&json!({"click":{"sketch":[at.x,at.y]},"shift":true})).unwrap();
         h.frames(2);
         assert_eq!(h.app.session.selection, vec![Sel::Profile { sketch: sid, index: i }]);
@@ -1519,12 +1592,14 @@ mod tests {
         h.frames(3);
         h.step(&json!({"click":{"handle":"dialog:Italic"}})).unwrap();
         h.step(&json!({"click":{"handle":"dialog:Align center"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:Vertical middle"}})).unwrap();
         replace(&mut h, "dialog:Letter Spacing", "1.5");
         replace(&mut h, "dialog:Line Spacing", "1.25");
         h.frames(2);
         // On the canvas before OK.
         let live = style_of(&h, &link);
         assert!(live.italic && !live.bold && live.align == TextAlign::Center, "{live:?}");
+        assert_eq!(live.vertical_align, TextVerticalAlign::Middle, "{live:?}");
         assert_eq!((live.letter_spacing, live.line_spacing), (1.5, 1.25));
         ok(&mut h);
         assert!(!editing(&h.app));
@@ -1588,7 +1663,7 @@ mod tests {
         h.frames(3);
         assert_eq!(tx(&h.app).style.path.as_deref(), Some(line.as_str()));
         assert_eq!(style_of(&h, &link).path.as_deref(), Some(line.as_str()));
-        let state = h.app.session.world_state();
+        let state = h.app.session.world_state().unwrap();
         let sk = &state.sketch(sid).unwrap().sketch;
         let low = sk.link_curves(&link).into_iter().flat_map(|ci| sk.polyline(ci)).map(|p| p.y).fold(f64::MAX, f64::min);
         assert!((low + 30.0).abs() < 1e-6, "on the line: {low}");

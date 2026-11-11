@@ -1,0 +1,10 @@
+{
+ "sources": [],
+ "what": "three pipes R4 at 120 degrees in a plane, their intersection edges rounded 1",
+ "source": "invariants",
+ "method": "no closed form for the round on these quadrics' intersection: one valid closed body whose round meets its faces G1",
+ "body_count": 1,
+ "continuity": {
+  "order": "g1"
+ }
+}

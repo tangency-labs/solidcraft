@@ -1,0 +1,11 @@
+{
+ "commands": [
+  {
+   "command": "solid.torus",
+   "params": {
+    "major": 20,
+    "minor": 5
+   }
+  }
+ ]
+}

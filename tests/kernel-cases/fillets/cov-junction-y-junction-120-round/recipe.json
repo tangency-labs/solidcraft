@@ -1,0 +1,87 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 4.0,
+    "height": 30,
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     6.123233995736766e-17,
+     1.0,
+     0
+    ],
+    "body_name": "Y"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 4.0,
+    "height": 30,
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     -0.8660254037844386,
+     -0.5000000000000001,
+     0
+    ],
+    "operation": "join",
+    "targets": [
+     "Y"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 4.0,
+    "height": 30,
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "axis": [
+     0.8660254037844384,
+     -0.5000000000000004,
+     0
+    ],
+    "operation": "join",
+    "targets": [
+     "Y"
+    ]
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      -2.4492935982947064e-16,
+      -4.0,
+      2.0
+     ],
+     [
+      3.4641016151377544,
+      2.0000000000000004,
+      2.0
+     ],
+     [
+      -3.4641016151377535,
+      2.0000000000000018,
+      2.0
+     ]
+    ],
+    "radius": 1
+   }
+  }
+ ]
+}

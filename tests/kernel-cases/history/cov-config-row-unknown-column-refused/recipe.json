@@ -1,0 +1,14 @@
+{
+ "base": "../cov-config-configure-default-row",
+ "commands": [
+  {
+   "command": "config.row",
+   "params": {
+    "name": "Deep",
+    "values": {
+     "Depth": "5 mm"
+    }
+   }
+  }
+ ]
+}

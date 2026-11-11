@@ -1,0 +1,213 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 23,
+    "height": 20,
+    "base": [
+     0,
+     0,
+     0
+    ],
+    "body_name": "Hub"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 21.5,
+    "height": 22,
+    "base": [
+     0,
+     0,
+     -1
+    ],
+    "operation": "cut",
+    "targets": [
+     "Hub"
+    ]
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 1,
+    "height": 15,
+    "base": [
+     22.2,
+     0.0,
+     10
+    ],
+    "axis": [
+     1.0,
+     0.0,
+     0
+    ],
+    "body_name": "Blade1"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 1,
+    "height": 15,
+    "base": [
+     17.006186637,
+     14.269884935,
+     10
+    ],
+    "axis": [
+     0.766044443119,
+     0.642787609687,
+     0
+    ],
+    "body_name": "Blade2"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 1,
+    "height": 15,
+    "base": [
+     3.854989544,
+     21.862732117,
+     10
+    ],
+    "axis": [
+     0.173648177667,
+     0.984807753012,
+     0
+    ],
+    "body_name": "Blade3"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 1,
+    "height": 15,
+    "base": [
+     -11.1,
+     19.225763964,
+     10
+    ],
+    "axis": [
+     -0.5,
+     0.866025403784,
+     0
+    ],
+    "body_name": "Blade4"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 1,
+    "height": 15,
+    "base": [
+     -20.861176181,
+     7.592847182,
+     10
+    ],
+    "axis": [
+     -0.939692620786,
+     0.342020143326,
+     0
+    ],
+    "body_name": "Blade5"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 1,
+    "height": 15,
+    "base": [
+     -20.861176181,
+     -7.592847182,
+     10
+    ],
+    "axis": [
+     -0.939692620786,
+     -0.342020143326,
+     0
+    ],
+    "body_name": "Blade6"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 1,
+    "height": 15,
+    "base": [
+     -11.1,
+     -19.225763964,
+     10
+    ],
+    "axis": [
+     -0.5,
+     -0.866025403784,
+     0
+    ],
+    "body_name": "Blade7"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 1,
+    "height": 15,
+    "base": [
+     3.854989544,
+     -21.862732117,
+     10
+    ],
+    "axis": [
+     0.173648177667,
+     -0.984807753012,
+     0
+    ],
+    "body_name": "Blade8"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 1,
+    "height": 15,
+    "base": [
+     17.006186637,
+     -14.269884935,
+     10
+    ],
+    "axis": [
+     0.766044443119,
+     -0.642787609687,
+     0
+    ],
+    "body_name": "Blade9"
+   }
+  },
+  {
+   "command": "solid.combine",
+   "params": {
+    "target": "Hub",
+    "tools": [
+     "Blade1",
+     "Blade2",
+     "Blade3",
+     "Blade4",
+     "Blade5",
+     "Blade6",
+     "Blade7",
+     "Blade8",
+     "Blade9"
+    ],
+    "operation": "join"
+   }
+  }
+ ]
+}

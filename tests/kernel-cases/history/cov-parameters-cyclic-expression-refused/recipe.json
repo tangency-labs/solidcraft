@@ -1,0 +1,35 @@
+{
+ "commands": [
+  {
+   "command": "parameters.add",
+   "params": {
+    "name": "A",
+    "expression": "10 mm",
+    "unit": "mm"
+   }
+  },
+  {
+   "command": "parameters.add",
+   "params": {
+    "name": "B",
+    "expression": "A + 5 mm",
+    "unit": "mm"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": "B",
+    "width": 10,
+    "height": 10
+   }
+  },
+  {
+   "command": "parameters.change",
+   "params": {
+    "name": "A",
+    "expression": "B - 5 mm"
+   }
+  }
+ ]
+}

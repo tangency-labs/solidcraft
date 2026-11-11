@@ -88,6 +88,16 @@ impl BloomTask {
         let previous: usize = (0..self.phase).map(|p| if p == 0 || p % 2 == 1 { self.height } else { self.width }).sum();
         (previous + self.line) as u64
     }
+    #[cfg(feature = "raytrace-cpu")]
+    pub(crate) fn next_line_pixels(&self) -> u64 {
+        if self.phase == 7 {
+            0
+        } else if self.phase == 0 || self.phase % 2 == 1 {
+            self.width as u64
+        } else {
+            self.height as u64
+        }
+    }
     /// Every call has bounded line and pixel loops, independent of kernel radius.
     pub fn step(&mut self, lines: usize) -> Result<bool> {
         self.cancel.check()?;

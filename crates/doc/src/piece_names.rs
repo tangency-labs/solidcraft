@@ -57,15 +57,17 @@ fn matching_open(s: &str, close: usize) -> Option<usize> {
     None
 }
 
-/// `s` split at the commas outside brackets (a qualifier's list of faces).
+/// `s` split at the commas outside brackets and parentheses (a qualifier's list of faces).
 fn split_top_level(s: &str) -> Vec<&str> {
     let mut out = Vec::new();
-    let (mut depth, mut from) = (0usize, 0usize);
+    let (mut depth, mut parens, mut from) = (0usize, 0usize, 0usize);
     for (i, b) in s.bytes().enumerate() {
         match b {
             b'[' => depth += 1,
             b']' => depth = depth.saturating_sub(1),
-            b',' if depth == 0 => {
+            b'(' => parens += 1,
+            b')' => parens = parens.saturating_sub(1),
+            b',' if depth == 0 && parens == 0 => {
                 out.extend(s.get(from..i).filter(|x| !x.is_empty()));
                 from = i + 1;
             }
@@ -80,7 +82,13 @@ fn split_top_level(s: &str) -> Vec<&str> {
 /// numbered pieces of older designs), so pieces of a split edge, or of an edge between split
 /// faces, match.
 pub(crate) fn strip_edge_piece(n: &str) -> String {
-    let n = strip_edge_number(n);
+    strip_qualifiers(strip_edge_number(n))
+}
+
+/// A name without any face's piece qualifiers (`#[…]`, and the numbered pieces of older designs),
+/// wherever they are in it: the face a piece name is a piece of, with every face it names
+/// unqualified too. An edge's own number (`~k`) stays.
+pub(crate) fn strip_qualifiers(n: &str) -> String {
     let mut out = String::with_capacity(n.len());
     let bytes = n.as_bytes();
     let mut i = 0;

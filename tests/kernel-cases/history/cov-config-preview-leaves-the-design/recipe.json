@@ -1,0 +1,24 @@
+{
+ "base": "../cov-config-configure-default-row",
+ "commands": [
+  {
+   "command": "config.row",
+   "params": {
+    "name": "Long",
+    "values": {
+     "W": "60 mm"
+    }
+   }
+  },
+  {
+   "command": "config.preview",
+   "params": {
+    "row": "Long"
+   }
+  },
+  {
+   "command": "config.table",
+   "params": {}
+  }
+ ]
+}

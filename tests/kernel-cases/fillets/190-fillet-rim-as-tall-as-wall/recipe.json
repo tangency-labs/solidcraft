@@ -1,0 +1,24 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 13,
+    "height": 2
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "radius": 2,
+    "edges": [
+     [
+      13,
+      0,
+      2
+     ]
+    ]
+   }
+  }
+ ]
+}

@@ -5,7 +5,8 @@
 
 use egui::{Pos2, Stroke};
 use serde_json::{Value, json};
-use solidcraft_engine::geom::Vec2;
+use solidcore_record::Vec2;
+use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::sketch::Sketch;
 
 use crate::SolveApp;
@@ -57,11 +58,11 @@ pub fn rejoin(app: &SolveApp, t: &mut Tool) {
     if t.cmd != LINE && !in_arc_mode(t) {
         return;
     }
-    let Some(Some(current)) = t.pts.last().map(|p| p.1.clone()) else { return };
-    let state = app.session.world_state();
+    let Some((point, Some(current))) = t.pts.last().cloned() else { return };
+    let Ok(state) = app.session.world_state() else { return };
     let Some(ss) = app.session.active_sketch.and_then(|id| state.sketch(id)) else { return };
-    let at = |id: &str| ss.sketch.resolve_point(id).and_then(|p| ss.sketch.point(p));
-    if at(&current).is_some() {
+    let at = |id: &str, point| chain_point(&ss.sketch, id, point);
+    if at(&current, point).is_some() {
         return;
     }
     let mut back = std::mem::take(&mut t.chain.back);
@@ -69,7 +70,7 @@ pub fn rejoin(app: &SolveApp, t: &mut Tool) {
     while let Some(((point, id), curve)) = back.pop() {
         match id {
             None => to = Some(((point, None), curve)),
-            Some(id) => match at(&id) {
+            Some(id) => match at(&id, point) {
                 Some(point) => to = Some(((point, Some(id)), curve)),
                 None => continue,
             },
@@ -87,6 +88,28 @@ pub fn rejoin(app: &SolveApp, t: &mut Tool) {
     t.lined.clear();
     crate::sketch_dims::reset(t);
     t.chain = LineChain { curve, back, ..LineChain::default() };
+}
+
+/// A drawing snap has no point id until the command materializes it. Keep its picked position
+/// while its source curves remain, including when Undo returns to the start of the chain.
+/// Model-vertex snaps are resolved by the drawing command, not by the sketch's point lookup.
+fn chain_point(sketch: &Sketch, id: &str, picked: Vec2) -> Option<Vec2> {
+    if let Some(point) = sketch.resolve_point(id).and_then(|p| sketch.point(p)) {
+        return Some(point);
+    }
+    let exists = if let Some(curve) = id.strip_prefix("mid:") {
+        sketch.curve_index(curve).is_some()
+    } else if let Some(snap) = id.strip_prefix("on:") {
+        let (curve, _) = snap.rsplit_once(':')?;
+        sketch.curve_index(curve).is_some()
+    } else if let Some(snap) = id.strip_prefix("x:") {
+        let (curves, _) = snap.rsplit_once(':')?;
+        let (a, b) = curves.split_once('+')?;
+        sketch.curve_index(a).is_some() && sketch.curve_index(b).is_some()
+    } else {
+        id.starts_with("vertex:")
+    };
+    exists.then_some(picked)
 }
 
 /// Whether the tool is a Line tool's chain drawing tangent arcs, not the Tangent Arc tool itself.
@@ -109,7 +132,7 @@ pub fn follow_pointer(app: &mut SolveApp, ctx: &egui::Context, proj: &Proj, poin
         return;
     }
     let screen = {
-        let state = app.session.world_state();
+        let state = crate::open_meshing::session_world(&app.session);
         let plane = app.session.active_sketch.and_then(|s| state.sketch(s)).map(|ss| ss.plane);
         let last = app.tool.as_ref().and_then(|t| t.pts.first()).map(|p| p.0);
         plane.zip(last).and_then(|(plane, last)| proj.to_screen(plane.to_world(last)))
@@ -177,7 +200,7 @@ pub fn place_arc(app: &mut SolveApp, tool: &mut Tool, end: &(Vec2, Option<String
     // On an existing point the arc ends on that point, so an outline closes. The other snaps
     // (a midpoint, a place on a curve) name no point: their coordinates.
     let on_point = |id: &&String| {
-        let state = app.session.world_state();
+        let state = crate::open_meshing::session_world(&app.session);
         app.session.active_sketch.and_then(|s| state.sketch(s)).is_some_and(|ss| ss.sketch.resolve_point(id).is_some())
     };
     let to = end.1.as_ref().filter(on_point).map_or_else(|| json!([end.0.x, end.0.y]), |id| json!(id));
@@ -212,14 +235,14 @@ fn shown_mode(t: &Tool) -> Option<(&'static str, &'static str)> {
 
 /// The words next to the cursor, in the interface language.
 pub(crate) fn shown_label(t: &Tool) -> Option<&'static str> {
-    shown_mode(t).map(|(command, _)| crate::i18n::tr_label(crate::command_label(command)))
+    shown_mode(t).map(|(command, _)| solidcraft_ui_text::tr_label(crate::command_label(command)))
 }
 
 /// The label next to the cursor (below the point's coordinates).
 pub fn paint_mode(app: &SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &Proj) {
     let Some((command, icon)) = app.tool.as_ref().and_then(shown_mode) else { return };
     let Some(pointer) = ui.input(|i| i.pointer.hover_pos()).filter(|p| proj.rect.contains(*p)) else { return };
-    let tk = crate::theme::Tokens::view();
+    let tk = solidcraft_theme::Tokens::view();
     let Some(label) = app.tool.as_ref().and_then(shown_label) else { return };
     let galley = painter.layout_no_wrap(label.to_string(), egui::FontId::proportional(tk.font_small), tk.text);
     let side = galley.size().y.max(14.0);

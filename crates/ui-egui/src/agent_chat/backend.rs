@@ -21,7 +21,7 @@ pub enum TestError {
 impl TestError {
     pub fn message(&self) -> &str {
         match self {
-            Self::AuthRequired => crate::i18n::tr("ui.agent_chat_state_auth"),
+            Self::AuthRequired => solidcraft_ui_text::tr("ui.agent_chat_state_auth"),
             Self::Other(message) => message,
         }
     }
@@ -78,6 +78,8 @@ pub enum Event {
     Permission {
         key: u64,
         title: String,
+        /// The tool call's kind, as the agent gives it.
+        kind: Option<String>,
         options: Vec<PermissionOption>,
     },
     /// It needs the user to sign in; `methods` are its own ways to do so.
@@ -142,6 +144,9 @@ pub trait ChatBackend {
     /// Start a fresh conversation on the running backend (no restart); [`Event::Ready`] follows.
     /// A message being answered is cancelled first.
     fn new_session(&mut self);
+    /// The user's custom instructions (#8220), added to the system note of every session that
+    /// starts after this call. The panel sets them before the first session and before New chat.
+    fn set_instructions(&mut self, _text: &str) {}
     /// Answer an [`Event::Permission`] with one of its options (`None`: cancelled).
     fn answer_permission(&mut self, key: u64, option: Option<&str>);
     /// Ask the backend to sign in by itself with one of its methods (it opens the browser).

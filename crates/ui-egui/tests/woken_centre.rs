@@ -14,7 +14,7 @@ fn sketch() -> Harness {
 
 /// A line's first point: the circle's centre, or a point of its own.
 fn starts_at_centre(h: &Harness) -> bool {
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     let centre = sk.resolve_point("c1.center").unwrap();
     sk.curves.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::CurveKind::Line { a, b } if a == centre || b == centre))

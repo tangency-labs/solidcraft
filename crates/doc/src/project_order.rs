@@ -1,9 +1,11 @@
 //! Stable face projection order: outer boundary first, then holes by geometry.
 //! B-rep edge indices depend on face enumeration and must not choose sketch curve IDs.
 
+use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
-use solidcraft_geom::{Aabb3, Mesh, Plane, Vec3};
+use solidcore_record::{Plane, Vec3};
+use solidcraft_geom::{Aabb3, Mesh};
 
 use crate::{DocError, Result};
 
@@ -177,6 +179,26 @@ fn boundary_edges(mesh: &Mesh, mut edges: Vec<usize>, faces: &BTreeSet<usize>, p
 mod tests {
     use super::*;
 
+    /// A cube's outline from above is its four sides whatever normals its mesh carries: none, too
+    /// few, zero or not numbers fall back to each triangle's own normal, and so do normals
+    /// averaged across its creases, as an imported mesh may have them.
+    #[test]
+    fn a_silhouette_takes_the_triangles_own_normal_where_the_mesh_has_no_surface_normal() {
+        let corner = |i: u32| Vec3::new(f64::from(i & 1), f64::from((i >> 1) & 1), f64::from((i >> 2) & 1)) * 10.0;
+        let positions: Vec<Vec3> = (0..8).map(corner).collect();
+        let quads = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]];
+        let triangles: Vec<[u32; 3]> = quads.iter().flat_map(|[a, b, c, d]| [[*a, *b, *c], [*a, *c, *d]]).collect();
+        let averaged: Vec<Vec3> = positions.iter().map(|p| (*p - Vec3::new(5.0, 5.0, 5.0)).normalized().unwrap_or(Vec3::Z)).collect();
+        let nan = Vec3::new(f64::NAN, 0.0, 0.0);
+        for normals in [Vec::new(), vec![Vec3::Z; 3], vec![Vec3::ZERO; 8], vec![nan; 8], vec![Vec3::new(f64::INFINITY, 0.0, 0.0); 8], averaged] {
+            let tri_face = vec![0; triangles.len()];
+            let mesh = Mesh { positions: positions.clone(), normals: normals.clone(), triangles: triangles.clone(), tri_face, ..Mesh::default() };
+            let outline = super::super::silhouette(&Plane::XY, &mesh, None);
+            let sides = outline.iter().filter(|g| matches!(g, solidcraft_sketch::LinkGeom::Line(a, b) if (a.dist(*b) - 10.0).abs() < 1e-9)).count();
+            assert_eq!((outline.len(), sides), (4, 4), "{normals:?}: {outline:?}");
+        }
+    }
+
     #[test]
     fn face_family_omits_only_exact_shared_topological_edges() {
         let mut mesh = Mesh::default();
@@ -208,7 +230,7 @@ mod tests {
 
     #[test]
     fn coarsely_tessellated_round_silhouette_fits_an_arc() {
-        use solidcraft_geom::Vec2;
+        use solidcore_record::Vec2;
         use solidcraft_sketch::LinkGeom;
         let on = |deg: f64| Vec2::new(5. + 5. * deg.to_radians().cos(), 5. + 5. * deg.to_radians().sin());
         let mut chain = vec![Vec2::new(0., -20.)];
@@ -221,7 +243,7 @@ mod tests {
 
     #[test]
     fn tangent_snapping_leaves_unrelated_collinear_lines_alone() {
-        use solidcraft_geom::Vec2;
+        use solidcore_record::Vec2;
         use solidcraft_sketch::LinkGeom;
         let v = Vec2::new;
         // A rounded corner of radius 2 meeting the top edge, and an unrelated collinear edge.
@@ -238,7 +260,7 @@ mod tests {
 
     #[test]
     fn tangent_snapping_leaves_a_line_further_along_alone() {
-        use solidcraft_geom::Vec2;
+        use solidcore_record::Vec2;
         use solidcraft_sketch::LinkGeom;
         let v = Vec2::new;
         let y = |x: f64| 2.0 - (4.0 - x * x).sqrt();
@@ -259,7 +281,7 @@ mod tests {
 
     #[test]
     fn tangent_snapping_gives_one_line_to_one_end_of_an_arc() {
-        use solidcraft_geom::Vec2;
+        use solidcore_record::Vec2;
         use solidcraft_sketch::LinkGeom;
         let v = Vec2::new;
         let y = |x: f64| 2.0 - (4.0 - x * x).sqrt();
@@ -273,7 +295,7 @@ mod tests {
 
     #[test]
     fn tangent_snapping_moves_the_other_end_of_an_arc_to_its_next_line() {
-        use solidcraft_geom::Vec2;
+        use solidcore_record::Vec2;
         use solidcraft_sketch::LinkGeom;
         let v = Vec2::new;
         let y = |x: f64| 2.0 - (4.0 - x * x).sqrt();
@@ -292,7 +314,7 @@ mod tests {
 
     #[test]
     fn tangent_snapping_closes_a_conic_corner_in_any_order() {
-        use solidcraft_geom::Vec2;
+        use solidcore_record::Vec2;
         use solidcraft_sketch::LinkGeom;
         // A square of side 150 with a conic round of 10 mm legs at each corner, fitted with lines
         // and arcs the way a silhouette is, then snapped with the pieces in each order.
@@ -347,6 +369,133 @@ mod tests {
     }
 
     #[test]
+    fn a_round_refitted_to_the_exact_section_still_meets_its_neighbours() {
+        use solidcore_record::Vec2;
+        use solidcraft_sketch::LinkGeom;
+        let v = Vec2::new;
+        // A 10 x 10 square with an R2 round at its top right corner, fitted from mesh crossings:
+        // the arc misses the round's circle (centre (8, 8)) by 5e-4 but meets the sides exactly.
+        // The exact crossings lie on the circle, and the refit puts the arc on it. The outline has
+        // to stay closed: a profile joins ends only within 1e-4, so a wider gap leaves none (the
+        // R2 rounds of a section at y = 20 through grooved walls, tangency-labs/solidcore#2908).
+        let c = v(7.9995, 7.9995);
+        let (p, q) = (v(10., c.y), v(c.x, 10.));
+        let exact: Vec<Vec2> =
+            (0..=8).map(|k| f64::from(k) * std::f64::consts::FRAC_PI_8 / 2.).map(|t| v(8. + 2. * t.cos(), 8. + 2. * t.sin())).collect();
+        let square = |top: Vec<LinkGeom>| {
+            let mut out = vec![LinkGeom::Line(v(0., 0.), v(10., 0.)), LinkGeom::Line(v(10., 0.), p), LinkGeom::Arc { c, a: p, b: q }];
+            out.extend(top);
+            out.push(LinkGeom::Line(v(0., 10.), v(0., 0.)));
+            out
+        };
+        // The top side a line, or an arc of radius 10 (a shallow round on it) and then a line.
+        let bulge = v(c.x, 20.);
+        let from = bulge + v(-(10f64.to_radians().sin()), -(10f64.to_radians().cos())) * 10.;
+        let cases =
+            [square(vec![LinkGeom::Line(q, v(0., 10.))]), square(vec![LinkGeom::Arc { c: bulge, a: from, b: q }, LinkGeom::Line(from, v(0., 10.))])];
+        // Ends as the sketch takes them: an arc ends on the circle through its start.
+        let ends = |g: &LinkGeom| match *g {
+            LinkGeom::Line(s, t) => vec![s, t],
+            LinkGeom::Arc { c, a, b } => vec![a, c + (b - c).normalized().unwrap_or(Vec2::X) * c.dist(a)],
+            _ => Vec::new(),
+        };
+        for (n, fitted) in cases.into_iter().enumerate() {
+            // The size of the section: the square's diagonal.
+            let out = super::super::refine_rounds(fitted, &exact, 200f64.sqrt());
+            for (i, g) in out.iter().enumerate() {
+                for e in ends(g) {
+                    let gap =
+                        out.iter().enumerate().filter(|(j, _)| *j != i).flat_map(|(_, h)| ends(h)).map(|x| x.dist(e)).fold(f64::INFINITY, f64::min);
+                    assert!(gap < 1e-9, "case {n}: gap {gap} at {e:?}: {out:?}");
+                }
+            }
+            // Where the round meets only lines, the arc lies on the round's circle.
+            if n == 0 {
+                let Some(LinkGeom::Arc { c, a, b }) = out.get(2) else { panic!("{out:?}") };
+                assert!(c.dist(v(8., 8.)) < 1e-9 && (c.dist(*a) - 2.).abs() < 1e-9 && (c.dist(*b) - 2.).abs() < 1e-9, "{out:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_round_beside_another_arc_is_refitted_when_their_joint_stays_put() {
+        use solidcore_record::Vec2;
+        use solidcraft_sketch::LinkGeom;
+        let v = Vec2::new;
+        // The R2 round of a 10 x 10 square misses its circle (centre (8, 8)) by `s`, and an arc of
+        // radius 10 runs on from its end. The refit moves that joint by `s`. While that is within
+        // the 1e-4 a profile joins ends across, the round is refitted as before the fix for
+        // tangency-labs/solidcore#2908, and the profile still closes.
+        let exact: Vec<Vec2> =
+            (0..=8).map(|k| f64::from(k) * std::f64::consts::FRAC_PI_8 / 2.).map(|t| v(8. + 2. * t.cos(), 8. + 2. * t.sin())).collect();
+        for s in [1e-8, 1e-6, 1e-5, 5e-5, 9e-5] {
+            let c = v(8., 8. + s);
+            let (p, q) = (v(10., c.y), v(8., 10. + s));
+            let bulge = v(8., 20. + s);
+            let from = bulge + v(-(10f64.to_radians().sin()), -(10f64.to_radians().cos())) * 10.;
+            let fitted = vec![
+                LinkGeom::Line(v(0., 0.), v(10., 0.)),
+                LinkGeom::Line(v(10., 0.), p),
+                LinkGeom::Arc { c, a: p, b: q },
+                LinkGeom::Arc { c: bulge, a: from, b: q },
+                LinkGeom::Line(from, v(0., 10.)),
+                LinkGeom::Line(v(0., 10.), v(0., 0.)),
+            ];
+            let out = super::super::refine_rounds(fitted, &exact, 200f64.sqrt());
+            let (Some(LinkGeom::Arc { c, b, .. }), Some(LinkGeom::Arc { b: joint, .. })) = (out.get(2), out.get(3)) else { panic!("{out:?}") };
+            assert!(c.dist(v(8., 8.)) < 1e-12, "shift {s}: the round is refitted: {out:?}");
+            assert!(b.dist(*joint) < 1e-4, "shift {s}: {out:?}");
+        }
+    }
+
+    #[test]
+    fn two_arcs_refitted_the_same_way_keep_their_joint() {
+        use solidcore_record::Vec2;
+        use solidcraft_sketch::LinkGeom;
+        let v = Vec2::new;
+        // The R2 round of a 10 x 10 square and the arc of radius 10 running on from it both miss
+        // their circles (centres (8, 8) and (8, 20)) by `s` in the same direction. Both refits move
+        // their joint from (8, 10 + s) to (8, 10), so the two refitted arcs still meet, as they do
+        // before the fix for tangency-labs/solidcore#2908, even where `s` is past a profile's 1e-4.
+        let round = (0..=8).map(|k| f64::from(k) * std::f64::consts::FRAC_PI_8 / 2.).map(|t| v(8. + 2. * t.cos(), 8. + 2. * t.sin()));
+        let side = [261., 263., 265., 267., 269.].map(|d: f64| v(8. + 10. * d.to_radians().cos(), 20. + 10. * d.to_radians().sin()));
+        let exact: Vec<Vec2> = round.chain(side).collect();
+        for s in [1e-5, 2e-4, 5e-4] {
+            let c = v(8., 8. + s);
+            let (p, q) = (v(10., c.y), v(8., 10. + s));
+            let bulge = v(8., 20. + s);
+            let from = bulge + v(-(10f64.to_radians().sin()), -(10f64.to_radians().cos())) * 10.;
+            let fitted = vec![
+                LinkGeom::Line(v(0., 0.), v(10., 0.)),
+                LinkGeom::Line(v(10., 0.), p),
+                LinkGeom::Arc { c, a: p, b: q },
+                LinkGeom::Arc { c: bulge, a: from, b: q },
+                LinkGeom::Line(from, v(0., 10.)),
+                LinkGeom::Line(v(0., 10.), v(0., 0.)),
+            ];
+            let out = super::super::refine_rounds(fitted, &exact, 200f64.sqrt());
+            let (Some(LinkGeom::Arc { c: c1, b: b1, .. }), Some(LinkGeom::Arc { c: c2, b: b2, .. })) = (out.get(2), out.get(3)) else {
+                panic!("{out:?}")
+            };
+            assert!(c1.dist(v(8., 8.)) < 1e-9 && c2.dist(v(8., 20.)) < 1e-9, "shift {s}: both arcs are refitted: {out:?}");
+            assert!(b1.dist(*b2) < 1e-4, "shift {s}: {out:?}");
+            // The lines on the arcs' other ends move with them: the whole outline stays closed.
+            let ends = |g: &LinkGeom| match *g {
+                LinkGeom::Line(s, t) => vec![s, t],
+                LinkGeom::Arc { c, a, b } => vec![a, c + (b - c).normalized().unwrap_or(Vec2::X) * c.dist(a)],
+                _ => Vec::new(),
+            };
+            for (i, g) in out.iter().enumerate() {
+                for e in ends(g) {
+                    let gap =
+                        out.iter().enumerate().filter(|(j, _)| *j != i).flat_map(|(_, h)| ends(h)).map(|x| x.dist(e)).fold(f64::INFINITY, f64::min);
+                    assert!(gap < 1e-9, "shift {s}: gap {gap} at {e:?}: {out:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn boundaries_touching_at_a_vertex_project() {
         // Two squares of one face family meet only at the corner (1, 1): four boundary edges meet
         // there (a pinch), and the walk keeps each square's loop on its own face.
@@ -390,7 +539,7 @@ mod tests {
 
     #[test]
     fn family_line_normalization_preserves_corners_arcs_branches_and_retracing() {
-        use solidcraft_geom::Vec2;
+        use solidcore_record::Vec2;
         use solidcraft_sketch::LinkGeom;
         let line = |a, b| LinkGeom::Line(Vec2::new(a, 0.), Vec2::new(b, 0.));
         assert_eq!(super::super::merge_family_lines(vec![line(0., 1.), line(2., 1.)]).unwrap(), vec![line(0., 2.)]);
@@ -402,7 +551,13 @@ mod tests {
             vec![
                 line(0., 1.),
                 line(1., 2.),
-                LinkGeom::Spline { pts: vec![Vec2::new(1., 0.), Vec2::new(2., 1.), Vec2::new(3., 1.)], control: false, degree: 2, periodic: false },
+                LinkGeom::Spline {
+                    pts: vec![Vec2::new(1., 0.), Vec2::new(2., 1.), Vec2::new(3., 1.)],
+                    control: false,
+                    degree: 2,
+                    periodic: false,
+                    nurbs: None,
+                },
             ],
             vec![line(0., 1.), LinkGeom::Arc { c: Vec2::new(1., 1.), a: Vec2::new(1., 0.), b: Vec2::new(2., 1.) }],
             vec![line(0., 1.), line(1.00001, 2.)],
@@ -472,7 +627,7 @@ mod tests {
 
     #[test]
     fn rounded_boundary_arc_sweeps_survive_individual_edge_reversal() {
-        use solidcraft_geom::{Seg2, Vec2};
+        use solidcore_record::{Seg2, Vec2};
         use solidcraft_sketch::LinkGeom;
         let mut mesh = Mesh::default();
         for (extent, radius) in [(10.0, 3.0), (8.0, 1.0)] {
@@ -567,7 +722,7 @@ mod tests {
 
     #[test]
     fn curve_ends_a_hair_apart_become_one_point_and_distant_ones_stay() {
-        use solidcraft_geom::Vec2;
+        use solidcore_record::Vec2;
         use solidcraft_sketch::LinkGeom;
         let mut geom = vec![
             LinkGeom::Line(Vec2::new(0., 0.), Vec2::new(10., 0.)),
@@ -576,13 +731,20 @@ mod tests {
                 control: true,
                 degree: 3,
                 periodic: false,
+                nurbs: None,
             },
             LinkGeom::Line(Vec2::new(12., 5. - 1e-5), Vec2::new(0., 0.1)),
         ];
         super::super::meet_at_shared_ends(&mut geom, 1e-4);
         assert_eq!(
             geom[1],
-            LinkGeom::Spline { pts: vec![Vec2::new(10., 0.), Vec2::new(11., 1.), Vec2::new(12., 5.)], control: true, degree: 3, periodic: false }
+            LinkGeom::Spline {
+                pts: vec![Vec2::new(10., 0.), Vec2::new(11., 1.), Vec2::new(12., 5.)],
+                control: true,
+                degree: 3,
+                periodic: false,
+                nurbs: None
+            }
         );
         assert_eq!(geom[2], LinkGeom::Line(Vec2::new(12., 5.), Vec2::new(0., 0.1)));
     }
