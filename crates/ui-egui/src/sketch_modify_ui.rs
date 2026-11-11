@@ -384,6 +384,20 @@ pub fn candidate(d: &Dialog, session: &solidcraft_engine::Session, hit: &Hit) ->
             sk.curve_index(id)?;
             d.active_input()?.accepts(hit, Some(active), |_, _| false)
         }
+        // Once the curves picked close a shape, Offset takes no other curve: it neither highlights
+        // nor picks. A picked curve still does, so clicking it opens the shape again.
+        Hit::SketchCurve { id, .. } if matches!(d.kind, Kind::SketchModify(Mod::Offset { .. })) => {
+            let follow = matches!(d.kind, Kind::SketchModify(Mod::Offset { chain: true, .. }));
+            let picks = curve_ids(&d.inputs, 0);
+            if !picks.is_empty() && !picks.contains(id) {
+                let state = crate::open_meshing::session_world(session);
+                let shape = solidcraft_engine::cmd::offset_closed_shape(&state.sketch(active)?.sketch, &picks, follow);
+                if !shape.is_empty() && !shape.contains(id) {
+                    return None;
+                }
+            }
+            d.active_input()?.accepts(hit, Some(active), |_, _| false)
+        }
         _ => d.active_input()?.accepts(hit, Some(active), |_, _| false),
     }
 }
