@@ -659,6 +659,15 @@ pub struct ConvertParams {
     /// cut open on both as `print_joint` says.
     #[serde(default)]
     pub print_splits: Option<SheetPoints>,
+    /// Foldable print: points on straight edges of holes through a face where the face ends in
+    /// a mitre, half the angle to the hole's wall: that wall is printed as a part of its own
+    /// (Unfold for Printing makes it, mitred to match).
+    #[serde(default)]
+    pub print_mitres: Option<SheetPoints>,
+    /// Foldable print: straight edges of holes through a face notched for the fingers of the
+    /// hole's wall there, which is printed as a part of its own (Unfold for Printing makes it).
+    #[serde(default)]
+    pub print_sockets: Option<Vec<PrintSocketParams>>,
     /// Foldable print: joints on open edges (no bends) that a filament holds: the edge split
     /// into fingers of its two faces by turns, a square channel through them, `diameter` +
     /// `tolerance` wide, at half the wall's thickness behind both faces.
@@ -671,6 +680,21 @@ pub struct ConvertParams {
     pub print_press: Option<PressJoints>,
     #[serde(flatten, deserialize_with = "feature_common")]
     pub common: FeatureCommon,
+}
+
+/// Sockets along one straight edge of a hole through a face of a foldable print.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct PrintSocketParams {
+    /// The edge's two ends, in mm.
+    pub a: super::types::Point3,
+    pub b: super::types::Point3,
+    /// The stretches along the edge from `a` where the wall's fingers stand in the face, each
+    /// `[from, to]` in mm (at most 200).
+    pub fingers: Vec<[f64; 2]>,
+    /// A channel along the edge for a filament, in place of a press fit's dimples. Default: false.
+    #[serde(default)]
+    pub filament: Option<bool>,
 }
 
 /// List the design's sheet metal rules (the built-in steel rule if none are saved).

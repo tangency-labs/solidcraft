@@ -35,6 +35,16 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&BEND_CONTRACT)
         .output(crate::schema::output_schema_for::<PrintUnfoldState>)
         .params("edge: [x, y, z] on an edge of the body being unfolded, in mm → the state of the unfolded print: an edge that is a cut becomes a bend, the face across it hangs on the pattern, and that face's other edges are cuts (a face that hung by another bend moves to this one, with what hangs on it); an edge that is a bend becomes a cut again, and what hung by it is off the pattern. Bends are set outward from the base face. An edge in an inside corner of the body can't fold"),
+    CommandSpec::new("print.unfold.group", "Carve Out Faces", crate::checked!("print.unfold.group", group))
+        .icon("print_unfold")
+        .contract(&GROUP_CONTRACT)
+        .output(crate::schema::output_schema_for::<PrintUnfoldState>)
+        .params("faces: [[x, y, z], …] on faces of the body being unfolded, in mm → the state of the unfolded print: those faces are carved out of the pattern into a group, a part of its own that starts at the first of them. Every edge between the group and the other faces is a cut; inside the group, print.unfold.bend sets bends at inside corners of the body (they turn toward the outer skin, on the film alone). Bends that reached the faces are cleared"),
+    CommandSpec::new("print.unfold.ungroup", "Put Carved Faces Back", crate::checked!("print.unfold.ungroup", ungroup))
+        .icon("print_unfold")
+        .contract(&UNGROUP_CONTRACT)
+        .output(crate::schema::output_schema_for::<PrintUnfoldState>)
+        .params("face: [x, y, z] on a face of a carved-out group, in mm → the state of the unfolded print: the group is no more, its faces are off the pattern until bends reach them again"),
     CommandSpec::new("print.unfold.surface", "Make Surface Model", crate::checked!("print.unfold.surface", surface))
         .icon("print_unfold")
         .contract(&EMPTY_CONTRACT)
@@ -90,6 +100,8 @@ pub static COMMANDS: &[CommandSpec] = &[
 
 const START_CONTRACT: crate::schema::TypedContract<crate::schema::print_unfold::StartParams> = crate::schema::TypedContract::new();
 const BEND_CONTRACT: crate::schema::TypedContract<crate::schema::print_unfold::BendParams> = crate::schema::TypedContract::new();
+const GROUP_CONTRACT: crate::schema::TypedContract<crate::schema::print_unfold::GroupParams> = crate::schema::TypedContract::new();
+const UNGROUP_CONTRACT: crate::schema::TypedContract<crate::schema::print_unfold::UngroupParams> = crate::schema::TypedContract::new();
 const BED_CONTRACT: crate::schema::TypedContract<crate::schema::print_unfold::BedParams> = crate::schema::TypedContract::new();
 const SPLIT_CONTRACT: crate::schema::TypedContract<crate::schema::print_unfold::SplitParams> = crate::schema::TypedContract::new();
 const JOINTS_CONTRACT: crate::schema::TypedContract<crate::schema::print_unfold::JointsParams> = crate::schema::TypedContract::new();
@@ -136,6 +148,7 @@ pub fn unfold_design(s: &Session, name: &str, face: Vec3) -> Result<Session> {
         body: name.to_string(),
         base: solidcraft_doc::apply_point(&lay, face),
         bends: Vec::new(),
+        groups: Vec::new(),
         step: PrintUnfoldStep::Edges,
         source: Some(source),
         surface: None,
@@ -143,7 +156,10 @@ pub fn unfold_design(s: &Session, name: &str, face: Vec3) -> Result<Session> {
         bed: None,
         joints: None,
         solid: None,
+        group_solids: None,
     });
+    // Nothing is sketched here: the origin's planes and axes would only lie over the edges to click.
+    fresh.visibility.origin_hidden = Some(true);
     fresh.refresh();
     if let Some(error) = fresh.model.result(id).and_then(|r| r.error.as_ref()) {
         return Err(bad(cmd, format!("the body didn't copy: {error}")));
@@ -168,15 +184,18 @@ pub fn read(s: &Session, cmd: &str) -> Result<(PrintUnfold, UnfoldGraph, usize, 
     let body = world.body(&unfold.body).ok_or_else(|| bad(cmd, format!("the body `{}` being unfolded is gone", unfold.body)))?;
     let graph = UnfoldGraph::of(&body.body).map_err(|e| invalid(cmd, e))?;
     let (base, bends) = unfold.resolve(&graph).map_err(|e| invalid(cmd, e))?;
-    let layout = graph.layout(base, &bends).map_err(|e| invalid(cmd, e))?;
+    let groups = unfold.resolve_groups(&graph).map_err(|e| invalid(cmd, e))?;
+    let layout = graph.layout(base, &bends, &groups).map_err(|e| invalid(cmd, e))?;
     Ok((unfold, graph, base, bends, layout))
 }
 
-fn edge_out(graph: &UnfoldGraph, e: usize) -> Option<PrintUnfoldEdge> {
+fn edge_out(graph: &UnfoldGraph, layout: &UnfoldLayout, e: usize) -> Option<PrintUnfoldEdge> {
     let edge = graph.edges.get(e)?;
+    let (ga, gb) = (layout.group.get(edge.faces.0).copied().flatten(), layout.group.get(edge.faces.1).copied().flatten());
     let (angle, foldable) = match edge.turn {
-        EdgeTurn::Outside(a) => (Some(a.to_degrees()), true),
-        EdgeTurn::Inside | EdgeTurn::Flat => (None, false),
+        EdgeTurn::Outside(a) => (Some(a.to_degrees()), ga.is_none() && gb.is_none()),
+        EdgeTurn::Inside => (None, ga.is_some() && ga == gb),
+        EdgeTurn::Flat => (None, false),
     };
     let xyz = |p: Vec3| [p.x, p.y, p.z];
     Some(PrintUnfoldEdge { start: xyz(edge.ends.0), end: xyz(edge.ends.1), faces: [edge.faces.0, edge.faces.1], angle, foldable })
@@ -198,6 +217,9 @@ pub fn state_of(s: &Session, cmd: &str) -> Result<PrintUnfoldState> {
             cuts: Vec::new(),
             open: Vec::new(),
             missing: Vec::new(),
+            groups: u.groups.len(),
+            carved: Vec::new(),
+            group_points: Vec::new(),
             wall: joints.wall,
             min_wall: 0.0,
             bend_joint: joints.bends,
@@ -220,7 +242,7 @@ pub fn state_of(s: &Session, cmd: &str) -> Result<PrintUnfoldState> {
         Default::default()
     };
     let of = |kind: EdgeKind| -> Vec<PrintUnfoldEdge> {
-        layout.kinds.iter().enumerate().filter(|(_, k)| **k == kind).filter_map(|(e, _)| edge_out(&graph, e)).collect()
+        layout.kinds.iter().enumerate().filter(|(_, k)| **k == kind).filter_map(|(e, _)| edge_out(&graph, &layout, e)).collect()
     };
     Ok(PrintUnfoldState {
         body: unfold.body.clone(),
@@ -244,6 +266,15 @@ pub fn state_of(s: &Session, cmd: &str) -> Result<PrintUnfoldState> {
             .filter(|(_, on)| !**on)
             .flat_map(|(f, _)| f.loops.iter().map(|lp| lp.iter().map(|p| [p.x, p.y, p.z]).collect()))
             .collect(),
+        groups: layout.roots.len(),
+        carved: graph
+            .faces
+            .iter()
+            .zip(&layout.group)
+            .filter(|(_, g)| g.is_some())
+            .flat_map(|(f, _)| f.loops.iter().map(|lp| lp.iter().map(|p| [p.x, p.y, p.z]).collect()))
+            .collect(),
+        group_points: layout.roots.iter().filter_map(|f| graph.faces.get(*f)?.inner_point()).map(|p| [p.x, p.y, p.z]).collect(),
         wall: unfold.joints.clone().unwrap_or_default().wall,
         min_wall: if unfold.step == PrintUnfoldStep::Flat { min_wall(&unfold, &graph, &layout, &bends) } else { 0.0 },
         bend_joint: unfold.joints.clone().unwrap_or_default().bends,
@@ -342,6 +373,11 @@ fn rigid_possible(graph: &UnfoldGraph, e: usize, folds: bool) -> bool {
     }
 }
 
+/// Whether a face of a carved-out group lies at edge `e`.
+fn carved_edge(graph: &UnfoldGraph, layout: &UnfoldLayout, e: usize) -> bool {
+    graph.edges.get(e).is_some_and(|edge| [edge.faces.0, edge.faces.1].iter().any(|f| layout.group.get(*f).copied().flatten().is_some()))
+}
+
 /// The joint edge `e` gets, and whether it is its own: a bend that folds gets what bends get, a
 /// cut and a split bend what cuts get. Where a rigid joint can't be made (an inside corner, or a
 /// fold angle the fingers can't do), what all bends or cuts get is the film alone for a bend and
@@ -349,6 +385,23 @@ fn rigid_possible(graph: &UnfoldGraph, e: usize, folds: bool) -> bool {
 fn joint_of(unfold: &PrintUnfold, graph: &UnfoldGraph, layout: &UnfoldLayout, splits: &[usize], e: usize) -> (String, bool) {
     let joints = unfold.joints.clone().unwrap_or_default();
     let folds = layout.kinds.get(e) == Some(&EdgeKind::Bend) && !splits.contains(&e);
+    // An edge of a carved-out group: its bends turn on the film; at its border it follows what
+    // all cuts get (fingers in sockets where the two faces meet square and the edge is long
+    // enough, else a mitre); its other edges end square.
+    if carved_edge(graph, layout, e) {
+        let Some(edge) = graph.edges.get(e).filter(|_| !folds) else { return ("film".into(), false) };
+        let border = layout.group.get(edge.faces.0) != layout.group.get(edge.faces.1);
+        let outside = matches!(edge.turn, EdgeTurn::Outside(_));
+        let sockets = solidcraft_doc::print_unfold_group::socket_possible(edge.turn)
+            && !solidcraft_doc::sheet::socket_fingers(edge.ends.0.dist(edge.ends.1)).is_empty();
+        let kind = match joints.cuts.as_str() {
+            _ if !(border && outside) => "butt",
+            "press" | "filament" if sockets => joints.cuts.as_str(),
+            "butt" => "butt",
+            _ => "mitre",
+        };
+        return (kind.into(), false);
+    }
     let plain = if folds {
         "film"
     } else if joints.cuts == "mitre" {
@@ -447,6 +500,12 @@ fn joint(s: &mut Session, p: &Value) -> Result<Value> {
     let flat = graph.flat(&layout, &unfold.resolve_splits(&graph, &bends)).map_err(|e| invalid(cmd, e))?;
     let e = flat_edge_at(&graph, &flat, at).ok_or_else(|| bad(cmd, "no edge of the flat pattern at `edge`"))?;
     let folds = layout.kinds.get(e) == Some(&EdgeKind::Bend) && !unfold.resolve_splits(&graph, &bends).contains(&e);
+    if kind != "default" && carved_edge(&graph, &layout, e) {
+        return Err(bad(
+            cmd,
+            "this edge is on a carved-out group: its bends turn on the film, and its border follows what all cuts get (no joint of its own yet)",
+        ));
+    }
     if ["filament", "press"].contains(&kind) && !rigid_possible(&graph, e, folds) {
         return Err(bad(
             cmd,
@@ -479,11 +538,53 @@ fn make(s: &mut Session, _: &Value) -> Result<Value> {
     }
     let joints = unfold.joints.clone().unwrap_or_default();
     let xyz = |e: usize| graph.edges.get(e).map(|edge| edge.middle()).map(|p| serde_json::json!([p.x, p.y, p.z]));
-    let folding: Vec<Value> = bends.iter().filter(|e| !splits.contains(e)).filter_map(|e| xyz(*e)).collect();
-    let split_at: Vec<Value> = splits.iter().filter_map(|e| xyz(*e)).collect();
+    // The carved-out groups are made on their own (below): the body's sheet has none of their edges.
+    let main = |e: &&usize| !carved_edge(&graph, &layout, **e);
+    let folding: Vec<Value> = bends.iter().filter(|e| !splits.contains(e)).filter(main).filter_map(|e| xyz(*e)).collect();
+    let split_at: Vec<Value> = splits.iter().filter(main).filter_map(|e| xyz(*e)).collect();
+    let carved = if layout.roots.is_empty() {
+        Vec::new()
+    } else {
+        let wall = joints
+            .wall
+            .trim()
+            .trim_end_matches("mm")
+            .trim()
+            .replace(',', ".")
+            .parse::<f64>()
+            .ok()
+            .filter(|w| w.is_finite() && *w > 0.0)
+            .ok_or_else(|| bad(cmd, "with carved-out groups, give the wall thickness as a number in mm"))?;
+        let w = solidcraft_doc::print_unfold_group::GroupWall {
+            wall,
+            film: solidcraft_doc::sheet::DEFAULT_FILM,
+            clearance: solidcraft_doc::sheet::DEFAULT_PRINT_CLEARANCE,
+        };
+        let kinds: Vec<String> = (0..graph.edges.len()).map(|e| joint_of(&unfold, &graph, &layout, &splits, e).0).collect();
+        graph.group_solids(&layout, &flat, &splits, w, &kinds).map_err(|e| invalid(cmd, e))?
+    };
+    // The faces a group meets at its border: mitred to match it, or notched for its fingers.
+    let (mut mitred, mut sockets) = (Vec::new(), Vec::new());
+    for (e, edge) in graph.edges.iter().enumerate() {
+        if !carved_edge(&graph, &layout, e) || layout.group.get(edge.faces.0) == layout.group.get(edge.faces.1) {
+            continue;
+        }
+        let xyz = |p: Vec3| serde_json::json!([p.x, p.y, p.z]);
+        match joint_of(&unfold, &graph, &layout, &splits, e).0.as_str() {
+            "mitre" => mitred.push(xyz(edge.middle())),
+            kind @ ("press" | "filament") => {
+                let fingers: Vec<Value> = solidcraft_doc::sheet::socket_fingers(edge.ends.0.dist(edge.ends.1))
+                    .into_iter()
+                    .map(|(lo, hi)| serde_json::json!([lo, hi]))
+                    .collect();
+                sockets.push(serde_json::json!({"a": xyz(edge.ends.0), "b": xyz(edge.ends.1), "fingers": fingers, "filament": kind == "filament"}));
+            }
+            _ => {}
+        }
+    }
     let with = |kind: &str| -> Vec<Value> {
         (0..graph.edges.len())
-            .filter(|e| joint_of(&unfold, &graph, &layout, &splits, *e).0 == kind)
+            .filter(|e| !carved_edge(&graph, &layout, *e) && joint_of(&unfold, &graph, &layout, &splits, *e).0 == kind)
             .filter_map(xyz)
             .map(|at| serde_json::json!({"at": at}))
             .collect()
@@ -496,7 +597,13 @@ fn make(s: &mut Session, _: &Value) -> Result<Value> {
         "print_wall": joints.wall,
         "print_joint": if ["mitre", "filament", "press"].contains(&joints.cuts.as_str()) { "mitre" } else { "butt" },
     });
-    for (key, list) in [("print_splits", split_at), ("print_filament", with("filament")), ("print_press", with("press"))] {
+    for (key, list) in [
+        ("print_splits", split_at),
+        ("print_filament", with("filament")),
+        ("print_press", with("press")),
+        ("print_mitres", mitred),
+        ("print_sockets", sockets),
+    ] {
         if !list.is_empty() {
             params[key] = Value::Array(list);
         }
@@ -504,14 +611,42 @@ fn make(s: &mut Session, _: &Value) -> Result<Value> {
     s.visibility.hidden_bodies.retain(|b| *b != unfold.body);
     let made = super::sheet::convert(s, &params)?;
     let feature = made.get("feature").and_then(Value::as_u64);
+    // The groups' bodies beside the body made, their lower edges level with its.
+    let mut beside = Vec::with_capacity(carved.len());
+    if !carved.is_empty() {
+        let world = s.world_state()?;
+        let made = world.body(&unfold.body).ok_or_else(|| bad(cmd, "the printable body was not made"))?;
+        let bbox = solidcraft_kernel::measure(&made.body)?.bbox;
+        let mut right = bbox.max.x;
+        for body in &carved {
+            let own = solidcraft_kernel::measure(body)?.bbox;
+            let gap = solidcraft_doc::print_unfold_flat::PART_GAP;
+            let shift =
+                solidcraft_doc::rigid(Vec3::new(right + gap - own.min.x, bbox.min.y - own.min.y, bbox.min.z - own.min.z), Vec3::ZERO, Vec3::Z, 0.0);
+            beside.push(solidcraft_kernel::transform_matrix(body, shift)?);
+            right += gap + (own.max.x - own.min.x);
+        }
+    }
     let mut scratch = s.scratch();
     if let Some(old) = unfold.surface {
         scratch.doc_mut().delete_feature(old)?;
+    }
+    let mut group_solids = None;
+    if !beside.is_empty() {
+        let refs: Vec<&solidcraft_kernel::Body> = beside.iter().collect();
+        let text = solidcraft_kernel::step_export(&refs, "SolidCraft unfold for printing")?;
+        let kind = FeatureKind::Import { file: format!("{} carved faces", unfold.body), step: text.into(), components: Vec::new(), skip: Vec::new() };
+        let id = scratch.doc_mut().add_feature(kind, None)?;
+        if let Some(f) = scratch.doc_mut().feature_mut(id) {
+            f.body_names = (1..=beside.len()).map(|i| format!("{} Group {i}", unfold.body)).collect();
+        }
+        group_solids = Some(id);
     }
     if let Some(u) = scratch.doc_mut().print_unfold.as_mut() {
         u.step = PrintUnfoldStep::Solid;
         u.surface = None;
         u.solid = feature;
+        u.group_solids = group_solids;
     }
     scratch.refresh();
     s.accept_computed(scratch);
@@ -526,12 +661,13 @@ fn unmake(s: &mut Session, _: &Value) -> Result<Value> {
     }
     let splits = unfold.splits.clone();
     let mut scratch = s.scratch();
-    if let Some(id) = unfold.solid {
+    for id in unfold.group_solids.into_iter().chain(unfold.solid) {
         scratch.doc_mut().delete_feature(id)?;
     }
     if let Some(u) = scratch.doc_mut().print_unfold.as_mut() {
         u.step = PrintUnfoldStep::Surface;
         u.solid = None;
+        u.group_solids = None;
     }
     scratch.refresh();
     s.accept_computed(scratch);
@@ -668,7 +804,8 @@ fn bend(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "the surface model is made: go back to the edges first (print.unfold.edit)"));
     }
     let e = graph.edge_at(at).ok_or_else(|| bad(cmd, "no edge of the body at `edge`"))?;
-    let change = graph.toggle_bend(base, &mut bends, e).map_err(|e| invalid(cmd, e))?;
+    let groups = unfold.resolve_groups(&graph).map_err(|e| invalid(cmd, e))?;
+    let change = graph.toggle_bend(base, &mut bends, &groups, e).map_err(|e| invalid(cmd, e))?;
     let points: Vec<Vec3> = bends.iter().filter_map(|b| graph.edges.get(*b)).map(|e| e.middle()).collect();
     if let Some(u) = s.doc_mut().print_unfold.as_mut() {
         u.bends = points;
@@ -680,6 +817,108 @@ fn bend(s: &mut Session, p: &Value) -> Result<Value> {
         BendChange::Removed { .. } => "removed".into(),
     });
     serde_json::to_value(out).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+/// The bends of `bends` that still hang on the pattern from the base face and the first face of
+/// each group, none of them across a group's border.
+fn reached(graph: &UnfoldGraph, base: usize, bends: &[usize], groups: &[Vec<usize>]) -> Vec<usize> {
+    let group_of = |f: usize| groups.iter().position(|g| g.contains(&f));
+    let mut on = vec![false; graph.faces.len()];
+    for f in std::iter::once(base).chain(groups.iter().filter_map(|g| g.first().copied())) {
+        if let Some(slot) = on.get_mut(f) {
+            *slot = true;
+        }
+    }
+    let mut kept = Vec::new();
+    loop {
+        let before = kept.len();
+        for e in bends {
+            let Some(edge) = graph.edges.get(*e) else { continue };
+            let (a, b) = edge.faces;
+            let (at_a, at_b) = (on.get(a).copied().unwrap_or(false), on.get(b).copied().unwrap_or(false));
+            if kept.contains(e) || group_of(a) != group_of(b) || at_a == at_b {
+                continue;
+            }
+            if let Some(slot) = on.get_mut(if at_a { b } else { a }) {
+                *slot = true;
+            }
+            kept.push(*e);
+        }
+        if kept.len() == before {
+            break;
+        }
+    }
+    kept
+}
+
+/// Save the groups and the bends that are left with them.
+fn set_groups(s: &mut Session, graph: &UnfoldGraph, base: usize, bends: &[usize], groups: &[Vec<usize>], cmd: &str) -> Result<()> {
+    let mut saved = Vec::with_capacity(groups.len());
+    for g in groups {
+        let mut faces = Vec::with_capacity(g.len());
+        for f in g {
+            let p = graph.faces.get(*f).and_then(|f| f.inner_point()).ok_or_else(|| bad(cmd, "a face to carve out has no inside"))?;
+            faces.push(p);
+        }
+        saved.push(solidcraft_doc::print_unfold::PrintGroup { faces });
+    }
+    let kept = reached(graph, base, bends, groups);
+    graph.layout(base, &kept, groups).map_err(|e| invalid(cmd, e))?;
+    let points: Vec<Vec3> = kept.iter().filter_map(|b| graph.edges.get(*b)).map(|e| e.middle()).collect();
+    if let Some(u) = s.doc_mut().print_unfold.as_mut() {
+        u.groups = saved;
+        u.bends = points;
+    }
+    Ok(())
+}
+
+fn group(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "print.unfold.group";
+    let (unfold, graph, base, bends, _) = read(s, cmd)?;
+    if unfold.step != PrintUnfoldStep::Edges {
+        return Err(bad(cmd, "the surface model is made: go back to the edges first (print.unfold.edit)"));
+    }
+    let picked = p
+        .get("faces")
+        .and_then(Value::as_array)
+        .filter(|a| !a.is_empty() && a.len() <= 200)
+        .ok_or_else(|| bad(cmd, "give `faces`: 1 to 200 points"))?;
+    let mut groups = unfold.resolve_groups(&graph).map_err(|e| invalid(cmd, e))?;
+    let mut faces = Vec::with_capacity(picked.len());
+    for at in picked {
+        let at = crate::params::vec3(at).ok_or_else(|| bad(cmd, "each of `faces` must be [x, y, z] of numbers, in mm"))?;
+        let f = graph.face_at(at).ok_or_else(|| bad(cmd, "no face of the body at one of `faces`"))?;
+        if f == base {
+            return Err(bad(cmd, "the base face can't be carved out: it is where the pattern starts"));
+        }
+        if groups.iter().any(|g| g.contains(&f)) {
+            return Err(bad(cmd, "one of the faces is carved out already (print.unfold.ungroup puts its group back)"));
+        }
+        if !faces.contains(&f) {
+            faces.push(f);
+        }
+    }
+    groups.push(faces);
+    set_groups(s, &graph, base, &bends, &groups, cmd)?;
+    reply(s, cmd)
+}
+
+fn ungroup(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "print.unfold.ungroup";
+    let at = point(p, "face", cmd)?;
+    let (unfold, graph, base, bends, _) = read(s, cmd)?;
+    if unfold.step != PrintUnfoldStep::Edges {
+        return Err(bad(cmd, "the surface model is made: go back to the edges first (print.unfold.edit)"));
+    }
+    let mut groups = unfold.resolve_groups(&graph).map_err(|e| invalid(cmd, e))?;
+    let f = graph.face_at(at).ok_or_else(|| bad(cmd, "no face of the body at `face`"))?;
+    let k = groups.iter().position(|g| g.contains(&f)).ok_or_else(|| bad(cmd, "the face at `face` is in no carved-out group"))?;
+    let gone = groups.remove(k);
+    // The bends between its faces go with it: they are inside corners, which fold in a group only.
+    let left: Vec<usize> =
+        bends.iter().copied().filter(|e| !graph.edges.get(*e).is_some_and(|x| gone.contains(&x.faces.0) || gone.contains(&x.faces.1))).collect();
+    set_groups(s, &graph, base, &left, &groups, cmd)?;
+    reply(s, cmd)
 }
 
 fn surface(s: &mut Session, _: &Value) -> Result<Value> {

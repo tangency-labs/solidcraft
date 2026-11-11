@@ -1570,6 +1570,8 @@ preference_settings! {
     save_mesh_quality: String = "standard".into();
     /// The programs the user added to the slicer list, newest first.
     custom_slicers: Vec<String> = Vec::new();
+    /// The printers the user saved in Unfold for Printing, each `name|width|depth` (mm).
+    print_beds: Vec<String> = Vec::new();
     /// AI features (docs/agent-chat.md): the master switch. Off: no AI button, shortcut, menu
     /// entry or panel, and nothing is looked for or started.
     ai_features: bool = true, PAGE_ASSISTANT;

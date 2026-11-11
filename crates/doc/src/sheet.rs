@@ -30,7 +30,8 @@ pub use face_names::body_sheet_face_names;
 pub use print_fold::{
     Bevel, DEFAULT_CHANNEL_TOLERANCE, DEFAULT_FILAMENT, DEFAULT_FILM, DEFAULT_JOINT_WALL, DEFAULT_NUB_HEIGHT, DEFAULT_NUB_RADIUS,
     DEFAULT_PRINT_CLEARANCE, DEFAULT_SEGMENTS, FOLD_JOINT_ANGLES, FilamentCut, FoldCore, FoldEnd, FoldFilament, MIN_FINGER_WIDTH, PART_GAP, PressFit,
-    PrintFilament, PrintFold, PrintJoint, check_print_fold, finger_count, fold_core, print_fold_parts, print_folded_parts,
+    PrintFilament, PrintFold, PrintJoint, PrintSocket, check_print_fold, finger_count, fold_core, print_fold_parts, print_folded_parts,
+    socket_fingers,
 };
 
 // Bound the aggregate geometry, including sampled curves and intermediate clipping pieces.

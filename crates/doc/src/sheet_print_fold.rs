@@ -41,6 +41,16 @@ pub fn finger_count(segments: u32, len: f64) -> u32 {
     segments.min(fit).max(2.min(segments.max(1)))
 }
 
+/// The least two panels of a foldable print that lie side by side in the flat stay apart where
+/// their fingers lean toward each other (mm): a line of a 0.4 mm nozzle, so they print apart.
+pub const FINGER_FLAT_GAP: f64 = 0.4;
+
+/// A loose piece of a foldable print smaller than this is a crumb its cuts left, and is dropped (mm³).
+pub const CRUMB: f64 = 5.0;
+
+/// A corner fill smaller than this share of a cube of the wall's thickness is a fin, and is left out.
+pub const FIN: f64 = 0.15;
+
 /// The default wall round the channel or the nub of a joint on a bend, inside its fingers (mm):
 /// two lines of a 0.4 mm nozzle.
 pub const DEFAULT_JOINT_WALL: f64 = 0.8;
@@ -188,6 +198,34 @@ impl PrintFilament {
     pub fn side(&self) -> f64 {
         self.diameter + self.tolerance
     }
+}
+
+/// Sockets along a straight edge of a hole through a face of a foldable print, the edge from
+/// `a` to `b` (the body's coordinates): the hole's wall there is printed as a part of its own
+/// (a carved-out group of Unfold for Printing), and fingers of it stand in the face along
+/// `fingers` (stretches from `a`, mm). The face is notched for each, a wall and the clearance
+/// deep, with a dimple for a press-fit nub in both sides of each notch, or with `filament` a
+/// channel along the edge through what is left of the face there.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PrintSocket {
+    pub a: Vec3,
+    pub b: Vec3,
+    pub fingers: Vec<(f64, f64)>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub filament: bool,
+}
+
+/// Where a hole wall `len` long has its fingers in the face it meets (from the edge's first end):
+/// every other stretch of the edge split as a joint's is, never the first or the last, so the
+/// corners of the hole stay the face's. An edge too short for three stretches of
+/// [`MIN_FINGER_WIDTH`] gets three narrower ones from 9 mm on, and none below.
+pub fn socket_fingers(len: f64) -> Vec<(f64, f64)> {
+    if !(len.is_finite() && len >= 9.0) {
+        return Vec::new();
+    }
+    let n = finger_count(DEFAULT_SEGMENTS, len).max(3);
+    let each = len / f64::from(n);
+    (0..n).filter(|k| k % 2 == 1 && k + 1 < n).map(|k| (f64::from(k) * each, f64::from(k + 1) * each)).collect()
 }
 
 /// A filament joint's cuts in one panel of the flat: the open edge from `a` to `b` on the
@@ -1330,10 +1368,51 @@ impl SheetBody {
             if reach > 1e-9 {
                 let eps = (over * 0.1).min(0.005);
                 let wedge = Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(reach, t), Vec2::new(-eps, t - eps)]);
-                for (s, e) in fc.own_fingers() {
+                // In the flat the panel across the joint lies beside this one, turned away by the
+                // corner of the face both hang on: past the line halfway between their two edges
+                // a finger leaning out would stand in that panel. It ends short of that line.
+                let mut sides: Vec<Body> = Vec::new();
+                for other in self.filament.iter().filter(|o| o.panel != fc.panel) {
+                    let (r, q) = (fc.b - fc.a, other.b - other.a);
+                    let den = r.cross(q);
+                    if den.abs() < 1e-9 {
+                        continue;
+                    }
+                    let c = fc.a + r * ((other.a - fc.a).cross(q) / den);
+                    let near = |a: Vec2, b: Vec2| (c - a).len().min((c - b).len()) <= 4.0 * t + reach;
+                    if !(near(fc.a, fc.b) && near(other.a, other.b)) {
+                        continue;
+                    }
+                    let (Some(own), Some(theirs)) = (((fc.a + fc.b) * 0.5 - c).normalized(), ((other.a + other.b) * 0.5 - c).normalized()) else {
+                        continue;
+                    };
+                    if own.dot(theirs).abs() > 0.996 {
+                        continue;
+                    }
+                    let Some(m) = (own + theirs).normalized() else { continue };
+                    let side = if Vec2::new(-m.y, m.x).dot(own) >= 0.0 { Vec2::new(-m.y, m.x) } else { Vec2::new(m.y, -m.x) };
+                    let (far, gap) = (len + q.len() + 10.0 * t + reach, FINGER_FLAT_GAP / 2.0);
+                    let p = |along: f64, across: f64| c + m * along + side * across;
+                    let half = Loop2::polygon(&[p(-far, gap), p(far, gap), p(far, gap + far), p(-far, gap + far)]);
+                    sides.push(extrude_flat(&Plane::XY, &[Region2 { outer: half.ccw(), holes: Vec::new() }], -2.0 * over, t + 2.0 * over)?);
+                }
+                'fingers: for (s, e) in fc.own_fingers() {
                     let mid = fc.a + d * ((s + e) / 2.0);
                     let plane = Plane { origin: Vec3::new(mid.x, mid.y, 0.0), x: Vec3::new(-fc.n.x, -fc.n.y, 0.0), y: Vec3::Z };
-                    let tool = extrude_flat(&plane, &[Region2 { outer: wedge.ccw(), holes: Vec::new() }], -(e - s) / 2.0, (e - s) / 2.0)?;
+                    let mut tool = extrude_flat(&plane, &[Region2 { outer: wedge.ccw(), holes: Vec::new() }], -(e - s) / 2.0, (e - s) / 2.0)?;
+                    if !sides.is_empty() {
+                        let whole = kernel::measure(&tool)?.volume;
+                        for side in &sides {
+                            match kernel::boolean(&tool, side, kernel::BoolOp::Intersect)? {
+                                Some(left) => tool = left,
+                                None => continue 'fingers,
+                            }
+                        }
+                        // What is left of a finger cut back to a fin would break off in folding.
+                        if kernel::measure(&tool)?.volume < 0.6 * whole {
+                            continue 'fingers;
+                        }
+                    }
                     body = kernel::boolean(&body, &tool, kernel::BoolOp::Union)?
                         .ok_or_else(|| DocError::Invalid("a joint on an open edge leaves nothing of the print".into()))?;
                 }
@@ -1351,13 +1430,38 @@ impl SheetBody {
             channels.push(extrude_flat(&plane, &[Region2 { outer: square.ccw(), holes: Vec::new() }], lo, hi)?);
         }
         // The corners the bend zones leave open, closed; then every channel.
-        let fills = self.corner_fills(pf)?;
+        // A fill that is a thin fin (a corner where the walls meet at a shallow angle) hangs on
+        // the film alone and breaks off in folding: the corner stays open there.
+        let mut fills = self.corner_fills(pf)?;
+        let mut sturdy = Vec::with_capacity(fills.len());
+        for (owner, fill) in fills.drain(..) {
+            if kernel::measure(&fill)?.volume >= FIN * t * t * t {
+                sturdy.push((owner, fill));
+            }
+        }
+        let fills = sturdy;
         for (_, fill) in &fills {
             body = kernel::boolean(&body, fill, kernel::BoolOp::Union)?
                 .ok_or_else(|| DocError::Invalid("a corner of the print leaves nothing of it".into()))?;
         }
         for tool in channels {
             body = cut(body, tool)?;
+        }
+        // Crumbs the cuts left loose (a sliver between a channel and a groove) are no part of the
+        // print: they would print as loose bits beside it.
+        let lumps = body.lumps()?;
+        if lumps.len() > 1 {
+            let mut kept = Vec::with_capacity(lumps.len());
+            for lump in lumps {
+                if kernel::measure(&lump)?.volume >= CRUMB {
+                    kept.push(lump);
+                }
+            }
+            if kept.len() == 1 {
+                body = kept.remove(0);
+            } else if let Some(joined) = kernel::join_apart(&kept)? {
+                body = joined;
+            }
         }
         Ok((body, fills))
     }

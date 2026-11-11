@@ -837,6 +837,8 @@ pub(super) fn sheet_eval(
             print_joint,
             print_splits,
             print_filament,
+            print_mitres,
+            print_sockets,
         } if !bends.is_empty() => {
             let mb = st.body(body).cloned().ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let r = doc.sheet_rule(rule.as_deref());
@@ -891,9 +893,22 @@ pub(super) fn sheet_eval(
             let placement = doc.component_transform(doc.model_body_component(&mb));
             let body_to_world = doc.model_body_offset(&mb).map(|offset| crate::mat_mul(&placement, offset)).unwrap_or(placement);
             let splits: Vec<_> = print_splits.iter().map(|p| p.0).collect();
+            let mitres: Vec<_> = print_mitres.iter().map(|p| p.0).collect();
             let joint = print_fold.then(|| print_joint.unwrap_or_default());
-            let (mut parts, notes) =
-                sheet::convert_body(&mb, &r.name, &values, face.0, &picks, &body_to_world, joint, print.film, &splits, print_filament)?;
+            let (mut parts, notes) = sheet::convert_body(
+                &mb,
+                &r.name,
+                &values,
+                face.0,
+                &picks,
+                &body_to_world,
+                joint,
+                print.film,
+                &splits,
+                print_filament,
+                &mitres,
+                print_sockets,
+            )?;
             // The notes say where a corner or a bend's end is not finished as a rule says; a
             // foldable print has no rule, and leaves its corners cut open on purpose.
             if !*print_fold {

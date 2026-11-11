@@ -56,8 +56,9 @@ use solidcraft_geom::{Mesh, Ring, UnitVec3};
 use solidcraft_kernel::{Body, FaceSurface, face_surface};
 
 use super::{
-    Bevel, FilamentCut, FlatWork, FoldEnd, FoldFilament, PrintFilament, PrintFold, PrintJoint, ReliefOverride, RuleValues, SheetBody, SheetFlange,
-    base_flange, polys_cross, signed_area, snap,
+    Bevel, DEFAULT_CHANNEL_TOLERANCE, DEFAULT_FILAMENT, DEFAULT_NUB_HEIGHT, DEFAULT_NUB_RADIUS, FilamentCut, FlatWork, FoldEnd, FoldFilament,
+    PressFit, PrintFilament, PrintFold, PrintJoint, PrintSocket, ReliefOverride, RuleValues, SheetBody, SheetFlange, base_flange, polys_cross,
+    signed_area, snap,
 };
 use crate::{DocError, ModelBody, Result, apply_point, apply_vector, mat_inverse};
 
@@ -547,6 +548,10 @@ fn rip_cut(x: &Face, y: &Face, e: Vec3, t: f64, gap: f64) -> Result<f64> {
     Ok((gap / 2.0 - lean.min(0.0)) / wx.dot(mid))
 }
 
+/// The least a panel of a foldable print ends short of an inside corner (mm): a line of a 0.4 mm
+/// nozzle, so that it prints apart from a panel it lies beside in the flat.
+pub const PRINT_FLAT_GAP: f64 = 0.4;
+
 /// A foldable print's end of panel `x` along the edge `e` (its direction round `x`) to panel `y`
 /// that is no bend: how far in from the edge the panel ends square at its outer skin, and, for a
 /// mitre, how much further in it ends at its inner skin. Where `y` turns behind `x` (a corner on
@@ -559,7 +564,10 @@ fn rip_cut(x: &Face, y: &Face, e: Vec3, t: f64, gap: f64) -> Result<f64> {
 fn print_cut(x: &Face, y: &Face, e: Vec3, t: f64, clearance: f64, joint: PrintJoint, x_first: bool) -> Result<(f64, Option<f64>)> {
     let (wx, wy) = (x.n.cross(e), e.cross(y.n));
     if wy.dot(x.n) >= -1e-9 {
-        return Ok((rip_cut(x, y, e, t, clearance)?, None));
+        // In the flat such an end can lie along another panel of its part (a wall beside the next
+        // edge of the face it hangs on, at an inside corner of that face): nearer than a line of
+        // the nozzle, a slicer prints the two as one.
+        return Ok((rip_cut(x, y, e, t, clearance)?.max(PRINT_FLAT_GAP), None));
     }
     match joint {
         PrintJoint::Butt if x_first => Ok((0.0, None)),
@@ -989,6 +997,8 @@ pub fn convert_body(
     film: f64,
     splits: &[Vec3],
     filament: &[PrintFilament],
+    mitres: &[Vec3],
+    sockets: &[PrintSocket],
 ) -> Result<(Vec<SheetBody>, Vec<String>)> {
     let hinged = print.is_some();
     let at = |p| at(apply_point(body_to_world, p));
@@ -997,6 +1007,9 @@ pub fn convert_body(
     }
     if !hinged && !(splits.is_empty() && filament.is_empty()) {
         return err("only a foldable print is split into parts or joined with filament");
+    }
+    if mitres.len() + sockets.len() > MAX_BENDS || (!hinged && !(mitres.is_empty() && sockets.is_empty())) {
+        return err(format!("only a foldable print has mitred hole edges and sockets, at most {MAX_BENDS}"));
     }
     if filament.len() > MAX_BENDS {
         return err(format!("pick at most {MAX_BENDS} filament edges"));
@@ -1362,6 +1375,65 @@ pub fn convert_body(
                         return err(format!("not supported yet: the {kind} at {} reaches into a bend (cut it after converting)", at(p)));
                     }
                     if through {
+                        // An edge of the hole whose wall is a part of its own: mitred to match it, or
+                        // notched for its fingers. The face keeps its outline there.
+                        if hinged && !(mitres.is_empty() && sockets.is_empty()) {
+                            let inv = mat_inverse(&sh.world(fl)).ok_or_else(|| DocError::Invalid("sheet panel frame".into()))?;
+                            let to_flat = |p: Vec3| {
+                                let q = apply_point(&inv, p);
+                                Vec2::new(q.x, q.y)
+                            };
+                            for seg in &h.segs {
+                                let Seg2::Line { a, b: end } = *seg else { continue };
+                                let (wa, wb) = (face.plane.to_world(a), face.plane.to_world(end));
+                                let mitred = mitres.iter().any(|m| m.dist_to_segment(wa, wb) <= near);
+                                let socket = sockets.iter().find(|s| s.a.dist_to_segment(wa, wb) <= near && s.b.dist_to_segment(wa, wb) <= near);
+                                if !mitred && socket.is_none() {
+                                    continue;
+                                }
+                                // The wall along this edge: a flat face through both its ends.
+                                let wall = walls.iter().find_map(|g| match face_surface(b, *g) {
+                                    Some(FaceSurface::Plane { normal, point })
+                                        if (wa - point).dot(*normal).abs() <= near && (wb - point).dot(*normal).abs() <= near =>
+                                    {
+                                        Some(normal)
+                                    }
+                                    _ => None,
+                                });
+                                let Some(normal) = wall else { continue };
+                                let into = apply_vector(&inv, -*normal);
+                                let Some(n) = Vec2::new(into.x, into.y).normalized() else { continue };
+                                if let Some(s) = socket {
+                                    if face.n.dot(*normal).abs() > 0.17 {
+                                        return err(format!("the socket at {} needs a hole wall square to its face", at(s.a)));
+                                    }
+                                    let gap = rv.gap;
+                                    fil_cuts.push(FilamentCut {
+                                        a: to_flat(s.a),
+                                        b: to_flat(s.b),
+                                        n,
+                                        notches: s.fingers.iter().map(|(lo, hi)| (lo - gap / 2.0, hi + gap / 2.0)).collect(),
+                                        depth: t + gap,
+                                        offset: t / 2.0,
+                                        side: if s.filament { DEFAULT_FILAMENT + DEFAULT_CHANNEL_TOLERANCE } else { 0.0 },
+                                        press: (!s.filament).then_some(PressFit {
+                                            radius: DEFAULT_NUB_RADIUS,
+                                            height: DEFAULT_NUB_HEIGHT,
+                                            tolerance: 0.0,
+                                        }),
+                                        nubs: false,
+                                        angle: FRAC_PI_2,
+                                        panel: owner,
+                                    });
+                                    continue;
+                                }
+                                let half = (PI - face.n.dot(*normal).clamp(-1.0, 1.0).acos()) / 2.0;
+                                if !(half > 1e-6 && half < FRAC_PI_2 - 1e-6) {
+                                    continue;
+                                }
+                                bevels.push(Bevel { a: to_flat(wa), b: to_flat(wb), n, at: 0.0, extra: t / half.tan() });
+                            }
+                        }
                         sh.holes.push(cut);
                         continue;
                     }

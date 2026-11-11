@@ -9,6 +9,9 @@
 //! starts a part of its own there: the face across it is laid out as if it had folded, then its
 //! part is moved clear of the others. The two faces at a cut, and at a split, each keep the edge:
 //! the pair is found again by the edge's index.
+//!
+//! A carved-out group is a part of its own too: its first face is turned onto the base face's
+//! plane the same way up, and the group's other faces about their bends from there.
 
 use solidcore_record::{Vec2, Vec3};
 use solidcraft_geom::prelude::*;
@@ -104,8 +107,11 @@ impl MinRect {
 /// A part of the flat pattern: faces that hang together by bends that are not split.
 #[derive(Clone, Debug)]
 pub struct FlatPart {
-    /// The face the part starts at: the base face, or the face across a split bend.
+    /// The face the part starts at: the base face, the first face of a carved-out group, or the
+    /// face across a split bend.
     pub root: usize,
+    /// The carved-out group its faces are in.
+    pub group: Option<usize>,
     pub faces: Vec<usize>,
     /// The smallest rectangle round it.
     pub rect: Option<MinRect>,
@@ -188,6 +194,7 @@ impl UnfoldGraph {
         let n = self.faces.len();
         // Faces in the order they hang: a face after the face it hangs on.
         let mut order = vec![layout.base];
+        order.extend(layout.roots.iter().copied().filter(|f| *f != layout.base));
         let mut at = 0;
         while let Some(&f) = order.get(at) {
             at += 1;
@@ -203,6 +210,26 @@ impl UnfoldGraph {
         let mut moves = vec![IDENTITY; n];
         let mut part = vec![0usize; n];
         let mut roots = vec![layout.base];
+        // A group's first face, turned onto the base face's plane the same way up.
+        if let Some(base) = self.faces.get(layout.base) {
+            let down = base.normal();
+            for f in &layout.roots {
+                let Some(face) = self.faces.get(*f) else { continue };
+                let from = face.normal();
+                let (axis, angle) = match from.cross(down).normalized() {
+                    Some(axis) => (axis, from.cross(down).len().atan2(from.dot(down))),
+                    None if from.dot(down) < 0.0 => (face.plane.x, std::f64::consts::PI),
+                    None => (Vec3::Z, 0.0),
+                };
+                let turn = rigid(Vec3::ZERO, face.plane.origin, axis, angle);
+                let lift = down * (base.plane.origin - apply_point(&turn, face.plane.origin)).dot(down);
+                if let (Some(slot), Some(p)) = (moves.get_mut(*f), part.get_mut(*f)) {
+                    *slot = mat_mul(&rigid(lift, Vec3::ZERO, Vec3::Z, 0.0), &turn);
+                    roots.push(*f);
+                    *p = roots.len() - 1;
+                }
+            }
+        }
         for &f in order.iter().skip(1) {
             let Some((parent, e)) = layout.parent.get(f).copied().flatten() else { continue };
             let (Some(edge), Some(face), Some(on)) = (self.edges.get(e), self.faces.get(f), self.faces.get(parent)) else { continue };
@@ -266,7 +293,7 @@ impl UnfoldGraph {
                         }
                     }
                 }
-                FlatPart { root: *root, faces, rect: MinRect::of(&pts), overlaps }
+                FlatPart { root: *root, group: layout.group.get(*root).copied().flatten(), faces, rect: MinRect::of(&pts), overlaps }
             })
             .collect();
         Ok(FlatLayout { moves, part, parts })

@@ -1493,6 +1493,14 @@ pub enum FeatureKind {
         /// with a channel through them for a filament that holds the folded print together.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         print_filament: Vec<crate::sheet::PrintFilament>,
+        /// Points on edges of holes through a face of a foldable print where the face ends in a
+        /// mitre: the hole's wall there is printed as a part of its own, mitred to match.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        print_mitres: Vec<Position>,
+        /// Sockets in the faces of a foldable print along edges of holes through them, for the
+        /// fingers of a hole wall printed as a part of its own.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        print_sockets: Vec<crate::sheet::PrintSocket>,
     },
     /// Plastic boss: a round post on a face (draft, root fillet, hole, ribs).
     Boss {

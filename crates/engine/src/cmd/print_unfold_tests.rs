@@ -245,3 +245,85 @@ fn where_a_rigid_joint_cant_be_made_an_edge_gets_a_mitre_by_itself() {
     let v = run(&mut s, "print.unfold.joints", json!({"cuts": "butt", "bends": "film"}));
     assert_eq!(v["min_wall"].as_f64(), Some(2.7), "the edge of its own still needs its channel: {v}");
 }
+
+#[test]
+fn the_walls_of_a_hole_are_carved_out_into_a_chain_that_folds_at_its_inside_corners() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Plate"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0], [40, 40], [0, 40]], "closed": true}));
+    run(&mut s, "sketch.line", json!({"points": [[10, 10], [30, 10], [30, 30], [10, 30]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Plate", "distance": 10, "body_name": "Plate"}));
+    // Lying on its base face, the body's centre of mass is over the origin.
+    let v = run(&mut s, "print.unfold.start", json!({"body": "Plate", "face": [2, 2, 0]}));
+    assert_eq!(v["faces"].as_u64(), Some(10), "{v}");
+    // An inside corner of the hole can't fold before its walls are carved out.
+    let why = refused(&mut s, "print.unfold.bend", json!({"edge": [10, 10, 5]}));
+    assert!(why.contains("Carve its faces out"), "{why}");
+    let v = run(&mut s, "print.unfold.group", json!({"faces": [[-10, 0, 5], [0, 10, 5], [10, 0, 5], [0, -10, 5]]}));
+    assert_eq!((v["groups"].as_u64(), v["group_points"].as_array().map(Vec::len)), (Some(1), Some(1)), "{v}");
+    // The base face and the group's first face are on the pattern.
+    assert_eq!(v["attached"].as_u64(), Some(2), "{v}");
+    // The border of the group stays a cut; three inside corners fold, the fourth would close the ring.
+    let why = refused(&mut s, "print.unfold.bend", json!({"edge": [-10, 0, 0]}));
+    assert!(why.contains("border of a carved-out group"), "{why}");
+    for at in [[-10, 10, 5], [10, 10, 5], [10, -10, 5]] {
+        run(&mut s, "print.unfold.bend", json!({"edge": at}));
+    }
+    let v = run(&mut s, "print.unfold.state", json!({}));
+    assert_eq!((v["attached"].as_u64(), v["bends"].as_array().map(Vec::len)), (Some(5), Some(3)), "{v}");
+    // The outer walls and the top, as on any body.
+    for e in v["cuts"].as_array().cloned().unwrap_or_default() {
+        if e["foldable"] == true {
+            run(&mut s, "print.unfold.bend", json!({"edge": mid(&e)}));
+        }
+    }
+    let v = run(&mut s, "print.unfold.state", json!({}));
+    let top = v["cuts"].as_array().into_iter().flatten().find(|e| e["foldable"] == true && e["start"][2] == e["end"][2]).cloned();
+    run(&mut s, "print.unfold.bend", json!({"edge": mid(&top.unwrap_or_else(|| panic!("no top edge: {v}")))}));
+    let v = run(&mut s, "print.unfold.flatten", json!({}));
+    assert_eq!((v["step"].as_str(), v["complete"].as_bool()), (Some("flat"), Some(true)), "{v}");
+    // The chain is a part of its own, its four walls in a row: 4 x 20 long, 10 high.
+    let parts = v["parts"].as_array().cloned().unwrap_or_default();
+    assert_eq!(parts.len(), 2, "{v}");
+    let chain = parts.iter().find(|p| p["faces"] == 4).unwrap_or_else(|| panic!("no chain: {v}"));
+    assert!((chain["long"].as_f64().unwrap_or(0.0) - 80.0).abs() < 1e-6 && (chain["short"].as_f64().unwrap_or(0.0) - 10.0).abs() < 1e-6, "{chain}");
+    // Made: the body, and the chain beside it as a body of its own, its walls 2 mm thick and
+    // 2.15 mm shorter at the top and the bottom (the plate's wall and the clearance).
+    let v = run(&mut s, "print.unfold.make", json!({}));
+    assert_eq!(v["step"].as_str(), Some("solid"), "{v}");
+    let (lo, hi) = bbox(&mut s, "Plate Group 1");
+    assert!((hi[2] - lo[2] - 2.0).abs() < 1e-6, "{lo:?} {hi:?}");
+    let (long, short) = ((hi[0] - lo[0]).max(hi[1] - lo[1]), (hi[0] - lo[0]).min(hi[1] - lo[1]));
+    assert!((long - 80.0).abs() < 1e-6 && (short - (10.0 - 2.0 * 2.15)).abs() < 1e-6, "{long} {short}");
+    let v = run(&mut s, "print.unfold.unmake", json!({}));
+    assert_eq!(v["step"].as_str(), Some("flat"), "{v}");
+    // With a press fit at the cuts the chain's fingers stand through the plate's two faces, in
+    // sockets there: the chain is as high as the plate again, and the plate lost the notches.
+    let v = run(&mut s, "print.unfold.joints", json!({"wall": "3 mm", "cuts": "press"}));
+    let border = v["flat_cuts"].as_array().into_iter().flatten().filter(|e| e["joint"] == "press").count();
+    assert!(border >= 16, "the eight border edges of the chain, each on two faces: {v}");
+    run(&mut s, "print.unfold.make", json!({}));
+    let (lo, hi) = bbox(&mut s, "Plate Group 1");
+    let short = (hi[0] - lo[0]).min(hi[1] - lo[1]);
+    assert!((short - 10.0).abs() < 1e-6 && (hi[2] - lo[2] - 3.0).abs() < 1e-6, "{lo:?} {hi:?}");
+    // A mitre instead: the chain ends in a slope at the plate's outer faces.
+    run(&mut s, "print.unfold.unmake", json!({}));
+    run(&mut s, "print.unfold.joints", json!({"cuts": "mitre"}));
+    run(&mut s, "print.unfold.make", json!({}));
+    let (lo, hi) = bbox(&mut s, "Plate Group 1");
+    let short = (hi[0] - lo[0]).min(hi[1] - lo[1]);
+    assert!(short > 9.0 && short < 10.0, "{lo:?} {hi:?}");
+}
+
+#[test]
+fn a_box_with_flat_chamfers_unfolds_as_any_body_of_flat_faces() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Box"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0], [40, 30], [0, 30]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Box", "distance": 20, "body_name": "Box"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[20, 0, 20], [0, 15, 20]], "distance": 4, "body": "Box"}));
+    let v = run(&mut s, "print.unfold.start", json!({"body": "Box", "face": [20, 15, 0]}));
+    assert_eq!(v["faces"].as_u64(), Some(8), "{v}");
+}

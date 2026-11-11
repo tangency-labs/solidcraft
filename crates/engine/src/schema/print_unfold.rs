@@ -24,6 +24,22 @@ pub struct BendParams {
     pub edge: Point3,
 }
 
+/// Carve faces out of the pattern into a group: a part of its own.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct GroupParams {
+    /// A point on each face, in mm (1 to 200 faces). The part starts at the first.
+    pub faces: Vec<Point3>,
+}
+
+/// Put the faces of a carved-out group back.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct UngroupParams {
+    /// A point on a face of the group, in mm.
+    pub face: Point3,
+}
+
 /// Choose the print bed the flat pattern is checked against.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -88,7 +104,8 @@ pub struct PrintUnfoldEdge {
     /// The angle a bend here folds by, in degrees. Absent where the edge can't fold.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub angle: Option<f64>,
-    /// Whether the edge can be a bend: its faces meet round the outside of the body.
+    /// Whether the edge can be a bend: its faces meet round the outside of the body, or in an
+    /// inside corner between two faces of one carved-out group.
     pub foldable: bool,
 }
 
@@ -158,6 +175,12 @@ pub struct PrintUnfoldState {
     /// The outlines of the faces that do not hang on the pattern yet: every loop of each (its
     /// outer one and its holes) as its corners, in mm.
     pub missing: Vec<Vec<[f64; 3]>>,
+    /// How many groups of faces are carved out of the pattern, and the outlines of their faces
+    /// (every loop of each as its corners, in mm, where the faces lie on the body).
+    pub groups: usize,
+    pub carved: Vec<Vec<[f64; 3]>>,
+    /// A point inside the first face of each carved-out group, in mm.
+    pub group_points: Vec<[f64; 3]>,
     /// The wall thickness and what all bends and all cuts get.
     pub wall: String,
     /// The least wall thickness the joints chosen need, in mm: a filament channel and the film

@@ -124,6 +124,9 @@ pub static COMMANDS: &[CommandSpec] = &[
              print_wall? (required for a solid body), print_clearance? (default 0.15), print_film? (default 0.4), \
              print_joint?: \"butt\" (default: the panel nearer the fixed face runs on to the corner) or \"mitre\" where two panels meet on an edge that is no bend; \
              print_splits?: [[x,y,z], ...] edges where the print splits into parts printed side by side (a print whose faces unfold onto each other is refused, naming them); \
+             print_mitres?: [[x,y,z], ...] straight edges of holes through a face where the face ends in a mitre (for a wall of the hole printed as a part of its own); \
+             print_sockets?: [{a: [x,y,z], b: [x,y,z], fingers: [[from, to], ...] (mm along the edge from a), filament?: bool}] straight edges of holes through a face notched for the fingers of such a wall, \
+             with a dimple for a press-fit nub in both sides of each notch, or with filament a channel along the edge; \
              print_filament?: [{at: [x,y,z] on an open edge or a bend, segments? (default 5), diameter? (mm, default 1.75), tolerance? (mm, default 0.1), flip?, wall? (mm, default 0.8)}] \
              joins the edge with fingers of both faces by turns and a square channel (diameter + tolerance) through them for a filament; \
              print_press?: [{at: [x,y,z] on an open edge or a bend, segments? (default 5), radius? (nub on the finger ends, mm, default 0.8), height? (mm, default 0.3), tolerance? (dimple, mm, default 0), flip?, wall? (mm, default 0.8)}] \
@@ -668,6 +671,41 @@ pub(super) fn convert(s: &mut Session, p: &Value) -> Result<Value> {
         None | Some(Value::Null) => Vec::new(),
         Some(_) => points(p, "print_splits", cmd)?,
     };
+    let print_mitres = match p.get("print_mitres") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(_) => points(p, "print_mitres", cmd)?,
+    };
+    let mut print_sockets = Vec::new();
+    if let Some(list) = p.get("print_sockets").filter(|v| !v.is_null()) {
+        let list =
+            list.as_array().filter(|a| a.len() <= 1000).ok_or_else(|| bad(cmd, "`print_sockets` must be a list of at most 1000 {a, b, fingers}"))?;
+        for item in list {
+            let end = |k: &str| {
+                item.get(k)
+                    .and_then(crate::params::vec3)
+                    .ok_or_else(|| bad(cmd, format!("`{k}` of a `print_sockets` entry must be [x, y, z] of numbers, in mm")))
+            };
+            let stretches = item
+                .get("fingers")
+                .and_then(Value::as_array)
+                .filter(|f| f.len() <= 200)
+                .ok_or_else(|| bad(cmd, "`fingers` of a `print_sockets` entry must be a list of at most 200 [from, to]"))?;
+            let mut fingers = Vec::with_capacity(stretches.len());
+            for stretch in stretches {
+                let pair = stretch.as_array().map(|x| x.iter().filter_map(Value::as_f64).filter(|v| v.is_finite()).collect::<Vec<f64>>());
+                match pair.as_deref() {
+                    Some(&[lo, hi]) if lo >= 0.0 && lo < hi && hi <= 1e6 => fingers.push((lo, hi)),
+                    _ => return Err(bad(cmd, "each of `fingers` must be [from, to] along the edge, in mm, from < to")),
+                }
+            }
+            print_sockets.push(sheet::PrintSocket {
+                a: end("a")?,
+                b: end("b")?,
+                fingers,
+                filament: item.get("filament").and_then(Value::as_bool).unwrap_or(false),
+            });
+        }
+    }
     let mut print_filament = match p.get("print_filament") {
         None | Some(Value::Null) => Vec::new(),
         Some(v) => filament_params(v).map_err(|why| bad(cmd, why))?,
@@ -687,9 +725,19 @@ pub(super) fn convert(s: &mut Session, p: &Value) -> Result<Value> {
         if rule.is_some() {
             return Err(bad(cmd, "a foldable print (`print_fold`) takes no `rule`: `print_wall`, `print_clearance` and `print_film` set it"));
         }
-    } else if let Some(k) = ["print_wall", "print_clearance", "print_film", "print_joint", "print_splits", "print_filament", "print_press"]
-        .into_iter()
-        .find(|k| p.get(*k).is_some())
+    } else if let Some(k) = [
+        "print_wall",
+        "print_clearance",
+        "print_film",
+        "print_joint",
+        "print_splits",
+        "print_filament",
+        "print_press",
+        "print_mitres",
+        "print_sockets",
+    ]
+    .into_iter()
+    .find(|k| p.get(*k).is_some())
     {
         return Err(bad(cmd, format!("`{k}` is only for a foldable print: set `print_fold` to true")));
     }
@@ -708,6 +756,8 @@ pub(super) fn convert(s: &mut Session, p: &Value) -> Result<Value> {
             print_joint,
             print_splits: print_splits.into_iter().map(Position).collect(),
             print_filament,
+            print_mitres: print_mitres.into_iter().map(Position).collect(),
+            print_sockets,
         },
     )
 }

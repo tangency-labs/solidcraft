@@ -1,7 +1,10 @@
 //! Convert to Sheet Metal can make a foldable 3D print: a `sheet_convert` feature may carry
 //! `print_fold: true` with `print_wall`, `print_clearance` and `print_film` (length
 //! expressions), `print_joint` ("butt" or "mitre"), `print_splits` (points on edges where the
-//! print splits into parts) and `print_filament` (a list of `{at, segments, diameter, tolerance,
+//! print splits into parts), `print_mitres` (points on edges of holes through a face where the
+//! face ends in a mitre, for a wall of the hole printed as a part of its own), `print_sockets` (a list of `{a, b,
+//! fingers, filament?}`: such an edge notched for the fingers of that wall, with dimples for a
+//! press fit or a channel for a filament) and `print_filament` (a list of `{at, segments, diameter, tolerance,
 //! flip, press?}`: open edges or bends joined by fingers and a channel for a filament, or with
 //! `press: {radius, height, tolerance}` by the same fingers and a nub that snaps into a dimple). Such a feature makes the
 //! flat pattern as one printable body, with a V-groove at each bend that leaves a thin film to

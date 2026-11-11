@@ -65,7 +65,19 @@
     "ui.print_unfold_to_split": "Back to Splitting",
     "ui.print_unfold_done_note": "The printable body is made: it lies flat, ready to export for the slicer. Refold in this tab folds it up to check it. Back returns to the wall and joints.",
     "ui.print_unfold_rigid_note": "Where a rigid joint can't be made (inside corners, or bends the fingers can't fold), the edge gets the thin film or a mitre by itself, and bends turn on the film.",
-    "ui.print_unfold_min_wall": "The joints chosen need a wall of at least {wall} mm."
+    "ui.print_unfold_min_wall": "The joints chosen need a wall of at least {wall} mm.",
+    "cmd.print_unfold_group": "Carve Out Faces",
+    "cmd.print_unfold_ungroup": "Put Carved Faces Back",
+    "ui.print_unfold_carve": "Carve out",
+    "ui.print_unfold_carve_tip": "Select the faces to carve out into a part of their own (inner walls of a hole, for example)",
+    "ui.print_unfold_carve_note": "Carve out faces that can't fold with the rest, such as the inner walls of a hole: select them, then click Carve out. They become a part of their own. Its edges to the other faces are cuts; inside it, click the inside corners to set its bends and leave one edge of a closed ring as a cut.",
+    "ui.print_unfold_groups": "Carved-out parts",
+    "ui.print_unfold_ungroup_all": "Put all back",
+    "ui.print_unfold_carved": "The faces are carved out into a part of their own",
+    "ui.print_unfold_bed_name": "Name",
+    "ui.print_unfold_bed_save": "Save printer",
+    "ui.print_unfold_bed_remove": "Remove printer",
+    "ui.print_unfold_bed_saved": "The printer is saved in the list"
   },
   "de": {
     "cmd.print_unfold_start": "Entfalten für Druck",
@@ -133,7 +145,19 @@
     "ui.print_unfold_to_split": "Zurück zum Zerteilen",
     "ui.print_unfold_done_note": "Der Druckkörper ist erzeugt: Er liegt flach und kann für den Slicer exportiert werden. „Wieder falten“ in diesem Reiter faltet ihn zur Kontrolle zusammen. „Zurück“ führt zu Wand und Verbindungen.",
     "ui.print_unfold_rigid_note": "Wo eine starre Verbindung nicht möglich ist (Innenecken oder Biegungen, die die Stege nicht falten können), erhält die Kante automatisch den dünnen Film oder eine Gehrung; die Biegung erfolgt dann über den Film.",
-    "ui.print_unfold_min_wall": "Die gewählten Verbindungen brauchen eine Wand von mindestens {wall} mm."
+    "ui.print_unfold_min_wall": "Die gewählten Verbindungen brauchen eine Wand von mindestens {wall} mm.",
+    "cmd.print_unfold_group": "Flächen heraustrennen",
+    "cmd.print_unfold_ungroup": "Herausgetrennte Flächen zurücklegen",
+    "ui.print_unfold_carve": "Heraustrennen",
+    "ui.print_unfold_carve_tip": "Wählen Sie die Flächen, die als eigenes Teil herausgetrennt werden (zum Beispiel die Innenwände eines Lochs)",
+    "ui.print_unfold_carve_note": "Trennen Sie Flächen heraus, die sich nicht mit dem Rest falten lassen, zum Beispiel die Innenwände eines Lochs: Flächen wählen, dann „Heraustrennen“ klicken. Sie werden ein eigenes Teil. Seine Kanten zu den übrigen Flächen sind Schnittkanten; innerhalb des Teils setzen Sie die Biegekanten per Klick auf die Innenecken und lassen bei einem geschlossenen Ring eine Kante als Schnittkante.",
+    "ui.print_unfold_groups": "Herausgetrennte Teile",
+    "ui.print_unfold_ungroup_all": "Alle zurücklegen",
+    "ui.print_unfold_carved": "Die Flächen sind als eigenes Teil herausgetrennt",
+    "ui.print_unfold_bed_name": "Name",
+    "ui.print_unfold_bed_save": "Drucker speichern",
+    "ui.print_unfold_bed_remove": "Drucker entfernen",
+    "ui.print_unfold_bed_saved": "Der Drucker ist in der Liste gespeichert"
   },
   "ar": {
     "cmd.print_unfold_start": "فرد للطباعة",
@@ -201,7 +225,19 @@
     "ui.print_unfold_to_split": "العودة إلى التقسيم",
     "ui.print_unfold_done_note": "تم إنشاء الجسم القابل للطباعة: إنه مسطح وجاهز للتصدير إلى برنامج التقطيع. «إعادة الطي» في هذا التبويب يطويه للتحقق. «رجوع» يعيد إلى الجدار والوصلات.",
     "ui.print_unfold_rigid_note": "حيث يتعذر إنشاء وصلة صلبة (زوايا داخلية أو ثنيات لا تستطيع الأصابع طيّها) تحصل الحافة تلقائياً على الغشاء الرقيق أو على وصلة مائلة، ويتم الثني عبر الغشاء.",
-    "ui.print_unfold_min_wall": "تحتاج الوصلات المختارة جداراً لا تقل سماكته عن {wall} مم."
+    "ui.print_unfold_min_wall": "تحتاج الوصلات المختارة جداراً لا تقل سماكته عن {wall} مم.",
+    "cmd.print_unfold_group": "اقتطاع أوجه",
+    "cmd.print_unfold_ungroup": "إعادة الأوجه المقتطعة",
+    "ui.print_unfold_carve": "اقتطاع",
+    "ui.print_unfold_carve_tip": "حدد الأوجه التي تُقتطع لتصبح جزءاً مستقلاً (مثل الجدران الداخلية لثقب)",
+    "ui.print_unfold_carve_note": "اقتطع الأوجه التي لا يمكن طيّها مع الباقي، مثل الجدران الداخلية لثقب: حددها ثم انقر «اقتطاع». تصبح جزءاً مستقلاً. حوافه مع الأوجه الأخرى قطوع؛ وداخله انقر على الزوايا الداخلية لتعيين ثنياته واترك حافة واحدة من الحلقة المغلقة قطعاً.",
+    "ui.print_unfold_groups": "الأجزاء المقتطعة",
+    "ui.print_unfold_ungroup_all": "إعادة الكل",
+    "ui.print_unfold_carved": "تم اقتطاع الأوجه إلى جزء مستقل",
+    "ui.print_unfold_bed_name": "الاسم",
+    "ui.print_unfold_bed_save": "حفظ الطابعة",
+    "ui.print_unfold_bed_remove": "إزالة الطابعة",
+    "ui.print_unfold_bed_saved": "تم حفظ الطابعة في القائمة"
   },
   "he": {
     "cmd.print_unfold_start": "פריסה להדפסה",
@@ -269,7 +305,19 @@
     "ui.print_unfold_to_split": "חזרה לפיצול",
     "ui.print_unfold_done_note": "גוף ההדפסה נוצר: הוא שטוח ומוכן לייצוא לסלייסר. \"קיפול מחדש\" בלשונית זו מקפל אותו לבדיקה. \"חזרה\" מחזיר לדופן ולחיבורים.",
     "ui.print_unfold_rigid_note": "במקום שבו אי אפשר ליצור חיבור קשיח (פינות פנימיות או כיפופים שהאצבעות לא יכולות לקפל) הקצה מקבל אוטומטית את הקרום הדק או חיבור חצוי, והכיפוף נעשה על הקרום.",
-    "ui.print_unfold_min_wall": "החיבורים שנבחרו דורשים דופן בעובי {wall} מ\"מ לפחות."
+    "ui.print_unfold_min_wall": "החיבורים שנבחרו דורשים דופן בעובי {wall} מ\"מ לפחות.",
+    "cmd.print_unfold_group": "הוצאת פאות",
+    "cmd.print_unfold_ungroup": "החזרת פאות שהוצאו",
+    "ui.print_unfold_carve": "הוצאה",
+    "ui.print_unfold_carve_tip": "בחרו את הפאות שיוצאו לחלק נפרד (למשל הדפנות הפנימיות של חור)",
+    "ui.print_unfold_carve_note": "הוציאו פאות שאינן מתקפלות עם השאר, כמו הדפנות הפנימיות של חור: בחרו אותן ולחצו „הוצאה”. הן הופכות לחלק נפרד. הקצוות שלו אל שאר הפאות הם חיתוכים; בתוכו לחצו על הפינות הפנימיות כדי לקבוע כיפופים והשאירו קצה אחד של טבעת סגורה כחיתוך.",
+    "ui.print_unfold_groups": "חלקים שהוצאו",
+    "ui.print_unfold_ungroup_all": "החזרת הכול",
+    "ui.print_unfold_carved": "הפאות הוצאו לחלק נפרד",
+    "ui.print_unfold_bed_name": "שם",
+    "ui.print_unfold_bed_save": "שמירת מדפסת",
+    "ui.print_unfold_bed_remove": "הסרת מדפסת",
+    "ui.print_unfold_bed_saved": "המדפסת נשמרה ברשימה"
   },
   "ja": {
     "cmd.print_unfold_start": "印刷用に展開",
@@ -337,7 +385,19 @@
     "ui.print_unfold_to_split": "分割に戻る",
     "ui.print_unfold_done_note": "印刷用ボディを作成しました。平らな状態で、スライサーへエクスポートできます。このタブの [再折り曲げ] で折りたたんで確認できます。[戻る] で壁と接合に戻ります。",
     "ui.print_unfold_rigid_note": "剛性のある接合ができない箇所 (入隅や、フィンガーで折れない曲げ) では、エッジに薄いフィルムまたは留め継ぎが自動で適用され、曲げはフィルムで行われます。",
-    "ui.print_unfold_min_wall": "選択した接合には {wall} mm 以上の壁が必要です。"
+    "ui.print_unfold_min_wall": "選択した接合には {wall} mm 以上の壁が必要です。",
+    "cmd.print_unfold_group": "面を切り離す",
+    "cmd.print_unfold_ungroup": "切り離した面を戻す",
+    "ui.print_unfold_carve": "切り離す",
+    "ui.print_unfold_carve_tip": "独立したパーツとして切り離す面を選択します (穴の内壁など)",
+    "ui.print_unfold_carve_note": "穴の内壁のように残りと一緒に折れない面を切り離します。面を選択して「切り離す」をクリックすると、独立したパーツになります。他の面との境界はカットになり、パーツ内では入隅をクリックして曲げを設定し、閉じた輪は 1 辺をカットのまま残します。",
+    "ui.print_unfold_groups": "切り離したパーツ",
+    "ui.print_unfold_ungroup_all": "すべて戻す",
+    "ui.print_unfold_carved": "面を独立したパーツとして切り離しました",
+    "ui.print_unfold_bed_name": "名前",
+    "ui.print_unfold_bed_save": "プリンターを保存",
+    "ui.print_unfold_bed_remove": "プリンターを削除",
+    "ui.print_unfold_bed_saved": "プリンターをリストに保存しました"
   },
   "ko": {
     "cmd.print_unfold_start": "인쇄용 펼치기",
@@ -405,7 +465,19 @@
     "ui.print_unfold_to_split": "분할로 돌아가기",
     "ui.print_unfold_done_note": "인쇄용 바디가 만들어졌습니다. 평평하게 놓여 있으며 슬라이서로 내보낼 수 있습니다. 이 탭의 다시 접기로 접어서 확인하세요. 뒤로를 누르면 벽과 조인트로 돌아갑니다.",
     "ui.print_unfold_rigid_note": "단단한 조인트를 만들 수 없는 곳(안쪽 모서리나 핑거로 접을 수 없는 굽힘)에서는 모서리에 얇은 필름 또는 마이터가 자동으로 적용되며, 굽힘은 필름에서 이루어집니다.",
-    "ui.print_unfold_min_wall": "선택한 조인트에는 최소 {wall} mm의 벽이 필요합니다."
+    "ui.print_unfold_min_wall": "선택한 조인트에는 최소 {wall} mm의 벽이 필요합니다.",
+    "cmd.print_unfold_group": "면 떼어내기",
+    "cmd.print_unfold_ungroup": "떼어낸 면 되돌리기",
+    "ui.print_unfold_carve": "떼어내기",
+    "ui.print_unfold_carve_tip": "별도의 파트로 떼어낼 면을 선택하세요(예: 구멍의 안쪽 벽)",
+    "ui.print_unfold_carve_note": "구멍의 안쪽 벽처럼 나머지와 함께 접을 수 없는 면을 떼어냅니다. 면을 선택한 다음 \"떼어내기\"를 클릭하면 별도의 파트가 됩니다. 다른 면과의 모서리는 절단이 되고, 파트 안에서는 안쪽 모서리를 클릭해 굽힘을 지정하며 닫힌 고리의 한 모서리는 절단으로 남겨 둡니다.",
+    "ui.print_unfold_groups": "떼어낸 파트",
+    "ui.print_unfold_ungroup_all": "모두 되돌리기",
+    "ui.print_unfold_carved": "면을 별도의 파트로 떼어냈습니다",
+    "ui.print_unfold_bed_name": "이름",
+    "ui.print_unfold_bed_save": "프린터 저장",
+    "ui.print_unfold_bed_remove": "프린터 제거",
+    "ui.print_unfold_bed_saved": "프린터를 목록에 저장했습니다"
   },
   "vi": {
     "cmd.print_unfold_start": "Trải phẳng để in",
@@ -473,7 +545,19 @@
     "ui.print_unfold_to_split": "Quay lại bước tách",
     "ui.print_unfold_done_note": "Đã tạo vật thể in: nó nằm phẳng, sẵn sàng xuất cho phần mềm cắt lớp. Gấp lại trong thẻ này sẽ gấp nó lên để kiểm tra. Quay lại sẽ trở về thành và mối nối.",
     "ui.print_unfold_rigid_note": "Ở nơi không thể tạo mối nối cứng (góc trong hoặc chỗ uốn mà các ngón không gấp được), cạnh tự động nhận màng mỏng hoặc mối vát, và chỗ uốn xoay trên màng.",
-    "ui.print_unfold_min_wall": "Các mối nối đã chọn cần thành dày ít nhất {wall} mm."
+    "ui.print_unfold_min_wall": "Các mối nối đã chọn cần thành dày ít nhất {wall} mm.",
+    "cmd.print_unfold_group": "Tách các mặt ra",
+    "cmd.print_unfold_ungroup": "Đưa các mặt đã tách trở lại",
+    "ui.print_unfold_carve": "Tách ra",
+    "ui.print_unfold_carve_tip": "Chọn các mặt cần tách thành một phần riêng (ví dụ các thành trong của một lỗ)",
+    "ui.print_unfold_carve_note": "Tách các mặt không gấp được cùng phần còn lại, như các thành trong của một lỗ: chọn chúng rồi nhấp \"Tách ra\". Chúng trở thành một phần riêng. Các cạnh của nó với những mặt khác là đường cắt; bên trong nó, nhấp vào các góc trong để đặt cạnh uốn và để lại một cạnh của vòng kín làm đường cắt.",
+    "ui.print_unfold_groups": "Phần đã tách",
+    "ui.print_unfold_ungroup_all": "Đưa tất cả trở lại",
+    "ui.print_unfold_carved": "Các mặt đã được tách thành một phần riêng",
+    "ui.print_unfold_bed_name": "Tên",
+    "ui.print_unfold_bed_save": "Lưu máy in",
+    "ui.print_unfold_bed_remove": "Xóa máy in",
+    "ui.print_unfold_bed_saved": "Đã lưu máy in vào danh sách"
   },
   "zh": {
     "cmd.print_unfold_start": "展开以打印",
@@ -541,6 +625,18 @@
     "ui.print_unfold_to_split": "返回拆分",
     "ui.print_unfold_done_note": "可打印实体已创建：它平放着，可导出到切片软件。此选项卡中的“重新折叠”可将其折起以检查。“返回”回到壁和连接。",
     "ui.print_unfold_rigid_note": "无法制作刚性连接的地方（内角，或指状结构无法折叠的折弯），该边会自动采用薄膜或斜接，折弯则在薄膜上完成。",
-    "ui.print_unfold_min_wall": "所选连接至少需要 {wall} mm 的壁厚。"
+    "ui.print_unfold_min_wall": "所选连接至少需要 {wall} mm 的壁厚。",
+    "cmd.print_unfold_group": "分离面",
+    "cmd.print_unfold_ungroup": "放回已分离的面",
+    "ui.print_unfold_carve": "分离",
+    "ui.print_unfold_carve_tip": "选择要分离为独立部分的面（例如孔的内壁）",
+    "ui.print_unfold_carve_note": "分离无法与其余部分一起折叠的面，例如孔的内壁：选择这些面，然后单击“分离”。它们成为独立的部分。它与其他面之间的边为切边；在其内部单击内角以设置折弯，闭合的环保留一条边作为切边。",
+    "ui.print_unfold_groups": "已分离的部分",
+    "ui.print_unfold_ungroup_all": "全部放回",
+    "ui.print_unfold_carved": "这些面已分离为独立的部分",
+    "ui.print_unfold_bed_name": "名称",
+    "ui.print_unfold_bed_save": "保存打印机",
+    "ui.print_unfold_bed_remove": "移除打印机",
+    "ui.print_unfold_bed_saved": "打印机已保存到列表"
   }
 }

@@ -73,6 +73,7 @@ mod print_face;
 pub use print_face::PrintFace;
 pub mod print_unfold;
 pub mod print_unfold_flat;
+pub mod print_unfold_group;
 pub mod project;
 mod project3d;
 pub mod render_aging;

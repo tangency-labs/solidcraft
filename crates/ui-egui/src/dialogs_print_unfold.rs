@@ -32,8 +32,9 @@ pub enum Pu {
     /// Step 2 is done: the surface model is made, not laid flat yet.
     Surface,
     /// Step 3: the pattern laid flat, checked against a print bed. `printer` is the entry of
-    /// the printer list (one past its end: a size typed in, `width` by `depth`).
-    Flat { printer: usize, width: String, depth: String },
+    /// the printer list (one past its end: a size typed in, `width` by `depth`, saved as a
+    /// printer of one's own under `name`).
+    Flat { printer: usize, width: String, depth: String, name: String },
     /// Step 4: the flat pattern split into parts at bends.
     Split,
     /// Step 5: the wall thickness and the joints. `bends` and `cuts` are entries of their
@@ -100,6 +101,19 @@ fn bed_mm_any(text: &str) -> Option<f64> {
     text.trim().trim_end_matches("mm").trim().replace(',', ".").parse::<f64>().ok().filter(|v| *v > 0.0 && *v < 1000.0)
 }
 
+/// The most printers of one's own that are kept.
+const MAX_OWN_BEDS: usize = 50;
+
+/// The printers offered: the built-in list, then the user's own (saved in the preferences).
+fn beds(app: &SolveApp) -> Vec<(String, f64, f64)> {
+    let own = app.preferences.print_beds.iter().take(MAX_OWN_BEDS).filter_map(|entry| {
+        let mut it = entry.rsplitn(3, '|');
+        let (depth, width, name) = (it.next()?.parse::<f64>().ok()?, it.next()?.parse::<f64>().ok()?, it.next()?.trim());
+        ((10.0..=5000.0).contains(&width) && (10.0..=5000.0).contains(&depth) && !name.is_empty()).then(|| (name.to_string(), width, depth))
+    });
+    solidcraft_engine::cmd::print_unfold::PRINTERS.iter().map(|p| (p.0.to_string(), p.1, p.2)).chain(own).collect()
+}
+
 /// A length typed for the bed, in mm.
 fn bed_mm(text: &str) -> Option<f64> {
     text.trim().trim_end_matches("mm").trim().replace(',', ".").parse::<f64>().ok().filter(|v| (10.0..=5000.0).contains(v))
@@ -110,10 +124,16 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     if id != COMMAND {
         return None;
     }
-    let printers = solidcraft_engine::cmd::print_unfold::PRINTERS;
+    let printers = beds(app);
     Some(match app.session.doc.print_unfold.as_ref().map(|u| u.step) {
         None => (Kind::PrintUnfold(Pu::Base), vec![SelInput::new("Base Face", PLANAR_FACES, false).tip("ui.print_unfold_base_tip")]),
-        Some(PrintUnfoldStep::Edges) => (Kind::PrintUnfold(Pu::Edges), vec![SelInput::new("Edge", EDGES, true).tip("ui.print_unfold_edge_tip")]),
+        Some(PrintUnfoldStep::Edges) => (
+            Kind::PrintUnfold(Pu::Edges),
+            vec![
+                SelInput::new("Edge", EDGES, true).tip("ui.print_unfold_edge_tip"),
+                SelInput::new("Faces", PLANAR_FACES, true).tip("ui.print_unfold_carve_tip"),
+            ],
+        ),
         Some(PrintUnfoldStep::Surface) => (Kind::PrintUnfold(Pu::Surface), Vec::new()),
         Some(PrintUnfoldStep::Solid) => (Kind::PrintUnfold(Pu::Done), Vec::new()),
         Some(PrintUnfoldStep::Flat) if JOINING.with(std::cell::Cell::get) == Some(app.session.uid) => {
@@ -139,7 +159,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
                 }
                 None => (1, "220 mm".to_string(), "220 mm".to_string()),
             };
-            (Kind::PrintUnfold(Pu::Flat { printer, width, depth }), Vec::new())
+            (Kind::PrintUnfold(Pu::Flat { printer, width, depth, name: String::new() }), Vec::new())
         }
     })
 }
@@ -268,26 +288,104 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pu, inputs: &mut [Sel
                     note(ui, solidcraft_ui_text::tr("ui.print_unfold_missing_note"));
                     note(ui, solidcraft_ui_text::tr("ui.print_unfold_incomplete"));
                 }
+                // Step 2B: faces carved out into a part of their own.
+                note(ui, solidcraft_ui_text::tr("ui.print_unfold_carve_note"));
+                let faces: Vec<Value> = inputs
+                    .get(1)
+                    .map(|i| {
+                        i.items
+                            .iter()
+                            .filter_map(|sel| if let Sel::Face { point, .. } = sel { Some(json!([point.x, point.y, point.z])) } else { None })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let mut carve = false;
+                crate::dialogs::form_row(ui, "", |ui| {
+                    ui.add_enabled_ui(!faces.is_empty(), |ui| {
+                        carve = crate::ui_kit::button(ui, solidcraft_ui_text::tr("ui.print_unfold_carve"), crate::ui_kit::Button::Small).clicked();
+                    });
+                });
+                if carve {
+                    match app.run("print.unfold.group", json!({"faces": faces})) {
+                        Ok(_) => {
+                            if let Some(i) = inputs.get_mut(1) {
+                                i.items.clear();
+                            }
+                            app.set_status(solidcraft_ui_text::tr("ui.print_unfold_carved"), false);
+                        }
+                        Err(e) => app.set_status(e, true),
+                    }
+                }
+                if s.groups > 0 {
+                    count_row(ui, solidcraft_ui_text::tr("ui.print_unfold_groups"), s.groups.to_string());
+                    let mut back = false;
+                    crate::dialogs::form_row(ui, "", |ui| {
+                        back =
+                            crate::ui_kit::button(ui, solidcraft_ui_text::tr("ui.print_unfold_ungroup_all"), crate::ui_kit::Button::Small).clicked();
+                    });
+                    if back {
+                        for p in &s.group_points {
+                            if let Err(e) = app.run("print.unfold.ungroup", json!({"face": p})) {
+                                app.set_status(e, true);
+                            }
+                        }
+                    }
+                }
             }
         }
         Pu::Surface => {
             note(ui, solidcraft_ui_text::tr("ui.print_unfold_surface_note"));
             edit_edges_row(app, ui);
         }
-        Pu::Flat { printer, width, depth } => {
+        Pu::Flat { printer, width, depth, name } => {
             step_note(ui, "3");
             note(ui, solidcraft_ui_text::tr("ui.print_unfold_flat_note"));
-            let printers = solidcraft_engine::cmd::print_unfold::PRINTERS;
+            let printers = beds(app);
+            let built_in = solidcraft_engine::cmd::print_unfold::PRINTERS.len();
             let custom = solidcraft_ui_text::tr("ui.print_unfold_custom_bed").to_string();
-            let mut names: Vec<&str> = printers.iter().map(|p| p.0).collect();
+            let mut names: Vec<&str> = printers.iter().map(|p| p.0.as_str()).collect();
             names.push(&custom);
             crate::ui_kit::choice_row(ui, solidcraft_ui_text::tr("ui.print_unfold_printer"), "pu_printer", printer, &names);
             let chosen = match printers.get(*printer) {
-                Some((name, w, d)) => Some((name.to_string(), *w, *d)),
+                Some((bed, w, d)) => {
+                    // A printer of one's own can be taken off the list again.
+                    if *printer >= built_in {
+                        let mut gone = false;
+                        crate::dialogs::form_row(ui, "", |ui| {
+                            gone = crate::ui_kit::button(ui, solidcraft_ui_text::tr("ui.print_unfold_bed_remove"), crate::ui_kit::Button::Small)
+                                .clicked();
+                        });
+                        if gone {
+                            let own = *printer - built_in;
+                            if own < app.preferences.print_beds.len() {
+                                app.preferences.print_beds.remove(own);
+                            }
+                            *printer = printers.len() - 1;
+                        }
+                    }
+                    Some((bed.clone(), *w, *d))
+                }
                 None => {
                     enter |= crate::ui_kit::expr_row(ui, solidcraft_ui_text::tr("ui.print_unfold_bed_width"), width);
                     enter |= crate::ui_kit::expr_row(ui, solidcraft_ui_text::tr("ui.print_unfold_bed_depth"), depth);
-                    bed_mm(width).zip(bed_mm(depth)).map(|(w, d)| (String::new(), w, d))
+                    crate::ui_kit::expr_row(ui, solidcraft_ui_text::tr("ui.print_unfold_bed_name"), name);
+                    let size = bed_mm(width).zip(bed_mm(depth));
+                    let label: String = name.trim().chars().filter(|c| *c != '|' && !c.is_control()).take(60).collect();
+                    let room = app.preferences.print_beds.len() < MAX_OWN_BEDS && !printers.iter().any(|p| p.0 == label);
+                    let mut save = false;
+                    crate::dialogs::form_row(ui, "", |ui| {
+                        ui.add_enabled_ui(size.is_some() && !label.is_empty() && room, |ui| {
+                            save =
+                                crate::ui_kit::button(ui, solidcraft_ui_text::tr("ui.print_unfold_bed_save"), crate::ui_kit::Button::Small).clicked();
+                        });
+                    });
+                    if let (true, Some((w, d))) = (save, size) {
+                        app.preferences.print_beds.push(format!("{label}|{w}|{d}"));
+                        *printer = printers.len();
+                        name.clear();
+                        app.set_status(solidcraft_ui_text::tr("ui.print_unfold_bed_saved"), false);
+                    }
+                    size.map(|(w, d)| (String::new(), w, d))
                 }
             };
             if let Some((name, w, d)) = chosen {
@@ -497,18 +595,29 @@ pub fn overlay(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         }
         return;
     }
-    // The faces not on the pattern yet stand out: they are what is left to do.
-    for outline in &state.missing {
+    // The faces carved out into a part of their own: a wide band under their edges, so the cuts
+    // and bends drawn over it still show what each edge is.
+    for outline in &state.carved {
         let n = outline.len();
         for i in 0..n {
             if let (Some(a), Some(b)) = (outline.get(i).and_then(point), outline.get((i + 1) % n).and_then(point)) {
-                painter.line_segment([a, b], Stroke::new(4.0, t.form_error));
+                painter.line_segment([a, b], Stroke::new(8.0, t.form_success));
             }
         }
     }
     for edge in &state.cuts {
         if let (Some(a), Some(b)) = (point(&edge.start), point(&edge.end)) {
             painter.line_segment([a, b], Stroke::new(2.0, t.warning));
+        }
+    }
+    // The faces not on the pattern yet stand out: they are what is left to do (drawn over a
+    // carved-out group's outline: its faces wait for bends too).
+    for outline in &state.missing {
+        let n = outline.len();
+        for i in 0..n {
+            if let (Some(a), Some(b)) = (outline.get(i).and_then(point), outline.get((i + 1) % n).and_then(point)) {
+                painter.line_segment([a, b], Stroke::new(4.0, t.form_error));
+            }
         }
     }
     for edge in &state.bends {

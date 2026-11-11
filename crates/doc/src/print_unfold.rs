@@ -11,6 +11,11 @@
 //! one edge of the body and an edge of each of its two faces in the pattern: the two are found
 //! again as a pair by the cut's edge.
 //!
+//! Faces can be carved out of the pattern into a group: a part of its own that starts at the
+//! group's first face. Every edge between a face of the group and a face outside it is a cut,
+//! and inside the group the bends make a tree from its first face. A group folds at the inside
+//! corners of the body only: its bends turn toward the outer skin, on the film alone.
+//!
 //! Faces, edges and the base face are kept as points on them in the body's coordinates, as the
 //! other commands that pick edges keep them: the body is a copy that no feature changes.
 
@@ -30,6 +35,25 @@ fn err<T>(msg: impl Into<String>) -> Result<T> {
 }
 
 const CURVED: &str = "not supported yet: unfolding a body with curved faces for printing (every face must be flat)";
+
+/// Whether an edge's curve is a straight line: a line, or a polyline or spline whose points all
+/// lie on the line through its first and last (such a curve lies on that line all along: a
+/// chamfer's edges are splines of two points).
+fn straight(curve: &Curve, tol: f64) -> bool {
+    let on_line = |pts: &[Vec3]| {
+        let (Some(a), Some(b)) = (pts.first(), pts.last()) else { return false };
+        pts.len() >= 2 && a.dist(*b) > tol && pts.iter().all(|p| p.dist_to_segment(*a, *b) <= tol)
+    };
+    match curve {
+        Curve::Line { .. } => true,
+        Curve::Polyline { points } | Curve::Spline { points, .. } => on_line(&points.iter().map(|p| Vec3::new(p[0], p[1], p[2])).collect::<Vec<_>>()),
+        Curve::RationalSpline { homogeneous, .. } => {
+            homogeneous.iter().all(|h| h[3] > 1e-12)
+                && on_line(&homogeneous.iter().map(|h| Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3])).collect::<Vec<_>>())
+        }
+        _ => false,
+    }
+}
 
 /// How far the work on a design's unfolded print has come.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -125,6 +149,13 @@ pub struct PrintUnfoldSource {
     pub session: u64,
 }
 
+/// Faces carved out of the pattern into a part of their own: a point inside each face (the
+/// body's coordinates, mm), the face the part starts at first.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PrintGroup {
+    pub faces: Vec<Vec3>,
+}
+
 /// A design's unfolded print: the body lying on its base face, and its bends.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PrintUnfold {
@@ -135,6 +166,9 @@ pub struct PrintUnfold {
     /// A point on each bend edge (its middle), in the order they were set.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bends: Vec<Vec3>,
+    /// The groups of faces carved out of the pattern.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<PrintGroup>,
     #[serde(default)]
     pub step: PrintUnfoldStep,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -155,6 +189,9 @@ pub struct PrintUnfold {
     /// The feature that makes the printable body, once [`PrintUnfoldStep::Solid`] made it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub solid: Option<u64>,
+    /// The feature that holds the printable bodies of the carved-out groups, made with it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_solids: Option<u64>,
 }
 
 /// How the two faces at an edge meet.
@@ -218,6 +255,28 @@ impl UnfoldFace {
             }
         }
         best
+    }
+
+    /// A point well inside the face: of the middles of its corners' triangles, the one farthest
+    /// from its boundary.
+    pub fn inner_point(&self) -> Option<Vec3> {
+        let lp = self.loops.first()?;
+        let n = lp.len();
+        let mut best: Option<(Vec3, f64)> = None;
+        for i in 0..n {
+            for j in 1..n.saturating_sub(1) {
+                let (Some(a), Some(b), Some(c)) = (lp.get(i), lp.get((i + j) % n), lp.get((i + j + 1) % n)) else { continue };
+                let p = (*a + *b + *c) * (1.0 / 3.0);
+                if !self.contains(p) {
+                    continue;
+                }
+                let d = self.boundary_distance(p);
+                if best.is_none_or(|(_, far)| d > far) {
+                    best = Some((p, d));
+                }
+            }
+        }
+        best.map(|(p, _)| p)
     }
 
     /// The face as a region in its plane.
@@ -291,6 +350,10 @@ pub struct UnfoldLayout {
     pub attached: Vec<bool>,
     /// Per edge.
     pub kinds: Vec<EdgeKind>,
+    /// Per face: the carved-out group it is in.
+    pub group: Vec<Option<usize>>,
+    /// The first face of each group: where its part starts.
+    pub roots: Vec<usize>,
 }
 
 impl UnfoldLayout {
@@ -380,7 +443,7 @@ impl UnfoldGraph {
             if e.uses.is_empty() {
                 continue;
             }
-            if !matches!(e.curve, Curve::Line { .. }) {
+            if !straight(&e.curve, size * 1e-9) {
                 return err(CURVED);
             }
             let mut faces: Vec<usize> = e.uses.iter().map(|u| u.face as usize).collect();
@@ -514,9 +577,10 @@ impl UnfoldGraph {
             .map(|(i, _)| i)
     }
 
-    /// The pattern `bends` (edges) make from face `base`. Refused: a bend that hangs on no face
-    /// of the pattern, and one that closes a ring.
-    pub fn layout(&self, base: usize, bends: &[usize]) -> Result<UnfoldLayout> {
+    /// The pattern `bends` (edges) make from face `base`, and from the first face of each of
+    /// `groups` (faces carved out into a part of their own). Refused: a bend that hangs on no
+    /// face of the pattern, one that closes a ring, and one across the border of a group.
+    pub fn layout(&self, base: usize, bends: &[usize], groups: &[Vec<usize>]) -> Result<UnfoldLayout> {
         if base >= self.faces.len() {
             return err("the base face is not a face of the body");
         }
@@ -524,6 +588,25 @@ impl UnfoldGraph {
         let mut parent: Vec<Option<(usize, usize)>> = vec![None; self.faces.len()];
         if let Some(a) = attached.get_mut(base) {
             *a = true;
+        }
+        let mut group: Vec<Option<usize>> = vec![None; self.faces.len()];
+        let mut roots = Vec::with_capacity(groups.len());
+        for (k, faces) in groups.iter().enumerate() {
+            for f in faces {
+                match group.get_mut(*f) {
+                    Some(slot) if slot.is_none() && *f != base => *slot = Some(k),
+                    Some(_) => return err("a face is in two carved-out groups, or the base face is in one"),
+                    None => return err("a carved-out face is not a face of the body"),
+                }
+            }
+            let Some(first) = faces.first() else { return err("a carved-out group has no faces") };
+            if let Some(a) = attached.get_mut(*first) {
+                *a = true;
+            }
+            roots.push(*first);
+        }
+        if bends.iter().filter_map(|e| self.edges.get(*e)).any(|e| group.get(e.faces.0) != group.get(e.faces.1)) {
+            return err("a bend lies on the border of a carved-out group: that edge is a cut");
         }
         let mut rest: Vec<usize> = bends.to_vec();
         loop {
@@ -567,14 +650,14 @@ impl UnfoldGraph {
                 }
             })
             .collect();
-        Ok(UnfoldLayout { base, parent, attached, kinds })
+        Ok(UnfoldLayout { base, parent, attached, kinds, group, roots })
     }
 
     /// Click edge `e`: a cut becomes a bend and hangs the face across it on the pattern (a face
     /// that hung by another bend moves to this one, with what hangs on it); a bend becomes a
     /// cut again, and what hung by it is off the pattern.
-    pub fn toggle_bend(&self, base: usize, bends: &mut Vec<usize>, e: usize) -> Result<BendChange> {
-        let layout = self.layout(base, bends)?;
+    pub fn toggle_bend(&self, base: usize, bends: &mut Vec<usize>, groups: &[Vec<usize>], e: usize) -> Result<BendChange> {
+        let layout = self.layout(base, bends, groups)?;
         let Some(edge) = self.edges.get(e) else { return err("that is not an edge of the body") };
         if let Some(at) = bends.iter().position(|b| *b == e) {
             // The face that hung by it, and everything hanging on that face.
@@ -584,14 +667,21 @@ impl UnfoldGraph {
             bends.retain(|b| !layout.parent.iter().enumerate().any(|(f, p)| off.contains(&f) && p.is_some_and(|(_, by)| by == *b)));
             return Ok(BendChange::Removed { faces: off });
         }
-        match edge.turn {
-            EdgeTurn::Outside(_) => {}
-            EdgeTurn::Inside => {
+        let (ga, gb) = (layout.group.get(edge.faces.0).copied().flatten(), layout.group.get(edge.faces.1).copied().flatten());
+        if ga != gb {
+            return err("this edge is the border of a carved-out group: it stays a cut");
+        }
+        match (edge.turn, ga) {
+            (EdgeTurn::Outside(_), None) | (EdgeTurn::Inside, Some(_)) => {}
+            (EdgeTurn::Outside(_), Some(_)) => {
+                return err("not supported yet: a carved-out group folds at inside corners of the body only (this edge stays a cut)");
+            }
+            (EdgeTurn::Inside, None) => {
                 return err(
-                    "this edge can't fold: its faces meet in an inside corner of the body, and a printed hinge folds round the outside only (it stays a cut)",
+                    "this edge can't fold here: its faces meet in an inside corner of the body. Carve its faces out into a group first; a group folds at inside corners",
                 );
             }
-            EdgeTurn::Flat => return err("this edge can't fold: its two faces lie in one plane"),
+            (EdgeTurn::Flat, _) => return err("this edge can't fold: its two faces lie in one plane"),
         }
         let on = |f: usize| layout.attached.get(f).copied().unwrap_or(false);
         match (on(edge.faces.0), on(edge.faces.1)) {
@@ -621,7 +711,7 @@ impl UnfoldGraph {
                     }
                 };
                 let Some((_, old)) = layout.parent.get(moves).copied().flatten() else {
-                    return err("the base face can't hang on another face: it is where the pattern starts");
+                    return err("this edge would close a ring of bends round the face a part starts at: one edge of a ring stays a cut");
                 };
                 bends.retain(|x| *x != old);
                 bends.push(e);
@@ -652,6 +742,22 @@ impl PrintUnfold {
             }
         }
         Ok((base, bends))
+    }
+
+    /// The carved-out groups as faces of `graph`.
+    pub fn resolve_groups(&self, graph: &UnfoldGraph) -> Result<Vec<Vec<usize>>> {
+        let mut out = Vec::with_capacity(self.groups.len());
+        for g in &self.groups {
+            let mut faces = Vec::with_capacity(g.faces.len());
+            for p in &g.faces {
+                let Some(f) = graph.face_at(*p) else { return err("a carved-out face of the unfolded print is no longer a face of its body") };
+                if !faces.contains(&f) {
+                    faces.push(f);
+                }
+            }
+            out.push(faces);
+        }
+        Ok(out)
     }
 
     /// The bends the flat pattern is split at, as edges of `graph`: those of `bends` only.
