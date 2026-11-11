@@ -13,7 +13,11 @@ pub mod design_lock;
 mod design_metadata;
 mod dxf;
 mod dxf_out;
+mod excellon;
 pub mod formats;
+mod gerber;
+mod gerber_area;
+mod gerber_set;
 pub use design::{
     DesignCompression, DesignContainerReader, DesignPreview, FileKind, THUMBNAIL_SIZE, file_kind, is_design_container, read_design_file,
     read_design_geometry, read_design_preview, read_design_thumbnail, read_design_thumbnail_file, read_drawing, read_drawing_file,
@@ -43,6 +47,11 @@ pub use dxf::{DxfWriteOptions, read_dxf, write_dxf, write_dxf_entities, write_dx
 pub use dxf_out::{
     DxfEntity, DxfLayer, DxfLinetype, DxfShape, loop_lwpolyline, loop_lwpolyline_scaled, loop_shapes, seg_shape, write_dxf_drawing,
     write_dxf_drawing_units,
+};
+pub use excellon::{DrillArc, DrillHit, DrillSlot, Drills, read_excellon};
+pub use gerber::{GerberLayer, GerberOutline, read_gerber_layer, read_gerber_outline};
+pub use gerber_set::{
+    BOARD_EXTENSIONS, BoardJob, GerberSet, MAX_SET_FILES, SetFile, SetRole, classify_set, is_zip_path, read_gerber_set, zip_entries,
 };
 pub use legacy_dir::{APP_ID, LEGACY_APP_ID, PREVIOUS_APP_IDS, adopt_legacy_dir, legacy_flatpak_paths};
 pub use safe_write::{backup_path, write_atomic};

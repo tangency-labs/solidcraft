@@ -77,6 +77,23 @@ mod imp {
         touched();
         std::fs::create_dir_all(path)
     }
+    /// The paths of the regular files directly in a folder, sorted; at most `max` of them.
+    pub fn files_in(dir: &str, max: usize) -> Result<Vec<String>> {
+        check(dir)?;
+        touched();
+        let mut out = Vec::new();
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            if entry.file_type()?.is_file() {
+                out.push(entry.path().to_string_lossy().into_owned());
+                if out.len() > max {
+                    return Err(Error::new(ErrorKind::InvalidData, "too many files in the folder"));
+                }
+            }
+        }
+        out.sort();
+        Ok(out)
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -139,6 +156,16 @@ mod imp {
     pub fn take_writes() -> Vec<(String, Vec<u8>)> {
         let paths = WRITES.with(|w| std::mem::take(&mut *w.borrow_mut()));
         paths.into_iter().filter_map(|p| FILES.with(|f| f.borrow().get(&p).cloned()).map(|b| (p, b))).collect()
+    }
+    /// The files directly in a folder, sorted; at most `max` of them.
+    pub fn files_in(dir: &str, max: usize) -> Result<Vec<String>> {
+        let prefix = format!("{}/", dir.trim_end_matches('/'));
+        let out: Vec<String> =
+            FILES.with(|f| f.borrow().keys().filter(|p| p.strip_prefix(&prefix).is_some_and(|rest| !rest.contains('/'))).cloned().collect());
+        if out.len() > max {
+            return Err(Error::new(ErrorKind::InvalidData, "too many files in the folder"));
+        }
+        Ok(out)
     }
     pub fn list(prefix: &str) -> Vec<(String, u64)> {
         FILES.with(|f| f.borrow().iter().filter(|(p, _)| p.starts_with(prefix)).map(|(p, b)| (p.clone(), b.len() as u64)).collect())

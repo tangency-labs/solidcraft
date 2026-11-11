@@ -2118,6 +2118,18 @@ impl SolveApp {
             });
             return;
         }
+        if id == "file.insert_gerber" {
+            // Like Insert STEP: the board's zip, or any file in its folder, is picked and the
+            // board goes in beside the window, each file's layer found from what it says.
+            // On the web only the chosen file is uploaded, not its folder: there the board's zip.
+            let extensions: &[&str] = if cfg!(target_arch = "wasm32") { &["zip"] } else { &solidcraft_engine::io::BOARD_EXTENSIONS };
+            self.pick_open_for(extensions, |app, path| {
+                if let Some(path) = path {
+                    file_load::insert_board(app, &path, cfg!(target_arch = "wasm32"));
+                }
+            });
+            return;
+        }
         if id == "component.update_links" && self.edit_in_place.active.is_some() {
             // In a part edited in place it also refreshes the assembly around it.
             edit_in_place::refresh(self);
