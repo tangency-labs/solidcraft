@@ -102,6 +102,50 @@ fn a_picked_cam_edge_makes_the_cam() {
     assert!((v.first().copied().unwrap_or(f64::NAN) - (800f64.sqrt() - 40.0)).abs() < 1e-3, "{v:?}");
 }
 
+/// A snap point picked as the tip (on no body) is the tip's point, on the follower there; a corner
+/// picked on the follower keeps the corner it was.
+#[test]
+fn a_snap_point_is_the_cam_tip() {
+    let mut app = valve();
+    app.start("joint.cam");
+    let mut d = app.dialog.take().unwrap();
+    assert_ne!(d.inputs[TIP].accept & crate::selection::SNAP_POINTS, 0, "the tip takes snap points");
+    d.inputs[PROFILE].items = vec![edge(&app, Vec3::new(-20.0, 0.0, 5.0))];
+    d.inputs[TIP].items = vec![Sel::Vertex { body: String::new(), point: Vec3::new(40.0, 0.0, 5.0) }];
+    let p = apply_commands(&app, &d).unwrap().remove(0).1;
+    assert_eq!(p["tip"], json!({"point": [40.0, 0.0, 5.0]}), "{p}");
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    assert_eq!(app.session.doc.assembly.links.len(), 1, "the cam is made with the snapped tip");
+}
+
+/// A snapped middle of the tappet's end edge (a point on the part, no corner) is kept by that
+/// edge, so the tip follows it as a pick of the edge does; a real corner stays a corner.
+#[test]
+fn a_snapped_edge_middle_tip_is_kept_by_its_edge() {
+    let app = valve();
+    let st = app.session.world_state().unwrap();
+    let body = st.bodies.iter().find(|b| b.mesh().bounds().max.x > 59.0).map(|b| b.name.clone()).unwrap();
+    let mid = crate::dialogs_assembly::snap_of(&app.session, &Sel::Vertex { body: body.clone(), point: Vec3::new(60.0, 0.0, 5.0) }).unwrap();
+    assert!(mid.param.get("corner").is_none() && mid.param["edge"] == json!([60.0, 0.0, 5.0]), "{}", mid.param);
+    let corner = crate::dialogs_assembly::snap_of(&app.session, &Sel::Vertex { body, point: Vec3::new(60.0, 2.0, 5.0) }).unwrap();
+    assert_eq!(corner.param["corner"], json!([60.0, 2.0, 5.0]), "{}", corner.param);
+}
+
+/// A snapped centre of the tappet's flat end face is kept by that face, so the tip follows the
+/// face as the part changes, as a pick of the face does.
+#[test]
+fn a_snapped_face_centre_tip_is_kept_by_its_face() {
+    let app = valve();
+    let st = app.session.world_state().unwrap();
+    let b = st.bodies.iter().find(|b| b.mesh().bounds().max.x > 59.0).unwrap();
+    let tol = (b.body.size() * 2e-3).max(1e-3);
+    let end = b.body.faces(tol).unwrap().into_iter().find(|f| f.plane_normal.is_some() && f.centroid.x > 59.0).unwrap();
+    let tip = crate::dialogs_assembly::snap_of(&app.session, &Sel::Vertex { body: b.name.clone(), point: end.centroid }).unwrap();
+    assert!(tip.param.get("face").is_some(), "{}", tip.param);
+}
+
 /// The dialog's rows pass their English text, which the catalogs translate by its key.
 #[test]
 fn the_cam_dialog_labels_translate() {

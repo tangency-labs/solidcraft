@@ -15,7 +15,7 @@ use super::{ROUND, joint_row, occurrence, pick, picked_radius, trim, turn};
 use crate::SolveApp;
 use crate::dialogs::{combo, field, form_row};
 use crate::dialogs_assembly::Asm;
-use crate::selection::{EDGES, FACES, PROFILES, SelInput, SelectionExt as _, VERTICES};
+use crate::selection::{EDGES, FACES, PROFILES, SNAP_POINTS, SelInput, SelectionExt as _, VERTICES, point_value};
 use solidcraft_theme::Tokens;
 
 /// The follower types, as `joint.cam` takes them, and their labels.
@@ -70,7 +70,7 @@ pub fn start(app: &SolveApp) -> (Asm, Vec<SelInput>) {
     let inputs = vec![
         SelInput::new("Profile", PROFILES | EDGES, true),
         SelInput::new("Roller (optional)", ROUND, false),
-        SelInput::new("Tip (optional)", FACES | EDGES | VERTICES, false),
+        SelInput::new("Tip (optional)", FACES | EDGES | VERTICES | SNAP_POINTS, false),
     ];
     (Asm::Cam(Box::new(f)), inputs)
 }
@@ -183,8 +183,15 @@ pub fn commands(app: &SolveApp, f: &CamForm, inputs: &[SelInput]) -> Result<Vec<
             None => json!(f.radius.trim()),
         };
     }
-    if let Some(snap) = inputs.get(TIP).and_then(|i| i.items.first()).and_then(|x| crate::dialogs_assembly::snap_of(s, x)) {
-        p["tip"] = snap.param;
+    match inputs.get(TIP).and_then(|i| i.items.first()) {
+        // A snap point (an edge's middle, a face's centre) is the point itself, on the part there.
+        Some(Sel::Vertex { body, point }) if body.is_empty() => p["tip"] = json!({"point": point_value(*point)}),
+        Some(x) => {
+            if let Some(snap) = crate::dialogs_assembly::snap_of(s, x) {
+                p["tip"] = snap.param;
+            }
+        }
+        None => {}
     }
     Ok(vec![("joint.cam".to_string(), p)])
 }
