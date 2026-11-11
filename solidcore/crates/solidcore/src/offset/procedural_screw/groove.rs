@@ -131,13 +131,16 @@ impl Flank {
     }
 
     /// ||C+d*n|| differs from the original radius by at most |d|. Add the
-    /// operation's displacement once more to put the boundary roots strictly
-    /// inside the search interval; this is the offset reach margin, not a body
-    /// bounding-box multiplier. Original support endpoints are retained.
-    fn domain(&self, radii: [Affine; 2], family: Ivl) -> Result<Ivl> {
+    /// operation's `displacement` ([`Band::displacement`]) once more to put the
+    /// boundary roots strictly inside the search interval; this is the offset
+    /// reach margin, not a body bounding-box multiplier. It is the whole
+    /// operation's, not this flank's own move: a flank that stays, its section
+    /// starting on a land's radius, has that root at its support's end, which
+    /// no endpoint sign proves. Original support endpoints are retained.
+    fn domain(&self, radii: [Affine; 2], family: Ivl, displacement: f64) -> Result<Ivl> {
         let [a, b] = radii.map(|r| r.at(family));
         let delta = self.distance.at(family).mag();
-        let margin = (Ivl::from(self.distance.rate.mag()) * Ivl::from(family.mag().max(1.0))).hi;
+        let margin = (Ivl::from(displacement) * Ivl::from(family.mag().max(1.0))).hi;
         let padding = Ivl::from(delta) + Ivl::from(margin);
         let radial = Ivl::new(a.lo.min(b.lo), a.hi.max(b.hi)) + Ivl::new(-padding.hi, padding.hi);
         if radial.lo <= 0.0 || self.radius.rate.mig() <= 0.0 {
@@ -272,6 +275,16 @@ impl State {
 }
 
 impl Band {
+    /// The operation's displacement per unit family: the largest rate of either
+    /// flank's offset and of either land's radius.
+    fn displacement(&self) -> f64 {
+        self.flanks
+            .iter()
+            .map(|flank| flank.distance.rate.mag())
+            .chain(self.radii.iter().map(|r| r.rate.mag()))
+            .fold(0.0, f64::max)
+    }
+
     /// Prove a nonempty ordered section throughout [0,end], including after a
     /// land vanishes, and return its two boundaries at end. Since `D_R` never
     /// vanishes, each clipping root is unique and continues by the implicit
@@ -359,7 +372,7 @@ impl Band {
             let family = Ivl::from(end);
             flank
                 .inverse(
-                    flank.domain(self.radii, family)?,
+                    flank.domain(self.radii, family, self.displacement())?,
                     Affine {
                         origin: radius,
                         rate: Ivl::from(0.0),
@@ -380,7 +393,7 @@ impl Band {
             let [a, b] = self.flanks.each_ref().map(|flank| {
                 flank
                     .inverse(
-                        flank.domain(self.radii, family)?,
+                        flank.domain(self.radii, family, self.displacement())?,
                         Affine {
                             origin: Ivl::from(mid),
                             rate: Ivl::from(0.0),
@@ -539,8 +552,8 @@ impl Band {
             return Ok(None);
         }
         let [a, b] = &self.flanks;
-        let xa = a.domain(self.radii, family)?;
-        let xb = b.domain(self.radii, family)?;
+        let xa = a.domain(self.radii, family, self.displacement())?;
+        let xb = b.domain(self.radii, family, self.displacement())?;
         let [a_lower, a_upper] = self.radii.map(|r| a.inverse_cell(xa, r, family));
         let [b_lower, b_upper] = self.radii.map(|r| b.inverse_cell(xb, r, family));
         let (Some(a_lower), Some(a_upper), Some(b_lower), Some(b_upper)) =
@@ -643,7 +656,7 @@ impl Band {
         }
         let final_family = Ivl::from(1.0);
         let [first, second] = self.flanks.each_ref().map(|flank| -> Result<[Ivl; 2]> {
-            let source = flank.domain(self.radii, Ivl::new(0.0, 1.0))?;
+            let source = flank.domain(self.radii, Ivl::new(0.0, 1.0), self.displacement())?;
             let [a, b] = self.radii;
             Ok([
                 flank.inverse(source, a, final_family)?.source,
@@ -1043,9 +1056,10 @@ pub(crate) fn operation_reach(
         winding: 0,
         cancel: k.cancel.clone(),
     };
+    let pad = band.displacement();
     let [a, b] = &band.flanks;
-    let x = a.domain(radii, family)?;
-    let y = b.domain(radii, family)?;
+    let x = a.domain(radii, family, pad)?;
+    let y = b.domain(radii, family, pad)?;
     let ga = a.inverse(x, *lower, Ivl::from(0.0))?.height;
     let gb = b.inverse(y, *lower, Ivl::from(0.0))?.height;
     // This chooses an integer chart only; the complete interval ordering below
@@ -1075,7 +1089,7 @@ pub(crate) fn operation_reach(
     // azimuth, each boundary helix's height changes by G_lambda, so this bound
     // covers every segmented land's axial continuation, including its cap ends.
     for flank in &band.flanks {
-        let domain = flank.domain(radii, family)?;
+        let domain = flank.domain(radii, family, pad)?;
         for radius in radii {
             let height_rate = flank.inverse(domain, radius, family)?.height_rate;
             reach = reach.max(height_rate.mag());
