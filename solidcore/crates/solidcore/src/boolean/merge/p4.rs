@@ -477,6 +477,17 @@ fn face_leaking_solid(b: &Brep, delete: &[FaceId]) -> Result<Option<FaceId>> {
     Ok(None)
 }
 
+/// Not upstream (WR-619): whether `b` has a solid region other than the infinite one.
+fn has_solid_region(b: &Brep) -> Result<bool> {
+    let infinite = b.infinite_region();
+    for r in bp::regions(b, None)? {
+        if Some(r) != infinite && void(b, r)? == 0 {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 fn void(b: &Brep, r: RegionId) -> Result<i32> {
     Ok(b.region(r)?.is_void())
 }
@@ -1477,14 +1488,16 @@ fn editing_stages(
         }
     }
     // Not upstream unless opted in (`fixes.boolean_union_refuses_solid_leak`, WR-619): a
-    // union never deletes a face that bounds a solid against the outside.
-    if kernels.primary.fixes.boolean_union_refuses_solid_leak
+    // union whose face deletion merges a solid into the outside is refused below. A face
+    // between a solid and the outside is also deleted where the other body's solid lies just
+    // across it (a coincident wall, #13455), so only a union left with no solid is refused.
+    let leak = if kernels.primary.fixes.boolean_union_refuses_solid_leak
         && operation == BooleanOperation::Union
     {
-        if let Some(f) = face_leaking_solid(primary, &faces.delete)? {
-            return Err(Failure::new(OP, BooleanFailure::SolidLeaks { face: f }).into_error());
-        }
-    }
+        face_leaking_solid(primary, &faces.delete)?
+    } else {
+        None
+    };
     intersector.delete_faces(
         kernels,
         primary,
@@ -1529,6 +1542,11 @@ fn editing_stages(
         )
     {
         intersector.post_process(kernels, primary, attributes, state, false)?;
+    }
+    if let Some(f) = leak {
+        if !has_solid_region(primary)? {
+            return Err(Failure::new(OP, BooleanFailure::SolidLeaks { face: f }).into_error());
+        }
     }
     Ok(false)
 }
