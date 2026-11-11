@@ -21,7 +21,8 @@
 # sccache is on a Blacksmith sticky disk that only main commits.
 # A push to main runs only the repository checks when a passing merge-queue run tested that very
 # commit, or when nothing a build reads changed since the last push to main whose run passed.
-# Otherwise it runs everything.
+# Otherwise it runs everything; it also does when it changes a cache key (the toolchain, Cargo.lock,
+# the cache settings here), so that main saves the caches the next runs restore.
 # Heavy checks wait for review: a pull request without the `approved-for-ci` label runs only
 # Select checks, the format and repository checks and a quick compile. Adding the label (after
 # review) runs everything above, and every later push to the PR does too, except a push that only
@@ -240,6 +241,24 @@ jobs:
           solidcore_paths() {
             if grep -qz '^solidcore/' "$1"; then solidcore=true; fi
           }
+          # Whether the NUL-separated paths in $1 (the diff $2..$3) change what the build jobs' caches
+          # are keyed on, and which (cache_key): rust-cache hashes the toolchain file and the lockfile,
+          # and this workflow installs the toolchain and names the caches. Of ci.yml only the lines
+          # that set those count: the toolchain, rust-cache and sccache actions, the sticky disks,
+          # cache keys and the CARGO_, RUST and SCCACHE_ environment. solidcore/ has its own toolchain
+          # file and lockfile, which only the SolidCore checks read; solidcore_paths runs those.
+          cache_key_paths() {
+            while IFS= read -r -d '' path; do
+              case "$path" in
+                rust-toolchain|rust-toolchain.toml|Cargo.lock) cache_key="${cache_key:+$cache_key, }$path" ;;
+              esac
+            done < "$1"
+            if grep -qxzF '.github/workflows/ci.yml' "$1" \
+              && git diff -U0 "$2" "$3" -- .github/workflows/ci.yml \
+                | grep -E '^[+-] .*(dtolnay/rust-toolchain@|Swatinem/rust-cache@|useblacksmith/stickydisk@|mozilla-actions/sccache-action@|[[:space:]](key|save-if|workspaces|prefix-key|shared-key|cache-[a-z-]+|toolchain|components|targets|CARGO_[A-Z_]+|RUST[A-Z_]*|SCCACHE_[A-Z_]+):)' > /dev/null; then
+              cache_key="${cache_key:+$cache_key, }the cache settings in ci.yml"
+            fi
+          }
           # Opt-in for a big render change: a pull request labelled render-tests, or a merge group
           # holding one (its pull requests are the (#N) of its squash commits), runs them whatever
           # the paths say.
@@ -255,11 +274,17 @@ jobs:
             # SolidCore checks for a push to main that changes solidcore/**, whatever the queue
             # tested: main saves their caches, which every pull request restores. A push that
             # can't be compared (new branch, force push) runs them.
+            # Likewise the build jobs for a push to main that changes a cache key (cache_key_paths),
+            # or can't be compared: only main saves their caches, so skipping them left every run cold
+            # until the nightly saved one.
+            cache_key=
             if [ "$GITHUB_REF_NAME" = main ]; then
               if git diff --no-renames --name-only -z "$BEFORE_SHA" "$PUSH_SHA" > "$RUNNER_TEMP/ci-solidcore-paths" 2>/dev/null; then
                 solidcore_paths "$RUNNER_TEMP/ci-solidcore-paths"
+                cache_key_paths "$RUNNER_TEMP/ci-solidcore-paths" "$BEFORE_SHA" "$PUSH_SHA"
               else
                 solidcore=true
+                cache_key="a push that can't be compared"
               fi
               echo "solidcore=$solidcore for $BEFORE_SHA..$PUSH_SHA"
             fi
@@ -267,10 +292,17 @@ jobs:
             # testing the push again proves nothing new; otherwise (a merge that skipped the
             # queue, or the API cannot answer) test everything.
             # The API through curl and grep, which every runner image has.
-            tested=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/$REPO/actions/workflows/ci.yml/runs?event=merge_group&head_sha=$PUSH_SHA&status=success&per_page=1" \
-              | grep -o '"total_count": *[0-9]*' | grep -o '[0-9]*$' || echo 0)
-            if [ "${tested:-0}" -gt 0 ]; then
+            if [ -z "$cache_key" ]; then
+              tested=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/$REPO/actions/workflows/ci.yml/runs?event=merge_group&head_sha=$PUSH_SHA&status=success&per_page=1" \
+                | grep -o '"total_count": *[0-9]*' | grep -o '[0-9]*$' || echo 0)
+            fi
+            if [ -n "$cache_key" ]; then
+              echo "$BEFORE_SHA..$PUSH_SHA changes a cache key ($cache_key): running the build jobs to save their caches."
+              full=true
+              packages=
+              native=true
+            elif [ "${tested:-0}" -gt 0 ]; then
               echo "The merge queue already tested $PUSH_SHA: repository checks only."
             elif tested=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
                 "https://api.github.com/repos/$REPO/actions/workflows/ci.yml/runs?event=push&branch=$GITHUB_REF_NAME&status=success&per_page=1" \
