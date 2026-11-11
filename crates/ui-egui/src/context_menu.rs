@@ -241,14 +241,12 @@ const RY: f32 = crate::ui_kit::RADIAL_RADIUS;
 // What the menus offer
 // ---------------------------------------------------------------------------------------------
 
-/// What a body menu's Rename renames (#12341): one body, or several together.
-fn rename_bodies(app: &SolveApp, bodies: &[String]) -> Value {
+/// The bodies a body menu's Rename Selected Bodies renames together (#12341): the selection,
+/// when it holds several bodies and the menu is for one or all of them. `None` leaves the item
+/// out.
+fn rename_selected(app: &SolveApp, bodies: &[String]) -> Option<Vec<String>> {
     let selected = sel_bodies(app);
-    let list: &[String] = if bodies.len() == 1 && selected.len() > 1 && selected.contains(&bodies[0]) { &selected } else { bodies };
-    match list {
-        [one] => json!({ "body": one }),
-        _ => json!({ "bodies": list }),
-    }
+    (selected.len() > 1 && !bodies.is_empty() && bodies.iter().all(|b| selected.contains(b))).then_some(selected)
 }
 
 fn sel_bodies(app: &SolveApp) -> Vec<String> {
@@ -767,6 +765,7 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
     let one = bodies.len() == 1;
     let locked = bodies.iter().all(|b| app.session.visibility.locked_bodies.contains(b));
     let items = json!(bodies.iter().map(|b| json!({"type": "body", "name": b})).collect::<Vec<_>>());
+    let several = rename_selected(app, bodies);
     let mut v = vec![
         act("ui.moveBodies", "Move/Copy", "move").key("M").with(json!({ "bodies": names })).on(!locked),
         cmd(app, "component.from_bodies", "Create Components from Bodies").with(json!({ "bodies": names })),
@@ -785,15 +784,20 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
         act("ui.paste", "Paste", "paste").key("Ctrl+V").on(crate::edit_clipboard::can_paste(app)),
         act("ui.delete", "Delete", "delete").key("Del").with(json!({ "items": items })).on(!locked),
         cmd(app, "solid.remove", "Remove").with(json!({ "bodies": names })).on(!locked),
-        // Several bodies take one name, numbered after the first (#12341): the ones the menu is
-        // for, or, from a browser row that is part of a selection of several bodies, that
-        // selection, as F2 renames it.
-        act("ui.rename", "Rename", "rename").key("F2").with(rename_bodies(app, bodies)).on(!bodies.is_empty()),
+        // F2 renames the selection: with several bodies selected, it is Rename Selected Bodies.
+        act("ui.rename", "Rename", "rename").key(if several.is_some() { "" } else { "F2" }).with(json!({ "body": bodies.first() })).on(one),
         Item::sep(),
         act(if all_hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": names })),
         act("ui.lock", if locked { "Unlock" } else { "Lock" }, "ground").with(json!({ "bodies": names })),
         act("ui.isolate", "Isolate", "body").with(json!({ "bodies": names })),
     ];
+    // Several selected bodies take one name, numbered after the first (#12341), as F2 renames
+    // them. Rename itself still renames only the body the menu is for.
+    if let Some(list) = several
+        && let Some(at) = v.iter().position(|i| i.id == "ui.rename")
+    {
+        v.insert(at + 1, act("ui.rename", "Rename Selected Bodies", "rename").key("F2").with(json!({ "bodies": list })));
+    }
     if one {
         let b = bodies.first().cloned().unwrap_or_default();
         if let Some(component) = crate::dialogs_part_size::component_for_bodies(app, bodies) {

@@ -5,7 +5,7 @@
 //! by name, a sketch or construction plane by feature id. Expand All / Collapse All return the
 //! tree keys the UI opens or closes; they do not change the design.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 
 use std::collections::BTreeMap;
 
@@ -1426,15 +1426,24 @@ fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
 /// of the list took.
 fn numbered_names(s: &Session, olds: &[String], name: &str) -> Vec<String> {
     let st = s.model.state();
-    let removed = |n: &str| s.doc.features.iter().any(|f| matches!(&f.kind, FeatureKind::Remove { bodies } if bodies.iter().any(|b| b == n)));
+    // Sets, not lists: with up to MAX_RENAMED_BODIES bodies, each trying many candidates, a
+    // linear search per candidate would make the command cubic in the list.
+    let mut taken: HashSet<&str> = st.bodies.iter().map(|b| b.name.as_str()).chain(olds.iter().map(String::as_str)).collect();
+    for f in &s.doc.features {
+        if let FeatureKind::Remove { bodies } = &f.kind {
+            taken.extend(bodies.iter().map(|b| b.0.as_str()));
+        }
+    }
+    let mut given: HashSet<String> = HashSet::with_capacity(olds.len());
     let mut out: Vec<String> = Vec::with_capacity(olds.len());
     for old in olds {
         // Every body, listed name and Remove target can rule out one candidate at most.
-        let tries = st.bodies.len() + olds.len() + s.doc.features.len() + out.len() + 1;
+        let tries = taken.len() + out.len() + 1;
         let pick = (1..=tries)
             .map(|k| if k == 1 { name.to_string() } else { format!("{name} ({k})") })
-            .find(|c| !out.contains(c) && (c == old || (st.body(c).is_none() && !olds.contains(c) && !removed(c))))
+            .find(|c| !given.contains(c) && (c == old || !taken.contains(c.as_str())))
             .unwrap_or_else(|| format!("{name} ({})", tries + 1));
+        given.insert(pick.clone());
         out.push(pick);
     }
     out
