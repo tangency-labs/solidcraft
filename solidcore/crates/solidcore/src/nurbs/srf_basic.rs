@@ -43,6 +43,7 @@
 //! | [`Direction`]                                | `NL_UDIR` / `NL_VDIR` / `NL_UVDIR` |
 //! | [`WEIGHT_MIN`], [`WEIGHT_MAX`], [`WEIGHT_TOL`] | `NL_WMIN`, `NL_WMAX`, `NL_WTOL` |
 //! | [`Surface::displace_cpts`]                   | none                              |
+//! | [`falloff_weight`], [`FalloffShape`]         | none                              |
 //!
 //! Deviations:
 //! - [`Surface`] owns its control net and knot arrays (upstream points at caller- or
@@ -1136,6 +1137,31 @@ fn rescale(u: &mut [f64], r: usize, p: usize, lo: f64, hi: f64) -> Result<()> {
     Ok(())
 }
 
+/// How a soft move's share falls with a control point's index distance from the moved points
+/// (not upstream), with `s = d / (radius + 1)` for a point `d` index steps away.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FalloffShape {
+    /// `1 - s`.
+    Linear,
+    /// `1 - (3 s² - 2 s³)`: flat at the moved points and at the radius's edge.
+    Smooth,
+}
+
+/// The fraction of a soft move ([`Surface::displace_cpts`]) taken by a control point `d` index
+/// steps from the nearest moved point (not upstream): 1 at `d = 0`, falling by `shape` with
+/// `s = d / (radius + 1)`, and 0 past `radius`.
+#[must_use]
+pub fn falloff_weight(shape: FalloffShape, radius: u32, d: u32) -> f64 {
+    if d > radius {
+        return 0.0;
+    }
+    let s = f64::from(d) / (f64::from(radius) + 1.0);
+    match shape {
+        FalloffShape::Linear => 1.0 - s,
+        FalloffShape::Smooth => 1.0 - s * s * (3.0 - 2.0 * s),
+    }
+}
+
 /// Makes the surfaces rationality-compatible (`N_MakeSrfsRatCompatible`): when any
 /// is rational, every non-rational one gets weights `1.0`.
 pub fn make_rat_compatible(surfaces: &mut [Surface]) {
@@ -1262,6 +1288,25 @@ mod tests {
             vec![0.0, 0.0, 1.0, 1.0],
         )
         .unwrap()
+    }
+
+    #[test]
+    fn falloff_is_one_at_the_moved_points_and_zero_past_the_radius() {
+        for shape in [FalloffShape::Linear, FalloffShape::Smooth] {
+            assert_eq!(falloff_weight(shape, 0, 0), 1.0);
+            assert_eq!(falloff_weight(shape, 0, 1), 0.0);
+            assert_eq!(falloff_weight(shape, 3, 0), 1.0);
+            assert_eq!(falloff_weight(shape, 3, 4), 0.0);
+            assert_eq!(falloff_weight(shape, 3, u32::MAX), 0.0);
+            let w: Vec<f64> = (0..=3).map(|d| falloff_weight(shape, 3, d)).collect();
+            assert!(w.windows(2).all(|p| p[1] < p[0]), "{shape:?}: {w:?}");
+        }
+        // s = 1/4 at one step of radius 3
+        assert_eq!(falloff_weight(FalloffShape::Linear, 3, 1), 0.75);
+        assert_eq!(
+            falloff_weight(FalloffShape::Smooth, 3, 1),
+            1.0 - 0.0625 * 2.5
+        );
     }
 
     #[test]

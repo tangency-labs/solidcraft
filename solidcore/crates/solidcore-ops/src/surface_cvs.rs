@@ -9,7 +9,9 @@ use solidcore::nurbs::crv_fit::p1::approx_knots;
 use solidcore::nurbs::geom::Rectangle;
 use solidcore::nurbs::knots::{clamped_uniform, KnotVector, Side};
 use solidcore::nurbs::math::{CPoint, NOW};
-use solidcore::nurbs::srf_basic::{Direction, Surface as NurbSurface};
+use solidcore::nurbs::srf_basic::{
+    falloff_weight as kernel_falloff, Direction, FalloffShape, Surface as NurbSurface,
+};
 use solidcore::nurbs::srf_deviation::certified_distance;
 use solidcore::Vec3;
 use solidcore_record::brep::{
@@ -121,14 +123,11 @@ pub fn falloff_weight(falloff: Option<Falloff>, d: usize) -> f64 {
     let Ok(d) = u32::try_from(d) else {
         return 0.0;
     };
-    if d > f.radius {
-        return 0.0;
-    }
-    let s = f64::from(d) / (f64::from(f.radius) + 1.0);
-    match f.shape {
-        Shape::Linear => 1.0 - s,
-        Shape::Smooth => 1.0 - s * s * (3.0 - 2.0 * s),
-    }
+    let shape = match f.shape {
+        Shape::Linear => FalloffShape::Linear,
+        Shape::Smooth => FalloffShape::Smooth,
+    };
+    kernel_falloff(shape, f.radius, d)
 }
 
 /// The weight table of a `rows` by `cols` net (row by row, as [`Net::points`]): each point's
