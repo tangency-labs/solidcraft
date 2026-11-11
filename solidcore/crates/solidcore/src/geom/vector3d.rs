@@ -1018,7 +1018,7 @@ mod tests {
         assert!(z.square_turn(x, Vec3::new(f64::NAN, 0.0, 0.0)).is_err());
     }
 
-    /// Fuzz regression: when `|v|^2` overflows,the unit vector underflows to
+    /// Fuzz regression: when `|v|^2` overflows, the unit vector underflows to
     /// zero and upstream fails after writing the x and z out-params.
     #[test]
     fn ortho_vectors_on_overflow() {
