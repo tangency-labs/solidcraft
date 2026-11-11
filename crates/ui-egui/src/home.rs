@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use solidcraft_engine::Session;
-use solidcraft_engine::render::{Camera, StandardView};
+use solidcraft_viewport::{Camera, StandardView};
 
 use crate::SolveApp;
 use crate::start_page;
@@ -135,7 +135,7 @@ pub fn thumbnail(s: &Session) -> Option<egui::ColorImage> {
     if b.is_empty() {
         return None;
     }
-    cam.fit(&b);
+    cam.fit(&solidcraft_engine::render::view_bounds(&b));
     // Fill the card: the fit leaves room for a whole window's margins.
     cam.distance *= 0.7;
     let scene = solidcraft_engine::view::scene(s, &cam).ok()?;
@@ -205,7 +205,7 @@ fn remember_at(s: &Session, key: &str, #[cfg(not(target_arch = "wasm32"))] ident
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(path) = identity.filter(|p| cache_path(key).as_ref() == Some(p)) {
         let rgba: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
-        if let Some(bytes) = solidcraft_engine::render::png(THUMB[0], THUMB[1], rgba)
+        if let Some(bytes) = solidcraft_viewport::png(THUMB[0], THUMB[1], rgba)
             && let Some(dir) = path.parent()
             && std::fs::create_dir_all(dir).is_ok()
         {
@@ -643,7 +643,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
 
     if interactive
         && !had_help_window
-        && !app.prefs_window.open
+        && !app.prefs_window.shell.open
         && !app.help.about
         && !app.crashes.open
         && !app.help.menu
@@ -656,7 +656,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if interactive
         && !had_help_window
-        && !app.prefs_window.open
+        && !app.prefs_window.shell.open
         && !app.help.about
         && !app.crashes.open
         && !egui::Popup::is_any_open(ui.ctx())
@@ -849,10 +849,17 @@ fn recent_entry<'a>(app: &'a SolveApp, index: usize, path: &'a str) -> start_pag
     } else {
         friendly_path(path).into()
     };
-    let mut menu =
-        vec![start_page::MenuEntry { label: app.tr_label("Remove from list").into(), icon: "delete", chosen: FileAction::ForgetRecent(index) }];
+    let mut menu = vec![start_page::MenuEntry {
+        label: app.tr_label("Remove from list").into(),
+        icon: "delete".into(),
+        chosen: FileAction::ForgetRecent(index),
+    }];
     if !cfg!(target_arch = "wasm32") {
-        menu.push(start_page::MenuEntry { label: app.tr_label("Show in folder").into(), icon: "folder", chosen: FileAction::ShowInFolder(index) });
+        menu.push(start_page::MenuEntry {
+            label: app.tr_label("Show in folder").into(),
+            icon: "folder".into(),
+            chosen: FileAction::ShowInFolder(index),
+        });
     }
     start_page::Recent {
         title,
@@ -1178,7 +1185,7 @@ mod tests {
             session.run_script(&script).unwrap();
             let image = thumbnail(&session).unwrap();
             let rgba = image.pixels.iter().flat_map(|p| p.to_srgba_unmultiplied()).collect();
-            let png = solidcraft_engine::render::png(THUMB[0], THUMB[1], rgba).unwrap();
+            let png = solidcraft_viewport::png(THUMB[0], THUMB[1], rgba).unwrap();
             std::fs::write(dir.join(format!("{i}.png")), png).unwrap();
             hashes.push(format!("{:x}", Sha256::digest(serde_json::to_vec(&script).unwrap())));
             eprintln!("{}: {:.3} s", sample.name, began.elapsed().as_secs_f64());
@@ -1449,7 +1456,7 @@ mod tests {
         assert!(h.app.home.open);
         let gear = crate::scenario::handle_at("titlebar:preferences").unwrap();
         h.call("ui.click", serde_json::json!({"x": gear.x, "y": gear.y}));
-        assert!(h.app.prefs_window.open && h.app.home.open);
+        assert!(h.app.prefs_window.shell.open && h.app.home.open);
         let shown = |h: &crate::scenario::Harness| {
             h.ctx.memory(|m| m.areas().visible_last_frame(&egui::LayerId::new(egui::Order::Middle, egui::Id::unique("sc_prefs"))))
         };
@@ -1460,7 +1467,7 @@ mod tests {
         // Home › Keyboard Shortcuts opens the same window at its page.
         h.app.keymap.open = true;
         h.frames(2);
-        assert!(shown(&h) && h.app.prefs_window.section == crate::prefs::PAGE_SHORTCUTS && h.app.home.open);
+        assert!(shown(&h) && h.app.prefs_window.shell.section == crate::prefs::PAGE_SHORTCUTS && h.app.home.open);
     }
 
     fn click_file(h: &mut crate::scenario::Harness, id: &str) {
@@ -1572,7 +1579,7 @@ mod tests {
         h.app.home.show(0);
         assert_eq!(solidcraft_ui_text::tr("home.settings"), solidcraft_ui_text::tr("ui.preferences"), "one name for the window");
         click_file(&mut h, "home:settings");
-        assert!(h.app.prefs_window.open, "the entry opens Preferences");
+        assert!(h.app.prefs_window.shell.open, "the entry opens Preferences");
     }
 
     #[test]

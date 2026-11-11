@@ -51,7 +51,6 @@ use solidcore::nurbs::math::{CPoint, NOW};
 use solidcore::nurbs::spiral::allocate_nurb_volume;
 use solidcore::surface::b_spline_volume::BSplineVolume;
 use solidcore::surface::volume::{Volume, VolumeKind};
-use solidcore::SolidError;
 
 use super::intersect_surface_drop_lib_p2::{
     add3, gen_knots, gen_scale, pick, rust_curve, scale3, unit_dir, CurveIn,
@@ -600,7 +599,7 @@ const SM_SUCCESS: i64 = 1000;
 fn status(r: &solidcore::Result<()>) -> i64 {
     match r {
         Ok(()) => SM_SUCCESS,
-        Err(SolidError::Upstream { code, .. }) => i64::from(*code),
+        Err(err) if solidcore::error::upstream_status(err).is_some() => i64::from(solidcore::error::upstream_status(err).unwrap_or(-1)),
         Err(_) => -1,
     }
 }

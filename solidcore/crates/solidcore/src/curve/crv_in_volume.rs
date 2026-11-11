@@ -1125,7 +1125,10 @@ impl CrvInVolume {
     fn fill_mults(&self, knots: &[f64], mults: &mut [usize], by_break: bool) -> Result<()> {
         // check state - cached breaks and conts are current
         if self.need_breaks || self.breaks.len() != self.conts.len() {
-            return Err(SolidError::sm_err(OP_MULTS));
+            return Err(SolidError::curve_failed(
+                OP_MULTS,
+                "the cached breaks and continuities are not current",
+            ));
         }
 
         let mut bi = 0usize;
@@ -1150,7 +1153,10 @@ impl CrvInVolume {
 
             // error condition - ran out of breaks to search
             if bi >= self.breaks.len() {
-                return Err(SolidError::sm_err(OP_MULTS));
+                return Err(SolidError::curve_failed(
+                    OP_MULTS,
+                    "a knot matched no cached break",
+                ));
             }
 
             // when a match was not found move onto the next Knot
@@ -1164,7 +1170,10 @@ impl CrvInVolume {
                 SolidError::invalid_input(OP_MULTS, "more knots matched than continuities")
             })?;
             if cont == ContinuityType::Undefined {
-                return Err(SolidError::sm_err(OP_MULTS));
+                return Err(SolidError::curve_failed(
+                    OP_MULTS,
+                    "a cached continuity is undefined",
+                ));
             }
 
             // set an effective multiplicity
@@ -1359,7 +1368,10 @@ impl CrvInVolume {
     ) -> Result<Extent1d> {
         // Don't own curve can not reverse parameterization
         if !self.owns_curve() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::curve_failed(
+                OP,
+                "a curve that does not own its base curve cannot be reparametrised",
+            ));
         }
         self.curve.reverse_parameterization(k, old_interval)
     }
@@ -1389,7 +1401,10 @@ impl CrvInVolume {
     ) -> Result<()> {
         // Don't own curve can not trim the curve
         if !self.owns_curve() {
-            return Err(SolidError::sm_err(OP));
+            return Err(SolidError::curve_failed(
+                OP,
+                "a curve that does not own its base curve cannot be trimmed",
+            ));
         }
 
         // pass the call along to the Curve

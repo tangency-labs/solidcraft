@@ -48,8 +48,7 @@
 //!   upstream); a NaN step (from NaN tolerances) would loop forever upstream. Here
 //!   each step loop stops after [`MAX_STEP_TRIES`] tries and the trace after
 //!   [`MAX_TRACE_ITERATIONS`] steps (also counting the snapped points upstream does
-//!   not count) with [`SolidError::InvalidInput`]; and, with
-//!   `fixes.ssi_start_loop_trace_budget`, the traces of one start-point loop of
+//!   not count) with [`SolidError::InvalidInput`]; and the traces of one start-point loop of
 //!   `DoIntersection` together after [`MAX_START_LOOP_TRACE_STEPS`] steps (HANG-52),
 //!   the same way. `DoLawIntersection`'s span
 //!   subdivision stops at [`MAX_LAW_POINTS`] points the same way.
@@ -137,7 +136,7 @@ pub const MAX_STEP_TRIES: usize = 4096;
 pub const MAX_TRACE_ITERATIONS: usize = 100_000;
 
 /// The `ComputeNextPoint` calls of all the traces of one start-point loop of
-/// `DoIntersection` together, with `fixes.ssi_start_loop_trace_budget` (HANG-52).
+/// `DoIntersection` together (HANG-52).
 /// Upstream bounds one trace by 5000 points only, and a trace that creeps toward a
 /// surface boundary in ever smaller steps reaches that after about 15,000 calls, after
 /// which the loop goes on with the next start point: a filleted 30x20x10 box's face 14

@@ -240,7 +240,7 @@ fn output(open_status: i64, recs: &[Rec]) -> Output {
 fn status_of(e: &SolidError) -> Result<i64, HarnessError> {
     match e {
         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. } => Ok(ST_SHORT),
-        SolidError::Upstream { code, .. } => Ok(i64::from(*code)),
+        up_err if solidcore::error::upstream_status(up_err).is_some() => Ok(i64::from(solidcore::error::upstream_status(up_err).unwrap_or(-1))),
         other => Err(HarnessError::new(format!("unexpected error {other}"))),
     }
 }
