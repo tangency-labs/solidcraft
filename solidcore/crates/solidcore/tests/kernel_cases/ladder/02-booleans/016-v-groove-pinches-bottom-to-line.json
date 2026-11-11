@@ -1,0 +1,69 @@
+{
+  "area": "ladder/02-booleans",
+  "bodies": {},
+  "calls": [],
+  "case": "016-v-groove-pinches-bottom-to-line",
+  "expected": {
+    "body_count": 2,
+    "method": "apex (30, 0) on the bottom face, flanks through (18, 20) and (42, 20): removed triangle 24 wide x 20 high, times 40; the pieces meet only along the line x=30, z=0, so the regularized result is two solids",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 38400.0,
+    "what": "a V groove whose apex touches the bottom face along a line, cut through: two pieces"
+  },
+  "expressible": false,
+  "golden": {
+    "measured": {
+      "area_mm2": 9225.904606350497,
+      "body_count": 2,
+      "edges": 24,
+      "faces": 12,
+      "vertices": 16,
+      "volume_mm3": 38400.00000000001
+    },
+    "status": "pass",
+    "unstable": null
+  },
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 24,
+      "faces": 12,
+      "vertices": 16
+    }
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 9225.904606350497,
+      "body_count": 2,
+      "edges": 24,
+      "faces": 12,
+      "vertices": 16,
+      "volume_mm3": 38400.00000000001
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "extrude",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a V groove whose apex touches the bottom face along a line, cut through: two pieces",
+  "why_not": [
+    "body \"Part\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record",
+    "body \"Part (1)\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+  ]
+}

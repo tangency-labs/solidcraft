@@ -278,6 +278,109 @@ fn a_mesh_file_comes_in_as_one_component() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A 10 x 20 x 30 box with its low corner at (100, 50, 7), saved as `block.stl` in `dir`.
+fn off_origin_stl(dir: &std::path::Path) -> String {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 30, "corner": [100, 50, 7]}));
+    let stl = dir.join("block.stl").to_string_lossy().to_string();
+    run(&mut s, "file.save_mesh", json!({"path": stl}));
+    stl
+}
+
+/// The one box the design shows.
+fn only_box(s: &Session) -> [i64; 6] {
+    let boxes = shown_boxes(s);
+    assert_eq!(boxes.len(), 1, "{boxes:?}");
+    boxes[0]
+}
+
+/// Insert Mesh's `origin` (#12543): off, the mesh stays where its file puts it; on, its box is
+/// centred on X and Y with its base on Z = 0, by moving the import's occurrence, and the reply
+/// says by how much. A unit scales the mesh first, so the scaled box is the one centred.
+#[test]
+fn a_mesh_import_moves_to_the_origin_only_when_asked() {
+    let dir = temp_dir("origin");
+    let stl = off_origin_stl(&dir);
+    let mut s = Session::default();
+    let r = run(&mut s, "file.insert_mesh", json!({"path": stl}));
+    assert!(r.get("moved_to_origin").is_none(), "{r}");
+    assert_eq!(only_box(&s), [100_000, 50_000, 7_000, 110_000, 70_000, 37_000], "the file's coordinates by default");
+
+    let mut s = Session::default();
+    let r = run(&mut s, "file.insert_mesh", json!({"path": stl, "origin": true}));
+    assert_eq!(only_box(&s), [-5_000, -10_000, 0, 5_000, 10_000, 30_000], "centred on X and Y, base on Z = 0");
+    assert_eq!(r["moved_to_origin"], json!([-105.0, -60.0, -7.0]), "{r}");
+    let occ = r["occurrence"].as_u64().unwrap();
+    let placed = s.doc.occurrences.iter().find(|o| o.id == occ).unwrap().transform;
+    assert_eq!(placed[3], [-105.0, -60.0, -7.0, 1.0], "the occurrence carries the move");
+    // One undo step takes the whole import, move and all, away.
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.world_state().unwrap().bodies.is_empty());
+
+    let mut s = Session::default();
+    run(&mut s, "file.insert_mesh", json!({"path": stl, "origin": true, "units": "cm"}));
+    assert_eq!(only_box(&s), [-50_000, -100_000, 0, 50_000, 100_000, 300_000], "scaled to millimetres, then centred");
+
+    let mut s = Session::default();
+    let e = s.execute("file.insert_mesh", &json!({"path": stl, "origin": "yes"})).unwrap_err().to_string();
+    assert!(e.contains("`origin` must be true"), "{e}");
+    assert!(s.doc.features.is_empty(), "a refused import adds nothing");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `origin` is the origin of the component the mesh is inserted into, wherever that component
+/// is placed; and opening a mesh file as a design takes it too.
+#[test]
+fn a_mesh_moved_to_the_origin_sits_on_the_active_components_origin() {
+    let dir = temp_dir("origin-active");
+    let stl = off_origin_stl(&dir);
+    let mut s = Session::default();
+    let holder = run(&mut s, "component.create", json!({"name": "Holder", "grounded": false}));
+    // Made active as it is made.
+    run(&mut s, "occurrence.move", json!({"occurrence": holder["occurrence"], "translate": [0, 0, 40]}));
+    assert_ne!(s.active_component, 0);
+    run(&mut s, "file.insert_mesh", json!({"path": stl, "origin": true}));
+    assert_eq!(only_box(&s), [-5_000, -10_000, 40_000, 5_000, 10_000, 70_000], "on Holder's origin, 40 mm up");
+
+    let mut s = Session::default();
+    let r = run(&mut s, "doc.open", json!({"path": stl, "origin": true}));
+    assert_eq!(r["moved_to_origin"], json!([-105.0, -60.0, -7.0]), "{r}");
+    assert_eq!(only_box(&s), [-5_000, -10_000, 0, 5_000, 10_000, 30_000]);
+    let e = s.execute("doc.open", &json!({"path": dir.join("x.sc").to_string_lossy(), "origin": true})).unwrap_err().to_string();
+    assert!(e.contains("`origin` applies to"), "{e}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Moving to the origin measures the mesh in the active component's own frame, so a component
+/// turned 45 degrees takes exactly the file box's shift (not a larger box around the turned
+/// one's corners); and a component made active without an occurrence path is taken at its first
+/// placement, as everywhere else.
+#[test]
+fn a_mesh_moves_to_the_origin_of_a_turned_or_pathless_active_component() {
+    let dir = temp_dir("origin-turned");
+    let stl = off_origin_stl(&dir);
+    let shift = |r: &Value| -> Vec3 {
+        let v = r["moved_to_origin"].as_array().unwrap_or_else(|| panic!("not moved: {r}"));
+        Vec3::new(v[0].as_f64().unwrap(), v[1].as_f64().unwrap(), v[2].as_f64().unwrap())
+    };
+
+    let mut s = Session::default();
+    let holder = run(&mut s, "component.create", json!({"name": "Holder", "grounded": false}));
+    run(&mut s, "occurrence.move", json!({"occurrence": holder["occurrence"], "axis": [1, 0, 0], "angle": "45 deg", "translate": [0, 0, 40]}));
+    assert_ne!(s.active_component, 0);
+    let r = run(&mut s, "file.insert_mesh", json!({"path": stl, "origin": true}));
+    assert!(close(shift(&r), Vec3::new(-105.0, -60.0, -7.0)), "in Holder's frame: {r}");
+
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Holder", "grounded": false}));
+    assert_ne!(s.active_component, 0);
+    s.active_occurrence_path = None;
+    let r = run(&mut s, "file.insert_mesh", json!({"path": stl, "origin": true}));
+    assert!(close(shift(&r), Vec3::new(-105.0, -60.0, -7.0)), "at Holder's first placement: {r}");
+    assert_eq!(only_box(&s), [-5_000, -10_000, 0, 5_000, 10_000, 30_000]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn undo_takes_the_whole_import_away() {
     let dir = temp_dir("undo");

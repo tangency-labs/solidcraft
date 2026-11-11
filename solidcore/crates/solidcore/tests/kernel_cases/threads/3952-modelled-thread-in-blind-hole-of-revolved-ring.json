@@ -1,0 +1,183 @@
+{
+  "area": "threads",
+  "bodies": {
+    "b13": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b27": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b13"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b28"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b28"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b29"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b27"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b30"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b30"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b31"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b29"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b32"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b31"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b33"
+      ],
+      "params": {
+        "operand": 1
+      }
+    },
+    {
+      "inputs": [
+        "b32",
+        "b33"
+      ],
+      "op": "boolean",
+      "outputs": [
+        "b34"
+      ],
+      "params": {
+        "op": "subtract"
+      }
+    }
+  ],
+  "case": "3952-modelled-thread-in-blind-hole-of-revolved-ring",
+  "expected": {
+    "bbox": {
+      "max": [
+        30,
+        30,
+        30
+      ],
+      "min": [
+        -30,
+        -30,
+        0
+      ]
+    },
+    "body_count": 1,
+    "method": "ISO 68-1 basic profile: H = P sqrt3/2, basic depth 5H/8. External groove (the space between teeth): a trapezoid P/4 wide at the root radius d/2 - 5H/8, widening by 2 tan30 per unit of radius to 7P/8 at d/2. Internal groove: P/8 wide at the major radius d/2, widening to 3P/4 at the minor radius, cut only where there is material (r >= hole radius). Pappus: volume per turn = 2 pi A rc (A the trapezoid area, rc its centroid radius from the axis); a helical sweep of L/P turns removes exactly (L/P) x that, where each end of the thread is a free end or lies inside material. Revolved ring R12..30, 30 tall: pi (30^2 - 12^2) 30 = 71251.3214. A D2.5 flat-bottomed hole 8 deep at 21 mm from the axis (pi 1.25^2 8 = 39.2699), M3 (P=0.5, rho=1.25) over the hole's whole 8 mm (16 turns): 16 x 0.43729. The blind end can shift the groove's last end by under 0.25 mm3. V = 71205.0548 mm3. Tolerance 1e-3 (the ring dominates the volume; the check is that the thread builds a valid solid, which it once refused: faceted boolean: inconsistent volumes).",
+    "outcome": "solid",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#3952"
+    ],
+    "timeout_s": 600,
+    "volume_mm3": 71205.0548,
+    "what": "a modelled thread in a small blind hole drilled into a revolved ring, off its axis ('faceted boolean: inconsistent volumes')"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 283,
+      "faces": 118,
+      "vertices": 168
+    }
+  },
+  "records": "3952-modelled-thread-in-blind-hole-of-revolved-ring.bodies.json.gz",
+  "result": [
+    {
+      "body": "Body1",
+      "made": "b34"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 12772.890442027812,
+      "body_count": 1,
+      "edges": 207,
+      "faces": 72,
+      "vertices": 138,
+      "volume_mm3": 71205.24410759218
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#3952"
+  ],
+  "traced_ops": [
+    "revolve",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean",
+    "extrude",
+    "extrude",
+    "screw_sweep",
+    "copy",
+    "copy",
+    "copy",
+    "copy",
+    "tagged",
+    "tagged",
+    "boolean"
+  ],
+  "ungraded": [],
+  "what": "a modelled thread in a small blind hole drilled into a revolved ring, off its axis ('faceted boolean: inconsistent volumes')",
+  "why_not": []
+}

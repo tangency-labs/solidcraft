@@ -1,0 +1,10 @@
+#### UB-265. `SmHealData::Fix_SplitEdgesAtSeam` reads the mark of a null target face
+- **Severity:** Crash / undefined behaviour: a robustness defect in a public method, not a crash in normal healing.
+- **Area:** Healer
+- **Location:** `source/SMLib/src/SmHealData.cpp`, `SmHealData::Fix_SplitEdgesAtSeam` (def. `:4342`), the final loop over `m_sTgtFaceProps` (`:4690`-`:4700`): `pFaceProps->m_pFace->IsMarked(rMarkLock.GetMarkType())` (`:4693`) dereferences `m_pFace` without a null check.
+- **What happens:** null pointer dereference (`SmTopology::GetMark` on a null `SmFace`) when any target face props has no face, for example props not yet filled by `Cache_FaceProps_Gaps`.
+- **Introduced:** in usd-brep v1.0.1 (3fd5b95). The loop that records one split-edge outcome per marked face is new there. c9c5979 has no such loop, and the same direct call does not crash at c9c5979. Healing through `HealBrep` is not affected in either version.
+- **Reachability:** only by calling `Fix_SplitEdgesAtSeam` directly before `Cache_FaceProps_Gaps` has filled the target face props, or with a target face props whose face is null. The healer's own `HealBrep` sequence runs `Cache_FaceProps_Gaps` before this step and never reaches it.
+- **How found:** the difftest `heal.heal_data_p3` worker crashed against the v1.0.1 C++ reference during the reference pin move (2026-10-26).
+- **Confirmed:** yes. A gdb backtrace in the pin101 C++ run (v1.0.1 release build, x86-64 Linux) shows SIGSEGV in `SmTopology::GetMark` ← `SmTopology::IsMarked` ← `SmHealData::Fix_SplitEdgesAtSeam` ← the heal shim. The faulting pointer was not inspected. The shim guard below, which refuses exactly the null-face input, removes the crash.
+- **Rust port:** not affected (safe Rust). `HealData::fix_split_edges_at_seam` returns `InvalidInput` ("seam props without face") at the same point. While a target face props has no face, the difftest shim refuses the case before the call (its record becomes `-999 265`), and the runner reports it as rejected with reason UB-265 instead of comparing it.

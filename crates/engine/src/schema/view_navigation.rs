@@ -129,7 +129,7 @@ pub struct NormalToParams {
 pub struct CameraReply {
     /// The camera now.
     #[schemars(with = "CameraParam")]
-    pub camera: solidcraft_render::Camera,
+    pub camera: solidcraft_viewport::Camera,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -322,13 +322,13 @@ fn nullable<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Option<String>>, D
 
 /// A key's value as its handler reads it: `read` takes the raw JSON value, and anything it
 /// refuses gets the handler's own message, whole (no key put in front).
-fn read_with<'de, D: Deserializer<'de>, T>(d: D, message: &str, read: impl FnOnce(&Value) -> Option<T>) -> Result<Option<T>, D::Error> {
+pub(super) fn read_with<'de, D: Deserializer<'de>, T>(d: D, message: &str, read: impl FnOnce(&Value) -> Option<T>) -> Result<Option<T>, D::Error> {
     let value = Value::deserialize(d)?;
     read(&value).map(Some).ok_or_else(|| serde::de::Error::custom(whole(message)))
 }
 
 /// A value `T` deserializes from, or the handler's message.
-fn read_as<'de, D: Deserializer<'de>, T: serde::de::DeserializeOwned>(d: D, message: &str) -> Result<Option<T>, D::Error> {
+pub(super) fn read_as<'de, D: Deserializer<'de>, T: serde::de::DeserializeOwned>(d: D, message: &str) -> Result<Option<T>, D::Error> {
     read_with(d, message, |v| serde_json::from_value(v.clone()).ok())
 }
 
@@ -771,7 +771,7 @@ fn navigate_form(p: &serde_json::Map<String, Value>) -> Result<NavigateParams, s
 pub struct NavigateResult {
     /// The camera now.
     #[schemars(with = "CameraParam")]
-    pub camera: solidcraft_render::Camera,
+    pub camera: solidcraft_viewport::Camera,
     /// Frame the whole model from the new direction.
     pub fit: bool,
     /// True for a `motion`; absent for a turn.

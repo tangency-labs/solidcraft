@@ -1,0 +1,14 @@
+{
+  "cases": [
+    {
+      "name": "original_trim_plane_square",
+      "source": "Original SmTrimmingTools region overload: Plane evaluated at four UV-square corners, four actual Line segments, TRUE/FALSE/FALSE flags; positive G1 construction and caller-owned surface check.",
+      "inputs": { "op": "trim_constructed", "kind": "plane_square" }
+    },
+    {
+      "name": "original_trim_creased_strip",
+      "source": "Original SmTrimmingTools region overload: degree-one 3x2 strip with a U crease, six actual boundary Line segments, TRUE/TRUE/FALSE flags; positive non-G1 two-face construction and each current surface owner.",
+      "inputs": { "op": "trim_constructed", "kind": "creased_strip" }
+    }
+  ]
+}

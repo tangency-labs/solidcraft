@@ -6,14 +6,13 @@ use egui::{ColorImage, Rect, TextureId};
 use serde_json::json;
 use solidcraft_ui_egui::{
     scenario::{self, Harness},
-    shell::LayoutMode,
-    theme,
+    ui_kit::LayoutMode,
 };
 use std::collections::HashMap;
 
 #[test]
 fn appearance_and_browser_folds_keep_handles_and_render_both_states() {
-    let previous = theme::is_dark();
+    let previous = solidcraft_theme::is_dark();
     let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/disclosure-review");
     std::fs::create_dir_all(&dir).unwrap();
     for dark in [false, true] {
@@ -38,7 +37,7 @@ fn appearance_and_browser_folds_keep_handles_and_render_both_states() {
             // Fresh context transfers all textures to the software renderer, including fonts.
             h.ctx = egui::Context::default();
             solidcraft_ui_egui::fonts::setup_fonts(&h.ctx);
-            theme::apply(&h.ctx);
+            solidcraft_theme::apply(&h.ctx);
             let mut textures: HashMap<TextureId, ColorImage> = HashMap::new();
             for _ in 0..8 {
                 raster::paint(&mut h, &mut textures, vec![]);
@@ -59,7 +58,7 @@ fn appearance_and_browser_folds_keep_handles_and_render_both_states() {
             }
         }
     }
-    theme::set_dark(previous);
+    solidcraft_theme::set_dark(previous);
 }
 
 #[test]
@@ -88,7 +87,7 @@ fn render_browser_uses_shared_rows_in_both_lenses_and_themes() {
         h.call("ui.workspace", json!({"workspace":"render"}));
         h.ctx = egui::Context::default();
         solidcraft_ui_egui::fonts::setup_fonts(&h.ctx);
-        theme::apply(&h.ctx);
+        solidcraft_theme::apply(&h.ctx);
         let mut textures: HashMap<TextureId, ColorImage> = HashMap::new();
         for _ in 0..8 {
             raster::paint(&mut h, &mut textures, vec![]);
@@ -119,7 +118,7 @@ fn render_browser_uses_shared_rows_in_both_lenses_and_themes() {
             for action in ["render:tree:lights:add", "render:tree:light:0:solo", "render:tree:light:0:mute", "render:tree:shots:add"] {
                 assert!(scenario::rect_of(action).is_some(), "{action}");
             }
-            assert_eq!(theme::is_dark(), dark);
+            assert_eq!(solidcraft_theme::is_dark(), dark);
             assert_eq!(scenario::rect_of("render:tree:look:0").is_some(), lens == "look");
             let browser = scenario::rect_of("browser:card").unwrap();
             let screenshot = raster::raster(&mut h, &textures, output);

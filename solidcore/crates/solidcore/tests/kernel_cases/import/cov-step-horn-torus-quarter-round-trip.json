@@ -1,0 +1,48 @@
+{
+  "area": "import",
+  "bodies": {},
+  "calls": [],
+  "case": "cov-step-horn-torus-quarter-round-trip",
+  "expected": {
+    "body_count": 1,
+    "method": "the disc r5 about (5, 0) on XZ touches the Z axis at the origin; Pappus, its centroid 5 from the axis: V = pi 25 x 2 pi 5 / 4 = 616.850275; read back into a new design, the same",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 616.8502750680849,
+    "what": "a quarter horn torus (a circle r5 touching its axis, revolved 90 deg) written to STEP and read back: the same solid"
+  },
+  "expressible": false,
+  "operation_expressible": false,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 2,
+      "faces": 3,
+      "vertices": 1
+    }
+  },
+  "result": [],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 403.8197427056007,
+      "body_count": 1,
+      "edges": 2,
+      "faces": 3,
+      "vertices": 1,
+      "volume_mm3": 616.8502750706624
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "revolve"
+  ],
+  "ungraded": [],
+  "what": "a quarter horn torus (a circle r5 touching its axis, revolved 90 deg) written to STEP and read back: the same solid",
+  "why_not": [
+    "body \"Horn\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
+  ]
+}
