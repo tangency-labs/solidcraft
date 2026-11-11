@@ -24,6 +24,7 @@
 //! | [`Side`]                               | `NL_LEFT` / `NL_RIGHT` flags      |
 //! | [`MAX_DEGREE`]                         | `NL_MAXDEG`                       |
 //! | [`clamped_uniform`]                    | none (not upstream)               |
+//! | [`periodic_uniform`]                   | none (not upstream)               |
 //!
 //! Deviations:
 //! - Out-params become return values ([`Basis`], tuples, `Vec`s sized by the callee).
@@ -844,8 +845,56 @@ pub fn clamped_uniform(count: usize, degree: usize) -> Result<Vec<f64>> {
     Ok(knots)
 }
 
+/// The uniform knots of a closed (periodic) curve of `count` control points of `degree`,
+/// whose control polygon repeats its first `degree` points after its last (`count + degree`
+/// points in all): `count + 2 degree + 1` knots `(i - degree) / count`, evenly spaced, so the
+/// curve's domain `[knots[degree], knots[count + degree]]` is `[0, 1]` and it joins itself
+/// there with continuity `degree - 1` (Piegl and Tiller, *The NURBS Book*, 2nd ed., §12.2:
+/// a periodic, uniform knot vector, unclamped).
+///
+/// Not upstream: the knots of a closed curve made from control points alone.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a degree of 0 or past [`MAX_DEGREE`], or fewer than
+/// `degree + 1` points.
+pub fn periodic_uniform(count: usize, degree: usize) -> Result<Vec<f64>> {
+    if degree == 0 || degree > MAX_DEGREE || count < degree + 1 {
+        return Err(SolidError::invalid_input(
+            "nurbs::knots::periodic_uniform",
+            "a degree of 0 or past the most, or too few points for it",
+        ));
+    }
+    let len = count.checked_add(2 * degree + 1).ok_or_else(|| {
+        SolidError::invalid_input("nurbs::knots::periodic_uniform", "too many points")
+    })?;
+    let n = count as f64;
+    let p = degree as f64;
+    Ok((0..len).map(|i| (i as f64 - p) / n).collect())
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn periodic_uniform_knots_are_evenly_spaced_with_the_domain_zero_to_one() {
+        let knots = periodic_uniform(4, 3).unwrap();
+        assert_eq!(knots.len(), 4 + 2 * 3 + 1);
+        assert_eq!(knots[3], 0.0);
+        assert_eq!(knots[7], 1.0);
+        assert_eq!(knots[0], -0.75);
+        assert_eq!(knots[10], 1.75);
+        for w in knots.windows(2) {
+            assert!((w[1] - w[0] - 0.25).abs() < 1e-15, "{knots:?}");
+        }
+        KnotVector::from_slice(&knots).unwrap().validate(3).unwrap();
+        for (count, degree) in [(3, 3), (5, 0), (1, 1)] {
+            assert!(
+                periodic_uniform(count, degree).is_err(),
+                "{count}, {degree}"
+            );
+        }
+    }
 
     #[test]
     fn clamped_uniform_knots_clamp_both_ends_and_space_the_rest_evenly() {
