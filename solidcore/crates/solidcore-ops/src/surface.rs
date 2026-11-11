@@ -309,6 +309,8 @@ pub fn ruled(a: &Curve, b: &Curve, reversed: bool) -> Result<Record> {
 }
 
 #[cfg(test)]
+// The tests check against a sphere's radius; ops itself computes none.
+#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use solidcore::eval::SurfaceEval;
