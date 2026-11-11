@@ -1674,10 +1674,12 @@ fn reach(s: &mut Session, p: &Value) -> Result<Value> {
             x.clone()
         }
         Ok(x) => {
-            let doc = s.doc_mut();
-            for (id, q) in &x.values {
-                if let Some(j) = doc.assembly.joints.iter_mut().find(|j| j.id == *id) {
-                    j.values.clone_from(q);
+            if !x.values.is_empty() {
+                let doc = s.doc_mut();
+                for (id, q) in &x.values {
+                    if let Some(j) = doc.assembly.joints.iter_mut().find(|j| j.id == *id) {
+                        j.values.clone_from(q);
+                    }
                 }
             }
             x.clone()
