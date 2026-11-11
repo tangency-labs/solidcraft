@@ -6160,10 +6160,11 @@ fn hole_feature_tools(
     if spots.is_empty() || spots.len() > 10_000 {
         return Err(DocError::Invalid("a hole needs 1…10000 points".into()));
     }
+    let kept_inside = !hole_from_inside(doc, f);
     let mut tools = Vec::new();
     for at in spots {
         let depth = hole_depth_to(st, &at, dir, &to.map(Vec3::from), depth)?;
-        tools.extend(hole_tools_and_prisms(vals, st, &at, dir, diameter, &depth, hole)?);
+        tools.extend(hole_tools_and_prisms(vals, st, &at, dir, diameter, &depth, hole, kept_inside)?);
     }
     Ok(tools)
 }
@@ -6247,7 +6248,8 @@ fn sheet_hole_cut(
     Ok(handled)
 }
 
-/// The cutting tools of one hole at `position`, drilling along `dir`.
+/// The cutting tools of one hole at `position`, drilling along `dir` (`kept_inside`: see
+/// [`hole_tools_and_prisms`]).
 #[allow(clippy::too_many_arguments)]
 fn hole_tools(
     vals: &BTreeMap<String, Value>,
@@ -6257,8 +6259,9 @@ fn hole_tools(
     diameter: &str,
     depth: &Option<crate::Expr>,
     hole: &HoleKind,
+    kept_inside: bool,
 ) -> Result<Vec<Traced>> {
-    Ok(hole_tools_and_prisms(vals, st, position, dir, diameter, depth, hole)?.into_iter().map(|(tool, _)| tool).collect())
+    Ok(hole_tools_and_prisms(vals, st, position, dir, diameter, depth, hole, kept_inside)?.into_iter().map(|(tool, _)| tool).collect())
 }
 
 /// The scale a hole's tools are sized by: the largest body the hole's axis meets (#2904), so a
@@ -6385,6 +6388,7 @@ fn hole_tools_and_prisms(
     diameter: &str,
     depth: &Option<crate::Expr>,
     hole: &HoleKind,
+    kept_inside: bool,
 ) -> Result<Vec<(Traced, Option<more::PrimitivePrism>)>> {
     let r = val(vals, diameter, Kind::Length)? / 2.0;
     if !(r > 1e-6) {
@@ -6392,11 +6396,11 @@ fn hole_tools_and_prisms(
     }
     let size = hole_axis_size(st, position, dir);
     let mut top = (size * 0.01).max(0.1);
-    // A hole that starts inside the part (a sketch on a plane through it, #11538) starts there:
-    // the reach above a face, there so the tool's top never lies on that face, would cut the
-    // material above the plane.
-    let over = *position - dir * (top * 0.5);
-    if st.bodies.iter().any(|b| matches!(b.body.classify_point(over), Ok(kernel::PointClass::Inside))) {
+    // A hole whose spot stays inside the part (`kept_inside`: a sketch on a plane through it,
+    // #11538) starts there: the reach above a face, there so the tool's top never lies on that
+    // face, would cut the material above the plane. Judged at the spot itself, so a plane just
+    // under a face keeps the thin roof above it.
+    if kept_inside && st.bodies.iter().any(|b| matches!(b.body.classify_point(*position), Ok(kernel::PointClass::Inside))) {
         top = size * 1e-4;
     }
     // Tools are cylinders and cones made by (tapered) extrudes along the axis, cut one
@@ -8767,7 +8771,7 @@ fn replay(
                     let to = to.map(|t| crate::apply_point(m, t.0));
                     let depth = hole_depth_to(st, &at, d, &to, depth)?;
                     // Each copy's faces are named as the hole's, with the instance.
-                    copies.extend(hole_tools(vals, st, &at, d, diameter, &depth, hole)?.into_iter().map(|t| Traced {
+                    copies.extend(hole_tools(vals, st, &at, d, diameter, &depth, hole, !from_inside)?.into_iter().map(|t| Traced {
                         lineage: t.lineage.map(|l| l.copied(src.id, first + k + 1)),
                         body: t.body,
                         recipe: None,
