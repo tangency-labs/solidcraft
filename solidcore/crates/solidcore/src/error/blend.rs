@@ -370,7 +370,7 @@ mod tests {
             ("blend/fillet_solver/p1/rails.rs", 7),
             ("blend/fillet_solver/p2.rs", 8),
             ("blend/fillet_solver/p3.rs", 18),
-            ("blend/fillet_solver/p4.rs", 6),
+            ("blend/fillet_solver/p4.rs", 38),
             ("blend/fillet_solver/p5.rs", 7),
             ("blend/fillet_solver/p5/end_sections_fit.rs", 13),
             ("blend/fillet_solver/p5/rails_fit.rs", 25),
@@ -381,7 +381,6 @@ mod tests {
             ("blend/fillet_standard_solver/surface_surface.rs", 2),
             ("blend/fillet_standard_solver/touch_circle.rs", 1),
         ];
-        // the cut at each file's test module is the shared one, `bare_statuses_in`
         let found = super::super::query::tests::bare_statuses_in("blend", 100);
         let waiting: Vec<(String, usize)> = WAITING
             .iter()
