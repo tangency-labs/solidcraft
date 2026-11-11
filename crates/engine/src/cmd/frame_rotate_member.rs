@@ -68,8 +68,8 @@ fn rotate_member_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     super::features::add_feature_in(s, p, kind, false)
 }
 
-/// The angle that lays the picked side of `member` parallel to `target`: its current turn plus
-/// the kernel's delta, as a degree expression.
+/// The angle that lays the picked side of `member` parallel to `target`: its current turn, less
+/// any full turns, plus the kernel's delta, as a degree expression.
 fn parallel_angle(s: &Session, plane: &PlaneRef, member: &end_cap::Member, target: &Value, cmd: &str) -> Result<Expr> {
     let line_err = || bad(cmd, "Select a straight edge, a sketch line or an axis");
     let geo = super::construct::geo(s, Some(target), cmd, "parallel_to").map_err(|_| line_err())?;
@@ -85,7 +85,9 @@ fn parallel_angle(s: &Session, plane: &PlaneRef, member: &end_cap::Member, targe
         ParallelTurnError::NotALine => line_err(),
         ParallelTurnError::AlongAxis => bad(cmd, "That line runs along the member: its sides are already parallel to it"),
     })?;
-    let current = solidcraft_doc::frame::member_turns(&s.doc, &vals, member.feature).get(&member.line).map_or(0.0, |(_, radians)| *radians);
+    let current = solidcraft_doc::frame::member_turns(&s.doc, &vals, member.feature)
+        .get(&member.line)
+        .map_or(0.0, |(_, radians)| radians.rem_euclid(std::f64::consts::TAU));
     let degrees = (current + delta).to_degrees();
     if !degrees.is_finite() {
         return Err(bad(cmd, "the turn is out of range"));
