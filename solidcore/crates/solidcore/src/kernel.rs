@@ -165,6 +165,7 @@ pub struct WorkCounters {
     proto_edge_intersections: Cell<u64>,
     face_extreme_control_points: Cell<u64>,
     feet_tm_coefficients: Cell<u64>,
+    mass_iso_evaluations: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -220,6 +221,16 @@ impl WorkCounters {
         self.feet_tm_coefficients.get()
     }
 
+    /// Integrand evaluations of the precise mass properties' iso-curve integrals
+    /// (`OdeIsoCurveLength::evaluate`): each point of a surface line the face integration
+    /// samples. A face's bands between its v knots are integrated each on its own, so the
+    /// count grows with the knot spans a face crosses, not with their square. Not the
+    /// fork's.
+    #[must_use]
+    pub fn mass_iso_evaluations(&self) -> u64 {
+        self.mass_iso_evaluations.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
@@ -228,6 +239,7 @@ impl WorkCounters {
         self.proto_edge_intersections.set(0);
         self.face_extreme_control_points.set(0);
         self.feet_tm_coefficients.set(0);
+        self.mass_iso_evaluations.set(0);
     }
 
     /// Counts one face pair examined for intersection.
@@ -257,6 +269,12 @@ impl WorkCounters {
     pub(crate) fn add_face_extreme_control_points(&self, n: u64) {
         self.face_extreme_control_points
             .set(self.face_extreme_control_points.get().saturating_add(n));
+    }
+
+    /// Counts one evaluation of a mass-property iso-curve integrand.
+    pub(crate) fn add_mass_iso_evaluation(&self) {
+        self.mass_iso_evaluations
+            .set(self.mass_iso_evaluations.get().saturating_add(1));
     }
 
     /// Counts `n` series coefficients a feet Taylor model computed.
