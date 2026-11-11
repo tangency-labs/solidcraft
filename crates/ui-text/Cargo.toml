@@ -1,0 +1,19 @@
+[package]
+name = "solidcraft-ui-text"
+description = "Translated interface text: message catalogs the host installs, lookup by stable id, labels, substitution, the language choice and right-to-left display order"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde_json = { workspace = true }
+log = { workspace = true }
+# Right-to-left interface text (Hebrew): the Unicode Bidirectional Algorithm puts translated
+# strings in display order, which egui does not do itself (MIT OR Apache-2.0).
+unicode-bidi = "0.3"
+# The system's preferred languages on a first start (MIT OR Apache-2.0, maintained by
+# 1Password): the OS locale on desktop and, with `js`, `navigator.languages` in the browser (#10138).
+sys-locale = { version = "0.3.2", features = ["js"] }

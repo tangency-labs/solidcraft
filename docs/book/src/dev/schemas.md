@@ -61,10 +61,10 @@ handler and everything it passes `p` to:
   that take picks;
 - `live`, for a command with `.live(…)` (today `sketch.drag` and `sketch.edit_text`): a call
   with `live: true` goes to the live runner, which `checked!` doesn't wrap, so live calls aren't
-  checked yet. Leave `sketch.drag` on the list until the engine checks the live path too;
-  `sketch.edit_text` has its contract (with `live` declared as an optional `bool`) and its live
-  calls aren't checked. A new command that needs a live runner gets its contract the same way;
-  say in its pull request that its live calls aren't checked.
+  checked yet. `sketch.drag` and `sketch.edit_text` have their contracts (with `live` declared as
+  an optional `bool`) and their live calls aren't checked. A new command that needs a live
+  runner gets its contract the same way; say in its pull request that its live calls aren't
+  checked.
 
 A key the handler reads only in some situations (thin-wall keys with `thin: true`) is still a
 field; its description says when it applies. Contracts don't check combinations of keys

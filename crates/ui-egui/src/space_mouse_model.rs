@@ -95,7 +95,7 @@ pub(crate) fn paint(ui: &egui::Ui, rect: egui::Rect, pose: &Pose, moving: [bool;
     let painter = ui.painter_at(rect);
     let visuals = ui.visuals();
     let (_, at) = view(rect);
-    let (faint, accent) = (crate::theme::Tokens::get().text_dim, visuals.selection.stroke.color);
+    let (faint, accent) = (solidcraft_theme::Tokens::get().text_dim, visuals.selection.stroke.color);
     let marker = |live: bool| Stroke::new(if live { 2.5 } else { 1.5 }, if live { accent } else { faint });
     let outline = Stroke::new(1.0, faint);
     let (base_side, base_top) = (visuals.widgets.noninteractive.bg_stroke.color, visuals.widgets.inactive.bg_fill);
@@ -397,7 +397,7 @@ pub(crate) mod ball {
         let painter = ui.painter_at(rect);
         let visuals = ui.visuals();
         let (scale, at) = view(rect);
-        let (faint, accent) = (crate::theme::Tokens::get().text_dim, visuals.selection.stroke.color);
+        let (faint, accent) = (solidcraft_theme::Tokens::get().text_dim, visuals.selection.stroke.color);
         let outline = Stroke::new(1.0, faint);
         let flat = |radius: f32, height: f32| ring(radius, height).into_iter().map(at).collect::<Vec<Pos2>>();
         let base: Vec<Pos2> = ring(BASE_RADIUS, 0.0).into_iter().chain(ring(BASE_RADIUS, BASE_HEIGHT)).map(at).collect();

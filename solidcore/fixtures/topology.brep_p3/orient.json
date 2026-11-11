@@ -1,0 +1,1544 @@
+{
+ "cases": [
+  {
+   "name": "orient_Mouse_u1_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_Mouse_u1_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_Mouse_u0_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_Mouse_u0_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_Mouse_swap0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": [
+     0
+    ]
+   }
+  },
+  {
+   "name": "orient_Mouse_swapnone",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Mouse.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": []
+   }
+  },
+  {
+   "name": "orient_Endcap_u1_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_Endcap_u1_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_Endcap_u0_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_Endcap_u0_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_Endcap_swap0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": [
+     0
+    ]
+   }
+  },
+  {
+   "name": "orient_Endcap_swapnone",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "Endcap.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": []
+   }
+  },
+  {
+   "name": "orient_box_with_large_fillet_u1_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_box_with_large_fillet_u1_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_box_with_large_fillet_u0_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_box_with_large_fillet_u0_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_box_with_large_fillet_swap0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": [
+     0
+    ]
+   }
+  },
+  {
+   "name": "orient_box_with_large_fillet_swapnone",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": []
+   }
+  },
+  {
+   "name": "orient_cone_u1_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_cone_u1_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_cone_u0_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_cone_u0_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_cone_swap0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": [
+     0
+    ]
+   }
+  },
+  {
+   "name": "orient_cone_swapnone",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": []
+   }
+  },
+  {
+   "name": "orient_disk_u1_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_disk_u1_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_disk_u0_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_disk_u0_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_disk_swap0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": [
+     0
+    ]
+   }
+  },
+  {
+   "name": "orient_disk_swapnone",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "disk.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": []
+   }
+  },
+  {
+   "name": "orient_ellips_ts2_u1_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_ellips_ts2_u1_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_ellips_ts2_u0_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_ellips_ts2_u0_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_ellips_ts2_swap0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": [
+     0
+    ]
+   }
+  },
+  {
+   "name": "orient_ellips_ts2_swapnone",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "ellips_ts2.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": []
+   }
+  },
+  {
+   "name": "orient_plane_circ_u1_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_plane_circ_u1_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_plane_circ_u0_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_plane_circ_u0_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_plane_circ_swap0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": [
+     0
+    ]
+   }
+  },
+  {
+   "name": "orient_plane_circ_swapnone",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_circ.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": []
+   }
+  },
+  {
+   "name": "orient_plane_square_u1_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_plane_square_u1_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_plane_square_u0_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_plane_square_u0_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_plane_square_swap0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": [
+     0
+    ]
+   }
+  },
+  {
+   "name": "orient_plane_square_swapnone",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": []
+   }
+  },
+  {
+   "name": "orient_sphere_u1_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_sphere_u1_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_sphere_u0_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_sphere_u0_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_sphere_swap0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": [
+     0
+    ]
+   }
+  },
+  {
+   "name": "orient_sphere_swapnone",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "sphere.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": []
+   }
+  },
+  {
+   "name": "orient_surf_extrude_u1_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_surf_extrude_u1_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_surf_extrude_u0_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_surf_extrude_u0_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_surf_extrude_swap0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": [
+     0
+    ]
+   }
+  },
+  {
+   "name": "orient_surf_extrude_swapnone",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_extrude.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": []
+   }
+  },
+  {
+   "name": "orient_surf_rev_u1_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_surf_rev_u1_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_surf_rev_u0_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_surf_rev_u0_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_surf_rev_swap0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": [
+     0
+    ]
+   }
+  },
+  {
+   "name": "orient_surf_rev_swapnone",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": []
+   }
+  },
+  {
+   "name": "orient_surf_sphere150_u1_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_surf_sphere150_u1_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_surf_sphere150_u0_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_surf_sphere150_u0_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_surf_sphere150_swap0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": [
+     0
+    ]
+   }
+  },
+  {
+   "name": "orient_surf_sphere150_swapnone",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "surf_sphere150.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": []
+   }
+  },
+  {
+   "name": "orient_torus_u1_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_torus_u1_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_torus_u0_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_torus_u0_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_torus_swap0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": [
+     0
+    ]
+   }
+  },
+  {
+   "name": "orient_torus_swapnone",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": []
+   }
+  },
+  {
+   "name": "orient_toruswvy_u1_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_toruswvy_u1_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_toruswvy_u0_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_toruswvy_u0_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_toruswvy_swap0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": [
+     0
+    ]
+   }
+  },
+  {
+   "name": "orient_toruswvy_swapnone",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "toruswvy.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": []
+   }
+  },
+  {
+   "name": "orient_vase_rev_u1_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_vase_rev_u1_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_vase_rev_u0_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_vase_rev_u0_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_vase_rev_swap0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": [
+     0
+    ]
+   }
+  },
+  {
+   "name": "orient_vase_rev_swapnone",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "vase_rev.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": []
+   }
+  },
+  {
+   "name": "orient_net_u1_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_net_u1_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": true,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_net_u0_o1",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_net_u0_o0",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": false,
+    "unify": false,
+    "faces": null
+   }
+  },
+  {
+   "name": "orient_net_swapnone",
+   "upstream_ref": "tests/prog_test/src/smOffsetTest.cpp / smMergeTest.cpp (OrientTrimmedSurfaces)",
+   "inputs": {
+    "brep": {
+     "kind": "network"
+    },
+    "editing": -1,
+    "op": "orient",
+    "outward": true,
+    "unify": true,
+    "faces": []
+   }
+  }
+ ]
+}

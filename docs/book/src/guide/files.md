@@ -2,7 +2,8 @@
 
 Everything here starts from the **File** menu at the top left.
 
-![The File menu, numbered 1 to 5](../media/files/menu.png)
+<img class="dark-ui" src="../media/files/menu.png" alt="The File menu, numbered 1 to 5">
+<img class="light-ui" src="../media/files/menu.light.png" alt="The File menu, numbered 1 to 5">
 
 **1** Open a design (or a STEP, IGES or mesh file as a new one) · **2** Insert a file into the open
 design · **3** Save · **4** Export: meshes, STEP, a DXF of the view, URDF, JSON ·
@@ -85,7 +86,7 @@ origin; the design itself does not move. The face is tinted and outlined in the 
 copy made with Move/Copy or Mirror keeps it. A print face that is gone or no longer flat is
 reported, and the body is sent as it lies. Curved faces and mesh bodies can't be print faces.
 Known limitation: after a shell of a body that is already shelled, no face of that body can be
-marked, as no sketch can be attached to one either; this needs kernel work, which is paused.
+marked, as no sketch can be attached to one either; this needs kernel work in solidcore.
 
 The list also has a plain **EasyPrint (Printables, in the browser)** row, and it is the one entry
 that works in the browser build too. EasyPrint is Printables' slicer, so choosing it uploads the
@@ -117,8 +118,9 @@ is started on its own first, SolidCraft waits up to ten seconds for it to be rea
 file. If the version can't be read, the command decides: the `slic3r-app-launcher` launcher is
 treated as PrusaSlicer 3, and any other entry is left as it is.
 
-Closed mechanical meshes with a constant cross-section can be rebuilt as solids with the
-`mesh.convert` command (command palette, scripts and the control channel).
+Closed meshes can be rebuilt as solids with the `mesh.convert` command (command palette,
+scripts and the control channel): a mesh with a constant cross-section as analytic planar and
+cylindrical faces, any other closed mesh as the faceted solid its triangles describe.
 
 **File → Export 3MF…** with the format changed to **3MF with face tags** (`file.export` or `file.save_mesh` with `format: "3mf-tagged"`) writes an
 ordinary 3MF in which every triangle also names the B-rep face it lies on and every coordinate
@@ -216,6 +218,29 @@ Before you raise them:
 
 The control channel sets the same preference with `ui.prefs {"max_step_file_mb": 2048,
 "max_design_file_mb": 1024}`.
+
+## Export file names
+
+**Preferences → Design → Export file name** sets the name that **File → Export**, **Save As Mesh**
+and a body's right-click **Export…** offer in the save dialog. The setting is a template. Each
+placeholder in it is replaced:
+
+| Placeholder | Replaced with |
+|---|---|
+| `{design}` | The design's name |
+| `{body}` | The exported body's name. When an export holds several bodies, the first one |
+| `{project}`, `{part_number}`, `{revision}`, `{author}`, `{organization}`, `{description}`, `{license}` | That [design property](#design-properties) |
+
+The help icon next to the setting lists the same placeholders. A design property that is not set
+is left out. Other text in braces stays as typed.
+
+With `{part_number}_rev{revision}`, a design with part number RV-102 and revision C is offered as
+`RV-102_revC.step`. With `{design}-{body}`, the body Base of the design Bracket is offered as
+`Bracket-Base.stl`. Characters that file names cannot hold (`/ \ : * ? " < > |`) become `_`. A
+name that Windows keeps for a device, such as `CON` or `NUL`, gets a `_` in front. A long name is
+cut to 200 characters and 240 bytes, so it fits with its extension. Left empty, File → Export
+offers the design's name, and Save As Mesh and a body's Export… offer the body's name. The control
+channel sets it with `ui.prefs {"export_name": "{design}-{body}"}`.
 
 ## Design properties
 

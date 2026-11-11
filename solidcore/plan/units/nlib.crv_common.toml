@@ -1,0 +1,12 @@
+id = "nlib.crv_common"
+upstream = ["source/SMLib/src/NL_CrvCommon.cpp"]
+rust_module = "nurbs::crv_common"
+depends_on = ["nlib.crv_basic", "nlib.geom", "nlib.math"]
+soft_depends_on = ["nlib.crv_geom", "nlib.crv_tool_p1"]
+est_lines = 803
+layer = 8
+tests = ["prog_test:my_test_surface_closest_point", "prog_test:my_test_drop_point", "prog_test:my_test_matrix", "prog_test:my_test_reversed_line_join", "SM_API_test:TestSmCreateRectangle", "SM_API_test:TestSmCreateRegularPolygon"]
+status = "green"
+claimed_by = "swarm-nlib.crv_common-a1"
+claimed_at = "2026-10-12T21:44:13Z"
+notes = "8 fns; largest: N_CreateQuarticArcTol, N_CreateQuadraticArcTol, N_CreateQuinticArcTol, N_CreateEllipticalArcAngTypeTol; 317 upstream test entry points reach this unit; difftest: 2137 cases (137 fixture + 2000 generated), 0 deferred, bit-exact"
