@@ -216,40 +216,21 @@
       "rel": 0.001
     },
     "volume_mm3": 6806.784,
-    "what": "a dome made by `solid.revolve` (quarter disc r 10 about y, its arc passing through [7.0710678118654755, 7.0710678], about 1e-8 off the true circle (its y is rounded to 8 decimals; the exact point passes)) joined flush to a cylinder of the same radius (r 10, h 15, below y = 0, sharing the circular face y = 0): one solid. With the arc about 1e-8 off, the check refuses the result ('Face Near missing Seam'); the same case with the exact arc passes, and so does a primitive sphere joined to a cylinder (2851)"
+    "what": "a dome made by `solid.revolve` (quarter disc r 10 about y, its arc passing through [7.0710678118654755, 7.0710678], about 1e-8 off the true circle (its y is rounded to 8 decimals; the exact point passes)) joined flush to a cylinder of the same radius (r 10, h 15, below y = 0, sharing the circular face y = 0): one solid. With the arc about 1e-8 off, the check refused the result ('Face Near missing Seam') until #13713 was fixed (#14348); the same case with the exact arc passes, and so does a primitive sphere joined to a cylinder (2851)"
   },
-  "expressible": false,
-  "operation_expressible": false,
-  "outcome": {
-    "engine_error": "step 8 (solid.combine): body `Cyl`: the operation failed: SMLib boolean: SMLib's check refuses the result: 1 failed tests:\nSmFace::Test #36 Face Near missing Seam: Face Surface Seam has suspicious Edge near seam [owner SmFace]\n",
-    "ran": false
-  },
+  "expressible": true,
+  "operation_expressible": true,
   "records": "3011-revolved-dome-1e-8-off-joined-flush-to-a-cylinder.bodies.json.gz",
-  "result": [],
-  "rig": {
-    "error": "step 8 (solid.combine): body `Cyl`: the operation failed: SMLib boolean: SMLib's check refuses the result: 1 failed tests:\nSmFace::Test #36 Face Near missing Seam: Face Surface Seam has suspicious Edge near seam [owner SmFace]\n",
-    "known_failing": null,
-    "measured": null,
-    "refused_with": null,
-    "status": "fail"
-  },
+  "result": [
+    {
+      "body": "Cyl",
+      "made": "b11"
+    }
+  ],
   "sources": [
     "tangency-labs/solidcore#3011"
   ],
-  "traced_ops": [
-    "revolve",
-    "extrude",
-    "copy",
-    "copy",
-    "copy",
-    "copy",
-    "tagged",
-    "tagged",
-    "boolean"
-  ],
   "ungraded": [],
-  "what": "a dome made by `solid.revolve` (quarter disc r 10 about y, its arc passing through [7.0710678118654755, 7.0710678], about 1e-8 off the true circle (its y is rounded to 8 decimals; the exact point passes)) joined flush to a cylinder of the same radius (r 10, h 15, below y = 0, sharing the circular face y = 0): one solid. With the arc about 1e-8 off, the check refuses the result ('Face Near missing Seam'); the same case with the exact arc passes, and so does a primitive sphere joined to a cylinder (2851)",
-  "why_not": [
-    "the failure is SolidCraft's, not a kernel operation's: step 8 (solid.combine): body `Cyl`: the operation failed: SMLib boolean: SMLib's check refuses the result: 1 failed tests:\nSmFace::Test #36 Face Near missing Seam: Face Surface Seam has suspicious Edge near seam [owner SmFace]\n"
-  ]
+  "what": "a dome made by `solid.revolve` (quarter disc r 10 about y, its arc passing through [7.0710678118654755, 7.0710678], about 1e-8 off the true circle (its y is rounded to 8 decimals; the exact point passes)) joined flush to a cylinder of the same radius (r 10, h 15, below y = 0, sharing the circular face y = 0): one solid. With the arc about 1e-8 off, the check refused the result ('Face Near missing Seam') until #13713 was fixed (#14348); the same case with the exact arc passes, and so does a primitive sphere joined to a cylinder (2851)",
+  "why_not": []
 }

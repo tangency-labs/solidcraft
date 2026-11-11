@@ -23,6 +23,7 @@
       "cases": 129,
       "chain": {
         "1": 9,
+        "12": 1,
         "121": 1,
         "13": 2,
         "14": 2,
@@ -39,14 +40,14 @@
         "7": 77,
         "76": 1,
         "8": 6,
-        "9": 2
+        "9": 3
       },
-      "expressible": 112,
-      "not_expressible": 14,
-      "operation_expressible": 115,
+      "expressible": 114,
+      "not_expressible": 12,
+      "operation_expressible": 117,
       "reasons": {
         "a final body built or changed by SolidCraft (its own geometry or a change to the kernel's record)": 10,
-        "refused or failed in SolidCraft, not in a kernel operation": 4
+        "refused or failed in SolidCraft, not in a kernel operation": 2
       },
       "ungraded": {
         "edges": 1,
@@ -621,18 +622,6 @@
       "case": "booleans/1927-delete-pocket-face-restores-plate",
       "why": [
         "body \"Plate\" is no kernel operation's output nor an operand: SolidCraft built it or changed the kernel's record"
-      ]
-    },
-    {
-      "case": "booleans/3011-revolved-dome-1e-8-off-joined-flush-to-a-cylinder",
-      "why": [
-        "the failure is SolidCraft's, not a kernel operation's: step 8 (solid.combine): body `Cyl`: the operation failed: SMLib boolean: SMLib's check refuses the result: 1 failed tests:\nSmFace::Test #36 Face Near missing Seam: Face Surface Seam has suspicious Edge near seam [owner SmFace]\n"
-      ]
-    },
-    {
-      "case": "booleans/3011-revolved-dome-1e-8-off-joined-to-its-mirror",
-      "why": [
-        "the failure is SolidCraft's, not a kernel operation's: step 5 (solid.mirror): body `Dome`: the operation failed: SMLib boolean: SMLib's check refuses the result: 1 failed tests:\nSmFace::Test #36 Face Near missing Seam: Face Surface Seam has suspicious Edge near seam [owner SmFace]\n"
       ]
     },
     {
