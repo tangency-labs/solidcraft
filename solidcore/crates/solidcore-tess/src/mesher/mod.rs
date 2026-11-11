@@ -216,6 +216,12 @@ impl Prepared {
     pub(crate) fn loops(&self, fi: usize) -> &[seam::Loop] {
         self.boundaries.get(fi).map_or(&[], |fb| fb.loops.as_slice())
     }
+
+    /// How near a pole a point of face `fi` is taken as one ([`Boundary::reach`]; 0 for a face
+    /// left out).
+    pub(crate) fn reach(&self, fi: usize) -> f64 {
+        self.boundaries.get(fi).map_or(0.0, |fb| fb.reach)
+    }
 }
 
 /// Plan the tessellation of `b` with chord tolerance `tol` and, when given, a facet angle no
@@ -1184,28 +1190,29 @@ fn plan_or_fill(
     }
 }
 
-/// One face: boundary loops in 3D (shared edge nodes) to parameters and triangles.
-/// `size`: the face's target side length (mm) and the surface's mean speed along u and v.
-/// `reach`: how near a pole a point is taken as one ([`Boundary::reach`]). `lenient`: the last resort
-/// for a face no method could plan (see [`Lenient`]).
-#[allow(clippy::too_many_arguments)]
-fn plan_face(
-    fi: usize,
-    kind: &str,
-    s: &poles::Face,
-    loops: &[seam::Loop],
-    rules: &size::Rules,
-    size: (f64, [f64; 2]),
-    reach: f64,
-    stats: &mut PlanStats,
-    lenient: Lenient,
-) -> Result<FacePlan> {
-    let tol = rules.tol;
-    let (h, speed) = size;
-    // The memory bounds that limit this face, if any ([`crate::Cap`]).
-    let mut caps: Vec<crate::Cap> = Vec::new();
+/// A face's boundary loops as closed polygons in its surface's (u, v), as the planner
+/// triangulates them (and [`crate::isoparms`] clips its lines to them): every node in order, the
+/// 3D point each stands for, and each loop's range.
+pub(crate) struct Polygons {
+    /// Each node's (u, v).
+    pub(crate) uvs: Vec<[f64; 2]>,
+    /// Each node's 3D point (the shared edge node it stands for).
+    pub(crate) fixed: Vec<Vec3>,
+    /// Each loop's nodes.
+    pub(crate) ranges: Vec<std::ops::Range<usize>>,
+    /// Whether the face was cut along a seam into one period.
+    pub(crate) seamed: bool,
+}
+
+/// Face loops `loops` on `s` (from [`Prepared::loops`]) made closed polygons in (u, v): a loop
+/// up a seam to a pole and back down it opened at the pole; a face whose boundary winds round a
+/// closed direction cut along a parameter line into one period ([`seam::cut`], at side `h`); a
+/// loop from pole to pole and back along one seam opened, and holes moved by whole periods
+/// beside the outer loop; and at a pole (within `reach`, [`Prepared::reach`]) the free parameter
+/// split into the previous node's value and the next one's, so the polygon runs along the
+/// collapsed side. Why not, where the boundary winds round the surface and cannot be cut.
+pub(crate) fn polygons(s: &poles::Face, loops: &[seam::Loop], rules: &size::Rules, h: f64, reach: f64) -> std::result::Result<Polygons, &'static str> {
     let dom = uv::domain(s);
-    let fail = |why: &str| unsupported(format!("face {fi} ({kind}): {why}"));
     let mut projected: Vec<seam::Loop> = loops.to_vec();
     // A loop that winds around a periodic direction does not close in (u, v): the face is cut
     // along a parameter line into one period (a seamless cylinder face, a helical trim).
@@ -1223,9 +1230,9 @@ fn plan_face(
         [] => {}
         [d] => {
             let per = dom.period.get(*d).copied().flatten().unwrap_or(std::f64::consts::TAU);
-            projected = seam::cut(s, &projected, *d, per, rules, h).ok_or_else(|| fail("boundary winds around the surface"))?;
+            projected = seam::cut(s, &projected, *d, per, rules, h).ok_or("boundary winds around the surface")?;
         }
-        _ => return Err(fail("boundary winds around the surface both ways")),
+        _ => return Err("boundary winds around the surface both ways"),
     }
     // A loop from pole to pole and back along one seam (a whole sphere as one face, as another
     // kernel writes it) projects onto one parameter line: its second run is a period along.
@@ -1272,6 +1279,31 @@ fn plan_face(
         }
         ranges.push(start..uvs.len());
     }
+    Ok(Polygons { uvs, fixed, ranges, seamed })
+}
+
+/// One face: boundary loops in 3D (shared edge nodes) to parameters and triangles.
+/// `size`: the face's target side length (mm) and the surface's mean speed along u and v.
+/// `reach`: how near a pole a point is taken as one ([`Boundary::reach`]). `lenient`: the last resort
+/// for a face no method could plan (see [`Lenient`]).
+#[allow(clippy::too_many_arguments)]
+fn plan_face(
+    fi: usize,
+    kind: &str,
+    s: &poles::Face,
+    loops: &[seam::Loop],
+    rules: &size::Rules,
+    size: (f64, [f64; 2]),
+    reach: f64,
+    stats: &mut PlanStats,
+    lenient: Lenient,
+) -> Result<FacePlan> {
+    let tol = rules.tol;
+    let (h, speed) = size;
+    // The memory bounds that limit this face, if any ([`crate::Cap`]).
+    let mut caps: Vec<crate::Cap> = Vec::new();
+    let fail = |why: &str| unsupported(format!("face {fi} ({kind}): {why}"));
+    let Polygons { uvs, fixed, ranges, seamed } = polygons(s, loops, rules, h, reach).map_err(fail)?;
     if uvs.len() < 3 {
         return Err(fail("degenerate boundary"));
     }

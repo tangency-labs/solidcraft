@@ -10,9 +10,8 @@ use solidcore::eval::plan::EvalSurface;
 use solidcore_record::brep::Brep;
 
 use crate::mesher::edges::bisect;
-use crate::mesher::seam::{self, Loop};
 use crate::mesher::size::Rules;
-use crate::mesher::{comp, prepare, uv};
+use crate::mesher::{Polygons, comp, polygons, prepare, uv};
 use crate::vec::VecExt as _;
 use crate::{MeshTolerance, Result, TessError};
 
@@ -73,8 +72,15 @@ pub fn isoparms(
         ) else {
             continue;
         };
-        // The planner cannot read a boundary it cannot close either.
-        let Some(loops) = closed(s, prepared.loops(fi), &prepared.rules, h) else {
+        // The boundary as the planner triangulates it: its pole and seam fixes made. One the
+        // planner cannot close leaves the face unplanned too.
+        let Ok(poly) = polygons(
+            s,
+            prepared.loops(fi),
+            &prepared.rules,
+            h,
+            prepared.reach(fi),
+        ) else {
             continue;
         };
         let period = uv::domain(s).period;
@@ -98,8 +104,8 @@ pub fn isoparms(
                     _ => continue,
                 };
                 let per = period.get(d).copied().flatten();
-                for c in copies(&loops, d, comp(&a, d), per) {
-                    for run in inside(&loops, d, c) {
+                for c in copies(&poly.uvs, d, comp(&a, d), per) {
+                    for run in inside(&poly, d, c) {
                         out.push(sample(s, fi, d, c, run, &rules)?);
                     }
                 }
@@ -109,36 +115,14 @@ pub fn isoparms(
     Ok(out)
 }
 
-/// `loops` as closed polygons in (u, v): unchanged unless one winds round a closed direction of
-/// the surface, when the face is cut into one period as the planner cuts it ([`seam::cut`]);
-/// `None` where the planner cannot cut it either.
-fn closed(s: &EvalSurface, loops: &[Loop], rules: &Rules, h: f64) -> Option<Vec<Loop>> {
-    let dom = uv::domain(s);
-    let wound: Vec<(usize, f64)> = (0..2)
-        .filter_map(|d| {
-            dom.period
-                .get(d)
-                .copied()
-                .flatten()
-                .filter(|per| seam::winds(loops, d, *per))
-                .map(|per| (d, per))
-        })
-        .collect();
-    match wound.as_slice() {
-        [] => Some(loops.to_vec()),
-        [(d, per)] => seam::cut(s, loops, *d, *per, rules, h),
-        _ => None,
-    }
-}
-
 /// The values of the surface's parameter `d`, `c` and its copies a whole `period` along, that
-/// lie within the loops' extent in `d` (`c` alone on an open direction).
-fn copies(loops: &[Loop], d: usize, c: f64, period: Option<f64>) -> Vec<f64> {
+/// lie within the boundary's extent in `d` (`c` alone on an open direction).
+fn copies(uvs: &[[f64; 2]], d: usize, c: f64, period: Option<f64>) -> Vec<f64> {
     let Some(per) = period.filter(|p| p.is_finite() && *p > 0.0) else {
         return vec![c];
     };
     let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
-    for q in loops.iter().flat_map(|l| &l.uv) {
+    for q in uvs {
         lo = lo.min(comp(q, d));
         hi = hi.max(comp(q, d));
     }
@@ -152,14 +136,17 @@ fn copies(loops: &[Loop], d: usize, c: f64, period: Option<f64>) -> Vec<f64> {
         .collect()
 }
 
-/// The runs of the line where the surface's parameter `d` is `c` that lie inside `loops`, by the
+/// The runs of the line where the surface's parameter `d` is `c` that lie inside the boundary `poly`, by the
 /// even-odd rule: increasing intervals of the other parameter.
-fn inside(loops: &[Loop], d: usize, c: f64) -> Vec<[f64; 2]> {
+fn inside(poly: &Polygons, d: usize, c: f64) -> Vec<[f64; 2]> {
     let o = usize::from(d == 0);
     let mut at: Vec<f64> = Vec::new();
-    for l in loops {
-        let next = l.uv.iter().cycle().skip(1);
-        for (p, q) in l.uv.iter().zip(next) {
+    for range in &poly.ranges {
+        let Some(nodes) = poly.uvs.get(range.clone()) else {
+            continue;
+        };
+        let next = nodes.iter().cycle().skip(1);
+        for (p, q) in nodes.iter().zip(next) {
             let (pd, qd) = (comp(p, d), comp(q, d));
             // half open, so a node on the line is crossed once or not at all
             if (pd <= c) != (qd <= c) {
@@ -309,7 +296,7 @@ mod tests {
         // ends on the hole's rim: on its sampled circle, within the tolerance inside it
         let on_rim = |p: [f64; 3]| {
             let (r, radius) = radial(&hole.surface, p).unwrap();
-            r <= radius + 1e-9 && r >= radius - tol * 1.01
+            (radius - tol * 1.01..=radius + 1e-9).contains(&r)
         };
         let at_hole = lines
             .iter()
@@ -366,5 +353,89 @@ mod tests {
             }
             assert!(round > 0, "no line round the cylinder at {tol}");
         }
+    }
+
+    /// The centre and radius of `b`'s sphere face.
+    fn sphere(b: &Brep) -> ([f64; 3], f64) {
+        b.faces
+            .iter()
+            .find_map(|f| match &f.surface {
+                Surface::Sphere { frame, radius } => Some((frame.origin, *radius)),
+                _ => None,
+            })
+            .unwrap()
+    }
+
+    /// The lines of `b` that lie on its sphere (every point at its radius), each checked: its
+    /// chords sag at most `tol` inside the sphere.
+    fn sphere_lines(b: &Brep, lines: &[Vec<[f64; 3]>], tol: f64) -> Vec<Vec<[f64; 3]>> {
+        let (c, r) = sphere(b);
+        let from_centre = |p: [f64; 3]| dot(sub(p, c), sub(p, c)).sqrt();
+        let on: Vec<Vec<[f64; 3]>> = lines
+            .iter()
+            .filter(|l| l.iter().all(|p| (from_centre(*p) - r).abs() < 1e-6))
+            .cloned()
+            .collect();
+        for l in &on {
+            for w in l.windows(2) {
+                let m = [0, 1, 2].map(|i| (w[0][i] + w[1][i]) / 2.0);
+                let sag = r - from_centre(m);
+                assert!((-1e-9..=tol * 1.0001).contains(&sag), "sag {sag} on {w:?}");
+            }
+        }
+        on
+    }
+
+    #[test]
+    fn a_whole_spheres_lines_are_one_run_each() {
+        let b = fixture("sphere_r12");
+        let tol = 0.01;
+        let lines = isoparms(&b, 5, 3, MeshTolerance::chord(tol)).unwrap();
+        // one face, its boundary a seam from pole to pole: every line is one run
+        assert_eq!(lines.len(), 8, "{}", lines.len());
+        let on = sphere_lines(&b, &lines, tol);
+        assert_eq!(on.len(), 8);
+        // the meridians run from pole to pole, the parallels close
+        let pole = |p: [f64; 3]| p[0].hypot(p[1]) < 1e-6;
+        let meridians = on
+            .iter()
+            .filter(|l| pole(l[0]) && pole(l[l.len() - 1]))
+            .count();
+        let rounds = on
+            .iter()
+            .filter(|l| dot(sub(l[0], l[l.len() - 1]), sub(l[0], l[l.len() - 1])) < 1e-12)
+            .count();
+        assert_eq!(
+            meridians + rounds,
+            8,
+            "{meridians} meridians, {rounds} round"
+        );
+        assert!(meridians > 0 && rounds > 0);
+    }
+
+    #[test]
+    fn a_half_spheres_lines_stay_on_its_half() {
+        let b = fixture("smlib_half_sphere");
+        let tol = 0.01;
+        let lines = isoparms(&b, 4, 4, MeshTolerance::chord(tol)).unwrap();
+        let on = sphere_lines(&b, &lines, tol);
+        assert!(!on.is_empty());
+        // every point of the sphere's lines on one side of the rim's plane z = 0
+        let zs: Vec<f64> = on.iter().flatten().map(|p| p[2]).collect();
+        assert!(
+            zs.iter().all(|z| *z >= -1e-9) || zs.iter().all(|z| *z <= 1e-9),
+            "both sides of the rim"
+        );
+        // and a meridian reaches the pole
+        assert!(on.iter().flatten().any(|p| p[0].hypot(p[1]) < 1e-6));
+    }
+
+    #[test]
+    fn a_pocketed_spheres_lines_lie_on_it() {
+        let b = fixture("sphere_r10_with_pocket");
+        let tol = 0.01;
+        let lines = isoparms(&b, 6, 6, MeshTolerance::chord(tol)).unwrap();
+        let on = sphere_lines(&b, &lines, tol);
+        assert!(on.len() >= 6, "{}", on.len());
     }
 }
