@@ -1,14 +1,18 @@
 //! Curves fitted to points: through points (edit points), closed, and rebuilt to a degree and span count.
-//! The curve is the record's ([`Curve`]); the fit is the kernel's ([`interp`]: global
-//! interpolation, The NURBS Book's §9.2.1). Ops checks the inputs and converts.
+//! The curve is the record's ([`Curve`]); the knots, the fits and the bound are the kernel's
+//! ([`interp`]: global interpolation, The NURBS Book's §9.2.1; [`periodic_uniform`];
+//! [`approx_knots`]: least squares at given parameters, §9.4.1; [`certified_distance`]). Ops
+//! checks the inputs and converts.
 
-use solidcore::nurbs::crv_fit::p1::ParamMethod;
+use solidcore::nurbs::crv_deviation::certified_distance;
+use solidcore::nurbs::crv_fit::p1::{approx_knots, ParamMethod};
 use solidcore::nurbs::crv_fit::p2::interp;
-use solidcore::nurbs::knots::MAX_DEGREE;
+use solidcore::nurbs::geom::Interval;
+use solidcore::nurbs::knots::{clamped_uniform, periodic_uniform, KnotVector, Side, MAX_DEGREE};
 use solidcore::Vec3;
-use solidcore_record::brep::Curve;
+use solidcore_record::brep::{check_curve, Budget, Curve, MAX_SPLINE_DEGREE};
 
-use crate::curve_knots::record_of;
+use crate::curve_knots::{nurb_of, record_of};
 use crate::session::run;
 use crate::sweep::{coord_ok, CURVE_MAX_POINTS};
 use crate::{Error, Result};
@@ -39,11 +43,94 @@ pub fn ep_curve(points: &[[f64; 3]], degree: usize) -> Result<Curve> {
     })?
 }
 
+/// The closed B-spline of `degree` (at most one less than the number of points) with `points`
+/// as its control polygon, closing from the last back to the first, on `[0, 1]`: periodic,
+/// so it joins itself smoothly (continuity `degree - 1`) and passes through none of its
+/// points. The record holds it as a spline whose polygon repeats its first `degree` points
+/// after its last, on the kernel's unclamped uniform knots ([`periodic_uniform`]);
+/// [`crate::curve::move_cv`] moves a repeated point with its copy.
+///
+/// # Errors
+/// [`Error::Argument`] for fewer than three points, more than [`CURVE_MAX_POINTS`] (or than a
+/// record holds), a coordinate that is not finite or past the coordinate bound, or a degree
+/// of 0 or past the kernel's most.
+pub fn closed_cv_curve(points: &[[f64; 3]], degree: usize) -> Result<Curve> {
+    if points.len() < 3 || points.len() > CURVE_MAX_POINTS || !points.iter().all(|p| coord_ok(p)) {
+        return Err(Error::Argument);
+    }
+    if degree == 0 || degree > MAX_DEGREE {
+        return Err(Error::Argument);
+    }
+    let degree = degree.min(points.len() - 1);
+    let knots = periodic_uniform(points.len(), degree).map_err(|_| Error::Argument)?;
+    let mut wrapped = points.to_vec();
+    wrapped.extend_from_slice(points.get(..degree).ok_or(Error::Argument)?);
+    let curve = Curve::Spline {
+        knots,
+        points: wrapped,
+    };
+    check_curve(&curve, &mut Budget::input()).map_err(|_| Error::Argument)?;
+    Ok(curve)
+}
+
+/// `curve` refitted as a clamped spline of `degree` with `spans` uniform spans on `[0, 1]`,
+/// and the kernel's certified bound of how far it is from `curve` at every parameter
+/// ([`certified_distance`]): `curve` is sampled at even steps of its parameter (mapped onto
+/// `[0, 1]`), four per control point, and the samples fitted by least squares at those
+/// parameters through its two ends ([`approx_knots`]).
+///
+/// # Errors
+/// [`Error::Argument`] for a curve that is not a valid clamped spline (a rational spline,
+/// whose bound the kernel does not certify yet, and a closed periodic one are refused), a
+/// degree of 0 or past the record's most ([`MAX_SPLINE_DEGREE`]), no spans, fewer than three
+/// control points (`spans + degree`) or more than a record holds; the kernel's status
+/// otherwise.
+pub fn rebuild(curve: &Curve, degree: usize, spans: usize) -> Result<(Curve, f64)> {
+    let nurb = nurb_of(curve)?;
+    if !matches!(curve, Curve::Spline { .. })
+        || degree == 0
+        || degree > MAX_SPLINE_DEGREE
+        || spans == 0
+    {
+        return Err(Error::Argument);
+    }
+    let count = spans.checked_add(degree).ok_or(Error::Argument)?;
+    if !(3..=4096).contains(&count) {
+        return Err(Error::Argument);
+    }
+    let samples = count
+        .checked_mul(4)
+        .and_then(|s| s.checked_add(1))
+        .ok_or(Error::Argument)?;
+    // even steps on [0, 1]: the distinct knots of a polyline of that many points
+    let steps = clamped_uniform(samples, 1).map_err(|_| Error::Argument)?;
+    let params = steps.get(1..=samples).ok_or(Error::Argument)?.to_vec();
+    let knots = clamped_uniform(count, degree).map_err(|_| Error::Argument)?;
+    run("curve_fit::rebuild", |_| {
+        let mut unit = nurb.clone();
+        unit.reparam_to_interval(Interval { ul: 0.0, ur: 1.0 })?;
+        let data = params
+            .iter()
+            .map(|&t| unit.eval(t, Side::Left))
+            .collect::<solidcore::Result<Vec<Vec3>>>()?;
+        let fit = approx_knots(
+            &data,
+            &params,
+            &KnotVector::from_slice(&knots)?,
+            count - 1,
+            degree,
+        )?;
+        let bound = certified_distance(&unit, &fit)?;
+        Ok(record_of(&fit).map(|c| (c, bound)))
+    })?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::curve_knots::nurb_of;
-    use solidcore::nurbs::knots::Side;
+    use crate::curve::{curve_comb, cv_curve};
+    use solidcore::nurbs::crv_basic::Curve as NurbCurve;
+    use solidcore::nurbs::math::{CPoint, NOW};
 
     /// The point of `c` at `t`, by the kernel's evaluator.
     fn at(c: &Curve, t: f64) -> [f64; 3] {
@@ -133,5 +220,154 @@ mod tests {
         );
         assert_eq!(ep_curve(&ends, 0), Err(Error::Argument));
         assert_eq!(ep_curve(&ends, MAX_DEGREE + 1), Err(Error::Argument));
+    }
+
+    const SQUARE: [[f64; 3]; 4] = [
+        [0.0, 0.0, 0.0],
+        [10.0, 0.0, 0.0],
+        [10.0, 10.0, 0.0],
+        [0.0, 10.0, 0.0],
+    ];
+
+    /// The kernel's curve of a spline record as it is, clamped or not.
+    fn unclamped(c: &Curve) -> NurbCurve {
+        let Curve::Spline { knots, points } = c else {
+            panic!("a spline: {c:?}")
+        };
+        let pw = points
+            .iter()
+            .map(|&[x, y, z]| CPoint::new(x, y, z, NOW))
+            .collect();
+        NurbCurve::new(pw, knots.len() - points.len() - 1, knots.clone()).unwrap()
+    }
+
+    #[test]
+    fn a_closed_curve_joins_itself_smoothly() {
+        let c = closed_cv_curve(&SQUARE, 3).unwrap();
+        let Curve::Spline { knots, points } = &c else {
+            panic!("a spline: {c:?}")
+        };
+        assert_eq!(points.len(), 7);
+        assert_eq!(&points[4..], &SQUARE[..3]);
+        assert_eq!(knots.len(), 11);
+        assert_eq!((knots[3], knots[7]), (0.0, 1.0));
+        let k = unclamped(&c);
+        // the uniform cubic starts at (P0 + 4 P1 + P2) / 6
+        let start = k.eval(0.0, Side::Right).unwrap();
+        assert!((start.x - 50.0 / 6.0).abs() < 1e-12 && (start.y - 10.0 / 6.0).abs() < 1e-12);
+        // position, first and second derivatives meet across the seam
+        let (a, b) = (
+            k.derivs(0.0, Side::Right, 2).unwrap(),
+            k.derivs(1.0, Side::Left, 2).unwrap(),
+        );
+        for (x, y) in a.iter().zip(&b) {
+            assert!(
+                (x.x - y.x).abs() < 1e-9 && (x.y - y.y).abs() < 1e-9 && (x.z - y.z).abs() < 1e-9,
+                "{a:?} and {b:?}"
+            );
+        }
+        // the kernel takes it as an edge's curve: its comb's end teeth stand on one point
+        let comb = curve_comb(&c, [0.0, 1.0], 9).unwrap();
+        let (first, last) = (comb.first().unwrap(), comb.last().unwrap());
+        assert!(
+            first
+                .at
+                .iter()
+                .zip(last.at)
+                .all(|(x, y)| (x - y).abs() < 1e-9),
+            "{:?} and {:?}",
+            first.at,
+            last.at
+        );
+        // fewer points lower the degree; two points make no closed curve
+        let Curve::Spline { knots, points } = closed_cv_curve(&SQUARE[..3], 5).unwrap() else {
+            panic!()
+        };
+        assert_eq!(knots.len() - points.len() - 1, 2);
+        assert_eq!(closed_cv_curve(&SQUARE[..2], 1), Err(Error::Argument));
+        assert_eq!(closed_cv_curve(&SQUARE, 0), Err(Error::Argument));
+    }
+
+    const WAVE: [[f64; 3]; 6] = [
+        [0.0, 0.0, 0.0],
+        [1.0, 2.0, 0.0],
+        [2.0, -1.0, 0.0],
+        [3.0, 3.0, 0.0],
+        [4.0, 0.0, 1.0],
+        [5.0, 1.0, 0.0],
+    ];
+
+    #[test]
+    fn a_curve_rebuilt_in_its_own_space_is_itself() {
+        let c = cv_curve(&WAVE, 3).unwrap();
+        let (r, bound) = rebuild(&c, 3, 3).unwrap();
+        assert!(bound < 1e-9, "{bound}");
+        let (Curve::Spline { knots: k0, .. }, Curve::Spline { knots: k1, .. }) = (&c, &r) else {
+            panic!("splines")
+        };
+        assert_eq!(k0, k1);
+    }
+
+    #[test]
+    fn a_rebuilt_curves_bound_holds_its_gap_everywhere() {
+        let c = cv_curve(&WAVE, 3).unwrap();
+        let (r, bound) = rebuild(&c, 3, 1).unwrap();
+        let Curve::Spline { knots, points } = &r else {
+            panic!("a spline: {r:?}")
+        };
+        assert_eq!(points.len(), 4);
+        assert_eq!(knots, &vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]);
+        assert!(bound > 0.0);
+        let mut largest = 0.0_f64;
+        for i in 0..=400 {
+            let t = f64::from(i) / 400.0;
+            let (p, q) = (at(&c, t), at(&r, t));
+            let gap2: f64 = p.iter().zip(q).map(|(a, b)| (a - b) * (a - b)).sum();
+            largest = largest.max(gap2);
+        }
+        assert!(largest <= bound * bound, "{largest} past {bound}²");
+        // the ends stay put
+        for (t, end) in [(0.0, WAVE[0]), (1.0, WAVE[5])] {
+            let p = at(&r, t);
+            assert!(
+                p.iter().zip(end).all(|(a, b)| (a - b).abs() < 1e-12),
+                "{p:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_curve_on_another_domain_is_rebuilt_on_zero_to_one() {
+        let c = Curve::Spline {
+            knots: vec![0.0, 0.0, 0.0, 0.0, 2.0, 2.0, 2.0, 2.0],
+            points: WAVE[..4].to_vec(),
+        };
+        let (r, bound) = rebuild(&c, 3, 1).unwrap();
+        assert!(bound < 1e-9, "{bound}");
+        assert_eq!(
+            r.natural(),
+            solidcore_record::brep::Natural::Range(0.0, 1.0)
+        );
+    }
+
+    #[test]
+    fn a_rebuild_with_bad_arguments_is_refused() {
+        let c = cv_curve(&WAVE, 3).unwrap();
+        assert_eq!(rebuild(&c, 0, 3), Err(Error::Argument));
+        assert_eq!(rebuild(&c, 3, 0), Err(Error::Argument));
+        assert_eq!(rebuild(&c, 1, 1), Err(Error::Argument));
+        assert_eq!(rebuild(&c, MAX_SPLINE_DEGREE + 1, 1), Err(Error::Argument));
+        let closed = closed_cv_curve(&SQUARE, 3).unwrap();
+        assert_eq!(rebuild(&closed, 3, 3), Err(Error::Argument));
+        let w = std::f64::consts::FRAC_1_SQRT_2;
+        let arc = Curve::RationalSpline {
+            knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            homogeneous: vec![
+                [10.0, 0.0, 0.0, 1.0],
+                [10.0 * w, 10.0 * w, 0.0, w],
+                [0.0, 10.0, 0.0, 1.0],
+            ],
+        };
+        assert_eq!(rebuild(&arc, 3, 2), Err(Error::Argument));
     }
 }
