@@ -1911,6 +1911,8 @@ impl<O: LoopObject> FaceProps<O> {
     /// # Errors
     ///
     /// As [`FaceProps::set_props_stage2`].
+    // `C = &mut Brep`, the only `FaceBrep` over a bare Brep, so the stage takes `&mut &mut Brep`.
+    #[allow(clippy::mut_mut)]
     pub fn set_props_stage2_mut(
         &mut self,
         k: &Kernel,
