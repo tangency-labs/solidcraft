@@ -1788,6 +1788,10 @@ impl SolveApp {
         let mut request = file_load::Request::new(path, file_load::Kind::InsertDesign);
         request.allow_hosts = solidcraft_engine::io::vfs::network_host(path).into_iter().collect();
         request.note = note;
+        // How a linked design that has components comes in: as the preferences say.
+        for (key, on) in linked_source::insert_design_options(&self.preferences) {
+            request.options.insert(key.into(), json!(on));
+        }
         // A request that could not be queued has said why in the status line.
         let _ = file_load::begin_request(self, request);
     }

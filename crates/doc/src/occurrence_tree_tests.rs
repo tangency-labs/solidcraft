@@ -116,7 +116,7 @@ fn the_walk_is_the_scanning_walk_for_every_shape() {
     for (name, doc) in shapes() {
         let walked = doc.placements();
         assert_eq!(walked, scanning_placements(&doc), "{name}");
-        assert_eq!(OccurrenceTree::new(&doc).placements_with(|o| o.transform), walked, "{name}");
+        assert_eq!(OccurrenceTree::new(&doc).placements_with(|_, o| o.transform), walked, "{name}");
         if doc.occurrences.len() < 100 {
             assert_eq!(same_inside(&doc), Ok(()), "{name}");
         }
@@ -152,7 +152,7 @@ fn children_are_listed_in_document_order() {
 fn a_walk_uses_the_transform_it_is_given() {
     let doc = with(vec![occurrence(1, 1, 0), occurrence(2, 2, 1)]);
     let moved = rigid(Vec3::new(0.0, 0.0, 9.0), Vec3::ZERO, Vec3::Z, 0.0);
-    let walked = OccurrenceTree::new(&doc).placements_with(|o| if o.id == 1 { moved } else { o.transform });
+    let walked = OccurrenceTree::new(&doc).placements_with(|_, o| if o.id == 1 { moved } else { o.transform });
     let child = &doc.occurrences[1].transform;
     assert_eq!(walked[1], (1, vec![1], moved));
     assert_eq!(walked[2], (2, vec![1, 2], mat_mul(&moved, child)));

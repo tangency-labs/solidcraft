@@ -19,6 +19,8 @@ pub(super) struct Node {
     pub key: String,
     pub tooltip: String,
     pub grounded: bool,
+    /// A linked design placed it: it stays where that design has it.
+    pub kept: bool,
     pub first: bool,
     pub children: Vec<Vec<u64>>,
     pub hover_bodies: Option<Vec<String>>,
@@ -93,6 +95,9 @@ pub(super) struct Cache {
     colors: [Color32; 2],
     components: BTreeMap<u64, Component>,
     ids: BTreeMap<u64, usize>,
+    /// The linked component that keeps an occurrence for its linked design, by the occurrence:
+    /// looked up for every row, where asking the design each time would search every link.
+    kept_by: HashMap<u64, u64>,
     scheduled: usize,
     pub root: Node,
     pub root_bodies: Vec<String>,
@@ -114,6 +119,12 @@ impl Cache {
         self.components.clear();
         self.ids.clear();
         self.occurrences.clear();
+        self.kept_by.clear();
+        for (top, link) in &app.session.doc.links {
+            for occurrence in link.tree.iter().flat_map(|tree| tree.occurrences.values()) {
+                self.kept_by.insert(*occurrence, *top);
+            }
+        }
         for (i, component) in app.session.doc.components.iter().enumerate() {
             self.components.entry(component.id).or_default().definition = Some(i);
         }
@@ -175,6 +186,12 @@ impl Cache {
             tooltip.push_str(&doc.occurrences.get(*self.ids.get(id)?)?.name);
         }
         tooltip.push_str("\nGeometry edits apply to every instance of this component.");
+        // A placement a linked design made says so: it is changed in that design.
+        let keeper = self.kept_by.get(&occurrence.id).and_then(|top| doc.components.iter().find(|c| c.id == *top));
+        if let Some(keeper) = keeper {
+            tooltip.push('\n');
+            tooltip.push_str(&solidcraft_ui_text::format("browser.kept_by_link", &[("name", &keeper.name)]));
+        }
         let children = self.children(app, component, path, solidcraft_engine::doc::MAX_PLACEMENTS.saturating_sub(self.scheduled));
         self.scheduled += children.len();
         Some((
@@ -187,6 +204,7 @@ impl Cache {
                 key: occurrence_key(path),
                 tooltip,
                 grounded: occurrence.grounded,
+                kept: keeper.is_some(),
                 first,
                 children,
                 hover_bodies: None,

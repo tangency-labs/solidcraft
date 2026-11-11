@@ -874,6 +874,10 @@ pub struct ComponentNode {
     pub occurrences: Vec<PlacementEntry>,
     /// The placements it holds.
     pub children: Vec<ChildEntry>,
+    /// The linked component that keeps this one for a component of its linked design (see
+    /// `component.links`): it is changed in that design, not here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<u64>,
 }
 
 /// What `component.list` returns.

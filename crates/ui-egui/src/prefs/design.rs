@@ -188,6 +188,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let response = setting::insert_lists_open_designs(app, ui);
             crate::scenario::publish_target("prefs:insert_lists_open_designs", response.rect);
             crate::scenario::publish_target("dialog:Insert Design lists the designs open in other tabs first", response.rect);
+            let response = setting::insert_keeps_components(app, ui);
+            crate::scenario::publish_target("prefs:insert_keeps_components", response.rect);
+            let response = setting::insert_flexible(app, ui);
+            crate::scenario::publish_target("prefs:insert_flexible", response.rect);
         });
     });
 }

@@ -1152,6 +1152,14 @@ preference_settings! {
     /// Insert Design lists the designs open in other tabs, each inserted with one click, then
     /// Browse… for a file (#8570). Off: it opens the file picker at once, as before.
     insert_lists_open_designs: bool = true, PAGE_DESIGN => check_id("settings.insert_lists_open_designs");
+    /// Insert Design keeps a linked design's own components as components inside the linked
+    /// one, so a linked assembly is a subassembly whose components the bill of materials counts
+    /// (#5526). Off: every body goes into the one linked component, as before.
+    insert_keeps_components: bool = true, PAGE_DESIGN => check_id("settings.insert_keeps_components");
+    /// A new occurrence of a linked design that has joints is flexible: its joints are joints of this design
+    /// too, so its components move by them. Off: rigid, it moves as one. Either can be changed
+    /// afterwards from the linked component's menu.
+    insert_flexible: bool = false, PAGE_DESIGN => check_id("settings.insert_flexible");
     /// Reopen the saved designs that were open when the app was last closed (#5542).
     reopen_designs: bool = true, PAGE_GENERAL;
     /// Ask separately when closing several unsaved designs, as before grouped saving.
@@ -6488,6 +6496,8 @@ mod tests {
             ("update_changed_links", json!(false), PAGE_DESIGN),
             ("double_click_components", json!(false), PAGE_DESIGN),
             ("insert_lists_open_designs", json!(false), PAGE_DESIGN),
+            ("insert_keeps_components", json!(false), PAGE_DESIGN),
+            ("insert_flexible", json!(true), PAGE_DESIGN),
             ("theme", json!("light"), PAGE_APPEARANCE),
             ("ui_scale", json!(1.25), PAGE_APPEARANCE),
             ("ui_font", json!("test font"), PAGE_APPEARANCE),

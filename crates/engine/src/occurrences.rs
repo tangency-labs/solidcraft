@@ -432,14 +432,16 @@ impl Session {
         let mut world = IDENTITY;
         let mut parent_world = IDENTITY;
         let mut leaf = None;
-        for id in path {
+        for (k, id) in path.iter().enumerate() {
             let i = *index.by_parent_id.get(&(component, *id))?;
             let o = &index.doc.occurrences[i];
             if !index.components.contains(&o.component) {
                 return None;
             }
             parent_world = world;
-            world = mat_mul(&world, self.pending_moves.get(id).unwrap_or(&o.transform));
+            // Inside a flexible occurrence of a linked subassembly: where that occurrence has it.
+            let own = index.doc.posed_local(path.get(..=k).unwrap_or_default(), o);
+            world = mat_mul(&world, self.pending_moves.get(id).unwrap_or(&own));
             if world.iter().flatten().any(|x| !x.is_finite()) {
                 return None;
             }
@@ -455,7 +457,7 @@ impl Session {
             path: path.to_vec(),
             name: leaf.name.clone(),
             world,
-            local: self.pending_moves.get(&leaf.id).copied().unwrap_or(leaf.transform),
+            local: self.pending_moves.get(&leaf.id).copied().unwrap_or_else(|| index.doc.posed_local(path, leaf)),
             parent_world,
             grounded: leaf.grounded,
             bodies,
@@ -490,7 +492,7 @@ impl Session {
         let mut world = IDENTITY;
         let mut parent_world = IDENTITY;
         let mut seen = std::collections::BTreeSet::new();
-        for id in path {
+        for (k, id) in path.iter().enumerate() {
             if !seen.insert(*id) {
                 return Err(invalid("occurrence path repeats an id"));
             }
@@ -504,7 +506,9 @@ impl Session {
                 return Err(invalid("occurrence path has a missing component"));
             }
             parent_world = world;
-            world = mat_mul(&world, moves.get(id).unwrap_or(&o.transform));
+            // Inside a flexible occurrence of a linked subassembly: where that occurrence has it.
+            let own = self.doc.posed_local(path.get(..=k).unwrap_or_default(), o);
+            world = mat_mul(&world, moves.get(id).unwrap_or(&own));
             if world.iter().flatten().any(|x| !x.is_finite()) {
                 return Err(invalid("occurrence path has a non-finite transform"));
             }
@@ -525,7 +529,7 @@ impl Session {
             path: path.to_vec(),
             name: leaf.name.clone(),
             world,
-            local: moves.get(&leaf.id).copied().unwrap_or(leaf.transform),
+            local: moves.get(&leaf.id).copied().unwrap_or_else(|| self.doc.posed_local(path, leaf)),
             parent_world,
             grounded: leaf.grounded,
             bodies,

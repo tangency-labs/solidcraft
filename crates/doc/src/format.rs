@@ -737,6 +737,7 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
     DESIGN.upgrade(&mut v, version, applied)?;
     let mut d: Document = serde_json::from_value(v).map_err(|e| DocError::Invalid(format!("design file: {e}")))?;
     check_typed_numbers(&d)?;
+    settle_links(&mut d);
     let mut legacy_by_feature = std::collections::BTreeMap::<usize, Vec<usize>>::new();
     for (feature, wire) in legacy_wires {
         legacy_by_feature.entry(feature).or_default().push(wire);
@@ -857,6 +858,76 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
     d.format = format_string(FORMAT);
     d.format_pending = pending_names();
     Ok(d)
+}
+
+/// What a design file says its links keep, and the poses it has, made what this build would
+/// have written: a design file is not trusted, and every command reads these records as sound.
+///
+/// - A component a link keeps is inside the linked one and is no linked component itself; an
+///   occurrence it keeps is of such a component, in the linked one or in another such; each is
+///   kept by one link.
+/// - A flexible occurrence is an occurrence of the linked component, and a joint it has from
+///   the linked design is on it with both sides; an inner occurrence the design holds still is
+///   one the link keeps.
+/// - A pose is for a flexible occurrence and an occurrence its link keeps, or for two
+///   occurrences one link keeps (the linked design's own pose), and is a placement. The poses
+///   are in order, one for each pair.
+///
+/// A record that is none of that is dropped, not the design refused: Update Links writes what a
+/// link keeps again, and a pose is where joints last put something, which the next solve works
+/// out again.
+fn settle_links(d: &mut Document) {
+    use std::collections::{HashMap, HashSet};
+    if d.assembly.poses.is_empty() && d.links.values().all(|link| link.tree.is_none()) {
+        return;
+    }
+    let parents: HashMap<u64, u64> = d.components.iter().map(|c| (c.id, c.parent)).collect();
+    let linked: HashSet<u64> = d.links.keys().copied().collect();
+    let placed: HashMap<u64, (u64, u64)> = d.occurrences.iter().map(|o| (o.id, (o.component, o.parent))).collect();
+    let sides: HashMap<u64, (u64, u64)> = d.assembly.joints.iter().map(|j| (j.id, (j.a.occurrence, j.b.occurrence))).collect();
+    let within = |component: u64, top: u64| {
+        let mut at = component;
+        for _ in 0..=crate::MAX_PLACEMENT_DEPTH {
+            match parents.get(&at) {
+                Some(parent) if *parent == top => return true,
+                Some(parent) if *parent != 0 && *parent != at => at = *parent,
+                _ => return false,
+            }
+        }
+        false
+    };
+    // Each kept occurrence, with the linked component that keeps it; each flexible occurrence.
+    let mut keeper: HashMap<u64, u64> = HashMap::new();
+    let mut flexible: HashSet<u64> = HashSet::new();
+    let (mut components, mut joints): (HashSet<u64>, HashSet<u64>) = (HashSet::new(), HashSet::new());
+    for (top, link) in &mut d.links {
+        let Some(tree) = link.tree.as_mut() else { continue };
+        tree.components.retain(|_, c| *c != *top && !linked.contains(c) && within(*c, *top) && components.insert(*c));
+        let mine: HashSet<u64> = tree.components.values().copied().collect();
+        tree.occurrences.retain(|_, o| {
+            placed.get(o).is_some_and(|(component, parent)| mine.contains(component) && (parent == top || mine.contains(parent)))
+                && !keeper.contains_key(o)
+                && {
+                    keeper.insert(*o, *top);
+                    true
+                }
+        });
+        tree.fixed.retain(|o| keeper.get(o) == Some(top));
+        tree.flexible.retain(|occurrence, _| placed.get(occurrence).is_some_and(|(component, _)| component == top));
+        for (occurrence, own) in &mut tree.flexible {
+            own.retain(|_, joint| sides.get(joint) == Some(&(*occurrence, *occurrence)) && joints.insert(*joint));
+            flexible.insert(*occurrence);
+        }
+    }
+    let of = |occurrence: u64| placed.get(&occurrence).map(|(component, _)| *component);
+    d.assembly.poses.retain(|p| {
+        let kept = keeper.get(&p.inner);
+        crate::is_placement(&p.transform)
+            && kept.is_some()
+            && ((flexible.contains(&p.occurrence) && of(p.occurrence) == kept.copied()) || keeper.get(&p.occurrence) == kept)
+    });
+    d.assembly.order_poses();
+    d.assembly.poses.truncate(crate::MAX_PLACEMENTS);
 }
 
 fn all_unique(ids: impl Iterator<Item = u64>) -> bool {

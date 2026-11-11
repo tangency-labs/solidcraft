@@ -333,15 +333,17 @@ impl Document {
     }
 
     /// One placement: the component the occurrence `path` from the root leads to (the root for
-    /// an empty path) and its world transform. `None` when the path no longer exists.
+    /// an empty path) and its world transform, as the world shows it ([`Self::placements`]).
+    /// `None` when the path no longer exists.
     pub fn path_placement(&self, path: &[u64]) -> Option<(u64, Mat)> {
         if path.len() > MAX_PLACEMENT_DEPTH + 1 {
             return None;
         }
+        let poses = crate::joints::placed::Poses::of(self);
         let (mut m, mut c) = (IDENTITY, 0);
-        for id in path {
+        for (i, id) in path.iter().enumerate() {
             let o = self.occurrences.iter().find(|o| o.id == *id && o.parent == c)?;
-            m = mat_mul(&m, &o.transform);
+            m = mat_mul(&m, &poses.as_ref().map_or(o.transform, |p| p.local(path.get(..=i).unwrap_or_default(), o)));
             c = o.component;
         }
         Some((c, m))
@@ -353,10 +355,22 @@ impl Document {
         self.path_placement(path).and_then(|(c, m)| (c == component).then_some(m))
     }
 
-    /// Every placement of each component: (component, occurrence path ids, world transform).
+    /// Every placement of each component: (component, occurrence path ids, world transform),
+    /// as the world shows it. An occurrence inside a flexible occurrence of a linked subassembly
+    /// is where that occurrence has its own copy of it (`Assembly::poses`), which can differ
+    /// from one such occurrence to the next. Evaluation does not follow those poses: a feature
+    /// that reads another component reads it where its design has it.
     /// A branch stops past [`MAX_PLACEMENT_DEPTH`] levels, the walk past [`MAX_PLACEMENTS`] placements.
     pub fn placements(&self) -> Vec<(u64, Vec<u64>, Mat)> {
-        crate::occurrence_tree::OccurrenceTree::new(self).placements_with(|o| o.transform)
+        let poses = crate::joints::placed::Poses::of(self);
+        crate::occurrence_tree::OccurrenceTree::new(self).placements_with(|path, o| poses.as_ref().map_or(o.transform, |p| p.local(path, o)))
+    }
+
+    /// [`Self::placements`] with every occurrence where the design has it: without the poses
+    /// flexible occurrences of linked subassemblies have. What evaluation places bodies by, so
+    /// that what a feature builds does not depend on where a joint stands.
+    pub fn placements_as_designed(&self) -> Vec<(u64, Vec<u64>, Mat)> {
+        crate::occurrence_tree::OccurrenceTree::new(self).placements_with(|_, o| o.transform)
     }
 
     /// Every body as the world shows it: its world name ("Body1", or "Body1 (Occ:2)" for a

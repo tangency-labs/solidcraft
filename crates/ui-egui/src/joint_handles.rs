@@ -24,6 +24,10 @@ use solidcraft_theme::Tokens;
 #[derive(Clone, Debug)]
 pub(crate) struct Mode {
     occurrence: u64,
+    /// The placement picked: the occurrences from the top of the assembly down to `occurrence`,
+    /// when it is one of several its component shows in (an occurrence inside a linked
+    /// subassembly is the same in every occurrence of that subassembly). Empty: its first.
+    path: Vec<u64>,
     axes: Vec<joints::MotionAxis>,
     drag: Option<Drag>,
     radii: BTreeMap<(u64, usize), f64>,
@@ -89,12 +93,20 @@ pub(crate) fn selected_path(app: &SolveApp) -> Option<Vec<u64>> {
 }
 
 /// Both Assemble > Move and the context menu enter here; picking a face alone never does.
+/// Where the world shows occurrence `occurrence`: at the placement `path` when one is given,
+/// else at its first.
+fn placed_world(doc: &solidcraft_engine::doc::Document, occurrence: u64, path: &[u64]) -> solidcraft_engine::doc::Mat {
+    let at_path = if path.is_empty() { None } else { doc.path_placement(path).map(|(_, world)| world) };
+    at_path.unwrap_or_else(|| joints::occurrence_world(doc, occurrence))
+}
+
 pub(crate) fn begin(app: &mut SolveApp, occurrence: u64) -> bool {
     close(app);
     if !app.preferences.assembly_move_handles || app.session.active_sketch.is_some() || app.applying.is_some() {
         return false;
     }
-    let world = joints::occurrence_world(&app.session.doc, occurrence);
+    let path = selected_path(app).filter(|path| path.len() > 1 && path.last() == Some(&occurrence)).unwrap_or_default();
+    let world = placed_world(&app.session.doc, occurrence, &path);
     let anchor = app
         .session
         .selection
@@ -107,6 +119,7 @@ pub(crate) fn begin(app: &mut SolveApp, occurrence: u64) -> bool {
     let Some(inverse) = mat_inverse(&world) else { return false };
     let mut mode = Mode {
         occurrence,
+        path,
         axes: Vec::new(),
         drag: None,
         radii: BTreeMap::new(),
@@ -129,8 +142,8 @@ pub(crate) fn begin(app: &mut SolveApp, occurrence: u64) -> bool {
 
 impl Mode {
     fn refresh(&mut self, app: &SolveApp) {
-        self.axes = joints::motion_axes(&app.session.doc, &app.session.model.state(), self.occurrence);
-        let anchor = apply_point(&joints::occurrence_world(&app.session.doc, self.occurrence), self.local_anchor);
+        self.axes = joints::motion_axes(&app.session.doc, &app.session.model.state(), self.occurrence, &self.path);
+        let anchor = apply_point(&placed_world(&app.session.doc, self.occurrence, &self.path), self.local_anchor);
         // Keep the rotation ring on the selected face's depth, on the true joint axis.
         for a in &mut self.axes {
             a.origin += a.axis * (anchor - a.origin).dot(a.axis);
@@ -468,7 +481,7 @@ pub(crate) fn start_drag(app: &mut SolveApp, proj: &Proj, p: Pos2) -> bool {
     let (Some(start), Some(radius)) = (start, radius(app, proj, &axis)) else { return false };
     let checkpoint = app.session.execute("edit.checkpoint", &json!({})).ok().and_then(|v| v["checkpoint"].as_u64());
     let Some(mode) = app.viewport.joint_handles.as_mut() else { return false };
-    let world = joints::occurrence_world(&app.session.doc, mode.occurrence);
+    let world = placed_world(&app.session.doc, mode.occurrence, &mode.path);
     mode.drag = Some(Drag {
         axis,
         initial,
@@ -560,7 +573,7 @@ pub(crate) fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
                 }
             }
         }
-        let now = joints::occurrence_world(&app.session.doc, mode.occurrence);
+        let now = placed_world(&app.session.doc, mode.occurrence, &mode.path);
         if d.axis.angular {
             if let Some(inv) = mat_inverse(&d.last_world) {
                 let delta = mat_mul(&now, &inv);
@@ -599,7 +612,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     let axes = if let Some(d) = &mode.drag {
         let mut axis = d.axis.clone();
         if let Some(inverse) = mat_inverse(&d.world) {
-            let delta = mat_mul(&joints::occurrence_world(&app.session.doc, mode.occurrence), &inverse);
+            let delta = mat_mul(&placed_world(&app.session.doc, mode.occurrence, &mode.path), &inverse);
             axis.origin = apply_point(&delta, axis.origin);
         }
         vec![axis]
@@ -880,16 +893,16 @@ mod tests {
             let expected = Vec3::new(1., 2., 3.).normalized().unwrap();
             let (mut h, joint) = assembly("cylindrical", expected, reverse);
             let occurrence = selected_occurrence(&h.app).unwrap();
-            let axes = joints::motion_axes(&h.app.session.doc, &h.app.session.model.state(), occurrence);
+            let axes = joints::motion_axes(&h.app.session.doc, &h.app.session.model.state(), occurrence, &[]);
             assert_eq!(axes.len(), 2, "{axes:?}");
             assert!(axes.iter().all(|a| a.axis.dot(expected).abs() > 0.999));
             assert_eq!(axes.iter().filter(|a| a.angular).count(), 1);
             h.app.run("joint.limits", json!({"joint":joint,"index":0,"min":0,"max":0})).unwrap();
             h.app.run("joint.limits", json!({"joint":joint,"index":1,"min":0,"max":0})).unwrap();
-            assert!(joints::motion_axes(&h.app.session.doc, &h.app.session.model.state(), occurrence).is_empty());
+            assert!(joints::motion_axes(&h.app.session.doc, &h.app.session.model.state(), occurrence, &[]).is_empty());
         }
         let (h, _) = assembly("rigid", Vec3::Z, false);
-        assert!(joints::motion_axes(&h.app.session.doc, &h.app.session.model.state(), selected_occurrence(&h.app).unwrap()).is_empty());
+        assert!(joints::motion_axes(&h.app.session.doc, &h.app.session.model.state(), selected_occurrence(&h.app).unwrap(), &[]).is_empty());
     }
 
     #[test]

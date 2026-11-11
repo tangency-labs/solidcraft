@@ -3,7 +3,7 @@
 use solidcraft_geom::prelude::*;
 use std::collections::BTreeSet;
 
-use super::{Analysis, Held, MAX_LOOP_VALUES, Solution, apply_links, build, joint_values, link_chains, solve_holding_with_analysis};
+use super::{Analysis, Held, MAX_LOOP_VALUES, Solution, apply_links, build, joint_values, link_chains, solve_as_given};
 use crate::{Document, Mat, ModelState, apply_point, apply_vector, mat_inverse, mat_mul};
 use solidcore_record::Vec3;
 
@@ -23,11 +23,21 @@ pub struct MotionAxis {
 /// Independent values on this occurrence's anchored chain, excluding fixed, suppressed,
 /// invalid and zero-range motion. Closed loops must admit the probe before an axis is shown.
 /// This is a bounded query for an explicit Move operation, not a per-hover rank analysis.
-pub fn motion_axes(doc: &Document, st: &ModelState, occurrence: u64) -> Vec<MotionAxis> {
-    let asm = &doc.assembly;
+///
+/// `path` is the occurrences from the root down to `occurrence`, when it is one of several
+/// places its component shows in (an occurrence inside a linked subassembly is the same in
+/// every occurrence of that subassembly); empty, the first occurrence of each component above.
+pub fn motion_axes(doc: &Document, st: &ModelState, occurrence: u64, path: &[u64]) -> Vec<MotionAxis> {
+    // In a design with linked subassemblies the joints as the solver takes them, and what it
+    // moves for an occurrence inside a subassembly: the copy a flexible occurrence's joints
+    // move, or the subassembly's occurrence. Either moves as the occurrence asked for does.
+    let expanded = super::placed::expand(doc, st);
+    let (occurrence, _) = super::placed::stand_in(doc, expanded.as_ref(), occurrence, path);
+    let asm = expanded.as_ref().map_or(&doc.assembly, |x| &x.assembly);
+    let start = expanded.as_ref().map(|x| x.start()).unwrap_or_default();
     let values = joint_values(asm);
     let mut report = Solution::default();
-    let built = build(doc, st, &values, &mut report);
+    let built = build(doc, asm, st, &values, &mut report, start);
     let tree = &built.tree;
     if tree.fixed.contains_key(&occurrence) || !tree.parent.contains_key(&occurrence) || !report.errors.is_empty() {
         return Vec::new();
@@ -80,14 +90,15 @@ pub fn motion_axes(doc: &Document, st: &ModelState, occurrence: u64) -> Vec<Moti
             let next = if built.closing.is_empty() {
                 tree.world(occurrence, &probe)
             } else {
-                let mut changed = doc.clone();
-                for j in &mut changed.assembly.joints {
+                let mut changed = asm.clone();
+                for j in &mut changed.joints {
                     if let Some(q) = probe.get(&j.id) {
                         j.values.clone_from(q);
                     }
                 }
                 let held = Held::from([((id, index), q)]);
-                let solved = solve_holding_with_analysis(&changed, st, &held, Analysis::Placement);
+                // `changed` is the solver's joints already: they are solved as they are.
+                let solved = solve_as_given(doc, &changed, st, &held, Analysis::Placement, start);
                 if solved.conflicts.is_empty() && solved.errors.is_empty() { solved.world.get(&occurrence).copied() } else { None }
             };
             let Some(next) = next else { continue };

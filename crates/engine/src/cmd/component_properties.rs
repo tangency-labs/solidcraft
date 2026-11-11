@@ -69,7 +69,9 @@ fn subtree(doc: &Document, root: (u64, Vec<u64>, Mat), descendants: bool, cmd: &
             }
             let mut child_path = path.clone();
             child_path.push(occurrence.id);
-            let world = solidcraft_doc::mat_mul(&transform, &occurrence.transform);
+            // As the world shows it: a flexible occurrence of a linked subassembly has its own
+            // copy of where the occurrences inside it are.
+            let world = solidcraft_doc::mat_mul(&transform, &doc.posed_local(&child_path, occurrence));
             out.push((occurrence.component, child_path.clone(), world));
             stack.push((occurrence.component, child_path, world));
         }

@@ -19,6 +19,7 @@ crates/engine/src/cmd/component_clone_assembly.rs
 crates/engine/src/cmd/component_drag.rs
 crates/engine/src/cmd/component_extract.rs
 crates/engine/src/cmd/component_link.rs
+crates/engine/src/cmd/component_link_tree.rs
 crates/engine/src/cmd/component_move_features.rs
 crates/engine/src/cmd/component_placing.rs
 crates/engine/src/cmd/component_properties.rs

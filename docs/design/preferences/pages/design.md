@@ -41,6 +41,8 @@ profile" tag. Source today: Design page (`prefs/design.rs`).
 | Update changed links when a tab comes back | Checkbox | `Prefs.update_changed_links` | `true` | none | none | |
 | Double-click a component to activate it | Checkbox | `Prefs.double_click_components` | `true` | "Or to edit a linked one in place." | none | |
 | Insert Design lists open designs first | Checkbox | `Prefs.insert_lists_open_designs` | `true` | none | none | |
+| Insert Design keeps a linked design's components | Checkbox | `Prefs.insert_keeps_components` | `true` | none | none | |
+| A new occurrence of a linked design with joints is flexible | Checkbox | `Prefs.insert_flexible` | `false` | none | none | |
 
 ## Mismatches
 

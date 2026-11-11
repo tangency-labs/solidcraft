@@ -69,6 +69,7 @@ pub use view_dxf::sketch::exportable as view_dxf_exportable;
 pub(crate) use view_navigation::camera_form;
 pub use view_navigation::standard_view;
 mod component_link;
+pub(crate) use component_link::kept_changed;
 pub use component_link::resolve_design_links;
 mod config;
 mod design_link;

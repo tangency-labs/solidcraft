@@ -299,6 +299,9 @@ fn scope(s: &Session, comp: u64, cmd: &str) -> Result<Scope> {
     if source.links.contains_key(&comp) {
         return Err(bad(cmd, format!("{name} is linked to a design file already")));
     }
+    if let Some(why) = super::kept_component_refusal(s, comp).or_else(|| super::flexible_inside_refusal(s, comp)) {
+        return Err(bad(cmd, why));
+    }
     if source.parts.contains_key(&comp) {
         return Err(bad(cmd, format!("{name} is a standard part")));
     }
@@ -678,7 +681,9 @@ pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
 
     // This design: the component's history becomes an Import feature of the new design's bodies
     let shown = file.display().to_string();
-    let (_, sf, faces, _, properties) = session_bodies(&part, &shown)?;
+    // Every body in the component itself, as it is here: the link keeps no structure of the
+    // new design (Relink Source with `structure` makes it keep it).
+    let ((_, sf, faces, _, properties), _) = session_bodies(&part, &shown, false, false)?;
     // The link has a body per piece: a body in pieces keeps its name on the first
     let mut solids: Vec<String> = Vec::new();
     for b in part.world_state()?.bodies.iter().filter(|b| !b.body.is_mesh()) {
@@ -776,7 +781,9 @@ pub(super) fn replace_with_link(s: &mut Session, p: &Value) -> Result<Value> {
             Some(c) => c,
             None => {
                 let parent = targets.first().and_then(|t| s.doc.components.iter().find(|c| c.id == *t)).map(|c| c.parent).unwrap_or(0);
-                let made = super::insert_design(s, &json!({"path": given, "parent": parent}))?;
+                // Every body in the one component, as Extract to File leaves a link: the
+                // components replaced are compared with it body for body.
+                let made = super::insert_design(s, &json!({"path": given, "parent": parent, "structure": false}))?;
                 inserted = made["occurrence"].as_u64();
                 made["component"].as_u64().ok_or_else(|| bad(cmd, "the linked component was not created"))?
             }

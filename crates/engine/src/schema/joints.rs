@@ -1098,6 +1098,14 @@ pub struct ListedJoint {
     pub a: u64,
     /// Side b's occurrence, by id.
     pub b: u64,
+    /// The occurrences inside `a`, by id, down to the one side a is on: that copy of it. Left
+    /// out for a side on `a` itself.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub a_inside: Vec<u64>,
+    /// The occurrences inside `b`, by id, down to the one side b is on. Left out for a side on
+    /// `b` itself.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub b_inside: Vec<u64>,
     /// Its values as the solver places them (after motion links), with their limits.
     pub values: Vec<NamedValue>,
     /// Whether b's z lies along a's.
@@ -2243,6 +2251,13 @@ pub struct ReachParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "OccurrenceKey")]
     pub occurrence: Option<OccurrenceKey>,
+    /// The copy of the occurrence to move: occurrence ids from the top of the assembly down,
+    /// ending at `occurrence`. For an occurrence inside a sub-assembly placed more than once:
+    /// each occurrence of a linked subassembly has its own copy of what is inside it. Default:
+    /// the occurrence's first placement.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<OccurrencePath>")]
+    pub path: Option<Value>,
     /// Where its point goes, in world coordinates (mm).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "WorldPoint")]
@@ -2288,12 +2303,16 @@ impl<'de> Deserialize<'de> for ReachParams {
         let m = keys(d)?;
         // In the handler's order.
         let occurrence = given(&m, "occurrence", OccurrenceKey::read)?;
+        let path = m.get("path").filter(|path| !path.is_null()).cloned();
+        if let Some(path) = &path {
+            OccurrencePath::deserialize(path).map_err(|_| D::Error::custom(whole("`path` must list 1..64 occurrence ids")))?;
+        }
         let point = reach_vector(&m, "point", false)?;
         let at = reach_vector(&m, "at", false)?;
         let z = reach_vector(&m, "z", true)?;
         let axis = reach_vector(&m, "axis", true)?;
         let joints = given(&m, "joints", JointKeyList::read)?;
-        Ok(ReachParams { occurrence, point, at, z, axis, joints, quiet: flag(&m, "quiet")?, continuous: flag(&m, "continuous")? })
+        Ok(ReachParams { occurrence, path, point, at, z, axis, joints, quiet: flag(&m, "quiet")?, continuous: flag(&m, "continuous")? })
     }
 }
 

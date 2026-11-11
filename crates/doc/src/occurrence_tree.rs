@@ -26,10 +26,11 @@ impl<'a> OccurrenceTree<'a> {
     }
 
     /// Every placement from the root: (component, occurrence path ids, world transform), with
-    /// each occurrence placed in its parent by `transform`. Depth first, children in document
-    /// order. A branch stops past [`MAX_PLACEMENT_DEPTH`] levels, the walk past [`MAX_PLACEMENTS`]
+    /// each occurrence placed in its parent by `transform`, which is given the path down to it
+    /// (the same occurrence can be placed differently along different paths). Depth first,
+    /// children in document order. A branch stops past [`MAX_PLACEMENT_DEPTH`] levels, the walk past [`MAX_PLACEMENTS`]
     /// placements.
-    pub(crate) fn placements_with(&self, transform: impl Fn(&Occurrence) -> Mat) -> Vec<(u64, Vec<u64>, Mat)> {
+    pub(crate) fn placements_with(&self, transform: impl Fn(&[u64], &Occurrence) -> Mat) -> Vec<(u64, Vec<u64>, Mat)> {
         let mut out = vec![(0, Vec::new(), IDENTITY)];
         let mut stack: Vec<(u64, Vec<u64>, Mat)> = vec![(0, Vec::new(), IDENTITY)];
         while let Some((comp, path, m)) = stack.pop() {
@@ -43,7 +44,7 @@ impl<'a> OccurrenceTree<'a> {
             for o in self.children(comp) {
                 let mut p = path.clone();
                 p.push(o.id);
-                let w = mat_mul(&m, &transform(o));
+                let w = mat_mul(&m, &transform(&p, o));
                 out.push((o.component, p.clone(), w));
                 stack.push((o.component, p, w));
             }

@@ -158,6 +158,9 @@ pub(super) fn align(s: &mut Session, p: &Value) -> Result<Value> {
                 format!("{} is grounded: unground it first (occurrence.ground; a design's first part is grounded when it is made)", o.name),
             ));
         }
+        if let Some(why) = crate::cmd::component_link::kept_occurrence_refusal(s, id) {
+            return Err(bad(cmd, why));
+        }
         if let Some(mut group) = s.held_by_rigid_group(id) {
             for _ in 0..64 {
                 match s.doc.occurrence_of(group).and_then(|occ| s.held_by_rigid_group(occ.id)) {

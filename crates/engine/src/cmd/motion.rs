@@ -1041,13 +1041,45 @@ fn keyed(m: &MotionStudy) -> BTreeSet<(u64, usize)> {
 
 /// Where each occurrence is: (name, world transform).
 pub(super) fn positions(s: &Session) -> Vec<(String, Mat)> {
-    s.doc.occurrences.iter().map(|o| (o.name.clone(), joints::occurrence_world(&s.doc, o.id))).collect()
+    let mut all: Vec<(String, Mat)> = s.doc.occurrences.iter().map(|o| (o.name.clone(), joints::occurrence_world(&s.doc, o.id))).collect();
+    // And the copies that flexible occurrences of linked subassemblies have of the occurrences
+    // inside them, each named with its occurrence in front (`hinge:2/arm:1`).
+    let posed = s.doc.posed_worlds();
+    if !posed.is_empty() {
+        let names: std::collections::HashMap<u64, &str> = s.doc.occurrences.iter().map(|o| (o.id, o.name.as_str())).collect();
+        let name = |id: u64| names.get(&id).copied().unwrap_or_default();
+        all.extend(posed.into_iter().map(|(occurrence, inner, world)| (format!("{}/{}", name(occurrence), name(inner)), world)));
+    }
+    all
 }
 
 /// The occurrences placed differently `after` than `before` ([`positions`] of one design, so in
-/// the same order even where two share a name).
+/// the same order even where two share a name), and the copies of flexible occurrences that
+/// are: one of those that `before` has not got was made since, so it moved.
 pub(super) fn moved<'a>(before: &'a [(String, Mat)], after: &'a [(String, Mat)]) -> impl Iterator<Item = &'a (String, Mat)> {
-    after.iter().zip(before).filter(|((_, a), (_, b))| a.iter().flatten().zip(b.iter().flatten()).any(|(x, y)| (x - y).abs() > 1e-9)).map(|(a, _)| a)
+    let differs = |a: &Mat, b: &Mat| a.iter().flatten().zip(b.iter().flatten()).any(|(x, y)| (x - y).abs() > 1e-9);
+    // The same lists: side by side. A copy was made or given up between them: by name.
+    let aligned = before.len() == after.len() && before.iter().zip(after).all(|((a, _), (b, _))| a == b);
+    let was: std::collections::HashMap<&str, Vec<&Mat>> = if aligned {
+        std::collections::HashMap::new()
+    } else {
+        let mut was: std::collections::HashMap<&str, Vec<&Mat>> = std::collections::HashMap::new();
+        for (name, m) in before {
+            was.entry(name.as_str()).or_default().push(m);
+        }
+        was
+    };
+    after
+        .iter()
+        .enumerate()
+        .filter(move |(i, (name, a))| {
+            if aligned {
+                before.get(*i).is_none_or(|(_, b)| differs(a, b))
+            } else {
+                !was.get(name.as_str()).is_some_and(|all| all.iter().any(|b| !differs(a, b)))
+            }
+        })
+        .map(|(_, a)| a)
 }
 
 /// Where occurrence `name` is placed by `m`: its origin and axes.

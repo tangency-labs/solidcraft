@@ -1764,6 +1764,22 @@ impl Session {
             Err(EngineError::BadParams { cmd, msg }) if cmd.is_empty() => Err(EngineError::BadParams { cmd: spec.id.to_string(), msg }),
             Err(e) => Err(e),
         };
+        // What a link keeps for its linked design's own is that design's to change. A command
+        // that put something of this design into it is refused, whichever command it was: the
+        // design goes back to what it was, as after any other error.
+        let r = match r {
+            Ok(done) if outermost && spec.undoable && self.replacements == replacements && !Arc::ptr_eq(&self.doc, &before.doc) => {
+                match cmd::kept_changed(&before.doc, &self.doc) {
+                    Some(why) => {
+                        // Where new geometry goes is not in the design: it goes back here.
+                        (self.active_component, self.active_occurrence_path) = active_before.clone();
+                        Err(EngineError::BadParams { cmd: spec.id.to_string(), msg: why })
+                    }
+                    None => Ok(done),
+                }
+            }
+            r => r,
+        };
         // New/open/recover can replace the Session. Device ownership belongs to the host,
         // so its capability metadata survives those document lifecycle commands.
         self.render_viewport = host_viewport;

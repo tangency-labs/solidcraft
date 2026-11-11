@@ -71,6 +71,14 @@ impl AxisRef {
         AxisRef::Target(AxisTarget::Datum { datum })
     }
 
+    /// The placement datum the reference names, when it names one.
+    pub fn datum_mut(&mut self) -> Option<&mut DatumRef> {
+        match self {
+            AxisRef::Target(AxisTarget::Datum { datum }) => Some(datum),
+            _ => None,
+        }
+    }
+
     pub fn geo(geo: crate::construct::GeoRef) -> Self {
         AxisRef::Target(AxisTarget::Geo { geo })
     }
@@ -831,6 +839,10 @@ pub struct Assembly {
     pub traces: Vec<crate::motion::MotionTrace>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exploded: Vec<crate::motion::ExplodedView>,
+    /// Where the flexible occurrences of linked subassemblies have their own copies of the
+    /// occurrences inside them ([`placed`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub poses: Vec<PlacedPose>,
 }
 
 impl Assembly {
@@ -905,6 +917,7 @@ impl Assembly {
             && self.studies.is_empty()
             && self.traces.is_empty()
             && self.exploded.is_empty()
+            && self.poses.is_empty()
     }
 }
 
@@ -1030,13 +1043,17 @@ fn nearest_plane(doc: &Document, st: &ModelState, o: &JointOrigin, pick: Vec3) -
     })
 }
 
-/// The world seen from an occurrence's component: the inverse of the occurrence's own world
-/// frame (identity for the root).
-fn in_occurrence(doc: &Document, occ: u64) -> Result<Mat> {
-    if occ == 0 {
+/// The design seen from the part a side is on (`occurrence`, and the occurrences `inside` it
+/// down to the part): the inverse of that part's world frame (identity for the root), where the
+/// design itself has the part. A datum is found where the design has it too
+/// ([`crate::construct::resolve_datum`]), so a part's own datum is the same on it whatever pose
+/// a flexible occurrence of a linked subassembly shows its copy of the part in.
+fn in_side(doc: &Document, occurrence: u64, inside: &[u64]) -> Result<Mat> {
+    if occurrence == 0 && inside.is_empty() {
         return Ok(IDENTITY);
     }
-    mat_inverse(&occurrence_world(doc, occ)).ok_or_else(|| DocError::Invalid("joint origin: the occurrence's placement is singular".into()))
+    let world = mat_mul(&occurrence_world_as_designed(doc, occurrence), &inside_transform(doc, occurrence, inside, true)?);
+    mat_inverse(&world).ok_or_else(|| DocError::Invalid("joint origin: the occurrence's placement is singular".into()))
 }
 
 /// Resolve an axis reference to a line (origin, unit direction) in the side's component
@@ -1044,6 +1061,13 @@ fn in_occurrence(doc: &Document, occ: u64) -> Result<Mat> {
 /// in the component that owns it (no cross-component fallback), and a placement's datum resolves
 /// in the world ([`crate::construct::resolve_datum`]) and is mapped into the side's frame.
 pub fn resolve_axis_ref(doc: &Document, st: &ModelState, occurrence: u64, axis: &AxisRef) -> Result<(Vec3, Vec3)> {
+    axis_ref(doc, st, occurrence, (occurrence, &[]), axis)
+}
+
+/// [`resolve_axis_ref`] for `occurrence`, the part of a joint side that is on `side`: its
+/// occurrence and the occurrences inside it down to the part, which is where a placement's
+/// datum is mapped into the part's frame from ([`in_side`]).
+fn axis_ref(doc: &Document, st: &ModelState, occurrence: u64, side: (u64, &[u64]), axis: &AxisRef) -> Result<(Vec3, Vec3)> {
     let comp = component_of(doc, occurrence)?;
     match axis {
         AxisRef::Target(AxisTarget::Origin { axis }) => {
@@ -1080,7 +1104,7 @@ pub fn resolve_axis_ref(doc: &Document, st: &ModelState, occurrence: u64, axis: 
             // side's frame. `resolve_datum_in`'s component mapping is not used here: it goes
             // through a component's FIRST placement, while a joint side is an exact occurrence,
             // which may be a later placement of its component.
-            let inv = in_occurrence(doc, occurrence)?;
+            let inv = in_side(doc, side.0, side.1)?;
             match crate::construct::resolve_datum(doc, datum)? {
                 ConstructGeom::Axis { origin, dir } => Ok((apply_point(&inv, origin), apply_vector(&inv, dir))),
                 _ => Err(DocError::Invalid("the datum is not an axis (pick the X, Y or Z of a component)".into())),
@@ -1097,10 +1121,34 @@ pub fn resolve_axis_ref(doc: &Document, st: &ModelState, occurrence: u64, axis: 
 /// Resolve a joint origin to a frame in its component's coordinates (its `occurrence`'s: an
 /// origin with occurrences `inside` is resolved on its part and carried up through them).
 pub fn resolve_origin(doc: &Document, st: &ModelState, o: &JointOrigin) -> Result<Mat> {
-    if !o.inside.is_empty() {
-        let on_part = resolve_origin(doc, st, &JointOrigin::new(o.part(), o.snap.clone()))?;
-        return Ok(mat_mul(&inside_transform(doc, o)?, &on_part));
+    origin_frame(doc, st, o, false)
+}
+
+/// [`resolve_origin`] with the occurrences `inside` where the design itself has them, whatever
+/// pose a flexible occurrence of a linked subassembly shows its copies of them in: what a
+/// feature reads, so that what it builds does not depend on where a joint stands.
+pub fn resolve_origin_as_designed(doc: &Document, st: &ModelState, o: &JointOrigin) -> Result<Mat> {
+    origin_frame(doc, st, o, true)
+}
+
+fn origin_frame(doc: &Document, st: &ModelState, o: &JointOrigin, designed: bool) -> Result<Mat> {
+    let on_part = resolve_on_part(doc, st, o)?;
+    if o.inside.is_empty() {
+        return Ok(on_part);
     }
+    Ok(mat_mul(&inside_transform(doc, o.occurrence, &o.inside, designed)?, &on_part))
+}
+
+/// A joint origin as a frame in the coordinates of its part ([`JointOrigin::part`]): the
+/// occurrence its geometry is on, which is the last of the occurrences `inside` when it has any.
+pub(crate) fn resolve_on_part(doc: &Document, st: &ModelState, side: &JointOrigin) -> Result<Mat> {
+    let part;
+    let o = if side.inside.is_empty() {
+        side
+    } else {
+        part = JointOrigin::new(side.part(), side.snap.clone());
+        &part
+    };
     let bad = || DocError::Invalid("joint origin: degenerate frame".into());
     match &o.snap {
         Snap::Frame { origin, z, x } => frame(*origin, *z, *x).ok_or_else(bad),
@@ -1140,7 +1188,7 @@ pub fn resolve_origin(doc: &Document, st: &ModelState, o: &JointOrigin) -> Resul
                     doc.resolve_plane_in(&vals, plane, 0, comp, Some(st))?
                 }
                 _ => {
-                    let inv = in_occurrence(doc, o.occurrence)?;
+                    let inv = in_side(doc, side.occurrence, &side.inside)?;
                     let world = doc.resolve_plane_in(&vals, plane, 0, 0, Some(st))?;
                     Plane::new(apply_point(&inv, world.origin), apply_vector(&inv, world.x), apply_vector(&inv, world.y)).ok_or_else(bad)?
                 }
@@ -1158,7 +1206,7 @@ pub fn resolve_origin(doc: &Document, st: &ModelState, o: &JointOrigin) -> Resul
         }
         Snap::Axis { axis, pick, x } => {
             let comp = component_of(doc, o.occurrence)?;
-            let (line_origin, line_dir) = resolve_axis_ref(doc, st, o.occurrence, axis)?;
+            let (line_origin, line_dir) = axis_ref(doc, st, o.occurrence, (side.occurrence, &side.inside), axis)?;
             let z = line_dir.normalized().ok_or_else(bad)?;
             let origin = match pick {
                 Some(p) => line_origin + z * (*p - line_origin).dot(z),
@@ -1171,16 +1219,30 @@ pub fn resolve_origin(doc: &Document, st: &ModelState, o: &JointOrigin) -> Resul
 }
 
 /// The transform from an origin's part to its `occurrence`, through the occurrences `inside`
-/// (each placed in the one before). An error when they no longer lead from one to the next.
-fn inside_transform(doc: &Document, o: &JointOrigin) -> Result<Mat> {
+/// (each placed in the one before): as the world shows them, or, `designed`, where the design
+/// itself has them. An error when they no longer lead from one to the next.
+fn inside_transform(doc: &Document, occurrence: u64, inside: &[u64], designed: bool) -> Result<Mat> {
     let lost = || DocError::Invalid("joint origin: its part is no longer in that sub-assembly".into());
-    if o.inside.len() > crate::MAX_PLACEMENT_DEPTH {
+    if inside.len() > crate::MAX_PLACEMENT_DEPTH {
         return Err(lost());
     }
-    let (mut m, mut component) = (IDENTITY, component_of(doc, o.occurrence)?);
-    for id in &o.inside {
+    // Where an occurrence above has its own copy of an occurrence (a pose), that is where the
+    // world shows it.
+    let poses = placed::Poses::of(doc).filter(|_| !designed);
+    let mut path: Vec<u64> = match &poses {
+        Some(_) => placed::first_chain(doc, occurrence).iter().map(|x| x.id).collect(),
+        None => Vec::new(),
+    };
+    let (mut m, mut component) = (IDENTITY, component_of(doc, occurrence)?);
+    for id in inside {
         let x = doc.occurrences.iter().find(|x| x.id == *id && x.parent == component).ok_or_else(lost)?;
-        m = mat_mul(&m, &x.transform);
+        m = match &poses {
+            Some(poses) => {
+                path.push(*id);
+                mat_mul(&m, &poses.local(&path, x))
+            }
+            None => mat_mul(&m, &x.transform),
+        };
         component = x.component;
     }
     Ok(m)
@@ -1242,8 +1304,18 @@ pub fn origin_anchor(doc: &Document, path: &[u64]) -> (u64, Vec<u64>) {
     }
 }
 
-/// World transform of an occurrence (through its parents).
+/// World transform of an occurrence (through its parents), as the world shows it: an occurrence
+/// inside a flexible occurrence of a linked subassembly is where that occurrence has its copy.
 pub fn occurrence_world(doc: &Document, occ: u64) -> Mat {
+    if let Some(poses) = placed::Poses::of(doc) {
+        return poses.along(&placed::first_chain(doc, occ));
+    }
+    occurrence_world_as_designed(doc, occ)
+}
+
+/// [`occurrence_world`] where the design itself has the occurrence, whatever pose a flexible
+/// occurrence of a linked subassembly above it shows its copy of it in.
+pub(crate) fn occurrence_world_as_designed(doc: &Document, occ: u64) -> Mat {
     let mut m = IDENTITY;
     let mut cur = doc.occurrences.iter().find(|o| o.id == occ);
     for _ in 0..1000 {
@@ -1295,6 +1367,33 @@ pub struct Solution {
     pub dof: BTreeMap<u64, usize>,
     /// Occurrences fixed in place (grounded, or the root's).
     pub fixed: Vec<u64>,
+    /// New world transforms of the copies that flexible occurrences of linked subassemblies have
+    /// of the occurrences inside them: the flexible occurrence, the inner occurrence, and where
+    /// the joints place that copy ([`placed`]).
+    #[serde(skip)]
+    pub placed: Vec<(u64, u64, Mat)>,
+}
+
+impl Solution {
+    /// Whether the solve placed `occurrence` or holds it still: itself, or, for an occurrence of
+    /// a linked subassembly, one of its own copies of the occurrences inside it.
+    pub fn reaches(&self, occurrence: u64) -> bool {
+        // `fixed` is in order, as the solve leaves it.
+        occurrence == 0
+            || self.world.contains_key(&occurrence)
+            || self.fixed.binary_search(&occurrence).is_ok()
+            || self.placed.iter().any(|(top, _, _)| *top == occurrence)
+    }
+}
+
+/// What a solve of a design with linked subassemblies takes from the design's joints as they
+/// are, where the joints it solves no longer say it ([`placed::expand`]).
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Start {
+    /// The occurrence to hold when nothing joined is fixed. `None`: the first joint's A side.
+    pub(crate) anchor: Option<u64>,
+    /// Whether a joint has a datum plane or axis side. `None`: as the joints solved have.
+    pub(crate) datum: Option<bool>,
 }
 
 /// Joint values by joint id.
@@ -2290,10 +2389,21 @@ pub fn solve_holding(doc: &Document, st: &ModelState, held: &Held) -> Solution {
 /// solves still close and check every loop, respect held values and limits, and report errors;
 /// they leave `Solution::dof` empty rather than returning the spanning tree's approximate count.
 pub fn solve_holding_with_analysis(doc: &Document, st: &ModelState, held: &Held, analysis: Analysis) -> Solution {
-    let asm = &doc.assembly;
+    // A design with flexible occurrences of linked subassemblies is solved with their own copies
+    // of their parts as occurrences ([`placed`]); any other design as it is.
+    match placed::expand(doc, st) {
+        Some(expanded) => expanded.fold(doc, solve_as_given(doc, &expanded.assembly, st, held, analysis, expanded.start())),
+        None => placed::kept_dof(doc, solve_as_given(doc, &doc.assembly, st, held, analysis, Start::default()), &Default::default()),
+    }
+}
+
+/// [`solve_holding_with_analysis`] for the joints and motion links of `asm`, as it has them:
+/// the design's own, or the ones [`placed::expand`] made of them. An occurrence the design does
+/// not have is a copy `expand` gave a place of its own.
+fn solve_as_given(doc: &Document, asm: &Assembly, st: &ModelState, held: &Held, analysis: Analysis, start: Start) -> Solution {
     let mut sol = Solution::default();
     let mut vals = joint_values(asm);
-    let Built { tree, mut placed, closing, mut dof } = build(doc, st, &vals, &mut sol);
+    let Built { tree, mut placed, closing, mut dof } = build(doc, asm, st, &vals, &mut sol, start);
     let mut stuck = BTreeSet::new();
     if !closing.is_empty() {
         (sol.values, stuck) = close_loops(&tree, &closing, asm, held, &mut vals);
@@ -2336,7 +2446,7 @@ pub fn solve_holding_with_analysis(doc: &Document, st: &ModelState, held: &Held,
     for occ in bad {
         placed.remove(&occ);
         for j in asm.joints.iter().filter(|j| !j.suppressed && (j.a.occurrence == occ || j.b.occurrence == occ)) {
-            sol.errors.push((j.id, j.name.clone(), format!("it would place occurrence {occ} outside a rigid placement within 1e9 mm")));
+            sol.errors.push((j.id, j.name.clone(), format!("{}{occ} outside a rigid placement within 1e9 mm", placed::WOULD_PLACE)));
         }
     }
     sol.world = placed;
@@ -2364,22 +2474,28 @@ struct Built<'a> {
 /// the **earlier-queued parent** wins the tie (the original behaviour, predating `BinaryHeap`).
 /// Two runs of the same design place identically; a design's tree can still differ from
 /// `BinaryHeap`'s, which broke ties by joint creation index instead.
-fn build<'a>(doc: &'a Document, st: &'a ModelState, vals: &Values, sol: &mut Solution) -> Built<'a> {
-    let asm = &doc.assembly;
+fn build<'a>(doc: &'a Document, asm: &'a Assembly, st: &'a ModelState, vals: &Values, sol: &mut Solution, start: Start) -> Built<'a> {
     let joints: Vec<&Joint> = asm.joints.iter().filter(|j| !j.suppressed).take(MAX_JOINTS).collect();
     // Joint frames in component coordinates (errors leave the joint out). An origin several joints
     // share (a panel face every part sits on) is found once.
     let mut frames: BTreeMap<u64, JointFrames> = BTreeMap::new();
     let mut found: BTreeMap<(u64, String), std::result::Result<Mat, String>> = BTreeMap::new();
     let mut resolve = |o: &JointOrigin| -> Result<Mat> {
+        // A frame given as it is needs nothing found: it is not looked up, nor kept.
+        if let (Snap::Frame { origin, z, x }, true) = (&o.snap, o.inside.is_empty()) {
+            return frame(*origin, *z, *x).ok_or_else(|| DocError::Invalid("joint origin: degenerate frame".into()));
+        }
         let Ok(comp) = component_of(doc, o.occurrence) else { return resolve_origin(doc, st, o) };
         // A plane or axis side resolves in the world and is mapped into the side's exact
         // occurrence's frame (`in_occurrence`), so its frame depends on the occurrence, not just
         // on the component: two placements of one component whose sides name the same datum must
         // not share the cached entry, or the second reads the first's frame. Such sides key by
         // their occurrence; every other snap stays component-local and shares as before.
+        // A side through occurrences inside its occurrence is where that occurrence shows
+        // them, which two occurrences of one linked subassembly can differ in (a pose).
         let keyed = match &o.snap {
             Snap::Plane { .. } | Snap::Axis { .. } => o.occurrence,
+            _ if !o.inside.is_empty() => o.occurrence,
             _ => comp,
         };
         found
@@ -2415,11 +2531,15 @@ fn build<'a>(doc: &'a Document, st: &'a ModelState, vals: &Values, sol: &mut Sol
         dof.insert(o.id, 0);
     }
     let involved: BTreeSet<u64> = joints.iter().flat_map(|j| [j.a.occurrence, j.b.occurrence]).collect();
+    // With nothing fixed among them, the first joint's A side is: the design's own occurrence
+    // there (`start`), not a copy a flexible subassembly has of an occurrence inside it, which
+    // would hold that copy still and swing its subassembly about it.
+    let first = start.anchor.or_else(|| joints.first().map(|j| j.a.occurrence));
     if !involved.iter().any(|o| placed.contains_key(o))
-        && let Some(j) = joints.first()
+        && let Some(first) = first
     {
-        placed.insert(j.a.occurrence, occurrence_world(doc, j.a.occurrence));
-        dof.insert(j.a.occurrence, 0);
+        placed.insert(first, occurrence_world(doc, first));
+        dof.insert(first, 0);
     }
     sol.fixed = placed.keys().copied().collect();
     let mut tree =
@@ -2467,9 +2587,11 @@ fn build<'a>(doc: &'a Document, st: &'a ModelState, vals: &Values, sol: &mut Sol
     // before the root's joints. Without one, the seeds keep their pre-change order (the root
     // first, then the grounded occurrences in id order), so assemblies built of the existing
     // snaps alone solve exactly as before.
-    let datum = joints
-        .iter()
-        .any(|j| matches!(j.a.snap, Snap::Plane { .. } | Snap::Axis { .. }) || matches!(j.b.snap, Snap::Plane { .. } | Snap::Axis { .. }));
+    let datum = start.datum.unwrap_or_else(|| {
+        joints
+            .iter()
+            .any(|j| matches!(j.a.snap, Snap::Plane { .. } | Snap::Axis { .. }) || matches!(j.b.snap, Snap::Plane { .. } | Snap::Axis { .. }))
+    });
     let waves: Vec<Vec<u64>> =
         if datum { vec![placed.keys().copied().filter(|&o| o != 0).collect(), vec![0]] } else { vec![placed.keys().copied().collect()] };
     for seeds in waves {
@@ -2588,6 +2710,8 @@ impl Document {
                 }
             }
         }
+        // After the occurrences: a copy's pose is in the frame of the occurrence it is inside.
+        changed |= self.apply_placed(&sol.placed);
         changed
     }
 
@@ -2616,6 +2740,10 @@ impl Document {
 
 #[path = "joints_cam.rs"]
 pub mod cam;
+
+#[path = "joints_placed.rs"]
+pub(crate) mod placed;
+pub use placed::{Inside, PlacedPose, both_datums, frame_snap};
 
 #[path = "joints_edge.rs"]
 mod edge;

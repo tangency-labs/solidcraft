@@ -299,9 +299,11 @@ impl ContactGeometry {
 
     fn frame_in(body: &CachedBody, doc: &Document) -> Result<Mat> {
         let mut frame = IDENTITY;
-        for id in &body.path {
+        for (k, id) in body.path.iter().enumerate() {
             let occurrence = doc.occurrences.iter().find(|o| o.id == *id).ok_or_else(|| limit("contact occurrence disappeared"))?;
-            frame = mat_mul(&frame, &occurrence.transform);
+            // Where the world shows it: inside a flexible occurrence of a linked subassembly,
+            // where that occurrence has its own copy.
+            frame = mat_mul(&frame, &doc.posed_local(body.path.get(..=k).unwrap_or_default(), occurrence));
         }
         Ok(mat_mul(&frame, &body.offset))
     }

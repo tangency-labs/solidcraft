@@ -15,6 +15,9 @@ use crate::viewport::{Hit, Proj};
 #[derive(Clone, Debug)]
 pub struct Drag {
     occurrence: u64,
+    /// The placement grabbed, when the occurrence is inside a linked subassembly: the
+    /// occurrences from the top of the assembly down to it. Empty for any other occurrence.
+    path: Vec<u64>,
     /// The point grabbed, in the occurrence's own coordinates.
     local: Vec3,
     /// The plane the pointer moves the point in: through where it was grabbed, facing the view.
@@ -40,6 +43,23 @@ pub fn start(app: &mut SolveApp, proj: &Proj, p: Pos2) -> bool {
     };
     let s = &app.session;
     let Some(occurrence) = crate::dialogs_assembly::occurrence_of_body(s, &body).filter(|o| *o != 0) else { return false };
+    // A part inside a linked subassembly has no joint of its own: the joints its subassembly's
+    // occurrence has move it, the copy grabbed and no other. It is asked for by its placement.
+    if s.doc.link_keeping_occurrence(occurrence).is_some() {
+        let st = s.model.state();
+        let Some(path) = s.doc.body_frames_with_source(&st).into_iter().find(|(world, ..)| *world == body).map(|(_, _, _, path, _)| path) else {
+            return false;
+        };
+        if path.last() != Some(&occurrence) || joints::motion_axes(&s.doc, &st, occurrence, &path).is_empty() {
+            return false;
+        }
+        let Some(local) = s.doc.path_placement(&path).and_then(|(_, world)| mat_inverse(&world)).map(|inv| apply_point(&inv, at)) else {
+            return false;
+        };
+        let normal = proj.ray(p).1;
+        app.viewport.joint_drag = Some(Drag { occurrence, path, local, origin: at, normal, pushed: false });
+        return true;
+    }
     if !s.doc.assembly.joints.iter().any(|j| !j.suppressed && (j.a.occurrence == occurrence || j.b.occurrence == occurrence)) {
         return false;
     }
@@ -49,7 +69,7 @@ pub fn start(app: &mut SolveApp, proj: &Proj, p: Pos2) -> bool {
     }
     let Some(local) = mat_inverse(&joints::occurrence_world(&s.doc, occurrence)).map(|inv| apply_point(&inv, at)) else { return false };
     let normal = proj.ray(p).1;
-    app.viewport.joint_drag = Some(Drag { occurrence, local, origin: at, normal, pushed: false });
+    app.viewport.joint_drag = Some(Drag { occurrence, path: Vec::new(), local, origin: at, normal, pushed: false });
     true
 }
 
@@ -69,9 +89,13 @@ pub fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
     if !target.is_finite() {
         return;
     }
-    let at = apply_point(&joints::occurrence_world(&app.session.doc, d.occurrence), d.local);
-    let params =
+    let placed = if d.path.is_empty() { None } else { app.session.doc.path_placement(&d.path).map(|(_, world)| world) };
+    let at = apply_point(&placed.unwrap_or_else(|| joints::occurrence_world(&app.session.doc, d.occurrence)), d.local);
+    let mut params =
         json!({"occurrence": d.occurrence, "at": [at.x, at.y, at.z], "point": [target.x, target.y, target.z], "quiet": true, "continuous": true});
+    if !d.path.is_empty() {
+        params["path"] = json!(d.path);
+    }
     // One undo step for the whole drag: the first frame's, kept on top while the others run (not
     // truncated by depth, which a full history would make lose its oldest steps frame by frame).
     let own = if d.pushed { app.session.undo.pop() } else { None };

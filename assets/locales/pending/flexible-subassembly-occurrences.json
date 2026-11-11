@@ -1,0 +1,47 @@
+{
+  "ar": {
+    "settings.insert_flexible": "التصميم المرتبط ذو المفاصل يُدرج مرنًا",
+    "ui.link_make_flexible": "جعله مرنًا",
+    "ui.link_make_rigid": "جعله صلبًا"
+  },
+  "de": {
+    "settings.insert_flexible": "Ein verknüpftes Design mit Gelenken wird flexibel eingefügt",
+    "ui.link_make_flexible": "Flexibel machen",
+    "ui.link_make_rigid": "Starr machen"
+  },
+  "en": {
+    "settings.insert_flexible": "A new occurrence of a linked design with joints is flexible",
+    "ui.link_make_flexible": "Make Flexible",
+    "ui.link_make_rigid": "Make Rigid"
+  },
+  "es": {
+    "settings.insert_flexible": "Un diseño vinculado con uniones se inserta flexible",
+    "ui.link_make_flexible": "Hacer flexible",
+    "ui.link_make_rigid": "Hacer rígido"
+  },
+  "he": {
+    "settings.insert_flexible": "תכן מקושר עם מפרקים נוסף כגמיש",
+    "ui.link_make_flexible": "הפיכה לגמיש",
+    "ui.link_make_rigid": "הפיכה לקשיח"
+  },
+  "ja": {
+    "settings.insert_flexible": "ジョイントのあるリンクされたデザインをフレキシブルとして挿入",
+    "ui.link_make_flexible": "フレキシブルにする",
+    "ui.link_make_rigid": "リジッドにする"
+  },
+  "ko": {
+    "settings.insert_flexible": "관절이 있는 연결된 디자인을 유연하게 삽입",
+    "ui.link_make_flexible": "유연하게 설정",
+    "ui.link_make_rigid": "강체로 설정"
+  },
+  "vi": {
+    "settings.insert_flexible": "Thiết kế liên kết có khớp nối được chèn ở dạng linh hoạt",
+    "ui.link_make_flexible": "Đặt thành linh hoạt",
+    "ui.link_make_rigid": "Đặt thành cứng"
+  },
+  "zh": {
+    "settings.insert_flexible": "带接头的链接设计以柔性方式插入",
+    "ui.link_make_flexible": "设为柔性",
+    "ui.link_make_rigid": "设为刚性"
+  }
+}

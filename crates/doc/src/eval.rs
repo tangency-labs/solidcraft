@@ -8034,7 +8034,9 @@ fn mirror_copy_frame(doc: &Document, own: u64, path: &[u64]) -> Option<(u64, Mat
 /// nowhere or the frame is singular.
 fn frame_in_own(doc: &Document, component: u64, path: &[u64]) -> Option<Mat> {
     let Some(own) = first_placement_path(doc, component) else {
-        let (_, world) = doc.path_placement(path)?;
+        // Where the design has it, as `component_transform` does: evaluation does not follow
+        // the poses of flexible occurrences (`Document::placements`).
+        let world = path_frame(doc, path)?;
         return Some(crate::mat_mul(&crate::mat_inverse(&doc.component_transform(component))?, &world));
     };
     let shared = own.iter().zip(path).take_while(|(a, b)| a == b).count();
@@ -10303,10 +10305,13 @@ fn unique_body_name(st: &ModelState, base: &str) -> String {
 /// every placement agrees (the usual case).
 /// What construction geometry of component `comp` is built on: the model as that component sees
 /// it, other components' bodies where they are placed. In the root, every placement of a
-/// component (its pasted instances too) is there, as the viewport shows it.
+/// component (its pasted instances too) is there, where the design has it: the viewport shows
+/// the same, but for the copies a flexible occurrence of a linked subassembly has in a pose.
 fn construction_state<'a>(doc: &Document, st: &'a ModelState, comp: u64) -> Result<std::borrow::Cow<'a, ModelState>> {
     if comp == 0 && !doc.occurrences.is_empty() {
-        return Ok(std::borrow::Cow::Owned(world_state(doc, st)?));
+        // Where the design has each body: what is built on it must not depend on the pose a
+        // flexible subassembly stands in (`Document::placements_as_designed`).
+        return Ok(std::borrow::Cow::Owned(world_state_as_designed(doc, st)?));
     }
     state_in_frame(doc, st, comp)
 }
@@ -10614,7 +10619,8 @@ pub fn with_placed_copies<'a>(
     }
     let world = crate::WorldNames::new(doc, st);
     let mut placed: Vec<ModelBody> = Vec::new();
-    for (comp, path, m) in doc.placements() {
+    // As designed: evaluation does not follow the poses of flexible subassemblies.
+    for (comp, path, m) in doc.placements_as_designed() {
         for b in by_component.get(&comp).into_iter().flatten() {
             let name = world.name(&b.name, comp, &path);
             if !missing.contains(&name.as_str()) || placed.iter().any(|p| p.name == name) {
@@ -10797,6 +10803,27 @@ fn placed_apart(b: &ModelBody, m: &crate::Mat) -> bool {
 /// [`world_state`], reusing the bodies `placed` holds from an earlier call and leaving it holding
 /// this call's.
 pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut PlacedBodies) -> Result<ModelState> {
+    // A design without occurrences is its own world: nothing to walk.
+    if doc.occurrences.is_empty() {
+        return Ok(st.clone());
+    }
+    world_state_placed(doc, st, placed_before, doc.placements())
+}
+
+/// The world with every occurrence where the design has it, without the poses flexible
+/// occurrences of linked subassemblies have: what evaluation builds on
+/// ([`Document::placements_as_designed`]). The world a design shows is [`world_state`].
+pub fn world_state_as_designed(doc: &Document, st: &ModelState) -> Result<ModelState> {
+    world_state_placed(doc, st, &mut PlacedBodies::default(), doc.placements_as_designed())
+}
+
+/// [`world_state_reusing`] with the design's `placements` given.
+fn world_state_placed(
+    doc: &Document,
+    st: &ModelState,
+    placed_before: &mut PlacedBodies,
+    placements: Vec<(u64, Vec<u64>, crate::Mat)>,
+) -> Result<ModelState> {
     if doc.occurrences.is_empty() {
         return Ok(st.clone());
     }
@@ -10819,7 +10846,6 @@ pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut 
         path
     };
     let mut out = ModelState { body_counter: st.body_counter, ..Default::default() };
-    let placements = doc.placements();
     // A body moved in from another component keeps its place (its offset).
     let body_matrix = |b: &ModelBody, m: &crate::Mat| doc.model_body_offset(b).map(|o| crate::mat_mul(m, o)).unwrap_or(*m);
     // Every body placed elsewhere than its definition, placed on all cores: a large assembly

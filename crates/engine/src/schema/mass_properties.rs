@@ -97,11 +97,13 @@ pub struct RigidGroupMass {
 /// What `assembly.mass_properties` returns.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct AssemblyMassResult {
-    /// Every occurrence, the design's own bodies (0) first, then by occurrence id.
+    /// Every occurrence, the design's own bodies (0) first, then by occurrence id, each at its
+    /// first placement; then the further placements of the occurrences inside a component that
+    /// is placed more than once, each with its `path`.
     pub occurrences: Vec<OccurrenceMass>,
     /// The rigid groups, in order of their lowest occurrence id.
     pub groups: Vec<RigidGroupMass>,
-    /// Approximations made (open bodies, repeated subassemblies, scaled frames).
+    /// Approximations made (open bodies, scaled frames).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

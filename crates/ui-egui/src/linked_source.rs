@@ -7,6 +7,35 @@ use serde_json::{Value, json};
 
 use crate::SolveApp;
 
+/// What Insert Design asks of `component.insert_design` for a design that has components of
+/// its own, from the preferences: keep them as components inside the linked one
+/// (`insert_keeps_components`), and bring its joints too (`insert_flexible`), which needs them.
+/// Keeping them is what the command does when it is not told: it is left out, so that a design
+/// with more components than a link keeps still comes in, as one component and with a warning.
+pub(crate) fn insert_design_options(preferences: &crate::prefs::Prefs) -> Vec<(&'static str, bool)> {
+    match (preferences.insert_keeps_components, preferences.insert_flexible) {
+        (false, _) => vec![("structure", false)],
+        (true, true) => vec![("flexible", true)],
+        (true, false) => Vec::new(),
+    }
+}
+
+/// The switch the menu of `occurrence`, an occurrence of linked component `component`, offers
+/// for how the link keeps its design: keep its components when it keeps none, else make this
+/// occurrence flexible or rigid again (each occurrence is one or the other on its own). `None`
+/// when the design has no components to keep apart.
+pub(crate) fn link_mode_item(doc: &solidcraft_engine::doc::Document, component: u64, occurrence: u64) -> Option<(&'static str, serde_json::Value)> {
+    let link = doc.links.get(&component)?;
+    Some(match link.tree.as_ref() {
+        None => ("Keep Its Components", json!({"component": component, "structure": true})),
+        Some(tree) if tree.components.is_empty() || occurrence == 0 => return None,
+        Some(tree) => {
+            let flexible = tree.flexible.contains_key(&occurrence);
+            (if flexible { "Make Rigid" } else { "Make Flexible" }, json!({"component": component, "occurrence": occurrence, "flexible": !flexible}))
+        }
+    })
+}
+
 /// Relink Source for the selection, which must name exactly one linked component, through
 /// its browser rows or placements.
 pub(crate) fn start_selected(app: &mut SolveApp) {
@@ -311,6 +340,88 @@ mod tests {
             let result = path.clone();
             Box::pin(async move { result })
         }));
+    }
+
+    /// How Insert Design asks for a design that has components, from the two preferences.
+    #[test]
+    fn insert_design_takes_how_a_linked_design_comes_in_from_the_preferences() {
+        let mut prefs = crate::prefs::Prefs::default();
+        assert_eq!(insert_design_options(&prefs), [], "as shipped: its components kept, rigid, which is what the command does untold");
+        prefs.insert_flexible = true;
+        assert_eq!(insert_design_options(&prefs), [("flexible", true)]);
+        prefs.insert_keeps_components = false;
+        assert_eq!(insert_design_options(&prefs), [("structure", false)], "one component has no joints to bring");
+    }
+
+    /// A linked design that has components (#5526): its menu switches it between rigid and
+    /// flexible, and a component it gave opens the design it is changed in.
+    #[test]
+    fn a_linked_assemblys_menu_makes_it_flexible_and_rigid_again() {
+        let folder = std::env::temp_dir().join(format!("solidcraft-link-mode-ui-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        let (plate, unit) = (folder.join("plate.sc"), folder.join("unit.sc"));
+        let mut part = Session::default();
+        part.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30})).unwrap();
+        part.execute("file.save", &json!({"path": plate})).unwrap();
+        // The unit: the plate twice, the second on a slider from the first. An occurrence is
+        // flexible by the joints it has from its linked design, so the unit needs one.
+        let mut design = Session::default();
+        design.execute("component.insert_design", &json!({"path": plate})).unwrap();
+        design.execute("component.insert_design", &json!({"path": plate, "reuse": true, "translate": [40, 0, 0]})).unwrap();
+        let origin = |occurrence: &str| json!({"occurrence": occurrence, "point": [0, 0, 0], "z": [0, 0, 1]});
+        design
+            .execute("joint.create", &json!({"type": "slider", "name": "Slide", "flip": true, "a": origin("plate:1"), "b": origin("plate:2")}))
+            .unwrap();
+        design.execute("file.save", &json!({"path": unit})).unwrap();
+
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        let linked = app.run("component.insert_design", json!({"path": unit})).unwrap()["component"].as_u64().unwrap();
+        let own = app.run("component.insert_design", json!({"path": plate, "translate": [50, 0, 0]})).unwrap()["component"].as_u64().unwrap();
+        let switch =
+            |app: &SolveApp, id: u64| context_menu::entries(app, &Target::Component { id }).into_iter().find(|i| i.id == "component.link_mode");
+        let flexible = |app: &SolveApp| app.session.doc.links.get(&linked).and_then(|link| link.tree.as_ref()).map(|tree| !tree.flexible.is_empty());
+        // The unit keeps its plate as a component: rigid as it comes in, and it can be made flexible.
+        let item = switch(&app, linked).unwrap();
+        assert_eq!((item.label.as_str(), flexible(&app)), ("Make Flexible", Some(false)));
+        assert!(item.enabled && item.icon == "chain", "the link icon, as the other link commands have: {:?}", item.icon);
+        context_menu::run_item(&mut app, &item, egui::Pos2::ZERO);
+        assert_eq!(flexible(&app), Some(true));
+        let item = switch(&app, linked).unwrap();
+        assert_eq!(item.label, "Make Rigid");
+        context_menu::run_item(&mut app, &item, egui::Pos2::ZERO);
+        assert_eq!(flexible(&app), Some(false));
+        // Each occurrence has its own switch: a second one made flexible leaves the first rigid.
+        let first = app.session.doc.occurrences.iter().find(|o| o.component == linked).map(|o| o.id).unwrap();
+        let second = app.run("component.insert_design", json!({"path": unit, "reuse": true, "translate": [0, 80, 0]})).unwrap()["occurrence"]
+            .as_u64()
+            .unwrap();
+        let on = |app: &SolveApp, occurrence: u64| {
+            context_menu::entries(app, &Target::Occurrence { path: vec![occurrence] }).into_iter().find(|i| i.id == "component.link_mode").unwrap()
+        };
+        let item = on(&app, second);
+        assert_eq!(item.params, Some(json!({"component": linked, "occurrence": second, "flexible": true})));
+        context_menu::run_item(&mut app, &item, egui::Pos2::ZERO);
+        let flexible_now: Vec<u64> = app.session.doc.links[&linked].tree.as_ref().unwrap().flexible.keys().copied().collect();
+        assert_eq!(flexible_now, [second]);
+        assert_eq!((on(&app, first).label.as_str(), on(&app, second).label.as_str()), ("Make Flexible", "Make Rigid"));
+        let item = on(&app, second);
+        context_menu::run_item(&mut app, &item, egui::Pos2::ZERO);
+        assert_eq!(flexible(&app), Some(false));
+        // A linked part has no components to keep apart: nothing to switch.
+        assert!(switch(&app, own).is_none());
+        // The plate inside the unit is the unit's design's: its menu opens that design, and
+        // it cannot be moved on its own.
+        let kept = app.session.doc.components.iter().find(|c| app.session.doc.link_keeping_component(c.id) == Some(linked)).map(|c| c.id).unwrap();
+        let items = context_menu::entries(&app, &Target::Component { id: kept });
+        let open = items.iter().find(|i| i.id == "ui.openLinkedDesign").unwrap();
+        assert_eq!(open.params, Some(json!({"component": linked})));
+        assert!(items.iter().all(|i| i.id != "ui.editInPlace" && i.id != "component.link_mode"));
+        assert!(!items.iter().find(|i| i.id == "ui.moveOccurrence").unwrap().enabled, "held where the unit's design has it");
+        // A link that keeps the design in one component offers to keep its components.
+        app.run("component.link_mode", json!({"component": linked, "structure": false})).unwrap();
+        assert_eq!(switch(&app, linked).unwrap().label, "Keep Its Components");
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
     #[test]

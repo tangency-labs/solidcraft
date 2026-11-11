@@ -966,6 +966,12 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
             item.label = if placement.grounded { "Unground" } else { "Ground" }.into();
             item.params = Some(json!({"occurrence": placement.occurrence, "grounded": !placement.grounded}));
         }
+        "component.link_mode" => {
+            if let Some((label, params)) = crate::linked_source::link_mode_item(&app.session.doc, placement.component, placement.occurrence) {
+                item.label = label.into();
+                item.params = Some(params);
+            }
+        }
         "ui.moveOccurrence" => {
             item.params = Some(json!({"occurrence": placement.occurrence, "path": path}));
             item.enabled = movable;
@@ -1081,6 +1087,9 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     if id != 0 && doc.links.contains_key(&id) {
         v.push(act("ui.editInPlace", "Edit in Place", "edit").with(json!({ "component": id })));
         v.push(act("ui.openLinkedDesign", "Open Linked Design", "open").with(json!({ "component": id })));
+    } else if let Some(keeper) = doc.link_keeping_component(id) {
+        // A component a linked design gave is changed in that design: this opens it.
+        v.push(act("ui.openLinkedDesign", "Open Linked Design", "open").with(json!({ "component": keeper })));
     }
     if edits {
         v.push(activate);
@@ -1114,6 +1123,13 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     }
     if doc.links.contains_key(&id) {
         own.push(act("ui.relinkSource", "Relink Source (All Instances)…", "update").with(json!({"component": id})));
+        // How the link keeps a design that has components: all in one, or as a subassembly
+        // whose occurrences are each rigid or flexible. As Ground does, the component's menu
+        // asks its first occurrence.
+        let first = doc.occurrence_of(id).map_or(0, |o| o.id);
+        if let Some((label, params)) = crate::linked_source::link_mode_item(doc, id, first) {
+            own.push(cmd(app, "component.link_mode", label).with(params));
+        }
     } else if id != 0 && app.session.can_extract(id) {
         own.push(act("ui.extractComponent", "Extract to File…", "export").with(json!({"component": id})));
     }
