@@ -1882,6 +1882,7 @@
   "material.editor.preserved_appearance": "Сохранённый внешний вид",
   "material.editor.public_reference": "Общедоступный справочник",
   "material.editor.reference": "Ссылка",
+  "material.editor.remove": "Убрать",
   "material.editor.save_or_discard": "Сохраните или отмените черновик материала, прежде чем назначать материал.",
   "material.editor.saved": "Материал сохранён. Назначения телам не изменились.",
   "material.editor.scope": "Сохранение записывает этот материал, не назначая его телам. Пустые свойства и условия остаются неизвестными. Плотность в карточке не меняет назначенную плотность и массу.",

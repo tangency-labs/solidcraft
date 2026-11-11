@@ -1,0 +1,9765 @@
+{
+ "cases": [
+  {
+   "name": "line_bbox_all",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "line": {
+       "p": [
+        1,
+        2,
+        3
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 2.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "line_bbox_tight",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "line": {
+       "p": [
+        1,
+        2,
+        3
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 2.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": true
+   }
+  },
+  {
+   "name": "line_bbox_tight_normal",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "line": {
+       "p": [
+        1,
+        2,
+        3
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 2.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": false,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "line_bbox_none",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "line": {
+       "p": [
+        1,
+        2,
+        3
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 2.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": false,
+    "pseudo": false,
+    "polar": false,
+    "tight": false
+   }
+  },
+  {
+   "name": "line_tight",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "line": {
+       "p": [
+        1,
+        2,
+        3
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 2.0
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "line_closest0",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "line": {
+       "p": [
+        1,
+        2,
+        3
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 2.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "line_closest1",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "line": {
+       "p": [
+        1,
+        2,
+        3
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 2.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     0.5,
+     1.0,
+     -2.0
+    ]
+   }
+  },
+  {
+   "name": "line_closest2",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "line": {
+       "p": [
+        1,
+        2,
+        3
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 2.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     1e-09,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "line_closest3",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "line": {
+       "p": [
+        1,
+        2,
+        3
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 2.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     100,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "line_closest4",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "line": {
+       "p": [
+        1,
+        2,
+        3
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 2.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "line_closest5",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "line": {
+       "p": [
+        1,
+        2,
+        3
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 2.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     0.5,
+     1.0,
+     -2.0
+    ]
+   }
+  },
+  {
+   "name": "line_closest6",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "line": {
+       "p": [
+        1,
+        2,
+        3
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 2.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     1e-09,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "line_closest7",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "line": {
+       "p": [
+        1,
+        2,
+        3
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 2.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     100,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "line_closest8",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "line": {
+       "p": [
+        1,
+        2,
+        3
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 2.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "line_closest9",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "line": {
+       "p": [
+        1,
+        2,
+        3
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 2.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     0.5,
+     1.0,
+     -2.0
+    ]
+   }
+  },
+  {
+   "name": "line_closest10",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "line": {
+       "p": [
+        1,
+        2,
+        3
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 2.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     1e-09,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "line_closest11",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "line": {
+       "p": [
+        1,
+        2,
+        3
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 2.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     100,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "line_nocurve_bbox_all",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "line": {
+       "p": [
+        1,
+        2,
+        3
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 2.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false,
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "line_nocurve_bbox_tight",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "line": {
+       "p": [
+        1,
+        2,
+        3
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 2.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": true,
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "line_nocurve_bbox_tight_normal",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "line": {
+       "p": [
+        1,
+        2,
+        3
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 2.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": false,
+    "polar": false,
+    "tight": true,
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "line_nocurve_bbox_none",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "line": {
+       "p": [
+        1,
+        2,
+        3
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 2.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": false,
+    "pseudo": false,
+    "polar": false,
+    "tight": false,
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "line_nocurve_tight",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "line": {
+       "p": [
+        1,
+        2,
+        3
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 2.0
+    },
+    "op": "tight",
+    "edge": 0,
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "line_nocurve_closest0",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "line": {
+       "p": [
+        1,
+        2,
+        3
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 2.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "line_nocurve_closest1",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "line": {
+       "p": [
+        1,
+        2,
+        3
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 2.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "line_nocurve_closest2",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "line": {
+       "p": [
+        1,
+        2,
+        3
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 2.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "line_tol0.0",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "line": {
+       "p": [
+        1,
+        2,
+        3
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 2.0
+    },
+    "edits": {
+     "edge": 0,
+     "tol": 0.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.4,
+    "offset": [
+     1e-06,
+     2e-06,
+     0
+    ]
+   }
+  },
+  {
+   "name": "line_tol1e-12",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "line": {
+       "p": [
+        1,
+        2,
+        3
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 2.0
+    },
+    "edits": {
+     "edge": 0,
+     "tol": 1e-12
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.4,
+    "offset": [
+     1e-06,
+     2e-06,
+     0
+    ]
+   }
+  },
+  {
+   "name": "line_tol10.0",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "line": {
+       "p": [
+        1,
+        2,
+        3
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 2.0
+    },
+    "edits": {
+     "edge": 0,
+     "tol": 10.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.4,
+    "offset": [
+     1e-06,
+     2e-06,
+     0
+    ]
+   }
+  },
+  {
+   "name": "line_moved",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "line": {
+       "p": [
+        1,
+        2,
+        3
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 2.0
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -50,
+      -50,
+      -50
+     ],
+     "p1": [
+      50,
+      50,
+      50
+     ]
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "line_moved_tiny",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "line": {
+       "p": [
+        1,
+        2,
+        3
+       ],
+       "v": [
+        1,
+        0,
+        0
+       ],
+       "domain": [
+        0,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 2.0
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      1e-09,
+      0,
+      0
+     ]
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "circle_bbox_all",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "circle_bbox_tight",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": true
+   }
+  },
+  {
+   "name": "circle_bbox_tight_normal",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": false,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "circle_bbox_none",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": false,
+    "pseudo": false,
+    "polar": false,
+    "tight": false
+   }
+  },
+  {
+   "name": "circle_tight",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "circle_closest0",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle_closest1",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     0.5,
+     1.0,
+     -2.0
+    ]
+   }
+  },
+  {
+   "name": "circle_closest2",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     1e-09,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle_closest3",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     100,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle_closest4",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle_closest5",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     0.5,
+     1.0,
+     -2.0
+    ]
+   }
+  },
+  {
+   "name": "circle_closest6",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     1e-09,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle_closest7",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     100,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle_closest8",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle_closest9",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     0.5,
+     1.0,
+     -2.0
+    ]
+   }
+  },
+  {
+   "name": "circle_closest10",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     1e-09,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle_closest11",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     100,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle_nocurve_bbox_all",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false,
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "circle_nocurve_bbox_tight",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": true,
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "circle_nocurve_bbox_tight_normal",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": false,
+    "polar": false,
+    "tight": true,
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "circle_nocurve_bbox_none",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": false,
+    "pseudo": false,
+    "polar": false,
+    "tight": false,
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "circle_nocurve_tight",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "tight",
+    "edge": 0,
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "circle_nocurve_closest0",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "circle_nocurve_closest1",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "circle_nocurve_closest2",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "circle_tol0.0",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "edits": {
+     "edge": 0,
+     "tol": 0.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.4,
+    "offset": [
+     1e-06,
+     2e-06,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle_tol1e-12",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "edits": {
+     "edge": 0,
+     "tol": 1e-12
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.4,
+    "offset": [
+     1e-06,
+     2e-06,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle_tol10.0",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "edits": {
+     "edge": 0,
+     "tol": 10.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.4,
+    "offset": [
+     1e-06,
+     2e-06,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle_moved",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -50,
+      -50,
+      -50
+     ],
+     "p1": [
+      50,
+      50,
+      50
+     ]
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "circle_moved_tiny",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      1e-09,
+      0,
+      0
+     ]
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "circle_arc_bbox_all",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.1,
+     "t1": 0.35
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "circle_arc_bbox_tight",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.1,
+     "t1": 0.35
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": true
+   }
+  },
+  {
+   "name": "circle_arc_bbox_tight_normal",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.1,
+     "t1": 0.35
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": false,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "circle_arc_bbox_none",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.1,
+     "t1": 0.35
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": false,
+    "pseudo": false,
+    "polar": false,
+    "tight": false
+   }
+  },
+  {
+   "name": "circle_arc_tight",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.1,
+     "t1": 0.35
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "circle_arc_closest0",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.1,
+     "t1": 0.35
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle_arc_closest1",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.1,
+     "t1": 0.35
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     0.5,
+     1.0,
+     -2.0
+    ]
+   }
+  },
+  {
+   "name": "circle_arc_closest2",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.1,
+     "t1": 0.35
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     1e-09,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle_arc_closest3",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.1,
+     "t1": 0.35
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     100,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle_arc_closest4",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.1,
+     "t1": 0.35
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle_arc_closest5",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.1,
+     "t1": 0.35
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     0.5,
+     1.0,
+     -2.0
+    ]
+   }
+  },
+  {
+   "name": "circle_arc_closest6",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.1,
+     "t1": 0.35
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     1e-09,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle_arc_closest7",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.1,
+     "t1": 0.35
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     100,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle_arc_closest8",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.1,
+     "t1": 0.35
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle_arc_closest9",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.1,
+     "t1": 0.35
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     0.5,
+     1.0,
+     -2.0
+    ]
+   }
+  },
+  {
+   "name": "circle_arc_closest10",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.1,
+     "t1": 0.35
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     1e-09,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle_arc_closest11",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.1,
+     "t1": 0.35
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     100,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle_arc_nocurve_bbox_all",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.1,
+     "t1": 0.35
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false,
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "circle_arc_nocurve_bbox_tight",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.1,
+     "t1": 0.35
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": true,
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "circle_arc_nocurve_bbox_tight_normal",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.1,
+     "t1": 0.35
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": false,
+    "polar": false,
+    "tight": true,
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "circle_arc_nocurve_bbox_none",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.1,
+     "t1": 0.35
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": false,
+    "pseudo": false,
+    "polar": false,
+    "tight": false,
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "circle_arc_nocurve_tight",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.1,
+     "t1": 0.35
+    },
+    "op": "tight",
+    "edge": 0,
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "circle_arc_nocurve_closest0",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.1,
+     "t1": 0.35
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "circle_arc_nocurve_closest1",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.1,
+     "t1": 0.35
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "circle_arc_nocurve_closest2",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.1,
+     "t1": 0.35
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "circle_arc_tol0.0",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.1,
+     "t1": 0.35
+    },
+    "edits": {
+     "edge": 0,
+     "tol": 0.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.4,
+    "offset": [
+     1e-06,
+     2e-06,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle_arc_tol1e-12",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.1,
+     "t1": 0.35
+    },
+    "edits": {
+     "edge": 0,
+     "tol": 1e-12
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.4,
+    "offset": [
+     1e-06,
+     2e-06,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle_arc_tol10.0",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.1,
+     "t1": 0.35
+    },
+    "edits": {
+     "edge": 0,
+     "tol": 10.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.4,
+    "offset": [
+     1e-06,
+     2e-06,
+     0
+    ]
+   }
+  },
+  {
+   "name": "circle_arc_moved",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.1,
+     "t1": 0.35
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -50,
+      -50,
+      -50
+     ],
+     "p1": [
+      50,
+      50,
+      50
+     ]
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "circle_arc_moved_tiny",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "circle": {
+       "c": [
+        0,
+        0,
+        0
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        1,
+        0
+       ],
+       "domain": [
+        0,
+        360
+       ],
+       "radius": 2.0
+      }
+     },
+     "t0": 0.1,
+     "t1": 0.35
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      1e-09,
+      0,
+      0
+     ]
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "ellipse_bbox_all",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "ellipse": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "domain": [
+        -45,
+        200
+       ],
+       "radii": [
+        3.0,
+        0.5
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "ellipse_bbox_tight",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "ellipse": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "domain": [
+        -45,
+        200
+       ],
+       "radii": [
+        3.0,
+        0.5
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": true
+   }
+  },
+  {
+   "name": "ellipse_bbox_tight_normal",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "ellipse": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "domain": [
+        -45,
+        200
+       ],
+       "radii": [
+        3.0,
+        0.5
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": false,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "ellipse_bbox_none",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "ellipse": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "domain": [
+        -45,
+        200
+       ],
+       "radii": [
+        3.0,
+        0.5
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": false,
+    "pseudo": false,
+    "polar": false,
+    "tight": false
+   }
+  },
+  {
+   "name": "ellipse_tight",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "ellipse": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "domain": [
+        -45,
+        200
+       ],
+       "radii": [
+        3.0,
+        0.5
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "ellipse_closest0",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "ellipse": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "domain": [
+        -45,
+        200
+       ],
+       "radii": [
+        3.0,
+        0.5
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "ellipse_closest1",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "ellipse": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "domain": [
+        -45,
+        200
+       ],
+       "radii": [
+        3.0,
+        0.5
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     0.5,
+     1.0,
+     -2.0
+    ]
+   }
+  },
+  {
+   "name": "ellipse_closest2",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "ellipse": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "domain": [
+        -45,
+        200
+       ],
+       "radii": [
+        3.0,
+        0.5
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     1e-09,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "ellipse_closest3",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "ellipse": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "domain": [
+        -45,
+        200
+       ],
+       "radii": [
+        3.0,
+        0.5
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     100,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "ellipse_closest4",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "ellipse": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "domain": [
+        -45,
+        200
+       ],
+       "radii": [
+        3.0,
+        0.5
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "ellipse_closest5",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "ellipse": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "domain": [
+        -45,
+        200
+       ],
+       "radii": [
+        3.0,
+        0.5
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     0.5,
+     1.0,
+     -2.0
+    ]
+   }
+  },
+  {
+   "name": "ellipse_closest6",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "ellipse": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "domain": [
+        -45,
+        200
+       ],
+       "radii": [
+        3.0,
+        0.5
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     1e-09,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "ellipse_closest7",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "ellipse": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "domain": [
+        -45,
+        200
+       ],
+       "radii": [
+        3.0,
+        0.5
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     100,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "ellipse_closest8",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "ellipse": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "domain": [
+        -45,
+        200
+       ],
+       "radii": [
+        3.0,
+        0.5
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "ellipse_closest9",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "ellipse": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "domain": [
+        -45,
+        200
+       ],
+       "radii": [
+        3.0,
+        0.5
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     0.5,
+     1.0,
+     -2.0
+    ]
+   }
+  },
+  {
+   "name": "ellipse_closest10",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "ellipse": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "domain": [
+        -45,
+        200
+       ],
+       "radii": [
+        3.0,
+        0.5
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     1e-09,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "ellipse_closest11",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "ellipse": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "domain": [
+        -45,
+        200
+       ],
+       "radii": [
+        3.0,
+        0.5
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     100,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "ellipse_nocurve_bbox_all",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "ellipse": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "domain": [
+        -45,
+        200
+       ],
+       "radii": [
+        3.0,
+        0.5
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false,
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "ellipse_nocurve_bbox_tight",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "ellipse": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "domain": [
+        -45,
+        200
+       ],
+       "radii": [
+        3.0,
+        0.5
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": true,
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "ellipse_nocurve_bbox_tight_normal",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "ellipse": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "domain": [
+        -45,
+        200
+       ],
+       "radii": [
+        3.0,
+        0.5
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": false,
+    "polar": false,
+    "tight": true,
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "ellipse_nocurve_bbox_none",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "ellipse": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "domain": [
+        -45,
+        200
+       ],
+       "radii": [
+        3.0,
+        0.5
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": false,
+    "pseudo": false,
+    "polar": false,
+    "tight": false,
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "ellipse_nocurve_tight",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "ellipse": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "domain": [
+        -45,
+        200
+       ],
+       "radii": [
+        3.0,
+        0.5
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "tight",
+    "edge": 0,
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "ellipse_nocurve_closest0",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "ellipse": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "domain": [
+        -45,
+        200
+       ],
+       "radii": [
+        3.0,
+        0.5
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "ellipse_nocurve_closest1",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "ellipse": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "domain": [
+        -45,
+        200
+       ],
+       "radii": [
+        3.0,
+        0.5
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "ellipse_nocurve_closest2",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "ellipse": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "domain": [
+        -45,
+        200
+       ],
+       "radii": [
+        3.0,
+        0.5
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "ellipse_tol0.0",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "ellipse": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "domain": [
+        -45,
+        200
+       ],
+       "radii": [
+        3.0,
+        0.5
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "edits": {
+     "edge": 0,
+     "tol": 0.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.4,
+    "offset": [
+     1e-06,
+     2e-06,
+     0
+    ]
+   }
+  },
+  {
+   "name": "ellipse_tol1e-12",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "ellipse": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "domain": [
+        -45,
+        200
+       ],
+       "radii": [
+        3.0,
+        0.5
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "edits": {
+     "edge": 0,
+     "tol": 1e-12
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.4,
+    "offset": [
+     1e-06,
+     2e-06,
+     0
+    ]
+   }
+  },
+  {
+   "name": "ellipse_tol10.0",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "ellipse": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "domain": [
+        -45,
+        200
+       ],
+       "radii": [
+        3.0,
+        0.5
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "edits": {
+     "edge": 0,
+     "tol": 10.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.4,
+    "offset": [
+     1e-06,
+     2e-06,
+     0
+    ]
+   }
+  },
+  {
+   "name": "ellipse_moved",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "ellipse": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "domain": [
+        -45,
+        200
+       ],
+       "radii": [
+        3.0,
+        0.5
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -50,
+      -50,
+      -50
+     ],
+     "p1": [
+      50,
+      50,
+      50
+     ]
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "ellipse_moved_tiny",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "ellipse": {
+       "c": [
+        1,
+        1,
+        1
+       ],
+       "x": [
+        1,
+        0,
+        0
+       ],
+       "y": [
+        0,
+        0,
+        1
+       ],
+       "domain": [
+        -45,
+        200
+       ],
+       "radii": [
+        3.0,
+        0.5
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      1e-09,
+      0,
+      0
+     ]
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "hermite_bbox_all",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "hermite_bbox_tight",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": true
+   }
+  },
+  {
+   "name": "hermite_bbox_tight_normal",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": false,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "hermite_bbox_none",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": false,
+    "pseudo": false,
+    "polar": false,
+    "tight": false
+   }
+  },
+  {
+   "name": "hermite_tight",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "hermite_closest0",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "hermite_closest1",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     0.5,
+     1.0,
+     -2.0
+    ]
+   }
+  },
+  {
+   "name": "hermite_closest2",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     1e-09,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "hermite_closest3",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     100,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "hermite_closest4",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "hermite_closest5",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     0.5,
+     1.0,
+     -2.0
+    ]
+   }
+  },
+  {
+   "name": "hermite_closest6",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     1e-09,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "hermite_closest7",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     100,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "hermite_closest8",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "hermite_closest9",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     0.5,
+     1.0,
+     -2.0
+    ]
+   }
+  },
+  {
+   "name": "hermite_closest10",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     1e-09,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "hermite_closest11",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     100,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "hermite_nocurve_bbox_all",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false,
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "hermite_nocurve_bbox_tight",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": true,
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "hermite_nocurve_bbox_tight_normal",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": false,
+    "polar": false,
+    "tight": true,
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "hermite_nocurve_bbox_none",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": false,
+    "pseudo": false,
+    "polar": false,
+    "tight": false,
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "hermite_nocurve_tight",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "tight",
+    "edge": 0,
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "hermite_nocurve_closest0",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "hermite_nocurve_closest1",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "hermite_nocurve_closest2",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "hermite_tol0.0",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "edits": {
+     "edge": 0,
+     "tol": 0.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.4,
+    "offset": [
+     1e-06,
+     2e-06,
+     0
+    ]
+   }
+  },
+  {
+   "name": "hermite_tol1e-12",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "edits": {
+     "edge": 0,
+     "tol": 1e-12
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.4,
+    "offset": [
+     1e-06,
+     2e-06,
+     0
+    ]
+   }
+  },
+  {
+   "name": "hermite_tol10.0",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "edits": {
+     "edge": 0,
+     "tol": 10.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.4,
+    "offset": [
+     1e-06,
+     2e-06,
+     0
+    ]
+   }
+  },
+  {
+   "name": "hermite_moved",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -50,
+      -50,
+      -50
+     ],
+     "p1": [
+      50,
+      50,
+      50
+     ]
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "hermite_moved_tiny",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      1e-09,
+      0,
+      0
+     ]
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "hermite_sub_bbox_all",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.2,
+     "t1": 0.6
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "hermite_sub_bbox_tight",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.2,
+     "t1": 0.6
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": true
+   }
+  },
+  {
+   "name": "hermite_sub_bbox_tight_normal",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.2,
+     "t1": 0.6
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": false,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "hermite_sub_bbox_none",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.2,
+     "t1": 0.6
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": false,
+    "pseudo": false,
+    "polar": false,
+    "tight": false
+   }
+  },
+  {
+   "name": "hermite_sub_tight",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.2,
+     "t1": 0.6
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "hermite_sub_closest0",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.2,
+     "t1": 0.6
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "hermite_sub_closest1",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.2,
+     "t1": 0.6
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     0.5,
+     1.0,
+     -2.0
+    ]
+   }
+  },
+  {
+   "name": "hermite_sub_closest2",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.2,
+     "t1": 0.6
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     1e-09,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "hermite_sub_closest3",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.2,
+     "t1": 0.6
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     100,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "hermite_sub_closest4",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.2,
+     "t1": 0.6
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "hermite_sub_closest5",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.2,
+     "t1": 0.6
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     0.5,
+     1.0,
+     -2.0
+    ]
+   }
+  },
+  {
+   "name": "hermite_sub_closest6",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.2,
+     "t1": 0.6
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     1e-09,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "hermite_sub_closest7",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.2,
+     "t1": 0.6
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     100,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "hermite_sub_closest8",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.2,
+     "t1": 0.6
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "hermite_sub_closest9",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.2,
+     "t1": 0.6
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     0.5,
+     1.0,
+     -2.0
+    ]
+   }
+  },
+  {
+   "name": "hermite_sub_closest10",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.2,
+     "t1": 0.6
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     1e-09,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "hermite_sub_closest11",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.2,
+     "t1": 0.6
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     100,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "hermite_sub_nocurve_bbox_all",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.2,
+     "t1": 0.6
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false,
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "hermite_sub_nocurve_bbox_tight",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.2,
+     "t1": 0.6
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": true,
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "hermite_sub_nocurve_bbox_tight_normal",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.2,
+     "t1": 0.6
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": false,
+    "polar": false,
+    "tight": true,
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "hermite_sub_nocurve_bbox_none",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.2,
+     "t1": 0.6
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": false,
+    "pseudo": false,
+    "polar": false,
+    "tight": false,
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "hermite_sub_nocurve_tight",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.2,
+     "t1": 0.6
+    },
+    "op": "tight",
+    "edge": 0,
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "hermite_sub_nocurve_closest0",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.2,
+     "t1": 0.6
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "hermite_sub_nocurve_closest1",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.2,
+     "t1": 0.6
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "hermite_sub_nocurve_closest2",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.2,
+     "t1": 0.6
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     0,
+     0,
+     0
+    ],
+    "edits": {
+     "edge": 0,
+     "drop": true
+    }
+   }
+  },
+  {
+   "name": "hermite_sub_tol0.0",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.2,
+     "t1": 0.6
+    },
+    "edits": {
+     "edge": 0,
+     "tol": 0.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.4,
+    "offset": [
+     1e-06,
+     2e-06,
+     0
+    ]
+   }
+  },
+  {
+   "name": "hermite_sub_tol1e-12",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.2,
+     "t1": 0.6
+    },
+    "edits": {
+     "edge": 0,
+     "tol": 1e-12
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.4,
+    "offset": [
+     1e-06,
+     2e-06,
+     0
+    ]
+   }
+  },
+  {
+   "name": "hermite_sub_tol10.0",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.2,
+     "t1": 0.6
+    },
+    "edits": {
+     "edge": 0,
+     "tol": 10.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.4,
+    "offset": [
+     1e-06,
+     2e-06,
+     0
+    ]
+   }
+  },
+  {
+   "name": "hermite_sub_moved",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.2,
+     "t1": 0.6
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      -50,
+      -50,
+      -50
+     ],
+     "p1": [
+      50,
+      50,
+      50
+     ]
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "hermite_sub_moved_tiny",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0,
+        0,
+        0
+       ],
+       "d1": [
+        1,
+        2,
+        0
+       ],
+       "p2": [
+        3,
+        0,
+        1
+       ],
+       "d2": [
+        0,
+        -1,
+        2
+       ]
+      }
+     },
+     "t0": 0.2,
+     "t1": 0.6
+    },
+    "edits": {
+     "edge": 0,
+     "p0": [
+      1e-09,
+      0,
+      0
+     ]
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "degenerate_bbox_all",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         1,
+         1,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         1,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "degenerate_bbox_tight",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         1,
+         1,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         1,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": true
+   }
+  },
+  {
+   "name": "degenerate_bbox_tight_normal",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         1,
+         1,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         1,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": false,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "degenerate_bbox_none",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         1,
+         1,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         1,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": false,
+    "pseudo": false,
+    "polar": false,
+    "tight": false
+   }
+  },
+  {
+   "name": "degenerate_tight",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         1,
+         1,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         1,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "degenerate_closest0",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         1,
+         1,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         1,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "degenerate_closest1",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         1,
+         1,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         1,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "degenerate_closest2",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         1,
+         1,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         1,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "degenerate_closest3",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         1,
+         1,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         1,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "degenerate_closest4",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         1,
+         1,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         1,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "degenerate_closest5",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         1,
+         1,
+         1,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         1,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     1,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "tiny_bbox_all",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         1e-06,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2e-06,
+         1e-06,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "tiny_bbox_tight",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         1e-06,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2e-06,
+         1e-06,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": true
+   }
+  },
+  {
+   "name": "tiny_bbox_tight_normal",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         1e-06,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2e-06,
+         1e-06,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": false,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "tiny_bbox_none",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         1e-06,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2e-06,
+         1e-06,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": false,
+    "pseudo": false,
+    "polar": false,
+    "tight": false
+   }
+  },
+  {
+   "name": "tiny_tight",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         1e-06,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2e-06,
+         1e-06,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "tiny_closest0",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         1e-06,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2e-06,
+         1e-06,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "tiny_closest1",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         1e-06,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2e-06,
+         1e-06,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     1e-07,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "tiny_closest2",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         1e-06,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2e-06,
+         1e-06,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "tiny_closest3",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         1e-06,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2e-06,
+         1e-06,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     1e-07,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "tiny_closest4",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         1e-06,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2e-06,
+         1e-06,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "tiny_closest5",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         1e-06,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         2e-06,
+         1e-06,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     1e-07,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "huge_bbox_all",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         10000000.0,
+         -10000000.0,
+         30000000.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -20000000.0,
+         10000000.0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": false
+   }
+  },
+  {
+   "name": "huge_bbox_tight",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         10000000.0,
+         -10000000.0,
+         30000000.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -20000000.0,
+         10000000.0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": true
+   }
+  },
+  {
+   "name": "huge_bbox_tight_normal",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         10000000.0,
+         -10000000.0,
+         30000000.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -20000000.0,
+         10000000.0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": false,
+    "polar": false,
+    "tight": true
+   }
+  },
+  {
+   "name": "huge_bbox_none",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         10000000.0,
+         -10000000.0,
+         30000000.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -20000000.0,
+         10000000.0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": false,
+    "pseudo": false,
+    "polar": false,
+    "tight": false
+   }
+  },
+  {
+   "name": "huge_tight",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         10000000.0,
+         -10000000.0,
+         30000000.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -20000000.0,
+         10000000.0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "tight",
+    "edge": 0
+   }
+  },
+  {
+   "name": "huge_closest0",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         10000000.0,
+         -10000000.0,
+         30000000.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -20000000.0,
+         10000000.0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "huge_closest1",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         10000000.0,
+         -10000000.0,
+         30000000.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -20000000.0,
+         10000000.0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.0,
+    "offset": [
+     1000.0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "huge_closest2",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         10000000.0,
+         -10000000.0,
+         30000000.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -20000000.0,
+         10000000.0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "huge_closest3",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         10000000.0,
+         -10000000.0,
+         30000000.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -20000000.0,
+         10000000.0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     1000.0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "huge_closest4",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         10000000.0,
+         -10000000.0,
+         30000000.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -20000000.0,
+         10000000.0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "huge_closest5",
+   "inputs": {
+    "brep": {
+     "kind": "wire",
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         10000000.0,
+         -10000000.0,
+         30000000.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         -20000000.0,
+         10000000.0,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 1,
+       "u": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "t0": 0.0,
+     "t1": 1.0
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 1.0,
+    "offset": [
+     1000.0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "name": "face_bbox0",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "net": [
+       [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         1,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ]
+      ],
+      "p": 1,
+      "q": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ],
+      "v": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "bbox",
+    "edge": 0,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": true
+   }
+  },
+  {
+   "name": "face_closest0",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "net": [
+       [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         1,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ]
+      ],
+      "p": 1,
+      "q": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ],
+      "v": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "closest",
+    "edge": 0,
+    "nt": 0.5,
+    "offset": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "face_bbox1",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "net": [
+       [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         1,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ]
+      ],
+      "p": 1,
+      "q": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ],
+      "v": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "bbox",
+    "edge": 1,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": true
+   }
+  },
+  {
+   "name": "face_closest1",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "net": [
+       [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         1,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ]
+      ],
+      "p": 1,
+      "q": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ],
+      "v": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "closest",
+    "edge": 1,
+    "nt": 0.5,
+    "offset": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "face_bbox2",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "net": [
+       [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         1,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ]
+      ],
+      "p": 1,
+      "q": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ],
+      "v": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "bbox",
+    "edge": 2,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": true
+   }
+  },
+  {
+   "name": "face_closest2",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "net": [
+       [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         1,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ]
+      ],
+      "p": 1,
+      "q": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ],
+      "v": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "closest",
+    "edge": 2,
+    "nt": 0.5,
+    "offset": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "face_bbox3",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "net": [
+       [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         1,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ]
+      ],
+      "p": 1,
+      "q": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ],
+      "v": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "bbox",
+    "edge": 3,
+    "normal": true,
+    "pseudo": true,
+    "polar": true,
+    "tight": true
+   }
+  },
+  {
+   "name": "face_closest3",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "net": [
+       [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         1,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ]
+      ],
+      "p": 1,
+      "q": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ],
+      "v": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "closest",
+    "edge": 3,
+    "nt": 0.5,
+    "offset": [
+     0,
+     0,
+     1
+    ]
+   }
+  },
+  {
+   "name": "face_radial",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "net": [
+       [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         1,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ]
+      ],
+      "p": 1,
+      "q": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ],
+      "v": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "radial",
+    "eu": 0,
+    "classify": 1,
+    "nparam": 0.5
+   }
+  },
+  {
+   "name": "face_radial_curve",
+   "inputs": {
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "net": [
+       [
+        [
+         0,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ],
+       [
+        [
+         1,
+         0,
+         0,
+         -1.7976931348623157e+308
+        ],
+        [
+         1,
+         1,
+         0,
+         -1.7976931348623157e+308
+        ]
+       ]
+      ],
+      "p": 1,
+      "q": 1,
+      "u": [
+       0,
+       0,
+       1,
+       1
+      ],
+      "v": [
+       0,
+       0,
+       1,
+       1
+      ]
+     },
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "op": "radial_curve",
+    "eu": 0,
+    "nt": 0.5,
+    "dir": [
+     0,
+     0,
+     1
+    ],
+    "len": 1.0,
+    "orient": 1,
+    "force": false
+   }
+  }
+ ]
+}

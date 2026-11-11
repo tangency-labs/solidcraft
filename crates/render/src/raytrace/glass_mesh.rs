@@ -5,11 +5,13 @@
 //! edges, concavity and holes; geometric contact is
 //! permitted only along the same body's actual shared topological simplex.
 use super::{Bounds, Triangle, WorkBudget};
+use crate::optical_boundary::{coplanar_edge_bad, in_triangle, key, opposite, predicate_domain, project, projection, side};
+pub(super) use crate::optical_boundary::{forbidden_contact, origin_crossing};
 use crate::{
     ProductScene,
     job::{self, CancelToken, DielectricBoundary, RaytraceOptions},
 };
-use robust::{Coord, Coord3D, orient2d, orient3d};
+use robust::orient2d;
 use solidcore_record::Vec3;
 use std::mem::size_of;
 
@@ -27,129 +29,11 @@ fn reserved<T>(n: usize) -> job::Result<Vec<T>> {
     }
     Ok(values)
 }
-// Keep adaptive determinant expansions away from IEEE underflow. This is a
-// conservative certificate domain, not a snap tolerance or a changed ray bound.
-// With coordinates in [2^-128, 1e12] (or exactly zero), each nonzero f64
-// difference is at least 2^-180 and the degree-three expansion products remain
-// normal. Original legacy optics have no new coordinate restriction.
-fn predicate_domain(points: &[Vec3]) -> job::Result<()> {
-    let minimum = f64::from_bits((1023 - 128) << 52);
-    if points.iter().flat_map(|p| [p.x, p.y, p.z]).any(|v| !v.is_finite() || v.abs() > super::MAX_COORDINATE_MM || (v != 0.0 && v.abs() < minimum)) {
-        return Err(invalid("CPU exact glass certificate requires zero or coordinate magnitudes at least 2^-128 mm within the existing world bound"));
-    }
-    Ok(())
-}
-fn point(p: Vec3) -> Coord3D<f64> {
-    Coord3D { x: p.x, y: p.y, z: p.z }
-}
-fn side(t: [Vec3; 3], p: Vec3) -> f64 {
-    orient3d(point(t[0]), point(t[1]), point(t[2]), point(p))
-}
-fn key(p: Vec3) -> [u64; 3] {
-    [p.x, p.y, p.z].map(|v| if v == 0.0 { 0 } else { v.to_bits() })
-}
 fn target_key(p: Vec3, medium: usize, options: &RaytraceOptions) -> job::Result<[u64; 3]> {
     let input = options.dielectrics.get(medium).ok_or_else(|| invalid("CPU glass coordinate target"))?;
     Ok(if input.boundary == DielectricBoundary::ClosedBox { [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()] } else { key(p) })
 }
-fn same(a: Vec3, b: Vec3) -> bool {
-    key(a) == key(b)
-}
-fn projection(t: [Vec3; 3]) -> usize {
-    for drop in 0..3 {
-        let q = t.map(|p| project(p, drop));
-        if orient2d(q[0], q[1], q[2]) != 0.0 {
-            return drop;
-        }
-    }
-    2
-}
-fn project(p: Vec3, drop: usize) -> Coord<f64> {
-    match drop {
-        0 => Coord { x: p.y, y: p.z },
-        1 => Coord { x: p.z, y: p.x },
-        _ => Coord { x: p.x, y: p.y },
-    }
-}
-fn in_triangle(t: [Vec3; 3], p: Vec3, drop: usize) -> bool {
-    let q = t.map(|p| project(p, drop));
-    let p = project(p, drop);
-    let s = [orient2d(q[0], q[1], p), orient2d(q[1], q[2], p), orient2d(q[2], q[0], p)];
-    !s.iter().any(|v| *v < 0.0) || !s.iter().any(|v| *v > 0.0)
-}
-fn on_segment(a: Coord<f64>, b: Coord<f64>, p: Coord<f64>) -> bool {
-    orient2d(a, b, p) == 0.0 && p.x >= a.x.min(b.x) && p.x <= a.x.max(b.x) && p.y >= a.y.min(b.y) && p.y <= a.y.max(b.y)
-}
-fn opposite(a: f64, b: f64) -> bool {
-    (a < 0.0 && b > 0.0) || (a > 0.0 && b < 0.0)
-}
-fn shared_vertex(p: Vec3, a: [Vec3; 3], b: [Vec3; 3]) -> bool {
-    a.into_iter().any(|x| same(x, p)) && b.into_iter().any(|x| same(x, p))
-}
-fn coplanar_edge_bad(edges: [[Vec3; 2]; 2], triangles: [[Vec3; 3]; 2], allow_shared: bool, drop: usize) -> bool {
-    let [[a, b], [c, d]] = edges;
-    let [ta, tb] = triangles;
-    let [pa, pb, pc, pd] = [a, b, c, d].map(|p| project(p, drop));
-    let s = [orient2d(pa, pb, pc), orient2d(pa, pb, pd), orient2d(pc, pd, pa), orient2d(pc, pd, pb)];
-    if opposite(s[0], s[1]) && opposite(s[2], s[3]) {
-        return true;
-    }
-    for (p, q, r) in [(a, pc, pd), (b, pc, pd), (c, pa, pb), (d, pa, pb)] {
-        if on_segment(q, r, project(p, drop)) && (!allow_shared || !shared_vertex(p, ta, tb)) {
-            return true;
-        }
-    }
-    // If collinear overlap has positive length, it is legal only for the exact
-    // shared topological edge, not two incident edges extending the same way.
-    if s.into_iter().all(|v| v == 0.0) {
-        let axis_x = (pa.x - pb.x).abs() >= (pa.y - pb.y).abs();
-        let value = |p: Coord<f64>| if axis_x { p.x } else { p.y };
-        let lo = value(pa).min(value(pb)).max(value(pc).min(value(pd)));
-        let hi = value(pa).max(value(pb)).min(value(pc).max(value(pd)));
-        if lo < hi && !(allow_shared && ((same(a, c) && same(b, d)) || (same(a, d) && same(b, c)))) {
-            return true;
-        }
-    }
-    false
-}
-/// True if the two exact triangles meet beyond their permitted shared simplex.
-/// This uses signs of adaptive exact predicates; no distance/angle tolerance.
-pub(super) fn forbidden_contact(a: [Vec3; 3], b: [Vec3; 3], allow_shared: bool) -> bool {
-    let sa = a.map(|p| side(b, p));
-    let sb = b.map(|p| side(a, p));
-    if sa.iter().all(|v| *v > 0.0) || sa.iter().all(|v| *v < 0.0) || sb.iter().all(|v| *v > 0.0) || sb.iter().all(|v| *v < 0.0) {
-        return false;
-    }
-    let common = a.iter().filter(|p| b.iter().any(|q| same(**p, *q))).count();
-    if common == 3 {
-        return true;
-    }
-    for (t, u, s) in [(a, b, sa), (b, a, sb)] {
-        let drop = projection(u);
-        for (p, sign) in t.into_iter().zip(s) {
-            if sign == 0.0 && in_triangle(u, p, drop) && (!allow_shared || !shared_vertex(p, a, b)) {
-                return true;
-            }
-        }
-        for (i, j) in [(0, 1), (1, 2), (2, 0)] {
-            let p = t[i];
-            let q = t[j];
-            if opposite(s[i], s[j]) {
-                let w = [side([p, q, u[0]], u[1]), side([p, q, u[1]], u[2]), side([p, q, u[2]], u[0])];
-                if !w.iter().any(|v| *v < 0.0) || !w.iter().any(|v| *v > 0.0) {
-                    return true;
-                }
-            } else if s[i] == 0.0 && s[j] == 0.0 {
-                for (k, l) in [(0, 1), (1, 2), (2, 0)] {
-                    if coplanar_edge_bad([[p, q], [u[k], u[l]]], [a, b], allow_shared, drop) {
-                        return true;
-                    }
-                }
-            }
-        }
-    }
-    false
-}
+
 #[derive(Clone, Copy)]
 struct Face {
     p: [Vec3; 3],
@@ -190,12 +74,13 @@ enum Stage {
     CornerEdges,
     CornerRecords,
     VertexLinks,
+    ContactBuild,
     Contact,
     Sources,
     Volume,
     Parents,
-    Convex,
-    Inside,
+    WindingA,
+    WindingB,
     Done,
 }
 /// All vectors reserve their admitted exact capacity before preparation begins.
@@ -206,14 +91,13 @@ pub(super) struct Task {
     scratch: Vec<Edge>,
     parents: Vec<usize>,
     ranks: Vec<u8>,
-    regions: [Region; 8],
+    regions: Vec<Region>,
     count: usize,
     stage: Stage,
     vertex_sort: bool,
     medium: usize,
     triangle: usize,
     i: usize,
-    j: usize,
     width: usize,
     begin: usize,
     left: usize,
@@ -225,6 +109,10 @@ pub(super) struct Task {
     outer: usize,
     inner: usize,
     volume: super::glass_volume::SignedVolume,
+    contact_index: Option<crate::optical_boundary::ContactIndex>,
+    contact_query: Option<crate::optical_boundary::ContactQuery>,
+    winding: i32,
+    inside_a: bool,
 }
 fn selected_count(scene: &ProductScene, options: &RaytraceOptions) -> job::Result<usize> {
     let mut count = 0_usize;
@@ -242,7 +130,10 @@ impl Task {
         let n = selected_count(scene, options)?;
         n.checked_mul(size_of::<Face>() + 6 * size_of::<Edge>() + 3 * size_of::<usize>() + 3 * size_of::<u8>())
             .and_then(|n| n.checked_add(size_of::<Self>()))
+            .and_then(|n| n.checked_add(options.dielectrics.len() * size_of::<Region>()))
             .and_then(|n| u64::try_from(n).ok())
+            .ok_or_else(memory)?
+            .checked_add(crate::optical_boundary::ContactIndex::required_bytes(n)?)
             .ok_or_else(memory)
     }
     pub(super) fn new(scene: &ProductScene, options: &RaytraceOptions) -> job::Result<Self> {
@@ -255,14 +146,17 @@ impl Task {
             scratch: reserved(edges)?,
             parents: reserved(edges)?,
             ranks: reserved(edges)?,
-            regions: [Region::default(); 8],
+            regions: {
+                let mut regions = reserved(options.dielectrics.len())?;
+                regions.resize(options.dielectrics.len(), Region::default());
+                regions
+            },
             count: options.dielectrics.len(),
             stage: Stage::Index,
             vertex_sort: false,
             medium: 0,
             triangle: 0,
             i: 0,
-            j: 1,
             width: 1,
             begin: 0,
             left: 0,
@@ -274,6 +168,10 @@ impl Task {
             outer: 0,
             inner: 0,
             volume: Default::default(),
+            contact_index: None,
+            contact_query: None,
+            winding: 0,
+            inside_a: false,
         })
     }
     pub(super) fn ready(&self) -> bool {
@@ -308,13 +206,7 @@ impl Task {
         }
         Ok(())
     }
-    fn next_pair(&mut self) {
-        self.pair.1 += 1;
-        if self.pair.1 >= self.faces.len() {
-            self.pair.0 += 1;
-            self.pair.1 = self.pair.0 + 1;
-        }
-    }
+
     pub(super) fn step(&mut self, scene: &ProductScene, options: &RaytraceOptions, work: &mut WorkBudget, cancel: &CancelToken) -> job::Result<()> {
         work.tick(cancel).map_err(super::image::error)?;
         match self.stage {
@@ -596,8 +488,9 @@ impl Task {
             }
             Stage::VertexLinks => {
                 let Some(a) = self.edges.get(self.i).copied() else {
-                    self.stage = Stage::Contact;
-                    self.pair = (0, 1);
+                    self.contact_index = Some(crate::optical_boundary::ContactIndex::new(self.faces.len())?);
+                    self.stage = Stage::ContactBuild;
+                    self.pair = (0, 0);
                     return Ok(());
                 };
                 if let Some(b) = self.i.checked_sub(1).and_then(|i| self.edges.get(i)).copied()
@@ -610,24 +503,42 @@ impl Task {
                 }
                 self.i += 1;
             }
+            Stage::ContactBuild => {
+                let index = self.contact_index.as_mut().ok_or_else(|| invalid("missing CPU optical contact hierarchy"))?;
+                if index.step(|i| self.faces.get(i).map(|face| face.p), cancel)? {
+                    self.stage = Stage::Contact;
+                }
+            }
             Stage::Contact => {
                 let Some(a) = self.faces.get(self.pair.0).copied() else {
+                    self.contact_index = None;
+                    self.contact_query = None;
                     self.stage = Stage::Sources;
                     self.medium = 0;
                     self.triangle = 0;
                     self.vertex = 0;
                     return Ok(());
                 };
-                let Some(b) = self.faces.get(self.pair.1).copied() else {
-                    self.next_pair();
-                    return Ok(());
-                };
-                let ba = Triangle::new(a.p).map_err(super::image::error)?.bounds();
-                let bb = Triangle::new(b.p).map_err(super::image::error)?.bounds();
-                if !disjoint(ba, bb) && forbidden_contact(a.p, b.p, a.medium == b.medium) {
-                    return Err(invalid("CPU glass boundaries intersect, touch, overlap or self-intersect"));
+                let index = self.contact_index.as_ref().ok_or_else(|| invalid("missing CPU optical contact hierarchy"))?;
+                if self.contact_query.is_none() {
+                    self.contact_query = Some(index.query(a.p)?);
                 }
-                self.next_pair();
+                let query = self.contact_query.as_mut().ok_or_else(|| invalid("missing CPU optical contact traversal"))?;
+                match index.query_step(query, cancel)? {
+                    None => {
+                        self.contact_query = None;
+                        self.pair.0 += 1;
+                    }
+                    Some(Some(other)) if other > self.pair.0 => {
+                        let b = self.faces.get(other).ok_or_else(|| invalid("missing CPU optical contact candidate"))?;
+                        if forbidden_contact(a.p, b.p, a.medium == b.medium) {
+                            let first = options.dielectrics.get(a.medium).map_or("unknown", |input| input.body_name.as_str());
+                            let second = options.dielectrics.get(b.medium).map_or("unknown", |input| input.body_name.as_str());
+                            return Err(invalid(&format!("CPU glass boundaries intersect, touch, overlap or self-intersect: {first} / {second}")));
+                        }
+                    }
+                    Some(_) => {}
+                }
             }
             Stage::Sources => {
                 let Some(input) = options.dielectrics.get(self.medium) else {
@@ -708,6 +619,17 @@ impl Task {
             }
             Stage::Parents => {
                 if self.outer >= self.count {
+                    for child in 0..self.count {
+                        let mut parent = self.regions[child].parent;
+                        let mut depth = 1;
+                        while let Some(at) = parent {
+                            depth += 1;
+                            if depth > job::MAX_NESTED_MEDIA {
+                                return Err(job::JobError::new(job::ErrorCode::LimitExceeded, "at most 16 nested dielectric layers are supported"));
+                            }
+                            parent = self.regions.get(at).ok_or_else(|| invalid("CPU glass parent identity"))?.parent;
+                        }
+                    }
                     self.finish();
                     return Ok(());
                 }
@@ -727,55 +649,52 @@ impl Task {
                 if oa.boundary == DielectricBoundary::ThinSheet || ob.boundary == DielectricBoundary::ThinSheet {
                     return Err(invalid("CPU thin sheets may not touch or overlap a closed medium's bounds"));
                 }
-                let (parent, child) = if contains(a.bounds, b.bounds) {
-                    (self.outer, self.inner)
-                } else if contains(b.bounds, a.bounds) {
-                    (self.inner, self.outer)
-                } else {
-                    return Err(invalid("CPU glass overlapping bounds have no conservative nesting certificate"));
-                };
-                self.pair = (parent, child);
-                self.i = self.regions[parent].begin;
-                self.j = self.regions[parent].begin;
-                self.vertex = 0;
-                self.stage = Stage::Convex;
+                self.i = a.begin;
+                self.winding = 0;
+                self.stage = Stage::WindingA;
             }
-            Stage::Convex | Stage::Inside => {
-                let (parent, child) = self.pair;
-                let pr = self.regions[parent];
-                let cr = self.regions[child];
-                let inside = matches!(self.stage, Stage::Inside);
-                let points = if inside { cr } else { pr };
-                if self.i >= pr.end {
-                    if !inside {
-                        self.stage = Stage::Inside;
-                        self.i = pr.begin;
-                        self.j = cr.begin;
-                        self.vertex = 0;
-                        return Ok(());
-                    }
-                    let old = self.regions[child].parent;
-                    if old.is_none_or(|old| contains(self.regions[old].bounds, pr.bounds)) {
-                        self.regions[child].parent = Some(parent);
-                    }
-                    self.inner += 1;
-                    self.stage = Stage::Parents;
-                    return Ok(());
-                }
-                let face = self.faces.get(self.i).ok_or_else(|| invalid("CPU glass nesting face"))?;
-                let p = self.faces.get(self.j).and_then(|f| f.p.get(self.vertex)).copied().ok_or_else(|| invalid("CPU glass nesting point"))?;
-                let sign = side(face.p, p);
-                if (inside && sign <= 0.0) || (!inside && sign < 0.0) {
-                    return Err(invalid("CPU nested glass requires a convex outward parent and strictly contained child"));
-                }
-                self.vertex += 1;
-                if self.vertex == 3 {
-                    self.vertex = 0;
-                    self.j += 1;
-                }
-                if self.j >= points.end {
+            Stage::WindingA | Stage::WindingB => {
+                let second = matches!(self.stage, Stage::WindingB);
+                let (container, sample) = if second { (self.inner, self.outer) } else { (self.outer, self.inner) };
+                let region = self.regions[container];
+                if self.i < region.end {
+                    let face = self.faces.get(self.i).ok_or_else(|| invalid("CPU glass winding face"))?;
+                    let point = self.faces.get(self.regions[sample].begin).ok_or_else(|| invalid("CPU glass winding sample"))?.p[0];
+                    self.winding += i32::from(origin_crossing(face.p, point)?);
                     self.i += 1;
-                    self.j = points.begin;
+                } else {
+                    if !(0..=1).contains(&self.winding) {
+                        return Err(invalid("CPU glass boundary has ambiguous containment winding"));
+                    }
+                    if !second {
+                        self.inside_a = self.winding == 1;
+                        self.winding = 0;
+                        self.i = self.regions[self.inner].begin;
+                        self.stage = Stage::WindingB;
+                    } else {
+                        let inside_b = self.winding == 1;
+                        if self.inside_a && inside_b {
+                            return Err(invalid("CPU glass containment cycle"));
+                        }
+                        let relation = if self.inside_a {
+                            Some((self.outer, self.inner))
+                        } else if inside_b {
+                            Some((self.inner, self.outer))
+                        } else {
+                            None
+                        };
+                        if let Some((parent, child)) = relation {
+                            if !contains(self.regions[parent].bounds, self.regions[child].bounds) {
+                                return Err(invalid("CPU glass containment contradicts its certified bounds"));
+                            }
+                            let old = self.regions[child].parent;
+                            if old.is_none_or(|old| contains(self.regions[old].bounds, self.regions[parent].bounds)) {
+                                self.regions[child].parent = Some(parent);
+                            }
+                        }
+                        self.inner += 1;
+                        self.stage = Stage::Parents;
+                    }
                 }
             }
             Stage::Done => return Err(invalid("CPU glass certification already complete")),
@@ -810,39 +729,6 @@ fn contains(a: Bounds, b: Bounds) -> bool {
 /// plane, so a parallel opposite interface or another body's occluder remains.
 pub(super) fn same_plane(a: [Vec3; 3], b: [Vec3; 3]) -> bool {
     b.into_iter().all(|p| side(a, p) == 0.0)
-}
-
-/// Exact positive-X oriented crossing with half-open projected edge ownership.
-/// Shared projected edges with equal normal signs contribute once; silhouettes
-/// contribute opposite signs (or neither). Thus a closed oriented manifold has
-/// winding0 outside and1 inside, including rays through edges/vertices. A point
-/// actually on the surface is refused instead of assigned to an arbitrary side.
-pub(super) fn origin_crossing(t: [Vec3; 3], origin: Vec3) -> job::Result<i8> {
-    predicate_domain(&[origin])?;
-    let sign = side(t, origin);
-    if sign == 0.0 && in_triangle(t, origin, projection(t)) {
-        return Err(invalid("CPU camera or pupil origin lies exactly on a Glass boundary"));
-    }
-    let mut q = t.map(|p| project(p, 0));
-    let p = project(origin, 0);
-    let area = orient2d(q[0], q[1], q[2]);
-    if area == 0.0 || sign == 0.0 || opposite(sign, area) {
-        return Ok(0);
-    }
-    let contribution = if area > 0.0 { 1 } else { -1 };
-    if area < 0.0 {
-        q.swap(1, 2);
-    }
-    for (a, b) in [(0, 1), (1, 2), (2, 0)] {
-        let a = q[a];
-        let b = q[b];
-        let edge = orient2d(a, b, p);
-        let owns = b.y > a.y || (b.y == a.y && b.x < a.x);
-        if edge < 0.0 || (edge == 0.0 && !owns) {
-            return Ok(0);
-        }
-    }
-    Ok(contribution)
 }
 
 /// Exact contact between a finite pre-clip segment and one optical triangle.

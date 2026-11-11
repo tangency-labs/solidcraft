@@ -1,0 +1,34 @@
+{
+  "cases": [
+    {
+      "fuzz": {
+        "base": "member_cylinder_extend_outset",
+        "mutations": ["/config/member_approx_tol = -1e-300", "/config/inset = true", "/tolerance = 1e+300"],
+        "seed": 18246873986750999429
+      },
+      "inputs": {
+        "config": {
+          "extend_convex": true,
+          "inset": true,
+          "member_approx_tol": -1e-300,
+          "member_distance": 0.5,
+          "merge_results": false
+        },
+        "operation": "solid",
+        "source": {
+          "height": 5,
+          "kind": "cylinder",
+          "origin": [1, -2, 0.5],
+          "radius": 3
+        },
+        "tolerance": 1e+300
+      },
+      "name": "fuzz00087"
+    }
+  ],
+  "fuzz_failure": {
+    "case": "fuzz00087",
+    "detail": "values.result.geometry[0]: cpp=1e-300 rust=-1e-300",
+    "verdict": "differs"
+  }
+}

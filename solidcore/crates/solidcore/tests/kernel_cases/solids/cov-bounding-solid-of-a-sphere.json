@@ -1,0 +1,161 @@
+{
+  "area": "solids",
+  "bodies": {},
+  "calls": [
+    {
+      "inputs": [],
+      "op": "make_sphere",
+      "outputs": [
+        "b1"
+      ],
+      "params": {
+        "center": [
+          5.0,
+          5.0,
+          5.0
+        ],
+        "radius": 10.0
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b2"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 20.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "line": {
+              "end": [
+                15.0,
+                -5.0,
+                -5.0
+              ],
+              "start": [
+                -5.0,
+                -5.0,
+                -5.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                15.0,
+                15.0,
+                -5.0
+              ],
+              "start": [
+                15.0,
+                -5.0,
+                -5.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -5.0,
+                15.0,
+                -5.0
+              ],
+              "start": [
+                15.0,
+                15.0,
+                -5.0
+              ]
+            }
+          },
+          {
+            "line": {
+              "end": [
+                -5.0,
+                -5.0,
+                -5.0
+              ],
+              "start": [
+                -5.0,
+                15.0,
+                -5.0
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "case": "cov-bounding-solid-of-a-sphere",
+  "expected": {
+    "bbox": {
+      "max": [
+        15,
+        15,
+        15
+      ],
+      "min": [
+        -5,
+        -5,
+        -5
+      ]
+    },
+    "body_count": 2,
+    "faces": 7,
+    "method": "the sphere spans 5 +- 10 on each axis: the box (-5,-5,-5)-(15,15,15) = 20^3 = 8000; with the sphere kept: V = 8000 + 4/3 pi 1000; faces 6 + 1",
+    "source": "analytic",
+    "sources": [],
+    "volume_mm3": 12188.79020478639,
+    "what": "the bounding box of a sphere r10 at (5,5,5): a curved body's exact extremes, not its mesh's"
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 13,
+      "faces": 7,
+      "vertices": 10
+    }
+  },
+  "result": [
+    {
+      "body": "Ball",
+      "made": "b1"
+    },
+    {
+      "body": "Bound",
+      "made": "b2"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 3656.6370614485077,
+      "body_count": 2,
+      "edges": 13,
+      "faces": 7,
+      "vertices": 10,
+      "volume_mm3": 12188.790205011417
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [],
+  "traced_ops": [
+    "make_sphere",
+    "extrude"
+  ],
+  "ungraded": [],
+  "what": "the bounding box of a sphere r10 at (5,5,5): a curved body's exact extremes, not its mesh's",
+  "why_not": []
+}

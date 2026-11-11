@@ -740,9 +740,9 @@ fn picks_on_one_component_say_why_and_offer_components() {
         frame(&mut app, vec![]);
     }
     let out = frame(&mut app, vec![]);
-    let why = crate::i18n::format("joint.one_component", &[("bodies", "Body1, Body2")]);
+    let why = solidcraft_ui_text::format("joint.one_component", &[("bodies", "Body1, Body2")]);
     assert!(text_at(&out, &why).is_some(), "the dialog says why");
-    let at = text_at(&out, crate::i18n::tr("cmd.component_from_bodies")).expect("and offers the way out");
+    let at = text_at(&out, solidcraft_ui_text::tr("cmd.component_from_bodies")).expect("and offers the way out");
     let button = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
     frame(&mut app, vec![egui::Event::PointerMoved(at)]);
     frame(&mut app, vec![button(true)]);
@@ -1241,7 +1241,9 @@ fn motion_trace_keeps_the_picked_point_path() {
     assert_eq!((&p["occurrence"], &p["joint"], &p["from"], &p["to"]), (&json!([coupler]), &json!(crank), &json!("0 deg"), &json!("360 deg")), "{p}");
     let at = |p: &Value| Vec3::new(p["point"][0].as_f64().unwrap(), p["point"][1].as_f64().unwrap(), p["point"][2].as_f64().unwrap());
     assert!(at(p).dist(placed) < 1e-6, "{p}");
-    let preview = app.session.scratch().execute("motion.trace", p).unwrap();
+    let mut scratch = app.session.scratch();
+    scratch.param_check = solidcraft_engine::schema::ParamCheck::Strict;
+    let preview = scratch.execute("motion.trace", &super::trace::preview_params(p.clone())).unwrap();
     assert!(preview["samples"] == 100 && preview["stopped_at"].is_null(), "{preview}");
     crate::dialogs::run_dialog(&mut app, &d).unwrap();
     let sketch = app.session.doc.find_feature("Motion Trace1").unwrap().id;
@@ -1334,7 +1336,7 @@ fn components_from_bodies_dialog_select_all_cancel_and_ok() {
     assert!(matches!(d.kind, Kind::Assembly(Asm::FromBodies)));
     assert!(apply_commands(&h.app, d).is_err(), "OK requires at least one body");
     assert_eq!(h.app.session.doc, before);
-    h.step(&json!({"widget":crate::i18n::tr("ui.select_all")})).unwrap();
+    h.step(&json!({"widget":solidcraft_ui_text::tr("ui.select_all")})).unwrap();
     let commands = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
     assert_eq!(commands, vec![("component.from_bodies".into(), json!({"bodies":names}))]);
     if let Ok(path) = std::env::var("SOLIDCRAFT_COMPONENTS_DIALOG_EVIDENCE") {
@@ -1361,7 +1363,7 @@ fn components_from_bodies_dialog_select_all_cancel_and_ok() {
     h.step(&json!({"start":"component.from_bodies"})).unwrap();
     let d = h.app.dialog.as_ref().unwrap();
     assert_eq!(d.inputs[0].items.body_names(), vec![names[0].clone()]);
-    h.step(&json!({"widget":crate::i18n::tr("ui.select_all")})).unwrap();
+    h.step(&json!({"widget":solidcraft_ui_text::tr("ui.select_all")})).unwrap();
     h.step(&json!({"widget":"OK"})).unwrap();
     assert!(h.app.dialog.is_none());
     for name in &names {
@@ -1415,8 +1417,8 @@ fn find_limits_fills_the_limits_from_where_the_door_meets_the_block() {
         frame(app, vec![button(true)]);
         frame(app, vec![button(false)]);
     };
-    click(&mut app, &crate::i18n::tr_label("Limits").to_uppercase());
-    click(&mut app, crate::i18n::tr("joint.find_limits"));
+    click(&mut app, &solidcraft_ui_text::tr_label("Limits").to_uppercase());
+    click(&mut app, solidcraft_ui_text::tr("joint.find_limits"));
     assert_eq!(*app.session.doc, *before, "nothing changes until OK");
     let Some(Kind::Assembly(Asm::Joint(f))) = app.dialog.as_ref().map(|d| &d.kind) else { panic!("the dialog stays open") };
     // The door's face 4 mm off its hinge line meets the block's corner (80, 30) opening, and the
@@ -1455,7 +1457,11 @@ fn find_limits_searches_the_joint_as_edited_and_leaves_a_free_side() {
     // from it the other, where nothing is in its way.
     assert_eq!(f.limits[0].0, untouched.0, "one side found: the row stays as it was: {:?}", f.found);
     assert!(f.limits[0].1 == untouched.1 || f.limits[0].2 == untouched.2, "{:?} {:?}", f.limits, f.found);
-    assert!(f.found[0].contains(crate::i18n::tr_label("Minimum")) && f.found[0].contains(crate::i18n::tr_label("Maximum")), "{:?}", f.found);
+    assert!(
+        f.found[0].contains(solidcraft_ui_text::tr_label("Minimum")) && f.found[0].contains(solidcraft_ui_text::tr_label("Maximum")),
+        "{:?}",
+        f.found
+    );
     assert!(f.found_note.is_none(), "{:?}", f.found_note);
     // Edited after the search, the joint is no longer the one searched (its notes then go).
     let searched = f.searched.clone().expect("what was searched");
@@ -1698,4 +1704,193 @@ fn the_grouped_joints_arrow_lights_up_under_the_pointer() {
     let arrow = crate::scenario::rect_of("timeline:joints_arrow").expect("the arrow's well");
     assert_eq!(h.call("ui.click", json!({"x": arrow.center().x, "y": arrow.center().y}))["ok"], true);
     assert!(!joints_open(&h.app, 1201, JointRun::Loose), "and groups them again");
+}
+
+/// A pick on a part in a sub-assembly placed twice sends the placement it was made on: on the
+/// second copy the origin is on that copy, inside the part; on the first it is stored as before
+/// (#11426).
+#[test]
+fn joint_origin_picked_on_a_repeated_sub_assembly_is_on_that_copy() {
+    let mut s = Session::default();
+    for (id, p) in [
+        ("component.create", json!({"name": "Board", "parent": "root"})),
+        ("component.create", json!({"name": "Header", "parent": "Board"})),
+        ("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Pin"})),
+        ("component.activate", json!({"component": "root"})),
+        // Header turned and moved in Board: its top's centre at (-5, 25, 10).
+        ("occurrence.move", json!({"occurrence": "Header:1", "axis": [0, 0, 1], "angle": "90 deg", "origin": [0, 0, 0]})),
+        ("occurrence.move", json!({"occurrence": "Header:1", "translate": [0, 20, 0]})),
+        ("occurrence.copy", json!({"component": "Board", "translate": [100, 0, 0]})),
+    ] {
+        s.execute(id, &p).unwrap();
+    }
+    let mut app = SolveApp::new(s, Services::default());
+    let board = app.session.doc.find_component("Board").unwrap();
+    let boards: Vec<u64> = app.session.doc.occurrences.iter().filter(|o| o.component == board).map(|o| o.id).collect();
+    let header = occ(&app, "Header");
+    for (x, board, body, stored) in
+        [(95.0, boards[1], "Pin (Board:2/Header:1)", (boards[1], vec![header])), (-5.0, boards[0], "Pin", (header, vec![]))]
+    {
+        app.start("joint.origin");
+        let mut d = app.dialog.clone().unwrap();
+        let top = face_sel(&app.session, Vec3::new(x, 25.0, 10.0)).unwrap();
+        assert!(matches!(&top, Sel::Face { body: b, .. } if b == body), "{top:?}");
+        d.pick(&app.session, top);
+        let commands = apply_commands(&app, &d).unwrap();
+        assert_eq!(commands[0].1["path"], json!([board, header]), "{commands:?}");
+        for (id, p) in commands {
+            app.run(&id, p).unwrap();
+        }
+        let o = &app.session.doc.assembly.origins.last().unwrap().origin;
+        assert_eq!((o.occurrence, o.inside.clone()), stored, "{body}: {o:?}");
+    }
+    // The same part in two copies is two sides of a joint, not "one component".
+    app.start("joint.create");
+    let mut d = app.dialog.take().unwrap();
+    for x in [-5.0, 95.0] {
+        d.pick(&app.session, face_sel(&app.session, Vec3::new(x, 25.0, 10.0)).unwrap());
+    }
+    let Kind::Assembly(k) = &d.kind else { panic!("{:?}", d.kind) };
+    assert_eq!(joint_problem(&app, k, &d.inputs), None);
+    // Edit Joint shows a side on the second copy on that copy's part.
+    app.run("component.create", json!({"name": "Probe", "parent": "root", "grounded": false})).unwrap();
+    app.run("solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [50, -30, 0]})).unwrap();
+    app.run("component.activate", json!({"component": "root"})).unwrap();
+    let on_copy = app.session.doc.assembly.origins[0].name.clone();
+    app.run("joint.create", json!({"type": "rigid", "a": on_copy, "b": {"occurrence": "Probe", "face": [51, -29, 0]}})).unwrap();
+    let d = edit_joint(&app, app.session.doc.assembly.joints[0].id).unwrap();
+    let Some(Sel::Face { body, .. }) = d.inputs[0].items.first() else { panic!("no side pick: {:?}", d.inputs[0].items) };
+    assert_eq!(body, "Pin (Board:2/Header:1)");
+}
+
+/// The Joint and Edit Joint dialogs take origin planes and axes as joint sides, keep them on
+/// edit, refuse sketch curves as sides, and leave Measure's sketch-curve picks alone.
+#[test]
+fn joint_dialog_picks_origin_plane_and_axis() {
+    let mut app = two_boxes();
+
+    // 1. Pick origin plane XY in the Joint dialog.
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    let plane_sel = Sel::Plane { name: "XY".into() };
+    let snap_plane = snap_of(&app.session, &plane_sel).expect("snap for XY plane");
+    assert_eq!(snap_plane.kind, SnapKind::FaceCenter);
+    assert_eq!(snap_plane.z, Vec3::Z);
+    d.pick(&app.session, plane_sel);
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap());
+    let cmds = apply_commands(&app, &d).expect("joint between plane and component B");
+    assert_eq!(cmds[0].0, "joint.create");
+    assert_eq!(cmds[0].1["a"]["plane"], "XY");
+    assert_eq!(cmds[0].1["b"]["occurrence"], occ(&app, "B"));
+    for (cmd, params) in cmds {
+        app.run(&cmd, params).unwrap();
+    }
+    assert_eq!(app.session.doc.assembly.joints.len(), 1);
+
+    // 2. Pick origin axis Z in the Joint dialog, on a fresh scene: the first joint carried B
+    //    onto the XY plane (a solve captures the pose into B's occurrence), so B no longer
+    //    sits where it was placed and the old world face pick would find nothing.
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    let axis_sel = Sel::Axis { name: "Z".into() };
+    let snap_axis = snap_of(&app.session, &axis_sel).expect("snap for Z axis");
+    assert_eq!(snap_axis.kind, SnapKind::EdgeMid);
+    assert_eq!(snap_axis.z, Vec3::Z);
+    d.pick(&app.session, axis_sel);
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap());
+    let cmds = apply_commands(&app, &d).expect("joint between axis and component B");
+    assert_eq!(cmds[0].0, "joint.create");
+    assert_eq!(cmds[0].1["a"]["axis"], "Z");
+    assert_eq!(cmds[0].1["b"]["occurrence"], occ(&app, "B"));
+    for (cmd, params) in cmds {
+        app.run(&cmd, params).unwrap();
+    }
+    assert_eq!(app.session.doc.assembly.joints.len(), 1);
+}
+
+#[test]
+fn edit_joint_preserves_plane_and_axis_sides() {
+    let mut app = two_boxes();
+
+    // 1. Create a joint using a construction plane and verify Edit Joint pre-fills Sel::Plane.
+    let wp = app.run("construct.plane.offset", json!({"base": "XY", "offset": 5, "name": "WorkPlane"})).unwrap();
+    let feat_id = wp["feature"].as_u64().unwrap();
+    let j_plane = app
+        .run(
+            "joint.create",
+            json!({
+                "type": "planar",
+                "a": {"plane": {"type": "construction", "feature": feat_id}},
+                "b": {"occurrence": occ(&app, "B"), "face": [40, 10, 0]}
+            }),
+        )
+        .unwrap();
+    let plane_joint_id = j_plane["joint"].as_u64().unwrap();
+    let edit_plane = edit_joint(&app, plane_joint_id).unwrap();
+    assert_eq!(edit_plane.inputs[0].items, vec![Sel::Plane { name: "WorkPlane".into() }]);
+    let cmds = apply_commands(&app, &edit_plane).unwrap();
+    assert!(cmds[0].1.get("a").is_none() && cmds[0].1.get("b").is_none(), "unchanged sides are not re-sent");
+    app.run("joint.delete", json!({"joint": plane_joint_id})).unwrap();
+
+    // 2. Create a joint using a construction axis and verify Edit Joint pre-fills Sel::Axis.
+    app.run(
+        "construct.axis.two_points",
+        json!({
+            "a": {"point": [0, 0, 0]},
+            "b": {"point": [0, 0, 50]},
+            "name": "WorkAxis"
+        }),
+    )
+    .unwrap();
+    let j_axis = app
+        .run(
+            "joint.create",
+            json!({
+                "type": "revolute",
+                "a": {"axis": "WorkAxis"},
+                "b": {"occurrence": occ(&app, "B"), "face": [40, 10, 0]}
+            }),
+        )
+        .unwrap();
+    let axis_joint_id = j_axis["joint"].as_u64().unwrap();
+    let edit_axis = edit_joint(&app, axis_joint_id).unwrap();
+    assert_eq!(edit_axis.inputs[0].items, vec![Sel::Axis { name: "WorkAxis".into() }]);
+    let cmds = apply_commands(&app, &edit_axis).unwrap();
+    assert!(cmds[0].1.get("a").is_none() && cmds[0].1.get("b").is_none(), "unchanged sides are not re-sent");
+}
+
+#[test]
+fn joint_sides_refuse_sketch_curves() {
+    let mut app = two_boxes();
+    app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    app.run("sketch.line", json!({"points": [[0, 0], [10, 0]]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    assert_eq!(d.inputs[0].accept, crate::dialogs_assembly::SNAPS);
+
+    let sketch_sel = Sel::SketchCurve { id: "l1".into(), sketch: None };
+    d.pick(&app.session, sketch_sel);
+    assert!(d.inputs[0].items.is_empty(), "straight sketch curve must be rejected by SNAPS input");
+}
+
+/// Measure's items take more than the joint-origin kinds (sketch curves among them), so the
+/// joint-origin rejection must leave them alone: a sketch curve stays pickable in Measure.
+#[test]
+fn measure_still_takes_sketch_curve_picks() {
+    let mut app = two_boxes();
+    app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    app.run("sketch.line", json!({"points": [[0, 0], [10, 0]]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+
+    app.start("inspect.measure");
+    let mut d = app.dialog.clone().unwrap();
+    assert_ne!(d.inputs[0].accept, crate::dialogs_assembly::SNAPS);
+    assert!(!d.inputs[0].rejects(&Sel::SketchCurve { id: "l1".into(), sketch: None }));
+
+    let sketch_sel = Sel::SketchCurve { id: "l1".into(), sketch: None };
+    d.pick(&app.session, sketch_sel.clone());
+    assert_eq!(d.inputs[0].items, vec![sketch_sel], "Measure takes a sketch curve");
 }

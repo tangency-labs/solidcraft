@@ -10,20 +10,27 @@ workspace = true
 
 [features]
 default = []
-raytrace-cpu = ["dep:robust"]
+raytrace-cpu = ["dep:rayon"]
 
 [dependencies]
 solidcore-record = { workspace = true }
+solidcore-tess = { workspace = true }
+solidcraft-color = { workspace = true }
+solidcraft-viewport = { workspace = true }
 solidcraft-geom = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 image = { workspace = true, features = ["jpeg"] }
 moxcms = { workspace = true }
 png = { workspace = true }
-robust = { workspace = true, optional = true }
+robust = { workspace = true }
 sha2 = { workspace = true }
 web-time = { workspace = true }
 weezl = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rayon = { workspace = true, optional = true }
+sysinfo = { workspace = true }
 
 [dev-dependencies]
 flate2 = "1"

@@ -1,0 +1,64 @@
+{
+  "cases": [
+    {
+      "name": "real-box-high-corner-setback-eight",
+      "upstream_ref": "source/SMLib/inc/SmFilletCorner.h:197; source/SM_API/src/SmApiBrep.cpp:2318 (actual executive setup, created high-corner setback before DoFilleting; complete final topology, geometry and mass; pinned native setback behaviour)",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            60,
+            40,
+            20
+          ],
+          "radius": 5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0,
+            1,
+            5
+          ],
+          "corner_setback": {
+            "vertex": [
+              60,
+              40,
+              20
+            ],
+            "distance": 8.0
+          }
+        }
+      }
+    },
+    {
+      "name": "real-box-high-corner-setback-zero-control",
+      "upstream_ref": "source/SMLib/inc/SmFilletCorner.h:197; source/SM_API/src/SmApiBrep.cpp:2318 (actual executive setup, created high-corner setback before DoFilleting; complete final topology, geometry and mass; pinned native setback behaviour)",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            60,
+            40,
+            20
+          ],
+          "radius": 5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0,
+            1,
+            5
+          ],
+          "corner_setback": {
+            "vertex": [
+              60,
+              40,
+              20
+            ],
+            "distance": 0.0
+          }
+        }
+      }
+    }
+  ]
+}
