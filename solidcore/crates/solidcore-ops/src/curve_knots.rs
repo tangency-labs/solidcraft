@@ -31,16 +31,17 @@ pub fn insert_knot(curve: &Curve, t: f64) -> Result<Curve> {
     })?
 }
 
-/// `curve` with one copy of its interior knot `t` removed (The NURBS Book, A5.8), when the
-/// kernel's certified bound of how far that moves the curve
-/// ([`solidcore::nurbs::crv_deviation::certified_distance`]) is within `tol`.
+/// `curve` with one copy of its interior knot `t` removed (The NURBS Book, A5.8; a knot of
+/// multiplicity `m` keeps `m - 1`), and the kernel's certified bound of how far the result is
+/// from `curve` ([`solidcore::nurbs::crv_deviation::certified_distance`], measured against
+/// the curve as it was, never the removal's own estimate), kept when within `tol`.
 ///
 /// # Errors
 /// [`Error::Argument`] for a curve that is not a valid clamped spline (a rational spline, whose
 /// bound the kernel does not certify yet, and a closed periodic one are refused), a `t` that is
 /// not one of its interior knots, or a `tol` not finite or negative;
 /// [`Error::PastTolerance`] with the bound when it is past `tol`; the kernel's status otherwise.
-pub fn remove_knot(curve: &Curve, t: f64, tol: f64) -> Result<Curve> {
+pub fn remove_knot(curve: &Curve, t: f64, tol: f64) -> Result<(Curve, f64)> {
     let nurb = nurb_of(curve)?;
     if !matches!(curve, Curve::Spline { .. })
         || !interior(curve, t)
@@ -60,11 +61,12 @@ pub fn remove_knot(curve: &Curve, t: f64, tol: f64) -> Result<Curve> {
     })?
 }
 
-/// `curve` of degree `degree`. Raising it is exact (the same curve, more control points;
-/// `tol` is not used); the same degree is the curve as it is; lowering it (The NURBS Book,
-/// A5.11, once per degree) is kept when the kernel's certified bound of how far the lowered
-/// curve is from `curve` ([`solidcore::nurbs::crv_deviation::certified_distance`]) is within
-/// `tol`.
+/// `curve` of degree `degree`, and the kernel's certified bound of how far it is from `curve`
+/// ([`solidcore::nurbs::crv_deviation::certified_distance`]). Raising it is exact in exact
+/// arithmetic (the same curve, more control points; `tol` is not used), its bound the
+/// rounding; the same degree is the curve as it is, bound 0; lowering it (The NURBS Book,
+/// A5.11, once per degree) is kept when the bound is within `tol`. A rational spline is raised
+/// with no bound (`None`): the kernel's bound does not take rational curves yet.
 ///
 /// # Errors
 /// [`Error::Argument`] for a curve that is not a valid clamped spline or rational spline (a
@@ -73,17 +75,23 @@ pub fn remove_knot(curve: &Curve, t: f64, tol: f64) -> Result<Curve> {
 /// spline (whose bound the kernel does not certify yet); [`Error::PastTolerance`] with the
 /// bound when it is past `tol`; [`Error::NoEffect`] when the kernel does not lower it; the
 /// kernel's status otherwise.
-pub fn set_degree(curve: &Curve, degree: usize, tol: f64) -> Result<Curve> {
+pub fn set_degree(curve: &Curve, degree: usize, tol: f64) -> Result<(Curve, Option<f64>)> {
     let nurb = nurb_of(curve)?;
     if degree == 0 || degree > MAX_SPLINE_DEGREE || !tol.is_finite() || tol < 0.0 {
         return Err(Error::Argument);
     }
     if let Some(raise) = degree.checked_sub(nurb.degree()) {
         if raise == 0 {
-            return Ok(curve.clone());
+            return Ok((curve.clone(), Some(0.0)));
         }
+        let rational = !matches!(curve, Curve::Spline { .. });
         return run("curve_knots::set_degree", |_| {
-            Ok(record_of(&nurb.elevate_degree(raise)?))
+            let raised = nurb.elevate_degree(raise)?;
+            if rational {
+                return Ok(record_of(&raised).map(|c| (c, None)));
+            }
+            let bound = certified_distance(&nurb, &raised)?;
+            Ok(record_of(&raised).map(|c| (c, Some(bound))))
         })?;
     }
     if !matches!(curve, Curve::Spline { .. }) {
@@ -98,16 +106,20 @@ pub fn set_degree(curve: &Curve, degree: usize, tol: f64) -> Result<Curve> {
                 None => return Ok(Err(Error::NoEffect)),
             }
         }
-        within(&nurb, &lowered, tol)
+        Ok(within(&nurb, &lowered, tol)?.map(|(c, bound)| (c, Some(bound))))
     })?
 }
 
-/// The record of `changed` when the kernel's certified bound of its distance from `original`
-/// is within `tol`, else [`Error::PastTolerance`] with the bound.
-fn within(original: &NurbCurve, changed: &NurbCurve, tol: f64) -> solidcore::Result<Result<Curve>> {
+/// The record of `changed` and the kernel's certified bound of its distance from `original`,
+/// when that is within `tol`, else [`Error::PastTolerance`] with the bound.
+fn within(
+    original: &NurbCurve,
+    changed: &NurbCurve,
+    tol: f64,
+) -> solidcore::Result<Result<(Curve, f64)>> {
     let bound = certified_distance(original, changed)?;
     Ok(if bound <= tol {
-        record_of(changed)
+        record_of(changed).map(|c| (c, bound))
     } else {
         Err(Error::PastTolerance { bound })
     })
@@ -268,11 +280,42 @@ mod tests {
     fn a_knot_inserted_then_removed_gives_the_curve_back() {
         let c = cv_curve(&WAVE, 3).unwrap();
         let more = insert_knot(&c, 0.3).unwrap();
-        let back = remove_knot(&more, 0.3, 1e-9).unwrap();
+        let (back, bound) = remove_knot(&more, 0.3, 1e-9).unwrap();
+        assert!(bound < 1e-12, "{bound}");
         let (knots, count) = parts(&back);
         assert_eq!(knots, parts(&c).0);
         assert_eq!(count, WAVE.len());
         same_shape(&c, &back, 1e-9);
+    }
+
+    #[test]
+    fn an_inserted_knot_moves_the_curve_by_no_more_than_rounding() {
+        let c = cv_curve(&WAVE, 3).unwrap();
+        let more = insert_knot(&c, 0.3).unwrap();
+        let bound = certified_distance(&nurb_of(&c).unwrap(), &nurb_of(&more).unwrap()).unwrap();
+        assert!(bound < 1e-12, "{bound}");
+        for i in 0..=200 {
+            let t = f64::from(i) / 200.0;
+            let (p, q) = (at(&c, t), at(&more, t));
+            let gap2: f64 = p.iter().zip(q).map(|(a, b)| (a - b) * (a - b)).sum();
+            assert!(gap2 <= bound * bound, "at {t}: {gap2} past {bound}²");
+        }
+    }
+
+    #[test]
+    fn a_repeated_knot_is_removed_one_copy_at_a_time() {
+        let c = cv_curve(&WAVE, 3).unwrap();
+        let twice = insert_knot(&insert_knot(&c, 0.5).unwrap(), 0.5).unwrap();
+        assert_eq!(multiplicity(parts(&twice).0, 0.5), 2);
+        let (once, _) = remove_knot(&twice, 0.5, 1e-9).unwrap();
+        assert_eq!(multiplicity(parts(&once).0, 0.5), 1);
+        assert_eq!(parts(&once).1, WAVE.len() + 1);
+        let (none, bound) = remove_knot(&once, 0.5, 1e-9).unwrap();
+        assert_eq!(multiplicity(parts(&none).0, 0.5), 0);
+        assert_eq!(parts(&none).0, parts(&c).0);
+        // measured against the curve it started from, within rounding of it
+        assert!(bound < 1e-9, "{bound}");
+        same_shape(&c, &none, 1e-9);
     }
 
     #[test]
@@ -294,13 +337,14 @@ mod tests {
     #[test]
     fn a_raised_degree_keeps_the_shape() {
         let c = cv_curve(&WAVE, 3).unwrap();
-        let quintic = set_degree(&c, 5, 0.0).unwrap();
+        let (quintic, bound) = set_degree(&c, 5, 0.0).unwrap();
+        assert!(bound.is_some_and(|b| b < 1e-12), "{bound:?}");
         let (knots, count) = parts(&quintic);
         assert_eq!(knots.len() - count - 1, 5);
         assert_eq!(knots.first(), Some(&0.0));
         assert_eq!(knots.last(), Some(&1.0));
         same_shape(&c, &quintic, 1e-12);
-        assert_eq!(set_degree(&c, 3, 0.0), Ok(c.clone()));
+        assert_eq!(set_degree(&c, 3, 0.0), Ok((c.clone(), Some(0.0))));
         assert_eq!(set_degree(&c, 0, 0.0), Err(Error::Argument));
         assert_eq!(
             set_degree(&c, MAX_SPLINE_DEGREE + 1, 0.0),
@@ -313,8 +357,10 @@ mod tests {
     fn a_degree_is_lowered_only_within_the_certified_tolerance() {
         let c = cv_curve(&WAVE, 3).unwrap();
         // a raised curve comes back down to its own degree, within rounding
-        let quintic = set_degree(&c, 5, 0.0).unwrap();
-        let back = set_degree(&quintic, 3, 1e-9).unwrap();
+        let (quintic, bound) = set_degree(&c, 5, 0.0).unwrap();
+        assert!(bound.is_some_and(|b| b < 1e-12), "{bound:?}");
+        let (back, bound) = set_degree(&quintic, 3, 1e-9).unwrap();
+        assert!(bound.is_some_and(|b| b <= 1e-9), "{bound:?}");
         let (knots, count) = parts(&back);
         assert_eq!(knots.len() - count - 1, 3);
         same_shape(&c, &back, 1e-9);
@@ -336,7 +382,8 @@ mod tests {
                 [0.0, 10.0, 0.0, 1.0],
             ],
         };
-        let cubic = set_degree(&arc, 3, 0.0).unwrap();
+        let (cubic, bound) = set_degree(&arc, 3, 0.0).unwrap();
+        assert_eq!(bound, None);
         assert!(matches!(cubic, Curve::RationalSpline { .. }));
         assert_eq!(parts(&cubic).1, 4);
         same_shape(&arc, &cubic, 1e-12);

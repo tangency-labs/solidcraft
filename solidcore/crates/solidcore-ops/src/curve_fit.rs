@@ -1,11 +1,12 @@
 //! Curves fitted to points: through points (edit points), closed, and rebuilt to a degree and span count.
 //! The curve is the record's ([`Curve`]); the knots, the fits and the bound are the kernel's
 //! ([`interp`]: global interpolation, The NURBS Book's §9.2.1; [`periodic_uniform`];
-//! [`approx_knots`]: least squares at given parameters, §9.4.1; [`certified_distance`]). Ops
-//! checks the inputs and converts.
+//! [`approx_knots`]: least squares at given parameters, §9.4.1; [`certified_distance`] and
+//! [`interpolation_bound`]). Ops checks the inputs and converts; every fit comes with the
+//! kernel's certified bound of how far it is from what it fits.
 
-use solidcore::nurbs::crv_deviation::certified_distance;
-use solidcore::nurbs::crv_fit::p1::{approx_knots, ParamMethod};
+use solidcore::nurbs::crv_deviation::{certified_distance, interpolation_bound};
+use solidcore::nurbs::crv_fit::p1::{approx_knots, param_values, ParamMethod};
 use solidcore::nurbs::crv_fit::p2::interp;
 use solidcore::nurbs::geom::Interval;
 use solidcore::nurbs::knots::{clamped_uniform, periodic_uniform, KnotVector, Side, MAX_DEGREE};
@@ -17,33 +18,37 @@ use crate::session::run;
 use crate::sweep::{coord_ok, CURVE_MAX_POINTS};
 use crate::{Error, Result};
 
-/// The clamped B-spline of `degree` (at most one less than the number of points: two points
-/// make a line, three a quadratic) through `points` in order, on `[0, 1]`, each point at its
-/// share of the polygon's length (chord-length parameters) and the knots their averages.
+/// The clamped B-spline of `degree` through `points` in order, on `[0, 1]`, each point at its
+/// share of the polygon's length (chord-length parameters) and the knots their averages (The
+/// NURBS Book, eq. 9.8), and the kernel's certified bound of how far the curve misses a point
+/// at its parameter ([`interpolation_bound`]): interpolation in floating point is not exact.
 ///
 /// # Errors
 /// [`Error::Argument`] for fewer than two points, more than [`CURVE_MAX_POINTS`] (or than a
 /// record holds), a coordinate that is not finite or past the coordinate bound, a point
-/// repeating the one before it, or a degree of 0 or past the kernel's most; the kernel's status
-/// otherwise (points so close the fit is singular).
-pub fn ep_curve(points: &[[f64; 3]], degree: usize) -> Result<Curve> {
+/// repeating the one before it (a chord of no length), or a degree of 0, not below the number
+/// of points, or past the kernel's most; the kernel's status otherwise (points so close the fit
+/// is singular).
+pub fn ep_curve(points: &[[f64; 3]], degree: usize) -> Result<(Curve, f64)> {
     if points.len() < 2 || points.len() > CURVE_MAX_POINTS || !points.iter().all(|p| coord_ok(p)) {
         return Err(Error::Argument);
     }
     if points.windows(2).any(|w| w.first() == w.get(1)) {
         return Err(Error::Argument);
     }
-    if degree == 0 || degree > MAX_DEGREE {
+    if degree == 0 || degree >= points.len() || degree > MAX_DEGREE {
         return Err(Error::Argument);
     }
-    let degree = degree.min(points.len() - 1);
     let data: Vec<Vec3> = points.iter().map(|&[x, y, z]| Vec3::new(x, y, z)).collect();
     run("curve_fit::ep_curve", |_| {
-        Ok(record_of(&interp(&data, degree, ParamMethod::ChordLength)?))
+        let params = param_values(&data, ParamMethod::ChordLength)?;
+        let fit = interp(&data, degree, ParamMethod::ChordLength)?;
+        let bound = interpolation_bound(&fit, &params, &data)?;
+        Ok(record_of(&fit).map(|c| (c, bound)))
     })?
 }
 
-/// The closed B-spline of `degree` (at most one less than the number of points) with `points`
+/// The closed B-spline of `degree` (below the number of points) with `points`
 /// as its control polygon, closing from the last back to the first, on `[0, 1]`: periodic,
 /// so it joins itself smoothly (continuity `degree - 1`) and passes through none of its
 /// points. The record holds it as a spline whose polygon repeats its first `degree` points
@@ -53,15 +58,14 @@ pub fn ep_curve(points: &[[f64; 3]], degree: usize) -> Result<Curve> {
 /// # Errors
 /// [`Error::Argument`] for fewer than three points, more than [`CURVE_MAX_POINTS`] (or than a
 /// record holds), a coordinate that is not finite or past the coordinate bound, or a degree
-/// of 0 or past the kernel's most.
+/// of 0, not below the number of points, or past the kernel's most.
 pub fn closed_cv_curve(points: &[[f64; 3]], degree: usize) -> Result<Curve> {
     if points.len() < 3 || points.len() > CURVE_MAX_POINTS || !points.iter().all(|p| coord_ok(p)) {
         return Err(Error::Argument);
     }
-    if degree == 0 || degree > MAX_DEGREE {
+    if degree == 0 || degree >= points.len() || degree > MAX_DEGREE {
         return Err(Error::Argument);
     }
-    let degree = degree.min(points.len() - 1);
     let knots = periodic_uniform(points.len(), degree).map_err(|_| Error::Argument)?;
     let mut wrapped = points.to_vec();
     wrapped.extend_from_slice(points.get(..degree).ok_or(Error::Argument)?);
@@ -142,7 +146,7 @@ mod tests {
         for (p, t) in points.iter().zip(params) {
             let q = at(c, *t);
             assert!(
-                p.iter().zip(q).all(|(a, b)| (a - b).abs() < 1e-9),
+                p.iter().zip(q).all(|(a, b)| (a - b).abs() < 1e-12),
                 "at {t}: {q:?}, not {p:?}"
             );
         }
@@ -158,7 +162,8 @@ mod tests {
             [3.0, 4.0, 12.0],
             [6.0, 8.0, 12.0],
         ];
-        let c = ep_curve(&points, 3).unwrap();
+        let (c, bound) = ep_curve(&points, 3).unwrap();
+        assert!(bound < 1e-12, "{bound}");
         let Curve::Spline { knots, points: cvs } = &c else {
             panic!("a spline: {c:?}")
         };
@@ -179,7 +184,8 @@ mod tests {
             [15.0, 4.0, 0.0],
         ];
         let params: Vec<f64> = (0..6).map(|i| f64::from(i) / 5.0).collect();
-        let c = ep_curve(&points, 3).unwrap();
+        let (c, bound) = ep_curve(&points, 3).unwrap();
+        assert!(bound < 1e-12, "{bound}");
         let Curve::Spline { knots, points: cvs } = &c else {
             panic!("a spline: {c:?}")
         };
@@ -190,20 +196,22 @@ mod tests {
         }
         passes_through(&c, &points, &params);
 
-        let quadratic = ep_curve(&points, 2).unwrap();
+        let (quadratic, _) = ep_curve(&points, 2).unwrap();
         passes_through(&quadratic, &points, &params);
     }
 
     #[test]
     fn two_points_make_a_line() {
         let ends = [[1.0, 2.0, 3.0], [4.0, 6.0, 3.0]];
+        let (line, bound) = ep_curve(&ends, 1).unwrap();
         assert_eq!(
-            ep_curve(&ends, 3),
-            Ok(Curve::Spline {
+            line,
+            Curve::Spline {
                 knots: vec![0.0, 0.0, 1.0, 1.0],
                 points: ends.to_vec(),
-            })
+            }
         );
+        assert!(bound < 1e-12, "{bound}");
     }
 
     #[test]
@@ -219,6 +227,9 @@ mod tests {
             Err(Error::Argument)
         );
         assert_eq!(ep_curve(&ends, 0), Err(Error::Argument));
+        // a degree not below the number of points is refused, not lowered
+        assert_eq!(ep_curve(&ends, 2), Err(Error::Argument));
+        assert_eq!(ep_curve(&ends[..], 3), Err(Error::Argument));
         assert_eq!(ep_curve(&ends, MAX_DEGREE + 1), Err(Error::Argument));
     }
 
@@ -279,13 +290,44 @@ mod tests {
             first.at,
             last.at
         );
-        // fewer points lower the degree; two points make no closed curve
-        let Curve::Spline { knots, points } = closed_cv_curve(&SQUARE[..3], 5).unwrap() else {
+        // a degree not below the number of points is refused, not lowered; two points make no
+        // closed curve
+        let Curve::Spline { knots, points } = closed_cv_curve(&SQUARE[..3], 2).unwrap() else {
             panic!()
         };
         assert_eq!(knots.len() - points.len() - 1, 2);
+        assert_eq!(closed_cv_curve(&SQUARE[..3], 3), Err(Error::Argument));
         assert_eq!(closed_cv_curve(&SQUARE[..2], 1), Err(Error::Argument));
         assert_eq!(closed_cv_curve(&SQUARE, 0), Err(Error::Argument));
+    }
+
+    #[test]
+    fn a_closed_curve_of_degree_p_is_c_p_minus_1_across_its_seam() {
+        let hexagon = [
+            [10.0, 0.0, 0.0],
+            [5.0, 8.0, 1.0],
+            [-5.0, 8.0, 0.0],
+            [-10.0, 0.0, -1.0],
+            [-5.0, -8.0, 0.0],
+            [5.0, -8.0, 2.0],
+        ];
+        for p in 1..=5 {
+            let k = unclamped(&closed_cv_curve(&hexagon, p).unwrap());
+            // every derivative of order below p meets across the seam
+            let (a, b) = (
+                k.derivs(0.0, Side::Right, p - 1).unwrap(),
+                k.derivs(1.0, Side::Left, p - 1).unwrap(),
+            );
+            assert_eq!(a.len(), p);
+            for (order, (x, y)) in a.iter().zip(&b).enumerate() {
+                for (u, v) in [(x.x, y.x), (x.y, y.y), (x.z, y.z)] {
+                    assert!(
+                        (u - v).abs() <= 1e-9 * (1.0 + u.abs()),
+                        "degree {p}, derivative {order}: {x:?} and {y:?}"
+                    );
+                }
+            }
+        }
     }
 
     const WAVE: [[f64; 3]; 6] = [
